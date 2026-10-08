@@ -19,7 +19,7 @@ import {
   type AskRequest,
 } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
-import { hasRegisteredRunProcess, onUsage, registerRunProcess, unregisterRunProcess, type ProcessUsage } from '../core/process-usage.ts';
+import { hasRegisteredRunProcess, onUsage, registerRunProcess, replaceRunProcess, unregisterRunProcess, type ProcessUsage } from '../core/process-usage.ts';
 import { processGroupAlive, processGroupOf, sessionGroupOf, signalProcessGroup } from '../core/session-process.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
 import { noJitter, ORPHAN_BACKOFF, retryDelayMs, type Backoff } from '../delegation/retry-backoff.ts';
@@ -6073,7 +6073,7 @@ export class RunManager {
         },
         onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
         onAgentInputConsumed: (ids) => this.handleAgentInputConsumed(runId, state, session, ids),
-        onPidChange: (pid) => { registerRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
+        onPidChange: (pid) => { replaceRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
       },
     );
     } catch (error) { ciTools?.revoke(); state.revokeCiTools = undefined; delegation?.revoke(); state.revokeDelegation = undefined; throw error; }
@@ -6955,7 +6955,7 @@ export class RunManager {
           },
           onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
           onAgentInputConsumed: (ids) => this.handleAgentInputConsumed(runId, state, session, ids),
-          onPidChange: (pid) => { registerRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
+          onPidChange: (pid) => { replaceRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
         },
       );
     } catch (err) {

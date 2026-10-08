@@ -2454,19 +2454,23 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
   const pendingRule = 'If the watched work is still pending, end with CEZ:MONITORING.';
   const markerlessRule = 'Never yield markerless for a monitoring wrap-up.';
   type Wire = {
-    userText?: string; method?: string; url?: string;
+    userText?: string; method?: string; url?: string; prompt?: string;
     params?: { input?: { text?: string }[]; prompt?: { text?: string }[] };
     body?: { parts?: { text?: string }[] };
   };
   const records = (path: string): (Wire | string[])[] => existsSync(path)
     ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
-  // These wires record each user message on the stdin hook and the system prompt in argv.
+  // Print carries its combined prompt on stdin; Claude/Pi/OMP keep the system prompt in argv.
   const stdinWire = (backend: RunnerId) => backend === 'claude' || backend === 'pi' || backend === 'omp';
   const messages = (backend: RunnerId, dir: string): string[] => {
     const channel = stdinWire(backend) ? 'stdin' : 'args';
-    return records(join(dir, channel)).flatMap(row => {
-      if (Array.isArray(row)) return backend === 'cursor' ? [row.at(-1) ?? ''] : [];
+    const wire = backend === 'cursor' ? [...records(join(dir, 'args')), ...records(join(dir, 'stdin'))]
+      : records(join(dir, channel));
+    return wire.flatMap(row => {
+      if (Array.isArray(row)) return backend === 'cursor' && row.at(-1)?.includes('\n\n---\n\n')
+        ? [row.at(-1)!] : [];
       if (stdinWire(backend)) return row.userText === undefined ? [] : [row.userText];
+      if (backend === 'cursor' && row.method === 'cursor-print/stdin' && row.prompt !== undefined) return [row.prompt];
       const parts = backend === 'codex' && row.method === 'turn/start' ? row.params?.input
         : backend === 'cursor' && row.method === 'session/prompt' ? row.params?.prompt
         : backend === 'opencode' && /\/(message|prompt_async)$/.test(row.url ?? '') ? row.body?.parts : undefined;

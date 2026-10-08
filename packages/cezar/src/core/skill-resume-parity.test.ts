@@ -145,7 +145,7 @@ function systemPromptsFrom(backend: RunnerId, recording: string): string[] {
   for (const row of rows) {
     if (backend === 'cursor' && Array.isArray(row)) {
       const prompt = row.at(-1);
-      if (typeof prompt === 'string') texts.push(systemFromPrepended(prompt));
+      if (typeof prompt === 'string' && prompt.includes('\n\n---\n\n')) texts.push(systemFromPrepended(prompt));
       continue;
     }
     if (!row || typeof row !== 'object') continue;
@@ -159,6 +159,9 @@ function systemPromptsFrom(backend: RunnerId, recording: string): string[] {
       const prompt = (rec.params as { prompt?: Array<{ type?: string; text?: string }> } | undefined)?.prompt;
       const text = prompt?.find((part) => typeof part.text === 'string')?.text;
       if (typeof text === 'string') texts.push(systemFromPrepended(text));
+    }
+    if (backend === 'cursor' && rec.method === 'cursor-print/stdin' && typeof rec.prompt === 'string') {
+      texts.push(systemFromPrepended(rec.prompt));
     }
     if (backend === 'opencode' && typeof rec.url === 'string' && rec.url.includes('prompt_async')) {
       const parts = (rec.body as { parts?: Array<{ type?: string; text?: string }> } | undefined)?.parts;

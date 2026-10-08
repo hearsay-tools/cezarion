@@ -15,7 +15,19 @@ const flag = name => { const at = args.indexOf(name); return at < 0 ? undefined 
 const resumeId = flag('--resume');
 const mode = process.env.CEZ_MOCK_CURSOR_PRINT_MODE ?? 'normal';
 const turn = resumeId ? 2 : 1;
-const promptArg = args.at(-1) ?? '';
+// Cursor accepts a print prompt on stdin. Preserve the positional form so a
+// regression back to argv delivery is visible to the runner tests.
+const valueFlags = new Set(['--output-format', '--model', '--resume', '--allowed-tools',
+  '--add-dir', '--plugin-dir', '--image']);
+let positionalPrompt = '';
+for (let i = 0; i < args.length; i++) {
+  if (valueFlags.has(args[i])) { i++; continue; }
+  if (!args[i].startsWith('-')) positionalPrompt = args[i];
+}
+const stdinChunks = [];
+if (!positionalPrompt) for await (const chunk of process.stdin) stdinChunks.push(chunk);
+const stdinPrompt = Buffer.concat(stdinChunks).toString('utf8');
+const promptArg = stdinPrompt || positionalPrompt;
 const promptBoundary = promptArg.lastIndexOf('\n\n---\n\n');
 const prompt = promptBoundary < 0 ? promptArg : promptArg.slice(promptBoundary + '\n\n---\n\n'.length);
 const taggedScenarios = [
@@ -60,12 +72,17 @@ const waitForRelease = async (fallbackMs) => {
 };
 const finish = (text) => { assistant(text); result(text); };
 const log = process.env.CEZ_MOCK_CURSOR_PRINT_LOG;
-if (log) appendFileSync(log, `${JSON.stringify({ pid: process.pid, resumeId, id, args })}\n`);
+if (log) appendFileSync(log, `${JSON.stringify({ pid: process.pid, resumeId, id, args,
+  promptSource: stdinPrompt ? 'stdin' : 'argv', prompt: promptArg })}\n`);
 if (process.env.CEZ_MOCK_ARGS_FILE) {
   appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify(args)}\n`);
   const pluginDir = flag('--plugin-dir');
   if (pluginDir) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE,
     `${JSON.stringify({ type: 'cursor-print-plugin', ...JSON.parse(readFileSync(`${pluginDir}/mcp.json`, 'utf8')) })}\n`);
+}
+if (process.env.CEZ_MOCK_STDIN_FILE && stdinPrompt) {
+  appendFileSync(process.env.CEZ_MOCK_STDIN_FILE,
+    `${JSON.stringify({ method: 'cursor-print/stdin', prompt: stdinPrompt })}\n`);
 }
 if (mode === 'delay-init') await new Promise(resolve => setTimeout(resolve, 10_000));
 frame({ type: 'system', subtype: 'init', session_id: id, model: flag('--model') ?? 'auto', cwd: process.cwd() });
@@ -129,6 +146,11 @@ if (prompt.includes('mock:no-progress')) {
   if (prompt.includes('ignore-term')) process.on('SIGTERM', () => {});
   if (prompt.includes('held-pipe')) spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'],
     { stdio: ['ignore', process.stdout, process.stderr] });
+  if (prompt.includes('leftover')) {
+    const leftover = (file) => `process.on('SIGTERM',()=>{}); require('fs').writeFileSync(${JSON.stringify(file)}, String(process.pid)); setTimeout(()=>{},20000)`;
+    spawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
+    spawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
+  }
   setInterval(() => {}, 1000);
   await new Promise(() => {});
 }

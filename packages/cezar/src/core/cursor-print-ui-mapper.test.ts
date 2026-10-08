@@ -19,6 +19,26 @@ function replay(name: string): UiEvent[] {
 }
 
 describe('Cursor print mapper', () => {
+  it('maps native updateTodos snapshots and merges by id', () => {
+    let state = createCursorPrintUiState();
+    const start = (callId: string, todos: unknown[], merge: boolean) => {
+      const mapped = mapCursorPrintMessage({ type: 'tool_call', subtype: 'started', call_id: callId,
+        tool_call: { updateTodosToolCall: { args: { todos, merge } } },
+      }, state);
+      state = mapped.state;
+      return mapped.events;
+    };
+    expect(start('todo-1', [
+      { id: 'a', content: 'Read', status: 'in_progress' },
+      { id: 'b', content: 'Write', status: 'pending' },
+    ], false)).toContainEqual({ type: 'plan.updated', entries: [
+      { content: 'Read', status: 'in_progress' }, { content: 'Write', status: 'pending' },
+    ] });
+    expect(start('todo-2', [{ id: 'a', content: 'Read', status: 'completed' }], true))
+      .toContainEqual({ type: 'plan.updated', entries: [
+        { content: 'Read', status: 'completed' }, { content: 'Write', status: 'pending' },
+      ] });
+  });
   it('maps two native print turns as one logical session with independent golden expectations', () => {
     expect(JSON.parse(JSON.stringify(replay('print-lifecycle.ndjson')))).toStrictEqual(
       JSON.parse(readFileSync(join(fixtures, 'print-lifecycle.expected.json'), 'utf8')),

@@ -20,11 +20,25 @@ function fixture(mode = 'normal'): { spec: AgentRunSpec; log: string } {
   } };
 }
 
-const logs = (path: string): { pid: number; id: string; resumeId?: string; args: string[] }[] =>
+const logs = (path: string): { pid: number; id: string; resumeId?: string; args: string[];
+  promptSource: 'stdin' | 'argv'; prompt: string }[] =>
   readFileSync(path, 'utf8').trim().split('\n').map(line => JSON.parse(line));
 const turnEnds = (events: AgentEvent[]) => events.filter(event => event.type === 'turn-end').length;
 
 describe('Cursor print logical session', () => {
+  it('delivers a large Unicode prompt over stdin without placing it in argv', async () => {
+    const { spec, log } = fixture();
+    const prompt = '界'.repeat(50_000);
+    const events: AgentEvent[] = [];
+    const result = await new CursorPrintRunner({ bin: mock, processOptions: { drainMs: 20 } })
+      .run({ ...spec, userPrompt: prompt }, event => events.push(event));
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(result.text).toContain(prompt);
+    const turn = logs(log)[0];
+    expect(turn?.promptSource).toBe('stdin');
+    expect(turn?.prompt).toBe(prompt);
+    expect(turn?.args).not.toContain(prompt);
+  });
   it('keeps one native ID across two owned processes and settles only after explicit end', async () => {
     const { spec, log } = fixture();
     const events: AgentEvent[] = [];
@@ -228,7 +242,7 @@ describe('Cursor print logical session', () => {
     await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(2);
     expect(logs(log)).toHaveLength(2);
     expect(logs(log)[1]?.resumeId).toBe(logs(log)[0]?.id);
-    expect(logs(log)[1]?.args.at(-1)).toContain('Library: Vitest');
+    expect(logs(log)[1]?.prompt).toContain('Library: Vitest');
     session.end();
     await session.result;
   });
@@ -245,7 +259,7 @@ describe('Cursor print logical session', () => {
       session.end();
       await session.result;
       expect(logs(log)[1]?.resumeId).toBe(logs(log)[0]?.id);
-      expect(logs(log)[1]?.args.at(-1)).toContain(reply);
+      expect(logs(log)[1]?.prompt).toContain(reply);
     },
   );
 

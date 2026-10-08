@@ -48,6 +48,7 @@ export interface CursorPrintUiState {
   readonly itemSeq: number;
   readonly sawAssistantText: boolean;
   readonly openTools: ReadonlyMap<string, UiToolItem>;
+  readonly todos: ReadonlyMap<string, PlanEntry>;
 }
 
 export interface CursorPrintUiMapping {
@@ -64,6 +65,7 @@ export function createCursorPrintUiState(opts: { fallbackSessionId?: string } = 
     itemSeq: 0,
     sawAssistantText: false,
     openTools: new Map(),
+    todos: new Map(),
   };
 }
 
@@ -166,7 +168,15 @@ function mapToolCall(msg: Record<string, unknown>, state: CursorPrintUiState): C
       item.locations = edit.locations;
     }
     const events: UiEvent[] = [{ type: 'item.started', item }];
-    if (parsed.name === 'TodoWrite') {
+    if (parsed.name === 'UpdateTodos') {
+      const updated = nativeTodoUpdate(parsed.input, state.todos);
+      if (updated) {
+        events.push({ type: 'plan.updated', entries: [...updated.values()] });
+        const openTools = new Map(state.openTools);
+        openTools.set(callId, item);
+        return { events, state: { ...state, openTools, todos: updated } };
+      }
+    } else if (parsed.name === 'TodoWrite') {
       const entries = planEntries(parsed.input);
       if (entries) events.push({ type: 'plan.updated', entries });
     }
@@ -453,6 +463,21 @@ function toolOutput(parsed: ParsedTool): string | undefined {
 }
 
 const PLAN_STATUSES: readonly PlanStatus[] = ['pending', 'in_progress', 'completed', 'cancelled'];
+
+function nativeTodoUpdate(input: unknown, prior: ReadonlyMap<string, PlanEntry>): Map<string, PlanEntry> | undefined {
+  if (!isRecord(input) || !Array.isArray(input.todos)) return undefined;
+  const todos = input.merge === true ? new Map(prior) : new Map<string, PlanEntry>();
+  for (const raw of input.todos) {
+    if (!isRecord(raw) || typeof raw.id !== 'string' || !raw.id ||
+      typeof raw.content !== 'string' || !PLAN_STATUSES.includes(raw.status as PlanStatus)) return undefined;
+    const entry: PlanEntry = { content: raw.content, status: raw.status as PlanStatus };
+    if (typeof raw.priority === 'string' && ['high', 'medium', 'low'].includes(raw.priority)) {
+      entry.priority = raw.priority as PlanEntry['priority'];
+    }
+    todos.set(raw.id, entry);
+  }
+  return todos;
+}
 
 function planEntries(input: unknown): PlanEntry[] | undefined {
   if (!isRecord(input) || !Array.isArray(input.todos)) return undefined;

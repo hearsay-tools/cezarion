@@ -22,7 +22,7 @@ import { AUTO_END_DELAY_MS, DEFAULT_NO_PROGRESS_TIMEOUT_MS, DEFAULT_RUN_TIMEOUT_
 export const CURSOR_PRINT_SPEC_SUPPORT: AgentRunSpecSupport = {
   cezarTools: { honored: true, via: 'private local --plugin-dir with mcp.json env placeholders on every turn' },
   systemPrompt: { honored: true, via: 'prepended to each print prompt' },
-  userPrompt: { honored: true, via: 'final positional print prompt' },
+  userPrompt: { honored: true, via: 'print stdin' },
   images: { honored: true, via: 'private temporary image files passed with --image' },
   cwd: { honored: true, via: 'spawn cwd' },
   allowedTools: { honored: false, reason: 'No general Cezar tool-name to native Cursor tool-name mapping exists' },
@@ -216,7 +216,7 @@ class CursorPrintSession implements AgentSession {
     for (const dir of this.spec.additionalDirectories ?? []) args.push('--add-dir', dir);
     if (this.pluginDir) args.push('--plugin-dir', this.pluginDir);
     for (const path of imagePaths) args.push('--image', path);
-    args.push(prependSystemPrompt(this.spec.systemPrompt, text));
+    const prompt = prependSystemPrompt(this.spec.systemPrompt, text);
     let proc: CursorPrintProcess;
     try {
       proc = startCursorPrintProcess({
@@ -240,6 +240,9 @@ class CursorPrintSession implements AgentSession {
     if (this.turnCount > 1 && proc.pid) this.opts.onPidChange?.(proc.pid);
     this.armNoProgress();
     void this.watchTurn(active);
+    void proc.write(prompt).then(() => proc.closeInput(), () => {
+      if (this.active === active) this.fail('Cursor print input transport failed');
+    });
   }
 
   private activity(): void {

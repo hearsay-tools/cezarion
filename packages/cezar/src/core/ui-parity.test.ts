@@ -104,6 +104,11 @@ const CURSOR_NO_USAGE_TELEMETRY = new Set([
 ]);
 
 describe('protocol v2 backend parity (every mapper emits every matrix capability)', () => {
+  it('Cursor print independently emits a plan from its native todo wire', () => {
+    const printEvents = JSON.parse(readFileSync(join(HERE, '__fixtures__', 'cursor',
+      'print-lifecycle.expected.json'), 'utf8')) as UiEvent[];
+    expect(printEvents.some(event => event.type === 'plan.updated' && event.entries.length > 0)).toBe(true);
+  });
   for (const backend of BACKENDS) {
     const events = fixtureEvents(backend);
     for (const [name, produced] of CAPABILITIES) {

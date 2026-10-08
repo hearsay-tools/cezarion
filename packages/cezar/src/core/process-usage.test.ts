@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
-import { aggregateTreeUsage, parsePsOutput } from './process-usage.ts';
+import { aggregateTreeUsage, parsePsOutput, registerRunProcess,
+  replaceRunProcess, recordUsageSampleForTest, unregisterRunProcess } from './process-usage.ts';
+
+describe('run process replacement', () => {
+  it('keeps the peak across Cursor print turns when the PID changes', () => {
+    const runId = 'replacement-peak';
+    try {
+      registerRunProcess(runId, 123);
+      recordUsageSampleForTest(runId, { cpuPct: 1, rssBytes: 30_000, procCount: 4 });
+      replaceRunProcess(runId, 456);
+      recordUsageSampleForTest(runId, { cpuPct: 1, rssBytes: 10_000, procCount: 1 });
+      expect(unregisterRunProcess(runId)).toEqual({ peakRssBytes: 30_000, peakProcCount: 4 });
+    } finally {
+      unregisterRunProcess(runId);
+    }
+  });
+});
 
 describe('parsePsOutput', () => {
   it('parses the unix `ps` shape (pid ppid rssKb cpu)', () => {

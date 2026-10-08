@@ -124,6 +124,27 @@ export function registerRunProcess(runId: string, pid: number): void {
   }
 }
 
+/** Follow a replacement backend PID within the same session without losing
+ * peaks accumulated by its earlier processes (Cursor print starts one per turn). */
+export function replaceRunProcess(runId: string, pid: number): void {
+  const prior = entries.get(runId);
+  if (!prior) { registerRunProcess(runId, pid); return; }
+  entries.set(runId, { ...prior, pid, last: undefined });
+  void sample();
+}
+
+function recordUsageSample(entry: Entry, usage: ProcessUsage): void {
+  entry.last = usage;
+  entry.peakRssBytes = Math.max(entry.peakRssBytes, usage.rssBytes);
+  entry.peakProcCount = Math.max(entry.peakProcCount, usage.procCount);
+}
+
+/** Deterministic sample injection for replacement peak regression tests. */
+export function recordUsageSampleForTest(runId: string, usage: ProcessUsage): void {
+  const entry = entries.get(runId);
+  if (entry) recordUsageSample(entry, usage);
+}
+
 /** Same-process ownership proof used when rebuilding a manager/context: a
  * disposed manager may still have a live backend registered for this run. */
 export function hasRegisteredRunProcess(runId: string): boolean {
@@ -188,10 +209,7 @@ async function sample(): Promise<void> {
     for (const entry of entries.values()) {
       const usage = aggregateTreeUsage(procs, entry.pid);
       entry.last = usage ?? undefined;
-      if (usage) {
-        entry.peakRssBytes = Math.max(entry.peakRssBytes, usage.rssBytes);
-        entry.peakProcCount = Math.max(entry.peakProcCount, usage.procCount);
-      }
+      if (usage) recordUsageSample(entry, usage);
     }
     if (listeners.size > 0) {
       const snapshot = allUsage();
