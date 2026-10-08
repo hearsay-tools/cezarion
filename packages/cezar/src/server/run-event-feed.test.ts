@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { brotliCompressSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
-import { readRunEventBatch, subscribeRunFeed } from './run-event-feed.ts';
+import { readFiniteRunFeed, readRunEventBatch, subscribeRunFeed } from './run-event-feed.ts';
 import { LIVE_BYTE_LIMIT, type RunEvent } from '@open-mercato/cezar-contract';
 
 let dataDir: string;
@@ -48,7 +48,7 @@ describe('bounded persisted feed', () => {
     store.appendEvent(runId, { type: 'item.started', item: { kind: 'message', id: 'item', text: '' } });
     store.emitEphemeral(runId, { type: 'item.delta', itemId: 'item', field: 'text', delta: 'latest text' });
     store.appendEvent(runId, { type: 'note', text: 'following' });
-    const snapshots = store.liveItemSnapshots(runId);
+    const snapshots = store.liveReadSnapshot(runId);
     let cursor: string | undefined;
     let afterSeq = 0;
     const seen: RunEvent[] = [];
@@ -65,9 +65,21 @@ describe('bounded persisted feed', () => {
   it('cancels a snapshot-only response while checking for absent disk history', async () => {
     const controller = new AbortController();
     const reading = readRunEventBatch(dataDir, demand(), controller.signal, LIVE_BYTE_LIMIT,
-      [{ type: 'item.updated', seq: 1, ts: '', item: { id: 'item', kind: 'message', text: 'live' } }]);
+      { throughSeq: 1, events: [{ type: 'item.updated', seq: 1, ts: '', item: { id: 'item', kind: 'message', text: 'live' } }] });
     controller.abort();
     await expect(reading).rejects.toMatchObject({ name: 'AbortError' });
+  });
+  it('releases the finite scan write observer on cancellation and a failed read', async () => {
+    const before = store.listenerCount('event');
+    const controller = new AbortController();
+    const reading = readFiniteRunFeed({ store, dataDir }, demand(), controller.signal);
+    expect(store.listenerCount('event')).toBe(before + 1);
+    controller.abort();
+    await expect(reading).rejects.toMatchObject({ name: 'AbortError' });
+    expect(store.listenerCount('event')).toBe(before);
+    store.appendEvent(runId, { type: 'note', text: 'x'.repeat(LIVE_BYTE_LIMIT + 1) });
+    await expect(readFiniteRunFeed({ store, dataDir }, demand(), signal())).rejects.toMatchObject({ status: 413 });
+    expect(store.listenerCount('event')).toBe(before);
   });
   it('rejects expired cursors and pre-aborted requests', async () => {
     store.appendEvent(runId, { type: 'note', text: 'old' });

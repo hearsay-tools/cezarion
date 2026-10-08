@@ -1322,7 +1322,10 @@ export class RunStore extends EventEmitter {
   private readonly facts: TranscriptFactsIndex;
   private readonly liveItems = new LiveItemSnapshots();
 
-  liveItemSnapshots(runId: string): RunEvent[] { return this.liveItems.read(runId); }
+  /** Capture both sources on the same synchronous sequence boundary before history IO. */
+  liveReadSnapshot(runId: string) {
+    return { events: this.liveItems.read(runId), throughSeq: this.seqs.get(runId) ?? Infinity };
+  }
 
   private constructor(private readonly dataDir: string) {
     super();

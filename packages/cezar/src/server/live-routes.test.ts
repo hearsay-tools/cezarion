@@ -2,7 +2,7 @@ import { LIVE_BYTE_LIMIT, liveRunBatchResponseSchema, type LiveRunBatch } from '
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { UiEventSink } from '../runs/ui-event-sink.ts';
 import type { RunManager } from '../workflows/run.ts';
@@ -51,6 +51,39 @@ describe('finite multi-run catch-up', () => {
     const completed = liveRunBatchResponseSchema.parse(await (await batch([{ projectId: 'boot', runId, afterSeq: last.afterSeq, cursor: last.cursor }])).json()).results[0] as LiveRunBatch;
     expect(completed.events).toMatchObject([{ type: 'item.completed', item: { text: 'Finished' } }]);
   });
+  it.each([[false, false], [true, false], [false, true]])('does not acknowledge writes newer than its captured snapshots (prior live text: %s, cold store: %s)', async (priorText, cold) => {
+    store.appendEvent(runId, { type: 'item.started', item: { kind: 'message', id: 'typing', text: '' } });
+    if (priorText) store.emitEphemeral(runId, { type: 'item.delta', itemId: 'typing', field: 'text', delta: 'before ' });
+    if (cold) {
+      store.close(); store = RunStore.open(join(root, '.ai/cezar'));
+      app = createApp({ repoRoot: root, store, manager: {} as RunManager, version: 'test', bootProjectId: 'boot' });
+    }
+    const other = store.createRun({ title: 'Other', task: 'Other', workflow: 'quick-task', steps: [] }).id;
+    const before = store.listenerCount('event');
+    const capture = store.liveReadSnapshot.bind(store);
+    vi.spyOn(store, 'liveReadSnapshot').mockImplementationOnce(id => {
+      const snapshot = capture(id);
+      // The history scanner awaits filesystem IO after capturing live state.
+      queueMicrotask(() => {
+        store.emitEphemeral(other, { type: 'item.delta', itemId: 'other', field: 'text', delta: 'unrelated' });
+        if (cold) store.emitEphemeral(runId, { type: 'item.updated', item: { id: 'typing', kind: 'message', text: 'during scan' } });
+        else store.emitEphemeral(runId, { type: 'item.delta', itemId: 'typing', field: 'text', delta: 'during scan' });
+        store.appendEvent(runId, { type: 'note', text: 'persisted during scan' });
+      });
+      return snapshot;
+    });
+    const first = liveRunBatchResponseSchema.parse(await (await batch([{ projectId: 'boot', runId, afterSeq: 0 }])).json()).results[0] as LiveRunBatch;
+    expect(first.afterSeq).toBe(priorText ? 2 : 1);
+    expect(first.hasMore).toBe(true);
+    if (priorText) expect(first.events.at(-1)).toMatchObject({ type: 'item.updated', item: { text: 'before ' } });
+    const next = liveRunBatchResponseSchema.parse(await (await batch([{ projectId: 'boot', runId, afterSeq: first.afterSeq, cursor: first.cursor }])).json()).results[0] as LiveRunBatch;
+    expect(next.events).toMatchObject([
+      { type: 'item.updated', item: { text: priorText ? 'before during scan' : 'during scan' } },
+      { type: 'note', text: 'persisted during scan' },
+    ]);
+    expect(next.hasMore).toBe(false);
+    expect(store.listenerCount('event')).toBe(before);
+  });
   it('merges active snapshots at an event-limit boundary without skipping persisted records', async () => {
     store.appendEvent(runId, { type: 'item.started', item: { kind: 'message', id: 'typing', text: '' } });
     for (let i = 0; i < 254; i++) store.appendEvent(runId, { type: 'note', text: 'history' });
@@ -71,17 +104,17 @@ describe('finite multi-run catch-up', () => {
     const response = await (await batch([{ projectId: 'boot', runId, afterSeq: 0 }])).text();
     expect(response).not.toContain('fixture-secret-must-be-redacted');
     expect(response).toContain('[REDACTED]');
-    expect(store.liveItemSnapshots(runId)).toHaveLength(1);
+    expect(store.liveReadSnapshot(runId).events).toHaveLength(1);
     store.close();
-    expect(store.liveItemSnapshots(runId)).toEqual([]);
+    expect(store.liveReadSnapshot(runId).events).toEqual([]);
   });
   it('discards active snapshots when their run is deleted', () => {
     store.appendEvent(runId, { type: 'item.started', item: { kind: 'message', id: 'typing', text: '' } });
     store.emitEphemeral(runId, { type: 'item.delta', itemId: 'typing', field: 'text', delta: 'temporary' });
     store.updateRun(runId, { status: 'done' });
-    expect(store.liveItemSnapshots(runId)).toHaveLength(1);
+    expect(store.liveReadSnapshot(runId).events).toHaveLength(1);
     expect(store.deleteRun(runId)).toBe(true);
-    expect(store.liveItemSnapshots(runId)).toEqual([]);
+    expect(store.liveReadSnapshot(runId).events).toEqual([]);
   });
   it('bounds replay at an accepted prefix and continues without loss or duplicates', async () => {
     for (let i = 0; i < 300; i++) store.appendEvent(runId, { type: 'note', text: `line ${i}` });

@@ -66,7 +66,9 @@ five seconds of workspace latency, plus request/backoff time. Ephemeral intermed
 deltas coalesce into full active-item snapshots in finite batches, so unfinished text
 and tool output remain visible. The store retains at most 256 active items / 4 MiB of serialized snapshots,
 with a 1 MiB per-item cap, after credential redaction. Snapshots share the persisted
-sequence clock and merge into bounded replay prefixes; no raw deltas reach disk.
+sequence clock and merge into bounded replay prefixes. Each finite read captures a
+sequence boundary with its snapshots and leaves later disk/live writes for the next
+batch, so events arriving during filesystem IO cannot be skipped. No raw deltas reach disk.
 Completion/session end, run deletion and store closure release their retained items.
 Eviction drops whole items (never a partial suffix); subsequent full snapshots can
 reseed them, and persisted content is always recovered. As with an SSE reconnect,

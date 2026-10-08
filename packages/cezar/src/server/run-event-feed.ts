@@ -8,10 +8,11 @@ export class LiveFeedReset extends Error {
 }
 
 /** The returned cursor covers exactly the accepted prefix, including complete ignored lines.
- * Capture sorted live snapshots BEFORE starting disk IO: every lower-seq persisted
- * event has already been appended synchronously. Merge before acknowledging either
- * source, keeping the byte offset at the first unaccepted persisted record. */
-export async function readRunEventBatch(dataDir: string, demand: LiveRunDemand, signal: AbortSignal, byteLimit = LIVE_BYTE_LIMIT, snapshots: readonly RunEvent[] = []): Promise<LiveRunBatch> {
+ * Capture sorted live snapshots and their sequence boundary together BEFORE disk IO.
+ * Later writes wait for the next capture: otherwise a newer persisted event could
+ * acknowledge live content emitted during the scan but absent from the snapshots.
+ * Keep the byte offset at the first unaccepted persisted record. */
+export async function readRunEventBatch(dataDir: string, demand: LiveRunDemand, signal: AbortSignal, byteLimit = LIVE_BYTE_LIMIT, snapshot?: ReturnType<ProjectContext['store']['liveReadSnapshot']>): Promise<LiveRunBatch> {
   signal.throwIfAborted();
   const start = demand.cursor ? decodeLiveCursor(demand.cursor) : { offset: 0, boundarySeq: 0 };
   let offset = start.offset;
@@ -20,6 +21,8 @@ export async function readRunEventBatch(dataDir: string, demand: LiveRunDemand, 
   let bytes = 0;
   let pending: Buffer = Buffer.alloc(0);
   let hasMore = false;
+  let laterWrites = false;
+  const snapshots = snapshot?.events ?? [];
   let snapshotIndex = 0;
   const accept = (event: RunEvent, length: number): boolean => {
     if (event.seq <= afterSeq) return true;
@@ -51,6 +54,7 @@ export async function readRunEventBatch(dataDir: string, demand: LiveRunDemand, 
         const value = JSON.parse(line) as RunEvent;
         if (Number.isSafeInteger(value.seq) && typeof value.type === 'string' && typeof value.ts === 'string') event = value;
       } catch { /* Malformed historical lines have never belonged to replay. */ }
+      if (event && snapshot && event.seq > snapshot.throughSeq) { laterWrites = true; break outer; }
       if (event && event.seq > afterSeq) {
         if (!acceptSnapshotsBefore(event.seq) || !accept(event, length)) break outer;
       }
@@ -63,9 +67,24 @@ export async function readRunEventBatch(dataDir: string, demand: LiveRunDemand, 
   if (!hasMore) acceptSnapshotsBefore(Infinity);
   // No newline means a writer is still appending: do not acknowledge that partial record.
   return {
-    type: 'batch', projectId: demand.projectId, runId: demand.runId, events, afterSeq, hasMore,
+    type: 'batch', projectId: demand.projectId, runId: demand.runId, events, afterSeq, hasMore: hasMore || laterWrites,
     cursor: Buffer.from(JSON.stringify({ v: 1, kind: 'live', offset, boundarySeq: afterSeq })).toString('base64url'),
   };
+}
+
+/** Freeze the finite scan even for a cold store with no in-memory sequence yet.
+ * Observing its first new write gives the upper boundary without rebuilding an
+ * entire cold/compressed transcript just to discover its final sequence. */
+export async function readFiniteRunFeed(
+  context: Pick<ProjectContext, 'store' | 'dataDir'>, demand: LiveRunDemand, signal: AbortSignal,
+): Promise<LiveRunBatch> {
+  const snapshot = context.store.liveReadSnapshot(demand.runId);
+  const bound = ({ runId, event }: { runId: string; event: RunEvent }) => {
+    if (runId === demand.runId) snapshot.throughSeq = Math.min(snapshot.throughSeq, event.seq - 1);
+  };
+  context.store.on('event', bound);
+  try { return await readRunEventBatch(context.dataDir, demand, signal, LIVE_BYTE_LIMIT, snapshot); }
+  finally { context.store.off('event', bound); }
 }
 
 /** Attach before reading; serialize replay and live writes; bound slow-client memory. */
