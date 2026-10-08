@@ -402,12 +402,9 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
   },
   cursor: {
     backend: 'cursor',
-    askResumeCases: [
-      { kind: 'cursor/ask_question', scenario: 'ask-resume', answer: 'Tests: Vitest' },
-      { kind: 'cursor/create_plan', scenario: 'plan-resume', answer: 'Plan: Approve' },
-    ],
+    askResumeCases: [{ kind: 'CEZ:ASK', scenario: 'ask-resume', answer: 'Library: Vitest' }],
     binEnv: 'CEZ_CURSOR_BIN',
-    mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-acp.mjs'),
+    mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-print.mjs'),
     scenarios: { 'turn-messages': 'mock:turn-messages', 'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
@@ -430,8 +427,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-resume': 'mock:ask mock:resume-done',
       'plan-resume': 'mock:plan mock:resume-done',
       'ask-snapshot': 'mock:ask-snapshot',
-      'ask-snapshot-bad': 'mock:ask-snapshot-bad', 'ask-prose': 'mock:ask-prose', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:ask', subagent: 'mock:subagent',
-      'subagent-after-park': 'mock:subagent-after-park' },
+      'ask-snapshot-bad': 'mock:ask-snapshot-bad', 'ask-prose': 'mock:ask-prose', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:ask' },
   },
   pi: {
     backend: 'pi',
@@ -565,6 +561,10 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
+  ...(['S9', 'R12', 'R15'] as const).map(criterion => ({
+    criterion, backend: 'cursor' as const, kind: 'scenario-unconstructible' as const,
+    reason: 'Cursor 2026.10.01-e373342 print stream-json reports parent tool calls but no child-session transcript or child terminal frames; native delegation is suppressed for governed runs. The ACP child-session fixture remains covered by direct ACP mapper tests.',
+  })),
   ...(['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion: 'S25', backend, kind: 'scenario-unconstructible' as const,
     reason: 'This runner speaks its native wire over the spawned process\'s stdio, so there is no listen phase between spawn and session: a start that exits before listening cannot be constructed, and an early exit is the crash path (S15–S18). hearsay-tools/cezarion#872 retries only `opencode serve`; other runners\' process starts are out of scope.',
@@ -757,6 +757,7 @@ export async function driveSeam(
   const v1: AgentEvent[] = [];
   const v2: UiEvent[] = [];
   let session: AgentSession | undefined;
+  let pid: number | undefined;
   try {
     session = createRunner(backend).startSession(
       {
@@ -778,14 +779,15 @@ export async function driveSeam(
         ...opts.spec,
       },
       (event) => v1.push(event),
-      { ...opts.sessionOptions, onUiEvent: (event) => v2.push(event) },
+      { ...opts.sessionOptions, onUiEvent: (event) => v2.push(event),
+        onPidChange: (nextPid) => { pid = nextPid; opts.sessionOptions?.onPidChange?.(nextPid); } },
     );
     let failure: Error | undefined;
     const settled = session.result.catch((error: unknown): AgentRunResult => {
       failure = error instanceof Error ? error : new Error(String(error));
       return { text: '', toolCalls: [], tokensUsed: 0 };
     });
-    const pid = session.pid;
+    pid ??= session.pid;
     if (scenario === 'missing-binary') await settled;
     else if (opts.whileOpen) await opts.whileOpen(session, { v1, v2 });
     else await waitFor(() => v1.some((e) => e.type === 'turn-end' || e.type === 'error'));

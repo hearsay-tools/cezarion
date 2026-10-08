@@ -7,8 +7,22 @@ import { resolveCodexExecutable } from './codex-app-server-transport.ts';
 import { driveSeam } from './harness-parity.testkit.ts';
 import { OpencodeServerRunner } from './opencode-server-runner.ts';
 import { OmpRunner } from './omp-runner.ts';
+import { createRunner } from './runner-factory.ts';
+import { CursorRunner } from './cursor-runner.ts';
 
 afterEach(() => vi.unstubAllEnvs());
+it('uses bundled Cursor print for a fresh dry run and ACP for a legacy session', async () => {
+  vi.stubEnv('CEZ_DRY_RUN', '1');
+  vi.stubEnv('CEZ_CURSOR_BIN', undefined);
+  const dir = mkdtempSync(join(tmpdir(), 'cez-dry-cursor-'));
+  try {
+    expect(createRunner('cursor')).toBeInstanceOf(CursorRunner);
+    const events: Array<{ type: string; sessionTransport?: string }> = [];
+    await createRunner('cursor').run({ cwd: dir, userPrompt: 'hello' }, event => events.push(event));
+    expect(events.find(event => event.type === 'session')?.sessionTransport).toBe('cursor-print');
+    expect(createRunner('cursor', { sessionTransport: 'cursor-acp' })).toBeInstanceOf(CursorRunner);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 it('selects bundled Codex, OpenCode and OMP mocks in dry runs without host binaries', () => {
   vi.stubEnv('CEZ_DRY_RUN', '1');
   vi.stubEnv('CEZ_CODEX_BIN', undefined);

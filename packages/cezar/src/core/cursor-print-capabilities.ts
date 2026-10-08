@@ -29,7 +29,12 @@ export async function inspectCursorPrintCapabilities(
   };
   let version: string;
   try { version = (await execute(bin, ['--version'], options)).stdout.trim(); }
-  catch { throw new Error('Cursor print capability preflight could not read CLI version'); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error('Cursor CLI is not installed or is unavailable on PATH');
+    }
+    throw new Error('Cursor print capability preflight could not read CLI version');
+  }
   if (version !== QUALIFIED_VERSION) {
     return { supported: false, reason: `Cursor print marketplace support is qualified for ${QUALIFIED_VERSION}; installed build is not qualified` };
   }

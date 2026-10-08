@@ -31,12 +31,14 @@ export class CursorRunner implements AgentRunner {
   constructor(private readonly options: CursorRunnerOptions = {}) {}
 
   startSession(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void, opts: SessionOptions = {}): AgentSession {
+    const bundledPrintMock = fileURLToPath(new URL('../../scripts/mock-cursor-print.mjs', import.meta.url));
     const bin = this.options.bin ?? process.env.CEZ_CURSOR_BIN ?? (process.env.CEZ_DRY_RUN === '1'
-      ? fileURLToPath(new URL('../../scripts/mock-cursor-print.mjs', import.meta.url)) : 'agent');
+      ? bundledPrintMock : 'agent');
+    const isBundledMock = bin === bundledPrintMock;
     const select = async (signal: AbortSignal): Promise<{ transport: SessionTransport; note?: string; models?: readonly ModelOption[]; model?: string }> => {
       if (this.options.sessionTransport === 'cursor-acp') return { transport: 'cursor-acp' };
       if (this.options.sessionTransport === 'cursor-print') {
-        if (process.env.CEZ_DRY_RUN === '1' && !this.options.bin && !process.env.CEZ_CURSOR_BIN) {
+        if (isBundledMock) {
           return { transport: 'cursor-print' };
         }
         const capability = await (this.options.inspect ?? inspectCursorPrintCapabilities)(bin, spec, signal);
@@ -44,7 +46,7 @@ export class CursorRunner implements AgentRunner {
         return { transport: 'cursor-print', models: capability.models, model: capability.model };
       }
       if (spec.resume) return { transport: 'cursor-acp' }; // Legacy untagged Cursor ID.
-      if (process.env.CEZ_DRY_RUN === '1' && !this.options.bin && !process.env.CEZ_CURSOR_BIN) {
+      if (isBundledMock) {
         return { transport: 'cursor-print' };
       }
       const capability = await (this.options.inspect ?? inspectCursorPrintCapabilities)(bin, spec, signal);
@@ -98,7 +100,9 @@ class SelectingCursorSession implements AgentSession {
         this.settle(result);
       } catch (error) {
         if (!this.active) return;
-        onEvent?.({ type: 'error', message: error instanceof Error ? error.message : 'Cursor transport selection failed' });
+        const message = error instanceof Error ? error.message : 'Cursor transport selection failed';
+        onEvent?.({ type: 'error', message });
+        opts.onUiEvent?.({ type: 'session.error', message, fatal: true });
         this.settle({ text: '', toolCalls: [], tokensUsed: 0 });
       }
     })();

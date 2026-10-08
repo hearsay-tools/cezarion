@@ -12,6 +12,16 @@ const turn = resumeId ? 2 : 1;
 const id = resumeId && mode !== 'mismatch-on-resume' ? resumeId : randomUUID();
 const prompt = args.at(-1) ?? '';
 const frame = value => process.stdout.write(`${JSON.stringify(value)}\n`);
+const assistant = text => frame({ type: 'assistant', session_id: id,
+  message: { role: 'assistant', content: [{ type: 'text', text }] } });
+const result = (text, error = false) => frame({ type: 'result', subtype: error ? 'error_during_execution' : 'success',
+  session_id: id, is_error: error, result: text });
+const readTool = () => {
+  const call = { readToolCall: { args: { path: 'README.md' } } };
+  frame({ type: 'tool_call', subtype: 'started', call_id: 'read-1', session_id: id, tool_call: call });
+  frame({ type: 'tool_call', subtype: 'completed', call_id: 'read-1', session_id: id,
+    tool_call: { readToolCall: { ...call.readToolCall, result: { success: { content: 'A project' } } } } });
+};
 const log = process.env.CEZ_MOCK_CURSOR_PRINT_LOG;
 if (log) appendFileSync(log, `${JSON.stringify({ pid: process.pid, resumeId, id, args })}\n`);
 if (mode === 'delay-init') await new Promise(resolve => setTimeout(resolve, 10_000));
@@ -24,15 +34,29 @@ if (mode === 'portable-ask' && !resumeId) {
   process.exit(0);
 }
 if (mode === 'provider-error') {
-  frame({ type: 'result', subtype: 'error_during_execution', session_id: id, is_error: true,
-    result: 'RetriableError: provider unavailable' });
+  result('RetriableError: provider unavailable', true);
   process.exit(0);
+}
+if (prompt.includes('mock:provider-error')) { result('RetriableError: provider unavailable', true); process.exit(0); }
+if (prompt.includes('mock:split-text')) {
+  const text = 'parity split text\nCEZ:MONITORING'; assistant(text); result(text); process.exit(0);
+}
+if (prompt.includes('mock:done') || (resumeId && /Library:|Tests:|Plan:/.test(prompt))) {
+  const text = 'Done.\nCEZ:DONE'; assistant(text); result(text); process.exit(0);
+}
+if (prompt.includes('mock:ask') && !resumeId) {
+  const text = 'Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}';
+  assistant(text); result(text); process.exit(0);
+}
+if (prompt.includes('mock:hold')) await new Promise(resolve => setTimeout(resolve, 500));
+if (prompt === 'inspect the working tree' || prompt.includes('mock:baseline')) {
+  readTool(); const text = 'Cursor inspected the workspace.'; assistant(text); result(text); process.exit(0);
 }
 const text = mode === 'native-question' ? 'Question skipped.' : `turn ${turn}: ${prompt}`;
 if (mode === 'delay-work' && resumeId) await new Promise(resolve => setTimeout(resolve, 200));
-frame({ type: 'assistant', session_id: id, message: { role: 'assistant', content: [{ type: 'text', text }] } });
+assistant(text);
 if (mode === 'crash-after-work') process.exit(1);
-frame({ type: 'result', subtype: 'success', session_id: id, is_error: false, result: text });
+result(text);
 if (mode === 'duplicate-result') frame({ type: 'result', subtype: 'success', session_id: id, is_error: false, result: text });
 if (mode === 'late-frame') frame({ type: 'assistant', session_id: id,
   message: { role: 'assistant', content: [{ type: 'text', text: 'LATE_FRAME' }] } });

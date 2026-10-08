@@ -2,7 +2,6 @@ import type { AgentBackend, AgentRunner, RunnerId } from './agent-runner.ts';
 import { ClaudeCliRunner } from './claude-cli-runner.ts';
 import { CodexAppServerRunner } from './codex-app-server-runner.ts';
 import { OpencodeServerRunner } from './opencode-server-runner.ts';
-import { CursorAcpRunner } from './cursor-acp-runner.ts';
 import { CursorRunner } from './cursor-runner.ts';
 import type { SessionTransport } from '@open-mercato/cezar-contract';
 import { PiRunner } from './pi-runner.ts';
@@ -21,7 +20,7 @@ export function createRunner(backend: AgentBackend | RunnerId | undefined, optio
     case 'opencode':
       return new OpencodeServerRunner();
     case 'cursor':
-      return options.sessionTransport ? new CursorRunner(options) : new CursorAcpRunner();
+      return new CursorRunner(options);
     case 'pi':
       return new PiRunner();
     case 'omp':
