@@ -115,6 +115,7 @@ import {
   validateLiveCursor,
 } from '../runs/event-history.ts';
 import { readRunIndexFromDisk, searchRunIndexFromDisk } from '../runs/run-index.ts';
+import { workerDestroyView } from '../runs/delegation-state.ts';
 import { searchTokens } from '../runs/run-search.ts';
 import { clientRequestHash } from '../runs/client-request.ts';
 import { ColdRepoHandles } from './cold-repo-handles.ts';
@@ -3974,7 +3975,7 @@ export function createApp(deps: ServerDeps) {
         return [{ workerId: worker.id, parentRunId: run.id, status: worker.status, workspace: owned.workspace,
           ...(worker.currentStepId === undefined ? {} : { currentStepId: worker.currentStepId }),
           ...(worker.activity === undefined ? {} : { activity: worker.activity }),
-          ...(owned.destroy ? { destroy: owned.destroy } : {}),
+          ...(owned.destroy ? { destroy: workerDestroyView(worker) } : {}),
         }];
       });
       // #864: the titles of the runs this answer names, since the cockpit's run list no longer

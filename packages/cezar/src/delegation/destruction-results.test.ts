@@ -55,7 +55,7 @@ describe('verified destruction retains results through explicit history deletion
     expect(execFileSync('git', ['rev-parse', `refs/heads/${workspace.branch}`], { cwd: f.root, encoding: 'utf8' }).trim()).toBe(f.sha);
   });
   it('retries a locked owned worktree after the Git lock is removed', async () => {
-    Object.assign(f.service, { destroyRetryDelayMs: 50 });
+    Object.assign(f.service, { destroyBackoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
     const { workerId, workspace } = await completed();
     execFileSync('git', ['worktree', 'lock', workspace.path], { cwd: f.root });
     expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });

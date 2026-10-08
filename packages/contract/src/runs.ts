@@ -1,6 +1,6 @@
 import { ciWaitSchema } from './ci-wait.ts';
 import { z } from 'zod';
-import { agentInputSchema, delegationStateSchema, runDelegationSummarySchema } from './delegation.ts';
+import { agentInputSchema, delegationStateSchema, runDelegationSummarySchema, workerDestroyRetrySchema } from './delegation.ts';
 import { runnerSchema } from './health.ts';
 import { referenceStatusSchema } from './github.ts';
 import { previewServerSchema } from './preview.ts';
@@ -250,6 +250,10 @@ export const runRecordSchema = z.object({
       occurrenceAt: z.string(),
     })
     .optional(),
+  /** A pending worker destroy's automatic retry state (hearsay-tools/cezarion#879). Here, not in
+   *  the strict worker `delegation`, so an older cezar strips it instead of quarantining the worker,
+   *  and keeps it across its own writes. The API shows it as the worker's `destroy.retry`. */
+  destroyRetry: workerDestroyRetrySchema.optional(),
   /** Task webhook opt-in (#589): the project's webhook receives this run's status changes.
    *  Absent = off. Changes after start through `POST /runs/:id/notify`, which is why it is not
    *  part of the idempotent-start hash. */

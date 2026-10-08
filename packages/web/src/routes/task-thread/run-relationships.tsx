@@ -4,12 +4,14 @@ import { LoaderCircleIcon } from 'lucide-react'
 import { useIsDesktop } from '@/lib/use-desktop'
 import { delegationWaitLabel } from '@/lib/attention'
 import { runTitle } from '@/lib/task-groups'
-import type { ApiRun, RunRelationships, WorkerDestroy, WorkerInspection } from '@open-mercato/cezar-api-client'
+import type { ApiRun, RunRelationships, WorkerDestroyView, WorkerInspection } from '@open-mercato/cezar-api-client'
 
 import { useDestroyWorker, useRun, useRunRelationships, useRuns } from '@/api/queries'
 import { Button } from '@/components/ui/button'
 import { Link } from '@/lib/project-router'
 import { cn } from '@/lib/utils'
+import { relativeIn } from '@/lib/automation-format'
+import { useNow } from '@/lib/use-now'
 
 import { ActivityRow } from './run-activity-row'
 
@@ -250,6 +252,8 @@ function CleanUpWorker({ parentRunId, worker }: { parentRunId: string; worker: W
   const [confirming, setConfirming] = useState(false)
   if (!SETTLED.has(worker.status) || (worker.destroy?.phase === 'complete' && worker.destroy.remaining.length === 0)) return null
   const short = worker.workerId.slice(0, 8)
+  // A destroy already under way retries on its own; this runs one now and restarts its backoff (hearsay-tools/cezarion#879).
+  const retrying = !!worker.destroy && worker.destroy.phase !== 'complete'
   return <div className="flex min-w-0 flex-wrap items-center gap-2 px-1">
     {confirming ? <>
       <span className="break-words text-xs">Removes this worker's worktree and branch. Its result is saved first.</span>
@@ -267,11 +271,11 @@ function CleanUpWorker({ parentRunId, worker }: { parentRunId: string; worker: W
       variant="outline"
       size="sm"
       className="min-h-11"
-      aria-label={`Clean up worker ${short}`}
+      aria-label={retrying ? `Retry clean up of worker ${short}` : `Clean up worker ${short}`}
       disabled={destroy.isPending}
       onClick={() => setConfirming(true)}
     >
-      {destroy.isPending ? 'Cleaning up…' : 'Clean up'}
+      {destroy.isPending ? 'Cleaning up…' : retrying ? 'Retry clean up' : 'Clean up'}
     </Button>}
     {destroy.isError && !confirming ? <span role="status" className="break-words text-xs">Cleanup did not finish: {destroy.error.message}</span> : null}
   </div>
@@ -282,13 +286,28 @@ function CleanUpWorker({ parentRunId, worker }: { parentRunId: string; worker: W
  * reached `complete` with nothing remaining and no error is the expected end of every
  * destroyed worker, so a line saying so appeared on every worker row and carried no
  * information — it just pushed the rows that DO carry some off the first screen.
+ *
+ * A pending cleanup retries on its own, backing off to hourly; once its retries see nothing
+ * change it needs attention (hearsay-tools/cezarion#879). The line says which, when the next check is, and that
+ * Retry clean up tries at once.
  */
-function Cleanup({ state }: { state: WorkerDestroy }) {
+function Cleanup({ state }: { state: WorkerDestroyView }) {
   const tidy = state.phase === 'complete' && state.remaining.length === 0 && state.error === undefined
   if (tidy) return null
+  const retry = state.phase === 'complete' ? undefined : state.retry
+  const next = retry && <NextCheck at={retry.nextAt} />
   return <p className="px-2 pb-2 break-words">
-    {state.phase === 'incomplete' ? 'Cleanup incomplete' : state.phase === 'complete' ? 'Cleanup complete' : `Cleanup ${state.phase}`}
+    {retry?.needsAttention ? 'Cleanup needs attention' : state.phase === 'incomplete' ? 'Cleanup incomplete' : state.phase === 'complete' ? 'Cleanup complete' : `Cleanup ${state.phase}`}
     {state.remaining.length ? ` — remaining: ${state.remaining.join(', ')}` : ''}
-    {state.error ? ` — ${state.error}` : ''}
+    {state.error ? ` — ${retry ? state.error.replace(/\.$/, '') : state.error}` : ''}
+    {retry?.needsAttention ? <>. Nothing changed after {retry.attempts} automatic attempts; checking hourly, next check {next}. Retry clean up to try now.</>
+      : retry ? <>. Retrying automatically, next attempt {next}.</> : null}
   </p>
+}
+
+/** When a retrying cleanup checks next. It re-renders on the slow clock, since an hourly retry writes
+ * nothing in between; only a row with a pending retry mounts one, however large the family. */
+function NextCheck({ at }: { at: string }) {
+  const now = useNow(30_000)
+  return <time dateTime={at} title={new Date(at).toLocaleString()}>{relativeIn(now, Date.parse(at))}</time>
 }

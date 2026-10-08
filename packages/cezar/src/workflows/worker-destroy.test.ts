@@ -20,6 +20,7 @@ import * as runners from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunManager } from './run.ts';
 import { DelegationService } from '../delegation/service.ts';
+import type { Backoff } from '../delegation/retry-backoff.ts';
 import { processesWithCwdUnder, processStartToken } from '../delegation/process-liveness.ts';
 import { signalSession, spawnSessionLeader } from '../core/session-process.ts';
 import { blockRunWrites } from '../runs/run-store.testkit.ts';
@@ -853,10 +854,9 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
     it.each(['inside', 'after'] as const)('a parked parent wait resolves once a survivor dies %s the fast re-probe window', async window => {
       const { w, child, reopened, other } = await crashed('failed');
-      const cadence = other as unknown as { orphanReprobeMs: number; orphanReprobeLimitMs: number; orphanReprobeSlowMs: number };
+      const cadence = other as unknown as { orphanBackoff: Backoff };
       // After the fast window a slow probe remains the wake source; it never gives up.
-      if (window === 'inside') cadence.orphanReprobeMs = 100;
-      else Object.assign(cadence, { orphanReprobeMs: 600_000, orphanReprobeLimitMs: 0, orphanReprobeSlowMs: 100 });
+      cadence.orphanBackoff = window === 'inside' ? { fastMs: 100, fastCount: 60, capMs: 3_600_000 } : { fastMs: 600_000, fastCount: 0, capMs: 100 };
       const owner = reopened.getRun(parent.id)!;
       if (owner.delegation?.role !== 'root') throw Error('fixture');
       reopened.commitDelegation([{ id: parent.id, delegation: { ...owner.delegation, wait: { id: randomUUID(), workerIds: [w.id],
@@ -871,6 +871,41 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         await until(() => !!wait()?.outcomes.some(outcome => outcome.workerId === w.id));
         expect(wait()!.outcomes).toEqual([expect.objectContaining({ workerId: w.id, revision: 0, status: 'failed' })]);
       } finally { other.dispose(); reopened.flush(); }
+    });
+
+    it('scan-only survivors share one /proc scan per reprobe tick, and the reprobe backs off (hearsay-tools/cezarion#879)', async () => {
+      const ids: string[] = []; const holders: Awaited<ReturnType<typeof spawnReady>>[] = [];
+      for (let i = 0; i < 2; i++) {
+        const w = await worker(); store.commitWorkerExecutionStart(w.id);
+        const created = await ensureOwnedWorkspace(root, store.getRun(w.id)!);
+        store.updateRun(w.id, { status: 'failed', worktreePath: created.path, branch: created.branch });
+        rmSync(recordPath(w.id), { force: true }); // legacy: the cwd scan is the only evidence
+        holders.push(await spawnReady(created.path)); ids.push(w.id);
+      }
+      type Cadence = { orphanBackoff: Backoff; orphanDue: Map<string, { at: number; attempts: number }>; armOrphanReprobe(id: string): void };
+      const cadence = manager as unknown as Cadence;
+      cadence.orphanBackoff = { fastMs: 400, fastCount: 2, capMs: 1_600 };
+      const listings = () => vi.mocked(fs.readdirSync).mock.calls.filter(([path]) => path === '/proc').length;
+      // The clock is fake too, so arming the two orphans one after the other cannot drift them apart
+      // under load: recovery arms its orphans in one synchronous pass.
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      try {
+        for (const id of ids) cadence.armOrphanReprobe(id);
+        const before = listings();
+        await vi.advanceTimersByTimeAsync(400);
+        expect(listings() - before).toBe(1);
+        expect(ids.map(id => store.readWorkerExecution(id)?.phase)).toEqual(['starting', 'starting']);
+        expect(ids.map(id => cadence.orphanDue.get(id)?.attempts)).toEqual([1, 1]);
+        // Then 400, 800 and 1,600 ms: past the fast window it doubles to the cap.
+        await vi.advanceTimersByTimeAsync(400 + 800 + 1_600);
+        expect(listings() - before).toBe(4);
+        expect(ids.map(id => cadence.orphanDue.get(id)?.attempts)).toEqual([4, 4]);
+        expect(cadence.orphanDue.get(ids[0]!)!.at - Date.now()).toBeGreaterThan(1_500);
+        for (const holder of holders) { holder.proc.kill('SIGKILL'); await holder.exited; }
+        await vi.advanceTimersByTimeAsync(1_700);
+        expect(ids.map(id => store.readWorkerExecution(id)?.phase)).toEqual(['complete', 'complete']);
+        expect(cadence.orphanDue.size).toBe(0);
+      } finally { vi.useRealTimers(); }
     });
 
     it('destroy waits out a scan-only survivor of a legacy generation instead of returning at once', async () => {
