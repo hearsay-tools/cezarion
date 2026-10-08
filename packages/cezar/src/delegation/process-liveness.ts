@@ -94,14 +94,16 @@ export function isCurrentProcess(entry: RecordedProcess): boolean {
 
 /** The `/proc` reads the Linux scan makes; injectable for platform/error boundary coverage. */
 export type ProcReader = { readdir: () => string[]; readlink: (pid: string) => string };
-/** The darwin scan: `lsof` for working directories. */
-export type DarwinReader = { lsof: () => { ok: boolean; stdout: string } };
+/** The darwin scan: `lsof` for working directories, of every process or of one. */
+export type DarwinReader = { lsof: () => { ok: boolean; stdout: string }; lsofPid?: (pid: number) => { ok: boolean; stdout: string } };
+const lsofCwd = (args: string[], timeout: number) => {
+  const lsof = spawnSync('lsof', [...args, '-d', 'cwd', '-Fpn'], { encoding: 'utf8', timeout, maxBuffer: 16 * 1024 * 1024 });
+  // Status 1 is ordinary: some process was unreadable, and an unreadable cwd is no evidence.
+  return { ok: !lsof.error && (lsof.status === 0 || lsof.status === 1) && !!lsof.stdout, stdout: lsof.stdout ?? '' };
+};
 const realDarwin: DarwinReader = {
-  lsof: () => {
-    const lsof = spawnSync('lsof', ['-a', '-d', 'cwd', '-Fpn'], { encoding: 'utf8', timeout: 5_000, maxBuffer: 16 * 1024 * 1024 });
-    // Status 1 is ordinary: some process was unreadable, and an unreadable cwd is no evidence.
-    return { ok: !lsof.error && (lsof.status === 0 || lsof.status === 1) && !!lsof.stdout, stdout: lsof.stdout ?? '' };
-  },
+  lsof: () => lsofCwd(['-a'], 5_000),
+  lsofPid: pid => lsofCwd(['-a', '-p', String(pid)], 2_000),
 };
 
 const realProc: ProcReader = {
@@ -162,13 +164,20 @@ export function processesWithCwdUnder(dirs: string | readonly string[], platform
   return [...snapshot].filter(([, cwd]) => under(cwd)).map(([pid]) => pid);
 }
 
-/** Whether one process's working directory is still one of `dirs` or beneath it, from a single
- * `readlink`: `false` when it moved away or cannot be read (no evidence, hearsay-tools/cezarion#889),
- * `undefined` where only a full scan could say (darwin, win32). */
-export function processCwdUnder(pid: number, dirs: readonly string[], platform: NodeJS.Platform = process.platform, proc: ProcReader = realProc): boolean | undefined {
-  if (platform !== 'linux') return undefined;
-  let cwd: string;
-  try { cwd = proc.readlink(String(pid)); } catch { return false; }
+/** Whether one process's working directory is still one of `dirs` or beneath it, without a scan:
+ * one `readlink` on Linux, one `lsof` of that process on darwin. `false` when it moved away or
+ * cannot be read (no evidence, hearsay-tools/cezarion#889); `undefined` on win32, whose scan names
+ * no holder in the first place. */
+export function processCwdUnder(pid: number, dirs: readonly string[], platform: NodeJS.Platform = process.platform, proc: ProcReader = realProc,
+  darwin: DarwinReader = realDarwin): boolean | undefined {
+  let cwd: string | undefined;
+  if (platform === 'linux') {
+    try { cwd = proc.readlink(String(pid)); } catch { return false; }
+  } else if (platform === 'darwin') {
+    const lsof = darwin.lsofPid?.(pid);
+    cwd = lsof?.ok ? lsof.stdout.split('\n').find(line => line.startsWith('n'))?.slice(1) : undefined;
+    if (cwd === undefined) return false;
+  } else return undefined;
   const found = processesWithCwdUnder(dirs, platform, proc, undefined, new Map([[pid, cwd]]));
   return found !== 'unknown' && found.length > 0;
 }

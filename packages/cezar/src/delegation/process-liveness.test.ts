@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { nonDumpableHolder, readableHolder } from './non-dumpable.testkit.ts';
-import { inspectExecutionGeneration, inspectGeneration, parseProcStat, probeGeneration, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, scanProcessCwds, sharedCwdScan } from './process-liveness.ts';
+import { inspectExecutionGeneration, inspectGeneration, parseProcStat, probeGeneration, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, scanProcessCwds, sharedCwdScan, processCwdUnder } from './process-liveness.ts';
 
 // Scope only enumeration to the processes this fixture owns, so host processes never enter a scan.
 // Keep cwd/stat/token reads real, including ENOENT after our child has exited;
@@ -270,6 +270,27 @@ describe('shared cwd snapshot (hearsay-tools/cezarion#879)', () => {
     const linux = { readdir: () => ['7', String(process.pid), 'self'], readlink: () => '/worker' };
     expect(scanProcessCwds('linux', linux)).toEqual(new Map([[7, '/worker']]));
     expect(scanProcessCwds('aix')).toBe('unknown');
+  });
+});
+
+describe('one holder\'s working directory (hearsay-tools/cezarion#879)', () => {
+  it('darwin rechecks a named holder with a targeted lsof; a failed or empty answer is no evidence of holding', () => {
+    const linuxUnused = { readdir: () => { throw Error('no /proc on darwin'); }, readlink: () => { throw Error('no /proc on darwin'); } };
+    const darwin = (stdout: string, ok = true) => ({
+      lsof: () => { throw Error('a recheck never runs the full scan'); },
+      lsofPid: (pid: number) => ({ ok, stdout: stdout.replaceAll('PID', String(pid)) }),
+    });
+    expect(processCwdUnder(42, ['/worker'], 'darwin', linuxUnused, darwin('pPID\nn/worker/nested\n'))).toBe(true);
+    expect(processCwdUnder(42, ['/worker'], 'darwin', linuxUnused, darwin('pPID\nn/\n'))).toBe(false);
+    expect(processCwdUnder(42, ['/worker'], 'darwin', linuxUnused, darwin('', false))).toBe(false);
+    expect(processCwdUnder(42, ['/worker'], 'darwin', linuxUnused, darwin('pPID\n'))).toBe(false);
+  });
+
+  it('linux reads one link; win32, whose scan never names a holder, cannot say', () => {
+    const proc = { readdir: () => { throw Error('no listing for one process'); }, readlink: (pid: string) => pid === '7' ? '/worker' : '/elsewhere' };
+    expect(processCwdUnder(7, ['/worker'], 'linux', proc)).toBe(true);
+    expect(processCwdUnder(8, ['/worker'], 'linux', proc)).toBe(false);
+    expect(processCwdUnder(7, ['/worker'], 'win32')).toBeUndefined();
   });
 });
 

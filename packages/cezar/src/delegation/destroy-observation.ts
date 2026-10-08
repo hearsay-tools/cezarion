@@ -91,7 +91,8 @@ export function recordHolders(pids: readonly number[]): RecordedProcess[] {
  * Every holder the last attempt named still holds: the same live process and, unless it belongs to
  * the generation's own process record (which blocks wherever it works), still working under the
  * worktree or a scratch location. A holder that exited, was replaced or moved away is a change.
- * One `readlink` per holder; where only a full scan could read a cwd, liveness alone decides.
+ * One `readlink` (Linux) or one-process `lsof` (darwin) per holder; on win32, whose scan names no
+ * holder, only recorded processes reach this, and liveness decides.
  */
 export function holdersStillHold({ store, dataDir, workerId, holders }: { store: RunStore; dataDir: string; workerId: string; holders: readonly RecordedProcess[] }): boolean {
   if (!holders.length) return true;
