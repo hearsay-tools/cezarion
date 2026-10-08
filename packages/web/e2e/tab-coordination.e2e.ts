@@ -185,7 +185,10 @@ it('a frozen document releases its demand and rehydrates after native resume', a
       await request('Page.setWebLifecycleState', { state: 'frozen' }, sessionId)
       await request('Target.activateTarget', { targetId: sibling.targetId })
       await pollFor(async () => JSON.stringify((await fixture.control()).listeners) === JSON.stringify(baseline.listeners) ? true : undefined,
-        () => 'frozen document retained server demand', { timeoutMs: 20_000, tries: 100 })
+        async () => `frozen document retained server demand: baseline=${JSON.stringify(baseline.listeners)} current=${JSON.stringify((await fixture.control()).listeners)}`, { timeoutMs: 20_000, tries: 100 }).catch(async error => {
+          await request('Page.setWebLifecycleState', { state: 'active' }, sessionId)
+          throw new Error(`${String(error)} lifecycle=${JSON.stringify(await read(request, sessionId, '({events:window.__tabLifecycle,visibility:document.visibilityState})'))}`)
+        })
       const text = `after-sleep-${Date.now()}`
       await fixture.control({ publish: text, runs: [run] })
       await request('Page.setWebLifecycleState', { state: 'active' }, sessionId)
