@@ -11,6 +11,7 @@ import { ProjectScopeContext } from './project-scope-context'
 import type { GithubRefStatusData } from '@open-mercato/cezar-api-client'
 import {
   refStatusRecheckAfter,
+  useReferenceStatuses,
   useReferenceProjectId,
   useProjectRepoBase,
   queryKeys,
@@ -1240,6 +1241,36 @@ describe('useProjectRepoBase', () => {
     })
     expect(result.current).toBe('https://github.com/o/boot')
   })
+})
+
+it('keeps a newer shared ref-status snapshot when an older document query finishes last', async () => {
+  vi.useFakeTimers()
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+  const client = createQueryClient()
+  const ref = { projectId: 'shared-status', kind: 'PR' as const, number: 924 }
+  const key = queryKeys.githubRefStatus(ref.projectId, [ref.number], [])
+  const older: GithubRefStatusData = { available: true, prs: { 924: 'checks-pending' }, issues: {}, recheckAfterMs: 1_000 }
+  const newer: GithubRefStatusData = { ...older, prs: { 924: 'merged' } }
+  client.setQueryData(key, older)
+  const pending = deferredResponse()
+  fetchMock.mockReturnValueOnce(pending.promise).mockResolvedValue(json(newer))
+  const view = renderHook(() => useReferenceStatuses([ref]), {
+    wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  })
+  try {
+    let recheck!: Promise<void>
+    act(() => { recheck = client.refetchQueries({ queryKey: key, exact: true }) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_001) })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(client.getQueryData(key)).toEqual(newer)
+    await act(async () => {
+      pending.resolve(json(older))
+      await recheck
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(client.getQueryData(key)).toEqual(newer)
+    expect(view.result.current(ref)).toMatchObject({ state: 'ready', status: 'merged' })
+  } finally { view.unmount(); client.clear(); vi.useRealTimers() }
 })
 
 describe('refStatusRecheckAfter', () => {

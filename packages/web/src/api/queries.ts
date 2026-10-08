@@ -2151,16 +2151,22 @@ export function useReferenceStatuses(
   const readsSignature = JSON.stringify(groups.map((group, index) => ({ ...group, interval: refStatusRecheckAfter(results[index]?.data) ?? false })))
   useEffect(() => {
     if (!enabled || isCockpitE2e()) return
+    let active = true
     const demands = JSON.parse(readsSignature) as Array<{ projectId: string; prs: number[]; issues: number[]; interval: number | false }>
     const releases = demands.filter(group => group.interval !== false).map(group => {
       const params = new URLSearchParams()
       if (group.prs.length) params.set('prs', group.prs.join(','))
       if (group.issues.length) params.set('issues', group.issues.join(','))
-      return subscribeLiveRead({ path: `/api/v1/p/${group.projectId}/github/ref-status?${params}`, intervalMs: group.interval as number }, value => {
-        referenceClient.setQueryData(queryKeys.githubRefStatus(group.projectId, group.prs, group.issues), value)
+      const key = queryKeys.githubRefStatus(group.projectId, group.prs, group.issues)
+      return subscribeLiveRead({ path: `/api/v1/p/${group.projectId}/github/ref-status?${params}`, intervalMs: group.interval as number }, (value, error) => {
+        if (error) return
+        // A document-local refetch must not overwrite the newer shared snapshot.
+        void referenceClient.cancelQueries({ queryKey: key, exact: true }).then(() => {
+          if (active) referenceClient.setQueryData(key, value)
+        })
       })
     })
-    return () => { for (const release of releases) release() }
+    return () => { active = false; for (const release of releases) release() }
   }, [enabled, readsSignature, referenceClient])
 
   const byRef = useMemo(() => {
