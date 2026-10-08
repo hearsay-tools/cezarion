@@ -110,3 +110,16 @@ it('opens boot publications and supported legacy flat URLs', () => {
     expect(browser.url()).toBe(baseUrl + bootPublication.link)
   }
 })
+
+// #925: a legacy flat URL names a RUN, and the run belongs to the project whose store holds it —
+// not necessarily the boot one. The redirect must resolve that owner from the cross-project
+// runs index instead of sending the link to a boot project that honestly answers 404 for it.
+it('resolves a legacy flat URL of a non-boot-owned run to the owning project', () => {
+  browser.goto(`${baseUrl}/p/boot/`)
+  browser.waitForFunction(`location.pathname === '/p/boot/'`)
+  browser.goto(`${baseUrl}/tasks/${ownerRun}/files?artifact=${publication.id}`)
+
+  expectOwnerPreview()
+  settleVisual(browser, '[data-slot="file-preview"]')
+  browser.screenshot(join(evidenceDir, 'owner-flat-preview.png'))
+})

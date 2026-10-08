@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from './api/query-client'
 import { queryKeys, workspaceQueryKeys } from './api/queries'
-import type { ProjectsResponse, WorkspaceUiState } from '@open-mercato/cezar-api-client'
+import type { ProjectsResponse, RunsIndexResponse, WorkspaceUiState } from '@open-mercato/cezar-api-client'
 import { AppearanceProvider } from './components/appearance-provider'
 import { ListViewProvider } from './components/list-view'
 import { ThemeProvider } from './components/theme-provider'
@@ -101,10 +101,11 @@ function ProjectNavigationProbe() {
 /** Cold-load the router at a URL, exactly as a pasted deep link would — under the same providers
  *  the app shell supplies. With `seed` (the default) the health and registry answers the redirect
  *  gates need are already cached, the way a warm app has them (plus the workspace UI-state the
- *  appearance provider reads); `seed: false` is the cold state where the boot id is still unknown.
- *  Passing `null` skips an individual seed so error and pending behavior can be exercised without
- *  replacing the shared harness. The remembered location is NOT seeded here — it is per-browser
- *  now, so `rememberLocation` writes it to localStorage instead. */
+ *  appearance provider reads, and the cross-project runs index the task-link redirect reads);
+ *  `seed: false` is the cold state where the boot id is still unknown. Passing `null` skips an
+ *  individual seed so error and pending behavior can be exercised without replacing the shared
+ *  harness. The remembered location is NOT seeded here — it is per-browser now, so
+ *  `rememberLocation` writes it to localStorage instead. */
 function renderAt(
   entry: string,
   {
@@ -112,11 +113,13 @@ function renderAt(
     health = HEALTH,
     registry = REGISTRY,
     uiState = {},
+    runsIndex,
   }: {
     seed?: boolean
     health?: typeof HEALTH | null
     registry?: ProjectsResponse | null
     uiState?: WorkspaceUiState | Record<string, unknown> | null
+    runsIndex?: RunsIndexResponse | null
   } = {},
 ) {
   const client = createQueryClient()
@@ -126,6 +129,7 @@ function renderAt(
     if (health !== null) client.setQueryData(queryKeys.health, health)
     if (registry !== null) client.setQueryData(workspaceQueryKeys.projects, registry)
     if (uiState !== null) client.setQueryData(workspaceQueryKeys.uiState, uiState)
+    if (runsIndex !== undefined && runsIndex !== null) client.setQueryData(workspaceQueryKeys.runsIndex, runsIndex)
   }
   render(
     <QueryClientProvider client={client}>
@@ -469,6 +473,62 @@ describe('legacy flat URLs redirect to the boot project', () => {
     renderAt(url)
     expect(currentPathname()).toBe(`/p/${BOOT}${url}`)
     expect(routeName()).toBe('task-github-item')
+  })
+
+  // #925: a flat task link names a run that may belong to a project other than the boot one.
+  // The redirect resolves the owner from the cross-project runs index — the same one-request
+  // snapshot the global Tasks page and the palette read — so the link lands in the store that
+  // owns the run instead of a boot project that honestly answers 404 for it.
+  const OWNER_RUN = '11111111-2222-3333-4444-555555555555'
+  const indexFor = (rows: Array<{ id: string; projectId: string }>): RunsIndexResponse => ({
+    runs: rows.map((row) => ({
+      ...row,
+      title: `Task ${row.id}`,
+      status: 'done' as const,
+      createdAt: '2026-10-08T08:00:00Z',
+      archived: false,
+      workflow: 'quick-task',
+      workflowLabel: 'quick-task',
+      runner: 'claude',
+      tokensUsed: 0,
+    })),
+    referenceStatuses: {},
+    perProjectLimit: 50,
+    truncated: [],
+  })
+
+  it('resolves the owning project for a flat task link of a non-boot run', () => {
+    renderAt(`/tasks/${OWNER_RUN}/files?path=docs%2Fdesign.md`, {
+      runsIndex: indexFor([{ id: OWNER_RUN, projectId: 'other' }]),
+    })
+
+    expect(currentPathname()).toBe(`/p/other/tasks/${OWNER_RUN}/files`)
+    expect(currentSearch()).toBe('?path=docs%2Fdesign.md')
+    expect(routeName()).toBe('task-files')
+  })
+
+  it('keeps a boot-owned flat task link on the boot project', () => {
+    renderAt(`/tasks/${OWNER_RUN}/files?path=docs%2Fdesign.md`, {
+      runsIndex: indexFor([{ id: OWNER_RUN, projectId: BOOT }]),
+    })
+
+    expect(currentPathname()).toBe(`/p/${BOOT}/tasks/${OWNER_RUN}/files`)
+    expect(currentSearch()).toBe('?path=docs%2Fdesign.md')
+  })
+
+  it('falls back to the boot project when a loaded index does not know the run', () => {
+    renderAt(`/tasks/${OWNER_RUN}/files?path=x.md`, {
+      runsIndex: indexFor([{ id: '99999999-2222-3333-4444-555555555555', projectId: 'other' }]),
+    })
+
+    expect(currentPathname()).toBe(`/p/${BOOT}/tasks/${OWNER_RUN}/files`)
+  })
+
+  it('falls back to the boot project when the runs index cannot answer', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('server down'))))
+    renderAt(`/tasks/${OWNER_RUN}`)
+
+    await waitFor(() => expect(currentPathname()).toBe(`/p/${BOOT}/tasks/${OWNER_RUN}`), { timeout: 5000 })
   })
 
   it('keeps an explicit legacy deep link even when another location was saved', () => {

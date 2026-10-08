@@ -13,7 +13,7 @@ import {
 
 import type { HealthResponse } from '@open-mercato/cezar-api-client'
 
-import { useHealth, useProjects } from './api/queries'
+import { useHealth, useProjects, useRunsIndex } from './api/queries'
 import { ProjectScopeProvider } from './api/project-scope-context'
 import { locationToRestore, readStoredLastLocation } from './lib/last-location'
 import { Navigate as ScopedNavigate, stripProjectPrefix } from './lib/project-router'
@@ -234,11 +234,25 @@ function NewTaskProjectRoute() {
  * the last valid project-scoped page THIS browser was on (localStorage, so a second client never
  * decides where this one lands). Any query/hash makes `/` explicit, so pasted links always win.
  * `replace` keeps Back from bouncing off either startup redirect.
+ *
+ * One flat shape gets better than boot (#925): `/tasks/<run-id>/…`, the link `taskFileHref` and
+ * `cez artifact publish` emit, names a RUN — and a run belongs to the project whose store holds
+ * it, which is often not the boot one. For that shape the redirect resolves the owner from the
+ * cross-project runs index (the same one-request snapshot the global Tasks page and the palette
+ * read) and lands the link there. Everything else — an id the loaded index does not know (the
+ * index is a capped window, and a never-registered run was never reachable anyway), an index
+ * that cannot answer, or any other flat path — keeps the boot project, exactly as before.
  */
+const FLAT_TASK_RUN_ID = /^\/tasks\/([0-9a-f-]{36})(?=\/|$)/i
+
 function LegacyPathRedirect() {
   const location = useLocation()
   const health = useHealth()
   const projects = useProjects()
+  // Only a run-id-shaped task link pays for the index; every other flat (bookmarklet `/new`,
+  // `/git`, moved settings) has nothing to resolve and must not fetch anything new.
+  const flatRunId = FLAT_TASK_RUN_ID.exec(location.pathname)?.[1] ?? null
+  const runsIndex = useRunsIndex(flatRunId !== null)
   const resolvedBoot = health.data?.bootProject ?? projects.data?.bootProject
   const bootSourcesSettled =
     (health.data !== undefined || health.isError) &&
@@ -263,12 +277,20 @@ function LegacyPathRedirect() {
     if (restored !== null) return <Navigate to={restored} replace />
   }
 
+  // Owner resolution waits for the index like the boot sources above: routing a foreign run to
+  // boot is the 404 this exists to fix, so "not answered yet" must not read as "unknown".
+  let target = boot
+  if (flatRunId !== null) {
+    if (runsIndex.data === undefined && !runsIndex.isError) return <ScopeResolving />
+    target = runsIndex.data?.runs.find((row) => row.id === flatRunId)?.projectId ?? boot
+  }
+
   // A bare `/p` (or `/p/`) names no project — send it to the boot project's home rather than
   // minting a nonsense `/p/<boot>/p` path.
   const path = location.pathname === '/p' || location.pathname === '/p/' ? '/' : location.pathname
   return (
     <Navigate
-      to={`/p/${encodeURIComponent(boot)}${path}${location.search}${location.hash}`}
+      to={`/p/${encodeURIComponent(target)}${path}${location.search}${location.hash}`}
       replace
     />
   )
