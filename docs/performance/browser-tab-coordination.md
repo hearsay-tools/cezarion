@@ -107,4 +107,3 @@ TMPDIR=/tmp node --import tsx packages/web/scripts/benchmark-tabs.ts --windows -
 Build the baseline in a separate checkout of `c961c04ab6633373ec8377cf08674814d255a760` with its own `npm ci` and `npm run build`. Run the current harness with `--build-root /absolute/path/to/baseline`, keeping all other options identical. Never install dependencies into a checkout while its tests are running. `--quick` uses one-second warmup/three-second sampling solely to smoke-test the harness; none of the report tables uses it.
 
 The application and fixture servers are shut down by the harness after each case. Each case gets a new browser profile and private workspace; no host credentials or real project histories are used.
-
