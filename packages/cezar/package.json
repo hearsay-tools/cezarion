@@ -1,6 +1,6 @@
 {
   "name": "@wjarka/cezarion",
-  "version": "0.15.1",
+  "version": "0.16.0",
   "description": "Local cockpit for running and tracking AI agent tasks in your repo. Uses your logged-in `claude` CLI and `gh` — zero config, zero database.",
   "license": "MIT",
   "type": "module",
@@ -53,8 +53,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@open-mercato/cezar-api-client": "^0.15.1",
-    "@open-mercato/cezar-contract": "^0.15.1",
+    "@open-mercato/cezar-api-client": "^0.16.0",
+    "@open-mercato/cezar-contract": "^0.16.0",
     "@types/node": "^24.19.1",
     "@types/ws": "^8.18.1",
     "esbuild": "^0.28.1",
