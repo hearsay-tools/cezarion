@@ -139,6 +139,94 @@ describe('transcript facts sidecar', () => {
   });
   afterEach(() => { restoreTranscriptReads(); rmSync(dataDir, { recursive: true, force: true }); });
 
+  it.each(['plain', 'compressed'] as const)('shared reader preserves %s sidecar bytes without writing', async (format) => {
+    const text = line(ev('conversation-message', { projectionId: 'π:1' }))
+      + line(ask('選択')) + '{bad json\n'
+      + line(ev('worker-question-routed', { askSeq: 2, messageId: 'route' }))
+      + line(ev('worker-question-fallback', { askSeq: 2 }))
+      + line(ev('worker-outcome', { waitId: 'wait', outcome: { workerId: 'worker', revision: 2 } }));
+    if (format === 'plain') writeFileSync(plainPath(), text);
+    else writeFileSync(historyPaths(dataDir, id).compressed, brotliCompressSync(Buffer.from(text)));
+    const expected = JSON.stringify(new TranscriptFactsIndex(dataDir).get(id));
+    expect(readFileSync(factsPath(), 'utf8')).toBe(expected);
+    const literal = {
+      version: 1, bytes: Buffer.byteLength(text), lastSeq: 5, projectionIds: ['π:1'],
+      workerOutcomeKeys: ['wait:worker:2'],
+      pendingAsk: { seq: 2, requestId: '選択', questions, routedMessageId: 'route', fallback: true },
+      pendingGateSeq: 2,
+    };
+    expect(JSON.parse(expected!)).toMatchObject(literal);
+    const { loadTranscriptFacts } = await import('./transcript-facts-load.ts');
+    const savedStat = statSync(factsPath());
+    // Validation has its own existing key order; compare the matching cached-load path.
+    expect(JSON.stringify(loadTranscriptFacts(dataDir, id)?.facts)).toBe(JSON.stringify(new TranscriptFactsIndex(dataDir).get(id)));
+    expect(statSync(factsPath()).mtimeMs).toBe(savedStat.mtimeMs);
+    rmSync(factsPath());
+    const loaded = loadTranscriptFacts(dataDir, id);
+    expect(JSON.stringify(loaded?.facts)).toBe(expected);
+    expect(loaded).toMatchObject({ written: -1, needsWrite: true });
+    expect(existsSync(factsPath())).toBe(false);
+  });
+
+  it('shared reader distinguishes meaningful tails from byte-only advances', async () => {
+    const writer = new TranscriptFactsIndex(dataDir);
+    append(writer, ev('conversation-message', { projectionId: 'p:1' }));
+    const saved = readFileSync(factsPath(), 'utf8');
+    const written = statSync(plainPath()).size;
+    appendFileSync(plainPath(), line(ev('text', { text: '尾' })));
+    const { loadTranscriptFacts } = await import('./transcript-facts-load.ts');
+    expect(loadTranscriptFacts(dataDir, id)).toMatchObject({ written, needsWrite: false, facts: { lastSeq: 2 } });
+    const reader = new TranscriptFactsIndex(dataDir);
+    reader.get(id);
+    expect(readFileSync(factsPath(), 'utf8')).toBe(saved);
+    appendFileSync(plainPath(), line(ask('tail')));
+    expect(loadTranscriptFacts(dataDir, id)).toMatchObject({ written, needsWrite: true, facts: { pendingAsk: { requestId: 'tail' } } });
+    expect(readFileSync(factsPath(), 'utf8')).toBe(saved);
+    expect(JSON.stringify(reader.get(id))).toBe(readFileSync(factsPath(), 'utf8'));
+  });
+
+  it('shared reader returns unreadable without caching an empty transcript', async () => {
+    const { loadTranscriptFacts } = await import('./transcript-facts-load.ts');
+    mkdirSync(plainPath());
+    expect(loadTranscriptFacts(dataDir, id)).toBeUndefined();
+    const index = new TranscriptFactsIndex(dataDir);
+    expect(index.get(id)).toBeUndefined();
+    expect(existsSync(factsPath())).toBe(false);
+    rmSync(plainPath(), { recursive: true });
+    writeFileSync(plainPath(), line(ask('recovered')));
+    expect(index.get(id)?.pendingAsk?.requestId).toBe('recovered');
+  });
+
+  it('shared reader preserves missing-history and undecodable-archive behavior', async () => {
+    const { loadTranscriptFacts } = await import('./transcript-facts-load.ts');
+    expect(loadTranscriptFacts(dataDir, id)).toEqual({
+      facts: { version: 1, bytes: 0, lastSeq: 0, projectionIds: [], workerOutcomeKeys: [] },
+      written: 0, needsWrite: false,
+    });
+    const { compressed } = historyPaths(dataDir, id);
+    writeFileSync(compressed, 'not brotli');
+    const loaded = loadTranscriptFacts(dataDir, id);
+    expect(loaded).toMatchObject({ written: -1, needsWrite: true, facts: { bytes: 0, lastSeq: 0 } });
+    expect(loaded?.facts.archive).toEqual({ size: 10, mtimeMs: statSync(compressed).mtimeMs, ino: statSync(compressed).ino });
+    expect(existsSync(factsPath())).toBe(false);
+    expect(JSON.stringify(new TranscriptFactsIndex(dataDir).get(id))).toBe(JSON.stringify(loaded?.facts));
+  });
+
+  it.each(['size', 'mtimeMs', 'ino'] as const)('shared reader rejects a mismatched archive %s', async (field) => {
+    const text = line(ask('archive'));
+    writeFileSync(historyPaths(dataDir, id).compressed, brotliCompressSync(Buffer.from(text)));
+    const expected = JSON.stringify(new TranscriptFactsIndex(dataDir).get(id));
+    const stale = JSON.parse(readFileSync(factsPath(), 'utf8'));
+    stale.archive[field] += 1;
+    stale.projectionIds = ['stale'];
+    writeFileSync(factsPath(), JSON.stringify(stale));
+    const { loadTranscriptFacts } = await import('./transcript-facts-load.ts');
+    const loaded = loadTranscriptFacts(dataDir, id);
+    expect(JSON.stringify(loaded?.facts)).toBe(expected);
+    expect(loaded?.needsWrite).toBe(true);
+    expect(readFileSync(factsPath(), 'utf8')).toBe(JSON.stringify(stale));
+  });
+
   it('persists only when an indexed fact changes', () => {
     const index = new TranscriptFactsIndex(dataDir);
     // The first append loads the run, which saves the facts it built.
