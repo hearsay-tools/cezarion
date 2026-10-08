@@ -17,12 +17,19 @@ if (log) appendFileSync(log, `${JSON.stringify({ pid: process.pid, resumeId, id,
 if (mode === 'delay-init') await new Promise(resolve => setTimeout(resolve, 10_000));
 frame({ type: 'system', subtype: 'init', session_id: id, model: flag('--model') ?? 'auto', cwd: process.cwd() });
 if (mode === 'no-result') process.exit(0);
+if (mode === 'portable-ask' && !resumeId) {
+  const ask = 'CEZ:ASK {"questions":[{"header":"Library","question":"Which library?","multiSelect":false,"options":[{"label":"Vitest","description":"Use Vitest"},{"label":"Jest","description":"Use Jest"}]}]}';
+  frame({ type: 'assistant', session_id: id, message: { role: 'assistant', content: [{ type: 'text', text: `Choose one.\n${ask}` }] } });
+  frame({ type: 'result', subtype: 'success', session_id: id, is_error: false, result: `Choose one.\n${ask}` });
+  process.exit(0);
+}
 if (mode === 'provider-error') {
   frame({ type: 'result', subtype: 'error_during_execution', session_id: id, is_error: true,
     result: 'RetriableError: provider unavailable' });
   process.exit(0);
 }
 const text = mode === 'native-question' ? 'Question skipped.' : `turn ${turn}: ${prompt}`;
+if (mode === 'delay-work' && resumeId) await new Promise(resolve => setTimeout(resolve, 200));
 frame({ type: 'assistant', session_id: id, message: { role: 'assistant', content: [{ type: 'text', text }] } });
 if (mode === 'crash-after-work') process.exit(1);
 frame({ type: 'result', subtype: 'success', session_id: id, is_error: false, result: text });

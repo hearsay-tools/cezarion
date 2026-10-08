@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -210,5 +210,153 @@ describe('Cursor print logical session', () => {
     await expect.poll(() => events.some(event => event.type === 'done'), { timeout: 2_000 }).toBe(true);
     expect(events.some(event => event.type === 'error' && /no progress/i.test(event.message))).toBe(true);
     await session.result;
+  });
+
+  it('parks a trailing CEZ:ASK until explicit human input and drops premature follow-ups', async () => {
+    const { spec, log } = fixture('portable-ask');
+    const events: AgentEvent[] = [];
+    const session = new CursorPrintRunner({ bin: mock, processOptions: { drainMs: 20 } })
+      .startSession(spec, event => events.push(event), { autoEndAfterFirstTurn: true });
+    expect(session.sendMessage([{ type: 'text', text: 'premature' }])).toBe(true);
+    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(1);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(session.open).toBe(true);
+    expect(session.heldHumanInputCount?.()).toBe(0);
+    expect(session.sendAgentMessage([{ type: 'text', text: 'worker cannot answer' }])).toBe(false);
+    expect(logs(log)).toHaveLength(1);
+    expect(session.sendMessage([{ type: 'text', text: 'Library: Vitest' }])).toBe(true);
+    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(2);
+    expect(logs(log)).toHaveLength(2);
+    expect(logs(log)[1]?.resumeId).toBe(logs(log)[0]?.id);
+    expect(logs(log)[1]?.args.at(-1)).toContain('Library: Vitest');
+    session.end();
+    await session.result;
+  });
+
+  it.each(['Library: Vitest', 'I prefer a different library', 'Library: decline'])(
+    'sends the human reply %s as its own exact-resume turn', async reply => {
+      const { spec, log } = fixture('portable-ask');
+      const events: AgentEvent[] = [];
+      const session = new CursorPrintRunner({ bin: mock, processOptions: { drainMs: 20 } })
+        .startSession(spec, event => events.push(event));
+      await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(1);
+      session.sendMessage([{ type: 'text', text: reply }]);
+      await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(2);
+      session.end();
+      await session.result;
+      expect(logs(log)[1]?.resumeId).toBe(logs(log)[0]?.id);
+      expect(logs(log)[1]?.args.at(-1)).toContain(reply);
+    },
+  );
+
+  it('refuses busy worker input and admits it only after model output on a new turn', async () => {
+    const { spec, log } = fixture('delay-work');
+    const events: AgentEvent[] = [];
+    const consumed: string[][] = [];
+    const session = new CursorPrintRunner({ bin: mock, processOptions: { drainMs: 20 } })
+      .startSession(spec, event => events.push(event), { onAgentInputConsumed: ids => consumed.push([...ids]) });
+    expect(session.sendAgentMessage([{ type: 'text', text: 'busy' }], ['busy-id'])).toBe(false);
+    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(1);
+    const delivery = session.sendAgentMessage([{ type: 'text', text: 'worker follow-up' }], ['worker-id']);
+    expect(delivery).not.toBe(false);
+    let admitted = false;
+    void (delivery as Promise<void>).then(() => { admitted = true; });
+    await expect.poll(() => logs(log).length, { timeout: 3_000 }).toBe(2);
+    expect(admitted).toBe(false);
+    await delivery;
+    expect(admitted).toBe(true);
+    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(2);
+    expect(consumed).toEqual([]);
+    session.end();
+    await session.result;
+  });
+
+  it('counts and discards queued human messages without opening new turns', async () => {
+    const { spec, log } = fixture('result-before-exit');
+    const events: AgentEvent[] = [];
+    const session = new CursorPrintRunner({ bin: mock, processOptions: { drainMs: 20 } })
+      .startSession(spec, event => events.push(event));
+    session.sendMessage([{ type: 'text', text: 'one' }]);
+    session.sendMessage([{ type: 'text', text: 'two' }]);
+    expect(session.holdsHumanInput()).toBe(true);
+    expect(session.heldHumanInputCount?.()).toBe(2);
+    session.discardQueuedMessages();
+    expect(session.heldHumanInputCount?.()).toBe(0);
+    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(1);
+    expect(logs(log)).toHaveLength(1);
+    session.end();
+    await session.result;
+  });
+
+  it('passes qualified delegation, MCP, image, root and advertised effort fields on each turn', async () => {
+    const { spec, log } = fixture();
+    const extraRoot = mkdtempSync(join(tmpdir(), 'cez-print-extra-root-'));
+    scratch.push(extraRoot);
+    const syntheticToken = 'synthetic-tool-token-590';
+    spec.restrictNativeDelegation = true;
+    spec.cezarTools = { name: 'cezar', command: 'node', args: ['/safe/mock-mcp.mjs'] };
+    spec.env = { ...spec.env, CEZ_TOOL_TOKEN: syntheticToken, CEZ_TOOL_SOCKET: '/tmp/synthetic-tool-socket' };
+    spec.additionalDirectories = [extraRoot];
+    spec.effort = 'low';
+    spec.images = [{ type: 'image', source: { type: 'base64', media_type: 'image/png',
+      data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/R1cAAAAASUVORK5CYII=',
+    } }];
+    let descriptor = '';
+    const events: AgentEvent[] = [];
+    const runner = new CursorPrintRunner({ bin: mock, processOptions: { drainMs: 20 }, models: [
+      { id: 'gpt-5.4-mini-medium', label: 'Mini Medium', description: '' },
+      { id: 'gpt-5.4-mini-low', label: 'Mini Low', description: '' },
+    ] });
+    const session = runner.startSession(spec, event => events.push(event), {
+      onUiEvent: event => {
+        if (event.type !== 'session.started') return;
+        const args = logs(log)[0]?.args ?? [];
+        const pluginDir = args[args.indexOf('--plugin-dir') + 1];
+        if (pluginDir && existsSync(join(pluginDir, 'mcp.json'))) {
+          descriptor = readFileSync(join(pluginDir, 'mcp.json'), 'utf8');
+        }
+      },
+    });
+    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(1);
+    session.sendMessage([{ type: 'text', text: 'followup' }]);
+    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(2);
+    session.end();
+    await session.result;
+    const turns = logs(log);
+    expect(turns).toHaveLength(2);
+    for (const turn of turns) {
+      expect(turn.args).toContain('--add-dir');
+      expect(turn.args[turn.args.indexOf('--add-dir') + 1]).toBe(extraRoot);
+      expect(turn.args[turn.args.indexOf('--model') + 1]).toBe('gpt-5.4-mini-low');
+      const allowed = turn.args[turn.args.indexOf('--allowed-tools') + 1] ?? '';
+      expect(allowed).toContain('read_tool_call');
+      expect(allowed).not.toContain('task_tool_call');
+      expect(allowed).not.toContain('create_agent_tool_call');
+      expect(turn.args).toContain('--plugin-dir');
+      expect(JSON.stringify(turn.args)).not.toContain(syntheticToken);
+    }
+    expect(turns[0]?.args).toContain('--image');
+    expect(turns[1]?.args).not.toContain('--image');
+    expect(descriptor).toContain('${CEZ_TOOL_TOKEN}');
+    expect(descriptor).toContain('${CEZ_TOOL_SOCKET}');
+    expect(descriptor).not.toContain(syntheticToken);
+    const pluginDir = turns[0]?.args[(turns[0]?.args.indexOf('--plugin-dir') ?? -1) + 1];
+    const imagePath = turns[0]?.args[(turns[0]?.args.indexOf('--image') ?? -1) + 1];
+    expect(existsSync(pluginDir!)).toBe(false);
+    expect(existsSync(imagePath!)).toBe(false);
+  });
+
+  it('rejects unknown model and effort pins before the first process', async () => {
+    const { spec, log } = fixture();
+    const models = [{ id: 'gpt-5.4-mini-medium', label: 'Mini Medium', description: '' }];
+    const missingModel: AgentEvent[] = [];
+    await new CursorPrintRunner({ bin: mock, models }).run({ ...spec, model: 'unknown-model' },
+      event => missingModel.push(event));
+    expect(missingModel.some(event => event.type === 'error' && /model/i.test(event.message))).toBe(true);
+    const missingEffort: AgentEvent[] = [];
+    await new CursorPrintRunner({ bin: mock, models }).run({ ...spec, effort: 'low' },
+      event => missingEffort.push(event));
+    expect(missingEffort.some(event => event.type === 'error' && /effort/i.test(event.message))).toBe(true);
+    expect(existsSync(log)).toBe(false);
   });
 });

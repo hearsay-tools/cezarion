@@ -1,29 +1,36 @@
 import { fileURLToPath } from 'node:url';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type {
   AgentEvent, AgentRunResult, AgentRunner, AgentRunSpec, AgentRunSpecSupport,
   AgentSession, AgentToolCallRecord, ContentBlock, InputDelivery, SessionOptions,
 } from './agent-runner.ts';
 import { prependSystemPrompt } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
+import { parseAskMarker } from './ask.ts';
+import { cezarToolEnvNames } from '../ci-wait/tools.ts';
+import type { ModelOption } from './runner-model-catalog.ts';
+import { SAFE_CURSOR_PRINT_TOOLS } from './cursor-print-tool-catalog.ts';
 import { sanitizeCursorProviderError } from './cursor-provider-error.ts';
 import { startCursorPrintProcess, type CursorPrintProcess, type CursorPrintProcessOptions } from './cursor-print-process.ts';
 import { createCursorPrintUiState, mapCursorPrintMessage, mapCursorPrintStreamEvent } from './cursor-print-ui-mapper.ts';
 import { AUTO_END_DELAY_MS, DEFAULT_NO_PROGRESS_TIMEOUT_MS, DEFAULT_RUN_TIMEOUT_MS } from './runner-runtime.ts';
 
-/** Current Task 3 wire declaration; Task 4 binds the remaining spec fields. */
+/** Cursor print fields with live-qualified invocation mechanisms. */
 export const CURSOR_PRINT_SPEC_SUPPORT: AgentRunSpecSupport = {
-  cezarTools: { honored: false, reason: 'No Cezar MCP descriptor is attached by this print adapter yet' },
+  cezarTools: { honored: true, via: 'private local --plugin-dir with mcp.json env placeholders on every turn' },
   systemPrompt: { honored: true, via: 'prepended to each print prompt' },
   userPrompt: { honored: true, via: 'final positional print prompt' },
-  images: { honored: false, reason: 'Print image blocks need temporary image files and --image flags' },
+  images: { honored: true, via: 'private temporary image files passed with --image' },
   cwd: { honored: true, via: 'spawn cwd' },
   allowedTools: { honored: false, reason: 'No general Cezar tool-name to native Cursor tool-name mapping exists' },
   bashAllowlist: { honored: false, reason: 'Cursor print has no per-command prefix allowlist' },
-  restrictNativeDelegation: { honored: false, reason: 'Strict native --allowed-tools binding is added with the qualified invocation' },
-  additionalDirectories: { honored: false, reason: 'The qualified --add-dir mapping is added with the complete invocation' },
+  restrictNativeDelegation: { honored: true, via: 'strict --allowed-tools native catalog omitting delegation entries on every turn' },
+  additionalDirectories: { honored: true, via: '--add-dir per workspace root on every turn' },
   env: { honored: true, via: 'buildChildEnv with per-run env' },
   model: { honored: true, via: '--model opaque ID' },
-  effort: { honored: false, reason: 'Explicit effort must map to an advertised Cursor model variant' },
+  effort: { honored: true, via: 'advertised opaque model variant selected by --model' },
   timeoutMs: { honored: true, via: 'logical wall-clock timer across print processes' },
   sessionId: { honored: true, via: 'exact --resume native ID after first turn' },
   resume: { honored: true, via: '--resume for a recorded native session' },
@@ -33,6 +40,8 @@ export const CURSOR_PRINT_SPEC_SUPPORT: AgentRunSpecSupport = {
 export interface CursorPrintRunnerOptions {
   bin?: string;
   timeoutMs?: number;
+  /** The selected account's read-only model catalog, supplied by the facade. */
+  models?: readonly ModelOption[];
   /** Test override; production retains the shared 30-minute no-progress cap. */
   noProgressTimeoutMs?: number;
   processOptions?: Pick<CursorPrintProcessOptions, 'drainMs' | 'termGraceMs' | 'killGraceMs'>;
@@ -64,6 +73,7 @@ interface ActiveTurn {
   initSeen: boolean;
   resultSeen: boolean;
   modelWorkSeen: boolean;
+  turnText: string;
   receipt?: { resolve(): void; reject(error: Error): void; settled: boolean };
 }
 
@@ -89,6 +99,11 @@ class CursorPrintSession implements AgentSession {
   private noProgress?: NodeJS.Timeout;
   private autoEnd?: NodeJS.Timeout;
   private errorReported = false;
+  private markerAsk = false;
+  private model?: string;
+  private scratch?: string;
+  private pluginDir?: string;
+  private imageIndex = 0;
 
   constructor(
     private readonly bin: string,
@@ -102,6 +117,13 @@ class CursorPrintSession implements AgentSession {
     if (limit > 0) this.deadline = setTimeout(() => this.fail('Cursor print timed out'), limit);
     if (spec.resume && (!spec.sessionId || !NATIVE_ID_RE.test(spec.sessionId))) {
       this.fail('Cursor print resume requires a valid recorded session id');
+      return;
+    }
+    try {
+      this.model = this.resolveModel();
+      if (spec.cezarTools) this.prepareCezarPlugin();
+    } catch (error) {
+      this.fail(error instanceof Error ? error.message : 'Cursor print invocation is unsupported');
       return;
     }
     this.nativeId = spec.resume ? spec.sessionId : undefined;
@@ -118,20 +140,79 @@ class CursorPrintSession implements AgentSession {
     this.onEvent?.(event);
   }
 
-  private contentText(content: ContentBlock[]): string | undefined {
-    if (content.some(block => block.type !== 'text')) return undefined;
-    return content.map(block => block.type === 'text' ? block.text : '').join('\n');
+  private resolveModel(): string | undefined {
+    const model = this.spec.model;
+    const catalog = this.options.models;
+    if (model && catalog && !catalog.some(option => option.id === model) && !this.spec.effort) {
+      throw new Error(`Cursor print model '${model}' is not advertised`);
+    }
+    if (!this.spec.effort) return model;
+    if (!model || !catalog?.length) throw new Error('Cursor print cannot verify the requested effort without an advertised model catalog');
+    const base = model.replace(/-(?:none|low|medium|high|xhigh|extra-high|max)$/, '');
+    const suffixes = this.spec.effort === 'xhigh' ? ['xhigh', 'extra-high'] : [this.spec.effort];
+    const selected = suffixes.map(suffix => `${base}-${suffix}`)
+      .find(candidate => catalog.some(option => option.id === candidate));
+    if (!selected) throw new Error(`Cursor print model does not advertise effort '${this.spec.effort}'`);
+    return selected;
+  }
+
+  private ensureScratch(): string {
+    return this.scratch ??= mkdtempSync(join(tmpdir(), 'cez-cursor-print-'));
+  }
+
+  private prepareCezarPlugin(): void {
+    const tools = this.spec.cezarTools;
+    if (!tools) return;
+    const dir = join(this.ensureScratch(), 'cezar-tools');
+    mkdirSync(dir, { mode: 0o700 });
+    writeFileSync(join(dir, 'plugin.json'), JSON.stringify({
+      name: 'cezar-tools', version: '0.0.1', description: 'Cezar task tools',
+    }), { mode: 0o600 });
+    const env = Object.fromEntries(cezarToolEnvNames(this.spec.env ?? {}).filter(name => this.spec.env?.[name])
+      .map(name => [name, '${' + name + '}']));
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: {
+      [tools.name]: { type: 'stdio', command: tools.command, args: tools.args, env },
+    } }), { mode: 0o600 });
+    this.pluginDir = dir;
+  }
+
+  private imagePath(block: Extract<ContentBlock, { type: 'image' }>): string {
+    const extensions: Record<string, string> = {
+      'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp',
+    };
+    const extension = extensions[block.source.media_type];
+    if (!extension) throw new Error(`Cursor print image type '${block.source.media_type}' is unsupported`);
+    const bytes = Buffer.from(block.source.data, 'base64');
+    if (!bytes.length || bytes.length > 10 * 1024 * 1024) throw new Error('Cursor print image size is unsupported');
+    const path = join(this.ensureScratch(), `image-${++this.imageIndex}.${extension}`);
+    writeFileSync(path, bytes, { mode: 0o600 });
+    return path;
   }
 
   private beginTurn(content: ContentBlock[], receipt?: ActiveTurn['receipt']): void {
     if (this.closing || !this.isOpen) { receipt?.reject(new Error('Cursor print session closed')); return; }
-    const text = this.contentText(content);
-    if (text === undefined) { receipt?.reject(new Error('Cursor print image follow-up is not bound')); this.fail('Cursor print image follow-up is not bound'); return; }
+    let text: string;
+    let imagePaths: string[];
+    try {
+      text = content.filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
+        .map(block => block.text).join('\n');
+      const images = [...(this.turnCount === 0 ? this.spec.images ?? [] : []), ...content]
+        .filter((block): block is Extract<ContentBlock, { type: 'image' }> => block.type === 'image');
+      imagePaths = images.map(block => this.imagePath(block));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Cursor print could not prepare input';
+      receipt?.reject(new Error(message)); this.fail(message); return;
+    }
     this.clearAutoEnd();
+    this.markerAsk = false;
     this.busy = true;
     const args = ['-p', '--force', '--trust', '--output-format', 'stream-json'];
-    if (this.spec.model) args.push('--model', this.spec.model);
+    if (this.model) args.push('--model', this.model);
     if (this.nativeId) args.push('--resume', this.nativeId);
+    if (this.spec.restrictNativeDelegation) args.push('--allowed-tools', SAFE_CURSOR_PRINT_TOOLS.join(','));
+    for (const dir of this.spec.additionalDirectories ?? []) args.push('--add-dir', dir);
+    if (this.pluginDir) args.push('--plugin-dir', this.pluginDir);
+    for (const path of imagePaths) args.push('--image', path);
     args.push(prependSystemPrompt(this.spec.systemPrompt, text));
     let proc: CursorPrintProcess;
     try {
@@ -149,7 +230,7 @@ class CursorPrintSession implements AgentSession {
       return;
     }
     const active: ActiveTurn = { process: proc, buffer: '', initSeen: false,
-      resultSeen: false, modelWorkSeen: false, receipt };
+      resultSeen: false, modelWorkSeen: false, turnText: '', receipt };
     this.active = active;
     this.turnCount += 1;
     if (this.turnCount > 1 && proc.pid) this.opts.onPidChange?.(proc.pid);
@@ -207,6 +288,10 @@ class CursorPrintSession implements AgentSession {
         this.fail('Cursor print result had a different session id'); return;
       }
       active.resultSeen = true;
+      if (!active.turnText && native.is_error !== true && typeof native.result === 'string') {
+        active.turnText = native.result;
+        this.emit({ type: 'text', text: native.result });
+      }
     }
     if (native.type === 'assistant' || native.type === 'tool_call') {
       if (!active.initSeen) { this.fail('Cursor print emitted model work before session init'); return; }
@@ -222,6 +307,7 @@ class CursorPrintSession implements AgentSession {
     for (const event of mapCursorPrintStreamEvent(frame)) {
       if (event.type === 'session' || event.type === 'turn-end') continue;
       if (event.type === 'error') this.errorReported = true;
+      if (event.type === 'text') active.turnText += event.text;
       this.emit(event);
     }
   }
@@ -246,6 +332,10 @@ class CursorPrintSession implements AgentSession {
       else active.receipt.reject(new Error('Cursor print input admission was not confirmed'));
     }
     const completedTurn = active.resultSeen && !spawnError && exitCode === 0 && signal === null;
+    if (completedTurn && !this.errorReported) {
+      this.markerAsk = parseAskMarker(active.turnText) !== null;
+      if (this.markerAsk) this.queue = [];
+    }
     if (completedTurn) this.emit({ type: 'turn-end' });
     if (this.closing) { this.finish(); return; }
     if (spawnError) { this.fail('Cursor print process failed to start'); return; }
@@ -253,19 +343,19 @@ class CursorPrintSession implements AgentSession {
     if (exitCode !== 0 || signal !== null) { this.fail('Cursor print process exited after a reported result'); return; }
     if (this.errorReported) { this.finish(); return; }
     this.busy = false;
-    this.opts.onAgentInputReady?.();
+    if (!this.markerAsk) this.opts.onAgentInputReady?.();
     queueMicrotask(() => this.afterTurn());
   }
 
   private afterTurn(): void {
-    if (!this.isOpen || this.busy || this.closing) return;
+    if (!this.isOpen || this.busy || this.closing || this.markerAsk) return;
     const next = this.queue.shift();
     if (next) this.beginTurn(next);
     else this.scheduleAutoEnd();
   }
   private clearAutoEnd(): void { if (this.autoEnd) clearTimeout(this.autoEnd); this.autoEnd = undefined; }
   private scheduleAutoEnd(): void {
-    if (!this.opts.autoEndAfterFirstTurn || this.busy || this.closing) return;
+    if (!this.opts.autoEndAfterFirstTurn || this.busy || this.closing || this.markerAsk) return;
     this.clearAutoEnd();
     this.autoEnd = setTimeout(() => {
       this.autoEnd = undefined;
@@ -280,7 +370,7 @@ class CursorPrintSession implements AgentSession {
     return true;
   }
   sendAgentMessage(content: ContentBlock[]): false | Promise<void> {
-    if (!this.isOpen || this.closing || this.busy || this.queue.length) return false;
+    if (!this.isOpen || this.closing || this.busy || this.queue.length || this.markerAsk) return false;
     return new Promise<void>((resolve, reject) => {
       const receipt = { resolve, reject, settled: false };
       this.beginTurn(content, receipt);
@@ -326,6 +416,9 @@ class CursorPrintSession implements AgentSession {
     if (this.noProgress) clearTimeout(this.noProgress);
     this.clearAutoEnd();
     this.queue = [];
+    if (this.scratch) {
+      try { rmSync(this.scratch, { recursive: true, force: true }); } catch { /* cleanup is best effort */ }
+    }
     this.emit({ type: 'done' });
     this.resolveResult({ text: this.texts.join('').trim(), toolCalls: this.toolCalls,
       tokensUsed: this.tokensUsed, sessionId: this.nativeId });
