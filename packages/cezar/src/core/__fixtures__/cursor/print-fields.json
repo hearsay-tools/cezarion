@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "case": "fields",
+  "cliVersion": "2026.10.01-e373342",
+  "model": "gpt-5.4-mini-medium",
+  "invocation": [
+    "-p",
+    "--force",
+    "--trust",
+    "--output-format stream-json",
+    "--model <advertised ID>",
+    "--allowed-tools read_tool_call",
+    "--add-dir <disposable root>",
+    "--image <disposable PNG>",
+    "--resume <exact native ID>"
+  ],
+  "advertisedModel": true,
+  "invalidRejectedBeforeInference": true,
+  "advertisedEffortVariant": true,
+  "advertisedEffortVariantAdmitted": true,
+  "extraRootToolRead": true,
+  "extraRootCanarySeen": true,
+  "imageOrderSeen": true,
+  "sameNativeSession": true,
+  "currentInstructionFollowedOnResume": true,
+  "freshExitCode": 0,
+  "resumedExitCode": 0,
+  "timedOut": false,
+  "outputTruncated": false,
+  "outcome": "pass"
+}

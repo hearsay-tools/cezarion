@@ -9,9 +9,15 @@ mandatory print gates remain unqualified. `print-mcp.json` and
 `print-portable-ask.json` record fresh/resume bindings; `print-plugins.json`
 records the accepted project-local limitation: a Claude plugin disable did
 not stop Cursor's marketplace copy of Superpowers. `print-resume-missing.json`
-records the remaining release blocker: a nonexistent `--resume` ID succeeds
-as an empty conversation under the requested ID. No fixture here claims
+records the accepted vendor history-loss limit: a nonexistent `--resume` ID
+succeeds as an empty conversation under the requested ID. No fixture here claims
 print is ready to replace ACP.
+`print-fields.json` records image, additional-root, model-pin and exact-resume
+controls. `print-plugin-lifecycle.json` records local skill presence/absence,
+marketplace Superpowers discovery and a `sessionStart` hook whose context
+survived resume without rerunning the hook.
+`print-errors.json` records an invalid account key rejection and bounded
+process-group cleanup in the opt-in probe harness.
 
 Verified 2026-09-16 against Cursor CLI **2026.09.15-d2fe57e** and:
 

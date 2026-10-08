@@ -2,18 +2,19 @@
 // Opt-in vendor probe. It saves only a small allowlisted summary, never a transcript.
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { deflateSync } from 'node:zlib';
 
 const { values } = parseArgs({ options: {
   model: { type: 'string' },
   'output-dir': { type: 'string' },
   case: { type: 'string' },
 } });
-if (!values.model || !values['output-dir'] || !['native-question', 'delegation', 'mcp', 'portable-ask', 'plugins', 'resume-missing'].includes(values.case)) {
-  process.stderr.write('Usage: probe-cursor-print.mjs --model <discovered-id> --output-dir <path> --case native-question|delegation|mcp|portable-ask|plugins|resume-missing\n');
+if (!values.model || !values['output-dir'] || !['native-question', 'delegation', 'mcp', 'portable-ask', 'plugins', 'resume-missing', 'fields', 'plugin-lifecycle', 'errors'].includes(values.case)) {
+  process.stderr.write('Usage: probe-cursor-print.mjs --model <discovered-id> --output-dir <path> --case native-question|delegation|mcp|portable-ask|plugins|resume-missing|fields|plugin-lifecycle|errors\n');
   process.exit(1);
 }
 
@@ -58,7 +59,8 @@ function runAgent(args, cwd, timeoutMs, env = process.env) {
       signalGroup('SIGTERM');
       await new Promise(done => setTimeout(done, 500));
       if (groupAlive()) signalGroup('SIGKILL');
-      resolveRun({ code, stdout, stderr, truncated, timedOut });
+      await new Promise(done => setTimeout(done, 100));
+      resolveRun({ code, stdout, stderr, truncated, timedOut, processGroupGone: !groupAlive() });
     });
   });
 }
@@ -380,6 +382,205 @@ async function probeResumeMissing(version) {
   };
 }
 
+function writeStripedPng(path) {
+  // A small randomized red/blue control, generated locally and never retained.
+  const colors = Math.random() < 0.5
+    ? [[255, 0, 0], [0, 0, 255]] : [[0, 0, 255], [255, 0, 0]];
+  const width = 40;
+  const height = 20;
+  const raw = Buffer.concat(Array.from({ length: height }, () => Buffer.from([
+    0, ...Array.from({ length: width }, (_, x) => colors[x < width / 2 ? 0 : 1]).flat(),
+  ])));
+  const crc = bytes => {
+    let value = 0xffffffff;
+    for (const byte of bytes) {
+      value ^= byte;
+      for (let bit = 0; bit < 8; bit++) value = (value >>> 1) ^ (value & 1 ? 0xedb88320 : 0);
+    }
+    return (value ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const label = Buffer.from(type);
+    const size = Buffer.alloc(4);
+    size.writeUInt32BE(data.length);
+    const checksum = Buffer.alloc(4);
+    checksum.writeUInt32BE(crc(Buffer.concat([label, data])));
+    return Buffer.concat([size, label, data, checksum]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 2;
+  writeFileSync(path, Buffer.concat([
+    Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', header),
+    chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0)),
+  ]));
+  return colors[0][0] === 255 ? 'RED_BLUE' : 'BLUE_RED';
+}
+
+async function probeFields(version) {
+  const modelListing = await runAgent(['--list-models'], checkout, 15_000);
+  const advertisedModel = modelListing.code === 0
+    && modelListing.stdout.split('\n').some(line => line.startsWith(`${values.model} - `));
+  const lowEffortModel = values.model.replace(/-medium$/, '-low');
+  const lowEffortAdvertised = lowEffortModel !== values.model && modelListing.stdout.split('\n')
+    .some(line => line.startsWith(`${lowEffortModel} - `));
+  const lowEffort = lowEffortAdvertised ? await runAgent([
+    '-p', '--force', '--trust', '--output-format', 'stream-json',
+    '--model', lowEffortModel, '--allowed-tools', 'read_todos_tool_call', 'Reply OK.',
+  ], checkout, 45_000) : undefined;
+  const invalid = await runAgent([
+    '-p', '--force', '--trust', '--output-format', 'stream-json',
+    '--model', 'cez-nonexistent-model-pin', 'Reply OK.',
+  ], checkout, 15_000);
+  const invalidRejectedBeforeInference = invalid.code !== 0
+    && !framesOf(invalid.stdout).some(frame => frame.type === 'assistant' || frame.type === 'result');
+
+  const extraRoot = join(scratch, 'extra-root');
+  mkdirSync(extraRoot);
+  const canary = randomBytes(12).toString('hex');
+  writeFileSync(join(extraRoot, 'root-canary.txt'), canary, { mode: 0o600 });
+  const image = join(checkout, 'stripes.png');
+  const colorOrder = writeStripedPng(image);
+  const args = [
+    '-p', '--force', '--trust', '--output-format', 'stream-json',
+    '--model', values.model, '--allowed-tools', 'read_tool_call',
+    '--add-dir', extraRoot, '--image', image,
+  ];
+  const first = await runAgent([...args,
+    `Read ${join(extraRoot, 'root-canary.txt')} with the native Read tool. Then describe the image's colors from left to right as RED_BLUE or BLUE_RED. Reply with the file contents and that code only.`,
+  ], checkout, 45_000);
+  const firstFrames = framesOf(first.stdout);
+  const firstResult = resultOf(firstFrames);
+  const firstId = firstResult?.session_id;
+  const second = firstId ? await runAgent([
+    '-p', '--force', '--trust', '--output-format', 'stream-json', '--model', values.model,
+    '--resume', firstId, '--allowed-tools', 'read_todos_tool_call',
+    'What was the image color-order code from the previous turn? Reply with just that code.',
+  ], checkout, 45_000) : undefined;
+  const secondResult = second ? resultOf(framesOf(second.stdout)) : undefined;
+  const rootRead = firstFrames.some(frame => frame.type === 'tool_call' && frame.tool_call?.readToolCall);
+  const text = String(firstResult?.result ?? '');
+  return {
+    schema: 1, case: 'fields', cliVersion: version, model: values.model,
+    invocation: ['-p', '--force', '--trust', '--output-format stream-json', '--model <advertised ID>', '--allowed-tools read_tool_call', '--add-dir <disposable root>', '--image <disposable PNG>', '--resume <exact native ID>'],
+    advertisedModel, invalidRejectedBeforeInference,
+    advertisedEffortVariant: lowEffortAdvertised,
+    advertisedEffortVariantAdmitted: lowEffort?.code === 0 && resultOf(framesOf(lowEffort.stdout))?.subtype === 'success',
+    extraRootToolRead: rootRead, extraRootCanarySeen: text.includes(canary),
+    imageOrderSeen: text.includes(colorOrder),
+    sameNativeSession: Boolean(firstId && secondResult?.session_id === firstId),
+    currentInstructionFollowedOnResume: String(secondResult?.result ?? '').trim() === colorOrder,
+    freshExitCode: first.code, resumedExitCode: second?.code ?? null,
+    timedOut: first.timedOut || Boolean(second?.timedOut),
+    outputTruncated: first.truncated || Boolean(second?.truncated),
+    outcome: advertisedModel && lowEffortAdvertised && lowEffort?.code === 0
+      && resultOf(framesOf(lowEffort.stdout))?.subtype === 'success'
+      && invalidRejectedBeforeInference && first.code === 0
+      && second?.code === 0 && rootRead && text.includes(canary)
+      && text.includes(colorOrder) && secondResult?.session_id === firstId
+      && String(secondResult?.result ?? '').trim() === colorOrder ? 'pass' : 'blocked',
+  };
+}
+
+async function probeErrors(version) {
+  const invalidKey = `cez-invalid-${randomBytes(16).toString('hex')}`;
+  const auth = await runAgent([
+    '-p', '--force', '--trust', '--output-format', 'stream-json',
+    '--model', values.model, '--allowed-tools', 'read_todos_tool_call', 'Reply OK.',
+  ], checkout, 20_000, { ...process.env, CURSOR_API_KEY: invalidKey });
+  const authFrames = framesOf(auth.stdout);
+  const authFailedWithoutSuccess = auth.code !== 0
+    && !authFrames.some(frame => frame.type === 'result' && frame.subtype === 'success');
+  const timeout = await runAgent([
+    '-p', '--force', '--trust', '--output-format', 'stream-json',
+    '--model', values.model, '--allowed-tools', 'read_todos_tool_call', 'Reply OK.',
+  ], checkout, 10);
+  return {
+    schema: 1, case: 'errors', cliVersion: version, model: values.model,
+    invocation: ['-p', '--force', '--trust', '--output-format stream-json', '--allowed-tools read_todos_tool_call', 'invalid synthetic CURSOR_API_KEY in process env', '10 ms timeout in disposable worktree'],
+    invalidKeyNotEchoed: !auth.stdout.includes(invalidKey) && !auth.stderr.includes(invalidKey),
+    invalidKeyRejected: authFailedWithoutSuccess,
+    noFallbackToLoggedInAccount: authFailedWithoutSuccess,
+    authProcessGroupGone: auth.processGroupGone,
+    timeoutTriggered: timeout.timedOut,
+    timeoutProcessGroupGone: timeout.processGroupGone,
+    outcome: authFailedWithoutSuccess && !auth.stdout.includes(invalidKey)
+      && !auth.stderr.includes(invalidKey) && auth.processGroupGone
+      && timeout.timedOut && timeout.processGroupGone ? 'pass' : 'blocked',
+  };
+}
+
+async function probePluginLifecycle(version) {
+  const { catalogRun, names, safeAllowedTools } = await discoverSafeAllowedTools();
+  const pluginDir = join(checkout, 'cez-print-qualification-plugin');
+  const manifestDir = join(pluginDir, '.cursor-plugin');
+  const hooksDir = join(pluginDir, 'hooks');
+  const skillDir = join(pluginDir, 'skills', 'print-qualification');
+  mkdirSync(manifestDir, { recursive: true });
+  mkdirSync(hooksDir);
+  mkdirSync(skillDir, { recursive: true });
+  const heading = `# Print qualification ${randomBytes(6).toString('hex')}`;
+  const hookPhrase = randomBytes(12).toString('hex');
+  writeFileSync(join(skillDir, 'SKILL.md'), `${heading}\nA local test skill.\n`);
+  writeFileSync(join(manifestDir, 'plugin.json'), JSON.stringify({
+    name: 'cez-print-qualification', version: '0.0.1',
+    description: 'Disposable local plugin for fork 590 qualification',
+    skills: './skills/', hooks: './hooks/hooks.json',
+  }));
+  const hookOutput = join(hooksDir, 'started');
+  writeFileSync(join(hooksDir, 'start.mjs'), `import { appendFileSync } from 'node:fs';\nappendFileSync(${JSON.stringify(hookOutput)}, '1\\n');\nprocess.stdout.write(JSON.stringify({ additional_context: ${JSON.stringify(`Remember this hook phrase for later: ${hookPhrase}`)} }));\n`);
+  writeFileSync(join(hooksDir, 'hooks.json'), JSON.stringify({
+    version: 1, hooks: { sessionStart: [{ command: `node ${join(hooksDir, 'start.mjs')}` }] },
+  }));
+  const hookCount = () => existsSync(hookOutput) ? readFileSync(hookOutput, 'utf8').split('\n').filter(Boolean).length : 0;
+  const base = ['-p', '--force', '--trust', '--output-format', 'stream-json',
+    '--model', values.model, '--allowed-tools', safeAllowedTools.join(',')];
+  const first = await runAgent([...base, '--plugin-dir', pluginDir,
+    'Use your loaded print-qualification skill. Read its SKILL.md with the native Read tool and report the first heading exactly.',
+  ], checkout, 45_000);
+  const firstFrames = framesOf(first.stdout);
+  const firstId = resultOf(firstFrames)?.session_id;
+  const firstHookCount = hookCount();
+  const localSkillRead = firstFrames.some(frame => frame.type === 'tool_call'
+    && frame.tool_call?.readToolCall && JSON.stringify(frame.tool_call.readToolCall).includes('print-qualification/SKILL.md'));
+  const second = firstId ? await runAgent([...base, '--resume', firstId, '--plugin-dir', pluginDir,
+    'From your enabled marketplace plugins, read the Superpowers brainstorming SKILL.md with the native Read tool. Then report its first heading and the hook phrase injected at the start of this session.',
+  ], checkout, 45_000) : undefined;
+  const secondFrames = second ? framesOf(second.stdout) : [];
+  const secondId = resultOf(secondFrames)?.session_id;
+  const secondHookCount = hookCount();
+  const marketplaceSkillRead = secondFrames.some(frame => frame.type === 'tool_call'
+    && frame.tool_call?.readToolCall
+    && /\.cursor\/plugins\/cache\/.*superpowers.*SKILL\.md/i.test(JSON.stringify(frame.tool_call.readToolCall)));
+  rmSync(pluginDir, { recursive: true, force: true });
+  const absent = await runAgent([...base,
+    'If a loaded skill named print-qualification is available, read its SKILL.md. Otherwise reply ABSENT. Do not search the filesystem.',
+  ], checkout, 45_000);
+  const absentFrames = framesOf(absent.stdout);
+  const absentLocalRead = absentFrames.some(frame => frame.type === 'tool_call'
+    && frame.tool_call?.readToolCall && JSON.stringify(frame.tool_call.readToolCall).includes('print-qualification/SKILL.md'));
+  return {
+    schema: 1, case: 'plugin-lifecycle', cliVersion: version, model: values.model,
+    invocation: ['-p', '--force', '--trust', '--output-format stream-json', '--allowed-tools <non-agent catalog>', '--plugin-dir <disposable local plugin>', '--resume <exact native ID>'],
+    catalogValidatedBeforeInference: catalogRun.code === 1 && names.includes('read_tool_call'),
+    localSkillRead, localHeadingSeen: String(resultOf(firstFrames)?.result ?? '').includes(heading),
+    marketplaceSkillRead, sameNativeSession: Boolean(firstId && secondId === firstId),
+    freshHookRan: firstHookCount > 0, resumedHookRan: secondHookCount > firstHookCount,
+    hookContextRecalledOnResume: String(resultOf(secondFrames)?.result ?? '').includes(hookPhrase),
+    absentLocalSkillRead: absentLocalRead,
+    absentModelReportedMissing: String(resultOf(absentFrames)?.result ?? '').includes('ABSENT'),
+    globalConfigurationWritten: false,
+    outcome: catalogRun.code === 1 && first.code === 0 && second?.code === 0 && absent.code === 0
+      && localSkillRead && String(resultOf(firstFrames)?.result ?? '').includes(heading)
+      && marketplaceSkillRead && firstId === secondId && firstHookCount > 0
+      && String(resultOf(secondFrames)?.result ?? '').includes(hookPhrase)
+      && !absentLocalRead
+      && String(resultOf(absentFrames)?.result ?? '').includes('ABSENT') ? 'pass' : 'blocked',
+  };
+}
+
 let added = false;
 let cleaned = true;
 try {
@@ -388,7 +589,7 @@ try {
   git(['worktree', 'add', '--quiet', '--detach', checkout, 'HEAD']);
   added = true;
 
-  const probes = { 'native-question': probeNativeQuestion, delegation: probeDelegation, mcp: probeMcp, 'portable-ask': probePortableAsk, plugins: probePlugins, 'resume-missing': probeResumeMissing };
+  const probes = { 'native-question': probeNativeQuestion, delegation: probeDelegation, mcp: probeMcp, 'portable-ask': probePortableAsk, plugins: probePlugins, 'resume-missing': probeResumeMissing, fields: probeFields, 'plugin-lifecycle': probePluginLifecycle, errors: probeErrors };
   const summary = await probes[values.case](version.stdout.trim());
   mkdirSync(outputDir, { recursive: true });
   const output = join(outputDir, `print-${values.case}.json`);

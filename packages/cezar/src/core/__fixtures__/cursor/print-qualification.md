@@ -2,8 +2,8 @@
 
 Checked on 2026-10-07 with Cursor CLI `2026.10.01-e373342`, model
 `gpt-5.4-mini` from the live Cursor catalog, in a disposable Git worktree.
-The print transport is **blocked**. No Cezar default transport change is
-qualified by this record.
+The accepted vendor limits are recorded below. The print transport is not yet
+the Cezar default; the product adapter and its parity gates remain to be built.
 
 ## Mandatory gate
 
@@ -91,7 +91,7 @@ project-specific marketplace toggle behaves. The human accepted a narrower
 user/team-enabled plugin scope on 2026-10-07. This remains a known limit to
 document; it no longer blocks the default switch by itself.
 
-## Missing-session resume blocker
+## Missing-session resume limit
 
 After that scope revision, the [`resume-missing` probe](print-resume-missing.json)
 used a random never-seen UUID as `--resume <id>`. Cursor exited 0, emitted a
@@ -104,11 +104,14 @@ noninteractive existence check. No read-only local predicate was
 established: a normal fresh print turn created no new directory under
 `~/.cursor/chats` in the probe.
 
-The revised design still requires exact history and no silent fresh fallback
-for follow-ups and Continue. Until a reliable pre-inference check or a newly
-approved verification-turn design exists, this **resume gate blocks Tasks
-2–6 and the default switch**. No product runner was changed after this
-finding.
+The revised design requires Cezar to resume only an ID it recorded from a
+Cursor session event, under the owning account, and compare the returned ID.
+The existing `resumableSessionId` path already requires that persisted event;
+Continue pins the owning profile. This probe does not model a normal Cezar
+wrong-ID path. It shows that Cursor could silently lose its own history while
+still accepting a formerly valid ID. Its public print wire offers no proof
+of history continuity. The human accepted this vendor-side limit on
+2026-10-08. Cezar must not deliberately retry a failed resume as fresh.
 
 Other exploratory checks: a hidden `--image <path>`
 accepted a generated five-stripe PNG, and the model reported the randomized
@@ -120,15 +123,43 @@ an enabled Superpowers skill and controlled hook in a task worktree; a
 repeat with the MCP invocation read its skill. No global Cursor files were
 changed by these probes.
 
+The checked-in [`fields` probe](print-fields.json) used advertised opaque model
+`gpt-5.4-mini-medium`. It rejected a nonexistent explicit model pin before any
+assistant or result frame, read a random canary from an `--add-dir` root, and
+identified the randomized colors of a generated PNG passed by hidden
+`--image`. An exact-resume turn kept the native ID and followed its new
+instruction. The probe removed its disposable worktree. This does not prove
+an independently specified effort value; the model catalog advertises
+effort-specific opaque IDs, including a `-low` variant that the probe admitted
+successfully. The runner must map explicit effort only to an advertised ID.
+
+The [`plugin-lifecycle` probe](print-plugin-lifecycle.json) loaded a
+disposable Cursor plugin containing a local skill and a `sessionStart` hook,
+plus the user-enabled marketplace Superpowers skill. Its local hook ran on
+the fresh session and injected a blind phrase; the exact-resume turn read
+Superpowers from Cursor's marketplace cache and recalled that phrase. Cursor
+did not rerun `sessionStart` in the replacement print process. This is the
+hook's once-per-logical-session behavior, not a lost hook: its context was
+present on resume. A new session after removing the local plugin did not
+read its skill and reported it absent. No global plugin state was changed.
+
+The [`errors` probe](print-errors.json) set a synthetic invalid
+`CURSOR_API_KEY` for one print process. Cursor rejected it instead of falling
+through to the logged-in account; neither output channel echoed the key.
+A separate 10 ms deadline triggered and the probe's owned process group was
+gone after cleanup. These are vendor and probe-harness controls. The product
+runner still needs mock tests for result/EOF ordering, ambiguous admission
+and descendants that outlive the leader.
+
 | Required capability | Invocation / reply mechanism | Read-only prerequisite | Admission and positive / negative assertion | Evidence | Outcome |
 | --- | --- | --- | --- | --- | --- |
 | Native delegation restriction | Strict `--allowed-tools <comma-separated proto oneof names>` per invocation; omit ten native agent entries | Invalid-name validation exits before inference; version and tool catalog are checked | Fresh allowed read succeeds; resumed denied read fails; full non-agent list succeeds; same native ID throughout. No native worker was requested | `print-delegation.json`; installed `7000.index.js`, `src/utils/exclude-tools.ts` | Pass for built-in native entry points; custom extensions/shell outside control |
 | Cezar MCP tools | Local plugin `mcp.json` with `${NAME}` environment placeholders, `--plugin-dir` on each turn | Strict non-agent tool catalog and bundled controller descriptor | Inert server received the synthetic value on fresh/resume; bundled CI tool discovered on both. No blanket approval or global writes | `print-mcp.json`; separate bounded bundled-controller check | Binding passed; production regression pending |
 | Human questions and plan approval | Trailing `CEZ:ASK` text, explicit `--resume <id>` reply; native `AskQuestion` rejected | CLI version and discovered model | Marker/reply and history passed; native request auto-skipped after 1 ms, with no human answer | `print-portable-ask.json`; `print-native-question.json` | Portable binding passed; native question is accepted visible limit; full Cezar gate pending |
-| Images, model, effort and workspace roots | Hidden `--image <path>` accepted; model variants advertised by `--list-models` | Live account/model | Randomized image recognized without read tools; invalid API key did not fall through. Effort/roots not fully probed | Exploratory task-session checks | Partial; downstream halted |
-| Resume and recovery | Explicit `--resume <id>` | CLI exposes `--resume` but no noninteractive existence check | A never-seen UUID returned success under the requested ID and had no prior turn; ID equality is not proof of resumed history | `print-resume-missing.json`; exploratory repeats | **Blocked: silent fresh fallback** |
-| Plugin scope and lifecycle | Native marketplace loading; project `.claude` disable does not filter that source | Earlier spike used this CLI version | Project-local `enabledPlugins=false` still allowed Cursor marketplace Superpowers skill read from native cache | `print-plugins.json`; installed `index.js` marketplace loader | Known project-local limit accepted by user; remaining plugin lifecycle unqualified |
-| Process ownership and errors | Bounded print process group | Probe used a 45-second deadline and group termination | The probe completed and its disposable worktree was removed; full runner process/error behavior remains untested | Probe command and cleanup check | Not qualified |
+| Images, model, effort and workspace roots | Hidden `--image <path>`, `--add-dir <path>`, `--model <opaque advertised ID>` | `--list-models` live catalog | Randomized PNG identified, extra-root canary read, invalid model rejected before inference, advertised low-effort ID admitted, exact resume followed new instruction | `print-fields.json` | Pass for observed flags and advertised model variants; runner mapping pending |
+| Resume and recovery | Explicit `--resume <id>` | Cezar resumes only an ID confirmed by a persisted Cursor session event under the owning profile | Valid-ID history recall passed; a never-seen UUID returned success under the requested ID with no prior turn, so vendor-side history loss is not detectable from ID equality | `print-portable-ask.json`; `print-resume-missing.json`; exploratory repeats | Valid-ID binding passed; vendor history-loss limit accepted; recovery integration pending |
+| Plugin scope and lifecycle | Native marketplace loading and per-invocation `--plugin-dir`; project `.claude` disable does not filter marketplace | CLI version, live enabled plugin and strict native tool catalog | Local skill and hook ran fresh; hook context and marketplace skill remained on exact resume; local skill absent after removal. `sessionStart` runs once per logical session | `print-plugins.json`; `print-plugin-lifecycle.json`; installed `index.js` marketplace loader | Pass for enabled and absent local plugin; project-local disable limit accepted |
+| Account failure and process cleanup | Per-process `CURSOR_API_KEY`; bounded process group | Synthetic invalid key and 10 ms deadline | Invalid key rejected without fallback or echo; timed-out process group gone. Product runner must still distinguish result from EOF and ambiguous admission | `print-errors.json`; probe cleanup | Vendor control passed; runner lifecycle tests pending |
 
 ## Recheck
 
@@ -153,15 +184,24 @@ node packages/cezar/scripts/probe-cursor-print.mjs \
 node packages/cezar/scripts/probe-cursor-print.mjs \
   --model <discovered-model-id> --output-dir /tmp/cursor-print-check \
   --case resume-missing
+node packages/cezar/scripts/probe-cursor-print.mjs \
+  --model <discovered-model-id> --output-dir /tmp/cursor-print-check \
+  --case fields
+node packages/cezar/scripts/probe-cursor-print.mjs \
+  --model <discovered-model-id> --output-dir /tmp/cursor-print-check \
+  --case plugin-lifecycle
+node packages/cezar/scripts/probe-cursor-print.mjs \
+  --model <discovered-model-id> --output-dir /tmp/cursor-print-check \
+  --case errors
 ```
 
 For `native-question`, exit code `2` means the native question was
 automatically skipped; this is an accepted limit under the revised design.
-For `delegation`, `mcp` and `portable-ask`, exit code `0` means their named
+For `delegation`, `mcp`, `portable-ask`, `fields`, `plugin-lifecycle` and `errors`, exit code `0` means their named
 binding passed. For `plugins`, exit code `2` reproduces the accepted
 project-local limitation on this installed plugin state. For
-`resume-missing`, exit code `2` reproduces the silent fresh fallback and
-blocks this revised design. Exit code `1` means a probe is inconclusive.
+`resume-missing`, exit code `2` reproduces the accepted vendor history-loss
+limit. Exit code `1` means a probe is inconclusive.
 The script saves
 only a bounded, allowlisted JSON summary and removes its temporary worktree.
 A future CLI may change native-question behavior; requalify it before
