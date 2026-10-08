@@ -22,6 +22,7 @@ import { ensureOwnedWorkspace, gitCommonDir, WORKTREE_LOCK_BUSY_ERROR } from './
 import { DelegationService } from './service.ts';
 import { withWorktreeMutation } from '../git-worktree-lock.ts';
 import { readableHolder } from './non-dumpable.testkit.ts';
+import { agentTmpDir } from '../runs/agent-tmpdir.ts';
 
 describe('delegation service durable authority', () => {
   let f: ReturnType<typeof fixture>;
@@ -828,6 +829,21 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     await vi.waitFor(() => expect(destroyOf(workerId)?.error).toMatch(new RegExp(`processes ${late!.pid}\\b`)), { timeout: 10_000 });
     const exited = new Promise<void>(resolve => late!.once('exit', () => resolve()));
     late!.kill('SIGKILL'); await exited;
+    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
+    expect(existsSync(workspace.path)).toBe(false);
+  });
+
+  it('a holder check that names no process is retried in full once its evidence is repaired, never skipped', async () => {
+    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    const { workerId, workspace } = await settled(false);
+    // A malformed fallback pointer leaves scratch ownership unproven: held, with no process to name and
+    // nothing in the scratch directory's own stamp to show the repair.
+    const scratch = agentTmpDir(join(f.root, '.ai/cezar'), workerId);
+    mkdirSync(scratch, { recursive: true }); writeFileSync(join(scratch, '.cez-fallback'), '{not a pointer');
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
+    expect(destroyOf(workerId)?.phase).toBe('incomplete');
+    rmSync(join(scratch, '.cez-fallback'));
     await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
     expect(existsSync(workspace.path)).toBe(false);
   });

@@ -739,11 +739,11 @@ export class DelegationService {
         key = observe();
         const holders = project.store.workerResourceHolders(workerId, proof.generation, workspace.resourceId);
         if (holders === 'safe') return;
-        // Held even with no PID to name: what decides it (the process record, scratch, the execution) is in the key.
-        throw new WorkspaceHeldError(holders);
+        throw holders.length ? new WorkspaceHeldError(holders) : new Error('Worker resources may still be held; cleanup will retry');
       };
-      // The removal turns being held into an incomplete result; it reports the holders of either of
-      // its checks, or that it stopped for a reason no key input explains (hearsay-tools/cezarion#879).
+      // The removal turns being held into an incomplete result; it reports the holders either of its
+      // checks named, or that it stopped for a reason no key input explains, an unnamed holder
+      // included (hearsay-tools/cezarion#879).
       let holders: readonly number[] = [];
       let explained = true;
       try {

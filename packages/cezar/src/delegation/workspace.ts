@@ -275,9 +275,10 @@ export class WorkspaceHeldError extends Error {
  * `beforeRemove` runs once every check has passed, right before git removes the checkout: call
  * this through `releaseThenRemoveOwnedWorkspace` so the worker's preview goes first (#781).
  * `report` tells a retrying caller why an incomplete removal stopped (hearsay-tools/cezarion#879):
- * `held` with the processes either holder check found, so it can tell when they exit, or
- * `unexplained` when a destructive Git step failed or something threw, a cause no observation
- * of the inputs can see change (a holder Windows names to no scan, a transient lock). */
+ * `held` with the processes either holder check named, so it can tell when they exit, or
+ * `unexplained` when a holder check named none, a destructive Git step failed or something threw:
+ * causes no observation of the inputs can see change (scratch ownership evidence, a holder Windows
+ * names to no scan, a transient lock). */
 export type RemovalReport = { held?: (pids: readonly number[]) => void; unexplained?: () => void };
 export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorkspace, assertCurrent?: () => void,
   beforeRemove?: () => Promise<void>, assertUnheld?: () => void, report?: RemovalReport): Promise<WorkerDestroyResult> {
@@ -354,7 +355,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         // only afterwards, immediately before destructive Git; they are never signalled.
         assertUnheld?.();
         const holders = inspectGeneration({ paths: [workspace.path] });
-        if (holders.liveness !== 'gone') { held(holders.pids); return result(); }
+        if (holders.liveness !== 'gone') { if (holders.pids.length) held(holders.pids); else report?.unexplained?.(); return result(); }
         const removed = await mutationGit(repoRoot, ['worktree', 'remove', '--force', workspace.path]);
         if (!removed.ok) { report?.unexplained?.(); return result(); }
         remaining = ['branch'];
@@ -415,7 +416,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
   } catch (error) {
     // Ambiguous ownership and every failed Git/filesystem operation fail closed.
     lockBusy = error instanceof WorktreeMutationLockTimeout;
-    if (error instanceof WorkspaceHeldError) held(error.pids);
+    if (error instanceof WorkspaceHeldError && error.pids.length) held(error.pids);
     else report?.unexplained?.();
   }
   return result();
