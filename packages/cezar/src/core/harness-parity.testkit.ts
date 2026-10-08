@@ -221,6 +221,11 @@ export const SKILL_RESUME_CRITERIA = [
   { id: 'R57', scenario: 'baseline', name: 'reuses the recorded session id on Continue and recover' },
 ] as const;
 
+/** hearsay-tools/cezarion#917: worktree setup's note reaches every runner's opening message. */
+export const WORKTREE_SETUP_CRITERIA = [
+  { id: 'R58', scenario: 'baseline', name: 'delivers the worktree setup note in the opening message' },
+] as const;
+
 export interface HarnessAdapter {
   readonly backend: RunnerId;
   /** Every human ask wire this runner exposes; marker fallback when none exists. */
@@ -849,8 +854,12 @@ export async function driveRun(
   options: {
     autonomous?: boolean;
     workflowDef?: WorkflowDef;
-    /** Called with the fresh store and manager before the run starts (to observe either). */
-    beforeStart?: (context: { store: RunStore; manager: RunManager }) => void;
+    /** Called with the fresh store and manager before the run starts (to observe either), and
+     *  the repo root, so a row can write the project's `.ai/cezar/config.json` (#917). */
+    beforeStart?: (context: { store: RunStore; manager: RunManager; repoRoot: string }) => void;
+    /** Run in an isolated task worktree instead of in place (#917: worktree setup only runs
+     *  there). Default false, which every earlier row relies on. */
+    worktree?: boolean;
     /** Runs after startRun, in parallel with the settle loop — inject a mid-turn follow-up (#486). */
     during?: (context: { store: RunStore; manager: RunManager; runId: string }) => Promise<void>;
     /** Environment overrides restored after the run settles. */
@@ -859,7 +868,7 @@ export async function driveRun(
     mockBin?: string;
   } = {},
 ): Promise<RunObservation> {
-  const { beforeStart, during, env, mockBin, ...runOptions } = options;
+  const { beforeStart, during, env, mockBin, worktree, ...runOptions } = options;
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
   const savedDry = process.env.CEZ_DRY_RUN;
@@ -881,12 +890,12 @@ export async function driveRun(
     await execFileAsync('git', [...GIT_IDENTITY, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     manager = createFixtureManager(store, repoRoot);
-    beforeStart?.({ store, manager });
+    beforeStart?.({ store, manager, repoRoot });
     const started = manager.startRun(runOptions.workflowDef ?? SINGLE_STEP, {
       ...runOptions,
       task: typeof scenario === 'string' ? promptFor(backend, scenario) : scenario.prompt,
       runner: backend,
-      worktree: false,
+      ...(worktree === true ? {} : { worktree: false as const }),
     });
     let duringError: unknown;
     const duringWork = during

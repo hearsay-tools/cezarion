@@ -154,6 +154,21 @@ export type RunWebhookOutcome = z.infer<typeof runWebhookOutcomeSchema>;
  * key is always present in what the server hands out. Everything else optional here is optional
  * there — these are additive fields, and an absent one means "this run predates it".
  */
+/**
+ * The worktree setup of a run (#917): written `running` before the first command and settled
+ * after the last. Recovery reads it, so a restart during setup requeues the run instead of
+ * leaving it failed with no agent session to resume.
+ */
+export const runWorktreeSetupSchema = z.object({
+  status: z.enum(['running', 'done', 'failed']),
+  startedAt: z.string(),
+  finishedAt: z.string().optional(),
+  durationMs: z.number().optional(),
+  /** One line: "`npm ci` exited 1", "`npm ci` timed out after 900s", "invalid config: …". */
+  error: z.string().optional(),
+});
+export type RunWorktreeSetup = z.infer<typeof runWorktreeSetupSchema>;
+
 export const runRecordSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -297,6 +312,8 @@ export const runRecordSchema = z.object({
   /** Set when count-based retention (#483) reclaimed the worktree DIRECTORY (the branch is
    *  kept): the dir is gone but recoverable. */
   worktreeReclaimedAt: z.string().optional(),
+  /** The worktree setup this run's isolated worktree got (#917). Absent when none ran. */
+  worktreeSetup: runWorktreeSetupSchema.optional(),
   /** Parallel variants (spec 010): runs sharing a groupId are one group. */
   groupId: z.string().optional(),
   /** Variant letter within the group — 'A' | 'B' | 'C'. */

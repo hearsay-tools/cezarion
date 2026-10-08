@@ -66,6 +66,7 @@ with a separately resolved built CLI path.
 | variants-compare.e2e.ts | 72 | OS-bound initial port; original 15 s |
 | worker-conversation.e2e.ts | 80 | OS-bound initial port; original 15 s |
 | worker-relationships.e2e.ts | 63 | Original 20 s retained |
+| worktree-setup.e2e.ts | 47 | Initial port 0; original 15 s |
 
 The merge of main adds two fixtures to this class: `automations.e2e.ts` (the
 opted-in schedule server) and `live-preview.e2e.ts` (the opted-in cockpit server).
@@ -92,6 +93,11 @@ construction with port 0, owned listener readiness within the original 15 s
 health budget, and awaited shutdown before fixture removal. The guard now pins
 50 starts across 42 specs.
 
+hearsay-tools/cezarion#917 adds `worktree-setup.e2e.ts`: one CLI construction with
+port 0 over its own fixture repo, owned listener readiness within the original 15 s
+health budget, and awaited shutdown before fixture removal. The guard now pins 51
+starts across 43 specs.
+
 ## Other server classes audited
 
 - `task-views-layout` fault proxy uses a direct Node HTTP listener; it does not run
@@ -104,7 +110,7 @@ health budget, and awaited shutdown before fixture removal. The guard now pins
   zero-config repo-identity discovery rather than a requested health endpoint.
   Application-update tests use their own IPC actual-listener acknowledgement with
   exact-restart identity checks, or packaged mock servers with fixed explicit binds.
-  They are distinct from the 50 cockpit-spec CLI preference/health constructions.
+  They are distinct from the 51 cockpit-spec CLI preference/health constructions.
 - In-process Hono/server tests use their returned listener or app and do not spawn
   an adaptive CLI port. Browser mock API fixtures do not spawn this CLI.
 

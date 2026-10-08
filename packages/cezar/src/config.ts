@@ -123,6 +123,12 @@ const configSchema = z.object({
    * false preserves the ordinary per-runner model selector.
    */
   modelsLocked: z.boolean().optional().catch(undefined),
+  /**
+   * Commands that prepare a new task or worker worktree (#917). Deliberately `unknown` here:
+   * `resolveWorktreeSetup` (`worktree-setup.ts`) judges it, so an invalid value is reported to the
+   * run instead of resetting this whole file to defaults or being dropped without a word.
+   */
+  worktreeSetup: z.unknown().optional(),
 });
 
 export type CezConfig = z.infer<typeof configSchema>;
