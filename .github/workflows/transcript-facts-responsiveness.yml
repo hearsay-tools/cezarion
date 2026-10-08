@@ -1,0 +1,84 @@
+name: Transcript facts responsiveness
+
+# Unlike the base-loaded pull_request_target CI, this runs the new check on this PR.
+# Drafts run too. PR code receives no secrets or persisted checkout credential.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: transcript-facts-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  strict-timing:
+    name: Strict cold-history timing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out PR merge revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.20.0'
+      - name: Record tested runtime and commands
+        id: evidence
+        run: |
+          mkdir -p timing-evidence
+          git rev-parse HEAD > timing-evidence/revision.txt
+          node --version > timing-evidence/node-version.txt
+          date -u +%Y-%m-%dT%H:%M:%SZ > timing-evidence/job-started-at.txt
+          printf '%s\n' 'node --expose-gc --import tsx packages/cezar/scripts/measure-transcript-facts-lag.mjs' > timing-evidence/lag.command.txt
+          printf '%s\n' 'node --expose-gc packages/cezar/scripts/measure-transcript-facts-health.mjs' > timing-evidence/health.command.txt
+      - name: Install dependencies
+        run: npm ci
+        timeout-minutes: 5
+      - name: Build server before measurement
+        id: build
+        run: npm run build:server
+        timeout-minutes: 3
+      # These steps are serial on a dedicated hosted runner. No other test/build
+      # runs concurrently here; host scheduling can still cause a genuine failure.
+      - name: Measure strict server-free lag
+        id: lag
+        timeout-minutes: 2
+        run: |
+          date -u +%Y-%m-%dT%H:%M:%SZ > timing-evidence/lag.started-at.txt
+          set +e
+          node --expose-gc --import tsx packages/cezar/scripts/measure-transcript-facts-lag.mjs > timing-evidence/lag.json 2> timing-evidence/lag.stderr
+          probe_status=$?
+          set -e
+          printf '%s\n' "$probe_status" > timing-evidence/lag.exit-code.txt
+          date -u +%Y-%m-%dT%H:%M:%SZ > timing-evidence/lag.finished-at.txt
+          exit "$probe_status"
+      - name: Measure strict real HTTP health
+        id: health
+        # A failed lag assertion must not hide health evidence. Failed setup/build
+        # must not pretend that a runnable runtime was measured.
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.evidence.outcome == 'success' }}
+        timeout-minutes: 2
+        run: |
+          date -u +%Y-%m-%dT%H:%M:%SZ > timing-evidence/health.started-at.txt
+          set +e
+          node --expose-gc packages/cezar/scripts/measure-transcript-facts-health.mjs > timing-evidence/health.json 2> timing-evidence/health.stderr
+          probe_status=$?
+          set -e
+          printf '%s\n' "$probe_status" > timing-evidence/health.exit-code.txt
+          date -u +%Y-%m-%dT%H:%M:%SZ > timing-evidence/health.finished-at.txt
+          exit "$probe_status"
+      - name: Preserve every timing sample including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: transcript-facts-timing-${{ github.run_id }}-${{ github.run_attempt }}
+          path: timing-evidence/
+          retention-days: 14
+          if-no-files-found: warn
