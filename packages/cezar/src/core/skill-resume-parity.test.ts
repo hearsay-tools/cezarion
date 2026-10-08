@@ -345,7 +345,7 @@ function assertContinuationSkill(
 }
 
 describe('harness parity — skill system prompt on Continue (#790)', () => {
-  expect(SKILL_RESUME_CRITERIA.map((row) => row.id)).toEqual(['R53', 'R54', 'R55', 'R56', 'R57']);
+  expect(SKILL_RESUME_CRITERIA.map((row) => row.id)).toEqual(['R53', 'R54', 'R55', 'R56', 'R57', 'R59']);
 
   for (const backend of RUNNER_IDS) {
     it(`${backend} R53 keeps the skill system prompt on a live Continue`, async () => {
@@ -394,6 +394,31 @@ describe('harness parity — skill system prompt on Continue (#790)', () => {
         await waitFor(() => fixture.wireSince(recoverMark).includes('--append-system-prompt') || fixture.wireSince(recoverMark).includes('turn/start') || fixture.wireSince(recoverMark).includes('session/prompt') || fixture.wireSince(recoverMark).includes('prompt_async') || fixture.wireSince(recoverMark).includes('session/load') || fixture.wireSince(recoverMark).includes('thread/resume') || fixture.wireSince(recoverMark).includes('--output-format'));
         assertReusedRecordedSession(backend, fixture.wireSince(recoverMark), sessionId);
         expect(recordedSessionId(fixture.store, fixture.runId)).toBe(sessionId);
+      });
+    }, 90_000);
+
+    it(`${backend} R59 recovers a Continue interrupted before its session event`, async () => {
+      await withSkillResumeRun(backend, async (fixture) => {
+        const sessionId = recordedSessionId(fixture.store, fixture.runId);
+        const original = fixture.store.getRun(fixture.runId)!.steps[0]!;
+        await idleClose(fixture.manager, fixture.runId);
+        fixture.store.addStep(fixture.runId, {
+          id: 'continue-1', name: 'Continue', kind: 'agent', synthetic: 'continuation',
+        });
+        fixture.store.updateStep(fixture.runId, 'continue-1', {
+          status: 'running', sessionId, backend,
+          ...(original.sessionTransport ? { sessionTransport: original.sessionTransport } : {}),
+        });
+        fixture.store.updateRun(fixture.runId, {
+          status: 'running', currentStepId: 'continue-1', finishedAt: undefined,
+        });
+        expect(fixture.store.readEvents(fixture.runId).some(event =>
+          event.type === 'session' && event.stepId === 'continue-1')).toBe(false);
+        const marked = fixture.markWire();
+        await fixture.restart();
+        await waitFor(() => fixture.wireSince(marked).includes('--append-system-prompt') || fixture.wireSince(marked).includes('turn/start') || fixture.wireSince(marked).includes('session/prompt') || fixture.wireSince(marked).includes('prompt_async') || fixture.wireSince(marked).includes('--output-format'));
+        assertReusedRecordedSession(backend, fixture.wireSince(marked), sessionId);
+        expect(fixture.store.getRun(fixture.runId)?.status).not.toBe('failed');
       });
     }, 90_000);
 

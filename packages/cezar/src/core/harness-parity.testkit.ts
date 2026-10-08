@@ -220,6 +220,7 @@ export const SKILL_RESUME_CRITERIA = [
   { id: 'R55', scenario: 'baseline', name: 'warns once when a resent continued skill is gone' },
   { id: 'R56', scenario: 'baseline', name: 'declares systemPromptOnResume matching the resume wire' },
   { id: 'R57', scenario: 'baseline', name: 'reuses the recorded session id on Continue and recover' },
+  { id: 'R59', scenario: 'baseline', name: 'recovers a continued session before its next session event' },
 ] as const;
 
 /** hearsay-tools/cezarion#917: worktree setup's note reaches every runner's opening message. */

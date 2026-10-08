@@ -5178,10 +5178,19 @@ export class RunManager {
   private resumableSessionId(runId: string, sessionStep: StepState | undefined): string | undefined {
     if (!sessionStep?.sessionId) return undefined;
     if ((sessionStep.backend ?? this.store.getRun(runId)?.runner) === 'cursor') {
+      const run = this.store.getRun(runId);
+      const sessionStepIndex = run?.steps.findIndex((step) => step.id === sessionStep.id) ?? -1;
+      // A Continue records the existing ID before the resumed process emits its
+      // own session event. After a crash, its original owning step still holds
+      // the print-session proof; later steps cannot establish that proof.
+      const printEvidenceSteps = new Set(run?.steps.slice(0, sessionStepIndex + 1)
+        .filter((step) => step.sessionId === sessionStep.sessionId && step.sessionTransport === 'cursor-print')
+        .map((step) => step.id));
       const confirmed = this.store.readEvents(runId).some(
         (event) => event.type === 'session' && event.sessionId === sessionStep.sessionId &&
           (sessionStep.sessionTransport !== 'cursor-print' ||
-            (event.stepId === sessionStep.id && event.sessionTransport === 'cursor-print')),
+            (event.stepId !== undefined && printEvidenceSteps.has(event.stepId) &&
+              event.sessionTransport === 'cursor-print')),
       );
       if (!confirmed) return undefined;
     }
