@@ -57,11 +57,14 @@ export type ConversationMessageProps = {
   children: ReactNode
   className?: string
   ts?: string
+  /** Always-visible controls in the header row (label + timestamp), e.g. reply copy. */
+  headerActions?: ReactNode
 } & Omit<ComponentPropsWithoutRef<'article'>, 'role' | 'children' | 'className'>
 
 /** Shared user/agent transcript surface (#252). Role only changes label, name, and colors. */
-export function ConversationMessage({ role, children, className, ts, ...rest }: ConversationMessageProps) {
+export function ConversationMessage({ role, children, className, ts, headerActions, ...rest }: ConversationMessageProps) {
   const surface = MESSAGE_SURFACE[role]
+  const time = ts !== undefined ? clockLabel(ts) : undefined
   return (
     <article
       {...rest}
@@ -73,13 +76,16 @@ export function ConversationMessage({ role, children, className, ts, ...rest }: 
         className,
       )}
     >
-      <p className={cn('m-0 flex w-full min-w-0 items-start justify-between gap-2 text-[11px] leading-[1.2] font-semibold tracking-[0.6px] uppercase', surface.accent)}>
-        <span className="inline-flex min-w-0 items-center gap-2">
-          <MessageSquareIcon aria-hidden="true" className="size-4 shrink-0" />{surface.label}
+      <p className={cn('m-0 flex w-full min-w-0 items-start gap-2 text-[11px] leading-[1.2] font-semibold tracking-[0.6px] uppercase', surface.accent)}>
+        <span className="inline-flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 normal-case tracking-normal">
+          <span className="inline-flex min-w-0 items-center gap-2 uppercase tracking-[0.6px]">
+            <MessageSquareIcon aria-hidden="true" className="size-4 shrink-0" />{surface.label}
+          </span>
+          {headerActions}
         </span>
-        {ts !== undefined && clockLabel(ts) !== undefined ? (
+        {time !== undefined ? (
           <span className="shrink-0 font-normal tracking-normal normal-case">
-            <MessageTime ts={ts} />
+            <MessageTime ts={ts!} />
           </span>
         ) : null}
       </p>
@@ -407,30 +413,33 @@ export function AssistantMessage({ text, ts }: { text: string; ts?: string }) {
   }
 
   return (
-    <ConversationMessage role="agent" ts={ts} data-slot="assistant-message" className="group">
-      <span
-        data-slot="bubble-actions"
-        className="mb-1 flex justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 no-hover:opacity-100"
-      >
-        <button
-          type="button"
-          aria-label="Copy reply"
-          onClick={() => void copy('html')}
-          className={REPLY_ACTION_CLASS}
-        >
-          <CopyIcon className="size-3.5" aria-hidden="true" />
-          <span aria-live="polite">{copied === 'html' ? 'Copied' : 'Copy'}</span>
-        </button>
-        <button
-          type="button"
-          aria-label="Copy reply as markdown"
-          onClick={() => void copy('markdown')}
-          className={REPLY_ACTION_CLASS}
-        >
-          <FileTextIcon className="size-3.5" aria-hidden="true" />
-          <span aria-live="polite">{copied === 'markdown' ? 'Copied' : 'Copy markdown'}</span>
-        </button>
-      </span>
+    <ConversationMessage
+      role="agent"
+      ts={ts}
+      data-slot="assistant-message"
+      headerActions={(
+        <span data-slot="bubble-actions" className="flex items-center gap-0.5">
+          <button
+            type="button"
+            aria-label="Copy reply"
+            onClick={() => void copy('html')}
+            className={REPLY_ACTION_CLASS}
+          >
+            <CopyIcon className="size-3.5" aria-hidden="true" />
+            <span aria-live="polite">{copied === 'html' ? 'Copied' : 'Copy'}</span>
+          </button>
+          <button
+            type="button"
+            aria-label="Copy reply as markdown"
+            onClick={() => void copy('markdown')}
+            className={REPLY_ACTION_CLASS}
+          >
+            <FileTextIcon className="size-3.5" aria-hidden="true" />
+            <span aria-live="polite">{copied === 'markdown' ? 'Copied' : 'Copy markdown'}</span>
+          </button>
+        </span>
+      )}
+    >
       {copyError ? <p role="alert" className="mb-1 text-xs text-danger">{copyError}</p> : null}
       <div ref={markdownRef}>
         <Markdown breaks>{text}</Markdown>
