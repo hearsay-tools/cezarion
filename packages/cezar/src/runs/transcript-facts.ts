@@ -6,11 +6,13 @@
 import { randomBytes } from 'node:crypto';
 import { renameSync, rmSync, writeFileSync } from 'node:fs';
 import { type RunEvent } from '@open-mercato/cezar-contract';
-import { historyPaths, historyStat, readHistoryTextAsync } from './history-file.ts';
+import { historyPaths, historyStat } from './history-file.ts';
 
 export { emptyFacts, foldEvent, foldText, stampOf, PROSE_HUMAN_GATE, workerOutcomeKey, type PendingAskFacts, type ArchiveStamp, type TranscriptFacts } from './transcript-facts-fold.ts';
 import { emptyFacts, foldEvent, foldText, sameStamp, stampOf, type ArchiveStamp, type TranscriptFacts } from './transcript-facts-fold.ts';
-import { loadTranscriptFacts, readFactsSidecar } from './transcript-facts-load.ts';
+import { readFactsSidecar, type FactsLoadResult } from './transcript-facts-load.ts';
+
+import { REFRESH_FACTS, TranscriptFactsQueue } from './transcript-facts-queue.ts';
 
 interface Entry { facts: TranscriptFacts; written: number }
 
@@ -24,7 +26,35 @@ export class TranscriptFactsIndex {
   private readonly warnedWrite = new Set<string>();
   private stopped = false;
 
-  constructor(private readonly dataDir: string) {}
+  private readonly queue: TranscriptFactsQueue<Entry | undefined>;
+
+  constructor(private readonly dataDir: string) {
+    this.queue = new TranscriptFactsQueue(
+      dataDir,
+      (id, loaded, serialized) => this.accept(id, loaded, serialized),
+      (id) => this.peek(id) ? this.entries.get(id) : undefined,
+    );
+  }
+
+  /** Read only an already-current entry or exact sidecar; never decode/fold history. */
+  peek(runId: string): Readonly<TranscriptFacts> | undefined {
+    const cached = this.entries.get(runId);
+    if (cached && this.current(runId, cached.facts)) return cached.facts;
+    const stored = readFactsSidecar(historyPaths(this.dataDir, runId).facts);
+    if (!stored || !this.current(runId, stored)) return undefined;
+    this.entries.set(runId, { facts: stored, written: stored.bytes });
+    return stored;
+  }
+
+  async ready(runId: string): Promise<Readonly<TranscriptFacts> | undefined> {
+    if (this.stopped) throw new Error('Transcript facts index stopped');
+    // An in-flight owner remains authoritative even if a sidecar appears meanwhile.
+    if (!this.queue.has(runId)) {
+      const facts = this.peek(runId);
+      if (facts) return facts;
+    }
+    return (await this.queue.request(runId))?.facts;
+  }
 
   /** Undefined only when the transcript exists but cannot be read; that answer is not cached. */
   get(runId: string): Readonly<TranscriptFacts> | undefined {
@@ -67,40 +97,19 @@ export class TranscriptFactsIndex {
 
   forget(runId: string): void {
     this.entries.delete(runId);
+    this.queue.forget(runId);
   }
 
-  /**
-   * Build, off the event loop, every index a first `get` would have to rebuild from the whole
-   * transcript: one run at a time, async reads and async brotli. A run some reader loaded first,
-   * or whose transcript moved meanwhile, is left to `get`. Never throws.
-   */
+  /** Register all IDs without reading history; requested runs can overtake background work. */
   async warm(runIds: Iterable<string>): Promise<void> {
-    for (const runId of runIds) {
-      if (this.stopped) return;
-      if (this.entries.has(runId)) continue;
-      try {
-        const stored = readFactsSidecar(historyPaths(this.dataDir, runId).facts);
-        const before = historyStat(this.dataDir, runId);
-        const current = before.plainSize !== undefined ? !!stored && before.plainSize >= stored.bytes
-          : !before.archive || (!!stored && sameStamp(stored.archive, stampOf(before.archive)));
-        if (current) continue;
-        const text = await readHistoryTextAsync(this.dataDir, runId);
-        if (this.stopped || this.entries.has(runId)) continue;
-        const after = historyStat(this.dataDir, runId);
-        if (after.plainSize !== before.plainSize || (before.archive && (!after.archive || !sameStamp(stampOf(before.archive), stampOf(after.archive))))) continue;
-        const facts = emptyFacts();
-        if (text !== undefined) foldText(facts, text);
-        if (after.archive) facts.archive = stampOf(after.archive);
-        const entry = { facts, written: -1 };
-        this.entries.set(runId, entry);
-        this.persist(runId, entry);
-      } catch { /* the first `get` rebuilds it */ }
-    }
+    if (this.stopped) return;
+    await Promise.all([...new Set(runIds)].map((id) => this.queue.request(id, false)));
   }
 
   /** Stop warming (store close). */
   stop(): void {
     this.stopped = true;
+    this.queue.stop();
   }
 
   private entry(runId: string): Entry | undefined {
@@ -108,10 +117,17 @@ export class TranscriptFactsIndex {
     if (cached && this.current(runId, cached.facts)) return cached;
     // Another process may have written the transcript since: reload from the sidecar and tail.
     if (cached) this.entries.delete(runId);
-    const loaded = loadTranscriptFacts(this.dataDir, runId);
+    if (this.stopped) return undefined;
+    return this.queue.join(runId);
+  }
+
+  private accept(runId: string, loaded: FactsLoadResult | undefined, serialized?: string): Entry | undefined | typeof REFRESH_FACTS {
+    const newer = this.entries.get(runId);
+    if (newer && this.current(runId, newer.facts)) return newer;
     if (!loaded) return undefined;
+    if (!this.current(runId, loaded.facts)) return REFRESH_FACTS;
     const entry = { facts: loaded.facts, written: loaded.written };
-    try { if (loaded.needsWrite) this.persist(runId, entry); } catch { return undefined; }
+    try { if (loaded.needsWrite) this.persist(runId, entry, serialized); } catch { return undefined; }
     this.entries.set(runId, entry);
     return entry;
   }
@@ -129,11 +145,11 @@ export class TranscriptFactsIndex {
     }
   }
 
-  private persist(runId: string, entry: Entry): void {
+  private persist(runId: string, entry: Entry, serialized?: string): void {
     const path = historyPaths(this.dataDir, runId).facts;
     const tmp = `${path}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
     try {
-      writeFileSync(tmp, JSON.stringify(entry.facts), { mode: 0o600 });
+      writeFileSync(tmp, serialized ?? JSON.stringify(entry.facts), { mode: 0o600 });
       renameSync(tmp, path);
       entry.written = entry.facts.bytes;
     } catch (error) {

@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { brotliCompressSync } from 'node:zlib';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { advancePendingHumanAsk, pendingHumanAsk, type RunEvent } from '@open-mercato/cezar-contract';
 import { historyPaths } from './history-file.ts';
 import { emptyFacts, foldEvent, foldText, PROSE_HUMAN_GATE, TranscriptFactsIndex, workerOutcomeKey } from './transcript-facts.ts';
@@ -204,12 +204,14 @@ describe('transcript facts sidecar', () => {
       written: 0, needsWrite: false,
     });
     const { compressed } = historyPaths(dataDir, id);
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     writeFileSync(compressed, 'not brotli');
     const loaded = loadTranscriptFacts(dataDir, id);
     expect(loaded).toMatchObject({ written: -1, needsWrite: true, facts: { bytes: 0, lastSeq: 0 } });
     expect(loaded?.facts.archive).toEqual({ size: 10, mtimeMs: statSync(compressed).mtimeMs, ino: statSync(compressed).ino });
     expect(existsSync(factsPath())).toBe(false);
     expect(JSON.stringify(new TranscriptFactsIndex(dataDir).get(id))).toBe(JSON.stringify(loaded?.facts));
+    expect(warning).toHaveBeenCalledExactlyOnceWith(`[cez] ignoring undecodable compressed transcript ${compressed}`);
   });
 
   it.each(['size', 'mtimeMs', 'ino'] as const)('shared reader rejects a mismatched archive %s', async (field) => {
