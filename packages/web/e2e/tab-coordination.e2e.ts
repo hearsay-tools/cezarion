@@ -1,14 +1,22 @@
-import { afterAll, beforeAll, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest'
 import { AgentBrowser } from './agent-browser'
 import { createTabFixture } from './tab-fixture'
 import { pollFor } from './poll'
 
 let fixture: Awaited<ReturnType<typeof createTabFixture>>
 let browser: AgentBrowser
+let baseline: Awaited<ReturnType<typeof fixture.control>>
 beforeAll(async () => {
   fixture = await createTabFixture()
+  baseline = await fixture.control()
   browser = AgentBrowser.open(`e2e-tabs-${process.pid}`)
   browser.goto('about:blank')
+})
+beforeEach(async () => {
+  // A closed page can still have a finite batch finishing server-side. Never
+  // promote those temporary listeners into the next test's expected baseline.
+  await pollFor(async () => JSON.stringify((await fixture.control()).listeners) === JSON.stringify(baseline.listeners) ? true : undefined,
+    async () => `previous document demand did not drain: ${JSON.stringify((await fixture.control()).listeners)}`, { timeoutMs: 20_000, tries: 100 })
 })
 afterAll(async () => { browser?.close(); await fixture?.stop() })
 
@@ -23,7 +31,6 @@ it.each([false, true])('ten mixed tabs (separate visible windows: %s) share work
   await browser.withCdp(async (request, subscribe) => {
     const pages: Array<{ targetId: string; sessionId: string }> = []
     const streams = new Set<string>(), sockets = new Set<string>(), workers = new Set<string>(), protocols = new Set<string>()
-    const baseline = await fixture.control()
     const primary = windows ? 0 : 1
     const off = subscribe(event => {
       if (event.method === 'Target.attachedToTarget' && event.params.targetInfo.type === 'shared_worker') {
@@ -172,7 +179,6 @@ it('remote Basic Auth keeps finite recovery authenticated without a worker or or
 
 it('a frozen document releases its demand and rehydrates after native resume', async () => {
   await browser.withCdp(async request => {
-    const baseline = await fixture.control()
     const { targetId } = await request('Target.createTarget', { url: 'about:blank' })
     const { sessionId } = await request('Target.attachToTarget', { targetId, flatten: true })
     const sibling = await request('Target.createTarget', { url: 'about:blank' })
@@ -181,6 +187,8 @@ it('a frozen document releases its demand and rehydrates after native resume', a
       const run = fixture.runs[0]!
       await request('Page.navigate', { url: `${fixture.origin}/p/${run.projectId}/tasks/${run.runId}` }, sessionId)
       await waitText(request, sessionId, `Tab fixture transcript ${run.runId}`)
+      await pollFor(async () => (await fixture.control()).listeners.some(current => current.event > baseline.listeners.find(initial => initial.projectId === current.projectId)!.event) ? true : undefined,
+        () => 'visible document never established server demand')
       await read(request, sessionId, `window.__tabLifecycle=[];for(const name of ['freeze','resume','visibilitychange'])document.addEventListener(name,()=>window.__tabLifecycle.push([name,document.visibilityState]));true`)
       await request('Page.setWebLifecycleState', { state: 'frozen' }, sessionId)
       await request('Target.activateTarget', { targetId: sibling.targetId })
