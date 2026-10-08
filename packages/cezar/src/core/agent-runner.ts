@@ -4,8 +4,10 @@
  * no token-budget circuit breaker, no zod response schemas — one run is one
  * agent-CLI session streaming normalized events.
  *
- * Four interchangeable backends implement this seam, each as a persistent
- * process so multi-turn follow-ups, `waiting`, interrupt and resume all work:
+ * Interchangeable backends implement this seam as logical sessions. Most keep
+ * one process across turns; Cursor print replaces its owned process at each
+ * turn while preserving the native session ID. Both forms support follow-ups,
+ * `waiting`, interrupt and resume:
  *  - `claude`   — Claude Code CLI, stream-json over stdin/stdout;
  *  - `codex`    — `codex app-server`, JSON-RPC 2.0 (JSONL) over stdin/stdout;
  *  - `opencode` — `opencode serve`, HTTP + SSE;
@@ -262,10 +264,9 @@ export interface SessionOptions {
 }
 
 /**
- * A live agent session over one spawned backend process. The process stays
- * alive between turns and reads further user messages — that's what makes
- * mid-task follow-ups possible. Implemented identically by every backend
- * (claude stdin, codex app-server, opencode serve).
+ * A live logical agent session. Most backends retain one process and read
+ * follow-ups from it. Cursor print replaces its process after each completed
+ * turn and resumes the same native session ID for follow-ups.
  */
 export interface AgentSession {
   /** Resolves when the backend process exits — the session is fully over. */
