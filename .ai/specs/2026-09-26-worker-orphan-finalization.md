@@ -330,9 +330,9 @@ attempts that coincide (every pending destroy on the first tick after a restart)
 for the worktree mutation lock. A failure that neither the key nor a named holder explains is never
 skipped: a failed Git step (a holder only Windows' checked removal can see, a stale ref lock), lock
 contention (every attempt takes that lock, so its stamp cannot be in the key) or a throw. The removal
-reports it through `RemovalReport.unexplained`, and it retries in full on the backoff. A holder check
-that names no PID stays explained: what decides it (the process record, scratch, the execution) is
-in the key.
+reports it through `RemovalReport.unexplained`, and it retries in full on the backoff. So is a holder
+check that names no process: what decides it includes scratch ownership evidence (the owner marker,
+the fallback pointer, removal receipts) that the key does not read.
 
 **Retry state and attention.** Every tick writes `destroy.retry`
 (`{ attempts, nextAt, needsAttention? }`); the write changes only `destroy`, so it does not
