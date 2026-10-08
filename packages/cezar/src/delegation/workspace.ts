@@ -336,13 +336,15 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         if (checkpoint?.phase === 'worktree-removed') return result();
         if (await liveGitDir(repoRoot, workspace) !== receipt.gitDir ||
             await readIdentityFile(join(receipt.gitDir, 'cezar-owned-resource'), 36) !== workspace.resourceId) return result();
-        if (await checkedGit(workspace.path, ['symbolic-ref', '-q', 'HEAD']) !== `refs/heads/${workspace.branch}`) return result();
+        // HEAD files (this worktree's, another's) are not in a retrying caller's observation: these
+        // refusals report unexplained, so a retry never skips them (hearsay-tools/cezarion#879).
+        if (await checkedGit(workspace.path, ['symbolic-ref', '-q', 'HEAD']) !== `refs/heads/${workspace.branch}`) { report?.unexplained?.(); return result(); }
         // Git permits duplicate checkouts with --force. Preserve both resources
         // before the first removal if another registered path uses this branch.
         let registeredPath: string | undefined;
         for (const entry of await registered()) {
           if (entry.startsWith('worktree ')) registeredPath = entry.slice('worktree '.length);
-          if (entry === `branch refs/heads/${workspace.branch}` && registeredPath !== workspace.path) return result();
+          if (entry === `branch refs/heads/${workspace.branch}` && registeredPath !== workspace.path) { report?.unexplained?.(); return result(); }
         }
         const current = await verifyBranch(repoRoot, workspace, receipt);
         if (checkpoint && (checkpoint.sha !== current.sha || checkpoint.logHash !== hash(current.log.content))) return result();
@@ -378,7 +380,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         // below. A branch reset back to its baseline keeps the worker's commits only in the reflog
         // that the delete would drop. Commits on it are a human's call.
         remaining = ['branch'];
-        if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) return result();
+        if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) { report?.unexplained?.(); return result(); }
         const current = await verifyBranch(repoRoot, workspace, receipt);
         if (current.sha !== workspace.baselineSha) {
           const commits = Number(await checkedGit(repoRoot, ['rev-list', '--count', `${workspace.baselineSha}..${current.sha}`]));
@@ -400,7 +402,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
       checkpoint = { ...checkpoint, phase: 'worktree-removed' };
       await writeCleanup(checkpointPath, checkpoint, assertCurrent);
       if (await branchExists()) {
-        if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) return result();
+        if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) { report?.unexplained?.(); return result(); }
         const current = await verifyBranch(repoRoot, workspace, receipt);
         if (current.sha !== checkpoint.sha || hash(current.log.content) !== checkpoint.logHash) return result();
         // Ref CAS: never delete a branch advanced after our verified snapshot.

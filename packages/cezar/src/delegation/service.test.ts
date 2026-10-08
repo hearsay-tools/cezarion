@@ -848,6 +848,22 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     expect(existsSync(workspace.path)).toBe(false);
   });
 
+  it.runIf(linux)('a worktree whose HEAD points at another branch is retried in full once restored, never skipped', async () => {
+    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    const { workerId, workspace } = await settled(false);
+    // In place, as an editor or a script would: the admin directory's own stamp does not move.
+    const admin = resolve(workspace.path, /^gitdir: (.+)$/m.exec(readFileSync(join(workspace.path, '.git'), 'utf8'))![1]!.trim());
+    const head = join(admin, 'HEAD'), attached = readFileSync(head, 'utf8');
+    // Another branch, not a detached HEAD: `symbolic-ref` answers, so this is a refusal, not a throw.
+    writeFileSync(head, 'ref: refs/heads/elsewhere\n');
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
+    expect(destroyOf(workerId)?.phase).toBe('incomplete');
+    writeFileSync(head, attached);
+    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
+    expect(existsSync(workspace.path)).toBe(false);
+  });
+
   it.runIf(linux)('Clean up resets the backoff: a full attempt now, and the next tick at the fast cadence', async () => {
     cadence({ fastMs: 1_000, fastCount: 0, capMs: 5_000 }, 1);
     const { workerId } = await settled();
