@@ -1,6 +1,6 @@
 // Offline harness fixtures share the real bundled MCP protocol, never a fake receipt.
-import { writeFileSync, existsSync } from 'node:fs';
-import { basename } from 'node:path';
+import { writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -34,8 +34,16 @@ export async function probeCezarTool(backend, wire, name, args) {
       server = Object.entries(wire.config ?? {}).find(([key]) => key.startsWith('mcp_servers.cezar_ci_'))?.[1];
       env = Object.fromEntries((server?.env_vars ?? []).map(name => [name, process.env[name]]));
     } else if (backend === 'cursor') {
-      server = wire.mcpServers.find(server => server.name.startsWith('cezar_ci_'));
-      env = Object.fromEntries(server?.env.map(({name,value}) => [name,value]) ?? []);
+      if (Array.isArray(wire)) {
+        const dir = wire[wire.indexOf('--plugin-dir') + 1];
+        const servers = JSON.parse(readFileSync(join(dir, 'mcp.json'), 'utf8')).mcpServers;
+        server = Object.entries(servers).find(([name]) => name.startsWith('cezar_ci_'))?.[1];
+        env = Object.fromEntries(Object.entries(server?.env ?? {}).map(([key, value]) =>
+          [key, value.replace(/\$\{([^}]+)\}/g, (_, name) => process.env[name] ?? '')]));
+      } else {
+        server = wire.mcpServers.find(server => server.name.startsWith('cezar_ci_'));
+        env = Object.fromEntries(server?.env.map(({name,value}) => [name,value]) ?? []);
+      }
     } else {
       const local = Object.entries(wire.mcp ?? {}).find(([key]) => key.startsWith('cezar_ci_'))?.[1];
       server = local && { command: local.command[0], args: local.command.slice(1) };

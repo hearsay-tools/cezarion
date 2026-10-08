@@ -21,7 +21,7 @@ const mock = fileURLToPath(new URL('../../scripts/mock-cursor-acp.mjs', import.m
  *  hoist, so using it here in test callbacks is fine. */
 const fastRetry = () => new CursorAcpRunner({ providerRetry: { backoffMs: 10 } });
 
-async function withSession(prompt: string, body: (session: AgentSession, v1: AgentEvent[], v2: UiEvent[]) => Promise<void>, runner: AgentRunner = createRunner('cursor' as RunnerId)) {
+async function withSession(prompt: string, body: (session: AgentSession, v1: AgentEvent[], v2: UiEvent[]) => Promise<void>, runner: AgentRunner = new CursorAcpRunner()) {
   vi.stubEnv('CEZ_CURSOR_BIN', mock);
   const v1: AgentEvent[] = []; const v2: UiEvent[] = [];
   const session = runner.startSession({ cwd: process.cwd(), userPrompt: prompt, timeoutMs: 5000 }, e => v1.push(e), { onUiEvent: e => v2.push(e) });
@@ -433,7 +433,7 @@ it('takes a free-text cockpit answer to completed work without another needs-you
     expect(events.filter(e => e.type === 'human-input-delivered')).toHaveLength(1);
     expect(events.filter(e => e.type === 'turn.started')).toHaveLength(2);
     expect(events.filter(e => e.type === 'turn-end')).toHaveLength(1);
-  });
+  }, { mockBin: mock });
 }, 30_000);
 
 it('preserves rejection and uses queued human input instead of an extra automatic prompt', async () => {
@@ -454,7 +454,7 @@ it('keeps queued human input ahead of reentrant worker input at turn end', async
   let session: AgentSession;
   let admitted: false | Promise<void> | undefined;
   let turns = 0;
-  session = createRunner('cursor').startSession({ cwd: process.cwd(), userPrompt: 'mock:hold' }, e => {
+  session = new CursorAcpRunner().startSession({ cwd: process.cwd(), userPrompt: 'mock:hold' }, e => {
     if (e.type === 'turn-end' && ++turns === 1) admitted = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo WORKER' }]);
   });
   try {

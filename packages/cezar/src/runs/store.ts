@@ -107,6 +107,7 @@ const stepStateSchema = z.object({
   error: z.string().optional(),
   /** Latest backend-owned session id, used for same-backend Continue. */
   sessionId: z.string().optional(),
+  sessionTransport: z.enum(['cursor-acp', 'cursor-print']).optional(),
   /** Backend that owns `sessionId`. Optional so pre-affinity runs.json files still parse;
    *  `storedRunnerSchema` so a legacy `claude-cli` folds to `claude` instead of failing (#547). */
   backend: storedRunnerSchema.optional(),

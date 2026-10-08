@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "case": "plugin-lifecycle",
+  "cliVersion": "2026.10.01-e373342",
+  "model": "gpt-5.4-mini-medium",
+  "invocation": [
+    "-p",
+    "--force",
+    "--trust",
+    "--output-format stream-json",
+    "--allowed-tools <non-agent catalog>",
+    "--plugin-dir <disposable local plugin>",
+    "--resume <exact native ID>"
+  ],
+  "catalogValidatedBeforeInference": true,
+  "localSkillRead": true,
+  "localHeadingSeen": true,
+  "marketplaceSkillRead": true,
+  "sameNativeSession": true,
+  "freshHookRan": true,
+  "resumedHookRan": false,
+  "hookContextRecalledOnResume": true,
+  "absentLocalSkillRead": false,
+  "absentModelReportedMissing": true,
+  "globalConfigurationWritten": false,
+  "outcome": "pass"
+}

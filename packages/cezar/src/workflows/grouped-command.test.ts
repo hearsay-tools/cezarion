@@ -29,7 +29,8 @@ async function waitForFile(path: string, ms = 10_000): Promise<number> {
   throw new Error(`timed out waiting for ${path}`);
 }
 
-const base = (cwd: string) => ({ cwd, env: process.env, setInterrupt: () => undefined, keep: 'head' as const, cap: 20_000 });
+const base = (cwd: string) => ({ cwd, env: { ...process.env, TERM: 'xterm' },
+  setInterrupt: () => undefined, keep: 'head' as const, cap: 20_000 });
 
 describe('runGroupedCommand', () => {
   it('reports exit code and combined output', async () => {

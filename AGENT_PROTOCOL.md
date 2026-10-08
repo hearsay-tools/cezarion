@@ -556,6 +556,28 @@ messages" tests).
 
 <a id="cursor-acp-264"></a>
 
+### Cursor print (hearsay-tools/cezarion#590)
+
+`CursorRunner` selects print for new sessions only after the installed binary
+matches `2026.10.01-e373342` and rejects an invalid native tool with the
+qualified catalog. Each turn launches `agent -p --force --trust --output-format
+stream-json`; subsequent turns use `--resume` with the exact recorded native
+session ID. A mismatch fails the run. Transport identity is persisted with the
+native ID and account, so Continue and recovery retain the original transport.
+Untagged legacy Cursor sessions use ACP. Unqualified new sessions also fall back
+to ACP with a visible note that marketplace plugins are unavailable.
+
+The print invocation supplies the run's Cezar tools through a private temporary
+plugin directory and accepts the user's existing Cursor marketplace plugins.
+Governed runs use the qualified strict `--allowed-tools` catalog with native
+delegation tools omitted. The allowlist is checked afresh against each CLI
+build before a new print session. `CEZ:ASK` is parsed by Cezar and remains
+answerable; this Cursor build auto-skips native questions from plugins, which
+is a visible limitation. Print mode has no child-session transcript or
+qualified token usage. Project-local Claude settings do not reliably disable
+a user/team marketplace copy, and Cursor may silently lose history under an
+otherwise valid ID; Cezar only verifies the returned ID.
+
 ### Cursor ACP (hearsay-tools/cezarion#264)
 
 `cursor-acp-runner.ts` launches `agent --force acp` and holds one JSON-RPC stdio

@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "case": "mcp",
+  "cliVersion": "2026.10.01-e373342",
+  "model": "gpt-5.4-mini",
+  "invocation": [
+    "-p",
+    "--force",
+    "--trust",
+    "--output-format stream-json",
+    "--allowed-tools <non-agent catalog>",
+    "--plugin-dir <disposable local plugin>",
+    "--resume <exact native id>"
+  ],
+  "environmentBinding": "MCP env placeholder expanded from per-process environment",
+  "globalCursorConfigWritten": false,
+  "blanketMcpApprovalUsed": false,
+  "catalogSafe": true,
+  "freshToolCalled": true,
+  "freshServerCalled": true,
+  "freshEnvironmentHashSeen": true,
+  "resumedToolCalled": true,
+  "resumedServerCalled": true,
+  "resumedEnvironmentHashSeen": true,
+  "sameNativeSession": true,
+  "stderrMentionsApproval": false,
+  "outcome": "pass"
+}

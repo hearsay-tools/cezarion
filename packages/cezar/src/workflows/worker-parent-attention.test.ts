@@ -4,7 +4,7 @@ import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
-import { withDelayedCommand, withHeldPipeResponse } from '../core/owned-input-delivery.testkit.ts';
+import { withDelayedCommand, withHeldPipeResponse, withHeldPrintResponse } from '../core/owned-input-delivery.testkit.ts';
 import { MONITORING_TEXT, REJECTED_ASK_TEXT } from './monitoring-turn.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { manager, store, root, worker, until, semaphore, useWorkerWaitFixture, waitOf } from './worker-wait.testkit.ts';
@@ -12,8 +12,8 @@ import { manager, store, root, worker, until, semaphore, useWorkerWaitFixture, w
 // Exhaustive transport classification: a new runner must provide either the real
 // delayed-ACK race or an executable wire limitation, never an omitted/skip row.
 const ACK_WIRES = {
-  claude: 'pipe-write', codex: 'protocol', opencode: 'protocol', pi: 'protocol', cursor: 'pipe-write', omp: 'protocol',
-} as const satisfies Record<RunnerId, 'pipe-write' | 'protocol'>;
+  claude: 'pipe-write', codex: 'protocol', opencode: 'protocol', pi: 'protocol', cursor: 'model-work', omp: 'protocol',
+} as const satisfies Record<RunnerId, 'pipe-write' | 'protocol' | 'model-work'>;
 
 it('classifies every RUNNER_IDS delayed-ACK cell without omissions', () => {
   expect(Object.keys(ACK_WIRES).sort()).toEqual([...RUNNER_IDS].sort());
@@ -23,7 +23,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
   useWorkerWaitFixture();
   for (const mode of ['fresh', 'continuation'] as const) {
     for (const transport of ['ordinary', ACK_WIRES[backend]] as const) for (const gate of ['none', 'prose', 'rejected'] as const) {
-      it(`${mode} ${gate === 'rejected' ? mode === 'fresh' ? 'M26' : 'M27' : gate === 'prose' ? mode === 'fresh' ? 'M9' : 'M10' : ''} worker progress then ${gate === 'rejected' ? 'rejected ASK stays Needs-you' : gate === 'prose' ? 'explicit review gate stays Needs-you' : 'markerless turn stays Working'} (${transport === 'pipe-write' ? 'pipe-write ACK exemption: acceptance precedes provider response' : transport === 'protocol' ? 'delayed ACK' : 'ordinary ACK'})`, async () => {
+      it(`${mode} ${gate === 'rejected' ? mode === 'fresh' ? 'M26' : 'M27' : gate === 'prose' ? mode === 'fresh' ? 'M9' : 'M10' : ''} worker progress then ${gate === 'rejected' ? 'rejected ASK stays Needs-you' : gate === 'prose' ? 'explicit review gate stays Needs-you' : 'markerless turn stays Working'} (${transport === 'pipe-write' ? 'pipe-write ACK exemption: acceptance precedes provider response' : transport === 'model-work' ? 'model-work admission boundary' : transport === 'protocol' ? 'delayed ACK' : 'ordinary ACK'})`, async () => {
         const humanGate = gate !== 'none';
         const exercise = async (release: () => void, responseHeld?: () => boolean) => {
           process.env.CEZ_DRY_RUN = '0';
@@ -54,14 +54,22 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
             const caller = credentials.authenticate(credentials.issue('project', w.id, randomUUID()))!;
             const id = randomUUID();
             const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
-            await service.send(caller, { id, recipientRunId: p.id, kind: 'progress', text: `Progress mock:agent-echo delay-owned-ack${gate === 'rejected' ? `\n${MONITORING_TEXT}\n${REJECTED_ASK_TEXT}` : humanGate ? '\nPlease review the changes before I continue.' : ''}`, timeoutSeconds: 600 });
-            if (responseHeld) {
-              // Claude and Cursor acknowledge the local pipe write, not any
-              // provider reply. A held wire response cannot delay that ACK.
-              await until(responseHeld);
-              await until(() => !!store.getRun(p.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt);
-              expect(store.readEvents(p.id).filter(event => event.type === 'turn-end')).toHaveLength(boundaries);
+            const delivery = service.send(caller, { id, recipientRunId: p.id, kind: 'progress', text: `Progress mock:agent-echo delay-owned-ack${gate === 'rejected' ? `\n${MONITORING_TEXT}\n${REJECTED_ASK_TEXT}` : humanGate ? '\nPlease review the changes before I continue.' : ''}`, timeoutSeconds: 600 });
+            if (transport === 'model-work') {
+              await until(() => responseHeld?.() === true);
+              expect(store.getRun(p.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt).toBeUndefined();
               release();
+            }
+            await delivery;
+            if (responseHeld) {
+              // Claude acknowledges the local pipe write; Cursor print waits
+              // for native model work before acknowledging owned input.
+              if (transport === 'pipe-write') {
+                await until(responseHeld);
+                await until(() => !!store.getRun(p.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt);
+                expect(store.readEvents(p.id).filter(event => event.type === 'turn-end')).toHaveLength(boundaries);
+                release();
+              }
             }
             await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
             if (transport === 'protocol') {
@@ -97,7 +105,8 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
           } finally { release(); credentials.close(); }
         };
         if (transport === 'protocol' && backend !== 'claude' && backend !== 'cursor') await withDelayedCommand(backend, exercise);
-        else if (transport === 'pipe-write' && (backend === 'claude' || backend === 'cursor')) await withHeldPipeResponse(backend, exercise);
+        else if (transport === 'pipe-write' && backend === 'claude') await withHeldPipeResponse(backend, exercise);
+        else if (transport === 'model-work' && backend === 'cursor') await withHeldPrintResponse(exercise);
         else await exercise(() => {});
       });
     }

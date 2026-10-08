@@ -1,0 +1,16 @@
+[
+  { "type": "session.started", "sessionId": "print-session-1", "backend": "cursor", "model": "gpt-5.4-mini-medium", "cwd": "/repo" },
+  { "type": "turn.started", "turnId": "turn_1" },
+  { "type": "item.started", "item": { "kind": "tool", "id": "todo_1", "name": "UpdateTodos", "toolKind": "other", "title": "UpdateTodos", "status": "running", "input": { "todos": [{ "id": "a", "content": "Read control", "status": "in_progress" }], "merge": false } } },
+  { "type": "plan.updated", "entries": [{ "content": "Read control", "status": "in_progress" }] },
+  { "type": "item.completed", "item": { "kind": "tool", "id": "todo_1", "name": "UpdateTodos", "toolKind": "other", "title": "UpdateTodos", "status": "completed", "input": { "todos": [{ "id": "a", "content": "Read control", "status": "in_progress" }], "merge": false }, "output": "{\"success\":{}}" } },
+  { "type": "item.started", "item": { "kind": "tool", "id": "read_1", "name": "Read", "toolKind": "read", "title": "Read /repo/control.txt", "status": "running", "input": { "path": "/repo/control.txt" } } },
+  { "type": "item.completed", "item": { "kind": "tool", "id": "read_1", "name": "Read", "toolKind": "read", "title": "Read /repo/control.txt", "status": "completed", "input": { "path": "/repo/control.txt" }, "output": "control text" } },
+  { "type": "item.started", "item": { "kind": "message", "id": "item_1", "role": "assistant", "text": "Ready" } },
+  { "type": "item.completed", "item": { "kind": "message", "id": "item_1", "role": "assistant", "text": "Ready" } },
+  { "type": "turn.completed", "turnId": "turn_1", "stopReason": "end_turn" },
+  { "type": "turn.started", "turnId": "turn_2" },
+  { "type": "item.started", "item": { "kind": "message", "id": "item_2", "role": "assistant", "text": "Done" } },
+  { "type": "item.completed", "item": { "kind": "message", "id": "item_2", "role": "assistant", "text": "Done" } },
+  { "type": "turn.completed", "turnId": "turn_2", "stopReason": "end_turn" }
+]

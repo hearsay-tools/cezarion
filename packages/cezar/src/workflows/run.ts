@@ -19,7 +19,7 @@ import {
   type AskRequest,
 } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
-import { hasRegisteredRunProcess, onUsage, registerRunProcess, unregisterRunProcess, type ProcessUsage } from '../core/process-usage.ts';
+import { hasRegisteredRunProcess, onUsage, registerRunProcess, replaceRunProcess, unregisterRunProcess, type ProcessUsage } from '../core/process-usage.ts';
 import { processGroupAlive, processGroupOf, sessionGroupOf, signalProcessGroup } from '../core/session-process.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
 import { noJitter, ORPHAN_BACKOFF, retryDelayMs, type Backoff } from '../delegation/retry-backoff.ts';
@@ -2388,9 +2388,18 @@ export class RunManager {
       const sessionAccount = sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
       const agentProfile = resumeIdentity?.account.profileId ?? run.agentProfile;
       const sameAccount = agentProfile === undefined || agentProfile === sessionAccount;
+      const recoveredSessionId = sessionBackend === backend && sameAccount
+        ? this.resumableSessionId(run.id, sessionStep) : undefined;
+      if (sessionStep.sessionTransport === 'cursor-print' && sessionBackend === backend && sameAccount && !recoveredSessionId) {
+        const error = 'Cursor print session identity lacks a matching recorded session event';
+        const finishedAt = new Date().toISOString();
+        this.store.updateStep(run.id, queuedContinuation.id, { status: 'failed', error, finishedAt });
+        this.store.updateRun(run.id, { status: 'failed', error, finishedAt, currentStepId: undefined });
+        return;
+      }
       this.pendingContinuations.set(run.id, {
         stepId: queuedContinuation.id,
-        sessionId: sessionBackend === backend && sameAccount ? this.resumableSessionId(run.id, sessionStep) : undefined,
+        sessionId: recoveredSessionId,
         backend,
         prompt: run.continuationMessage?.text ?? RESTART_CONTINUATION_PROMPT,
         images: [],
@@ -5169,8 +5178,19 @@ export class RunManager {
   private resumableSessionId(runId: string, sessionStep: StepState | undefined): string | undefined {
     if (!sessionStep?.sessionId) return undefined;
     if ((sessionStep.backend ?? this.store.getRun(runId)?.runner) === 'cursor') {
+      const run = this.store.getRun(runId);
+      const sessionStepIndex = run?.steps.findIndex((step) => step.id === sessionStep.id) ?? -1;
+      // A Continue records the existing ID before the resumed process emits its
+      // own session event. After a crash, its original owning step still holds
+      // the print-session proof; later steps cannot establish that proof.
+      const printEvidenceSteps = new Set(run?.steps.slice(0, sessionStepIndex + 1)
+        .filter((step) => step.sessionId === sessionStep.sessionId && step.sessionTransport === 'cursor-print')
+        .map((step) => step.id));
       const confirmed = this.store.readEvents(runId).some(
-        (event) => event.type === 'session' && event.sessionId === sessionStep.sessionId,
+        (event) => event.type === 'session' && event.sessionId === sessionStep.sessionId &&
+          (sessionStep.sessionTransport !== 'cursor-print' ||
+            (event.stepId !== undefined && printEvidenceSteps.has(event.stepId) &&
+              event.sessionTransport === 'cursor-print')),
       );
       if (!confirmed) return undefined;
     }
@@ -5292,6 +5312,9 @@ export class RunManager {
     const accountSwitched = (opts.agentProfile ?? resumeIdentity?.account.profileId ?? run.agentProfile ?? sessionAccount) !== sessionAccount;
     const resume = sessionBackend === targetRunner && !accountSwitched;
     const resumeSessionId = resume ? this.resumableSessionId(runId, sessionStep) : undefined;
+    if (resume && sessionStep?.sessionTransport === 'cursor-print' && !resumeSessionId) {
+      return { ok: false, error: 'Cursor print session identity lacks a matching recorded session event' };
+    }
 
     // Follow-up runner/model/account override (#401, spec 2026-07-29-agent-profiles): the composer
     // lets the user pick which backend, model and login handle this continuation — the same flat
@@ -5596,6 +5619,9 @@ export class RunManager {
       startedAt: new Date().toISOString(),
       sessionId,
       backend,
+      ...(sessionId && backend === 'cursor' ? {
+        sessionTransport: record?.steps.find((step) => step.sessionId === sessionId)?.sessionTransport ?? 'cursor-acp',
+      } : {}),
     });
     this.store.appendEvent(runId, { type: 'step-start', stepId, name: 'Continue', kind: 'agent', iteration: 1 });
     // Attachments pasted into the follow-up composer, on the same terms as a live-session
@@ -5671,7 +5697,8 @@ export class RunManager {
       }
       if (sessionError || state.agentInputError) return;
       if (event.type === 'session') {
-        this.store.updateStep(runId, stepId, { sessionId: event.sessionId, backend });
+        this.store.updateStep(runId, stepId, { sessionId: event.sessionId, backend,
+          ...(event.sessionTransport ? { sessionTransport: event.sessionTransport } : {}) });
       }
       if (event.type === 'token-usage') {
         this.store.updateStep(runId, stepId, { tokensUsed: event.tokensUsed });
@@ -5924,7 +5951,10 @@ export class RunManager {
     state.delegationSettings = { cwd: state.cwd, runner: continueBackend, model: continueModel,
       effort: continueEffort, agentProfile: continueProfile.profileId, accountBinding: continueProfile.accountBinding,
       systemPrompt: record?.systemPrompt, allowedTools: grants.allowedTools, bashAllowlist: grants.bashAllowlist };
-    const runner = createRunner(continueBackend);
+    const sessionTransport = sessionId !== undefined && continueBackend === 'cursor'
+      ? owningStep?.sessionTransport ?? 'cursor-acp'
+      : undefined;
+    const runner = createRunner(continueBackend, sessionTransport ? { sessionTransport } : {});
     // Re-expand the continued step's skill from the current registry (#790) BEFORE
     // provisionSession. `await materializeSkillDir` used to sit after the pre-launch
     // revalidation, so Stop during that await still launched with revoked tools.
@@ -6052,7 +6082,7 @@ export class RunManager {
         },
         onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
         onAgentInputConsumed: (ids) => this.handleAgentInputConsumed(runId, state, session, ids),
-        onPidChange: (pid) => { registerRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
+        onPidChange: (pid) => { replaceRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
       },
     );
     } catch (error) { ciTools?.revoke(); state.revokeCiTools = undefined; delegation?.revoke(); state.revokeDelegation = undefined; throw error; }
@@ -6695,7 +6725,8 @@ export class RunManager {
       if (sessionError || state.agentInputError) return;
       if (event.type === 'session') {
         // Codex/OpenCode mint their own session id — persist it so resume works.
-        this.store.updateStep(runId, step.id, { sessionId: event.sessionId, backend });
+        this.store.updateStep(runId, step.id, { sessionId: event.sessionId, backend,
+          ...(event.sessionTransport ? { sessionTransport: event.sessionTransport } : {}) });
       }
       if (event.type === 'token-usage') {
         this.store.updateStep(runId, step.id, { tokensUsed: startTokens + event.tokensUsed });
@@ -6933,7 +6964,7 @@ export class RunManager {
           },
           onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
           onAgentInputConsumed: (ids) => this.handleAgentInputConsumed(runId, state, session, ids),
-          onPidChange: (pid) => { registerRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
+          onPidChange: (pid) => { replaceRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
         },
       );
     } catch (err) {

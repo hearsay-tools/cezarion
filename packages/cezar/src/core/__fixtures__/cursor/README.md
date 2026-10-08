@@ -1,4 +1,34 @@
-# Cursor ACP fixtures
+# Cursor ACP and print fixtures
+
+Cursor print qualification for fork #590 is recorded in
+[`print-qualification.md`](print-qualification.md). CLI
+`2026.10.01-e373342` auto-skips native questions; the revised design accepts
+that visible limit and uses Cezar `CEZ:ASK` for its own questions. The
+per-invocation native tool allowlist passed a harmless live control. The
+qualification record contains the remaining live probes. `print-mcp.json` and
+`print-portable-ask.json` record fresh/resume bindings; `print-plugins.json`
+records the accepted project-local limitation: a Claude plugin disable did
+not stop Cursor's marketplace copy of Superpowers. `print-resume-missing.json`
+records the accepted vendor history-loss limit: a nonexistent `--resume` ID
+succeeds as an empty conversation under the requested ID. No fixture here claims
+print is ready to replace ACP.
+`print-fields.json` records image, additional-root, model-pin and exact-resume
+controls. `print-plugin-lifecycle.json` records local skill presence/absence,
+marketplace Superpowers discovery and a `sessionStart` hook whose context
+survived resume without rerunning the hook.
+`print-errors.json` records an invalid account key rejection and bounded
+process-group cleanup in the opt-in probe harness.
+
+`print-lifecycle.ndjson` and `print-native-question.ndjson` are constructed
+fixtures with synthetic text, IDs and paths. Their frame structure follows
+the installed CLI's observed `system/init`, assistant, result, read tool and
+native question frames. `print-fields.json` records the live read tool's
+`args.path` and `result.success` keys; the question request, auto-rejected
+response and failed tool result were inspected on `2026.10.01-e373342`.
+`print-lifecycle.expected.json` is hand authored from the v2 contract for
+two exact-resume print turns, including one logical `session.started`.
+The qualified invocation omits native agent tools, so no child-session wire
+is expected; child attribution remains a named unsupported print case.
 
 Verified 2026-09-16 against Cursor CLI **2026.09.15-d2fe57e** and:
 

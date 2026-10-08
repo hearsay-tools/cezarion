@@ -87,7 +87,7 @@ export async function withDelayedCommand(backend: 'codex' | 'opencode' | 'pi' | 
  * acknowledge the local stdin write independently; withholding a protocol
  * response therefore cannot construct a turn-end-before-ACK race. */
 export async function withHeldPipeResponse(
-  backend: 'claude' | 'cursor',
+  backend: 'claude',
   body: (release: () => void, responseHeld: () => boolean) => Promise<void>,
 ): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), 'cez-delivery-pipe-'));
@@ -95,14 +95,36 @@ export async function withHeldPipeResponse(
   const adapter = HARNESS_ADAPTERS[backend] as { mockBin: string };
   const original = adapter.mockBin, mock = join(root, 'mock.mjs');
   let source = readFileSync(original, 'utf8').replace(/^#!.*\n/, '');
-  const anchor = backend === 'claude'
-    ? "  if (userText.includes('mock:agent-echo')) {"
-    : "  if (input.includes('mock:agent-echo')) {";
+  const anchor = "  if (userText.includes('mock:agent-echo')) {";
   expect(source.split(anchor)).toHaveLength(2);
   source = `import * as pipeGateFs from 'node:fs';\n${source}`.replace(anchor, `${anchor}
     pipeGateFs.writeFileSync(${JSON.stringify(received)}, '');
     while (!pipeGateFs.existsSync(${JSON.stringify(released)})) await new Promise(resolve => setTimeout(resolve, 5));
   `);
+  try {
+    writeFileSync(mock, '#!/usr/bin/env node\n' + source, { mode: 0o755 });
+    adapter.mockBin = mock;
+    await body(() => writeFileSync(released, ''), () => existsSync(received));
+  } finally { adapter.mockBin = original; rmSync(root, { recursive: true, force: true }); }
+}
+
+/** Print has no pipe-write ACK: owned input is admitted on first model work.
+ * Hold that native work to prove delivery cannot clear before admission. */
+export async function withHeldPrintResponse(
+  body: (release: () => void, responseHeld: () => boolean) => Promise<void>,
+): Promise<void> {
+  const root = mkdtempSync(join(tmpdir(), 'cez-delivery-print-'));
+  const released = join(root, 'released'), received = join(root, 'received');
+  const adapter = HARNESS_ADAPTERS.cursor as { mockBin: string };
+  const original = adapter.mockBin, mock = join(root, 'mock.mjs');
+  let source = readFileSync(original, 'utf8').replace(/^#!.*\n/, '');
+  const anchor = "if (prompt.includes('mock:agent-echo')) { finish(prompt); process.exit(0); }";
+  expect(source.split(anchor)).toHaveLength(2);
+  source = source.replace(anchor, `${anchor.replace('finish(prompt);', `
+    pipeGateFs.writeFileSync(${JSON.stringify(received)}, '');
+    while (!pipeGateFs.existsSync(${JSON.stringify(released)})) await new Promise(resolve => setTimeout(resolve, 5));
+    finish(prompt);`)}`);
+  source = `import * as pipeGateFs from 'node:fs';\n${source}`;
   try {
     writeFileSync(mock, '#!/usr/bin/env node\n' + source, { mode: 0o755 });
     adapter.mockBin = mock;

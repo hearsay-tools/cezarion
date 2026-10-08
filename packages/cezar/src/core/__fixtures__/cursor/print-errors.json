@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "case": "errors",
+  "cliVersion": "2026.10.01-e373342",
+  "model": "gpt-5.4-mini-medium",
+  "invocation": [
+    "-p",
+    "--force",
+    "--trust",
+    "--output-format stream-json",
+    "--allowed-tools read_todos_tool_call",
+    "invalid synthetic CURSOR_API_KEY in process env",
+    "10 ms timeout in disposable worktree"
+  ],
+  "invalidKeyNotEchoed": true,
+  "invalidKeyRejected": true,
+  "noFallbackToLoggedInAccount": true,
+  "authProcessGroupGone": true,
+  "timeoutTriggered": true,
+  "timeoutProcessGroupGone": true,
+  "outcome": "pass"
+}

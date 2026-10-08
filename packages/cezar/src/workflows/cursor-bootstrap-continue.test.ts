@@ -13,10 +13,12 @@ const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 
 /** Every spec a (mocked) Cursor runner's `startSession` receives, in spawn order. */
-const captured = vi.hoisted(() => ({ specs: [] as AgentRunSpec[] }));
+const captured = vi.hoisted(() => ({ specs: [] as AgentRunSpec[], options: [] as Array<{ sessionTransport?: string }> }));
 
 vi.mock('../core/runner-factory.ts', () => ({
-  createRunner: () => ({
+  createRunner: (_backend: string, options: { sessionTransport?: string } = {}) => {
+    captured.options.push(options);
+    return ({
     backend: 'cursor' as const,
     systemPromptOnResume: 'in-thread' as const,
     run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
@@ -32,7 +34,8 @@ vi.mock('../core/runner-factory.ts', () => ({
       };
     },
     interrupt: async () => {},
-  }),
+    });
+  },
 }));
 
 /**
@@ -50,6 +53,7 @@ describe('Continue after a Cursor bootstrap crash', () => {
 
   beforeEach(async () => {
     captured.specs.length = 0;
+    captured.options.length = 0;
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-cursor-bootstrap-'));
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
     await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
@@ -126,6 +130,38 @@ describe('Continue after a Cursor bootstrap crash', () => {
     const spec = await continueSpec(id);
     expect(spec.resume).toBe(true);
     expect(spec.sessionId).toBe(CURSOR_SESSION_ID);
+    expect(captured.options[0]).toEqual({ sessionTransport: 'cursor-acp' });
     await settled(id);
+  });
+
+  it('resumes a confirmed print ID through print even after defaults change', async () => {
+    const id = failedCursorRun(CURSOR_SESSION_ID, true);
+    store.updateStep(id, 'work', { sessionTransport: 'cursor-print', profileId: 'default' });
+    store.appendEvent(id, { type: 'session', stepId: 'work', sessionId: CURSOR_SESSION_ID, sessionTransport: 'cursor-print' });
+    const spec = await continueSpec(id);
+    expect(spec.resume).toBe(true);
+    expect(spec.sessionId).toBe(CURSOR_SESSION_ID);
+    expect(captured.options[0]).toEqual({ sessionTransport: 'cursor-print' });
+    await settled(id);
+  });
+
+  it('refuses a print checkpoint without matching transport evidence', () => {
+    const id = failedCursorRun(CURSOR_SESSION_ID, true);
+    store.updateStep(id, 'work', { sessionTransport: 'cursor-print' });
+    expect(manager!.continueRun(id, { text: 'keep going' })).toEqual({
+      ok: false, error: 'Cursor print session identity lacks a matching recorded session event',
+    });
+    expect(captured.specs).toHaveLength(0);
+  });
+
+  it('does not requeue a print checkpoint as a fresh session on restart', async () => {
+    const id = failedCursorRun(CURSOR_SESSION_ID, true);
+    store.updateStep(id, 'work', { sessionTransport: 'cursor-print' });
+    store.addStep(id, { id: 'continue-1', name: 'Continue', kind: 'agent', synthetic: 'continuation' });
+    store.updateRun(id, { status: 'queued', finishedAt: undefined });
+    await (manager as unknown as { reviveQueuedRun(run: NonNullable<ReturnType<RunStore['getRun']>>, reason: string): Promise<void> })
+      .reviveQueuedRun(store.getRun(id)!, 'cezar restarted');
+    expect(store.getRun(id)?.status).toBe('failed');
+    expect(captured.specs).toHaveLength(0);
   });
 });

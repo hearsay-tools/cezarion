@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "case": "native-question",
+  "cliVersion": "2026.10.01-e373342",
+  "model": "gpt-5.4-mini",
+  "invocation": [
+    "-p",
+    "--force",
+    "--trust",
+    "--output-format stream-json",
+    "--allowed-tools ask_question_tool_call"
+  ],
+  "exitCode": 0,
+  "timedOut": false,
+  "outputTruncated": false,
+  "nativeQuestionRequested": true,
+  "nativeQuestionAnswered": true,
+  "responseKind": "rejected",
+  "rejectionKind": "skipped",
+  "sameSession": true,
+  "responseDelayMs": 1,
+  "outcome": "blocked"
+}

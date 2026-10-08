@@ -1770,7 +1770,7 @@ describe('harness parity — the matrix itself', () => {
       codex: ['item/tool/requestUserInput'],
       opencode: ['question.asked'],
       pi: ['CEZ:ASK'],
-      cursor: ['cursor/ask_question', 'cursor/create_plan'],
+      cursor: ['CEZ:ASK'],
       omp: ['CEZ:ASK'],
     };
     for (const backend of RUNNER_IDS) {
@@ -1888,12 +1888,15 @@ describe('harness parity — D1 governed native delegation', () => {
             expect(ordinary![0]).not.toContain('--config');
             // The `task` strip from the default tool list is proven in omp-runner.test.ts (D1).
           } else if (backend === 'cursor') {
-            const normal = ordinary!.find(row => row.method === 'initialize');
-            const controlled = restricted!.find(row => row.method === 'initialize');
-            expect(normal.params.clientCapabilities._meta.subagents).toBe(true);
-            expect(controlled.params.clientCapabilities._meta.subagents).toBe(false);
-            const normalize = (rows: typeof ordinary) => rows!.filter(row => row.method !== 'initialize');
-            expect(normalize(restricted)).toEqual(normalize(ordinary));
+            const normal: string[] = ordinary![0];
+            const controlled: string[] = restricted![0];
+            expect(normal).not.toContain('--allowed-tools');
+            const index = controlled.indexOf('--allowed-tools');
+            expect(index).toBeGreaterThanOrEqual(0);
+            expect(controlled[index + 1]).toContain('read_tool_call');
+            expect(controlled[index + 1]).not.toContain('task_tool_call');
+            expect(controlled.filter((_, i) => i !== index && i !== index + 1)).toEqual(normal);
+            expect(normal.includes('--resume')).toBe(resume);
           } else if (resume) {
             const sessionUrl = `/session/${PINNED_SESSION_ID}`;
             const deny = { permission: [{ permission: 'task', pattern: '*', action: 'deny' }] };
@@ -2026,6 +2029,10 @@ const SPEC_FIELD_PROBES: Readonly<Record<AgentRunSpecField, SpecFieldProbe>> = {
 };
 
 const variantKey = (spec: Partial<AgentRunSpec>): string => JSON.stringify(spec);
+const fieldVariants = (backend: RunnerId, field: AgentRunSpecField, probe: Extract<SpecFieldProbe, { kind: 'boundary' }>) =>
+  backend === 'cursor' && field === 'sessionId'
+    ? { kind: 'boundary' as const, without: {}, with: probe.with }
+    : probe;
 
 /** The mock's own record of what reached it: argv or requests, then stdin where hooked. */
 function readRecording(dir: string, name: string): string[] {
@@ -2072,7 +2079,8 @@ describe('harness parity — AgentRunSpec support declarations', () => {
       beforeAll(async () => {
         dir = mkdtempSync(join(tmpdir(), `cez-spec-support-${backend}-`));
         const variants = new Map<string, Partial<AgentRunSpec>>();
-        for (const probe of Object.values(SPEC_FIELD_PROBES)) {
+        for (const [field, entry] of Object.entries(SPEC_FIELD_PROBES) as [AgentRunSpecField, SpecFieldProbe][]) {
+          const probe = entry.kind === 'boundary' ? fieldVariants(backend, field, entry) : entry;
           if (probe.kind !== 'boundary') continue;
           variants.set(variantKey(probe.without), probe.without);
           variants.set(variantKey(probe.with), probe.with);
@@ -2106,8 +2114,9 @@ describe('harness parity — AgentRunSpec support declarations', () => {
           const probe = SPEC_FIELD_PROBES[field];
           let observed: boolean;
           if (probe.kind === 'boundary') {
-            const without = recordings.get(variantKey(probe.without));
-            const withField = recordings.get(variantKey(probe.with));
+            const variants = fieldVariants(backend, field, probe);
+            const without = recordings.get(variantKey(variants.without));
+            const withField = recordings.get(variantKey(variants.with));
             expect(without?.length ?? 0).toBeGreaterThan(0);
             observed = JSON.stringify(without) !== JSON.stringify(withField);
           } else if (probe.kind === 'process') {
@@ -2445,19 +2454,23 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
   const pendingRule = 'If the watched work is still pending, end with CEZ:MONITORING.';
   const markerlessRule = 'Never yield markerless for a monitoring wrap-up.';
   type Wire = {
-    userText?: string; method?: string; url?: string;
+    userText?: string; method?: string; url?: string; prompt?: string;
     params?: { input?: { text?: string }[]; prompt?: { text?: string }[] };
     body?: { parts?: { text?: string }[] };
   };
   const records = (path: string): (Wire | string[])[] => existsSync(path)
     ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
-  // These wires record each user message on the stdin hook and the system prompt in argv.
+  // Print carries its combined prompt on stdin; Claude/Pi/OMP keep the system prompt in argv.
   const stdinWire = (backend: RunnerId) => backend === 'claude' || backend === 'pi' || backend === 'omp';
   const messages = (backend: RunnerId, dir: string): string[] => {
     const channel = stdinWire(backend) ? 'stdin' : 'args';
-    return records(join(dir, channel)).flatMap(row => {
-      if (Array.isArray(row)) return [];
+    const wire = backend === 'cursor' ? [...records(join(dir, 'args')), ...records(join(dir, 'stdin'))]
+      : records(join(dir, channel));
+    return wire.flatMap(row => {
+      if (Array.isArray(row)) return backend === 'cursor' && row.at(-1)?.includes('\n\n---\n\n')
+        ? [row.at(-1)!] : [];
       if (stdinWire(backend)) return row.userText === undefined ? [] : [row.userText];
+      if (backend === 'cursor' && row.method === 'cursor-print/stdin' && row.prompt !== undefined) return [row.prompt];
       const parts = backend === 'codex' && row.method === 'turn/start' ? row.params?.input
         : backend === 'cursor' && row.method === 'session/prompt' ? row.params?.prompt
         : backend === 'opencode' && /\/(message|prompt_async)$/.test(row.url ?? '') ? row.body?.parts : undefined;

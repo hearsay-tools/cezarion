@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "case": "portable-ask",
+  "cliVersion": "2026.10.01-e373342",
+  "model": "gpt-5.4-mini",
+  "invocation": [
+    "-p",
+    "--force",
+    "--trust",
+    "--output-format stream-json",
+    "--allowed-tools read_todos_tool_call",
+    "--resume <exact native id>"
+  ],
+  "markerTokenSeen": true,
+  "markerSeen": true,
+  "markerValid": true,
+  "firstResultTextPresent": true,
+  "explicitReplyDelivered": true,
+  "phraseRecalled": true,
+  "sameNativeSession": true,
+  "fullCezarAskRoundTrip": false,
+  "outcome": "pass"
+}

@@ -28,6 +28,7 @@ function watchdogStall(prompt) {
 import { createInterface } from 'node:readline';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import * as parityGateFs from 'node:fs';
+if (process.argv.includes('--version')) { process.stdout.write('2026.09.15-mock-acp\n'); process.exit(0); }
 
 // #401: let the test observe the actual monitoring park before releasing late wire frames.
 async function afterParityPark(prompt) {

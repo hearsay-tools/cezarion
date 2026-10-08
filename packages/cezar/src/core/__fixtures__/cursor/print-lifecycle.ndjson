@@ -1,0 +1,10 @@
+{"type":"system","subtype":"init","session_id":"print-session-1","model":"gpt-5.4-mini-medium","cwd":"/repo"}
+{"type":"tool_call","subtype":"started","call_id":"todo_1","session_id":"print-session-1","tool_call":{"updateTodosToolCall":{"args":{"todos":[{"id":"a","content":"Read control","status":"in_progress"}],"merge":false}}}}
+{"type":"tool_call","subtype":"completed","call_id":"todo_1","session_id":"print-session-1","tool_call":{"updateTodosToolCall":{"args":{"todos":[{"id":"a","content":"Read control","status":"in_progress"}],"merge":false},"result":{"success":{}}}}}
+{"type":"tool_call","subtype":"started","call_id":"read_1","session_id":"print-session-1","tool_call":{"readToolCall":{"args":{"path":"/repo/control.txt"}}}}
+{"type":"tool_call","subtype":"completed","call_id":"read_1","session_id":"print-session-1","tool_call":{"readToolCall":{"args":{"path":"/repo/control.txt"},"result":{"success":{"content":"control text"}}}}}
+{"type":"assistant","session_id":"print-session-1","message":{"role":"assistant","content":[{"type":"text","text":"Ready"}]}}
+{"type":"result","subtype":"success","session_id":"print-session-1","is_error":false,"result":"Ready"}
+{"type":"system","subtype":"init","session_id":"print-session-1","model":"gpt-5.4-mini-medium","cwd":"/repo"}
+{"type":"assistant","session_id":"print-session-1","message":{"role":"assistant","content":[{"type":"text","text":"Done"}]}}
+{"type":"result","subtype":"success","session_id":"print-session-1","is_error":false,"result":"Done"}

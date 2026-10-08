@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "case": "cezar-live",
+  "checkedAt": "2026-10-08",
+  "cliVersion": "2026.10.01-e373342",
+  "model": "gpt-5.4-mini-medium",
+  "qualifiedTransport": "cursor-print",
+  "marketplaceSkillRead": true,
+  "worktreeRead": true,
+  "cezarAskParked": true,
+  "choiceDelivered": true,
+  "freeTextFollowupDelivered": true,
+  "sameRecordedNativeSessionAcrossThreeTurns": true,
+  "blindPhraseRecalled": true,
+  "completedWithDone": true,
+  "controlledPluginLifecycleProbePassed": true,
+  "globalConfigurationWritten": false
+}

@@ -311,4 +311,3 @@ it('offers Retry clean up while a destroy is pending, and plain Clean up otherwi
   expect(retry.className).toContain('min-h-11')
   expect(within(group).getByRole('button', cleanUp(fresh.workerId)).textContent).toBe('Clean up')
 })
-
