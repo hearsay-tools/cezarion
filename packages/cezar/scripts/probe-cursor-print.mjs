@@ -461,6 +461,8 @@ async function probeFields(version) {
   ], checkout, 45_000) : undefined;
   const secondResult = second ? resultOf(framesOf(second.stdout)) : undefined;
   const rootRead = firstFrames.some(frame => frame.type === 'tool_call' && frame.tool_call?.readToolCall);
+  const readCall = firstFrames.find(frame => frame.type === 'tool_call' && frame.subtype === 'completed'
+    && frame.tool_call?.readToolCall)?.tool_call.readToolCall;
   const text = String(firstResult?.result ?? '');
   return {
     schema: 1, case: 'fields', cliVersion: version, model: values.model,
@@ -469,6 +471,8 @@ async function probeFields(version) {
     advertisedEffortVariant: lowEffortAdvertised,
     advertisedEffortVariantAdmitted: lowEffort?.code === 0 && resultOf(framesOf(lowEffort.stdout))?.subtype === 'success',
     extraRootToolRead: rootRead, extraRootCanarySeen: text.includes(canary),
+    readArgKeys: readCall?.args && typeof readCall.args === 'object' ? Object.keys(readCall.args).sort() : [],
+    readResultKeys: readCall?.result && typeof readCall.result === 'object' ? Object.keys(readCall.result).sort() : [],
     imageOrderSeen: text.includes(colorOrder),
     sameNativeSession: Boolean(firstId && secondResult?.session_id === firstId),
     currentInstructionFollowedOnResume: String(secondResult?.result ?? '').trim() === colorOrder,

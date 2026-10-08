@@ -19,6 +19,17 @@ survived resume without rerunning the hook.
 `print-errors.json` records an invalid account key rejection and bounded
 process-group cleanup in the opt-in probe harness.
 
+`print-lifecycle.ndjson` and `print-native-question.ndjson` are constructed
+fixtures with synthetic text, IDs and paths. Their frame structure follows
+the installed CLI's observed `system/init`, assistant, result, read tool and
+native question frames. `print-fields.json` records the live read tool's
+`args.path` and `result.success` keys; the question request, auto-rejected
+response and failed tool result were inspected on `2026.10.01-e373342`.
+`print-lifecycle.expected.json` is hand authored from the v2 contract for
+two exact-resume print turns, including one logical `session.started`.
+The qualified invocation omits native agent tools, so no child-session wire
+is expected; child attribution remains a named unsupported print case.
+
 Verified 2026-09-16 against Cursor CLI **2026.09.15-d2fe57e** and:
 
 - [Cursor ACP documentation](https://cursor.com/docs/cli/acp), including

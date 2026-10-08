@@ -20,6 +20,12 @@
   "advertisedEffortVariantAdmitted": true,
   "extraRootToolRead": true,
   "extraRootCanarySeen": true,
+  "readArgKeys": [
+    "path"
+  ],
+  "readResultKeys": [
+    "success"
+  ],
   "imageOrderSeen": true,
   "sameNativeSession": true,
   "currentInstructionFollowedOnResume": true,
