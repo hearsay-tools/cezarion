@@ -60,6 +60,10 @@ export const stepStatusSchema = z.enum([
 ]);
 export type StepStatus = z.infer<typeof stepStatusSchema>;
 
+/** Wire transport that owns a Cursor native session. Legacy Cursor sessions omit it (ACP). */
+export const sessionTransportSchema = z.enum(['cursor-acp', 'cursor-print']);
+export type SessionTransport = z.infer<typeof sessionTransportSchema>;
+
 const usageCounterSchema = z.number().finite().nonnegative();
 
 /** One step of a run's chain. */
@@ -84,6 +88,7 @@ export const stepStateSchema = z.object({
   error: z.string().optional(),
   /** Latest agent session id — `claude --resume <id>` and friends. */
   sessionId: z.string().optional(),
+  sessionTransport: sessionTransportSchema.optional(),
   /** Backend that owns `sessionId`; absent on records written before backend affinity. */
   backend: runnerSchema.optional(),
   /** Agent account (spec 2026-07-29-agent-profiles) that owns `sessionId` — `default`, or a

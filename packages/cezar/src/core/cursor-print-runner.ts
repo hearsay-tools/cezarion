@@ -88,6 +88,7 @@ class CursorPrintSession implements AgentSession {
   private finished = false;
   private busy = false;
   private nativeId?: string;
+  private sessionEventEmitted = false;
   private turnCount = 0;
   private active?: ActiveTurn;
   private queue: ContentBlock[][] = [];
@@ -279,6 +280,11 @@ class CursorPrintSession implements AgentSession {
       }
       if (!this.nativeId) {
         this.nativeId = native.session_id;
+      }
+      // A separate Continue creates a new managed step even with the same native ID.
+      // Emit once for that logical session so its step has corroborating evidence.
+      if (!this.sessionEventEmitted) {
+        this.sessionEventEmitted = true;
         this.emit({ type: 'session', sessionId: native.session_id });
       }
       active.initSeen = true;

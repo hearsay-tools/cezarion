@@ -3,6 +3,8 @@ import { ClaudeCliRunner } from './claude-cli-runner.ts';
 import { CodexAppServerRunner } from './codex-app-server-runner.ts';
 import { OpencodeServerRunner } from './opencode-server-runner.ts';
 import { CursorAcpRunner } from './cursor-acp-runner.ts';
+import { CursorRunner } from './cursor-runner.ts';
+import type { SessionTransport } from '@open-mercato/cezar-contract';
 import { PiRunner } from './pi-runner.ts';
 import { OmpRunner } from './omp-runner.ts';
 
@@ -12,14 +14,14 @@ import { OmpRunner } from './omp-runner.ts';
  * goes through here so switching the agent backend is one function call.
  * `claude-cli` is the legacy id for `claude`.
  */
-export function createRunner(backend: AgentBackend | RunnerId | undefined): AgentRunner {
+export function createRunner(backend: AgentBackend | RunnerId | undefined, options: { sessionTransport?: SessionTransport } = {}): AgentRunner {
   switch (backend) {
     case 'codex':
       return new CodexAppServerRunner();
     case 'opencode':
       return new OpencodeServerRunner();
     case 'cursor':
-      return new CursorAcpRunner();
+      return options.sessionTransport ? new CursorRunner(options) : new CursorAcpRunner();
     case 'pi':
       return new PiRunner();
     case 'omp':

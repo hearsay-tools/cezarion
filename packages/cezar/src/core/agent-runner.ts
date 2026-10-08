@@ -16,6 +16,7 @@
  */
 
 import type { UiEvent } from './ui-events.ts';
+import type { SessionTransport } from '@open-mercato/cezar-contract';
 
 /**
  * The user-selectable runners (what config/GUI expose), in display order — the SINGLE source of
@@ -208,7 +209,7 @@ export type AgentEvent =
   /** The backend's real session id, once known — codex threads and opencode
    *  sessions mint their own id, so the run manager persists this to enable
    *  resume ("Continue") and "open in CLI". Claude's equals `spec.sessionId`. */
-  | { type: 'session'; sessionId: string }
+  | { type: 'session'; sessionId: string; sessionTransport?: SessionTransport }
   /** `unconsumedInputIds`: agent input accepted in this turn that the model never
    *  read before the turn ended idle (#505). */
   | { type: 'turn-end'; unconsumedInputIds?: readonly string[] }
