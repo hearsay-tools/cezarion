@@ -71,6 +71,10 @@ describe('automatic Open Mercato skills updates', () => {
 
     expect(browser.isVisible('[data-slot="skills-auto-update"]')).toBe(true)
     expect(browser.text('[data-slot="skills-settings-section"]')).toContain('On (default)')
+    // Local run 1791473329082-3196347, lane-3-failures/skills-update/
+    // shows-the-inherited-global-preference-and-persists-an-explicit-override-1/probe.json
+    // (2026-10-08T15:36:09Z): the section existed, but this assertion received
+    // "Checking tracked Open Mercato installations…" before the status query settled.
     expect(browser.waitForValue(`document.querySelector('[data-slot="skills-installation-status"]')?.textContent`,
       value => typeof value === 'string' && value.includes('No tracked Open Mercato installation found.'))).toContain(
       'No tracked Open Mercato installation found.',
