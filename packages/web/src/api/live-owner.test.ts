@@ -25,6 +25,26 @@ beforeEach(() => {
 })
 afterEach(() => vi.useRealTimers())
 describe('shared live ownership', () => {
+  it('keeps a ten-minute read alive after two of three documents leave without polling early', async () => {
+    const owner = createLiveOwner(deps)
+    const ports = [new Port(), new Port(), new Port()]
+    const read = { id: 'status', demand: { kind: 'read', path: '/api/v1/p/boot/github/ref-status?issues=1', intervalMs: 600_000 } }
+    for (const [i, port] of ports.entries()) { owner.attach(port); port.sync(String(i), [read]) }
+    const renewal = setInterval(() => ports[0]!.sync('0', [read]), 5_000)
+    try {
+      await vi.advanceTimersByTimeAsync(10_000)
+      ports[1]!.sync('1', []); ports[2]!.sync('2', [])
+      await vi.advanceTimersByTimeAsync(589_999)
+      expect(deps.read).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(deps.read).toHaveBeenCalledTimes(1)
+      expect(ports[0]!.frames).toContainEqual(expect.objectContaining({ type: 'value', id: 'status' }))
+      expect(ports[1]!.frames.some(frame => frame.type === 'value')).toBe(false)
+      expect(ports[2]!.frames.some(frame => frame.type === 'value')).toBe(false)
+    } finally { clearInterval(renewal); owner.dispose() }
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('shares one workspace stream and closes it after the last lease leaves', async () => {
     const owner = createLiveOwner(deps)
     const ports = Array.from({ length: 10 }, () => new Port())

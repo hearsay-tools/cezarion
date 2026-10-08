@@ -1273,6 +1273,28 @@ it('keeps a newer shared ref-status snapshot when an older document query finish
   } finally { view.unmount(); client.clear(); vi.useRealTimers() }
 })
 
+it.each([600_000, 86_400_000])('keeps reference statuses mounted and obeys a server cadence of %i ms', async intervalMs => {
+  vi.useFakeTimers()
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+  const client = createQueryClient()
+  const ref = { projectId: 'slow-status', kind: 'Issue' as const, number: 925 }
+  const closed: GithubRefStatusData = { available: true, prs: {}, issues: { 925: 'completed' }, recheckAfterMs: intervalMs }
+  fetchMock.mockImplementation(async () => json(closed))
+  const view = renderHook(() => useReferenceStatuses([ref]), {
+    wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  })
+  try {
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(view.result.current(ref)).toMatchObject({ state: 'ready', status: 'completed' })
+    await act(async () => { await vi.advanceTimersByTimeAsync(intervalMs - 2) })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    fetchMock.mockImplementation(async () => json({ ...closed, issues: { 925: 'open' } }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(3) })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(view.result.current(ref)).toMatchObject({ state: 'ready', status: 'open' })
+  } finally { view.unmount(); client.clear(); vi.useRealTimers() }
+})
+
 describe('refStatusRecheckAfter', () => {
   const answered = (recheckAfterMs: number | null): GithubRefStatusData =>
     ({ available: true, prs: {}, issues: {}, recheckAfterMs }) as GithubRefStatusData

@@ -15,7 +15,9 @@ export const liveDemandSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('workspace') }),
   liveRunDemandSchema.extend({ kind: z.literal('run') }),
   z.object({ kind: z.literal('topic'), topic: z.string().min(1).max(128) }),
-  z.object({ kind: z.literal('read'), path: z.string().max(4096).refine(allowedLiveRead), intervalMs: z.number().int().min(1_000).max(300_000) }),
+  // Preserve server-directed cadence (settled references use ten minutes). Only
+  // bound the timer itself: larger delays overflow setTimeout into a tight loop.
+  z.object({ kind: z.literal('read'), path: z.string().max(4096).refine(allowedLiveRead), intervalMs: z.number().int().min(1_000).max(2_147_483_647) }),
 ])
 export type LiveDemand = z.infer<typeof liveDemandSchema>
 export const liveEntrySchema = z.object({ id: z.string().min(1).max(128), demand: liveDemandSchema })
