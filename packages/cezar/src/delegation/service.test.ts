@@ -5,7 +5,7 @@ import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import fs, { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { workerSpawnRequestSchema } from '@open-mercato/cezar-contract';
+import { delegationStateSchema, workerSpawnRequestSchema } from '@open-mercato/cezar-contract';
 import { DelegationPolicyError } from './policy.ts';
 import { workerWorkflowHash } from './execution-identity.ts';
 import { QUICK_TASK_WORKFLOW, skillTaskSteps } from '../workflows/types.ts';
@@ -22,6 +22,7 @@ import { ensureOwnedWorkspace, gitCommonDir, WORKTREE_LOCK_BUSY_ERROR } from './
 import { DelegationService } from './service.ts';
 import { withWorktreeMutation } from '../git-worktree-lock.ts';
 import { readableHolder } from './non-dumpable.testkit.ts';
+import { workerDestroyView } from '../runs/delegation-state.ts';
 import { agentTmpDir } from '../runs/agent-tmpdir.ts';
 
 describe('delegation service durable authority', () => {
@@ -653,7 +654,8 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     if (holder) onTestFinished(() => holder.close());
     return { workerId, workspace, holder };
   }
-  const destroyOf = (workerId: string) => { const run = f.store.getRun(workerId); return run?.delegation?.role === 'worker' ? run.delegation.destroy : undefined; };
+  /** The destroy as the API shows it: the stored phase plus the run's retry state. */
+  const destroyOf = (workerId: string) => { const run = f.store.getRun(workerId); return run ? workerDestroyView(run) : undefined; };
   /** One `/proc` listing is one full holder scan; the fixture's process scope spies the listing. */
   const listings = () => vi.mocked(fs.readdirSync).mock.calls.filter(([path]) => path === '/proc').length;
 
@@ -705,13 +707,10 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     const { workerId } = await settled();
     // When each retry state was written: the wait is measured from there, not from whenever a poll notices it.
     const written: Array<{ at: number; attempts: number; nextAt: string; needsAttention?: true }> = [];
-    const commit = f.store.commitDelegation.bind(f.store);
-    vi.spyOn(f.store, 'commitDelegation').mockImplementation((patches, ...rest) => {
-      for (const patch of patches) {
-        const retry = (patch.delegation as { destroy?: { retry?: Omit<(typeof written)[number], 'at'> } }).destroy?.retry;
-        if (retry) written.push({ at: Date.now(), ...retry });
-      }
-      return commit(patches, ...rest);
+    const commit = f.store.commitDestroyRetry.bind(f.store);
+    vi.spyOn(f.store, 'commitDestroyRetry').mockImplementation((id, retry) => {
+      if (retry) written.push({ at: Date.now(), ...retry });
+      return commit(id, retry);
     });
     await f.service.destroy(f.caller, { workerId });
     await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.needsAttention).toBe(true), { timeout: 10_000 });
@@ -730,11 +729,12 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     // only the holder's exit can start the next full attempt.
     await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 5_000 });
     const reached = destroyOf(workerId)!.retry!.attempts;
-    const writes = vi.spyOn(f.store, 'commitDelegation');
+    const writes = vi.spyOn(f.store, 'commitDestroyRetry');
     await holder!.close();
     await vi.waitFor(() => expect(destroyOf(workerId)).toEqual({ requestedAt: expect.any(String), phase: 'complete', remaining: [] }), { timeout: 5_000 });
-    const attempts = writes.mock.calls.flatMap(([patches]) => patches)
-      .map(patch => (patch.delegation as { destroy?: { retry?: { attempts: number } } }).destroy?.retry?.attempts ?? 0);
+    // A completed destroy drops the run's retry state too.
+    expect(f.store.getRun(workerId)?.destroyRetry).toBeUndefined();
+    const attempts = writes.mock.calls.map(([, retry]) => retry?.attempts ?? 0);
     // The next tick after the exit attempts in full and completes, inside the five fast ticks.
     expect(Math.max(reached, ...attempts)).toBeLessThanOrEqual(Math.min(reached + 1, 5));
     expect(existsSync(workspace.path)).toBe(false);
@@ -908,7 +908,8 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     const run = f.store.getRun(workerId)!;
     if (run.delegation?.role !== 'worker') throw Error('worker');
     f.store.commitDelegation([{ id: workerId, delegation: { ...run.delegation, destroy: { requestedAt: new Date().toISOString(), phase: 'incomplete',
-      remaining: ['worktree', 'branch'], retry: { attempts: 7, nextAt: new Date(Date.now() + 2_000).toISOString() } } } }]);
+      remaining: ['worktree', 'branch'] } } }]);
+    f.store.commitDestroyRetry(workerId, { attempts: 7, nextAt: new Date(Date.now() + 2_000).toISOString() });
     const restarted = new DelegationService();
     Object.assign(restarted, { destroyBackoff: { fastMs: 40, fastCount: 3, capMs: 5_000 } });
     const detach = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
@@ -931,6 +932,19 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     for (const { workerId } of [a, b]) expect(f.store.readWorkerResult(f.parent.id, workerId)).toMatchObject({ workerId });
   });
 
+  it.runIf(linux)('keeps retry state beside the worker delegation, so the stored delegation is what an older cezar parses', async () => {
+    cadence();
+    const { workerId } = await settled();
+    await f.service.destroy(f.caller, { workerId });
+    await vi.waitFor(() => expect(f.store.getRun(workerId)?.destroyRetry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 5_000 });
+    const run = f.store.getRun(workerId)!;
+    if (run.delegation?.role !== 'worker') throw Error('worker');
+    // The pre-#879 destroy keys exactly: a strict reader that has never heard of retries still parses it.
+    expect(Object.keys(run.delegation.destroy!).sort()).toEqual(['error', 'phase', 'remaining', 'requestedAt']);
+    expect(delegationStateSchema.safeParse(run.delegation).success).toBe(true);
+    expect(await f.service.inspect(f.caller, { workerId })).toMatchObject({ destroy: { phase: 'incomplete', retry: { attempts: run.destroyRetry!.attempts } } });
+  });
+
   it.runIf(linux)('a tick cut off by project replacement writes nothing afterwards (guard)', async () => {
     cadence();
     const { workerId, holder } = await settled();
@@ -944,11 +958,12 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     const before = structuredClone(destroyOf(workerId));
     const replacementManager = createFixtureManager(f.store, f.root);
     const detachReplacement = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
-    const writes = vi.spyOn(f.store, 'commitDelegation');
+    const writes = vi.spyOn(f.store, 'commitDelegation'), retries = vi.spyOn(f.store, 'commitDestroyRetry');
     try {
       release(true);
       await sleep(300);
       expect(writes).not.toHaveBeenCalled();
+      expect(retries).not.toHaveBeenCalled();
       expect(destroyOf(workerId)).toEqual(before);
     } finally { detachReplacement(); replacementManager.dispose(); }
   });

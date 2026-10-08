@@ -36,7 +36,7 @@ describe('destroy observation (hearsay-tools/cezarion#879)', () => {
     expect(key()).toBe(first);
     withDestroy(workerId, { phase: 'incomplete', remaining: ['worktree', 'branch'], error: 'held' });
     expect(key()).toBe(first);
-    withDestroy(workerId, { phase: 'incomplete', remaining: ['worktree', 'branch'], retry: { attempts: 4, nextAt: new Date().toISOString() } });
+    f.store.commitDestroyRetry(workerId, { attempts: 4, nextAt: new Date().toISOString() });
     expect(key()).toBe(first);
   });
 

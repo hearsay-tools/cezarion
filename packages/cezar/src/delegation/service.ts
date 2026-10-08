@@ -15,7 +15,7 @@ import {
   type WorkerParams, type WorkerSpawnRequest, type WorkerSteerRequest, type WorkerWaitRequest,
 } from '@open-mercato/cezar-contract';
 import type { RunStore, RunRecord } from '../runs/store.ts';
-import { workerOutcome } from '../runs/delegation-state.ts';
+import { workerDestroyView, workerOutcome } from '../runs/delegation-state.ts';
 import type { DelegationExecutionSettings, RunManager } from '../workflows/run.ts';
 import { QUICK_TASK_WORKFLOW, skillTaskSteps, plannedWorkflow, allowedToolsForStep, stepKind, type WorkflowDef, type WorkflowStepDef } from '../workflows/types.ts';
 import { discoverSkills } from '../skills.ts';
@@ -180,7 +180,7 @@ export class DelegationService {
     if (!timers) { timers = new Map(); this.destroyRetryTimers.set(project.id, timers); }
     if (timers.has(workerId) || this.destroyRetryInFlight.get(project.id)?.has(workerId)) return;
     const { fastMs, capMs } = this.destroyBackoff;
-    const nextAt = run.delegation.destroy.retry ? Date.parse(run.delegation.destroy.retry.nextAt) - Date.now() : 0;
+    const nextAt = run.destroyRetry ? Date.parse(run.destroyRetry.nextAt) - Date.now() : 0;
     const delay = Math.min(Math.max(fastMs, nextAt), capMs * 1.1);
     const timer = setTimeout(() => {
       timers.delete(workerId);
@@ -220,10 +220,10 @@ export class DelegationService {
       if (this.projects.get(project.id) !== project) return;
       const current = project.store.getRun(workerId);
       if (current?.delegation?.role !== 'worker' || !current.delegation.destroy || current.delegation.destroy.phase === 'complete') return;
-      const attempts = (current.delegation.destroy.retry?.attempts ?? 0) + 1;
+      const attempts = (current.destroyRetry?.attempts ?? 0) + 1;
       const retry = { attempts, nextAt: new Date(Date.now() + retryDelayMs(attempts, this.destroyBackoff)).toISOString(),
         ...(attempts >= this.destroyAttentionAttempts ? { needsAttention: true as const } : {}) };
-      project.store.commitDelegation([{ id: workerId, delegation: { ...current.delegation, destroy: { ...current.delegation.destroy, retry } } }]);
+      project.store.commitDestroyRetry(workerId, retry);
     });
   }
   private commonDir(project: DelegationProject): Promise<string | undefined> {
@@ -554,7 +554,7 @@ export class DelegationService {
       ...(worker.delegation.context === undefined ? {} : { inputs: worker.delegation.context.inputs }),
       ...(worker.currentStepId === undefined ? {} : { currentStepId: worker.currentStepId }),
       ...(worker.activity === undefined ? {} : { activity: worker.activity }),
-      ...(wait ? { wait } : {}), ...(worker.delegation.destroy ? { destroy: worker.delegation.destroy } : {}), ...(outcome ? { outcome } : {}) };
+      ...(wait ? { wait } : {}), ...(worker.delegation.destroy ? { destroy: workerDestroyView(worker) } : {}), ...(outcome ? { outcome } : {}) };
   }
   async collect(caller: Caller, params: WorkerParams): Promise<WorkerCollectedResult> {
     const project = this.context(caller);
@@ -649,7 +649,7 @@ export class DelegationService {
     });
   }
   /** One full destroy attempt; the caller holds the worker's serialization key. A manual attempt
-   * writes no `retry`, which resets the backoff; an automatic one carries it until completion. */
+   * clears the run's `destroyRetry`, which resets the backoff; a completed destroy drops it. */
   private async destroyAttempt(project: DelegationProject, workerId: string, check: () => RunRecord, mode: 'manual' | 'scheduled'): Promise<WorkerDestroyResult> {
     const assertAttached = () => {
       if (this.projects.get(project.id) !== project) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
@@ -677,9 +677,10 @@ export class DelegationService {
       assertAttached();
       worker = project.store.getRun(workerId)!;
       if (worker.delegation?.role !== 'worker') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
-      const retry = mode === 'scheduled' && phase !== 'complete' ? worker.delegation.destroy?.retry : undefined;
       project.store.commitDelegation([{ id: workerId, delegation: { ...worker.delegation, destroy: { requestedAt, phase, remaining,
-        ...(error ? { error: error.slice(0, 2_000) } : {}), ...(retry ? { retry } : {}) } } }]);
+        ...(error ? { error: error.slice(0, 2_000) } : {}) } } }]);
+      // The retry state lives beside the delegation: an explicit destroy and a completed one both drop it.
+      if (worker.destroyRetry && (phase === 'complete' || (mode === 'manual' && phase === 'requested'))) project.store.commitDestroyRetry(workerId, undefined);
     };
     /** What the attempt decided on, and the holders it ran into, kept only when that explains the
      * failure. A complete destroy keeps nothing, and neither does a failure no key input or named

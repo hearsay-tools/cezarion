@@ -9,10 +9,10 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import {
   ciWaitSchema, agentInputSchema, inboxClaimSchema, delegationStateSchema, workerCreationReceiptSchema, workerCollectedResultSchema, workerResultFileSchema,
-  continuationMessageSchema, previewServerSchema, toRunSummary,
+  continuationMessageSchema, previewServerSchema, toRunSummary, workerDestroyRetrySchema,
   runRecordSchema as contractRunRecordSchema,
 } from '@open-mercato/cezar-contract';
-import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult } from '@open-mercato/cezar-contract';
+import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult, WorkerDestroyRetry } from '@open-mercato/cezar-contract';
 import { matchesRunQuery, sqlPrefilterTokens } from './run-search.ts';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { HistoryCompressor } from './history-compressor.ts';
@@ -244,6 +244,8 @@ export const runRecordSchema = z.object({
       occurrenceAt: z.string(),
     })
     .optional(),
+  /** A pending worker destroy's automatic retry state (hearsay-tools/cezarion#879); a malformed one is dropped, never the run. */
+  destroyRetry: contractRunRecordSchema.shape.destroyRetry.catch(undefined),
   status: z.enum(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']),
   stopping: contractRunRecordSchema.shape.stopping.catch(undefined),
   /** Sub-state of `running` (spec 2026-07-18-subagent-monitoring-status, #490):
@@ -2513,6 +2515,17 @@ export class RunStore extends EventEmitter {
     // In-process cause only: consumers can skip metadata replay when delegation
     // is disabled without dropping real status or termination-proof notifications.
     this.commitIndex(staged, destroyProgress ? 'delegation-destroy-progress' : 'delegation-checkpoint');
+  }
+
+  /** A pending destroy's automatic retry state, or its removal (hearsay-tools/cezarion#879). Kept on
+   * the record beside the strict delegation, so an older cezar strips it rather than quarantining the
+   * worker. Destroy progress: nothing the family reconcile reads changes. */
+  commitDestroyRetry(id: string, retry: WorkerDestroyRetry | undefined): void {
+    const run = this.peek(id);
+    if (run?.delegation?.role !== 'worker' || !run.delegation.destroy) throw new Error('missing pending destroy');
+    if (!retry && !run.destroyRetry) return;
+    // An explicit `undefined`, not an omitted key: commitIndex assigns onto the live record.
+    this.commitIndex(new Map([[id, { ...run, destroyRetry: retry ? workerDestroyRetrySchema.parse(retry) : undefined }]]), 'delegation-destroy-progress');
   }
 
   /** Accepted execution revision is public lifecycle identity, separate from process generations. */

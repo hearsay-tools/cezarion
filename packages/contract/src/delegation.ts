@@ -57,7 +57,9 @@ export type WorkerWait = z.infer<typeof workerWaitSchema>;
 /** Automatic retries of a pending destroy (hearsay-tools/cezarion#879): how many scheduled
  * attempts ran since the last explicit request, when the next one is due, and whether they
  * reached the hourly cap with nothing changing, which the cockpit shows as needing attention.
- * Absent until the first automatic attempt; a manual destroy clears it. */
+ * Absent until the first automatic attempt; a manual destroy clears it. Stored on the run record
+ * (`destroyRetry`), never inside the strict worker delegation, so an older cezar strips it instead
+ * of quarantining the worker; the API shows it as the worker's `destroy.retry`. */
 export const workerDestroyRetrySchema = z.object({
   attempts: z.number().int().positive(),
   nextAt: z.iso.datetime(),
@@ -70,9 +72,11 @@ export const workerDestroySchema = z.object({
   phase: z.enum(['requested', 'terminating', 'cleaning', 'complete', 'incomplete']),
   remaining: remainingSchema,
   error: errorSchema.optional(),
-  retry: workerDestroyRetrySchema.optional(),
 }).strict();
 export type WorkerDestroy = z.infer<typeof workerDestroySchema>;
+/** A worker's destroy as inspection and relationships show it: the stored phase, plus its retry state. */
+export const workerDestroyViewSchema = workerDestroySchema.extend({ retry: workerDestroyRetrySchema.optional() }).strict();
+export type WorkerDestroyView = z.infer<typeof workerDestroyViewSchema>;
 
 export const workerCreationReceiptSchema = z.object({
   requestId: z.uuid(),
@@ -267,7 +271,7 @@ export const workerInspectionSchema = z.object({
   model: z.string().max(512).optional(),
   inputs: z.array(workerInputSchema).max(32).optional(),
   wait: workerWaitSchema.optional(),
-  destroy: workerDestroySchema.optional(),
+  destroy: workerDestroyViewSchema.optional(),
   outcome: workerOutcomeSchema.optional(),
 });
 export type WorkerInspection = z.infer<typeof workerInspectionSchema>;

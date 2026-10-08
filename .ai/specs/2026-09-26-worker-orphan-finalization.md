@@ -334,10 +334,11 @@ reports it through `RemovalReport.unexplained`, and it retries in full on the ba
 check that names no process: what decides it includes scratch ownership evidence (the owner marker,
 the fallback pointer, removal receipts) that the key does not read.
 
-**Retry state and attention.** Every tick writes `destroy.retry`
-(`{ attempts, nextAt, needsAttention? }`); the write changes only `destroy`, so it does not
-reconcile the family. A restart resumes the persisted `nextAt` (floored at the fast cadence,
-capped a little over the hourly cap). From the tenth attempt, the first capped one, the destroy
+**Retry state and attention.** Every tick writes the run's top-level `destroyRetry`
+(`{ attempts, nextAt, needsAttention? }`), never the strict worker delegation, so an older cezar
+strips it instead of quarantining the worker; inspection and relationships show it as
+`destroy.retry`. The write is destroy progress, so it does not reconcile the family. A restart
+resumes the persisted `nextAt` (floored at the fast cadence, capped a little over the hourly cap). From the tenth attempt, the first capped one, the destroy
 `needsAttention`, and the cockpit's worker row says so with the next check. An explicit destroy
 (Retry clean up, `cez worker destroy`) runs in full, drops `retry` and re-arms at the fast cadence.
 Continue stays refused for a destroying worker. A completed destroy drops `retry`. An attempt that

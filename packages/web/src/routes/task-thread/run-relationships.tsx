@@ -4,7 +4,7 @@ import { LoaderCircleIcon } from 'lucide-react'
 import { useIsDesktop } from '@/lib/use-desktop'
 import { delegationWaitLabel } from '@/lib/attention'
 import { runTitle } from '@/lib/task-groups'
-import type { ApiRun, RunRelationships, WorkerDestroy, WorkerInspection } from '@open-mercato/cezar-api-client'
+import type { ApiRun, RunRelationships, WorkerDestroyView, WorkerInspection } from '@open-mercato/cezar-api-client'
 
 import { useDestroyWorker, useRun, useRunRelationships, useRuns } from '@/api/queries'
 import { Button } from '@/components/ui/button'
@@ -292,7 +292,7 @@ function CleanUpWorker({ parentRunId, worker }: { parentRunId: string; worker: W
  * Retry clean up tries at once. The countdown re-renders on the slow clock: an hourly retry
  * writes nothing in between, so no data update would correct it.
  */
-function Cleanup({ state }: { state: WorkerDestroy }) {
+function Cleanup({ state }: { state: WorkerDestroyView }) {
   const now = useNow(30_000)
   const tidy = state.phase === 'complete' && state.remaining.length === 0 && state.error === undefined
   if (tidy) return null
