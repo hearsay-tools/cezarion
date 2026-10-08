@@ -1,4 +1,5 @@
 import { sidebarLimitsSchema } from '@open-mercato/cezar-contract';
+import { worktreeSetupConfigSchema } from '@open-mercato/cezar-contract';
 import type { ApiRun, ArchivedRunsResponse, RunSummary, RunsSearchResponse } from '@open-mercato/cezar-contract';
 import { ARCHIVED_RUNS_PAGE_DEFAULT, RUNS_SEARCH_PER_PROJECT_MAX, archivedRunsQuerySchema, runSummariesQuerySchema, runsSearchQuerySchema } from '@open-mercato/cezar-contract';
 import { automationKindSchema, automationScheduleSchema, localTimeZone, nextOccurrence, type AutomationKind } from '@open-mercato/cezar-contract';
@@ -114,6 +115,7 @@ import {
   validateLiveCursor,
 } from '../runs/event-history.ts';
 import { readRunIndexFromDisk, searchRunIndexFromDisk } from '../runs/run-index.ts';
+import { workerDestroyView } from '../runs/delegation-state.ts';
 import { searchTokens } from '../runs/run-search.ts';
 import { clientRequestHash } from '../runs/client-request.ts';
 import { ColdRepoHandles } from './cold-repo-handles.ts';
@@ -146,6 +148,7 @@ import {
   readWorktreePath,
 } from './git-changes.ts';
 import { gatedSkillsRepos, loadConfig, resolveWorktreeRetention, type CezConfig } from '../config.ts';
+import { resolveWorktreeSetup } from '../worktree-setup.ts';
 import { findConfigFile } from '../agent-config/catalog.ts';
 import { readConfigFile, statConfigPath, writeConfigFile } from '../agent-config/files.ts';
 import { readAgentModelDefaults } from '../agent-config/models.ts';
@@ -3972,7 +3975,7 @@ export function createApp(deps: ServerDeps) {
         return [{ workerId: worker.id, parentRunId: run.id, status: worker.status, workspace: owned.workspace,
           ...(worker.currentStepId === undefined ? {} : { currentStepId: worker.currentStepId }),
           ...(worker.activity === undefined ? {} : { activity: worker.activity }),
-          ...(owned.destroy ? { destroy: owned.destroy } : {}),
+          ...(owned.destroy ? { destroy: workerDestroyView(worker) } : {}),
         }];
       });
       // #864: the titles of the runs this answer names, since the cockpit's run list no longer
@@ -5914,10 +5917,14 @@ export function createApp(deps: ServerDeps) {
       }
     });
 
+  /** #917: setup commands run on the host before every task, so only a local cockpit edits them. */
+  const WORKTREE_SETUP_HOSTED_ERROR = 'Worktree setup commands can be edited only on the machine running cezar.';
+
   // The Settings → Agents knobs in one read (R6 Step 1.5) — an ADDITIVE
   // sibling of PUT /api/config below; /api/health keeps its protected shape.
   const configAnswer = async (repoRoot: string, config: CezConfig) => {
     const nativeModels = await readAgentModelDefaults(repoRoot);
+    const setup = resolveWorktreeSetup(config.worktreeSetup);
     const modelsLocked = agentModelsLocked(repoRoot);
     return {
       baseBranch: config.baseBranch ?? null,
@@ -5940,6 +5947,9 @@ export function createApp(deps: ServerDeps) {
       // Optional review gate (#489): tri-state — null means "no config key, the
       // CEZ_REVIEW_GATE env default (OFF) decides".
       reviewGate: config.reviewGate ?? null,
+      // Worktree setup (#917): an invalid value is reported, never shown as "no setup".
+      worktreeSetup: setup.kind === 'commands' ? { commands: setup.commands, timeoutSeconds: setup.timeoutSeconds } : null,
+      worktreeSetupIssue: setup.kind === 'invalid' ? setup.issue : null,
     };
   };
   // ---- chained family: per-repo config (project-scoped) ----
@@ -5954,6 +5964,11 @@ export function createApp(deps: ServerDeps) {
       const parsed = { data: c.req.valid('json') };
       if (agentModelsLocked(repoRoot) && parsed.data.defaultModels !== undefined) {
         return c.json({ error: AGENT_MODELS_LOCKED_ERROR }, 409);
+      }
+      // Setup commands run on the host before every task (#917): a local-machine capability, like
+      // Agent config writes. Checked before any write, so a refused body changes nothing.
+      if (parsed.data.worktreeSetup !== undefined && !capabilities().localHandoff) {
+        return c.json({ error: WORKTREE_SETUP_HOSTED_ERROR }, 409);
       }
       const configPath = join(dataDir, 'config.json');
       let raw: Record<string, unknown> = {};
@@ -5998,6 +6013,15 @@ export function createApp(deps: ServerDeps) {
         } else {
           raw.memoryLimitMb = parsed.data.memoryLimitMb;
         }
+      }
+      if (parsed.data.worktreeSetup !== undefined) {
+        // null or no commands = no setup: delete the key rather than store an empty list.
+        const setup = parsed.data.worktreeSetup;
+        if (setup === null || setup.commands.length === 0) delete raw.worktreeSetup;
+        else raw.worktreeSetup = {
+          commands: setup.commands,
+          ...(setup.timeoutSeconds !== undefined ? { timeoutSeconds: setup.timeoutSeconds } : {}),
+        };
       }
       if (parsed.data.defaultModels !== undefined) {
         // Per-runner merge, so setting codex's preset never clobbers claude's.
@@ -6057,6 +6081,8 @@ export function createApp(deps: ServerDeps) {
     // Optional review gate toggle (Settings → Agents, #489): null clears the key
     // back to the env-default behavior (OFF).
     reviewGate: z.boolean().nullable().optional(),
+    // Worktree setup (Settings → Worktrees, #917): null or [] deletes the key.
+    worktreeSetup: worktreeSetupConfigSchema.nullable().optional(),
   });
   const setAgentConfigSchema = z.object({
     content: z.string().max(2_000_000),

@@ -9,10 +9,10 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import {
   ciWaitSchema, agentInputSchema, inboxClaimSchema, delegationStateSchema, workerCreationReceiptSchema, workerCollectedResultSchema, workerResultFileSchema,
-  continuationMessageSchema, previewServerSchema, toRunSummary,
+  continuationMessageSchema, previewServerSchema, toRunSummary, workerDestroyRetrySchema,
   runRecordSchema as contractRunRecordSchema,
 } from '@open-mercato/cezar-contract';
-import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult } from '@open-mercato/cezar-contract';
+import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult, WorkerDestroyRetry } from '@open-mercato/cezar-contract';
 import { matchesRunQuery, sqlPrefilterTokens } from './run-search.ts';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { HistoryCompressor } from './history-compressor.ts';
@@ -21,7 +21,7 @@ import { hasPlainHistory, historyPaths, readHistoryText, readHistoryTextAsync, r
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
-import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { MAX_REF } from './task-refs.ts';
@@ -245,6 +245,8 @@ export const runRecordSchema = z.object({
       occurrenceAt: z.string(),
     })
     .optional(),
+  /** A pending worker destroy's automatic retry state (hearsay-tools/cezarion#879); a malformed one is dropped, never the run. */
+  destroyRetry: contractRunRecordSchema.shape.destroyRetry.catch(undefined),
   status: z.enum(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']),
   stopping: contractRunRecordSchema.shape.stopping.catch(undefined),
   /** Sub-state of `running` (spec 2026-07-18-subagent-monitoring-status, #490):
@@ -326,6 +328,8 @@ export const runRecordSchema = z.object({
    *  dir gone, recoverable via `git worktree add`"; it excludes the run from the
    *  retention budget until the dir is re-materialized (resume clears it). */
   worktreeReclaimedAt: z.string().optional(),
+  /** Worktree setup (#917). An unreadable value drops the field, never the run. */
+  worktreeSetup: contractRunRecordSchema.shape.worktreeSetup.catch(undefined),
   /** Parallel variants (spec 010): tasks sharing a groupId are one group. */
   groupId: z.string().optional(),
   /** Variant letter within the group — 'A' | 'B' | 'C' (kept as a string). */
@@ -1119,6 +1123,17 @@ function isDestroyProgress(before: RunRecord['delegation'], after: DelegationSta
   return isDeepStrictEqual({ ...before, destroy: undefined }, { ...after, destroy: undefined });
 }
 
+/**
+ * Two collected worker results carry the same evidence: equal but for when they were observed and
+ * which snapshot file holds them, and, with `ignoreCleanup`, the cleanup phase. A retried destroy
+ * that observed nothing new then rewrites and fsyncs nothing (hearsay-tools/cezarion#879).
+ */
+function sameWorkerResult(a: WorkerCollectedResult, b: WorkerCollectedResult, opts: { ignoreCleanup?: boolean }): boolean {
+  const comparable = (value: WorkerCollectedResult) => ({ ...value, observedAt: undefined, ...(opts.ignoreCleanup ? { cleanup: undefined } : {}),
+    diff: value.diff.state === 'available' ? { ...value.diff, snapshotId: undefined, path: undefined } : value.diff });
+  return isDeepStrictEqual(comparable(a), comparable(b));
+}
+
 /** NDJSON transcript text to events; a damaged line is skipped, never fatal. */
 function parseEvents(raw: string): RunEvent[] {
   return raw
@@ -1200,7 +1215,8 @@ export function parseStoredSummary(text: string): RunSummary | undefined {
 }
 
 const WORKER_PROCESS_CAP = 32;
-const recordedProcessSchema = z.object({ pid: z.number().int().positive(), startToken: z.string().min(1).max(128).optional() }).strict();
+const recordedProcessSchema = z.object({ pid: z.number().int().positive(), startToken: z.string().min(1).max(128).optional(),
+  pgid: z.number().int().positive().optional() }).strict();
 const workerProcessRecordSchema = z.object({ generation: z.string().uuid(), controller: recordedProcessSchema,
   processes: z.array(recordedProcessSchema).max(WORKER_PROCESS_CAP) }).strict();
 const startToken = (pid: number) => { const token = processStartToken(pid); return token === undefined ? {} : { startToken: token }; };
@@ -2504,6 +2520,17 @@ export class RunStore extends EventEmitter {
     this.commitIndex(staged, destroyProgress ? 'delegation-destroy-progress' : 'delegation-checkpoint');
   }
 
+  /** A pending destroy's automatic retry state, or its removal (hearsay-tools/cezarion#879). Kept on
+   * the record beside the strict delegation, so an older cezar strips it rather than quarantining the
+   * worker. Destroy progress: nothing the family reconcile reads changes. */
+  commitDestroyRetry(id: string, retry: WorkerDestroyRetry | undefined): void {
+    const run = this.peek(id);
+    if (run?.delegation?.role !== 'worker' || !run.delegation.destroy) throw new Error('missing pending destroy');
+    if (!retry && !run.destroyRetry) return;
+    // An explicit `undefined`, not an omitted key: commitIndex assigns onto the live record.
+    this.commitIndex(new Map([[id, { ...run, destroyRetry: retry ? workerDestroyRetrySchema.parse(retry) : undefined }]]), 'delegation-destroy-progress');
+  }
+
   /** Accepted execution revision is public lifecycle identity, separate from process generations. */
   commitWorkerContinuation(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps' | 'delegation'>>, step?: Pick<StepState, 'id' | 'name' | 'kind' | 'synthetic'>,
     conversation?: { rootId: string; state: ConversationState; input: AgentInput }): void {
@@ -2568,8 +2595,10 @@ export class RunStore extends EventEmitter {
     return this.readWorkerResultFile(parentId, workerId)?.diffSnapshot;
   }
 
-  /** Publish a pointer only after its redacted immutable snapshot reaches disk. Failed index writes retain the old evidence. */
-  commitWorkerResult(parentId: string, value: WorkerCollectedResult, diffSnapshot?: string): WorkerCollectedResult {
+  /** Publish a pointer only after its redacted immutable snapshot reaches disk. Failed index writes retain the old evidence.
+   * A result whose evidence is already stored returns the stored one and writes nothing; `ignoreCleanup` is for a
+   * caller that only needs the payload durable, whatever cleanup phase the stored copy names. */
+  commitWorkerResult(parentId: string, value: WorkerCollectedResult, diffSnapshot?: string, opts: { ignoreCleanup?: boolean } = {}): WorkerCollectedResult {
     const result = workerCollectedResultSchema.parse(this.redact({ type: 'worker-result', seq: 0, ts: value.observedAt, result: value }).result);
     const parent = this.peek(parentId);
     const worker = this.peek(result.workerId);
@@ -2578,6 +2607,9 @@ export class RunStore extends EventEmitter {
     if (worker && (worker.delegation?.role !== 'worker' || worker.delegation.parentRunId !== parentId ||
       worker.delegation.workspace.ownerRunId !== worker.id || (worker.delegation.executionRevision ?? 0) !== result.revision || worker.status !== result.status)) throw new Error('worker result revision changed');
     const old = parent.delegation.results?.find(entry => entry.workerId === result.workerId);
+    const stored = old && this.readWorkerResultFile(parentId, result.workerId);
+    if (stored && sameWorkerResult(stored.result, result, opts) &&
+      stored.diffSnapshot === (diffSnapshot === undefined ? undefined : this.redactText(diffSnapshot))) return stored.result;
     if ((!worker && !this.readWorkerResult(parentId, result.workerId)) || (old && (old.revision > result.revision || (old.revision === result.revision && old.observedAt > result.observedAt)))) throw new Error('worker result is obsolete');
     const snapshotId = result.diff.state === 'available' ? result.diff.snapshotId : randomUUID();
     if (result.diff.state === 'available') result.diff.path = this.workerResultSnapshotPath(parentId, result.workerId, snapshotId);
@@ -3487,7 +3519,7 @@ export class RunStore extends EventEmitter {
 
   /** `workerResourcesSafe` with the refusal's live PIDs (empty when no PID explains it). */
   workerResourceHolders(id: string, generation: string, resourceId: string,
-    opts: { admittingQueued?: boolean } = {}): 'safe' | number[] {
+    opts: { admittingQueued?: boolean; cwds?: CwdSource } = {}): 'safe' | number[] {
     const run = this.peek(id);
     const proof = this.readWorkerExecution(id);
     if (run?.delegation?.role !== 'worker' || run.delegation.workspace.ownerRunId !== id ||
@@ -3504,7 +3536,7 @@ export class RunStore extends EventEmitter {
     });
     if (absent) return record === 'absent' ||
       ((!recordedProcessLive(record.controller) || isCurrentProcess(record.controller)) && !record.processes.some(recordedProcessLive)) ? 'safe' : [];
-    const probe = inspectGeneration({ ...(record === 'absent' ? {} : { record }), paths });
+    const probe = inspectGeneration({ ...(record === 'absent' ? {} : { record }), paths, cwds: opts.cwds });
     return probe.liveness === 'gone' ? 'safe' : probe.controller !== undefined ? [probe.controller] : probe.pids;
   }
 
@@ -3518,20 +3550,21 @@ export class RunStore extends EventEmitter {
     this.writeWorkerExecution(id, { ...proof, scratchCleanup: { resourceId, path } });
   }
 
-  /** Cleanup can outlive its index row, but never its generation or terminal task intent. */
-  workerScratchResourcesSafe(id: string, generation: string, resourceId: string): boolean {
+  /** Cleanup can outlive its index row, but never its generation or terminal task intent.
+   * `cwds` is the scratch reprobe tick's shared `/proc` snapshot (hearsay-tools/cezarion#879). */
+  workerScratchResourcesSafe(id: string, generation: string, resourceId: string, cwds?: CwdSource): boolean {
     const run = this.peek(id), proof = this.readWorkerExecution(id);
     if (proof?.phase !== 'complete' || proof.generation !== generation || proof.scratchCleanup?.resourceId !== resourceId ||
       (run && ['queued', 'running', 'waiting'].includes(run.status))) return false;
     if (run?.delegation?.role === 'worker') return run.delegation.workspace.path === proof.scratchCleanup.path &&
-      this.workerResourcesSafe(id, generation, resourceId);
+      this.workerResourceHolders(id, generation, resourceId, { cwds }) === 'safe';
     // A valid different role contradicts the retained intent. Quarantined/missing metadata
     // supplies no new authority; only the private terminal checkpoint authorizes scratch.
     if (run && run.delegation?.role !== 'invalid') return false;
     const record = this.readWorkerProcesses(id, generation);
     if (record === 'unknown' || !agentTmpDirOwnershipProven(this.dataDir, id)) return false;
     return inspectGeneration({ ...(record === 'absent' ? {} : { record }),
-      paths: [proof.scratchCleanup.path, ...agentTmpDirLocations(this.dataDir, id)] }).liveness === 'gone';
+      paths: [proof.scratchCleanup.path, ...agentTmpDirLocations(this.dataDir, id)], cwds }).liveness === 'gone';
   }
 
   commitWorkerExecutionStart(id: string): string {
@@ -3586,10 +3619,10 @@ export class RunStore extends EventEmitter {
 
   /** Bound to the current generation. Past the cap the record never drops an entry: the
    * working-directory scan is the remaining evidence. */
-  appendWorkerProcess(id: string, generation: string, pid: number): boolean {
+  appendWorkerProcess(id: string, generation: string, pid: number, pgid?: number): boolean {
     const record = this.readWorkerProcesses(id, generation);
     if (typeof record === 'string' || this.readWorkerExecution(id)?.generation !== generation) return false;
-    const entry: RecordedProcess = { pid, ...startToken(pid) };
+    const entry: RecordedProcess = { pid, ...startToken(pid), ...(pgid === undefined ? {} : { pgid }) };
     if (record.processes.some(known => known.pid === entry.pid && known.startToken === entry.startToken)) return true;
     if (record.processes.length >= WORKER_PROCESS_CAP) return false;
     this.writeWorkerProcesses(id, { ...record, processes: [...record.processes, entry] });

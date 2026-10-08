@@ -14,6 +14,7 @@ import {
   providerAuthChecksDisabled,
 } from './core/provider-auth.ts';
 import { applyProviderEnablement } from './core/provider-availability.ts';
+import { forwardToSessionGroups } from './core/session-process.ts';
 import { pruneOrphans } from './git-worktree.ts';
 import { getRepoInfo } from './server/git.ts';
 import { DEFAULT_WORKTREE_RETENTION, loadConfig, resolveWorktreeRetention } from './config.ts';
@@ -402,16 +403,21 @@ async function serveCommand(
   // Silenced by CEZ_NO_BANNER=1 or by dismissing the cockpit's banner (#391).
   await printSkillsBanner(repoRoot);
 
-  const shutdown = () => {
+  const shutdown = (signal: NodeJS.Signals) => {
     // Dev servers run in their own process groups: stop them before this process exits.
     void Promise.all([delegation.close(), previewHost?.close()]).finally(() => {
       server.close();
       store.close();
+      // Agent sessions lead their own process groups (hearsay-tools/cezarion#890), so the
+      // terminal's Ctrl-C no longer reaches them. Forward the signal last: with the store
+      // closed, an agent it ends cannot settle its run, and restart recovery resumes it.
+      // SIGHUP stays unhandled: a listener would override nohup's ignore disposition.
+      forwardToSessionGroups(signal);
       process.exit(0);
     });
   };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 
   // Open the browser only once the server actually answers, so the first
   // paint is the cockpit and never a connection error.
@@ -530,6 +536,16 @@ async function runCommand(
   }
   const delegation = await DelegationController.start();
   delegation.service.setDiscovery(createHostDiscovery(repoRoot, providerAuth));
+  // Agent sessions lead their own process groups (hearsay-tools/cezarion#890): pass Ctrl-C and
+  // SIGTERM on, then end by the same signal, as this process did before it had a handler.
+  const forward = (signal: NodeJS.Signals) => {
+    forwardToSessionGroups(signal);
+    process.off('SIGINT', onSigint); process.off('SIGTERM', onSigterm);
+    process.kill(process.pid, signal);
+  };
+  const onSigint = () => forward('SIGINT');
+  const onSigterm = () => forward('SIGTERM');
+  process.on('SIGINT', onSigint); process.on('SIGTERM', onSigterm);
   try {
     // Headless tasks still appear in the cockpit later, so persist the same
     // task-local recovery event when a credential expires after the preflight.
@@ -584,6 +600,7 @@ async function runCommand(
     console.log(`\nrun ${final} — ${record?.tokensUsed ?? 0} tokens — details in the cockpit: npx cezarion`);
     process.exitCode = final === 'done' || final === 'review' ? 0 : 1;
   } finally {
+    process.off('SIGINT', onSigint); process.off('SIGTERM', onSigterm);
     await delegation.close();
     // A slow GitHub child must not keep a completed headless task alive. Any handle that
     // already arrived has repaired the store; an unfinished lookup remains unknown.

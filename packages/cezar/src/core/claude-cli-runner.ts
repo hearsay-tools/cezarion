@@ -1,5 +1,5 @@
 import { summarizeRunnerStderr } from './runner-stderr.ts';
-import { execFileSync, spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { parseEffort } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +29,7 @@ import type {
 // Re-exported for backends and the run manager that still import them from here.
 export type { AgentSession, SessionOptions } from './agent-runner.ts';
 import { isSignalTerminationExit, trackChildExit } from './agent-runner.ts';
+import { signalSession, spawnSessionLeader } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { cezarToolEnvNames, cezarToolNames } from '../ci-wait/tools.ts';
 import { costWeightedTokens, type RawUsage } from './usage.ts';
@@ -128,7 +129,7 @@ export class ClaudeCliRunner implements AgentRunner {
 
     let child: ChildProcessWithoutNullStreams;
     try {
-      child = nodeSpawn(this.bin, args, {
+      child = spawnSessionLeader(this.bin, args, {
         cwd: spec.cwd,
         env: buildChildEnv({ backend: this.backend, extraEnv: spec.env }),
       });
@@ -234,7 +235,7 @@ export class ClaudeCliRunner implements AgentRunner {
     let terminatedByCezar = false;
     const signalChild = (signal: 'SIGTERM' | 'SIGKILL'): void => {
       terminatedByCezar = true;
-      child.kill(signal);
+      signalSession(child, signal);
     };
     // Every watchdog below asks "is the child still alive?" — and that question
     // is NOT `child.killed`, which only reports signal delivery. claude handles

@@ -8,7 +8,8 @@ import { resolve, sep } from 'node:path';
  * An unreadable cwd is no evidence (hearsay-tools/cezarion#889); every other uncertainty answers
  * "alive" or "unknown", never "gone".
  */
-export type RecordedProcess = { pid: number; startToken?: string };
+/** `pgid`: the session leader leads its own process group (hearsay-tools/cezarion#890). */
+export type RecordedProcess = { pid: number; startToken?: string; pgid?: number };
 export type WorkerProcessRecord = { generation: string; controller: RecordedProcess; processes: RecordedProcess[] };
 export type GenerationLiveness = 'gone' | 'alive' | 'unknown';
 
@@ -74,6 +75,17 @@ export function recordedProcessLive(entry: RecordedProcess): boolean {
   return current === undefined || sameIncarnation(entry.startToken, current);
 }
 
+/** Whether a recorded session leader's group may be signalled (hearsay-tools/cezarion#890). A live
+ * leader must be the exact recorded incarnation; a different one means the group emptied and its
+ * number was reused. A dead leader proves nothing: its number may since have been reused, and a
+ * double-fork daemon leaves exactly a live group with a dead leader. Such a group is signalled
+ * only when it holds the worker's paths: `holderGroups` are the groups of those holders. */
+export function recordedGroupSignalable(entry: RecordedProcess, holderGroups: readonly number[] = []): boolean {
+  if (entry.pgid === undefined || entry.pgid !== entry.pid) return false;
+  if (pidExists(entry.pid)) return entry.startToken !== undefined && processStartToken(entry.pid) === entry.startToken;
+  return holderGroups.includes(entry.pgid);
+}
+
 export function isCurrentProcess(entry: RecordedProcess): boolean {
   if (entry.pid !== process.pid) return false;
   const own = processStartToken(process.pid);
@@ -82,14 +94,16 @@ export function isCurrentProcess(entry: RecordedProcess): boolean {
 
 /** The `/proc` reads the Linux scan makes; injectable for platform/error boundary coverage. */
 export type ProcReader = { readdir: () => string[]; readlink: (pid: string) => string };
-/** The darwin scan: `lsof` for working directories. */
-export type DarwinReader = { lsof: () => { ok: boolean; stdout: string } };
+/** The darwin scan: `lsof` for working directories, of every process or of one. */
+export type DarwinReader = { lsof: () => { ok: boolean; stdout: string }; lsofPid?: (pid: number) => { ok: boolean; stdout: string } };
+const lsofCwd = (args: string[], timeout: number) => {
+  const lsof = spawnSync('lsof', [...args, '-d', 'cwd', '-Fpn'], { encoding: 'utf8', timeout, maxBuffer: 16 * 1024 * 1024 });
+  // Status 1 is ordinary: some process was unreadable, and an unreadable cwd is no evidence.
+  return { ok: !lsof.error && (lsof.status === 0 || lsof.status === 1) && !!lsof.stdout, stdout: lsof.stdout ?? '' };
+};
 const realDarwin: DarwinReader = {
-  lsof: () => {
-    const lsof = spawnSync('lsof', ['-a', '-d', 'cwd', '-Fpn'], { encoding: 'utf8', timeout: 5_000, maxBuffer: 16 * 1024 * 1024 });
-    // Status 1 is ordinary: some process was unreadable, and an unreadable cwd is no evidence.
-    return { ok: !lsof.error && (lsof.status === 0 || lsof.status === 1) && !!lsof.stdout, stdout: lsof.stdout ?? '' };
-  },
+  lsof: () => lsofCwd(['-a'], 5_000),
+  lsofPid: pid => lsofCwd(['-a', '-p', String(pid)], 2_000),
 };
 
 const realProc: ProcReader = {
@@ -97,27 +111,29 @@ const realProc: ProcReader = {
   readlink: pid => readlinkSync(`/proc/${pid}/cwd`),
 };
 
-/** PIDs (never this process) whose readable working directory is one of `dirs` or beneath it,
- * in one scan pass; `unknown` when the processes cannot be listed at all. cezar's own short-lived
- * git children in a worktree make this read "alive" briefly: conservative, and a retry self-heals.
- * An unreadable cwd is no evidence (hearsay-tools/cezarion#889): a process that vanished, another
- * user's, or a non-dumpable one of ours (login `sshd`, `systemd --user`, `gpg-agent`, which every
- * host has) is skipped, as `lsof` skips what it cannot read. win32 has no cwd scan and answers
- * none: Windows refuses to delete a directory a process holds, so the checked removal is the
- * proof there, beside the recorded processes. */
-export function processesWithCwdUnder(dirs: string | readonly string[], platform: NodeJS.Platform = process.platform, proc: ProcReader = realProc, darwin: DarwinReader = realDarwin): number[] | 'unknown' {
-  if (platform === 'win32') return [];
-  const targets = (typeof dirs === 'string' ? [dirs] : dirs).map(dir => { try { return realpathSync(dir); } catch { return resolve(dir); } });
-  const under = (cwd: string) => { const path = cwd.replace(/ \(deleted\)$/, ''); return targets.some(target => path === target || path.startsWith(target + sep)); };
-  const found = new Set<number>();
+/** Each other process's readable working directory, by pid, or `unknown` when none can be listed. */
+export type CwdSnapshot = ReadonlyMap<number, string> | 'unknown';
+/** A snapshot taken on first use. Shared only inside one synchronous reprobe tick, never across
+ * a yield; destroy, admission and history deletion scan fresh (hearsay-tools/cezarion#879). */
+export type CwdSource = () => CwdSnapshot;
+
+/** Every other process's readable working directory, in one scan pass; `unknown` when the
+ * processes cannot be listed at all. An unreadable cwd is no evidence (hearsay-tools/cezarion#889):
+ * a process that vanished, another user's, or a non-dumpable one of ours (login `sshd`,
+ * `systemd --user`, `gpg-agent`, which every host has) is skipped, as `lsof` skips what it cannot
+ * read. win32 has no cwd scan and answers none: Windows refuses to delete a directory a process
+ * holds, so the checked removal is the proof there, beside the recorded processes. */
+export function scanProcessCwds(platform: NodeJS.Platform = process.platform, proc: ProcReader = realProc, darwin: DarwinReader = realDarwin): CwdSnapshot {
+  const found = new Map<number, string>();
+  if (platform === 'win32') return found;
   if (platform === 'linux') {
     let entries: string[];
     try { entries = proc.readdir(); } catch { return 'unknown'; }
     for (const entry of entries) {
       if (!/^\d+$/.test(entry) || Number(entry) === process.pid) continue;
-      try { if (under(proc.readlink(entry))) found.add(Number(entry)); } catch { /* unreadable: no evidence */ }
+      try { found.set(Number(entry), proc.readlink(entry)); } catch { /* unreadable: no evidence */ }
     }
-    return [...found];
+    return found;
   }
   if (platform !== 'darwin') return 'unknown';
   const lsof = darwin.lsof();
@@ -125,9 +141,45 @@ export function processesWithCwdUnder(dirs: string | readonly string[], platform
   let pid: number | undefined;
   for (const line of lsof.stdout.split('\n')) {
     if (line.startsWith('p')) pid = Number(line.slice(1));
-    else if (line.startsWith('n') && pid !== undefined && pid !== process.pid && under(line.slice(1))) found.add(pid);
+    else if (line.startsWith('n') && pid !== undefined && pid !== process.pid) found.set(pid, line.slice(1));
   }
-  return [...found];
+  return found;
+}
+
+/** One lazy `scan`, memoized for the life of the returned source. */
+export function sharedCwdScan(scan: () => CwdSnapshot = scanProcessCwds): CwdSource {
+  let snapshot: CwdSnapshot | undefined;
+  return () => snapshot ??= scan();
+}
+
+/** PIDs (never this process) whose readable working directory is one of `dirs` or beneath it,
+ * from `cwds` when the caller shares a snapshot, else from a fresh scan. cezar's own short-lived
+ * git children in a worktree make this read "alive" briefly: conservative, and a retry self-heals. */
+export function processesWithCwdUnder(dirs: string | readonly string[], platform: NodeJS.Platform = process.platform, proc: ProcReader = realProc,
+  darwin: DarwinReader = realDarwin, cwds?: CwdSnapshot): number[] | 'unknown' {
+  const snapshot = cwds ?? scanProcessCwds(platform, proc, darwin);
+  if (snapshot === 'unknown') return 'unknown';
+  const targets = (typeof dirs === 'string' ? [dirs] : dirs).map(dir => { try { return realpathSync(dir); } catch { return resolve(dir); } });
+  const under = (cwd: string) => { const path = cwd.replace(/ \(deleted\)$/, ''); return targets.some(target => path === target || path.startsWith(target + sep)); };
+  return [...snapshot].filter(([, cwd]) => under(cwd)).map(([pid]) => pid);
+}
+
+/** Whether one process's working directory is still one of `dirs` or beneath it, without a scan:
+ * one `readlink` on Linux, one `lsof` of that process on darwin. `false` when it moved away or
+ * cannot be read (no evidence, hearsay-tools/cezarion#889); `undefined` on win32, whose scan names
+ * no holder in the first place. */
+export function processCwdUnder(pid: number, dirs: readonly string[], platform: NodeJS.Platform = process.platform, proc: ProcReader = realProc,
+  darwin: DarwinReader = realDarwin): boolean | undefined {
+  let cwd: string | undefined;
+  if (platform === 'linux') {
+    try { cwd = proc.readlink(String(pid)); } catch { return false; }
+  } else if (platform === 'darwin') {
+    const lsof = darwin.lsofPid?.(pid);
+    cwd = lsof?.ok ? lsof.stdout.split('\n').find(line => line.startsWith('n'))?.slice(1) : undefined;
+    if (cwd === undefined) return false;
+  } else return undefined;
+  const found = processesWithCwdUnder(dirs, platform, proc, undefined, new Map([[pid, cwd]]));
+  return found !== 'unknown' && found.length > 0;
 }
 
 export type GenerationProbe = { liveness: GenerationLiveness; controller?: number; pids: number[] };
@@ -137,11 +189,12 @@ export type GenerationProbe = { liveness: GenerationLiveness; controller?: numbe
  * blocks only when its readable cwd is under `paths`, when it is a live recorded process of the
  * generation, or when it is a live foreign controller (hearsay-tools/cezarion#889). `paths` are
  * the worktree and every scratch location; a missing record (legacy) relies on the scan alone.
- * A live foreign controller short-circuits the scan; otherwise `pids` names every holder. */
-export function inspectGeneration({ record, paths }: { record?: WorkerProcessRecord; paths: readonly string[] }): GenerationProbe {
+ * A live foreign controller short-circuits the scan; otherwise `pids` names every holder.
+ * `cwds` is a reprobe tick's shared snapshot (hearsay-tools/cezarion#879); without it, it scans. */
+export function inspectGeneration({ record, paths, cwds }: { record?: WorkerProcessRecord; paths: readonly string[]; cwds?: CwdSource }): GenerationProbe {
   if (record && !isCurrentProcess(record.controller) && recordedProcessLive(record.controller)) return { liveness: 'alive', controller: record.controller.pid, pids: [] };
   const recorded = record?.processes.filter(recordedProcessLive).map(entry => entry.pid) ?? [];
-  const scan = processesWithCwdUnder(paths);
+  const scan = processesWithCwdUnder(paths, undefined, undefined, undefined, cwds?.());
   const pids = [...new Set([...recorded, ...(scan === 'unknown' ? [] : scan)])];
   return { liveness: pids.length ? 'alive' : scan === 'unknown' ? 'unknown' : 'gone', pids };
 }
@@ -153,7 +206,7 @@ export function probeGeneration(input: { record?: WorkerProcessRecord; paths: re
 /** Execution-only proof: a known reboot ended all old descendants, provided neither the
  * controller nor any recorded process is still live. Never use this to authorize reuse/deletion;
  * execution settlement itself deletes nothing. Legacy or unknown boot evidence keeps the descendant scan. */
-export function inspectExecutionGeneration(input: { record?: WorkerProcessRecord; paths: readonly string[]; pathsComplete?: boolean }): GenerationProbe {
+export function inspectExecutionGeneration(input: { record?: WorkerProcessRecord; paths: readonly string[]; pathsComplete?: boolean; cwds?: CwdSource }): GenerationProbe {
   const record = input.record;
   if (record && recordedProcessLive(record.controller)) return { liveness: 'alive', controller: record.controller.pid, pids: [] };
   const pids = record?.processes.filter(recordedProcessLive).map(entry => entry.pid) ?? [];

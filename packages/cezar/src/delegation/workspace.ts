@@ -30,7 +30,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const hash = (content: Buffer) => createHash('sha256').update(content).digest('hex');
 
 async function branchLog(repoRoot: string, workspace: WorkerWorkspace) {
-  const common = await commonDir(repoRoot);
+  const common = await gitCommonDir(repoRoot);
   const path = join(common, 'logs/refs/heads', workspace.branch);
   if (await realpath(path) !== path) throw new Error('Branch reflog redirected');
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -76,7 +76,8 @@ async function checkedGit(cwd: string, args: string[], index?: string): Promise<
   if (!result.ok) throw new Error(`Owned workspace Git ${args[0]} failed`);
   return result.stdout.trim();
 }
-async function commonDir(cwd: string): Promise<string> {
+/** The repository's shared Git directory (where refs, reflogs and linked-worktree admin dirs live), resolved. */
+export async function gitCommonDir(cwd: string): Promise<string> {
   return realpath(await checkedGit(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
 }
 async function exists(path: string): Promise<boolean> {
@@ -90,7 +91,7 @@ async function exists(path: string): Promise<boolean> {
 export async function resolveWorkerBaseline(repoRoot: string, parentCwd: string, baseline: string): Promise<string> {
   try {
     if (!isSafeGitRef(baseline) || baseline.length > 1024 || /[\0\r\n]/.test(baseline)) throw new Error('Invalid ref');
-    if (await commonDir(repoRoot) !== await commonDir(parentCwd)) throw new Error('Parent is not in this repository');
+    if (await gitCommonDir(repoRoot) !== await gitCommonDir(parentCwd)) throw new Error('Parent is not in this repository');
     const ref = baseline === 'parent-head' ? 'HEAD' : baseline;
     return workerWorkspaceSchema.shape.baselineSha.parse(await checkedGit(
       baseline === 'parent-head' ? parentCwd : repoRoot,
@@ -135,7 +136,7 @@ function workerWorkspace(run: RunRecord): WorkerWorkspace {
 }
 
 async function receiptLocation(repoRoot: string, workspace: WorkerWorkspace, create = false): Promise<string> {
-  const dir = join(await commonDir(repoRoot), 'cezar-owned-workspaces');
+  const dir = join(await gitCommonDir(repoRoot), 'cezar-owned-workspaces');
   if (create) await mkdir(dir, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== 'EEXIST') throw error;
   });
@@ -171,7 +172,7 @@ async function readReceipt(path: string): Promise<Receipt | undefined> {
 /** Whether any linked worktree's admin directory still carries this resource's identity marker.
  * An unsafe or unreadable marker throws, so the caller fails closed. */
 async function markerRemains(repoRoot: string, workspace: WorkerWorkspace): Promise<boolean> {
-  const admin = join(await commonDir(repoRoot), 'worktrees');
+  const admin = join(await gitCommonDir(repoRoot), 'worktrees');
   if (!await exists(admin)) return false;
   for (const entry of await readdir(admin)) {
     const marker = join(admin, entry, 'cezar-owned-resource');
@@ -181,8 +182,8 @@ async function markerRemains(repoRoot: string, workspace: WorkerWorkspace): Prom
 }
 async function liveGitDir(repoRoot: string, workspace: WorkerWorkspace): Promise<string> {
   if (await realpath(workspace.path) !== workspace.path) throw new Error('Owned workspace path is redirected');
-  const rootCommon = await commonDir(repoRoot);
-  if (await commonDir(workspace.path) !== rootCommon) throw new Error('Owned workspace repository changed');
+  const rootCommon = await gitCommonDir(repoRoot);
+  if (await gitCommonDir(workspace.path) !== rootCommon) throw new Error('Owned workspace repository changed');
   const top = await realpath(await checkedGit(workspace.path, ['rev-parse', '--show-toplevel']));
   if (top !== workspace.path) throw new Error('Owned workspace is no longer a Git worktree');
   const listed = await checkedGit(repoRoot, ['worktree', 'list', '--porcelain', '-z']);
@@ -259,6 +260,10 @@ export async function readOwnedDiff(repoRoot: string, run: RunRecord): Promise<W
   } finally { if (scratch) await rm(scratch, { recursive: true, force: true }); }
 }
 
+/** A removal that could not take the worktree mutation lock in time. Contention clears without
+ * changing anything a destroy can observe, so a retry must not skip it (hearsay-tools/cezarion#879). */
+export const WORKTREE_LOCK_BUSY_ERROR = 'Owned resources retained: worktree mutation lock is busy; retry destroy later';
+
 /** Thrown by a removal's `assertUnheld` when live processes may hold the worker's resources. */
 export class WorkspaceHeldError extends Error {
   constructor(readonly pids: readonly number[]) { super(`Processes ${pids.join(', ')} may still hold the worker's resources`); }
@@ -268,14 +273,21 @@ export class WorkspaceHeldError extends Error {
  * The private checkpoint survives removal of the linked Git directory and records
  * the exact ref/log identity whose compare-and-swap deletion may be retried.
  * `beforeRemove` runs once every check has passed, right before git removes the checkout: call
- * this through `releaseThenRemoveOwnedWorkspace` so the worker's preview goes first (#781). */
+ * this through `releaseThenRemoveOwnedWorkspace` so the worker's preview goes first (#781).
+ * `report` tells a retrying caller why an incomplete removal stopped (hearsay-tools/cezarion#879):
+ * `held` with the processes either holder check named, so it can tell when they exit, or
+ * `unexplained` when a holder check named none, a destructive Git step failed or something threw:
+ * causes no observation of the inputs can see change (scratch ownership evidence, a holder Windows
+ * names to no scan, a transient lock). */
+export type RemovalReport = { held?: (pids: readonly number[]) => void; unexplained?: () => void };
 export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorkspace, assertCurrent?: () => void,
-  beforeRemove?: () => Promise<void>, assertUnheld?: () => void): Promise<WorkerDestroyResult> {
+  beforeRemove?: () => Promise<void>, assertUnheld?: () => void, report?: RemovalReport): Promise<WorkerDestroyResult> {
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
+  const held = (pids: readonly number[]) => { heldBy = pids; report?.held?.(pids); };
   let stranded: string | undefined;
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
-    ...(remaining.length ? { error: lockBusy ? 'Owned resources retained: worktree mutation lock is busy; retry destroy later'
+    ...(remaining.length ? { error: lockBusy ? WORKTREE_LOCK_BUSY_ERROR
       : heldBy.length ? `Owned resources retained: processes ${heldBy.join(', ')} may still hold the worker worktree or scratch; retry destroy after they exit`
       : stranded ? `Owned branch ${value.branch} ${stranded}; keep what you need, delete the branch, then retry destroy`
       : 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),
@@ -307,6 +319,9 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           assertCurrent?.();
           if (await absent()) remaining = [];
         }
+        // Markers in any linked admin directory decide this, and a retrying caller's observation
+        // does not read them all: a refusal here is unexplained (hearsay-tools/cezarion#879).
+        if (remaining.length) report?.unexplained?.();
         return result();
       }
       if (!same(receipt.workspace, workspace)) return result();
@@ -324,13 +339,15 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         if (checkpoint?.phase === 'worktree-removed') return result();
         if (await liveGitDir(repoRoot, workspace) !== receipt.gitDir ||
             await readIdentityFile(join(receipt.gitDir, 'cezar-owned-resource'), 36) !== workspace.resourceId) return result();
-        if (await checkedGit(workspace.path, ['symbolic-ref', '-q', 'HEAD']) !== `refs/heads/${workspace.branch}`) return result();
+        // HEAD files (this worktree's, another's) are not in a retrying caller's observation: these
+        // refusals report unexplained, so a retry never skips them (hearsay-tools/cezarion#879).
+        if (await checkedGit(workspace.path, ['symbolic-ref', '-q', 'HEAD']) !== `refs/heads/${workspace.branch}`) { report?.unexplained?.(); return result(); }
         // Git permits duplicate checkouts with --force. Preserve both resources
         // before the first removal if another registered path uses this branch.
         let registeredPath: string | undefined;
         for (const entry of await registered()) {
           if (entry.startsWith('worktree ')) registeredPath = entry.slice('worktree '.length);
-          if (entry === `branch refs/heads/${workspace.branch}` && registeredPath !== workspace.path) return result();
+          if (entry === `branch refs/heads/${workspace.branch}` && registeredPath !== workspace.path) { report?.unexplained?.(); return result(); }
         }
         const current = await verifyBranch(repoRoot, workspace, receipt);
         if (checkpoint && (checkpoint.sha !== current.sha || checkpoint.logHash !== hash(current.log.content))) return result();
@@ -343,9 +360,9 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         // only afterwards, immediately before destructive Git; they are never signalled.
         assertUnheld?.();
         const holders = inspectGeneration({ paths: [workspace.path] });
-        if (holders.liveness !== 'gone') { heldBy = holders.pids; return result(); }
+        if (holders.liveness !== 'gone') { if (holders.pids.length) held(holders.pids); else report?.unexplained?.(); return result(); }
         const removed = await mutationGit(repoRoot, ['worktree', 'remove', '--force', workspace.path]);
-        if (!removed.ok) return result();
+        if (!removed.ok) { report?.unexplained?.(); return result(); }
         remaining = ['branch'];
       }
       if (!checkpoint) {
@@ -366,7 +383,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         // below. A branch reset back to its baseline keeps the worker's commits only in the reflog
         // that the delete would drop. Commits on it are a human's call.
         remaining = ['branch'];
-        if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) return result();
+        if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) { report?.unexplained?.(); return result(); }
         const current = await verifyBranch(repoRoot, workspace, receipt);
         if (current.sha !== workspace.baselineSha) {
           const commits = Number(await checkedGit(repoRoot, ['rev-list', '--count', `${workspace.baselineSha}..${current.sha}`]));
@@ -388,14 +405,14 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
       checkpoint = { ...checkpoint, phase: 'worktree-removed' };
       await writeCleanup(checkpointPath, checkpoint, assertCurrent);
       if (await branchExists()) {
-        if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) return result();
+        if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) { report?.unexplained?.(); return result(); }
         const current = await verifyBranch(repoRoot, workspace, receipt);
         if (current.sha !== checkpoint.sha || hash(current.log.content) !== checkpoint.logHash) return result();
         // Ref CAS: never delete a branch advanced after our verified snapshot.
         assertCurrent?.();
         assertUnheld?.();
         const removed = await mutationGit(repoRoot, ['update-ref', '-d', `refs/heads/${workspace.branch}`, checkpoint.sha]);
-        if (!removed.ok || await branchExists()) return result();
+        if (!removed.ok || await branchExists()) { report?.unexplained?.(); return result(); }
       }
       await writeCleanup(checkpointPath, { ...checkpoint, phase: 'complete' }, assertCurrent);
       remaining = [];
@@ -404,7 +421,8 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
   } catch (error) {
     // Ambiguous ownership and every failed Git/filesystem operation fail closed.
     lockBusy = error instanceof WorktreeMutationLockTimeout;
-    if (error instanceof WorkspaceHeldError) heldBy = error.pids;
+    if (error instanceof WorkspaceHeldError && error.pids.length) held(error.pids);
+    else report?.unexplained?.();
   }
   return result();
 }

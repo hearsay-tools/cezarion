@@ -429,3 +429,33 @@ describe('loadConfig machine-wide agent defaults', () => {
     expect(config.systemPrompt).toBe('be brief');
   });
 });
+
+/** #917: `worktreeSetup` is parsed loosely here so a bad value can never reset the whole file;
+ *  `resolveWorktreeSetup` judges it and the run reports it. */
+describe('loadConfig worktreeSetup', () => {
+  let repoRoot: string;
+
+  beforeEach(() => {
+    repoRoot = mkdtempSync(join(tmpdir(), 'cez-config-setup-'));
+    mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(repoRoot, { recursive: true, force: true });
+  });
+
+  it('an invalid worktreeSetup keeps every other key', async () => {
+    writeFileSync(
+      join(repoRoot, '.ai/cezar', 'config.json'),
+      JSON.stringify({ systemPrompt: 'keep me', worktreeSetup: { commands: 'npm ci' } }),
+      'utf8',
+    );
+    const config = await loadConfig(repoRoot);
+    expect(config.systemPrompt).toBe('keep me');
+    expect(config.worktreeSetup).toEqual({ commands: 'npm ci' });
+  });
+
+  it('is undefined when the key is absent', async () => {
+    expect((await loadConfig(repoRoot)).worktreeSetup).toBeUndefined();
+  });
+});

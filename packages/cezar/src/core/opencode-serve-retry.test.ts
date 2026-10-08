@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from './agent-runner.ts';
 import { OpencodeServerRunner, SERVE_START_RETRY_DELAY_MS } from './opencode-server-runner.ts';
+import { sessionGroupOf } from './session-process.ts';
 
 /** `override` sees the 1-based spawn count; returning undefined spawns for real. */
 const spawnHook = vi.hoisted(() => ({ calls: 0, override: null as null | ((call: number) => unknown) }));
@@ -115,6 +116,8 @@ describe('opencode serve start retry (#872)', { timeout: 20_000 }, () => {
     expect(pids).toHaveLength(1);
     expect(pids[0]).not.toBe(firstPid);
     expect(session.pid).toBe(pids[0]);
+    // hearsay-tools/cezarion#890: the replacement leads its own process group too.
+    if (process.platform !== 'win32') expect(sessionGroupOf(session.pid!)).toBe(session.pid);
     expect(events.filter(e => e.type === 'turn-end')).toHaveLength(1);
     expect(events.some(e => e.type === 'text')).toBe(true);
 

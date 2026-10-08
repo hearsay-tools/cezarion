@@ -154,6 +154,8 @@ const CONFIG: ConfigResponse = {
   worktreeRetention: 10,
   liveTitleUpdates: null,
   reviewGate: null,
+  worktreeSetup: null,
+  worktreeSetupIssue: null,
 }
 
 const WORKSPACE_CONFIG: WorkspaceConfigResponse = {

@@ -14,6 +14,13 @@ function watchdogStall(prompt) {
   if (prompt.includes('held-pipe')) {
     watchdogSpawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', process.stdout, process.stderr] });
   }
+  if (prompt.includes('leftover')) {
+    // hearsay-tools/cezarion#890: one child stays in the session's process group and ignores
+    // SIGTERM; one leaves the group with setsid. Both exit on their own as a cleanup backstop.
+    const leftover = (file) => `process.on('SIGTERM',()=>{}); require('fs').writeFileSync(${JSON.stringify(file)}, String(process.pid)); setTimeout(()=>{},20000)`;
+    watchdogSpawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
+    watchdogSpawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
+  }
   return true;
 }
 

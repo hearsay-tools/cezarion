@@ -10,7 +10,6 @@ import { workerContextHash, workerWorkflowHash, workerStepIdentity, captureWorke
 import { buildChildEnv } from '../core/agent-env.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
@@ -21,8 +20,10 @@ import {
 } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
 import { hasRegisteredRunProcess, onUsage, registerRunProcess, unregisterRunProcess, type ProcessUsage } from '../core/process-usage.ts';
+import { processGroupAlive, processGroupOf, sessionGroupOf, signalProcessGroup } from '../core/session-process.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
-import { inspectExecutionGeneration, isCurrentProcess, processStartToken, recordedProcessLive, type GenerationProbe, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { noJitter, ORPHAN_BACKOFF, retryDelayMs, type Backoff } from '../delegation/retry-backoff.ts';
+import { inspectExecutionGeneration, isCurrentProcess, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, sharedCwdScan, type CwdSource, type GenerationProbe, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
 import { startManagedSession } from '../core/managed-session.ts';
 import { createRunner } from '../core/runner-factory.ts';
@@ -72,6 +73,17 @@ import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
 import { autosaveCommit, type AutosaveReason, createWorktree, resolveBaseRef, worktreeDiff, worktreeShortstat } from '../git-worktree.ts';
+import { runGroupedCommand } from './grouped-command.ts';
+import {
+  resolveWorktreeSetup,
+  runWorktreeSetup,
+  worktreeSetupAgentNote,
+  worktreeSetupEndNote,
+  worktreeSetupEnv,
+  worktreeSetupRecordError,
+  worktreeSetupStartNote,
+  type WorktreeSetupOutcome,
+} from '../worktree-setup.ts';
 import { getHeadCommit, getRepoInfo } from '../server/git.ts';
 import { ensureOwnedWorkspace, verifyOwnedWorkspace } from '../delegation/workspace.ts';
 import { verifyWorkerContext } from '../delegation/context.ts';
@@ -361,10 +373,7 @@ function isSyntheticContinuation(run: RunRecord, step: StepState): boolean {
 /** Periodic "cezar autosave" commit in the task worktree (spec 006). */
 export const AUTOSAVE_INTERVAL_MS = 90_000;
 
-/** Stop on a workflow check: SIGTERM first, SIGKILL to its process group after this grace. */
-export const CHECK_KILL_GRACE_MS = 3_000;
-/** After SIGKILL, how long to wait for the group to disappear before resolving unconfirmed. */
-export const CHECK_TERMINATION_CONFIRM_MS = 5_000;
+export { CHECK_KILL_GRACE_MS, CHECK_TERMINATION_CONFIRM_MS } from './grouped-command.ts';
 
 /** The periodic autosave timer is opt-in (#471): off, a task branch carries only the
  *  agent's own commits plus the turn-end/pre-PR flushes — no mid-run "cezar autosave"
@@ -977,12 +986,12 @@ export class RunManager {
   /** Settles a crashed generation after exit proof. Sync and signal-free; recovery, resume,
    * delivery, collect and destroy then take their normal paths.
    * A non-gone probe is cached briefly: on darwin the scan is a synchronous `lsof` on the event loop. */
-  settleOrphanedWorkerExecution(runId: string, opts: { admitting?: boolean; fresh?: boolean } = {}): boolean {
+  settleOrphanedWorkerExecution(runId: string, opts: { admitting?: boolean; fresh?: boolean; cwds?: CwdSource } = {}): boolean {
     const orphan = this.orphanedWorkerGeneration(runId, opts.admitting);
     if (!orphan) return false;
     const cached = this.orphanProbes.get(runId);
     if (!opts.fresh && cached?.generation === orphan.generation && Date.now() - cached.at < ORPHAN_PROBE_CACHE_MS) return false;
-    const probe = inspectExecutionGeneration(orphan);
+    const probe = inspectExecutionGeneration({ ...orphan, cwds: opts.cwds });
     if (probe.liveness !== 'gone') { this.orphanProbes.set(runId, { generation: orphan.generation, at: Date.now(), probe }); return false; }
     // A stale `alive` must not outlive a `gone` probe, even when the commit below fails.
     this.orphanProbes.delete(runId);
@@ -996,42 +1005,67 @@ export class RunManager {
   }
 
   private readonly orphanProbes = new Map<string, { generation: string; at: number; probe: GenerationProbe }>();
-  private readonly orphanReprobes = new Map<string, NodeJS.Timeout>();
+  /** Pending orphan reprobes by run id. One timer serves them all (hearsay-tools/cezarion#879). */
+  private readonly orphanDue = new Map<string, { generation: string; at: number; attempts: number }>();
+  private orphanTimer?: NodeJS.Timeout;
+  /** The `at` the timer was armed for; with the clock, it decides what a tick takes. */
+  private orphanArmedFor = 0;
   private readonly orphanBlockers = new Map<string, WorkerTerminationBlocker>();
   private readonly reportedOrphanBlockers = new Map<string, string>();
   // Private and overridable so tests need not wait out production cadence.
-  private orphanReprobeMs = 15_000;
-  private orphanReprobeLimitMs = 15 * 60_000;
-  private orphanReprobeSlowMs = 60_000;
+  private orphanBackoff: Backoff = ORPHAN_BACKOFF;
   private orphanTermGraceMs = 10_000;
 
   /** #469: a survivor that dies after recovery has no other wake source (no exit callback for a
    * process another cezar spawned). Unref'd; finalization's `run` event then lets worker waits and
-   * outcomes observe it. Fast for the first window, then slow but uncapped, so a long-lived
-   * survivor is still noticed when it exits. A tick while this manager holds the run is skipped;
-   * only terminal reasons (proof settled, generation changed, run gone, unknown record, dispose)
-   * stop it. */
+   * outcomes observe it. Every 15 s for the first 15 minutes, then backing off to hourly
+   * (hearsay-tools/cezarion#879), so a long-lived survivor is still noticed when it exits. One
+   * timer serves every orphan, and a tick shares one `/proc` scan across them. A tick while this
+   * manager holds the run is skipped; only terminal reasons (proof settled, generation changed,
+   * run gone, unknown record, dispose) stop it. */
   private armOrphanReprobe(runId: string): void {
     const armed = this.orphanedWorkerGeneration(runId);
-    if (this.disposed || this.orphanReprobes.has(runId) || !armed) return;
-    const slowAfter = Date.now() + this.orphanReprobeLimitMs;
-    const schedule = () => {
-      const timer = setTimeout(() => {
-        const orphan = this.orphanState(runId);
-        if (orphan.state === 'busy') return schedule();
-        if (orphan.state !== 'orphan' || orphan.generation !== armed.generation || this.settleOrphanedWorkerExecution(runId)) this.clearOrphanReprobe(runId);
-        else schedule();
-      }, Date.now() < slowAfter ? this.orphanReprobeMs : this.orphanReprobeSlowMs);
-      timer.unref?.();
-      this.orphanReprobes.set(runId, timer);
-    };
-    schedule();
+    if (this.disposed || this.orphanDue.has(runId) || !armed) return;
+    this.orphanDue.set(runId, { generation: armed.generation, at: Date.now() + retryDelayMs(0, this.orphanBackoff, noJitter), attempts: 0 });
+    this.wakeOrphanReprobes();
+  }
+
+  private wakeOrphanReprobes(): void {
+    clearTimeout(this.orphanTimer); this.orphanTimer = undefined;
+    if (this.disposed || !this.orphanDue.size) return;
+    let next = Infinity;
+    for (const { at } of this.orphanDue.values()) next = Math.min(next, at);
+    this.orphanArmedFor = next;
+    this.orphanTimer = setTimeout(() => this.orphanReprobeTick(), Math.max(0, next - Date.now()));
+    this.orphanTimer.unref?.();
+  }
+
+  private orphanReprobeTick(): void {
+    this.orphanTimer = undefined;
+    if (this.disposed) return;
+    // Orphans due within 5 % of the fast cadence ride along, so near neighbours share the scan, and
+    // every orphan this tick keeps is re-armed from the same instant, so they stay together.
+    const now = Date.now();
+    const dueBy = Math.max(this.orphanArmedFor, now) + this.orphanBackoff.fastMs / 20;
+    const cwds = sharedCwdScan();
+    for (const [runId, pending] of [...this.orphanDue]) {
+      if (pending.at > dueBy) continue;
+      this.orphanDue.delete(runId);
+      const orphan = this.orphanState(runId);
+      let attempts = pending.attempts;
+      if (orphan.state !== 'busy') {
+        // Ticks are seconds apart, so the brief probe cache would only skip them: probe fresh.
+        if (orphan.state !== 'orphan' || orphan.generation !== pending.generation ||
+          this.settleOrphanedWorkerExecution(runId, { fresh: true, cwds })) continue;
+        attempts++;
+      }
+      this.orphanDue.set(runId, { ...pending, attempts, at: now + retryDelayMs(attempts, this.orphanBackoff, noJitter) });
+    }
+    this.wakeOrphanReprobes();
   }
 
   private clearOrphanReprobe(runId: string): void {
-    const timer = this.orphanReprobes.get(runId);
-    if (timer) clearTimeout(timer);
-    this.orphanReprobes.delete(runId);
+    this.orphanDue.delete(runId);
   }
 
   /** Why the last destroy could not prove termination (#469), and whether that differs from the
@@ -1068,22 +1102,16 @@ export class RunManager {
     // >= 500 ms: every probe may be a synchronous darwin `lsof`.
     const pause = () => new Promise(resolve => setTimeout(resolve, Math.max(0, Math.min(500, deadline - Date.now()))));
     // A live controller is another cezar's: nothing to signal or wait for. Otherwise signal only
-    // recorded, token-verified survivors (none for a legacy record-less generation), then wait
-    // for readable cwd holders until the deadline.
+    // recorded, token-verified survivors and recorded session groups (none for a legacy
+    // record-less generation), then wait for readable cwd holders until the deadline.
     if (!orphan.record || !recordedProcessLive(orphan.record.controller)) {
       if (orphan.record) {
-        const targets = orphan.record.processes.filter(entry => entry.startToken !== undefined && recordedProcessLive(entry));
-        const signal = (name: NodeJS.Signals) => {
-          for (const entry of targets) {
-            if (!same()) return;
-            // Re-verified immediately before every signal, exactly: a reused PID is never touched.
-            if (processStartToken(entry.pid) === entry.startToken) try { process.kill(entry.pid, name); } catch { /* already gone */ }
-          }
-        };
-        signal('SIGTERM');
-        const killAt = Math.min(deadline, Date.now() + this.orphanTermGraceMs);
-        while (Date.now() < killAt && targets.some(recordedProcessLive)) await pause();
-        if (targets.some(recordedProcessLive)) signal('SIGKILL');
+        const { processes } = orphan.record;
+        await this.terminateRecorded({
+          pids: processes.filter(entry => entry.pgid === undefined && entry.startToken !== undefined && recordedProcessLive(entry)),
+          groups: processes.filter(entry => entry.pgid !== undefined),
+          paths: orphan.paths,
+        }, deadline, pause, same);
       }
       while (!this.settleOrphanedWorkerExecution(runId, { fresh: true }) && Date.now() < deadline && same()) await pause();
     }
@@ -1093,11 +1121,58 @@ export class RunManager {
     else if (probe?.pids.length) this.orphanBlockers.set(runId, { kind: 'processes', pids: probe.pids });
   }
 
+  /** Destroy only: SIGTERM recorded survivors, then SIGKILL what outlives `orphanTermGraceMs`.
+   * `pids` are signalled by token-verified pid; `groups` are session leaders whose whole process
+   * group is signalled (hearsay-tools/cezarion#890), so what an agent left behind exits with it. A
+   * dead leader's group counts only while a process holding `paths` is in it. Every signal
+   * re-verifies first: a reused PID or group number is never touched. */
+  private async terminateRecorded(targets: { pids: RecordedProcess[]; groups: RecordedProcess[]; paths: readonly string[] }, deadline: number,
+    pause: () => Promise<unknown>, current: () => boolean = () => true): Promise<void> {
+    const holders = processesWithCwdUnder(targets.paths);
+    const holderGroups = () => (holders === 'unknown' ? [] : holders).map(processGroupOf).filter((pgid): pgid is number => pgid !== undefined);
+    const groups = targets.groups.filter(entry => recordedGroupSignalable(entry, holderGroups()) && processGroupAlive(entry.pgid!));
+    const living = () => targets.pids.some(recordedProcessLive) || groups.some(entry => processGroupAlive(entry.pgid!));
+    const signal = (name: NodeJS.Signals) => {
+      for (const entry of targets.pids) {
+        if (!current()) return;
+        if (processStartToken(entry.pid) === entry.startToken) try { process.kill(entry.pid, name); } catch { /* already gone */ }
+      }
+      const evidence = holderGroups();
+      for (const entry of groups) {
+        if (!current()) return;
+        if (recordedGroupSignalable(entry, evidence)) signalProcessGroup(entry.pgid!, name);
+      }
+    };
+    if (!living()) return;
+    signal('SIGTERM');
+    const killAt = Math.min(deadline, Date.now() + this.orphanTermGraceMs);
+    while (Date.now() < killAt && living()) await pause();
+    if (living()) signal('SIGKILL');
+  }
+
+  /** Destroy of a finished generation (hearsay-tools/cezarion#890): a dev server or watcher its
+   * agent left in its process group holds the worktree, and nothing else ties it to the worker.
+   * A record whose controller is another live cezar is not ours to act on. */
+  private async terminateFinishedWorkerGroups(runId: string, timeoutMs: number): Promise<void> {
+    const proof = this.store.readWorkerExecution(runId);
+    if (proof?.phase !== 'complete') return;
+    const record = this.store.readWorkerProcesses(runId, proof.generation);
+    const run = this.store.getRun(runId);
+    if (typeof record === 'string' || run?.delegation?.role !== 'worker' ||
+      (recordedProcessLive(record.controller) && !isCurrentProcess(record.controller))) return;
+    const groups = record.processes.filter(entry => entry.pgid !== undefined);
+    if (!groups.length) return;
+    const deadline = Date.now() + Math.min(30_000, Math.max(0, Number.isFinite(timeoutMs) ? timeoutMs : 0));
+    const pause = () => new Promise(resolve => setTimeout(resolve, Math.max(0, Math.min(100, deadline - Date.now()))));
+    const paths = [run.delegation.workspace.path, ...agentTmpDirLocationEvidence(this.dataDir, runId).paths];
+    await this.terminateRecorded({ pids: [], groups, paths }, deadline, pause);
+  }
+
   /** Best effort: a failed write leaves the working-directory scan as this process's evidence. */
   private recordWorkerProcess(runId: string, pid: number): void {
     const generation = this.executions.get(runId)?.generation;
     if (!generation) return;
-    try { if (!this.store.appendWorkerProcess(runId, generation, pid)) console.warn(`[cez] worker ${runId} process record unavailable; relying on the working-directory scan`); }
+    try { if (!this.store.appendWorkerProcess(runId, generation, pid, sessionGroupOf(pid))) console.warn(`[cez] worker ${runId} process record unavailable; relying on the working-directory scan`); }
     catch { console.warn(`[cez] worker ${runId} process record write failed; relying on the working-directory scan`); }
   }
 
@@ -1116,6 +1191,12 @@ export class RunManager {
   }
 
   async awaitRunTermination(runId: string, timeoutMs: number, opts: { reapOrphans?: boolean } = {}): Promise<boolean> {
+    const terminated = await this.proveRunTermination(runId, timeoutMs, opts);
+    if (terminated && opts.reapOrphans && !this.disposed) await this.terminateFinishedWorkerGroups(runId, timeoutMs);
+    return terminated;
+  }
+
+  private async proveRunTermination(runId: string, timeoutMs: number, opts: { reapOrphans?: boolean }): Promise<boolean> {
     const execution = this.executions.get(runId);
     if (!execution) {
       const generation = this.finalizedWorkers.get(runId);
@@ -1347,7 +1428,7 @@ export class RunManager {
     this.ciResources.release();
     this.delegationProvisioner = undefined;
     this.finalizedWorkers.clear();
-    for (const runId of [...this.orphanReprobes.keys()]) this.clearOrphanReprobe(runId);
+    this.orphanDue.clear(); clearTimeout(this.orphanTimer); this.orphanTimer = undefined;
     this.orphanProbes.clear(); this.orphanBlockers.clear(); this.reportedOrphanBlockers.clear();
     for (const settle of this.terminationWaiters) settle();
     this.store.off('run', this.onDelegationRun);
@@ -2546,6 +2627,18 @@ export class RunManager {
       });
       const interruptedIndex = run.workflowDef?.steps.findIndex(step => step.id === interruptedStepId) ?? -1;
       const interruptedDef = interruptedIndex >= 0 ? run.workflowDef?.steps[interruptedIndex] : undefined;
+      const requeueInput = () => ({ task: run.task, runner: run.runner, model: run.model, effort: run.effort,
+        agentProfile: run.agentProfile, systemPrompt: run.systemPrompt, autonomous: run.autonomous,
+        generateFollowups: run.generateFollowups, worktree: run.worktree });
+      // Worktree setup (#917) interrupted before any agent session: there is no session to
+      // continue, so start the workflow over. `execute` sees setup still `running` and reruns it.
+      if (run.workflowDef && run.worktreeSetup?.status === 'running' && !run.steps.some(step => step.sessionId)) {
+        this.store.updateRun(run.id, { status: 'queued', error: undefined, finishedAt: undefined, currentStepId: undefined });
+        this.store.flush();
+        this.pendingJobs.set(run.id, { workflow: run.workflowDef, startAt: 0, input: requeueInput() });
+        this.queue.push(run.id);
+        continue;
+      }
       if (run.workflowDef && interruptedDef && stepKind(interruptedDef) === 'check') {
         this.store.updateStep(run.id, interruptedDef.id, { status: 'pending', error: undefined, finishedAt: undefined });
         this.store.updateRun(run.id, { status: 'queued', error: undefined, finishedAt: undefined, currentStepId: undefined });
@@ -2553,9 +2646,7 @@ export class RunManager {
         this.pendingJobs.set(run.id, {
           workflow: run.workflowDef,
           startAt: interruptedIndex,
-          input: { task: run.task, runner: run.runner, model: run.model, effort: run.effort,
-            agentProfile: run.agentProfile, systemPrompt: run.systemPrompt, autonomous: run.autonomous,
-            generateFollowups: run.generateFollowups, worktree: run.worktree },
+          input: requeueInput(),
         });
         this.queue.push(run.id);
         continue;
@@ -5427,6 +5518,8 @@ export class RunManager {
     this.workerIdentity(runId);
     const record = this.store.getRun(runId);
     let cwd: string;
+    // Retention (#483) rebuilt a reclaimed directory: a bare checkout that needs setup again (#917).
+    let rematerialized = false;
     if (record?.delegation?.role === 'worker') {
       try {
         if (record.delegation.destroy) throw new Error('Worker destruction has begun');
@@ -5443,7 +5536,7 @@ export class RunManager {
         return;
       }
     } else {
-      await rematerializeReclaimedWorktree(this.repoRoot, this.store, runId);
+      rematerialized = await rematerializeReclaimedWorktree(this.repoRoot, this.store, runId);
       cwd = record?.worktreePath && existsSync(record.worktreePath) ? record.worktreePath : this.repoRoot;
     }
     if (this.store.getRun(runId)?.stopping) {
@@ -5489,6 +5582,15 @@ export class RunManager {
     }
     this.armAutosave(runId, state);
     if (record) seedHandoffFile(this.dataDir, record); // idempotent — normally already there
+    // Worktree setup (#917) for a directory retention rebuilt, or one a restart interrupted.
+    const setupNote = await this.prepareWorktree(
+      runId,
+      state,
+      (await loadConfig(this.repoRoot)).worktreeSetup,
+      (event) => this.store.appendEvent(runId, event),
+      rematerialized ? 'rematerialized' : 'resume',
+    );
+    // A Stop during setup settles below, at the prelaunch cancellation check before any spawn.
     // Registry snapshot for `/skill` expansion. `execute` loads this for the workflow's own
     // sessions; a continuation builds its OWN ActiveRun, and without this the resumed session
     // expanded against an empty registry and leaked `/om-...` verbatim to the backend, which
@@ -5902,7 +6004,7 @@ export class RunManager {
     // through `deliverMessage`, so it needs the SAME delivery-only `/skill` rewrite the
     // live path applies (#811). Delivery-only: the `user-message` event above already
     // persisted the user's original text, and the transcript must keep showing that.
-    const openingPrompt = expandRegistrySlashSkillText(prompt, state.skills ?? []);
+    const openingPrompt = expandRegistrySlashSkillText(prompt, state.skills ?? []) + (setupNote ? `\n\n${setupNote}` : '');
     state.agentSessionError = undefined;
     let session: AgentSession | undefined;
     if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
@@ -6282,6 +6384,9 @@ export class RunManager {
     // header can name the branch. Idempotent: an existing file stays as-is.
     const seeded = this.store.getRun(runId);
     if (seeded) seedHandoffFile(this.dataDir, seeded);
+    // Worktree setup (#917): before the first step, so the agent starts in a prepared tree. Its
+    // note rides the first agent step's opening message only, like the task's attachments.
+    let startSetupNote = await this.prepareWorktree(runId, state, config.worktreeSetup, emit, 'start');
 
     const skills = await discoverSkills(this.repoRoot);
     // Every ActiveRun construction site must carry the registry — `runContinuation` builds
@@ -6370,9 +6475,11 @@ export class RunManager {
           extraSystemPrompt,
           chainStepNote(workflow.steps, i),
           startAttachments,
+          startSetupNote,
         );
         startImages = undefined;
         startAttachments = [];
+        startSetupNote = undefined;
         checkFailure = null;
         // Stale setup cannot finalize a replacement owner. Disposal also clears
         // active, but must still honor a previously accepted Stop/Finish intent.
@@ -6496,6 +6603,8 @@ export class RunManager {
      *  paths are appended to `userPrompt` so the agent can operate on the
      *  real files, not just view the inline image blocks. */
     attachments: PersistedAttachment[] = [],
+    /** Worktree setup's paragraph for the agent (#917) — appended to the opening message. */
+    openingNote?: string,
   ): Promise<string | null> {
     let systemPrompt: string | undefined;
     if (step.skill) {
@@ -6556,6 +6665,7 @@ export class RunManager {
     // existing is what would leave an agent holding a task about a `.pdf` it was never told the
     // location of.
     if (attachments.length) userPrompt += `\n\n${pastedAttachmentsText(attachments)}`;
+    if (openingNote) userPrompt += `\n\n${openingNote}`;
 
     const sessionId = randomUUID();
     const backend = step.runner ?? taskBackend;
@@ -7773,95 +7883,100 @@ export class RunManager {
     }
   }
 
-  private runCheckStep(
+  /**
+   * Worktree setup (#917, spec `.ai/specs/2026-10-07-worktree-setup.md`): run the project's
+   * `worktreeSetup` commands in this run's isolated worktree when it needs them, and return the
+   * paragraph for the agent's opening message. `start` is a new task or worker, `rematerialized`
+   * a Continue that rebuilt a reclaimed directory, and `resume` any other Continue, which only
+   * finishes a setup a restart interrupted. In-place and non-Git runs never get setup: that tree
+   * is the user's own checkout.
+   */
+  private async prepareWorktree(
+    runId: string,
+    state: ActiveRun,
+    raw: unknown,
+    emit: (event: { type: string; [k: string]: unknown }) => void,
+    trigger: 'start' | 'rematerialized' | 'resume',
+  ): Promise<string | undefined> {
+    const record = this.store.getRun(runId);
+    if (!record || state.cwd === this.repoRoot) return undefined;
+    const plan = resolveWorktreeSetup(raw);
+    const interrupted = record.worktreeSetup?.status === 'running';
+    if (plan.kind === 'none') {
+      // A restart interrupted setup the project has since removed: nothing is left to finish.
+      if (interrupted) this.store.updateRun(runId, { worktreeSetup: undefined });
+      return undefined;
+    }
+    const fresh = trigger === 'start' && record.worktreeSetup === undefined &&
+      !record.steps.some((step) => step.kind === 'agent' && step.iterations > 0);
+    if (!interrupted && !fresh && trigger !== 'rematerialized') return undefined;
+
+    const startedAt = new Date().toISOString();
+    let outcome: WorktreeSetupOutcome;
+    if (plan.kind === 'invalid') {
+      outcome = { status: 'invalid', issue: plan.issue };
+    } else {
+      // Durable before the first command: recovery reads `running` to requeue a run a restart
+      // interrupted here, instead of failing it with no agent session to resume.
+      this.store.updateRun(runId, { worktreeSetup: { status: 'running', startedAt } });
+      this.store.flush();
+      emit({ type: 'note', message: worktreeSetupStartNote(plan.commands.length) });
+      let tmpEnv: Record<string, string> = {};
+      try {
+        tmpEnv = agentTmpEnv(this.dataDir, runId);
+      } catch (err) {
+        if (!(err instanceof AgentTempDirError)) throw err;
+      }
+      outcome = await runWorktreeSetup({
+        plan,
+        cwd: state.cwd,
+        env: worktreeSetupEnv({ projectRoot: this.repoRoot, runId, tmpEnv }),
+        setInterrupt: (stop) => { state.interrupt = stop; },
+        isCancelled: () => state.cancelled,
+        onCommandResult: (result) => emit({
+          type: 'check-output',
+          command: result.command,
+          text: result.output,
+          exitCode: result.exitCode ?? -1,
+        }),
+      });
+    }
+    const finishedAt = new Date().toISOString();
+    const error = worktreeSetupRecordError(outcome);
+    this.store.updateRun(runId, {
+      worktreeSetup: {
+        status: outcome.status === 'done' ? 'done' : 'failed',
+        startedAt,
+        finishedAt,
+        durationMs: 'durationMs' in outcome ? outcome.durationMs : 0,
+        ...(error !== undefined ? { error } : {}),
+      },
+    });
+    const endNote = worktreeSetupEndNote(outcome);
+    emit({ type: 'note', message: endNote });
+    appendHandoffHeartbeat(this.dataDir, runId, endNote);
+    return worktreeSetupAgentNote(outcome);
+  }
+
+  private async runCheckStep(
     state: ActiveRun,
     step: WorkflowStepDef,
     emit: (event: { type: string; stepId?: string; [k: string]: unknown }) => void,
   ): Promise<{ ok: boolean; output: string }> {
     const command = step.command as string;
     emit({ type: 'note', stepId: step.id, message: `$ ${command}` });
-    return new Promise((resolve) => {
-      // Check steps run in the same cwd as the agent steps — the worktree.
-      // Own process group (POSIX): Stop signals the group we created, never a
-      // recycled pid or an unrelated process.
-      const grouped = process.platform !== 'win32';
-      const child = spawn('bash', ['-lc', command], { cwd: state.cwd, env: process.env, detached: grouped });
-      const pid = child.pid;
-
-      let output = '';
-      let finished = false;
-      let stopping = false;
-      let killTimer: NodeJS.Timeout | undefined;
-      let stopAt = 0;
-      const signalGroup = (signal: NodeJS.Signals) => {
-        if (finished || !pid) return;
-        try { if (grouped) process.kill(-pid, signal); else child.kill(signal); } catch { /* already gone */ }
-      };
-      const groupAlive = () => {
-        if (!grouped || !pid) return false;
-        try { process.kill(-pid, 0); return true; } catch (err) { return (err as NodeJS.ErrnoException).code === 'EPERM'; }
-      };
-      const finish = (code: number | null) => {
-        if (finished) return;
-        finished = true;
-        if (killTimer) clearTimeout(killTimer);
-        state.interrupt = () => undefined;
-        child.stdout?.destroy();
-        child.stderr?.destroy();
-        const trimmed = output.trim() || '(no output)';
-        emit({ type: 'check-output', stepId: step.id, command, text: trimmed, exitCode: code ?? -1 });
-        resolve({ ok: code === 0, output: trimmed });
-      };
-      // After Stop: the KILL timer escalates; resolve only once the group is
-      // confirmed gone (or the confirmation bound passes, reported honestly).
-      let reaping = false;
-      const confirmTermination = async (code: number | null) => {
-        if (reaping) return;
-        reaping = true;
-        const deadline = stopAt + CHECK_KILL_GRACE_MS + CHECK_TERMINATION_CONFIRM_MS;
-        while (groupAlive() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
-        if (groupAlive()) {
-          output += '\n… (process group did not confirm termination)';
-        }
-        finish(code);
-      };
-      state.interrupt = () => {
-        if (stopping || finished) return;
-        stopping = true;
-        stopAt = Date.now();
-        signalGroup('SIGTERM');
-        killTimer = setTimeout(() => signalGroup('SIGKILL'), CHECK_KILL_GRACE_MS);
-        killTimer.unref?.();
-        // Leader already gone but a descendant holds the pipes: no `exit` will follow.
-        if (child.exitCode !== null || child.signalCode !== null) void confirmTermination(child.exitCode);
-      };
-
-      const collect = (chunk: Buffer) => {
-        if (output.length < CHECK_OUTPUT_CAP) {
-          output += chunk.toString('utf8');
-          if (output.length >= CHECK_OUTPUT_CAP) output += '\n… (output truncated)';
-        }
-      };
-      child.stdout.on('data', collect);
-      child.stderr.on('data', collect);
-      child.on('error', (err) => {
-        finished = true;
-        if (killTimer) clearTimeout(killTimer);
-        state.interrupt = () => undefined;
-        const message = `failed to spawn: ${err.message}`;
-        emit({ type: 'check-output', stepId: step.id, command, text: message, exitCode: -1 });
-        resolve({ ok: false, output: message });
-      });
-      // A descendant can hold the inherited pipes open, so `close` may never
-      // fire after Stop. `exit` of the leader is the signal to reap the group.
-      child.on('exit', (code) => {
-        if (stopping) void confirmTermination(code);
-      });
-      child.on('close', (code) => {
-        if (stopping) void confirmTermination(code);
-        else finish(code);
-      });
+    // Check steps run in the same cwd as the agent steps — the worktree — in their own process
+    // group, shared with worktree setup (#917).
+    const result = await runGroupedCommand({
+      command,
+      cwd: state.cwd,
+      env: process.env,
+      setInterrupt: (stop) => { state.interrupt = stop; },
+      keep: 'head',
+      cap: CHECK_OUTPUT_CAP,
     });
+    emit({ type: 'check-output', stepId: step.id, command, text: result.output, exitCode: result.exitCode ?? -1 });
+    return { ok: result.exitCode === 0, output: result.output };
   }
 
   private finishStep(

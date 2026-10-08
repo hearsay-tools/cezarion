@@ -2762,3 +2762,37 @@ describe('RunRecord.automationTrigger', () => {
     expect(runRecordSchema.parse(LEGACY_RUN).automationTrigger).toBeUndefined();
   });
 });
+
+describe('RunRecord.worktreeSetup (#917)', () => {
+  let dataDir: string;
+  beforeEach(() => { dataDir = mkdtempSync(join(tmpdir(), 'cez-store-setup-')); });
+  afterEach(() => { rmSync(dataDir, { recursive: true, force: true }); });
+
+  const settled = {
+    status: 'done' as const,
+    startedAt: '2026-10-07T10:00:00.000Z',
+    finishedAt: '2026-10-07T10:00:05.000Z',
+    durationMs: 5000,
+  };
+
+  it('round-trips through a reopen', () => {
+    seedRuns(dataDir, [LEGACY_RUN]);
+    const store = RunStore.open(dataDir, { keepLive: true });
+    store.updateRun('legacy-1', { worktreeSetup: settled });
+    store.flush();
+    store.close();
+    const reopened = RunStore.open(dataDir, { keepLive: true });
+    expect(reopened.getRun('legacy-1')?.worktreeSetup).toEqual(settled);
+  });
+
+  it('loads a record with an unreadable worktreeSetup, without the field', () => {
+    seedRuns(dataDir, [{ ...LEGACY_RUN, worktreeSetup: { status: 'bogus' } }]);
+    const store = RunStore.open(dataDir, { keepLive: true });
+    expect(store.getRun('legacy-1')).toBeDefined();
+    expect(store.getRun('legacy-1')?.worktreeSetup).toBeUndefined();
+  });
+
+  it('is absent on a record that predates it', () => {
+    expect(runRecordSchema.parse(LEGACY_RUN).worktreeSetup).toBeUndefined();
+  });
+});

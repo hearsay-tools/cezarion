@@ -4,7 +4,7 @@ import { finished } from 'node:stream/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { parseEffort } from '@open-mercato/cezar-contract';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
 import type {
@@ -20,6 +20,7 @@ import type {
 import { InputSubmissions } from './input-submissions.ts';
 import type { AgentSession, SessionOptions } from './agent-runner.ts';
 import { isSignalTerminationExit, prependSystemPrompt, trackChildExit } from './agent-runner.ts';
+import { signalSession, spawnSessionLeader } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { ciOpenCodeEnv } from '../ci-wait/injection.ts';
 import { parseAskRequest, type AskQuestion } from './ask.ts';
@@ -537,10 +538,10 @@ class OpencodeSession implements AgentSession {
     const serve = this.serve;
     if (serve.signalled || serve.hasExited()) return;
     serve.signalled = true;
-    serve.child.kill('SIGTERM');
+    signalSession(serve.child, 'SIGTERM');
     setTimeout(() => {
       if (serve.hasExited()) return;
-      serve.child.kill('SIGKILL');
+      signalSession(serve.child, 'SIGKILL');
     }, KILL_GRACE_MS).unref?.();
   }
 
@@ -554,7 +555,7 @@ class OpencodeSession implements AgentSession {
     const port = 40000 + Math.floor(Math.random() * 20000);
     let child: ChildProcessWithoutNullStreams;
     try {
-      child = nodeSpawn(this.bin, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
+      child = spawnSessionLeader(this.bin, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
         cwd: this.spec.cwd,
         env: buildChildEnv({ backend: 'opencode', extraEnv: ciOpenCodeEnv(this.spec) }),
       });

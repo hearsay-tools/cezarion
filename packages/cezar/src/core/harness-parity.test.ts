@@ -63,6 +63,7 @@ import {
   WORKFLOW_ASK_CRITERIA,
   FOLLOWUP_CRITERIA,
   SKILL_RESUME_CRITERIA,
+  WORKTREE_SETUP_CRITERIA,
   PARITY_EXEMPTIONS,
   PINNED_SESSION_ID,
   seedOpencodeMockSession,
@@ -1709,6 +1710,7 @@ describe('harness parity — the matrix itself', () => {
     ...WORKFLOW_ASK_CRITERIA.map(c => c.id),
     ...FOLLOWUP_CRITERIA.map(c => c.id),
     ...SKILL_RESUME_CRITERIA.map(c => c.id),
+    ...WORKTREE_SETUP_CRITERIA.map(c => c.id),
     ...AUTONOMOUS_CRITERIA.map(c => c.id),
     ...FINAL_MESSAGE_CRITERIA.map(c => c.id),
     ...NO_PROGRESS_CRITERIA.map(c => c.id),
@@ -1729,6 +1731,8 @@ describe('harness parity — the matrix itself', () => {
     if (followup) return followup.scenario;
     const skillResume = SKILL_RESUME_CRITERIA.find(c => c.id === id);
     if (skillResume) return skillResume.scenario;
+    const worktreeSetup = WORKTREE_SETUP_CRITERIA.find(c => c.id === id);
+    if (worktreeSetup) return worktreeSetup.scenario;
     const autonomous = AUTONOMOUS_CRITERIA.find(c => c.id === id);
     if (autonomous) return autonomous.scenario;
     const finalMessage = FINAL_MESSAGE_CRITERIA.find(c => c.id === id);

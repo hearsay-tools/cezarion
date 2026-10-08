@@ -1,7 +1,7 @@
 import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { randomUUID } from 'node:crypto';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
@@ -20,7 +20,9 @@ import * as runners from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunManager } from './run.ts';
 import { DelegationService } from '../delegation/service.ts';
-import { processStartToken } from '../delegation/process-liveness.ts';
+import type { Backoff } from '../delegation/retry-backoff.ts';
+import { processesWithCwdUnder, processStartToken } from '../delegation/process-liveness.ts';
+import { signalSession, spawnSessionLeader } from '../core/session-process.ts';
 import { blockRunWrites } from '../runs/run-store.testkit.ts';
 
 const until = async (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 });
@@ -640,6 +642,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     it('destroy reaps a recorded child that ignores SIGTERM, then completes', async () => {
       const { w, child, prior, reopened, other, service } = await crashed('failed');
       (other as unknown as { orphanTermGraceMs: number }).orphanTermGraceMs = 500;
+      // A leader spawned outside spawnSessionLeader records no group (hearsay-tools/cezarion#890): pid-only reaping.
+      expect(readRecord(w.id).processes.map(entry => 'pgid' in entry)).toEqual([false]);
       try {
         expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'complete', remaining: [] });
         await child.exited;
@@ -850,10 +854,9 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
     it.each(['inside', 'after'] as const)('a parked parent wait resolves once a survivor dies %s the fast re-probe window', async window => {
       const { w, child, reopened, other } = await crashed('failed');
-      const cadence = other as unknown as { orphanReprobeMs: number; orphanReprobeLimitMs: number; orphanReprobeSlowMs: number };
+      const cadence = other as unknown as { orphanBackoff: Backoff };
       // After the fast window a slow probe remains the wake source; it never gives up.
-      if (window === 'inside') cadence.orphanReprobeMs = 100;
-      else Object.assign(cadence, { orphanReprobeMs: 600_000, orphanReprobeLimitMs: 0, orphanReprobeSlowMs: 100 });
+      cadence.orphanBackoff = window === 'inside' ? { fastMs: 100, fastCount: 60, capMs: 3_600_000 } : { fastMs: 600_000, fastCount: 0, capMs: 100 };
       const owner = reopened.getRun(parent.id)!;
       if (owner.delegation?.role !== 'root') throw Error('fixture');
       reopened.commitDelegation([{ id: parent.id, delegation: { ...owner.delegation, wait: { id: randomUUID(), workerIds: [w.id],
@@ -868,6 +871,41 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         await until(() => !!wait()?.outcomes.some(outcome => outcome.workerId === w.id));
         expect(wait()!.outcomes).toEqual([expect.objectContaining({ workerId: w.id, revision: 0, status: 'failed' })]);
       } finally { other.dispose(); reopened.flush(); }
+    });
+
+    it('scan-only survivors share one /proc scan per reprobe tick, and the reprobe backs off (hearsay-tools/cezarion#879)', async () => {
+      const ids: string[] = []; const holders: Awaited<ReturnType<typeof spawnReady>>[] = [];
+      for (let i = 0; i < 2; i++) {
+        const w = await worker(); store.commitWorkerExecutionStart(w.id);
+        const created = await ensureOwnedWorkspace(root, store.getRun(w.id)!);
+        store.updateRun(w.id, { status: 'failed', worktreePath: created.path, branch: created.branch });
+        rmSync(recordPath(w.id), { force: true }); // legacy: the cwd scan is the only evidence
+        holders.push(await spawnReady(created.path)); ids.push(w.id);
+      }
+      type Cadence = { orphanBackoff: Backoff; orphanDue: Map<string, { at: number; attempts: number }>; armOrphanReprobe(id: string): void };
+      const cadence = manager as unknown as Cadence;
+      cadence.orphanBackoff = { fastMs: 400, fastCount: 2, capMs: 1_600 };
+      const listings = () => vi.mocked(fs.readdirSync).mock.calls.filter(([path]) => path === '/proc').length;
+      // The clock is fake too, so arming the two orphans one after the other cannot drift them apart
+      // under load: recovery arms its orphans in one synchronous pass.
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      try {
+        for (const id of ids) cadence.armOrphanReprobe(id);
+        const before = listings();
+        await vi.advanceTimersByTimeAsync(400);
+        expect(listings() - before).toBe(1);
+        expect(ids.map(id => store.readWorkerExecution(id)?.phase)).toEqual(['starting', 'starting']);
+        expect(ids.map(id => cadence.orphanDue.get(id)?.attempts)).toEqual([1, 1]);
+        // Then 400, 800 and 1,600 ms: past the fast window it doubles to the cap.
+        await vi.advanceTimersByTimeAsync(400 + 800 + 1_600);
+        expect(listings() - before).toBe(4);
+        expect(ids.map(id => cadence.orphanDue.get(id)?.attempts)).toEqual([4, 4]);
+        expect(cadence.orphanDue.get(ids[0]!)!.at - Date.now()).toBeGreaterThan(1_500);
+        for (const holder of holders) { holder.proc.kill('SIGKILL'); await holder.exited; }
+        await vi.advanceTimersByTimeAsync(1_700);
+        expect(ids.map(id => store.readWorkerExecution(id)?.phase)).toEqual(['complete', 'complete']);
+        expect(cadence.orphanDue.size).toBe(0);
+      } finally { vi.useRealTimers(); }
     });
 
     it('destroy waits out a scan-only survivor of a legacy generation instead of returning at once', async () => {
@@ -989,6 +1027,121 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         holder.kill('SIGKILL'); await exited;
         expect(await service.destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
       } finally { holder.kill('SIGKILL'); await exited; detach(); }
+    });
+  });
+
+  // hearsay-tools/cezarion#890: the leader is spawned as a runner spawns it, in its own process
+  // group, and leaves one member working in the worktree.
+  describe('agent session process groups (hearsay-tools/cezarion#890)', () => {
+    type Entry = { pid: number; startToken?: string; pgid?: number };
+    const recordPath = (id: string) => join(root, '.ai/cezar/runs', `${id}.processes.json`);
+    const readRecord = (id: string) => JSON.parse(readFileSync(recordPath(id), 'utf8')) as { generation: string; controller: Entry; processes: Entry[] };
+    const branchExists = (branch: string) => execFileSync('git', ['branch', '--list', branch], { cwd: root, encoding: 'utf8' }).includes(branch);
+    /** A zombie has exited; only its reaper's wait remains. */
+    const alive = (pid: number) => {
+      try { process.kill(pid, 0); } catch { return false; }
+      if (process.platform !== 'linux') return true;
+      try { const stat = readFileSync(`/proc/${pid}/stat`, 'utf8'); return stat.slice(stat.lastIndexOf(')') + 1).trim()[0] !== 'Z'; } catch { return false; }
+    };
+
+    /** `member`: a SIGTERM-ignoring child in the leader's group, or a SIGTERM-sensitive one that
+     * left it with setsid. `leader`: stays up, or exits 0 on its own once the member runs. Before
+     * it exits, one scan sees the member as its descendant, so the fixture's scoped enumeration
+     * still counts it after it is reparented. */
+    async function groupedWorker(opts: { member: 'group' | 'setsid'; leader: 'stay' | 'exit' }) {
+      const w = await worker();
+      const member = opts.member === 'setsid' ? "process.on('SIGTERM',()=>process.exit(42)); setInterval(()=>{},1000)" : "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)";
+      const script = `const m = require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(member)}], { stdio: 'ignore', detached: ${opts.member === 'setsid'} });
+console.log(String(m.pid)); ${opts.leader === 'exit' ? "m.unref(); process.stdin.on('end', () => process.exit(0)).resume();" : 'setInterval(()=>{},1000);'}`;
+      let leader: ChildProcessWithoutNullStreams | undefined; let ready!: (pid: number) => void;
+      const memberPid = new Promise<number>(resolve => { ready = resolve; });
+      vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent', interrupt: async () => undefined,
+        run: async () => { throw Error('unused'); }, startSession: () => {
+          const proc = spawnSessionLeader(process.execPath, ['-e', script], { cwd: workspace(w).path, env: process.env });
+          leader = proc;
+          releases.push(() => { try { process.kill(-proc.pid!, 'SIGKILL'); } catch { /* gone */ } });
+          proc.stdout.once('data', chunk => ready(Number(String(chunk).trim())));
+          const result = new Promise<{ text: string; toolCalls: []; tokensUsed: number }>(resolve => proc.once('exit', () => resolve({ text: '', toolCalls: [], tokensUsed: 0 })));
+          return { pid: proc.pid, result, open: true, sendMessage: () => true, sendAgentMessage: () => Promise.resolve(), discardQueuedMessages: () => {}, holdsHumanInput: () => false,
+            interrupt: () => signalSession(proc, 'SIGTERM'), end: () => signalSession(proc, 'SIGTERM') };
+        } });
+      manager.enqueueOwnedRun(w.id);
+      const pid = await memberPid;
+      releases.push(() => { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } });
+      expect(processesWithCwdUnder(workspace(w).path)).toContain(pid);
+      if (opts.leader === 'exit') leader!.stdin.end();
+      return { w, leader: leader!, member: pid };
+    }
+
+    it("the ledger records the session leader's process group", async () => {
+      const { w, leader } = await groupedWorker({ member: 'group', leader: 'stay' });
+      await until(() => existsSync(recordPath(w.id)) && readRecord(w.id).processes.length === 1);
+      expect(readRecord(w.id)).toMatchObject({ generation: store.readWorkerExecution(w.id)!.generation,
+        processes: [{ pid: leader.pid, pgid: leader.pid, ...(process.platform === 'linux' ? { startToken: expect.any(String) } : {}) }] });
+    });
+
+    const service = (projectStore: RunStore, projectManager: RunManager) => {
+      (projectManager as unknown as { orphanTermGraceMs: number }).orphanTermGraceMs = 500;
+      const delegation = new DelegationService(); delegation.registerProject({ id: 'p', root, store: projectStore, manager: projectManager });
+      return delegation;
+    };
+
+    it.skipIf(process.platform === 'win32')("destroy ends a finished worker's leftover in its process group", async () => {
+      const { w, member } = await groupedWorker({ member: 'group', leader: 'exit' });
+      await until(() => !manager.isActive(w.id) && store.readWorkerExecution(w.id)?.phase === 'complete');
+      expect(alive(member)).toBe(true);
+      expect(await service(store, manager).destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+      expect(alive(member)).toBe(false);
+      expect(existsSync(workspace(w).path)).toBe(false); expect(branchExists(workspace(w).branch)).toBe(false);
+    });
+
+    it.skipIf(process.platform === 'win32')("destroy reaps a crashed generation's recorded group after its leader died", async () => {
+      const { w, leader, member } = await groupedWorker({ member: 'group', leader: 'stay' });
+      await until(() => existsSync(recordPath(w.id)) && readRecord(w.id).processes.length === 1);
+      manager.dispose(); store.updateRun(w.id, { status: 'failed' }); store.flush();
+      const corpse = spawn(process.execPath, ['-e', '']); await new Promise(resolve => corpse.once('exit', resolve));
+      writeFileSync(recordPath(w.id), JSON.stringify({ ...readRecord(w.id), controller: { pid: corpse.pid!, startToken: '1' } }));
+      // Only the leader dies: its member keeps the group, and the worktree, alive.
+      const gone = new Promise(resolve => leader.once('exit', resolve)); process.kill(leader.pid!, 'SIGKILL'); await gone;
+      expect(alive(member)).toBe(true);
+      store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
+      try {
+        expect(await service(reopened, other).destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+        expect(alive(member)).toBe(false);
+        expect(existsSync(workspace(w).path)).toBe(false);
+      } finally { other.dispose(); reopened.flush(); }
+    });
+
+    it.skipIf(process.platform === 'win32')("destroy never signals a dead leader's recorded group that holds nothing of the worker", async () => {
+      const w = await worker();
+      const generation = store.commitWorkerExecutionStart(w.id);
+      await ensureOwnedWorkspace(root, w);
+      store.updateRun(w.id, { status: 'done' }); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
+      // An unrelated group whose number equals the recorded leader's pid, its leader already gone:
+      // the shape a double-fork daemon leaves once a freed number is reused.
+      const script = `const m = require('child_process').spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)"], { stdio: 'ignore' }); console.log(String(m.pid)); m.unref(); setTimeout(() => process.exit(0), 50);`;
+      const foreign = spawn(process.execPath, ['-e', script], { cwd: tmpdir(), detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
+      const member = Number(String(await new Promise<Buffer>(resolve => foreign.stdout!.once('data', resolve))).trim());
+      releases.push(() => { try { process.kill(member, 'SIGKILL'); } catch { /* gone */ } });
+      await new Promise(resolve => foreign.once('exit', resolve));
+      expect(alive(member)).toBe(true);
+      writeFileSync(recordPath(w.id), JSON.stringify({ ...readRecord(w.id), processes: [{ pid: foreign.pid!, pgid: foreign.pid! }] }));
+      const kills = vi.spyOn(process, 'kill');
+      expect(await service(store, manager).destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+      expect(kills.mock.calls.filter(([pid, signal]) => pid === -foreign.pid! && signal !== 0)).toEqual([]);
+      expect(alive(member)).toBe(true);
+    });
+
+    it.skipIf(process.platform === 'win32')('a setsid child keeps destroy incomplete and is never signalled', async () => {
+      const { w, member } = await groupedWorker({ member: 'setsid', leader: 'exit' });
+      await until(() => !manager.isActive(w.id) && store.readWorkerExecution(w.id)?.phase === 'complete');
+      const kills = vi.spyOn(process, 'kill');
+      const result = await service(store, manager).destroyForHuman('p', w.id);
+      expect(result).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+      expect(result.error).toContain(String(member));
+      expect(alive(member)).toBe(true);
+      expect(kills.mock.calls.filter(([pid, signal]) => Math.abs(pid) === member && signal !== 0)).toEqual([]);
+      expect(existsSync(workspace(w).path)).toBe(true);
     });
   });
 });

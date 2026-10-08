@@ -1,9 +1,10 @@
 import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { parseCursorConfigOptions, cursorEffortSelection, type CursorConfigOption } from './cursor-config-options.ts';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { AgentEvent, AgentRunResult, AgentRunner, AgentRunSpec, AgentRunSpecSupport, AgentSession, AgentToolCallRecord, ContentBlock, InputDelivery, SessionOptions } from './agent-runner.ts';
 import { prependSystemPrompt, trackChildExit } from './agent-runner.ts';
+import { signalSession, spawnSessionLeader } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { cezarToolEnvNames } from '../ci-wait/tools.ts';
 import { parseAskMarker, parseAskRequest, type AskQuestion } from './ask.ts';
@@ -148,7 +149,7 @@ class CursorSession implements AgentSession {
     this.stderrBuf = '';
     this.stderrTruncated = false;
     const spec = this.spec;
-    this.attachChild(spawn(this.bin, ['--force', ...(spec.model ? ['--model', spec.model] : []), ...(spec.additionalDirectories ?? []).flatMap(path => ['--add-dir', path]), 'acp'], {
+    this.attachChild(spawnSessionLeader(this.bin, ['--force', ...(spec.model ? ['--model', spec.model] : []), ...(spec.additionalDirectories ?? []).flatMap(path => ['--add-dir', path]), 'acp'], {
       cwd: spec.cwd, env: buildChildEnv({ backend: 'cursor', extraEnv: spec.env }),
     }));
   }
@@ -240,11 +241,11 @@ class CursorSession implements AgentSession {
     if (this.closing || this.settled) return;
     const child = this.child;
     if (!this.hasExited()) {
-      child.kill('SIGTERM');
+      signalSession(child, 'SIGTERM');
       if (this.hungKillTimer) clearTimeout(this.hungKillTimer);
       this.hungKillTimer = setTimeout(() => {
         this.hungKillTimer = undefined;
-        child.kill('SIGKILL');
+        signalSession(child, 'SIGKILL');
       }, HUNG_BOOTSTRAP_KILL_MS);
       this.hungKillTimer.unref();
     }
@@ -461,8 +462,8 @@ class CursorSession implements AgentSession {
   }
   private terminate(): void {
     if (this.hasExited()) return;
-    this.child.kill('SIGTERM');
-    if (!this.killTimer) { this.killTimer = setTimeout(() => { if (!this.hasExited()) this.child.kill('SIGKILL'); }, EOF_KILL_GRACE_MS); this.killTimer.unref(); }
+    signalSession(this.child, 'SIGTERM');
+    if (!this.killTimer) { this.killTimer = setTimeout(() => { if (!this.hasExited()) signalSession(this.child, 'SIGKILL'); }, EOF_KILL_GRACE_MS); this.killTimer.unref(); }
   }
   private fail(message: string): void {
     if (this.failure || this.settled) return;

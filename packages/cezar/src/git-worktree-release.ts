@@ -1,5 +1,5 @@
 import type { WorkerDestroyResult, WorkerWorkspace } from '@open-mercato/cezar-contract';
-import { removeOwnedWorkspace } from './delegation/workspace.ts';
+import { removeOwnedWorkspace, type RemovalReport } from './delegation/workspace.ts';
 import { removeWorktree, type RemoveWorktreeOptions } from './git-worktree.ts';
 import type { PreviewHostLike } from './preview/registration.ts';
 
@@ -36,8 +36,9 @@ export async function releaseThenRemoveOwnedWorkspace(
   workspace: WorkerWorkspace,
   assertCurrent?: () => void,
   assertUnheld?: () => void,
+  report?: RemovalReport,
 ): Promise<WorkerDestroyResult> {
   return removeOwnedWorkspace(repoRoot, workspace, assertCurrent, async () => {
     await deps.previewHost?.release(workspace.ownerRunId).catch(() => undefined);
-  }, assertUnheld);
+  }, assertUnheld, report);
 }

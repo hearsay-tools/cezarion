@@ -1144,7 +1144,8 @@ never blocks startup):
   "defaultRunner": "claude", // agent backend: "claude" (default) · "codex" · "opencode" · "pi"
   "modelsLocked": true,      // optional: native per-runner model is fixed/read-only; runner stays selectable
   "plannerModel": "sonnet",  // model the "Plan first" button uses to draft chains
-  "baseBranch": "develop"    // branch worktrees fork from + PRs target (also settable in the Git tab)
+  "baseBranch": "develop",   // branch worktrees fork from + PRs target (also settable in the Git tab)
+  "worktreeSetup": { "commands": ["npm ci"] } // prepare each new worktree before the agent starts (below)
 }
 ```
 
@@ -1166,6 +1167,56 @@ root — live once in `~/.cezar/config.json`, alongside the
 **Settings → Resources** and **Settings → Projects**. A `maxParallel` left over
 in a repo's `.ai/cezar/config.json` is imported into the workspace file the
 first time cezar boots there, and ignored afterwards.
+
+### Preparing new worktrees
+
+Every task and worker runs in a fresh worktree, and a fresh worktree has nothing installed. Give
+the project a `worktreeSetup` and cezar runs those commands in each new worktree before the
+agent's first turn, so the agent (and anything that runs beside it, such as a test watcher)
+starts in a ready tree:
+
+```jsonc
+// .ai/cezar/config.json
+"worktreeSetup": {
+  "commands": ["npm ci", "cp \"$CEZ_PROJECT_ROOT/.env\" .env"],
+  "timeoutSeconds": 900 // optional, per command; default 900, max 7200
+}
+```
+
+Or edit it in **Settings → Worktrees → Prepare new worktrees**, one command per line. Only a
+cockpit on the machine running cezar can change it: a hosted cockpit (`CEZ_REMOTE=1`) shows it
+read-only, because these are commands the host runs.
+
+- **When it runs.** In every new task worktree and every worker worktree, and again when Continue
+  rebuilds a worktree that retention reclaimed. Never for a task that runs in the repo working
+  tree (worktree off), and never for a non-git directory.
+- **How it runs.** Each command runs as `bash -lc '<command>'` in the worktree root, in order,
+  and the setup stops at the first command that fails or times out. Up to 20 commands.
+- **What it can see.** The same curated environment the live preview gives a dev server: your
+  `PATH`, `HOME` and the shell basics, but no agent API keys and no GitHub token. A private
+  registry token reaches it through `CEZ_ENV_PASSTHROUGH=NPM_TOKEN` (or the tool's own config
+  file under `HOME`). It also gets `CEZ_PROJECT_ROOT` (the main checkout, for copying untracked
+  files like `.env`) and `CEZ_TASK_ID`.
+- **What you see.** The task thread shows a "Ran `<command>`" card per command with its output
+  (the last 20 KB) and a line with the outcome and duration, which also goes into the handoff
+  file.
+- **What the agent sees.** Its first message says what ran, so it doesn't repeat the install.
+  If a command fails or times out, the agent still starts and its first message names the
+  command, the exit code and the end of the output, so it can fix the cause or work around it.
+- **Keep generated files gitignored.** Autosave commits whatever Git doesn't ignore, so anything
+  setup creates outside `.gitignore` becomes part of the task's changes. `node_modules/` and
+  `.venv/` are usually ignored already.
+
+Without the key nothing runs, exactly as before. Examples:
+
+| Project | `commands` |
+| --- | --- |
+| npm | `["npm ci"]` |
+| pnpm | `["pnpm install --frozen-lockfile"]` |
+| Python (uv) | `["uv sync --frozen"]` |
+| Go | `["go mod download"]` |
+| Rust | `["cargo fetch"]` |
+| Copy local env | `["cp \"$CEZ_PROJECT_ROOT/.env\" .env"]` |
 
 ### Editing the agents' own config (Settings → Agent config)
 

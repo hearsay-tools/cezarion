@@ -889,6 +889,16 @@ output transport must terminate the live child. OpenCode uses its real HTTP/SSE
 stream for the transport failure, while the other backends use stdout.
 Requested teardown remains successful. The matrix has no wire exemptions.
 
+**S26–S28** (hearsay-tools/cezarion#890), in the same file, start every `RUNNER_IDS` backend's
+native mock with `mock:no-progress-leftover`. The mock leaves two children in its cwd: one in
+the session's process group that ignores SIGTERM, and one that left the group with `setsid`.
+S26: the session leader leads its own process group (`pgid` equals its pid). S27: `interrupt()`
+ends the leader and the in-group child, and the `setsid` child keeps running. S28: `end()` on a
+leader that cannot process EOF or SIGTERM escalates to SIGKILL for the whole group, with the
+same outcome. Every runner spawns and signals through `core/session-process.ts`, which also
+sends the group its SIGKILL when a member outlives a leader cezar stopped. win32 has no process
+groups and skips these rows; it ends the tree with `taskkill /T /F`. No wire exemptions.
+
 **R43** (hearsay-tools/cezarion#738), in `workflows/worker-reboot-parity.test.ts` and
 `workflows/worker-location-evidence.test.ts`, drives every `RUNNER_IDS`
 backend's `HARNESS_ADAPTERS` native wire through worker cancellation and a successful twin.
@@ -957,6 +967,13 @@ id (OpenCode GETs `/session/{id}` and does not `POST /session`; the other runner
 resume channel). A fresh-session continuation on an `in-thread` runner still receives the
 skill. OpenCode's lost-session 404 fallback is covered alongside R57: one notice, a new
 session id, skill present in the fresh session's system prompt. No runner is exempt.
+
+**R58** (hearsay-tools/cezarion#917), in `core/worktree-setup-parity.test.ts`, drives every
+`RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire on a task in an isolated
+worktree whose project declares `worktreeSetup`. The setup runs before the first turn, the run
+records `worktreeSetup.status === 'done'`, and the paragraph saying what ran reaches the opening
+message on each runner's own wire. The note is appended in `workflows/run.ts` before the
+runner seam, so no runner can lose it on the way. No runner is exempt.
 
 Crash-diagnostic rows **S15–S17** (hearsay-tools/cezarion#499) drive every `RUNNER_IDS` adapter's
 native transport through an uncaught-exception-shaped stderr fixture, a plain

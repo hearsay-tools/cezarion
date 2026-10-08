@@ -1,7 +1,9 @@
 # Finalizing a crashed worker's execution proof (hearsay-tools/cezarion#469)
 
 Status: approved design (2026-09-26), revised with human approval for hearsay-tools/cezarion#738 (2026-10-04) and
-for hearsay-tools/cezarion#889 (2026-10-07), which reverses #738's rule that an unreadable cwd is a possible holder. Extends
+for hearsay-tools/cezarion#889 (2026-10-07), which reverses #738's rule that an unreadable cwd is a possible holder, and
+for hearsay-tools/cezarion#890 (2026-10-07), which runs each agent session in its own process group, and
+for hearsay-tools/cezarion#879 (2026-10-07), which backs off the three cleanup loops (section 6). Extends
 `2026-09-06-owned-workers-isolated-worktrees.md` ("destroy awaits proven termination").
 
 ## Problem
@@ -42,8 +44,12 @@ A second private file next to `<id>.execution.json`, written with the same disci
 ```json
 { "generation": "<uuid>",
   "controller": { "pid": 1234, "startToken": "..." },
-  "processes": [{ "pid": 5678, "startToken": "..." }] }
+  "processes": [{ "pid": 5678, "startToken": "...", "pgid": 5678 }] }
 ```
+
+`pgid` (hearsay-tools/cezarion#890) is present when the session leader leads its own process
+group, which every runner's leader does on POSIX (`core/session-process.ts`). It always equals
+the pid. An entry without it (a leader recorded before #890, or on win32) keeps pid-only handling.
 
 - `commitWorkerExecutionStart` writes it fresh with the new generation and the current
   process as `controller`, before it returns.
@@ -183,8 +189,8 @@ Callers:
   `finalizedWorkers` entry.
 - **The re-probe timer** is what fires when a survivor dies after recovery. `recover()`
   arms one unref'd timer for each orphan it could not finalize (`alive`, `unknown`, or a
-  failed commit). It probes every 15 s for the first 15 minutes, then every 60 s with no cap,
-  so a survivor that lives for hours is still noticed when it exits. It skips a tick while the
+  failed commit). It probes every 15 s for the first 15 minutes, then backs off to hourly
+  (section 6), so a survivor that lives for hours is still noticed when it exits. It skips a tick while the
   run is queued or active, and it stops on finalization, a changed generation, a deleted run,
   an unknown record, or dispose. Finalization emits `run`,
   which reconciles the parent's worker waits, so a parked parent wakes.
@@ -210,6 +216,23 @@ signal, so it skips step 1 and still waits in step 3:
 A live controller, or a controller that is this process, is never reaped from. The first
 belongs to another cezar. The second is the ordinary `cancel` path.
 
+**Recorded process groups (hearsay-tools/cezarion#890).** An entry with a `pgid` is signalled as a
+group in step 1, so what the agent left in its group (a dev server, a watcher) exits with it. The
+group may be signalled when its live leader is the exact recorded incarnation. A live pid of
+another incarnation means the group emptied and its number was reused, so it is skipped; so is a
+live leader with no token. A dead leader proves nothing by itself: its number may have been freed
+and reused since, and a double-fork daemon leaves exactly a live group whose leader is gone. So a
+dead leader's group is signalled only while a process that holds the worker's worktree or scratch
+is in it. Linux frees a pid number only when no task uses it as a pid, pgid or sid, and XNU skips
+a candidate pid while a process group holds it, so that holder keeps the number ours.
+
+Destroy also signals the recorded groups of a **finished** generation. Once
+`awaitRunTermination` proves the generation `complete`, it sends SIGTERM to each recorded group
+that still has members, waits up to `orphanTermGraceMs`, then sends SIGKILL. A record whose
+controller is another live cezar is skipped. This covers the agent that exits normally and
+leaves a dev server holding the worktree, which otherwise kept destroy `incomplete` forever.
+Settlement, admission, scratch cleanup and history deletion never signal anything.
+
 ### 5. Durable independent cleanup and admission fencing
 
 The private execution checkpoint records terminal scratch-cleanup intent (resource identity and
@@ -222,8 +245,7 @@ unreadable/malformed sidecars reserve those locations. Missing terminal intent i
 not permission to remove a legacy worker's scratch; restoring usable evidence permits retry.
 
 Recovery and project reattach reconstruct timers. The first attempt is deferred; each incomplete
-attempt retries after the same 60-second cadence as pending destroy, without an agent slot, age
-limit or force deletion. Disposal/detach cancels timers, including failed evidence-discovery retries.
+attempt retries on the backoff of section 6, without an agent slot, age limit or force deletion. Disposal/detach cancels timers, including failed evidence-discovery retries.
 A timer stops when resources are removed or a known task ceases to be terminal. A changed
 generation/resource invalidates the captured operation; the new completed generation supplies
 its own intent. Unknown execution/process evidence and path permission errors retain files and
@@ -238,13 +260,13 @@ an atomic private receipt under local scratch binds previously verified ownershi
 device, inode and birth time. This survives an interrupted removal that already deleted the owner
 marker. A missing marker may use only the matching receipt; unreadable/foreign ownership still
 blocks, and the receipt cannot authorize a replacement directory. Failed fallback removal retains both pointer and receipt, so
-restart and the ordinary 60-second retry can finish after permissions and holders clear. The local
+restart and the ordinary backed-off retry can finish after permissions and holders clear. The local
 pointer/receipts are removed only after every fallback is proven absent.
 
 Pointer and removal-receipt reads are independent: neither failure discards a candidate discovered
 by the other. Malformed/unreadable evidence marks the list incomplete, which also blocks legacy
-execution settlement after known holders exit. The orphan reprobe keeps its existing 15-second,
-then 60-second uncapped cadence; evidence restoration permits settlement on a later probe. A
+execution settlement after known holders exit. The orphan reprobe keeps its 15-second first
+window, then backs off (section 6); evidence restoration permits settlement on a later probe. A
 known-reboot execution proof remains independent, but incomplete discovery always refuses cleanup
 or reuse. Removal receipts continue to require exact directory identity; their location value alone
 never authorizes deletion.
@@ -253,7 +275,8 @@ Destroy remains an explicit persisted request for worktree/branch removal. Colle
 requests it. Existing authorized retention after parent Finish keeps its behavior, with the same
 fresh holder proof and preserved parent result required. Destroy retains the immutable parent
 result before destructive work and returns settled-but-cleanup-incomplete when holders remain.
-The ordinary 60-second destroy timer rearms after recovery and retries until independently safe.
+The destroy timer rearms after recovery and retries, backing off as section 6 describes, until
+independently safe.
 
 Cleanup and execution admission exclude one another. Scratch's fresh ownership/generation/probe
 and deletion are synchronous with no yield; asynchronous workspace cleanup holds the manager's
@@ -263,6 +286,76 @@ resume, replies and pump admission. A stale retry cannot delete a newer executio
 History deletion checks holders before removing evidence, removes scratch while process/generation
 evidence still exists, and refuses to forget an intent whose scratch removal failed.
 
+### 6. Backing off the cleanup loops (hearsay-tools/cezarion#879)
+
+Each loop is the only wake source for its state: cezar has no exit callback for a process it did not
+spawn, and a pending destroy holds its parent's worker slot until cleanup completes. So no loop
+stops. Each stays fast for a first window, then doubles to an hourly cap (`delegation/retry-backoff.ts`):
+
+| Loop | First window | Then |
+| --- | --- | --- |
+| Destroy retry | 5 attempts, 60 s apart | 2, 4, 8, 16, 32 minutes, then hourly, stretched by up to 10 % |
+| Terminal scratch reprobe | 5 probes, 60 s apart | the same doubling to hourly, no jitter |
+| Orphan reprobe | 60 probes, 15 s apart | 30 s, 1, 2 ... minutes, to hourly, no jitter |
+
+Before hearsay-tools/cezarion#879 these were fixed: 60 s forever, and 15 s then 60 s forever. On one host 25 stuck
+destroys and 122 retained scratch dirs took about half the serve's busy time.
+
+**One `/proc` scan per reprobe tick.** The scratch and orphan reprobes each keep one timer for
+every pending id. A tick probes each due id synchronously, sharing one lazily taken cwd snapshot
+(`sharedCwdScan`), and re-arms what it keeps from the tick's own instant, so ids that probed
+together keep probing together; ids due within 5 % of the fast cadence ride along. The snapshot
+never outlives the synchronous tick, and scratch's probe-then-remove still has no yield. Destroy's
+final proof before Git removal, admission and history deletion never receive a snapshot: they scan
+fresh. A repeated terminal event keeps a pending scratch id's place in its backoff; a new
+generation starts over.
+
+**Destroy skips what it already tried.** A full attempt records the state it decided on
+(`delegation/destroy-observation.ts`), taken right after the termination proof and again at each
+holder proof inside the removal: after the attempt's own writes (stopping the worker, the removal's
+checkpoint), which are therefore not a change, and before the checks it decides on, so any later
+change is. Validation that fails earlier in the removal acts on state at least as new. The key: the worker record without `destroy`, the parent's receipt,
+the execution checkpoint, the process record, the scratch locations, the worktree, its admin dir,
+lock and ownership marker and, through the cached common Git dir, the ownership receipt and its
+cleanup checkpoint, the branch ref, `packed-refs`, the branch reflog and the linked-worktree admin
+dirs. File stamps include `ctime` and `mode`, so an in-place repair or a `chmod` counts. It also
+records the holders it named, each pinned to its start token; the removal turns a held error into
+an incomplete result, so they are kept where the proof finds them. A scheduled tick skips the
+attempt (no transcript read, no git, no `/proc` scan, no snapshot write) when its fresh
+observation is the same and every holder still holds: the same live process and, unless it is in
+the generation's process record, still working under the worktree or a scratch location (one
+`readlink` each on Linux; liveness alone elsewhere). Anything else, including a holder exiting or
+moving away, runs it in full. A project's automatic full attempts run one at a time, so the
+attempts that coincide (every pending destroy on the first tick after a restart) do not contend
+for the worktree mutation lock. A failure that neither the key nor a named holder explains is never
+skipped: a failed Git step (a holder only Windows' checked removal can see, a stale ref lock), lock
+contention (every attempt takes that lock, so its stamp cannot be in the key) or a throw. The removal
+reports it through `RemovalReport.unexplained`, and it retries in full on the backoff. So is a holder
+check that names no process: what decides it includes scratch ownership evidence (the owner marker,
+the fallback pointer, removal receipts) that the key does not read. So is every refusal that rests on
+repository state outside the key: the worktree's HEAD on another branch, the branch checked out by
+another registered worktree, and a receipt-gone destroy refused by an ownership marker in any linked
+admin directory. Each remaining refusal in `removeOwnedWorkspace` reads only keyed inputs.
+
+**Retry state and attention.** Every tick writes the run's top-level `destroyRetry`
+(`{ attempts, nextAt, needsAttention? }`), never the strict worker delegation, so an older cezar
+strips it instead of quarantining the worker; inspection and relationships show it as
+`destroy.retry`. The write is destroy progress, so it does not reconcile the family. A restart
+resumes the persisted `nextAt` (floored at the fast cadence, capped a little over the hourly cap). From the tenth attempt, the first capped one, the destroy
+`needsAttention`, and the cockpit's worker row says so with the next check. An explicit destroy
+(Retry clean up, `cez worker destroy`) runs in full, drops `retry` and re-arms at the fast cadence.
+Continue stays refused for a destroying worker. A completed destroy drops `retry`. An attempt that
+throws records `incomplete` and its message, where it used to leave an in-progress phase with no
+error.
+
+A repeated full attempt that collects the same evidence writes no worker-result snapshot:
+`commitWorkerResult` returns the stored result when only `observedAt` and the snapshot identity
+would differ, and destroy's pre-removal durability commit also ignores the cleanup phase.
+
+Measured by `packages/cezar/scripts/benchmark-stuck-destroys.ts` (20 settled workers, each with a
+worktree and scratch held by a process, against none, over 10 minutes at production cadence); the
+before and after table is in the hearsay-tools/cezarion#879 pull request.
+
 The original hearsay-tools/cezarion#738 acceptance criterion that cleanup always succeeds after reboot is explicitly
 narrowed: **execution settlement, collection and parent Finish unblock once execution is proven
 terminated; eventual cleanup requires independent fresh proof that no readable holder, live
@@ -271,8 +364,13 @@ remain indefinitely.** An unreadable cwd never withholds that proof (hearsay-too
 
 ## Not changing
 
-- Shutdown still leaves sessions running (`dispose()` contract); reaping at SIGTERM is out
-  of scope.
+- `dispose()` still leaves sessions running. Since hearsay-tools/cezarion#890, `cez serve`
+  forwards its SIGINT and SIGTERM to every live agent process group as its last step, after the
+  store has closed, so an agent ended that way cannot settle its run and restart recovery resumes
+  it. `cez run` forwards the signal and still ends by it. Before #890 the terminal delivered
+  Ctrl-C to agents through cezar's foreground group, and a `kill <cez pid>` left them running.
+  SIGHUP is not handled, so `nohup` keeps working. The application-update restart
+  (`shutdownForRestart`) signals nothing.
 - `commitWorkerExecutionStart`'s refusal to replace an incomplete generation is unchanged.
   The finalizer completes the old generation first, through the existing
   `commitWorkerExecutionComplete`.
@@ -292,13 +390,41 @@ remain indefinitely.** An unreadable cwd never withholds that proof (hearsay-too
   unrecorded process still working in the worktree does not stop a new generation from starting
   there. Keeping `unknown` for admission instead refused the next generation of every
   materialized worker, so Continue never worked on win32 and destroy was the only exit.
-- Reaping signals only the recorded session leader. Runners do not spawn detached, so there
-  is no process group to kill. A descendant that survives the leader keeps its cwd in the
-  worktree, and the scan keeps destroy `incomplete` (naming the PIDs) until it exits.
+- A descendant that calls `setsid` or `setpgid` leaves its session's process group
+  (hearsay-tools/cezarion#890). It is never signalled, and the scan keeps destroy `incomplete`
+  (naming its PID) until it exits.
+- win32 has no process groups. `taskkill /T /F` walks parent pids at call time and misses a
+  grandchild whose parent already exited. Windows Job Objects would close that gap; Node does not
+  expose them.
+- Agent sessions have no controlling terminal (hearsay-tools/cezarion#890). A tool that opens
+  `/dev/tty`, such as an ssh or gpg prompt, fails instead of prompting on cezar's terminal.
+- Closing the terminal does not signal agents: cezar handles no SIGHUP. SIGKILL or a crash of
+  cezar leaves agents running, as before; destroy's reaping covers a worker's.
+- A leftover whose session leader already exited is reached only while it can be proven ours.
+  Shutdown forwarding signals such a group only while a member recorded at the leader's exit is
+  still the same process in it, and destroy only while a holder of the worker's paths is in it.
+  A leftover that started after its leader exited, or that holds nothing of the worker, can
+  outlive both.
 - The scan sees only same-user processes in this PID namespace. A process in another
   container that holds the worktree is invisible to it.
 
 ## Tests
+
+- hearsay-tools/cezarion#890:
+  - `core/session-process.test.ts`: a leader leads its own group; a signalled session's member
+    that ignores SIGTERM gets SIGKILL after its leader exits; a `setsid` member and the members
+    of a leader that exited on its own are not signalled; a fake child never reaches
+    `process.kill(-pid)`; forwarding reaches a member whose leader exited and stops once the group
+    is empty. `session-process-win32.test.ts` pins `taskkill /T /F /PID`.
+  - Harness rows S26–S28 (`core/runner-shutdown-parity.test.ts`), every `RUNNER_IDS` backend's
+    native mock: own group, Stop and `end()` escalation end the group, a `setsid` child survives.
+  - `worker-destroy.test.ts`: the ledger records `pgid`; destroy ends a finished worker's leftover
+    and a crashed generation's group whose leader already died; a `setsid` child keeps destroy
+    `incomplete` by name and is never signalled. `process-liveness.test.ts` pins
+    `recordedGroupSignalable`, including a reused leader pid.
+  - `session-signal-cli.test.ts`: the real `cez serve` and `cez run`, started as a shell starts a
+    foreground job; Ctrl-C and SIGTERM end the agent, the run stays `running`, and `cez run`
+    still ends by SIGINT.
 
 - `process-liveness.test.ts`:
   - token parsing (a comm with spaces and `)`);

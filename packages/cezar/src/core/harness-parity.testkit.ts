@@ -106,6 +106,7 @@ export const SCENARIOS = [
   'no-progress-ignore-term',
   'no-progress-held-pipe',
   'no-progress-ack-only',
+  'no-progress-leftover',
   'busy-progress',
   'split-text',
   'provider-error',
@@ -130,6 +131,10 @@ export const SHUTDOWN_CRITERIA = [
   { id: 'S22', scenario: 'no-progress', name: 'treats an outside signal as failure' },
   { id: 'S23', scenario: 'no-progress', name: 'end escalates when the child cannot process EOF or SIGTERM' },
   { id: 'S24', scenario: 'no-progress', name: 'stops the live child when its output transport fails' },
+  // hearsay-tools/cezarion#890: the session leader's own process group.
+  { id: 'S26', scenario: 'no-progress-leftover', name: 'the session leader leads its own process group' },
+  { id: 'S27', scenario: 'no-progress-leftover', name: "stop ends the leader's process group but not a setsid child" },
+  { id: 'S28', scenario: 'no-progress-leftover', name: 'end escalation reaches the whole process group' },
 ] as const;
 
 /** #427: portable intermediate asks, through every native message wire. */
@@ -217,6 +222,11 @@ export const SKILL_RESUME_CRITERIA = [
   { id: 'R57', scenario: 'baseline', name: 'reuses the recorded session id on Continue and recover' },
 ] as const;
 
+/** hearsay-tools/cezarion#917: worktree setup's note reaches every runner's opening message. */
+export const WORKTREE_SETUP_CRITERIA = [
+  { id: 'R58', scenario: 'baseline', name: 'delivers the worktree setup note in the opening message' },
+] as const;
+
 export interface HarnessAdapter {
   readonly backend: RunnerId;
   /** Every human ask wire this runner exposes; marker fallback when none exists. */
@@ -293,7 +303,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
-      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
+      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
       // Claude's mock has carried an auth-rejection branch since #430.
       'provider-error': 'mock:auth-error',
@@ -338,7 +348,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
-      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
+      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
       // #83: 0.147 reports provider rejection on turn/completed with turn.error.
       'provider-error': 'mock:provider-error',
@@ -387,7 +397,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
-      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
+      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
@@ -422,7 +432,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
-      'crash-stderr-single': 'mock:crash-stderr-single', done: 'mock:done', hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
+      'crash-stderr-single': 'mock:crash-stderr-single', done: 'mock:done', hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text', 'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       ask: 'mock:ask',
@@ -454,7 +464,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
-      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
+      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
@@ -504,7 +514,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
-      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
+      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
@@ -862,8 +872,12 @@ export async function driveRun(
   options: {
     autonomous?: boolean;
     workflowDef?: WorkflowDef;
-    /** Called with the fresh store and manager before the run starts (to observe either). */
-    beforeStart?: (context: { store: RunStore; manager: RunManager }) => void;
+    /** Called with the fresh store and manager before the run starts (to observe either), and
+     *  the repo root, so a row can write the project's `.ai/cezar/config.json` (#917). */
+    beforeStart?: (context: { store: RunStore; manager: RunManager; repoRoot: string }) => void;
+    /** Run in an isolated task worktree instead of in place (#917: worktree setup only runs
+     *  there). Default false, which every earlier row relies on. */
+    worktree?: boolean;
     /** Runs after startRun, in parallel with the settle loop — inject a mid-turn follow-up (#486). */
     during?: (context: { store: RunStore; manager: RunManager; runId: string }) => Promise<void>;
     /** Environment overrides restored after the run settles. */
@@ -872,7 +886,7 @@ export async function driveRun(
     mockBin?: string;
   } = {},
 ): Promise<RunObservation> {
-  const { beforeStart, during, env, mockBin, ...runOptions } = options;
+  const { beforeStart, during, env, mockBin, worktree, ...runOptions } = options;
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
   const savedDry = process.env.CEZ_DRY_RUN;
@@ -894,12 +908,12 @@ export async function driveRun(
     await execFileAsync('git', [...GIT_IDENTITY, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     manager = createFixtureManager(store, repoRoot);
-    beforeStart?.({ store, manager });
+    beforeStart?.({ store, manager, repoRoot });
     const started = manager.startRun(runOptions.workflowDef ?? SINGLE_STEP, {
       ...runOptions,
       task: typeof scenario === 'string' ? promptFor(backend, scenario) : scenario.prompt,
       runner: backend,
-      worktree: false,
+      ...(worktree === true ? {} : { worktree: false as const }),
     });
     let duringError: unknown;
     const duringWork = during
