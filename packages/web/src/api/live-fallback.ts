@@ -102,7 +102,14 @@ export function createLiveFallback(
     }
   }
   return {
-    start() { if (!stopped) { if (!controller) { clearTimeout(timer); timer = undefined; void cycle() }; return }; stopped = false; workspaceAt = runsAt = -Infinity; void cycle() },
+    start(workspaceReconciled = false) {
+      if (!stopped) { if (!controller) { clearTimeout(timer); timer = undefined; void cycle() }; return }
+      stopped = false
+      // Restoration already awaited this wave; resume its normal freshness cadence.
+      workspaceAt = workspaceReconciled ? Date.now() : -Infinity
+      runsAt = -Infinity
+      void cycle()
+    },
     refresh() { workspaceAt = runsAt = -Infinity; for (const path of readAt.keys()) readAt.set(path, -Infinity); if (!controller && !stopped) { clearTimeout(timer); timer = undefined; void cycle() } },
     stop() { stopped = true; readAt.clear(); clearTimeout(timer); timer = undefined; clearTimeout(deadline); deadline = undefined; controller?.abort() },
   }

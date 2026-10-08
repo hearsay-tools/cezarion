@@ -842,11 +842,9 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
 
     const onVisibilityChange = (): void => {
       if (document.visibilityState !== 'visible') return
-      // The phone-in-a-pocket case: mobile browsers freeze background tabs, so the stream may have
-      // been dead for an hour with no error handler ever running. Whatever is on screen right now
-      // is what the reader is about to trust, so ask the server before they read it.
+      // The coordinator authenticates and reconciles on restore. Only flush local
+      // queued patches here; a second invalidation would cancel its recovery reads.
       runListBatcher.flush()
-      reconcile(queryClient)
       if (!source || source.readyState === CLOSED) {
         // Don't make them wait out a backoff that started while they were away.
         clearTimeout(reopenTimer)
@@ -856,28 +854,19 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
     }
 
     const onPageHide = (): void => {
-      // Full navigation away. React never unmounts for those — the document goes to the
-      // back/forward cache still holding this socket, and six cached documents exhaust the
-      // browser's per-origin connection pool: the *next* page load then hangs waiting for a
-      // free socket. Close eagerly; pageshow reopens if the document ever comes back.
+      // Keep the subscription registered while the coordinator releases its wire
+      // demand. Recreating it on pageshow would bypass authenticated restoration.
       clearTimeout(reopenTimer)
       reopenTimer = undefined
       runListBatcher.flush()
-      source?.close()
-    }
-
-    const onPageShow = (event: PageTransitionEvent): void => {
-      // Only a bfcache restore (`persisted`) finds this document alive with its stream closed
-      // by onPageHide; on a normal load this effect just ran and the stream is fresh.
-      if (!event.persisted) return
-      reconcile(queryClient)
-      connect()
     }
 
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('pagehide', onPageHide)
-    window.addEventListener('pageshow', onPageShow)
-    const stopReconcile = onLiveReconcile((signal, periodic) => reconcile(queryClient, signal, periodic))
+    const stopReconcile = onLiveReconcile((signal, periodic) => {
+      runListBatcher.flush()
+      return reconcile(queryClient, signal, periodic)
+    })
     connect()
 
     return () => {
@@ -891,7 +880,6 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
       relationshipsRefresher.cancel()
       document.removeEventListener('visibilitychange', onVisibilityChange)
       window.removeEventListener('pagehide', onPageHide)
-      window.removeEventListener('pageshow', onPageShow)
       // Explicit: an EventSource keeps its socket (and its retry loop) alive on its own, so a
       // dropped reference leaks a connection per remount, and StrictMode remounts every effect.
       source?.close()

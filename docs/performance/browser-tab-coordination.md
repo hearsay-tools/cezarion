@@ -8,6 +8,8 @@ The full tab matrix missed 72 of 130 ordinary GET deadlines before the change an
 
 Measurements use production builds with polling enabled, real HTTP/1.1, one Chrome profile per case, and fixture-owned local state. The baseline is `c961c04ab6633373ec8377cf08674814d255a760`; the implementation includes the subsequent `origin/main` integration at `f9d6e9f6`. The implementation was committed as `db0bb085` during measurement, without changing the built files. The final after reports record the starting Git state and built-content SHA256; the tab and native-window after samples use the same artifact. The original baseline predates the hash field; the native-window baseline records the preserved baseline artifact hash. No real agent or paid provider runs in the fixture.
 
+These measurements cover the `db0bb085` artifact. Later review fixes for prefixed API deployments and restoration reconciliation are verified by focused regressions and browser lifecycle tests; the performance matrix has not been resampled for those follow-ups.
+
 The maintained [harness](../../packages/web/scripts/benchmark-tabs.ts) covers overview pages, duplicate views of one task, and distinct tasks across two projects, each with 1/3/6/10 tabs. Each case has five seconds of cold-load/warmup observation followed by 20 seconds of sampling, either idle or streaming 20 small assistant messages per second per selected run. Exactly one tab is visible in the tab matrix; the supplement uses separate native windows. CDP observes worker traffic as well as page traffic before navigation. Ordinary GET probes have a two-second deadline. Real mouse clicks open the command palette, and the measured result is the rendered dialog; this measures local interaction responsiveness, not a server mutation round-trip.
 
 Host: Linux 6.8.0-142-generic, AMD Ryzen 9 5950X, 24 reported CPU cores, reported RAM between 45.4 and 46.6 GiB across the samples. Browser: Chrome 154.0.8037.97. This is a shared development host. Each case ran once, without randomization or confidence intervals.
@@ -91,7 +93,7 @@ The real [preview test](../../packages/web/e2e/live-preview.e2e.ts) receives and
 - Hidden documents release demand immediately; crashed/frozen owners are reclaimed by 15-second leases or the independent feed watchdog. Whole-browser/OS suspension can delay timers until execution resumes.
 - Caches, React rendering and initial hydration remain document-local, so memory is not constant with tab count. A background tab saves live work but still retains its page.
 - Baseline samples ran while other development work was present. After samples were collected separately from the full gate. CPU/RSS numbers are descriptive only. The robust comparison is connection bounds and actual completed/deadline-missed requests.
-- An earlier after run and an incomplete rerun that hit a CDP navigation timeout were retained as local diagnostics and excluded from these tables. They are not substituted for the final build's samples.
+- An earlier after run and an incomplete rerun that hit a CDP navigation timeout were retained as local diagnostics and excluded from these tables. The tables use only the measured artifact identified above.
 
 ## Reproduce
 

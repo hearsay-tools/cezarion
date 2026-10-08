@@ -110,7 +110,7 @@ export function createLiveCoordinator() {
       if (!entry.released && active && !parentSignal) { ++epoch; start() }
     }
   }
-  const start = () => {
+  const start = (workspaceReconciled = false) => {
     if (disposed || restoration || !session || !subscriptions.size || !pageIsActive()) return
     active = true
     const apiUrl = new URL(session.apiBase || '/', location.href)
@@ -118,7 +118,7 @@ export function createLiveCoordinator() {
     // use document-authenticated finite requests, which preserve the configured base.
     if (!session.local || apiUrl.origin !== location.origin || apiUrl.pathname !== '/' || workerFailed || typeof SharedWorker !== 'function') {
       for (const entry of available()) entry.handlers.ready?.()
-      fallback.start()
+      fallback.start(workspaceReconciled)
       return
     }
     if (worker) { for (const entry of available()) entry.handlers.ready?.(); sync(); return }
@@ -189,7 +189,7 @@ export function createLiveCoordinator() {
       current.signal.throwIfAborted()
       if (restoration !== current) return
       restoration = undefined; restoreFailures = 0
-      start()
+      start(true)
     })().catch(() => {
       if (restoration !== current || disposed || !pageIsActive()) return
       active = false
