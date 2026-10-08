@@ -86,7 +86,7 @@ The real [preview test](../../packages/web/e2e/live-preview.e2e.ts) receives and
 
 ## Remaining limits
 
-- Remote deployments and unavailable/failed workers use finite authenticated HTTP, with no ordinary persistent SSE or WebSocket. Expected freshness is about two seconds for tasks and five seconds for workspace reconciliation, plus transport delay; failures back off up to 30 seconds. Simultaneously visible remote tabs still duplicate finite requests.
+- Remote deployments, configured API bases with a path prefix, and unavailable/failed workers use finite authenticated HTTP, with no ordinary persistent SSE or WebSocket. Expected freshness is about two seconds for tasks and five seconds for workspace reconciliation, plus transport delay; failures back off up to 30 seconds. Simultaneously visible fallback tabs still duplicate finite requests.
 - A shared task stream accepts at most 32 distinct runs and 1 MiB per complete SSE frame; capacity overflow uses finite recovery. Oversized events use the existing authoritative history/context hydration path.
 - Hidden documents release demand immediately; crashed/frozen owners are reclaimed by 15-second leases or the independent feed watchdog. Whole-browser/OS suspension can delay timers until execution resumes.
 - Caches, React rendering and initial hydration remain document-local, so memory is not constant with tab count. A background tab saves live work but still retains its page.

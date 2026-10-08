@@ -113,7 +113,10 @@ export function createLiveCoordinator() {
   const start = () => {
     if (disposed || restoration || !session || !subscriptions.size || !pageIsActive()) return
     active = true
-    if (!session.local || session.apiBase && new URL(session.apiBase, location.href).origin !== location.origin || workerFailed || typeof SharedWorker !== 'function') {
+    const apiUrl = new URL(session.apiBase || '/', location.href)
+    // The shared owner serves root-relative URLs. Other origins or service prefixes
+    // use document-authenticated finite requests, which preserve the configured base.
+    if (!session.local || apiUrl.origin !== location.origin || apiUrl.pathname !== '/' || workerFailed || typeof SharedWorker !== 'function') {
       for (const entry of available()) entry.handlers.ready?.()
       fallback.start()
       return

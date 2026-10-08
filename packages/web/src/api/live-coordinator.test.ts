@@ -84,6 +84,26 @@ describe('document live demand', () => {
 })
 
 describe('worker recovery boundaries', () => {
+  it.each(['/cezar', `${location.origin}/cezar`])('delivers finite run updates through the configured API prefix %s', async apiBase => {
+    const frame = vi.fn()
+    vi.mocked(fetch).mockImplementation(async path => {
+      if (String(path) !== `${apiBase}/api/v1/workspace/run-event-batches`) return new Response('', { status: 404 })
+      return new Response(JSON.stringify({ generation: 'one', results: [{ type: 'batch', projectId: 'boot', runId: 'run',
+        afterSeq: 1, cursor: 'cursor-1', hasMore: false, events: [{ type: 'note', seq: 1, ts: '' }] }] }))
+    })
+    coordinator.configure({ ...local, apiBase })
+    coordinator.subscribe({ kind: 'run', projectId: 'boot', runId: 'run', afterSeq: 0 }, { frame })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(frame).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'boot', runId: 'run', event: { type: 'note', seq: 1, ts: '' } }))
+    expect(fetch).toHaveBeenCalledWith(`${apiBase}/api/v1/workspace/run-event-batches`, expect.objectContaining({ credentials: 'include' }))
+    expect(Worker.all).toHaveLength(0)
+  })
+  it('keeps an explicit same-origin root API base on shared transport', () => {
+    coordinator.configure({ ...local, apiBase: location.origin })
+    coordinator.subscribe({ kind: 'workspace' }, {})
+    expect(Worker.all).toHaveLength(1)
+    expect(fetch).not.toHaveBeenCalled()
+  })
   it('rejects incompatible worker protocols and catches up by authenticated finite HTTP', async () => {
     coordinator.configure(local)
     coordinator.subscribe({ kind: 'run', projectId: 'boot', runId: 'run', afterSeq: 0 }, {})
