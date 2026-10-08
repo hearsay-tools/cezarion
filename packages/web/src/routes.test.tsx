@@ -516,12 +516,45 @@ describe('legacy flat URLs redirect to the boot project', () => {
     expect(currentSearch()).toBe('?path=docs%2Fdesign.md')
   })
 
-  it('falls back to the boot project when a loaded index does not know the run', () => {
+  it('falls back to the boot project when neither the loaded index nor the search knows the run', async () => {
+    vi.stubGlobal('fetch', searchAnswer([]))
     renderAt(`/tasks/${OWNER_RUN}/files?path=x.md`, {
       runsIndex: indexFor([{ id: '99999999-2222-3333-4444-555555555555', projectId: 'other' }]),
     })
 
-    expect(currentPathname()).toBe(`/p/${BOOT}/tasks/${OWNER_RUN}/files`)
+    await waitFor(() => expect(currentPathname()).toBe(`/p/${BOOT}/tasks/${OWNER_RUN}/files`), { timeout: 5000 })
+  })
+
+  // The index is a capped window: each project's unarchived roots plus its newest archived
+  // ones. A run older than that window is omitted with the project marked truncated — the
+  // review's case — and the redirect must reach past the window through the workspace runs
+  // search (#864) instead of sending the link to a boot project that cannot find the run.
+  const searchAnswer = (rows: Array<{ id: string; projectId: string }>) =>
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      const body = url.includes('runs-search')
+        ? { runs: indexFor(rows).runs, truncated: [] }
+        : new Promise<never>(() => {})
+      return Promise.resolve(typeof body === 'object' ? new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } }) : (body as never))
+    })
+
+  it('resolves an index-omitted run through the workspace runs search before falling back to boot', async () => {
+    vi.stubGlobal('fetch', searchAnswer([{ id: OWNER_RUN, projectId: 'other' }]))
+    renderAt(`/tasks/${OWNER_RUN}/files?path=old.md`, {
+      runsIndex: indexFor([]),
+    })
+
+    await waitFor(() => expect(currentPathname()).toBe(`/p/other/tasks/${OWNER_RUN}/files`), { timeout: 5000 })
+    expect(currentSearch()).toBe('?path=old.md')
+  })
+
+  it('keeps the boot project when the runs search cannot find the run either', async () => {
+    vi.stubGlobal('fetch', searchAnswer([]))
+    renderAt(`/tasks/${OWNER_RUN}`, {
+      runsIndex: indexFor([]),
+    })
+
+    await waitFor(() => expect(currentPathname()).toBe(`/p/${BOOT}/tasks/${OWNER_RUN}`), { timeout: 5000 })
   })
 
   it('falls back to the boot project when the runs index cannot answer', async () => {

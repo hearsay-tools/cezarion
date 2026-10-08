@@ -13,7 +13,7 @@ import {
 
 import type { HealthResponse } from '@open-mercato/cezar-api-client'
 
-import { useHealth, useProjects, useRunsIndex } from './api/queries'
+import { useHealth, useProjects, useRunsIndex, useRunsSearch } from './api/queries'
 import { ProjectScopeProvider } from './api/project-scope-context'
 import { locationToRestore, readStoredLastLocation } from './lib/last-location'
 import { Navigate as ScopedNavigate, stripProjectPrefix } from './lib/project-router'
@@ -239,9 +239,12 @@ function NewTaskProjectRoute() {
  * `cez artifact publish` emit, names a RUN — and a run belongs to the project whose store holds
  * it, which is often not the boot one. For that shape the redirect resolves the owner from the
  * cross-project runs index (the same one-request snapshot the global Tasks page and the palette
- * read) and lands the link there. Everything else — an id the loaded index does not know (the
- * index is a capped window, and a never-registered run was never reachable anyway), an index
- * that cannot answer, or any other flat path — keeps the boot project, exactly as before.
+ * read) and lands the link there. The index is a capped window — each project's unarchived roots
+ * plus only its newest archived ones — so a run older than the window is absent from a loaded
+ * index with its project marked truncated; that miss reaches one step further, through the
+ * workspace runs search (#864), before giving up. Everything else — a run neither source knows
+ * (deleted, or never registered), a search/index that cannot answer, or any other flat path —
+ * keeps the boot project, exactly as before.
  */
 const FLAT_TASK_RUN_ID = /^\/tasks\/([0-9a-f-]{36})(?=\/|$)/i
 
@@ -253,6 +256,11 @@ function LegacyPathRedirect() {
   // `/git`, moved settings) has nothing to resolve and must not fetch anything new.
   const flatRunId = FLAT_TASK_RUN_ID.exec(location.pathname)?.[1] ?? null
   const runsIndex = useRunsIndex(flatRunId !== null)
+  // The reach past the index's archived window, asked only when a LOADED index lacks the id.
+  // An empty query keeps the search disabled everywhere else (`useRunsSearch` needs ≥2 chars).
+  const indexSettled = runsIndex.data !== undefined || runsIndex.isError
+  const indexMissed = runsIndex.data !== undefined && !runsIndex.data.runs.some((row) => row.id === flatRunId)
+  const runsSearch = useRunsSearch(flatRunId !== null && indexMissed ? flatRunId : '')
   const resolvedBoot = health.data?.bootProject ?? projects.data?.bootProject
   const bootSourcesSettled =
     (health.data !== undefined || health.isError) &&
@@ -277,12 +285,18 @@ function LegacyPathRedirect() {
     if (restored !== null) return <Navigate to={restored} replace />
   }
 
-  // Owner resolution waits for the index like the boot sources above: routing a foreign run to
-  // boot is the 404 this exists to fix, so "not answered yet" must not read as "unknown".
+  // Owner resolution waits for each source like the boot sources above: routing a foreign run
+  // to boot is the 404 this exists to fix, so "not answered yet" must not read as "unknown".
   let target = boot
   if (flatRunId !== null) {
-    if (runsIndex.data === undefined && !runsIndex.isError) return <ScopeResolving />
-    target = runsIndex.data?.runs.find((row) => row.id === flatRunId)?.projectId ?? boot
+    if (!indexSettled) return <ScopeResolving />
+    const indexed = runsIndex.data?.runs.find((row) => row.id === flatRunId)?.projectId
+    if (indexed !== undefined) {
+      target = indexed
+    } else if (indexMissed) {
+      if (runsSearch.data === undefined && !runsSearch.isError) return <ScopeResolving />
+      target = runsSearch.data?.runs.find((row) => row.id === flatRunId)?.projectId ?? boot
+    }
   }
 
   // A bare `/p` (or `/p/`) names no project — send it to the boot project's home rather than
