@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { historyPaths } from '../runs/history-file.ts';
+import { TranscriptFactsQueue } from '../runs/transcript-facts-queue.ts';
 import { RunStore } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
@@ -57,6 +59,73 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     // pass over live families would skip them.
     manager.reconcileAllWorkerFamilies();
     for (const family of [a, b]) expect(store.readEvents(family.parentId).some(e => e.type === 'conversation-message')).toBe(true);
+  });
+
+  it.each(['boot', 'adopt'] as const)('%s recovery awaits cold family facts before projections', async mode => {
+    manager.dispose(); store.close();
+    const dataDir = join(root, '.ai/cezar');
+    for (const family of [a, b]) for (const id of [family.parentId, family.workerId]) {
+      rmSync(historyPaths(dataDir, id).facts, { force: true });
+    }
+    store = RunStore.open(dataDir, { keepLive: true });
+    manager = new RunManager(store, root);
+    const joins = vi.spyOn(TranscriptFactsQueue.prototype, 'join');
+    if (mode === 'boot') await manager.recover();
+    else expect(await manager.adoptOrphanedRun(a.parentId)).toBe(true);
+    expect(joins).not.toHaveBeenCalled();
+    for (const id of [a.parentId, a.workerId]) {
+      expect(store.readEvents(id).some(e => e.type === 'conversation-message')).toBe(true);
+    }
+    store.close();
+  });
+
+  it('does not let the queue watchdog revive a family awaiting recovery facts', async () => {
+    store.updateRun(a.parentId, { status: 'queued' });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const prepare = store.prepareRecoveryFacts.bind(store);
+    vi.spyOn(store, 'prepareRecoveryFacts').mockImplementationOnce(async family => {
+      await gate; await prepare(family);
+    });
+    const before = store.readEvents(a.parentId);
+    const recovery = manager.recover(a.parentId);
+    try {
+      await manager.rescueStalledQueue();
+      expect(store.readEvents(a.parentId)).toEqual(before);
+      expect(store.getRun(a.parentId)?.status).toBe('queued');
+    } finally {
+      manager.dispose(); release(); await recovery;
+    }
+  });
+
+  it.each(['dispose', 'failure', 'ready'] as const)('holds reconciliation until readiness and releases the recovery guard on %s', async outcome => {
+    manager.dispose(); store.close();
+    const dataDir = join(root, '.ai/cezar');
+    store = RunStore.open(dataDir, { keepLive: true });
+    manager = new RunManager(store, root);
+    let release!: () => void;
+    let reject!: (reason: Error) => void;
+    const gate = new Promise<void>((yes, no) => { release = yes; reject = no; });
+    const prepare = store.prepareRecoveryFacts.bind(store);
+    vi.spyOn(store, 'prepareRecoveryFacts').mockImplementationOnce(async family => {
+      await gate;
+      await prepare(family);
+    });
+    const recovery = manager.recover(a.parentId);
+    // The watchdog/global and delegation-checkpoint paths must not project this family yet.
+    manager.reconcileWorkerWaits(a.parentId);
+    store.commitDelegation([{ id: a.parentId, delegation: store.getRun(a.parentId)!.delegation! }]);
+    expect(store.readEvents(a.parentId).some(e => e.type === 'conversation-message')).toBe(false);
+    if (outcome === 'dispose') manager.dispose();
+    if (outcome === 'failure') {
+      const rejected = expect(recovery).rejects.toThrow('facts failed');
+      reject(new Error('facts failed'));
+      await rejected;
+      // A retry must enter recovery, rather than finding a stranded in-flight scope.
+      await manager.recover(a.parentId);
+    } else { release(); await recovery; }
+    expect(store.readEvents(a.parentId).some(e => e.type === 'conversation-message')).toBe(outcome !== 'dispose');
+    store.close();
   });
 
   it('reconciles only the families with a live member when no family is named', () => {

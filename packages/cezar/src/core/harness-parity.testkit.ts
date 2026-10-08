@@ -1001,7 +1001,7 @@ export async function withOwnedInputRun(
   body: (fixture: {
     repoRoot: string; runId: string; parentRunId: string;
     store: RunStore; manager: RunManager;
-    restart: () => Promise<{ store: RunStore; manager: RunManager }>;
+    restart: (beforeOpen?: (dataDir: string) => void) => Promise<{ store: RunStore; manager: RunManager }>;
   }) => Promise<void>,
   options: {
     /** A persisted catalog definition the worker runs instead of quick-task (#451). */
@@ -1070,7 +1070,7 @@ export async function withOwnedInputRun(
     }, 'a'.repeat(64), options.identity ?? { kind: 'internal', ...(workflowDef ? { workflowHash: workerWorkflowHash(workflowDef) } : {}) });
     manager = new RunManager(store, repoRoot);
     drainBookkeeping = trackTurnBookkeeping(manager);
-    const restart = async () => {
+    const restart = async (beforeOpen?: (dataDir: string) => void) => {
       store!.flush();
       const index = readPersistedRuns(join(repoRoot, '.ai/cezar'));
       // Stop only test-owned processes, then restore the precise pre-crash disk
@@ -1081,6 +1081,7 @@ export async function withOwnedInputRun(
       manager!.dispose();
       store!.close();
       seedRuns(join(repoRoot, '.ai/cezar'), index);
+      beforeOpen?.(join(repoRoot, '.ai/cezar'));
       store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
       manager = new RunManager(store, repoRoot);
       drainBookkeeping = trackTurnBookkeeping(manager);

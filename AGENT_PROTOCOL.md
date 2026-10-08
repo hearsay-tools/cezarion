@@ -874,6 +874,14 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
+**R7** also pins off-loop restart readiness (hearsay-tools/cezarion#906): every
+`RUNNER_IDS` backend uses its `HARNESS_ADAPTERS` native mock, then restarts with
+both root and worker facts sidecars removed. Recovery must never use the
+exceptional synchronous facts queue join. Pending asks and queued input survive;
+bare Continue is refused, and an explicit human answer reaches the native runner
+before queued agent input drains. This extends the registered R7 cell, with no
+runner exemptions.
+
 **S21** (hearsay-tools/cezarion#832) detects unexpected restored history through
 OMP's startup `get_state.messageCount`. A fresh step emits one v1 note and one
 non-fatal `session.error`, and still completes normally. Other native wires have
