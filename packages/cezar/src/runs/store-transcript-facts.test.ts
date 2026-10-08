@@ -1,4 +1,5 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { Worker } from 'node:worker_threads';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { brotliCompressSync } from 'node:zlib';
@@ -176,6 +177,45 @@ describe('off-loop store readiness (hearsay-tools/cezarion#906)', () => {
     await reopened.prepareRecoveryFacts();
     expect(reopened.getRun(run.id)?.hasPendingHumanAsk).toBe(false);
     expect(joins).not.toHaveBeenCalled();
+  });
+
+  it.each(['warm', 'selected'] as const)('%s worker failure releases deferred settled families and claims without clearing attention', async mode => {
+    const { dir, store: producer } = openStore();
+    // Selected readiness must be tested independently of the open-time warm catch.
+    const reader = mode === 'selected' ? openStore(dir).store : undefined;
+    await reader?.factsWarmIdle();
+    const families = [seedSettledFamily(producer, dir), seedSettledFamily(producer, dir)];
+    for (const { parentId } of families) {
+      producer.updateRun(parentId, { status: 'waiting' });
+      producer.appendEvent(parentId, { type: 'ask.requested', requestId: parentId, questions });
+    }
+    producer.close(); stores.splice(stores.indexOf(producer), 1);
+    for (const { parentId, workerId } of families) {
+      rmSync(historyPaths(dir, parentId).facts, { force: true });
+      rmSync(historyPaths(dir, workerId).facts, { force: true });
+    }
+    const failure = new Error('facts worker dispatch failed');
+    const dispatch = vi.spyOn(Worker.prototype, 'postMessage').mockImplementation(() => { throw failure; });
+    const joins = vi.spyOn(TranscriptFactsQueue.prototype, 'join');
+    const reopened = reader ?? openStore(dir).store;
+    if (reader) for (const { parentId } of families) expect(reader.adoptFamily(parentId)).toBe(parentId);
+    reopened.flush();
+    for (const { parentId } of families) expect(reopened.heldIds()).toContain(parentId);
+    if (mode === 'warm') await expect(reopened.factsWarmIdle()).resolves.toBeUndefined();
+    else await expect(reopened.prepareTranscriptFacts(families.flatMap(f => [f.parentId, f.workerId]))).rejects.toBe(failure);
+    expect(dispatch).toHaveBeenCalled();
+    expect(joins).not.toHaveBeenCalled();
+    // Failure itself must schedule the ordinary fenced save/eviction, without another caller.
+    await expect.poll(() => reopened.heldIds(), { timeout: 5_000 }).toEqual([]);
+    for (const { parentId, workerId } of families) {
+      expect(reopened.getRun(parentId)?.hasPendingHumanAsk).toBe(true);
+      expect(reopened.heldIds()).not.toContain(parentId);
+      expect(reopened.heldIds()).not.toContain(workerId);
+      expect(existsSync(historyPaths(dir, parentId).facts)).toBe(false);
+    }
+    // This is ownership release, not just memory eviction: a peer can claim both families.
+    const peer = openStore(dir).store;
+    for (const { parentId } of families) expect(peer.adoptFamily(parentId)).toBe(parentId);
   });
 
   it.each([undefined, false, true])('retains legacy summary %s for an empty transcript without a sidecar', async summary => {

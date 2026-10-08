@@ -3445,11 +3445,17 @@ export class RunStore extends EventEmitter {
 
   /** Readiness owns no run snapshot across an await: refresh only the currently held owner. */
   async prepareTranscriptFacts(runIds: Iterable<string>): Promise<void> {
-    for (const id of new Set(runIds)) {
-      // Exact sidecars resolve immediately too: recovery must yield to timers/I/O between IDs.
-      await new Promise<void>(resolve => setImmediate(resolve));
-      const facts = await this.facts.ready(id);
-      this.refreshDeferredAskSummary(id, facts);
+    const ids = new Set(runIds);
+    try {
+      for (const id of ids) {
+        // Exact sidecars resolve immediately too: recovery must yield to timers/I/O between IDs.
+        await new Promise<void>(resolve => setImmediate(resolve));
+        const facts = await this.facts.ready(id);
+        this.refreshDeferredAskSummary(id, facts);
+      }
+    } catch (error) {
+      this.releaseDeferredAskSummaries(ids);
+      throw error;
     }
   }
 
@@ -3467,6 +3473,14 @@ export class RunStore extends EventEmitter {
     this.scheduleSave();
   }
 
+  /** Failed readiness cannot retain settled families indefinitely. Keep their current summaries
+   * untouched; the normal fenced save/eviction path releases only otherwise-unanchored owners. */
+  private releaseDeferredAskSummaries(ids: Iterable<string>): void {
+    let released = false;
+    for (const id of ids) if (this.deferredAskSummaries.delete(id)) released = true;
+    if (released) this.scheduleSave();
+  }
+
   /** Register IDs only here; the index yields between cache reads and off-loop rebuilds. */
   private warmTranscriptFacts(): void {
     this.factsWarming = Promise.resolve().then(async () => {
@@ -3476,8 +3490,12 @@ export class RunStore extends EventEmitter {
         for (const id of this.listFamilyRunIds(rootId)) ids.add(id);
       }
       for (const id of this.listRunIds()) ids.add(id);
-      await this.facts.warm(ids);
-      for (const id of this.deferredAskSummaries) this.refreshDeferredAskSummary(id, this.facts.peek(id));
+      try {
+        await this.facts.warm(ids);
+        for (const id of this.deferredAskSummaries) this.refreshDeferredAskSummary(id, this.facts.peek(id));
+      } catch {
+        this.releaseDeferredAskSummaries(ids);
+      }
     }).catch(() => undefined);
   }
 
