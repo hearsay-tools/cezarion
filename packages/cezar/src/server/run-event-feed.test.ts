@@ -44,6 +44,31 @@ describe('bounded persisted feed', () => {
     store.appendEvent(runId, { type: 'note', text: 'x'.repeat(LIVE_BYTE_LIMIT + 1) });
     await expect(readRunEventBatch(dataDir, demand(), signal())).rejects.toMatchObject({ status: 413 });
   });
+  it('resumes both snapshot and disk prefixes across byte-limited pages', async () => {
+    store.appendEvent(runId, { type: 'item.started', item: { kind: 'message', id: 'item', text: '' } });
+    store.emitEphemeral(runId, { type: 'item.delta', itemId: 'item', field: 'text', delta: 'latest text' });
+    store.appendEvent(runId, { type: 'note', text: 'following' });
+    const snapshots = store.liveItemSnapshots(runId);
+    let cursor: string | undefined;
+    let afterSeq = 0;
+    const seen: RunEvent[] = [];
+    for (let i = 0; i < 3; i++) {
+      const page = await readRunEventBatch(dataDir, { ...demand(), cursor, afterSeq }, signal(), 150, snapshots);
+      seen.push(...page.events);
+      cursor = page.cursor; afterSeq = page.afterSeq;
+      expect(page.events).toHaveLength(1);
+      expect(page.hasMore).toBe(i < 2);
+    }
+    expect(seen.map(event => event.seq)).toEqual([1, 2, 3]);
+    expect(seen[1]).toMatchObject({ type: 'item.updated', item: { text: 'latest text' } });
+  });
+  it('cancels a snapshot-only response while checking for absent disk history', async () => {
+    const controller = new AbortController();
+    const reading = readRunEventBatch(dataDir, demand(), controller.signal, LIVE_BYTE_LIMIT,
+      [{ type: 'item.updated', seq: 1, ts: '', item: { id: 'item', kind: 'message', text: 'live' } }]);
+    controller.abort();
+    await expect(reading).rejects.toMatchObject({ name: 'AbortError' });
+  });
   it('rejects expired cursors and pre-aborted requests', async () => {
     store.appendEvent(runId, { type: 'note', text: 'old' });
     const a = await readRunEventBatch(dataDir, demand(), signal());

@@ -8,6 +8,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 const [root, buildRoot = process.cwd(), authMode] = process.argv.slice(2)
 const load = file => import(pathToFileURL(resolve(buildRoot, 'packages/cezar/dist', file)).href)
 const { RunStore } = await load('runs/store.js')
+const { UiEventSink } = await load('runs/ui-event-sink.js')
 const { RunManager } = await load('workflows/run.js')
 const { startServer } = await load('server/server.js')
 const { ProjectContexts } = await load('server/project-context.js')
@@ -45,6 +46,16 @@ const control = createServer(async (req, res) => {
       timer = setInterval(() => {
         for (const run of selected) stores.get(run.projectId)?.appendEvent(run.runId, { type: 'item.completed', item: { kind: 'message', id: `stream-${++published}`, role: 'assistant', text: `stream-${published}` } })
       }, 50)
+    }
+    if (command.ephemeral) for (const run of command.runs ?? runs) {
+      const target = stores.get(run.projectId)
+      target.updateRun(run.runId, { status: 'running' })
+      const sink = new UiEventSink({ persist: event => target.appendEvent(run.runId, event), emitLive: event => target.emitEphemeral(run.runId, event) })
+      const item = { kind: 'message', id: `ephemeral-${++published}`, role: 'assistant', text: '' }
+      sink.handle({ type: 'item.started', item })
+      if (command.snapshot) sink.handle({ type: 'item.updated', item: { ...item, text: command.ephemeral } })
+      else sink.handle({ type: 'item.delta', itemId: item.id, field: 'text', delta: command.ephemeral })
+      sink.flushAll() // Keep the item unfinished: disk replay has no generated text.
     }
     if (command.disconnect) server.closeAllConnections()
     if (command.publish) for (const run of command.runs ?? runs) stores.get(run.projectId)?.appendEvent(run.runId, { type: 'item.completed', item: { kind: 'message', id: `publish-${++published}`, role: 'assistant', text: command.publish } })

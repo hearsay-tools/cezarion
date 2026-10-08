@@ -131,6 +131,11 @@ it('blocked SharedWorker uses finite HTTP in ten visible windows and aborts on p
       const text = `finite-${Date.now()}`
       await fixture.control({ publish: text, runs: [run] })
       await Promise.all(pages.map(page => waitText(request, page.sessionId, text)))
+      for (const snapshot of [false, true]) {
+        const typing = `unfinished-${snapshot}-${Date.now()}`
+        await fixture.control({ ephemeral: typing, snapshot, runs: [run] })
+        await Promise.all(pages.map(page => waitText(request, page.sessionId, typing)))
+      }
       expect(persistent).toEqual([])
       expect(await read(request, pages[0]!.sessionId, `(async()=>{const r=await fetch('/api/v1/projects',{signal:AbortSignal.timeout(2000)});return r.ok})()`)).toBe(true)
       await request('Runtime.evaluate', { expression: 'window.dispatchEvent(new Event("pagehide"))' }, pages[0]!.sessionId)
@@ -163,6 +168,11 @@ it('remote Basic Auth keeps finite recovery authenticated without a worker or or
         const text = `authenticated-${Date.now()}`
         await remote.control({ publish: text, runs: [run] })
         await waitText(request, sessionId, text)
+        for (const snapshot of [false, true]) {
+          const typing = `authenticated-unfinished-${snapshot}-${Date.now()}`
+          await remote.control({ ephemeral: typing, snapshot, runs: [run] })
+          await waitText(request, sessionId, typing)
+        }
         await request('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }, sessionId)
         const afterOffline = `${text}-after-offline`
         await remote.control({ publish: afterOffline, runs: [run] })

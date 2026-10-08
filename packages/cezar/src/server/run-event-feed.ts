@@ -7,8 +7,11 @@ export class LiveFeedReset extends Error {
   readonly status = 413;
 }
 
-/** The returned cursor covers exactly the accepted prefix, including complete ignored lines. */
-export async function readRunEventBatch(dataDir: string, demand: LiveRunDemand, signal: AbortSignal, byteLimit = LIVE_BYTE_LIMIT): Promise<LiveRunBatch> {
+/** The returned cursor covers exactly the accepted prefix, including complete ignored lines.
+ * Capture sorted live snapshots BEFORE starting disk IO: every lower-seq persisted
+ * event has already been appended synchronously. Merge before acknowledging either
+ * source, keeping the byte offset at the first unaccepted persisted record. */
+export async function readRunEventBatch(dataDir: string, demand: LiveRunDemand, signal: AbortSignal, byteLimit = LIVE_BYTE_LIMIT, snapshots: readonly RunEvent[] = []): Promise<LiveRunBatch> {
   signal.throwIfAborted();
   const start = demand.cursor ? decodeLiveCursor(demand.cursor) : { offset: 0, boundarySeq: 0 };
   let offset = start.offset;
@@ -17,6 +20,24 @@ export async function readRunEventBatch(dataDir: string, demand: LiveRunDemand, 
   let bytes = 0;
   let pending: Buffer = Buffer.alloc(0);
   let hasMore = false;
+  let snapshotIndex = 0;
+  const accept = (event: RunEvent, length: number): boolean => {
+    if (event.seq <= afterSeq) return true;
+    if (length > byteLimit) throw new LiveFeedReset('event exceeds live batch limit — reload history');
+    if (events.length >= LIVE_EVENT_LIMIT || bytes + length > byteLimit) { hasMore = true; return false; }
+    events.push(event);
+    bytes += length;
+    afterSeq = event.seq;
+    return true;
+  };
+  const acceptSnapshotsBefore = (seq: number): boolean => {
+    while (snapshotIndex < snapshots.length && snapshots[snapshotIndex]!.seq < seq) {
+      const snapshot = snapshots[snapshotIndex]!;
+      if (!accept(snapshot, Buffer.byteLength(JSON.stringify(snapshot)) + 1)) return false;
+      snapshotIndex++;
+    }
+    return true;
+  };
   outer: for await (const chunk of streamHistoryAfter(dataDir, demand.runId, offset, signal)) {
     pending = pending.length ? Buffer.concat([pending, chunk]) : chunk;
     let boundary: number;
@@ -31,16 +52,15 @@ export async function readRunEventBatch(dataDir: string, demand: LiveRunDemand, 
         if (Number.isSafeInteger(value.seq) && typeof value.type === 'string' && typeof value.ts === 'string') event = value;
       } catch { /* Malformed historical lines have never belonged to replay. */ }
       if (event && event.seq > afterSeq) {
-        if (events.length >= LIVE_EVENT_LIMIT || bytes + length > byteLimit) { hasMore = true; break outer; }
-        events.push(event);
-        bytes += length;
-        afterSeq = event.seq;
+        if (!acceptSnapshotsBefore(event.seq) || !accept(event, length)) break outer;
       }
       offset += length;
       pending = pending.subarray(length);
     }
     if (pending.length > byteLimit) throw new LiveFeedReset('event exceeds live batch limit — reload history');
   }
+  signal.throwIfAborted();
+  if (!hasMore) acceptSnapshotsBefore(Infinity);
   // No newline means a writer is still appending: do not acknowledge that partial record.
   return {
     type: 'batch', projectId: demand.projectId, runId: demand.runId, events, afterSeq, hasMore,

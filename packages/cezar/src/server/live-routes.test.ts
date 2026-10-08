@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
+import { UiEventSink } from '../runs/ui-event-sink.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
@@ -24,6 +25,64 @@ const batch = (runs: unknown[]) => apiRequest(app, '/api/v1/workspace/run-event-
 });
 
 describe('finite multi-run catch-up', () => {
+  it('delivers current text before item completion without persisting streaming deltas', async () => {
+    const sink = new UiEventSink({
+      persist: event => { store.appendEvent(runId, event); },
+      emitLive: event => { store.emitEphemeral(runId, event); },
+    });
+    const item = { kind: 'message' as const, id: 'typing', role: 'assistant' as const, text: '' };
+    sink.handle({ type: 'item.started', item });
+    const first = liveRunBatchResponseSchema.parse(await (await batch([{ projectId: 'boot', runId, afterSeq: 0 }])).json()).results[0] as LiveRunBatch;
+    sink.handle({ type: 'item.delta', itemId: item.id, field: 'text', delta: 'Still ' });
+    sink.flushAll();
+    sink.handle({ type: 'item.delta', itemId: item.id, field: 'text', delta: 'writing' });
+    sink.flushAll();
+    store.appendEvent(runId, { type: 'note', text: 'unrelated persisted event' });
+    const next = liveRunBatchResponseSchema.parse(await (await batch([{ projectId: 'boot', runId, afterSeq: first.afterSeq, cursor: first.cursor }])).json()).results[0] as LiveRunBatch;
+    expect(next.events.map(event => event.seq)).toEqual([3, 4]);
+    expect(next.events[0]).toMatchObject({ type: 'item.updated', item: { text: 'Still writing' } });
+    sink.handle({ type: 'item.updated', item: { ...item, text: 'Still writing more' } });
+    const last = liveRunBatchResponseSchema.parse(await (await batch([{ projectId: 'boot', runId, afterSeq: next.afterSeq, cursor: next.cursor }])).json()).results[0] as LiveRunBatch;
+    expect(last.events).toMatchObject([{ type: 'item.updated', item: { text: 'Still writing more' } }]);
+    expect(store.readEvents(runId).map(event => event.type)).toEqual(['item.started', 'note']);
+    const duplicate = liveRunBatchResponseSchema.parse(await (await batch([{ projectId: 'boot', runId, afterSeq: last.afterSeq, cursor: last.cursor }])).json()).results[0] as LiveRunBatch;
+    expect(duplicate.events).toEqual([]);
+    sink.handle({ type: 'item.completed', item: { ...item, text: 'Finished' } });
+    const completed = liveRunBatchResponseSchema.parse(await (await batch([{ projectId: 'boot', runId, afterSeq: last.afterSeq, cursor: last.cursor }])).json()).results[0] as LiveRunBatch;
+    expect(completed.events).toMatchObject([{ type: 'item.completed', item: { text: 'Finished' } }]);
+  });
+  it('merges active snapshots at an event-limit boundary without skipping persisted records', async () => {
+    store.appendEvent(runId, { type: 'item.started', item: { kind: 'message', id: 'typing', text: '' } });
+    for (let i = 0; i < 254; i++) store.appendEvent(runId, { type: 'note', text: 'history' });
+    store.emitEphemeral(runId, { type: 'item.delta', itemId: 'typing', field: 'text', delta: 'live text' });
+    store.appendEvent(runId, { type: 'note', text: 'after live text' });
+    const first = liveRunBatchResponseSchema.parse(await (await batch([{ projectId: 'boot', runId, afterSeq: 0 }])).json()).results[0] as LiveRunBatch;
+    expect(first.events).toHaveLength(256);
+    expect(first.events.at(-1)).toMatchObject({ seq: 256, type: 'item.updated', item: { text: 'live text' } });
+    expect(first.hasMore).toBe(true);
+    const next = liveRunBatchResponseSchema.parse(await (await batch([{ projectId: 'boot', runId, afterSeq: first.afterSeq, cursor: first.cursor }])).json()).results[0] as LiveRunBatch;
+    expect(next.events).toMatchObject([{ seq: 257, text: 'after live text' }]);
+    expect(next.hasMore).toBe(false);
+  });
+  it('retains only redacted active content and clears it on store closure', async () => {
+    store.registerSessionSecret('fixture-secret-must-be-redacted');
+    store.appendEvent(runId, { type: 'item.started', item: { kind: 'message', id: 'typing', text: '' } });
+    store.emitEphemeral(runId, { type: 'item.delta', itemId: 'typing', field: 'text', delta: 'fixture-secret-must-be-redacted' });
+    const response = await (await batch([{ projectId: 'boot', runId, afterSeq: 0 }])).text();
+    expect(response).not.toContain('fixture-secret-must-be-redacted');
+    expect(response).toContain('[REDACTED]');
+    expect(store.liveItemSnapshots(runId)).toHaveLength(1);
+    store.close();
+    expect(store.liveItemSnapshots(runId)).toEqual([]);
+  });
+  it('discards active snapshots when their run is deleted', () => {
+    store.appendEvent(runId, { type: 'item.started', item: { kind: 'message', id: 'typing', text: '' } });
+    store.emitEphemeral(runId, { type: 'item.delta', itemId: 'typing', field: 'text', delta: 'temporary' });
+    store.updateRun(runId, { status: 'done' });
+    expect(store.liveItemSnapshots(runId)).toHaveLength(1);
+    expect(store.deleteRun(runId)).toBe(true);
+    expect(store.liveItemSnapshots(runId)).toEqual([]);
+  });
   it('bounds replay at an accepted prefix and continues without loss or duplicates', async () => {
     for (let i = 0; i < 300; i++) store.appendEvent(runId, { type: 'note', text: `line ${i}` });
     const first = await batch([{ projectId: 'default', runId, afterSeq: 0 }]);

@@ -56,7 +56,8 @@ export function createLiveRoutes({ resolveProject, serverGeneration, resolveBoot
           demand = resolved.demand;
           if (!resolved.project.store.getRun(demand.runId)) {
             results.push({ projectId: demand.projectId, runId: demand.runId, type: 'error', status: 404, error: 'run not found' });
-          } else results.push(await readRunEventBatch(resolved.project.dataDir, demand, c.req.raw.signal));
+          } else results.push(await readRunEventBatch(resolved.project.dataDir, demand, c.req.raw.signal, LIVE_BYTE_LIMIT,
+            resolved.project.store.liveItemSnapshots(demand.runId)));
         } catch (error) {
           c.req.raw.signal.throwIfAborted();
           results.push(failure(demand, error));
