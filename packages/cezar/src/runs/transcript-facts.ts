@@ -9,7 +9,7 @@ import { type RunEvent } from '@open-mercato/cezar-contract';
 import { historyPaths, historyStat } from './history-file.ts';
 
 export { emptyFacts, foldEvent, foldText, stampOf, PROSE_HUMAN_GATE, workerOutcomeKey, type PendingAskFacts, type ArchiveStamp, type TranscriptFacts } from './transcript-facts-fold.ts';
-import { emptyFacts, foldEvent, foldText, sameStamp, stampOf, type ArchiveStamp, type TranscriptFacts } from './transcript-facts-fold.ts';
+import { foldEvent, sameStamp, stampOf, type ArchiveStamp, type TranscriptFacts } from './transcript-facts-fold.ts';
 import { readFactsSidecar, type FactsLoadResult } from './transcript-facts-load.ts';
 
 import { REFRESH_FACTS, TranscriptFactsQueue } from './transcript-facts-queue.ts';
@@ -79,12 +79,15 @@ export class TranscriptFactsIndex {
 
   /** The compressor archived `plain` as a `.br` with `stamp`. */
   adoptArchive(runId: string, plain: Buffer, stamp: ArchiveStamp): void {
-    let entry = this.entries.get(runId);
+    if (this.stopped) return;
+    const entry = this.entries.get(runId);
     if (!entry || entry.facts.bytes !== plain.length) {
-      const facts = emptyFacts();
-      foldText(facts, plain.toString('utf8'));
-      entry = { facts, written: -1 };
-      this.entries.set(runId, entry);
+      this.entries.delete(runId);
+      // The compressor callback runs on the parent loop. Keep an active job's ownership:
+      // its old snapshot will fail validation and refresh from the newly committed archive.
+      // Without an owner, queue the rebuild too; never decode/fold the compressor's buffer here.
+      void this.queue.request(runId, false).catch(() => undefined);
+      return;
     }
     entry.facts.archive = stamp;
     this.persist(runId, entry);

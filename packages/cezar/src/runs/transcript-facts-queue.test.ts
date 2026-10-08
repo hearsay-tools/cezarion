@@ -9,7 +9,8 @@ import { brotliCompressSync } from 'node:zlib';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { TranscriptFactsIndex } from './transcript-facts.ts';
 import { REFRESH_FACTS, TranscriptFactsQueue } from './transcript-facts-queue.ts';
-import { historyPaths } from './history-file.ts';
+import * as factsFold from './transcript-facts-fold.ts';
+import { compressHistory, historyPaths } from './history-file.ts';
 import { countTranscriptReads, restoreTranscriptReads } from './transcript-reads.testkit.ts';
 
 let dir: string;
@@ -210,24 +211,44 @@ it('append while a completed worker result awaits acceptance joins and refreshes
   expect(held.dispatch).toHaveBeenCalledTimes(2);
 });
 
-it('keeps an archive adoption newer than the held worker result', async () => {
+it('archive adoption refreshes an active worker without a parent full fold', async () => {
   seed('a');
   const held = holdFirstResult();
   const reader = index();
   const pending = reader.ready('a');
+  void pending.catch(() => undefined);
   await held.loaded;
-  const plain = Buffer.from(line(1, 'a') + line(2, 'adopted'));
   const paths = historyPaths(dir, 'a');
-  writeFileSync(paths.compressed, brotliCompressSync(plain));
-  rmSync(paths.plain);
-  const { statSync } = await import('node:fs');
-  const { size, mtimeMs, ino } = statSync(paths.compressed);
-  reader.adoptArchive('a', plain, { size, mtimeMs, ino });
-  const adopted = reader.peek('a');
+  appendFileSync(paths.plain, line(2, 'adopted'));
+  const parentFold = vi.spyOn(factsFold, 'foldText');
+  expect(await compressHistory(dir, 'a', () => true, (plain, archive) => {
+    reader.adoptArchive('a', plain, factsFold.stampOf(archive));
+  })).toBe('compressed');
   held.release();
-  expect(await pending).toBe(adopted);
-  expect(JSON.parse(readFileSync(paths.facts, 'utf8'))).toMatchObject({ lastSeq: 2, projectionIds: ['a', 'adopted'] });
-  expect(held.dispatch).toHaveBeenCalledTimes(1);
+  expect(parentFold).not.toHaveBeenCalled();
+  const adopted = await pending;
+  expect(adopted).toBe(reader.peek('a'));
+  expect(adopted).toMatchObject({ lastSeq: 2, projectionIds: ['a', 'adopted'], archive: expect.any(Object) });
+  expect(JSON.parse(readFileSync(paths.facts, 'utf8'))).toEqual(adopted);
+  expect(held.dispatch).toHaveBeenCalledTimes(2);
+  expect(parentFold).not.toHaveBeenCalled();
+});
+
+it.each(['absent', 'stale'] as const)('archive adoption queues an unowned %s entry without a parent full fold', async (state) => {
+  seed('a');
+  const reader = index();
+  if (state === 'stale') reader.get('a');
+  const paths = historyPaths(dir, 'a');
+  appendFileSync(paths.plain, line(2, 'adopted'));
+  const parentFold = vi.spyOn(factsFold, 'foldText');
+  expect(await compressHistory(dir, 'a', () => true, (plain, archive) => {
+    reader.adoptArchive('a', plain, factsFold.stampOf(archive));
+  })).toBe('compressed');
+  expect(parentFold).not.toHaveBeenCalled();
+  const adopted = await reader.ready('a');
+  expect(adopted).toMatchObject({ lastSeq: 2, projectionIds: ['a', 'adopted'], archive: expect.any(Object) });
+  expect(JSON.parse(readFileSync(paths.facts, 'utf8'))).toEqual(adopted);
+  expect(parentFold).not.toHaveBeenCalled();
 });
 
 it.each(['forget', 'stop'] as const)('%s revokes a held real result and prevents late sidecars', async (action) => {
