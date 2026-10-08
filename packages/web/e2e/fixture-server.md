@@ -95,8 +95,13 @@ health budget, and awaited shutdown before fixture removal. The guard now pins
 
 hearsay-tools/cezarion#917 adds `worktree-setup.e2e.ts`: one CLI construction with
 port 0 over its own fixture repo, owned listener readiness within the original 15 s
-health budget, and awaited shutdown before fixture removal. The guard now pins 52
-starts across 44 specs.
+health budget, and awaited shutdown before fixture removal. The guard now pins 51
+starts across 43 specs.
+
+hearsay-tools/cezarion#927 adds `assistant-reply-copy.e2e.ts`: one CLI construction
+with port 0 over its own fixture repo, owned listener readiness within the original
+15 s health budget, and awaited shutdown before fixture removal. The guard now pins
+52 starts across 44 specs.
 
 ## Other server classes audited
 
