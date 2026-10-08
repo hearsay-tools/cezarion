@@ -35,8 +35,10 @@ import type { RunManager as RunManagerInstance } from '../src/workflows/run.ts';
 process.env.CEZ_DRY_RUN = '1';
 process.env.CEZ_DELEGATION = '1';
 process.env.CEZ_AUTONAME = '0';
-// The repo's own sandbox for ~/.cezar, so a benchmark never touches the user's registry.
-process.env.CEZ_HOME ??= mkdtempSync(join(tmpdir(), 'cez-bench-home-'));
+// The repo's own sandbox for ~/.cezar, so a benchmark never touches the user's registry; one this
+// run creates is removed with the rest of its teardown.
+const ownHome = process.env.CEZ_HOME ? undefined : mkdtempSync(join(tmpdir(), 'cez-bench-home-'));
+if (ownHome) process.env.CEZ_HOME = ownHome;
 
 const { values } = parseArgs({ options: {
   workers: { type: 'string', default: '20' },
@@ -136,5 +138,6 @@ try {
   manager?.dispose();
   store?.close();
   rmSync(root, { recursive: true, force: true });
+  if (ownHome) rmSync(ownHome, { recursive: true, force: true });
 }
 process.exit(0);
