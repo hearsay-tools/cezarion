@@ -251,3 +251,30 @@ Packaged fixtures' audited polling, shutdown simulation and process escalation t
 an adjacent `// e2e-wait: condition-poll|shutdown-grace|process-deadline — reason` annotation.
 These annotations describe fixture mechanisms, never readiness; do not exempt an observation
 sleep. HTTP request socket deadlines (`request.setTimeout`) are not unconditional sleeps.
+
+
+## Browser-tab connection benchmark
+
+`tab-coordination.e2e.ts` uses one agent-browser profile and real HTTP/1.1 tabs/windows.
+Its private fixture boots production server modules and exposes test control on a
+separate loopback listener. CDP observation stays inside `AgentBrowser.withCdp`.
+
+Run the performance harness against a **production** build (omit `VITE_CEZ_E2E`):
+
+```sh
+npm run build
+node --import tsx packages/web/scripts/benchmark-tabs.ts --output .ai/qa/tabs-after.json
+```
+
+The default matrix is overview/repeated task/distinct projects × 1/3/6/10 tabs ×
+idle/20 events per second per run, with 5 s warmup and 20 s samples. `--build-root DIR`
+uses an independently installed/built baseline checkout; the same fixture drives both
+versions. `--windows` uses simultaneous native windows. `--quick` is a short harness
+smoke, not performance evidence. Keep raw failed requests and actual visibility states.
+See [the report](../../../docs/performance/browser-tab-coordination.md).
+
+
+For a smaller full-duration visible-window supplement, use
+`--windows --workload distinct --counts 1,10`. Unlike `--quick`, these selectors
+retain the five-second warmup and 20-second sample. The measured report and raw
+samples live in [`docs/performance/browser-tab-coordination.md`](../../../docs/performance/browser-tab-coordination.md).

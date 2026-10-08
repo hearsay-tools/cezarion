@@ -1,3 +1,4 @@
+import type { LiveRunBatchResponse, CheckoutProgressResponse } from '@open-mercato/cezar-contract';
 import type { InferResponseType } from 'hono/client';
 import { hc } from 'hono/client';
 import type { JSONParsed, JSONValue } from 'hono/utils/types';
@@ -55,6 +56,8 @@ describe('src/contract projects/workspace schemas match the routes exactly', () 
   type Mutual<A, B> = [A] extends [B] ? ([B] extends [A] ? true : 'route-is-wider') : 'schema-is-wider';
   type Exact<Schema, Route> = Mutual<Schema, Route>;
   type Assert<T extends true> = T;
+  type _LiveBatch = Assert<Exact<LiveRunBatchResponse, InferResponseType<typeof client.api.v1.workspace['run-event-batches']['$post'], 200>>>;
+  type _CheckoutProgress = Assert<Exact<CheckoutProgressResponse, InferResponseType<typeof client.api.v1.projects.checkout[':checkoutId']['progress']['$get'], 200>>>;
 
   /**
    * `Exact`, for the two OPEN bags — the only schemas here with a catchall.

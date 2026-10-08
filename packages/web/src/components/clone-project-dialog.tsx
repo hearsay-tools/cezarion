@@ -1,3 +1,5 @@
+import { onLiveReconcile } from '@/api/live-coordinator'
+import { getCheckoutProgress } from '@/api/client'
 import { SettingsIcon } from '@/components/design-icons'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link as RouterLink, useNavigate } from 'react-router'
@@ -100,6 +102,13 @@ export function CloneProjectDialog({
       else if (event.phase !== 'cloning') setProgress(null)
     })
   }, [])
+
+  useEffect(() => onLiveReconcile(async signal => {
+    if (!isPending) return
+    const { progress: event } = await getCheckoutProgress(checkoutId, { signal })
+    if (signal.aborted || event?.checkoutId !== idRef.current) return
+    setProgress(event?.phase === 'cloning' ? event.line ?? null : null)
+  }), [isPending, checkoutId])
 
   /** The repo half of whatever was typed, used as the default folder name. Deliberately naive —
    *  it mirrors the server's default, and the server re-derives it anyway when `name` is blank. */

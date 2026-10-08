@@ -103,6 +103,25 @@ describe('PreviewHost', () => {
     return env;
   };
 
+  it('a hidden viewer resuming cannot reclaim a preview another tab explicitly opened', async () => {
+    const { host, ctx } = make();
+    const a = fakeViewer(), b = fakeViewer(), restored = fakeViewer();
+    await host.handle(ctx, a, { t: 'open', target: { port: 5173 }, viewerId: 'a' });
+    host.detach(ctx.runId, a);
+    await host.handle(ctx, b, { t: 'open', target: { port: 5173 }, viewerId: 'b' });
+    await host.handle(ctx, restored, { t: 'open', target: { port: 5173 }, viewerId: 'a', resume: true });
+    expect(restored.messages.at(-1)).toMatchObject({ t: 'replaced' });
+    expect(b.messages.some(message => message.t === 'replaced')).toBe(false);
+    host.detach(ctx.runId, b);
+    const again = fakeViewer();
+    await host.handle(ctx, again, { t: 'open', target: { port: 5173 }, viewerId: 'a', resume: true });
+    expect(again.messages.at(-1)).toMatchObject({ t: 'replaced' });
+    const explicit = fakeViewer();
+    await host.handle(ctx, explicit, { t: 'open', target: { port: 5173 }, viewerId: 'a' });
+    expect(stages(explicit).at(-1)).toBe('needs-approval');
+    await host.close();
+  });
+
   it('agent stop preserves approval through stop and crash and reports Stopped', async () => {
     const { host, ctx, devServers, store } = make();
     const viewer = fakeViewer();

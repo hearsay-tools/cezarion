@@ -76,6 +76,8 @@ type RunEntry = {
   /** Chromium died or would not start: shown until `retryBrowser`, never relaunched on its own. */
   browserFailure?: PreviewStateMessage;
   viewer?: Viewer;
+  /** Retained across detach so a background tab cannot steal a newer viewer on resume. */
+  viewerId?: string;
   /** The registered port the viewer is looking at; undefined for a typed URL. */
   port?: number;
   lastUrl?: string;
@@ -163,9 +165,15 @@ export class PreviewHost implements PreviewHostLike {
    * A pane asks for a server or a URL. A registered port is probed again now: answering is
    * adopted and streamed, silent asks for approval. Nothing here spawns a command.
    */
-  async open(ctx: RunContext, viewer: Viewer, target: PreviewTarget): Promise<void> {
+  async open(ctx: RunContext, viewer: Viewer, target: PreviewTarget, options: { viewerId?: string; resume?: boolean } = {}): Promise<void> {
     const entry = this.entryFor(ctx);
     if (entry.released) return;
+    if (options.resume && ((entry.viewerId !== undefined && entry.viewerId !== options.viewerId) || (entry.viewer && entry.viewer !== viewer && (!options.viewerId || entry.viewerId !== options.viewerId)))) {
+      viewer.send({ t: 'replaced', by: entry.viewer?.userAgent ?? 'another tab' });
+      viewer.close(4001, 'replaced');
+      return;
+    }
+    entry.viewerId = options.viewerId;
     this.claim(entry, viewer);
     // Whatever this open shows, a show still waiting on Chromium for an older target is stale.
     entry.targetGen += 1;
@@ -325,7 +333,7 @@ export class PreviewHost implements PreviewHostLike {
 
   /** Every message a connected pane sends, already validated against the contract. */
   async handle(ctx: RunContext, viewer: Viewer, msg: PreviewClientMessage): Promise<void> {
-    if (msg.t === 'open') return this.open(ctx, viewer, msg.target);
+    if (msg.t === 'open') return this.open(ctx, viewer, msg.target, msg);
     const entry = this.entries.get(ctx.runId);
     if (!entry || entry.viewer !== viewer) return;
     switch (msg.t) {

@@ -34,6 +34,8 @@ describe('every mutating route carries a typed body into AppType', () => {
   // Project-scoped routes are asserted on their unscoped spelling; the `/api/v1/p/:projectId`
   // mount is the same sub-app, so it stands or falls with this one.
   type _Checks = [
+    Assert<HasTypedBody<'/api/v1/workspace/run-events', '$post'>>,
+    Assert<HasTypedBody<'/api/v1/workspace/run-event-batches', '$post'>>,
     Assert<HasTypedBody<'/api/v1/runs', '$post'>>,
     Assert<HasTypedBody<'/api/v1/plan', '$post'>>,
     Assert<HasTypedBody<'/api/v1/automations', '$post'>>,

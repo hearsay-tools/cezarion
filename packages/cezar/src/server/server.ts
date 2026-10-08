@@ -1,3 +1,7 @@
+import { CheckoutProgressCache } from './checkout-progress.ts';
+import { checkoutProgressParamsSchema } from '@open-mercato/cezar-contract';
+import { createLiveRoutes } from './live-routes.ts';
+import { subscribeRunFeed } from './run-event-feed.ts';
 import { sidebarLimitsSchema } from '@open-mercato/cezar-contract';
 import { worktreeSetupConfigSchema } from '@open-mercato/cezar-contract';
 import type { ApiRun, ArchivedRunsResponse, RunSummary, RunsSearchResponse } from '@open-mercato/cezar-contract';
@@ -110,7 +114,6 @@ import { ARCHIVED_WINDOW, type RepoHandle, type RunEvent, type RunRecord, type R
 import {
   HistoryCursorError,
   deriveRunContextEvents,
-  readEventsAfterLiveCursor,
   readRunHistoryPage,
   validateLiveCursor,
 } from '../runs/event-history.ts';
@@ -1350,6 +1353,8 @@ export function createApp(deps: ServerDeps) {
   });
   // Workspace-level SSE bus (step 2.8) — the registry mutators and the
   // checkout flow (Phase 4) emit here; /api/workspace/events relays.
+  const serverGeneration = randomUUID();
+  const checkoutProgress = new CheckoutProgressCache();
   const workspaceEvents = deps.workspaceEvents ?? new WorkspaceEventBus();
   const emitAutomationChange = (
     project: ProjectContext,
@@ -1566,6 +1571,13 @@ export function createApp(deps: ServerDeps) {
     if (!existsSync(path)) return c.json({ error: 'not found' }, 404);
     return new Response(readFileSync(path), { headers: { 'content-type': type } });
   };
+
+  // Stable SharedWorker identity across same-origin tabs; its imported chunks stay hashed.
+  app.get('/live-worker.js', (c) => {
+    const response = staticFile('live-worker.js', 'text/javascript; charset=utf-8')(c);
+    response.headers.set('Cache-Control', 'no-cache');
+    return response;
+  });
 
   let hintLogged = false;
   const serveShell = (c: Context): Response | undefined => {
@@ -2804,6 +2816,8 @@ export function createApp(deps: ServerDeps) {
       return c.json(body);
     })
 
+    .get('/projects/checkout/:checkoutId/progress', paramZodValidator(checkoutProgressParamsSchema), c => c.json({ progress: checkoutProgress.get(c.req.valid('param').checkoutId) }))
+
     .post('/projects/checkout', jsonZodValidator(() => checkoutSchema, { message: 'url must be a GitHub repository' }), async (c) => {
       if (capabilities().singleProject) {
         return c.json(singleProjectRefusal('adding projects'), 409);
@@ -2815,7 +2829,7 @@ export function createApp(deps: ServerDeps) {
         name,
         checkoutId,
         projectsDir: expandTilde(await workspaceProjectsDir()),
-        onProgress: (event) => workspaceEvents.emit('checkout-progress', event),
+        onProgress: (event) => { checkoutProgress.record(event); workspaceEvents.emit('checkout-progress', event); },
         // A closed dialog / navigated-away tab aborts the request; the clone is
         // killed and its partial directory removed rather than left running.
         signal: c.req.raw.signal,
@@ -5321,57 +5335,34 @@ export function createApp(deps: ServerDeps) {
         Number.isSafeInteger(lastEventId) && lastEventId >= 0 ? lastEventId : 0,
       );
       return streamSSENoBuffer(c, async (stream) => {
-        let replaying = true;
-        let maxSeq = requestedAfter;
-        const buffered: RunEvent[] = [];
-        // One endpoint, two SSE event names: v1 lines stay `run-event` (the name
-        // the legacy UI listened to — its default branch JSON-dumped unknown
-        // types into the transcript, which is why v2 never rode that name; the
-        // split outlives the R7 retirement as wire shape); protocol-v2 lines
-        // (dotted types, persisted snapshots AND ephemeral coalesced deltas)
-        // ride `ui-event`, which only v2-aware clients subscribe to.
-        // EventSource ignores names it has no listener for.
-        const writeEvent = (event: RunEvent) =>
-          stream.writeSSE({
-            id: String(event.seq),
-            event: isV2WireEventType(event.type) ? 'ui-event' : 'run-event',
-            data: JSON.stringify(event),
-          });
-        const onEvent = (payload: { runId: string; event: RunEvent }) => {
-          if (payload.runId !== id) return;
-          if (replaying) buffered.push(payload.event);
-          else void writeEvent(payload.event);
-        };
+        const controller = new AbortController();
+        const stop = () => controller.abort();
         const onRun = (run: RunRecord) => {
-          if (run.id !== id) return;
-          void stream.writeSSE({ event: 'run', data: JSON.stringify(run) });
+          if (run.id === id) void stream.writeSSE({ event: 'run', data: JSON.stringify(run) });
         };
-        store.on('event', onEvent);
         store.on('run', onRun);
-        stream.onAbort(() => {
-          store.off('event', onEvent);
-          store.off('run', onRun);
-        });
-
-        const replay = query.cursor
-          ? await readEventsAfterLiveCursor(dataDir, id, query.cursor)
-          : { events: store.readEvents(id), boundarySeq: 0 };
-        maxSeq = Math.max(maxSeq, replay.boundarySeq);
-        for (const event of replay.events) {
-          if (event.seq <= maxSeq) continue;
-          await writeEvent(event);
-          maxSeq = event.seq;
-        }
-        replaying = false;
-        for (const event of buffered) {
-          if (event.seq > maxSeq) await writeEvent(event);
-        }
+        stream.onAbort(() => { stop(); store.off('run', onRun); });
+        const feed = subscribeRunFeed({ store, dataDir }, {
+          projectId: c.get('project').id, runId: id, afterSeq: requestedAfter,
+          ...(query.cursor ? { cursor: query.cursor } : {}),
+        }, {
+          event: async event => {
+            await stream.writeSSE({ id: String(event.seq), event: isV2WireEventType(event.type) ? 'ui-event' : 'run-event', data: JSON.stringify(event) });
+          },
+          reset: () => { stop(); void stream.close(); },
+        // The legacy full-replay endpoint predates the finite batch limit. Preserve its
+        // ability to deliver a large persisted event; new multiplex clients rehydrate it.
+        }, controller.signal, Infinity);
         const run = store.getRun(id);
         if (run) await stream.writeSSE({ event: 'run', data: JSON.stringify(run) });
-
-        while (!stream.aborted) {
-          await stream.writeSSE({ event: 'ping', data: '' });
-          await stream.sleep(15_000);
+        try {
+          while (!stream.aborted && !controller.signal.aborted) {
+            await stream.writeSSE({ event: 'ping', data: '' });
+            await stream.sleep(15_000);
+          }
+        } finally {
+          stop(); store.off('run', onRun);
+          await feed;
         }
       });
     },
@@ -5529,6 +5520,8 @@ export function createApp(deps: ServerDeps) {
           for (const { detach } of attached.values()) detach();
           attached.clear();
         });
+
+        await stream.writeSSE({ event: 'ready', data: JSON.stringify({ generation: serverGeneration }) });
 
         while (!stream.aborted) {
           await stream.writeSSE({ event: 'ping', data: '' });
@@ -6351,7 +6344,16 @@ export function createApp(deps: ServerDeps) {
 
   // Workspace-level families answer for the whole workspace, so they are single-mount: never a
   // project-scoped spelling, which would be a second surface to protect with no consumer.
+  const liveRoutes = createLiveRoutes({
+    serverGeneration, resolveBootProject,
+    resolveProject: async (id) => {
+      const bootId = await resolveBootProject();
+      if (id === 'default' || id === bootId) return { ...bootContext, id: bootId };
+      return contexts.context(id);
+    },
+  });
   const workspaceV1 = new Hono()
+    .route('/', liveRoutes)
     .route('/', healthRoutes)
     .route('/', modelsRoutes)
     .route('/', providersRoutes)

@@ -1,3 +1,4 @@
+import { configureLiveSession, resetLiveSession } from './live-coordinator'
 import { focusManager, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
@@ -36,14 +37,27 @@ import {
   workspaceQueryKeys,
 } from './queries'
 
+// This suite tests health cache folding; worker ownership has its own transport tests.
+vi.mock('./ws', () => ({ subscribeTopic: (topic: string, listener: (data: unknown) => void) => {
+  const socket = new WebSocket('ws://localhost/api/v1/ws')
+  socket.addEventListener('open', () => socket.send(JSON.stringify({ type: 'subscribe', topic })))
+  socket.addEventListener('message', event => {
+    const frame = JSON.parse(event.data as string) as { type: string; topic: string; data: unknown }
+    if (frame.type === 'event' && frame.topic === topic) listener(frame.data)
+  })
+  return () => socket.close()
+} }))
+
 const fetchMock = vi.fn<typeof fetch>()
 
 beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock)
+  configureLiveSession({ local: false, bootProject: 'boot', apiBase: '' })
 })
 
 afterEach(() => {
   cleanup()
+  resetLiveSession()
   fetchMock.mockReset()
   vi.unstubAllGlobals()
 })
@@ -681,16 +695,11 @@ describe('useSkillsUpdate', () => {
     })
     await waitFor(() => expect(result.current.data?.status).toBe('idle'))
 
-    const query = client.getQueryCache().find({ queryKey: key })
-    const interval = query?.observers[0]?.options.refetchInterval
-    expect(typeof interval).toBe('function')
-    expect((interval as (current: typeof query) => number | false)(query)).toBe(60_000)
+    // The interval now belongs to the coordinator; this query must not open its own poll.
+    expect(client.getQueryCache().find({ queryKey: key })?.observers[0]?.options.refetchInterval).toBe(false)
+    act(() => client.setQueryData(key, { ...result.current.data!, status: 'current' }))
+    await waitFor(() => expect(result.current.data?.status).toBe('current'))
 
-    client.setQueryData(key, { ...result.current.data!, status: 'current' })
-    expect((interval as (current: typeof query) => number | false)(query)).toBe(false)
-
-    client.setQueryData(key, { ...result.current.data!, status: 'available' })
-    expect((interval as (current: typeof query) => number | false)(query)).toBe(false)
   })
 })
 
@@ -1306,7 +1315,7 @@ describe('GitHub list freshness (#152)', () => {
   })
   beforeEach(() => {
     vi.useFakeTimers()
-    focusManager.setFocused(true)
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }); document.dispatchEvent(new Event('visibilitychange')); focusManager.setFocused(true)
     setApiScope('shop')
   })
   afterEach(() => {
@@ -1332,12 +1341,12 @@ describe('GitHub list freshness (#152)', () => {
     expect(second.result.current.data?.issues?.[0]?.body).toBe('edited')
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(String(fetchMock.mock.calls[1]?.[0])).toBe('/api/v1/p/shop/github?limit=1000')
-    focusManager.setFocused(false)
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); focusManager.setFocused(false)
     await tick(180_000)
     expect(fetchMock).toHaveBeenCalledTimes(2)
     first.unmount()
     second.unmount()
-    focusManager.setFocused(true)
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }); document.dispatchEvent(new Event('visibilitychange')); focusManager.setFocused(true)
     await tick(180_000)
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
@@ -1362,13 +1371,14 @@ describe('GitHub list freshness (#152)', () => {
     fetchMock.mockImplementation(async () => json(data(fetchMock.mock.calls.length === 1 ? 'old' : 'edited')))
     const { result } = renderHook(() => useGithub(), { wrapper: wrapper() })
     await tick()
-    focusManager.setFocused(false)
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); focusManager.setFocused(false)
     await tick(90_000)
     expect(result.current.data?.issues?.[0]?.body).toBe('old')
-    await act(async () => { focusManager.setFocused(true) })
+    await act(async () => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }); document.dispatchEvent(new Event('visibilitychange')); focusManager.setFocused(true) })
     await tick()
     expect(result.current.data?.issues?.[0]?.body).toBe('edited')
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/github'))).toHaveLength(2)
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/health', expect.objectContaining({ credentials: 'include' }))
   })
   it('does not fetch disabled lists', async () => {
     renderHook(() => useGithub({}, false), { wrapper: wrapper() })

@@ -15,6 +15,14 @@ import { RunNotifications } from '../components/run-notifications'
 import { TasksOverview } from '../routes/tasks-overview'
 import type { ApiRun, ProviderStatusResponse, RunRecord } from '@open-mercato/cezar-api-client'
 
+// Reducer/lifecycle tests control named frames at the adapter seam. Actual ownership and
+// finite fallback are tested in live-coordinator and the browser suite.
+vi.mock('./live-workspace-source', () => ({ LiveWorkspaceSource: class {
+  constructor(url: string, options: EventSourceInit) {
+    return typeof globalThis.EventSource === 'function' ? new globalThis.EventSource(url, options) : { readyState: 2, addEventListener() {}, close() {} }
+  }
+} }))
+
 /**
  * jsdom ships no EventSource at all (it is not in its supported-API set), so there is nothing to
  * spy on — the stub *is* the test double. Same lesson as `matchMedia` in the theme tests: stub the
@@ -1613,6 +1621,7 @@ describe('useGlobalEvents — reconcile doctrine', () => {
       // The cross-project index behind the global Tasks page. Nothing else here covers it: the
       // scoped caches hold one project, and this spans the workspace.
       workspaceQueryKeys.runsIndex,
+      workspaceQueryKeys.projects,
       queryKeys.todos,
       queryKeys.worktrees, // the Resources panel's list/total (#483)
       queryKeys.repoBranches, // the Git view's branch classes (issue 08)
@@ -1668,6 +1677,7 @@ describe('useGlobalEvents — reconcile doctrine', () => {
       queryKeys.runs.all,
       // The cross-project index behind the global Tasks page — nothing else here covers it.
       workspaceQueryKeys.runsIndex,
+      workspaceQueryKeys.projects,
       queryKeys.todos,
       queryKeys.worktrees,
       queryKeys.repoBranches,

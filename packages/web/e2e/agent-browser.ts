@@ -770,27 +770,33 @@ export class AgentBrowser {
     return outcome.sample
   }
 
-  /** One flattened CDP session on this page for the duration of `fn` — for input the CLI has no
-   *  command for (wheel at a point, touch). */
-  private async withPageSession<T>(fn: (request: (method: string, params: object) => Promise<any>) => Promise<T>): Promise<T> {
+  /** Browser-protocol access for same-profile multi-tab/worker tests. All targets share
+   * this provider session's connection pool; separate AgentBrowser sessions do not. */
+  async withCdp<T>(work: (
+    request: (method: string, params?: Record<string, unknown>, sessionId?: string) => Promise<any>,
+    subscribe: (listener: (event: { method: string; params: any; sessionId?: string }) => void) => () => void,
+  ) => Promise<T>): Promise<T> {
     const { cdpUrl } = this.run(['get', 'cdp-url'])
     if (typeof cdpUrl !== 'string') throw new Error('agent-browser did not expose its CDP URL')
-    const url = this.url()
     const socket = new WebSocket(cdpUrl)
     let sequence = 0
-    const request = (method: string, params: object, sessionId?: string): Promise<any> => new Promise((resolve, reject) => {
+    const pending = new Map<number, { method: string; resolve(value: any): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>()
+    const listeners = new Set<(event: { method: string; params: any; sessionId?: string }) => void>()
+    const request = (method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<any> => new Promise((resolve, reject) => {
       const id = ++sequence
-      const timeout = setTimeout(() => { socket.removeEventListener('message', receive); reject(new Error(`CDP ${method} timed out`)) }, 5000)
-      const receive = (event: MessageEvent) => {
-        const response = JSON.parse(String(event.data))
-        if (response.id !== id) return
-        clearTimeout(timeout)
-        socket.removeEventListener('message', receive)
-        if (response.error) reject(new Error(JSON.stringify(response.error)))
-        else resolve(response.result)
-      }
-      socket.addEventListener('message', receive)
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP ${method} timed out`)) }, 10_000)
+      pending.set(id, { method, resolve, reject, timer })
       socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }))
+    })
+    socket.addEventListener('message', event => {
+      const message = JSON.parse(String(event.data))
+      const entry = pending.get(message.id)
+      if (entry) {
+        pending.delete(message.id)
+        clearTimeout(entry.timer)
+        if (message.error) entry.reject(new Error(`CDP ${entry.method}: ${JSON.stringify(message.error)}`))
+        else entry.resolve(message.result)
+      } else if (message.method) for (const listener of listeners) listener(message)
     })
     try {
       await new Promise<void>((resolve, reject) => {
@@ -798,18 +804,26 @@ export class AgentBrowser {
         socket.addEventListener('open', () => { clearTimeout(timeout); resolve() }, { once: true })
         socket.addEventListener('error', () => { clearTimeout(timeout); reject(new Error('CDP connection failed')) }, { once: true })
       })
-      const { targetInfos } = await request('Target.getTargets', {})
+      return await work(request, listener => { listeners.add(listener); return () => { listeners.delete(listener) } })
+    } finally {
+      for (const entry of pending.values()) { clearTimeout(entry.timer); entry.reject(new Error('CDP session closed')) }
+      pending.clear()
+      listeners.clear()
+      socket.close()
+    }
+  }
+
+  /** One flattened CDP session on this page for input the CLI cannot express. */
+  private async withPageSession<T>(fn: (request: (method: string, params: object) => Promise<any>) => Promise<T>): Promise<T> {
+    const url = this.url()
+    return this.withCdp(async request => {
+      const { targetInfos } = await request('Target.getTargets')
       const target = targetInfos.find((entry: { type: string; url: string }) => entry.type === 'page' && entry.url === url)
       if (!target) throw new Error(`No agent-browser page at ${url}`)
       const { sessionId } = await request('Target.attachToTarget', { targetId: target.targetId, flatten: true })
-      try {
-        return await fn((method, params) => request(method, params, sessionId))
-      } finally {
-        await request('Target.detachFromTarget', { sessionId })
-      }
-    } finally {
-      socket.close()
-    }
+      try { return await fn((method, params) => request(method, params as Record<string, unknown>, sessionId)) }
+      finally { await request('Target.detachFromTarget', { sessionId }) }
+    })
   }
 
   /** Move a real pointer without clicking, for hover targets whose bounding-box center is covered. */

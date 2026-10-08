@@ -95,6 +95,9 @@ export const previewClientMessageSchema = z.discriminatedUnion('t', [
   /** Never spawns anything: a silent port answers with `needs-approval`. */
   z.object({
     t: z.literal('open'),
+    /** Automatic reconnects may reclaim only this pane's last ownership. */
+    viewerId: z.string().min(1).max(128).optional(),
+    resume: z.boolean().optional(),
     target: z.union([z.object({ port }), z.object({ url: z.string().min(1).max(2048) })]),
   }),
   /** The owner's explicit approval; the only message that runs a registered command. */

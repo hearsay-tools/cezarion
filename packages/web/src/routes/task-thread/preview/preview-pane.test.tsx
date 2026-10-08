@@ -76,7 +76,7 @@ describe('PreviewPane', () => {
     expect(sockets).toHaveLength(1)
     expect(sent()).toEqual([])
     transport('open')
-    expect(sent()).toContainEqual({ t: 'open', target: { port: 5173 } })
+    expect(sent()).toContainEqual(expect.objectContaining({ t: 'open', target: { port: 5173 } }))
     expect(sent().some(m => m.t === 'run')).toBe(false)
     unmount()
     expect(last().close).toHaveBeenCalledTimes(1)
@@ -143,7 +143,7 @@ describe('PreviewPane', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use it here' }))
     expect(sockets).toHaveLength(2)
     transport('open')
-    expect(sent()).toContainEqual({ t: 'open', target: { port: 5173 } })
+    expect(sent()).toContainEqual(expect.objectContaining({ t: 'open', target: { port: 5173 }, resume: false }))
   })
 
   it('answers a page dialog with dialogResult', () => {
@@ -199,7 +199,7 @@ describe('PreviewPane', () => {
     const field = screen.getByRole('textbox', { name: 'Page address' })
     fireEvent.change(field, { target: { value: '3000' } })
     fireEvent.keyDown(field, { key: 'Enter' })
-    expect(sent()).toContainEqual({ t: 'open', target: { url: 'http://localhost:3000' } })
+    expect(sent()).toContainEqual(expect.objectContaining({ t: 'open', target: { url: 'http://localhost:3000' } }))
   })
 
   it('a URL typed while streaming becomes the target a reconnect reopens, and no server stays current', () => {
@@ -214,7 +214,7 @@ describe('PreviewPane', () => {
     expect(onPort).toHaveBeenLastCalledWith(undefined)
     transport('reconnecting', 1)
     transport('open')
-    expect(sent().filter(m => m.t === 'open').at(-1)).toEqual({ t: 'open', target: { url: 'http://example.com/docs' } })
+    expect(sent().filter(m => m.t === 'open').at(-1)).toEqual(expect.objectContaining({ t: 'open', target: { url: 'http://example.com/docs' } }))
   })
 
   it('a typed registered port opens that server instead of a bare URL', () => {
@@ -223,7 +223,7 @@ describe('PreviewPane', () => {
     const field = screen.getByRole('textbox', { name: 'Page address' })
     fireEvent.change(field, { target: { value: '5173' } })
     fireEvent.keyDown(field, { key: 'Enter' })
-    expect(sent()).toContainEqual({ t: 'open', target: { port: 5173 } })
+    expect(sent()).toContainEqual(expect.objectContaining({ t: 'open', target: { port: 5173 } }))
   })
 
   it('refuses addresses the browser must not open, without asking the server', () => {

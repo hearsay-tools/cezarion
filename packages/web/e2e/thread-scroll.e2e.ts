@@ -1,3 +1,4 @@
+import { LIVE_PROTOCOL } from '@open-mercato/cezar-api-client'
 import type { ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -107,10 +108,36 @@ function openThread(query = '', runId = RUN_ID) {
   // full-replay fallback; progressive-history.e2e.ts covers the paginated default.
   // Only the optimized history request fails; actual server/SSE replay stays real.
   browser.evaluate(`(() => {
-    const NativeSource = window.EventSource;
-    window.__threadSources = [];
-    window.EventSource = class extends NativeSource {
-      constructor(...args) { super(...args); window.__threadSources.push(this); }
+    // Capture the real document/worker wire at demand publication. Rendering tests
+    // inject/hold frames here without a product-only hook or a second transport.
+    const nativePost = MessagePort.prototype.postMessage;
+    MessagePort.prototype.postMessage = function(message, ...rest) {
+      if (message?.type === 'sync' && message.version === ${LIVE_PROTOCOL}) {
+        const entry = message.entries.find(entry => entry.demand.kind === 'run' && entry.demand.runId === '${runId}');
+        if (entry) {
+          window.__threadLive = { port: this, epoch: message.epoch, entry };
+          if (!this.__threadOriginalMessage) {
+            const deliver = this.__threadOriginalMessage = this.onmessage;
+            this.onmessage = event => {
+              const frame = event.data?.frame, state = window.__heldReplay;
+              if (state && frame?.type === 'event' && frame.runId === '${REPLAY_ID}') {
+                state.lastSeq = frame.event.seq;
+                if (!state.released && frame.event.seq > ${replayBoundary}) { state.queue.push(() => deliver.call(this, event)); return; }
+              }
+              deliver.call(this, event);
+            };
+          }
+        }
+      }
+      return nativePost.call(this, message, ...rest);
+    };
+    window.__emitThreadEvent = event => {
+      const current = window.__threadLive;
+      if (!current) throw new Error('missing shared task subscription');
+      current.port.dispatchEvent(new MessageEvent('message', { data: {
+        version: ${LIVE_PROTOCOL}, type: 'frame', epoch: current.epoch, id: current.entry.id,
+        frame: { type: 'event', projectId: current.entry.demand.projectId, runId: current.entry.demand.runId, name: 'ui-event', event },
+      } }));
     };
     const original = window.fetch.bind(window);
     window.fetch = (input, options) => new URL(String(input), location.href).pathname.endsWith('/history')
@@ -297,24 +324,8 @@ describe('thread virtualization on a 1,000-row transcript', () => {
     })()`)
     expect(reader.top).toBeGreaterThan(1000)
     expect(reader.height - reader.viewport - reader.top).toBeGreaterThan(1000)
-    // Hold actual ordered SSE frames after a real prefix. No atomic preload or DOM rewrite.
-    browser.evaluate(`(() => {
-      const NativeSource = window.EventSource; window.__replayNativeSource = NativeSource;
-      window.EventSource = class extends NativeSource {
-        constructor(...args) { super(...args); this.gated = String(args[0]).includes('/runs/${REPLAY_ID}/events');
-          if (this.gated) window.__heldReplay = { queue: [], lastSeq: 0, released: false };
-        }
-        addEventListener(type, listener, options) {
-          if (!this.gated || !['run-event', 'ui-event'].includes(type)) return super.addEventListener(type, listener, options);
-          return super.addEventListener(type, event => {
-            const state = window.__heldReplay, seq = JSON.parse(event.data).seq;
-            const deliver = () => typeof listener === 'function' ? listener.call(this, event) : listener.handleEvent(event);
-            state.lastSeq = seq;
-            if (!state.released && seq > ${replayBoundary}) state.queue.push(deliver); else deliver();
-          }, options);
-        }
-      };
-    })()`)
+    // Hold actual ordered worker-delivered frames after a real prefix. No DOM rewrite.
+    browser.evaluate(`window.__heldReplay = { queue: [], lastSeq: 0, released: false }`)
     try {
       browser.click(`[data-slot="sidebar"] a[href="${scoped('/')}"]`)
       browser.waitForFunction(`document.querySelector('[data-route="task-thread"]') === null`)
@@ -348,7 +359,7 @@ describe('thread virtualization on a 1,000-row transcript', () => {
       captureScrollState('thread-held-replay-timeout')
       throw error
     } finally {
-      browser.evaluate(`(() => { const state = window.__heldReplay; if (state) { state.released = true; for (const deliver of state.queue.splice(0)) deliver(); } window.EventSource = window.__replayNativeSource; })()`)
+      browser.evaluate(`(() => { const state = window.__heldReplay; if (state) { state.released = true; for (const deliver of state.queue.splice(0)) deliver(); } window.__heldReplay = undefined; })()`)
     }
   }, 90_000)
 })
@@ -396,12 +407,11 @@ describe('phone viewports', () => {
         resolve({ beforeTop: before.top, beforeBottom: before.bottom, afterTop: after.top, afterBottom: after.bottom });
       });
       observer.observe(conversation, { childList: true, subtree: true, characterData: true });
-      const source = window.__threadSources.findLast(s => s.url.includes('/runs/') && s.url.includes('/events'));
-      if (!source) { clearTimeout(timeout); observer.disconnect(); reject(new Error('missing run EventSource')); return; }
-      source.dispatchEvent(new MessageEvent('ui-event', { data: JSON.stringify({
+      if (!window.__threadLive) { clearTimeout(timeout); observer.disconnect(); reject(new Error('missing shared task subscription')); return; }
+      window.__emitThreadEvent({
         type: 'item.completed', seq: 100001, ts: new Date().toISOString(), stepId: 'task',
         item: { kind: 'message', id: 'mobile-dock-append', role: 'assistant', text: 'mobile dock append probe' },
-      }) }));
+      });
     })`) as { beforeTop: number; beforeBottom: number; afterTop: number; afterBottom: number }
     expect(Math.abs(append.afterBottom - append.beforeBottom)).toBeLessThanOrEqual(1)
 
@@ -459,7 +469,7 @@ describe('phone viewports', () => {
 
 /** #160: live appends must not shift the cached height of a message onto a tool card.
  * Replay uses the real server; only the additional incoming wire frame is injected into
- * its EventSource, so the real reducer, grouping, virtualizer and browser layout all run. */
+ * the document/worker wire, so the real reducer, grouping, virtualizer and browser layout all run. */
 describe('tool cards remain below assistant messages after live appends', () => {
   it.each([
     ['flat', 360, 640, 'light'], ['virtual', 360, 640, 'light'],
@@ -472,13 +482,11 @@ describe('tool cards remain below assistant messages after live appends', () => 
 
     parkAt('m.scrollHeight - m.clientHeight - 120')
     browser.evaluate(`(() => {
-      const source = window.__threadSources.findLast(s => s.url.includes('/runs/') && s.url.includes('/events'));
-      if (!source) throw new Error('missing run EventSource');
-      source.dispatchEvent(new MessageEvent('ui-event', { data: JSON.stringify({
+      window.__emitThreadEvent({
         type: 'item.completed', seq: 100000, ts: new Date().toISOString(), stepId: 'task',
         item: { kind: 'tool', id: 'overlap-probe', name: 'Bash', toolKind: 'execute',
           title: 'Ran incoming overlap probe', status: 'completed', output: 'probe completed', exitCode: 0 },
-      }) }));
+      });
     })()`)
     browser.waitForFunction(`document.body.textContent.includes('incoming overlap probe')`)
     const assertSeparated = () => {

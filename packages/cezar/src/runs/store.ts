@@ -4122,6 +4122,8 @@ export class RunStore extends EventEmitter {
    * absent. It saves nothing more, and a durable commit on it throws.
    */
   close(): void {
+    // Demand-bound feeds stop before storage disappears during project removal/shutdown.
+    this.emit('closed');
     this.compressor.stop();
     this.facts.stop();
     this.facts.flush();

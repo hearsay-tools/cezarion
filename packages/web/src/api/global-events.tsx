@@ -1,3 +1,5 @@
+import { LiveWorkspaceSource } from './live-workspace-source'
+import { onLiveReconcile } from './live-coordinator'
 import { useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 
@@ -175,8 +177,16 @@ function reconcileRunLists(queryClient: QueryClient): Promise<void>[] {
   }).map(query => reconcileBackgroundQuery(queryClient, query.queryKey))
 }
 
-function reconcile(queryClient: QueryClient): void {
-  trackSseReconcile(() => {
+function reconcile(queryClient: QueryClient, signal?: AbortSignal, periodic = false): Promise<void> {
+  if (signal?.aborted) return Promise.resolve()
+  // Cancel just this reconciliation's demanded families when the document hides or its
+  // finite recovery deadline expires. Query functions receive TanStack's own AbortSignal.
+  const keys = [queryKeys.runs.all, workspaceQueryKeys.runsIndex, workspaceQueryKeys.projects,
+    queryKeys.todos, queryKeys.health, queryKeys.worktrees, queryKeys.repoBranches,
+    workspaceQueryKeys.providerStatus, workspaceQueryKeys.models('cursor')]
+  const cancel = () => { for (const key of keys) void queryClient.cancelQueries({ queryKey: key }) }
+  signal?.addEventListener('abort', cancel, { once: true })
+  return trackSseReconcile(() => {
     // Warm invalidation already replaces a running GET. Cold invalidation reuses it, so cancel
     // only that uncovered case before preserving the existing family/list reconciliation.
     for (const query of queryClient.getQueryCache().findAll({ predicate: query => isRunListQueryKey(query.queryKey) })) {
@@ -185,13 +195,16 @@ function reconcile(queryClient: QueryClient): void {
       }
     }
     return [
-      queryClient.invalidateQueries({ queryKey: queryKeys.runs.all }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.runs.all,
+        ...(periodic ? { predicate: query => ['list', 'detail', 'relationships', 'archived'].includes(String(query.queryKey[2])) } : {}),
+      }),
       // Sidebar groups keep per-project list caches. `queryKeys.runs.all` is scope-led, so a
       // reconnect would otherwise leave an expanded non-active group's patched list stale (#129).
       queryClient.invalidateQueries({ predicate: query => isRunListQueryKey(query.queryKey) }),
       // Events happened while we were disconnected, and the index is cross-project — nothing else
       // here covers it.
       queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex }),
+      queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.projects }),
       queryClient.invalidateQueries({ queryKey: queryKeys.todos }),
       reconcileBackgroundQuery(queryClient, queryKeys.health),
       // The worktree panel's list/total (#483) — a run finishing or a reclaim changes it.
@@ -203,12 +216,12 @@ function reconcile(queryClient: QueryClient): void {
       // GitHub edits never enter this stream. Reconnect (including server restart) must
       // invalidate every project's list, leaving inactive caches stale until revisited.
       // Restrict this to list keys: comments/checks/search have separate cache policies.
-      queryClient.invalidateQueries({
+      !periodic ? queryClient.invalidateQueries({
         predicate: ({ queryKey }) => queryKey.length === 3 && queryKey[1] === 'github'
           && (queryKey[2] === null || typeof queryKey[2] === 'number'),
-      }),
+      }) : undefined,
     ]
-  })
+  }).finally(() => signal?.removeEventListener('abort', cancel))
 }
 
 /**
@@ -655,10 +668,10 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
   useEffect(() => {
     // jsdom has no EventSource, and neither would a prerender. Read it off `globalThis` so the
     // check and the construction see the same binding (`vi.stubGlobal` is what the tests install).
-    const Source = globalThis.EventSource
+    const Source = LiveWorkspaceSource
     if (typeof Source !== 'function') return
 
-    let source: EventSource | null = null
+    let source: LiveWorkspaceSource | null = null
     const runsIndexRefresher = createRunsIndexRefresher(queryClient)
     const runDetailRefresher = createRunDetailRefresher(queryClient)
     const runListBatcher = createRunListBatcher(queryClient)
@@ -864,9 +877,11 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('pagehide', onPageHide)
     window.addEventListener('pageshow', onPageShow)
+    const stopReconcile = onLiveReconcile((signal, periodic) => reconcile(queryClient, signal, periodic))
     connect()
 
     return () => {
+      stopReconcile()
       disposed = true
       clearTimeout(reopenTimer)
       runListBatcher.flush()
