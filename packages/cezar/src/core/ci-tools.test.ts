@@ -71,7 +71,15 @@ describe('CI tool injection', () => {
           expect(config['features.multi_agent']).toBe(false);
           expect(config[`mcp_servers.${descriptor.name}`]).toEqual({ command: descriptor.command, args: descriptor.args, env_vars: ['CEZ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET'] });
         }
-        if (backend === 'cursor') expect(rows.find(row => row.method === (resume ? 'session/load' : 'session/new')).params.mcpServers).toEqual([{ ...descriptor, env: [] }]);
+        if (backend === 'cursor') {
+          const args: string[] = rows[0];
+          expect(args).toContain('--plugin-dir');
+          expect(args.includes('--resume')).toBe(resume);
+          expect(args).toContain('--allowed-tools');
+          const plugin = rows.find(row => row.type === 'cursor-print-plugin');
+          expect(plugin.mcpServers[descriptor.name]).toEqual({ type: 'stdio', command: descriptor.command,
+            args: descriptor.args, env: {} });
+        }
         if (backend === 'opencode') expect(rows.find(row => row.type === 'runtime-config').config.mcp[descriptor.name].command).toEqual([descriptor.command, ...descriptor.args]);
       } finally { rmSync(dir, { recursive: true, force: true }); }
     }, 20_000);

@@ -28,7 +28,7 @@ export interface CursorPrintProcess {
  */
 export function startCursorPrintProcess(
   options: CursorPrintProcessOptions,
-  callbacks: { onStdout(chunk: string): void; onStderr(chunk: string): void },
+  callbacks: { onStdout(chunk: string): void; onStderr(chunk: string): void; onOutputError?(error: Error): void },
 ): CursorPrintProcess {
   const isNodeScript = /\.[cm]?js$/.test(options.bin);
   const command = isNodeScript ? process.execPath : options.bin;
@@ -59,6 +59,8 @@ export function startCursorPrintProcess(
   child.stderr.setEncoding('utf8');
   child.stdout.on('data', (chunk: string) => { if (!closed) callbacks.onStdout(chunk); });
   child.stderr.on('data', (chunk: string) => { if (!closed) callbacks.onStderr(chunk); });
+  child.stdout.on('error', error => { if (!closed) callbacks.onOutputError?.(error); });
+  child.stderr.on('error', error => { if (!closed) callbacks.onOutputError?.(error); });
   // The input pipe can fail after an interrupted turn even if no writer is
   // pending. Keep it observed so an EPIPE cannot crash the server.
   child.stdin.on('error', () => {});
@@ -68,11 +70,15 @@ export function startCursorPrintProcess(
     child.once('error', reject);
   });
   const settled = (async () => {
-    try { await exit; } catch { /* failed spawn is reported through exit */ }
+    let failedExit = false;
+    try { failedExit = (await exit).code !== 0; } catch { failedExit = true; }
     if (termTimer) clearTimeout(termTimer);
     if (killTimer) clearTimeout(killTimer);
     // The leader can exit while a child retains stdout/stderr. End its owned
     // process group, allow buffered final frames, then force pipe closure.
+    // On a crash, allow a short bounded drain for a descendant's final
+    // diagnostic before terminating the group (#499/S19).
+    if (failedExit) await new Promise(resolve => setTimeout(resolve, 200));
     signal('SIGTERM');
     const drainMs = options.drainMs ?? 250;
     await new Promise<void>(resolve => { drainTimer = setTimeout(resolve, drainMs); });

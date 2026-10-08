@@ -24,10 +24,11 @@ function holdNativeTurn(runner: RunnerId) {
     const anchor = runner === 'claude' ? "const held = 'parity hold: content after the pause';"
       : runner === 'pi' ? "sendText(['parity hold: content after the pause']);"
       : runner === 'omp' ? "assistantText(['parity hold: content after the pause']);"
-      : "if (input.includes('mock:hold')) await new Promise(r => setTimeout(r, 500));";
+      : "if (prompt.includes('mock:hold')) await new Promise(resolve => setTimeout(resolve, 500));";
     expect(source.split(anchor)).toHaveLength(2);
-    source = source.replace(anchor, runner === 'cursor' ? `if (input.includes('mock:hold')) { ${gate} }` : `${gate}\n${anchor}`);
+    source = source.replace(anchor, runner === 'cursor' ? `if (prompt.includes('mock:hold')) { ${gate} }` : `${gate}\n${anchor}`);
   }
+  if (runner === 'cursor') source = source.replaceAll("import('./", `import('${join(adapter.mockBin, '..')}/`);
   const mock = join(root, 'gated-native.mjs');
   writeFileSync(mock, `#!/usr/bin/env node\nimport * as ciGateFs from 'node:fs';
 async function ciRefusalGate() {

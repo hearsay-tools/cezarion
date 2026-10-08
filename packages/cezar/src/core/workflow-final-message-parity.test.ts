@@ -114,6 +114,16 @@ describe('final-message nudge parity — #544', () => {
         continue;
       }
       if (row.id === 'F9') {
+        const exemption = exemptionFor('F9', backend);
+        if (exemption) {
+          it(`${backend} F9 exemption — ${exemption.reason}`, async () => {
+            expect(HARNESS_ADAPTERS[backend].scenarios['silent-tail-late-reply']).toBeUndefined();
+            const observed = await driveSeam(backend, 'silent-tail');
+            expect(observed.v2.some(event => event.type === 'turn.started')).toBe(true);
+            expect(observed.v1.some(event => event.type === 'turn-end')).toBe(true);
+          });
+          continue;
+        }
         it(`${backend} ${row.id} ${row.name}`, async () => {
           await withOwnedInputRun(backend, 'silent-tail-late-reply', async ({ store, manager, runId }) => {
             shortenNudgeBound(manager as unknown as { finalMessageNudgeReplyMs?: number });
@@ -220,8 +230,12 @@ describe('final-message nudge parity — #544', () => {
               expect(autonomousNotes(events)).toHaveLength(0);
               expect(all.some(e => {
                 if (e.type !== 'item.completed') return false;
-                const item = e.item as { kind?: string; text?: string } | undefined;
-                return item?.kind === 'reasoning' && (item.text ?? '').includes('CEZ:DONE');
+                const item = e.item as { kind?: string; text?: string; output?: string } | undefined;
+                // Cursor print suppresses reasoning natively. Its tool output
+                // carries the marker control without turning it into v1 text.
+                return backend === 'cursor'
+                  ? item?.kind === 'tool' && (item.output ?? '').includes('CEZ:DONE')
+                  : item?.kind === 'reasoning' && (item.text ?? '').includes('CEZ:DONE');
               })).toBe(true);
             } else if (row.id === 'F4') {
               expect(status).toBe('waiting');

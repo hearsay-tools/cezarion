@@ -58,7 +58,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `provider-error` | a runtime provider rejection in its native error shape |
  * | `ask` | an ask — native where the wire has one, a `CEZ:ASK` marker otherwise |
  * | `ask-resume` | accept one human answer, then finish with `CEZ:DONE` without another prompt |
- * | `plan-resume` | Cursor’s `cursor/create_plan` variant of `ask-resume` |
+ * | `plan-resume` | Legacy Cursor ACP `cursor/create_plan` variant (direct ACP tests) |
  * | `ask-reply-late` | native ask whose reply acknowledgement can lag the resumed turn |
  * | `ask-bad` | a malformed ask, and then still end the turn |
  * | `subagent` | child work and terminal signal, then parent monitoring text followed by late child text |
@@ -105,6 +105,7 @@ export const SCENARIOS = [
   'no-progress',
   'no-progress-ignore-term',
   'no-progress-held-pipe',
+  'no-progress-ack-only',
   'busy-progress',
   'split-text',
   'provider-error',
@@ -163,7 +164,7 @@ export const NO_PROGRESS_CRITERIA = [
   { id: 'N5', scenario: 'no-progress-ignore-term', name: 'stalled processes ignoring TERM are killed before releasing capacity' },
   { id: 'N6', scenario: 'ask', name: 'native questions or marker fallback pause protection until answered' },
   { id: 'N7', scenario: 'no-progress-held-pipe', name: 'descendant-held pipes cannot retain capacity after CLI exit' },
-  { id: 'N8', scenario: 'baseline', name: 'agent input rearms protection even without a native turn-start notification' },
+  { id: 'N8', scenario: 'no-progress-ack-only', name: 'agent input rearms protection even without a native turn-start notification' },
   { id: 'N4', scenario: 'baseline', name: 'Continue sessions enforce inactivity' },
 ] as const;
 
@@ -285,6 +286,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'silent-tail-slow-done': 'mock:silent-tail-slow-done',
       'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
+      'no-progress-ack-only': BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
       'shutdown-stderr': 'mock:crash-stderr-clean',
@@ -329,6 +331,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'silent-tail-slow-done': 'mock:silent-tail-slow-done',
       'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
+      'no-progress-ack-only': BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
       'shutdown-stderr': 'mock:crash-stderr-clean',
@@ -377,6 +380,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'silent-tail-slow-done': 'mock:silent-tail-slow-done',
       'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
+      'no-progress-ack-only': BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
       'shutdown-stderr': 'mock:crash-stderr-clean',
@@ -411,8 +415,6 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
-      'silent-tail-no-reply': 'mock:silent-tail-no-reply',
-      'silent-tail-late-reply': 'mock:silent-tail-late-reply',
       'silent-tail-slow-done': 'mock:silent-tail-slow-done',
       'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
@@ -427,7 +429,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-resume': 'mock:ask mock:resume-done',
       'plan-resume': 'mock:plan mock:resume-done',
       'ask-snapshot': 'mock:ask-snapshot',
-      'ask-snapshot-bad': 'mock:ask-snapshot-bad', 'ask-prose': 'mock:ask-prose', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:ask' },
+      'ask-snapshot-bad': 'mock:ask-snapshot-bad', 'ask-prose': 'mock:ask-prose', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:ask-reply-late' },
   },
   pi: {
     backend: 'pi',
@@ -445,6 +447,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
       'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
+      'no-progress-ack-only': BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
       'shutdown-stderr': 'mock:crash-stderr-clean',
@@ -494,6 +497,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'silent-tail-slow-done': 'mock:silent-tail-slow-done',
       'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
+      'no-progress-ack-only': BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
       'shutdown-stderr': 'mock:crash-stderr-clean',
@@ -589,6 +593,14 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'F7', backend, kind: 'scenario-unconstructible' as const,
     reason: 'This wire has no separate HTTP ACK retained after turn completion. Turn frames and the transport ACK share one stream, so a silent-tail turn cannot end while its agent-input ACK is still pending.',
   })),
+  ...(['F8', 'F9'] as const).map(criterion => ({
+    criterion, backend: 'cursor' as const, kind: 'scenario-unconstructible' as const,
+    reason: 'Cursor print has no independent nudge ACK before native model work. It cannot acknowledge a silent nudge and then withhold or delay that turn; the native turn and no-progress cells exercise the available liveness bound.',
+  })),
+  {
+    criterion: 'N8', backend: 'cursor', kind: 'scenario-unconstructible',
+    reason: 'Every Cursor print process emits a native init frame mapped to turn.started before model-work admission. The native no-progress rows exercise the timeout after that start; no turn-start-free acknowledged input can be constructed.',
+  },
   ...(['claude', 'opencode', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion: 'F11', backend, kind: 'scenario-unconstructible' as const,
     reason: 'This wire has no native turn-start frame that reaches v2 after the nudge is sent; turn.started is synthetic inside sendAgentMessage and fires at nudge send, before the bound.',
@@ -596,6 +608,10 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   {
     criterion: 'A9', backend: 'claude', kind: 'capability-absent',
     reason: 'Claude stream-json uses the turn-end CEZ:ASK fallback; its ask wire emits no native mid-turn ask.requested (A3/A4 cover the portable policy).',
+  },
+  {
+    criterion: 'A9', backend: 'cursor', kind: 'capability-absent',
+    reason: 'Cursor print auto-skips native AskQuestion before a human can answer. The executable native-question rejection and A3/A4 portable CEZ:ASK cells cover the available paths.',
   },
   {
     criterion: 'A9', backend: 'pi', kind: 'capability-absent',
@@ -759,7 +775,7 @@ export async function driveSeam(
   let session: AgentSession | undefined;
   let pid: number | undefined;
   try {
-    session = createRunner(backend).startSession(
+    session = createRunner(backend, backend === 'cursor' ? { sessionTransport: 'cursor-print' } : {}).startSession(
       {
         userPrompt: promptFor(backend, scenario),
         cwd,
@@ -983,6 +999,8 @@ export async function withOwnedInputRun(
     extraBackends?: readonly RunnerId[];
     /** Environment overrides restored after the native mock worker settles. */
     env?: Record<string, string>;
+    /** Preserve a legacy native-wire fixture while the backend default changes. */
+    mockBin?: string;
   } = {},
 ): Promise<void> {
   const adapter = HARNESS_ADAPTERS[backend];
@@ -995,7 +1013,7 @@ export async function withOwnedInputRun(
   Object.assign(process.env, options.env);
   // Naming is a separate auxiliary invocation, not part of input delivery.
   process.env.CEZ_AUTONAME = '0';
-  process.env[adapter.binEnv] = adapter.mockBin;
+  process.env[adapter.binEnv] = options.mockBin ?? adapter.mockBin;
   delete process.env.CEZ_DRY_RUN;
   const repoRoot = mkdtempSync(join(tmpdir(), `cez-owned-input-${backend}-`));
   // This fixture owns every native mock process; ambient host daemons cannot hold its new repo.

@@ -13,6 +13,7 @@ import { cezarToolEnvNames } from '../ci-wait/tools.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
 import { SAFE_CURSOR_PRINT_TOOLS } from './cursor-print-tool-catalog.ts';
 import { sanitizeCursorProviderError } from './cursor-provider-error.ts';
+import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { startCursorPrintProcess, type CursorPrintProcess, type CursorPrintProcessOptions } from './cursor-print-process.ts';
 import { createCursorPrintUiState, mapCursorPrintMessage, mapCursorPrintStreamEvent } from './cursor-print-ui-mapper.ts';
 import { AUTO_END_DELAY_MS, DEFAULT_NO_PROGRESS_TIMEOUT_MS, DEFAULT_RUN_TIMEOUT_MS } from './runner-runtime.ts';
@@ -74,6 +75,7 @@ interface ActiveTurn {
   resultSeen: boolean;
   modelWorkSeen: boolean;
   turnText: string;
+  stderr: string;
   receipt?: { resolve(): void; reject(error: Error): void; settled: boolean };
 }
 
@@ -223,7 +225,8 @@ class CursorPrintSession implements AgentSession {
         ...this.options.processOptions,
       }, {
         onStdout: chunk => this.onStdout(chunk),
-        onStderr: () => { this.activity(); },
+        onStderr: chunk => { this.activity(); if (this.active) this.active.stderr = (this.active.stderr + chunk).slice(-16_384); },
+        onOutputError: () => this.fail('Cursor print output transport failed'),
       });
     } catch (error) {
       receipt?.reject(error instanceof Error ? error : new Error('Cursor print spawn failed'));
@@ -231,7 +234,7 @@ class CursorPrintSession implements AgentSession {
       return;
     }
     const active: ActiveTurn = { process: proc, buffer: '', initSeen: false,
-      resultSeen: false, modelWorkSeen: false, turnText: '', receipt };
+      resultSeen: false, modelWorkSeen: false, turnText: '', stderr: '', receipt };
     this.active = active;
     this.turnCount += 1;
     if (this.turnCount > 1 && proc.pid) this.opts.onPidChange?.(proc.pid);
@@ -342,14 +345,22 @@ class CursorPrintSession implements AgentSession {
       this.markerAsk = parseAskMarker(active.turnText) !== null;
       if (this.markerAsk) this.queue = [];
     }
+    // The workflow can submit an autonomous follow-up synchronously from
+    // turn-end. Admit it at this boundary, after the old process settled.
+    if (completedTurn && !this.errorReported) this.busy = false;
     if (completedTurn) this.emit({ type: 'turn-end' });
     if (this.closing) { this.finish(); return; }
     if (spawnError) { this.fail('Cursor print process failed to start'); return; }
+    if (exitCode !== 0 || signal !== null) {
+      if (active.stderr.trim()) this.emit({ type: 'note', message: `Cursor print CLI stderr:\n${active.stderr}` });
+      const detail = sanitizeCursorProviderError(summarizeRunnerStderr(active.stderr));
+      const boundary = active.resultSeen ? 'after a reported result' : 'without a result frame';
+      this.fail(`Cursor print exited ${boundary} (code ${exitCode ?? signal ?? 'unknown'})${detail ? `: ${detail}` : ''}`);
+      return;
+    }
     if (!active.resultSeen) { this.fail('Cursor print exited without a result frame'); return; }
-    if (exitCode !== 0 || signal !== null) { this.fail('Cursor print process exited after a reported result'); return; }
     if (this.errorReported) { this.finish(); return; }
-    this.busy = false;
-    if (!this.markerAsk) this.opts.onAgentInputReady?.();
+    if (!this.markerAsk && !this.busy) this.opts.onAgentInputReady?.();
     queueMicrotask(() => this.afterTurn());
   }
 

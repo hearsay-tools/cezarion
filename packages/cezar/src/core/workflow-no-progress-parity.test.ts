@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
-import { NO_PROGRESS_CRITERIA, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+import { NO_PROGRESS_CRITERIA, driveSeam, exemptionFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 import { workflowDefSchema } from '../workflows/types.ts';
 
 vi.mock('./runner-runtime.ts', async importOriginal => ({
@@ -16,6 +16,15 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 describe('managed open-turn inactivity — #470', () => {
   for (const backend of RUNNER_IDS) {
     for (const row of NO_PROGRESS_CRITERIA) {
+      const exemption = exemptionFor(row.id, backend);
+      if (exemption) {
+        it(`${backend} ${row.id} exemption — ${exemption.reason}`, async () => {
+          const observed = await driveSeam(backend, 'no-progress', { timeoutMs: 2_500 });
+          expect(observed.v2.some(event => event.type === 'turn.started')).toBe(true);
+          expect(observed.v1.some(event => event.type === 'error' && /no progress/i.test(event.message))).toBe(true);
+        });
+        continue;
+      }
       it(`${backend} ${row.id} ${row.name}`, async () => {
         const workflowDef = row.id === 'N1' || row.id === 'N2' || row.id === 'N5' || row.id === 'N7'
           ? workflowDefSchema.parse({ name: 'inactivity', source: 'file', steps: [

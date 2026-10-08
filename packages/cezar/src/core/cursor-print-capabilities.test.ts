@@ -12,7 +12,7 @@ function bin(version: string, catalog?: string, fail = false): string {
   const dir = mkdtempSync(join(tmpdir(), 'cez-cursor-cap-')); dirs.push(dir);
   const path = join(dir, 'agent');
   const names = catalog ?? [...SAFE_CURSOR_PRINT_TOOLS, ...NATIVE_CURSOR_DELEGATION_TOOLS].join(', ');
-  writeFileSync(path, `#!/usr/bin/env node\nconst a=process.argv.slice(2); if(a[0]==='--version'){console.log(${JSON.stringify(version)});process.exit(0)} if(${fail})process.exit(2); if(a[0]==='--list-models'){if(process.env.CEZ_TEST_ACCOUNT!=='scoped')process.exit(3);console.log('Available models\\nmodel-a - Model A (default)\\nmodel-a-low - Model A Low');process.exit(0)} if(a.includes('__cezar_probe_invalid__')){console.error(${JSON.stringify(`Invalid --allowed-tools value(s): __cezar_probe_invalid__. Expected one of: ${names}`)});process.exit(1)} process.exit(0);\n`);
+  writeFileSync(path, `#!/usr/bin/env node\nconst a=process.argv.slice(2); if(a[0]==='--version'){console.log(${JSON.stringify(version)});process.exit(0)} if(${fail})process.exit(2); if(a[0]==='--list-models'){if(process.env.CEZ_TEST_ACCOUNT!=='scoped')process.exit(3);console.log('Available models\\nmodel-a - Model A (default)\\nmodel-a-low - Model A Low');process.exit(0)} if(a.includes('__cezar_probe_invalid__')){if(!a.includes('--trust')||!a.includes('--force')){console.error('Workspace Trust Required');process.exit(1)}console.error(${JSON.stringify(`Invalid --allowed-tools value(s): __cezar_probe_invalid__. Expected one of: ${names}`)});process.exit(1)} process.exit(0);\n`);
   chmodSync(path, 0o700);
   return path;
 }

@@ -40,7 +40,9 @@ export async function inspectCursorPrintCapabilities(
   }
   let output: string;
   try {
-    await execute(bin, ['--print', '--allowed-tools', INVALID_TOOL, 'capability validation only'], options);
+    // Match the trusted headless invocation. In a new task worktree Cursor
+    // checks workspace trust before it validates --allowed-tools otherwise.
+    await execute(bin, ['--print', '--force', '--trust', '--allowed-tools', INVALID_TOOL, 'capability validation only'], options);
     throw new Error('Cursor print capability preflight did not reject an invalid native tool');
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('Cursor print capability preflight')) throw error;

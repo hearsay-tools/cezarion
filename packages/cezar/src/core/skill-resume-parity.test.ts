@@ -107,7 +107,7 @@ function assertReusedRecordedSession(
     return;
   }
   if (backend === 'cursor') {
-    expect(continuationRecording).toContain('session/load');
+    expect(continuationRecording).toContain('--resume');
     expect(continuationRecording).toContain(sessionId);
     expect(continuationRecording).not.toMatch(/"method"\s*:\s*"session\/new"/);
     return;
@@ -143,6 +143,11 @@ function systemPromptsFrom(backend: RunnerId, recording: string): string[] {
   }
   const texts: string[] = [];
   for (const row of rows) {
+    if (backend === 'cursor' && Array.isArray(row)) {
+      const prompt = row.at(-1);
+      if (typeof prompt === 'string') texts.push(systemFromPrepended(prompt));
+      continue;
+    }
     if (!row || typeof row !== 'object') continue;
     const rec = row as Record<string, unknown>;
     if (backend === 'codex' && rec.method === 'turn/start') {
@@ -216,7 +221,7 @@ async function continueAndPark(
   expect(fixture.manager.continueRun(fixture.runId, opts).ok).toBe(true);
   await waitFor(() => fixture.manager.isActive(fixture.runId) || fixture.store.getRun(fixture.runId)?.status === 'running');
   await waitFor(() => fixture.store.getRun(fixture.runId)?.status === 'waiting' && fixture.manager.isActive(fixture.runId));
-  await waitFor(() => fixture.wireSince(marked).includes('--append-system-prompt') || fixture.wireSince(marked).includes('turn/start') || fixture.wireSince(marked).includes('session/prompt') || fixture.wireSince(marked).includes('prompt_async'));
+  await waitFor(() => fixture.wireSince(marked).includes('--append-system-prompt') || fixture.wireSince(marked).includes('turn/start') || fixture.wireSince(marked).includes('session/prompt') || fixture.wireSince(marked).includes('prompt_async') || fixture.wireSince(marked).includes('--output-format'));
   return fixture.wireSince(marked);
 }
 
@@ -362,7 +367,7 @@ describe('harness parity — skill system prompt on Continue (#790)', () => {
         await fixture.restart();
         await waitFor(() => fixture.manager.isActive(fixture.runId) || ['queued', 'running', 'waiting'].includes(fixture.store.getRun(fixture.runId)?.status ?? ''));
         await waitFor(() => fixture.store.getRun(fixture.runId)?.status === 'waiting' && fixture.manager.isActive(fixture.runId));
-        await waitFor(() => fixture.wireSince(marked).includes('--append-system-prompt') || fixture.wireSince(marked).includes('turn/start') || fixture.wireSince(marked).includes('session/prompt') || fixture.wireSince(marked).includes('prompt_async'));
+        await waitFor(() => fixture.wireSince(marked).includes('--append-system-prompt') || fixture.wireSince(marked).includes('turn/start') || fixture.wireSince(marked).includes('session/prompt') || fixture.wireSince(marked).includes('prompt_async') || fixture.wireSince(marked).includes('--output-format'));
         assertContinuationSkill(backend, fixture.repoRoot, launchPrompt, fixture.wireSince(marked));
       });
     }, 60_000);
@@ -383,7 +388,7 @@ describe('harness parity — skill system prompt on Continue (#790)', () => {
         await fixture.restart();
         await waitFor(() => fixture.manager.isActive(fixture.runId) || ['queued', 'running', 'waiting'].includes(fixture.store.getRun(fixture.runId)?.status ?? ''));
         await waitFor(() => fixture.store.getRun(fixture.runId)?.status === 'waiting' && fixture.manager.isActive(fixture.runId));
-        await waitFor(() => fixture.wireSince(recoverMark).includes('--append-system-prompt') || fixture.wireSince(recoverMark).includes('turn/start') || fixture.wireSince(recoverMark).includes('session/prompt') || fixture.wireSince(recoverMark).includes('prompt_async') || fixture.wireSince(recoverMark).includes('session/load') || fixture.wireSince(recoverMark).includes('thread/resume'));
+        await waitFor(() => fixture.wireSince(recoverMark).includes('--append-system-prompt') || fixture.wireSince(recoverMark).includes('turn/start') || fixture.wireSince(recoverMark).includes('session/prompt') || fixture.wireSince(recoverMark).includes('prompt_async') || fixture.wireSince(recoverMark).includes('session/load') || fixture.wireSince(recoverMark).includes('thread/resume') || fixture.wireSince(recoverMark).includes('--output-format'));
         assertReusedRecordedSession(backend, fixture.wireSince(recoverMark), sessionId);
         expect(recordedSessionId(fixture.store, fixture.runId)).toBe(sessionId);
       });
@@ -506,6 +511,10 @@ describe('harness parity — systemPromptOnResume declaration (#790)', () => {
             expect(opencodeSessionGets(resumeWire)).toEqual([PINNED_SESSION_ID]);
             expect(opencodeSessionGets(freshWire)).toEqual([]);
             expect(freshWire).not.toMatch(/thread\/resume|session\/load/);
+          } else if (backend === 'cursor') {
+            expect(resumeWire).toContain('--resume');
+            expect(resumeWire).toContain(PINNED_SESSION_ID);
+            expect(freshWire).not.toContain('--resume');
           } else {
             expect(resumeWire).toMatch(/thread\/resume|session\/load/);
             expect(freshWire).not.toMatch(/thread\/resume|session\/load/);

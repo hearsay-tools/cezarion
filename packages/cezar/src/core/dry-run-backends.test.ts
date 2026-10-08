@@ -9,6 +9,7 @@ import { OpencodeServerRunner } from './opencode-server-runner.ts';
 import { OmpRunner } from './omp-runner.ts';
 import { createRunner } from './runner-factory.ts';
 import { CursorRunner } from './cursor-runner.ts';
+import type { UiEvent } from './ui-events.ts';
 
 afterEach(() => vi.unstubAllEnvs());
 it('uses bundled Cursor print for a fresh dry run and ACP for a legacy session', async () => {
@@ -21,6 +22,24 @@ it('uses bundled Cursor print for a fresh dry run and ACP for a legacy session',
     await createRunner('cursor').run({ cwd: dir, userPrompt: 'hello' }, event => events.push(event));
     expect(events.find(event => event.type === 'session')?.sessionTransport).toBe('cursor-print');
     expect(createRunner('cursor', { sessionTransport: 'cursor-acp' })).toBeInstanceOf(CursorRunner);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+it('shows Cursor native questions as failed tools without a Cezar answer card', async () => {
+  vi.stubEnv('CEZ_DRY_RUN', '1');
+  vi.stubEnv('CEZ_CURSOR_BIN', undefined);
+  vi.stubEnv('CEZ_MOCK_CURSOR_PRINT_MODE', 'native-question');
+  const dir = mkdtempSync(join(tmpdir(), 'cez-dry-cursor-question-'));
+  try {
+    const ui: UiEvent[] = [];
+    const session = createRunner('cursor').startSession({ cwd: dir, userPrompt: 'Ask a native question' }, undefined,
+      { onUiEvent: event => ui.push(event) });
+    await expect.poll(() => ui.some(event => event.type === 'turn.completed'), { timeout: 3_000 }).toBe(true);
+    session.end();
+    await session.result;
+    expect(ui.filter(event => event.type === 'ask.requested')).toEqual([]);
+    expect(ui).toContainEqual(expect.objectContaining({ type: 'item.completed', item: expect.objectContaining({
+      status: 'failed', error: 'Cursor skipped this native question in headless print mode',
+    }) }));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 it('selects bundled Codex, OpenCode and OMP mocks in dry runs without host binaries', () => {

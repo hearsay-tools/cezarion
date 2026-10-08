@@ -1,11 +1,11 @@
-# Cursor ACP fixtures
+# Cursor ACP and print fixtures
 
 Cursor print qualification for fork #590 is recorded in
 [`print-qualification.md`](print-qualification.md). CLI
 `2026.10.01-e373342` auto-skips native questions; the revised design accepts
 that visible limit and uses Cezar `CEZ:ASK` for its own questions. The
-per-invocation native tool allowlist passed a harmless live control. Other
-mandatory print gates remain unqualified. `print-mcp.json` and
+per-invocation native tool allowlist passed a harmless live control. The
+qualification record contains the remaining live probes. `print-mcp.json` and
 `print-portable-ask.json` record fresh/resume bindings; `print-plugins.json`
 records the accepted project-local limitation: a Claude plugin disable did
 not stop Cursor's marketplace copy of Superpowers. `print-resume-missing.json`

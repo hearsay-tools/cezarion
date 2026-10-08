@@ -35,11 +35,16 @@ export class CursorRunner implements AgentRunner {
     const bin = this.options.bin ?? process.env.CEZ_CURSOR_BIN ?? (process.env.CEZ_DRY_RUN === '1'
       ? bundledPrintMock : 'agent');
     const isBundledMock = bin === bundledPrintMock;
+    const mockModels: readonly ModelOption[] = [
+      { id: 'mock-default-model', label: 'Mock default', description: 'Default model' },
+      { id: 'mock-default-model-xhigh', label: 'Mock high effort', description: 'Mock high effort' },
+    ];
     const select = async (signal: AbortSignal): Promise<{ transport: SessionTransport; note?: string; models?: readonly ModelOption[]; model?: string }> => {
       if (this.options.sessionTransport === 'cursor-acp') return { transport: 'cursor-acp' };
       if (this.options.sessionTransport === 'cursor-print') {
         if (isBundledMock) {
-          return { transport: 'cursor-print' };
+          return { transport: 'cursor-print', models: spec.effort ? mockModels : undefined,
+            model: spec.effort && !spec.model ? 'mock-default-model' : undefined };
         }
         const capability = await (this.options.inspect ?? inspectCursorPrintCapabilities)(bin, spec, signal);
         if (!capability.supported) throw new Error(`Cursor print session cannot resume: ${capability.reason}`);
@@ -47,7 +52,8 @@ export class CursorRunner implements AgentRunner {
       }
       if (spec.resume) return { transport: 'cursor-acp' }; // Legacy untagged Cursor ID.
       if (isBundledMock) {
-        return { transport: 'cursor-print' };
+        return { transport: 'cursor-print', models: spec.effort ? mockModels : undefined,
+          model: spec.effort && !spec.model ? 'mock-default-model' : undefined };
       }
       const capability = await (this.options.inspect ?? inspectCursorPrintCapabilities)(bin, spec, signal);
       return capability.supported

@@ -941,7 +941,7 @@ cezar is not married to one vendor. Every agent step runs through a single
 | **Claude Code** (default) | [`claude`](https://github.com/anthropics/claude-code) | Headless `stream-json` mode. | Per-tool `--allowedTools` (`bashAllowlist` scopes `Bash`); `dontAsk` denies unapproved tools without prompting (`CEZ_APPROVAL_GATE=1` → `acceptEdits` + approval UI; `CEZ_CLAUDE_PERMISSION_MODE=bypass` → `--dangerously-skip-permissions`). |
 | **Codex** | [`codex`](https://github.com/openai/codex) | `codex app-server` — JSON-RPC over stdio, the same transport the Codex IDE extensions use. | Ignores `allowedTools`; inherits managed permissions and Codex approval defaults. Confirmed unmanaged sessions use `danger-full-access`. `CEZ_CODEX_NETWORK=0` requires network restriction: unmanaged sessions use network-blocked `workspace-write`; managed filesystem rules remain intact, and an unconfirmed network restriction stops before any turn. If requirements discovery is unavailable, Codex permission defaults apply. |
 | **OpenCode** _(experimental)_ | [`opencode`](https://opencode.ai) | `opencode serve` — a local HTTP server with an SSE event stream. | Ignores `allowedTools` entirely; every permission is auto-approved. |
-| **Cursor** | [`agent`](https://cursor.com/docs/cli/installation) | Persistent ACP over stdio. | Uses `--force` and approves ACP allow-once requests; Cursor’s native deny rules still apply. Per-run `allowedTools` and `bashAllowlist` are unsupported. |
+| **Cursor** | [`agent`](https://cursor.com/docs/cli/installation) | Qualified builds use resumable `--print --output-format stream-json` turns; other builds and legacy sessions use ACP. | Print mode admits marketplace plugins, including user and team plugins, and narrows known native delegation tools for governed runs. Per-run `allowedTools` and `bashAllowlist` are unsupported. |
 | **pi** _(experimental)_ | [`pi`](https://github.com/badlogic/pi-mono) | Persistent `--mode rpc` over JSONL; models are picked with the `provider/model` convention. | Maps `allowedTools` onto pi's `--tools` allowlist; default sessions also pass harness extras (`Subagent`, `SubagentSupervisor`, `SubagentWait`) through `--tools`, and an explicit `allowedTools` still restricts. A configured `bashAllowlist` disables Bash because pi cannot express command-prefix rules. |
 | **OMP** _(experimental)_ | [`omp`](https://github.com/can1357/oh-my-pi) | Persistent `--mode rpc` over JSONL (Oh My Pi, a pi fork); models use the `provider/model` convention and are discovered from `omp models --json`. | Maps `allowedTools` onto OMP's `--tools` allowlist (`[]` becomes `--no-tools`); default sessions also pass `todo`, `lsp`, `ast_edit`, `task` and `wait`. A configured `bashAllowlist` disables `bash` because OMP cannot express command-prefix rules. |
 
@@ -957,10 +957,21 @@ the backends it found — install any one of the six and you're operational.
 
 Install [Cursor CLI](https://cursor.com/docs/cli/installation) and run `agent login`,
 or set `CURSOR_API_KEY`. Cezar discovers `agent` on PATH; `CEZ_CURSOR_BIN` overrides
-its location. Select **Cursor** in the runner picker to use a persistent ACP session.
+its location. Select **Cursor** in the runner picker. On the qualified
+`2026.10.01-e373342` build, new sessions use print mode so marketplace plugins
+are available. Cezar checks `agent --version` and the native tool catalog before
+the first turn; `agent --version` is also the quick way to check your installation.
+Other builds use ACP, which may not see marketplace plugins. Existing ACP
+sessions continue on ACP so their conversation history is preserved.
 A missing CLI leaves the other backends available. `CEZ_DRY_RUN=1` uses the mock.
-Cursor ACP currently provides no token-usage telemetry; Cezar leaves usage unavailable
-instead of estimating it. Cezar negotiates Cursor’s parameterized model picker and
+Cursor questions from a plugin may be automatically skipped by print mode. Cezar's
+own `CEZ:ASK` questions remain answerable in the cockpit; plugins that require
+native questions may not work fully. Project-local Claude plugin settings may
+not disable a user or team marketplace copy. A previously confirmed Cursor
+session ID can also lose history inside Cursor without an error; Cezar resumes
+the recorded ID and checks that Cursor returns the same ID.
+Cursor provides no qualified token-usage telemetry; Cezar leaves usage unavailable
+instead of estimating it. In ACP mode, Cezar negotiates Cursor’s parameterized model picker and
 shows only the effort levels the selected model advertises. The runner applies
 `effort` or `reasoning` through ACP session config options before prompting;
 unsupported explicit values fail instead of silently using a default. Initial models
