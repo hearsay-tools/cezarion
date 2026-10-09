@@ -122,6 +122,16 @@ describe('live preview', () => {
     // the fixed task header and never moves with the thread.
     browser.click('[data-slot="preview-toggle"]')
     const approval = '[data-slot="preview-pane"] [data-slot="preview-state"][data-state="needs-approval"]'
+    // Registration can reach the header before its default server selection.
+    // The empty pane legitimately lists that server for review in this ordering.
+    const landing = browser.waitForValue(
+      `(() => { const pane = document.querySelector('[data-slot="preview-pane"]');
+        if (pane?.querySelector('[data-state="needs-approval"]')) return 'approval';
+        return [...(pane?.querySelectorAll('[data-state="empty"] button') ?? [])]
+          .some(button => button.textContent.trim() === 'Review') ? 'review' : null })()`,
+      value => value === 'approval' || value === 'review',
+    )
+    if (landing === 'review') browser.click('[data-slot="preview-pane"] [data-state="empty"] button')
     const pending = browser.waitForValue(
       `(() => { const s = document.querySelector('${approval}'); return s ? s.textContent : null })()`,
       text => typeof text === 'string' && text.includes('Run and open'),
