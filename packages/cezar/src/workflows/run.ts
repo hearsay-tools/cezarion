@@ -3941,8 +3941,9 @@ export class RunManager {
       this.executionBlockedByRootFinish(run) || !['queued', 'running', 'waiting'].includes(run.status) ||
       this.workerExecutionStopped(runId)) return;
     // A pending question holds every other input; only the parent's reply to a routed one
-    // answers it (#505), and the held inputs follow right behind that answer.
-    if (this.hasPendingHumanAsk(runId)) { this.answerRoutedQuestion(runId); return; }
+    // answers it (#505), and the held inputs follow right behind that answer. An answer
+    // already executing keeps its checkpoint until turn-end but no longer holds input (#935).
+    if (this.hasUnansweredHumanAsk(runId)) { this.answerRoutedQuestion(runId); return; }
     // Retain conversation input until the registered CI wait receives scheduler admission.
     // Converting this monitor into a worker wake would strand both admission paths.
     if (run.ciWait) { this.queueCiWake(runId); return; }
