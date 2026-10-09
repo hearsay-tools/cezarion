@@ -882,7 +882,7 @@ bare Continue is refused, and an explicit human answer reaches the native runner
 before queued agent input drains. This extends the registered R7 cell, with no
 runner exemptions.
 
-**R53** (hearsay-tools/cezarion#906), in `workflows/worker-restart-parity.test.ts`,
+**R60** (hearsay-tools/cezarion#906), in `workflows/worker-restart-parity.test.ts`,
 uses every `RUNNER_IDS` backend's `HARNESS_ADAPTERS` native wire to persist a
 starting execution generation. A fully terminal modern root and worker have no
 live or deferred anchor; their plain history is nonempty and facts sidecars are
