@@ -255,3 +255,13 @@ A dropped connection must not leave a publisher running server-side or a stale s
   lazy connect, per-topic ref-counting (one subscribe frame per topic), unsubscribe → idle close,
   reconnect on drop and on watchdog timeout, and the heartbeat resetting the watchdog.
 - `web/app/src/api/queries.test.tsx` covers `useHealth` folding pushed frames instead of polling.
+
+
+## Browser ownership follow-up
+
+[Browser tab coordination](2026-10-08-browser-tab-coordination.md), implemented for
+[hearsay-tools/cezarion#924](https://github.com/hearsay-tools/cezarion/issues/924), moves
+local topic ownership into one SharedWorker per origin. Components still subscribe
+through `subscribeTopic` and release demand on unmount; hidden documents release all
+demand. Remote/unavailable-worker mode uses finite authenticated HTTP reconciliation
+with no ordinary browser socket or permanent SSE. The opt-in preview exception remains.

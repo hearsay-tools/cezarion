@@ -1,3 +1,4 @@
+import { configureLiveSession, resetLiveSession } from './live-coordinator'
 import { focusManager, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
@@ -10,6 +11,7 @@ import { ProjectScopeContext } from './project-scope-context'
 import type { GithubRefStatusData } from '@open-mercato/cezar-api-client'
 import {
   refStatusRecheckAfter,
+  useReferenceStatuses,
   useReferenceProjectId,
   useProjectRepoBase,
   queryKeys,
@@ -36,14 +38,27 @@ import {
   workspaceQueryKeys,
 } from './queries'
 
+// This suite tests health cache folding; worker ownership has its own transport tests.
+vi.mock('./ws', () => ({ subscribeTopic: (topic: string, listener: (data: unknown) => void) => {
+  const socket = new WebSocket('ws://localhost/api/v1/ws')
+  socket.addEventListener('open', () => socket.send(JSON.stringify({ type: 'subscribe', topic })))
+  socket.addEventListener('message', event => {
+    const frame = JSON.parse(event.data as string) as { type: string; topic: string; data: unknown }
+    if (frame.type === 'event' && frame.topic === topic) listener(frame.data)
+  })
+  return () => socket.close()
+} }))
+
 const fetchMock = vi.fn<typeof fetch>()
 
 beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock)
+  configureLiveSession({ local: false, bootProject: 'boot', apiBase: '' })
 })
 
 afterEach(() => {
   cleanup()
+  resetLiveSession()
   fetchMock.mockReset()
   vi.unstubAllGlobals()
 })
@@ -681,16 +696,11 @@ describe('useSkillsUpdate', () => {
     })
     await waitFor(() => expect(result.current.data?.status).toBe('idle'))
 
-    const query = client.getQueryCache().find({ queryKey: key })
-    const interval = query?.observers[0]?.options.refetchInterval
-    expect(typeof interval).toBe('function')
-    expect((interval as (current: typeof query) => number | false)(query)).toBe(60_000)
+    // The interval now belongs to the coordinator; this query must not open its own poll.
+    expect(client.getQueryCache().find({ queryKey: key })?.observers[0]?.options.refetchInterval).toBe(false)
+    act(() => client.setQueryData(key, { ...result.current.data!, status: 'current' }))
+    await waitFor(() => expect(result.current.data?.status).toBe('current'))
 
-    client.setQueryData(key, { ...result.current.data!, status: 'current' })
-    expect((interval as (current: typeof query) => number | false)(query)).toBe(false)
-
-    client.setQueryData(key, { ...result.current.data!, status: 'available' })
-    expect((interval as (current: typeof query) => number | false)(query)).toBe(false)
   })
 })
 
@@ -1233,6 +1243,58 @@ describe('useProjectRepoBase', () => {
   })
 })
 
+it('keeps a newer shared ref-status snapshot when an older document query finishes last', async () => {
+  vi.useFakeTimers()
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+  const client = createQueryClient()
+  const ref = { projectId: 'shared-status', kind: 'PR' as const, number: 924 }
+  const key = queryKeys.githubRefStatus(ref.projectId, [ref.number], [])
+  const older: GithubRefStatusData = { available: true, prs: { 924: 'checks-pending' }, issues: {}, recheckAfterMs: 1_000 }
+  const newer: GithubRefStatusData = { ...older, prs: { 924: 'merged' } }
+  client.setQueryData(key, older)
+  const pending = deferredResponse()
+  fetchMock.mockReturnValueOnce(pending.promise).mockResolvedValue(json(newer))
+  const view = renderHook(() => useReferenceStatuses([ref]), {
+    wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  })
+  try {
+    let recheck!: Promise<void>
+    act(() => { recheck = client.refetchQueries({ queryKey: key, exact: true }) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_001) })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(client.getQueryData(key)).toEqual(newer)
+    await act(async () => {
+      pending.resolve(json(older))
+      await recheck
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(client.getQueryData(key)).toEqual(newer)
+    expect(view.result.current(ref)).toMatchObject({ state: 'ready', status: 'merged' })
+  } finally { view.unmount(); client.clear(); vi.useRealTimers() }
+})
+
+it.each([600_000, 86_400_000])('keeps reference statuses mounted and obeys a server cadence of %i ms', async intervalMs => {
+  vi.useFakeTimers()
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+  const client = createQueryClient()
+  const ref = { projectId: 'slow-status', kind: 'Issue' as const, number: 925 }
+  const closed: GithubRefStatusData = { available: true, prs: {}, issues: { 925: 'completed' }, recheckAfterMs: intervalMs }
+  fetchMock.mockImplementation(async () => json(closed))
+  const view = renderHook(() => useReferenceStatuses([ref]), {
+    wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  })
+  try {
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(view.result.current(ref)).toMatchObject({ state: 'ready', status: 'completed' })
+    await act(async () => { await vi.advanceTimersByTimeAsync(intervalMs - 2) })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    fetchMock.mockImplementation(async () => json({ ...closed, issues: { 925: 'open' } }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(3) })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(view.result.current(ref)).toMatchObject({ state: 'ready', status: 'open' })
+  } finally { view.unmount(); client.clear(); vi.useRealTimers() }
+})
+
 describe('refStatusRecheckAfter', () => {
   const answered = (recheckAfterMs: number | null): GithubRefStatusData =>
     ({ available: true, prs: {}, issues: {}, recheckAfterMs }) as GithubRefStatusData
@@ -1306,7 +1368,7 @@ describe('GitHub list freshness (#152)', () => {
   })
   beforeEach(() => {
     vi.useFakeTimers()
-    focusManager.setFocused(true)
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }); document.dispatchEvent(new Event('visibilitychange')); focusManager.setFocused(true)
     setApiScope('shop')
   })
   afterEach(() => {
@@ -1332,12 +1394,12 @@ describe('GitHub list freshness (#152)', () => {
     expect(second.result.current.data?.issues?.[0]?.body).toBe('edited')
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(String(fetchMock.mock.calls[1]?.[0])).toBe('/api/v1/p/shop/github?limit=1000')
-    focusManager.setFocused(false)
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); focusManager.setFocused(false)
     await tick(180_000)
     expect(fetchMock).toHaveBeenCalledTimes(2)
     first.unmount()
     second.unmount()
-    focusManager.setFocused(true)
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }); document.dispatchEvent(new Event('visibilitychange')); focusManager.setFocused(true)
     await tick(180_000)
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
@@ -1362,13 +1424,14 @@ describe('GitHub list freshness (#152)', () => {
     fetchMock.mockImplementation(async () => json(data(fetchMock.mock.calls.length === 1 ? 'old' : 'edited')))
     const { result } = renderHook(() => useGithub(), { wrapper: wrapper() })
     await tick()
-    focusManager.setFocused(false)
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); focusManager.setFocused(false)
     await tick(90_000)
     expect(result.current.data?.issues?.[0]?.body).toBe('old')
-    await act(async () => { focusManager.setFocused(true) })
+    await act(async () => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }); document.dispatchEvent(new Event('visibilitychange')); focusManager.setFocused(true) })
     await tick()
     expect(result.current.data?.issues?.[0]?.body).toBe('edited')
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/github'))).toHaveLength(2)
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/health', expect.objectContaining({ credentials: 'include' }))
   })
   it('does not fetch disabled lists', async () => {
     renderHook(() => useGithub({}, false), { wrapper: wrapper() })

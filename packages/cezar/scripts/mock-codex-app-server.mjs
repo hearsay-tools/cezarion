@@ -227,7 +227,8 @@ rl.on('line', async (line) => {
       silent = await import('./mock-silent-tail.mjs');
       silent.noteSilentTailPrompt(turnText);
       if (silent.isAckOnlyNudge(turnText)) return;
-      if (silent.isLateNudge(turnText) || silent.isLateTurnStartNudge(turnText)) await silent.sleep(silent.LATE_REPLY_MS);
+      if (silent.isLateTurnStartNudge(turnText)) await waitForMockRelease(silent.LATE_REPLY_MS);
+      else if (silent.isLateNudge(turnText)) await silent.sleep(silent.LATE_REPLY_MS);
     }
     if (!turnText.includes('mock:no-progress-ack-only')) {
     emit({ method: 'turn/started', params: { turn: { id: 'turn_mock_1', status: 'inProgress', items: [] } } });

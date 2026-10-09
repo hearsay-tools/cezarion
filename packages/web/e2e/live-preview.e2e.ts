@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { pollFor } from './poll'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 
 /**
@@ -105,7 +106,7 @@ afterAll(async () => {
 })
 
 describe('live preview', () => {
-  it('registers, runs, streams, takes a click and stops', () => {
+  it('registers, runs, streams, takes a click and stops', async () => {
     // The agent's tool call lands as a card that has not started anything yet.
     const registered = browser.waitForValue(
       `(() => { const c = document.querySelector('${card}'); return c ? c.textContent : null })()`,
@@ -188,6 +189,44 @@ describe('live preview', () => {
       value => typeof value === 'string' && value.endsWith('#clicked'),
     ) as string
     expect(shown).toContain(`localhost:${appPort}`)
+
+    // Native tab visibility releases preview transport; restoring an old viewer must not
+    // steal the page from the tab that explicitly opened it in the meantime.
+    await browser.withCdp(async (request, subscribe) => {
+      const targets = await request('Target.getTargets')
+      const first = targets.targetInfos.find((target: { url: string; type: string }) => target.type === 'page' && target.url === taskUrl)
+      const attached = await request('Target.attachToTarget', { targetId: first.targetId, flatten: true })
+      const firstSession = attached.sessionId
+      const evaluate = async (session: string, expression: string) => (await request('Runtime.evaluate', { expression, returnByValue: true }, session)).result.value
+      let closed = 0
+      const observations: Array<Record<string, unknown>> = []
+      const off = subscribe(event => { if (event.sessionId === firstSession && event.method === 'Network.webSocketClosed') closed++ })
+      await request('Network.enable', {}, firstSession)
+      const second = await request('Target.createTarget', { url: 'about:blank' })
+      const secondSession = (await request('Target.attachToTarget', { targetId: second.targetId, flatten: true })).sessionId
+      try {
+        await request('Target.activateTarget', { targetId: second.targetId })
+        await pollFor(async () => closed > 0 && await evaluate(firstSession, 'document.visibilityState') === 'hidden' ? true : undefined,
+          () => 'hidden preview retained its socket')
+        observations.push({ phase: 'hidden', closedSockets: closed, visibility: await evaluate(firstSession, 'document.visibilityState') })
+        await request('Page.navigate', { url: taskUrl }, secondSession)
+        await pollFor(async () => await evaluate(secondSession, '!!document.querySelector("[data-slot=preview-toggle]")') ? true : undefined,
+          () => 'second preview task did not hydrate')
+        await evaluate(secondSession, 'if(!document.querySelector("[data-slot=preview-pane]"))document.querySelector("[data-slot=preview-toggle]").click()')
+        await pollFor(async () => await evaluate(secondSession, '!!document.querySelector("[data-slot=preview-surface] canvas")?.width && !document.querySelector("[data-slot=preview-state]")') ? true : undefined,
+          () => 'second viewer did not claim the live preview', { timeoutMs: 30_000, tries: 120 })
+        await request('Target.activateTarget', { targetId: first.targetId })
+        await pollFor(async () => await evaluate(firstSession, '!!document.querySelector("[data-state=taken-over]")') ? true : undefined,
+          () => 'restored viewer stole another tab preview')
+        observations.push({ phase: 'restored', state: await evaluate(firstSession, 'document.querySelector("[data-slot=preview-state]")?.getAttribute("data-state")') })
+        // A deliberate user action can claim it back.
+        await evaluate(firstSession, '[...document.querySelectorAll("button")].find(button=>button.textContent.includes("Use it here")).click()')
+        await pollFor(async () => await evaluate(firstSession, '!document.querySelector("[data-slot=preview-state]") && !!document.querySelector("[data-slot=preview-surface] canvas")?.width') ? true : undefined,
+          () => 'explicit preview claim failed', { timeoutMs: 30_000, tries: 120 })
+        observations.push({ phase: 'explicit reclaim', canvasWidth: await evaluate(firstSession, 'document.querySelector("[data-slot=preview-surface] canvas")?.width') })
+        writeFileSync(resolve(artifactsDir, 'tab-lifecycle.json'), JSON.stringify(observations, null, 2))
+      } finally { off(); await request('Target.closeTarget', { targetId: second.targetId }); await request('Target.activateTarget', { targetId: first.targetId }) }
+    })
 
     // More → Stop server; the card reads stopped.
     browser.click('button[aria-label="More"]')

@@ -1,3 +1,7 @@
+import { isCockpitE2e } from '@/lib/e2e-mode'
+import { useLiveRead, subscribeLiveRead } from './live-reads'
+import { configureLiveSession, resetLiveSession } from './live-coordinator'
+import { getApiBaseUrl } from '@open-mercato/cezar-api-client'
 import { normalizeSidebarLimits, runnerModelCatalogResponseSchema } from '@open-mercato/cezar-api-client'
 import { toast } from '@/components/ui/toaster'
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type QueryClient, type MutateOptions } from '@tanstack/react-query'
@@ -793,6 +797,7 @@ export function useHealthSubscription(): void {
     const syncTransport = (): void => {
       const health = queryClient.getQueryData<HealthResponse>(queryKeys.health)
       const local = health?.capabilities?.localHandoff === true
+      if (health) configureLiveSession({ local, bootProject: health.bootProject ?? 'default', apiBase: getApiBaseUrl() })
       if (local && releaseTopic === undefined) {
         releaseTopic = subscribeTopic('health', (data) => {
           queryClient.setQueryData(queryKeys.health, data as HealthResponse)
@@ -812,6 +817,7 @@ export function useHealthSubscription(): void {
     return () => {
       releaseCache()
       releaseTopic?.()
+      resetLiveSession()
     }
   }, [queryClient])
 }
@@ -934,6 +940,7 @@ export const MIN_RUNS_SEARCH_LENGTH = 2
  * project's rows come from `useRuns()` anyway, so the live half of the list is never this stale.
  */
 export function useRunsIndex(enabled = true, refetchIntervalMs?: number) {
+  useLiveRead('/api/v1/workspace/runs-index', workspaceQueryKeys.runsIndex, liveRefetchInterval(enabled ? refetchIntervalMs ?? false : false))
   return useQuery({
     queryKey: workspaceQueryKeys.runsIndex,
     queryFn: ({ signal }) => getRunsIndex({ signal }),
@@ -946,7 +953,7 @@ export function useRunsIndex(enabled = true, refetchIntervalMs?: number) {
     // dropped socket, a frozen tab, a run that ended while the connection was down), not the only
     // freshness mechanism. Only the global Tasks page (a live view rather than a glance) asks for
     // one; the palette leaves it off and keeps its 30s staleness.
-    ...(refetchIntervalMs === undefined ? {} : { refetchInterval: liveRefetchInterval(refetchIntervalMs) }),
+    refetchInterval: false,
     // No `refetchOnWindowFocus` here on purpose, though the tab-comes-back case is real (the
     // interval above does not run in a hidden tab). `global-events.tsx` already reconciles this
     // key on `visibilitychange`, which is the same event with better manners — one reconcile for
@@ -1038,6 +1045,7 @@ export function useRunDiff(id: string | undefined) {
  *  worktree whose directory is unavailable) is a real answer, not a network hiccup — retrying
  *  cannot change it, so retries are off and the view renders the server's own reason. */
 export function useRunChanges(id: string | undefined, live = false) {
+  useLiveRead(id ? `/api/v1/p/${queryScope()}/runs/${encodeURIComponent(id)}/changes` : undefined, queryKeys.runs.changes(id ?? ''), liveRefetchInterval(live ? 4000 : false))
   return useQuery({
     queryKey: queryKeys.runs.changes(id ?? ''),
     queryFn: ({ signal }) => getRunChanges(id as string, { signal }),
@@ -1045,7 +1053,7 @@ export function useRunChanges(id: string | undefined, live = false) {
     retry: false,
     // While the run is active the agent is still writing — poll so the Changes tab keeps up
     // instead of showing a stale empty snapshot from before the first write (#changes-live).
-    refetchInterval: liveRefetchInterval(live ? 4000 : false),
+    refetchInterval: false,
     // Once a run finishes, polling stops (live === false) — but final agent/post-run-hook
     // writes and the user editing files in the worktree still change the diff. Scope a
     // focus refetch and a zero staleTime to THIS query (the global client keeps
@@ -1094,12 +1102,13 @@ export function useGroup(groupId: string | undefined) {
 /** A run's commit list (Commits tab). Polls while active so new commits appear as the agent
  *  works. A 409 from an unavailable backing directory is a real answer retries can't change. */
 export function useRunCommits(id: string | undefined, live = false) {
+  useLiveRead(id ? `/api/v1/p/${queryScope()}/runs/${encodeURIComponent(id)}/commits` : undefined, queryKeys.runs.commits(id ?? ''), liveRefetchInterval(live ? 5000 : false))
   return useQuery({
     queryKey: queryKeys.runs.commits(id ?? ''),
     queryFn: ({ signal }) => getRunCommits(id as string, { signal }),
     enabled: Boolean(id),
     retry: false,
-    refetchInterval: liveRefetchInterval(live ? 5000 : false),
+    refetchInterval: false,
   })
 }
 
@@ -1388,22 +1397,14 @@ export function useAgentProfiles() {
 }
 
 export function useSkillsUpdate(projectId: string, enabled = true) {
-  return useQuery({
+  const query = useQuery({
     queryKey: workspaceQueryKeys.skillsUpdate(projectId),
     queryFn: ({ signal }) => getSkillsUpdate(projectId, { signal }),
     enabled,
-    // GET deliberately answers the current snapshot and starts a stale check in the
-    // background. Retry only while that snapshot is transient so an initial `idle`
-    // response converges. Checks may legitimately take tens of seconds, so a one-minute cadence
-    // avoids repeatedly challenging authenticated remote sessions while still converging after
-    // a long-running operation. The initial mount remains the session's one automatic check.
-    refetchInterval: liveRefetchInterval((query: { state: { data?: SkillsUpdateState } }) => {
-      const status = query.state.data?.status
-      return status === undefined || status === 'idle' || status === 'checking' || status === 'updating'
-        ? 60_000
-        : false
-    }),
   })
+  const transient = query.data?.status === undefined || ['idle', 'checking', 'updating'].includes(query.data.status)
+  useLiveRead(`/api/v1/workspace/skills-update?projectId=${encodeURIComponent(projectId)}`, workspaceQueryKeys.skillsUpdate(projectId), liveRefetchInterval(enabled && transient ? 60_000 : false))
+  return query
 }
 
 export function useCheckSkillsUpdate(projectId: string) {
@@ -1698,12 +1699,13 @@ export function useRemoveQueuedMessage(id: string) {
 export function useGithub(params: { limit?: number } = {}, enabled = true) {
   const client = useQueryClient()
   const key = queryKeys.github(params)
+  useLiveRead(`/api/v1/p/${queryScope()}/github${params.limit === undefined ? '' : `?limit=${params.limit}`}`, key, liveRefetchInterval(enabled ? 60_000 : false))
   const list = useQuery({
     queryKey: queryKeys.github(params),
     queryFn: ({ signal }) => getGithub({ limit: params.limit }, { signal }),
     enabled,
     staleTime: 60_000,
-    refetchInterval: liveRefetchInterval(60_000),
+    refetchInterval: false,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   })
@@ -2136,8 +2138,7 @@ export function useReferenceStatuses(
       staleTime: (query: { state: { data?: GithubRefStatusData } }) =>
         refStatusRecheckAfter(query.state.data) ?? Infinity,
       // `refetchIntervalInBackground` stays at its default, so a hidden tab schedules nothing.
-      refetchInterval: liveRefetchInterval((query: { state: { data?: GithubRefStatusData } }) =>
-        refStatusRecheckAfter(query.state.data) ?? false),
+      refetchInterval: false,
       // Coming back to the tab is the strongest "is this still true?" signal there is, and the
       // staleTime above rate-limits it to the same cadence — an answer that can never change has
       // an infinite staleTime and so ignores focus entirely. The global default is `false` for the
@@ -2145,6 +2146,28 @@ export function useReferenceStatuses(
       refetchOnWindowFocus: true,
     })),
   })
+
+  const referenceClient = useQueryClient()
+  const readsSignature = JSON.stringify(groups.map((group, index) => ({ ...group, interval: refStatusRecheckAfter(results[index]?.data) ?? false })))
+  useEffect(() => {
+    if (!enabled || isCockpitE2e()) return
+    let active = true
+    const demands = JSON.parse(readsSignature) as Array<{ projectId: string; prs: number[]; issues: number[]; interval: number | false }>
+    const releases = demands.filter(group => group.interval !== false).map(group => {
+      const params = new URLSearchParams()
+      if (group.prs.length) params.set('prs', group.prs.join(','))
+      if (group.issues.length) params.set('issues', group.issues.join(','))
+      const key = queryKeys.githubRefStatus(group.projectId, group.prs, group.issues)
+      return subscribeLiveRead({ path: `/api/v1/p/${group.projectId}/github/ref-status?${params}`, intervalMs: group.interval as number }, (value, error) => {
+        if (error) return
+        // A document-local refetch must not overwrite the newer shared snapshot.
+        void referenceClient.cancelQueries({ queryKey: key, exact: true }).then(() => {
+          if (active) referenceClient.setQueryData(key, value)
+        })
+      })
+    })
+    return () => { active = false; for (const release of releases) release() }
+  }, [enabled, readsSignature, referenceClient])
 
   const byRef = useMemo(() => {
     const map = new Map<string, ReferenceStatusEntry>()

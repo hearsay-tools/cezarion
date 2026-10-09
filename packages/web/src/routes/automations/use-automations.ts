@@ -1,3 +1,4 @@
+import { onLiveReconcile } from '@/api/live-coordinator'
 import { useCallback, useEffect, useState } from 'react'
 import type { AutomationsResponse } from '@open-mercato/cezar-api-client'
 
@@ -26,10 +27,11 @@ export function useAutomations(): {
   const [data, setData] = useState<AutomationsResponse>()
   const [error, setError] = useState('')
   const refresh = useCallback(
-    () => getAutomations().then((next) => { setData(next); setError('') }).catch((cause) => setError(String(cause))),
+    (signal?: AbortSignal) => getAutomations({ signal }).then((next) => { if (signal?.aborted) return; setData(next); setError('') }).catch((cause) => { if (!signal?.aborted) setError(String(cause)) }),
     [],
   )
   useEffect(() => { if (healthKnown && !off) void refresh() }, [healthKnown, off, refresh])
+  useEffect(() => onLiveReconcile(async signal => { if (healthKnown && !off) await refresh(signal) }), [healthKnown, off, refresh])
   useEffect(() => onWorkspaceEvent((name, payload) => {
     if (name !== 'automation-change') return
     const changed = payload as { project?: unknown }

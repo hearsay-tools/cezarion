@@ -111,6 +111,8 @@ describe('application update chrome', () => {
     fixture({ status: 'error', supported: true, message: 'Preparation failed.' }); reconcile()
     browser.waitForFunction(`document.querySelector('${desktop} [role="status"]')?.textContent.includes('Retry or update manually')`)
     browser.screenshot(`${artifacts}/desktop-error-light.png`, { viewport: true })
+    // Match the authoritative health snapshot to the successful mutation response.
+    fixture({ status: 'ready', supported: true, targetVersion: '2.0.0' })
     browser.click(`${desktop} [aria-label="Update application"]`)
     browser.waitForFunction(`document.querySelector('${desktop} [aria-label="Restart application"]') !== null`)
     const after = waitForSettledSample(browser, `(() => { const root = document.querySelector('${desktop}'); const header = root.querySelector('[data-slot="version-action"]').getBoundingClientRect(); const button = root.querySelector('[aria-label="Restart application"]').getBoundingClientRect(); return { height: header.height, button: [button.width, button.height], title: root.querySelector('[aria-label="Restart application"]').title }; })()`)
@@ -187,6 +189,7 @@ describe('application update chrome', () => {
       const rect = action.getBoundingClientRect()
       return getComputedStyle(dialog).opacity === '1' && action.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2))
     })()`)
+    fixture({ status: 'restarting', supported: true, targetVersion: '2.0.0' }, '1.0.0-nightly.20260923.abcdef1234567890')
     browser.click('[data-slot="alert-dialog-action"]')
     browser.waitForFunction(`document.querySelector('${drawer} [aria-label="Reconnecting after restart"]') !== null && document.querySelector('[role="alertdialog"]') === null`)
     browser.screenshot(`${artifacts}/mobile-restarting-dark.png`, { viewport: true })

@@ -5,54 +5,28 @@ import { setApiScope } from '@open-mercato/cezar-api-client'
 import { flushAnimationFrames, installAnimationFrameQueue } from '../test/animation-frames'
 import { parseRunEvent, useRunEvents } from './run-events'
 
-/**
- * Same doctrine as the global-stream suite: jsdom ships no EventSource, so the stub IS the test
- * double — it implements only what the hook touches and adds the one lever the hook cannot,
- * emitting a named frame.
- */
-class FakeEventSource {
-  static instances: FakeEventSource[] = []
-  static get last(): FakeEventSource {
-    const instance = FakeEventSource.instances.at(-1)
-    if (!instance) throw new Error('no EventSource was constructed')
-    return instance
-  }
+import type { LiveDemand } from './live-protocol'
+import type { LiveHandlers } from './live-coordinator'
 
-  readyState = 0
+// Hook tests inject the coordinator seam. Port, visibility, replay and watchdog behavior
+// lives in live-coordinator/live-owner tests and the same-profile browser regressions.
+vi.mock('./live-coordinator', () => ({ subscribeLive: (demand: LiveDemand, handlers: LiveHandlers) => {
+  const source = new FakeFeed(demand, handlers)
+  return () => source.close()
+} }))
+class FakeFeed {
+  static instances: FakeFeed[] = []
+  static get last(): FakeFeed { return FakeFeed.instances.at(-1)! }
   closeCount = 0
-  private readonly listeners = new Map<string, Set<(event: Event) => void>>()
-
-  constructor(readonly url: string, readonly init?: EventSourceInit) {
-    FakeEventSource.instances.push(this)
+  readyState = 0
+  constructor(readonly demand: LiveDemand, readonly handlers: LiveHandlers) { FakeFeed.instances.push(this) }
+  close() { this.readyState = 2; this.closeCount++ }
+  deliver(name: string, data: string) {
+    const event = parseRunEvent(data)
+    if (!event || this.demand.kind !== 'run') return
+    this.handlers.frame?.({ type: 'event', name: name as 'run-event' | 'ui-event', event, projectId: this.demand.projectId, runId: this.demand.runId })
   }
-
-  addEventListener(name: string, fn: (event: Event) => void): void {
-    const set = this.listeners.get(name) ?? new Set()
-    set.add(fn)
-    this.listeners.set(name, set)
-  }
-
-  removeEventListener(name: string, fn: (event: Event) => void): void {
-    this.listeners.get(name)?.delete(fn)
-  }
-
-  close(): void {
-    this.readyState = 2
-    this.closeCount += 1
-  }
-
-  /** One `event:`/`data:` frame, then the animation frame that applies it (#881). */
-  emit(name: string, data: string): void {
-    act(() => {
-      this.deliver(name, data)
-      flushAnimationFrames()
-    })
-  }
-
-  /** One frame with no animation frame after it: the list does not change yet. */
-  deliver(name: string, data: string): void {
-    for (const fn of this.listeners.get(name) ?? []) fn(new MessageEvent(name, { data }))
-  }
+  emit(name: string, data: string) { act(() => { this.deliver(name, data); flushAnimationFrames() }) }
 }
 
 /** A wire line as the server stamps it: seq + ts + type + payload. */
@@ -60,8 +34,7 @@ const line = (seq: number, type: string, rest: Record<string, unknown> = {}) =>
   JSON.stringify({ seq, ts: '2026-07-14T12:00:00.000Z', type, ...rest })
 
 beforeEach(() => {
-  FakeEventSource.instances = []
-  vi.stubGlobal('EventSource', FakeEventSource)
+  FakeFeed.instances = []
   installAnimationFrameQueue()
 })
 
@@ -98,20 +71,19 @@ describe('parseRunEvent', () => {
 describe('useRunEvents — subscription', () => {
   it('opens one stream at the run endpoint, and none without a run id', () => {
     renderHook(() => useRunEvents('run-1'))
-    expect(FakeEventSource.instances).toHaveLength(1)
-    expect(FakeEventSource.last.url).toBe('/api/v1/runs/run-1/events')
-    expect(FakeEventSource.last.init).toEqual({ withCredentials: true })
+    expect(FakeFeed.instances).toHaveLength(1)
+    expect(FakeFeed.last.demand).toMatchObject({ kind: 'run', projectId: 'default', runId: 'run-1', afterSeq: 0 })
 
     cleanup()
     renderHook(() => useRunEvents(undefined))
-    expect(FakeEventSource.instances).toHaveLength(1)
+    expect(FakeFeed.instances).toHaveLength(1)
   })
 
   it('opens the scoped endpoint when a project scope is active (multi-project, step 3.1)', () => {
     setApiScope('proj-a')
     try {
       renderHook(() => useRunEvents('run-1'))
-      expect(FakeEventSource.last.url).toBe('/api/v1/p/proj-a/runs/run-1/events')
+      expect(FakeFeed.last.demand).toMatchObject({ projectId: 'proj-a', runId: 'run-1' })
     } finally {
       setApiScope(null)
     }
@@ -119,7 +91,7 @@ describe('useRunEvents — subscription', () => {
 
   it('collects BOTH wire vocabularies into one ordered list — v1 `run-event` and v2 `ui-event`', () => {
     const { result } = renderHook(() => useRunEvents('run-1'))
-    const source = FakeEventSource.last
+    const source = FakeFeed.last
 
     source.emit('run-event', line(1, 'stdout', { text: 'building…' }))
     source.emit('ui-event', line(2, 'item.started', { item: { kind: 'message', id: 'm1', role: 'assistant', text: '' } }))
@@ -136,7 +108,7 @@ describe('useRunEvents — subscription', () => {
 
   it('survives a malformed frame — one bad line costs one line', () => {
     const { result } = renderHook(() => useRunEvents('run-1'))
-    const source = FakeEventSource.last
+    const source = FakeFeed.last
 
     source.emit('ui-event', 'not json{')
     source.emit('ui-event', '{"type":"item.started"}') // no seq — unorderable
@@ -145,97 +117,12 @@ describe('useRunEvents — subscription', () => {
     expect(result.current.map((event) => event.type)).toEqual(['plan.updated'])
   })
 
-  it('reopens a CLOSED stream on return-to-visible; the replay dedups (#minor-run-sse-recovery)', () => {
-    const { result } = renderHook(() => useRunEvents('run-1'))
-    const first = FakeEventSource.last
-    first.emit('run-event', line(1, 'stdout', { text: 'a' }))
-
-    // A frozen tab (or a server restart) left the socket dead with no error handler firing.
-    first.close() // readyState → CLOSED
-    act(() => document.dispatchEvent(new Event('visibilitychange'))) // jsdom is 'visible' by default
-
-    expect(FakeEventSource.instances).toHaveLength(2)
-    const second = FakeEventSource.last
-    // The server replays the whole file on reconnect: seq 1 (already seen) is swallowed, seq 2 lands.
-    second.emit('run-event', line(1, 'stdout', { text: 'a' }))
-    second.emit('run-event', line(2, 'stdout', { text: 'b' }))
-    expect(result.current.map((event) => event.seq)).toEqual([1, 2])
-  })
-})
-
-describe('useRunEvents — liveness watchdog (#424)', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-  })
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('reopens a silently-dead socket that never reached CLOSED, then dedups the replay', () => {
-    const { result } = renderHook(() => useRunEvents('run-1'))
-    const first = FakeEventSource.last
-    first.emit('run-event', line(1, 'stdout', { text: 'a' }))
-    // The socket is half-open: the browser still reports it OPEN, no `error` ever fires, and no
-    // frame (not even a ping) arrives. None of the CLOSED-gated reopen paths can catch this.
-    expect(first.readyState).toBe(0)
-
-    act(() => {
-      vi.advanceTimersByTime(55_000) // past the ~40 s stale threshold with total silence
-    })
-
-    // The watchdog rebuilt the socket; the server replays the file and live events resume.
-    expect(FakeEventSource.instances).toHaveLength(2)
-    const second = FakeEventSource.last
-    second.emit('run-event', line(1, 'stdout', { text: 'a' }))
-    second.emit('run-event', line(2, 'stdout', { text: 'b' }))
-    expect(result.current.map((event) => event.seq)).toEqual([1, 2])
-  })
-
-  it('keeps a quiet-but-alive socket open — a ping resets the staleness clock', () => {
-    renderHook(() => useRunEvents('run-1'))
-    const source = FakeEventSource.last
-
-    // A run that is thinking emits no data for a while, but the 15 s server keepalive keeps
-    // arriving — that alone must prove liveness and prevent a needless reopen.
-    act(() => vi.advanceTimersByTime(30_000))
-    source.emit('ping', '')
-    act(() => vi.advanceTimersByTime(30_000))
-    source.emit('ping', '')
-    act(() => vi.advanceTimersByTime(30_000))
-
-    expect(FakeEventSource.instances).toHaveLength(1)
-  })
-
-  it('does not reopen while the tab is hidden — a throttled tab is expected to be quiet', () => {
-    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
-    try {
-      renderHook(() => useRunEvents('run-1'))
-      expect(FakeEventSource.instances).toHaveLength(1)
-
-      act(() => vi.advanceTimersByTime(60_000))
-
-      // Hidden and silent is normal; the visibilitychange path reopens on return instead.
-      expect(FakeEventSource.instances).toHaveLength(1)
-    } finally {
-      visibility.mockRestore()
-    }
-  })
-
-  it('stops the watchdog on unmount — no reopen after the effect is torn down', () => {
-    const { unmount } = renderHook(() => useRunEvents('run-1'))
-    expect(FakeEventSource.instances).toHaveLength(1)
-
-    unmount()
-    act(() => vi.advanceTimersByTime(60_000))
-
-    expect(FakeEventSource.instances).toHaveLength(1)
-  })
 })
 
 describe('useRunEvents — seq dedup uses `>`', () => {
   it('drops the replayed prefix after a reconnect instead of duplicating it', () => {
     const { result } = renderHook(() => useRunEvents('run-1'))
-    const source = FakeEventSource.last
+    const source = FakeFeed.last
 
     source.emit('run-event', line(1, 'stdout', { text: 'a' }))
     source.emit('ui-event', line(2, 'turn.started', { turnId: 't1' }))
@@ -251,7 +138,7 @@ describe('useRunEvents — seq dedup uses `>`', () => {
 
   it('accepts seq gaps — ephemeral deltas burn numbers that never replay', () => {
     const { result } = renderHook(() => useRunEvents('run-1'))
-    const source = FakeEventSource.last
+    const source = FakeFeed.last
 
     source.emit('ui-event', line(2, 'item.started', { item: { kind: 'reasoning', id: 'r1', text: '' } }))
     // seq 3–6 were coalesced deltas this client never saw; the next persisted line jumps.
@@ -262,7 +149,7 @@ describe('useRunEvents — seq dedup uses `>`', () => {
 
   it('drops a stale line at the high-water mark, not merely duplicates', () => {
     const { result } = renderHook(() => useRunEvents('run-1'))
-    const source = FakeEventSource.last
+    const source = FakeFeed.last
 
     source.emit('ui-event', line(5, 'turn.started', { turnId: 't1' }))
     source.emit('ui-event', line(5, 'turn.started', { turnId: 't1' })) // equal — not `>`
@@ -279,7 +166,7 @@ describe('useRunEvents — batching (#881)', () => {
       renders += 1
       return useRunEvents('run-1')
     })
-    const source = FakeEventSource.last
+    const source = FakeFeed.last
     const before = renders
 
     for (let seq = 1; seq <= 100; seq += 1) act(() => source.deliver('run-event', line(seq, 'stdout')))
@@ -295,7 +182,7 @@ describe('useRunEvents — batching (#881)', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
     try {
       const { result } = renderHook(() => useRunEvents('run-1'))
-      const source = FakeEventSource.last
+      const source = FakeFeed.last
       act(() => source.deliver('run-event', line(1, 'stdout')))
       act(() => vi.advanceTimersByTime(49))
       expect(result.current).toEqual([])
@@ -308,7 +195,7 @@ describe('useRunEvents — batching (#881)', () => {
 
   it('drops a pending batch on unmount', () => {
     const { result, unmount } = renderHook(() => useRunEvents('run-1'))
-    act(() => FakeEventSource.last.deliver('run-event', line(1, 'stdout')))
+    act(() => FakeFeed.last.deliver('run-event', line(1, 'stdout')))
     const shown = result.current
     unmount()
     act(() => flushAnimationFrames())
@@ -319,7 +206,7 @@ describe('useRunEvents — batching (#881)', () => {
 describe('useRunEvents — lifecycle', () => {
   it('closes the stream on unmount', () => {
     const { unmount } = renderHook(() => useRunEvents('run-1'))
-    const source = FakeEventSource.last
+    const source = FakeFeed.last
     expect(source.closeCount).toBe(0)
 
     unmount()
@@ -331,7 +218,7 @@ describe('useRunEvents — lifecycle', () => {
     const { result, rerender } = renderHook(({ id }: { id: string }) => useRunEvents(id), {
       initialProps: { id: 'run-1' },
     })
-    const first = FakeEventSource.last
+    const first = FakeFeed.last
     first.emit('ui-event', line(9, 'session.ended', { reason: 'end_turn' }))
     expect(result.current).toHaveLength(1)
 
@@ -339,45 +226,23 @@ describe('useRunEvents — lifecycle', () => {
 
     // Old socket closed, new one at the new endpoint, and run-1's events are gone.
     expect(first.closeCount).toBe(1)
-    expect(FakeEventSource.last.url).toBe('/api/v1/runs/run-2/events')
+    expect(FakeFeed.last.demand).toMatchObject({ runId: 'run-2' })
     expect(result.current).toEqual([])
 
     // The high-water mark reset with the list: run-2's own seq 1 must not be "stale".
-    FakeEventSource.last.emit('run-event', line(1, 'stdout', { text: 'fresh' }))
+    FakeFeed.last.emit('run-event', line(1, 'stdout', { text: 'fresh' }))
     expect(result.current.map((event) => event.seq)).toEqual([1])
   })
 
-  it('renders empty where there is no EventSource at all (prerender, bare jsdom)', () => {
-    vi.stubGlobal('EventSource', undefined)
-    const { result } = renderHook(() => useRunEvents('run-1'))
-    expect(result.current).toEqual([])
-    expect(FakeEventSource.instances).toHaveLength(0)
-  })
-
-  it('closes on pagehide and reopens on a bfcache restore, deduping the replay', () => {
-    const { result } = renderHook(() => useRunEvents('run-1'))
-    const first = FakeEventSource.last
-    first.emit('run-event', line(1, 'stdout', { text: 'before' }))
-
-    // Navigate away: the parked document must not hold a per-origin socket.
-    act(() => {
-      window.dispatchEvent(new Event('pagehide'))
-    })
-    expect(first.closeCount).toBe(1)
-
-    // Restored from bfcache: a fresh socket to the same run, and the server's replay of what
-    // we already rendered stays swallowed by the high-water mark.
-    const pageshow = new Event('pageshow')
-    Object.defineProperty(pageshow, 'persisted', { value: true })
-    act(() => {
-      window.dispatchEvent(pageshow)
-    })
-
-    const second = FakeEventSource.last
-    expect(second).not.toBe(first)
-    expect(second.url).toBe('/api/v1/runs/run-1/events')
-    second.emit('run-event', line(1, 'stdout', { text: 'before' })) // replayed prefix
-    second.emit('run-event', line(2, 'stdout', { text: 'after' }))
-    expect(result.current.map((event) => event.seq)).toEqual([1, 2])
+  it('rehydrates on owner reset and retains the displayed rows while waiting', async () => {
+    const onReset = vi.fn(async () => ({ cursor: 'fresh', afterSeq: 5 }))
+    const { result } = renderHook(() => useRunEvents('run-1', { onReset }))
+    const source = FakeFeed.last
+    source.emit('run-event', line(1, 'note'))
+    await act(async () => { await source.handlers.reset?.('server restarted', new AbortController().signal) })
+    source.emit('run-event', line(5, 'note'))
+    source.emit('run-event', line(6, 'note'))
+    expect(result.current.map(event => event.seq)).toEqual([1, 6])
+    expect(onReset).toHaveBeenCalled()
   })
 })

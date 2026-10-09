@@ -1,7 +1,8 @@
+import { createRef } from 'react'
 import { cleanup, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { PreviewStage, type StageGeometry } from './preview-stage'
+import { PreviewStage, type StageGeometry, type PreviewStageHandle } from './preview-stage'
 
 beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 1000 })
@@ -42,4 +43,26 @@ describe('PreviewStage', () => {
     render(<PreviewStage viewport={{ w: 300, h: 300 }} />)
     expect(Number(document.querySelector<HTMLElement>('[data-slot="preview-surface"]')!.dataset.scale)).toBe(1)
   })
+})
+
+
+it('releases a decoded bitmap without painting after the document hides', async () => {
+  const ref = createRef<PreviewStageHandle>()
+  const draw = vi.fn(), close = vi.fn()
+  const context = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage: draw } as never)
+  let finish!: (value: unknown) => void
+  vi.stubGlobal('createImageBitmap', vi.fn(() => new Promise(resolve => { finish = resolve })))
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+  try {
+    render(<PreviewStage ref={ref} viewport={{ w: 390, h: 844 }} />)
+    const pending = ref.current!.draw(new Blob(['frame']))
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    finish({ width: 390, height: 844, close })
+    await pending
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(draw).not.toHaveBeenCalled()
+  } finally {
+    context.mockRestore(); vi.unstubAllGlobals()
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+  }
 })

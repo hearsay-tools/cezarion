@@ -16,6 +16,7 @@ import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, ConversationSt
 import { matchesRunQuery, sqlPrefilterTokens } from './run-search.ts';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { HistoryCompressor } from './history-compressor.ts';
+import { LiveItemSnapshots } from './live-item-snapshots.ts';
 import { emptyFacts, stampOf, TranscriptFactsIndex, type TranscriptFacts } from './transcript-facts.ts';
 import { hasPlainHistory, historyPaths, readHistoryText, readHistoryTextAsync, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
@@ -1319,6 +1320,12 @@ export class RunStore extends EventEmitter {
   private readonly compressor: HistoryCompressor;
   /** Transcript facts the delegation paths ask about, so they never re-read a transcript (#880). */
   private readonly facts: TranscriptFactsIndex;
+  private readonly liveItems = new LiveItemSnapshots();
+
+  /** Capture both sources on the same synchronous sequence boundary before history IO. */
+  liveReadSnapshot(runId: string) {
+    return { events: this.liveItems.read(runId), throughSeq: this.seqs.get(runId) ?? Infinity };
+  }
 
   private constructor(private readonly dataDir: string) {
     super();
@@ -3178,6 +3185,7 @@ export class RunStore extends EventEmitter {
     this.maybeEnqueueHistoryCompress(run);
     if ((full.type === 'ask.requested' || full.type === 'human-input-delivered') &&
       this.syncHumanAskSummary(run)) this.touch(run);
+    this.liveItems.observe(runId, full, false);
     this.emit('event', { runId, event: full });
 
     // The janitor trick: agents print the PR URL after `gh pr create` — the
@@ -3356,11 +3364,13 @@ export class RunStore extends EventEmitter {
    * file — the channel for coalesced `item.delta` flushes (protocol-v2
    * performance guardrail: raw deltas never hit disk; replay = the persisted
    * snapshots). Stamped with `seq`/`ts` like persisted lines so the live
-   * wire keeps one ordering axis; the seq simply never appears in a replay
-   * (gaps are fine — dedup compares with `>`).
+   * wire keeps one ordering axis. Finite polling coalesces active item content
+   * into bounded in-memory snapshots on that clock; disk replay still has gaps
+   * (dedup compares with `>`).
    */
   emitEphemeral(runId: string, event: { type: string; stepId?: string; [key: string]: unknown }): RunEvent {
     const full: RunEvent = this.redact({ ...event, seq: this.nextSeq(runId), ts: new Date().toISOString() });
+    this.liveItems.observe(runId, full, true);
     this.emit('event', { runId, event: full });
     return full;
   }
@@ -3857,6 +3867,7 @@ export class RunStore extends EventEmitter {
   /** The held record is gone; the next save or commit deletes its row, fenced by `family`'s claim
    *  and by the revision this store last saw (kept in `base` until the delete is written). */
   private markDeleted(id: string, family: string): void {
+    this.liveItems.forget(id);
     const read = this.coldBase.get(id);
     if (!this.base.has(id) && read) this.base.set(id, storedRow(read));
     this.dirty.delete(id);
@@ -3994,6 +4005,7 @@ export class RunStore extends EventEmitter {
       this.base.set(row.id, { revision: commit.revisions.get(row.id)!, seq: commit.seqs.get(row.id)!, data: row.data, extras: extras.get(row.id) });
     }
     for (const id of deletes) {
+      this.liveItems.forget(id);
       this.base.delete(id);
       this.deletedFamilies.delete(id);
       this.removeOwedHistory(id);
@@ -4063,6 +4075,7 @@ export class RunStore extends EventEmitter {
     }
     unexpected.forEach((conflict, index) => {
       const family = this.familyOf(conflict.id);
+      this.liveItems.forget(conflict.id);
       this.quarantined.add(conflict.id);
       this.dirty.delete(conflict.id);
       this.deleted.delete(conflict.id);
@@ -4122,6 +4135,9 @@ export class RunStore extends EventEmitter {
    * absent. It saves nothing more, and a durable commit on it throws.
    */
   close(): void {
+    this.liveItems.clear();
+    // Demand-bound feeds stop before storage disappears during project removal/shutdown.
+    this.emit('closed');
     this.compressor.stop();
     this.facts.stop();
     this.facts.flush();

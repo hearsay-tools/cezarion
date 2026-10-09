@@ -1,6 +1,8 @@
+import { subscribeLive } from './live-coordinator'
+import { queryScope } from '@open-mercato/cezar-api-client'
+import type { LiveRunDemand } from '@open-mercato/cezar-api-client'
 import { useEffect, useState } from 'react'
 
-import { apiPath } from '@open-mercato/cezar-api-client'
 import type { RunEvent } from '@open-mercato/cezar-api-client'
 
 /**
@@ -59,41 +61,22 @@ export interface RunEventStreamOptions {
   /** Ask the history owner to fold the live prefix into a fresh persisted tail page. */
   compactAt?: number
   onCompact?: () => void
+  onReset?: (reason: string, signal: AbortSignal) => Promise<Pick<LiveRunDemand, 'cursor' | 'afterSeq'> | void>
 }
 
 export function useRunEvents(runId: string | undefined, options: RunEventStreamOptions = {}): RunEvent[] {
   const [events, setEvents] = useState<RunEvent[]>([])
-  const { cursor, afterSeq = 0, maxEvents, compactAt, onCompact } = options
+  const { cursor, afterSeq = 0, maxEvents, compactAt, onCompact, onReset } = options
 
   useEffect(() => {
     // The reset also covers the runId-changed case: whatever accumulated belongs to the old id.
     setEvents([])
     if (!runId) return
 
-    // Off `globalThis`, like global-events.tsx: jsdom has no EventSource, and the tests stub it.
-    const Source = globalThis.EventSource
-    if (typeof Source !== 'function') return
-
-    // The high-water mark lives with the socket's effect, not in state: a reconnect replay
-    // arrives between renders, and dedup must not race React's batching.
     let maxSeq = afterSeq
-    let source: EventSource | null = null
-    let reopenTimer: ReturnType<typeof setTimeout> | undefined
     let disposed = false
     let compactionRequested = false
-    const CLOSED = 2 // EventSource.CLOSED, spelled literally like global-events.tsx
-    const REOPEN_DELAY_MS = 1_500
-
-    // Liveness watchdog (#424): a backgrounded tab or the app's iframe can leave the socket
-    // half-open — TCP dead, but `readyState` stuck at OPEN/CONNECTING so no `error` ever fires and
-    // none of the reopen paths below match. The transcript then freezes until a full reload, with
-    // "no further SSE updates coming through" (exactly the reported symptom). The server pings every
-    // 15 s (server.ts); we treat a long silence across BOTH data and pings as a dead socket and
-    // force a reopen. `maxSeq` swallows the replay, same as every other reconnect here.
-    const STALE_MS = 40_000 // ~2.5× the 15 s server ping — one dropped ping must not trip it
-    const LIVENESS_CHECK_MS = 10_000
-    let lastFrameAt = Date.now()
-    let livenessTimer: ReturnType<typeof setInterval> | undefined
+    const scope = queryScope()
 
     // Frames are batched into one state update per animation frame (#881). Every SSE message is
     // its own task, so a per-frame `setEvents` re-rendered the whole thread once per frame: a
@@ -136,112 +119,28 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
       }
     }
 
-    const onFrame = (event: Event) => {
-      // Any frame proves the socket is alive — bump the watchdog before the dedup drop, so a
-      // replayed prefix (which is dropped below) still counts as liveness.
-      lastFrameAt = Date.now()
-      const parsed = parseRunEvent((event as MessageEvent<string>).data)
-      if (!parsed || !(parsed.seq > maxSeq)) return
-      maxSeq = parsed.seq
-      pending.push(parsed)
-      scheduleFlush()
-    }
-
-    // The keepalive carries no payload we accumulate — it exists only to prove the socket is
-    // alive during quiet stretches (a run that is thinking emits nothing for seconds), so it
-    // feeds the watchdog and nothing else.
-    const onPing = (): void => {
-      lastFrameAt = Date.now()
-    }
-
-    const reopenLater = (): void => {
-      if (disposed || reopenTimer !== undefined) return
-      reopenTimer = setTimeout(() => {
-        reopenTimer = undefined
-        if (!disposed) open()
-      }, REOPEN_DELAY_MS)
-    }
-
-    const open = (): void => {
-      source?.close()
-      // A fresh socket resets the clock: replay is about to arrive, so it must not be judged
-      // stale before its first frame lands.
-      lastFrameAt = Date.now()
-      // Scoped per project like every client.ts path (spec 3.1) — unscoped this is the
-      // byte-identical legacy URL. Read per (re)open, but the scope only changes with the
-      // route, which unmounts this hook first.
-      const params = new URLSearchParams()
-      if (cursor !== undefined) params.set('cursor', cursor)
-      if (cursor !== undefined || afterSeq > 0) params.set('afterSeq', String(maxSeq))
-      const query = params.size > 0 ? `?${params.toString()}` : ''
-      source = new Source(apiPath(`/runs/${encodeURIComponent(runId)}/events${query}`), {
-        withCredentials: true,
-      })
-      for (const name of RUN_EVENT_NAMES) source.addEventListener(name, onFrame)
-      source.addEventListener('ping', onPing)
-      source.addEventListener('error', () => {
-        // Ordinary drops leave the socket CONNECTING and the browser retries on its own; CLOSED
-        // means it gave up for good (what a restarting server produces), so nothing would reopen
-        // it — the transcript would silently freeze while the header (global stream) keeps
-        // updating, looking live over stale content. Reopen; `maxSeq` swallows the replay.
-        if (source?.readyState === CLOSED) reopenLater()
-      })
-    }
-
-    // The phone-in-a-pocket case: a frozen background tab can leave the stream dead for an hour
-    // with no error handler ever firing. On return, reopen if it's closed — whatever is on screen
-    // is about to be trusted (the thread is the app's primary view, same threat model as the
-    // global stream). #minor-run-sse-recovery.
-    const onVisibilityChange = (): void => {
-      if (document.visibilityState !== 'visible') return
-      if (!source || source.readyState === CLOSED) {
-        clearTimeout(reopenTimer)
-        reopenTimer = undefined
-        open()
-      }
-    }
-
-    // Same bfcache discipline as the global stream: a full navigation parks this document with
-    // its socket open and starves the per-origin pool. Close on pagehide; a bfcache restore
-    // reopens, and `maxSeq` swallows the replayed prefix.
-    const onPageHide = (): void => {
-      clearTimeout(reopenTimer)
-      reopenTimer = undefined
-      source?.close()
-    }
-    const onPageShow = (event: PageTransitionEvent): void => {
-      if (event.persisted) open()
-    }
-
-    // The watchdog only acts while the tab is visible: a hidden tab legitimately receives
-    // nothing (the browser throttles it), and `onVisibilityChange` already reopens a CLOSED
-    // socket on return. This catches the case that one cannot — a socket still reported OPEN
-    // that has silently stopped delivering.
-    livenessTimer = setInterval(() => {
-      if (disposed || document.visibilityState !== 'visible') return
-      if (Date.now() - lastFrameAt <= STALE_MS) return
-      clearTimeout(reopenTimer)
-      reopenTimer = undefined
-      open()
-    }, LIVENESS_CHECK_MS)
-
-    document.addEventListener('visibilitychange', onVisibilityChange)
-    window.addEventListener('pagehide', onPageHide)
-    window.addEventListener('pageshow', onPageShow)
-    open()
+    const release = subscribeLive({ kind: 'run', projectId: scope, runId, afterSeq, ...(cursor ? { cursor } : {}) }, {
+      frame: frame => {
+        if (!('type' in frame) || frame.type !== 'event' || frame.event.seq <= maxSeq) return
+        maxSeq = frame.event.seq
+        pending.push(frame.event)
+        scheduleFlush()
+      },
+      reset: async (reason, signal) => {
+        flush()
+        const resume = await onReset?.(reason, signal)
+        if (resume) maxSeq = Math.max(maxSeq, resume.afterSeq)
+        return resume
+      },
+    })
 
     return () => {
       disposed = true
       if (flushFrame !== undefined) globalThis.cancelAnimationFrame?.(flushFrame)
       clearTimeout(flushTimer)
-      clearTimeout(reopenTimer)
-      clearInterval(livenessTimer)
-      document.removeEventListener('visibilitychange', onVisibilityChange)
-      window.removeEventListener('pagehide', onPageHide)
-      window.removeEventListener('pageshow', onPageShow)
-      source?.close()
+      release()
     }
-  }, [runId, cursor, afterSeq, maxEvents, compactAt, onCompact])
+  }, [runId, cursor, afterSeq, maxEvents, compactAt, onCompact, onReset])
 
   return events
 }
