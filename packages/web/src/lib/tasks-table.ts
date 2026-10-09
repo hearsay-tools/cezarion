@@ -95,10 +95,17 @@ export function filterRuns(runs: readonly RunSummary[], query: string): RunSumma
   const needle = query.trim().toLowerCase()
   if (!needle) return [...listed]
   return listed.filter((run) =>
+    matchesTaskReferenceNumber(run, needle) ||
     [runTitle(run), run.branch ?? '', run.workflow, workflowLabel(run)].some((text) =>
       text.toLowerCase().includes(needle),
     ),
   )
+}
+
+/** References match whole numbers, with an optional #, never a substring of their digits. */
+export function matchesTaskReferenceNumber(run: TaskReferenceInput, token: string): boolean {
+  const match = /^#?(\d+)$/.exec(token)
+  return match !== null && taskReferences(run).some((reference) => reference.number === Number(match[1]))
 }
 
 /**
@@ -154,7 +161,7 @@ export function githubRepoBase(remote: string | undefined): string | undefined {
  *  Action gates (Draft PR, Create PR→View PR) must keep reading `pullRequestUrl` directly:
  *  a task that reviewed PR X must still be able to open its own PR from its branch. */
 export function taskPrUrl(run: TaskReferenceInput): string | undefined {
-  return prUrls(run)[0]
+  return prUrls(run)[0] ?? run.pullRequests?.find((pr) => pr.url)?.url
 }
 
 /**
@@ -206,6 +213,7 @@ export function taskIssueUrl(run: TaskReferenceInput, repoBase?: string): string
 export type TaskReferenceInput = Pick<
   RunSummary,
   | 'pullRequestUrl'
+  | 'pullRequests'
   | 'referencedPullRequestUrl'
   | 'prNumber'
   | 'issueNumber'
@@ -292,17 +300,18 @@ export function referenceKey(reference: { kind: string; number?: number; url?: s
 export function taskReferences(run: TaskReferenceInput, repoBase?: string, projectId = run.projectId): TaskReference[] {
   const prs = prUrls(run)
   const declared = run.markerRefs?.pr
-  const sources: { kind: TaskReference['kind']; url?: string; number?: number }[] = [
+  const sources: { kind: TaskReference['kind']; url?: string; number?: number; authoritative?: boolean }[] = [
     // The uncorroborated declaration, ahead of everything (see above). When a URL below does name
     // it, this entry is omitted entirely rather than added and deduped — that keeps the ORDER the
     // ordinary case had, with the created PR first.
-    ...(declared === undefined || prs.some((url) => prNumber(url) === String(declared))
+    ...(declared === undefined || [...prs, ...(run.pullRequests ?? []).flatMap(pr => pr.url ? [pr.url] : [])].some((url) => prNumber(url) === String(declared))
       ? []
       : [{ kind: 'PR' as const, number: declared }]),
     ...prs.map((url) => ({ kind: 'PR' as const, url })),
     // Numeric-only: a reference known by number before any URL was scraped. `repoBase` turns it
     // into a real link — see the synthesis note below.
     { kind: 'PR', number: run.prNumber },
+    ...(run.pullRequests ?? []).map(pr => ({ kind: 'PR' as const, number: pr.number, ...(pr.url ? { url: pr.url } : {}), authoritative: true })),
     { kind: 'Issue', url: taskIssueUrl(run, repoBase) },
     { kind: 'Issue', number: run.issueNumber },
   ]
@@ -314,7 +323,7 @@ export function taskReferences(run: TaskReferenceInput, repoBase?: string, proje
     if (!number || !Number.isInteger(number)) continue
     // Numeric fields can be derived from an explicit URL, including a foreign repo.
     // Keep that authoritative chip instead of synthesizing an unrelated local link.
-    if (!source.url && references.some((reference) =>
+    if (!source.url && !source.authoritative && references.some((reference) =>
       reference.url && reference.kind === source.kind && reference.number === number,
     )) continue
     // A number with no URL becomes one from the PROJECT's own repo — the same synthesis rule
@@ -405,8 +414,8 @@ export function taskItemPath(
 /** The PR chip's `#402`. Null when the URL's last segment is not a number — a forge we don't
  *  recognize still gets a working chip, just without a number we'd be inventing. */
 export function prNumber(url: string): string | null {
-  const last = url.split('/').pop() ?? ''
-  return /^\d+$/.test(last) ? last : null
+  const match = /\/(\d+)\/?(?:[?#].*)?$/.exec(url)
+  return match?.[1] ?? null
 }
 
 /** One cell of the CPU/Mem pair. `text` is '' when there is nothing true to print. */

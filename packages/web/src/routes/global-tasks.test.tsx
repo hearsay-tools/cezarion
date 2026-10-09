@@ -45,6 +45,7 @@ const PROJECTS: ProjectListEntry[] = [
   {
     id: 'web',
     name: 'Web',
+    repoUrl: 'https://github.com/acme/web',
     root: '/repos/web',
     addedAt: '2026-07-01T10:00:00Z',
     lastOpenedAt: '2026-07-01T10:00:00Z',
@@ -593,13 +594,13 @@ describe('global tasks page', () => {
     await screen.findByText('Add checkout endpoint')
 
     // `a1` carries several — the plural case has its own test; here, the strongest leads.
-    const prs = screen.getAllByRole('link', { name: /pull request for Add checkout endpoint/ })
+    const prs = screen.getAllByRole('link', { name: /pull request #\d+ for Add checkout endpoint/ })
     expect(prs[0]!.getAttribute('href')).toBe('/p/api/tasks/a1/pr/42')
     expect(prs[0]!.getAttribute('target')).toBeNull()
     expect(prs[0]!.textContent).toContain('#42')
 
-    const issue = screen.getByRole('link', { name: /issue for Checkout page/ })
-    expect(issue.getAttribute('href')).toBe('https://github.com/acme/web/issues/7')
+    const issue = screen.getByRole('link', { name: /issue #7 for Checkout page/ })
+    expect(issue.getAttribute('href')).toBe('/p/web/tasks/w1/issue/7')
     expect(issue.textContent).toContain('#7')
   })
 

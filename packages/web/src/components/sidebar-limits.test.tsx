@@ -8,7 +8,7 @@ import { ListViewProvider } from './list-view'
 import { ProjectGroups } from './project-groups'
 import { TaskQuickListContainer } from './task-quick-list'
 
-const project: ProjectListEntry = { id: 'boot', name: 'Boot', root: '/boot', addedAt: '2026-07-01T00:00:00Z', lastOpenedAt: '2026-07-01T00:00:00Z', source: 'local', status: 'ok' }
+const project: ProjectListEntry = { id: 'boot', name: 'Boot', root: '/boot', addedAt: '2026-07-01T00:00:00Z', lastOpenedAt: '2026-07-01T00:00:00Z', source: 'local', status: 'ok', repoUrl: 'https://github.com/o/r' }
 const runs: RunRecord[] = ['waiting', 'done', 'running'].flatMap((status, section) => Array.from({ length: 4 }, (_, index) => {
   const number = section * 10 + index + 1
   return { id: `r${number}`, title: `Row ${number}`, workflow: 'default', task: 'task', status: status as RunRecord['status'], createdAt: '2026-07-14T10:00:00Z', tokensUsed: 0, archived: false, steps: [], referencedIssueUrl: `https://github.com/o/r/issues/${number}` }
@@ -24,7 +24,7 @@ it.each([['desktop', true], ['mobile', true], ['desktop', false], ['mobile', fal
   const requested: string[] = []
   vi.stubGlobal('fetch', vi.fn(async input => {
     const url = String(input).replace('?archived=recent', ''); requested.push(url)
-    const body = url.endsWith('/run-summaries') ? runs : url.endsWith('/health') ? { bootProject: 'boot' } : url.includes('/ref-status') ? { available: true, prs: {}, issues: {}, conflicts: [], recheckAfterMs: null } : {}
+    const body = url.endsWith('/projects') ? { projects: [{ ...project, id: projectId }], bootProject: 'boot' } : url.endsWith('/run-summaries') ? runs : url.endsWith('/health') ? { bootProject: 'boot' } : url.includes('/ref-status') ? { available: true, prs: {}, issues: {}, conflicts: [], recheckAfterMs: null } : {}
     return new Response(JSON.stringify(body), { status: 200 })
   }))
   render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[`/p/${projectId}/`]}><ListViewProvider>
@@ -48,7 +48,7 @@ it.each((['desktop', 'mobile'] as const).flatMap(surface => [null, [], 3, 'bad',
   const requested: string[] = []
   vi.stubGlobal('fetch', vi.fn(async input => {
     const url = String(input).replace('?archived=recent', ''); requested.push(url)
-    return new Response(JSON.stringify(url.endsWith('/run-summaries') ? runs : url.includes('/ref-status') ? { available: true, prs: {}, issues: {}, conflicts: [], recheckAfterMs: null } : {}))
+    return new Response(JSON.stringify(url.endsWith('/projects') ? { projects: [project], bootProject: 'boot' } : url.endsWith('/run-summaries') ? runs : url.includes('/ref-status') ? { available: true, prs: {}, issues: {}, conflicts: [], recheckAfterMs: null } : {}))
   }))
   render(<QueryClientProvider client={client}><MemoryRouter><ListViewProvider>
     {surface === 'desktop' ? <ProjectGroups projects={[project]} bootProjectId="boot" /> : <TaskQuickListContainer projectId="boot" boot />}

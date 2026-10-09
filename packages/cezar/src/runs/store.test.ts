@@ -540,6 +540,114 @@ describe('RunStore — PR auto-link only on real creation (#fake-pr)', () => {
     return { store, run };
   };
 
+  it('retains every declaration and creation through replay and reopening', () => {
+    const { store, run } = freshRun();
+    store.setRepoHandle({ owner: 'o', name: 'r' });
+    store.applyMarkerRefs(run.id, { pr: 821, prs: Array.from({ length: 10 }, (_, i) => 812 + i) });
+    store.appendEvent(run.id, { type: 'result', result: 'Created a PR: https://github.com/o/r/pull/812. Compared https://github.com/o/r/pull/999. Created a PR: https://github.com/o/r/pull/813' });
+    store.appendEvent(run.id, { type: 'result', result: 'Created a PR: https://github.com/o/r/pull/812' });
+    expect(run.pullRequests?.map((pr) => pr.number)).toEqual([812, 813, 814, 815, 816, 817, 818, 819, 820, 821]);
+    expect(run.pullRequests?.slice(0, 2).map((pr) => pr.source)).toEqual(['created', 'created']);
+    expect(run.pullRequestUrl).toBe('https://github.com/o/r/pull/812');
+    expect(run.markerRefs?.pr).toBe(821);
+    store.close();
+    const reopened = RunStore.open(dataDir);
+    expect(reopened.getRun(run.id)?.pullRequests).toEqual(run.pullRequests);
+    reopened.close();
+  });
+
+  it('preserves legacy creation and declaration before authoritative replacement', () => {
+    const { store, run } = freshRun();
+    store.setRepoHandle({ owner: 'o', name: 'r' });
+    store.updateRun(run.id, { pullRequestUrl: 'https://github.com/o/r/pull/1', markerRefs: { pr: 2 } });
+    store.updateRun(run.id, { pullRequestUrl: 'https://github.com/o/r/pull/3' });
+    store.applyMarkerRefs(run.id, { pr: 4 });
+    expect(run.pullRequests?.map((pr) => pr.number)).toEqual([1, 3, 2, 4]);
+    expect(run.pullRequestUrl).toBe('https://github.com/o/r/pull/3');
+  });
+
+  it('keeps bare declarations numeric until delayed repository metadata establishes scope', () => {
+    const { store, run } = freshRun();
+    store.appendEvent(run.id, { type: 'result', result: 'Compare https://github.com/foreign/repo/pull/812' });
+    store.applyMarkerRefs(run.id, { pr: 812 });
+    expect(run.pullRequests).toEqual([{ number: 812, source: 'declared' }]);
+    store.setRepoHandle({ owner: 'o', name: 'r' });
+    expect(run.pullRequests).toEqual([{ number: 812, source: 'declared' }]);
+    store.recordCreatedPr(run.id, 'https://github.com/o/r/pull/812');
+    expect(run.pullRequests).toEqual([{ number: 812, source: 'created', url: 'https://github.com/o/r/pull/812' }]);
+    store.close();
+    const reopened = RunStore.open(dataDir);
+    expect(reopened.getRun(run.id)?.pullRequests).toEqual(run.pullRequests);
+    reopened.close();
+  });
+
+  it('retains prompt-corroborated foreign declarations when metadata arrives', () => {
+    const { store, run } = freshRun();
+    store.updateRun(run.id, { task: 'Review foreign/repo PR 812' });
+    store.appendEvent(run.id, { type: 'result', result: 'Review https://github.com/foreign/repo/pull/812' });
+    store.applyMarkerRefs(run.id, { pr: 812 });
+    const expected = [{ number: 812, source: 'declared', url: 'https://github.com/foreign/repo/pull/812' }];
+    expect(run.pullRequests).toEqual(expected);
+    store.setRepoHandle({ owner: 'o', name: 'r' });
+    expect(run.pullRequests).toEqual(expected);
+    store.close();
+    const reopened = RunStore.open(dataDir);
+    reopened.setRepoHandle({ owner: 'o', name: 'r' });
+    expect(reopened.getRun(run.id)?.pullRequests).toEqual(expected);
+    reopened.close();
+  });
+
+  it('heals uncorroborated declared scope while preserving trusted foreign creations', () => {
+    const { store, run } = freshRun();
+    store.updateRun(run.id, { pullRequests: [
+      { number: 812, source: 'declared', url: 'https://github.com/foreign/repo/pull/812' },
+      { number: 813, source: 'created', url: 'https://github.com/foreign/repo/pull/813' },
+    ] });
+    store.setRepoHandle({ owner: 'o', name: 'r' });
+    expect(run.pullRequests).toEqual([
+      { number: 812, source: 'declared' },
+      { number: 813, source: 'created', url: 'https://github.com/foreign/repo/pull/813' },
+    ]);
+  });
+
+  it('retains batched gh creation output without promoting an incidental adjacent URL', () => {
+    const { store, run } = freshRun();
+    store.appendEvent(run.id, { type: 'item.completed', item: {
+      id: 'batch', kind: 'tool', title: 'Ran gh pr create --head first && gh pr create --head second',
+      output: 'https://github.com/o/r/pull/812\nhttps://github.com/o/r/pull/813\nCompared https://github.com/o/r/pull/999',
+    } });
+    expect(run.pullRequests?.map(pr => pr.number)).toEqual([812, 813]);
+    expect(run.pullRequestUrl).toBe('https://github.com/o/r/pull/812');
+  });
+
+  it('retains each URL-before-claim assistant report', () => {
+    const { store, run } = freshRun();
+    store.appendEvent(run.id, { type: 'result', result:
+      'https://github.com/o/r/pull/812\nDraft pull request created.\nhttps://github.com/o/r/pull/813\nDraft pull request created.' });
+    expect(run.pullRequests?.map(pr => pr.number)).toEqual([812, 813]);
+    expect(run.pullRequestUrl).toBe('https://github.com/o/r/pull/812');
+  });
+
+  it('persists a creation scalar even when its collection evidence is already present', () => {
+    const { store, run } = freshRun();
+    store.updateRun(run.id, { pullRequests: [{ number: 812, url: 'https://github.com/o/r/pull/812', source: 'created' }] });
+    store.flush();
+    store.recordCreatedPr(run.id, 'https://github.com/o/r/pull/812');
+    store.close();
+    const reopened = RunStore.open(dataDir);
+    expect(reopened.getRun(run.id)?.pullRequestUrl).toBe('https://github.com/o/r/pull/812');
+    reopened.close();
+  });
+
+  it('does not collect tool-output or reasoning creation claims', () => {
+    const { store, run } = freshRun();
+    for (const kind of ['reasoning', 'tool']) store.appendEvent(run.id, {
+      type: 'item.completed', item: { id: kind, kind, title: 'Read transcript', output: 'Created a PR: https://github.com/o/r/pull/999', text: 'Created a PR: https://github.com/o/r/pull/999' },
+    });
+    store.appendEvent(run.id, { type: 'item.completed', item: { id: 'child', kind: 'message', role: 'assistant', parentItemId: 'task', text: 'Created a PR: https://github.com/o/r/pull/999' } });
+    expect(run.pullRequests).toBeUndefined();
+  });
+
   it('does NOT adopt a PR URL the agent merely reviewed/referenced', () => {
     const { store, run } = freshRun();
     store.appendEvent(run.id, {

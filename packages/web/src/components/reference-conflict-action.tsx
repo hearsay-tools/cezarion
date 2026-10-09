@@ -6,7 +6,7 @@ import { ReferenceChip, useCloseReferenceCard } from '@/components/reference-chi
 import { useReferenceScope } from '@/components/reference-status'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toaster'
-import { taskItemPath } from '@/lib/tasks-table'
+import { isOwnRepoReference, taskItemPath } from '@/lib/tasks-table'
 import { runTitle } from '@/lib/task-groups'
 import { useAskAnswer } from '@/routes/task-thread/ask-answer'
 import { resolveConflictsPrompt } from '@/routes/task-thread/run-actions'
@@ -184,7 +184,7 @@ export function TaskReferenceChip({
       reference={reference}
       taskTitle={runTitle(run)}
       to={to}
-      conflictAction={<ResolveConflictsForListRun runId={run.id} prNumber={reference.number} />}
+      conflictAction={isOwnRepoReference({ ...reference, number: reference.number ?? 0 }, repoBase) ? <ResolveConflictsForListRun runId={run.id} prNumber={reference.number} /> : undefined}
       className={className}
       compact={compact}
       plain={plain}

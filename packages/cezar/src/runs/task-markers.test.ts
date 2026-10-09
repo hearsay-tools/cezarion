@@ -3,16 +3,22 @@ import { parseTaskMarkers, stripTaskMarkers } from './task-markers.ts';
 
 /** Spec 2026-07-18-task-ref-markers — the in-band declaration layer above the fuzzy tiers. */
 describe('parseTaskMarkers', () => {
+  it('retains distinct explicit declarations in source order and keeps the last subject', () => {
+    expect(parseTaskMarkers('CEZ:PR=812\nCEZ:PR=813\nCEZ:PR=814\nCEZ:PR=815\nCEZ:PR=816\nCEZ:PR=812\nPR: #999 (link: https://github.com/o/r/pull/999)'))
+      .toMatchObject({ pr: 812, prs: [812, 813, 814, 815, 816] });
+  });
+
   it('reads each marker off its own line', () => {
     expect(parseTaskMarkers('Working on it.\nCEZ:PR=442\nCEZ:ISSUE=433\nCEZ:TITLE=fixing plan rendering\ndone soon')).toEqual({
       pr: 442,
+      prs: [442],
       issue: 433,
       title: 'fixing plan rendering',
     });
   });
 
   it('the last occurrence of a marker wins', () => {
-    expect(parseTaskMarkers('CEZ:PR=1\nsome progress\nCEZ:PR=500')).toEqual({ pr: 500 });
+    expect(parseTaskMarkers('CEZ:PR=1\nsome progress\nCEZ:PR=500')).toEqual({ pr: 500, prs: [1, 500] });
     expect(parseTaskMarkers('CEZ:TITLE=first guess\nCEZ:TITLE=implementing comment threads')).toEqual({
       title: 'implementing comment threads',
     });
@@ -33,7 +39,7 @@ describe('parseTaskMarkers', () => {
   });
 
   it('tolerates trailing whitespace and CRLF line endings', () => {
-    expect(parseTaskMarkers('CEZ:PR=7  \r\nCEZ:ISSUE=9\r\n')).toEqual({ pr: 7, issue: 9 });
+    expect(parseTaskMarkers('CEZ:PR=7  \r\nCEZ:ISSUE=9\r\n')).toEqual({ pr: 7, prs: [7], issue: 9 });
   });
 
   it('finds nothing in plain prose', () => {
@@ -51,31 +57,31 @@ describe('parseTaskMarkers — report-tier reference lines', () => {
       'PR: #442 (link: https://github.com/open-mercato/cezar/pull/442)',
       'Status: complete',
     ].join('\n');
-    expect(parseTaskMarkers(report)).toEqual({ pr: 442, issue: 433 });
+    expect(parseTaskMarkers(report)).toEqual({ pr: 442, prs: [442], issue: 433 });
   });
 
   it('a CEZ declaration in the same turn outranks a report line', () => {
     expect(
       parseTaskMarkers('CEZ:PR=7\nPR: #442 (link: https://github.com/o/r/pull/442)'),
-    ).toEqual({ pr: 7 });
+    ).toEqual({ pr: 7, prs: [7] });
     expect(
       parseTaskMarkers('Issue: #9 (link: https://github.com/o/r/issues/9)\nCEZ:ISSUE=3'),
     ).toEqual({ issue: 3 });
   });
 
   it('still accepts the legacy env-style markers from older skill versions', () => {
-    expect(parseTaskMarkers('PR_URL=https://github.com/o/r/pull/442\nPR_NUMBER=442')).toEqual({ pr: 442 });
-    expect(parseTaskMarkers('PR_URL=https://github.com/o/r/pull/442')).toEqual({ pr: 442 });
+    expect(parseTaskMarkers('PR_URL=https://github.com/o/r/pull/442\nPR_NUMBER=442')).toEqual({ pr: 442, prs: [442] });
+    expect(parseTaskMarkers('PR_URL=https://github.com/o/r/pull/442')).toEqual({ pr: 442, prs: [442] });
     expect(parseTaskMarkers('ISSUE_NUMBER=12')).toEqual({ issue: 12 });
   });
 
   it('a report line outranks a legacy marker; the last report line wins', () => {
-    expect(parseTaskMarkers('PR_NUMBER=1\nPR: #2 (link: https://github.com/o/r/pull/2)')).toEqual({ pr: 2 });
+    expect(parseTaskMarkers('PR_NUMBER=1\nPR: #2 (link: https://github.com/o/r/pull/2)')).toEqual({ pr: 2, prs: [2] });
     expect(
       parseTaskMarkers(
         'PR: #1 (link: https://github.com/o/r/pull/1)\nPR: #2 (link: https://github.com/o/r/pull/2)',
       ),
-    ).toEqual({ pr: 2 });
+    ).toEqual({ pr: 2, prs: [2] });
   });
 
   it('is line-anchored and exact-shape — prose, placeholders and decorated lines never parse', () => {
@@ -87,7 +93,7 @@ describe('parseTaskMarkers — report-tier reference lines', () => {
   });
 
   it('tolerates trailing whitespace and CRLF', () => {
-    expect(parseTaskMarkers('PR: #7 (link: https://github.com/o/r/pull/7)  \r\n')).toEqual({ pr: 7 });
+    expect(parseTaskMarkers('PR: #7 (link: https://github.com/o/r/pull/7)  \r\n')).toEqual({ pr: 7, prs: [7] });
   });
 });
 

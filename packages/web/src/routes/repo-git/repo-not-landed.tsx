@@ -3,7 +3,7 @@ import { CircleDashedIcon, GitPullRequestArrowIcon, GitPullRequestCreateIcon, In
 import { useId, useState } from 'react'
 
 import { ApiError, createRunPr, deleteRepoBranches } from '@/api/client'
-import { queryKeys, useRepoBranches, useRuns } from '@/api/queries'
+import { queryKeys, useProjectRepoBase, useRepoBranches, useRuns } from '@/api/queries'
 import type { RepoBranchEntry } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { CopyIcon, EllipsisIcon, TriangleAlertIcon } from '@/components/design-icons'
@@ -77,6 +77,9 @@ export function RepoNotLandedSection() {
   const branches = useRepoBranches()
   const runs = useRuns()
   const scope = queryScope()
+  // #922: every PR this view shows is the project's own, and the chips' URL scope guard needs
+  // that proof — without the repo base the chips fail closed and never read the status batch.
+  const repoBase = useProjectRepoBase()
   const [deleting, setDeleting] = useState<RepoBranchEntry | null>(null)
 
   if (branches.isPending) {
@@ -110,7 +113,7 @@ export function RepoNotLandedSection() {
   )
 
   return (
-    <ReferenceStatusProvider projectId={scope} requests={requests}>
+    <ReferenceStatusProvider projectId={scope} repoBase={repoBase} requests={requests}>
       <div data-slot="repo-not-landed" className="flex flex-col gap-[2px] px-[8px] pt-[12px] pb-[calc(90px+env(safe-area-inset-bottom))] md:px-[20px] md:pb-[20px]">
         {!branches.data.prStateKnown ? <ForgeNote /> : null}
         {retainedNote}

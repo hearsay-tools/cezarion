@@ -968,6 +968,14 @@ resume channel). A fresh-session continuation on an `in-thread` runner still rec
 skill. OpenCode's lost-session 404 fallback is covered alongside R57: one notice, a new
 session id, skill present in the fresh session's system prompt. No runner is exempt.
 
+**PR1–PR2** (hearsay-tools/cezarion#922), in `core/harness-parity.test.ts`, drive
+all `RUNNER_IDS` through the native `multi-pr-refs` scenario. PR1 retains five
+main-assistant declarations in first-seen order, including split text and repeats,
+and excludes tool, reasoning and attributed child text. PR2 continues the task,
+retains those five references and appends the sixth. Both check the last scalar
+subject and reopen the persisted store. No runner is exempt from accumulation;
+whole-block wires declare over complete assistant blocks rather than text deltas.
+
 **R58** (hearsay-tools/cezarion#917), in `core/worktree-setup-parity.test.ts`, drives every
 `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire on a task in an isolated
 worktree whose project declares `worktreeSetup`. The setup runs before the first turn, the run

@@ -694,6 +694,19 @@ export class AgentBrowser {
     this.run(['mouse', 'up'])
   }
 
+  /** Configure touch before measuring coordinates; enabling it can change viewport layout. */
+  async enableTouch(): Promise<void> {
+    await this.withPageSession(request => request('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 }))
+  }
+
+  /** One trusted finger press at a measured point in a touch-enabled target. */
+  async touchTapAt(x: number, y: number): Promise<void> {
+    await this.withPageSession(async request => {
+      await request('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: Math.round(x), y: Math.round(y), id: 1 }] })
+      await request('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    })
+  }
+
   /** Send trusted wheel input at the current pointer position. */
   wheel(deltaY: number): void {
     this.run(['mouse', 'wheel', String(deltaY)])

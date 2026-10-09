@@ -1,4 +1,4 @@
-import type { ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -26,6 +26,13 @@ const chip = (status: string) => `${row(status)} [data-slot="${isIssue(status) ?
 beforeAll(async () => {
   process.env.AGENT_BROWSER_ARGS = [originalArgs, '--blink-settings=primaryHoverType=2'].filter(Boolean).join(',')
   root = mkdtempSync(join(tmpdir(), 'cez-ref-status-'))
+  execFileSync('git', ['-C', root, 'init', '-q'])
+  execFileSync('git', ['-C', root, 'config', 'user.email', 'e2e@cezar.test'])
+  execFileSync('git', ['-C', root, 'config', 'user.name', 'cezar e2e'])
+  writeFileSync(join(root, 'README.md'), '# Reference status fixture\n')
+  execFileSync('git', ['-C', root, 'add', '.'])
+  execFileSync('git', ['-C', root, 'commit', '-qm', 'init'])
+  execFileSync('git', ['-C', root, 'remote', 'add', 'origin', 'https://github.com/o/r.git'])
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
   mkdirSync(artifacts, { recursive: true })
   const now = Date.now()
@@ -77,11 +84,11 @@ function sample(theme: string, state: string, status: string) {
   const selector = chip(status)
   const result = waitForSettledSample(browser, `(() => {
     const el = document.querySelector(${JSON.stringify(selector)})
-    const glyph = el?.querySelector('svg'), label = el?.querySelector('span')
+    const glyph = el?.querySelector('svg:not([data-slot="reference-kind"])'), label = el?.querySelector('span')
     if (!glyph || !label) return null
     const rect = glyph.getBoundingClientRect(), text = label.getBoundingClientRect()
-    return { glyph: ${contrastSampleExpression(`${selector} svg`)}, label: ${contrastSampleExpression(`${selector} > span`)},
-      width: rect.width, height: rect.height, gap: text.left - rect.right,
+    return { glyph: ${contrastSampleExpression(`${selector} svg:not([data-slot="reference-kind"])`)}, label: ${contrastSampleExpression(`${selector} > span`)},
+      width: rect.width, height: rect.height, gap: text.left - el.querySelector('[data-slot="reference-kind"]').getBoundingClientRect().right,
       weight: getComputedStyle(label).fontWeight, fontSize: getComputedStyle(label).fontSize,
       color: getComputedStyle(label).color, metaColor: getComputedStyle(el.parentElement).color,
       border: getComputedStyle(el).borderWidth, background: getComputedStyle(el).backgroundColor }
@@ -121,12 +128,12 @@ describe('sidebar reference status (#677)', () => {
   it('paints the shared group reference and each variant reference', () => {
     browser.goto(`${base}/p/${project}`)
     const group = '[data-slot="group-row"][data-group-id="references"]'
-    browser.waitForFunction(`document.querySelector('${group} [data-slot="issue-chip"] svg') !== null`)
-    const shared = browser.waitForValue(`document.querySelector('${group} [data-slot="issue-chip"] svg').getAttribute('class')`)
+    browser.waitForFunction(`document.querySelector('${group} [data-slot="issue-chip"] svg:not([data-slot="reference-kind"])') !== null`)
+    const shared = browser.waitForValue(`document.querySelector('${group} [data-slot="issue-chip"] svg:not([data-slot="reference-kind"])').getAttribute('class')`)
     expect(shared).toContain('text-merged-text')
     browser.click(`${group} [data-slot="group-tile"]`)
     for (const [variant, tone] of [['A', 'text-success'], ['B', 'text-merged-text']]) {
-      const glyph = browser.waitForValue(`document.querySelector('[data-run-id="variant-${variant}"] [data-slot="pr-chip"] svg')?.getAttribute('class')`)
+      const glyph = browser.waitForValue(`document.querySelector('[data-run-id="variant-${variant}"] [data-slot="pr-chip"] svg:not([data-slot="reference-kind"])')?.getAttribute('class')`)
       expect(glyph).toContain(tone)
     }
   })
@@ -176,15 +183,15 @@ describe('sidebar reference status (#677)', () => {
         const selector = `[data-slot="sidebar"] ${chip(status)}`
         const inert = waitForSettledSample(browser, `(() => {
           const el = document.querySelector(${JSON.stringify(selector)})
-          if (!el?.querySelector('svg')) return null
+          if (!el?.querySelector('svg:not([data-slot="reference-kind"])')) return null
           return { tag: el.tagName, inert: el.dataset.inert, links: el.querySelectorAll('a, button, [tabindex]').length,
-            tone: el.querySelector('svg').getAttribute('class'), rowHeight: el.closest('[data-slot="task-row"]').getBoundingClientRect().height }
+            tone: el.querySelector('svg:not([data-slot="reference-kind"])').getAttribute('class'), rowHeight: el.closest('[data-slot="task-row"]').getBoundingClientRect().height }
         })()`) as { tag: string; inert: string; links: number; tone: string; rowHeight: number }
         expect(inert).toMatchObject({ tag: 'SPAN', inert: 'true', links: 0 })
         expect(inert.rowHeight).toBeGreaterThanOrEqual(44)
         expect(inert.tone).not.toContain('text-accent')
       }
-      expect(browser.waitForValue(`getComputedStyle(document.querySelector('[data-slot="sidebar"] ${chip('checks-pending')} svg')).animationName`)).toBe('none')
+      expect(browser.waitForValue(`getComputedStyle(document.querySelector('[data-slot="sidebar"] ${chip('checks-pending')} svg:not([data-slot="reference-kind"])')).animationName`)).toBe('none')
       browser.screenshot(join(artifacts, `${theme}-touch-inert.png`), { viewport: true })
       browser.evaluate(`document.querySelector('[data-slot="sidebar"] ${chip('conflict')}').scrollIntoView({ block: 'center' })`)
       browser.waitForFunction(`document.querySelector('[data-slot="sidebar"] ${chip('conflict')}').getBoundingClientRect().bottom < innerHeight`)

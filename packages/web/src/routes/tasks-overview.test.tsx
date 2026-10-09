@@ -567,7 +567,7 @@ describe('TasksOverview — the table', () => {
     })
 
     const chip = within(tableRow('pr1') as HTMLElement).getByRole('link', {
-      name: 'Open the pull request for Has a PR',
+      name: 'Open the pull request #7 for Has a PR',
     })
     expect(chip.getAttribute('href')).toBe('https://github.com/o/r/pull/7')
     expect(chip.getAttribute('target')).toBe('_blank')

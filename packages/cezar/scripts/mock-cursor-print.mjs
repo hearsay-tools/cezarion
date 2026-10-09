@@ -157,6 +157,13 @@ if (prompt.includes('mock:no-progress')) {
 if (prompt.includes('mock:hold-done')) { await waitForRelease(400); finish('parity hold-done: content after the pause\nCEZ:DONE'); process.exit(0); }
 if (prompt.includes('mock:hold-ask')) { await waitForRelease(400); finish('Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}'); process.exit(0); }
 if (prompt.includes('mock:hold-gated')) { await waitForRelease(500); finish('parity hold-gated: content after the pause'); process.exit(0); }
+if (prompt.includes('mock:multi-pr-refs')) {
+  const { multiPrText, unrelatedPr } = await import('./mock-multi-pr.mjs');
+  readTool(unrelatedPr);
+  const text = multiPrText(prompt);
+  for (const block of text.split('\n')) assistant(block + '\n');
+  result(text); process.exit(0);
+}
 if (prompt.includes('mock:turn-messages:')) {
   const { turnMessages } = await import('./mock-turn-messages.mjs');
   for (const message of turnMessages(prompt)) assistant(message + '\n');

@@ -295,3 +295,19 @@ describe('cold reads of runs.db', () => {
     });
   });
 });
+
+ it('finds every collection-only PR in a cold archived database without writing files', () => {
+  const pullRequests = [812, 813, 814, 815, 816].map(number => ({ number, source: 'declared' as const }));
+  seedRuns(dir, [record({ id: 'split', archived: true, pullRequests })]);
+  const store = RunStore.open(dir); store.flush();
+  const before = readdirSync(dir).sort();
+  const bytes = readFileSync(join(dir, RUNS_DB_FILE));
+  for (const number of [812, 813, 814, 815, 816]) {
+    const found = searchRunIndexFromDisk(dir, `#${number}`, { limit: 50 });
+    expect(found.runs.map(run => run.id)).toEqual(['split']);
+    expect(found.runs[0]?.pullRequests).toEqual(pullRequests);
+  }
+  expect(readdirSync(dir).sort()).toEqual(before);
+  expect(readFileSync(join(dir, RUNS_DB_FILE))).toEqual(bytes);
+  store.close();
+ });

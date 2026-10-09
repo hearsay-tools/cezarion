@@ -11,6 +11,7 @@ import { MAX_REF } from './task-refs.ts';
 
 export interface TaskMarkers {
   pr?: number;
+  prs?: number[];
   issue?: number;
   title?: string;
 }
@@ -55,7 +56,12 @@ export function parseTaskMarkers(text: string): TaskMarkers {
     lastNumber(source, REPORT_PR_RE) ??
     lastNumber(source, LEGACY_PR_NUMBER_RE) ??
     lastNumber(source, LEGACY_PR_URL_RE);
-  if (pr !== undefined) markers.pr = pr;
+  if (pr !== undefined) {
+    markers.pr = pr;
+    const explicit = [...source.matchAll(PR_MARKER_RE)].map((match) => Number(match[1]))
+      .filter((number) => Number.isInteger(number) && number > 0 && number < MAX_REF);
+    markers.prs = explicit.length ? [...new Set(explicit)] : [pr];
+  }
   const issue =
     lastNumber(source, ISSUE_MARKER_RE) ??
     lastNumber(source, REPORT_ISSUE_RE) ??

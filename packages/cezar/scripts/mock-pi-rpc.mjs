@@ -230,6 +230,16 @@ async function handle(command) {
     activeTurn.late = true;
     await sleep(300);
     sendTurnEnd();
+  } else if (command.type === 'prompt' && command.message.includes('mock:multi-pr-refs')) {
+    const { multiPrText, unrelatedPr } = await import('./mock-multi-pr.mjs');
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    send({ type: 'agent_start' }); send({ type: 'turn_start' });
+    send({ type: 'tool_execution_start', toolCallId: 'multi-read', toolName: 'read', args: { path: 'other.txt' } });
+    send({ type: 'tool_execution_end', toolCallId: 'multi-read', toolName: 'read', result: { content: [{ type: 'text', text: unrelatedPr }] }, isError: false });
+    send({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'thinking', thinking: unrelatedPr }], stopReason: 'stop' } });
+    const text = multiPrText(command.message);
+    sendText([text.slice(0, 5), text.slice(5)]);
+    sendTurnEnd();
   } else if (command.type === 'prompt' && command.message.includes('mock:turn-messages:')) {
     const { turnMessages } = await import('./mock-turn-messages.mjs');
     send({ id: command.id, type: 'response', command: 'prompt', success: true });

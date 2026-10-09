@@ -280,6 +280,11 @@ export class OmpRunner implements AgentRunner {
       spawned.on('error', (error: NodeJS.ErrnoException) => {
         spawnError = wrapSpawnError(error, this.bin);
       });
+      // A stdin write whose reader dies between `writeNow`'s writable check and the kernel write
+      // reports EPIPE asynchronously on this stream; with no listener that becomes an uncaught
+      // exception. Every other runner guards this stream — the next `writable` check already
+      // reports the dead pipe, so the guard only stops the crash.
+      spawned.stdin.on('error', () => {});
       spawned.stderr.setEncoding('utf8');
       spawned.stderr.on('data', (chunk: string) => stderr.push(chunk));
       return spawned;

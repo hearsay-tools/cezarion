@@ -184,10 +184,11 @@ describe('cockpit app shell', () => {
     }
     // Read the label without the inbox badge — a populated shared env legitimately has todos,
     // and the badge digit must not leak into the nav-label assertion.
-    const labels = browser.evaluate(
-      `Array.from(document.querySelector('[data-slot="sidebar"] nav[aria-label="Main"]').querySelectorAll('a')).map(a => {
-        return a.getAttribute('aria-label')
-      })`
+    const labels = waitForSettledSample(browser,
+      `(() => {
+        if (window.__cezIdle !== true) return null
+        return Array.from(document.querySelector('[data-slot="sidebar"] nav[aria-label="Main"]').querySelectorAll('a')).map(a => a.getAttribute('aria-label'))
+      })()`
     )
     expect(labels).toEqual(expectedNavLabels())
 

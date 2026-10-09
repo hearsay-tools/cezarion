@@ -377,6 +377,16 @@ async function prompt(command) {
   respond(command);
   beginTurn(command);
   }
+  if (message.includes('mock:multi-pr-refs')) {
+    const { multiPrText, unrelatedPr } = await import('./mock-multi-pr.mjs');
+    assistantThinking(unrelatedPr);
+    subagentText('multi-child', unrelatedPr);
+    write({ type: 'tool_execution_start', toolCallId: 'multi-read', toolName: 'read', args: { path: 'other.txt' } });
+    write({ type: 'tool_execution_end', toolCallId: 'multi-read', toolName: 'read', result: { content: [{ type: 'text', text: unrelatedPr }] }, isError: false });
+    const text = multiPrText(message);
+    assistantText([text.slice(0, 5), text.slice(5)]);
+    endTurn(); return;
+  }
   if (message.includes('mock:turn-messages:')) {
     const { turnMessages } = await import('./mock-turn-messages.mjs');
     // Separate assistant messages within one native OMP turn; settle only after all of them.

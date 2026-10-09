@@ -433,7 +433,7 @@ describe('references on a device that cannot hover (#617 01b)', () => {
         return { text: meta.textContent, links: meta.querySelectorAll('a').length, focusable: meta.querySelectorAll('[tabindex], a, button').length,
           inert: [...meta.querySelectorAll('[data-slot="pr-chip"], [data-slot="issue-chip"]')].map((chip) => chip.dataset.inert) }
       })()`) as { text: string; links: number; focusable: number; inert: string[] }
-      expect(meta.text).toMatch(/^PR #594 · #451 · /)
+      expect(meta.text).toMatch(/^#594#451 · /)
       expect(meta).toMatchObject({ links: 0, focusable: 0, inert: ['true', 'true'] })
       // Tapping the reference text opens the task: the row is the one target. A plain click on
       // the text, not `tapEdge`: on the 390px run its right-edge hit test missed this inline

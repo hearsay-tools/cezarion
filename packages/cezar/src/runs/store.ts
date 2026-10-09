@@ -10,7 +10,7 @@ import { z } from 'zod';
 import {
   ciWaitSchema, agentInputSchema, inboxClaimSchema, delegationStateSchema, workerCreationReceiptSchema, workerCollectedResultSchema, workerResultFileSchema,
   continuationMessageSchema, previewServerSchema, toRunSummary, workerDestroyRetrySchema,
-  runRecordSchema as contractRunRecordSchema,
+  runRecordSchema as contractRunRecordSchema, runPullRequestSchema,
 } from '@open-mercato/cezar-contract';
 import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult, WorkerDestroyRetry } from '@open-mercato/cezar-contract';
 import { matchesRunQuery, sqlPrefilterTokens } from './run-search.ts';
@@ -24,6 +24,8 @@ import { capacityError, workerCapacity } from '../delegation/capacity.ts';
 import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
+import { mergePullRequests } from './pull-requests.ts';
+import type { RunPullRequest } from '@open-mercato/cezar-contract';
 import { MAX_REF } from './task-refs.ts';
 // Type-only module (zod + nothing else), so this cannot cycle back into the store.
 import { workflowDefSchema } from '../workflows/types.ts';
@@ -278,6 +280,12 @@ export const runRecordSchema = z.object({
   costUsd: z.number().optional(),
   /** First GitHub PR URL spotted in the transcript (the janitor trick). */
   pullRequestUrl: z.string().optional(),
+  pullRequests: z.preprocess((value) => Array.isArray(value)
+    ? value.flatMap((entry) => {
+        const parsed = runPullRequestSchema.safeParse(entry);
+        return parsed.success ? [parsed.data] : [];
+      })
+    : undefined, z.array(runPullRequestSchema).optional()),
   /** The PR this task is ABOUT (#407, spec 2026-07-16-pr-autodiscovery):
    *  auto-discovered from conversation references for tasks that work on an
    *  existing PR (review/continue/merge). Display-only tier — `pullRequestUrl`
@@ -543,6 +551,13 @@ function isRepoScopedRef(url: string, task: string, handle?: RepoHandle | null):
   const repo = refUrlRepo(url);
   if (!repo) return true;
   if (repo === `${handle.owner}/${handle.name}`.toLowerCase()) return true;
+  return promptNamesRepo(url, task);
+}
+
+/** Positive scope evidence for permanent declarations; legacy discovery still fails open. */
+function promptNamesRepo(url: string, task: string): boolean {
+  const repo = refUrlRepo(url);
+  if (!repo) return false;
   // Match whole owner/repository segments: naming acme/service2 must not corroborate
   // acme/service. Slashes remain valid boundaries for full URLs and their /pull or /issues path.
   const escapedRepo = repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -628,6 +643,9 @@ function eventTextFragments(event: Record<string, unknown>): string[] {
  */
 function eventCreationClaimFragments(event: Record<string, unknown>): string[] {
   const fragments: string[] = [];
+  const nested = event.item;
+  if (event.parentItemId !== undefined || (nested && typeof nested === 'object' &&
+    (nested as Record<string, unknown>).parentItemId !== undefined)) return fragments;
   // A `tool-result` event's `result` IS raw command output; on every other event the top-level
   // text is the agent's own.
   if (event.type !== 'tool-result') {
@@ -764,6 +782,31 @@ function createdPrUrl(haystack: string): string | undefined {
   return before;
 }
 
+/** Associate one URL per claim; command outputs remain separate from authored claims. */
+function createdPrUrls(claim: string, haystack: string, toolOutput?: string): string[] {
+  const phrases = [...claim.matchAll(new RegExp(CREATED_PR_RE.source, 'gi'))];
+  if (!phrases.length) return [];
+  const urls = phrases.flatMap((phrase, index) => {
+    const preceding = claim.slice(index ? phrases[index - 1]!.index! + phrases[index - 1]![0].length : 0, phrase.index);
+    const before = [...preceding.matchAll(new RegExp(PR_URL_RE.source, 'g'))].at(-1);
+    // URL-first reports put only punctuation/whitespace between the URL and its claim.
+    // An earlier URL followed by unrelated prose is still context, not a created resource.
+    if (before && /^[\s:—–-]*(?:draft\s+)?$/i.test(preceding.slice(before.index! + before[0].length))) return [before[0]];
+    const after = PR_URL_RE.exec(claim.slice(phrase.index, phrases[index + 1]?.index))?.[0];
+    return after ? [after] : [];
+  });
+  if (!urls.length && toolOutput !== undefined) {
+    // gh prints one URL per successful command. Never promote more output links than commands.
+    const outputs = [...toolOutput.matchAll(new RegExp(PR_URL_RE.source, 'g'))];
+    urls.push(...outputs.slice(0, phrases.length).map(match => match[0]));
+  }
+  if (!urls.length && phrases.length === 1) {
+    const url = createdPrUrl(`${claim} ${haystack}`);
+    if (url) urls.push(url);
+  }
+  return [...new Set(urls)];
+}
+
 /**
  * Reconcile one record just read off disk with the fact that whichever process wrote it is gone.
  *
@@ -868,6 +911,15 @@ export function settleOrphanedRun(run: RunRecord, opts: { stop?: boolean } = {})
  */
 export function rescopeRun(run: RunRecord, handle?: RepoHandle | null): boolean {
   let changed = false;
+  if (handle && run.pullRequests) {
+    const entries = run.pullRequests.map(entry => {
+      if (entry.source !== 'declared' || !entry.url || isRepoScopedRef(entry.url, run.task, handle)) return entry;
+      // Revoke an uncorroborated URL, preserving the accepted declaration and its order.
+      return { number: entry.number, source: entry.source };
+    });
+    const next = mergePullRequests(undefined, entries, `https://github.com/${handle.owner}/${handle.name}`);
+    if (!isDeepStrictEqual(next, run.pullRequests)) { run.pullRequests = next; changed = true; }
+  }
   if (
     run.referencedPullRequestUrl &&
     !isRepoScopedRef(run.referencedPullRequestUrl, run.task, handle)
@@ -902,7 +954,7 @@ export function rescopeRun(run: RunRecord, handle?: RepoHandle | null): boolean 
 function loadNormalizedFields(run: RunRecord): string {
   return JSON.stringify([
     run.stopping, run.status, run.finishedAt, run.error, run.activity, run.monitoringWakeAt, run.autoResumeAt,
-    run.monitoringWakeCapReached, run.referencedPullRequestUrl, run.hasPendingHumanAsk, run.steps.map((step) => step.status),
+    run.monitoringWakeCapReached, run.referencedPullRequestUrl, run.pullRequests, run.hasPendingHumanAsk, run.steps.map((step) => step.status),
   ]);
 }
 
@@ -2783,6 +2835,14 @@ export class RunStore extends EventEmitter {
       delete run.referencedIssueNumberSeeded;
     }
     const normalized = { ...patch };
+    if (normalized.pullRequestUrl !== undefined) {
+      this.accumulatePullRequests(run, [run.pullRequestUrl, normalized.pullRequestUrl].flatMap((url) => {
+        const number = refUrlNumber(url);
+        if (number === undefined) return [];
+        const parsed = runPullRequestSchema.safeParse({ number, url, source: 'created' });
+        return parsed.success ? [parsed.data] : [];
+      }));
+    }
     if (normalized.status && !['running', 'waiting', 'queued'].includes(normalized.status)) {
       normalized.activity = undefined;
       normalized.monitoringWakeAt = undefined;
@@ -3195,26 +3255,27 @@ export class RunStore extends EventEmitter {
     const claim = eventCreationClaimFragments(full).join(' ');
     if (haystack.length > 0) {
       let changed = false;
-      if (!run.pullRequestUrl) {
-        const created = CREATED_PR_RE.test(claim) ? createdPrUrl(`${claim} ${haystack}`) : undefined;
-        if (created) {
-          this.updateRun(runId, { pullRequestUrl: created });
-          // Adopting the created tier can RELEASE a declaration the referenced tier was holding
-          // (see `referencedPrDeclaration`), so re-resolve here too: the about-PR must come back
-          // whether the marker arrived before the creation evidence or after it.
-          const resolved = resolveReferencedRef(
-            run.referencedPrCandidates ?? [],
-            run.task,
-            referencedPrDeclaration(run),
-            this.repoHandle,
-          );
-          if (resolved !== run.referencedPullRequestUrl) {
-            run.referencedPullRequestUrl = resolved;
-            changed = true;
-          }
-        } else if (PR_URL_RE.test(haystack) && this.trackReferencedPrs(run, haystack)) {
+      // One associated URL per trusted creation claim; replayed v1/v2 reports merge by identity.
+      const item = full.item as Record<string, unknown> | undefined;
+      const toolOutput = item?.kind === 'tool' && typeof item.output === 'string' ? item.output : undefined;
+      const created = createdPrUrls(claim, haystack, toolOutput);
+      for (const url of created) {
+        const number = refUrlNumber(url);
+        const parsed = runPullRequestSchema.safeParse({ number, url, source: 'created' });
+        if (!parsed.success) continue;
+        changed = this.accumulatePullRequests(run, [parsed.data]) || changed;
+        if (!run.pullRequestUrl) { run.pullRequestUrl = url; changed = true; }
+      }
+      if (created.length > 0) {
+        const resolved = resolveReferencedRef(
+          run.referencedPrCandidates ?? [], run.task, referencedPrDeclaration(run), this.repoHandle,
+        );
+        if (resolved !== run.referencedPullRequestUrl) {
+          run.referencedPullRequestUrl = resolved;
           changed = true;
         }
+      } else if (!run.pullRequestUrl && PR_URL_RE.test(haystack) && this.trackReferencedPrs(run, haystack)) {
+        changed = true;
       }
       // Issue links feed their own referenced tier regardless of PR state —
       // a task that created a PR can still be ABOUT an issue
@@ -3313,9 +3374,19 @@ export class RunStore extends EventEmitter {
    * itself created. See `referencedPrDeclaration` — the marker contract asks the agent to
    * re-declare after it opens a PR, and taking that literally cost the task the PR it was about.
    */
-  applyMarkerRefs(runId: string, refs: { pr?: number; issue?: number }): RunRecord | undefined {
+  applyMarkerRefs(runId: string, refs: { pr?: number; prs?: readonly number[]; issue?: number }): RunRecord | undefined {
     const run = this.record(runId);
     if (!run || (refs.pr === undefined && refs.issue === undefined)) return run;
+    const numbers = [...new Set([...(run.markerRefs?.pr === undefined ? [] : [run.markerRefs.pr]),
+      ...(refs.prs ?? (refs.pr === undefined ? [] : [refs.pr]))])];
+    if (numbers.length) this.accumulatePullRequests(run, numbers.flatMap((number) => {
+      const matches = (run.referencedPrCandidates ?? []).filter((url) => refUrlNumber(url) === number &&
+        (this.repoHandle ? isRepoScopedRef(url, run.task, this.repoHandle) : promptNamesRepo(url, run.task)));
+      const url = matches.length === 1 ? matches[0] : matches.length === 0 && this.repoHandle
+        ? `https://github.com/${this.repoHandle.owner}/${this.repoHandle.name}/pull/${number}` : undefined;
+      const parsed = runPullRequestSchema.safeParse({ number, ...(url ? { url } : {}), source: 'declared' });
+      return parsed.success ? [parsed.data] : [];
+    }));
     run.markerRefs = {
       ...run.markerRefs,
       ...(refs.pr !== undefined ? { pr: refs.pr } : {}),
@@ -3349,6 +3420,25 @@ export class RunStore extends EventEmitter {
     }
     this.touch(run);
     return run;
+  }
+
+  /** Authoritative creation keeps the first scalar for publishing, plus every created identity. */
+  recordCreatedPr(runId: string, url: string): RunRecord | undefined {
+    const run = this.record(runId);
+    const parsed = runPullRequestSchema.safeParse({ number: refUrlNumber(url), url, source: 'created' });
+    if (!run || !parsed.success) return run;
+    let changed = this.accumulatePullRequests(run, [parsed.data]);
+    if (!run.pullRequestUrl) { run.pullRequestUrl = url; changed = true; }
+    if (changed) this.touch(run);
+    return run;
+  }
+
+  private accumulatePullRequests(run: RunRecord, entries: readonly RunPullRequest[]): boolean {
+    const next = mergePullRequests(run.pullRequests, entries, this.repoHandle
+      ? `https://github.com/${this.repoHandle.owner}/${this.repoHandle.name}` : undefined);
+    if (isDeepStrictEqual(next, run.pullRequests)) return false;
+    run.pullRequests = next;
+    return true;
   }
 
   /**

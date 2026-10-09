@@ -560,6 +560,8 @@ describe('the global follow-up gate (dry run)', () => {
     expect(capturedSystemPrompt()).toContain('CEZ:MONITORING');
     // The task-reference markers too (spec 2026-07-18-task-ref-markers).
     expect(capturedSystemPrompt()).toContain('CEZ:PR=<number>');
+    expect(capturedSystemPrompt()).toContain('Declare each PR this task opens, even when it opens several.');
+    expect(capturedSystemPrompt()).toContain('Earlier declarations remain associated with the task; the last declaration selects the current subject.');
     expect(capturedSystemPrompt()).toContain('CEZ:ISSUE=<number>');
     expect(capturedSystemPrompt()).toContain('CEZ:TITLE=');
     expect(readFileSync(join(repoRoot, '.ai/cezar/runs', `${id}.handoff.md`), 'utf8')).toContain(
