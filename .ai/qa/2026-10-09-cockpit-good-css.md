@@ -48,3 +48,5 @@ Focused unit guards passed: 139 tests across message colors, fixture readiness, 
 The tab-coordination cleanup failure was traced to an unowned worker-setup promise rejecting after CDP teardown. The test now collects setup errors and asserts them before teardown, while owning late cleanup rejections. All five tab-coordination tests passed after this test-only change, with no unhandled errors. No application coordination code changed. Together with the seven focused color/scroll/layout checks, all failures exposed by the full browser run now have passing reruns; this does not rewrite the original full command’s exit status.
 
 The full unit run is finished. Its sole delegation snapshot failure passed an isolated rerun unchanged (1 selected test); the cause of the intermittent result is not established. No service implementation changed. Real Safari QA remains outstanding. All monitored commands and owned workers have finished.
+
+The user approved opening the draft with the documented test exception; real Safari QA remains required before merge.
