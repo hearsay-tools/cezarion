@@ -5,7 +5,7 @@
 // are imported lazily.
 import readline from 'node:readline';
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, writeFileSync } from 'node:fs';
 
 const argv = process.argv.slice(2);
 if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify(argv)}\n`);
@@ -104,6 +104,14 @@ const fail = (command, error) => write({ ...(command.id ? { id: command.id } : {
 const localResult = (command, status, error) => write({ type: 'prompt_result', ...(command.id ? { id: command.id } : {}), agentInvoked: false, status, ...(error ? { error } : {}), sessionSettled: false });
 const respond = (command, data) => write({ ...(command.id ? { id: command.id } : {}), type: 'response', command: command.type, success: true, ...(data === undefined ? {} : { data }) });
 
+// A real broken input pipe before ready exercises the queued startup writes.
+if (process.env.CEZ_MOCK_OMP_CLOSED_INPUT === '1') {
+  closeSync(0);
+  write({ type: 'ready' });
+  setTimeout(() => process.exit(0), 300);
+  await new Promise(() => {});
+}
+
 // Real startup order: `ready`, then three unsolicited frames before any command is answered.
 write({ type: 'ready', protocolVersion: 1, supportedProtocolVersions: [1, 2], maxFrameBytes: 1048576, maxReassembledFrameBytes: 16777216 });
 write({ type: 'extension_ui_request', id: 'mock-widget-1', method: 'setWidget', widgetKey: 'mock', widgetLines: [] });
@@ -121,6 +129,11 @@ let resumeAfterAsk = false;
 /** Same as mock-pi-rpc.mjs `watchdogStall`: a turn that never progresses (no-progress rows). */
 function watchdogStall(message) {
   writeFileSync('watchdog.pid', String(process.pid));
+  if (message.includes('input-closed')) {
+    closeSync(0);
+    writeFileSync('input-closed.pid', String(process.pid));
+    setTimeout(() => process.exit(0), 300);
+  }
   if (message.includes('ignore-term')) {
     process.removeAllListeners('SIGTERM');
     process.on('SIGTERM', () => {});

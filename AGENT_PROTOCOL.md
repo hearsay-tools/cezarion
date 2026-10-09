@@ -897,6 +897,18 @@ output transport must terminate the live child. OpenCode uses its real HTTP/SSE
 stream for the transport failure, while the other backends use stdout.
 Requested teardown remains successful. The matrix has no wire exemptions.
 
+**S29** (hearsay-tools/cezarion#906), in `core/omp-input-pipe.test.ts`, closes each
+native input transport while the admitted turn's child is alive, then submits agent input.
+Claude/Codex/Pi/OMP mocks close fd 0; OpenCode destroys the next native prompt HTTP socket
+while retaining SSE. The rejected receipt must retain input failure evidence, settlement
+must be bounded, and no successful native turn completion may be fabricated. OpenCode's
+synthetic terminal turn boundary remains valid after failure. Cursor print has a named,
+executable `scenario-unconstructible` exemption: prompts are argv of a new process,
+and human follow-ups queue for its next process, so it has no live input transport to close.
+OMP additionally closes admission immediately, reports one fatal transport failure and
+rejects its result even if the child would later exit zero. Its focused regression closes
+stdin before the native `ready` frame to exercise the queued startup outbox.
+
 **S26–S28** (hearsay-tools/cezarion#890), in the same file, start every `RUNNER_IDS` backend's
 native mock with `mock:no-progress-leftover`. The mock leaves two children in its cwd: one in
 the session's process group that ignores SIGTERM, and one that left the group with `setsid`.

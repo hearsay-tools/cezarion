@@ -270,6 +270,7 @@ export class OmpRunner implements AgentRunner {
   ): AgentSession {
     const killGraceMs = this.killGraceMs;
     let spawnError: Error | null = null;
+    let inputError: Error | undefined;
     const stderr: string[] = [];
     const spawnOmp = (args: string[]): ChildProcessWithoutNullStreams => {
       const spawned = spawnSessionLeader(this.bin, args, {
@@ -277,6 +278,8 @@ export class OmpRunner implements AgentRunner {
         env: buildChildEnv({ backend: this.backend, extraEnv: spec.env }),
       });
       boundOutputDrainAfterExit(spawned);
+      // Observe asynchronous write errors before any startup command can reach stdin.
+      spawned.stdin.on('error', (error: Error) => failInput(spawned, error));
       spawned.on('error', (error: NodeJS.ErrnoException) => {
         spawnError = wrapSpawnError(error, this.bin);
       });
@@ -359,11 +362,12 @@ export class OmpRunner implements AgentRunner {
       for (const event of mapped.events) emitUiEvent(event);
     };
     const writeNow = (command: Record<string, unknown>): boolean => {
-      if (!child.stdin.writable) return false;
+      if (inputError || !child.stdin.writable) return false;
       try {
         child.stdin.write(`${JSON.stringify(command)}\n`);
         return true;
-      } catch {
+      } catch (error) {
+        failInput(child, error instanceof Error ? error : new Error(String(error)));
         return false;
       }
     };
@@ -371,6 +375,19 @@ export class OmpRunner implements AgentRunner {
     // Ruling 13 refusal rejects exits without reading stdin, and what it was handed would be lost with
     // it. Accepted commands wait here, in order, and the respawned child gets the same ones.
     const outbox: Array<Record<string, unknown>> = [];
+    const failInput = (failedChild: ChildProcessWithoutNullStreams, error: Error): void => {
+      // EOF/abort teardown and an old refusal child's late errors are not new failures.
+      if (failedChild !== child || closedByCaller || terminatedByCezar || inputError) return;
+      inputError = new Error(`omp input stream failed: ${error.message}`);
+      open = false;
+      outbox.length = 0;
+      rejectAgentAck(inputError);
+      onEvent?.({ type: 'error', message: inputError.message });
+      emitUiEvent({ type: 'session.error', message: inputError.message, fatal: true });
+      // The output loop owns bounded process cleanup. Retain the error even if the child
+      // exits zero before the destroyed output stream is observed.
+      failedChild.stdout.destroy(inputError);
+    };
     const flushOutbox = (): void => {
       for (const command of outbox.splice(0)) writeNow(command);
     };
@@ -389,9 +406,9 @@ export class OmpRunner implements AgentRunner {
     // answers the prompt that opened it, never a steer (the mapper gates on this id).
     const humanAcks = new Set<string>();
     let agentAck: { id: string; resolve: () => void; reject: (error: Error) => void } | undefined;
-    const rejectAgentAck = () => {
+    const rejectAgentAck = (error = new Error('omp closed before prompt acknowledgement')) => {
       const pending = agentAck; agentAck = undefined;
-      pending?.reject(new Error('omp closed before prompt acknowledgement'));
+      pending?.reject(error);
     };
     const scheduleAutoEnd = () => {
       if (!opts.autoEndAfterFirstTurn || !open || autoEndTimer || agentAck || humanAcks.size) return;
@@ -782,6 +799,7 @@ export class OmpRunner implements AgentRunner {
       open = false;
       releaseUiHold();
       if (spawnError) throw spawnError;
+      if (inputError) throw inputError;
       if (timedOut) {
         const message = `omp CLI timed out after ${Math.round((limitMs / 60_000) * 10) / 10}m and was killed`;
         onEvent?.({ type: 'error', message });

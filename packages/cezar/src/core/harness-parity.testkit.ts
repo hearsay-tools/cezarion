@@ -77,6 +77,8 @@ export const SCENARIOS = [
   'auto-resumed',
   'turn-messages',
   'skill-warning',
+  'closed-input',
+  'input-closed-live',
   'missing-binary',
   'serve-start-exit',
   'crash-stderr-pre-ack',
@@ -135,6 +137,7 @@ export const SHUTDOWN_CRITERIA = [
   { id: 'S26', scenario: 'no-progress-leftover', name: 'the session leader leads its own process group' },
   { id: 'S27', scenario: 'no-progress-leftover', name: "stop ends the leader's process group but not a setsid child" },
   { id: 'S28', scenario: 'no-progress-leftover', name: 'end escalation reaches the whole process group' },
+  { id: 'S29', scenario: 'input-closed-live', name: 'settles a live native input transport failure without false success' },
 ] as const;
 
 /** #427: portable intermediate asks, through every native message wire. */
@@ -285,6 +288,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_CLAUDE_BIN',
     mockBin: CLAUDE_MOCK,
     scenarios: {
+      'input-closed-live': 'mock:no-progress-input-closed',
       'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
@@ -329,6 +333,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_CODEX_BIN',
     mockBin: CODEX_MOCK,
     scenarios: {
+      'input-closed-live': 'mock:no-progress-input-closed',
       'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
@@ -374,6 +379,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_OPENCODE_BIN',
     mockBin: OPENCODE_MOCK,
     scenarios: {
+      'input-closed-live': 'mock:no-progress-input-closed',
       'skill-warning': 'mock:skill-warning mock:done',
       'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
@@ -420,7 +426,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     askResumeCases: [{ kind: 'CEZ:ASK', scenario: 'ask-resume', answer: 'Library: Vitest' }],
     binEnv: 'CEZ_CURSOR_BIN',
     mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-print.mjs'),
-    scenarios: { 'turn-messages': 'mock:turn-messages', 'missing-binary': BASELINE_PROMPT,
+    scenarios: {
+      'turn-messages': 'mock:turn-messages', 'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
@@ -448,6 +455,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_PI_BIN',
     mockBin: PI_MOCK,
     scenarios: {
+      'input-closed-live': 'mock:no-progress-input-closed',
       'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
@@ -493,6 +501,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_OMP_BIN',
     mockBin: OMP_MOCK,
     scenarios: {
+      'input-closed-live': 'mock:no-progress-input-closed',
+      'closed-input': 'mock:closed-input',
       'auto-resumed': BASELINE_PROMPT,
       'hold-done': 'mock:hold-done',
       'hold-ask': 'mock:hold-ask',
@@ -576,6 +586,10 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
+  {
+    criterion: 'S29', backend: 'cursor', kind: 'scenario-unconstructible',
+    reason: 'Cursor print delivers prompts in argv of a new child and queues human follow-ups until the current child finishes; there is no live stdin or HTTP prompt transport to close. ACP stdin behavior is a separate legacy transport, not the HARNESS_ADAPTERS cursor-print wire.',
+  },
   ...(['S9', 'R12', 'R15'] as const).map(criterion => ({
     criterion, backend: 'cursor' as const, kind: 'scenario-unconstructible' as const,
     reason: 'Cursor 2026.10.01-e373342 print stream-json reports parent tool calls but no child-session transcript or child terminal frames; native delegation is suppressed for governed runs. The ACP child-session fixture remains covered by direct ACP mapper tests.',
@@ -798,6 +812,7 @@ export async function driveSeam(
         // The claude mock writes to these when set; empty keeps a row from
         // touching a handoff file it does not own.
         env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_ARGS_FILE: '',
+          ...(scenario === 'closed-input' && backend === 'omp' ? { CEZ_MOCK_OMP_CLOSED_INPUT: '1' } : {}),
           ...(scenario === 'auto-resumed' ? { CEZ_MOCK_OMP_AUTO_RESUME: '1' } : {}),
           ...(scenario === 'serve-start-exit' ? {
             CEZ_MOCK_OPENCODE_SERVE_FAIL_STARTS: '1', CEZ_MOCK_OPENCODE_SERVE_FAIL_FILE: join(cwd, 'serve-starts'),
