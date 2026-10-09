@@ -64,6 +64,7 @@ import {
   FINAL_MESSAGE_CRITERIA,
   WORKFLOW_ASK_CRITERIA,
   FOLLOWUP_CRITERIA,
+  ANSWER_DELIVERY_CRITERIA,
   SKILL_RESUME_CRITERIA,
   WORKTREE_SETUP_CRITERIA,
   PARITY_EXEMPTIONS,
@@ -1724,6 +1725,7 @@ describe('harness parity — the matrix itself', () => {
     ...MONITORING_ORDER_CRITERIA.map(c => c.id),
     ...WORKFLOW_ASK_CRITERIA.map(c => c.id),
     ...FOLLOWUP_CRITERIA.map(c => c.id),
+    ...ANSWER_DELIVERY_CRITERIA.map(c => c.id),
     ...SKILL_RESUME_CRITERIA.map(c => c.id),
     ...WORKTREE_SETUP_CRITERIA.map(c => c.id),
     ...AUTONOMOUS_CRITERIA.map(c => c.id),
@@ -1744,6 +1746,8 @@ describe('harness parity — the matrix itself', () => {
     if (ask) return ask.scenario;
     const followup = FOLLOWUP_CRITERIA.find(c => c.id === id);
     if (followup) return followup.scenario;
+    const answerDelivery = ANSWER_DELIVERY_CRITERIA.find(c => c.id === id);
+    if (answerDelivery) return answerDelivery.scenario;
     const skillResume = SKILL_RESUME_CRITERIA.find(c => c.id === id);
     if (skillResume) return skillResume.scenario;
     const worktreeSetup = WORKTREE_SETUP_CRITERIA.find(c => c.id === id);
