@@ -1,3 +1,4 @@
+import { onLiveReconcile } from '@/api/live-coordinator'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { automationEventSchema, automationLogResultSchema, type AutomationLogRecord, type AutomationLogResult } from '@open-mercato/cezar-api-client'
 
@@ -44,10 +45,11 @@ function useAutomationLog(automationId: string) {
   const [records, setRecords] = useState<AutomationLogRecord[]>()
   const [error, setError] = useState('')
   const refresh = useCallback(
-    () => getAutomationLog(automationId).then(({ records: next }) => { setRecords(next); setError('') }).catch((cause) => setError(String(cause))),
+    (signal?: AbortSignal) => getAutomationLog(automationId, { signal }).then(({ records: next }) => { if (signal?.aborted) return; setRecords(next); setError('') }).catch((cause) => { if (!signal?.aborted) setError(String(cause)) }),
     [automationId],
   )
   useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => onLiveReconcile(refresh), [refresh])
   useEffect(() => onWorkspaceEvent((name, payload) => {
     if (name === 'automation-change' && (payload as { automationId?: unknown }).automationId === automationId) void refresh()
   }), [automationId, refresh])

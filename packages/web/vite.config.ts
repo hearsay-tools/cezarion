@@ -66,7 +66,9 @@ export default defineConfig({
     outDir: resolve(packagesDir, 'cezar/web/dist'),
     emptyOutDir: true,
     rolldownOptions: {
+      input: { index: resolve(appDir, 'index.html'), 'live-worker': resolve(appDir, 'src/api/live-worker.ts') },
       output: {
+        entryFileNames: chunk => chunk.name === 'live-worker' ? 'live-worker.js' : 'assets/[name]-[hash].js',
         codeSplitting: {
           groups: [reactRuntimeChunk],
         },

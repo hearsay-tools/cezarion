@@ -1,3 +1,4 @@
+import { pageIsActive } from '@/api/live-visibility'
 import { useEffect, useImperativeHandle, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -77,10 +78,11 @@ export function PreviewStage({
     async draw(frame) {
       const target = canvas.current
       const context = target?.getContext('2d')
-      if (!target || !context) return
+      if (!target || !context || !pageIsActive()) return
       try {
         const decoded = await decode(frame)
         try {
+          if (!pageIsActive() || canvas.current !== target) return
           if (target.width !== decoded.width) target.width = decoded.width
           if (target.height !== decoded.height) target.height = decoded.height
           context.drawImage(decoded.source, 0, 0)

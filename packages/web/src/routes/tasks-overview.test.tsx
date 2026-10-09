@@ -5,6 +5,14 @@ import type { ComponentProps } from 'react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+// Exercise the workspace reducers through their named-event adapter seam.
+vi.mock('@/api/live-workspace-source', () => ({ LiveWorkspaceSource: class {
+  constructor(url: string, options: EventSourceInit) {
+    return typeof globalThis.EventSource === 'function' ? new globalThis.EventSource(url, options) : { readyState: 2, addEventListener() {}, close() {} }
+  }
+} }))
+
+
 import { GlobalEventsProvider } from '@/api/global-events'
 import { queryKeys } from '@/api/queries'
 import { createQueryClient } from '@/api/query-client'

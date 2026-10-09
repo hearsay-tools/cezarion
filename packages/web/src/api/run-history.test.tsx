@@ -13,6 +13,20 @@ vi.mock('./client', () => ({
   getRunHistoryContext: vi.fn(),
 }))
 
+// Progressive-history tests inject the coordinator seam; transport lifecycle has its own suite.
+vi.mock('./live-coordinator', () => ({ subscribeLive: (demand: { projectId: string; runId: string; cursor?: string; afterSeq: number }, handlers: { frame(frame: unknown): void }) => {
+  const params = new URLSearchParams()
+  if (demand.cursor) params.set('cursor', demand.cursor)
+  if (demand.cursor || demand.afterSeq > 0) params.set('afterSeq', String(demand.afterSeq))
+  const prefix = demand.projectId === 'default' ? '/api/v1' : `/api/v1/p/${demand.projectId}`
+  const source = new FakeEventSource(`${prefix}/runs/${demand.runId}/events${params.size ? `?${params}` : ''}`)
+  for (const name of ['run-event', 'ui-event']) source.addEventListener(name, event => {
+    const data = JSON.parse((event as MessageEvent).data as string)
+    handlers.frame({ type: 'event', projectId: demand.projectId, runId: demand.runId, name, event: data })
+  })
+  return () => source.close()
+} }))
+
 const mockHistory = vi.mocked(getRunHistory)
 const mockContext = vi.mocked(getRunHistoryContext)
 

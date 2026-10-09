@@ -1,0 +1,15 @@
+[
+  {
+    "phase": "hidden",
+    "closedSockets": 1,
+    "visibility": "hidden"
+  },
+  {
+    "phase": "restored",
+    "state": "taken-over"
+  },
+  {
+    "phase": "explicit reclaim",
+    "canvasWidth": 646
+  }
+]

@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -20,6 +20,15 @@ const fetchMock = vi.fn<typeof fetch>()
 
 /** The workspace-event fan-out, captured so a test can play the server's side of the stream. */
 let emitWorkspaceEvent: ((name: string, payload: unknown) => void) | null = null
+let reconcileProgress: ((signal: AbortSignal) => Promise<void>) | null = null
+
+vi.mock('@/api/live-coordinator', async importOriginal => ({
+  ...await importOriginal<typeof import('@/api/live-coordinator')>(),
+  onLiveReconcile: (listener: (signal: AbortSignal) => Promise<void>) => {
+    reconcileProgress = listener
+    return () => { reconcileProgress = null }
+  },
+}))
 
 vi.mock('@/api/global-events', () => ({
   onWorkspaceEvent: (listener: (name: string, payload: unknown) => void) => {
@@ -172,6 +181,27 @@ describe('CloneProjectDialog', () => {
     emitWorkspaceEvent?.('project-added', { project: PROJECT })
     await waitFor(() => expect(slot('clone-progress')?.textContent).toBe('Receiving objects:  42% (420/1000)'))
 
+    release(json({ project: PROJECT }))
+    await waitFor(() => expect(slot('clone-progress')).toBeNull())
+  })
+
+  it('keeps optional progress failures out of restoration and recovers on the next refresh', async () => {
+    let release!: (response: Response) => void
+    serve(() => new Promise<Response>(resolve => { release = resolve }))
+    renderDialog()
+    fireEvent.change(urlInput(), { target: { value: 'open-mercato/cezar' } })
+    fireEvent.click(cloneButton())
+    await waitFor(() => expect(slot('clone-progress')).toBeTruthy())
+    const checkoutId = String(posted[0]?.checkoutId)
+    act(() => emitWorkspaceEvent?.('checkout-progress', { checkoutId, phase: 'cloning', line: 'Receiving objects: 42%' }))
+    fetchMock.mockResolvedValueOnce(json({ error: 'progress temporarily unavailable' }, 503))
+    await act(async () => {
+      await expect(reconcileProgress!(new AbortController().signal)).resolves.toBeUndefined()
+    })
+    expect(slot('clone-progress')?.textContent).toBe('Receiving objects: 42%')
+    fetchMock.mockResolvedValueOnce(json({ progress: { checkoutId, name: 'cezar', phase: 'cloning', line: 'Receiving objects: 80%' } }))
+    await act(async () => { await reconcileProgress!(new AbortController().signal) })
+    expect(slot('clone-progress')?.textContent).toBe('Receiving objects: 80%')
     release(json({ project: PROJECT }))
     await waitFor(() => expect(slot('clone-progress')).toBeNull())
   })

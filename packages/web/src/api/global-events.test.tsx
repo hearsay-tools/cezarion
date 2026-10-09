@@ -15,6 +15,14 @@ import { RunNotifications } from '../components/run-notifications'
 import { TasksOverview } from '../routes/tasks-overview'
 import type { ApiRun, ProviderStatusResponse, RunRecord } from '@open-mercato/cezar-api-client'
 
+// Reducer/lifecycle tests control named frames at the adapter seam. Actual ownership and
+// finite fallback are tested in live-coordinator and the browser suite.
+vi.mock('./live-workspace-source', () => ({ LiveWorkspaceSource: class {
+  constructor(url: string, options: EventSourceInit) {
+    return typeof globalThis.EventSource === 'function' ? new globalThis.EventSource(url, options) : { readyState: 2, addEventListener() {}, close() {} }
+  }
+} }))
+
 /**
  * jsdom ships no EventSource at all (it is not in its supported-API set), so there is nothing to
  * spy on — the stub *is* the test double. Same lesson as `matchMedia` in the theme tests: stub the
@@ -766,19 +774,19 @@ describe('useGlobalEvents — back/forward cache', () => {
     })
   }
 
-  it('closes the stream when the document is navigated away (pagehide)', () => {
+  it('retains the adapter subscription on pagehide for coordinator restoration', () => {
     const { source } = mount()
 
     act(() => {
       window.dispatchEvent(new Event('pagehide'))
     })
 
-    // The leak this prevents: a bfcached document's open EventSource keeps a real socket, and
-    // six parked documents exhaust the per-origin pool — the NEXT page load hangs.
-    expect(source.closeCount).toBe(1)
+    // This fake is the named-event adapter. The real coordinator must retain the
+    // subscription while closing its wire demand (global-events-lifecycle.test.tsx).
+    expect(source.closeCount).toBe(0)
   })
 
-  it('reopens the stream when the document is restored from bfcache', () => {
+  it('does not reconstruct the adapter when the document is restored from bfcache', () => {
     mount()
 
     act(() => {
@@ -786,7 +794,7 @@ describe('useGlobalEvents — back/forward cache', () => {
     })
     firePageShow(true)
 
-    expect(FakeEventSource.instances).toHaveLength(2)
+    expect(FakeEventSource.instances).toHaveLength(1)
     expect(FakeEventSource.last.url).toBe('/api/v1/workspace/events')
   })
 
@@ -1613,6 +1621,7 @@ describe('useGlobalEvents — reconcile doctrine', () => {
       // The cross-project index behind the global Tasks page. Nothing else here covers it: the
       // scoped caches hold one project, and this spans the workspace.
       workspaceQueryKeys.runsIndex,
+      workspaceQueryKeys.projects,
       queryKeys.todos,
       queryKeys.worktrees, // the Resources panel's list/total (#483)
       queryKeys.repoBranches, // the Git view's branch classes (issue 08)
@@ -1653,7 +1662,7 @@ describe('useGlobalEvents — reconcile doctrine', () => {
     )
   })
 
-  it('refetches when a hidden tab comes back', async () => {
+  it('leaves visibility reconciliation to the authenticated coordinator', async () => {
     const { source } = mount()
     await act(async () => source.open())
     const invalidate = vi.spyOn(client, 'invalidateQueries')
@@ -1661,20 +1670,10 @@ describe('useGlobalEvents — reconcile doctrine', () => {
     setVisibility('hidden')
     expect(invalidate).not.toHaveBeenCalled()
 
-    // A phone that slept: the tab was frozen, no error handler ever ran, and the stream may have
-    // been dead for an hour. What is on screen is about to be read as true.
+    // The integration lifecycle suite verifies the one post-authentication wave.
+    // This adapter hook must not start a competing wave before health returns.
     setVisibility('visible')
-    await waitFor(() => expect(invalidatedKeys(invalidate)).toEqual([
-      queryKeys.runs.all,
-      // The cross-project index behind the global Tasks page — nothing else here covers it.
-      workspaceQueryKeys.runsIndex,
-      queryKeys.todos,
-      queryKeys.worktrees,
-      queryKeys.repoBranches,
-      workspaceQueryKeys.providerStatus,
-      workspaceQueryKeys.models('cursor'),
-      queryKeys.health,
-    ]))
+    expect(invalidate).not.toHaveBeenCalled()
   })
 
   it('stops listening for visibility once unmounted', () => {

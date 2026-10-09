@@ -40,8 +40,8 @@ export function attachQueryIdle(client: QueryClient): () => void {
 }
 
 /** Mark SSE reconciliation busy until the invalidations settle. */
-export function trackSseReconcile(work: () => Array<Promise<unknown> | undefined | void>): void {
+export function trackSseReconcile(work: () => Array<Promise<unknown> | undefined | void>): Promise<void> {
   setIdleSource('sse', true)
   const tasks = work().filter((task): task is Promise<unknown> => task instanceof Promise)
-  void Promise.all(tasks).finally(() => setIdleSource('sse', false))
+  return Promise.allSettled(tasks).then(() => setIdleSource('sse', false))
 }

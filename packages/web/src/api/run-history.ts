@@ -105,8 +105,19 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     retry: 1,
   })
 
+  const recoverLive = useCallback(async (_reason: string, signal: AbortSignal) => {
+    if (runId === undefined) return
+    const [latest, current] = await Promise.all([
+      getRunHistory(runId, undefined, { signal }), getRunHistoryContext(runId, { signal }),
+    ])
+    signal.throwIfAborted()
+    mergeNewestPage(queryClient, ['run-history', scope, runId], latest)
+    queryClient.setQueryData(['run-history-context', scope, runId], current)
+    return { cursor: latest.liveCursor, afterSeq: latest.asOfSeq }
+  }, [queryClient, runId, scope])
+
   const fallback = history.isError || context.isError
-  const fallbackEvents = useRunEvents(fallback ? runId : undefined)
+  const fallbackEvents = useRunEvents(fallback ? runId : undefined, { onReset: recoverLive })
   const pages = history.data?.pages ?? []
   const newestPage = pages.reduce<RunHistoryPage | undefined>(
     (latest, page) =>
@@ -167,6 +178,7 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     maxEvents: MAX_LIVE_EVENTS,
     compactAt: COMPACT_LIVE_AT_EVENTS,
     onCompact: compactLive,
+    onReset: recoverLive,
   })
 
   // Exit (#881): live frames die with this component. Fold them into the cached newest page so

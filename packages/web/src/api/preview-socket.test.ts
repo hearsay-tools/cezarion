@@ -54,6 +54,7 @@ class FakeWebSocket {
   }
 }
 
+const handles: Array<{ close(): void }> = []
 const scope = { projectId: 'default', runId: 'r1' }
 
 function connect() {
@@ -62,6 +63,7 @@ function connect() {
   const transport: Array<[string, number | undefined]> = []
   const onTransport = vi.fn((t: string, attempt?: number) => { transport.push([t, attempt]) })
   const handle = connectPreview(scope, { onFrame, onMessage, onTransport: onTransport as never })
+  handles.push(handle)
   return { handle, onFrame, onMessage, onTransport, transport }
 }
 
@@ -73,6 +75,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  for (const handle of handles.splice(0)) handle.close()
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
@@ -183,5 +186,39 @@ describe('connectPreview', () => {
     vi.advanceTimersByTime(10 * 60_000)
     expect(FakeWebSocket.instances).toHaveLength(1)
     expect(transport).toHaveLength(seen)
+  })
+})
+
+
+describe('preview document lifetime', () => {
+  it('suspends hidden sockets and preserves the two-attempt proxy bound on return', () => {
+    const doc = Object.assign(new EventTarget(), { visibilityState: 'visible' })
+    const win = new EventTarget()
+    vi.stubGlobal('document', doc); vi.stubGlobal('window', win)
+    const { handle, onTransport } = connect()
+    FakeWebSocket.instances[0]!.drop()
+    doc.visibilityState = 'hidden'; doc.dispatchEvent(new Event('visibilitychange'))
+    vi.advanceTimersByTime(5000)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(vi.getTimerCount()).toBe(0)
+    doc.visibilityState = 'visible'; doc.dispatchEvent(new Event('visibilitychange'))
+    FakeWebSocket.instances[1]!.drop()
+    expect(onTransport).toHaveBeenLastCalledWith('blocked')
+    doc.visibilityState = 'hidden'; doc.dispatchEvent(new Event('visibilitychange'))
+    doc.visibilityState = 'visible'; doc.dispatchEvent(new Event('visibilitychange'))
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    handle.close()
+  })
+  it('closes the hidden viewer and ignores its late frames after restoring', () => {
+    const doc = Object.assign(new EventTarget(), { visibilityState: 'visible' })
+    vi.stubGlobal('document', doc); vi.stubGlobal('window', new EventTarget())
+    const { handle, onFrame } = connect()
+    const old = FakeWebSocket.instances[0]!; old.open()
+    doc.visibilityState = 'hidden'; doc.dispatchEvent(new Event('visibilitychange'))
+    old.message(new Blob(['late']))
+    expect(old.readyState).toBe(3); expect(onFrame).not.toHaveBeenCalled()
+    doc.visibilityState = 'visible'; doc.dispatchEvent(new Event('visibilitychange'))
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    handle.close(); expect(vi.getTimerCount()).toBe(0)
   })
 })

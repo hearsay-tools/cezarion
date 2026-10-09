@@ -1,3 +1,4 @@
+import { pageIsActive, subscribePageActivity } from './live-visibility'
 /**
  * The preview pane's own WebSocket (#781, spec 2026-10-02-live-preview-v1, "Transport").
  *
@@ -57,7 +58,9 @@ export function connectPreview(
   /** Reconnects spent since the last frame; a frame proves the stream works and refills it. */
   let reconnects = 0
 
+  const active = () => typeof document === 'undefined' || pageIsActive()
   const connect = (): void => {
+    if (stopped || !active()) return
     const Ctor = globalThis.WebSocket
     if (typeof Ctor !== 'function') return // jsdom / prerender: stay silent
     const ws = new Ctor(url())
@@ -117,6 +120,13 @@ export function connectPreview(
     })
   }
 
+  const releaseActivity = subscribePageActivity(visible => {
+    if (stopped) return
+    if (!visible) {
+      clearTimeout(retryTimer); retryTimer = undefined
+      const ws = socket; socket = null; ws?.close()
+    } else if (!socket) connect()
+  })
   handlers.onTransport('connecting')
   connect()
 
@@ -126,6 +136,7 @@ export function connectPreview(
     },
     close() {
       stopped = true
+      releaseActivity()
       clearTimeout(retryTimer)
       retryTimer = undefined
       const ws = socket

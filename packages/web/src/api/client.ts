@@ -1,3 +1,4 @@
+import { invalidateLiveReads } from './live-coordinator'
 import type {
   FileLinkResult,
   FilePreviewData,
@@ -390,7 +391,9 @@ async function unwrapValidated<R extends ClientResponse<unknown, number, Respons
  */
 async function fetchOrThrow(url: string, init?: RequestInit): Promise<Response> {
   try {
-    return await fetch(url, { ...init, credentials: 'include' })
+    const response = await fetch(url, { ...init, credentials: 'include' })
+    if (response.ok && init?.method && !['GET', 'HEAD'].includes(init.method.toUpperCase())) invalidateLiveReads()
+    return response
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === 'AbortError') throw cause
     throw new ApiError(0, `cannot reach the cezar server (${url})`, { cause })
@@ -2292,4 +2295,9 @@ export async function removeRunWorktree(id: string): Promise<RemoveWorktreeRespo
     }),
     runPath(id, '/remove-worktree'),
   )
+}
+
+/** Latest clone progress for finite-HTTP recovery; the mutation response decides success. */
+export async function getCheckoutProgress(checkoutId: string, opts?: ReadOptions) {
+  return unwrap(await cez.api.v1.projects.checkout[':checkoutId'].progress.$get({ param: { checkoutId } }, init(opts)), '/projects/checkout/progress')
 }

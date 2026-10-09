@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
@@ -150,22 +151,28 @@ describe('final-message nudge parity — #544', () => {
           continue;
         }
         it(`${backend} ${row.id} ${row.name}`, async () => {
-          await withOwnedInputRun(backend, 'silent-tail-late-turn-start', async ({ store, manager, runId }) => {
-            shortenNudgeBound(manager as unknown as { finalMessageNudgeReplyMs?: number });
-            const startSeq = store.readEvents(runId).length;
-            manager.enqueueOwnedRun(runId);
-            await waitFor(() => noReplyNotes(store.readEvents(runId).slice(startSeq)).length === 1);
-            expect(store.getRun(runId)?.status).toBe('waiting');
-            expect(manager['busySlots']()).toBe(0);
-            const parkedSeq = store.readEvents(runId).length;
-            // Hold is 800 ms; this poll must expire before content if turn.started is ignored.
-            await waitFor(() => store.getRun(runId)?.status === 'running', 400);
-            expect(manager['busySlots']()).toBe(1);
-            expect(lateDoneContent(store.readEvents(runId).slice(parkedSeq))).toBe(false);
-            await waitFor(() => store.getRun(runId)?.status === 'done');
-            expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
-            expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
-          });
+          const gateRoot = mkdtempSync(join(tmpdir(), 'cez-late-turn-'));
+          const release = join(gateRoot, 'release');
+          try {
+            await withOwnedInputRun(backend, 'silent-tail-late-turn-start', async ({ store, manager, runId }) => {
+              shortenNudgeBound(manager as unknown as { finalMessageNudgeReplyMs?: number });
+              const startSeq = store.readEvents(runId).length;
+              manager.enqueueOwnedRun(runId);
+              await waitFor(() => noReplyNotes(store.readEvents(runId).slice(startSeq)).length === 1);
+              expect(store.getRun(runId)?.status).toBe('waiting');
+              expect(manager['busySlots']()).toBe(0);
+              const parkedSeq = store.readEvents(runId).length;
+              // The mock waits for observed parking instead of racing a 200 ms window.
+              writeFileSync(release, 'go');
+              // Hold is 800 ms; this poll must expire before content if turn.started is ignored.
+              await waitFor(() => store.getRun(runId)?.status === 'running', 400);
+              expect(manager['busySlots']()).toBe(1);
+              expect(lateDoneContent(store.readEvents(runId).slice(parkedSeq))).toBe(false);
+              await waitFor(() => store.getRun(runId)?.status === 'done');
+              expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
+              expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
+            }, { env: { CEZ_MOCK_RELEASE_FILE: release } });
+          } finally { rmSync(gateRoot, { recursive: true, force: true }); }
         }, 30_000);
         continue;
       }

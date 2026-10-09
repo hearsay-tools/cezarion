@@ -1,3 +1,4 @@
+import { usePageActive, pageIsActive } from '@/api/live-visibility'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { connectPreview, type PreviewConnection, type PreviewTransport } from '@/api/preview-socket'
@@ -119,6 +120,9 @@ function statusFor(
 }
 
 function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPort, onLive, onClose }: PreviewPaneProps) {
+  const pageActive = usePageActive()
+  const viewerId = useRef(crypto.randomUUID())
+  const opened = useRef(false)
   const projectId = useActiveProjectId()
   const compact = useMediaQuery(PREVIEW_PHONE_QUERY, false)
 
@@ -166,6 +170,7 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
       { projectId: projectId ?? 'default', runId: run.id },
       {
         onFrame(blob) {
+          if (!pageIsActive()) return
           const now = Date.now()
           frames.current.push({ at: now, bytes: blob.size })
           if (!seenFrame.current) {
@@ -215,7 +220,10 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
           setTransport({ state, attempt: attempt ?? 0 })
           if (state !== 'open') return
           setEverOpened(true)
-          if (target.current) conn?.send({ t: 'open', target: target.current })
+          if (target.current) {
+            conn?.send({ t: 'open', target: target.current, viewerId: viewerId.current, resume: opened.current })
+            opened.current = true
+          }
         },
       },
     )
@@ -229,7 +237,7 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
 
   // A resize is only meaningful to a browser that exists, so it follows the stage messages too.
   // A takeover closes the socket without a transport event, so it ends the connection here.
-  const connected = transport.state === 'open' && takenOver === undefined
+  const connected = pageActive && transport.state === 'open' && takenOver === undefined
   const desired = compact || viewport === 'fit' ? stageSize : viewport
   useEffect(() => {
     if (desired && connected && (stage?.stage === 'streaming' || stage?.stage === 'loading')) {
@@ -290,7 +298,8 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
       setAddressError(undefined)
       setUrl(shownUrl)
       setPort('port' in next ? next.port : undefined)
-      send({ t: 'open', target: next })
+      send({ t: 'open', target: next, viewerId: viewerId.current })
+      opened.current = socketOpen.current
     },
     [send],
   )
@@ -339,6 +348,8 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
   }
 
   const reconnect = () => {
+    // An explicit owner action may reclaim; automatic visibility resumes may not.
+    opened.current = false
     setTakenOver(undefined)
     setTransport({ state: 'connecting', attempt: 0 })
     seenFrame.current = false

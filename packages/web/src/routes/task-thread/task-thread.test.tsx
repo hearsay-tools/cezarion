@@ -4,6 +4,14 @@ import type { ReactElement } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+// Exercise the workspace reducers through their named-event adapter seam.
+vi.mock('@/api/live-workspace-source', () => ({ LiveWorkspaceSource: class {
+  constructor(url: string, options: EventSourceInit) {
+    return typeof globalThis.EventSource === 'function' ? new globalThis.EventSource(url, options) : { readyState: 2, addEventListener() {}, close() {} }
+  }
+} }))
+
+
 import { ProjectScopeProvider } from '@/api/project-scope-context'
 import { GlobalEventsProvider } from '@/api/global-events'
 import { queryKeys, workspaceQueryKeys } from '@/api/queries'

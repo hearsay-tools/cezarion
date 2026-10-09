@@ -101,7 +101,7 @@ export function spawnFixtureServer(args: readonly string[], options: SpawnOption
 /** Child-owned listener + health share one original deadline; never probe a guessed port. */
 export async function waitForFixtureServer(
   child: ChildProcess,
-  { expectedOrigin, deadline = Infinity }: { expectedOrigin?: string; deadline?: number } = {},
+  { expectedOrigin, deadline = Infinity, healthHeaders }: { expectedOrigin?: string; deadline?: number; healthHeaders?: Record<string, string> } = {},
 ): Promise<string> {
   const fixture = ownedFixtures.get(child)
   if (!fixture) throw new Error('Fixture child was not constructed by spawnFixtureServer')
@@ -120,7 +120,7 @@ export async function waitForFixtureServer(
           return { failure: new Error(`Fixture restart listener changed: expected ${expectedOrigin}, announced ${origin}`) }
         }
         phase = 'awaiting owned listener health'
-        const response = await fetch(`${origin}/api/v1/health`, { signal })
+        const response = await fetch(`${origin}/api/v1/health`, { signal, headers: healthHeaders })
         // Keep received headers even if cancellation or a later probe times out.
         lastHealthResponse = `GET ${origin}/api/v1/health answered ${response.status}`
         await response.body?.cancel()
