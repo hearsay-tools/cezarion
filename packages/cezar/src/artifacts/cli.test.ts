@@ -1,5 +1,5 @@
-import { afterEach, expect, it, vi } from 'vitest';
-import { runArtifactCommand } from './cli.ts';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { owningProjectId, runArtifactCommand } from './cli.ts';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -99,4 +99,42 @@ it.each(['missing', 'corrupt', 'unreadable', 'empty', 'unmatched'])('keeps publi
     expect(result.markdown).toContain(`](${result.link})`);
     expect(await readdir(home)).toEqual(before);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+// #925: the ownership match must be realpath-SYMMETRIC — canonicalizing both spellings before
+// comparing — so an artifacts directory reached through an OS alias still names its owner. The
+// registry side is pinned above (`aliased-owner`); this pins the env side, whose spelling the
+// match site must never trust to arrive canonical.
+describe('owningProjectId (#925)', () => {
+  it('matches the owner when CEZ_ARTIFACTS_DIR is spelled through a symlink alias', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'cez-artifact-symmetric-'));
+    try {
+      const project = join(root, 'owner');
+      const alias = join(root, 'alias');
+      await mkdir(join(project, '.ai/cezar/runs'), { recursive: true });
+      await symlink(project, alias, 'dir');
+      const runId = randomUUID();
+      const dir = artifactDirectory(join(project, '.ai/cezar'), runId);
+      await mkdir(dir, { mode: 0o700 });
+      // The aliased spelling survives `resolve` untouched — only a symmetric canonicalization
+      // can see it names the same directory the registry knows.
+      const aliased = join(alias, '.ai/cezar/runs', `${runId}-artifacts`);
+      expect(aliased).not.toBe(dir);
+
+      expect(owningProjectId(
+        [{ id: 'owner', root: project }, { id: 'unrelated', root: process.cwd() }],
+        aliased,
+        runId,
+      )).toBe('owner');
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it('never names a project whose storage is a different directory', () => {
+    const runId = randomUUID();
+    expect(owningProjectId([{ id: 'other', root: process.cwd() }], join(process.cwd(), '.ai/cezar/runs', `${runId}-artifacts`), randomUUID())).toBeUndefined();
+  });
+
+  it('reads an absent directory as unowned rather than throwing', () => {
+    expect(owningProjectId([{ id: 'other', root: process.cwd() }], join(process.cwd(), 'absent-runs', `${randomUUID()}-artifacts`), randomUUID())).toBeUndefined();
+  });
 });

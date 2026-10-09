@@ -1,5 +1,8 @@
 import { createContext } from 'react'
 
+/** The project a file link may be stamped with is the run's OWNER — never a viewer/boot project
+ * (#925). `TaskFileScope` fills it from the matched `/p/:projectId` route; publish ownership and
+ * the legacy-flat redirect are the other two owner sources. */
 export type TaskFileContextValue = { runId: string; projectId?: string; basePath?: string }
 export const TaskFileContext = createContext<TaskFileContextValue | null>(null)
 
