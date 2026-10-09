@@ -1269,6 +1269,7 @@ export class RunManager {
   private recoveryScope: { family?: string } | undefined;
   /** Settles when the recovery in progress (if any) has finished. */
   private recoveryInFlight: Promise<void> | undefined;
+  private recoveryFactsPending = false;
   /** Adoptions of dead processes' runs, one at a time (`adoptOrphanedRun`). */
   private adoptionTail: Promise<unknown> = Promise.resolve();
   /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
@@ -2229,6 +2230,8 @@ export class RunManager {
         const chargedCiWake = (id: string) => this.ciWakeQueuedAt.has(id) && this.monitoring.has(id) &&
           this.monitoring.size - [...this.ciWakeAdmitted].filter(id => this.monitoring.has(id)).length > this.semaphore.maxMonitoringSessions();
         while (this.queue.length > 0) {
+          // Recovery may have begun while this pump awaited repository/config discovery.
+          if (this.disposed || this.recovering) return;
           // FIFO among the runs that CAN start; a held one keeps its place in the queue rather
           // than being dequeued and re-queued (which would churn its position and its record).
           const next = this.queue.findIndex((id) => {
@@ -2496,6 +2499,26 @@ export class RunManager {
     this.recoveryInFlight = new Promise<void>((resolve) => { settled = resolve; });
     const inScope = (run: RunRecord) => familyRootId === undefined || familyOf(run) === familyRootId;
     try {
+    this.recoveryFactsPending = true;
+    await this.store.prepareRecoveryFacts(familyRootId);
+    if (this.disposed) return;
+    // Public terminal state can precede the private completion checkpoint. Such a family
+    // has no live/deferred anchor, but orphan settlement still appends its lifecycle event.
+    // Prepare only eligible starting generations' families before any repair mutation;
+    // retain IDs, never an ownership or execution snapshot, across readiness.
+    const workerIds = familyRootId === undefined ? this.store.listWorkerIds() : this.store.listWorkersOf(familyRootId).map((run) => run.id);
+    const orphanWorkerIds: string[] = [];
+    const orphanFactIds = new Set<string>();
+    for (const id of workerIds) {
+      if (this.store.readWorkerExecution(id)?.phase !== 'starting' || this.store.writeRefusal(id)) continue;
+      const run = this.store.getRun(id);
+      if (run?.delegation?.role !== 'worker' || !inScope(run)) continue;
+      orphanWorkerIds.push(id);
+      for (const member of this.store.listFamilyRunIds(run.delegation.parentRunId)) orphanFactIds.add(member);
+    }
+    await this.store.prepareTranscriptFacts(orphanFactIds);
+    if (this.disposed) return;
+    this.recoveryFactsPending = false;
     // Recovery reads the live set (#779): `listRuns()` is the runs `open` loaded by the `live`
     // column, and finished runs have nothing to recover. The worker passes below go through
     // indexed queries instead.
@@ -2515,8 +2538,9 @@ export class RunManager {
     // private proof is read first, so only those workers' records are decoded: settling and
     // re-probing are no-ops for every other proof phase.
     // Another process's workers are its own to settle.
-    const workerIds = familyRootId === undefined ? this.store.listWorkerIds() : this.store.listWorkersOf(familyRootId).map((run) => run.id);
-    for (const id of workerIds) {
+    for (const id of orphanWorkerIds) {
+      const run = this.store.getRun(id);
+      if (!run || !inScope(run)) continue;
       if (this.store.readWorkerExecution(id)?.phase === 'starting' && !this.store.writeRefusal(id) &&
         !this.settleOrphanedWorkerExecution(id)) this.armOrphanReprobe(id);
     }
@@ -2669,7 +2693,10 @@ export class RunManager {
     // routinely longer than a cezar session, so the deadline is durable and the timer is rebuilt
     // from it. `pump()` reconciles again on every sweep, so this is the fast path, not the only
     // one — see `reconcileAutoResumes`.
+    if (familyRootId === undefined) await this.reconcileRecoveryWorkerFamilies();
+    if (this.disposed) return;
     } finally {
+      this.recoveryFactsPending = false;
       this.recoveryScope = undefined;
       this.recoveryInFlight = undefined;
       settled();
@@ -2678,8 +2705,7 @@ export class RunManager {
     // Only a family with a live member has anyone left to route to or fall back from.
     const families = familyRootId === undefined ? this.liveFamilyMembers() : this.familyMembers(familyRootId);
     for (const run of families) if (run.delegation?.role === 'worker') this.routeWorkerQuestion(run.id);
-    if (familyRootId === undefined) this.reconcileAllWorkerFamilies();
-    else this.reconcileWorkerWaits(familyRootId);
+    this.reconcileWorkerWaits(familyRootId);
     // A parent reply accepted just before the crash still answers its worker (#505), and only a
     // live worker takes one.
     for (const run of this.store.listRuns().filter(inScope)) if (run.delegation?.role === 'worker') this.answerRoutedQuestion(run.id);
@@ -3059,12 +3085,13 @@ export class RunManager {
    * Public so a test can drive the wedge directly instead of waiting out the interval.
    */
   async rescueStalledQueue(now = Date.now()): Promise<void> {
+    if (this.disposed) return;
     // First, the worst shape: a record that says `queued` while the engine holds no job, no
     // continuation and no queue entry for it. `pump()` cannot see such a run — it iterates the
     // queue, and this one is not in it — so nothing will ever start it. Re-adopt it through the
     // same path boot recovery uses.
     for (const run of this.store.listRuns()) {
-      if (run.status !== 'queued') continue;
+      if (run.status !== 'queued' || this.recoveringRun(run)) continue;
       if (this.active.has(run.id) || this.starting.has(run.id)) continue;
       if (this.pendingJobs.has(run.id) || this.pendingContinuations.has(run.id)) continue;
       if (this.queue.includes(run.id)) continue;
@@ -4256,6 +4283,17 @@ export class RunManager {
    * Finish intent) is a clause of `isLiveRecord`, so open already holds that family.
    * Everything else asks `reconcileWorkerWaits()`, which covers the live families (#779).
    */
+  private async reconcileRecoveryWorkerFamilies(): Promise<void> {
+    for (const rootId of this.store.listConversationRootIds()) {
+      if (this.store.writeRefusal(rootId)) continue;
+      this.recoveryFactsPending = true;
+      await this.store.prepareRecoveryFacts(rootId);
+      if (this.disposed) return;
+      this.recoveryFactsPending = false;
+      this.reconcileWorkerWaits(rootId);
+    }
+  }
+
   reconcileAllWorkerFamilies(): void {
     // Another process's families are its own to repair (#779, plan step 3).
     for (const rootId of this.store.listConversationRootIds()) if (!this.store.writeRefusal(rootId)) this.reconcileWorkerWaits(rootId);
@@ -4288,7 +4326,8 @@ export class RunManager {
     try {
       // One family by name, or every family with a live member (#779): a family nobody in it is
       // live has nothing left to settle, and its members are no longer in memory.
-      const family = familyRootId === undefined ? this.liveFamilyMembers() : this.familyMembers(familyRootId);
+      const family = (familyRootId === undefined ? this.liveFamilyMembers() : this.familyMembers(familyRootId))
+        .filter(run => !this.recoveryFactsPending || !this.recoveringRun(run));
       this.reconcileConversations(family);
       for (const parent of family) {
         if (!parent.delegation || parent.delegation.role === 'invalid' || this.historyDeletionPending(parent.id)) continue;

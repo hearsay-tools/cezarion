@@ -4,123 +4,17 @@
  * Spec: docs/superpowers/specs/2026-10-07-transcript-facts-index-design.md.
  */
 import { randomBytes } from 'node:crypto';
-import { readFileSync, renameSync, rmSync, writeFileSync, type Stats } from 'node:fs';
-import { z } from 'zod';
-import { advancePendingHumanAsk, type RunEvent } from '@open-mercato/cezar-contract';
-import { historyPaths, historyStat, readHistoryText, readHistoryTextAsync, readPlainHistoryRange } from './history-file.ts';
+import { renameSync, rmSync, writeFileSync } from 'node:fs';
+import { type RunEvent } from '@open-mercato/cezar-contract';
+import { historyPaths, historyStat } from './history-file.ts';
 
-/** A prose gate a turn ended on without a structured ask; answered like one. */
-export const PROSE_HUMAN_GATE = 'unstructured-human-gate';
+export { emptyFacts, foldEvent, foldText, stampOf, PROSE_HUMAN_GATE, workerOutcomeKey, type PendingAskFacts, type ArchiveStamp, type TranscriptFacts } from './transcript-facts-fold.ts';
+import { foldEvent, sameStamp, stampOf, type ArchiveStamp, type TranscriptFacts } from './transcript-facts-fold.ts';
+import { readFactsSidecar, type FactsLoadResult } from './transcript-facts-load.ts';
 
-export interface PendingAskFacts {
-  seq: number;
-  requestId: string;
-  questions: unknown;
-  /** The worker routed this ask to its parent as this conversation message (#505). */
-  routedMessageId?: string;
-  /** The ask went back to the human. */
-  fallback?: boolean;
-}
-
-export interface ArchiveStamp { size: number; mtimeMs: number; ino: number }
-
-export interface TranscriptFacts {
-  version: 1;
-  /** Decoded transcript bytes folded so far. */
-  bytes: number;
-  lastSeq: number;
-  projectionIds: string[];
-  /** The latest structured ask with no matching delivery receipt. */
-  pendingAsk?: PendingAskFacts;
-  /** As `pendingAsk`, with prose human gates counted as asks. */
-  pendingGateSeq?: number;
-  workerOutcomeKeys: string[];
-  /** Stat of the archive these facts were folded from, while the transcript is archived. */
-  archive?: ArchiveStamp;
-}
-
-export function emptyFacts(): TranscriptFacts {
-  return { version: 1, bytes: 0, lastSeq: 0, projectionIds: [], workerOutcomeKeys: [] };
-}
-
-export function workerOutcomeKey(waitId: string, workerId: string, revision: number): string {
-  return `${waitId}:${workerId}:${revision}`;
-}
-
-/** Fold one event. True when a fact other than `bytes`/`lastSeq` changed, i.e. worth persisting. */
-export function foldEvent(facts: TranscriptFacts, event: RunEvent): boolean {
-  if (typeof event.seq === 'number' && event.seq > facts.lastSeq) facts.lastSeq = event.seq;
-  let changed = false;
-  if (typeof event.projectionId === 'string' && !facts.projectionIds.includes(event.projectionId)) {
-    facts.projectionIds.push(event.projectionId);
-    changed = true;
-  }
-  // advancePendingHumanAsk reads only the pending event's seq.
-  const pending = facts.pendingAsk && ({ type: 'ask.requested', seq: facts.pendingAsk.seq, ts: '' } as RunEvent);
-  const next = advancePendingHumanAsk(pending, event);
-  if (next === event) {
-    facts.pendingAsk = { seq: event.seq, requestId: event.requestId as string, questions: event.questions };
-    changed = true;
-  } else if (next === undefined && facts.pendingAsk) {
-    delete facts.pendingAsk;
-    changed = true;
-  }
-  if (facts.pendingAsk && event.askSeq === facts.pendingAsk.seq) {
-    if (event.type === 'worker-question-routed' && facts.pendingAsk.routedMessageId === undefined && typeof event.messageId === 'string') {
-      facts.pendingAsk.routedMessageId = event.messageId;
-      changed = true;
-    } else if (event.type === 'worker-question-fallback' && !facts.pendingAsk.fallback) {
-      facts.pendingAsk.fallback = true;
-      changed = true;
-    }
-  }
-  const gate = event.type === 'note' && event.code === PROSE_HUMAN_GATE ? event
-    : advancePendingHumanAsk(facts.pendingGateSeq === undefined ? undefined : ({ type: 'note', seq: facts.pendingGateSeq, ts: '' } as RunEvent), event);
-  if (gate?.seq !== facts.pendingGateSeq) {
-    if (gate) facts.pendingGateSeq = gate.seq; else delete facts.pendingGateSeq;
-    changed = true;
-  }
-  if (event.type === 'worker-outcome' && typeof event.waitId === 'string') {
-    const outcome = event.outcome as { workerId?: unknown; revision?: unknown } | undefined;
-    if (typeof outcome?.workerId === 'string') {
-      const key = workerOutcomeKey(event.waitId, outcome.workerId, typeof outcome.revision === 'number' ? outcome.revision : 0);
-      if (!facts.workerOutcomeKeys.includes(key)) { facts.workerOutcomeKeys.push(key); changed = true; }
-    }
-  }
-  return changed;
-}
-
-/** Fold NDJSON text. Unparsable lines are skipped, as `RunStore.readEvents` skips them. */
-export function foldText(facts: TranscriptFacts, text: string): boolean {
-  let changed = false;
-  for (const line of text.split('\n')) {
-    if (!line) continue;
-    let event: unknown;
-    try { event = JSON.parse(line); } catch { continue; }
-    if (event !== null && typeof event === 'object' && foldEvent(facts, event as RunEvent)) changed = true;
-  }
-  facts.bytes += Buffer.byteLength(text);
-  return changed;
-}
-
-const factsFileSchema = z.object({
-  version: z.literal(1),
-  bytes: z.number().int().nonnegative(),
-  lastSeq: z.number(),
-  projectionIds: z.array(z.string()),
-  pendingAsk: z.object({
-    seq: z.number(), requestId: z.string(), questions: z.unknown(),
-    routedMessageId: z.string().optional(), fallback: z.boolean().optional(),
-  }).optional(),
-  pendingGateSeq: z.number().optional(),
-  workerOutcomeKeys: z.array(z.string()),
-  archive: z.object({ size: z.number(), mtimeMs: z.number(), ino: z.number() }).optional(),
-});
+import { REFRESH_FACTS, TranscriptFactsQueue } from './transcript-facts-queue.ts';
 
 interface Entry { facts: TranscriptFacts; written: number }
-
-export const stampOf = (st: Stats): ArchiveStamp => ({ size: st.size, mtimeMs: st.mtimeMs, ino: st.ino });
-const sameStamp = (a: ArchiveStamp | undefined, b: ArchiveStamp) => !!a && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ino === b.ino;
 
 /**
  * Per-run `runs/<id>.facts.json`, kept current by `append` and checked against the transcript on
@@ -132,7 +26,35 @@ export class TranscriptFactsIndex {
   private readonly warnedWrite = new Set<string>();
   private stopped = false;
 
-  constructor(private readonly dataDir: string) {}
+  private readonly queue: TranscriptFactsQueue<Entry | undefined>;
+
+  constructor(private readonly dataDir: string) {
+    this.queue = new TranscriptFactsQueue(
+      dataDir,
+      (id, loaded, serialized) => this.accept(id, loaded, serialized),
+      (id) => this.peek(id) ? this.entries.get(id) : undefined,
+    );
+  }
+
+  /** Read only an already-current entry or exact sidecar; never decode/fold history. */
+  peek(runId: string): Readonly<TranscriptFacts> | undefined {
+    const cached = this.entries.get(runId);
+    if (cached && this.current(runId, cached.facts)) return cached.facts;
+    const stored = readFactsSidecar(historyPaths(this.dataDir, runId).facts);
+    if (!stored || !this.current(runId, stored)) return undefined;
+    this.entries.set(runId, { facts: stored, written: stored.bytes });
+    return stored;
+  }
+
+  async ready(runId: string): Promise<Readonly<TranscriptFacts> | undefined> {
+    if (this.stopped) throw new Error('Transcript facts index stopped');
+    // An in-flight owner remains authoritative even if a sidecar appears meanwhile.
+    if (!this.queue.has(runId)) {
+      const facts = this.peek(runId);
+      if (facts) return facts;
+    }
+    return (await this.queue.request(runId))?.facts;
+  }
 
   /** Undefined only when the transcript exists but cannot be read; that answer is not cached. */
   get(runId: string): Readonly<TranscriptFacts> | undefined {
@@ -157,12 +79,15 @@ export class TranscriptFactsIndex {
 
   /** The compressor archived `plain` as a `.br` with `stamp`. */
   adoptArchive(runId: string, plain: Buffer, stamp: ArchiveStamp): void {
-    let entry = this.entries.get(runId);
+    if (this.stopped) return;
+    const entry = this.entries.get(runId);
     if (!entry || entry.facts.bytes !== plain.length) {
-      const facts = emptyFacts();
-      foldText(facts, plain.toString('utf8'));
-      entry = { facts, written: -1 };
-      this.entries.set(runId, entry);
+      this.entries.delete(runId);
+      // The compressor callback runs on the parent loop. Keep an active job's ownership:
+      // its old snapshot will fail validation and refresh from the newly committed archive.
+      // Without an owner, queue the rebuild too; never decode/fold the compressor's buffer here.
+      void this.queue.request(runId, false).catch(() => undefined);
+      return;
     }
     entry.facts.archive = stamp;
     this.persist(runId, entry);
@@ -175,40 +100,19 @@ export class TranscriptFactsIndex {
 
   forget(runId: string): void {
     this.entries.delete(runId);
+    this.queue.forget(runId);
   }
 
-  /**
-   * Build, off the event loop, every index a first `get` would have to rebuild from the whole
-   * transcript: one run at a time, async reads and async brotli. A run some reader loaded first,
-   * or whose transcript moved meanwhile, is left to `get`. Never throws.
-   */
+  /** Register all IDs without reading history; requested runs can overtake background work. */
   async warm(runIds: Iterable<string>): Promise<void> {
-    for (const runId of runIds) {
-      if (this.stopped) return;
-      if (this.entries.has(runId)) continue;
-      try {
-        const stored = this.readSidecar(historyPaths(this.dataDir, runId).facts);
-        const before = historyStat(this.dataDir, runId);
-        const current = before.plainSize !== undefined ? !!stored && before.plainSize >= stored.bytes
-          : !before.archive || (!!stored && sameStamp(stored.archive, stampOf(before.archive)));
-        if (current) continue;
-        const text = await readHistoryTextAsync(this.dataDir, runId);
-        if (this.stopped || this.entries.has(runId)) continue;
-        const after = historyStat(this.dataDir, runId);
-        if (after.plainSize !== before.plainSize || (before.archive && (!after.archive || !sameStamp(stampOf(before.archive), stampOf(after.archive))))) continue;
-        const facts = emptyFacts();
-        if (text !== undefined) foldText(facts, text);
-        if (after.archive) facts.archive = stampOf(after.archive);
-        const entry = { facts, written: -1 };
-        this.entries.set(runId, entry);
-        this.persist(runId, entry);
-      } catch { /* the first `get` rebuilds it */ }
-    }
+    if (this.stopped) return;
+    await Promise.all([...new Set(runIds)].map((id) => this.queue.request(id, false)));
   }
 
   /** Stop warming (store close). */
   stop(): void {
     this.stopped = true;
+    this.queue.stop();
   }
 
   private entry(runId: string): Entry | undefined {
@@ -216,39 +120,18 @@ export class TranscriptFactsIndex {
     if (cached && this.current(runId, cached.facts)) return cached;
     // Another process may have written the transcript since: reload from the sidecar and tail.
     if (cached) this.entries.delete(runId);
-    let entry: Entry | undefined;
-    try { entry = this.load(runId); } catch { return undefined; }
-    if (entry) this.entries.set(runId, entry);
-    return entry;
+    if (this.stopped) return undefined;
+    return this.queue.join(runId);
   }
 
-  private load(runId: string): Entry | undefined {
-    const stored = this.readSidecar(historyPaths(this.dataDir, runId).facts);
-    const { plainSize, archive } = historyStat(this.dataDir, runId);
-    if (plainSize !== undefined) {
-      if (stored && plainSize === stored.bytes) return { facts: stored, written: stored.bytes };
-      if (stored && plainSize > stored.bytes) {
-        const tail = this.readTail(runId, stored.bytes, plainSize);
-        if (tail !== undefined) {
-          delete stored.archive;
-          const entry = { facts: stored, written: stored.bytes };
-          if (foldText(stored, tail.toString('utf8'))) this.persist(runId, entry);
-          return entry;
-        }
-      }
-    } else if (!archive) {
-      return { facts: emptyFacts(), written: 0 };
-    } else if (stored && sameStamp(stored.archive, stampOf(archive))) {
-      return { facts: stored, written: stored.bytes };
-    }
-    // No sidecar describes this transcript (a new run, a crash, an archive an older cezar wrote):
-    // one rebuild, persisted so it is not repeated. Warm-up does it off the request path.
-    const facts = emptyFacts();
-    const text = readHistoryText(this.dataDir, runId);
-    if (text !== undefined) foldText(facts, text);
-    if (plainSize === undefined && archive) facts.archive = stampOf(archive);
-    const entry = { facts, written: -1 };
-    this.persist(runId, entry);
+  private accept(runId: string, loaded: FactsLoadResult | undefined, serialized?: string): Entry | undefined | typeof REFRESH_FACTS {
+    const newer = this.entries.get(runId);
+    if (newer && this.current(runId, newer.facts)) return newer;
+    if (!loaded) return undefined;
+    if (!this.current(runId, loaded.facts)) return REFRESH_FACTS;
+    const entry = { facts: loaded.facts, written: loaded.written };
+    try { if (loaded.needsWrite) this.persist(runId, entry, serialized); } catch { return undefined; }
+    this.entries.set(runId, entry);
     return entry;
   }
 
@@ -265,27 +148,11 @@ export class TranscriptFactsIndex {
     }
   }
 
-  private readSidecar(path: string): TranscriptFacts | undefined {
-    try {
-      const parsed = factsFileSchema.safeParse(JSON.parse(readFileSync(path, 'utf8')));
-      return parsed.success ? parsed.data as TranscriptFacts : undefined;
-    } catch { return undefined; }
-  }
-
-  /** `[from, to)` of the plain transcript, or undefined when `from` is not a line boundary. */
-  private readTail(runId: string, from: number, to: number): Buffer | undefined {
-    const start = from === 0 ? 0 : from - 1;
-    const bytes = readPlainHistoryRange(this.dataDir, runId, start, to);
-    if (bytes.length !== to - start) return undefined;
-    if (from === 0) return bytes;
-    return bytes[0] === 0x0a ? bytes.subarray(1) : undefined;
-  }
-
-  private persist(runId: string, entry: Entry): void {
+  private persist(runId: string, entry: Entry, serialized?: string): void {
     const path = historyPaths(this.dataDir, runId).facts;
     const tmp = `${path}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
     try {
-      writeFileSync(tmp, JSON.stringify(entry.facts), { mode: 0o600 });
+      writeFileSync(tmp, serialized ?? JSON.stringify(entry.facts), { mode: 0o600 });
       renameSync(tmp, path);
       entry.written = entry.facts.bytes;
     } catch (error) {

@@ -1,10 +1,12 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { Worker } from 'node:worker_threads';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { brotliCompressSync } from 'node:zlib';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { historyPaths } from './history-file.ts';
+import { TranscriptFactsQueue } from './transcript-facts-queue.ts';
 import { RunStore } from './store.ts';
 import { countTranscriptReads, restoreTranscriptReads } from './transcript-reads.testkit.ts';
 import { seedSettledFamily } from '../workflows/delegation-reconcile.testkit.ts';
@@ -152,5 +154,113 @@ describe('RunStore transcript facts off the request path (#880)', () => {
     expect(await store.readEventsAsync(run.id)).toEqual(expected);
     expect(reads.counts.decompress).toBe(0);
     expect(reads.counts.files).toEqual([]);
+  });
+});
+
+
+describe('off-loop store readiness (hearsay-tools/cezarion#906)', () => {
+  it.each([true, false])('opens a cold waiting root without synchronous history and refreshes its conservative summary (keepLive=%s)', async keepLive => {
+    const { dir, store } = openStore();
+    const run = store.createRun({ title: 'root', task: 'task', workflow: 'w', steps: [] });
+    store.updateRun(run.id, { status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [] } });
+    const ask = store.appendEvent(run.id, { type: 'ask.requested', requestId: 'q', questions });
+    store.appendEvent(run.id, { type: 'human-input-delivered', askSeq: ask.seq });
+    store.updateRun(run.id, { hasPendingHumanAsk: true });
+    store.close(); stores.pop();
+    rmSync(historyPaths(dir, run.id).facts, { force: true });
+    const reads = countTranscriptReads();
+    const joins = vi.spyOn(TranscriptFactsQueue.prototype, 'join');
+    const reopened = RunStore.open(dir, { keepLive }); stores.push(reopened);
+    expect(reads.counts.files).toEqual([]);
+    expect(reopened.getRun(run.id)?.hasPendingHumanAsk).toBe(true);
+    reopened.flush(); // A save before readiness must not lose the deferred repair.
+    await reopened.prepareRecoveryFacts();
+    expect(reopened.getRun(run.id)?.hasPendingHumanAsk).toBe(false);
+    expect(joins).not.toHaveBeenCalled();
+  });
+
+  it.each(['warm', 'selected'] as const)('%s worker failure releases deferred settled families and claims without clearing attention', async mode => {
+    const { dir, store: producer } = openStore();
+    // Selected readiness must be tested independently of the open-time warm catch.
+    const reader = mode === 'selected' ? openStore(dir).store : undefined;
+    await reader?.factsWarmIdle();
+    const families = [seedSettledFamily(producer, dir), seedSettledFamily(producer, dir)];
+    for (const { parentId } of families) {
+      producer.updateRun(parentId, { status: 'waiting' });
+      producer.appendEvent(parentId, { type: 'ask.requested', requestId: parentId, questions });
+    }
+    producer.close(); stores.splice(stores.indexOf(producer), 1);
+    for (const { parentId, workerId } of families) {
+      rmSync(historyPaths(dir, parentId).facts, { force: true });
+      rmSync(historyPaths(dir, workerId).facts, { force: true });
+    }
+    const failure = new Error('facts worker dispatch failed');
+    const dispatch = vi.spyOn(Worker.prototype, 'postMessage').mockImplementation(() => { throw failure; });
+    const joins = vi.spyOn(TranscriptFactsQueue.prototype, 'join');
+    const reopened = reader ?? openStore(dir).store;
+    if (reader) for (const { parentId } of families) expect(reader.adoptFamily(parentId)).toBe(parentId);
+    reopened.flush();
+    for (const { parentId } of families) expect(reopened.heldIds()).toContain(parentId);
+    if (mode === 'warm') await expect(reopened.factsWarmIdle()).resolves.toBeUndefined();
+    else await expect(reopened.prepareTranscriptFacts(families.flatMap(f => [f.parentId, f.workerId]))).rejects.toBe(failure);
+    expect(dispatch).toHaveBeenCalled();
+    expect(joins).not.toHaveBeenCalled();
+    // Failure itself must schedule the ordinary fenced save/eviction, without another caller.
+    await expect.poll(() => reopened.heldIds(), { timeout: 5_000 }).toEqual([]);
+    for (const { parentId, workerId } of families) {
+      expect(reopened.getRun(parentId)?.hasPendingHumanAsk).toBe(true);
+      expect(reopened.heldIds()).not.toContain(parentId);
+      expect(reopened.heldIds()).not.toContain(workerId);
+      expect(existsSync(historyPaths(dir, parentId).facts)).toBe(false);
+    }
+    // This is ownership release, not just memory eviction: a peer can claim both families.
+    const peer = openStore(dir).store;
+    for (const { parentId } of families) expect(peer.adoptFamily(parentId)).toBe(parentId);
+  });
+
+  it.each([undefined, false, true])('retains legacy summary %s for an empty transcript without a sidecar', async summary => {
+    const { dir, store } = openStore();
+    const run = store.createRun({ title: 'legacy', task: 'task', workflow: 'w', steps: [] });
+    store.updateRun(run.id, { status: 'waiting', hasPendingHumanAsk: summary,
+      delegation: { role: 'root', permissions: [], receipts: [] } });
+    store.close(); stores.pop();
+    writeFileSync(historyPaths(dir, run.id).plain, '');
+    rmSync(historyPaths(dir, run.id).facts, { force: true });
+    const reopened = RunStore.open(dir, { keepLive: true }); stores.push(reopened);
+    await reopened.prepareRecoveryFacts();
+    expect(reopened.getRun(run.id)?.hasPendingHumanAsk).toBe(summary === true);
+  });
+
+  it('yields between selected ready sidecars instead of chaining all work in microtasks', async () => {
+    const { store } = openStore();
+    const run = store.createRun({ title: 'ready', task: 'task', workflow: 'w', steps: [] });
+    store.appendEvent(run.id, { type: 'text', text: 'cached' });
+    let ticked = false;
+    const tick = new Promise<void>(resolve => setImmediate(() => { ticked = true; resolve(); }));
+    await store.prepareTranscriptFacts([run.id]);
+    expect(ticked).toBe(true);
+    await tick;
+  });
+
+  it('warms live complete families before historical families and other IDs, once each', async () => {
+    const { dir, store } = openStore();
+    const historical = seedSettledFamily(store, dir);
+    const other = store.createRun({ title: 'other', task: 'task', workflow: 'w', steps: [] });
+    store.updateRun(other.id, { status: 'done' });
+    const live = seedSettledFamily(store, dir);
+    store.updateRun(live.parentId, { status: 'waiting' });
+    const ids = [historical.parentId, historical.workerId, other.id, live.parentId, live.workerId];
+    for (const id of ids) store.appendEvent(id, { type: 'text', text: id });
+    store.close(); stores.pop();
+    for (const id of ids) rmSync(historyPaths(dir, id).facts, { force: true });
+    const completed: string[] = [];
+    const request = TranscriptFactsQueue.prototype.request;
+    vi.spyOn(TranscriptFactsQueue.prototype, 'request').mockImplementation(function (this: TranscriptFactsQueue<unknown>, id, demand) {
+      return request.call(this, id, demand).then(value => { completed.push(id); return value; });
+    });
+    const reopened = RunStore.open(dir, { keepLive: true }); stores.push(reopened);
+    await reopened.factsWarmIdle();
+    expect(completed).toEqual([live.parentId, live.workerId, historical.parentId, historical.workerId, other.id]);
+    for (const id of ids) expect(existsSync(historyPaths(dir, id).facts)).toBe(true);
   });
 });

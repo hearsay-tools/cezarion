@@ -12,42 +12,50 @@ const execFile = promisify(execFileCallback);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
+async function installTarball(root: string) {
+  const packDir = join(root, 'pack');
+  await mkdir(packDir);
+  const packed = await execFile(
+    npm,
+    ['pack', '--json', '--ignore-scripts', '--pack-destination', packDir],
+    { cwd: repoRoot, maxBuffer: 10 * 1024 * 1024 },
+  );
+  const records = JSON.parse(packed.stdout) as Array<{
+    filename: string;
+    files: Array<{ path: string }>;
+  }>;
+  const record = records[0];
+  assert.ok(record, 'npm pack should describe the generated tarball');
+
+  const consumerDir = join(root, 'consumer');
+  await mkdir(consumerDir);
+  await writeFile(join(consumerDir, 'package.json'), '{"private":true}\n', 'utf8');
+  const tarball = join(packDir, record.filename);
+  await execFile(
+    npm,
+    ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock', tarball],
+    { cwd: consumerDir, maxBuffer: 10 * 1024 * 1024 },
+  );
+
+  const packageRoot = join(consumerDir, 'node_modules', '@wjarka', 'cezarion');
+  return { record, consumerDir, packageRoot };
+}
+
 test('the release tarball installs and runs the dry-run CLI workflow', { timeout: 120_000 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'cezar-package-e2e-'));
+  // Cezar may set TMPDIR inside the checkout; installed resolution must have no
+  // repository node_modules anywhere in its parent chain.
+  const root = await mkdtemp(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'cezar-package-e2e-'));
+  assert.ok(!root.startsWith(resolve(repoRoot, '../..') + '/'));
 
   try {
-    const packDir = join(root, 'pack');
-    await mkdir(packDir);
-    const packed = await execFile(
-      npm,
-      ['pack', '--json', '--ignore-scripts', '--pack-destination', packDir],
-      { cwd: repoRoot, maxBuffer: 10 * 1024 * 1024 },
-    );
-    const records = JSON.parse(packed.stdout) as Array<{
-      filename: string;
-      files: Array<{ path: string }>;
-    }>;
-    const record = records[0];
-    assert.ok(record, 'npm pack should describe the generated tarball');
-
+    const { record, consumerDir, packageRoot } = await installTarball(root);
     const packagedPaths = new Set(record.files.map((file) => file.path));
-    for (const requiredPath of ['dist/index.js', 'web/dist/index.html', 'scripts/mock-claude.mjs', 'scripts/mock-codex-app-server.mjs', 'scripts/mock-opencode-serve.mjs', 'dist/ci-wait/controller.js', 'dist/ci-wait/client.js', 'dist/ci-wait/mcp.js', 'dist/ci-wait/tools.js', 'scripts/pi-ci-wait.mjs', 'scripts/omp-ci-wait.mjs', 'scripts/omp-restrict-delegation.yml', 'scripts/mock-omp-rpc.mjs', 'README.md']) {
+    for (const requiredPath of ['dist/index.js', 'dist/runs/transcript-facts-worker.js', 'web/dist/index.html', 'scripts/mock-claude.mjs', 'scripts/mock-codex-app-server.mjs', 'scripts/mock-opencode-serve.mjs', 'dist/ci-wait/controller.js', 'dist/ci-wait/client.js', 'dist/ci-wait/mcp.js', 'dist/ci-wait/tools.js', 'scripts/pi-ci-wait.mjs', 'scripts/omp-ci-wait.mjs', 'scripts/omp-restrict-delegation.yml', 'scripts/mock-omp-rpc.mjs', 'README.md']) {
       assert.ok(packagedPaths.has(requiredPath), `release tarball should contain ${requiredPath}`);
     }
     assert.equal(packagedPaths.has('src/index.ts'), false, 'release tarball should not contain TypeScript sources');
     assert.equal(packagedPaths.has('test/e2e/package-cli.test.ts'), false, 'release tarball should not contain tests');
 
-    const consumerDir = join(root, 'consumer');
-    await mkdir(consumerDir);
-    await writeFile(join(consumerDir, 'package.json'), '{"private":true}\n', 'utf8');
-    const tarball = join(packDir, record.filename);
-    await execFile(
-      npm,
-      ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock', tarball],
-      { cwd: consumerDir, maxBuffer: 10 * 1024 * 1024 },
-    );
-
-    const packageRoot = join(consumerDir, 'node_modules', '@wjarka', 'cezarion');
     const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8')) as {
       bin: { cezarion: string; cez: string };
     };
@@ -329,4 +337,72 @@ if (args.join(' ') === 'auth status --json') {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+
+test('the installed tarball warms cold histories through its emitted worker', { timeout: 120_000 }, async () => {
+  const root = await mkdtemp(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'cezar-facts-package-'));
+  assert.ok(!root.startsWith(resolve(repoRoot, '../..') + '/'));
+  try {
+    const { record, consumerDir, packageRoot } = await installTarball(root);
+    assert.ok(record.files.some(file => file.path === 'dist/runs/transcript-facts-worker.js'));
+    // Same installed-package boundary as the CLI: outside the repository, no loader,
+    // no workspace resolutions, and an observed real .js worker (not sync fallback).
+    const factsSmoke = join(consumerDir, 'facts-smoke.mjs');
+    await writeFile(factsSmoke, `
+import assert from 'node:assert/strict';
+import { registerHooks, syncBuiltinESMExports } from 'node:module';
+import { realpathSync } from 'node:fs';
+import { join, sep } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import threads from 'node:worker_threads';
+assert.deepEqual(process.execArgv, []);
+assert.equal(process.env.NODE_OPTIONS, '');
+const packageRoot = realpathSync(${JSON.stringify(packageRoot)});
+const installedModules = realpathSync(${JSON.stringify(join(consumerDir, 'node_modules'))}) + sep;
+assert.ok(packageRoot.startsWith(installedModules));
+const resolutions = [];
+registerHooks({ resolve(specifier, context, next) {
+  const result = next(specifier, context);
+  if (result.url.startsWith('file:')) {
+    const path = realpathSync(fileURLToPath(result.url));
+    assert.ok(path.startsWith(installedModules), 'outside installed node_modules: ' + path);
+    assert.ok(!path.includes(sep + 'tsx' + sep), 'tsx must not participate');
+    resolutions.push(path);
+  }
+  return result;
+} });
+let workers = 0;
+const NativeWorker = threads.Worker;
+threads.Worker = class extends NativeWorker {
+  constructor(entry, options) {
+    assert.equal(fileURLToPath(entry), join(packageRoot, 'dist/runs/transcript-facts-worker.js'));
+    assert.deepEqual(options.execArgv, []);
+    workers++;
+    super(entry, options);
+  }
+};
+syncBuiltinESMExports();
+const runtime = { url: pathToFileURL(packageRoot + '/dist/'), ext: 'js' };
+const { seedColdHistories, verifyFacts } = await import(pathToFileURL(packageRoot + '/scripts/transcript-facts-fixture.mjs'));
+const { RunStore } = await import(new URL('runs/store.js', runtime.url));
+const dataDir = ${JSON.stringify(join(root, 'installed-facts'))};
+const fixtures = await seedColdHistories(dataDir, runtime);
+const store = RunStore.open(dataDir);
+try {
+  await store.factsWarmIdle();
+  const stats = verifyFacts(dataDir, fixtures, store);
+  assert.equal(workers, 1);
+  assert.ok(resolutions.some(path => path.includes(sep + 'dist' + sep + 'contract' + sep)));
+  console.log(JSON.stringify({ kind: 'installed-transcript-facts', ...stats, workers,
+    execArgv: process.execArgv, packageRoot, resolvedModules: resolutions.length }));
+} finally { store.close(); }
+`);
+    const factsResult = await execFile(process.execPath, [factsSmoke], {
+      cwd: consumerDir, env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '', CEZ_HOME: join(root, 'facts-home') },
+      timeout: 30_000,
+    });
+    assert.match(factsResult.stdout, /"workers":1/);
+    console.log(factsResult.stdout.trim());
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

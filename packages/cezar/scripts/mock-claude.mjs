@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 // Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
 import { spawn as watchdogSpawn } from 'node:child_process';
-import { writeFileSync as watchdogWritePid } from 'node:fs';
+import { closeSync as watchdogCloseInput, writeFileSync as watchdogWritePid } from 'node:fs';
 function watchdogStall(prompt) {
   if (!prompt.includes('mock:no-progress')) return false;
   watchdogWritePid('watchdog.pid', String(process.pid));
+  if (prompt.includes('input-closed')) {
+    watchdogCloseInput(0);
+    watchdogWritePid('input-closed.pid', String(process.pid));
+    setTimeout(() => process.exit(0), 300);
+  }
   if (prompt.includes('ignore-term')) {
     process.removeAllListeners('SIGTERM');
     process.on('SIGTERM', () => {});

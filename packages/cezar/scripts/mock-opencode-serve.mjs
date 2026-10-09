@@ -2,9 +2,15 @@
 // Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
 import { spawn as watchdogSpawn } from 'node:child_process';
 import { writeFileSync as watchdogWritePid } from 'node:fs';
+let inputClosed = false;
 function watchdogStall(prompt) {
   if (!prompt.includes('mock:no-progress')) return false;
   watchdogWritePid('watchdog.pid', String(process.pid));
+  if (prompt.includes('input-closed')) {
+    inputClosed = true;
+    watchdogWritePid('input-closed.pid', String(process.pid));
+    setTimeout(() => process.exit(0), 300);
+  }
   if (prompt.includes('ignore-term')) {
     process.removeAllListeners('SIGTERM');
     process.on('SIGTERM', () => {});
@@ -232,6 +238,7 @@ let autonomousCap = false;
 let autonomousReadinessIdle = false;
 const server = createServer((req, res) => {
   const url = req.url ?? '';
+  if (inputClosed && req.method === 'POST') { req.socket.destroy(); return; }
   if (req.method === 'GET' && url === '/question') {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(pendingQuestions));

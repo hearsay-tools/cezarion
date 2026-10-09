@@ -11,6 +11,9 @@ import { DelegationService } from '../delegation/service.ts';
 import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
 import { withWorktreeMutation } from '../git-worktree-lock.ts';
+import { isLiveRecord } from '../runs/run-row.ts';
+import { historyPaths } from '../runs/history-file.ts';
+import { TranscriptFactsQueue } from '../runs/transcript-facts-queue.ts';
 import { agentTmpDir } from '../runs/agent-tmpdir.ts';
 import { manager, store, root, worker, until, executions, bookkeeping, reopenRuntime, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 
@@ -19,6 +22,51 @@ import { manager, store, root, worker, until, executions, bookkeeping, reopenRun
 describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker settlement (hearsay-tools/cezarion#839, hearsay-tools/cezarion#889)', { timeout: 30_000 }, () => {
   useWorkerWaitFixture({ processScope: false });
   afterEach(() => { vi.restoreAllMocks(); syncBuiltinESMExports(); });
+  it.each(RUNNER_IDS)('%s R60 cold terminal starting-proof recovery repairs execution without a synchronous facts join', async runner => {
+    process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';
+    const adapter = HARNESS_ADAPTERS[runner]; process.env[adapter.binEnv] = adapter.mockBin;
+    const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
+    store.updateRun(p.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
+    const w = await worker(p.id, adapter.scenarios.baseline!);
+    store.updateRun(w.id, { runner }); manager.enqueueOwnedRun(w.id);
+    await until(() => store.getRun(w.id)?.status === 'waiting');
+    const proof = store.readWorkerExecution(w.id)!;
+    expect(proof.phase).toBe('starting');
+    const recorded = store.readWorkerProcesses(w.id, proof.generation);
+    if (typeof recorded === 'string') throw Error('missing native process ledger');
+    expect(recorded.processes.length).toBeGreaterThan(0);
+    manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
+    await Promise.all(executions.splice(0)); await Promise.all(bookkeeping.splice(0)); manager.dispose();
+    // Public completion can be durable before its private completion checkpoint.
+    store.updateRun(w.id, { status: 'done', stopping: undefined, activity: undefined });
+    store.updateRun(p.id, { status: 'done' });
+    for (const id of [p.id, w.id]) expect(isLiveRecord(store.getRun(id)!)).toBe(false);
+    const dataDir = join(root, '.ai/cezar'); const files = join(dataDir, 'runs');
+    const before = store.readEvents(w.id);
+    expect(before.length).toBeGreaterThan(0);
+    store.flush(); store.close();
+    writeFileSync(join(files, `${w.id}.execution.json`), JSON.stringify(proof));
+    const boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+    writeFileSync(join(files, `${w.id}.processes.json`), JSON.stringify({ ...recorded,
+      controller: { pid: 2147483001, startToken: `${boot}:100` } }));
+    for (const id of [p.id, w.id]) rmSync(historyPaths(dataDir, id).facts, { force: true });
+    const joins = vi.spyOn(TranscriptFactsQueue.prototype, 'join');
+    reopenRuntime();
+    expect(store.listRuns()).toEqual([]); // no live, legacy or deferred family anchor
+    expect(store.readWorkerExecution(w.id)).toMatchObject({ phase: 'starting', generation: proof.generation });
+    expect(existsSync(historyPaths(dataDir, w.id).facts)).toBe(false);
+    // No pre-awaited global warming: boot recovery itself owns readiness.
+    await manager.recover();
+    expect(joins).not.toHaveBeenCalled();
+    expect(store.readWorkerExecution(w.id)).toMatchObject({ phase: 'complete', generation: proof.generation });
+    expect(store.readWorkerExecution(w.id)?.abandoned).toBeUndefined();
+    expect(store.getRun(w.id)?.status).toBe('done'); expect(store.getRun(p.id)?.status).toBe('done');
+    const events = store.readEvents(w.id);
+    const repaired = events.filter(e => e.type === 'lifecycle' && /execution was finalized/.test(String(e.message)));
+    expect(repaired).toHaveLength(1);
+    expect(repaired[0]!.seq).toBeGreaterThan(before.at(-1)!.seq);
+    expect(new Set(events.map(e => e.seq)).size).toBe(events.length);
+  });
   for (const ledgerKind of ['absent', 'incomplete'] as const) {
     it.each(RUNNER_IDS)(`%s completes destroy once the readable holder exits, while an unreadable process runs (${ledgerKind} ledger)`, async runner => {
       process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';

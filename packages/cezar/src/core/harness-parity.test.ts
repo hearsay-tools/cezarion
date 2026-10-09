@@ -18,6 +18,8 @@
  * `workflows/run.ts` for claude and pi — groups 1, 3 and 6 are only uniform
  * above the seam.
  */
+import { TranscriptFactsQueue } from '../runs/transcript-facts-queue.ts';
+import { historyPaths } from '../runs/history-file.ts';
 import { MONITORING_TURN_CRITERIA, MONITORING_ACK_CRITERIA, MONITORING_ORDER_CRITERIA } from '../workflows/monitoring-turn.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
@@ -602,6 +604,8 @@ const CONTROL_CRITERIA = [
   { id: 'R43', scenario: 'baseline' },
   // workflows/worker-restart-parity.test.ts: same-boot exit proof, mixed-holder polling and bounded cleanup locks.
   { id: 'R47', scenario: 'baseline' },
+  // worker-restart-parity.test.ts: cold terminal starting-proof facts readiness.
+  { id: 'R60', scenario: 'baseline' },
   // #779: Continue on a run only runs.db holds, through both ActiveRun construction sites.
   { id: 'R48', scenario: 'done' },
   // #779: restart still repairs a cancelled root's stale Finish intent, so Continue is not refused.
@@ -1365,7 +1369,16 @@ describe('harness parity — owned input run tier', () => {
         await waitFor(() => fixture.store.readEvents(runId).some(e => e.type === 'ask.requested'));
         const input = agentInput(parentRunId);
         expect(fixture.manager.steerWorker(runId, input)).toBe('queued');
-        const { store, manager } = await fixture.restart();
+        const joins = vi.spyOn(TranscriptFactsQueue.prototype, 'join');
+        let recovered: Awaited<ReturnType<typeof fixture.restart>>;
+        try {
+          recovered = await fixture.restart(dataDir => {
+            for (const id of [parentRunId, runId]) rmSync(historyPaths(dataDir, id).facts, { force: true });
+            joins.mockClear();
+          });
+          expect(joins).not.toHaveBeenCalled();
+        } finally { joins.mockRestore(); }
+        const { store, manager } = recovered!;
         expect(store.getRun(runId)?.status).toBe('waiting');
         expect(store.getRun(runId)?.agentInputs).toEqual([input]);
         expect(manager.continueRun(runId).ok).toBe(false);

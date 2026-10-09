@@ -18,7 +18,7 @@ import { storedDelegationStateSchema } from './delegation-state.ts';
 import { HistoryCompressor } from './history-compressor.ts';
 import { LiveItemSnapshots } from './live-item-snapshots.ts';
 import { emptyFacts, stampOf, TranscriptFactsIndex, type TranscriptFacts } from './transcript-facts.ts';
-import { hasPlainHistory, historyPaths, readHistoryText, readHistoryTextAsync, removeHistory, restoreHistory } from './history-file.ts';
+import { hasPlainHistory, historyStat, historyPaths, readHistoryText, readHistoryTextAsync, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
@@ -1515,7 +1515,20 @@ export class RunStore extends EventEmitter {
   private adoptLoadedRun({ run, extras }: DecodedRun, opts: { keepLive?: boolean; onlyIfChanged?: boolean; settle?: boolean; stop?: boolean }, row: RunRow): void {
     const before = loadNormalizedFields(run);
     if (run.delegation?.role === 'root' && (run.status === 'waiting' || run.delegation.wait !== undefined)) {
-      this.syncHumanAskSummary(run);
+      let facts = this.facts.peek(run.id);
+      if (!facts) {
+        // No transcript is a legacy summary, not evidence that an answer is pending.
+        try {
+          const history = historyStat(this.dataDir, run.id);
+          if (history.plainSize === 0 || (history.plainSize === undefined && !history.archive)) facts = emptyFacts();
+        } catch { /* unreadable history remains conservative until readiness */ }
+      }
+      if (facts) this.applyHumanAskSummary(run, facts);
+      else {
+        this.deferredAskSummaries.add(run.id);
+        // Until authoritative history is ready, a missing/stale summary cannot dismiss an ask.
+        run.hasPendingHumanAsk = true;
+      }
     }
     if (opts.settle) settleOrphanedRun(run, { stop: opts.stop });
     else reconcileLoadedRun(run, opts);
@@ -1693,7 +1706,7 @@ export class RunStore extends EventEmitter {
    * history.
    */
   private isAnchor(id: string, run: RunRecord): boolean {
-    return isLiveRecord(run) || this.pins.has(id) || this.dirty.has(id) || this.committing.has(id);
+    return isLiveRecord(run) || this.deferredAskSummaries.has(id) || this.pins.has(id) || this.dirty.has(id) || this.committing.has(id);
   }
 
   /** The family roots with an anchoring member in memory. */
@@ -3506,15 +3519,83 @@ export class RunStore extends EventEmitter {
   }
 
   private factsWarming: Promise<void> = Promise.resolve();
+  private readonly deferredAskSummaries = new Set<string>();
 
-  /** After open, build the indexes the delegation reconcile will ask for first, off the request
-   *  path: every member of every family with a conversation (#880). */
+  /** Indexed family enumeration, including members not yet flushed to SQLite. */
+  listFamilyRunIds(rootId: string): string[] {
+    const ids = new Set([rootId, ...(this.db?.listIdsByParent(rootId) ?? [])]);
+    for (const [id, run] of this.held) {
+      if (familyRootOf(run) === rootId) ids.add(id);
+      else if (id !== rootId) ids.delete(id);
+    }
+    for (const id of this.deleted) ids.delete(id);
+    return [...ids];
+  }
+
+  private recoveryFactIds(familyRootId?: string): string[] {
+    if (familyRootId !== undefined) return this.listFamilyRunIds(familyRootId);
+    const ids = new Set<string>();
+    for (const [id, run] of this.held) {
+      if (!isLiveRecord(run) && !this.deferredAskSummaries.has(id)) continue;
+      const root = familyRootOf(run);
+      for (const member of root === undefined ? [id] : this.listFamilyRunIds(root)) ids.add(member);
+    }
+    return [...ids];
+  }
+
+  /** Readiness owns no run snapshot across an await: refresh only the currently held owner. */
+  async prepareTranscriptFacts(runIds: Iterable<string>): Promise<void> {
+    const ids = new Set(runIds);
+    try {
+      for (const id of ids) {
+        // Exact sidecars resolve immediately too: recovery must yield to timers/I/O between IDs.
+        await new Promise<void>(resolve => setImmediate(resolve));
+        const facts = await this.facts.ready(id);
+        this.refreshDeferredAskSummary(id, facts);
+      }
+    } catch (error) {
+      this.releaseDeferredAskSummaries(ids);
+      throw error;
+    }
+  }
+
+  prepareRecoveryFacts(familyRootId?: string): Promise<void> {
+    return this.prepareTranscriptFacts(this.recoveryFactIds(familyRootId));
+  }
+
+  private refreshDeferredAskSummary(id: string, facts: Readonly<TranscriptFacts> | undefined): void {
+    if (!this.db || !this.deferredAskSummaries.has(id)) return;
+    const run = this.held.get(id);
+    this.deferredAskSummaries.delete(id);
+    if (!run || this.writeRefusal(id)) return;
+    if (this.applyHumanAskSummary(run, facts)) this.touch(run);
+    // Pending roots anchor their family until this refresh; release it after the write settles.
+    this.scheduleSave();
+  }
+
+  /** Failed readiness cannot retain settled families indefinitely. Keep their current summaries
+   * untouched; the normal fenced save/eviction path releases only otherwise-unanchored owners. */
+  private releaseDeferredAskSummaries(ids: Iterable<string>): void {
+    let released = false;
+    for (const id of ids) if (this.deferredAskSummaries.delete(id)) released = true;
+    if (released) this.scheduleSave();
+  }
+
+  /** Register IDs only here; the index yields between cache reads and off-loop rebuilds. */
   private warmTranscriptFacts(): void {
-    // A microtask, not a timer: open returns first, and no timer outlives a store that never warms.
-    this.factsWarming = Promise.resolve().then(() => {
-      const ids: string[] = [];
-      for (const rootId of this.listConversationRootIds()) ids.push(rootId, ...(this.db?.listIdsByParent(rootId) ?? []));
-      return this.facts.warm(ids);
+    this.factsWarming = Promise.resolve().then(async () => {
+      if (!this.db) return;
+      const ids = new Set(this.recoveryFactIds());
+      for (const rootId of this.listConversationRootIds()) {
+        for (const id of this.listFamilyRunIds(rootId)) ids.add(id);
+      }
+      for (const id of this.listRunIds()) ids.add(id);
+      try {
+        await this.facts.warm(ids);
+        for (const id of this.deferredAskSummaries) this.refreshDeferredAskSummary(id, this.facts.peek(id));
+      } catch {
+        this.releaseDeferredAskSummaries(ids);
+      }
     }).catch(() => undefined);
   }
 
@@ -3536,7 +3617,10 @@ export class RunStore extends EventEmitter {
   /** The owned store's `refreshHumanAskSummary`, from the index, on the same rules: no history
    *  (legacy runs) keeps the summary, an unreadable one requests attention. True when it changed. */
   private syncHumanAskSummary(run: RunRecord): boolean {
-    const facts = this.facts.get(run.id);
+    return this.applyHumanAskSummary(run, this.facts.get(run.id));
+  }
+
+  private applyHumanAskSummary(run: RunRecord, facts: Readonly<TranscriptFacts> | undefined): boolean {
     const next = !facts ? true
       : facts.bytes > 0 || facts.archive !== undefined ? facts.pendingAsk !== undefined
       : run.hasPendingHumanAsk === true;
@@ -3874,6 +3958,7 @@ export class RunStore extends EventEmitter {
     const dir = join(this.dataDir, 'runs');
     if (realpathSync(dir) !== resolve(dir)) throw new Error('History storage redirected');
     this.facts.forget(id);
+    this.deferredAskSummaries.delete(id);
     removeHistory(this.dataDir, id);
     rmSync(this.handoffPath(id), { force: true });
     rmSync(this.imagesDir(id), { recursive: true, force: true });
@@ -3972,6 +4057,7 @@ export class RunStore extends EventEmitter {
     if (!this.historyOwed.delete(id)) return;
     try {
       this.facts.forget(id);
+      this.deferredAskSummaries.delete(id);
       removeHistory(this.dataDir, id);
       rmSync(this.handoffPath(id), { force: true });
       rmSync(this.imagesDir(id), { recursive: true, force: true });
