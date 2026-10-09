@@ -156,7 +156,8 @@ describe('the repo branches API', () => {
   it('holds Continue off while a confirmed delete removes its task\'s branch', async () => {
     process.env.CEZ_DRY_RUN = '1';
     const { id, branch } = await finishedTask(1);
-    store.updateRun(id, { steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', sessionId: 'sess-1', backend: 'claude' }] } as never);
+    store.addStep(id, { id: 'task', name: 'Task', kind: 'agent' });
+    store.updateStep(id, 'task', { status: 'done', iterations: 1, tokensUsed: 0, sessionId: 'sess-1', backend: 'claude' });
     const claimed = new Promise<void>((resolve) => {
       const claim = manager.claimForBranchCleanup.bind(manager);
       vi.spyOn(manager, 'claimForBranchCleanup').mockImplementation((ids) => {
