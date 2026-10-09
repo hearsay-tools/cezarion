@@ -905,9 +905,9 @@ must be bounded, and no successful native turn completion may be fabricated. Ope
 synthetic terminal turn boundary remains valid after failure. Cursor print has a named,
 executable `scenario-unconstructible` exemption: prompts are argv of a new process,
 and human follow-ups queue for its next process, so it has no live input transport to close.
-OMP additionally closes admission immediately, reports one fatal transport failure and
-rejects its result even if the child would later exit zero. Its focused regression closes
-stdin before the native `ready` frame to exercise the queued startup outbox.
+Pi and OMP additionally close admission immediately, report one fatal transport failure
+and reject their results even if the child would later exit zero. OMP's focused regression
+closes stdin before the native `ready` frame to exercise the queued startup outbox.
 
 **S26–S28** (hearsay-tools/cezarion#890), in the same file, start every `RUNNER_IDS` backend's
 native mock with `mock:no-progress-leftover`. The mock leaves two children in its cwd: one in

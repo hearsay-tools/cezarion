@@ -145,6 +145,7 @@ export class PiRunner implements AgentRunner {
       onEvent?.({ type: 'error', message: latchedProviderError });
       latchedProviderError = undefined;
     };
+    let inputError: Error | undefined;
     let spawnError: Error | null = null;
     const stderr: string[] = [];
 
@@ -171,7 +172,8 @@ export class PiRunner implements AgentRunner {
       try {
         child.stdin.write(`${JSON.stringify(command)}\n`);
         return true;
-      } catch {
+      } catch (error) {
+        failInput(error instanceof Error ? error : new Error(String(error)));
         return false;
       }
     };
@@ -179,10 +181,23 @@ export class PiRunner implements AgentRunner {
     let promptSerial = 0;
     let humanPromptAcks = 0;
     let agentAck: { id: string; resolve: () => void; reject: (error: Error) => void } | undefined;
-    const rejectAgentAck = () => {
+    const rejectAgentAck = (error = new Error('pi closed before prompt acknowledgement')) => {
       const pending = agentAck; agentAck = undefined;
-      pending?.reject(new Error('pi closed before prompt acknowledgement'));
+      pending?.reject(error);
     };
+    const failInput = (error: Error): void => {
+      // Late errors from caller close/abort/deadline teardown are not new failures.
+      if (!open || terminatedByCezar || inputError) return;
+      inputError = new Error(`pi input stream failed: ${error.message}`);
+      open = false;
+      rejectAgentAck(inputError);
+      onEvent?.({ type: 'error', message: inputError.message });
+      opts.onUiEvent?.({ type: 'session.error', message: inputError.message, fatal: true });
+      // The output-loop catch owns the existing bounded process cleanup. The latch
+      // also prevents false success if the child exits zero before it observes this.
+      child.stdout.destroy(inputError);
+    };
+    child.stdin.on('error', failInput);
     const scheduleAutoEnd = () => {
       if (!opts.autoEndAfterFirstTurn || !open || autoEndTimer || agentAck || humanPromptAcks) return;
       autoEndTimer = setTimeout(() => {
@@ -273,10 +288,11 @@ export class PiRunner implements AgentRunner {
     };
     const interrupt = (): void => {
       if (!open) return;
+      // Mark intent before the abort write: even a synchronous write failure is teardown.
+      terminatedByCezar = true;
       write({ type: 'abort' });
       open = false;
       rejectAgentAck();
-      terminatedByCezar = true;
       signalSession(child, 'SIGTERM');
       interruptKillTimer = setTimeout(() => {
         if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
@@ -493,6 +509,7 @@ export class PiRunner implements AgentRunner {
       if (killTimer) clearTimeout(killTimer);
       if (interruptKillTimer) clearTimeout(interruptKillTimer);
       if (spawnError) throw spawnError;
+      if (inputError) throw inputError;
       if (timedOut) {
         const message = `pi CLI timed out after ${Math.round((limitMs / 60_000) * 10) / 10}m and was killed`;
         onEvent?.({ type: 'error', message });
@@ -536,7 +553,11 @@ export class PiRunner implements AgentRunner {
         let resolve!: () => void, reject!: (error: Error) => void;
         const acknowledged = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
         agentAck = { id, resolve, reject };
-        if (!sendMessage(content, id, inputIds)) { agentAck = undefined; return false; }
+        if (!sendMessage(content, id, inputIds)) {
+          agentAck = undefined;
+          // A synchronous transport failure already rejected this receipt.
+          return inputError ? acknowledged : false;
+        }
         return acknowledged;
       },
       discardQueuedMessages: () => undefined,

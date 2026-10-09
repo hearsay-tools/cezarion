@@ -49,8 +49,8 @@ describe('native live closed-input parity', () => {
             await receipt.catch((error: unknown) => { receiptError = error; });
             expect(receiptError).toBeInstanceOf(Error);
             expect((receiptError as Error).message).toMatch(/EPIPE|stdin|input|fetch failed/i);
-            if (backend === 'omp') {
-              // OMP must close admission immediately when its pipe fails.
+            if (backend === 'omp' || backend === 'pi') {
+              // A broken Pi/OMP pipe must close admission immediately.
               expect(session.sendMessage([{ type: 'text', text: 'later human input' }])).toBe(false);
               expect(session.sendAgentMessage([{ type: 'text', text: 'later agent input' }])).toBe(false);
             }
@@ -60,6 +60,14 @@ describe('native live closed-input parity', () => {
           },
         });
         expect(receiptError).toBeInstanceOf(Error);
+        if (backend === 'pi') {
+          expect(obs.failure?.message).toMatch(/pi.*input.*EPIPE/i);
+          expect(obs.v1.filter(e => e.type === 'error')).toHaveLength(1);
+          expect(obs.v2.filter(e => e.type === 'session.error')).toEqual([
+            { type: 'session.error', message: obs.failure?.message, fatal: true },
+          ]);
+          expect(obs.v1.some(e => e.type === 'done' || e.type === 'turn-end')).toBe(false);
+        }
         // OpenCode's native contract synthesizes a terminal turn boundary on failure.
         // It must never present that boundary as a successful model completion.
         expect(obs.v2.some(e => e.type === 'turn.completed' && e.stopReason === 'end_turn')).toBe(false);
@@ -72,4 +80,27 @@ describe('native live closed-input parity', () => {
       }
     }, 10000);
   }
+});
+
+describe('Pi native input teardown', () => {
+  it.each(['end', 'interrupt'] as const)('%s observes a broken pipe without reporting a new failure', async action => {
+    const cwd = mkdtempSync(join(tmpdir(), 'cez-pi-input-teardown-'));
+    try {
+      const obs = await driveSeam('pi', 'input-closed-live', {
+        spec: { cwd },
+        whileOpen: async session => {
+          await vi.waitFor(() => expect(existsSync(join(cwd, 'input-closed.pid'))).toBe(true), { timeout: 5000 });
+          expect(session.open).toBe(true);
+          session[action]();
+          await expect(session.result).resolves.toBeDefined();
+          expect(session.open).toBe(false);
+        },
+      });
+      expect(obs.failure).toBeUndefined();
+      expect(obs.v1.filter(e => e.type === 'error')).toEqual([]);
+      expect(obs.v2.filter(e => e.type === 'session.error')).toEqual([]);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }, 10000);
 });
