@@ -205,6 +205,7 @@ export function taskHelp(operation?: string): string {
   for (const [flag, spec] of Object.entries(COMMON)) flags.set(flag, spec);
   return [
     'cezar task — start, watch and steer cockpit tasks from the terminal', '', 'Usage:',
+    '  cez task [--url <origin> | --repo <dir>] <operation> …',
     ...names.flatMap((name) => {
       const op = OPERATIONS[name]!;
       return [`  cez task ${name} ${op.args}`.trimEnd(), `    ${op.description}`];
@@ -278,7 +279,30 @@ async function textArgument(io: TaskIo, operation: string, positional: string | 
 }
 
 function parseOperation(argv: string[]) {
-  const [name, ...rest] = argv;
+  // Only COMMON belongs before the operation. Keep the operation's existing strict
+  // parseArgs path below, including its handling of positionals and repeated flags.
+  const leading: Values = {};
+  let index = 0;
+  while (argv[index]?.startsWith('-')) {
+    const token = argv[index]!;
+    const equals = token.indexOf('=');
+    const option = equals === -1 ? token : token.slice(0, equals);
+    const flag = option === '-h' ? 'help' : option.startsWith('--') ? option.slice(2) : option;
+    if (!Object.hasOwn(COMMON, flag)) {
+      usageError(`unknown option '${option}' before the operation; only --url, --repo and --help go there`);
+    }
+    if (leading[flag] !== undefined) usageError(`duplicate option '--${flag}'`);
+    if (COMMON[flag]!.type === 'boolean') {
+      if (equals !== -1) usageError(`option '${option}' does not take a value`);
+      leading[flag] = true;
+    } else {
+      const value = equals === -1 ? argv[++index] : token.slice(equals + 1);
+      if (value === undefined || value === '' || value.startsWith('--')) usageError(`option '${option}' requires a value`);
+      leading[flag] = value;
+    }
+    index += 1;
+  }
+  const name = argv[index];
   if (name === undefined) usageError('missing operation');
   const operation = OPERATIONS[name];
   if (!operation) usageError(`unknown operation '${name}'`);
@@ -287,11 +311,15 @@ function parseOperation(argv: string[]) {
   ) as Record<string, { type: 'string' | 'boolean' }>;
   let parsed;
   try {
-    parsed = parseArgs({ args: rest, options, allowPositionals: true, strict: true });
+    parsed = parseArgs({ args: argv.slice(index + 1), options, allowPositionals: true, strict: true });
   } catch (error) {
     usageError(`${name}: ${error instanceof Error ? error.message : 'invalid arguments'}`);
   }
   const values = parsed.values as Record<string, string | boolean | undefined>;
+  for (const [flag, value] of Object.entries(leading)) {
+    if (values[flag] !== undefined) usageError(`duplicate option '--${flag}'`);
+    values[flag] = value;
+  }
   if (!values.help) {
     const [min, max] = operation.positionals;
     if (parsed.positionals.length < min) usageError(`${name} is missing a positional`);

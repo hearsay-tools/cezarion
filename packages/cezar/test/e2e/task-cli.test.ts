@@ -83,6 +83,11 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
     const id = String(started.json.id);
     const origin = new URL(String(started.json.url)).origin;
 
+    // hearsay-tools/cezarion#554: shared flags work before the operation in real argv.
+    const leadingUrlList = await task(['--url', origin, 'list']);
+    assert.equal(leadingUrlList.code, 0, leadingUrlList.stdout + leadingUrlList.stderr);
+    assert.deepEqual((leadingUrlList.json.runs as Array<{ id: string }>).map((row) => row.id), [id]);
+
     const retried = await task(['start', 'mock:done', '--request-id', requestId]);
     assert.equal(retried.code, 0);
     assert.equal(retried.json.id, id);

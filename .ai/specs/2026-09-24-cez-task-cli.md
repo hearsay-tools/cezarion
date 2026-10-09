@@ -78,6 +78,17 @@ The plain client passes the open-mercato/cezar#426 origin guard as-is (loopback 
 
 ### Commands (`cli.ts`)
 
+Usage: `cez task [--url <origin> | --repo <dir>] <operation> …`.
+Since hearsay-tools/cezarion#554, only COMMON flags (`--url`, `--repo`, `--help`/`-h`)
+are accepted before the operation. String flags accept space and equals forms.
+The first non-option token after consuming their values names the operation;
+everything after it retains strict operation parsing. A shared flag repeated before
+the operation or on both sides is a JSON usage error (exit 64), as are unknown leading
+options, missing string values (including values starting with `--`), and globals with
+no operation. `--help <operation>` and `-h <operation>` show operation help without
+discovery; bare `--help` keeps family help. URL/environment precedence and repo
+discovery are unchanged regardless of flag position.
+
 `start`, `list`, `status`, `log`, `wait`, `send`, `stop`, `finish`, `diff`,
 `open`, with the flags the issue lists. `--help` on the family and on each
 operation prints text without a server. `--full` returns the contract shape.
