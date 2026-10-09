@@ -67,9 +67,12 @@ function assertDestinations() {
   expect(destinations).toEqual([...numbers.map(taskPath), `/p/${project}/tasks/${id}/issue/142`])
 }
 
-/** A settled native tap. The row's reference line can re-wrap one re-render after the sample
- *  (a late status, a popover closing), so the tap verifies its effect and re-samples the settled
- *  geometry once before giving up — a human taps again when the target moved under their finger. */
+/** A settled native tap. The row's reference line can re-wrap one re-render after the sample —
+ *  instrumented runs measured the trigger sampled at y321 and painted at y349 400ms later
+ *  (failure bundle searches-every-hidden-PR-…-12; the same race red the four-lane lane 2) —
+ *  so a tap can land on geometry that moved. The retry is narrowed to exactly that: the effect
+ *  wait failing while the target STAYED where it was sampled is a real failure and fails the
+ *  spec right there, so an unrelated first-tap defect cannot pass behind a second tap. */
 async function nativeTap(selector: string, effect?: string) {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await browser.enableTouch()
@@ -85,7 +88,12 @@ async function nativeTap(selector: string, effect?: string) {
       browser.waitForValue(effect, undefined, { timeoutMs: 1_500, failure: 'tap had no effect' })
       return
     } catch {
-      // The target moved under the tap; the next attempt re-samples the settled geometry.
+      const moved = browser.waitForValue<boolean>(`(() => {
+        const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null
+        const r = el.getBoundingClientRect()
+        return Math.abs(r.x + r.width / 2 - ${point.x}) > 1 || Math.abs(r.y + r.height / 2 - ${point.y}) > 1
+      })()`, (value): value is boolean => typeof value === 'boolean', { timeoutMs: 2_000, failure: 'tap target vanished after the tap' })
+      if (!moved) throw new Error(`cezar e2e: tap had no effect and ${selector} stayed where it was sampled — not the re-wrap race, a real failure`)
     }
   }
   browser.waitForValue(`!!(${effect!})`)
