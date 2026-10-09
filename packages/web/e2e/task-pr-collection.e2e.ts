@@ -183,9 +183,20 @@ describe('complete task PR collection', () => {
     for (const width of [320, 360]) {
       browser.setViewport(width, 640)
       browser.goto(`${base}/tasks`)
+      const search = (query: string, matches: boolean, legacy = false) => {
+        browser.fill('input[aria-label="Search tasks across projects"]', query)
+        // The row also exists before search. Wait for the debounced URL and its results.
+        expect(browser.waitForValue(`(() => {
+          return new URLSearchParams(location.search).get('q') === ${JSON.stringify(query)} &&
+            document.querySelector('input[aria-label="Search tasks across projects"]')?.value === ${JSON.stringify(query)} &&
+            !!document.querySelector('${globalRow}') === ${matches} &&
+            !!document.querySelector('[data-slot="global-task-row"][data-run-id="legacy"]') === ${legacy} &&
+            !document.querySelector('[data-slot="global-task-row"][data-run-id="long"]')
+        })()`)).toBe(true)
+      }
+      search('#999999', false)
       for (const number of numbers) {
-        browser.fill('input[aria-label="Search tasks across projects"]', `#${number}`)
-        expect(browser.waitForValue(`!!document.querySelector('${globalRow}')`)).toBe(true)
+        search(`#${number}`, true, number === 128)
       }
       const trigger = `${globalRow} [data-slot="reference-overflow"]`
       await nativeTap(trigger, `document.querySelector('${panel}') !== null`)
