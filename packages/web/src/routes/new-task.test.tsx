@@ -2765,7 +2765,7 @@ describe('field chrome (#267)', () => {
 
   it('keeps the prompt editor a bordered card, not a full-bleed strip, on mobile', () => {
     expect(indexCss).not.toContain('border: 0; border-radius: 0; background: transparent')
-    expect(indexCss).toMatch(/\.new-task-editor \{[^}]*padding: 12px/)
+    expect(newTaskCss).toMatch(/\.new-task-editor \{[^}]*padding: 12px/)
   })
 
   it('keeps the model pill bordered and its Model label visible on mobile', () => {

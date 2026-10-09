@@ -1,3 +1,4 @@
+import { normalizeColorSample } from './contrast'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -163,7 +164,7 @@ describe('cockpit app shell', () => {
       const shell = getComputedStyle(document.querySelector('[data-slot="app-shell"]')).backgroundColor
       return [shell, token]
     })()`) as [string, string]
-    expect(token).toMatch(/^rgb/)
+    expect(token).toMatch(/^(?:rgba?|oklch)\(/)
     expect(applied).toBe(token)
 
     // The legacy shell must not be what we just loaded.
@@ -425,7 +426,7 @@ describe('cockpit app shell', () => {
     expect(browser.evaluate('document.documentElement.classList.contains("light")')).toBe(true)
     // The palette really flipped to the approved cool light canvas.
     expect(
-      browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="app-shell"]')).backgroundColor`)
+      normalizeColorSample(browser, browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="app-shell"]')).backgroundColor`))
     ).toBe('rgb(248, 250, 252)')
     browser.screenshot(`${artifactsDir}/shell-light.png`)
 

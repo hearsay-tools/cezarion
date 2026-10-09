@@ -9,7 +9,7 @@
 .engine-row > :is([data-slot$='pill'], :has(> [data-slot$='pill'])) { min-width: 0; }
 .engine-row [data-slot$='pill'] { width: 100%; min-width: 0; min-height: 44px; border-color: var(--border); border-radius: 9px; }
 .engine-row [data-slot='model-pill'] { justify-content: flex-start; }
-.engine-row [data-slot$='pill'] > svg:last-child { margin-left: auto; }
+.engine-row [data-slot$='pill'] > svg:last-child { margin-inline-start: auto; }
 @container engine-row (min-width: 550px) {
   .engine-row:not(:has([data-slot='runner-pill'])) { grid-template-columns: minmax(0, 1fr) max-content; }
 }

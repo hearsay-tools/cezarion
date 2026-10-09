@@ -146,7 +146,7 @@ export interface ComposerProps {
  *  caret the same way the GitHub/Inbox composers do with their own textarea refs. */
 export interface ComposerHandle {
   /** Insert `snippet` at the caret, blank-line separated (`insertTemplate`), then refocus with
-   *  the caret parked right after it. */
+   *  the caret parked end after it. */
   insertAtCaret: (snippet: string) => void
 }
 
@@ -190,7 +190,7 @@ export function Composer({
   ref,
 }: ComposerProps) {
   // Optionally controlled: `value` (when given) shadows the internal state, and every write is
-  // mirrored to both — updater functions resolve against whichever is authoritative right now.
+  // mirrored to both — updater functions resolve against whichever is authoritative end now.
   const [internalText, setInternalText] = useState('')
   const text = value ?? internalText
   const textRef = useRef(text)
@@ -374,8 +374,25 @@ export function Composer({
   useLayoutEffect(() => {
     const el = textareaRef.current
     if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 220)}px`
+    // Native sizing follows line wrapping and font loading, including width-only changes.
+    if (typeof CSS !== 'undefined' && CSS.supports('field-sizing', 'content')) return
+    // Older Safari/Firefox keep the shipped growth behavior. Watch inline size only:
+    // observing our own block-size writes would create a ResizeObserver feedback loop.
+    const resize = () => {
+      el.style.height = 'auto'
+      el.style.height = `${Math.min(el.scrollHeight, 220)}px`
+    }
+    resize()
+    let width = el.clientWidth
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
+      if (el.clientWidth === width) return
+      width = el.clientWidth
+      resize()
+    })
+    observer?.observe(el)
+    let disposed = false
+    void document.fonts?.ready.then(() => { if (!disposed) resize() })
+    return () => { disposed = true; observer?.disconnect() }
   }, [text, mobileOpen])
 
   // ---- attachments ---------------------------------------------------------------------------
@@ -407,7 +424,7 @@ export function Composer({
   const onPaste = (event: ClipboardEvent) => {
     // `kind: 'file'` rather than an `image/` type test (#950): the clipboard carries a pasted
     // `.md` as a file item too, and `screenFiles` is what decides whether cezar takes it. The
-    // text half of the clipboard is left alone so an ordinary ⌘V still types.
+    // text half of the clipboard is start alone so an ordinary ⌘V still types.
     const files = [...(event.clipboardData?.items ?? [])]
       .filter((item) => item.kind === 'file')
       .map((item) => item.getAsFile())
@@ -635,7 +652,7 @@ export function Composer({
           {retainDraftUntilSuccess || onStop || stopping ? (
             <div className={cn(
               'overflow-y-auto text-xs leading-5 text-muted-foreground',
-              compactFeedback && !hasCompactFeedback ? 'h-0' : 'px-3 pb-2 md:px-4',
+              compactFeedback && !hasCompactFeedback ? 'h-0' : 'px-3 pbe-2 md:px-4',
               compactFeedback ? hasCompactFeedback && 'min-h-6' : 'h-24 md:h-20',
             )}>
               <div
@@ -657,10 +674,10 @@ export function Composer({
   </>
 
   const submissionControls = (
-              <div data-slot="composer-submit-row" className={cn('ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1 md:flex-nowrap', executionOptions && 'new-task-submission')}>
+              <div data-slot="composer-submit-row" className={cn('ms-auto flex min-w-0 flex-wrap items-center justify-end gap-1 md:flex-nowrap', executionOptions && 'new-task-submission')}>
                 {executionOptions || sessionControls ? null : dictationButton}
                 {footerEnd ? (
-                  <div id={optionsId} data-slot="composer-footer-end" className={cn('min-w-0 flex-wrap items-center gap-1.5 md:flex-nowrap', executionOptions && 'mr-auto', mobileCollapsible && 'max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11', mobileCompact ? 'hidden md:flex' : 'flex')}>
+                  <div id={optionsId} data-slot="composer-footer-end" className={cn('min-w-0 flex-wrap items-center gap-1.5 md:flex-nowrap', executionOptions && 'me-auto', mobileCollapsible && 'max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11', mobileCompact ? 'hidden md:flex' : 'flex')}>
                     <div className="contents" inert={readOnly || undefined}>{footerEnd}</div>
                   </div>
                 ) : null}
@@ -712,7 +729,7 @@ export function Composer({
             className={cn("rounded-xl border border-[var(--composer-border)] bg-card shadow-none transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/15", executionOptions && "new-task-editor")}
           >
             {images.length > 0 ? (
-            <div data-slot="composer-thumbs" className="flex flex-nowrap items-center gap-2 overflow-x-auto px-4 pt-3 md:flex-wrap md:overflow-visible">
+            <div data-slot="composer-thumbs" className="flex flex-nowrap items-center gap-2 overflow-x-auto px-4 pbs-3 md:flex-wrap md:overflow-visible">
               {images.map((attachment, index) => (
                 <button
                   key={`${attachment.name}-${index}`}
@@ -748,7 +765,7 @@ export function Composer({
 
           {/* A real label keeps password managers from treating nearby page text as a
               one-time-code prompt on client-side navigation (#71); aria-label alone doesn't. */}
-          <label htmlFor={textareaId} className={executionOptions ? "hidden px-5 pt-5 text-xs text-muted-foreground md:block" : "sr-only"}>{executionOptions ? "Task description" : ariaLabel}</label>
+          <label htmlFor={textareaId} className={executionOptions ? "hidden px-5 pbs-5 text-xs text-muted-foreground md:block" : "sr-only"}>{executionOptions ? "Task description" : ariaLabel}</label>
           <textarea
             ref={textareaRef}
             id={textareaId}
@@ -764,7 +781,7 @@ export function Composer({
             placeholder={disabled ? disabledReason : placeholder}
             // 16px on touch widths — iOS zooms any focused input below 16px (spec mobile rule).
             className={cn(
-              'block min-h-11 w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-base leading-normal outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed md:min-h-[54px] md:px-4 md:pt-3 md:text-sm',
+              'block field-sizing-content min-h-11 w-full overflow-y-auto resize-none bg-transparent px-3 pbs-2.5 pbe-1 text-base leading-normal outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed md:min-h-[54px] md:px-4 md:pbs-3 md:text-sm',
               mobileCompact ? 'max-h-11 md:max-h-[220px]' : 'max-h-[220px]',
               executionOptions && 'md:text-base',
             )}
@@ -778,7 +795,7 @@ export function Composer({
             onPaste={onPaste}
           />
 
-          {executionOptions ? <p data-slot="composer-skill-hint" className="flex items-center gap-2 px-5 pt-3 pb-2 text-xs text-muted-foreground"><TerminalIcon aria-hidden="true" className="size-[15px] shrink-0" />Type / for a skill or workflow</p> : null}
+          {executionOptions ? <p data-slot="composer-skill-hint" className="flex items-center gap-2 px-5 pbs-3 pbe-2 text-xs text-muted-foreground"><TerminalIcon aria-hidden="true" className="size-[15px] shrink-0" />Type / for a skill or workflow</p> : null}
           {sessionControls && recording ? <div data-slot="session-controls" inert={readOnly || undefined}>{sessionControls}</div> : null}
           {recording ? (
             <div>
@@ -790,12 +807,12 @@ export function Composer({
                 onInsert={() => insertTranscript(false)}
                 onInsertAndSend={() => insertTranscript(true)}
               />
-              {stopControl ? <div className="flex justify-end px-2 pb-2">{stopControl}</div> : null}
+              {stopControl ? <div className="flex justify-end px-2 pbe-2">{stopControl}</div> : null}
             </div>
           ) : (
             // The footer may WRAP (the /new pill row on narrow widths), but the trailing
             // controls wrap on phones to keep long model/account labels inside the viewport.
-            <div data-slot="composer-toolbar" className="flex flex-wrap items-center gap-1 gap-y-1 px-1.5 pt-1 pb-1.5 md:gap-y-1.5 md:px-2 md:pt-1.5 md:pb-2">
+            <div data-slot="composer-toolbar" className="flex flex-wrap items-center gap-1 gap-y-1 px-1.5 pbs-1 pbe-1.5 md:gap-y-1.5 md:px-2 md:pbs-1.5 md:pbe-2">
               {sessionControls ? <div data-slot="session-controls" inert={readOnly || undefined}>{sessionControls}</div> : null}
               {/* Tools and context wrap together. New-task execution options get their own
                   section; thread composers retain their compact, wrapping footer. */}
@@ -967,7 +984,7 @@ function DictationBar({
       data-slot="dictation-overlay"
       role="status"
       aria-label="Dictation in progress"
-      className="flex items-center gap-2.5 rounded-b-xl border-t border-border bg-muted/60 px-3 py-2"
+      className="flex items-center gap-2.5 rounded-b-xl border-bs border-border bg-muted/60 px-3 py-2"
     >
       <span
         aria-hidden="true"

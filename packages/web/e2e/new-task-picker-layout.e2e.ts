@@ -55,16 +55,19 @@ const RAIL_WIDTH = 60
 const viewportWidth = (width: number): number => (width >= 768 ? width + RAIL_WIDTH : width)
 
 type Box = { left: number; right: number; top: number; bottom: number; width: number; height: number }
-type Layout = { runner: Box; model: Box; effort: Box; group: Box; sidebarWidth: number; viewportOverflow: boolean; clipped: string[]; truncated: string[]; incorrectPrefixes: string[] }
+type Layout = { runner: Box; model: Box; effort: Box; group: Box; editorWidth: number; editorBottom: number; executionTop: number; sidebarWidth: number; viewportOverflow: boolean; clipped: string[]; truncated: string[]; incorrectPrefixes: string[] }
 
 function layout(): Layout {
   return waitForSettledSample(browser, `(() => {
     const group = document.querySelector('[data-slot="agent-options"]');
     const get = (slot) => { const r = group.querySelector('[data-slot="' + slot + '"]').getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; };
     const r = group.getBoundingClientRect();
+    const editor = document.querySelector('.new-task-editor').getBoundingClientRect();
+    const execution = document.querySelector('[data-slot="composer-execution-panel"]').getBoundingClientRect();
     return {
       runner: get('runner-pill'), model: get('model-pill'), effort: get('effort-pill'),
       group: { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height },
+      editorWidth: editor.width, editorBottom: editor.bottom, executionTop: execution.top,
       sidebarWidth: document.querySelector('[data-slot="sidebar"]')?.getBoundingClientRect().width ?? 0,
       viewportOverflow: document.documentElement.scrollWidth > innerWidth,
       clipped: [...group.querySelectorAll('[data-slot$="pill"]')].filter(el => {
@@ -126,8 +129,10 @@ it('lays out New Task pickers in reading order without clipping at desktop, narr
       }
       if (sidebar === 420) expect(boxes.sidebarWidth).toBe(420)
       if ((width === 1280 && sidebar === 264) || (width === 1440 && sidebar === 420)) {
-        expect(boxes.group.width).toBeGreaterThanOrEqual(550)
-        expect(boxes.group.width).toBeLessThan(600)
+        // A wide sidebar leaves too little room for the split. Use the full editor
+        // track and place execution settings below it, independently of viewport width.
+        expect(boxes.group.width).toBeCloseTo(boxes.editorWidth, 0)
+        expect(boxes.executionTop).toBeGreaterThanOrEqual(boxes.editorBottom)
       }
       expect(boxes.incorrectPrefixes, `${width}px: remove the whole field before truncating the value`).toEqual([])
       expect(boxes.viewportOverflow, `${width}px ${theme}: page overflow`).toBe(false)

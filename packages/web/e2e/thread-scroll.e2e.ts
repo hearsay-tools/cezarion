@@ -423,12 +423,12 @@ describe('phone viewports', () => {
       const before = dock.getBoundingClientRect();
       const beforeHeight = textarea.getBoundingClientRect().height;
       const timeout = setTimeout(() => { observer.disconnect(); reject(new Error('textarea did not grow')); }, 5000);
-      const observer = new MutationObserver(() => {
+      const observer = new ResizeObserver(() => {
         const afterHeight = textarea.getBoundingClientRect().height;
         if (afterHeight <= beforeHeight) return;
         observer.disconnect();
-        // Style mutation precedes ResizeObserver's tail anchoring. Measure after that layout,
-        // not whichever side of its callback this machine happens to reach first.
+        // Observe rendered growth for native field-sizing and the measured fallback alike.
+        // Let the dock's tail anchoring settle before reading its final geometry.
         requestAnimationFrame(() => requestAnimationFrame(() => {
           const after = dock.getBoundingClientRect();
           clearTimeout(timeout);
@@ -436,7 +436,7 @@ describe('phone viewports', () => {
             afterTop: after.top, afterBottom: after.bottom, afterHeight });
         }));
       });
-      observer.observe(textarea, { attributes: true, attributeFilter: ['style'] });
+      observer.observe(textarea);
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
       setter.call(textarea, 'first line\\nsecond line\\nthird line');
       textarea.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: '\\n' }));

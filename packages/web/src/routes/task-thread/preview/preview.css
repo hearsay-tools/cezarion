@@ -13,14 +13,14 @@
  * measured); --preview-pane is the divider's width. */
 .preview-pane {
   position: sticky;
-  top: 0;
+  inset-block-start: 0;
   align-self: flex-start;
   flex: 0 0 var(--preview-pane, 58%);
   /* The toolbar needs room for the address next to its controls; the transcript keeps the rest. */
   min-width: min(440px, 100%);
   max-width: calc(100% - 360px);
   height: var(--preview-h, 100dvh);
-  border-left: 1px solid var(--border);
+  border-inline-start: 1px solid var(--border);
   background: var(--background);
 }
 .preview-pane[hidden] { display: none; }
@@ -39,7 +39,7 @@
     min-height: 0;
     min-width: 0;
     max-width: none;
-    border-left: 0;
+    border-inline-start: 0;
   }
 }
 [data-slot='task-main'][data-collapsed] [data-route] { min-height: 0; }
@@ -54,8 +54,8 @@
     height: 100dvh;
     min-width: 0;
     max-width: none;
-    padding-bottom: env(safe-area-inset-bottom);
-    border-left: 0;
+    padding-block-end: env(safe-area-inset-bottom);
+    border-inline-start: 0;
   }
 }
 
@@ -79,20 +79,23 @@
   z-index: 1;
   cursor: col-resize;
   touch-action: none;
-  outline: none;
+  outline: 2px solid transparent;
 }
 .preview-divider::after {
   content: '';
   position: absolute;
   inset-block: 0;
-  left: 4px;
+  inset-inline-start: 4px;
   width: 1px;
   background: transparent;
   transition: background-color 120ms;
 }
-.preview-divider:hover::after,
 .preview-divider:focus-visible::after,
-.preview-divider:active::after { background: var(--ring); width: 2px; left: 3.5px; }
+.preview-divider:active::after { background: var(--ring); width: 2px; inset-inline-start: 3.5px; }
+
+@media (hover: hover) and (pointer: fine) {
+  .preview-divider:hover::after { background: var(--ring); width: 2px; inset-inline-start: 3.5px; }
+}
 
 /* The thin bar under the toolbar while the first page opens. Reduced motion keeps the bar and
  * drops the sweep, so the feedback stays. */

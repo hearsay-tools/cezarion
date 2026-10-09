@@ -17,7 +17,7 @@
 }
 
 [data-slot='notes-panel'] .thread-markdown { font-size: 13px; line-height: 1.6; color: var(--muted-foreground); }
-[data-slot='notes-panel'] .thread-markdown :is(h1, h2, h3) { margin-top: 20px; margin-bottom: 8px; font-size: 16px; font-weight: 400; line-height: 1.5; color: var(--foreground); }
+[data-slot='notes-panel'] .thread-markdown :is(h1, h2, h3) { margin-block-start: 20px; margin-block-end: 8px; font-size: 16px; font-weight: 400; line-height: 1.5; color: var(--foreground); }
 [data-slot='notes-panel'] > div:first-child h2,
 .task-action-panel h2 { font-size: 18px; font-weight: 400; }
 [data-slot='notes-panel'] button,
@@ -29,30 +29,30 @@
 [data-slot='run-tabs'] > a { height: 44px; padding-inline: 4px; font-size: 12px; font-weight: 400; }
 /* The item tabs' "+N" overflow trigger (#692) is a button, not a link, but sits in the row as a tab. */
 [data-slot='run-tabs'] > [data-slot='run-tabs-more'] { height: 44px; padding-inline: 4px; font-size: 12px; font-weight: 400; }
-[data-slot='run-tabs'] > a[aria-current='page'] { color: var(--accent-text); border-bottom-color: var(--accent-strong); }
+[data-slot='run-tabs'] > a[aria-current='page'] { color: var(--accent-text); border-block-end-color: var(--accent-strong); }
 @media (max-width: 767px) {
   [data-slot='run-tabs'] { gap: calc(var(--spacing) * 5); }
 }
 
-[data-slot='run-tabs'] { margin-top: calc(var(--spacing) * 3); }
+[data-slot='run-tabs'] { margin-block-start: calc(var(--spacing) * 3); }
 [data-slot='run-tabs'] > a[aria-current='page'] { font-weight: 600; }
 /* Pushed phone screen (#621): the facet tabs sit directly under the shell's top bar, and read in
  * neutral ink rather than the desktop's teal accent: active --foreground with a 2px underline,
  * inactive --soft-foreground, counts quiet at 11.5px. */
 @media (max-width: 767px) {
-  [data-slot='run-tabs'][data-phone-bar] { margin-top: 0; }
+  [data-slot='run-tabs'][data-phone-bar] { margin-block-start: 0; }
   [data-slot='run-tabs'][data-phone-bar] > a { color: var(--soft-foreground); font-weight: 500; }
   [data-slot='run-tabs'][data-phone-bar] > [data-slot='run-tabs-more'] { color: var(--soft-foreground); font-weight: 500; }
-  [data-slot='run-tabs'][data-phone-bar] > a[aria-current='page'] { color: var(--foreground); font-weight: 600; border-bottom-color: var(--foreground); border-bottom-width: 2px; }
+  [data-slot='run-tabs'][data-phone-bar] > a[aria-current='page'] { color: var(--foreground); font-weight: 600; border-block-end-color: var(--foreground); border-block-end-width: 2px; }
   [data-slot='run-tabs'][data-phone-bar] > a [data-slot='tab-count'] { font-size: 11.5px; color: var(--soft-foreground); }
 }
-[data-slot='run-meta'] { margin-top: calc(var(--spacing) * 2.5); }
+[data-slot='run-meta'] { margin-block-start: calc(var(--spacing) * 2.5); }
 @media (min-width: 768px) {
-  [data-slot='run-header'] { padding-top: calc(var(--spacing) * 5.5); }
+  [data-slot='run-header'] { padding-block-start: calc(var(--spacing) * 5.5); }
   [data-slot='run-title-row'] { display: flex; flex-wrap: nowrap; align-items: center; gap: 12px; }
   [data-slot='run-title-row'] > .group { flex: 1; min-width: 0; max-width: none; }
   [data-slot='run-title-row'] h1 { font-size: 25px; letter-spacing: -0.7px; }
-  [data-slot='run-title-row'] > span:last-child { margin-left: 0; }
+  [data-slot='run-title-row'] > span:last-child { margin-inline-start: 0; }
 }
 
 /* At high zoom the header can be narrower than its viewport breakpoint. Let the

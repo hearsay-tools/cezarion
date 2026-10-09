@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -82,33 +83,36 @@ export function AddProjectDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <FolderBrowser
-          path={path}
-          selected={selected}
-          onSelect={setSelected}
-          onEnter={enter}
-          emptyHint="No subfolders here — “Add project” registers this folder."
-          decorate={(dir) => (
-            <>
-              {dir.isRepo ? (
-                <Badge variant="outline" className="shrink-0 text-[12px]">
-                  git
-                </Badge>
-              ) : null}
-              {registered.has(dir.path) ? (
-                <Badge variant="ghost" className="shrink-0 text-[12px] text-muted-foreground">
-                  already added
-                </Badge>
-              ) : null}
-            </>
-          )}
-        />
+        <DialogBody className="space-y-4">
+          <FolderBrowser
+            path={path}
+            selected={selected}
+            onSelect={setSelected}
+            onEnter={enter}
+            emptyHint="No subfolders here — “Add project” registers this folder."
+            decorate={(dir) => (
+              <>
+                {dir.isRepo ? (
+                  <Badge variant="outline" className="shrink-0 text-[12px]">
+                    git
+                  </Badge>
+                ) : null}
+                {registered.has(dir.path) ? (
+                  <Badge variant="ghost" className="shrink-0 text-[12px] text-muted-foreground">
+                    already added
+                  </Badge>
+                ) : null}
+              </>
+            )}
+          />
 
-        {register.isError ? (
-          <p data-slot="add-project-error" className="min-w-0 break-words text-[13px] text-danger">
-            {register.error instanceof Error ? register.error.message : 'could not add that folder'}
-          </p>
-        ) : null}
+          {register.isError ? (
+            <p data-slot="add-project-error" className="min-w-0 break-words text-[13px] text-danger">
+              {register.error instanceof Error ? register.error.message : 'could not add that folder'}
+            </p>
+          ) : null}
+
+        </DialogBody>
 
         {/* min-w-0 matters: DialogContent is a grid, and a grid item with visible overflow
             cannot shrink below its min-content — a long target path (unbreakable, mono) would

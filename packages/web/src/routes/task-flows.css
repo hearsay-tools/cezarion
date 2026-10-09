@@ -5,16 +5,16 @@
 [data-slot="todo-card"], [data-slot="variant-column"] { padding: 24px; gap: 20px; box-shadow: none; border-radius: 12px; }
 [data-slot="todo-summary"] { font-size: 18px; line-height: 1.55; }
 [data-slot="todo-card"] > div:first-child > svg { display: none; }
-[data-slot="todo-meta"] { margin-top: 16px; font-size: 13px; }
-[data-slot="todo-engine"], [data-slot="todo-instructions"] { padding-left: 0; }
+[data-slot="todo-meta"] { margin-block-start: 16px; font-size: 13px; }
+[data-slot="todo-engine"], [data-slot="todo-instructions"] { padding-inline-start: 0; }
 [data-slot="todo-actions"] { align-self: start; }
 [data-slot="todo-actions"] [data-action="todo-run"] { order: 2; }
 [data-slot="todo-card"] button { min-height: 40px; }
 [data-slot="variant-column"] > div:first-child { flex-wrap: wrap; }
 [data-slot="variant-letter"] { width: auto; height: auto; background: none; font: inherit; font-size: 18px; }
 [data-slot="variant-letter"]::before { content: 'Variant '; white-space: pre; }
-[data-slot="variant-token-metrics"] { flex-basis: 100%; margin-left: 0; }
-[data-slot="variant-diffstat"] { white-space: pre-wrap; overflow-wrap: anywhere; background: transparent; padding: 8px 0; color: var(--success); }
+[data-slot="variant-token-metrics"] { flex-basis: 100%; margin-inline-start: 0; }
+[data-slot="variant-diffstat"] { white-space: pre-wrap; overflow-wrap: anywhere; background: transparent; padding-block: 8px; padding-inline: 0; color: var(--success); }
 [data-slot="variant-progress"] { max-height: none; mask-image: none; overflow-wrap: anywhere; font-size: 13px; }
 [data-slot="variant-pick"] { align-self: start; }
 [data-slot="variant-diff"] > button { min-height: 52px; font-size: 13px; font-weight: 400; }
@@ -23,25 +23,25 @@
 [data-slot="plan-review"] [data-slot="plan-step"] > div > div { flex-wrap: wrap; }
 [data-slot="plan-review"] [data-slot="plan-step"] p { grid-column: 1 / -1; }
 [data-slot="plan-step-actions"] { grid-column: 1 / -1; }
-[data-slot="plan-step-actions"] button { width: auto; min-height: 40px; padding: 8px 14px; border: 1px solid var(--border); background: var(--card); font-size: 12px; }
+[data-slot="plan-step-actions"] button { width: auto; min-height: 40px; padding-block: 8px; padding-inline: 14px; border: 1px solid var(--border); background: var(--card); font-size: 12px; }
 [data-slot="plan-review"] [data-slot="dialog-title"] { color: var(--accent-text); }
 .automation-editor fieldset { background: var(--card); padding: 24px; border-radius: 12px; min-width: 0; }
-.automation-editor legend { float: left; width: 100%; padding: 0; font-size: 18px; font-weight: 500; margin-bottom: 8px; }
+.automation-editor legend { float: left; width: 100%; padding: 0; font-size: 18px; font-weight: 500; margin-block-end: 8px; }
 .automation-editor input:not([type="checkbox"]), .automation-editor textarea { min-height: 44px; background: var(--background); }
 .automation-editor label { line-height: 1.6; }
 .automation-editor label:has(input[type="checkbox"]) { align-items: start; }
-.automation-editor input[type="checkbox"] { margin-top: 5px; }
+.automation-editor input[type="checkbox"] { margin-block-start: 5px; }
 [data-route="automations"] article { padding: 24px; }
 [data-route="automations"] article h2 { font-size: 18px; font-weight: 500; }
 .task-flow-page [data-slot="centered-state"] { border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
 @media (max-width: 767px) {
-  .task-flow-page { padding: 22px 20px; gap: 20px; }
+  .task-flow-page { padding-block: 22px; padding-inline: 20px; gap: 20px; }
   .task-flow-page > header h1 { font-size: 22px; }
   [data-slot="todo-card"], [data-slot="variant-column"] { padding: 16px; }
   [data-slot="todo-actions"] { flex-direction: column; align-items: start; }
   [data-slot="todo-card"] button, [data-slot="variant-column"] button, [data-slot="variant-column"] a { min-height: 48px; }
   [data-slot="plan-review"] [data-slot="plan-task"] { white-space: normal; }
-  [data-slot="plan-step-actions"] button { min-height: 48px; padding: 8px 12px; }
+  [data-slot="plan-step-actions"] button { min-height: 48px; padding-block: 8px; padding-inline: 12px; }
   .automation-editor fieldset { padding: 16px; }
   .automation-editor button { min-height: 48px; }
 }
@@ -50,17 +50,17 @@
 [data-slot="todo-summary"] { font-weight: 400; }
 [data-slot="todo-card"] { gap: 16px; }
 [data-slot="todo-prompt"] { line-height: 1.55; }
-[data-slot="todo-card"] [data-slot="todo-instructions-toggle"], [data-slot="todo-card"] [data-slot="todo-instructions-hide"] { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; text-decoration: none; }
+[data-slot="todo-card"] [data-slot="todo-instructions-toggle"], [data-slot="todo-card"] [data-slot="todo-instructions-hide"] { padding-block: 8px; padding-inline: 12px; border: 1px solid var(--border); border-radius: 8px; text-decoration: none; }
 
 /* The supplied flow headings use regular Poppins, unlike the task overview title. */
 .task-flow-page > header h1 { font-weight: 400; line-height: 1.5; }
 .task-flow-page > header { gap: 22px; }
-[data-slot="todo-meta"] { margin-top: 16px; line-height: 1.55; }
+[data-slot="todo-meta"] { margin-block-start: 16px; line-height: 1.55; }
 [data-slot="todo-actions"] [data-action="todo-run"] { order: 1; }
-[data-slot="todo-actions"] button { font-weight: 500; padding: 10px 16px; }
+[data-slot="todo-actions"] button { font-weight: 500; padding-block: 10px; padding-inline: 16px; }
 [data-slot="todo-instructions-input"] { background: var(--background); }
 [data-slot="todo-instructions"] > label { font-size: 11px; font-weight: 400; }
-[data-route="automations"] > header > div > div { margin-bottom: 22px; }
+[data-route="automations"] > header > div > div { margin-block-end: 22px; }
 [data-route="automations"] > header p { font-size: 13px; }
 .automation-editor legend { font-weight: 400; }
 .automation-editor label { font-size: 11px; font-weight: 400; }
@@ -78,33 +78,33 @@
 [data-slot="variant-column"] > div:has([data-slot="variant-progress"]) { gap: 16px; }
 [data-slot="variant-column"] > div:has([data-slot="variant-progress"]) > span { font-size: 12px; font-weight: 400; text-transform: none; color: var(--foreground); }
 [data-slot="variant-column"] > div:has([data-slot="variant-diffstat"]) > span { font-weight: 400; letter-spacing: normal; }
-[data-slot="variant-column"] > button, [data-slot="variant-column"] > a { min-height: 40px; font-size: 12px; font-weight: 400; padding: 10px 16px; }
+[data-slot="variant-column"] > button, [data-slot="variant-column"] > a { min-height: 40px; font-size: 12px; font-weight: 400; padding-block: 10px; padding-inline: 16px; }
 [data-slot="variant-pick"] > svg { display: none; }
-[data-slot="plan-review"] [data-slot="dialog-header"] { padding: 24px 24px 12px; border: 0; gap: 12px; }
+[data-slot="plan-review"] [data-slot="dialog-header"] { padding-block: 24px 12px; padding-inline: 24px; border: 0; gap: 12px; }
 [data-slot="plan-review"] [data-slot="plan-task"] { font-weight: 400; }
 [data-slot="plan-review"] [data-slot="plan-rationale"] { font-size: 13px; }
-[data-slot="plan-review"] [data-slot="plan-steps"] { padding: 0 24px 12px; }
+[data-slot="plan-review"] [data-slot="plan-steps"] { padding-block: 0 12px; padding-inline: 24px; }
 [data-slot="plan-review"] [data-slot="plan-step"] { padding: 14px; border-radius: 12px; background: var(--background); }
-[data-slot="plan-review"] [data-slot="dialog-footer"] { padding: 12px 24px 24px; border: 0; }
+[data-slot="plan-review"] [data-slot="dialog-footer"] { padding-block: 12px 24px; padding-inline: 24px; border: 0; }
 
-[data-route="automations"] [data-slot="button"], [data-slot="variant-column"] [data-slot="button"] { font-size: 12px; font-weight: 400; min-height: 40px; height: auto; padding: 10px 16px; }
+[data-route="automations"] [data-slot="button"], [data-slot="variant-column"] [data-slot="button"] { font-size: 12px; font-weight: 400; min-height: 40px; height: auto; padding-block: 10px; padding-inline: 16px; }
 [data-route="automations"] [data-variant="primary"], [data-slot="variant-pick"], [data-action="todo-run"] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 [data-route="automations"] article h2, [data-slot="automation-inline-log"] h2 { font-weight: 400; }
 [data-slot="automation-inline-log"] ol > li { border: 0; border-radius: 0; padding: 0; }
 [data-slot="automation-inline-log"] ol { gap: 16px; }
 [data-slot="automation-inline-log"] li > div:first-child { justify-content: start; }
-[data-slot="automation-inline-log"] li time { margin-left: auto; }
+[data-slot="automation-inline-log"] li time { margin-inline-start: auto; }
 
 [data-slot="todo-engine"] { gap: 12px; }
 /* The pills sit in the shared engine row (components/engine-row.css, #724) which owns their box. */
 [data-slot="todo-engine"] [data-slot$="pill"] > span { text-transform: capitalize; }
 [data-slot="todo-actions"] [data-slot="prompt-template-trigger"] { border-radius: 8px; }
-[data-slot="todo-meta"] > * + *::before { content: '·'; margin-right: 8px; }
+[data-slot="todo-meta"] > * + *::before { content: '·'; margin-inline-end: 8px; }
 [data-slot="todo-meta"] { column-gap: 8px; }
 [data-slot="todo-source"] { text-decoration: none; }
 [data-slot="todo-card"][data-runnable="false"] [data-slot="todo-summary"] { font-size: 17px; }
 @media (max-width: 767px) {
-  .task-flow-page { padding-top: 20px; gap: 18px; }
+  .task-flow-page { padding-block-start: 20px; gap: 18px; }
   .task-flow-page > header { gap: 18px; }
   [data-slot="todo-card"] { gap: 16px; }
   [data-slot="todo-actions"] button { padding: 16px; font-weight: 500; }
@@ -112,7 +112,7 @@
 
 [data-slot="plan-start"] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 [data-slot="plan-start"] > svg { display: none; }
-[data-slot="plan-actions"] > button, [data-slot="plan-step-actions"] > button { font-size: 12px; font-weight: 400; min-height: 40px; padding: 10px 16px; }
+[data-slot="plan-actions"] > button, [data-slot="plan-step-actions"] > button { font-size: 12px; font-weight: 400; min-height: 40px; padding-block: 10px; padding-inline: 16px; }
 [data-slot="plan-review"] [data-slot="plan-step-actions"] { gap: 12px; }
 @media (max-width: 767px) {
   [data-slot="plan-actions"] > button, [data-slot="plan-step-actions"] > button { padding: 16px; min-height: 48px; }
@@ -151,18 +151,18 @@
 }
 
 [data-slot="plan-review"] [data-slot="dialog-header"] > div:first-child { position: relative; min-height: 14px; }
-[data-slot="plan-review"] [data-slot="dialog-header"] > div:first-child > button { position: absolute; right: 0; top: -8px; }
+[data-slot="plan-review"] [data-slot="dialog-header"] > div:first-child > button { position: absolute; inset-inline-end: 0; inset-block-start: -8px; }
 @media (max-width: 767px) {
-  [data-slot="plan-review"] [data-slot="dialog-header"] { padding: 20px 20px 12px; }
-  [data-slot="plan-review"] [data-slot="plan-steps"] { padding-left: 20px; padding-right: 20px; }
-  [data-slot="plan-review"] [data-slot="plan-actions"] { padding-left: 20px; padding-right: 20px; }
+  [data-slot="plan-review"] [data-slot="dialog-header"] { padding-block: 20px 12px; padding-inline: 20px; }
+  [data-slot="plan-review"] [data-slot="plan-steps"] { padding-inline-start: 20px; padding-inline-end: 20px; }
+  [data-slot="plan-review"] [data-slot="plan-actions"] { padding-inline-start: 20px; padding-inline-end: 20px; }
 }
 
 [data-slot="variant-confirm-dialog"] [data-slot="confirm-pick"],
 [data-slot="plan-overwrite-dialog"] [data-slot="alert-dialog-action"] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 [data-route="inbox"][data-inbox-empty="false"] [data-slot="centered-state"],
 [data-route="automations"] > [data-slot="centered-state"],
-[data-route="compare"] > [data-slot="centered-state"] { min-height: 0; flex: none; align-items: start; justify-content: start; padding: 24px; text-align: left; }
+[data-route="compare"] > [data-slot="centered-state"] { min-height: 0; flex: none; align-items: start; justify-content: start; padding: 24px; text-align: start; }
 [data-route="inbox"][data-inbox-empty="false"] [data-slot="centered-state"] > div,
 [data-route="automations"] > [data-slot="centered-state"] > div,
 [data-route="compare"] > [data-slot="centered-state"] > div { max-width: none; align-items: start; gap: 20px; }
@@ -174,11 +174,11 @@
 [data-route="compare"] > [data-slot="centered-state"] :is(h1,h2) { font-size: 20px; font-weight: 400; }
 
 /* Design22 keeps review in the page canvas; only Save/Overwrite are modal dialogs. */
-[data-route="new"][data-plan-review="true"] { padding-bottom: 0; }
+[data-route="new"][data-plan-review="true"] { padding-block-end: 0; }
 [data-slot="plan-page"] { padding: 36px; }
-[data-slot="plan-page-header"] { margin-bottom: 22px; }
+[data-slot="plan-page-header"] { margin-block-end: 22px; }
 [data-slot="plan-page-header"] h1 { font-size: 28px; font-weight: 400; line-height: 1.5; }
-[data-slot="plan-page-header"] p { margin-top: 22px; color: var(--muted-foreground); font-size: 13px; }
+[data-slot="plan-page-header"] p { margin-block-start: 22px; color: var(--muted-foreground); font-size: 13px; }
 [data-slot="plan-canvas"] { padding: 36px; border-radius: 12px; background: var(--card-2); }
 [data-slot="plan-review"] { width: 100%; max-width: 680px; margin-inline: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
 [data-slot="plan-review"] [data-slot="plan-steps"] { flex: none; overflow: visible; }

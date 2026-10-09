@@ -1,3 +1,4 @@
+import { paletteHex } from './test/palette'
 // @vitest-environment node
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
@@ -46,7 +47,7 @@ function cssTokenMap(css: string, open: string): Record<string, string> {
     const name = match[1]
     const value = match[2]
     if (name === undefined || value === undefined) continue
-    out[name] = value.trim().toLowerCase()
+    out[name] = paletteHex(value.trim().toLowerCase())
   }
   return out
 }
