@@ -121,6 +121,7 @@ import { readRunIndexFromDisk, searchRunIndexFromDisk } from '../runs/run-index.
 import { workerDestroyView } from '../runs/delegation-state.ts';
 import { searchTokens } from '../runs/run-search.ts';
 import { clientRequestHash } from '../runs/client-request.ts';
+import { ownPullRequestNumbers } from '../runs/pull-requests.ts';
 import { ColdRepoHandles } from './cold-repo-handles.ts';
 import { isV2WireEventType } from '../runs/ui-event-sink.ts';
 import {
@@ -4869,7 +4870,9 @@ export function createApp(deps: ServerDeps) {
       // per number, so without this the cockpit would keep showing the pre-push answer (up to a
       // minute of "Ready to merge" for a branch that has just been rewritten) about a push the
       // user watched this server make.
-      for (const number of runPrNumbers(run)) forgetRefStatus(repoRoot, number);
+      const remote = parseRemote((await getRepoInfo(repoRoot))?.remote ?? '');
+      const repoBase = remote?.host === 'github.com' ? `https://github.com/${remote.owner}/${remote.repo}` : undefined;
+      for (const number of ownPullRequestNumbers(run, repoBase)) forgetRefStatus(repoRoot, number);
       return c.json({
         pushed: true,
         branch: result.branch,
@@ -5116,20 +5119,6 @@ export function createApp(deps: ServerDeps) {
       ? repoRoot
       : worktreeOf(run);
   const NO_WORKTREE = 'no worktree — this task ran directly in the repo working tree';
-
-  /** Every pull request number this run points at — the one it created and the one it is about
-   *  (#901), from whichever field carries it. Used to invalidate what the forge told us about
-   *  them when this server does something that changes the answer. Deliberately tolerant: an
-   *  unrecognized URL shape yields nothing rather than a guessed number. */
-  const runPrNumbers = (run: RunRecord): number[] => {
-    const numbers = [
-      run.prNumber,
-      ...[run.pullRequestUrl, run.referencedPullRequestUrl].map((url) =>
-        url ? refNumberFromUrl(url) : null,
-      ),
-    ];
-    return [...new Set(numbers.filter((n): n is number => typeof n === 'number'))];
-  };
 
   // ---- chained family: worktrees (project-scoped) ----
   const worktreesRoutes = new Hono<ProjectApiEnv>()
@@ -6197,7 +6186,7 @@ export function createApp(deps: ServerDeps) {
    * the client will not paint is free and asking about one it will is the whole point.
    */
   const mentionedReferenceNumbers = (run: RunSummary): number[] => {
-    const numbers: number[] = [];
+    const numbers: number[] = (run.pullRequests ?? []).map(pr => pr.number);
     for (const url of [run.pullRequestUrl, run.referencedPullRequestUrl, run.referencedIssueUrl]) {
       const number = url ? refNumberFromUrl(url) : null;
       if (number !== null) numbers.push(number);

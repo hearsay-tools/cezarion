@@ -49,6 +49,7 @@ function referenceNumbers(run: RunSummary): Set<string> {
   for (const number of [run.prNumber, run.issueNumber, run.markerRefs?.pr, run.markerRefs?.issue]) {
     if (typeof number === 'number' && Number.isInteger(number) && number > 0) numbers.add(String(number));
   }
+  for (const pr of run.pullRequests ?? []) numbers.add(String(pr.number));
   return numbers;
 }
 
@@ -60,7 +61,7 @@ export function matchesRunQuery(run: RunSummary, query: string): boolean {
   // run inside a URL or a uuid: `86` must not find #864 through `…/issues/864` (#864 review).
   const prose = [run.title, run.titleSummary, run.branch, run.workflow, run.workflowLabel]
     .filter((field): field is string => typeof field === 'string').map((field) => field.toLowerCase());
-  const urls = [run.pullRequestUrl, run.referencedPullRequestUrl, run.referencedIssueUrl]
+  const urls = [run.pullRequestUrl, run.referencedPullRequestUrl, run.referencedIssueUrl, ...(run.pullRequests ?? []).map(pr => pr.url)]
     .filter((field): field is string => typeof field === 'string').map((field) => field.toLowerCase());
   const id = run.id.toLowerCase();
   let numbers: Set<string> | undefined;

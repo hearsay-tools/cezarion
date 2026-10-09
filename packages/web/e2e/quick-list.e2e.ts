@@ -308,7 +308,7 @@ describe('task quick-list', () => {
       const el = document.querySelector('[data-run-id="fix-review-pr"] [data-slot="pr-chip"]')
       return { noHover: matchMedia('(hover: none)').matches, tag: el.tagName, inert: el.dataset.inert ?? null, text: el.textContent }
     })()`) as { noHover: boolean; tag: string; inert: string | null; text: string }
-    expect(chip).toEqual({ noHover: true, tag: 'SPAN', inert: 'true', text: 'PR #396' })
+    expect(chip).toEqual({ noHover: true, tag: 'SPAN', inert: 'true', text: '#396' })
 
     // Only the run that has one.
     expect(browser.count('[data-run-id="fix-done"] [data-slot="pr-chip"]')).toBe(0)
@@ -1265,8 +1265,8 @@ describe('a row under width contention, in a column the user can widen', () => {
     })()`) as { title: string; chip: string; chipInert: string | null; tooltip: string }
 
     expect(painted.title).toBe('implementing comment threads across the whole thread view')
-    // Plain text on the meta line since #617, spelled as the kind and the number.
-    expect(painted.chip).toBe('PR #775')
+    // Compact references carry their kind in a glyph and their number in the label.
+    expect(painted.chip).toBe('#775')
     // Plain text on this spec's `hover: none` browser (#617 01b); the task header has the link.
     expect(painted.chipInert).toBe('true')
     // The number was moved, not deleted — the stored title is still one hover away.
@@ -1363,7 +1363,15 @@ describe('a row under width contention, in a column the user can widen', () => {
     const narrow = read()
     expect(narrow.age).toBeNull()
     expect(narrow.text).not.toMatch(/ · \d+[smhd]?…?$/)
-    expect(narrow.text).toContain('PR #12345')
+    // Two compact references cannot fit beside the state and glyph at 264px. Both remain
+    // reachable through the protected overflow rather than a clipped inline link.
+    const overflow = `${META_ROW} [data-slot="reference-overflow"]`
+    expect(browser.evaluate(`document.querySelector('${overflow}')?.textContent`)).toBe('+2')
+    browser.click(overflow)
+    browser.waitForFunction(`document.querySelector('[data-slot="reference-overflow-list"]') !== null`)
+    expect(browser.evaluate(`document.querySelector('[data-slot="reference-overflow-list"]').textContent`)).toContain('#12345')
+    expect(browser.evaluate(`document.querySelectorAll('[data-slot="reference-overflow-list"] a').length`)).toBe(2)
+    browser.press('Escape')
     expect(narrow.glyphInside && narrow.glyphFirst).toBe(true)
     // Stable: the decision does not flip across repeated frames at the same width.
     for (let i = 0; i < 8; i += 1) expect(read().age).toBeNull()
@@ -1775,7 +1783,10 @@ describe('archive from the sidebar (#780)', () => {
   })
 
   it('offers Archive all only in Finished, never a pinned sweep', async () => {
-    expect(browser.waitForValue(`Array.from(document.querySelectorAll('[data-action="archive-group"]')).map(el => [el.closest('[data-bucket]').dataset.bucket, el.dataset.scope])`)).toEqual([['Finished', 'unpinned']])
+    expect(waitForSettledSample(browser, `(() => {
+      if (window.__cezIdle !== true) return null
+      return Array.from(document.querySelectorAll('[data-action="archive-group"]')).map(el => [el.closest('[data-bucket]').dataset.bucket, el.dataset.scope])
+    })()`)).toEqual([['Finished', 'unpinned']])
     expect((await stored('arc-pinned')).pinned).toBe(true)
   })
 

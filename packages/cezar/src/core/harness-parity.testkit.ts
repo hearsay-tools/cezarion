@@ -74,6 +74,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `serve-start-exit` | the backend server's first start exits before listening; the next start answers `baseline` |
  */
 export const SCENARIOS = [
+  'multi-pr-refs',
   'auto-resumed',
   'turn-messages',
   'skill-warning',
@@ -289,6 +290,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: CLAUDE_MOCK,
     scenarios: {
       'input-closed-live': 'mock:no-progress-input-closed',
+      'multi-pr-refs': 'mock:multi-pr-refs',
       'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
@@ -334,6 +336,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: CODEX_MOCK,
     scenarios: {
       'input-closed-live': 'mock:no-progress-input-closed',
+      'multi-pr-refs': 'mock:multi-pr-refs',
       'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
@@ -381,7 +384,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     scenarios: {
       'input-closed-live': 'mock:no-progress-input-closed',
       'skill-warning': 'mock:skill-warning mock:done',
-      'turn-messages': 'mock:turn-messages',
+      'multi-pr-refs': 'mock:multi-pr-refs', 'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       // The failing start is set by driveSeam's env (no prompt exists before listening).
       'serve-start-exit': BASELINE_PROMPT,
@@ -427,6 +430,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_CURSOR_BIN',
     mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-print.mjs'),
     scenarios: {
+      'multi-pr-refs': 'mock:multi-pr-refs',
       'turn-messages': 'mock:turn-messages', 'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
@@ -456,6 +460,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: PI_MOCK,
     scenarios: {
       'input-closed-live': 'mock:no-progress-input-closed',
+      'multi-pr-refs': 'mock:multi-pr-refs',
       'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
@@ -506,7 +511,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'auto-resumed': BASELINE_PROMPT,
       'hold-done': 'mock:hold-done',
       'hold-ask': 'mock:hold-ask',
-      'turn-messages': 'mock:turn-messages',
+      'multi-pr-refs': 'mock:multi-pr-refs', 'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',

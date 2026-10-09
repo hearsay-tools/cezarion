@@ -301,6 +301,19 @@ rl.on('line', async (line) => {
       return;
     }
     // #401: agentMessage completion without deltas (same item envelope as baseline).
+    if (turnText.includes('mock:multi-pr-refs')) {
+      const { multiPrText, unrelatedPr } = await import('./mock-multi-pr.mjs');
+      const text = multiPrText(turnText);
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', item: { type: 'reasoning', id: 'multi-thinking', summary: [unrelatedPr] } } });
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', item: { type: 'commandExecution', id: 'multi-tool', command: 'cat other.txt', aggregatedOutput: unrelatedPr, status: 'completed', exitCode: 0 } } });
+      emit({ method: 'item/started', params: { threadId: 'th_mock_1', item: { type: 'collabAgentToolCall', id: 'multi-spawn', tool: 'spawnAgent', status: 'inProgress', receiverThreadIds: ['th_foreign_child'] } } });
+      emit({ method: 'item/completed', params: { threadId: 'th_foreign_child', item: { type: 'agentMessage', id: 'multi-child', text: unrelatedPr } } });
+      emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'multi-message', text: '' } } });
+      for (const delta of [text.slice(0, 5), text.slice(5)]) emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'multi-message', delta } });
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'multi-message', text } } });
+      emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
+      return;
+    }
     if (turnText.includes('mock:turn-messages:')) {
       const { turnMessages } = await import('./mock-turn-messages.mjs');
       for (const text of turnMessages(turnText)) emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: `item_multi_${++echoSerial}`, text } } });

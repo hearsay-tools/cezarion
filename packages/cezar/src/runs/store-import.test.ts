@@ -609,3 +609,22 @@ describe('what a failed open leaves behind', () => {
     expect(readdirSync(dataDir).sort()).toEqual(['runs', RUNS_DB_FILE]);
   });
 });
+
+ describe('optional PR collection import', () => {
+  it('salvages valid entries beside malformed optional data', () => {
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([
+      record('valid', { pullRequests: [{ number: 812, source: 'declared' }, { number: -1, source: 'created' }, { number: 813, source: 'created', url: 'https://github.com/o/r/pull/813' }] }),
+      record('malformed', { pullRequests: 'broken', pullRequestUrl: 'https://github.com/o/r/pull/1' }),
+      record('legacy', { pullRequestUrl: 'https://github.com/o/r/pull/2', referencedPullRequestUrl: 'https://github.com/o/r/pull/3' }),
+    ]));
+    const store = open();
+    expect(store.getRun('valid')).toHaveProperty('pullRequests', [
+      { number: 812, source: 'declared' }, { number: 813, source: 'created', url: 'https://github.com/o/r/pull/813' },
+    ]);
+    expect(store.getRun('malformed')).toMatchObject({ pullRequestUrl: 'https://github.com/o/r/pull/1' });
+    expect(store.getRun('malformed')?.pullRequests).toBeUndefined();
+    expect(store.getRun('legacy')?.pullRequests).toBeUndefined();
+    store.close();
+    expect(open().getRun('valid')?.pullRequests).toHaveLength(2);
+  });
+ });

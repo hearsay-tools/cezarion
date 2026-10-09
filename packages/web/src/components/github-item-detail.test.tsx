@@ -169,7 +169,9 @@ describe('merging from the detail (#692)', () => {
       <QueryClientProvider client={createQueryClient()}>
         <ProjectScopeContext.Provider value={{ projectId: 'p1', apiBase: '/api/v1/p/p1' }}>
           <MemoryRouter>
-            <ReferenceStatusProvider projectId="p1" requests={[{ projectId: 'p1', kind: 'PR', number: 42 }]}>
+            {/* #922: the chip carries the PR URL, so its scope guard needs the project's repo base
+             *  to prove #42 is the project's own PR before it reads the local status batch. */}
+            <ReferenceStatusProvider projectId="p1" repoBase="https://github.com/acme/demo" requests={[{ projectId: 'p1', kind: 'PR', number: 42 }]}>
               <ReferenceChip reference={{ kind: 'PR', number: 42, url: PR_42.url }} taskTitle="Share the detail" />
               <GithubItemDetail item={PR_42} colors={{}} backLink={null} subNav={null} />
             </ReferenceStatusProvider>

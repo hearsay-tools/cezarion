@@ -307,7 +307,7 @@ describe('TaskQuickList', () => {
     const headers = [...document.querySelectorAll('[data-slot="quick-list-bucket"] h2')].map((h) => h.textContent)
     expect(headers).toEqual(['Needs you 1', 'Finished 2', 'Working 1'])
     expect(rowsIn('Needs you')).toEqual(['Structured changes endpointneeds review · 1m'])
-    expect(rowsIn('Working')).toEqual(['Normalize agent-event protocolrunning · 1m'])
+    expect(rowsIn('Working')).toEqual(['Normalize agent-event protocol1m'])
     expect(rowsIn('Finished')).toEqual(['Kept1m', 'README parallel-agents tagline1m'])
   })
 
@@ -335,7 +335,7 @@ describe('TaskQuickList', () => {
     expect(title.tagName).toBe('A')
 
     const chip = within(row('pr1') as HTMLElement).getByRole('link', {
-      name: 'Open the pull request for Has a PR',
+      name: 'Open the pull request #7 for Has a PR',
     })
     expect(chip.getAttribute('href')).toBe('https://github.com/o/r/pull/7')
     expect(chip.getAttribute('target')).toBe('_blank')
@@ -394,7 +394,7 @@ describe('TaskQuickList', () => {
     expect(metadataText(row('sum'))).not.toContain('fix the login bug plz')
     expect(
       within(row('sum') as HTMLElement).getByRole('link', {
-        name: 'Open the pull request for Catch AuthError in the login handler',
+        name: 'Open the pull request #9 for Catch AuthError in the login handler',
       })
     ).not.toBeNull()
     // No summary yet (or a pre-R2 record) → the raw title, honestly.
@@ -485,7 +485,7 @@ describe('TaskQuickList', () => {
       })
 
       const chip = within(row('with') as HTMLElement).getByRole('link', {
-        name: 'Open the pull request for Has a PR',
+        name: 'Open the pull request #7 for Has a PR',
       })
       expect(chip.getAttribute('href')).toBe('https://github.com/o/r/pull/7')
       expect(chip.getAttribute('target')).toBe('_blank')
@@ -506,7 +506,7 @@ describe('TaskQuickList', () => {
         ],
       })
       const chip = within(row('ref') as HTMLElement).getByRole('link', {
-        name: 'Open the pull request for Review task',
+        name: 'Open the pull request #4170 for Review task',
       })
       expect(chip.getAttribute('href')).toBe('https://github.com/o/r/pull/4170')
     })
@@ -525,7 +525,7 @@ describe('TaskQuickList', () => {
         runs: [run({ id: 'x', title: 'Has a PR', status: 'review', pullRequestUrl: 'https://github.com/o/r/pull/7' })],
       })
       // Title on line one; state word, reference and age on line two.
-      expect(rowsIn('Needs you')).toEqual(['Has a PRneeds review · PR #7 · 1m'])
+      expect(rowsIn('Needs you')).toEqual(['Has a PRneeds review · #7 · 1m'])
     })
 
     it('carries the issue when no PR exists yet — the number the title prefix was about', () => {
@@ -540,7 +540,7 @@ describe('TaskQuickList', () => {
         ],
       })
       const chip = within(row('iss') as HTMLElement).getByRole('link', {
-        name: 'Open the issue for 788: implementing readable task names',
+        name: 'Open the issue #788 for 788: implementing readable task names',
       })
       expect(chip.getAttribute('href')).toBe('https://github.com/o/r/issues/788')
       // `#788`, not `Issue #788`: in this column the word costs six glyphs the name needs.
@@ -553,7 +553,7 @@ describe('TaskQuickList', () => {
       renderList({ runs: [run({ id: 'noturl', title: '402: no url for this one', prNumber: 402 })] })
       const chip = document.querySelector('[data-run-id="noturl"] [data-slot="pr-chip"]') as HTMLElement
       expect(chip.tagName).toBe('SPAN')
-      expect(chip.textContent).toBe('PR #402')
+      expect(chip.textContent).toBe('#402')
     })
   })
 
@@ -573,14 +573,14 @@ describe('TaskQuickList', () => {
       const title = document.querySelector('[data-run-id="dedup"] [data-slot="task-row-title"]')
       expect(title?.textContent).toBe('implementing comment threads')
       // Nothing is lost: the number is a chip, and the stored title is still the row's tooltip.
-      expect(document.querySelector('[data-run-id="dedup"] [data-slot="pr-chip"]')?.textContent).toBe('PR #775')
+      expect(document.querySelector('[data-run-id="dedup"] [data-slot="pr-chip"]')?.textContent).toBe('#775')
       expect(
         document.querySelector('[data-run-id="dedup"] a[href="/tasks/dedup"]')?.getAttribute('title')
       ).toBe('775: implementing comment threads')
     })
 
     it('keeps the prefix when it is a DIFFERENT number from the chip — two facts, not one', () => {
-      // Opened on issue #788, shipped as PR #790. Stripping `788: ` here would delete the only
+      // Opened on issue #788, shipped as #790. Stripping `788: ` here would delete the only
       // place the issue number appears.
       renderList({
         runs: [
@@ -596,7 +596,7 @@ describe('TaskQuickList', () => {
       expect(document.querySelector('[data-run-id="two"] [data-slot="task-row-title"]')?.textContent).toBe(
         '788: implementing readable task names'
       )
-      expect(document.querySelector('[data-run-id="two"] [data-slot="pr-chip"]')?.textContent).toBe('PR #790')
+      expect(document.querySelector('[data-run-id="two"] [data-slot="pr-chip"]')?.textContent).toBe('#790')
     })
 
     it('keeps a leading number that is not a reference at all', () => {
@@ -642,7 +642,7 @@ describe('TaskQuickList', () => {
 
       // Everything the row paints, in reading order: name and diff on line one; reference and
       // age on the meta line (a done row has no state word — its green dot says it).
-      expect(rowsIn('Finished')).toEqual(['implementing comment threads across the whole thread view+59,514 −12,160PR #775 · 1m'])
+      expect(rowsIn('Finished')).toEqual(['implementing comment threads across the whole thread view+59,514 −12,160#775 · 1m'])
     })
 
     it('lets the collapsed group title truncate before its ×N chip does', () => {
@@ -679,7 +679,7 @@ describe('TaskQuickList', () => {
       expect(age.textContent).toBe('2h')
       expect(age.classList.contains('sr-only')).toBe(false)
       expect(age.closest('[data-slot="task-row-meta"]')?.className).toContain('text-[11.5px]')
-      expect(metadataText(row('new'))).toBe('Newrunning · 4m')
+      expect(metadataText(row('new'))).toBe('New4m')
     })
 
     it('shows the queue position instead of an age for queued runs', () => {
@@ -724,7 +724,7 @@ describe('TaskQuickList', () => {
           }),
         ],
       })
-      expect(metadataText(row('aged'))).toBe('Finished with a PRPR #9 · 2h')
+      expect(metadataText(row('aged'))).toBe('Finished with a PR#9 · 2h')
     })
   })
 
@@ -742,10 +742,10 @@ describe('TaskQuickList', () => {
         '/',
         REPO,
       )
-      const own = within(row('own') as HTMLElement).getByRole('link', { name: 'Open the pull request for Own PR' })
+      const own = within(row('own') as HTMLElement).getByRole('link', { name: 'Open the pull request #7 for Own PR' })
       expect(own.getAttribute('href')).toBe('/p/api/tasks/own/pr/7')
       expect(own.getAttribute('target')).toBeNull()
-      const foreign = within(row('foreign') as HTMLElement).getByRole('link', { name: 'Open the pull request for Foreign PR' })
+      const foreign = within(row('foreign') as HTMLElement).getByRole('link', { name: 'Open the pull request #8 for Foreign PR' })
       expect(foreign.getAttribute('href')).toBe('https://github.com/x/y/pull/8')
     })
 
@@ -816,8 +816,8 @@ describe('TaskQuickList', () => {
       // The letter chip, its own dot, and what actually differs between the variants.
       // Line two is the meta line: state word (and references), never an age (#617 decision 1).
       // Line 1 `runner · $cost`, line 2 state · tokens (#617 01a).
-      expect(metadataText(row('va'))).toBe('Aclaude · $0.31running · IN 92.0k · OUT 4.2k')
-      expect(metadataText(row('vb'))).toBe('Bcodex · $0.12running · IN 40.0k · OUT 1.8k')
+      expect(metadataText(row('va'))).toBe('Aclaude · $0.31IN 92.0k · OUT 4.2k')
+      expect(metadataText(row('vb'))).toBe('Bcodex · $0.12IN 40.0k · OUT 1.8k')
       expect(dotOf('va')?.getAttribute('data-tone')).toBe('running')
       // Each variant is still its own deep link.
       expect(row('vb')?.querySelector('a')?.getAttribute('href')).toBe('/tasks/vb')
@@ -842,14 +842,14 @@ describe('TaskQuickList', () => {
         ),
       })
       fireEvent.click(screen.getByRole('button', { expanded: false }))
-      expect(metadataText(row('va'))).toBe('Aclaude · $0.31running')
+      expect(metadataText(row('va'))).toBe('Aclaude · $0.31\u00a0')
     })
 
     it('gates variant token directions and cost independently', () => {
       renderList({ runs: variants(), showTokens: false, showCost: true })
       fireEvent.click(screen.getByRole('button', { expanded: false }))
-      expect(metadataText(row('va'))).toBe('Aclaude · $0.31running')
-      expect(metadataText(row('vb'))).toBe('Bcodex · $0.12running')
+      expect(metadataText(row('va'))).toBe('Aclaude · $0.31\u00a0')
+      expect(metadataText(row('vb'))).toBe('Bcodex · $0.12\u00a0')
     })
   })
 
@@ -1021,6 +1021,24 @@ describe('TaskQuickListContainer', () => {
     )
     return render(<TaskQuickListContainer />, { wrapper })
   }
+
+  it('asks for collection references on every variant, not only the first member', async () => {
+    const records = [812, 813].map((number, index) => run({ id: `variant-${index}`, title: 'Grouped', groupId: 'complete', variant: index ? 'B' : 'A',
+      pullRequests: [{ number, source: 'declared' }] }));
+    const requested: string[] = [];
+    fetchMock.mockImplementation(async (input) => {
+      const path = String(input);
+      if (path.includes('ref-status')) {
+        requested.push(path);
+        return new Response(JSON.stringify({ available: true, recheckAfterMs: null, prs: {}, issues: {} }));
+      }
+      return new Response(JSON.stringify(path.includes('run-summaries') ? records : {}));
+    });
+    render(<QueryClientProvider client={createQueryClient()}><MemoryRouter><ListViewProvider>
+      <TaskQuickListContainer projectId="p" />
+    </ListViewProvider></MemoryRouter></QueryClientProvider>);
+    await waitFor(() => expect(requested.some(path => path.includes('prs=812%2C813'))).toBe(true));
+  });
 
   it('renders nothing until /api/v1/runs answers — no invented rows, no premature empty state', () => {
     fetchMock.mockImplementation(() => new Promise(() => {}))
@@ -1254,9 +1272,9 @@ it('marks the parent row active when currentRunId is the worker', () => {
 it('shows both tracker references on the meta line, never a line of their own', () => {
   renderList({ runs: [run({ id: 'both', pullRequestUrl: 'https://github.com/o/r/pull/217', referencedIssueUrl: 'https://github.com/o/r/issues/214' })] })
   const meta = row('both')?.querySelector('[data-slot="task-row-meta"]')
-  expect(meta?.querySelector('[data-slot="pr-chip"]')?.textContent).toBe('PR #217')
+  expect(meta?.querySelector('[data-slot="pr-chip"]')?.textContent).toBe('#217')
   expect(meta?.querySelector('[data-slot="issue-chip"]')?.textContent).toBe('#214')
-  expect(meta?.textContent).toBe('PR #217 · #214 · 1m')
+  expect(meta?.textContent).toBe('#217#214 · 1m')
   expect(row('both')?.querySelector('a a')).toBeNull()
 })
 
@@ -1293,7 +1311,7 @@ describe('the calmer row (#617)', () => {
       expect(title.closest('a')?.className).toContain('h-[19px]')
       expect(el.querySelector('[data-slot="session-references"]')).toBeNull()
       for (const chip of el.querySelectorAll('[data-slot="pr-chip"], [data-slot="issue-chip"]')) {
-        expect(chip.parentElement).toBe(meta)
+        expect(chip.closest('[data-slot="task-row-meta"]')).toBe(meta)
       }
     }
   })
@@ -1398,7 +1416,7 @@ describe('the calmer row (#617)', () => {
   it('makes references keyboard-reachable links on the meta line', () => {
     renderList({ runs: [run({ id: 'x', title: 'Has refs', pullRequestUrl: 'https://github.com/o/r/pull/594', referencedIssueUrl: 'https://github.com/o/r/issues/451' })] })
     const links = within(row('x') as HTMLElement).getAllByRole('link').filter(a => a.getAttribute('href')?.startsWith('https://'))
-    expect(links.map(a => a.textContent)).toEqual(['PR #594', '#451'])
+    expect(links.map(a => a.textContent)).toEqual(['#594', '#451'])
     for (const link of links) {
       expect(link.getAttribute('tabindex')).not.toBe('-1')
       expect(link.closest('a[href^="/tasks/"]')).toBeNull()
@@ -1438,7 +1456,7 @@ describe('meta-line state words (#617, the issue\'s list exactly)', () => {
     ] })
     for (const id of ['you', 'done', 'gone']) {
       expect(stateOf(id), id).toBeNull()
-      expect(metaOf(id), id).toBe('PR #594 · 1m')
+      expect(metaOf(id), id).toBe('#594 · 1m')
     }
   })
 
@@ -1456,7 +1474,7 @@ describe('meta-line state words (#617, the issue\'s list exactly)', () => {
       run({ id: 'rep', status: 'waiting', delegation: { ...workers, wait: { ...workers.wait, requestIds: ['00000000-0000-4000-8000-000000000009'] } } } as Partial<RunRecord>),
     ] })
     expect(stateOf('mon')).toBe('monitoring')
-    expect(stateOf('run')).toBe('running')
+    expect(stateOf('run')).toBeNull()
     expect(stateOf('rev')).toBe('needs review')
     expect(stateOf('fail')).toBe('failed')
     expect(stateOf('sched')).toBe('scheduled')
@@ -1543,15 +1561,15 @@ describe('the variant group and its members (#617 addendum 01a)', () => {
     expect(chip.className).toContain('text-muted-foreground')
     expect(row('va')?.querySelector('[data-slot="task-row-title"]')?.textContent).toBe('claude · $0.40')
     // The shared issue is the group's; each variant shows only a reference of its own.
-    expect(row('va')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('running · IN 12.0k · OUT 3.0k')
-    expect(row('vb')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('running · PR #611 · IN 9.0k · OUT 2.0k')
+    expect(row('va')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('IN 12.0k · OUT 3.0k')
+    expect(row('vb')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('#611 · IN 9.0k · OUT 2.0k')
   })
 
   it('keeps honouring showTokens and showCost, across both lines', () => {
     renderList({ runs: members(), showTokens: false, showCost: false })
     expand()
     expect(row('va')?.querySelector('[data-slot="task-row-title"]')?.textContent).toBe('claude')
-    expect(row('va')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('running')
+    expect(row('va')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('\u00a0')
   })
 
   it('a needs-you variant says no state word — unless line 2 would otherwise be empty', () => {
@@ -1597,7 +1615,7 @@ describe('references on a device that cannot hover (#617 01b)', () => {
     stubHover(true)
     renderList({ runs: [run({ id: 't', title: 'Touch', pullRequestUrl: 'https://github.com/o/r/pull/594', referencedIssueUrl: 'https://github.com/o/r/issues/451' })] })
     const meta = row('t')?.querySelector('[data-slot="task-row-meta"]') as HTMLElement
-    expect(meta.textContent).toBe('PR #594 · #451 · 1m')
+    expect(meta.textContent).toBe('#594#451 · 1m')
     expect(meta.querySelector('a')).toBeNull()
     expect(meta.querySelector('[tabindex]')).toBeNull()
     fireEvent.click(meta.querySelector('[data-slot="pr-chip"]') as HTMLElement)
@@ -1655,7 +1673,7 @@ describe('variant line 1 under width pressure (#617 fix round)', () => {
       widths.client = 24
       act(() => observers.forEach((cb) => cb()))
       expect(row('oa')?.querySelector('[data-slot="task-row-tokens"]')).toBeNull()
-      expect(row('oa')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('running')
+      expect(row('oa')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('\u00a0')
       // Room again: the tokens come back.
       widths.scroll = 24
       act(() => observers.forEach((cb) => cb()))
@@ -1812,7 +1830,7 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
     expect(on).not.toBeNull()
     expect(metaEl('on').firstElementChild).toBe(on)
     // No separator after it: the text is what it was without the glyph.
-    expect(metaEl('on').textContent).toBe('running · PR #594 · 1m')
+    expect(metaEl('on').textContent).toBe('#594 · 1m')
     expect(on?.getAttribute('role')).toBe('img')
     expect(on?.getAttribute('aria-label')).toBe('Notifying the task webhook')
     expect(on?.getAttribute('title')).toBe('Notifying the task webhook')
@@ -1844,7 +1862,7 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
     stubMedia({ noHover: true, desktop: true })
     renderList({ runs: [run({ id: 'on', status: 'running', notify: true })] })
     expect(glyph('on')).not.toBeNull()
-    expect(metaEl('on').textContent).toBe('running · 1m')
+    expect(metaEl('on').textContent).toBe('1m')
   })
 
   const members = (notify: boolean) => [
@@ -1886,14 +1904,14 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
     it('takes the age off together with its separator, never ellipsizing it', () => {
       renderList({ runs: [run({ id: 't', status: 'running', notify: true, pullRequestUrl: 'https://github.com/o/r/pull/594' })] })
       expect(age('t')).toBeNull()
-      expect(metaEl('t').textContent).toBe('running · PR #594')
+      expect(metaEl('t').textContent).toBe('#594')
       expect(glyph('t')).not.toBeNull()
     })
 
     it('does the same for a row that is not notifying', () => {
       renderList({ runs: [run({ id: 't', status: 'running' })] })
       expect(age('t')).toBeNull()
-      expect(metaEl('t').textContent).toBe('running')
+      expect(metaEl('t').textContent).toBe('\u00a0')
     })
 
     it('keeps the age while the line fits, and restores it when the column grows', () => {
@@ -2028,7 +2046,7 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
         <QueryClientProvider client={createQueryClient()}>
           <MemoryRouter>
             <ReferenceStatusRegistry>
-              <ReferenceStatusProvider projectId="p" requests={[{ projectId: 'p', kind: 'PR', number: 594 }]}>
+              <ReferenceStatusProvider projectId="p" repoBase="https://github.com/o/r" requests={[{ projectId: 'p', kind: 'PR', number: 594 }]}>
                 <TaskQuickList runs={[run({ id: 't', status: 'running', pullRequestUrl: 'https://github.com/o/r/pull/594' })]} view="active" now={NOW} onViewChange={vi.fn()} />
               </ReferenceStatusProvider>
             </ReferenceStatusRegistry>
@@ -2076,7 +2094,7 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
         <QueryClientProvider client={createQueryClient()}>
           <MemoryRouter>
             <ReferenceStatusRegistry>
-              <ReferenceStatusProvider projectId="p" requests={[{ projectId: 'p', kind: 'PR', number: 594 }]}>
+              <ReferenceStatusProvider projectId="p" repoBase="https://github.com/o/r" requests={[{ projectId: 'p', kind: 'PR', number: 594 }]}>
                 <TaskQuickList runs={[run({ id: 't', status: 'running', pullRequestUrl: 'https://github.com/o/r/pull/594' })]} view="active" now={NOW} onViewChange={vi.fn()} />
               </ReferenceStatusProvider>
             </ReferenceStatusRegistry>
@@ -2396,5 +2414,48 @@ describe('swipe to archive on touch (#780 §7)', () => {
     expect(action('a')).toBeNull()
     expect(layer('a').style.transform).toBe('')
     expect(action('b')).not.toBeNull()
+  })
+})
+
+describe('complete compact sidebar references', () => {
+  it('shows two references plus overflow without navigating or nesting a group button', async () => {
+    const collection = [812, 813, 814, 815, 816].map(number => ({ number, source: 'declared' as const }))
+    const task = run({ title: 'Split work', pullRequests: collection })
+    const { container } = renderList({ runs: [task] }, '/', { projectId: 'test-project', repoBase: 'https://github.com/o/r' })
+    const row = container.querySelector('[data-slot="task-row"]')!
+    expect(row.querySelectorAll('[data-slot="pr-chip"]')).toHaveLength(2)
+    expect(row.querySelector('[data-slot="pr-chip"]')?.textContent).toBe('#812')
+    const trigger = within(row as HTMLElement).getByRole('button', { name: 'Show all 5 references for Split work' })
+    expect(trigger.textContent).toBe('+3')
+    fireEvent.click(trigger)
+    await waitFor(() => expect(document.querySelector('[data-slot="reference-overflow-list"]')).not.toBeNull())
+    expect(screen.getByTestId('location').textContent).toBe('/')
+    expect(trigger.closest('a')).toBeNull()
+  })
+  it('keeps pointer overflow outside truncating metadata on groups and variants', () => {
+    const refs = [812, 813, 814, 815, 816].map(number => ({ number, source: 'declared' as const }));
+    const a = run({ title: 'Grouped work', groupId: 'protected', variant: 'A', pullRequests: [...refs, ...[900, 901, 902].map(number => ({ number, source: 'declared' as const }))] });
+    const b = run({ title: 'Grouped work', groupId: 'protected', variant: 'B', pullRequests: refs });
+    const { container } = renderList({ runs: [a, b] }, '/', { projectId: 'test-project', repoBase: 'https://github.com/o/r' });
+    const group = container.querySelector('[data-slot="group-row"]')!;
+    const control = group.querySelector('[data-slot="reference-overflow"]')!;
+    expect(control.closest('[data-slot="group-meta"]')).toBeNull();
+    fireEvent.click(group.querySelector('[data-slot="group-tile"]')!);
+    const single = container.querySelector(`[data-run-id="${a.id}"]`)!;
+    // Three variant-only references ensure this row has its own protected control.
+    expect(single.querySelector('[data-slot="reference-overflow"]')?.closest('[data-slot="task-row-meta"]')).toBeNull();
+  });
+
+  it('omits only running in Working and retains running outside Working', () => {
+    const working = run({ title: 'Working task', status: 'running' })
+    const pinned = run({ title: 'Running variant', status: 'running', groupId: 'mixed', variant: 'A' })
+    const waiting = run({ status: 'waiting', groupId: 'mixed', variant: 'B' })
+    const monitoring = run({ title: 'Monitoring task', status: 'running', activity: 'monitoring' })
+    const { container } = renderList({ runs: [working, pinned, waiting, monitoring] })
+    const row = (id: string) => container.querySelector(`[data-run-id="${id}"]`)!
+    expect(row(working.id).querySelector('[data-slot="task-row-state"]')).toBeNull()
+    fireEvent.click(container.querySelector('[data-group-id="mixed"][data-slot="group-tile"]')!)
+    expect(row(pinned.id).querySelector('[data-slot="task-row-state"]')?.textContent).toBe('running')
+    expect(row(monitoring.id).querySelector('[data-slot="task-row-state"]')?.textContent).toBe('monitoring')
   })
 })

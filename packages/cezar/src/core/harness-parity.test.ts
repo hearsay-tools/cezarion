@@ -615,6 +615,8 @@ const CONTROL_CRITERIA = [
   { id: 'R51', scenario: 'hold' },
   // #779: Stop on a dead owner's mid-turn run ends it cancelled, not interrupted, and starts nothing.
   { id: 'R52', scenario: 'hold' },
+  { id: 'PR1', scenario: 'multi-pr-refs' },
+  { id: 'PR2', scenario: 'multi-pr-refs' },
 ] as const;
 
 /**
@@ -2575,5 +2577,31 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
           expect(manager.isActive(runId)).toBe(true);
         });
     }, 60_000);
+  }
+});
+
+// hearsay-tools/cezarion#922: every task-owned declaration, through each native runner wire.
+describe('harness parity — multi-pr collection', () => {
+  for (const backend of RUNNER_IDS) {
+    for (const continuation of [false, true]) {
+      it(`${backend} ${continuation ? 'PR2' : 'PR1'} multi-pr retains fresh and continued declarations`, async () => {
+        let dataDir = '';
+        const observed = await driveRun(backend, 'multi-pr-refs', record => record?.status === 'done', 60_000,
+          async ({ store, manager, runId }) => {
+            expect(store.getRun(runId)?.pullRequests?.map(pr => pr.number)).toEqual([812, 813, 814, 815, 816]);
+            expect(store.getRun(runId)?.markerRefs?.pr).toBe(816);
+            if (continuation) {
+              await waitFor(() => !manager.isActive(runId));
+              expect(manager.continueRun(runId, { text: 'mock:multi-pr-refs-continue' }).ok).toBe(true);
+              await waitFor(() => !manager.isActive(runId) && store.getRun(runId)?.status === 'done', 60_000);
+              expect(store.getRun(runId)?.markerRefs?.pr).toBe(817);
+            }
+            store.flush();
+            expect(readPersistedRuns(dataDir).find(run => run.id === runId)?.pullRequests?.map((pr: NonNullable<RunRecord['pullRequests']>[number]) => pr.number))
+              .toEqual(continuation ? [812, 813, 814, 815, 816, 817] : [812, 813, 814, 815, 816]);
+          }, { beforeStart: ({ repoRoot }) => { dataDir = join(repoRoot, '.ai/cezar'); } });
+        expect(observed.record?.pullRequests?.some(pr => pr.number === 999)).toBe(false);
+      }, 150_000);
+    }
   }
 });

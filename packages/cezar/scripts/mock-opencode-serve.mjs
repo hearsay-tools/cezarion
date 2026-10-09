@@ -409,6 +409,16 @@ const server = createServer((req, res) => {
         send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
         return;
       }
+      if (body.includes('mock:multi-pr-refs')) {
+        const { multiPrText, unrelatedPr } = await import('./mock-multi-pr.mjs');
+        const text = multiPrText(JSON.parse(body).parts.map(part => part.text ?? '').join('\n'));
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        send({ type: 'message.part.updated', properties: { part: { id: 'multi-reasoning', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'reasoning', text: unrelatedPr } } });
+        send({ type: 'message.part.updated', properties: { part: { id: 'multi-tool', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'tool', tool: 'read', callID: 'multi-read', state: { status: 'completed', input: { filePath: 'other.txt' }, output: unrelatedPr, time: { start: 1, end: 2 } } } } });
+        for (const upto of [5, text.length]) send({ type: 'message.part.updated', properties: { part: { id: 'multi-message', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: text.slice(0, upto), ...(upto === text.length ? { time: { start: 1, end: 2 } } : {}) } } });
+        send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+        return;
+      }
       if (body.includes('mock:turn-messages:')) {
         const { turnMessages } = await import('./mock-turn-messages.mjs');
         send({ type: 'message.updated', properties: { info: info({}) } });

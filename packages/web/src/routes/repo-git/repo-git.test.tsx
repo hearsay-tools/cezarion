@@ -677,6 +677,23 @@ describe('the Git view Not landed section', () => {
     expect(document.querySelector('[data-slot="git-no-forge"]')).toBeNull()
   })
 
+  // #922: the row's PR chip carries the PR URL, and the only PRs this view shows belong to the
+  // project's own repository. The chip must still read the project's ref-status batch once the
+  // scope guard demands proof the URL is own — the fallback is the health repo remote here.
+  it('shows the open PR chip the forge status of the project\'s own PR', async () => {
+    stubFetch({
+      'GET /api/v1/github/ref-status?prs=705': () =>
+        jsonResponse({ available: true, prs: { 705: 'merged' }, issues: {}, conflicts: [], recheckAfterMs: null }),
+    })
+    renderAt('/git/not-landed')
+    const chip = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>('[data-branch="cez/7c1e09aa"] [data-slot="not-landed-pr"] [data-slot="pr-chip"]')
+      if (!found || found.getAttribute('data-status') !== 'merged') throw new Error('the chip has not learned the PR status yet')
+      return found
+    })
+    expect(chip.getAttribute('data-status')).toBe('merged')
+  })
+
   it('Create draft PR posts the task\'s own /runs/:id/pr', async () => {
     const sent = stubFetch({ 'POST /api/v1/runs/run-51/pr': () => jsonResponse({ url: 'https://github.com/acme/demo/pull/710' }) })
     renderAt('/git/not-landed')

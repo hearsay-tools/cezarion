@@ -70,7 +70,7 @@ const REQUESTS: ReferenceStatusRequest[] = [{ projectId: 'api', kind: 'PR', numb
 function renderChip(requests: readonly ReferenceStatusRequest[] = REQUESTS) {
   return render(
     <QueryClientProvider client={createQueryClient()}>
-      <ReferenceStatusProvider projectId="api" requests={requests}>
+      <ReferenceStatusProvider projectId="api" repoBase="https://github.com/acme/api" requests={requests}>
         <ReferenceChip reference={PR} taskTitle="Add checkout" />
       </ReferenceStatusProvider>
     </QueryClientProvider>,
@@ -125,7 +125,7 @@ describe('a chip under a ReferenceStatusProvider', () => {
           >
             filter
           </button>
-          <ReferenceStatusProvider projectId="api" requests={requests}>
+          <ReferenceStatusProvider projectId="api" repoBase="https://github.com/acme/api" requests={requests}>
             <ReferenceChip reference={PR} taskTitle="Add checkout" />
           </ReferenceStatusProvider>
         </QueryClientProvider>
@@ -162,7 +162,7 @@ describe('a chip under a ReferenceStatusProvider', () => {
     answers = [{ available: false, reason: 'gh CLI not found' }]
     rerender(
       <QueryClientProvider client={createQueryClient()}>
-        <ReferenceStatusProvider projectId="api" requests={[...REQUESTS, { projectId: 'api', kind: 'Issue', number: 1 }]}>
+        <ReferenceStatusProvider projectId="api" repoBase="https://github.com/acme/api" requests={[...REQUESTS, { projectId: 'api', kind: 'Issue', number: 1 }]}>
           <ReferenceChip reference={PR} taskTitle="Add checkout" />
         </ReferenceStatusProvider>
       </QueryClientProvider>,
@@ -208,7 +208,7 @@ describe('the conflict axis, from the wire to the chip', () => {
     // A second surface asks about a wider set — a fresh key, a fresh answer, the same PR.
     rerender(
       <QueryClientProvider client={createQueryClient()}>
-        <ReferenceStatusProvider projectId="api" requests={[...REQUESTS, { projectId: 'api', kind: 'Issue', number: 1 }]}>
+        <ReferenceStatusProvider projectId="api" repoBase="https://github.com/acme/api" requests={[...REQUESTS, { projectId: 'api', kind: 'Issue', number: 1 }]}>
           <ReferenceChip reference={PR} taskTitle="Add checkout" />
         </ReferenceStatusProvider>
       </QueryClientProvider>,
@@ -228,7 +228,7 @@ describe('the conflict axis, from the wire to the chip', () => {
 
     rerender(
       <QueryClientProvider client={createQueryClient()}>
-        <ReferenceStatusProvider projectId="api" requests={[...REQUESTS, { projectId: 'api', kind: 'Issue', number: 1 }]}>
+        <ReferenceStatusProvider projectId="api" repoBase="https://github.com/acme/api" requests={[...REQUESTS, { projectId: 'api', kind: 'Issue', number: 1 }]}>
           <ReferenceChip reference={PR} taskTitle="Add checkout" />
         </ReferenceStatusProvider>
       </QueryClientProvider>,
@@ -276,7 +276,7 @@ describe('a chip with no status says which kind of nothing it is', () => {
 
 describe('the app-root registry', () => {
   const chipFor = (number: number, projectId: string) => (
-    <ReferenceStatusProvider projectId={projectId} requests={[{ projectId, kind: 'PR', number }]}>
+    <ReferenceStatusProvider projectId={projectId} repoBase={`https://github.com/acme/${projectId}`} requests={[{ projectId, kind: 'PR', number }]}>
       <ReferenceChip
         reference={{ kind: 'PR', number, url: `https://github.com/acme/${projectId}/pull/${number}` }}
         taskTitle={`task ${number}`}
@@ -336,6 +336,7 @@ describe('the app-root registry', () => {
       <QueryClientProvider client={createQueryClient()}>
         <ReferenceStatusProvider
           projectId="api"
+          repoBase="https://github.com/acme/api"
           requests={numbers.map((number) => ({ projectId: 'api', kind: 'PR' as const, number }))}
         >
           <ReferenceChip reference={PR} taskTitle="Add checkout" />
@@ -418,6 +419,23 @@ describe('statuses survive a reload', () => {
 
     await waitFor(() => expect(chip().getAttribute('data-status')).toBe('queued-for-merge'))
     expect(chip().className).toContain('text-accent-text')
-    expect(chip().getAttribute('aria-label')).toBe('Open the pull request for Add checkout')
+    expect(chip().getAttribute('aria-label')).toBe('Open the pull request #774 for Add checkout')
   })
+})
+
+
+it('keeps foreign same-number PRs neutral while the own PR is conflicting', async () => {
+  answers = [{ available: true, prs: { 774: 'ready' }, issues: {}, conflicts: [774] }]
+  const { container } = render(<QueryClientProvider client={createQueryClient()}>
+    <ReferenceStatusProvider projectId="api" repoBase="https://github.com/acme/api" requests={REQUESTS}>
+      <ReferenceChip reference={PR} taskTitle="Local" conflictAction={<button>Local fix</button>} />
+      <ReferenceChip reference={{ ...PR, url: 'https://github.com/other/api/pull/774' }} taskTitle="Foreign" />
+    </ReferenceStatusProvider>
+  </QueryClientProvider>)
+  await waitFor(() => expect(container.querySelector('a[href="https://github.com/acme/api/pull/774"]')?.getAttribute('data-conflicting')).toBe('true'))
+  const foreign = container.querySelector('a[href="https://github.com/other/api/pull/774"]')!
+  expect(foreign.getAttribute('data-status')).toBeNull()
+  expect(foreign.getAttribute('data-conflicting')).toBeNull()
+  fireEvent.focus(foreign)
+  expect(screen.queryByRole('button', { name: 'Local fix' })).toBeNull()
 })

@@ -706,3 +706,31 @@ describe('taskItemTabs', () => {
     expect(taskItemPath('p1', 'r1', { kind: 'Issue', number: 692 }, BASE)).toBe('/p/p1/tasks/r1/issue/692')
   })
 })
+
+ describe('complete PR reference projection', () => {
+  it('projects five collection PRs into tabs before issues and preserves scoped collisions', () => {
+    const task = run({ pullRequests: Array.from({ length: 5 }, (_, i) => ({ number: 812 + i, source: 'declared' })), issueNumber: 20 });
+    expect(taskItemTabs(task, 'https://github.com/o/r')).toEqual([
+      { kind: 'pr', number: 812 }, { kind: 'pr', number: 813 }, { kind: 'pr', number: 814 },
+      { kind: 'pr', number: 815 }, { kind: 'pr', number: 816 }, { kind: 'issue', number: 20 },
+    ]);
+    const scoped = run({ pullRequests: [
+      { number: 812, source: 'declared' },
+      { number: 812, source: 'created', url: 'https://github.com/foreign/repo/pull/812' },
+    ] });
+    expect(taskReferences(scoped, 'https://github.com/o/r').map(ref => ref.url)).toEqual([
+      'https://github.com/o/r/pull/812', 'https://github.com/foreign/repo/pull/812',
+    ]);
+    expect(taskReferences(scoped)).toHaveLength(2);
+    expect(taskItemTabs(run({ pullRequests: [{ number: 812, source: 'created', url: 'https://github.com/foreign/repo/pull/812' }] }), 'https://github.com/o/r')).toEqual([]);
+  });
+  it('finds every retained PR number exactly without searching candidate URLs', () => {
+    const task = run({ title: 'Neutral task', pullRequests: Array.from({ length: 5 }, (_, i) => ({ number: 812 + i, source: 'declared' })) });
+    for (const number of [812, 813, 814, 815, 816]) {
+      expect(filterRuns([task], String(number))).toEqual([task]);
+      expect(filterRuns([task], `#${number}`)).toEqual([task]);
+    }
+    expect(filterRuns([task], '#81')).toEqual([]);
+    expect(filterRuns([task], '#999')).toEqual([]);
+  });
+ });

@@ -1191,6 +1191,11 @@ describe('meta line, tabs, pill and resume hint', () => {
   it('sends the resolve-conflicts prompt into this task’s own conversation', async () => {
     const sent = stubFetch({
       '/api/v1/health': () => jsonResponse({ bootProject: 'acme' }),
+      // #922: a URL-carrying chip only trusts the local status batch once the project's repo
+      // base proves the PR is the project's own. The registry entry supplies that proof.
+      '/api/v1/projects': () => jsonResponse({
+        projects: [{ id: 'acme', name: 'acme', root: '/acme', addedAt: '2026-07-01T00:00:00Z', lastOpenedAt: '2026-07-01T00:00:00Z', source: 'local', status: 'ok', repoUrl: 'https://github.com/open-mercato/cezar' }],
+      }),
       '/api/v1/p/acme/github/ref-status?prs=534': () =>
         jsonResponse({ available: true, prs: { 534: 'ready' }, issues: {}, conflicts: [534], recheckAfterMs: null }),
     })

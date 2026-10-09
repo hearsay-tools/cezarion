@@ -93,3 +93,14 @@ describe('refNumberFromUrl', () => {
     expect(refNumberFromUrl('https://github.com/o/r/pulls')).toBeNull();
   });
 });
+
+ it('matches every collection-only PR exactly for cold and archived summaries', () => {
+  const run = summary({ pullRequests: Array.from({ length: 5 }, (_, i) => ({ number: 812 + i, source: 'declared', url: `https://github.com/o/r/pull/${812 + i}` })) });
+  for (const number of [812, 813, 814, 815, 816]) {
+    expect(matchesRunQuery(run, `#${number}`)).toBe(true);
+    expect(matchesRunQuery(run, String(number))).toBe(true);
+  }
+  expect(matchesRunQuery(run, '#81')).toBe(false);
+  expect(matchesRunQuery(run, 'github.com/o/r')).toBe(true);
+  expect(matchesRunQuery(run, '#999')).toBe(false);
+ });

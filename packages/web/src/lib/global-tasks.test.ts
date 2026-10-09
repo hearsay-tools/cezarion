@@ -414,3 +414,16 @@ describe('truncatedProjectNames', () => {
     expect(truncatedProjectNames(['api', 'gone'], PROJECTS)).toEqual(['API', 'gone'])
   })
 })
+
+it('finds every hidden PR while retaining all-token and facet matching', () => {
+  const task = { run: { id: 'split', projectId: 'p', title: 'Neutral task', status: 'done' as const, archived: false,
+    workflow: 'quick-task', workflowLabel: 'quick-task', createdAt: '2026-10-08', tokensUsed: 0,
+    pullRequests: [812, 813, 814, 815, 816].map(number => ({ number, source: 'declared' as const })),
+  }, project: undefined, projectName: 'Project', tags: [] };
+  for (const number of [812, 813, 814, 815, 816]) {
+    expect(filterGlobalTasks([task], { ...NO_FILTERS, query: `Neutral #${number}` }, 'active')).toEqual([task]);
+    expect(filterGlobalTasks([task], { ...NO_FILTERS, query: String(number) }, 'active')).toEqual([task]);
+  }
+  expect(filterGlobalTasks([task], { ...NO_FILTERS, query: '#81' }, 'active')).toEqual([]);
+  expect(filterGlobalTasks([task], { ...NO_FILTERS, query: '#812', statuses: ['running'] }, 'active')).toEqual([]);
+});

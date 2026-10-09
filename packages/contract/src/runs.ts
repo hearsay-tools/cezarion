@@ -174,6 +174,15 @@ export const runWorktreeSetupSchema = z.object({
 });
 export type RunWorktreeSetup = z.infer<typeof runWorktreeSetupSchema>;
 
+/** Task-owned PR evidence (hearsay-tools/cezarion#922); candidates never enter this list. */
+export const runPullRequestSchema = z.object({
+  number: z.number().int().positive().lt(10_000_000),
+  url: z.string().regex(/^https?:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/pull\/\d+\/?(?:[?#][^\s]*)?$/i).optional(),
+  source: z.enum(['declared', 'created']),
+}).refine((entry) => entry.url === undefined ||
+  Number(/\/pull\/(\d+)/i.exec(entry.url)?.[1]) === entry.number, { message: 'PR URL and number must agree' });
+export type RunPullRequest = z.infer<typeof runPullRequestSchema>;
+
 export const runRecordSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -290,6 +299,7 @@ export const runRecordSchema = z.object({
   outputTokens: usageCounterSchema.optional(),
   costUsd: z.number().optional(),
   pullRequestUrl: z.string().optional(),
+  pullRequests: z.array(runPullRequestSchema).optional(),
   /** The PR this task is ABOUT (#407) — auto-discovered from conversation references. Display
    *  tier only: `pullRequestUrl` (the PR this task CREATED) wins, and the action gates ignore it. */
   referencedPullRequestUrl: z.string().optional(),
@@ -452,6 +462,7 @@ export const runSummarySchema = z.object({
    * the expensive half, stay off it.
    */
   pullRequestUrl: z.string().optional(),
+  pullRequests: z.array(runPullRequestSchema).optional(),
   referencedPullRequestUrl: z.string().optional(),
   prNumber: z.number().optional(),
   issueNumber: z.number().optional(),
@@ -514,7 +525,7 @@ export type RunIndexEntry = z.infer<typeof runIndexEntrySchema>;
 /** Keys a summary copies verbatim from the record when the record has them. */
 const SUMMARY_OPTIONAL_KEYS = [
   'titleSummary', 'titleOrigin', 'activity', 'hasPendingHumanAsk', 'finishedAt', 'seenAt',
-  'autoResumeAt', 'branch', 'startedAt', 'pullRequestUrl', 'referencedPullRequestUrl', 'prNumber',
+  'autoResumeAt', 'branch', 'startedAt', 'pullRequestUrl', 'pullRequests', 'referencedPullRequestUrl', 'prNumber',
   'issueNumber', 'referencedIssueUrl', 'markerRefs', 'costUsd', 'peakRssBytes', 'peakProcCount',
   'groupId', 'variant', 'pinned', 'runner', 'model', 'notify', 'diffStat', 'inputTokens',
   'outputTokens', 'currentStepId', 'error', 'worktreePath',

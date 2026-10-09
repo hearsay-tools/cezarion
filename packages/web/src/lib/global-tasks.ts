@@ -1,5 +1,6 @@
 import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
 
+import { matchesTaskReferenceNumber } from '@/lib/tasks-table'
 import { allProjectTags } from '@/lib/project-tags'
 import { isOwnedWorker, runTitle } from '@/lib/task-groups'
 
@@ -252,7 +253,7 @@ export function filterGlobalTasks(
     if (!matchesTags(task, filters.tags)) return false
     if (tokens.length === 0) return true
     const text = haystack(task)
-    return tokens.every((token) => text.includes(token))
+    return tokens.every((token) => text.includes(token) || matchesTaskReferenceNumber(task.run, token))
   })
 }
 
