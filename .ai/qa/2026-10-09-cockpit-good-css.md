@@ -72,3 +72,9 @@ PR CI on commit `7f4394c8` subsequently passed both Vitest shards, both Node-flo
 ## Authorized runner follow-up
 
 The user expanded scope after repeated CI failures. OpenCode classified only numeric exit codes; an external SIGKILL could settle without an error when process exit preceded SSE closure. The runner now recognizes an external signal and includes its name in the error, while preserving successful self-initiated termination. The existing RUNNER_IDS shutdown S22 regression retains native mocks and delays only the SSE terminal notification to force this ordering. It failed against the original source, then all 38 shutdown-parity tests passed with the fix. This strengthens an existing registered parity cell rather than introducing an exemption.
+
+## Preview landing failure evidence
+
+The preview landing adjustment responds to [CI job 114009939596](https://github.com/hearsay-tools/cezarion/actions/runs/37986554086/job/114009939596) on `2d62cd36`. Download its `cockpit-failures-shard-4` artifact; `live-preview/registers-runs-streams-takes-a-click-and-stops-1/` contains `snapshot.txt`, `probe.json`, and `screenshot.png`. The snapshot shows “Open a page in this task’s browser”, a registered server and its “Review” button. The probe records `needs-approval` as null. This is distinct from the earlier sticky-header click failure: opening the pane succeeded, but it landed on the valid server list instead of directly selecting approval.
+
+Recheck locally after building E2E assets with `npm run test:e2e -- live-preview.e2e.ts`. This command passed after the adjustment. The test follows Review when that landing appears and retains the original command/approval assertions, explicit Run and open action, stream/click checks and stop check. The CI failure is timing-dependent; a local pass alone does not reproduce the earlier ordering. All four browser shards subsequently passed on `9783423d`.

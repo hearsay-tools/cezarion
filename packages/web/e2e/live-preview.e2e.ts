@@ -122,6 +122,9 @@ describe('live preview', () => {
     // the fixed task header and never moves with the thread.
     browser.click('[data-slot="preview-toggle"]')
     const approval = '[data-slot="preview-pane"] [data-slot="preview-state"][data-state="needs-approval"]'
+    // CI evidence: https://github.com/hearsay-tools/cezarion/actions/runs/37986554086/job/114009939596
+    // Artifact cockpit-failures-shard-4, live-preview/registers-runs-streams-takes-a-click-and-stops-1:
+    // snapshot shows the registered server's Review button; probe has needs-approval=null.
     // Registration can reach the header before its default server selection.
     // The empty pane legitimately lists that server for review in this ordering.
     const landing = browser.waitForValue(
