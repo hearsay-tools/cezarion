@@ -882,6 +882,15 @@ bare Continue is refused, and an explicit human answer reaches the native runner
 before queued agent input drains. This extends the registered R7 cell, with no
 runner exemptions.
 
+**R53** (hearsay-tools/cezarion#906), in `workflows/worker-restart-parity.test.ts`,
+uses every `RUNNER_IDS` backend's `HARNESS_ADAPTERS` native wire to persist a
+starting execution generation. A fully terminal modern root and worker have no
+live or deferred anchor; their plain history is nonempty and facts sidecars are
+missing. Immediate boot recovery must prepare the selected family off-loop,
+never enter the synchronous facts join, and complete the private generation with
+one correctly sequenced lifecycle repair. No runner exemptions. Selected-readiness
+guards also pin disposal, failure, changed ownership and completed-proof rechecks.
+
 **S21** (hearsay-tools/cezarion#832) detects unexpected restored history through
 OMP's startup `get_state.messageCount`. A fresh step emits one v1 note and one
 non-fatal `session.error`, and still completes normally. Other native wires have

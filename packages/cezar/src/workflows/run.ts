@@ -2502,6 +2502,22 @@ export class RunManager {
     this.recoveryFactsPending = true;
     await this.store.prepareRecoveryFacts(familyRootId);
     if (this.disposed) return;
+    // Public terminal state can precede the private completion checkpoint. Such a family
+    // has no live/deferred anchor, but orphan settlement still appends its lifecycle event.
+    // Prepare only eligible starting generations' families before any repair mutation;
+    // retain IDs, never an ownership or execution snapshot, across readiness.
+    const workerIds = familyRootId === undefined ? this.store.listWorkerIds() : this.store.listWorkersOf(familyRootId).map((run) => run.id);
+    const orphanWorkerIds: string[] = [];
+    const orphanFactIds = new Set<string>();
+    for (const id of workerIds) {
+      if (this.store.readWorkerExecution(id)?.phase !== 'starting' || this.store.writeRefusal(id)) continue;
+      const run = this.store.getRun(id);
+      if (run?.delegation?.role !== 'worker' || !inScope(run)) continue;
+      orphanWorkerIds.push(id);
+      for (const member of this.store.listFamilyRunIds(run.delegation.parentRunId)) orphanFactIds.add(member);
+    }
+    await this.store.prepareTranscriptFacts(orphanFactIds);
+    if (this.disposed) return;
     this.recoveryFactsPending = false;
     // Recovery reads the live set (#779): `listRuns()` is the runs `open` loaded by the `live`
     // column, and finished runs have nothing to recover. The worker passes below go through
@@ -2522,8 +2538,9 @@ export class RunManager {
     // private proof is read first, so only those workers' records are decoded: settling and
     // re-probing are no-ops for every other proof phase.
     // Another process's workers are its own to settle.
-    const workerIds = familyRootId === undefined ? this.store.listWorkerIds() : this.store.listWorkersOf(familyRootId).map((run) => run.id);
-    for (const id of workerIds) {
+    for (const id of orphanWorkerIds) {
+      const run = this.store.getRun(id);
+      if (!run || !inScope(run)) continue;
       if (this.store.readWorkerExecution(id)?.phase === 'starting' && !this.store.writeRefusal(id) &&
         !this.settleOrphanedWorkerExecution(id)) this.armOrphanReprobe(id);
     }

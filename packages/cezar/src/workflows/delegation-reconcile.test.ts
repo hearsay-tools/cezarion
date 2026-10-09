@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -125,6 +125,50 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
       await manager.recover(a.parentId);
     } else { release(); await recovery; }
     expect(store.readEvents(a.parentId).some(e => e.type === 'conversation-message')).toBe(outcome !== 'dispose');
+    store.close();
+  });
+
+  it.each(['dispose', 'failure', 'foreign', 'completed'] as const)('selected starting-proof readiness retains guard and rechecks %s', async outcome => {
+    manager.dispose();
+    const generation = store.commitWorkerExecutionStart(a.workerId);
+    store.flush(); store.close();
+    const dataDir = join(root, '.ai/cezar');
+    // Prior-boot proof makes exit conclusive, independent of ambient process enumeration.
+    writeFileSync(join(dataDir, 'runs', `${a.workerId}.processes.json`), JSON.stringify({
+      generation, controller: { pid: 2147483001, startToken: 'old-boot:100' }, processes: [],
+    }));
+    store = RunStore.open(dataDir, { keepLive: true }); manager = new RunManager(store, root);
+    let entered!: () => void; let release!: () => void;
+    const ready = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const prepare = store.prepareTranscriptFacts.bind(store);
+    vi.spyOn(store, 'prepareTranscriptFacts').mockImplementation(async ids => {
+      const selected = [...ids];
+      if (selected.includes(a.workerId)) {
+        expect(selected).toContain(a.parentId); expect(selected).not.toContain(b.workerId);
+        entered(); await gate;
+        if (outcome === 'failure') throw Error('selected facts failed');
+      }
+      await prepare(selected);
+    });
+    const settlement = vi.spyOn(manager, 'settleOrphanedWorkerExecution');
+    const recovery = manager.recover();
+    const rejection = outcome === 'failure' ? expect(recovery).rejects.toThrow('selected facts failed') : undefined;
+    await ready;
+    manager.reconcileWorkerWaits(); await manager.rescueStalledQueue();
+    expect(settlement).not.toHaveBeenCalled();
+    expect(store.readWorkerExecution(a.workerId)).toMatchObject({ phase: 'starting', generation });
+    if (outcome === 'dispose') manager.dispose();
+    if (outcome === 'foreign') {
+      const refusal = store.writeRefusal.bind(store);
+      vi.spyOn(store, 'writeRefusal').mockImplementation(id => id === a.workerId ? 'RUN_IN_USE_ELSEWHERE' : refusal(id));
+    }
+    if (outcome === 'completed') expect(store.commitWorkerExecutionComplete(a.workerId, generation)).toBe(true);
+    release(); if (rejection) await rejection; else await recovery;
+    expect(settlement).not.toHaveBeenCalled();
+    expect(store.readWorkerExecution(a.workerId)?.phase).toBe(outcome === 'completed' ? 'complete' : 'starting');
+    expect(store.readEvents(a.workerId).some(e => e.type === 'lifecycle' && /execution was finalized/.test(String(e.message)))).toBe(false);
+    expect((manager as unknown as { recoveryFactsPending: boolean }).recoveryFactsPending).toBe(false);
     store.close();
   });
 
