@@ -24,6 +24,7 @@ export class TranscriptFactsQueue<T> {
   private pending: Job<T>[] = [];
   private active?: Job<T>;
   private worker?: Worker;
+  private workerLifecycle?: Int32Array;
   private dispatch?: NodeJS.Immediate;
   private stopped = false;
 
@@ -117,7 +118,9 @@ export class TranscriptFactsQueue<T> {
     const url = source ? new URL(`data:text/javascript,${encodeURIComponent(
       `import { register } from ${JSON.stringify(import.meta.resolve('tsx/esm/api'))}; register(); await import(${JSON.stringify(entry.href)});`,
     )}`) : entry;
-    const worker = new Worker(url, { execArgv: [] });
+    const lifecycle = new Int32Array(new SharedArrayBuffer(8));
+    const worker = new Worker(url, { execArgv: [], workerData: { lifecycle: lifecycle.buffer } });
+    this.workerLifecycle = lifecycle;
     worker.on('error', (error) => { if (this.worker === worker) this.fail(error); });
     worker.on('exit', (code) => {
       if (this.worker === worker) this.fail(new Error(`Transcript facts worker exited (${code})`));
@@ -180,8 +183,24 @@ export class TranscriptFactsQueue<T> {
 
   private disposeWorker(): void {
     const worker = this.worker;
+    const lifecycle = this.workerLifecycle;
     this.worker = undefined;
-    if (worker) void worker.terminate().catch(() => undefined);
+    this.workerLifecycle = undefined;
+    if (!worker) return;
+    if (lifecycle) {
+      Atomics.store(lifecycle, 1, 1);
+      if (Atomics.load(lifecycle, 0) === 0) {
+        // Node 24.15 can abort the process if terminate() interrupts CJS import
+        // parsing. Let finite startup imports finish, then the worker closes
+        // without processing buffered jobs. The worker stays referenced: exiting
+        // the parent mid-import aborts the same way. Keep emergency cleanup bounded.
+        const cleanup = setTimeout(() => { void worker.terminate().catch(() => undefined); }, JOB_TIMEOUT_MS);
+        cleanup.unref();
+        worker.once('exit', () => clearTimeout(cleanup));
+        return;
+      }
+    }
+    void worker.terminate().catch(() => undefined);
   }
 
   private fail(error: Error): void {
