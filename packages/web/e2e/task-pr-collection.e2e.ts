@@ -186,6 +186,10 @@ describe('complete task PR collection', () => {
       const search = (query: string, matches: boolean, legacy = false) => {
         browser.fill('input[aria-label="Search tasks across projects"]', query)
         // The row also exists before search. Wait for the debounced URL and its results.
+        // Provenance: CI run 37916953893 browser shard 3 failure bundle (artifact
+        // cockpit-failures-shard-3) probed /tasks?q=%23132 at 360px when nativeTap
+        // fired on a stale page; locally a 10 s search debounce reproduces it (the old
+        // row wait passed with q=null instead of #128) and this settlement wait is green.
         expect(browser.waitForValue(`(() => {
           return new URLSearchParams(location.search).get('q') === ${JSON.stringify(query)} &&
             document.querySelector('input[aria-label="Search tasks across projects"]')?.value === ${JSON.stringify(query)} &&
