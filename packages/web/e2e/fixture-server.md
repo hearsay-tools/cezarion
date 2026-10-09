@@ -103,6 +103,10 @@ with port 0 over its own fixture repo, owned listener readiness within the origi
 15 s health budget, and awaited shutdown before fixture removal. The guard now pins
 52 starts across 44 specs.
 
+hearsay-tools/cezarion#922 adds `task-pr-collection.e2e.ts`: one CLI construction
+with port 0 and child-owned readiness within the original 15 s deadline. The audit
+now covers 53 starts across 45 specs.
+
 ## Other server classes audited
 
 - `task-views-layout` fault proxy uses a direct Node HTTP listener; it does not run
@@ -115,7 +119,7 @@ with port 0 over its own fixture repo, owned listener readiness within the origi
   zero-config repo-identity discovery rather than a requested health endpoint.
   Application-update tests use their own IPC actual-listener acknowledgement with
   exact-restart identity checks, or packaged mock servers with fixed explicit binds.
-  They are distinct from the 52 cockpit-spec CLI preference/health constructions.
+  They are distinct from the 53 cockpit-spec CLI preference/health constructions.
 - In-process Hono/server tests use their returned listener or app and do not spawn
   an adaptive CLI port. Browser mock API fixtures do not spawn this CLI.
 

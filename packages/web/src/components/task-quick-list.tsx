@@ -12,8 +12,8 @@ import type { ArchiveFinishedScope, RunSummary, SidebarLimits } from '@open-merc
 import { DiffStatLabel } from '@/components/diff-stat'
 import { useListView } from '@/components/list-view'
 import { PinToggle } from '@/components/pin-toggle'
-import { TaskReferenceChip } from '@/components/reference-conflict-action'
-import { ReferenceStatusProvider } from '@/components/reference-status'
+import { ReferenceList } from '@/components/reference-overflow'
+import { useReferenceScope, ReferenceStatusProvider } from '@/components/reference-status'
 import { StatusDot } from '@/components/status-dot'
 import { deriveAttention, type Attention } from '@/lib/attention'
 import { ELLIPSIS_HIDDEN_CLASS, useEllipsisHiddenChildren } from '@/lib/ellipsis-hidden'
@@ -36,7 +36,7 @@ import {
   type QuickListBucket,
   type QuickListRow,
 } from '@/lib/task-groups'
-import { formatCost, isSweepable, sweepableRunCount, taskReference, taskReferences } from '@/lib/tasks-table'
+import { formatCost, isSweepable, sweepableRunCount, taskReference, isOwnRepoReference, taskReferences } from '@/lib/tasks-table'
 import { usageMetricVisibility } from '@/lib/token-metrics'
 import { useNow } from '@/lib/use-now'
 import { useSidebarSections } from '@/lib/use-sidebar-sections'
@@ -251,7 +251,7 @@ export function QuickListBuckets({
       return next
     })
 
-  const renderRow = (row: QuickListRow) => <Row row={row} currentRunId={currentRunId} currentGroupId={currentGroupId} now={now} scope={scope} showTokens={showTokens} showCost={showCost} expanded={row.kind === 'group' && expanded.has(row.groupId)} onToggle={toggleGroup} onTogglePin={onTogglePin} onArchiveRun={onArchiveRun} />
+  const renderRow = (row: QuickListRow, inWorkingGroup = false) => <Row inWorkingGroup={inWorkingGroup} row={row} currentRunId={currentRunId} currentGroupId={currentGroupId} now={now} scope={scope} showTokens={showTokens} showCost={showCost} expanded={row.kind === 'group' && expanded.has(row.groupId)} onToggle={toggleGroup} onTogglePin={onTogglePin} onArchiveRun={onArchiveRun} />
 
   return (
     <div ref={listRef} className="flex flex-col gap-3" onFocusCapture={event => {
@@ -295,7 +295,7 @@ export function QuickListBuckets({
           <div id={`${id}-rows`} hidden={collapsed}>
           {!collapsed && rows.map((row) => (
             <div key={row.kind === 'group' ? row.groupId : row.run.id}>
-              {renderRow(row)}
+              {renderRow(row, bucket.label === 'Working')}
             </div>
           ))}
           </div>
@@ -346,6 +346,7 @@ function Row({
   currentGroupId,
   now,
   scope,
+  inWorkingGroup = false,
   expanded,
   onToggle,
   showTokens,
@@ -358,6 +359,7 @@ function Row({
   currentGroupId: string | null
   now: number
   scope: string | null
+  inWorkingGroup?: boolean
   expanded: boolean
   onToggle: (groupId: string) => void
   showTokens: boolean
@@ -368,6 +370,7 @@ function Row({
   if (row.kind === 'run') {
     return (
       <RunRow
+        inWorkingGroup={inWorkingGroup}
         run={row.run}
         queuePosition={row.queuePosition}
         currentRunId={currentRunId}
@@ -398,6 +401,7 @@ function Row({
            status section with it. */}
       {expanded ? (
         <ExpandedVariantMembers
+          inWorkingGroup={inWorkingGroup}
           members={row.members}
           currentRunId={currentRunId}
           now={now}
@@ -455,6 +459,8 @@ function GroupRow({
   active: boolean
 }) {
   const onNavigate = useSidebarNavigate()
+  const referenceScope = useReferenceScope()
+  const [overflowContainer, setOverflowContainer] = React.useState<HTMLSpanElement | null>(null)
   const lead = deriveAttention(row.lead)
   const projectId = scope ?? undefined
   const { families, shared, age } = groupMetaParts(row.members, now, projectId)
@@ -471,20 +477,16 @@ function GroupRow({
     !touch && sharedReferences.length > 0,
     `${families.join(',')}|${sharedReferences.map(referenceKey).join(',')}|${age}`,
   )
+  const ageDropped = useAgeDropped(metaRef, !touch && Boolean(age),
+    `${families.join(',')}|${sharedReferences.map(referenceKey).join(',')}|${age}`)
   // Line 2 in the task row's own grammar: words, then the shared references as the same plain
   // links (with the status panel) a task row uses — inert text on touch (#617 01b) — then the age.
   const meta: React.ReactNode[] = [
     ...families.map((family) => <span key={`family-${family}`}>{family}</span>),
-    ...sharedReferences.map((reference) => (
-      <TaskReferenceChip
-        key={`${reference.kind}-${reference.number}-${reference.url}`}
-        run={first}
-        reference={reference}
-        plain
-        inert={touch}
-      />
-    )),
-    ...(age ? [<span key="age" className="tabular-nums">{age}</span>] : []),
+    ...(sharedReferences.length ? [<ReferenceList key="references" references={sharedReferences} maxVisible={2} taskTitle={row.title}
+      projectId={projectId ?? referenceScope.projectId} repoBase={referenceScope.repoBase} runId={first.id}
+      plain compact inertInline={touch} fitContainer overflowContainer={overflowContainer} />] : []),
+    ...(age && !ageDropped ? [<span key="age" data-slot="task-row-age" className="tabular-nums">{age}</span>] : []),
   ]
   const Disclosure = expanded ? ChevronDownIcon : ChevronRightIcon
   const lineOne = (
@@ -562,6 +564,8 @@ function GroupRow({
           <div ref={metaRef} data-slot="group-meta" className={cn(lineTwoClass, ELLIPSIS_HIDDEN_CLASS)}>{lineTwo}</div>
         </div>
       )}
+      {sharedReferences.length ? <span ref={setOverflowContainer} data-slot="protected-reference-overflow"
+        className={cn('shrink-0 self-end', touch && 'self-center')} /> : null}
       {/* 36px on a pointer device; on touch the compare link is a 44px target of its own, beside
           (never over) the disclosure, and the slot reserves that room permanently — px, not
           spacing units, so density cannot shrink it. */}
@@ -603,6 +607,7 @@ function ExpandedVariantMembers({
   currentRunId,
   now,
   scope,
+  inWorkingGroup = false,
   showTokens,
   showCost,
   onTogglePin,
@@ -612,6 +617,7 @@ function ExpandedVariantMembers({
   currentRunId: string | null
   now: number
   scope: string | null
+  inWorkingGroup?: boolean
   showTokens: boolean
   showCost: boolean
   onTogglePin?: (run: RunSummary, pinned: boolean) => void
@@ -624,6 +630,7 @@ function ExpandedVariantMembers({
     <div data-slot="variant-list" className="ml-[15.5px] border-l border-border pl-[6px]">
       {members.map((member) => (
         <RunRow
+          inWorkingGroup={inWorkingGroup}
           key={member.id}
           run={member}
           queuePosition={null}
@@ -737,7 +744,12 @@ function contentWidth(el: HTMLElement): number {
   const range = document.createRange()
   range.selectNodeContents(el)
   const width = range.getBoundingClientRect?.().width
-  return width ? Math.ceil(width) : el.scrollWidth
+  // Reference fitting removes inline chips, but age remains lower priority than those chips.
+  // Use their preferred width so overflow cannot trick the age policy into restoring too early.
+  const referenceList = el.querySelector<HTMLElement>('[data-reference-width]')
+  const missingReferences = referenceList
+    ? Math.max(0, Number(referenceList.dataset.referenceWidth) - referenceList.getBoundingClientRect().width) : 0
+  return Math.ceil((width || el.scrollWidth) + missingReferences)
 }
 
 /** Whether the meta line should drop its age (#729): true while the line, WITH the age in place,
@@ -808,7 +820,7 @@ function useAgeDropped(ref: React.RefObject<HTMLElement | null>, enabled: boolea
     const bound = new Set<Element>()
     const bind = (): boolean => {
       let fresh = false
-      for (const child of Array.from(el.children)) {
+      for (const child of [...el.children, ...el.querySelectorAll('[data-slot="reference-list"] [data-slot="pr-chip"], [data-slot="reference-list"] [data-slot="issue-chip"]')]) {
         const { slot } = (child as HTMLElement).dataset
         if (slot === 'task-row-age' || child.getAttribute('aria-hidden') === 'true') continue
         if (bound.has(child)) continue
@@ -829,7 +841,7 @@ function useAgeDropped(ref: React.RefObject<HTMLElement | null>, enabled: boolea
           needed.current = null
           check()
         })
-    mutations?.observe(el, { childList: true })
+    mutations?.observe(el, { childList: true, subtree: true })
     // Web fonts change widths without resizing anything. Once per row, and only if they have not
     // landed: a resolved `ready` would otherwise re-fire on every effect run and re-measure
     // forever. A callback from a torn-down run does nothing (`live`); the current run's takes over.
@@ -875,6 +887,7 @@ function RunRow({
   currentRunId,
   now,
   scope,
+  inWorkingGroup = false,
   variant = false,
   groupReferences,
   showTokens,
@@ -888,6 +901,7 @@ function RunRow({
   now: number
   /** Explicit `/p/<id>` link scope for a non-active project's row; null = the active scope. */
   scope: string | null
+  inWorkingGroup?: boolean
   /** A member row under an expanded group tile: indented, letter-chipped, and labelled with what
    *  actually distinguishes the variants (runner and spend) rather than the shared title. */
   variant?: boolean
@@ -930,7 +944,7 @@ function RunRow({
   // together, so an age says nothing that tells them apart. A queued row's position rides in
   // its state word instead of an age.
   const age = variant || queuePosition !== null ? '' : shortAge(run.finishedAt ?? run.createdAt, now)
-  const stateWord = metaStateWord(attention, queuePosition, run, now)
+  const stateWord = inWorkingGroup && attention.label === 'running' ? undefined : metaStateWord(attention, queuePosition, run, now)
   // A variant's tokens live on line 2, last, so they are the first thing a narrow column cuts
   // (#617 01a: tokens drop first, then cost; the letter and the runner never drop).
   const tokens = variant && showTokens && (run.inputTokens !== undefined || run.outputTokens !== undefined)
@@ -954,17 +968,11 @@ function RunRow({
 
   const meta: React.ReactNode[] = []
   if (stateWord) meta.push(<span key="state" data-slot="task-row-state">{stateWord}</span>)
-  for (const ref of references) {
-    meta.push(
-      <TaskReferenceChip
-        key={`${ref.kind}-${ref.number}-${ref.url}`}
-        run={run}
-        reference={ref}
-        plain
-        inert={inertReferences}
-      />,
-    )
-  }
+  const referenceScope = useReferenceScope()
+  const [overflowContainer, setOverflowContainer] = React.useState<HTMLSpanElement | null>(null)
+  if (references.length) meta.push(<ReferenceList key="references" references={references} maxVisible={2}
+    taskTitle={title} projectId={scope ?? referenceScope.projectId} repoBase={referenceScope.repoBase} runId={run.id}
+    plain compact inertInline={inertReferences} fitContainer overflowContainer={overflowContainer} />)
   if (age && !ageDropped) meta.push(<span key="age" data-slot="task-row-age" className="tabular-nums">{age}</span>)
   if (tokens && !lineOneOverflows) meta.push(<span key="tokens" data-slot="task-row-tokens" className="tabular-nums">{tokens}</span>)
   // A needs-you variant says no state word — its amber dot and the Needs you group say it —
@@ -1112,6 +1120,8 @@ function RunRow({
           {meta.length ? meta.flatMap((part, index) => (index ? [<MetaSeparator key={`sep-${index}`} />, part] : [part])) : run.notify === true ? null : ' '}
         </div>
       </div>
+      {references.length ? <span ref={setOverflowContainer} data-slot="protected-reference-overflow"
+        className={cn('shrink-0 self-end', inertReferences && '-my-1.5 self-center')} /> : null}
       {run.delegation?.role === 'worker' ? <span className="sr-only">Worker · {attention.label}</span> : null}
       {/* The trailing slot — reserved on every row, whether or not anything is in it (#617). */}
       <span
@@ -1297,8 +1307,10 @@ export function TaskQuickListContainer({ showViewControls = true, projectId: exp
   const repoBase = useProjectRepoBase(projectId)
   const buckets = capBuckets(groupRuns(runs.data ?? [], view), sidebarLimits)
   const referenceRequests = projectId === undefined ? [] : buckets.flatMap(bucket =>
-    bucket.rows.flatMap(row => taskReferences(row.kind === 'run' ? row.run : row.members[0]!).map(
-      reference => ({ projectId, kind: reference.kind, number: reference.number }),
+    bucket.rows.flatMap(row => (row.kind === 'run' ? [row.run] : row.members).flatMap(run =>
+      taskReferences(run, repoBase).filter(ref => isOwnRepoReference(ref, repoBase)).map(
+        reference => ({ projectId, kind: reference.kind, number: reference.number }),
+      ),
     )),
   )
 

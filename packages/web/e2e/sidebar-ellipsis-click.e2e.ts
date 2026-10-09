@@ -9,7 +9,9 @@ import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './f
 
 // A sidebar row's meta line truncates with an ellipsis, and Chromium keeps hit-testing a reference
 // chip the ellipsis hid. A click on the blank space right of the `…` opened that hidden reference
-// instead of the task's session. Real CSS and a real pointer: jsdom has neither layout nor paint.
+// instead of the task's session. Since #922 the reference list fits itself into the line: what
+// does not fit moves behind the +N button as a real link, so no reference is hidden by CSS any
+// more. Real CSS and a real pointer: jsdom has neither layout nor paint.
 const id = 'ellipsis-row'
 const row = `[data-slot="task-row"][data-run-id="${id}"]`
 const meta = `${row} [data-slot="task-row-meta"]`
@@ -53,27 +55,37 @@ afterAll(async () => {
   if (root) rmSync(root, { recursive: true, force: true })
 })
 
-describe('sidebar meta line ellipsis', () => {
-  it('a click right of the `…` opens the session, not the reference the ellipsis hid', () => {
+describe('sidebar meta line fitting', () => {
+  it('fits its references without hiding any: the rest sit behind +N as real links', () => {
     browser.goto(`${base}/p/${project}`)
     // Settled, not first truth: the web font changes every width on the line, and the marks follow
-    // it a ResizeObserver callback later. The line overflows, so the ellipsis hid a reference.
-    const point = waitForSettledSample<{ hover: boolean; x: number; y: number; hit: string | null; firstChip: string | null; hidden: string[] }>(browser, `(() => {
+    // it a ResizeObserver callback later.
+    const point = waitForSettledSample<{ hover: boolean; fits: boolean; hit: string | null; firstChip: string | null; hidden: string[] }>(browser, `(() => {
       const line = document.querySelector(${JSON.stringify(meta)})
       const chip = line?.querySelector('[data-slot="pr-chip"]')
-      if (!line || !chip || line.scrollWidth <= line.clientWidth) return null
+      const overflow = document.querySelector(${JSON.stringify(`${row} [data-slot="reference-overflow"]`)})
+      if (!line || !chip || !overflow) return null
       const box = line.getBoundingClientRect(), first = chip.getBoundingClientRect()
       const x = Math.round(box.right - 2), y = Math.round(box.top + box.height / 2)
       const at = (px, py) => document.elementFromPoint(px, py)?.closest('a')?.getAttribute('href') ?? null
       const hidden = [...line.querySelectorAll(':scope > [data-ellipsis-hidden]')].map((el) => el.getAttribute('href') ?? el.textContent)
-      return { hover: matchMedia('(hover: hover)').matches, x, y, hit: at(x, y), firstChip: at(first.left + first.width / 2, first.top + first.height / 2), hidden }
+      return { hover: matchMedia('(hover: hover)').matches, fits: line.scrollWidth <= line.clientWidth, hit: at(x, y), firstChip: at(first.left + first.width / 2, first.top + first.height / 2), hidden }
     })()`, undefined, meta)
     expect(point.hover, 'references are links only under a hover-capable pointer').toBe(true)
-    // The reference the line still paints stays a link; the space behind the ellipsis is the row.
-    expect(point.firstChip, `marked hidden: ${point.hidden.join(', ')}`).toBe('https://github.com/o/r/pull/47240001')
+    // The fitter keeps the whole reference line inside the column: no CSS ellipsis engages, so
+    // nothing is hidden-but-hit-testable. If this fails, a reference fell out of the fit again.
+    expect(point.fits, `marked hidden: ${point.hidden.join(', ')}`).toBe(true)
+    expect(point.hidden).toEqual([])
+    // The reference the line still paints stays a link; the space at the line's right edge
+    // belongs to the row (or the +N button), never to a reference nobody can see.
+    expect(point.firstChip).toBe('https://github.com/o/r/pull/47240001')
     expect(point.hit).toBeNull()
-    browser.tapAt(point.x, point.y)
-    const path = browser.waitForValue<string>(`location.pathname`, (value) => value.endsWith(`/tasks/${id}`))
-    expect(path).toBe(`/p/${project}/tasks/${id}`)
+    // The references the line could not fit stay reachable: the +N popover lists every one.
+    browser.click(`${row} [data-slot="reference-overflow"]`)
+    const destinations = browser.waitForValue<string[]>(`(() => {
+      const list = document.querySelector('[data-slot="reference-overflow-list"]')
+      return list ? [...list.querySelectorAll('a')].map(a => a.getAttribute('href')) : null
+    })()`)
+    expect(destinations).toEqual(['https://github.com/o/r/pull/47240001', 'https://github.com/o/r/pull/47120002', 'https://github.com/o/r/issues/46390003'])
   }, 60_000)
 })

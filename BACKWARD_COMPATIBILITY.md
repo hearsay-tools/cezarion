@@ -316,6 +316,14 @@ meaning what it meant when their session started.
 Breaking: removing or renaming a marker, or changing what an emitted marker does (e.g. making
 `CEZ:PR` gate an action instead of steering display). Additive is fine — a new `CEZ:*` marker is
 inert prose to older cezars, which is the property that keeps the vocabulary forward-compatible.
+The optional `pullRequests` record and summary collection retains every accepted PR
+declaration and trusted creation in first-seen order (hearsay-tools/cezarion#922).
+Each entry carries a number, an optional scoped GitHub URL and `declared` or
+`created` evidence. Repeating `CEZ:PR` changes the scalar subject to the last
+valid marker while retaining earlier associations. Scalar action gates remain
+unchanged. Old records without the collection still use their legacy references;
+loading does not scan historical transcripts or reconstruct missing associations.
+
 Required path for a change: keep parsing the old spelling for at least one minor release while
 the instructions emit the new one.
 

@@ -428,20 +428,31 @@ describe('selection and control states (#171)', () => {
       checkNavSelection(variant, { base: baseUrl, projectId: project, nav: '[data-slot="view-tabs"]' })
     })
 
-    if (variant.id === 'desktop-dark-comfortable') it(`${variant.id}: the group row's shared reference is a link with the status panel (#617)`, () => {
+    if (variant.id === 'desktop-dark-comfortable') it(`${variant.id}: the group row's shared foreign reference is a keyboard-accessible external link (#617)`, () => {
       variantId = variant.id
       browser.goto(`${baseUrl}/p/${project}/tasks/one`)
       const group = '[data-slot="group-row"][data-group-id="g-sel"]'
-      const link = `${group} [data-slot="group-meta"] a[data-slot="issue-chip"]`
-      browser.waitForFunction(`document.querySelector(${JSON.stringify(link)}) !== null`)
+      const inline = `${group} [data-slot="group-meta"] a[data-slot="issue-chip"]`
+      const overflow = `${group} [data-slot="reference-overflow"]`
+      browser.waitForFunction(`document.querySelector(${JSON.stringify(inline)}) !== null || document.querySelector(${JSON.stringify(overflow)}) !== null`)
       applyContrastQaVariant(browser, variant)
+      // The shared status text can consume the narrow group's entire metadata budget.
+      // Its protected overflow still gives the reference the same link and keyboard panel.
+      let link = inline
+      if (!browser.evaluate(`document.querySelector(${JSON.stringify(inline)}) !== null`)) {
+        browser.click(overflow)
+        link = '[data-slot="reference-overflow-list"] a[data-slot="issue-chip"]'
+      }
       browser.waitForFunction(`document.querySelector(${JSON.stringify(link)})?.getBoundingClientRect().width > 0`)
       expect(browser.evaluate(`(() => { const a = document.querySelector(${JSON.stringify(link)}); return { href: a.getAttribute('href'), inToggle: a.closest('button') !== null, text: a.textContent } })()`))
         .toEqual({ href: 'https://github.com/o/r/issues/425', inToggle: false, text: '#425' })
-      // Keyboard focus opens the same status panel a task row's reference has.
+      // This no-Git fixture has no known own repository. Preserve the foreign destination
+      // and keyboard focus without asking the local forge for that repository's status.
       focusWithKeyboard(browser, link)
-      browser.waitForFunction(`document.querySelector('[data-slot="reference-status-card"]') !== null`)
-      // …and focusing the link did not toggle the group.
+      browser.waitForFunction(`document.querySelector(${JSON.stringify(link)}) === document.activeElement`)
+      browser.waitForFunction(`document.querySelector(${JSON.stringify(link)})?.getAttribute('target') === '_blank'`)
+      expect(browser.evaluate(`document.querySelector('[data-slot="reference-status-card"]') === null`)).toBe(true)
+      // Focusing the link did not toggle the group.
       expect(browser.evaluate(`document.querySelector('${group} [data-slot="group-tile"]').getAttribute('aria-expanded')`)).toBe('false')
       browser.press('Escape')
       browser.waitForFunction(`document.querySelector('[data-slot="reference-status-card"]') === null`)

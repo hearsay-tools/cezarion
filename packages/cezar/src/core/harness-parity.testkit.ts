@@ -74,6 +74,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `serve-start-exit` | the backend server's first start exits before listening; the next start answers `baseline` |
  */
 export const SCENARIOS = [
+  'multi-pr-refs',
   'auto-resumed',
   'turn-messages',
   'skill-warning',
@@ -285,7 +286,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_CLAUDE_BIN',
     mockBin: CLAUDE_MOCK,
     scenarios: {
-      'turn-messages': 'mock:turn-messages',
+      'multi-pr-refs': 'mock:multi-pr-refs', 'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
@@ -329,7 +330,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_CODEX_BIN',
     mockBin: CODEX_MOCK,
     scenarios: {
-      'turn-messages': 'mock:turn-messages',
+      'multi-pr-refs': 'mock:multi-pr-refs', 'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
@@ -375,7 +376,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: OPENCODE_MOCK,
     scenarios: {
       'skill-warning': 'mock:skill-warning mock:done',
-      'turn-messages': 'mock:turn-messages',
+      'multi-pr-refs': 'mock:multi-pr-refs', 'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       // The failing start is set by driveSeam's env (no prompt exists before listening).
       'serve-start-exit': BASELINE_PROMPT,
@@ -420,7 +421,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     askResumeCases: [{ kind: 'CEZ:ASK', scenario: 'ask-resume', answer: 'Library: Vitest' }],
     binEnv: 'CEZ_CURSOR_BIN',
     mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-print.mjs'),
-    scenarios: { 'turn-messages': 'mock:turn-messages', 'missing-binary': BASELINE_PROMPT,
+    scenarios: { 'multi-pr-refs': 'mock:multi-pr-refs', 'turn-messages': 'mock:turn-messages', 'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
@@ -448,7 +449,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_PI_BIN',
     mockBin: PI_MOCK,
     scenarios: {
-      'turn-messages': 'mock:turn-messages',
+      'multi-pr-refs': 'mock:multi-pr-refs', 'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
@@ -496,7 +497,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'auto-resumed': BASELINE_PROMPT,
       'hold-done': 'mock:hold-done',
       'hold-ask': 'mock:hold-ask',
-      'turn-messages': 'mock:turn-messages',
+      'multi-pr-refs': 'mock:multi-pr-refs', 'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',

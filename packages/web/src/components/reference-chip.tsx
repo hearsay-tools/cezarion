@@ -5,7 +5,8 @@ import type * as React from 'react'
 import { Link as RouterLink } from 'react-router'
 import type { ReferenceStatus } from '@open-mercato/cezar-api-client'
 
-import { useReferenceStatus } from '@/components/reference-status'
+import { isOwnRepoReference } from '@/lib/tasks-table'
+import { useReferenceScope, useReferenceStatus } from '@/components/reference-status'
 import type { ReferenceStatusEntry } from '@/api/queries'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import {
@@ -97,6 +98,7 @@ export function ReferenceChip({
   conflicting: explicitConflicting,
   conflictAction,
   projectId,
+  repoBase: explicitRepoBase,
   to,
   className,
   compact = false,
@@ -119,6 +121,7 @@ export function ReferenceChip({
   /** Only the global Tasks page needs this: its rows come from different projects, and two of
    *  them may each have a #42. Elsewhere the provider's own project is right. */
   projectId?: string
+  repoBase?: string
   /** An in-app destination (#692): the chip becomes a router link opening in the same tab instead
    *  of an external GitHub link. Set only for a reference in the project's own repository. */
   to?: string
@@ -152,7 +155,10 @@ export function ReferenceChip({
   // An explicit `status` wins — it is what a test or a one-off caller passes — and otherwise the
   // surface's provider answers. Outside a provider neither exists and this is the chip the cockpit
   // has always painted.
-  const entry = useReferenceStatus(kind, number, projectId)
+  const scope = useReferenceScope()
+  const repoBase = explicitRepoBase ?? scope.repoBase
+  const localStatus = !url || (repoBase !== undefined && isOwnRepoReference({ kind, number: number ?? 0, url }, repoBase))
+  const entry = useReferenceStatus(kind, localStatus ? number : undefined, projectId)
   const status = explicitStatus ?? entry.status
   // A status this bundle has never heard of resolves to `undefined` here and is then treated
   // exactly like no status at all — the neutral chip, no glyph, no claim in the accessible name.
@@ -181,12 +187,12 @@ export function ReferenceChip({
       )
   // The overridden status rides along into the tooltip whenever the conflict took the chip.
   const tooltip = statusTooltip(entry, presentation, conflicting ? statusPresentation : undefined)
-  const label = plain
+  const label = plain && !compact
     ? number ? `${kind === 'PR' ? 'PR ' : ''}#${number}` : kind
     : number ? `${!compact && kind === 'Issue' ? 'Issue ' : ''}#${number}` : kind
   const kindWord = kind === 'PR' ? 'pull request' : 'issue'
   // The accessible name carries the status too — a screen reader gets what the color says.
-  const ariaLabel = `Open the ${kindWord} for ${taskTitle}${presentation ? ` — ${presentation.label}` : ''}`
+  const ariaLabel = `Open the ${kindWord}${number ? ` #${number}` : ''} for ${taskTitle}${presentation ? ` — ${presentation.label}` : ''}`
 
   const glyphClass = plain && presentation ? PLAIN_GLYPH_CLASS[presentation.tone] : undefined
   const body = (
@@ -197,6 +203,9 @@ export function ReferenceChip({
       ) : (
         <StatusGlyph status={presentation ? status : undefined} className={plain ? cn('size-2.5', glyphClass) : undefined} />
       )}
+      {plain && compact ? kind === 'PR'
+        ? <GitPullRequestIcon data-slot="reference-kind" className="size-2.5 shrink-0" aria-hidden="true" />
+        : <CircleDotIcon data-slot="reference-kind" className="size-2.5 shrink-0" aria-hidden="true" /> : null}
       {plain ? (
         <span className={inert ? undefined : 'underline-offset-2 group-hover/reference:underline group-focus-visible/reference:underline'}>{label}</span>
       ) : label}

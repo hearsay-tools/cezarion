@@ -210,6 +210,17 @@ async function respond(userText, imageCount, uuid) {
     return;
   }
   // #401: result-only full text; mapResult and v1 use the same fallback.
+  if (userText.includes('mock:multi-pr-refs')) {
+    const { multiPrText, unrelatedPr } = await import('./mock-multi-pr.mjs');
+    emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'multi-read', name: 'Read', input: { file_path: 'other.txt' } }] } });
+    emit({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'multi-read', content: unrelatedPr }] } });
+    emit({ type: 'assistant', parent_tool_use_id: 'multi-read', message: { role: 'assistant', content: [{ type: 'text', text: unrelatedPr }] } });
+    emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: unrelatedPr }] } });
+    const text = multiPrText(userText);
+    for (const block of text.split('\n')) emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: block }] } });
+    emit({ type: 'result', subtype: 'success', result: text, usage: { input_tokens: 10, output_tokens: 5 } });
+    return;
+  }
   if (userText.includes('mock:turn-messages:')) {
     const { turnMessages } = await import('./mock-turn-messages.mjs');
     const messages = turnMessages(userText);

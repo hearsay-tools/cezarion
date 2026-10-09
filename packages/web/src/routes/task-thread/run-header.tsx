@@ -66,6 +66,7 @@ import {
   taskIssueUrl,
   taskPrUrl,
   taskItemPath,
+  isOwnRepoReference,
   taskItemTabs,
   taskReferences,
   workflowLabel,
@@ -241,12 +242,12 @@ export function RunHeader({
     () =>
       referenceProjectId === undefined
         ? []
-        : references.map((reference) => ({
+        : references.filter(reference => isOwnRepoReference(reference, repoBase)).map((reference) => ({
             projectId: referenceProjectId,
             kind: reference.kind,
             number: reference.number,
           })),
-    [references, referenceProjectId],
+    [references, referenceProjectId, repoBase],
   )
   // The linked own-repo issues and PRs, one tab each after Files (#692).
   const itemTabs = useMemo(() => taskItemTabs(run, repoBase), [run, repoBase])

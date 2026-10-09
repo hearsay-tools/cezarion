@@ -557,11 +557,11 @@ export class AgentBrowser {
    *  first truth, which is how `waitForValue` is built on this rather than beside it. */
   waitForStable<T, U extends T>(
     js: string,
-    options: { holdMs: number; matcher: (value: T) => value is U; intervalMs?: number; failure?: string },
+    options: { holdMs: number; matcher: (value: T) => value is U; intervalMs?: number; failure?: string; timeoutMs?: number },
   ): U
   waitForStable<T = unknown>(
     js: string,
-    options: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string },
+    options: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string; timeoutMs?: number },
   ): T
   waitForStable<T = unknown>(
     js: string,
@@ -570,9 +570,10 @@ export class AgentBrowser {
       matcher = (value: T) => value !== null && value !== undefined && value !== false,
       intervalMs = 100,
       failure,
-    }: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string },
+      timeoutMs,
+    }: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string; timeoutMs?: number },
   ): T {
-    const deadline = performance.now() + defaultWaitTimeoutMs()
+    const deadline = performance.now() + (timeoutMs ?? defaultWaitTimeoutMs())
     let lastValue: unknown = undefined
     let lastError: unknown = undefined
     let holdStartedAt: number | null = null
@@ -629,12 +630,12 @@ export class AgentBrowser {
   waitForValue<T, U extends T>(
     js: string,
     matcher: (value: T) => value is U,
-    options?: { intervalMs?: number; failure?: string },
+    options?: { intervalMs?: number; failure?: string; timeoutMs?: number },
   ): U
   waitForValue<T = unknown>(
     js: string,
     matcher?: (value: T) => boolean,
-    options?: { intervalMs?: number; failure?: string },
+    options?: { intervalMs?: number; failure?: string; timeoutMs?: number },
   ): T
   waitForValue<T = unknown>(
     js: string,
@@ -692,6 +693,19 @@ export class AgentBrowser {
     this.run(['mouse', 'move', String(x), String(y)])
     this.run(['mouse', 'down'])
     this.run(['mouse', 'up'])
+  }
+
+  /** Configure touch before measuring coordinates; enabling it can change viewport layout. */
+  async enableTouch(): Promise<void> {
+    await this.withPageSession(request => request('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 }))
+  }
+
+  /** One trusted finger press at a measured point in a touch-enabled target. */
+  async touchTapAt(x: number, y: number): Promise<void> {
+    await this.withPageSession(async request => {
+      await request('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: Math.round(x), y: Math.round(y), id: 1 }] })
+      await request('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    })
   }
 
   /** Send trusted wheel input at the current pointer position. */

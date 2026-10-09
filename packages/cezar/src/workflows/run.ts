@@ -7359,7 +7359,7 @@ export class RunManager {
   private applyTurnMarkers(runId: string, run: RunRecord, turnText: string): void {
     const markers = parseTaskMarkers(turnText);
     if (markers.pr !== undefined || markers.issue !== undefined) {
-      this.store.applyMarkerRefs(runId, { pr: markers.pr, issue: markers.issue });
+      this.store.applyMarkerRefs(runId, { pr: markers.pr, prs: markers.prs, issue: markers.issue });
     }
     if (markers.title && run.titleOrigin !== 'user') {
       const current = this.store.getRun(runId);

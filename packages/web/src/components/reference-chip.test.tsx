@@ -152,7 +152,7 @@ describe('ReferenceChip with a status', () => {
     expect(chip.querySelector('svg[data-slot="status-dot"]')).toBeNull()
     // The neutral chip's own tooltip, not a described status: the URL, exactly as before statuses.
     expect(chip.getAttribute('title')).toBe('https://github.com/o/r/pull/402')
-    expect(chip.getAttribute('aria-label')).toBe('Open the pull request for Add checkout')
+    expect(chip.getAttribute('aria-label')).toBe('Open the pull request #402 for Add checkout')
   })
 
   it('keeps a non-http reference inert while still saying where it stands', () => {
@@ -354,7 +354,7 @@ describe('ReferenceChip plain (the sidebar meta line, #617)', () => {
 
   it('stays a keyboard-reachable link whose name still carries the status', () => {
     render(<ReferenceChip reference={PR} taskTitle="Add checkout" status="checks-failing" plain />)
-    const link = screen.getByRole('link', { name: `Open the pull request for Add checkout — ${REFERENCE_STATUS['checks-failing'].label}` })
+    const link = screen.getByRole('link', { name: `Open the pull request #402 for Add checkout — ${REFERENCE_STATUS['checks-failing'].label}` })
     expect(link.getAttribute('href')).toBe('https://github.com/o/r/pull/402')
     expect(link.getAttribute('tabindex')).not.toBe('-1')
   })
@@ -444,7 +444,7 @@ describe('ReferenceChip with an in-app destination (#692)', () => {
     expect(chip.tagName).toBe('A')
     expect(chip.getAttribute('href')).toBe('/p/api/tasks/r1/pr/402')
     expect(chip.getAttribute('target')).toBeNull()
-    expect(chip.getAttribute('aria-label')).toBe('Open the pull request for Add checkout — Ready to merge')
+    expect(chip.getAttribute('aria-label')).toBe('Open the pull request #402 for Add checkout — Ready to merge')
   })
 
   it('keeps the status panel and its conflict action keyboard-reachable on the router link', async () => {

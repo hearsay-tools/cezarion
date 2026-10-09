@@ -26,6 +26,16 @@ function record(over: Partial<RunRecord> = {}): RunRecord {
 }
 
 describe('toRunSummary', () => {
+  it('preserves every PR in the summary and workspace index', () => {
+    const entries = Array.from({ length: 10 }, (_, i) => ({ number: 812 + i, source: 'declared' as const }));
+    const summary = toRunSummary(record({ pullRequests: entries } as Partial<RunRecord>));
+    expect(summary).toHaveProperty('pullRequests', entries);
+    expect(runSummarySchema.parse(summary)).toHaveProperty('pullRequests', entries);
+    expect(runIndexEntrySchema.parse({ projectId: 'p1', ...summary })).toHaveProperty('pullRequests', entries);
+    expect('pullRequests' in toRunSummary(record())).toBe(false);
+    expect(toRunSummary(record({ pullRequests: [] } as Partial<RunRecord>))).toHaveProperty('pullRequests', []);
+  });
+
   it('omits detail-only fields', () => {
     const summary = toRunSummary(record({
       systemPrompt: 'be brief',

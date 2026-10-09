@@ -155,3 +155,13 @@ describe('RunStore.listRunSummaries({ archivedWindow })', () => {
     expect(open().listRunSummaries().runs).toHaveLength(1 + 4 + 2 + 250 + 300);
   });
 });
+
+it('archived search retains summaries whose only match is a PR in the collection', () => {
+  seedRuns(dataDir, [root('split', 1, { pullRequests: [812, 813, 814, 815, 816].map(number => ({ number, source: 'declared' })) })]);
+  const store = open();
+  for (const number of [812, 813, 814, 815, 816]) {
+    const found = store.listArchivedRuns({ q: `#${number}`, limit: 50 });
+    expect('error' in found).toBe(false);
+    if (!('error' in found)) expect(found.runs.map(run => run.id)).toEqual(['split']);
+  }
+});
