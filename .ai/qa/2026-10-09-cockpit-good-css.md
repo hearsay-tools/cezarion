@@ -68,3 +68,7 @@ This selects the two parameterized cases that create replacement SharedWorkers a
 The original full-spec reproduction command was `E2E_PREBUILT_ASSETS=1 npm run test:e2e -- tab-coordination.e2e.ts`; its fixed rerun passed all five tests with no unhandled errors. The separate remote Basic Auth navigation timeout produced `.ai/qa/failures/tab-coordination/remote-Basic-Auth-keeps-finite-recovery-authenticated-without-a-worker-or-ordina-1/`; that bundle describes the navigation timeout, not the CDP cleanup rejection.
 
 PR CI on commit `7f4394c8` subsequently passed both Vitest shards, both Node-floor shards, all four browser shards, and the aggregate build/package gate after the documented retry of an unchanged runner test.
+
+## Authorized runner follow-up
+
+The user expanded scope after repeated CI failures. OpenCode classified only numeric exit codes; an external SIGKILL could settle without an error when process exit preceded SSE closure. The runner now recognizes an external signal and includes its name in the error, while preserving successful self-initiated termination. The existing RUNNER_IDS shutdown S22 regression retains native mocks and delays only the SSE terminal notification to force this ordering. It failed against the original source, then all 38 shutdown-parity tests passed with the fix. This strengthens an existing registered parity cell rather than introducing an exemption.
