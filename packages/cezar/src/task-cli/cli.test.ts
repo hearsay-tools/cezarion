@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { apiRunSchema, runStatusSchema } from '@open-mercato/cezar-contract';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { startTestCockpit, type TestCockpit } from './cockpit.testkit.ts';
-import { runTaskCommand, type TaskIo } from './cli.ts';
+import { runTaskCommand, taskHelp, type TaskIo } from './cli.ts';
+import { discoverCockpit } from './discovery.ts';
 import { TaskCliError, type Cockpit } from './http.ts';
 import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { registerProject } from '../workspace/projects.ts';
@@ -67,6 +68,105 @@ describe('cez task', () => {
       'a'.repeat(64),
     ).id;
   };
+
+  describe('shared flag positions (hearsay-tools/cezarion#554)', () => {
+    const cases = ['list', 'status', 'stop'].flatMap((operation) =>
+      ['url', 'repo'].flatMap((flag) => ['before', 'after'].flatMap((position) =>
+        ['space', 'equals'].map((form) => ({ operation, flag, position, form })),
+      )),
+    );
+    it.each(cases)('$operation with --$flag $position ($form) resolves and requests the same cockpit', async ({ operation, flag, position, form }) => {
+      const project = await registerProject(harness.repoRoot);
+      const api = `${cockpit.origin}/api/v1/p/${project.id}`;
+      const id = await start();
+      const value = flag === 'url' ? cockpit.origin : harness.repoRoot;
+      const globals = form === 'space' ? [`--${flag}`, value] : [`--${flag}=${value}`];
+      const command = operation === 'list' ? [operation] : [operation, id];
+      const argv = position === 'before' ? [...globals, ...command] : [...command, ...globals];
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      try {
+        expect(await runTaskCommand(argv, flag === 'url' ? { CEZ_URL: 'http://127.0.0.1:1' } : {}, {
+          ...io(),
+          discover: async (options) => {
+            expect(options).toEqual({
+              url: flag === 'url' ? cockpit.origin : undefined,
+              repoDir: flag === 'repo' ? harness.repoRoot : resolve(process.cwd()),
+            });
+            const found = await discoverCockpit({ ...options, ports: [Number(new URL(cockpit.origin).port)] });
+            expect(found.api).toBe(api);
+            return found;
+          },
+        })).toBe(0);
+        const requests = fetchSpy.mock.calls
+          .filter(([url]) => String(url).startsWith(api + '/'))
+          .map(([url, init]) => ({ url: String(url), method: init?.method ?? 'GET' }));
+        expect(requests).toEqual([{
+          url: operation === 'list' ? `${api}/run-summaries?archived=recent`
+            : `${api}/runs/${id}${operation === 'stop' ? '/cancel' : ''}`,
+          method: operation === 'stop' ? 'POST' : 'GET',
+        }]);
+        if (operation === 'list') expect(last().runs).toMatchObject([{ id }]);
+        else if (operation === 'status') expect(last()).toMatchObject({ id, status: 'queued' });
+        else {
+          expect(last()).toEqual({ id, cancelled: true });
+          expect(store.getRun(id)?.status).toBe('cancelled');
+        }
+      } finally { fetchSpy.mockRestore(); }
+    });
+
+    it.each(['--x', '--wait', '--full', '--timeout-seconds=1'])('rejects %s before the operation without discovery', async (flag) => {
+      expect(await run([flag, 'start', 'x'])).toBe(64);
+      expect(last()).toMatchObject({
+        code: 'invalid_input',
+        error: `unknown option '${flag.split('=')[0]}' before the operation; only --url, --repo and --help go there`,
+        usage: { operations: expect.arrayContaining([{ name: 'list', synopsis: 'cez task list' }]) },
+      });
+      expect(discoveries).toBe(0);
+    });
+
+    it.each([
+      ['--url', 'http://127.0.0.1:1', 'list', '--url=http://127.0.0.1:2'],
+      ['--repo=one', 'list', '--repo', 'two'],
+      ['--help', 'list', '--help'],
+      ['-h', 'list', '--help'],
+      ['--url=one', '--url', 'two', 'list'],
+      ['--repo', 'one', '--repo=two', 'list'],
+      ['--help', '-h', 'list'],
+    ].map((argv) => ({ argv })))('rejects duplicate shared flags in $argv', async ({ argv }) => {
+      expect(await run(argv)).toBe(64);
+      expect(last()).toMatchObject({ code: 'invalid_input', error: expect.stringContaining('duplicate option'), usage: { operations: expect.arrayContaining([{ name: 'list', synopsis: 'cez task list' }]) } });
+      expect(discoveries).toBe(0);
+    });
+
+    it.each(['url', 'repo'].flatMap((flag) => [
+      [`--${flag}`], [`--${flag}`, '--help', 'list'], [`--${flag}=--help`, 'list'],
+      [`--${flag}`, '', 'list'], [`--${flag}=`, 'list'],
+    ]).map((argv) => ({ argv })))('rejects missing or option-shaped leading values in $argv', async ({ argv }) => {
+      expect(await run(argv)).toBe(64);
+      expect(last()).toMatchObject({ code: 'invalid_input', error: expect.stringContaining('requires a value'), usage: { operations: expect.arrayContaining([{ name: 'list', synopsis: 'cez task list' }]) } });
+      expect(discoveries).toBe(0);
+    });
+
+    it.each([['--url', 'http://127.0.0.1:1'], ['--repo=checkout']].map((argv) => ({ argv })))('reports missing operation after $argv', async ({ argv }) => {
+      expect(await run(argv)).toBe(64);
+      expect(last()).toMatchObject({ code: 'invalid_input', error: 'missing operation', usage: { operations: expect.arrayContaining([{ name: 'list', synopsis: 'cez task list' }]) } });
+      expect(discoveries).toBe(0);
+    });
+
+    it.each(['--help', '-h'].flatMap((help) => ['start', 'list', 'status', 'stop'].map((operation) => ({ help, operation }))))(
+      '$help $operation prints operation help without discovery', async ({ help, operation }) => {
+        expect(await run([help, operation])).toBe(0);
+        expect(out.at(-1)).toBe(taskHelp(operation));
+        expect(discoveries).toBe(0);
+      },
+    );
+
+    it('keeps parsing after the operation strict even with leading help', async () => {
+      expect(await run(['--help', 'list', '--x'])).toBe(64);
+      expect(last()).toMatchObject({ code: 'invalid_input' });
+      expect(discoveries).toBe(0);
+    });
+  });
 
   describe('start', () => {
     it('creates a queued run in the cockpit and prints its thread url', async () => {

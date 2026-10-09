@@ -665,6 +665,16 @@ branch on, so nothing has to parse prose. It never starts a server: it finds the
 project registry holds this checkout (ports 4321–4370; a task worktree resolves to its parent
 project), or you point it at one with `--url` / `CEZ_URL`.
 
+```text
+cez task [--url <origin> | --repo <dir>] <operation> …
+```
+
+The shared `--url`, `--repo` and `--help`/`-h` flags also work before the operation;
+`--url` and `--repo` accept both `--flag value` and `--flag=value`. A shared flag repeated
+before the operation or on both sides is a usage error. Operation flags stay after the
+operation. `cez task --help <operation>` shows that operation's help without discovery.
+An explicit `--url` wins over `CEZ_URL`; `--repo` selects the checkout to discover.
+
 ```bash
 id=$(cez task start --task-file - <<'EOF' | jq -r .id
 Fix the `cez task` docs. Keep $(example) and "quotes" literal.
