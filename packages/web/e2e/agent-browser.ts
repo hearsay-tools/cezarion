@@ -557,11 +557,11 @@ export class AgentBrowser {
    *  first truth, which is how `waitForValue` is built on this rather than beside it. */
   waitForStable<T, U extends T>(
     js: string,
-    options: { holdMs: number; matcher: (value: T) => value is U; intervalMs?: number; failure?: string },
+    options: { holdMs: number; matcher: (value: T) => value is U; intervalMs?: number; failure?: string; timeoutMs?: number },
   ): U
   waitForStable<T = unknown>(
     js: string,
-    options: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string },
+    options: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string; timeoutMs?: number },
   ): T
   waitForStable<T = unknown>(
     js: string,
@@ -570,9 +570,10 @@ export class AgentBrowser {
       matcher = (value: T) => value !== null && value !== undefined && value !== false,
       intervalMs = 100,
       failure,
-    }: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string },
+      timeoutMs,
+    }: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string; timeoutMs?: number },
   ): T {
-    const deadline = performance.now() + defaultWaitTimeoutMs()
+    const deadline = performance.now() + (timeoutMs ?? defaultWaitTimeoutMs())
     let lastValue: unknown = undefined
     let lastError: unknown = undefined
     let holdStartedAt: number | null = null
@@ -629,12 +630,12 @@ export class AgentBrowser {
   waitForValue<T, U extends T>(
     js: string,
     matcher: (value: T) => value is U,
-    options?: { intervalMs?: number; failure?: string },
+    options?: { intervalMs?: number; failure?: string; timeoutMs?: number },
   ): U
   waitForValue<T = unknown>(
     js: string,
     matcher?: (value: T) => boolean,
-    options?: { intervalMs?: number; failure?: string },
+    options?: { intervalMs?: number; failure?: string; timeoutMs?: number },
   ): T
   waitForValue<T = unknown>(
     js: string,

@@ -81,8 +81,12 @@ async function nativeTap(selector: string, effect?: string) {
     })()`, () => true, selector)
     await browser.touchTapAt(point.x, point.y)
     if (effect === undefined) return
-    await new Promise(resolve => setTimeout(resolve, 600))
-    if (browser.evaluate(`!!(${effect})`)) return
+    try {
+      browser.waitForValue(effect, undefined, { timeoutMs: 1_500, failure: 'tap had no effect' })
+      return
+    } catch {
+      // The target moved under the tap; the next attempt re-samples the settled geometry.
+    }
   }
   browser.waitForValue(`!!(${effect!})`)
 }
