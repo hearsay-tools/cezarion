@@ -903,8 +903,10 @@ Claude/Codex/Pi/OMP mocks close fd 0; OpenCode destroys the next native prompt H
 while retaining SSE. The rejected receipt must retain input failure evidence, settlement
 must be bounded, and no successful native turn completion may be fabricated. OpenCode's
 synthetic terminal turn boundary remains valid after failure. Cursor print has a named,
-executable `scenario-unconstructible` exemption: prompts are argv of a new process,
-and human follow-ups queue for its next process, so it has no live input transport to close.
+executable `scenario-unconstructible` exemption: Cursor print writes its prompt to stdin
+and closes stdin once per turn, refuses agent input while busy, and queues human follow-ups
+for a new per-turn child; consequently this admitted-turn/live-followup scenario cannot be
+constructed.
 Pi and OMP additionally close admission immediately, report one fatal transport failure
 and reject their results even if the child would later exit zero. OMP's focused regression
 closes stdin before the native `ready` frame to exercise the queued startup outbox.

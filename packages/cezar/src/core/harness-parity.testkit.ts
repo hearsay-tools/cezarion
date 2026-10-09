@@ -588,7 +588,7 @@ export interface ParityExemption {
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   {
     criterion: 'S29', backend: 'cursor', kind: 'scenario-unconstructible',
-    reason: 'Cursor print delivers prompts in argv of a new child and queues human follow-ups until the current child finishes; there is no live stdin or HTTP prompt transport to close. ACP stdin behavior is a separate legacy transport, not the HARNESS_ADAPTERS cursor-print wire.',
+    reason: 'Cursor print writes the prompt to stdin once per turn and then closes stdin. It refuses agent input while busy and queues human follow-ups for a new per-turn child, so this admitted-turn/live-followup cell has no writable input transport to close. ACP stdin behavior is a separate legacy transport, not the HARNESS_ADAPTERS cursor-print wire.',
   },
   ...(['S9', 'R12', 'R15'] as const).map(criterion => ({
     criterion, backend: 'cursor' as const, kind: 'scenario-unconstructible' as const,
