@@ -205,6 +205,12 @@ it('reduced-motion dialogs open and close without movement', async () => {
 it('older-browser composer fallback responds to width changes and keeps focus', () => {
   const selector = '[data-slot="composer"] textarea'
   open('/new', selector, 1440, 900)
+  // Navigation restores the previous test's draft. Clear it through React-observed
+  // keyboard input before fill: direct value clearing can retain controlled state.
+  browser.click(selector)
+  browser.press('Control+a')
+  browser.press('Backspace')
+  browser.waitForFunction(`document.querySelector('${selector}').value === ''`)
   // Simulate an engine lacking field-sizing without replacing the textarea or its React state.
   browser.evaluate(`window.__originalSupports = CSS.supports; CSS.supports = (...args) => args[0] === 'field-sizing' ? false : window.__originalSupports(...args)`)
   try {

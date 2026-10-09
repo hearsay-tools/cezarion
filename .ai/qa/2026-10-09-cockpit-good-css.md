@@ -50,3 +50,7 @@ The tab-coordination cleanup failure was traced to an unowned worker-setup promi
 The full unit run is finished. Its sole delegation snapshot failure passed an isolated rerun unchanged (1 selected test); the cause of the intermittent result is not established. No service implementation changed. Real Safari QA remains outstanding. All monitored commands and owned workers have finished.
 
 The user approved opening the draft with the documented test exception; real Safari QA remains required before merge.
+
+## PR CI follow-up
+
+The first PR CI run exposed restored draft text in the older-browser fallback test: its fill appended to the previous test’s `Short draft`. The test now clears through keyboard input before filling, preserving the exact draft-retention assertion. All 13 good-css browser checks passed in the focused rerun. The same CI run also failed the unchanged server `omp-input-pipe.test.ts` Codex closed-input assertion; the next push will recheck it. Other three browser shards and both Node-floor shards passed.
