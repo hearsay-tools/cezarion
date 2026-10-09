@@ -54,3 +54,17 @@ The user approved opening the draft with the documented test exception; real Saf
 ## PR CI follow-up
 
 The first PR CI run exposed restored draft text in the older-browser fallback test: its fill appended to the previous test’s `Short draft`. The test now clears through keyboard input before filling, preserving the exact draft-retention assertion. All 13 good-css browser checks passed in the focused rerun. The same CI run also failed the unchanged server `omp-input-pipe.test.ts` Codex closed-input assertion; the next push will recheck it. Other three browser shards and both Node-floor shards passed.
+
+### Reproducing the tab-coordination cleanup check
+
+From the repository root, install dependencies and run `npm run build`, then run:
+
+```sh
+E2E_PREBUILT_ASSETS=1 npm run test:e2e -- tab-coordination.e2e.ts -t 'ten mixed tabs'
+```
+
+This selects the two parameterized cases that create replacement SharedWorkers and close their CDP sessions during teardown. On an unfixed checkout, the intermittent failure signature is `Unhandled Rejection: Error: CDP session closed`, with the stack pointing to `AgentBrowser.withCdp` and `tab-coordination.e2e.ts:31`; it may be reported during the next test. It is timing-dependent, so a single passing run does not reproduce or disprove the old failure. The expected fixed outcome is both cases passing with no unhandled rejection; setup errors before teardown still fail the explicit assertion.
+
+The original full-spec reproduction command was `E2E_PREBUILT_ASSETS=1 npm run test:e2e -- tab-coordination.e2e.ts`; its fixed rerun passed all five tests with no unhandled errors. The separate remote Basic Auth navigation timeout produced `.ai/qa/failures/tab-coordination/remote-Basic-Auth-keeps-finite-recovery-authenticated-without-a-worker-or-ordina-1/`; that bundle describes the navigation timeout, not the CDP cleanup rejection.
+
+PR CI on commit `7f4394c8` subsequently passed both Vitest shards, both Node-floor shards, all four browser shards, and the aggregate build/package gate after the documented retry of an unchanged runner test.
