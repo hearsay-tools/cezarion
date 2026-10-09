@@ -21,11 +21,13 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   let id: string;
   let state: State;
   let session: AgentSession;
-  beforeEach(() => {
+  beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), 'cez-autonomous-guards-'));
     store = RunStore.open(join(root, '.ai/cezar'));
     id = store.createRun({ title: 'guard', task: 'work', workflow: 'quick-task', autonomous: true, steps: [{ id: 'task', name: 'Task', kind: 'agent' }] }).id;
     store.updateRun(id, { status: 'running' });
+    // Worker startup belongs to fixture setup, before policy tests replace timers.
+    await store.factsWarmIdle();
     manager = new RunManager(store, root);
     session = {
       open: true, result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
@@ -34,7 +36,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     };
     state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, autonomous: true, autoContinues: 0, session };
   });
-  afterEach(() => { manager['clearIdleTimer'](state); manager.dispose(); vi.useRealTimers(); store.flush(); rmSync(root, { recursive: true, force: true }); });
+  afterEach(() => { manager['clearIdleTimer'](state); manager.dispose(); vi.useRealTimers(); store.close(); rmSync(root, { recursive: true, force: true }); });
 
   function applyGuard(guard: typeof guards[number]): void {
     switch (guard) {

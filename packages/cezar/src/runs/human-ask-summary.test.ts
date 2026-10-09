@@ -65,7 +65,7 @@ it.each([undefined, false])('reconstructs a pending question after a legacy/cras
   expect(readPersistedText(dir)).toBe(bytes);
 });
 
-it('reconciles a stale true summary from a matching durable answer', () => {
+it('reconciles a stale true summary from a matching durable answer after readiness', async () => {
   store.close(); // the reopen below is a restart: this store must not still own the live root
   const index = readPersistedRuns(dir); index[0].hasPendingHumanAsk = true;
   seedRuns(dir, index);
@@ -73,7 +73,9 @@ it('reconciles a stale true summary from a matching durable answer', () => {
     { ...ask(), seq: 1, ts: new Date().toISOString() },
     { type: 'human-input-delivered', askSeq: 1, seq: 2, ts: new Date().toISOString() },
   ].map(event => JSON.stringify(event)).join('\n') + '\n');
-  expect(RunStore.open(dir, { keepLive: true }).getRun(id)).toHaveProperty('hasPendingHumanAsk', false);
+  store = RunStore.open(dir, { keepLive: true });
+  await store.prepareRecoveryFacts();
+  expect(store.getRun(id)).toHaveProperty('hasPendingHumanAsk', false);
   expect(readRunIndexFromDisk(dir).runs[0]).toHaveProperty('hasPendingHumanAsk', false);
 });
 

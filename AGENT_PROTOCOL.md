@@ -874,6 +874,23 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
+**R7** also pins off-loop restart readiness (hearsay-tools/cezarion#906): every
+`RUNNER_IDS` backend uses its `HARNESS_ADAPTERS` native mock, then restarts with
+both root and worker facts sidecars removed. Recovery must never use the
+exceptional synchronous facts queue join. Pending asks and queued input survive;
+bare Continue is refused, and an explicit human answer reaches the native runner
+before queued agent input drains. This extends the registered R7 cell, with no
+runner exemptions.
+
+**R60** (hearsay-tools/cezarion#906), in `workflows/worker-restart-parity.test.ts`,
+uses every `RUNNER_IDS` backend's `HARNESS_ADAPTERS` native wire to persist a
+starting execution generation. A fully terminal modern root and worker have no
+live or deferred anchor; their plain history is nonempty and facts sidecars are
+missing. Immediate boot recovery must prepare the selected family off-loop,
+never enter the synchronous facts join, and complete the private generation with
+one correctly sequenced lifecycle repair. No runner exemptions. Selected-readiness
+guards also pin disposal, failure, changed ownership and completed-proof rechecks.
+
 **S21** (hearsay-tools/cezarion#832) detects unexpected restored history through
 OMP's startup `get_state.messageCount`. A fresh step emits one v1 note and one
 non-fatal `session.error`, and still completes normally. Other native wires have
@@ -888,6 +905,20 @@ escalate to SIGKILL when the child cannot handle EOF or SIGTERM; and a failed
 output transport must terminate the live child. OpenCode uses its real HTTP/SSE
 stream for the transport failure, while the other backends use stdout.
 Requested teardown remains successful. The matrix has no wire exemptions.
+
+**S29** (hearsay-tools/cezarion#906), in `core/omp-input-pipe.test.ts`, closes each
+native input transport while the admitted turn's child is alive, then submits agent input.
+Claude/Codex/Pi/OMP mocks close fd 0; OpenCode destroys the next native prompt HTTP socket
+while retaining SSE. The rejected receipt must retain input failure evidence, settlement
+must be bounded, and no successful native turn completion may be fabricated. OpenCode's
+synthetic terminal turn boundary remains valid after failure. Cursor print has a named,
+executable `scenario-unconstructible` exemption: Cursor print writes its prompt to stdin
+and closes stdin once per turn, refuses agent input while busy, and queues human follow-ups
+for a new per-turn child; consequently this admitted-turn/live-followup scenario cannot be
+constructed.
+Pi and OMP additionally close admission immediately, report one fatal transport failure
+and reject their results even if the child would later exit zero. OMP's focused regression
+closes stdin before the native `ready` frame to exercise the queued startup outbox.
 
 **S26–S28** (hearsay-tools/cezarion#890), in the same file, start every `RUNNER_IDS` backend's
 native mock with `mock:no-progress-leftover`. The mock leaves two children in its cwd: one in
