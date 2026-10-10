@@ -54,7 +54,7 @@ export interface CodeEditorProps {
 
 /** Shared layout so the textarea and the highlighted underlay align to the pixel. */
 const SURFACE =
-  'm-0 min-h-full w-full whitespace-pre font-mono text-xs leading-[1.7] px-3 py-2 [tab-size:2]'
+  'code-editor-surface m-0 min-h-full w-full whitespace-pre font-mono text-xs leading-[1.7] px-3 py-2 [tab-size:2]'
 
 export function CodeEditor({ value, onChange, language, readOnly, className, ...aria }: CodeEditorProps) {
   const tokens = useCodeTokens(value, language)
@@ -112,7 +112,7 @@ export function CodeEditor({ value, onChange, language, readOnly, className, ...
         wrap="off"
         className={cn(
           SURFACE,
-          'relative block resize-none overflow-auto bg-transparent text-transparent caret-foreground outline-none',
+          'relative block resize-none overflow-auto bg-transparent text-transparent caret-foreground outline-hidden',
           'selection:bg-accent-strong/30 focus-visible:ring-0',
           readOnly && 'cursor-default',
         )}

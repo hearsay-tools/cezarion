@@ -1,3 +1,4 @@
+import { normalizeColorSample } from './contrast'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -110,7 +111,7 @@ function gotoRail(theme: 'dark' | 'light' = 'dark'): void {
 }
 
 const style = (selector: string, prop: string) =>
-  String(browser.evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(selector)}))[${JSON.stringify(prop)}]`))
+  String(normalizeColorSample(browser, browser.evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(selector)}))[${JSON.stringify(prop)}]`)))
 
 describe('project rail', () => {
   it('lights the top pill of a non-current project with a needs-review run', () => {

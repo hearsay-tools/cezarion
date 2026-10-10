@@ -5,13 +5,13 @@
 [data-slot="tasks-table"] th { height: 48px; }
 [data-slot="tasks-table"] td { height: 50px; }
 [data-slot="global-tasks-table"] { padding: 0; overflow: visible; border: 0; background: transparent; }
-[data-slot="global-task-row"] { display: grid; grid-template-columns: auto 1fr auto; gap: 8px 16px; padding: 22px; margin-bottom: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+[data-slot="global-task-row"] { display: grid; grid-template-columns: auto 1fr auto; gap: 8px 16px; padding: 22px; margin-block-end: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
 [data-slot="global-task-row"] > div { height: auto; min-width: 0; max-width: none; padding: 0; border: 0; white-space: normal; }
 [data-slot="global-task-row"] > [data-slot="global-task-title"] { grid-column: 1 / -1; }
 [data-slot="global-task-row"] > [data-slot="global-task-title"] > span > a { font-size: 18px; white-space: normal; line-height: 1.5; }
-[data-slot="global-task-row"] > [data-slot="global-task-actions"] { grid-column: 1 / -1; text-align: left; margin-top: 4px; }
+[data-slot="global-task-row"] > [data-slot="global-task-actions"] { grid-column: 1 / -1; text-align: start; margin-block-start: 4px; }
 [data-slot="global-task-row"] > [data-slot="global-task-actions"] > span { flex-wrap: wrap; gap: 8px; }
-[data-slot="global-task-row"] [data-action] { width: auto; min-height: 40px; padding: 8px 12px; gap: 6px; border: 1px solid var(--border); color: var(--foreground); font-size: 12px; }
+[data-slot="global-task-row"] [data-action] { width: auto; min-height: 40px; padding-block: 8px; padding-inline: 12px; gap: 6px; border: 1px solid var(--border); color: var(--foreground); font-size: 12px; }
 [data-slot="global-tasks-filters"] { gap: 20px; }
 [data-slot="global-tasks-filters"] button { min-height: 40px; }
 @media (max-width: 767px) {
@@ -21,7 +21,6 @@
   [data-slot="task-card"] { overflow-wrap: anywhere; }
 }
 @media (max-width: 767px) {
-  [data-route="tasks"] h1, [data-route="global-tasks"] h1 { font-size: 24px; }
   [data-slot="mark-all-read"] { display: inline-flex; }
 }
 
@@ -31,24 +30,24 @@
   [data-presentation="summary"] [data-slot="global-tasks-table"] { border: 1px solid var(--border); border-radius: 12px; background: var(--card); padding: 20px; }
   [data-presentation="summary"] [data-slot="global-summary-head"],
   [data-presentation="summary"] [data-slot="global-task-row"] { display: grid; grid-template-columns: minmax(0, 1fr) 120px 90px 100px 70px; column-gap: 16px; }
-  [data-presentation="summary"] [data-slot="global-summary-head"] { padding-bottom: 16px; color: var(--muted-foreground); font-weight: 500; text-transform: uppercase; }
-  [data-presentation="summary"] [data-slot="global-task-row"] { position: relative; align-items: center; margin: 0; padding: 20px 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; }
+  [data-presentation="summary"] [data-slot="global-summary-head"] { padding-block-end: 16px; color: var(--muted-foreground); font-weight: 500; text-transform: uppercase; }
+  [data-presentation="summary"] [data-slot="global-task-row"] { position: relative; align-items: center; margin: 0; padding-block: 20px; padding-inline: 0; border: 0; border-block-start: 1px solid var(--border); border-radius: 0; }
   [data-presentation="summary"] [data-slot="global-task-row"] > [data-slot="global-task-title"] { grid-column: 1; grid-row: 1; }
   [data-presentation="summary"] [data-slot="global-task-title"] > span > a { font-size: 13px; }
   [data-presentation="summary"] [data-slot="global-task-workflow"] { grid-column: 2; grid-row: 1; }
   [data-presentation="summary"] [data-slot="global-task-diff"] { grid-column: 3; grid-row: 1; white-space: pre-wrap; }
   [data-presentation="summary"] [data-slot="global-task-references"] { grid-column: 4; grid-row: 1; }
-  [data-presentation="summary"] [data-slot="global-task-age"] { grid-column: 5; grid-row: 1; text-align: left; }
+  [data-presentation="summary"] [data-slot="global-task-age"] { grid-column: 5; grid-row: 1; text-align: start; }
   [data-presentation="summary"] [data-slot="global-task-actions"] { margin: 0; }
   [data-presentation="summary"] [data-slot="global-task-actions"] > span { gap: 8px; }
   [data-slot="tasks-summary"] [data-slot="task-summary-row"] > td { height: 102px; }
   [data-slot="tasks-summary"] [data-slot="task-summary-row"] > td:first-child { vertical-align: middle; }
-  [data-slot="tasks-summary"] [data-slot="task-summary-row"] > td:first-child > div { margin-top: 8px; }
+  [data-slot="tasks-summary"] [data-slot="task-summary-row"] > td:first-child > div { margin-block-start: 8px; }
   [data-slot="tasks-summary"] [aria-controls^="task-resources-"] { min-height: 26px; }
 }
 
 @media (min-width: 768px) {
-  [data-slot="tasks-summary"] [data-slot="task-summary-row"] > td:first-child { padding-top: 12px; padding-bottom: 12px; }
+  [data-slot="tasks-summary"] [data-slot="task-summary-row"] > td:first-child { padding-block-start: 12px; padding-block-end: 12px; }
 }
 
 [data-filter-details="false"] [data-slot="group-controls"],
@@ -76,9 +75,9 @@
 
 @media (max-width: 767px) {
   [data-slot="tasks-toolbar"] [data-slot="archive-finished"] { min-height: 44px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--foreground); }
-  [data-slot="task-card"] { position: relative; padding-top: 20px; padding-bottom: 30px; }
+  [data-slot="task-card"] { position: relative; padding-block-start: 20px; padding-block-end: 30px; }
   [data-slot="task-card"] > div:first-child { align-items: center; }
-  [data-slot="task-card"] [data-slot="pin-toggle"] { margin-left: auto; }
+  [data-slot="task-card"] [data-slot="pin-toggle"] { margin-inline-start: auto; }
   [data-slot="task-card"] [data-slot="mobile-resources-toggle"] { min-height: 26px; border-radius: 4px; padding: 0; }
   [data-slot="mobile-task-meta"] { font-family: inherit; font-size: 12px; font-weight: 400; }
 }
@@ -86,10 +85,10 @@
 [data-presentation="cards"] [data-slot="global-task-row"] { grid-template-columns: auto auto auto minmax(0, 1fr); gap: 12px; }
 [data-presentation="cards"] [data-slot="global-task-row"] > [data-slot="global-task-title"] { display: contents; }
 [data-presentation="cards"] [data-slot="global-task-title"] > span { grid-column: 1 / -1; grid-row: 1; }
-[data-presentation="cards"] [data-slot="global-task-title"] > div { grid-column: 1; grid-row: 2; margin-top: 0; }
+[data-presentation="cards"] [data-slot="global-task-title"] > div { grid-column: 1; grid-row: 2; margin-block-start: 0; }
 [data-presentation="cards"] [data-slot="global-task-workflow"] { grid-column: 2; grid-row: 2; align-self: center; }
 [data-presentation="cards"] [data-slot="global-task-references"] { grid-column: 3; grid-row: 2; align-self: center; }
-[data-presentation="cards"] [data-slot="global-task-age"] { grid-column: 4; grid-row: 2; align-self: center; text-align: left; }
+[data-presentation="cards"] [data-slot="global-task-age"] { grid-column: 4; grid-row: 2; align-self: center; text-align: start; }
 [data-presentation="cards"] [data-slot="global-task-actions"] { grid-column: 1 / -1; grid-row: 3; margin: 0; }
 [data-presentation="cards"] [data-slot="global-task-title"] [data-slot="pill"] { padding: 0; background: transparent; color: var(--muted-foreground); font-size: 12px; font-weight: 400; text-transform: capitalize; }
 [data-presentation="cards"] [data-slot="global-task-actions"] [data-slot="button"] { font-weight: 400; }
@@ -107,7 +106,7 @@
 
 @media (max-width: 767px) {
   [data-presentation="summary"] [data-slot="global-tasks-table"] { border: 1px solid var(--border); border-radius: 12px; padding: 20px; background: var(--card); }
-  [data-presentation="summary"] [data-slot="global-task-row"] { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; margin: 0; padding: 20px 0 30px; border: 0; border-top: 1px solid var(--border); border-radius: 0; }
+  [data-presentation="summary"] [data-slot="global-task-row"] { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; margin: 0; padding-block: 20px 30px; padding-inline: 0; border: 0; border-block-start: 1px solid var(--border); border-radius: 0; }
   [data-presentation="summary"] [data-slot="global-task-title"] { grid-column: 1 / -1; }
   [data-presentation="summary"] [data-slot="global-task-title"] > span > a { line-height: 1.5; }
   [data-presentation="summary"] [data-slot="global-task-workflow"] { grid-column: 1; grid-row: 2; }
@@ -123,9 +122,9 @@
 [data-slot="tasks-toolbar"] [data-slot="button"] { font-size: 12px; font-weight: 500; }
 @media (max-width: 767px) {
   [data-slot="tasks-toolbar"] { align-items: start; }
-  [data-slot="tasks-toolbar"] [data-slot="new-task-inline"] { grid-column: 1; justify-self: start; margin-right: 0; }
+  [data-slot="tasks-toolbar"] [data-slot="new-task-inline"] { grid-column: 1; justify-self: start; margin-inline-end: 0; }
   [data-slot="task-card"] > div:first-child > a { font-size: 13px; line-height: 1.6; }
-  [data-slot="mobile-task-meta"] { margin-top: 10px; }
+  [data-slot="mobile-task-meta"] { margin-block-start: 10px; }
 }
 
 [data-slot="other-projects"] a { border: 1px solid var(--border); min-height: 44px; color: var(--foreground); }
@@ -137,10 +136,10 @@
 
 @media (min-width: 768px) {
   [data-route="tasks"][data-presentation="resources"] > header { flex-direction: row; flex-wrap: wrap; gap: 12px; align-items: center; }
-  [data-route="tasks"][data-presentation="resources"] > header > div:first-child { width: 100%; margin-bottom: 10px; }
+  [data-route="tasks"][data-presentation="resources"] > header > div:first-child { width: 100%; margin-block-end: 10px; }
   [data-route="tasks"][data-presentation="resources"] h1 { font-size: 28px; font-weight: 400; }
   [data-route="tasks"][data-presentation="resources"] > header > div:nth-child(2) { border: 0; gap: 8px; }
-  [data-route="tasks"][data-presentation="resources"] > header > div:nth-child(2) > button { min-height: 40px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; background: var(--card); }
+  [data-route="tasks"][data-presentation="resources"] > header > div:nth-child(2) > button { min-height: 40px; border: 1px solid var(--border); border-radius: 8px; padding-block: 10px; padding-inline: 14px; background: var(--card); }
   [data-route="tasks"][data-presentation="resources"] [data-slot="tasks-toolbar"] { flex: 1; }
 }
 

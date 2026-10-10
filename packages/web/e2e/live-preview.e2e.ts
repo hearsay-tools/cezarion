@@ -122,6 +122,19 @@ describe('live preview', () => {
     // the fixed task header and never moves with the thread.
     browser.click('[data-slot="preview-toggle"]')
     const approval = '[data-slot="preview-pane"] [data-slot="preview-state"][data-state="needs-approval"]'
+    // CI evidence: https://github.com/hearsay-tools/cezarion/actions/runs/37986554086/job/114009939596
+    // Artifact cockpit-failures-shard-4, live-preview/registers-runs-streams-takes-a-click-and-stops-1:
+    // snapshot shows the registered server's Review button; probe has needs-approval=null.
+    // Registration can reach the header before its default server selection.
+    // The empty pane legitimately lists that server for review in this ordering.
+    const landing = browser.waitForValue(
+      `(() => { const pane = document.querySelector('[data-slot="preview-pane"]');
+        if (pane?.querySelector('[data-state="needs-approval"]')) return 'approval';
+        return [...(pane?.querySelectorAll('[data-state="empty"] button') ?? [])]
+          .some(button => button.textContent.trim() === 'Review') ? 'review' : null })()`,
+      value => value === 'approval' || value === 'review',
+    )
+    if (landing === 'review') browser.click('[data-slot="preview-pane"] [data-state="empty"] button')
     const pending = browser.waitForValue(
       `(() => { const s = document.querySelector('${approval}'); return s ? s.textContent : null })()`,
       text => typeof text === 'string' && text.includes('Run and open'),

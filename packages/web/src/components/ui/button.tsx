@@ -9,15 +9,15 @@ import { cn } from "@/lib/utils"
  * destructive affordance. There is deliberately no `secondary`/`link` — the design system doesn't use them.
  */
 const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-[7px] rounded-md font-semibold whitespace-nowrap transition-[background-color,border-color,opacity,filter] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "inline-flex shrink-0 items-center justify-center gap-[7px] rounded-md font-semibold whitespace-nowrap transition-[background-color,border-color,opacity,filter] outline-hidden focus-visible:ring-[3px] focus-visible:ring-ring/50 enabled:active:brightness-90 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        primary: "bg-action text-action-foreground hover:brightness-[0.96]",
-        contrast: "bg-contrast text-contrast-foreground hover:brightness-[0.96]",
-        outline: "border border-border bg-card text-foreground hover:bg-muted",
-        ghost: "text-muted-foreground hover:bg-muted hover:text-foreground",
-        "danger-ghost": "text-danger hover:bg-danger/10",
+        primary: "bg-action text-action-foreground pointer-hover:brightness-[0.96]",
+        contrast: "bg-contrast text-contrast-foreground pointer-hover:brightness-[0.96]",
+        outline: "border border-border bg-card text-foreground pointer-hover:bg-muted",
+        ghost: "text-muted-foreground pointer-hover:bg-muted pointer-hover:text-foreground",
+        "danger-ghost": "text-danger pointer-hover:bg-danger/10",
       },
       size: {
         default: "h-11 px-3.5 text-[13px]",

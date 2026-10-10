@@ -15,10 +15,24 @@ export function crashWithStderr(prompt, malformedFrame) {
     process.exit(7);
   }
   if (prompt.includes('mock:crash-stderr-held-pipe')) {
-    spawn(process.execPath, ['-e', `setTimeout(() => process.stderr.write('late buffered crash diagnostic\\n'), 40); setTimeout(() => {}, 5000);`], {
-      stdio: ['ignore', process.stdout, process.stderr],
+    // Start the drain deadline only after the descendant is ready. Otherwise
+    // cold Node startup competes with the runner's bounded post-exit drain.
+    const child = spawn(process.execPath, ['-e', `
+      process.on('disconnect', () => {
+        setTimeout(() => process.stderr.write('late buffered crash diagnostic\\n'), 40);
+        setTimeout(() => {}, 5000);
+      });
+      process.send('ready');
+    `], {
+      stdio: ['ignore', process.stdout, process.stderr, 'ipc'],
     });
+    child.once('message', () => emitCrash(malformedFrame));
+    return true;
   }
+  emitCrash(malformedFrame);
+}
+
+function emitCrash(malformedFrame) {
   writeSync(2, 'Error: transient connection reset; retrying\nRecovered\n');
   if (malformedFrame) writeSync(1, malformedFrame + '\n');
   writeSync(2, `node:events:496

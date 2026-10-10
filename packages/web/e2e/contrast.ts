@@ -54,10 +54,13 @@ export function contrastSampleExpression(selector: string, foregroundProperty = 
   return `(() => {
     const element = document.querySelector(${JSON.stringify(selector)})
     if (!element) throw new Error('contrast target not found: ' + ${JSON.stringify(selector)})
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
     const parse = (value) => {
-      const channels = value.match(/[\\d.]+/g)?.map(Number) ?? []
-      if (channels.length < 3) throw new Error('unsupported computed color: ' + value)
-      return { r: channels[0], g: channels[1], b: channels[2], a: channels[3] ?? 1 }
+      // Let the browser resolve OKLCH / color-mix into the sRGB channels WCAG uses.
+      context.clearRect(0, 0, 1, 1); context.fillStyle = value; context.fillRect(0, 0, 1, 1);
+      const [r, g, b, alpha] = context.getImageData(0, 0, 1, 1).data;
+      return { r, g, b, a: alpha / 255 };
     }
     const over = (front, back) => {
       const alpha = front.a + back.a * (1 - front.a)
@@ -115,7 +118,7 @@ export function focusWithKeyboard(browser: AgentBrowser, selector: string): void
     const describe = ${describe}
     const target = document.querySelector(${target})
     if (!target) return { ready: false, predecessor: null }
-    const controls = [...document.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+    const controls = [...document.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')]
       .filter((element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden')
     const index = controls.indexOf(target)
     if (index < 1) return { ready: false, predecessor: null }
@@ -213,4 +216,28 @@ export function hoverVisiblePoint(browser: AgentBrowser, selector: string): void
   // layout pass (viewport/theme in the QA matrix) leaves them pointing at empty space.
   // Callers that need a settled pointer re-hit-test current rects, not this snapshot.
   browser.moveTo(Math.round(point.x), Math.round(point.y))
+}
+
+/** Normalize modern computed color syntax for existing palette assertions, using the browser's
+ * sRGB canvas conversion. Keeps geometry/text untouched and never changes application nodes. */
+export function normalizeColorExpression(expression: string): string {
+  return `(() => {
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    const normalize = value => {
+      if (Array.isArray(value)) return value.map(normalize);
+      if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, normalize(v)]));
+      if (typeof value !== 'string' || !/^(oklch|oklab|color)\\(/.test(value)) return value;
+      const alpha = value.match(/\\/\\s*([\\d.]+)(%)?\\s*\\)$/);
+      const a = alpha ? Number(alpha[1]) / (alpha[2] ? 100 : 1) : 1;
+      context.clearRect(0, 0, 1, 1); context.fillStyle = value.replace(/\\/[^)]+\\)/, ')'); context.fillRect(0, 0, 1, 1);
+      const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+      return a === 1 ? 'rgb(' + [r, g, b].join(', ') + ')' : 'rgba(' + [r, g, b, Math.round(a * 100) / 100].join(', ') + ')';
+    };
+    return normalize((${expression}));
+  })()`
+}
+
+export function normalizeColorSample<T>(browser: AgentBrowser, sample: T): T {
+  return browser.evaluate(normalizeColorExpression(JSON.stringify(sample))) as T
 }

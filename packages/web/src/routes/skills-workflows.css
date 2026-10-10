@@ -9,18 +9,18 @@
 [data-slot="skill-row"] [data-slot="skill-source"] { line-height: 1.5; }
 [data-slot="skill-row"] > span:nth-child(2) { font-size: 11px; line-height: 1.65; }
 [data-slot="skill-detail"] { display: flex; flex-direction: column; gap: 16px; }
-[data-slot="skill-detail"] > :is(p, section) { margin-top: 0; }
-.sw-detail-source { display: inline-flex; height: 26px; align-items: center; padding-inline: 8px; border-radius: 5px; background: color-mix(in srgb, var(--accent-strong) 10%, transparent); color: var(--link-foreground); font-weight: 500; white-space: pre; }
+[data-slot="skill-detail"] > :is(p, section) { margin-block-start: 0; }
+.sw-detail-source { display: inline-flex; height: 26px; align-items: center; padding-inline: 8px; border-radius: 5px; background: color-mix(in oklch, var(--accent-strong) 10%, transparent); color: var(--link-foreground); font-weight: 500; white-space: pre; }
 .sw-detail-source [data-slot="skill-source"] { padding: 0; background: none; color: inherit; font-size: inherit; font-weight: inherit; }
 [data-slot="skills-detail"] [data-slot="skill-description"] { display: none; }
-[data-slot="skill-used-by"] > p { margin-top: 16px; line-height: 1.6; }
-[data-slot="skill-body"] { margin-top: 0; font-size: 13px; line-height: 1.65; }
+[data-slot="skill-used-by"] > p { margin-block-start: 16px; line-height: 1.6; }
+[data-slot="skill-body"] { margin-block-start: 0; font-size: 13px; line-height: 1.65; }
 [data-slot="skill-body"] h1 { font-size: 18px; font-weight: 600; }
 [data-slot="skill-body"] h2 { font-size: 18px; font-weight: 600; }
 [data-slot="skill-body"] h3 { font-size: 14px; font-weight: 600; }
 [data-slot="skills-import-panel"] { display: flex; flex-direction: column; gap: 16px; }
-[data-slot="skills-import-panel"] > * { margin-top: 0; margin-bottom: 0; }
-[data-slot="skills-import-panel"] > p:first-child { align-self: start; height: 26px; display: flex; align-items: center; padding: 0 8px; border-radius: 5px; background: color-mix(in srgb, var(--accent-strong) 10%, transparent); letter-spacing: 0; }
+[data-slot="skills-import-panel"] > * { margin-block-start: 0; margin-block-end: 0; }
+[data-slot="skills-import-panel"] > p:first-child { align-self: start; height: 26px; display: flex; align-items: center; padding-block: 0; padding-inline: 8px; border-radius: 5px; background: color-mix(in oklch, var(--accent-strong) 10%, transparent); letter-spacing: 0; }
 [data-slot="skills-import-panel"] > h2 { font-size: 28px; font-weight: 400; }
 [data-slot="skills-import-panel"] > p:nth-of-type(3) { color: var(--link-foreground); }
 [data-slot="skills-update-card"] { background: var(--card); border-radius: 10px; }
@@ -32,35 +32,34 @@
 [data-slot="import-row"] input { width: 20px; height: 20px; }
 [data-slot="import-row"] span span { font-weight: 400; }
 [data-slot="wb-metadata"] { gap: 14px; }
-[data-slot="wb-load"] { margin-bottom: -6px; }
+[data-slot="wb-load"] { margin-block-end: -6px; }
 [data-slot="wb-load"] label { font-size: 11px; }
-[data-slot="wb-description"] { padding: 14px; line-height: 1.5; field-sizing: content; }
 [data-slot="wb-name"] { padding-inline: 14px; }
 [data-slot="wb-actions"] button { padding-inline: 12px; gap: 8px; border-radius: 8px; }
 [data-slot="wb-actions"] svg { width: 16px; height: 16px; }
-[data-slot="wb-auto-panel"] { border-color: color-mix(in srgb, var(--accent-strong) 35%, var(--border)); }
+[data-slot="wb-auto-panel"] { border-color: color-mix(in oklch, var(--accent-strong) 35%, var(--border)); }
 [data-slot="wb-auto-cancel"] { border: 1px solid var(--border); background: var(--card); }
-[data-slot="wb-palette"] { margin-top: 16px; gap: 16px; }
+[data-slot="wb-palette"] { margin-block-start: 16px; gap: 16px; }
 [data-slot="wb-skill"] { padding: 0; }
 [data-slot="wb-skill-add"] { width: 24px; }
 [data-slot="wb-aside"] h2 { font-size: 16px; }
-[data-slot="wb-aside"] h3 { margin-top: 16px; }
+[data-slot="wb-aside"] h3 { margin-block-start: 16px; }
 [data-slot="wb-step-grip"] span { font-family: inherit; padding: 0; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; }
 [data-slot="wb-step-heading"] > div { font-weight: 400; }
 [data-slot="wb-main"] > p:last-of-type { font-size: 11px; }
-[data-slot="wb-import-panel"] > div { flex-direction: row-reverse; justify-content: flex-end; gap: 12px; margin-top: 16px; }
+[data-slot="wb-import-panel"] > div { flex-direction: row-reverse; justify-content: flex-end; gap: 12px; margin-block-start: 16px; }
 [data-slot="wb-import-run"], [data-slot="wb-add-dialog"] button[data-variant="primary"] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 [data-slot="wb-import-cancel"] { border: 1px solid var(--border); }
 [data-slot="wb-import-panel"] { display: flex; flex-direction: column; }
-[data-slot="wb-import-error"] { order: 1; margin-top: 16px; font-size: 12px; }
+[data-slot="wb-import-error"] { order: 1; margin-block-start: 16px; font-size: 12px; }
 @media (max-width: 767px) {
-  [data-route="skills"], [data-route="workflows"] { padding-bottom: 32px; }
+  [data-route="skills"], [data-route="workflows"] { padding-block-end: 32px; }
   [data-route="workflows"] > header { align-items: flex-start; flex-direction: column; }
   [data-slot="skills-section"] > header a { padding-inline: 14px; gap: 10px; }
   [data-slot="skills-import-panel"] > h2 { font-size: 24px; }
   .sw-import-controls { flex-direction: column; align-items: flex-start; }
   .sw-import-controls .sw-search { width: 100%; }
-  [data-slot="wb-import-panel"] { position: fixed; inset: 57px 0 auto; max-height: calc(100dvh - 57px); overflow-y: auto; z-index: 50; }
+  [data-slot="wb-import-panel"] { position: fixed; inset-block: 57px auto; inset-inline: 0; max-height: calc(100dvh - 57px); overflow-y: auto; z-index: 50; }
 }
 @container (max-width: 649px) {
   [data-slot="skill-row"][aria-current="page"] { background: transparent; border-color: var(--border); }
@@ -78,7 +77,7 @@
 [data-slot="skill-body"] .thread-markdown { display: flex; flex-direction: column; gap: 16px; }
 [data-slot="skill-body"] .thread-markdown > * { margin: 0; }
 [data-slot="skill-body"] .thread-markdown :is(p,ul,ol) { color: var(--muted-foreground); }
-[data-slot="skill-body"] .thread-markdown ul { display: flex; flex-direction: column; gap: 16px; padding-left: 12px; font-size: 12px; }
+[data-slot="skill-body"] .thread-markdown ul { display: flex; flex-direction: column; gap: 16px; padding-inline-start: 12px; font-size: 12px; }
 [data-slot="skill-body"] .thread-markdown li { margin: 0; padding: 0; }
 [data-slot="wb-skill"] > span { font-weight: 400; color: var(--muted-foreground); }
 @container (max-width: 649px) {
@@ -91,17 +90,16 @@
 .sw-workflow-confirm button { min-height: 44px; }
 @media (max-width: 767px) {
   [data-slot="dialog-overlay"]:has(+ [data-slot="wb-import-panel"]) { background: transparent; }
-  [data-slot="wb-import-panel"] { width: 100%; max-width: 100%; translate: none; transform: none; top: 57px; left: 0; }
+  [data-slot="wb-import-panel"] { width: 100%; max-width: 100%; translate: none; transform: none; inset-block-start: 57px; inset-inline-start: 0; }
 }
 [data-slot="skills-section"] > header a { font-size: 13px; font-weight: 600; }
 .sw-detail-source, [data-slot="skills-import-panel"] > p:first-child, [data-slot="wb-step-grip"] span { background: var(--task-brand-selected); }
 [data-slot="skills-import-panel"] > h2 { line-height: 1.6; }
-[data-slot="wb-description"] { color: var(--muted-foreground); }
 [data-route="workflows"] button, [data-slot="skills-update-card"] button { font-size: 12px; font-weight: 500; border-radius: 8px; }
 :is([data-slot="wb-import-panel"], [data-slot="wb-add-dialog"], .sw-workflow-confirm) button { font-size: 12px; font-weight: 400; border-radius: 8px; }
 .sw-workflow-confirm [data-slot="alert-dialog-title"] { line-height: 1.6; }
 .sw-workflow-confirm [data-slot="alert-dialog-description"] { font-size: 13px; line-height: 1.6; }
-.sw-workflow-confirm [data-slot="alert-dialog-header"] { gap: 16px; text-align: left; }
+.sw-workflow-confirm [data-slot="alert-dialog-header"] { gap: 16px; text-align: start; }
 
 [data-slot="wb-step-actions"] svg, [data-slot="wb-skill-add"] svg { width: 18px; height: 18px; }
 [data-slot="wb-save"] svg, [data-slot="wb-auto-run"] svg { width: 16px; height: 16px; }
@@ -109,34 +107,33 @@
 [data-slot="skill-row"] > span:nth-child(2) { line-height: 1.6; }
 :is([data-slot="wb-import-panel"], [data-slot="wb-add-dialog"], .sw-workflow-confirm) { box-shadow: none; }
 [data-slot="wb-import-panel"] [data-slot="dialog-title"] { line-height: 1.6; }
-[data-slot="wb-add-dialog"] [data-slot="dialog-header"] { text-align: left; }
+[data-slot="wb-add-dialog"] [data-slot="dialog-header"] { text-align: start; }
 
 /* Pen strokes overlay the frame; CSS borders consume one pixel of its padding. */
 [data-slot="skills-detail"] > div { padding: 19px; }
 [data-slot="skills-update-card"] { padding: 15px; }
-[data-slot="import-row"] > span:last-child > span:last-child:not(:first-child) { margin-top: 6px; line-height: 1.6; }
+[data-slot="import-row"] > span:last-child > span:last-child:not(:first-child) { margin-block-start: 6px; line-height: 1.6; }
 [data-slot="skills-import-panel"] > p:not(:first-child), [data-slot="skills-update-card"] p { line-height: 1.6; }
 [data-slot="skills-update-card"] > div > div > p:nth-child(2) { font-size: 11px; }
 
 /* Match the approved frame's overlay strokes without shrinking its text columns. */
 [data-slot="skills-list"] { padding: 11px; }
-[data-slot="skill-row"] { border-bottom-width: 0; box-shadow: inset 0 -1px var(--border); }
+[data-slot="skill-row"] { border-block-end-width: 0; box-shadow: inset 0 -1px var(--border); }
 [data-slot="skill-row"]:is([aria-current="page"], [data-highlighted]) { box-shadow: none; }
 [data-slot="skills-section"] > header a { padding-inline: 11px; }
 [data-slot="skills-back"] { padding-inline: 11px; border-radius: 8px; }
 [data-slot="skills-back"] svg { width: 16px; height: 16px; }
 [data-slot="skill-body"] .thread-markdown :is(h1,h2,h3) { line-height: 1.5; }
 [data-slot="skill-body"] .thread-markdown :is(p,ul,ol) { line-height: 1.6; }
-[data-slot="skill-body"] .thread-markdown ul { padding-left: 0; list-style-position: inside; }
+[data-slot="skill-body"] .thread-markdown ul { padding-inline-start: 0; list-style-position: inside; }
 :is([data-slot="skills-filter"], [data-slot="import-filter"], [data-route="workflows"] :is(input,textarea,select)) { border-color: var(--border); border-radius: 8px; }
 :is([data-slot="skills-filter"], [data-slot="import-filter"], [data-route="workflows"] :is(input,textarea)):focus-visible { border-color: var(--ring); }
 :is([data-slot="import-filter"], [data-slot="wb-filter"]) { background: var(--card); }
-[data-slot="wb-description"] { line-height: 1.6; padding: 13px; }
 [data-slot="wb-metadata"] > label { line-height: 1.5; }
 [data-slot="wb-auto-panel"] { padding: 19px; border-color: var(--composer-border); }
 [data-slot="wb-auto-panel"] > h2 { line-height: 1.6; }
 [data-slot="wb-auto-panel"] > p { line-height: 1.6; }
-[data-slot="wb-auto-panel"] > div { margin-top: 16px; gap: 8px; }
+[data-slot="wb-auto-panel"] > div { margin-block-start: 16px; gap: 8px; }
 [data-slot="wb-auto-text"] { padding: 15px; border-radius: 8px; }
 @media (max-width: 767px) {
   [data-slot="skills-section"] > header a { padding-inline: 13px; }
@@ -156,7 +153,7 @@
   [data-slot="wb-import-panel"] [data-slot="dialog-title"] { line-height: 1.5; }
   [data-slot="wb-import-panel"] > p { font-size: 12px; line-height: 1.5; }
   [data-slot="wb-import-text"] { padding: 15px; line-height: 1.8; border-radius: 12px; }
-  [data-slot="wb-import-panel"] > div { margin-top: 0; }
+  [data-slot="wb-import-panel"] > div { margin-block-start: 0; }
   [data-slot="wb-import-panel"] button { min-height: 50px; height: 50px; padding-inline: 15px; }
 }
 
@@ -168,11 +165,10 @@
 [data-slot="wb-step-summary"], [data-slot="wb-main"] > p:first-child,
 [data-slot="wb-main"] footer p, [data-slot="wb-aside"] > p { line-height: 19px; }
 [data-slot="wb-main"] > p:last-of-type { line-height: 18px; }
-[data-slot="wb-main"] footer { padding-top: 15px; }
-[data-slot="wb-aside"] > p { margin-top: 16px; }
+[data-slot="wb-main"] footer { padding-block-start: 15px; }
+[data-slot="wb-aside"] > p { margin-block-start: 16px; }
 [data-slot="wb-aside"] h3 { line-height: 21px; }
 [data-slot="wb-load"] label { line-height: 16px; }
-[data-slot="wb-description"] { font-size: 13px; line-height: 21px; }
 /* Use separate selectors: a mixed :is() would lend the most specific member's
    weight to every control and prevent the border compensation from winning. */
 [data-slot="wb-new"], [data-slot="wb-save"], [data-slot="wb-auto-run"] { gap: 8px; padding-inline: 12px; }
@@ -181,7 +177,7 @@
 [data-slot="wb-yaml-toggle"] { gap: 8px; padding-inline: 11px; }
 [data-slot="skills-refresh"] { padding-inline: 11px; }
 [data-slot="skills-section"] > header a { gap: 10px; padding-inline: 13px; min-height: 43px; height: 43px; position: relative; }
-[data-slot="skills-section"] > header a::after { content: ''; position: absolute; inset: -.5px 0; }
+[data-slot="skills-section"] > header a::after { content: ''; position: absolute; inset-block: -.5px; inset-inline: 0; }
 [data-slot="skill-row"] > span:first-child { font-size: 13px; line-height: 21px; }
 [data-slot="skill-row"]:has([data-source="team"]) > span:first-child > span { line-height: 21px; }
 [data-slot="skill-row"] > span:nth-child(2) { line-height: 18px; }
@@ -206,7 +202,7 @@
 @container (max-width: 649px) {
   [data-slot="skill-row"][aria-current="page"] { box-shadow: inset 0 -1px var(--border); }
 }
-[data-slot="wb-yaml-toggle"] svg { margin-right: 0; }
+[data-slot="wb-yaml-toggle"] svg { margin-inline-end: 0; }
 [data-slot="skills-import-panel"] > h2 { line-height: 45px; }
 [data-slot="skills-import-panel"] > p:not(:first-child) { line-height: 19px; }
 [data-slot="skills-import-panel"] > p:nth-of-type(2) { line-height: 21px; }
@@ -218,3 +214,5 @@
 @media (max-width: 767px) {
   [data-slot="skills-import-panel"] > h2 { line-height: 38px; }
 }
+
+[data-slot="wb-description"] { field-sizing: content; padding: 13px; font-size: 13px; line-height: 21px; color: var(--muted-foreground); }

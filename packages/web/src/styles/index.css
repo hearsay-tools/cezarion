@@ -1,6 +1,6 @@
 /* cezar cockpit — Tailwind v4 entry point and the Mercato design-token definition site.
  *
- * Ported verbatim from the mockup token sheet (.ai/analysis/cockpit-ui-redesign/mercato-visuals.md §1).
+ * Palette preserved from the mockup token sheet (.ai/analysis/cockpit-ui-redesign/mercato-visuals.md §1).
  * Dark is the default theme; `.light` on <html> flips it.
  *
  * THIS FILE IS THE ONLY PLACE RAW HEX MAY APPEAR. Everything else — components, pages, tests —
@@ -32,6 +32,9 @@
  * Reach for this on any control that is hidden until hover. Pair it with `focus-visible:`, which
  * is the keyboard's answer to the same problem. */
 @custom-variant no-hover (@media (hover: none));
+@custom-variant pointer-hover {
+  @media (hover: hover) and (pointer: fine) { &:hover { @slot; } }
+}
 
 /* Streamdown (the thread's markdown renderer) styles itself with Tailwind utility classes that
  * live in node_modules — without this @source Tailwind would purge them and every code block /
@@ -69,68 +72,69 @@
 :root {
   color-scheme: dark;
   --app-duration-1: 120ms;
-  --nav-scrim: #0f172a99;
+  --page-gutter: clamp(1.125rem, 0.5rem + 2vw, 2.75rem);
+  --nav-scrim: oklch(0.20768191 0.03982432 265.754874 / 0.600000);
 
   /* Role-named family selected by appearance.accent. Cezarion is the sole family today. */
-  --action: #f4c542;
-  --action-foreground: #0b0f17;
-  --accent-strong: #2dd4bf;
-  --accent-strong-foreground: #0b0f17;
-  --merged-strong: #7c3aed;
-  --merged-text: #d7bdff;
+  --action: oklch(0.84292398 0.15105370 88.300494);
+  --action-foreground: oklch(0.16828084 0.01806226 263.904279);
+  --accent-strong: oklch(0.78451984 0.13252856 181.911977);
+  --accent-strong-foreground: oklch(0.16828084 0.01806226 263.904279);
+  --merged-strong: oklch(0.54133709 0.24658592 293.008968);
+  --merged-text: oklch(0.84265465 0.09442880 302.443560);
   /* Live-run fill. Same hex as --merged-strong (the pre-#373 accent-strong); own role so
    * running/monitoring dots are not merged chips and not review-required --info. */
-  --running: #7c3aed;
+  --running: oklch(0.54133709 0.24658592 293.008968);
   /* The status key's violet family (#617): running and monitoring dots and the waiting-on-workers
-   * robot. Its own token rather than a new --running, which other surfaces keep: #7c3aed is
+   * robot. Its own token rather than a new --running, which other surfaces keep: oklch(0.54133709 0.24658592 293.008968) is
    * 3.15:1 on the dark sidebar and 2.44:1 on a selected row, under the 3:1 non-text minimum. */
-  --status-running: #a78bfa;
+  --status-running: oklch(0.70896895 0.15916821 293.541199);
   /* The sidebar task row (#617): neutral hover and selected fills, replacing the teal
    * --task-brand-selected on the row so "selected" stops reading as loud. */
-  --sidebar-row-hover: #1b2130;
-  --sidebar-row-selected: #262c3e;
+  --sidebar-row-hover: oklch(0.24913385 0.02998288 267.396242);
+  --sidebar-row-selected: oklch(0.29568726 0.03397710 270.005451);
   /* The Inbox nav count (#617 01c): soft amber, because follow-ups wait for you. A tinted fill
    * with amber ink rather than the teal brand chip; 8.1:1 on the dark sidebar. */
-  --inbox-count: #f4c54226;
-  --inbox-count-foreground: #f4c542;
+  --inbox-count: oklch(0.84292398 0.15105370 88.300494 / 0.149020);
+  --inbox-count-foreground: oklch(0.84292398 0.15105370 88.300494);
   /* The project rail's pill numbers (#618). Amber is bright enough for dark ink in both themes
    * (11.0:1); red, violet and green take dark ink on the dark theme (4.76 / 6.59 / 10.05:1). */
-  --signal-ink-amber: #121722;
-  --signal-ink: #121722;
+  --signal-ink-amber: oklch(0.20502324 0.02337733 265.468208);
+  --signal-ink: oklch(0.20502324 0.02337733 265.468208);
   /* The project signal as WORDS (#711): the state line under a project's name on the expanded
    * rail and the mobile drawer. 11px text needs 4.5:1 on the default, hover and selected rows
    * alike; `--danger` as text drops to 3.69:1 on the selected row, so red and amber have their
    * own inks. Amber 11.8 / 9.9 / 8.5:1, red 6.9 / 5.8 / 5.0:1 (default / hover / selected). */
-  --signal-word-amber: #f4c542;
-  --signal-word-red: #f87171;
+  --signal-word-amber: oklch(0.84292398 0.15105370 88.300494);
+  --signal-word-red: oklch(0.71062735 0.16614792 22.216224);
 
   /* Cezarion surfaces from design.pen. Elevation comes from surface steps, not shadows. */
-  --surface-base: #0b0f17;
-  --surface-raised: #121722;
-  --surface-muted: #202535;
-  --border-subtle: #2c3142;
-  --text-primary: #f8fafc;
-  --text-secondary: #afb5c5;
-  --text-muted: #8992a6;
-  --accent-text: #5eead4;
-  --accent-icon: #2dd4bfb3;
-  --task-brand-bg: #080f17;
-  --task-brand-selected: #123c3a;
-  --composer-border: #347d75;
+  --surface-base: oklch(0.16828084 0.01806226 263.904279);
+  --surface-raised: oklch(0.20502324 0.02337733 265.468208);
+  --surface-muted: oklch(0.26713239 0.03085068 270.812067);
+  --border-subtle: oklch(0.31589964 0.03129597 271.795943);
+  --text-primary: oklch(0.98415186 0.00341267 247.857544);
+  --text-secondary: oklch(0.77337884 0.02371525 269.378111);
+  --text-muted: oklch(0.65939768 0.03151807 266.241095);
+  --accent-text: oklch(0.85488177 0.12507543 181.070723);
+  --accent-icon: oklch(0.78451984 0.13252856 181.911977 / 0.701961);
+  --task-brand-bg: oklch(0.16544886 0.02028162 251.891015);
+  --task-brand-selected: oklch(0.32665238 0.04598625 190.741863);
+  --composer-border: oklch(0.54138006 0.07357683 185.516756);
 
   /* Thread conversation surfaces (#252). Yellow is user intent; teal is the agent reply. */
-  --message-user-bg: #1b1912;
-  --message-user-border: #4d4324;
-  --message-user-accent: #f4c542;
-  --message-agent-bg: #10201f;
-  --message-agent-border: #29423f;
-  --message-agent-accent: #5eead4;
-  --message-outbound-bg: #101820;
-  --message-outbound-border: #2a4f75;
-  --message-outbound-accent: #83baff;
-  --message-inbound-bg: #1b1528;
-  --message-inbound-border: #534078;
-  --message-inbound-accent: #c4a5ff;
+  --message-user-bg: oklch(0.21321465 0.01351055 93.978991);
+  --message-user-border: oklch(0.38512024 0.04879594 92.073965);
+  --message-user-accent: oklch(0.84292398 0.15105370 88.300494);
+  --message-agent-bg: oklch(0.22894792 0.02180574 190.683667);
+  --message-agent-border: oklch(0.35768411 0.03133143 186.402701);
+  --message-agent-accent: oklch(0.85488177 0.12507543 181.070723);
+  --message-outbound-bg: oklch(0.20502250 0.02000954 248.830221);
+  --message-outbound-border: oklch(0.41855365 0.07679372 250.700245);
+  --message-outbound-accent: oklch(0.77792681 0.11495880 254.588347);
+  --message-inbound-bg: oklch(0.21302869 0.03745740 297.672919);
+  --message-inbound-border: oklch(0.41805099 0.09252441 297.928962);
+  --message-inbound-accent: oklch(0.78270926 0.12895489 299.255507);
 
   /* Existing semantic names remain the compatibility layer for every screen. */
   --background: var(--surface-base);
@@ -145,7 +149,7 @@
   --supporting-foreground: var(--text-secondary);
   --border: var(--border-subtle);
   --input: var(--border-subtle);
-  --control-border: #667084;
+  --control-border: oklch(0.54402337 0.03357110 264.243724);
   --selection-indicator: var(--accent-text);
   --contrast: var(--text-primary);
   --contrast-foreground: var(--surface-raised);
@@ -153,15 +157,15 @@
   --ring: var(--accent-text);
 
   /* status */
-  --danger: #ef4444;
-  --danger-foreground: #ffffff;
-  --success: #74d5a1;
+  --danger: oklch(0.63683371 0.20784885 25.331328);
+  --danger-foreground: oklch(0.99999999 0.00000000 none);
+  --success: oklch(0.79939674 0.11933177 158.659529);
   --pending: var(--action);
   /* Waiting on a PERSON — a reference that needs a reviewer, as opposed to one that is done
    * (teal completed / reserved purple merged), finished well (success) or broken (danger). The palette had no blue outside the
    * syntax theme, which is exactly why this reads as its own thing: nothing else in the cockpit
    * is blue. Ink-only, per theme, AA on both backgrounds (10.9:1 here, 6.7:1 on light). */
-  --info: #83baff;
+  --info: oklch(0.77792681 0.11495880 254.588347);
 
   /* A pull request that will not merge — the OTHER axis of a reference's state, and the reason it
    * needs a hue of its own. Red is already spoken for by "the checks failed" and "a reviewer asked
@@ -171,7 +175,7 @@
    * AA on both backgrounds (8.6:1 on this one, 7.9:1 on --card; 5.2:1 on light). Distinct from
    * `--pending`'s amber by hue AND by glyph: the pending chip carries the pulsing dot, this one a
    * warning triangle. */
-  --conflict: #ffaa70;
+  --conflict: oklch(0.80938607 0.12463754 54.328544);
 
   /* The INK version of pending. `--pending` is a fill colour: amber-400 as text passes against
    * this theme's near-black and fails badly against the light theme's white, which is why the
@@ -180,10 +184,10 @@
   --pending-strong: var(--action);
 
   /* diff tints */
-  --diff-add-bg: #132c24;
-  --diff-add-strong: rgba(116, 213, 161, 0.28);
-  --diff-del-bg: rgba(239, 68, 68, 0.1);
-  --diff-del-strong: rgba(239, 68, 68, 0.3);
+  --diff-add-bg: oklch(0.27005383 0.03487758 170.666725);
+  --diff-add-strong: oklch(0.79939674 0.11933177 158.659529 / 0.280000);
+  --diff-del-bg: oklch(0.63683371 0.20784885 25.331328 / 0.100000);
+  --diff-del-strong: oklch(0.63683371 0.20784885 25.331328 / 0.300000);
 
   --grad: linear-gradient(135deg, var(--accent-strong) 12%, var(--accent-text) 52%, var(--action) 100%);
 
@@ -198,13 +202,13 @@
   --measure: 820px;
 
   /* shiki syntax highlighting (dark) */
-  --syn-key: #5eead4;
-  --syn-str: #86efac;
-  --syn-fn: #93c5fd;
-  --syn-com: #6b7280;
-  --syn-num: #fca5a5;
-  --syn-punc: #9ca3af;
-  --syn-var: #e5e7eb;
+  --syn-key: oklch(0.85488177 0.12507543 181.070723);
+  --syn-str: oklch(0.87116318 0.13626706 154.449129);
+  --syn-fn: oklch(0.80906902 0.09559846 251.812784);
+  --syn-com: oklch(0.85 0.02 260);
+  --syn-num: oklch(0.80768967 0.10348574 19.570640);
+  --syn-punc: oklch(0.71366010 0.01917569 261.324645);
+  --syn-var: oklch(0.92758230 0.00581351 264.531291);
 
   /* shadcn aliases — mapped onto the tokens above, never duplicated */
   --popover: var(--card);
@@ -223,97 +227,81 @@
 .light {
   color-scheme: light;
 
-  --surface-base: #f8fafc;
-  --surface-raised: #ffffff;
-  --surface-muted: #eef0f5;
-  --border-subtle: #e2e5ee;
-  --text-primary: #0f172a;
-  --text-secondary: #4b5566;
-  --text-muted: #667084;
-  --accent-strong: #0f766e;
-  --accent-strong-foreground: #ffffff;
-  --accent-text: #0f766e;
-  --accent-icon: #0f766ecc;
-  --task-brand-bg: #f8fafc;
-  --task-brand-selected: #ccfbf1;
-  --composer-border: #438c84;
-  --merged-strong: #7c3aed;
-  --merged-text: #6d28d9;
-  --running: #7c3aed;
-  --status-running: #7c3aed;
-  --sidebar-row-hover: #f4f5f8;
-  --sidebar-row-selected: #eaedf3;
+  --surface-base: oklch(0.98415186 0.00341267 247.857544);
+  --surface-raised: oklch(0.99999999 0.00000000 none);
+  --surface-muted: oklch(0.95504219 0.00702862 268.546890);
+  --border-subtle: oklch(0.92222748 0.01259503 271.278649);
+  --text-primary: oklch(0.20768191 0.03982432 265.754874);
+  --text-secondary: oklch(0.44737478 0.03073402 261.031628);
+  --text-muted: oklch(0.54402337 0.03357110 264.243724);
+  --accent-strong: oklch(0.51093777 0.08605545 186.391359);
+  --accent-strong-foreground: oklch(0.99999999 0.00000000 none);
+  --accent-text: oklch(0.51093777 0.08605545 186.391359);
+  --accent-icon: oklch(0.51093777 0.08605545 186.391359 / 0.800000);
+  --task-brand-bg: oklch(0.98415186 0.00341267 247.857544);
+  --task-brand-selected: oklch(0.95265067 0.04979580 180.801231);
+  --composer-border: oklch(0.59096443 0.07421795 185.944644);
+  --merged-strong: oklch(0.54133709 0.24658592 293.008968);
+  --merged-text: oklch(0.49066650 0.24123171 292.580939);
+  --running: oklch(0.54133709 0.24658592 293.008968);
+  --status-running: oklch(0.54133709 0.24658592 293.008968);
+  --sidebar-row-hover: oklch(0.97023721 0.00413366 271.369521);
+  --sidebar-row-selected: oklch(0.94554043 0.00868545 264.521119);
   /* amber-400 ink on white is ~1.6:1, so the light count darkens its number (6.0:1 on the tint). */
-  --inbox-count: #f4c54240;
-  --inbox-count-foreground: #7a5200;
+  --inbox-count: oklch(0.84292398 0.15105370 88.300494 / 0.250980);
+  --inbox-count-foreground: oklch(0.47068846 0.09873444 76.333331);
   /* Rail pill numbers on the light theme: dark ink on amber only, white on the darker red, violet
    * and green fills (4.83 / 5.70 / 5.79:1). */
-  --signal-ink-amber: #121722;
-  --signal-ink: #ffffff;
+  --signal-ink-amber: oklch(0.20502324 0.02337733 265.468208);
+  --signal-ink: oklch(0.99999999 0.00000000 none);
   /* State words on light (#711): `--pending-strong` is 4.29:1 and `--danger` 4.12:1 on the selected
    * row, so both darken. Amber 6.6 / 6.4 / 5.9:1, red 6.2 / 5.9 / 5.5:1 (default / hover / selected). */
-  --signal-word-amber: #7a5200;
-  --signal-word-red: #b91c1c;
+  --signal-word-amber: oklch(0.47068846 0.09873444 76.333331);
+  --signal-word-red: oklch(0.50541985 0.19049342 27.518103);
 
-  --message-user-bg: #fff9e8;
-  --message-user-border: #ddc978;
-  --message-user-accent: #805d00;
-  --message-agent-bg: #f1f8f7;
-  --message-agent-border: #c9deda;
-  --message-agent-accent: #0f766e;
-  --message-outbound-bg: #eff6ff;
-  --message-outbound-border: #b8d5ff;
-  --message-outbound-accent: #245bcc;
-  --message-inbound-bg: #f5f3ff;
-  --message-inbound-border: #d9ccff;
-  --message-inbound-accent: #7040c0;
+  --message-user-bg: oklch(0.98221526 0.02320863 90.746621);
+  --message-user-border: oklch(0.83507807 0.10393238 95.902991);
+  --message-user-accent: oklch(0.50146436 0.10312847 82.920210);
+  --message-agent-bg: oklch(0.97358888 0.00752377 186.894377);
+  --message-agent-border: oklch(0.88382201 0.02305542 183.110219);
+  --message-agent-accent: oklch(0.51093777 0.08605545 186.391359);
+  --message-outbound-bg: oklch(0.97048003 0.01418225 254.604164);
+  --message-outbound-border: oklch(0.86584309 0.06640687 257.584465);
+  --message-outbound-accent: oklch(0.50470187 0.18503485 262.382595);
+  --message-inbound-bg: oklch(0.96914273 0.01605913 293.755758);
+  --message-inbound-border: oklch(0.87235115 0.07096328 296.583128);
+  --message-inbound-accent: oklch(0.49901048 0.18982318 295.993991);
 
-  --background: var(--surface-base);
-  --foreground: var(--text-primary);
-  --card: var(--surface-raised);
-  --card-2: var(--surface-muted);
-  --sidebar: var(--surface-raised);
-  --muted: var(--surface-muted);
-  --muted-foreground: var(--text-secondary);
-  --soft-foreground: var(--text-muted);
-  --link-foreground: var(--accent-text);
-  --supporting-foreground: var(--text-secondary);
-  --border: var(--border-subtle);
-  --input: var(--border-subtle);
   --control-border: var(--text-muted);
-  --selection-indicator: var(--accent-text);
-  --contrast: var(--text-primary);
-  --contrast-foreground: var(--surface-raised);
-  --ring: var(--accent-text);
 
   /* blue-700, not blue-300 — the same per-theme darkening the syntax blue already makes. */
-  --info: #2366b1;
+  --info: oklch(0.50845536 0.13625116 254.131270);
 
   /* amber-700, not amber-400: the dot keeps `--pending` in both themes, but amber ink on white
-   * has to come down this far to stay readable (~4.8:1 against #ffffff). */
-  --pending-strong: #996400;
+   * has to come down this far to stay readable (~4.8:1 against oklch(0.99999999 0.00000000 none)). */
+  --pending-strong: oklch(0.54699162 0.11646208 73.076281);
 
   /* orange-700, for the same reason the amber above darkens: orange-400 as ink on white is ~2:1.
    * Far enough from `--pending-strong` (amber-700) to stay a different colour, not a shade. */
-  --conflict: #b4490b;
+  --conflict: oklch(0.54067021 0.15312160 43.743846);
 
-  --success: #187447;
-  --danger: #dc2626;
+  --success: oklch(0.49560660 0.10996954 156.349587);
+  --danger: oklch(0.57709882 0.21515673 27.325049);
 
-  --shadow-modal: 0 16px 48px 0 rgba(0, 0, 0, 0.12);
+  --shadow-modal: 0 16px 48px 0 oklch(0.00000000 0.00000000 none / 0.120000);
 
-  --diff-add-bg: #eaf6ef;
-  --diff-add-strong: rgba(24, 116, 71, 0.18);
-  --diff-del-bg: rgba(239, 68, 68, 0.07);
+  --diff-add-bg: oklch(0.96224329 0.01568076 160.624938);
+  --diff-add-strong: oklch(0.49560660 0.10996954 156.349587 / 0.180000);
+  --diff-del-bg: oklch(0.63683371 0.20784885 25.331328 / 0.070000);
 
   /* shiki syntax highlighting (light) */
-  --syn-key: #0f766e;
-  --syn-str: #15803d;
-  --syn-fn: #1d4ed8;
-  --syn-com: #9ca3af;
-  --syn-num: #b91c1c;
-  --syn-punc: #6b7280;
-  --syn-var: #111827;
+  --syn-key: oklch(0.51093777 0.08605545 186.391359);
+  --syn-str: oklch(0.52729864 0.13710254 150.069279);
+  --syn-fn: oklch(0.48819831 0.21716546 264.376304);
+  --syn-com: oklch(0.43 0.025 260);
+  --syn-num: oklch(0.50541985 0.19049342 27.518103);
+  --syn-punc: oklch(0.55101910 0.02336090 264.363742);
+  --syn-var: oklch(0.21008449 0.03176261 264.664526);
 }
 
 /* ---------- appearance: density + reading width ----------
@@ -334,54 +322,6 @@
  * lever as compact, just smaller; the type scale still stays untouched. */
 :root[data-density='ultra'] {
   --spacing: 0.1875rem;
-}
-
-/* Mobile actions reserve their real hit area in layout (#166). Numeric Tailwind sizes
- * follow density, so `size-11` is only 33px in ultra. Keep the floor in CSS pixels and
- * outside layers so local size/min-size utilities cannot shrink it. No pseudo-element
- * expansion: neighboring actions must never share a target. Desktop density is unchanged.
- * Include native controls and Radix menu rows as well as our shared Button (including
- * asChild links); inline prose links deliberately keep their text layout.
- */
-@media (width < 48rem) {
-  :where(button, select, [role='button'], [role='menuitem'], [role='menuitemradio'],
-    [role='menuitemcheckbox'], [role='option'], nav a, a[data-slot='button'], [data-slot='run-tabs'] a,
-    input:not([type='hidden'], [type='checkbox'], [type='radio'], [type='range'], [type='file'])) {
-    min-width: 44px;
-    min-height: 44px;
-  }
-
-  :where(button, select, [role='button'], nav a, a[data-slot='button']):focus-visible {
-    /* Use semantic ink: the accent fill/ring is below 3:1 on the light sidebar. */
-    outline: 2px solid var(--link-foreground);
-    outline-offset: 2px;
-  }
-
-  /* The settings row scrolls; its labels must keep their intrinsic width rather than
-   * shrinking to the 44px floor. Preserve its existing overflow/reveal controller. */
-  [data-slot='settings-nav-mobile'] a {
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-  }
-
-  /* A switch reserves a 44px square while its familiar track stays compact. The
-   * transparent border belongs to the button, so even its edges toggle the switch. */
-  [role='switch'] {
-    box-sizing: content-box;
-    min-width: 40px;
-    min-height: 24px;
-    width: 40px;
-    height: 24px;
-    border-width: 10px 2px;
-    border-color: transparent;
-    background-clip: padding-box;
-    box-shadow: none;
-  }
-  [data-slot='switch-thumb'] {
-    width: 18px;
-    height: 18px;
-  }
 }
 
 /* Wide reading width (Settings → Appearance → Reading width): open the task-view column from the
@@ -410,10 +350,10 @@
 
   /* restrained by design — borders carry most of the separation */
   --shadow-*: initial;
-  --shadow-xs: 0 1px 2px 0 rgba(10, 13, 20, 0.03);
-  --shadow-sm: 0 2px 4px 0 rgba(27, 28, 29, 0.04);
-  --shadow-md: 0 16px 32px -12px rgba(14, 18, 27, 0.1);
-  --shadow-modal: 0 16px 48px 0 rgba(0, 0, 0, 0.45);
+  --shadow-xs: 0 1px 2px 0 oklch(0.15939287 0.01573426 266.594059 / 0.030000);
+  --shadow-sm: 0 2px 4px 0 oklch(0.22577776 0.00246572 247.935455 / 0.040000);
+  --shadow-md: 0 16px 32px -12px oklch(0.18255746 0.01963861 265.901203 / 0.100000);
+  --shadow-modal: 0 16px 48px 0 oklch(0.00000000 0.00000000 none / 0.450000);
 }
 
 /* ---------- Tailwind theme: utilities point at the tokens above ----------
@@ -609,7 +549,7 @@
 
 .ghost-code-line {
   width: calc(var(--n) * 1ch);
-  overflow: hidden;
+  overflow: clip;
   white-space: pre;
 }
 .ghost-code-block {
@@ -622,7 +562,7 @@
   }
   .ghost-code-line {
     width: 0;
-    border-right: 1px solid transparent;
+    border-inline-end: 1px solid transparent;
     animation:
       ghost-type var(--t) steps(var(--n)) var(--d) forwards,
       ghost-caret-off 1ms linear calc(var(--d) + var(--t) + 700ms) forwards;
@@ -631,16 +571,16 @@
 @keyframes ghost-type {
   from {
     width: 0;
-    border-right-color: var(--action);
+    border-inline-end-color: var(--action);
   }
   to {
     width: calc(var(--n) * 1ch);
-    border-right-color: var(--action);
+    border-inline-end-color: var(--action);
   }
 }
 @keyframes ghost-caret-off {
   to {
-    border-right-color: transparent;
+    border-inline-end-color: transparent;
   }
 }
 @keyframes ghost-block-fade {
@@ -669,7 +609,8 @@
   line-height: 1.6;
 }
 .thread-markdown :is(h1, h2, h3, h4, h5, h6) {
-  margin: 0.9em 0 0.35em;
+  margin-block: 0.9em 0.35em;
+  margin-inline: 0;
   font-size: 1.05em;
   font-weight: 600;
 }
@@ -680,10 +621,11 @@
   font-size: 1.15em;
 }
 .thread-markdown :is(p, ul, ol, table, blockquote) {
-  margin: 0.45em 0;
+  margin-block: 0.45em;
+  margin-inline: 0;
 }
 .thread-markdown :is(ul, ol) {
-  padding-left: 1.4em;
+  padding-inline-start: 1.4em;
 }
 .thread-markdown ul {
   list-style: disc;
@@ -692,14 +634,15 @@
   list-style: decimal;
 }
 .thread-markdown blockquote {
-  border-left: 2px solid var(--border);
-  padding-left: 0.9em;
+  border-inline-start: 2px solid var(--border);
+  padding-inline-start: 0.9em;
   color: var(--muted-foreground);
 }
 .thread-markdown [data-streamdown='inline-code'] {
   border-radius: 5px;
   background: var(--muted);
-  padding: 1.5px 5px;
+  padding-block: 1.5px;
+  padding-inline: 5px;
   font-size: 0.9em;
 }
 .thread-markdown [data-streamdown='link'] {
@@ -744,86 +687,7 @@
 
 /* design.pen 1A–1D: prompt, agent choices, execution panel and submission are
  * separate surfaces. Mobile follows the document order shown in the frame. */
-.new-task-composer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
-}
-.new-task-editor { grid-row: 1; }
-.new-task-editor textarea { min-height: 132px; padding: 16px 20px; }
-.new-task-composer [data-slot='composer-agent-options'] { grid-row: 3; }
-.new-task-composer [data-slot='composer-execution-panel'] { grid-row: 4; }
-.new-task-submission { display: contents; }
-.new-task-submission [data-slot='composer-footer-end'] { grid-row: 2; width: 100%; }
-.new-task-submission [data-slot='composer-actions'] { grid-row: 5; width: 100%; }
-.new-task-submission kbd { display: none; }
-.new-task-submission [data-slot='mode-seg'] { display: flex; width: 100%; height: 48px; }
-.new-task-submission [data-slot='mode-seg'] button { flex: 1; height: 42px; }
-.new-task-submission [data-slot='mode-seg'] [aria-checked='true'] {
-  background: var(--task-brand-selected); color: var(--accent-text);
-  border: 1px solid var(--composer-border); box-shadow: none;
-}
-.new-task-agent-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.new-task-agent-options > * { min-width: 0; }
-.new-task-agent-options [data-slot='model-pill'] { grid-column: 1 / -1; grid-row: 1; min-height: 60px; }
-.new-task-agent-options button { width: 100%; justify-content: flex-start; min-height: 44px; }
-.new-task-run-settings { display: flex; flex-direction: column; gap: 0; }
-.new-task-run-settings > * { min-height: 48px; }
-.new-task-run-settings > button { width: 100%; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; }
-.new-task-run-settings [data-slot='variants-pill'], .new-task-run-settings [data-slot='base-pill'] { border: 0; color: var(--accent-text); }
-.new-task-editor [data-slot='composer-footer-start'] { gap: 8px; padding: 8px 12px 12px; }
-.new-task-editor [data-slot='composer-footer-start'] button { min-height: 44px; }
-@media (min-width: 1280px) {
-  .new-task-composer { grid-template-columns: minmax(0, 1fr) 330px; column-gap: 24px; }
-  .new-task-editor { grid-column: 1; grid-row: 1; }
-  .new-task-editor textarea { min-height: 180px; }
-  .new-task-composer [data-slot='composer-agent-options'] { grid-column: 1; grid-row: 2; }
-  .new-task-composer [data-slot='composer-execution-panel'] { grid-column: 2; grid-row: 1 / 4; }
-  .new-task-submission { display: flex; grid-column: 1; grid-row: 3; gap: 18px; }
-  .new-task-submission [data-slot='composer-actions'] { width: auto; }
-}
-@media (max-width: 767px) {
-  /* #267: keep the prompt editor a bordered card (shell border/bg from composer.tsx), not a full-bleed strip. */
-  .new-task-editor { padding: 12px; }
-  .new-task-editor textarea { padding-inline: 0; }
-  .new-task-editor [data-slot='composer-footer-start'] { padding-inline: 0; }
-  .new-task-editor > p { padding-inline: 0; }
-  .new-task-composer [data-slot='execution-options'] { border: 0; }
-}
-.new-task-agent-options button { border-radius: 10px; padding: 10px; background: var(--card); }
-.new-task-agent-options button > svg:last-child { margin-left: auto; }
-.new-task-editor [data-slot='prompt-template-trigger'], .new-task-editor [data-slot='source-pill'] { border-radius: 9px; padding-inline: 14px; font-family: inherit; }
-.new-task-submission [data-slot='composer-footer-end'] { flex: 1; margin-right: 0; }
-.new-task-submission [data-slot='composer-footer-end'] > .contents { display: flex; width: 100%; }
-.new-task-submission [data-slot='composer-actions'] { min-width: 170px; }
-.new-task-submission { margin-left: 0; width: 100%; }
-.new-task-editor [data-slot='composer-footer-start'] button[aria-label='Start dictation'],
-.new-task-editor [data-slot='composer-footer-start'] button[aria-label='Attach files'] { border: 1px solid var(--border); border-radius: 9px; width: 44px; padding: 0; }
-@media (max-width: 767px) {
-  .new-task-editor:focus-within { box-shadow: none; }
-  .new-task-editor textarea { min-height: 96px; }
-}
-/* The sidebar task row (#617) is laid out entirely by its own utilities in
- * `task-quick-list.tsx`: two fixed lines, a 12px dot slot, a reserved 16px trailing slot, and
- * the neutral --sidebar-row-hover / --sidebar-row-selected fills. The earlier override layer
- * here (a grid, a 10px dot, a two-line clamped title and a teal selected title) is gone — do not
- * restyle the row from this sheet, or the geometry the row guarantees stops holding. */
 
-.new-task-composer [data-slot='composer-feedback'] { grid-row: 6; }
-@media (min-width: 1280px) {
-  .new-task-composer [data-slot='composer-feedback'] { grid-row: 4; grid-column: 1; }
-}
-@media (max-width: 767px) {
-  .new-task-composer { gap: 10px; }
-  .new-task-editor textarea { padding-block: 0; }
-  .new-task-editor > div:has([data-slot='composer-footer-start']) { padding: 0; }
-  .new-task-editor [data-slot='composer-footer-start'] { padding-block: 8px; }
-  .new-task-composer [data-slot='execution-options'] > div { padding: 0; }
-  .new-task-composer [data-slot='execution-options'] summary { padding-inline: 0; }
-  .new-task-agent-options button { border-color: var(--border); }
-}
-
-.new-task-editor textarea { color: var(--muted-foreground); }
 
 /* The approved navigation selection uses its surface, while focus remains outlined. */
 [data-slot='sidebar-content'] .selection-row::before { content: none; }

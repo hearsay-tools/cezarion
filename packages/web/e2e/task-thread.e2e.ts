@@ -13,6 +13,7 @@ import {
   contrastQaVariants,
   contrastSampleExpression,
   focusWithKeyboard,
+  normalizeColorSample,
   hoverVisiblePoint,
   restoreContrastQaDefaults,
   type ContrastSample,
@@ -232,7 +233,7 @@ describe('task thread', () => {
     // Streamdown owns how its custom token variable is painted; our contract is that Shiki
     // maps the keyword to cezar's theme token and that the active palette defines that token.
     expect(block.keywordToken).toBe('var(--syn-key)')
-    expect(block.synKey).toMatch(/^#[0-9a-f]{6}$/i)
+    expect(normalizeColorSample(browser, block.synKey)).toBe('rgb(94, 234, 212)')
   })
 
   it('keeps Shiki out of the main bundle — its chunks load lazily, after the thread route', () => {

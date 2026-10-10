@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { setApiBaseUrl } from '@open-mercato/cezar-api-client'
 import { App } from './app'
 import './styles/index.css'
+import './styles/accessibility.css'
 
 /**
  * Where the API lives, resolved before anything can fetch.

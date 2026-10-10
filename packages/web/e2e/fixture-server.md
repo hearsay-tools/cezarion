@@ -107,6 +107,10 @@ hearsay-tools/cezarion#922 adds `task-pr-collection.e2e.ts`: one CLI constructio
 with port 0 and child-owned readiness within the original 15 s deadline. The audit
 now covers 53 starts across 45 specs.
 
+hearsay-tools/cezarion#941 adds `good-css.e2e.ts`: one CLI construction with
+port 0, the shared owned-listener health budget, and awaited shutdown before
+fixture removal. The guard now pins 54 starts across 46 specs.
+
 ## Other server classes audited
 
 - `task-views-layout` fault proxy uses a direct Node HTTP listener; it does not run
@@ -119,7 +123,7 @@ now covers 53 starts across 45 specs.
   zero-config repo-identity discovery rather than a requested health endpoint.
   Application-update tests use their own IPC actual-listener acknowledgement with
   exact-restart identity checks, or packaged mock servers with fixed explicit binds.
-  They are distinct from the 53 cockpit-spec CLI preference/health constructions.
+  They are distinct from the 54 cockpit-spec CLI preference/health constructions.
 - In-process Hono/server tests use their returned listener or app and do not spawn
   an adaptive CLI port. Browser mock API fixtures do not spawn this CLI.
 

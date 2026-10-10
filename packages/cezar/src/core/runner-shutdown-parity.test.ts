@@ -9,12 +9,23 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // the production runner still own startup, input delivery and settlement.
 const spawned = vi.hoisted(() => [] as ChildProcess[]);
 const eventStreams = vi.hoisted(() => [] as IncomingMessage[]);
+const streamClosure = vi.hoisted(() => ({ gate: undefined as Promise<void> | undefined }));
 vi.mock('node:http', async (original) => {
   const actual = await original<typeof import('node:http')>();
   return { ...actual, request: ((...args: Parameters<typeof actual.request>) => {
     const request = actual.request(...args);
     request.on('response', response => {
-      if (response.headers['content-type']?.includes('text/event-stream')) eventStreams.push(response);
+      if (response.headers['content-type']?.includes('text/event-stream')) {
+        eventStreams.push(response);
+        const gate = streamClosure.gate;
+        if (gate) {
+          const iterate = response[Symbol.asyncIterator].bind(response);
+          response[Symbol.asyncIterator] = async function* () {
+            try { yield* iterate(); } finally { await gate; }
+            return undefined;
+          };
+        }
+      }
     });
     return request;
   }) as typeof actual.request };
@@ -100,16 +111,25 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
   const [outsideSignal, endEscalation, outputFailure, ownGroup, stopGroup, endGroup] = SHUTDOWN_CRITERIA;
   for (const backend of RUNNER_IDS) {
     it(`${backend} ${outsideSignal.id} ${outsideSignal.name}`, async () => {
-      await withChild(backend, async (_session, child, events, settled) => {
-        child.kill('SIGKILL');
-        const result = await settled;
-        expect(result instanceof Error || events.some(event => event.type === 'error')).toBe(true);
-        if (backend === 'pi' || backend === 'claude' || backend === 'codex') {
-          expect(result).toBeInstanceOf(Error);
-          expect((result as Error).message).toContain('SIGKILL');
-          expect(events.some(event => event.type === 'done')).toBe(false);
-        }
-      });
+      // Process exit must classify the failure even when HTTP stream closure
+      // arrives later. Keep native SSE frames, but hold its terminal notification.
+      let releaseStream!: () => void;
+      streamClosure.gate = new Promise<void>(resolve => { releaseStream = resolve; });
+      try {
+        await withChild(backend, async (_session, child, events, settled) => {
+          child.kill('SIGKILL');
+          const result = await settled;
+          expect(result instanceof Error || events.some(event => event.type === 'error')).toBe(true);
+          if (backend === 'pi' || backend === 'claude' || backend === 'codex') {
+            expect(result).toBeInstanceOf(Error);
+            expect((result as Error).message).toContain('SIGKILL');
+            expect(events.some(event => event.type === 'done')).toBe(false);
+          }
+        });
+      } finally {
+        releaseStream();
+        streamClosure.gate = undefined;
+      }
     }, 15_000);
 
     it(`${backend} ${endEscalation.id} ${endEscalation.name}`, async () => {

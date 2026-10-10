@@ -6,6 +6,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { paletteHex } from '@/test/palette'
+
 import { setApiScope } from '@open-mercato/cezar-api-client'
 import type { RunEvent } from '@open-mercato/cezar-api-client'
 import type { UiToolItem } from '@open-mercato/cezar-api-client'
@@ -840,7 +842,8 @@ describe('message color tokens', () => {
     // Reference screenshot: blue sends, purple receives, never human-message amber.
     for (const block of [rootBlock, lightBlock]) {
       const rgb = (role: string) => {
-        const hex = block.match(new RegExp(`--message-${role}-bg: #([0-9a-f]{6})`))![1]!
+        const token = block.match(new RegExp(`--message-${role}-bg: ([^;]+);`))![1]!
+        const hex = paletteHex(token).slice(1)
         return [0, 2, 4].map(offset => Number.parseInt(hex.slice(offset, offset + 2), 16)) as [number, number, number]
       }
       const [sendR, sendG, sendB] = rgb('outbound')

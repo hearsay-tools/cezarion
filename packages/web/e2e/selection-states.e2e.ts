@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { waitForSettledSample } from './visual-ready'
+import { waitForSettledSample as rawSettledSample } from './visual-ready'
+import { normalizeColorExpression, normalizeColorSample } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { expectGroupRowHeightMatchesTaskRow } from './row-height'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
@@ -70,7 +71,7 @@ afterAll(async () => {
 })
 
 function style(selector: string, pseudo?: string): Record<string, string> {
-  return browser.evaluate(`(() => {
+  return colorSample(`(() => {
     const el = document.querySelector(${JSON.stringify(selector)})
     const s = getComputedStyle(el, ${JSON.stringify(pseudo ?? null)})
     return { content: s.content, width: s.width, height: s.height, background: s.backgroundColor, color: s.color,
@@ -79,7 +80,7 @@ function style(selector: string, pseudo?: string): Record<string, string> {
 }
 
 function selectedSurface(selector: string, filled = true): void {
-  const facts = browser.evaluate(`(() => {
+  const facts = colorSample(`(() => {
     const el = document.querySelector(${JSON.stringify(selector)});
     const s = getComputedStyle(el), parent = getComputedStyle(el.parentElement);
     return { background: s.backgroundColor, color: s.color, parent: parent.backgroundColor,
@@ -90,16 +91,16 @@ function selectedSurface(selector: string, filled = true): void {
     expect(facts.background).not.toBe('rgba(0, 0, 0, 0)')
     expect(facts.background).not.toBe(facts.parent)
   }
-  const sample = browser.evaluate(contrastSampleExpression(selector)) as ContrastSample
+  const sample = colorSample(contrastSampleExpression(selector)) as ContrastSample
   samples.push({ variant: variantId, target: selector, state: 'selected surface text', ...sample })
   expect(sample.ratio, JSON.stringify(sample)).toBeGreaterThanOrEqual(4.5)
 }
 
 function focus(selector: string): void {
   focusWithKeyboard(browser, selector)
-  expect(browser.evaluate(`document.querySelector(${JSON.stringify(selector)}) === document.activeElement && document.activeElement.matches(':focus-visible')`)).toBe(true)
+  expect(colorSample(`document.querySelector(${JSON.stringify(selector)}) === document.activeElement && document.activeElement.matches(':focus-visible')`)).toBe(true)
   expect(style(selector).outline).not.toBe('none')
-  const sample = browser.evaluate(contrastSampleExpression(selector, 'outline-color', 'parent')) as ContrastSample
+  const sample = colorSample(contrastSampleExpression(selector, 'outline-color', 'parent')) as ContrastSample
   samples.push({ variant: variantId, target: selector, state: 'keyboard focus', ...sample })
   expect(sample.ratio, JSON.stringify(sample)).toBeGreaterThanOrEqual(3)
 }
@@ -139,7 +140,7 @@ function checkNavSelection(variant: ContrastQaVariant, { base, projectId, nav: n
     browser.waitForFunction(`document.querySelector(${JSON.stringify(container + ready)})?.getBoundingClientRect().width > 0`)
   }
   const record = (target: string, state: string, min: number, property = 'color', source: 'element' | 'parent' = 'element') => {
-    const sample = browser.evaluate(contrastSampleExpression(target, property, source)) as ContrastSample
+    const sample = colorSample(contrastSampleExpression(target, property, source)) as ContrastSample
     samples.push({ variant: variantId, target, state, ...sample })
     expect(sample.ratio, `${state}: ${JSON.stringify(sample)}`).toBeGreaterThanOrEqual(min)
   }
@@ -184,7 +185,7 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
   })()`
   open('/tasks/one', '[data-slot="task-row"][data-run-id="one"][data-active="true"]')
   // Waited, not sampled: the inbox count lands from its own query.
-  const f = browser.waitForValue(facts, (v: Facts | null) => v !== null && v.tasks === fill.selected) as Facts
+  const f = browser.waitForValue(normalizeColorExpression(facts), (v: Facts | null) => v !== null && v.tasks === fill.selected) as Facts
   expect({ tasks: f.tasks, row: f.row }).toEqual({ tasks: fill.selected, row: fill.selected })
   expect({ label: f.label, icon: f.icon, weight: f.weight }).toEqual({ label: f.ink, icon: f.ink, weight: '600' })
   // Below 48rem the unlayered floor keeps `nav a` at 44px in every density.
@@ -248,7 +249,7 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
     const el = document.querySelector('${badge}'); if (!el) return null
     return { text: el.textContent, bg: getComputedStyle(el).backgroundColor, color: getComputedStyle(el).color }
   })()`, (v: { text: string } | null) => v?.text === '2')
-  expect(inbox).toEqual({ text: '2', bg: amber.fill, color: amber.ink })
+  expect(normalizeColorSample(browser, inbox)).toEqual({ text: '2', bg: amber.fill, color: amber.ink })
   record(badge, 'inbox-count number', 4.5)
   browser.press('Escape')
   browser.waitForFunction(`document.querySelector('[role="menu"]') === null && document.activeElement === document.querySelector(${JSON.stringify(more)})`)
@@ -333,7 +334,7 @@ describe('selection and control states (#171)', () => {
       // Source10C/10D uses uniform mobile rows; desktop selection has a filled surface.
       selectedSurface(skill, variant.viewport.width !== 360)
       focus(skill)
-      expect((browser.evaluate(contrastSampleExpression(`${skill} span span`)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
+      expect((colorSample(contrastSampleExpression(`${skill} span span`)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
       browser.screenshot(`${artifacts}/states-skills-${variant.id}.png`, { viewport: true })
       browser.click('[data-slot="skill-row"][data-skill="ship"]')
       browser.waitForFunction(`document.querySelector('[data-slot="skill-row"][data-skill="ship"]')?.getAttribute('aria-current') === 'page'`)
@@ -367,7 +368,7 @@ describe('selection and control states (#171)', () => {
       // At rest: no fill, pin invisible (its slot is still reserved).
       const rest = waitForSettledSample(browser, geometry(other)) as Geometry
       expect({ bg: rest.bg, pin: rest.pin }).toEqual({ bg: 'rgba(0, 0, 0, 0)', pin: '0' })
-      expect(browser.evaluate(`getComputedStyle(document.querySelector('${selected}')).backgroundColor`)).toBe(fill.selected)
+      expect(colorSample(`getComputedStyle(document.querySelector('${selected}')).backgroundColor`)).toBe(fill.selected)
       hoverVisiblePoint(browser, other)
       // Hovered: the neutral hover fill and the pin revealed — and the title box and the row
       // height identical to rest, to the pixel. This is the jump the old w-0→w-5 pin caused.
@@ -377,7 +378,7 @@ describe('selection and control states (#171)', () => {
       // The row as the issue specifies it, from the resolved stylesheet rather than the classes:
       // nothing in a later sheet may restyle it (an override layer once clamped the title to two
       // 12px lines and painted the selected title teal).
-      const resolved = browser.evaluate(`(() => {
+      const resolved = colorSample(`(() => {
         const row = document.querySelector('${selected}'), s = getComputedStyle(row)
         const t = getComputedStyle(row.querySelector('[data-slot="task-row-title"]'))
         const m = getComputedStyle(row.querySelector('[data-slot="task-row-meta"]'))
@@ -395,28 +396,28 @@ describe('selection and control states (#171)', () => {
         titleSize: '13px', titleWeight: '500', titleWrap: 'nowrap', titleOverflow: 'ellipsis', titleInk: true, metaSize: '11.5px',
         metaWrap: 'nowrap', dot: '7px 7px', metaHeight: '16px', dotSlot: '12px', trailing: '16px' })
       // With a hover-capable pointer the reference is a real link (on touch it is plain text).
-      expect(browser.evaluate(`(() => { const a = document.querySelector('${other} [data-slot="task-row-meta"] [data-slot="pr-chip"]'); return a && { tag: a.tagName, href: a.getAttribute('href') } })()`))
+      expect(colorSample(`(() => { const a = document.querySelector('${other} [data-slot="task-row-meta"] [data-slot="pr-chip"]'); return a && { tag: a.tagName, href: a.getAttribute('href') } })()`))
         .toEqual({ tag: 'A', href: 'https://github.com/o/r/pull/594' })
       // Every row is the same two-line height.
       expect(waitForSettledSample(browser, `Math.round(document.querySelector('${selected}').getBoundingClientRect().height)`)).toBe(rest.row)
       // Ink on both fills: text at 4.5:1, the status dot as a non-text mark at 3:1.
       for (const [row, state] of [[selected, 'selected'], [other, 'hover']] as const) {
         for (const part of ['[data-slot="task-row-title"]', '[data-slot="task-row-meta"]']) {
-          const sample = browser.evaluate(contrastSampleExpression(`${row} ${part}`)) as ContrastSample
+          const sample = colorSample(contrastSampleExpression(`${row} ${part}`)) as ContrastSample
           samples.push({ variant: variantId, target: `${row} ${part}`, state: `${state} row text`, ...sample })
           expect(sample.ratio, `${state} ${part}: ${JSON.stringify(sample)}`).toBeGreaterThanOrEqual(4.5)
         }
         // The hand-off glyph (#729): the meta line's own ink (not a tone), a 3:1 non-text mark.
-        const glyph = browser.evaluate(contrastSampleExpression(`${row} [data-slot="task-row-notify"] svg`, 'stroke')) as ContrastSample
+        const glyph = colorSample(contrastSampleExpression(`${row} [data-slot="task-row-notify"] svg`, 'stroke')) as ContrastSample
         samples.push({ variant: variantId, target: `${row} task-row-notify`, state: `${state} row glyph`, ...glyph })
         expect(glyph.ratio, `${state} glyph: ${JSON.stringify(glyph)}`).toBeGreaterThanOrEqual(3)
-        const ink = browser.evaluate(`(() => { const r = document.querySelector('${row}'); return [getComputedStyle(r.querySelector('[data-slot="task-row-notify"] svg')).stroke, getComputedStyle(r.querySelector('[data-slot="task-row-meta"]')).color] })()`) as [string, string]
+        const ink = colorSample(`(() => { const r = document.querySelector('${row}'); return [getComputedStyle(r.querySelector('[data-slot="task-row-notify"] svg')).stroke, getComputedStyle(r.querySelector('[data-slot="task-row-meta"]')).color] })()`) as [string, string]
         expect(ink[0], `${state} glyph follows the meta ink`).toBe(ink[1])
-        const dot = browser.evaluate(contrastSampleExpression(`${row} [data-slot="status-dot"]`, 'background-color', 'parent')) as ContrastSample
+        const dot = colorSample(contrastSampleExpression(`${row} [data-slot="status-dot"]`, 'background-color', 'parent')) as ContrastSample
         samples.push({ variant: variantId, target: `${row} status-dot`, state: `${state} row dot`, ...dot })
         expect(dot.ratio, `${state} dot: ${JSON.stringify(dot)}`).toBeGreaterThanOrEqual(3)
       }
-      const pin = browser.evaluate(contrastSampleExpression(`${other} [data-slot="pin-toggle"]`, 'color', 'parent')) as ContrastSample
+      const pin = colorSample(contrastSampleExpression(`${other} [data-slot="pin-toggle"]`, 'color', 'parent')) as ContrastSample
       samples.push({ variant: variantId, target: `${other} pin`, state: 'hover pin', ...pin })
       expect(pin.ratio, `pin: ${JSON.stringify(pin)}`).toBeGreaterThanOrEqual(3)
       browser.screenshot(`${artifacts}/states-sidebar-row-${variant.id}.png`, { viewport: true })
@@ -439,21 +440,21 @@ describe('selection and control states (#171)', () => {
       // The shared status text can consume the narrow group's entire metadata budget.
       // Its protected overflow still gives the reference the same link and keyboard panel.
       let link = inline
-      if (!browser.evaluate(`document.querySelector(${JSON.stringify(inline)}) !== null`)) {
+      if (!colorSample(`document.querySelector(${JSON.stringify(inline)}) !== null`)) {
         browser.click(overflow)
         link = '[data-slot="reference-overflow-list"] a[data-slot="issue-chip"]'
       }
       browser.waitForFunction(`document.querySelector(${JSON.stringify(link)})?.getBoundingClientRect().width > 0`)
-      expect(browser.evaluate(`(() => { const a = document.querySelector(${JSON.stringify(link)}); return { href: a.getAttribute('href'), inToggle: a.closest('button') !== null, text: a.textContent } })()`))
+      expect(colorSample(`(() => { const a = document.querySelector(${JSON.stringify(link)}); return { href: a.getAttribute('href'), inToggle: a.closest('button') !== null, text: a.textContent } })()`))
         .toEqual({ href: 'https://github.com/o/r/issues/425', inToggle: false, text: '#425' })
       // This no-Git fixture has no known own repository. Preserve the foreign destination
       // and keyboard focus without asking the local forge for that repository's status.
       focusWithKeyboard(browser, link)
       browser.waitForFunction(`document.querySelector(${JSON.stringify(link)}) === document.activeElement`)
       browser.waitForFunction(`document.querySelector(${JSON.stringify(link)})?.getAttribute('target') === '_blank'`)
-      expect(browser.evaluate(`document.querySelector('[data-slot="reference-status-card"]') === null`)).toBe(true)
+      expect(colorSample(`document.querySelector('[data-slot="reference-status-card"]') === null`)).toBe(true)
       // Focusing the link did not toggle the group.
-      expect(browser.evaluate(`document.querySelector('${group} [data-slot="group-tile"]').getAttribute('aria-expanded')`)).toBe('false')
+      expect(colorSample(`document.querySelector('${group} [data-slot="group-tile"]').getAttribute('aria-expanded')`)).toBe('false')
       browser.press('Escape')
       browser.waitForFunction(`document.querySelector('[data-slot="reference-status-card"]') === null`)
     })
@@ -465,7 +466,7 @@ describe('selection and control states (#171)', () => {
       const disabled = 'button[data-slot="variants-pill"]'
       browser.waitForFunction(`document.querySelector('${model}')?.disabled === false && document.querySelector('${disabled}')?.disabled === true`)
       applyContrastQaVariant(browser, variant)
-      browser.evaluate(`document.querySelector('[data-slot="execution-options"] summary').scrollIntoView({ block: 'center' })`)
+      colorSample(`document.querySelector('[data-slot="execution-options"] summary').scrollIntoView({ block: 'center' })`)
       browser.click('[data-slot="execution-options"] summary')
       browser.moveTo(0, 0)
       const bounds = () => waitForSettledSample(browser, `(() => {
@@ -478,17 +479,17 @@ describe('selection and control states (#171)', () => {
       }
       const source = 'button[data-slot="source-pill"]'
       expect(style(source).border).toBe('solid')
-      expect((browser.evaluate(contrastSampleExpression(source)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
+      expect((colorSample(contrastSampleExpression(source)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
       const enabledStyle = style(model)
       const disabledStyle = style(disabled)
       expect(enabledStyle.border).toBe('solid')
-      expect(browser.evaluate(`document.querySelector('${disabled}').disabled`)).toBe(true)
+      expect(colorSample(`document.querySelector('${disabled}').disabled`)).toBe(true)
       expect(disabledStyle.opacity).toBe('1')
-      expect((browser.evaluate(contrastSampleExpression(disabled)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
+      expect((colorSample(contrastSampleExpression(disabled)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
       for (const state of ['rest', 'hover', 'focus']) {
         if (state === 'hover') {
           hoverVisiblePoint(browser, model)
-          expect(browser.evaluate(`({
+          expect(colorSample(`({
             hover: matchMedia('(hover: hover)').matches,
             target: document.querySelector('${model}').matches(':hover'),
           })`)).toEqual({ hover: true, target: true })
@@ -496,24 +497,24 @@ describe('selection and control states (#171)', () => {
         if (state === 'focus') focus(model)
         // Source1A/1B has no model border; source23 uses a subtle1px border (1.26/1.39:1).
         // The CPU glyph and label identify the control. Focus is independently checked above.
-        const sample = browser.evaluate(contrastSampleExpression(`${model} svg`, 'color')) as ContrastSample
+        const sample = colorSample(contrastSampleExpression(`${model} svg`, 'color')) as ContrastSample
         samples.push({ variant: variantId, target: model, state: `${state} icon`, ...sample })
         expect(sample.ratio, `${state}: ${JSON.stringify(sample)}`).toBeGreaterThanOrEqual(3)
         expect(bounds()).toEqual(originalBounds)
-        expect((browser.evaluate(contrastSampleExpression(model)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
+        expect((colorSample(contrastSampleExpression(model)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
       }
       browser.press('Enter')
       browser.waitForFunction(`document.querySelector('[role="menuitemradio"][aria-checked="true"]') !== null`)
-      expect(browser.evaluate(`document.querySelector('[role="menuitemradio"][aria-checked="true"] svg') !== null`)).toBe(true)
+      expect(colorSample(`document.querySelector('[role="menuitemradio"][aria-checked="true"] svg') !== null`)).toBe(true)
       const checked = '[role="menuitemradio"][aria-checked="true"] svg'
-      const indicator = browser.evaluate(contrastSampleExpression(checked, 'fill')) as ContrastSample
+      const indicator = colorSample(contrastSampleExpression(checked, 'fill')) as ContrastSample
       samples.push({ variant: variantId, target: checked, state: 'selected radio', ...indicator })
       expect(indicator.ratio, JSON.stringify(indicator)).toBeGreaterThanOrEqual(3)
       browser.press('ArrowDown')
       browser.press('Enter')
       browser.waitForFunction(`document.querySelector('[role="menu"]') === null`)
       // Native disabled behavior, with the actual product prop supplied by a non-Git repo.
-      expect(browser.evaluate(`(() => {
+      expect(colorSample(`(() => {
         const el = document.querySelector('${disabled}'); el.click(); el.focus()
         return { disabled: el.disabled, focused: document.activeElement === el, menu: !!document.querySelector('[role="menu"]') }
       })()`)).toEqual({ disabled: true, focused: false, menu: false })
@@ -563,3 +564,11 @@ describe('selection and control states (#171)', () => {
   })
 
 })
+
+function colorSample(expression: string): unknown {
+  return normalizeColorSample(browser, browser.evaluate(expression))
+}
+function waitForSettledSample<T = unknown>(...args: Parameters<typeof rawSettledSample<T>>): T {
+  args[1] = normalizeColorExpression(args[1])
+  return rawSettledSample<T>(...args)
+}

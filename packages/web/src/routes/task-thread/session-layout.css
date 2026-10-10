@@ -1,18 +1,18 @@
 /* Session frames 2A–2D / 3A / 3C: controls remain in document flow at every width.
  * The shared --measure preference remains independent of density and theme. */
 .session-composer [data-slot='composer-editor'] { border-color: var(--ring); border-radius: 12px; }
-.session-composer [data-slot='session-controls'] { padding: 0 12px 10px; }
+.session-composer [data-slot='session-controls'] { padding-block: 0 10px; padding-inline: 12px; }
 /* Keep Runner and Effort values visible beside their labels, icons and chevrons. */
 .session-engine-controls { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 8px; min-width: 0; }
 .session-engine-controls [data-slot$='pill'] { width: 100%; min-width: 0; }
-.session-engine-controls [data-slot$='pill'] > svg:last-child { margin-left: auto; }
+.session-engine-controls [data-slot$='pill'] > svg:last-child { margin-inline-start: auto; }
 .session-engine-controls [data-slot='session-runner-value'] { width: 100%; min-width: 0; }
-.session-composer [data-slot='composer-toolbar'] { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 0 12px 12px; }
+.session-composer [data-slot='composer-toolbar'] { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding-block: 0 12px; padding-inline: 12px; }
 .session-composer [data-slot='composer-toolbar'] > [data-slot='session-controls'] { grid-column: 1 / -1; grid-row: 1; min-width: 0; padding: 0; }
 .session-composer [data-slot='composer-footer-start'] { grid-column: 1; grid-row: 2; flex-wrap: nowrap; gap: 8px; }
 .session-composer [aria-label='Attach files'], .session-composer [aria-label='Start dictation'] { width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 9px; }
 .session-composer [data-slot='follow-up-model-pill'] { min-height: 44px; }
-.session-composer [data-slot='follow-up-model-pill'] > svg:last-child { margin-left: auto; }
+.session-composer [data-slot='follow-up-model-pill'] > svg:last-child { margin-inline-start: auto; }
 .session-composer [data-slot='composer-submit-row'] { grid-column: 2; grid-row: 2; margin: 0; flex: none; }
 [data-slot='run-actions-menu'] [role^='menuitem'] { min-height: 44px; }
 /* #478/#460: desktop starts at 768px, but a resized 420px sidebar can leave the dock
@@ -62,28 +62,28 @@
 
 /* Keep the reading measure and numeric density scale; match source conversation spacing. */
 [data-route='task-thread'] [data-slot='session-conversation'] { padding-block: calc(var(--spacing) * 5.5) calc(var(--spacing) * 4); gap: calc(var(--spacing) * 4); }
-[data-route='task-thread'] [data-slot='thread-row'] { padding-bottom: calc(var(--spacing) * 4); }
+[data-route='task-thread'] [data-slot='thread-row'] { padding-block-end: calc(var(--spacing) * 4); }
 [data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > :is(p, ul, ol, table, blockquote) { margin-block: calc(var(--spacing) * 3); }
 [data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > :first-child,
-[data-route='task-thread'] [data-slot='user-bubble'] .thread-markdown > :first-child { margin-top: 0; }
+[data-route='task-thread'] [data-slot='user-bubble'] .thread-markdown > :first-child { margin-block-start: 0; }
 [data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > :last-child,
-[data-route='task-thread'] [data-slot='user-bubble'] .thread-markdown > :last-child { margin-bottom: 0; }
+[data-route='task-thread'] [data-slot='user-bubble'] .thread-markdown > :last-child { margin-block-end: 0; }
 @media (max-width: 767px) {
   [data-route='task-thread'] [data-slot='session-conversation'] { padding-block: calc(var(--spacing) * 4); gap: calc(var(--spacing) * 3.5); }
-  [data-route='task-thread'] [data-slot='thread-row'] { padding-bottom: calc(var(--spacing) * 3.5); }
+  [data-route='task-thread'] [data-slot='thread-row'] { padding-block-end: calc(var(--spacing) * 3.5); }
 }
 
 /* A closed event follows the report; the conversation flex space stays after it. */
-[data-route='task-thread'] [data-slot='thread-footer'][data-state='closed'] { margin-top: 0; border-top: 0; padding-top: 0; }
-[data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > p:has(> :is(strong, [data-streamdown="strong"]):only-child) { margin-bottom: calc(var(--spacing) * 1); }
-[data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > p:has(> :is(strong, [data-streamdown="strong"]):only-child) + p { margin-top: calc(var(--spacing) * 1); }
+[data-route='task-thread'] [data-slot='thread-footer'][data-state='closed'] { margin-block-start: 0; border-block-start: 0; padding-block-start: 0; }
+[data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > p:has(> :is(strong, [data-streamdown="strong"]):only-child) { margin-block-end: calc(var(--spacing) * 1); }
+[data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > p:has(> :is(strong, [data-streamdown="strong"]):only-child) + p { margin-block-start: calc(var(--spacing) * 1); }
 
 /* Expanded activity cards, source3A–3D: one surface with10/12px insets. */
 [data-route='task-thread'] [data-slot='tool-card'] { border-radius: 7px; background: var(--task-brand-bg); }
-[data-route='task-thread'] [data-slot='tool-card'] > button { padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 3); }
-[data-route='task-thread'] [data-slot='tool-card'] > [data-slot='collapsible-content'] > div { background: transparent; border-top: 0; }
+[data-route='task-thread'] [data-slot='tool-card'] > button { padding-block: calc(var(--spacing) * 2.5); padding-inline: calc(var(--spacing) * 3); }
+[data-route='task-thread'] [data-slot='tool-card'] > [data-slot='collapsible-content'] > div { background: transparent; border-block-start: 0; }
 [data-route='task-thread'] [data-slot='tool-output'] pre,
-[data-route='task-thread'] [data-slot='tool-error'] { padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3) calc(var(--spacing) * 2.5); }
+[data-route='task-thread'] [data-slot='tool-error'] { padding-block: calc(var(--spacing) * 2) calc(var(--spacing) * 2.5); padding-inline: calc(var(--spacing) * 3); }
 [data-route='task-thread'] [data-slot='tool-output-fade'] { --tw-gradient-to: var(--task-brand-bg); }
 
 /* A docked live preview (#781) halves the transcript column; the 64px reading gutters would eat it. */

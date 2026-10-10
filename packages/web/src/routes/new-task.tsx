@@ -669,7 +669,7 @@ export function NewTaskRoute() {
 
 
 
-      <div ref={draftPanelRef} style={plan !== null ? { display: 'none' } : undefined} className="relative z-[1] mx-auto w-full max-w-none px-11 pt-12 max-md:px-[18px] max-md:pt-[22px]">
+      <div data-slot="new-task-layout" ref={draftPanelRef} style={plan !== null ? { display: 'none' } : undefined} className="relative z-[1] mx-auto w-full max-w-none px-11 pt-12 max-md:px-[18px] max-md:pt-[22px]">
         <header className="mb-7 max-md:mb-5">
           <p data-slot="page-eyebrow" className="mb-2 text-[11px] font-semibold tracking-[0.16em] text-[var(--accent-text)] uppercase">
             NEW TASK

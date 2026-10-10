@@ -1,3 +1,4 @@
+import { paletteHex } from '../test/palette'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
@@ -104,7 +105,8 @@ describe('sidebar tokens and the last teal (#617 01c)', () => {
   it('declares the inbox count amber per theme and exposes it as a colour utility', () => {
     const css = src('../styles/index.css')
     const block = (opener: string) => css.slice(css.indexOf(opener)).split(/\n}\n/)[0]
-    const dark = block('\n:root {\n'), light = block('\n.light {\n')
+    const normalize = (value: string | undefined) => (value ?? '').replace(/oklch\([^)]*\)/g, paletteHex)
+    const dark = normalize(block('\n:root {\n')), light = normalize(block('\n.light {\n'))
     expect(dark).toMatch(/--inbox-count:\s*#f4c54226;/i)
     expect(dark).toMatch(/--inbox-count-foreground:\s*#f4c542;/i)
     expect(light).toMatch(/--inbox-count:\s*#f4c54240;/i)

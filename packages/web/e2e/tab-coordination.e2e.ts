@@ -31,11 +31,16 @@ it.each([false, true])('ten mixed tabs (separate visible windows: %s) share work
   await browser.withCdp(async (request, subscribe) => {
     const pages: Array<{ targetId: string; sessionId: string }> = []
     const streams = new Set<string>(), sockets = new Set<string>(), workers = new Set<string>(), protocols = new Set<string>()
+    const workerSetupErrors: unknown[] = []
     const primary = windows ? 0 : 1
     const off = subscribe(event => {
       if (event.method === 'Target.attachedToTarget' && event.params.targetInfo.type === 'shared_worker') {
         workers.add(event.params.targetInfo.targetId)
-        void request('Network.enable', {}, event.params.sessionId).then(() => request('Runtime.runIfWaitingForDebugger', {}, event.params.sessionId))
+        // Own the async rejection: teardown can close CDP while a replacement worker
+        // is attaching. Failures during the exercised behavior are asserted below.
+        void request('Network.enable', {}, event.params.sessionId)
+          .then(() => request('Runtime.runIfWaitingForDebugger', {}, event.params.sessionId))
+          .catch(error => { workerSetupErrors.push(error) })
       }
       const key = `${event.sessionId}:${event.params.requestId}`
       if (event.method === 'Network.responseReceived') {
@@ -99,6 +104,7 @@ it.each([false, true])('ten mixed tabs (separate visible windows: %s) share work
       await request('Page.navigateToHistoryEntry', { entryId }, pages[2]!.sessionId)
       await waitText(request, pages[2]!.sessionId, navigated)
       expect(await read(request, pages[2]!.sessionId, `document.body.innerText.split(${JSON.stringify(navigated)}).length - 1`)).toBe(1)
+      expect(workerSetupErrors).toEqual([])
     } finally {
       await Promise.all(pages.map(page => request('Target.closeTarget', { targetId: page.targetId })))
       await pollFor(async () => {

@@ -321,7 +321,9 @@ class OpencodeSession implements AgentSession {
       // SSE closure can precede the process exit event. Choose one authoritative
       // error after settlement, before the synthetic turn-end, retaining the code.
       const code = serve.child.exitCode;
-      const crashed = code !== null && code !== 0 && !(serve.signalled && isSignalTerminationExit(code));
+      const signal = serve.child.signalCode;
+      const crashed = (signal !== null && !serve.signalled)
+        || (code !== null && code !== 0 && !(serve.signalled && isSignalTerminationExit(code)));
       if (!this.timedOut && (crashed || this.exitFailure)) {
         const stderr = serve.stderrChunks.join('');
         const detail = summarizeRunnerStderr(stderr);
@@ -344,7 +346,7 @@ class OpencodeSession implements AgentSession {
         } else {
           if (stderr.trim()) this.emit({ type: 'note', message: `opencode serve stderr:\n${stderr}` });
           const message = crashed
-            ? `opencode serve exited with code ${code}${detail ? ` — ${detail}` : ''}`
+            ? `opencode serve exited with ${describeExit(serve)}${detail ? ` — ${detail}` : ''}`
             : this.exitFailure!;
           this.emit({ type: 'error', message });
         }
