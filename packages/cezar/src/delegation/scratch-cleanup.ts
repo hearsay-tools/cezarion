@@ -1,3 +1,4 @@
+import { autosaveCleanupIds } from '../autosave-cleanup.ts';
 import { agentTmpDirMayExist, removeAgentTmpDir, sweepAgentTmpDirs } from '../runs/agent-tmpdir.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import type { RunStore } from '../runs/store.ts';
@@ -35,6 +36,7 @@ export class WorkerScratchCleanup {
     this.enabled = true;
     clearTimeout(this.recoveryTimer); this.recoveryTimer = undefined;
     const retained = workerEvidenceRunIds(this.dataDir);
+    const autosaves = autosaveCleanupIds(this.dataDir);
     // Only runs that can own scratch matter: the live set, and every worker or quarantined run
     // by id (indexed, nothing decoded, #779). Other finished runs were reaped when they ended.
     const live = this.store.listRuns();
@@ -43,10 +45,10 @@ export class WorkerScratchCleanup {
     // The sweep independently reserves every private-evidence id, even if the index lost it, and
     // every run another process claims (#779): its live runs are not in this store's live set, and
     // their scratch is theirs.
-    sweepAgentTmpDirs(this.dataDir, [...new Set([...live.filter(run =>
+    if (autosaves) sweepAgentTmpDirs(this.dataDir, [...new Set([...live.filter(run =>
       this.busy(run.id) || ['queued', 'running', 'waiting'].includes(run.status)).map(run => run.id), ...owners,
-      ...this.store.listForeignClaimedRunIds()])]);
-    if (!retained) { // failed enumeration must not permanently lose a wake source
+      ...this.store.listForeignClaimedRunIds(), ...(autosaves ?? [])])]);
+    if (!retained || !autosaves) { // failed enumeration must not permanently lose a wake source
       this.recoveryTimer = setTimeout(() => this.recover(), 60_000); this.recoveryTimer.unref?.();
     }
   }

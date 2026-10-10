@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import { branchFor, createWorktree } from '../git-worktree.ts';
+import { clearAutosaveCleanup, retainAutosaveCleanup } from '../autosave-cleanup.ts';
 import { reclaimWorktrees, type RetentionStore } from './retention.ts';
 import type { RunRecord } from './store.ts';
 
@@ -70,6 +71,37 @@ function finishedRun(
 }
 
 describe('reclaimWorktrees (real git, #483)', () => {
+  it.each([false, true])('startup retention preserves a clean ordinary checkout with autosave evidence (published during preview release: %s)', async late => {
+    const repo = await fixtureRepo();
+    const oldId = '11111111-1111-4111-8111-111111111111';
+    const newId = '22222222-2222-4222-8222-222222222222';
+    const oldWt = await createWorktree(repo, oldId, 'main');
+    const newWt = await createWorktree(repo, newId, 'main');
+    const store = fakeStore([
+      finishedRun(oldId, oldWt.path, '2026-07-01T00:00:00.000Z'),
+      finishedRun(newId, newWt.path, '2026-07-09T00:00:00.000Z'),
+    ]);
+    const dataDir = join(repo, '.ai/cezar');
+    mkdirSync(join(dataDir, 'runs'), { recursive: true });
+    const retain = () => retainAutosaveCleanup(dataDir, oldId, oldWt.path, 'strict cleanup pending', {
+      processes: [], groups: [], uncertain: false,
+    });
+    let blocked = true;
+    if (!late) retain();
+    const previewHost = { release: async () => { if (late && blocked) retain(); } };
+
+    // Startup supplies no manager claim: durable evidence must protect the reclaimer itself.
+    expect(await reclaimWorktrees(repo, store, 1, { previewHost })).toEqual([]);
+    expect(existsSync(oldWt.path)).toBe(true);
+    expect(store.getRun(oldId)?.worktreeReclaimedAt).toBeUndefined();
+
+    blocked = false;
+    clearAutosaveCleanup(dataDir, oldId);
+    expect(await reclaimWorktrees(repo, store, 1, { previewHost })).toEqual([oldId]);
+    expect(existsSync(oldWt.path)).toBe(false);
+    expect(await branchExists(repo, oldId)).toBe(true);
+  });
+
   it('reclaims the oldest over-limit worktree: dir removed, branch kept, field stamped', async () => {
     const repo = await fixtureRepo();
     const oldId = '11111111-1111-4111-8111-111111111111';

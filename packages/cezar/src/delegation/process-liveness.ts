@@ -59,6 +59,11 @@ function controllerPredatesBoot(token: string | undefined, boot: string | undefi
   const recordedBoot = token?.match(/^(.+):\d+$/)?.[1];
   return recordedBoot !== undefined && boot !== undefined && LINUX_BOOT_ID.test(recordedBoot) && LINUX_BOOT_ID.test(boot) && recordedBoot !== boot;
 }
+/** A different recorded Linux boot proves every original process group ended. */
+export function processPredatesCurrentBoot(entry: RecordedProcess): boolean {
+  return process.platform === 'linux' && controllerPredatesBoot(entry.startToken, linuxBootId());
+}
+
 /** Liveness-only comparison: when exactly one Linux token lacks the boot id (it was unreadable on one
  * side), the `starttime` suffix decides. Reaping still requires an exact match. */
 function sameIncarnation(recorded: string, current: string): boolean {

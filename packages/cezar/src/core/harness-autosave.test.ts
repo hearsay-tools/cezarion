@@ -16,8 +16,12 @@ describe('harness parity — autosave cleanup (#495)', () => {
       it(`${backend} ${continuation ? 'R25 continuation' : 'R24 initial'} retains reuse guard until Git termination`, async () => {
         vi.stubEnv('CEZ_DELEGATION', '1');
         const save = worktrees.autosaveCommit;
-        vi.spyOn(worktrees, 'autosaveCommit').mockImplementation((dir, reason, options) =>
-          save(dir, reason, { ...options, timeoutMs: 500, killGraceMs: 100, confirmMs: 100 }));
+        const saves: Promise<unknown>[] = [];
+        vi.spyOn(worktrees, 'autosaveCommit').mockImplementation((dir, reason, options) => {
+          const task = save(dir, reason, { ...options, timeoutMs: 500, killGraceMs: 100, confirmMs: 100 });
+          saves.push(task);
+          return task;
+        });
         vi.spyOn(console, 'warn').mockImplementation(() => undefined);
         try {
           await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId }) => {
@@ -58,8 +62,10 @@ if (args.includes('status') && args.includes('--porcelain')) {
             try {
               expect(manager.finish(runId)).toBe(true);
               await waitFor(() => store.readEvents(runId).some(event => event.type === 'note' && String(event.message).includes('termination not confirmed')), 5000);
-              expect(manager.isActive(runId)).toBe(true);
-              expect(store.readWorkerExecution(runId)?.phase).not.toBe('complete');
+              await waitFor(() => !manager.isActive(runId), 3000);
+              expect(store.readWorkerExecution(runId)?.phase).toBe('complete');
+              expect(manager.claimForPublish(runId)).toBeNull();
+              expect(manager.claimWorktreeReclaim(runId)).toBeNull();
               expect(manager.continueRun(runId, { text: 'another writer' }).ok).toBe(false);
               expect(readFileSync(join(dir, 'progress.txt'), 'utf8')).toBe('recover me\n');
             } finally {
@@ -70,6 +76,7 @@ if (args.includes('status') && args.includes('--porcelain')) {
                 try { kill(Number(readFileSync(join(bin, 'pid'), 'utf8')), 'SIGKILL'); } catch { /* gone */ }
               }
               probe.mockRestore();
+              await Promise.allSettled(saves);
               await waitFor(() => !manager.isActive(runId));
               rmSync(bin, { recursive: true, force: true });
             }

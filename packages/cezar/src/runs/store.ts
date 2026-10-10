@@ -1,3 +1,4 @@
+import { autosaveCleanupBlocker, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { EventEmitter } from 'node:events';
 import { workerEvidenceRunIds, workerExecutionSchema, type WorkerExecution } from './worker-execution.ts';
 import { agentTmpDirLocations, agentTmpDirMayExist, agentTmpDirOwnershipProven, removeAgentTmpDir } from './agent-tmpdir.ts';
@@ -3704,6 +3705,7 @@ export class RunStore extends EventEmitter {
   /** `workerResourcesSafe` with the refusal's live PIDs (empty when no PID explains it). */
   workerResourceHolders(id: string, generation: string, resourceId: string,
     opts: { admittingQueued?: boolean; cwds?: CwdSource } = {}): 'safe' | number[] {
+    if (autosaveCleanupBlocker(this.dataDir, id)) return [];
     const run = this.peek(id);
     const proof = this.readWorkerExecution(id);
     if (run?.delegation?.role !== 'worker' || run.delegation.workspace.ownerRunId !== id ||
@@ -3737,6 +3739,7 @@ export class RunStore extends EventEmitter {
   /** Cleanup can outlive its index row, but never its generation or terminal task intent.
    * `cwds` is the scratch reprobe tick's shared `/proc` snapshot (hearsay-tools/cezarion#879). */
   workerScratchResourcesSafe(id: string, generation: string, resourceId: string, cwds?: CwdSource): boolean {
+    if (autosaveCleanupBlocker(this.dataDir, id)) return false;
     const run = this.peek(id), proof = this.readWorkerExecution(id);
     if (proof?.phase !== 'complete' || proof.generation !== generation || proof.scratchCleanup?.resourceId !== resourceId ||
       (run && ['queued', 'running', 'waiting'].includes(run.status))) return false;
@@ -3881,6 +3884,7 @@ export class RunStore extends EventEmitter {
   }
 
   canDeleteRun(id: string): boolean {
+    if (autosaveCleanupBlocker(this.dataDir, id)) return false;
     const run = this.peek(id);
     if (run?.delegation?.role === 'invalid') return false;
     if (run?.delegation?.role === 'worker') return this.workerDeletionEvidence(id);
@@ -3963,6 +3967,7 @@ export class RunStore extends EventEmitter {
     rmSync(this.handoffPath(id), { force: true });
     rmSync(this.imagesDir(id), { recursive: true, force: true });
     removeArtifacts(this.dataDir, id);
+    clearAutosaveCleanup(this.dataDir, id);
   }
 
   deleteRun(id: string): boolean {
@@ -3970,6 +3975,7 @@ export class RunStore extends EventEmitter {
     const run = this.peek(id);
     if (run && this.db && (this.quarantined.has(id) || !this.claimFamilies([familyKey(run)]).size)) return false;
     if (run?.delegation?.role === 'worker' || run?.delegation?.role === 'root') return this.deleteDelegatedRun(id);
+    if (run) clearAutosaveCleanup(this.dataDir, id);
     const existed = run !== undefined;
     this.held.delete(id);
     if (existed) {

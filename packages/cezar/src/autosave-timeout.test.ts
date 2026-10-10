@@ -171,12 +171,16 @@ if (args.includes('status')) {
       return kill(pid, signal);
     });
     let settled = false;
-    const job = autosaveCommit(repo, 'run finalize', budget).then(result => { settled = true; return result; });
+    const blocked = vi.fn();
+    const job = autosaveCommit(repo, 'run finalize', { ...budget, onBlocked: blocked }).then(result => { settled = true; return result; });
     jobs.push(job);
-    await delay(1100);
-    expect(settled).toBe(false);
-    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('termination'));
-    obscure = false;
+    try {
+      await delay(1100);
+      expect(settled).toBe(false);
+      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('termination'));
+      expect(blocked).toHaveBeenCalledWith(expect.stringContaining('EPERM'), expect.objectContaining({ groups: expect.any(Array) }));
+      expect(blocked).toHaveBeenCalledWith(expect.stringContaining('process group'), expect.objectContaining({ groups: expect.any(Array) }));
+    } finally { obscure = false; }
     expect(await Promise.race([job, delay(1000).then(() => 'still waiting')])).toBe('failed');
   });
 });

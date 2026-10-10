@@ -1,3 +1,4 @@
+import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
 import { CheckoutProgressCache } from './checkout-progress.ts';
 import { checkoutProgressParamsSchema } from '@open-mercato/cezar-contract';
 import { createLiveRoutes } from './live-routes.ts';
@@ -4671,9 +4672,11 @@ export function createApp(deps: ServerDeps) {
 
     // Task diff (spec 006): what this run changed — its worktree vs its base.
     .get('/runs/:id/diff', async (c) => {
-      const { store } = c.get('project');
+      const { dataDir, store } = c.get('project');
       const run = store.getRun(c.req.param('id'));
       if (!run) return c.json({ error: 'not found' }, 404);
+      const blocker = autosaveCleanupBlocker(dataDir, run.id);
+      if (blocker) return c.json({ error: blocker }, 409);
       if (!run.worktreePath || !existsSync(run.worktreePath)) {
         return c.text('(no worktree — this task ran directly in the repo working tree)');
       }
@@ -4681,9 +4684,11 @@ export function createApp(deps: ServerDeps) {
     })
 
     .get('/runs/:id/changes', async (c) => {
-      const { root: repoRoot, store } = c.get('project');
+      const { root: repoRoot, dataDir, store } = c.get('project');
       const run = store.getRun(c.req.param('id'));
       if (!run) return c.json({ error: 'not found' }, 404);
+      const blocker = autosaveCleanupBlocker(dataDir, run.id);
+      if (blocker) return c.json({ error: blocker }, 409);
       const workingDirectory = workingDirectoryOf(run, repoRoot);
       if (!workingDirectory) return c.json({ error: NO_WORKTREE }, 409);
       const result = await collectChanges(workingDirectory, run.baseBranch ?? 'HEAD', {
@@ -4846,9 +4851,11 @@ export function createApp(deps: ServerDeps) {
     })
 
     .post('/runs/:id/git/commit', jsonZodValidator(gitCommitSchema), async (c) => {
-      const { store } = c.get('project');
+      const { dataDir, store } = c.get('project');
       const run = store.getRun(c.req.param('id'));
       if (!run) return c.json({ error: 'not found' }, 404);
+      const blocker = autosaveCleanupBlocker(dataDir, run.id);
+      if (blocker) return c.json({ error: blocker }, 409);
       const worktree = worktreeOf(run);
       if (!worktree) return c.json({ error: NO_WORKTREE }, 409);
       const parsed = { data: c.req.valid('json') };
@@ -4858,9 +4865,11 @@ export function createApp(deps: ServerDeps) {
     })
 
     .post('/runs/:id/git/push', async (c) => {
-      const { root: repoRoot, store } = c.get('project');
+      const { root: repoRoot, dataDir, store } = c.get('project');
       const run = store.getRun(c.req.param('id'));
       if (!run) return c.json({ error: 'not found' }, 404);
+      const blocker = autosaveCleanupBlocker(dataDir, run.id);
+      if (blocker) return c.json({ error: blocker }, 409);
       const worktree = worktreeOf(run);
       if (!worktree) return c.json({ error: NO_WORKTREE }, 409);
       const result = await pushCurrentBranch(worktree);
@@ -4943,9 +4952,13 @@ export function createApp(deps: ServerDeps) {
       if (!run) return c.json({ error: 'not found' }, 404);
       if (manager.isActive(id)) return c.json({ error: 'run is active — cancel it first' }, 409);
       if (run.delegation?.role === 'worker' || !store.canDeleteRun(id)) return c.json({ error: 'owned resources require verified worker cleanup' }, 409);
-      if (run.worktreePath) await releaseThenRemoveWorktree({ previewHost: deps.previewHost }, id, repoRoot, run.worktreePath, run.branch);
-      store.updateRun(id, { worktreePath: undefined, branch: undefined });
-      return c.json({ removed: true });
+      const release = manager.claimForPublish(id);
+      if (!release) return c.json({ error: 'worktree cleanup pending — retry after cleanup is confirmed' }, 409);
+      try {
+        if (run.worktreePath) await releaseThenRemoveWorktree({ previewHost: deps.previewHost }, id, repoRoot, run.worktreePath, run.branch);
+        store.updateRun(id, { worktreePath: undefined, branch: undefined });
+        return c.json({ removed: true });
+      } finally { release(); }
     })
 
     .delete('/runs/:id', async (c) => {
@@ -4956,8 +4969,12 @@ export function createApp(deps: ServerDeps) {
       if (!run) return c.json({ error: 'not found' }, 404);
       // Delete cleans up after itself: worktree + branch go with the run (spec 006).
       if (!store.canDeleteRun(id)) return c.json({ error: 'owned resources require verified worker cleanup and explicit child history deletion first' }, 409);
-      if (run.delegation?.role !== 'worker' && run.worktreePath) await releaseThenRemoveWorktree({ previewHost: deps.previewHost }, id, repoRoot, run.worktreePath, run.branch);
-      return store.deleteRun(id) ? c.json({ deleted: true }) : c.json({ error: 'history cleanup incomplete — retry deletion' }, 409);
+      const release = manager.claimForPublish(id);
+      if (!release) return c.json({ error: 'worktree cleanup pending — retry after cleanup is confirmed' }, 409);
+      try {
+        if (run.delegation?.role !== 'worker' && run.worktreePath) await releaseThenRemoveWorktree({ previewHost: deps.previewHost }, id, repoRoot, run.worktreePath, run.branch);
+        return store.deleteRun(id) ? c.json({ deleted: true }) : c.json({ error: 'history cleanup incomplete — retry deletion' }, 409);
+      } finally { release(); }
     });
 
   // ---- parallel variants (spec 010) -----------------------------------------
@@ -4985,7 +5002,7 @@ export function createApp(deps: ServerDeps) {
           ...(r.outputTokens !== undefined ? { outputTokens: r.outputTokens } : {}),
           ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}),
           diffStat:
-            r.worktreePath && existsSync(r.worktreePath)
+            r.worktreePath && existsSync(r.worktreePath) && !autosaveCleanupBlocker(dataDir, r.id)
               ? await worktreeDiffStat(r.worktreePath, r.baseBranch ?? 'HEAD')
               : '',
           handoffExcerpt: handoffProgressExcerpt(readHandoff(dataDir, r.id)),
@@ -5010,6 +5027,9 @@ export function createApp(deps: ServerDeps) {
       if (manager.isActive(winner.id)) {
         return c.json({ error: 'this variant is still active — wait for it to finish first' }, 409);
       }
+
+      const blocker = autosaveCleanupBlocker(dataDir, winner.id);
+      if (blocker) return c.json({ error: blocker }, 409);
 
       // Winner: a non-review terminal state with a non-empty diff flips to
       // `review` (the settleSuccess rule) — but only when the review gate applies
