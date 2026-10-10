@@ -512,6 +512,24 @@ describe('cez task watching against a scripted cockpit', () => {
     expect(lines.at(-1)).toEqual({ id: 'r1', status: 'missing', until: 'attention', timedOut: false });
   });
 
+  it('log --follow keeps the attention a run frame carried when it times out before the first run read (#931)', async () => {
+    handler = (req, res) => {
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/history')) return json(res, { events: [], itemCount: 0, liveCursor: 'c', asOfSeq: 5, hasOlder: false });
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/events')) {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        // The replay never reaches seq 5, so the boundary (and its run read) never comes.
+        res.write(`event: run-event\ndata: ${JSON.stringify({ seq: 1, ts: '2026-01-01T00:00:00.000Z', type: 'text', text: 't1' })}\n\n`);
+        res.write(`event: run\ndata: ${JSON.stringify(apiRun('waiting'))}\n\n`);
+        return;
+      }
+      res.statusCode = 404; res.end();
+    };
+    expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '1'])).toBe(3);
+    const lines = out.map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines.map((line) => line.text ?? line.status)).toEqual(['t1', 'waiting']);
+    expect(lines.at(-1)).toEqual({ id: 'r1', status: 'waiting', attention: 'waiting', attentionLabel: 'needs you', until: 'attention', timedOut: true });
+  });
+
   it('log --follow still reports a stream closed under a live run as unavailable (exit 2)', async () => {
     handler = (req, res) => {
       if (req.url === '/api/v1/p/default/runs/r1') return json(res, apiRun('running'));

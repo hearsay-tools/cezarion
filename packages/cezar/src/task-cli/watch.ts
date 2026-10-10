@@ -299,8 +299,8 @@ export async function readLog(
   let seenSeq = options.afterSeq;
   let status: RunStatus | undefined;
   let drainSeq: number | undefined;
-  /** The newest run read, what the attention key of the newest `run` frame was, and whether a read is owed. */
-  let judged: WaitEntry | undefined;
+  /** The newest entry known (a run read or a `run` frame), the newest frame's attention key, and whether a read is owed. */
+  let latest: WaitEntry | undefined;
   let frameKey: string | undefined;
   let readOwed = false;
   let decided: WaitEntry | undefined;
@@ -383,15 +383,16 @@ export async function readLog(
           if (run.success) {
             status = run.data.status;
             // Only a change in what attention reads owes a run read; a repeated frame does not.
-            const key = attentionKey(entryFor(id, toRunSummary(run.data)));
-            if (key !== frameKey) { frameKey = key; readOwed = true; }
+            const framed = entryFor(id, toRunSummary(run.data));
+            const key = attentionKey(framed);
+            if (key !== frameKey) { frameKey = key; readOwed = true; latest = framed; }
           }
         }
         let exit = step();
         if (exit === 'judge') {
           const entry = await readRun();
           if (entry === undefined) return timedOut();
-          judged = entry;
+          latest = entry;
           readOwed = false;
           if (endsWait(entry, options.until)) decided = entry;
           exit = step();
@@ -463,7 +464,7 @@ export async function readLog(
   function timedOut(): number {
     for (const line of tail.drain()) options.print(line);
     // Without --follow the line is unchanged (#931 changes only the follow loop).
-    options.print(JSON.stringify(options.follow ? finalLine(judged, true) : { id, ...(status === undefined ? {} : { status }), timedOut: true }));
+    options.print(JSON.stringify(options.follow ? finalLine(latest, true) : { id, ...(status === undefined ? {} : { status }), timedOut: true }));
     return 3;
   }
 }
