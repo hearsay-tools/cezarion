@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { Hono } from 'hono';
 import { onTestFinished, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { processStartToken } from '../delegation/process-liveness.ts';
 import { createOwnedWorkspace } from '../delegation/workspace.ts';
 import { createWorktree } from '../git-worktree.ts';
 import { RunStore } from '../runs/store.ts';
@@ -433,6 +434,47 @@ describe('the worktrees API', () => {
       expect((await reclaimOne(id)).status).toBe(409);
       expect(existsSync(store.getRun(id)!.worktreePath!)).toBe(true);
     });
+  });
+
+  it.each(['remove-worktree', 'history'] as const)('refuses %s while a settled run retains its maintenance hold', async operation => {
+    const id = await seed(randomUUID(), 'done');
+    const path = store.getRun(id)!.worktreePath!;
+    writeFileSync(join(path, 'working.txt'), 'preserve this');
+    const release = manager.claimForPublish(id)!;
+    expect(manager.isActive(id)).toBe(false);
+    try {
+      const url = `/api/v1/runs/${id}${operation === 'remove-worktree' ? '/remove-worktree' : ''}`;
+      expect((await apiRequest(app, url, { method: operation === 'history' ? 'DELETE' : 'POST' })).status).toBe(409);
+      expect(store.getRun(id)?.worktreePath).toBe(path);
+      expect(existsSync(join(path, 'working.txt'))).toBe(true);
+    } finally { release(); }
+  });
+
+  it('a replacement manager refuses reuse and deletion under persisted autosave cleanup', async () => {
+    const id = await seed(randomUUID(), 'done');
+    const path = store.getRun(id)!.worktreePath!;
+    const evidence = join(repoRoot, '.ai/cezar/runs', `${id}.autosave-cleanup.json`);
+    writeFileSync(evidence, JSON.stringify({
+      version: 1, cwd: path, controller: { pid: process.pid, startToken: processStartToken(process.pid) },
+      processes: [], groups: [], uncertain: false, message: 'cleanup pending',
+    }));
+    manager.dispose(); store.close();
+    store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
+    manager = createFixtureManager(store, repoRoot);
+    app = createApp({ repoRoot, store, manager, version: '0.0.0-test' });
+    expect(manager.continueRun(id, { text: 'continue' }).ok).toBe(false);
+    expect(manager.claimForPublish(id)).toBeNull();
+    expect(manager.claimWorktreeReclaim(id)).toBeNull();
+    expect(manager.claimForBranchCleanup([id])).toBeNull();
+    expect(store.canDeleteRun(id)).toBe(false);
+    for (const [suffix, method] of [['/remove-worktree', 'POST'], ['', 'DELETE'], ['/git/commit', 'POST'], ['/git/push', 'POST'], ['/changes', 'GET']] as const) {
+      expect((await apiRequest(app, `/api/v1/runs/${id}${suffix}`, {
+        method, ...(suffix === '/git/commit' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: 'unsafe' }) } : {}),
+      })).status).toBe(409);
+    }
+    expect(existsSync(path)).toBe(true);
+    rmSync(evidence);
+    const release = manager.claimForPublish(id); expect(release).not.toBeNull(); release?.();
   });
 
   it('human deletion still cleans an ordinary terminal run', async () => {

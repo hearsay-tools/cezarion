@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { retainAutosaveCleanup } from '../autosave-cleanup.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { createApp } from './server.ts';
@@ -94,6 +95,18 @@ describe('POST /api/v1/groups/:groupId/pick — review gate', () => {
     const winner = winnerRun();
     await pick(winner.id);
     expect(store.getRun(winner.id)?.status).toBe('review');
+  });
+
+  it('refuses a failed winner while autosave cleanup still holds its index', async () => {
+    process.env.CEZ_REVIEW_GATE = '1';
+    const winner = winnerRun();
+    store.updateRun(winner.id, { status: 'failed' });
+    retainAutosaveCleanup(join(repoRoot, '.ai/cezar'), winner.id, worktree, 'holder cleanup pending', { processes: [], groups: [], uncertain: false });
+    const before = g(worktree, 'ls-files', '--stage');
+    writeFileSync(join(worktree, 'untracked.txt'), 'keep me');
+    expect((await pick(winner.id)).status).toBe(409);
+    expect(g(worktree, 'ls-files', '--stage')).toBe(before);
+    expect(store.getRun(winner.id)?.status).toBe('failed');
   });
 
   it('gate on + autonomous: the winner stays done (autonomous wins)', async () => {

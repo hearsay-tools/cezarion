@@ -84,9 +84,10 @@ export async function watchAutosaveHolders(cwd: string) {
   const baseline = await snapshot(cwd);
   if (baseline === 'unknown') return undefined;
   const observed = new Map<number, RecordedProcess>();
-  return async () => {
+  let diagnostics: { pids: number[]; processes: RecordedProcess[]; inspectionFailed: boolean } = { pids: [], processes: [], inspectionFailed: false };
+  const alive = async () => {
     const current = await snapshot(cwd);
-    if (current === 'unknown') return true;
+    if (current === 'unknown') { diagnostics = { ...diagnostics, inspectionFailed: true }; return true; }
     for (const [pid, startToken] of current) {
       if (startToken !== undefined && baseline.get(pid) === startToken) continue;
       const previous = observed.get(pid);
@@ -96,6 +97,8 @@ export async function watchAutosaveHolders(cwd: string) {
     }
     // Once observed, a holder stays tracked even if it later changes cwd.
     const states = await Promise.all([...observed.values()].map(live));
+    diagnostics = { pids: [...observed.keys()].filter((_, index) => states[index]), processes: [...observed.values()].filter((_, index) => states[index]), inspectionFailed: false };
     return states.some(Boolean);
   };
+  return Object.assign(alive, { diagnostics: () => diagnostics });
 }

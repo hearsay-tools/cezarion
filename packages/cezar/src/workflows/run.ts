@@ -1,3 +1,4 @@
+import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { ciErrorMessage } from '../ci-wait/errors.ts';
 import { ciWaitRequestSchema, ciWaitResultSchema, previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type CiWait, type CiWaitRequest, type CiWaitResult, type CiWaitErrorCode, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract';
@@ -892,7 +893,7 @@ export class RunManager {
 
   private beginWorkerExecution(runId: string, admitted = true): void {
     if (this.store.getRun(runId)?.delegation?.role !== 'worker') return;
-    if (this.reclaiming.has(runId)) throw new Error('Worker resources are being cleaned up');
+    if (this.reclaiming.has(runId) || !!this.autosaveCleanupBlocker(runId)) throw new Error('Worker resources are being cleaned up');
     // #469: one site for Continue, --resume, parent replies and queued revival after a crash.
     // Fresh: admission is one-shot, so a cached "alive" must not refuse an orphan that has since died.
     if (!this.executions.has(runId)) this.settleOrphanedWorkerExecution(runId, { admitting: true, fresh: true });
@@ -1385,7 +1386,7 @@ export class RunManager {
     options: { semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; finalMessageNudgeReplyMs?: number; preview?: PreviewHostLike; cezarPort?: () => number | undefined } = {},
   ) {
     this.dataDir = join(repoRoot, '.ai/cezar');
-    this.workerScratchCleanup = new WorkerScratchCleanup(store, this.dataDir, id => this.isActive(id) || this.executions.has(id) || this.reclaiming.has(id));
+    this.workerScratchCleanup = new WorkerScratchCleanup(store, this.dataDir, id => this.isActive(id) || this.executions.has(id) || this.reclaiming.has(id) || !!this.autosaveCleanupBlocker(id));
     this.preview = options.preview;
     this.cezarPort = options.cezarPort;
     this.unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
@@ -2243,7 +2244,7 @@ export class RunManager {
               const wake = queued?.agentInputs?.find(input => input.id === this.workerWait(id)?.wakeId);
               if ((first && hasLiveInboxClaim(first)) || (wake && hasLiveInboxClaim(wake))) return false;
             }
-            return (capacity() || chargedCiWake(id)) && (!queued || this.historyDeletionPending(id) || ((!this.executions.get(id)?.admitted || this.active.has(id)) && !this.executionBlockedByRootFinish(queued) &&
+            return !this.reclaiming.has(id) && !this.autosaveCleanupBlocker(id) && (capacity() || chargedCiWake(id)) && (!queued || this.historyDeletionPending(id) || ((!this.executions.get(id)?.admitted || this.active.has(id)) && !this.executionBlockedByRootFinish(queued) &&
               (!anyHold || !accountHeldFor(queued, holds, defaultRunner ?? 'claude'))));
           });
           if (next === -1) break; // every queued run has a durable reason to remain held
@@ -2844,7 +2845,7 @@ export class RunManager {
 
   /** Hold off every admission path until destructive work (including async Git) completes. */
   claimWorkerCleanup(runId: string): (() => void) | undefined {
-    if (this.disposed || this.reclaiming.has(runId) || this.isActive(runId) || this.executions.has(runId)) return undefined;
+    if (this.disposed || this.reclaiming.has(runId) || !!this.autosaveCleanupBlocker(runId) || this.isActive(runId) || this.executions.has(runId)) return undefined;
     this.reclaiming.add(runId);
     return () => { this.reclaiming.delete(runId); this.workerScratchCleanup.schedule(runId); };
   }
@@ -2855,7 +2856,7 @@ export class RunManager {
   private reapTerminalScratch(runId: string): void {
     const run = this.store.getRun(runId);
     if (!run || ['queued', 'running', 'waiting'].includes(run.status)) return;
-    if (this.active.has(runId) || this.starting.has(runId) || this.queue.includes(runId)) return;
+    if (this.active.has(runId) || this.starting.has(runId) || this.queue.includes(runId) || this.reclaiming.has(runId) || !!this.autosaveCleanupBlocker(runId)) return;
     const privateWorkers = workerEvidenceRunIds(this.dataDir);
     if (run.delegation?.role === 'worker' || run.delegation?.role === 'invalid' || !privateWorkers || privateWorkers.includes(runId)) { this.workerScratchCleanup.schedule(runId); return; }
     removeAgentTmpDir(this.dataDir, runId);
@@ -3322,7 +3323,7 @@ export class RunManager {
    * forced removal is deleting — nor a removal start under a session that was just admitted.
    */
   claimWorktreeReclaim(runId: string): (() => void) | null {
-    if (this.reclaiming.has(runId) || this.isActive(runId) || this.store.writeRefusal(runId)) return null;
+    if (this.reclaiming.has(runId) || !!this.autosaveCleanupBlocker(runId) || this.isActive(runId) || this.store.writeRefusal(runId)) return null;
     const run = this.store.getRun(runId);
     if (!run || !isReclaimable(run, (id) => this.store.getRun(id))) return null;
     return this.holdForMaintenance([runId]);
@@ -3363,13 +3364,13 @@ export class RunManager {
    * branch cleanup and Continue off the checkout until the push and `gh` are done with it.
    */
   claimForPublish(runId: string): (() => void) | null {
-    if (this.reclaiming.has(runId) || this.isActive(runId) || this.store.writeRefusal(runId)) return null;
+    if (this.reclaiming.has(runId) || !!this.autosaveCleanupBlocker(runId) || this.isActive(runId) || this.store.writeRefusal(runId)) return null;
     return this.holdForMaintenance([runId]);
   }
 
   claimForBranchCleanup(runIds: readonly string[]): (() => void) | null {
     const unfinished = (id: string) => !['done', 'failed', 'cancelled'].includes(this.store.getRun(id)?.status ?? 'done');
-    if (runIds.some((id) => this.reclaiming.has(id) || this.isActive(id) || unfinished(id) || this.store.writeRefusal(id))) return null;
+    if (runIds.some((id) => this.reclaiming.has(id) || !!this.autosaveCleanupBlocker(id) || this.isActive(id) || unfinished(id) || this.store.writeRefusal(id))) return null;
     return this.holdForMaintenance(runIds);
   }
 
@@ -5279,6 +5280,8 @@ export class RunManager {
       return { ok: false, error: AGENT_MODELS_LOCKED_ERROR };
     }
     if (this.isActive(runId)) return { ok: false, error: 'run is still active' };
+    const autosaveBlocker = this.autosaveCleanupBlocker(runId);
+    if (autosaveBlocker) return { ok: false, error: autosaveBlocker };
     if (this.reclaiming.has(runId)) return { ok: false, error: 'its worktree or branch is being cleaned up — retry in a moment' };
     const run = this.store.getRun(runId);
     if (!run) return { ok: false, error: 'not found' };
@@ -6228,16 +6231,18 @@ export class RunManager {
       this.clearIdleTimer(state);
       this.clearAutosaveTimer(state);
       await this.saveWorktree(runId, state, 'turn end');
-      // Cancellation may be accepted while final autosave is yielding after
-      // the remainder was prepared. Retire that durable queue intent before
+      // Cancellation may be accepted while final autosave is yielding, even
+      // after success was recorded. Retire any durable queue intent before
       // dropping the active state, otherwise pump can launch the tail with a
       // fresh `cancelled:false` state.
-      if (resumeWorkflow && state.cancelled) {
-        this.store.updateRun(runId, {
-          status: 'cancelled', finishedAt: finishedAt(), currentStepId: undefined,
-        });
-        this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+      if (state.cancelled) {
         resumeWorkflow = undefined;
+        if (this.store.getRun(runId)?.status !== 'cancelled') {
+          this.store.updateRun(runId, {
+            status: 'cancelled', finishedAt: finishedAt(), currentStepId: undefined,
+          });
+          this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+        }
       }
       this.dropActive(runId);
       if (resumeWorkflow) {
@@ -7471,7 +7476,11 @@ export class RunManager {
     const run = this.store.getRun(runId);
     let review = false;
     if (run?.worktreePath && existsSync(run.worktreePath)) {
-      const diff = await worktreeDiff(run.worktreePath, run.baseBranch ?? 'HEAD');
+      // An unresolved autosave may still own the real index. Conservatively
+      // treat its retained work as reviewable without starting `git add -N`.
+      const diff = this.autosaveCleanupBlocker(runId)
+        ? 'autosave cleanup pending'
+        : await worktreeDiff(run.worktreePath, run.baseBranch ?? 'HEAD');
       if (durableRootFinish && diff.startsWith('(diff failed')) throw new Error('parent finish diff unavailable');
       const hasDiff = diff.trim().length > 0 && !diff.startsWith('(diff failed');
       const config = await loadConfig(this.repoRoot);
@@ -7902,13 +7911,68 @@ export class RunManager {
     if (runId) this.store.updateRun(runId, { monitoringWakeAt: undefined });
   }
 
-  /** Keep the active/execution guard until autosave proves its processes exited. */
+  /** The save may finish execution while its strict writer proof remains pending. */
+  private readonly autosaveTasks = new Map<string, { settlement: Promise<void>; blocker?: string }>();
+
+  /** Cleanup evidence survives manager disposal and store close/reopen. */
+  autosaveCleanupBlocker(runId: string): string | undefined {
+    return this.autosaveTasks.get(runId)?.blocker ?? autosaveCleanupBlocker(this.dataDir, runId);
+  }
+
+  /** Keep a separate maintenance hold until autosave proves all its processes exited. */
   private async saveWorktree(runId: string, state: ActiveRun, reason: AutosaveReason): Promise<void> {
     if (state.cwd === this.repoRoot) return;
-    const note = (message: string) => this.store.appendEvent(runId, { type: 'note', message });
-    const result = await autosaveCommit(state.cwd, reason, { onWarning: note });
-    if (result === 'failed') note(`${reason} autosave failed; working files remain in ${state.cwd}`);
-    else if (result === 'refused') note(`${reason} autosave refused because of unresolved conflicts; working files remain in ${state.cwd}`);
+    for (;;) {
+      const previous = this.autosaveTasks.get(runId);
+      if (!previous) break;
+      await previous.settlement;
+      // A blocked save still owns the tree. Do not queue another writer behind it.
+      if (previous.blocker) return;
+    }
+    const note = (message: string) => {
+      try { this.store.appendEvent(runId, { type: 'note', message }); }
+      catch { /* Cleanup may outlive the store or its history; reporting cannot interrupt it. */ }
+    };
+    let settle!: () => void;
+    const entry: { settlement: Promise<void>; blocker?: string } = { settlement: new Promise(resolve => { settle = resolve; }) };
+    this.autosaveTasks.set(runId, entry);
+    let release: (() => void) | undefined;
+    let retained = false;
+    let cleanupConfirmed = false;
+    const task = autosaveCommit(state.cwd, reason, {
+      onWarning: note,
+      onBlocked: (message, proof) => {
+        retainAutosaveCleanup(this.dataDir, runId, state.cwd, message, proof);
+        retained = true;
+        if (!release) {
+          const hold = this.holdForMaintenance([runId]);
+          if (!hold) return; // Never release execution without a replacement writer guard.
+          release = hold;
+          note(`${reason} autosave unsuccessful; run can settle, working files remain in ${state.cwd}`);
+        }
+        entry.blocker = message;
+        settle();
+      },
+    });
+    void task.then(result => {
+      cleanupConfirmed = true;
+      if (result === 'failed') note(`${reason} autosave failed; working files remain in ${state.cwd}`);
+      else if (result === 'refused') note(`${reason} autosave refused because of unresolved conflicts; working files remain in ${state.cwd}`);
+    }, error => note(`${reason} autosave failed: ${String(error)}; working files remain in ${state.cwd}`)).finally(() => {
+      if (this.autosaveTasks.get(runId) === entry) this.autosaveTasks.delete(runId);
+      if (retained && cleanupConfirmed) {
+        try { clearAutosaveCleanup(this.dataDir, runId); }
+        catch { note('autosave cleanup confirmed but retained evidence could not be cleared; worktree reuse remains blocked'); }
+      }
+      try { release?.(); } catch { /* The store may already be closed; durable evidence is independent. */ }
+      if (entry.blocker) {
+        note(this.autosaveCleanupBlocker(runId) ? 'autosave cleanup confirmed; retained evidence still blocks worktree reuse' : 'autosave cleanup confirmed; worktree reuse is available again');
+        if (!this.disposed) this.reapTerminalScratch(runId);
+        if (!this.disposed) this.releaseSlot();
+      }
+      settle();
+    });
+    await entry.settlement;
   }
 
   /** Autosave-commit the worktree every 90 s while the run lives (spec 006).

@@ -1033,6 +1033,8 @@ export async function withOwnedInputRun(
     repoRoot: string; runId: string; parentRunId: string;
     store: RunStore; manager: RunManager;
     restart: (beforeOpen?: (dataDir: string) => void) => Promise<{ store: RunStore; manager: RunManager }>;
+    /** Transfer fixture teardown to a reopened context without cancelling the old cleanup. */
+    adoptContext: (context: { store: RunStore; manager: RunManager }) => Promise<void>;
   }) => Promise<void>,
   options: {
     /** A persisted catalog definition the worker runs instead of quick-task (#451). */
@@ -1101,6 +1103,12 @@ export async function withOwnedInputRun(
     }, 'a'.repeat(64), options.identity ?? { kind: 'internal', ...(workflowDef ? { workflowHash: workerWorkflowHash(workflowDef) } : {}) });
     manager = new RunManager(store, repoRoot);
     drainBookkeeping = trackTurnBookkeeping(manager);
+    const adoptContext = async (context: { store: RunStore; manager: RunManager }) => {
+      await drainBookkeeping();
+      store = context.store;
+      manager = context.manager;
+      drainBookkeeping = trackTurnBookkeeping(manager);
+    };
     const restart = async (beforeOpen?: (dataDir: string) => void) => {
       store!.flush();
       const index = readPersistedRuns(join(repoRoot, '.ai/cezar'));
@@ -1119,7 +1127,7 @@ export async function withOwnedInputRun(
       await manager.recover();
       return { store, manager };
     };
-    await body({ repoRoot, runId, parentRunId: parent.id, store, manager, restart });
+    await body({ repoRoot, runId, parentRunId: parent.id, store, manager, restart, adoptContext });
   } finally {
     try {
       if (runId && manager) {

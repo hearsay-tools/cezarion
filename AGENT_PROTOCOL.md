@@ -1322,12 +1322,35 @@ cleanup checkpoint. Enabled delegation reads only that worker's family; disabled
 delegation enters no terminal-checkpoint reconciliation and reads no histories.
 The persisted execution proof remains complete in both cases.
 
-R24/R25 (hearsay-tools/cezarion#495, `core/harness-autosave.test.ts`) keep initial and Continue cleanup
-active across stalled autosave Git commands on every native runner wire. Each
-command gets 30 seconds, then TERM and (after one second) KILL. An unsuccessful
-save is reported without deleting working files. Two further seconds without
-termination proof produce a warning, not a released worktree: observation
-continues until the owned group and newly observed worktree holders are gone.
+R24/R25 (hearsay-tools/cezarion#495, `core/harness-autosave.test.ts`) retain writer
+protection across stalled autosave Git commands on initial and Continue sessions
+on every native runner wire. Each command gets 30 seconds, then TERM and (after
+one second) KILL. An unsuccessful save is reported without deleting working files.
+Two further seconds without termination proof produce blocker diagnostics: Git
+leader state, group liveness or failed inspection, and retained cwd-holder PIDs.
+The strict autosave promise stays pending until its group and observed holders
+exit. Run finalization instead takes a separate maintenance hold, settles the
+execution, clears stopping and releases capacity. That hold retains the store's
+cross-process ownership claim. Private `runs/<id>.autosave-cleanup.json` evidence
+retains the controller, observed process incarnations and unconfirmed groups across
+store close and project replacement. Continue, publishing, deletion, reclaim,
+branch and worker cleanup remain blocked until strict cleanup is confirmed. A dead
+controller's evidence is freshly reprobed; zombie-only groups and a positively
+different Linux boot grant no old writer, while uncertainty still blocks reuse.
+Admission reads leave expired evidence nonblocking and never unlink a newer proof.
+A queued workflow remainder
+waits behind the same hold; confirmed cleanup wakes the scheduler. A warning or
+Stop never grants permission for another writer or signals unrelated cwd holders.
+
+R61–R66 (hearsay-tools/cezarion#934, `core/harness-autosave-settlement.test.ts`) drive
+provider failure, Stop during final autosave, and successful Finish through every
+`HARNESS_ADAPTERS` native wire, both fresh and on Continue. A real parent-owned
+process born after the autosave baseline remains alive after Git exits: execution
+must settle while reuse stays refused with the holder's PID, working files remain,
+and confirmed holder exit automatically releases the worktree hold. R61 replaces
+the manager/store after the observed holder moves cwd; R64 stops a Continue with
+a remaining workflow step and requires that queued tail to retire immediately.
+
 Autosaves serialize per canonical worktree; Git auto-maintenance is disabled
 only for these commands. Holder discovery shares orphan recovery's cwd boundary,
 not OS containment: custom children that detach and leave the tree before they

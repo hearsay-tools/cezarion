@@ -214,6 +214,19 @@ describe('public delegation completion integration', () => {
     await until(() => store.getRun(p.id)?.status === 'review', 'collected deleted workers permit honest parent review');
   }, 120_000);
 
+  // hearsay-tools/cezarion#632: `--runner` and `--backend` fill the same request field, so a retry
+  // that switches spelling hashes identically and dedupes instead of reporting a payload conflict.
+  it('dedupes a --runner retry of a --backend spawn under the same request id', async () => {
+    const p = await parent();
+    const requestId = randomUUID();
+    const args = (flag: string) => ['spawn', '--baseline', 'parent-head', '--request-id', requestId, flag, 'codex', '--context', 'Parser only', 'Review parser'];
+    const first = await command<WorkerSpawnResult>(p.id, args('--backend'));
+    expect((await input(first.workerId)).backend).toBe('codex');
+    const retry = await command<WorkerSpawnResult>(p.id, args('--runner'));
+    expect(retry.workerId).toBe(first.workerId);
+    expect(store.listRuns().filter(run => run.delegation?.role === 'worker')).toHaveLength(1);
+  });
+
   it('reports a real provider failure and a stopped worker without allowing peer authority or premature success', async () => {
     const p = await parent(); const failed = await spawn(p.id, 'codex', 'Exercise provider failure'); const stopped = await spawn(p.id, 'claude', 'Exercise explicit stop');
     expect(await command(failed, ['steer', stopped, 'Unauthorized peer steering'], 1)).toMatchObject({ code: 'denied_scope' });

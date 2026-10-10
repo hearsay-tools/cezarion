@@ -1,7 +1,7 @@
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, rmSync, fsyncSync, fstatSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync, fsyncSync, fstatSync, readdirSync, openSync, closeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { onTestFinished, beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { fixture } from './service.testkit.ts';
@@ -16,7 +16,7 @@ vi.mock('node:fs', async importOriginal => {
   return { ...actual,
     // Keep enumeration live while this suite injects only write/fsync failures.
     readdirSync: (...args: Parameters<typeof actual.readdirSync>) => actual.default.readdirSync(...args),
-    writeFileSync: vi.fn(actual.writeFileSync), fsyncSync: vi.fn(actual.fsyncSync),
+    writeFileSync: vi.fn(actual.writeFileSync), fsyncSync: vi.fn(actual.fsyncSync), closeSync: vi.fn(actual.closeSync),
   };
 });
 
@@ -127,16 +127,23 @@ describe('parent-owned collected worker results', () => {
     let descriptor: number | undefined;
     if (operation === 'write') vi.mocked(writeFileSync).mockImplementationOnce(file => {
       if (typeof file === 'number') descriptor = file;
+      vi.mocked(closeSync).mockClear();
       throw Error('snapshot write failed');
     });
-    else vi.mocked(fsyncSync).mockImplementationOnce(fd => { descriptor = fd; throw Error('snapshot fsync failed'); });
+    else vi.mocked(fsyncSync).mockImplementationOnce(fd => { descriptor = fd; vi.mocked(closeSync).mockClear(); throw Error('snapshot fsync failed'); });
     // New evidence: an identical result is already durable and writes nothing (hearsay-tools/cezarion#879).
     const changed = { ...first, observedAt: new Date(Date.parse(first.observedAt) + 1).toISOString(), summary: { state: 'unavailable' as const, reason: 'no-assistant-output' as const } };
     expect(() => f.store.commitWorkerResult(f.parent.id, changed)).toThrow(`snapshot ${operation} failed`);
-    expect(descriptor).toBeTypeOf('number');
-    expect(() => fstatSync(descriptor!)).toThrow();
-    expect(f.store.readWorkerResult(f.parent.id, run.id)).toEqual(first);
-    expect(readdirSync(dir)).toEqual(before);
+    // Reproduce another file opening before the descriptor assertion (hearsay-tools/cezarion#940).
+    const reopened = openSync(join(dir, before[0]!), 'r');
+    try {
+      expect(descriptor).toBeTypeOf('number');
+      expect(fstatSync(reopened).isFile()).toBe(true);
+      // Earlier reads can close the same number; only calls after the injected fault prove cleanup.
+      expect(closeSync).toHaveBeenCalledExactlyOnceWith(descriptor);
+      expect(f.store.readWorkerResult(f.parent.id, run.id)).toEqual(first);
+      expect(readdirSync(dir)).toEqual(before);
+    } finally { closeSync(reopened); }
   });
 
   it('does not publish or replace retained evidence when the parent index checkpoint fails', async () => {

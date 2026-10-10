@@ -18,7 +18,8 @@ import {
   type RunSummary,
 } from '@open-mercato/cezar-contract';
 import { openUrl } from '../open-url.ts';
-import { skillFlagIssue, skillTaskSteps } from '../workflows/types.ts';
+import { RUNNER_IDS } from '../core/agent-runner.ts';
+import { runnerFlag, skillFlagIssue, skillTaskSteps } from '../workflows/types.ts';
 import { discoverCockpit, type DiscoverOptions } from './discovery.ts';
 import { handoffUrl, invalidResponse, refuse, request, TaskCliError, threadUrl, type Cockpit } from './http.ts';
 import { projectListRow, projectStatus } from './projections.ts';
@@ -75,7 +76,8 @@ export const OPERATIONS: Record<string, Operation> = {
       'request-id': { type: 'string', help: '<UUID>     Retry-safe id; reuse it when retrying this start.' },
       workflow: { type: 'string', help: '<name>       Workflow (default quick-task).' },
       skill: { type: 'string', help: '<name>          Run one discovered skill instead of a workflow.' },
-      backend: { type: 'string', help: '<id>          claude | codex | opencode | pi | cursor | omp.' },
+      runner: { type: 'string', help: `<id>           ${RUNNER_IDS.join(' | ')}.` },
+      backend: { type: 'string', help: '<id>          Alias of --runner.' },
       model: { type: 'string', help: '<model>         Model override.' },
       effort: { type: 'string', help: '<level>       Reasoning effort.' },
       autonomous: { type: 'boolean', help: '         Never park for input; run to completion.' },
@@ -376,6 +378,8 @@ function validateFlags(name: string, values: Values): void {
       workflow: values.workflow as string | undefined,
     });
     if (issue) usageError(issue);
+    const runner = runnerFlag({ runner: values.runner as string | undefined, backend: values.backend as string | undefined });
+    if (runner.issue) usageError(runner.issue);
     if (values.notify && values['no-notify']) usageError('--notify and --no-notify cannot be used together');
     if (values.until !== undefined && !values.wait) usageError('--until needs --wait');
   }
@@ -438,6 +442,7 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string,
   const waitMs = values.wait ? timeoutMs(values) : undefined;
   const requestId = (values['request-id'] as string | undefined) ?? randomUUID();
   const skill = values.skill as string | undefined;
+  const { runner } = runnerFlag({ runner: values.runner as string | undefined, backend: values.backend as string | undefined });
   // `--notify` is an explicit opt-in the server may refuse (no webhook: 400 with a hint). The
   // implicit default only opts in where the project has a webhook, so a bot on a fresh project
   // is never blocked (#589).
@@ -469,7 +474,7 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string,
       ...(skill === undefined
         ? { workflow: (values.workflow as string | undefined) ?? 'quick-task' }
         : { steps: skillTaskSteps(skill) }),
-      ...(values.backend === undefined ? {} : { runner: values.backend }),
+      ...(runner === undefined ? {} : { runner }),
       ...(values.model === undefined ? {} : { model: values.model }),
       ...(values.effort === undefined ? {} : { effort: values.effort }),
       ...(values.autonomous ? { autonomous: true } : {}),

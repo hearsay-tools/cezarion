@@ -1,3 +1,6 @@
+import { autosaveGroupExists, autosaveGroupSnapshotAlive, groupInspectionFailed } from './autosave-group.ts';
+import type { AutosaveCleanupProof } from './autosave-cleanup.ts';
+import { processStartToken } from './delegation/process-liveness.ts';
 import { spawn } from 'node:child_process';
 import { readdir, readFile } from 'node:fs/promises';
 import { watchAutosaveHolders } from './autosave-holders.ts';
@@ -9,33 +12,27 @@ export interface AutosaveOptions {
   killGraceMs?: number;
   confirmMs?: number;
   onWarning?: (message: string) => void;
+  /** Cleanup is still pending. Callers may settle execution only under a separate worktree hold. */
+  onBlocked?: (message: string, proof: AutosaveCleanupProof) => void;
 }
 
 /** A group consisting only of zombies cannot write, even before init reaps it. */
-async function groupAlive(pid: number): Promise<boolean> {
-  try { process.kill(-pid, 0); }
-  catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
-  if (process.platform !== 'linux') return true;
+async function groupAlive(pid: number, diagnostic: (message: string) => void): Promise<boolean> {
+  const uncertain = (error: unknown) => groupInspectionFailed(pid, error, diagnostic);
+  if (!autosaveGroupExists(pid, diagnostic)) return false;
+  if (process.platform !== 'linux') { diagnostic(`process group ${pid} alive`); return true; }
   try {
-    let zombie = false;
+    const stats: string[] = [];
     for (const entry of await readdir('/proc')) {
       if (!/^\d+$/.test(entry)) continue;
-      let stat: string;
-      try { stat = await readFile(`/proc/${entry}/stat`, 'utf8'); }
+      try { stats.push(await readFile(`/proc/${entry}/stat`, 'utf8')); }
       catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-        return true; // An unreadable process might belong to this group.
+        uncertain(error); return true;
       }
-      const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
-      if (Number(fields[2]) !== pid) continue;
-      if (fields[0] !== 'Z' && fields[0] !== 'X') return true;
-      zombie = true;
     }
-    if (zombie) return false;
-    // A scan with no matches is not proof: recheck the kernel's group lookup.
-    try { process.kill(-pid, 0); return true; }
-    catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
-  } catch { return true; }
+    return autosaveGroupSnapshotAlive(pid, stats, diagnostic);
+  } catch (error) { uncertain(error); return true; }
 }
 
 /**
@@ -46,7 +43,7 @@ async function groupAlive(pid: number): Promise<boolean> {
  */
 export async function autosaveGit(cwd: string, args: string[], options: AutosaveOptions) {
   const windows = process.platform === 'win32' ? await watchWindowsAutosave() : undefined;
-  const holdersAlive = process.platform === 'win32' ? (windows ? async () => false : undefined) : await watchAutosaveHolders(cwd);
+  const holdersAlive = process.platform === 'win32' ? (windows ? Object.assign(async () => false, { diagnostics: () => ({ pids: [] as number[], processes: [], inspectionFailed: false }) }) : undefined) : await watchAutosaveHolders(cwd);
   return new Promise<{ ok: boolean; stdout: string; code: number | null }>((resolve) => {
     const timeoutMs = options.timeoutMs ?? 30_000;
     const killGraceMs = options.killGraceMs ?? 1_000;
@@ -73,6 +70,26 @@ export async function autosaveGit(cwd: string, args: string[], options: Autosave
     let aborted = false;
     let finished = false;
     let checking = false;
+    let blocked = false;
+    let lastBlocker = '';
+    let groupDiagnostic = 'process inspection pending';
+    let groupPending = true;
+    const leaderToken = child.pid === undefined ? undefined : processStartToken(child.pid);
+    const reportBlocked = () => {
+      if (!blocked || finished) return;
+      const holders = holdersAlive.diagnostics();
+      const message = `termination not confirmed; Git PID ${child.pid ?? 'unknown'} ${exited ? 'exited' : 'has not exited'}; ${groupDiagnostic}; ` +
+        `${holders.inspectionFailed ? 'cwd inspection failed; ' : ''}retained cwd holder PIDs: ${holders.pids.join(', ') || 'none'}; worktree reuse blocked until cleanup is confirmed`;
+      const proof = windows ? windows.cleanupProof() : {
+        processes: [...holders.processes, ...(!exited && child.pid !== undefined ? [{ pid: child.pid, startToken: leaderToken }] : [])],
+        groups: groupPending && child.pid !== undefined ? [child.pid] : [], uncertain: !exited && child.pid === undefined,
+      };
+      const signature = JSON.stringify({ message, proof });
+      if (signature === lastBlocker) return;
+      lastBlocker = signature;
+      warn(message);
+      try { options.onBlocked?.(message, proof); } catch { /* Retain cleanup if the caller cannot take its own hold. */ }
+    };
     let killTimer: NodeJS.Timeout | undefined;
     let confirmTimer: NodeJS.Timeout | undefined;
     let pollTimer: NodeJS.Timeout | undefined;
@@ -96,11 +113,15 @@ export async function autosaveGit(cwd: string, args: string[], options: Autosave
       clearTimeout(pollTimer);
       checking = true;
       // A failed spawn owns no process. Signals never substitute for observation.
-      const alive = child.pid !== undefined && (windows ? await windows.alive(child.pid, () => exited) : await groupAlive(child.pid));
+      const alive = child.pid !== undefined && (windows ? await windows.alive(child.pid, () => exited) : await groupAlive(child.pid, message => { groupDiagnostic = message; }));
+      groupPending = alive;
+      if (!alive) groupDiagnostic = `process group ${child.pid ?? 'unknown'} exited`;
+      else if (windows) groupDiagnostic = windows.diagnostic();
       const holders = !alive && await holdersAlive();
       checking = false;
       if (finished) return;
       if (exited && !alive && !holders && (aborted || closed)) { finish(); return; }
+      reportBlocked();
       pollTimer = setTimeout(() => { void observe(); }, process.platform === 'linux' ? 50 : 500);
     };
     const abort = (reason: string) => {
@@ -110,7 +131,8 @@ export async function autosaveGit(cwd: string, args: string[], options: Autosave
       signal('SIGTERM');
       killTimer = setTimeout(() => signal('SIGKILL'), killGraceMs);
       confirmTimer = setTimeout(() => {
-        if (!finished) warn('termination not confirmed; worktree remains busy until processes exit');
+        blocked = true;
+        reportBlocked();
       }, killGraceMs + confirmMs);
       void observe();
     };
