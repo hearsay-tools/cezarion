@@ -250,6 +250,20 @@ export function skillFlagIssue(flags: { skill?: string; workflow?: string }): st
   return undefined;
 }
 
+/**
+ * `--runner` and its permanent alias `--backend` (hearsay-tools/cezarion#632). Both may be given
+ * with one value; two different values are a usage error. The caller maps the result onto its
+ * own wire field (`runner` on the run API, `backend` on a worker spawn).
+ */
+export function runnerFlag(flags: { runner?: string; backend?: string }): { runner?: string; issue?: string } {
+  const { runner, backend } = flags;
+  if (runner !== undefined && backend !== undefined && runner !== backend) {
+    return { issue: `--runner ${runner} and --backend ${backend} name different runners; pass one --runner` };
+  }
+  const selected = runner ?? backend;
+  return selected === undefined ? {} : { runner: selected };
+}
+
 /** The zero-config workflow: one agent step that just does the task. */
 export const QUICK_TASK_WORKFLOW: WorkflowDef = {
   name: 'quick-task',
