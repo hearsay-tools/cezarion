@@ -269,6 +269,16 @@ describe('cez task watching', () => {
         expect(last()).toMatchObject({ id, status: 'running', attention: 'running', attentionLabel: 'monitoring', until: 'attention', timedOut: true });
       });
 
+      it.each(['attention', 'settled'])('reports a run deleted mid-follow as missing, exit 1, under --until %s', async (until) => {
+        const id = create();
+        harness.store.updateRun(id, { status: 'running' });
+        harness.store.appendEvent(id, { type: 'text', text: 'before' });
+        later(200, () => { harness.store.deleteRun(id); });
+        expect(await run(['log', id, '--follow', '--until', until, '--timeout-seconds', '10'])).toBe(1);
+        expect(lines().filter((line) => line.type === 'text').map((line) => line.text)).toEqual(['before']);
+        expect(last()).toEqual({ id, status: 'missing', until, timedOut: false });
+      });
+
       it('--until settled waits through a park and ends on a terminal status', async () => {
         const id = create();
         later(40, () => harness.store.updateRun(id, { status: 'waiting' }));
@@ -450,19 +460,72 @@ describe('cez task watching against a scripted cockpit', () => {
     expect(seen).toContain('/api/v1/p/default/runs/r1');
   });
 
-  it('log --follow reports a run deleted under it as missing, exit 1 (#931)', async () => {
+  it('log --follow reports a run deleted under it as missing, exit 1, without a history read (#931)', async () => {
+    // Deleting a run 404s both its record and its history; the follow must not need the second.
+    let deleted = false;
+    let historyCalls = 0;
     handler = (req, res) => {
-      if (req.url === '/api/v1/p/default/runs/r1') { res.statusCode = 404; return json(res, { error: 'run not found' }); }
-      if (req.url?.startsWith('/api/v1/p/default/runs/r1/history')) return json(res, { events: [], itemCount: 0, liveCursor: 'c', asOfSeq: 0, hasOlder: false });
+      if (req.url === '/api/v1/p/default/runs/r1') {
+        if (deleted) { res.statusCode = 404; return json(res, { error: 'not found' }); }
+        return json(res, apiRun('running'));
+      }
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/history')) {
+        historyCalls += 1;
+        if (deleted) { res.statusCode = 404; return json(res, { error: 'not found' }); }
+        return json(res, { events: [], itemCount: 0, liveCursor: 'c', asOfSeq: 0, hasOlder: false });
+      }
       if (req.url?.startsWith('/api/v1/p/default/runs/r1/events')) {
         res.writeHead(200, { 'content-type': 'text/event-stream' });
-        res.write('event: ping\ndata: \n\n');
+        res.write(`event: run\ndata: ${JSON.stringify(apiRun('running'))}\n\n`);
+        // A last frame for a record that is gone by the time the CLI reads it.
+        setTimeout(() => { deleted = true; res.write(`event: run\ndata: ${JSON.stringify({ ...apiRun('running'), activity: 'monitoring' })}\n\n`); }, 50);
         return;
       }
       res.statusCode = 404; res.end();
     };
     expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '5'])).toBe(1);
     expect(JSON.parse(out.at(-1)!)).toEqual({ id: 'r1', status: 'missing', until: 'attention', timedOut: false });
+    expect(historyCalls).toBe(1);
+  });
+
+  it('log --follow reports a run whose event stream closed because it was deleted as missing, exit 1 (#931)', async () => {
+    let deleted = false;
+    handler = (req, res) => {
+      if (req.url === '/api/v1/p/default/runs/r1') {
+        if (deleted) { res.statusCode = 404; return json(res, { error: 'not found' }); }
+        return json(res, apiRun('running'));
+      }
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/history')) return json(res, { events: [], itemCount: 0, liveCursor: 'c', asOfSeq: 1, hasOlder: false });
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/events')) {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.write(`event: run-event\ndata: ${JSON.stringify({ seq: 1, ts: '2026-01-01T00:00:00.000Z', type: 'text', text: 't1' })}\n\n`);
+        res.write(`event: run\ndata: ${JSON.stringify(apiRun('running'))}\n\n`);
+        // The server resets a deleted run's feed and closes the stream without a run frame.
+        setTimeout(() => { deleted = true; res.end(); }, 50);
+        return;
+      }
+      res.statusCode = 404; res.end();
+    };
+    expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '5'])).toBe(1);
+    const lines = out.map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines.map((line) => line.text ?? line.status)).toEqual(['t1', 'missing']);
+    expect(lines.at(-1)).toEqual({ id: 'r1', status: 'missing', until: 'attention', timedOut: false });
+  });
+
+  it('log --follow still reports a stream closed under a live run as unavailable (exit 2)', async () => {
+    handler = (req, res) => {
+      if (req.url === '/api/v1/p/default/runs/r1') return json(res, apiRun('running'));
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/history')) return json(res, { events: [], itemCount: 0, liveCursor: 'c', asOfSeq: 0, hasOlder: false });
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/events')) {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.write(`event: run\ndata: ${JSON.stringify(apiRun('running'))}\n\n`);
+        setTimeout(() => res.end(), 50);
+        return;
+      }
+      res.statusCode = 404; res.end();
+    };
+    expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '5'])).toBe(2);
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ code: 'unavailable', error: 'the cockpit closed the event stream' });
   });
 
   it('log --follow counts loading history against --timeout-seconds', async () => {

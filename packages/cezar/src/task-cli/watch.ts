@@ -280,7 +280,9 @@ async function* sseFrames(body: ReadableStream<Uint8Array>): AsyncGenerator<SseF
  * - the deciding run ends the command only once the stream has caught up with a SECOND high-water
  *   read taken after that decision, so events the engine wrote just before parking or finishing
  *   are not dropped when the status frame overtakes them (exit 0/1, the final line is the
- *   judged run with `until`).
+ *   judged run with `until`). A deleted run (`missing`, exit 1) has no history left to drain, and
+ *   its feed closes without a `run` frame, so a closed stream is checked against a run read
+ *   before it is reported as the cockpit failing (exit 2).
  *
  * One `deadline` bounds every request, the history reads included (exit 3). Deduped by `seq`.
  * The stream rather than `GET /history` pages: a history page starts at its first transcript
@@ -405,6 +407,16 @@ export async function readLog(
       if (!controller.signal.aborted) throw error;
     }
     if (controller.signal.aborted) return timedOut();
+    // Deleting a run resets its feed and closes the stream without a `run` frame, so a follow
+    // asks whether the run is still there before calling the close a cockpit failure.
+    if (options.follow) {
+      const entry = await readRun();
+      if (entry === undefined) return timedOut();
+      if (entry.status === 'missing') {
+        for (const line of tail.drain()) options.print(line);
+        return finish(entry);
+      }
+    }
     throw new TaskCliError(2, { code: 'unavailable', error: 'the cockpit closed the event stream' });
   } finally {
     clearTimeout(timer);
@@ -424,10 +436,16 @@ export async function readLog(
     }
     if (replaying) return undefined;
     if (decided === undefined) return readOwed ? 'judge' : undefined;
+    // A deleted run's history is gone with it: there is nothing left to drain.
+    if (decided.status === 'missing') return finish(decided);
     if (drainSeq === undefined) return 'drain';
     if (seenSeq < drainSeq) return undefined;
-    options.print(JSON.stringify(finalLine(decided, false)));
-    return isFailure(decided) ? 1 : 0;
+    return finish(decided);
+  }
+
+  function finish(entry: WaitEntry): number {
+    options.print(JSON.stringify(finalLine(entry, false)));
+    return isFailure(entry) ? 1 : 0;
   }
 
   /** `{ id, status, attention, attentionLabel, until, timedOut }`, the run fields as far as known. */
