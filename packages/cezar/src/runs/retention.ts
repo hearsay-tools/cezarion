@@ -5,6 +5,8 @@
 // recoverable) and the thin I/O enforcer that performs the reclaim. The selector
 // is pure and unit-testable; the enforcer never throws (helper discipline).
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
 import { collectWorkerEvidence } from '../delegation/results.ts';
 import { createWorktree } from '../git-worktree.ts';
 import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
@@ -187,6 +189,9 @@ export async function reclaimWorktree(
   const onlyClean = opts.requireClean === true || run.delegation?.role !== 'worker';
   const execution = run.delegation?.role === 'worker' ? (store as Partial<RunStore>).readWorkerExecution?.(run.id) : undefined;
   const assertSafe = () => {
+    // Startup has no manager claim. Terminal execution can still have a retained
+    // autosave writer, so recheck its durable proof before every destructive step.
+    if (autosaveCleanupBlocker(join(repoRoot, '.ai/cezar'), run.id)) throw Error('Autosave cleanup is not confirmed');
     if (run.delegation?.role !== 'worker') return;
     const real = store as Partial<RunStore>;
     // Structural test stores have no private execution machinery. Real stores must attest both
@@ -208,6 +213,7 @@ export async function reclaimWorktree(
   try { pinned ||= real.pin!.call(store, run.id, 'cleanup') !== undefined; } catch { /* busy: not claimed */ }
   if (!pinned) { release(); return null; }
   try {
+    assertSafe();
     if (!(await preserveWorkerResult(repoRoot, store, run).catch(() => false))) return null;
     if (opts.remove) assertSafe(); // injected reclaimer has no final callback
     await remove(repoRoot, run.worktreePath);

@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { z } from 'zod';
 
 const processSchema = z.object({ pid: z.number().int().positive(), parent: z.number().int().nonnegative(), token: z.string().regex(/^\d*$/) });
@@ -20,6 +20,25 @@ async function snapshot(): Promise<Process[] | undefined> {
   catch { return undefined; }
 }
 
+/** One bounded synchronous incarnation probe for durable admission after restart. */
+function incarnation(pid: number): string | undefined {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return undefined;
+  const script = `$ErrorActionPreference='Stop'; $p=Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'; if (-not $p) { 'gone' } elseif ($p.CreationDate) { [string]$p.CreationDate.ToUniversalTime().Ticks }`;
+  try {
+    const token = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+      { encoding: 'utf8', windowsHide: true, timeout: 2_000, killSignal: 'SIGKILL', maxBuffer: 64 * 1024 }).trim();
+    return token === 'gone' || /^\d+$/.test(token) ? token : undefined;
+  } catch { return undefined; }
+}
+export function windowsAutosaveProcessToken(pid: number): string | undefined {
+  const token = incarnation(pid);
+  return token === 'gone' ? undefined : token;
+}
+export function windowsAutosaveProcessLive(entry: { pid: number; startToken?: string }): boolean {
+  const token = incarnation(entry.pid);
+  return token !== 'gone' && (token === undefined || entry.startToken === undefined || token === entry.startToken);
+}
+
 /**
  * Windows retains ParentProcessId when a parent exits. Remember observed ancestry
  * and CreationDate incarnations so children outlive their leader without being
@@ -37,6 +56,7 @@ export async function watchWindowsAutosave() {
   let stopping: boolean | undefined;
   const signalling = new Set<boolean>();
   let latest: Process[] = [];
+  let diagnostic = 'Windows process inspection pending';
   let rootExitTicks: bigint | undefined;
   const ticksNow = () => (BigInt(Date.now()) + 62135596800000n) * 10000n;
   const signal = async () => {
@@ -52,11 +72,18 @@ export async function watchWindowsAutosave() {
     try { await powershell(script); } finally { signalling.delete(force); }
   };
   return {
+    diagnostic: () => diagnostic,
+    cleanupProof: () => ({
+      processes: [...owned.values()].map(entry => ({ pid: entry.pid, ...(entry.token ? { startToken: entry.token } : {}) })),
+      groups: [] as number[],
+      // A crashed controller cannot reconstruct unobserved Windows ancestry.
+      uncertain: /failed|uncertain|pending/.test(diagnostic),
+    }),
     stop(force: boolean) { stopping = force || stopping === true; void signal(); },
     async alive(root: number, hasExited: () => boolean): Promise<boolean> {
       if (hasExited()) rootExitTicks ??= ticksNow();
       const entries = await snapshot();
-      if (!entries) return true;
+      if (!entries) { diagnostic = 'Windows process inspection failed'; return true; }
       const exited = hasExited();
       if (exited) rootExitTicks ??= ticksNow();
       latest = entries;
@@ -65,7 +92,7 @@ export async function watchWindowsAutosave() {
       // The leader can exit while CIM is taking its snapshot. Without an
       // observed incarnation this row might already be a reused PID. Retry
       // without claiming ownership or signalling that process.
-      if (exited && leader && !leaderObserved) { latest = []; return true; }
+      if (exited && leader && !leaderObserved) { latest = []; diagnostic = `Windows leader PID ${root} incarnation uncertain`; return true; }
       if (!exited && leader && !leaderObserved) { owned.set(key(leader), { ...leader, signalable: true }); leaderObserved = true; }
       let changed = true;
       while (changed) {
@@ -92,6 +119,8 @@ export async function watchWindowsAutosave() {
           owned.set(key(entry), { ...entry, signalable }); changed = true;
         }
       }
+      const pids = entries.filter(entry => owned.has(key(entry))).map(entry => entry.pid);
+      diagnostic = `Windows retained autosave PIDs: ${pids.join(', ') || 'none'}${!exited ? '; leader termination uncertain' : ''}`;
       void signal();
       return !exited || entries.some(entry => owned.has(key(entry)) ||
         [...owned.values()].some(recorded => recorded.pid === entry.pid && (!recorded.token || !entry.token)));

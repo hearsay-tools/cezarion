@@ -2,10 +2,10 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as cp from 'node:child_process';
-import { watchWindowsAutosave } from './autosave-windows.ts';
+import { watchWindowsAutosave, windowsAutosaveProcessLive, windowsAutosaveProcessToken } from './autosave-windows.ts';
 import { autosaveGit } from './autosave-git.ts';
 
-vi.mock('node:child_process', async original => ({ ...await original<typeof cp>(), execFile: vi.fn(), spawn: vi.fn() }));
+vi.mock('node:child_process', async original => ({ ...await original<typeof cp>(), execFile: vi.fn(), execFileSync: vi.fn(), spawn: vi.fn() }));
 const row = (pid: number, parent: number, token: string) => ({ pid, parent, token });
 describe('Windows autosave process proof', () => {
   let rows: ReturnType<typeof row>[];
@@ -22,6 +22,24 @@ describe('Windows autosave process proof', () => {
     }) as unknown as typeof cp.execFile);
   });
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  it('durable recovery compares Windows creation tokens before retaining a reused PID', () => {
+    vi.mocked(cp.execFileSync).mockReturnValue('2000');
+    expect(windowsAutosaveProcessToken(101)).toBe('2000');
+    expect(windowsAutosaveProcessLive({ pid: 101, startToken: '1000' })).toBe(false);
+    expect(windowsAutosaveProcessLive({ pid: 101, startToken: '2000' })).toBe(true);
+    vi.mocked(cp.execFileSync).mockReturnValue('gone');
+    expect(windowsAutosaveProcessLive({ pid: 101, startToken: '2000' })).toBe(false);
+    vi.mocked(cp.execFileSync).mockImplementation(() => { throw new Error('probe failed'); });
+    expect(windowsAutosaveProcessLive({ pid: 101, startToken: '2000' })).toBe(true);
+  });
+
+  it('serializes observed Windows creation tokens for durable cleanup recovery', async () => {
+    const proof = (await watchWindowsAutosave())!;
+    rows = [row(100, 1, '1000'), row(101, 100, '1001')];
+    await proof.alive(100, () => false);
+    expect(proof.cleanupProof().processes).toContainEqual({ pid: 101, startToken: '1001' });
+  });
+
   it('allows a healthy Git command and returns its output', async () => {
     vi.mocked(cp.spawn).mockImplementation((() => {
       const child = Object.assign(new EventEmitter(), { pid: 100, stdout: new PassThrough(), stderr: new PassThrough() });

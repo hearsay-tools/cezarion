@@ -578,6 +578,13 @@ const CONTROL_CRITERIA = [
   // harness-autosave.test.ts drives both cleanup paths with native runner wires.
   { id: 'R24', scenario: 'baseline' },
   { id: 'R25', scenario: 'baseline' },
+  // hearsay-tools/cezarion#934: harness-autosave-settlement.test.ts, independent writer guard.
+  { id: 'R61', scenario: 'provider-error' },
+  { id: 'R62', scenario: 'provider-error' },
+  { id: 'R63', scenario: 'baseline' },
+  { id: 'R64', scenario: 'ask-snapshot' },
+  { id: 'R65', scenario: 'baseline' },
+  { id: 'R66', scenario: 'baseline' },
   { id: 'R26', scenario: 'ask-resume' },
   // workflows/ci-wait-refusal.test.ts: settled worker wake, private CI IPC, then delivery.
   { id: 'R27', scenario: 'hold' },
