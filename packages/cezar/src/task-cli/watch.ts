@@ -394,7 +394,10 @@ export async function readLog(
           if (entry === undefined) return timedOut();
           latest = entry;
           readOwed = false;
-          if (endsWait(entry, options.until)) decided = entry;
+          // Every judgement replaces the last one, so a run that resumed while the drain caught up
+          // is followed again rather than reported in the state it already left.
+          decided = endsWait(entry, options.until) ? entry : undefined;
+          drainSeq = undefined;
           exit = step();
         }
         if (exit === 'drain') {
@@ -426,7 +429,8 @@ export async function readLog(
 
   /**
    * Ends the replay at its boundary (and owes the first run read there); then a run read that
-   * `endsWait` accepts ends the command once drained.
+   * `endsWait` accepts ends the command once drained, unless a changed `run` frame owes a new
+   * judgement first.
    */
   function step(): number | 'judge' | 'drain' | undefined {
     if (replaying && seenSeq >= boundarySeq!) {
@@ -436,7 +440,8 @@ export async function readLog(
       if (!options.follow) return 0;
     }
     if (replaying) return undefined;
-    if (decided === undefined) return readOwed ? 'judge' : undefined;
+    if (readOwed) return 'judge';
+    if (decided === undefined) return undefined;
     // A deleted run's history is gone with it: there is nothing left to drain.
     if (decided.status === 'missing') return finish(decided);
     if (drainSeq === undefined) return 'drain';

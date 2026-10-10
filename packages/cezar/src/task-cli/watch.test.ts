@@ -512,6 +512,34 @@ describe('cez task watching against a scripted cockpit', () => {
     expect(lines.at(-1)).toEqual({ id: 'r1', status: 'missing', until: 'attention', timedOut: false });
   });
 
+  it('log --follow rejudges a run that resumes while the drain catches up, instead of ending stale (#931)', async () => {
+    let resumed = false;
+    let historyCalls = 0;
+    handler = (req, res) => {
+      if (req.url === '/api/v1/p/default/runs/r1') return json(res, apiRun(resumed ? 'running' : 'waiting'));
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/history')) {
+        historyCalls += 1;
+        return json(res, { events: [], itemCount: 0, liveCursor: 'c', asOfSeq: historyCalls === 1 ? 1 : 3, hasOlder: false });
+      }
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/events')) {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        const frame = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        const text = (seq: number) => frame('run-event', { seq, ts: '2026-01-01T00:00:00.000Z', type: 'text', text: `t${seq}` });
+        text(1);
+        frame('run', apiRun('waiting'));
+        // The caller answers before the drain catches up: the task is running again.
+        setTimeout(() => { resumed = true; frame('run', apiRun('running')); }, 50);
+        setTimeout(() => { text(2); text(3); }, 100);
+        return;
+      }
+      res.statusCode = 404; res.end();
+    };
+    expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '1'])).toBe(3);
+    const lines = out.map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines.filter((line) => line.type === 'text').map((line) => line.text)).toEqual(['t1', 't2', 't3']);
+    expect(lines.at(-1)).toEqual({ id: 'r1', status: 'running', attention: 'running', attentionLabel: 'running', until: 'attention', timedOut: true });
+  });
+
   it('log --follow keeps the attention a run frame carried when it times out before the first run read (#931)', async () => {
     handler = (req, res) => {
       if (req.url?.startsWith('/api/v1/p/default/runs/r1/history')) return json(res, { events: [], itemCount: 0, liveCursor: 'c', asOfSeq: 5, hasOlder: false });
