@@ -411,13 +411,14 @@ async function serveCommand(
       // Agent sessions lead their own process groups (hearsay-tools/cezarion#890), so the
       // terminal's Ctrl-C no longer reaches them. Forward the signal last: with the store
       // closed, an agent it ends cannot settle its run, and restart recovery resumes it.
-      // SIGHUP stays unhandled: a listener would override nohup's ignore disposition.
       forwardToSessionGroups(signal);
       process.exit(0);
     });
   };
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
+  if (onTerminal()) process.on('SIGHUP', () => shutdown('SIGHUP'));
+  else ignoreHangupOffTerminal();
 
   // Open the browser only once the server actually answers, so the first
   // paint is the cockpit and never a connection error.
@@ -425,6 +426,20 @@ async function serveCommand(
     const healthy = await waitForHealth(`${url}/api/v1/health`, 5_000);
     if (healthy) openUrl(url);
   }
+}
+
+/**
+ * SIGHUP is acted on only when cezar runs on a terminal. GNU `nohup` moves stdin and stdout
+ * off the terminal, so `nohup cez serve` is not on one. Node resets SIGHUP to its default at
+ * startup, discarding the ignore disposition `nohup` set, so off a terminal cezar ignores
+ * hangups itself (hearsay-tools/cezarion#915).
+ */
+function onTerminal(): boolean {
+  return process.platform !== 'win32' && (Boolean(process.stdin.isTTY) || Boolean(process.stdout.isTTY));
+}
+
+function ignoreHangupOffTerminal(): void {
+  if (process.platform !== 'win32' && !onTerminal()) process.on('SIGHUP', () => {});
 }
 
 /** Acquire once, on the actual bind host; --port 0 delegates selection to the OS. */
@@ -540,12 +555,15 @@ async function runCommand(
   // SIGTERM on, then end by the same signal, as this process did before it had a handler.
   const forward = (signal: NodeJS.Signals) => {
     forwardToSessionGroups(signal);
-    process.off('SIGINT', onSigint); process.off('SIGTERM', onSigterm);
+    process.off('SIGINT', onSigint); process.off('SIGTERM', onSigterm); process.off('SIGHUP', onSighup);
     process.kill(process.pid, signal);
   };
   const onSigint = () => forward('SIGINT');
   const onSigterm = () => forward('SIGTERM');
+  const onSighup = () => forward('SIGHUP');
   process.on('SIGINT', onSigint); process.on('SIGTERM', onSigterm);
+  if (onTerminal()) process.on('SIGHUP', onSighup);
+  else ignoreHangupOffTerminal();
   try {
     // Headless tasks still appear in the cockpit later, so persist the same
     // task-local recovery event when a credential expires after the preflight.
@@ -600,7 +618,7 @@ async function runCommand(
     console.log(`\nrun ${final} — ${record?.tokensUsed ?? 0} tokens — details in the cockpit: npx cezarion`);
     process.exitCode = final === 'done' || final === 'review' ? 0 : 1;
   } finally {
-    process.off('SIGINT', onSigint); process.off('SIGTERM', onSigterm);
+    process.off('SIGINT', onSigint); process.off('SIGTERM', onSigterm); process.off('SIGHUP', onSighup);
     await delegation.close();
     // A slow GitHub child must not keep a completed headless task alive. Any handle that
     // already arrived has repaired the store; an unfinished lookup remains unknown.
