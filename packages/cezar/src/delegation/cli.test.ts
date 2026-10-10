@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { Writable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runWorkerCommand } from './cli.ts';
+import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { fixture } from './service.testkit.ts';
 import { createDelegationRoutes } from './routes.ts';
 import { createDelegationApp, startDelegationTransport } from './transport.ts';
@@ -277,6 +278,50 @@ describe('bundled worker CLI', () => {
     expect(f.store.getRun(json().workerId)?.workflowDef?.steps[0]?.skill).toBe('worker-skill');
     await runWorkerCommand(['spawn', '--help'], {});
     expect(String(output.mock.calls.at(-1)?.[0])).toContain('--skill');
+  });
+  describe('runner flag (hearsay-tools/cezarion#632)', () => {
+    const spawnArgs = (flags: string[]) => ['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), ...flags, 'work'];
+    it.each(RUNNER_IDS.flatMap(runner => [
+      { runner, flags: ['--runner', runner] },
+      { runner, flags: ['--backend', runner] },
+      { runner, flags: ['--runner', runner, '--backend', runner] },
+    ]))('$flags fills the spawn request backend with $runner', async ({ runner, flags }) => {
+      const spawn = vi.spyOn(f.service, 'spawn');
+      await runWorkerCommand(spawnArgs(flags), env);
+      expect(spawn.mock.calls[0]?.[1]).toMatchObject({ backend: runner });
+      expect(spawn.mock.calls[0]?.[1]).not.toHaveProperty('runner');
+    });
+    it('rejects conflicting --runner and --backend with exit 1 like every worker usage error', async () => {
+      const spawn = vi.spyOn(f.service, 'spawn');
+      expect(await runWorkerCommand(spawnArgs(['--runner', 'codex', '--backend', 'claude']), env)).toBe(1);
+      expect(json()).toEqual({ code: 'invalid_input', error: '--runner codex and --backend claude name different runners; pass one --runner' });
+      expect(spawn).not.toHaveBeenCalled();
+    });
+    it('shows --runner in spawn help and --backend only on its alias line', async () => {
+      for (const argv of [['spawn', '--help'], ['--help']]) {
+        expect(await runWorkerCommand(argv, {})).toBe(0);
+        const lines = String(output.mock.calls.at(-1)?.[0]).split('\n');
+        const runnerLine = lines.findIndex(line => line.startsWith('  --runner '));
+        expect(runnerLine).toBeGreaterThan(-1);
+        expect(lines.flatMap((line, index) => line.includes('--backend') ? [index] : [])).toEqual([runnerLine + 1]);
+        expect(lines[runnerLine + 1]).toMatch(/^ {2}--backend .*Alias of --runner\.$/);
+      }
+      expect(await runWorkerCommand([], env)).toBe(1);
+      const spawnUsage = json().usage.operations.find((op: { name: string }) => op.name === 'spawn');
+      expect(spawnUsage.optional.indexOf('--runner')).toBe(spawnUsage.optional.indexOf('--backend') - 1);
+    });
+    // Guard: passes with or without #632. The flag says runner; the persisted output field keeps
+    // its historical name `backend` (BACKWARD_COMPATIBILITY.md §1).
+    it('keeps the backend field in inspect and collect output', async () => {
+      expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--backend', 'codex', 'work'], env)).toBe(0);
+      const { workerId } = json();
+      expect(await runWorkerCommand(['inspect', workerId], env)).toBe(0);
+      expect(json()).toMatchObject({ backend: 'codex' });
+      expect(json()).not.toHaveProperty('runner');
+      expect(await runWorkerCommand(['collect', workerId], env)).toBe(0);
+      expect(json()).toMatchObject({ backend: 'codex' });
+      expect(json()).not.toHaveProperty('runner');
+    });
   });
   it.each([
     { flags: ['--skill', ''], error: '--skill must name a skill' },

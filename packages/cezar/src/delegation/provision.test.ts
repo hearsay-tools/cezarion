@@ -12,7 +12,7 @@ describe('session provisioning', () => {
   afterEach(async () => { await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   const provision = (id = f.parent.id) => provisionDelegationSession({ projectId: 'project', runId: id, store: f.store, credentials: f.credentials, url: 'http://127.0.0.1:12345/api/v1/delegation' });
   it('rotates session identity, revokes on teardown, and never includes a token in instructions/events', () => {
-    expect(provision()!.instructions).toContain('--backend <claude|codex|opencode|pi|cursor|omp>');
+    expect(provision()!.instructions).toContain('--runner <claude|codex|opencode|pi|cursor|omp>');
     const first = provision()!; const old = f.credentials.authenticate(first.env.CEZ_DELEGATION_TOKEN!)!;
     expect(first.instructions).toContain('worker spawn'); expect(first.instructions).toContain('--effort'); expect(first.instructions).toContain('wait --request'); expect(first.instructions).not.toContain(first.env.CEZ_DELEGATION_TOKEN!);
     const second = provision()!;
@@ -38,6 +38,14 @@ describe('session provisioning', () => {
     expect(session.instructions).toContain('conversation <recipient-run-id> for history or investigation; it does not acknowledge messages');
     const env = buildChildEnv({ backend, source: { CEZ_AGENT_ENV_FULL: '1', CEZ_DELEGATION_TOKEN: 'parent-token', CEZ_DELEGATION_URL: 'http://evil' }, extraEnv: session.env });
     expect(env.CEZ_DELEGATION_TOKEN).toBe(session.env.CEZ_DELEGATION_TOKEN); expect(env.CEZ_DELEGATION_URL).toBe('http://127.0.0.1:12345/api/v1/delegation');
+  });
+  // hearsay-tools/cezarion#632: parents learn one spelling. `--backend` stays a CLI alias, but the
+  // instructions every delegating session receives must never teach it again.
+  it('teaches --runner and never --backend in the parent instructions', () => {
+    const { instructions } = provision()!;
+    expect(instructions).toContain(`--runner <${RUNNER_IDS.join('|')}>`);
+    expect(instructions).toContain('--request-id <UUID> --runner codex');
+    expect(instructions).not.toMatch(/backend/i);
   });
   it('provisions no ordinary-run metadata while off and never promotes invalid/worker records to roots', async () => {
     const ordinary = f.store.createRun({ title: 'ordinary', task: 'ordinary', workflow: 'quick-task', steps: [] });

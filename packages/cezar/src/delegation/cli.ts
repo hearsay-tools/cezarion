@@ -7,7 +7,8 @@ import {
   workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema,
   workerDiffSchema, workerWaitResultSchema, delegationErrorResponseSchema,
 } from '@open-mercato/cezar-contract';
-import { skillFlagIssue } from '../workflows/types.ts';
+import { RUNNER_IDS } from '../core/agent-runner.ts';
+import { runnerFlag, skillFlagIssue } from '../workflows/types.ts';
 import { DelegationPolicyError } from './policy.ts';
 
 /** Accept exactly the endpoint format minted by this installation's private listener. */
@@ -24,13 +25,13 @@ const responseSchemas = { send: conversationSendResultSchema, progress: conversa
   stop: workerStopResultSchema, destroy: workerDestroyResultSchema, diff: workerDiffSchema, wait: workerWaitResultSchema, 'cancel-wait': workerCancelWaitResultSchema };
 const RESPONSE_BYTES = 3_145_728;
 const CLI_FLAG: Record<string, string> = {
-  requestId: '--request-id', baseline: '--baseline', backend: '--backend', model: '--model', effort: '--effort', workflow: '--workflow', skill: '--skill',
+  requestId: '--request-id', baseline: '--baseline', backend: '--runner', model: '--model', effort: '--effort', workflow: '--workflow', skill: '--skill',
   timeoutSeconds: '--timeout-seconds', mode: '--mode', kind: '--kind', id: '--id', context: '--context',
   requestIds: '--request', workerIds: 'worker-id', workerId: 'worker-id', waitId: 'wait-id', recipientRunId: 'recipient-run-id',
   task: 'task', text: 'text',
 };
 const WORKER_USAGE = { operations: [
-  { name: 'spawn', positionals: 1, required: ['--baseline', '--request-id'], optional: ['--workflow', '--skill', '--backend', '--model', '--effort', '--context', '--context-file'] },
+  { name: 'spawn', positionals: 1, required: ['--baseline', '--request-id'], optional: ['--workflow', '--skill', '--runner', '--backend', '--model', '--effort', '--context', '--context-file'] },
   { name: 'inspect', positionals: 1 },
   { name: 'steer', positionals: 2 },
   { name: 'stop', positionals: 1 },
@@ -71,7 +72,8 @@ const WORKER_HELP: Record<string, { args: string; description: string }> = {
 const WORKER_FLAG_HELP: Record<string, string> = {
   '--baseline': '<ref>                 Committed ref or parent-head; excludes dirty edits.',
   '--request-id': '<UUID>              Spawn retry ID, or request being followed up/replied to.',
-  '--backend': '<name>                 claude | codex | opencode | pi | cursor | omp.',
+  '--runner': `<name>                  ${RUNNER_IDS.join(' | ')}.`,
+  '--backend': '<name>                 Alias of --runner.',
   '--model': '<model>                  Model override.',
   '--effort': '<level>                 low | medium | high | xhigh | max | auto.',
   '--workflow': '<name>                Catalog workflow to run (built-in quick-task or .ai/cezar/workflows); default quick-task.',
@@ -192,7 +194,7 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
     const operation = argv[0] === 'collect' ? 'collect' : argv[0] === 'cancel-wait' ? 'cancel-wait' : z.union([workerOperationSchema, conversationOperationSchema]).parse(argv[0]);
     const { values, positionals } = parseArgs({ args: argv.slice(1), allowPositionals: true, strict: true, options: {
       help: { type: 'boolean', short: 'h' },
-      ...(operation === 'spawn' ? { baseline: { type: 'string' as const }, 'request-id': { type: 'string' as const }, workflow: { type: 'string' as const }, skill: { type: 'string' as const }, backend: { type: 'string' as const }, model: { type: 'string' as const }, effort: { type: 'string' as const }, context: { type: 'string' as const }, 'context-file': { type: 'string' as const } } : {}),
+      ...(operation === 'spawn' ? { baseline: { type: 'string' as const }, 'request-id': { type: 'string' as const }, workflow: { type: 'string' as const }, skill: { type: 'string' as const }, runner: { type: 'string' as const }, backend: { type: 'string' as const }, model: { type: 'string' as const }, effort: { type: 'string' as const }, context: { type: 'string' as const }, 'context-file': { type: 'string' as const } } : {}),
       ...(['send', 'progress', 'reply', 'follow-up'].includes(operation) ? { id: { type: 'string' as const }, kind: { type: 'string' as const }, 'request-id': { type: 'string' as const }, 'timeout-seconds': { type: 'string' as const } } : {}),
       ...(operation === 'send' || operation === 'progress' ? { resume: { type: 'boolean' as const } } : {}),
       ...(operation === 'wait' || operation === 'wait-requests' ? { request: { type: 'string' as const, multiple: true }, 'timeout-seconds': { type: 'string' as const }, mode: { type: 'string' as const } } : {}),
@@ -225,11 +227,15 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
         workflow: values.workflow as string | undefined,
       });
       if (skillIssue) throw new WorkerCliError(skillIssue);
+      // `--runner` fills the contract's historical `backend` field, so a retry that switches
+      // spelling keeps the same spawn request hash (hearsay-tools/cezarion#632).
+      const { runner, issue: runnerIssue } = runnerFlag({ runner: values.runner as string | undefined, backend: values.backend as string | undefined });
+      if (runnerIssue) throw new WorkerCliError(runnerIssue);
       if (values.context !== undefined && values['context-file'] !== undefined) throw new WorkerCliError('spawn has extra argument --context-file');
       const contextText = values['context-file'] === undefined ? values.context
         : new TextDecoder('utf-8', { fatal: true }).decode(await readBoundedContextFile(String(values['context-file']), 400_000));
       body = workerSpawnRequestSchema.parse({ task: positionals[0], baseline: values.baseline, requestId: values['request-id'],
-        ...(values.backend === undefined ? {} : { backend: values.backend }), ...(values.model === undefined ? {} : { model: values.model }),
+        ...(runner === undefined ? {} : { backend: runner }), ...(values.model === undefined ? {} : { model: values.model }),
         ...(values.effort === undefined ? {} : { effort: values.effort }),
         ...(values.workflow === undefined ? {} : { workflow: values.workflow }),
         ...(values.skill === undefined ? {} : { skill: values.skill }),

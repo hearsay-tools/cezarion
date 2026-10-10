@@ -95,6 +95,15 @@ operation prints text without a server. `--full` returns the contract shape.
 
 - `start` generates a `clientRequestId` when `--request-id` is omitted and
   prints `{ id, url, status, created, branch? }`. `--task-file -` reads stdin.
+- `start --runner <id>` picks the runner and sends it as `runner` on `POST /runs`
+  (hearsay-tools/cezarion#632). `--backend` is a permanent alias with no warning.
+  Both flags with one value are accepted; different values exit 64 with
+  `{ code: "invalid_input" }` before discovery, naming both values. `cez worker
+  spawn` takes the same pair through the same helper (`runnerFlag`,
+  `workflows/types.ts`): there `--runner` fills the delegation contract's
+  existing `backend` field, so the spawn request hash and the inspect/collect
+  output field are unchanged, and a conflict exits 1 like every other worker
+  usage error.
 - `status` is the slim projection; `question` comes from
   `GET /runs/:id/history-context`'s pending ask, fetched only when
   `hasPendingHumanAsk` is true. Default status always includes `handoffUrl`, built next

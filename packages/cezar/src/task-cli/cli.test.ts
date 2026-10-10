@@ -11,6 +11,7 @@ import { discoverCockpit } from './discovery.ts';
 import { TaskCliError, type Cockpit } from './http.ts';
 import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { registerProject } from '../workspace/projects.ts';
+import { RUNNER_IDS } from '../core/agent-runner.ts';
 
 /** `cez task` against a real cockpit app on a real socket (#504). */
 describe('cez task', () => {
@@ -364,6 +365,37 @@ describe('cez task', () => {
     it('rejects --notify with --no-notify before discovering a cockpit', async () => {
       expect(await run(['start', 'do it', '--notify', '--no-notify'])).toBe(64);
       expect(discoveries).toBe(0);
+    });
+
+    describe('runner flag (hearsay-tools/cezarion#632)', () => {
+      const cases = RUNNER_IDS.flatMap((runner) => [
+        { runner, flags: ['--runner', runner] },
+        { runner, flags: ['--backend', runner] },
+        { runner, flags: ['--runner', runner, '--backend', runner] },
+      ]);
+      it.each(cases)('$flags sends runner $runner on the run API', async ({ runner, flags }) => {
+        expect(await run(['start', ...flags, 'x'])).toBe(0);
+        expect(store.getRun(last().id as string)?.runner).toBe(runner);
+      });
+
+      it('rejects conflicting --runner and --backend before discovering a cockpit', async () => {
+        expect(await run(['start', '--runner', 'codex', '--backend', 'claude', 'x'])).toBe(64);
+        expect(last()).toMatchObject({
+          code: 'invalid_input',
+          error: '--runner codex and --backend claude name different runners; pass one --runner',
+        });
+        expect(discoveries).toBe(0);
+        expect(store.listRuns()).toHaveLength(0);
+      });
+
+      it('shows --runner first and --backend as a one-line alias in start help', () => {
+        const lines = taskHelp('start').split('\n');
+        const runnerLine = lines.findIndex((line) => line.startsWith('  --runner '));
+        const backendLines = lines.flatMap((line, index) => (line.includes('--backend') ? [index] : []));
+        expect(runnerLine).toBeGreaterThan(-1);
+        expect(backendLines).toEqual([runnerLine + 1]);
+        expect(lines[runnerLine + 1]).toMatch(/^ {2}--backend .*Alias of --runner\.$/);
+      });
     });
 
     it('forwards --no-worktree and --autonomous', async () => {
