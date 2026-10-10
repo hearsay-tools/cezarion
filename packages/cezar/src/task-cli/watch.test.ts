@@ -217,6 +217,68 @@ describe('cez task watching', () => {
     it('passes an unknown run through as exit 2', async () => {
       expect(await run(['log', 'bogus'])).toBe(2);
     });
+
+    /**
+     * #931: `log --follow` ends the way `wait` does. A parked interactive task ends a default
+     * follow promptly; a root parked on its own workers and a monitoring run keep it streaming;
+     * `--until settled` keeps the terminal-only behaviour.
+     */
+    describe('--follow until attention (#931)', () => {
+      const parkedOnWorkers = (id: string, hasPendingHumanAsk = false) => harness.store.updateRun(id, {
+        status: 'waiting',
+        hasPendingHumanAsk,
+        delegation: { role: 'root', permissions: [], receipts: [], wait: { id: '00000000-0000-4000-8000-0000000000aa', workerIds: ['00000000-0000-4000-8000-000000000001'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } },
+      } as never);
+
+      it('ends a default follow once an interactive task parks, exit 0, after every event', async () => {
+        const id = create();
+        harness.store.appendEvent(id, { type: 'text', text: 'before' });
+        later(100, () => harness.store.appendEvent(id, { type: 'text', text: 'during' }));
+        later(200, () => harness.store.updateRun(id, { status: 'waiting', hasPendingHumanAsk: false }));
+        const started = Date.now();
+        expect(await run(['log', id, '--follow', '--timeout-seconds', '10'])).toBe(0);
+        expect(Date.now() - started).toBeLessThan(5_000);
+        expect(lines().filter((line) => line.type === 'text').map((line) => line.text)).toEqual(['before', 'during']);
+        expect(last()).toEqual({ id, status: 'waiting', attention: 'waiting', attentionLabel: 'needs you', until: 'attention', timedOut: false });
+      });
+
+      it('ends at the replay boundary when the task is already parked', async () => {
+        const id = create();
+        harness.store.appendEvent(id, { type: 'text', text: 'turn' });
+        harness.store.updateRun(id, { status: 'waiting' });
+        expect(await run(['log', id, '--follow', '--timeout-seconds', '10'])).toBe(0);
+        expect(lines().map((line) => line.text ?? line.status)).toEqual(['turn', 'waiting']);
+        expect(last()).toMatchObject({ attention: 'waiting', until: 'attention', timedOut: false });
+      });
+
+      it('does not end on a root parked on its own workers, until a human question arrives', async () => {
+        const id = create();
+        later(40, () => parkedOnWorkers(id));
+        expect(await run(['log', id, '--follow', '--timeout-seconds', '1'])).toBe(3);
+        expect(last()).toMatchObject({ id, status: 'waiting', attention: 'none', attentionLabel: 'waiting on 1 worker', until: 'attention', timedOut: true });
+        // Same status and activity: only the question changes, and the follow still notices.
+        later(300, () => parkedOnWorkers(id, true));
+        expect(await run(['log', id, '--follow', '--timeout-seconds', '10'])).toBe(0);
+        expect(last()).toMatchObject({ id, status: 'waiting', attention: 'waiting', attentionLabel: 'needs you', timedOut: false });
+      });
+
+      it('does not end on a running or monitoring run', async () => {
+        const id = create();
+        later(40, () => harness.store.updateRun(id, { status: 'running', activity: 'monitoring' }));
+        expect(await run(['log', id, '--follow', '--timeout-seconds', '1'])).toBe(3);
+        expect(last()).toMatchObject({ id, status: 'running', attention: 'running', attentionLabel: 'monitoring', until: 'attention', timedOut: true });
+      });
+
+      it('--until settled waits through a park and ends on a terminal status', async () => {
+        const id = create();
+        later(40, () => harness.store.updateRun(id, { status: 'waiting' }));
+        expect(await run(['log', id, '--follow', '--until', 'settled', '--timeout-seconds', '1'])).toBe(3);
+        expect(last()).toMatchObject({ id, status: 'waiting', attention: 'waiting', until: 'settled', timedOut: true });
+        later(200, () => harness.store.updateRun(id, { status: 'cancelled' }));
+        expect(await run(['log', id, '--follow', '--until', 'settled', '--timeout-seconds', '10'])).toBe(1);
+        expect(last()).toEqual({ id, status: 'cancelled', attention: 'none', attentionLabel: 'cancelled', until: 'settled', timedOut: false });
+      });
+    });
   });
 });
 
@@ -336,6 +398,7 @@ describe('cez task watching against a scripted cockpit', () => {
   it('log --follow drains events written before a terminal run frame that overtook them', async () => {
     let historyCalls = 0;
     handler = (req, res) => {
+      if (req.url === '/api/v1/p/default/runs/r1') return json(res, apiRun('done'));
       if (req.url?.startsWith('/api/v1/p/default/runs/r1/history')) {
         historyCalls += 1;
         // The snapshot before connecting saw only seq 1; by the time the run is terminal, 3.
@@ -356,6 +419,50 @@ describe('cez task watching against a scripted cockpit', () => {
     const lines = out.map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(lines.filter((line) => line.type === 'text').map((line) => line.text)).toEqual(['t1', 't2', 't3']);
     expect(lines.at(-1)).toMatchObject({ id: 'r1', status: 'done' });
+  });
+
+  it('log --follow drains events written before a parked run frame that overtook them (#931)', async () => {
+    let historyCalls = 0;
+    const seen: string[] = [];
+    handler = (req, res) => {
+      seen.push(req.url ?? '');
+      if (req.url === '/api/v1/p/default/runs/r1') return json(res, { ...apiRun('waiting'), hasPendingHumanAsk: false });
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/history')) {
+        historyCalls += 1;
+        return json(res, { events: [], itemCount: 0, liveCursor: 'c', asOfSeq: historyCalls === 1 ? 1 : 3, hasOlder: false });
+      }
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/events')) {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        const frame = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        const text = (seq: number) => frame('run-event', { seq, ts: '2026-01-01T00:00:00.000Z', type: 'text', text: `t${seq}` });
+        text(1);
+        frame('run', apiRun('waiting'));
+        setTimeout(() => { text(2); text(3); }, 50);
+        return;
+      }
+      res.statusCode = 404; res.end();
+    };
+    expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '5'])).toBe(0);
+    const lines = out.map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines.filter((line) => line.type === 'text').map((line) => line.text)).toEqual(['t1', 't2', 't3']);
+    expect(lines.at(-1)).toEqual({ id: 'r1', status: 'waiting', attention: 'waiting', attentionLabel: 'needs you', until: 'attention', timedOut: false });
+    // The attention judgement is the run read, not the frame.
+    expect(seen).toContain('/api/v1/p/default/runs/r1');
+  });
+
+  it('log --follow reports a run deleted under it as missing, exit 1 (#931)', async () => {
+    handler = (req, res) => {
+      if (req.url === '/api/v1/p/default/runs/r1') { res.statusCode = 404; return json(res, { error: 'run not found' }); }
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/history')) return json(res, { events: [], itemCount: 0, liveCursor: 'c', asOfSeq: 0, hasOlder: false });
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/events')) {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.write('event: ping\ndata: \n\n');
+        return;
+      }
+      res.statusCode = 404; res.end();
+    };
+    expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '5'])).toBe(1);
+    expect(JSON.parse(out.at(-1)!)).toEqual({ id: 'r1', status: 'missing', until: 'attention', timedOut: false });
   });
 
   it('log --follow counts loading history against --timeout-seconds', async () => {
