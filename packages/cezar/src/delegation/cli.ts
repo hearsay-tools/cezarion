@@ -107,14 +107,17 @@ function workerHelp(operation?: string): string {
 }
 class WorkerCliError extends Error {}
 class InboxHttpError extends Error { constructor(readonly status: number) { super('Inbox operation failed'); } }
-function cliName(path: PropertyKey[]): string {
+function cliName(path: PropertyKey[], argv: string[]): string {
+  // `backend` takes `--runner` or its alias `--backend`; name the spelling the caller typed (#632).
+  if (path[0] === 'backend' && !argv.some(arg => arg === '--runner' || arg.startsWith('--runner='))) return '--backend';
   return CLI_FLAG[String(path[0] ?? '')] ?? String(path[0] ?? 'argument');
 }
 function expectCount(operation: string, positionals: string[], count: number): void {
   if (positionals.length === count) return;
   throw new WorkerCliError(positionals.length > count ? `${operation} has extra argument` : `${operation} is missing a positional`);
 }
-function formatWorkerCliError(error: unknown, argv0: string | undefined): string {
+function formatWorkerCliError(error: unknown, argv: string[]): string {
+  const argv0 = argv[0];
   if (error instanceof WorkerCliError) return error.message;
   if (error instanceof z.ZodError) {
     const operationUnknown = error.issues.every(issue => issue.path.length === 0)
@@ -122,9 +125,9 @@ function formatWorkerCliError(error: unknown, argv0: string | undefined): string
     if (operationUnknown) return `unknown operation '${argv0 ?? ''}'`;
     const operation = argv0 ?? 'worker';
     const missing = error.issues.filter(issue => issue.code === 'invalid_type' && issue.message.includes('undefined'));
-    if (missing.length) return `${operation} is missing ${missing.map(issue => cliName(issue.path)).join(' and ')}`;
+    if (missing.length) return `${operation} is missing ${missing.map(issue => cliName(issue.path, argv)).join(' and ')}`;
     const first = error.issues[0];
-    return first ? `${operation} has invalid ${cliName(first.path)}` : 'Invalid worker command arguments';
+    return first ? `${operation} has invalid ${cliName(first.path, argv)}` : 'Invalid worker command arguments';
   }
   if (error instanceof Error && 'code' in error && error.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') {
     const unknown = error.message.match(/Unknown option ['"]([^'"]+)['"]/);
@@ -316,7 +319,7 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
       throw new DelegationPolicyError('unavailable_transport', 'Delegation transport failed or returned an invalid response');
     }
   } catch (error) {
-    print(error instanceof DelegationPolicyError ? { code: error.code, error: error.message } : { code: 'invalid_input', error: formatWorkerCliError(error, argv[0]) });
+    print(error instanceof DelegationPolicyError ? { code: error.code, error: error.message } : { code: 'invalid_input', error: formatWorkerCliError(error, argv) });
     return 1;
   }
 }

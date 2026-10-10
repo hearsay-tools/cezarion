@@ -291,6 +291,16 @@ describe('bundled worker CLI', () => {
       expect(spawn.mock.calls[0]?.[1]).toMatchObject({ backend: runner });
       expect(spawn.mock.calls[0]?.[1]).not.toHaveProperty('runner');
     });
+    it.each([
+      { flags: ['--runner', 'bogus'], error: 'spawn has invalid --runner' },
+      { flags: ['--runner=bogus'], error: 'spawn has invalid --runner' },
+      { flags: ['--backend', 'bogus'], error: 'spawn has invalid --backend' },
+      { flags: ['--backend=bogus'], error: 'spawn has invalid --backend' },
+      { flags: ['--runner', 'bogus', '--backend', 'bogus'], error: 'spawn has invalid --runner' },
+    ])('names the flag the caller typed for an unknown runner: $flags', async ({ flags, error }) => {
+      expect(await runWorkerCommand(spawnArgs(flags), env)).toBe(1);
+      expect(json()).toEqual({ code: 'invalid_input', error });
+    });
     it('rejects conflicting --runner and --backend with exit 1 like every worker usage error', async () => {
       const spawn = vi.spyOn(f.service, 'spawn');
       expect(await runWorkerCommand(spawnArgs(['--runner', 'codex', '--backend', 'claude']), env)).toBe(1);
