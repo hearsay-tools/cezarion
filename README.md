@@ -685,7 +685,7 @@ cez task list                                                # currentStepId (ru
 cez task status "$id"                                       # slim JSON: status, attention, question, branch, handoffUrl…
 cez task send "$id" 'Use the retry helper instead'            # delivered live, queued before start
 cez task send "$id" --resume 'Continue with the next step'    # resumed: reopen a settled session
-cez task log "$id" --follow --timeout-seconds 300             # JSON lines until it ends
+cez task log "$id" --follow --timeout-seconds 300             # JSON lines until it needs you or ends
 ```
 
 `list --status` accepts comma-separated values: `queued`, `running`, `waiting`, `review`,
