@@ -1,6 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -89,6 +90,48 @@ async function stalledRun(url: string): Promise<string> {
   return ((await response.json()) as { id: string }).id;
 }
 
+/**
+ * Runs argv on a pseudo-terminal as its session leader, then closes the master when `hangup`
+ * appears: the kernel hangs up the foreground group, as closing a terminal window does. Prints
+ * the child's exit status ("signal N" or "code N") once it ends.
+ */
+const PTY_HOST = `
+import os, pty, sys, time, signal
+hangup = sys.argv[1]
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp(sys.argv[2], sys.argv[2:])
+os.set_blocking(fd, False)
+while not os.path.exists(hangup):
+    try: os.read(fd, 65536)
+    except (BlockingIOError, OSError): time.sleep(0.05)
+os.close(fd)
+_, status = os.waitpid(pid, 0)
+print('signal %d' % os.WTERMSIG(status) if os.WIFSIGNALED(status) else 'code %d' % os.WEXITSTATUS(status), flush=True)
+`;
+
+async function freePort(): Promise<number> {
+  const probe = createServer();
+  probe.listen(0, '127.0.0.1');
+  await once(probe, 'listening');
+  const { port } = probe.address() as AddressInfo;
+  probe.close();
+  await once(probe, 'close');
+  return port;
+}
+
+function onPty(args: string[]): { hangUp: () => void; ended: Promise<string> } {
+  const hangup = join(root, 'hangup');
+  const host = spawn('python3', ['-I', '-c', PTY_HOST, hangup, process.execPath, '--import', 'tsx', CLI, ...args], {
+    cwd: PACKAGE_DIR, env: env(), stdio: ['ignore', 'pipe', 'inherit'],
+  });
+  cez = host;
+  let out = '';
+  host.stdout!.on('data', (chunk) => { out += chunk; });
+  const ended = once(host, 'exit').then(() => out.trim().split('\n').at(-1) ?? '');
+  return { hangUp: () => writeFileSync(hangup, ''), ended };
+}
+
 describe.skipIf(process.platform === 'win32')('cezar forwards SIGINT and SIGTERM to agent sessions (hearsay-tools/cezarion#890)', () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'cez-session-signal-'));
@@ -138,4 +181,49 @@ describe.skipIf(process.platform === 'win32')('cezar forwards SIGINT and SIGTERM
     expect(signal).toBe('SIGINT');
     await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: 5_000 });
   }, 60_000);
+
+  describe('SIGHUP when the terminal closes (hearsay-tools/cezarion#915)', () => {
+    const hasPython = (() => { try { execFileSync('python3', ['-c', 'import pty']); return true; } catch { return false; } })();
+
+    it.skipIf(!hasPython)('closing the terminal of cez serve stops the agent and leaves the run for recovery', async () => {
+      const port = await freePort();
+      const url = `http://127.0.0.1:${port}`;
+      const terminal = onPty(['serve', '--repo', root, '--port', String(port), '--no-open']);
+      await vi.waitFor(async () => expect((await fetch(`${url}/api/v1/health`)).ok).toBe(true), { timeout: 30_000, interval: 200 });
+      const id = await stalledRun(url);
+      const agent = await agentPid();
+      terminal.hangUp();
+      await terminal.ended;
+      await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: 5_000 });
+      const store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
+      try { expect(store.getRun(id)?.status).toBe('running'); } finally { store.close(); }
+    }, 60_000);
+
+    it.skipIf(!hasPython)('closing the terminal of cez run stops the agent and ends cez by SIGHUP', async () => {
+      const terminal = onPty(['run', 'mock:no-progress', '--repo', root]);
+      const agent = await agentPid();
+      terminal.hangUp();
+      expect(await terminal.ended).toBe('signal 1');
+      await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: 5_000 });
+    }, 60_000);
+
+    it('nohup cez serve survives a hangup and its agent keeps running', async () => {
+      cez = spawn('nohup', [process.execPath, '--import', 'tsx', CLI, 'serve', '--repo', root, '--port', '0', '--no-open'], {
+        cwd: PACKAGE_DIR, env: env(), stdio: ['ignore', 'pipe', 'pipe'], detached: true,
+      });
+      cez.stderr!.resume();
+      let url = '';
+      for await (const line of createInterface({ input: cez.stdout! })) {
+        url = /cockpit → (http:\/\/\S+)/.exec(line)?.[1] ?? '';
+        if (url) break;
+      }
+      cez.stdout!.resume();
+      await stalledRun(url);
+      const agent = await agentPid();
+      process.kill(cez.pid!, 'SIGHUP');
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+      expect(alive(cez.pid!)).toBe(true);
+      expect(alive(agent)).toBe(true);
+    }, 60_000);
+  });
 });

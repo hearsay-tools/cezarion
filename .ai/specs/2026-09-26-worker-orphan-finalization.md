@@ -369,7 +369,9 @@ remain indefinitely.** An unreadable cwd never withholds that proof (hearsay-too
   store has closed, so an agent ended that way cannot settle its run and restart recovery resumes
   it. `cez run` forwards the signal and still ends by it. Before #890 the terminal delivered
   Ctrl-C to agents through cezar's foreground group, and a `kill <cez pid>` left them running.
-  SIGHUP is not handled, so `nohup` keeps working. The application-update restart
+  On a terminal (stdin or stdout a TTY), SIGHUP runs the same shutdown, or for `cez run`
+  forwards and re-raises; off a terminal cezar ignores SIGHUP itself, because Node resets the
+  disposition `nohup` sets (hearsay-tools/cezarion#915). The application-update restart
   (`shutdownForRestart`) signals nothing.
 - `commitWorkerExecutionStart`'s refusal to replace an incomplete generation is unchanged.
   The finalizer completes the old generation first, through the existing
@@ -398,8 +400,7 @@ remain indefinitely.** An unreadable cwd never withholds that proof (hearsay-too
   expose them.
 - Agent sessions have no controlling terminal (hearsay-tools/cezarion#890). A tool that opens
   `/dev/tty`, such as an ssh or gpg prompt, fails instead of prompting on cezar's terminal.
-- Closing the terminal does not signal agents: cezar handles no SIGHUP. SIGKILL or a crash of
-  cezar leaves agents running, as before; destroy's reaping covers a worker's.
+- SIGKILL or a crash of cezar leaves agents running, as before; destroy's reaping covers a worker's.
 - A leftover whose session leader already exited is reached only while it can be proven ours.
   Shutdown forwarding signals such a group only while a member recorded at the leader's exit is
   still the same process in it, and destroy only while a holder of the worker's paths is in it.
