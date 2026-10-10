@@ -14,8 +14,9 @@ import { attentionFields, TERMINAL_STATUSES, type AttentionFields } from './proj
 
 /**
  * Watching a task from a terminal (#504, spec 2026-09-24-cez-task-cli). Every loop here ends —
- * on a terminal status, on the attention `--until` asks for, or at the caller's deadline — because a bot's tool call that never
- * returns is the failure this command family exists to prevent.
+ * on a terminal status, on the attention `--until` asks for, or at the caller's deadline —
+ * because a bot's tool call that never returns is the failure this command family exists to
+ * prevent.
  */
 
 export const DEFAULT_POLL_MS = 1_500;
