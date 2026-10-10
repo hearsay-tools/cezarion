@@ -312,14 +312,16 @@ describe('bundled worker CLI', () => {
     });
     // Guard: passes with or without #632. The flag says runner; the persisted output field keeps
     // its historical name `backend` (BACKWARD_COMPATIBILITY.md §1).
+    // The fixture binds a claude account only; another runner would need that runner's host login.
     it('keeps the backend field in inspect and collect output', async () => {
-      expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--backend', 'codex', 'work'], env)).toBe(0);
+      const code = await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--backend', 'claude', 'work'], env);
+      expect(code, JSON.stringify(json())).toBe(0);
       const { workerId } = json();
       expect(await runWorkerCommand(['inspect', workerId], env)).toBe(0);
-      expect(json()).toMatchObject({ backend: 'codex' });
+      expect(json()).toMatchObject({ backend: 'claude' });
       expect(json()).not.toHaveProperty('runner');
       expect(await runWorkerCommand(['collect', workerId], env)).toBe(0);
-      expect(json()).toMatchObject({ backend: 'codex' });
+      expect(json()).toMatchObject({ backend: 'claude' });
       expect(json()).not.toHaveProperty('runner');
     });
   });
