@@ -137,6 +137,15 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
     assert.equal(parkedList.code, 0);
     const parkedRow = (parkedList.json.runs as Array<Record<string, unknown>>).find((row) => row.id === parked.json.id);
     assert.equal(parkedRow?.attentionLabel, 'needs you');
+    // #931: following the parked task's log ends as `wait` does — every event, then the attention
+    // line — instead of streaming until --timeout-seconds and exiting 3.
+    const followStarted = Date.now();
+    const followed = await task(['log', String(parked.json.id), '--follow', '--timeout-seconds', '120']);
+    assert.equal(followed.code, 0, followed.stdout + followed.stderr);
+    assert.ok(Date.now() - followStarted < 60_000, 'log --follow returned well before its timeout');
+    const followedLines = followed.stdout.trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    assert.ok(followedLines.slice(0, -1).length > 0 && followedLines.slice(0, -1).every((line) => typeof line.seq === 'number'), 'events print before the final line');
+    assert.deepEqual(followed.json, { id: parked.json.id, status: 'waiting', attention: 'waiting', attentionLabel: 'needs you', until: 'attention', timedOut: false });
     assert.equal((await task(['stop', String(parked.json.id)])).code, 0);
 
     const headless = await execFile(process.execPath, [cli, 'run', 'mock:done', '--repo', repo], { cwd: repo, env, timeout: 60_000 });

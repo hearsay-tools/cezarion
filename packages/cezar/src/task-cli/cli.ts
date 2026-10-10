@@ -63,7 +63,7 @@ const TASK_TEXT_MAX_CHARS = 100_000;
 const DEFAULT_TIMEOUT_SECONDS = 600;
 const MAX_TIMEOUT_SECONDS = 1_800;
 const TIMEOUT_FLAG: FlagSpec = { type: 'string', help: `<1-${MAX_TIMEOUT_SECONDS}>  Give up after this many seconds (default ${DEFAULT_TIMEOUT_SECONDS}).` };
-/** Shared by `wait` and `start --wait` (#553): attention is the default, settled the opt-in. */
+/** Shared by `wait`, `start --wait` (#553) and `log --follow` (#931): attention is the default, settled the opt-in. */
 const UNTIL_FLAG: FlagSpec = { type: 'string', help: '<attention|settled> attention (default): stop when the task needs you or ends; settled: terminal status only.' };
 
 export const OPERATIONS: Record<string, Operation> = {
@@ -113,7 +113,8 @@ export const OPERATIONS: Record<string, Operation> = {
     flags: {
       since: { type: 'string', help: '<seq>           Only events after this seq.' },
       'max-chars': { type: 'string', help: '<n>        Keep the newest lines within n characters (default 8000).' },
-      follow: { type: 'boolean', help: '             Keep streaming until the task ends or the timeout.' },
+      follow: { type: 'boolean', help: '             Keep streaming until the task needs you or ends (see wait), or the timeout.' },
+      until: UNTIL_FLAG,
       'timeout-seconds': TIMEOUT_FLAG,
     },
   },
@@ -171,24 +172,27 @@ export const OPERATIONS: Record<string, Operation> = {
  * `attention` and `attentionLabel` come from the cockpit's own attention function (the
  * contract's `deriveAttention`), so what the CLI says a run needs is what Needs You shows.
  */
-const ATTENTION_HELP_OPERATIONS = new Set(['start', 'wait', 'status', 'list']);
+const ATTENTION_HELP_OPERATIONS = new Set(['start', 'wait', 'status', 'list', 'log']);
 const ATTENTION_HELP = [
   'Attention — when a task needs you:',
-  '  status, list and wait carry `attention` (the cockpit bucket) and `attentionLabel` (its phrase),',
-  '  derived by the same function as the cockpit\'s Needs You. Read those, not the raw status:',
+  '  status, list, wait and log --follow carry `attention` (the cockpit bucket) and',
+  '  `attentionLabel` (its phrase), derived by the same function as the cockpit\'s Needs You.',
+  '  Read those, not the raw status:',
   '  - `waiting` is attention even when hasPendingHumanAsk is false (a finished turn parks the task);',
   '    never clear a task on hasPendingHumanAsk alone.',
   '  - `running` with activity `monitoring` is neither settled nor attention: the agent is still',
   '    working on its own sub-agents or a watched command. attention: running.',
   '  - a task parked on its own workers ("waiting on 2 workers") is attention: none; keep waiting.',
-  '  - attention: waiting | error | permission ends a wait; attentionLabel says why ("needs you",',
-  '    "needs review", "failed").',
+  '  - attention: waiting | error | permission ends a wait or a follow; attentionLabel says why',
+  '    ("needs you", "needs review", "failed").',
   '  --until attention (default) stops when the task needs you or ends. --until settled is the',
   '  opt-in for autonomous runs and bots that want terminal state only (done/review/failed/cancelled).',
   '  cez task wait <id>                   # default: stops when the task needs you',
   '  cez task wait <id> --until settled   # terminal status only',
   "  cez task start '…' --wait            # returns as soon as the agent parks for follow-up",
   "  cez task start '…' --wait --autonomous --until settled   # runs to completion, then returns",
+  '  cez task log <id> --follow             # default: stops when the task needs you',
+  '  cez task log <id> --follow --until settled   # streams until a terminal status',
   '',
 ];
 
@@ -379,13 +383,14 @@ function validateFlags(name: string, values: Values): void {
     if (values.notify && values['no-notify']) usageError('--notify and --no-notify cannot be used together');
     if (values.until !== undefined && !values.wait) usageError('--until needs --wait');
   }
+  if (name === 'log' && values.until !== undefined && !values.follow) usageError('--until needs --follow');
   if (name === 'notify') {
     if (values.message !== undefined && values['message-file'] !== undefined) usageError('notify takes the note as --message or --message-file, not both');
     if (values.off && (values.message !== undefined || values['message-file'] !== undefined)) usageError('--off takes no note');
   }
   if (name === 'list') { statuses(values.status); positiveInt(values.limit, 'limit', 1_000); }
   if (name === 'wait') oneOf<WaitMode>(values.mode, 'mode', ['any', 'all'], 'all');
-  if (name === 'wait' || name === 'start') waitUntil(values);
+  if (name === 'wait' || name === 'start' || name === 'log') waitUntil(values);
   if (name === 'log') { nonNegativeInt(values.since, 'since'); positiveInt(values['max-chars'], 'max-chars', 1_000_000); }
   if (name === 'wait' || name === 'log' || (name === 'start' && values.wait)) timeoutMs(values);
 }
@@ -561,7 +566,7 @@ async function execute(
       // An unknown run is the history route's 404, passed through. Without --follow the replay
       // ends at its boundary; the deadline is only a backstop there.
       return readLog(cockpit, id, {
-        afterSeq: since, maxChars, follow: values.follow === true,
+        afterSeq: since, maxChars, follow: values.follow === true, until: waitUntil(values),
         deadline: Date.now() + (values.follow ? timeoutMs(values) : 45_000),
         print: (line) => io.stdout(line),
       });

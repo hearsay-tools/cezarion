@@ -113,8 +113,11 @@ operation prints text without a server. `--full` returns the contract shape.
 - `log` prints one JSON line per `text`/`tool-call`/`tool-result`/`step-start`/
   `error`/`user-message` event from `GET /runs/:id/history`, bounded by
   `--max-chars`. `--follow` reads `GET /runs/:id/events` from the last printed
-  `seq`, dedupes by `seq`, and exits on a terminal `run` frame or at
-  `--timeout-seconds`.
+  `seq`, dedupes by `seq`, and ends where "The wait decision" below says, or at
+  `--timeout-seconds` (hearsay-tools/cezarion#931). It judges a `GET /runs/:id` read, taken once
+  after the replay boundary and again when a `run` frame changes what attention
+  reads, never on a timer. Every event up to the deciding point prints before the
+  final line `{ id, status, attention, attentionLabel, until, timedOut }`.
 - `wait` **polls** `GET /runs` every 1.5 s (owner decision, 2026-09-24): one
   call covers any number of runs and holds no socket. What ends it is decided
   by the cockpit's own attention function, shared through the contract since
@@ -137,8 +140,9 @@ operation prints text without a server. `--full` returns the contract shape.
 
 ### The wait decision (hearsay-tools/cezarion#553, hearsay-tools/cezarion#609)
 
-`wait` and `start --wait` take `--until attention` (the default) or
-`--until settled`:
+`wait`, `start --wait` and `log --follow` (since hearsay-tools/cezarion#931) take
+`--until attention` (the default) or `--until settled`. `--until` without
+`--wait` on `start`, or without `--follow` on `log`, is a usage error:
 
 | `--until` | Ends the wait when a judged run is… |
 |---|---|
@@ -182,8 +186,8 @@ includes "stopped for attention".
 
 | Code | Meaning |
 |---|---|
-| 0 | success; `wait`/`start --wait`: every judged run ended `done`/`review` or stopped for attention (`--mode all`), or one did (`--mode any`) |
-| 1 | run ended `failed`/`cancelled`, or a send was not delivered |
+| 0 | success; `wait`/`start --wait`: every judged run ended `done`/`review` or stopped for attention (`--mode all`), or one did (`--mode any`); `log --follow`: the run ended `done`/`review` or stopped for attention |
+| 1 | run ended `failed`/`cancelled` (`log --follow`: or vanished), or a send was not delivered |
 | 2 | no cockpit/project, or the cockpit refused (its `{ error }` passed through) |
 | 3 | `wait`/`log --follow` timed out; partial outcomes printed (under `--until attention` this includes a run still `running`/`monitoring` or parked on its workers) |
 | 64 | usage error: `{ code: "invalid_input", error, usage }` |

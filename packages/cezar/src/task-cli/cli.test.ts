@@ -779,7 +779,7 @@ describe('cez task', () => {
     });
 
     // #553/#609: the help is where a bot learns the clear contract, so it is pinned.
-    it.each([[['--help']], [['wait', '--help']], [['start', '--help']], [['status', '--help']], [['list', '--help']]])(
+    it.each([[['--help']], [['wait', '--help']], [['start', '--help']], [['status', '--help']], [['list', '--help']], [['log', '--help']]])(
       'states the attention contract and the wait default in %j (#553, #609)', async (argv) => {
         expect(await run(argv)).toBe(0);
         const help = out.at(-1)!;
@@ -793,6 +793,15 @@ describe('cez task', () => {
         expect(help).toContain('cez task start \'…\' --wait --autonomous --until settled');
         expect(discoveries).toBe(0);
       });
+
+    // #931: `log --follow` stops for attention too, so its help carries the same contract.
+    it.each([[['--help']], [['log', '--help']]])('documents the log --follow default in %j (#931)', async (argv) => {
+      expect(await run(argv)).toBe(0);
+      const help = out.at(-1)!;
+      expect(help).toContain('cez task log <id> --follow             # default: stops when the task needs you');
+      expect(help).toMatch(/--until <attention\|settled>/);
+      expect(discoveries).toBe(0);
+    });
 
     it('describes the webhook flags and the notify operation (#589)', async () => {
       expect(await run(['--help'])).toBe(0);
@@ -817,7 +826,7 @@ describe('cez task', () => {
       },
     );
 
-    it.each([[['list', '--limit', '0']], [['list', '--status', 'nope']], [['wait', 'x', '--mode', 'some']], [['log', 'x', '--since', '-1']], [['log', 'x', '--max-chars', '0']], [['start', 'x', '--wait', '--timeout-seconds', '0']], [['start', 'x', '--until', 'settled']], [['start', 'x', '--wait', '--until', 'later']]])(
+    it.each([[['list', '--limit', '0']], [['list', '--status', 'nope']], [['wait', 'x', '--mode', 'some']], [['log', 'x', '--since', '-1']], [['log', 'x', '--max-chars', '0']], [['start', 'x', '--wait', '--timeout-seconds', '0']], [['start', 'x', '--until', 'settled']], [['start', 'x', '--wait', '--until', 'later']], [['log', 'x', '--until', 'settled']], [['log', 'x', '--follow', '--until', 'later']]])(
       'judges %j as a usage error before looking for a cockpit', async (argv) => {
         expect(await run(argv)).toBe(64);
         expect(discoveries).toBe(0);
