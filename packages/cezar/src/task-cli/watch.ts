@@ -281,8 +281,8 @@ async function* sseFrames(body: ReadableStream<Uint8Array>): AsyncGenerator<SseF
  *   read taken after that decision, so events the engine wrote just before parking or finishing
  *   are not dropped when the status frame overtakes them (exit 0/1, the final line is the
  *   judged run with `until`). A deleted run (`missing`, exit 1) has no history left to drain, and
- *   its feed closes without a `run` frame, so a closed stream is checked against a run read
- *   before it is reported as the cockpit failing (exit 2).
+ *   its feed closes without a `run` frame (or its events route 404s), so a closed or refused
+ *   stream is checked against a run read before it is reported as the cockpit failing (exit 2).
  *
  * One `deadline` bounds every request, the history reads included (exit 3). Deduped by `seq`.
  * The stream rather than `GET /history` pages: a history page starts at its first transcript
@@ -360,6 +360,11 @@ export async function readLog(
       const text = await response.text().catch(() => '');
       let data: unknown = text;
       try { data = JSON.parse(text); } catch { /* not JSON */ }
+      // The run can be deleted between the history read and this connect; the route then 404s.
+      if (response.status === 404) {
+        const exit = await endIfMissing();
+        if (exit !== undefined) return exit;
+      }
       refuse({ status: response.status, data });
     }
     try {
@@ -413,14 +418,8 @@ export async function readLog(
     if (controller.signal.aborted) return timedOut();
     // Deleting a run resets its feed and closes the stream without a `run` frame, so a follow
     // asks whether the run is still there before calling the close a cockpit failure.
-    if (options.follow) {
-      const entry = await readRun();
-      if (entry === undefined) return timedOut();
-      if (entry.status === 'missing') {
-        for (const line of tail.drain()) options.print(line);
-        return finish(entry);
-      }
-    }
+    const exit = await endIfMissing();
+    if (exit !== undefined) return exit;
     throw new TaskCliError(2, { code: 'unavailable', error: 'the cockpit closed the event stream' });
   } finally {
     clearTimeout(timer);
@@ -447,6 +446,16 @@ export async function readLog(
     if (drainSeq === undefined) return 'drain';
     if (seenSeq < drainSeq) return undefined;
     return finish(decided);
+  }
+
+  /** A follow whose run is gone ends as `missing` (exit 1); undefined while the run still exists. */
+  async function endIfMissing(): Promise<number | undefined> {
+    if (!options.follow) return undefined;
+    const entry = await readRun();
+    if (entry === undefined) return timedOut();
+    if (entry.status !== 'missing') return undefined;
+    for (const line of tail.drain()) options.print(line);
+    return finish(entry);
   }
 
   function finish(entry: WaitEntry): number {

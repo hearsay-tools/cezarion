@@ -558,6 +558,28 @@ describe('cez task watching against a scripted cockpit', () => {
     expect(lines.at(-1)).toEqual({ id: 'r1', status: 'waiting', attention: 'waiting', attentionLabel: 'needs you', until: 'attention', timedOut: true });
   });
 
+  it('log --follow reports a run deleted before its event stream connects as missing, exit 1 (#931)', async () => {
+    // History answered, then the run was deleted: the events route and the run read both 404.
+    handler = (req, res) => {
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/history')) return json(res, { events: [], itemCount: 0, liveCursor: 'c', asOfSeq: 0, hasOlder: false });
+      res.statusCode = 404;
+      json(res, { error: 'not found' });
+    };
+    expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '5'])).toBe(1);
+    expect(JSON.parse(out.at(-1)!)).toEqual({ id: 'r1', status: 'missing', until: 'attention', timedOut: false });
+  });
+
+  it('log --follow passes a non-404 events refusal through as exit 2', async () => {
+    handler = (req, res) => {
+      if (req.url === '/api/v1/p/default/runs/r1') return json(res, apiRun('running'));
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/history')) return json(res, { events: [], itemCount: 0, liveCursor: 'c', asOfSeq: 0, hasOlder: false });
+      res.statusCode = 409;
+      json(res, { error: 'project root is gone' });
+    };
+    expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '5'])).toBe(2);
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ code: 'refused', status: 409, error: 'project root is gone' });
+  });
+
   it('log --follow still reports a stream closed under a live run as unavailable (exit 2)', async () => {
     handler = (req, res) => {
       if (req.url === '/api/v1/p/default/runs/r1') return json(res, apiRun('running'));
