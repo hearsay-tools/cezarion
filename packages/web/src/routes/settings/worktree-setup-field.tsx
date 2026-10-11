@@ -14,9 +14,10 @@ import {
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toaster'
 import { SettingsField } from './settings-field'
+import { useActiveProjectRoot } from './project-location'
 
 /**
- * Project settings → Worktrees → "Prepare new worktrees" (#917, spec
+ * Project settings → Worktrees → "Prepare new worktrees" (hearsay-tools/cezarion#917, spec
  * `.ai/specs/2026-10-07-worktree-setup.md`): the commands Cezar runs in every new task and worker
  * worktree before the agent starts. One command per line; blank lines are dropped.
  *
@@ -26,6 +27,8 @@ import { SettingsField } from './settings-field'
 export function WorktreeSetupField({ config }: { config: ConfigResponse }) {
   const queryClient = useQueryClient()
   const health = useHealth()
+  const projectRoot = useActiveProjectRoot()
+  const configPath = projectRoot === null ? null : `${projectRoot.replace(/\/$/, '')}/.ai/cezar/config.json`
   // Unknown until health answers: read-only rather than editable-then-refused.
   const editable = health.data?.capabilities?.localHandoff === true
 
@@ -81,8 +84,13 @@ export function WorktreeSetupField({ config }: { config: ConfigResponse }) {
   return (
     <SettingsField
       title="Prepare new worktrees"
-      hint="Runs in every new task and worker worktree before the agent starts, in order, stopping at the first failure. Empty = none."
+      hint="Runs in every new task and worker worktree before the agent starts, in order, stopping at the first failure. Leave commands empty to skip setup."
     >
+      {savedCommands.length === 0 && config.worktreeSetupIssue === null ? (
+        <p data-slot="worktree-setup-empty" className="text-sm text-foreground">
+          No setup commands configured. No commands will run in new worktrees.
+        </p>
+      ) : null}
       <textarea
         data-slot="worktree-setup-commands"
         aria-label="Worktree setup commands, one per line"
@@ -90,13 +98,15 @@ export function WorktreeSetupField({ config }: { config: ConfigResponse }) {
         spellCheck={false}
         autoCapitalize="off"
         autoCorrect="off"
-        placeholder="npm ci"
         value={text}
         readOnly={!editable}
         disabled={save.isPending}
         onChange={(event) => setText(event.target.value)}
         className={`${control} min-h-24 w-full resize-y font-mono text-[13px] leading-relaxed`}
       />
+      <p className="text-xs text-soft-foreground">
+        Example only: <code>npm ci</code>. Commands run only after they are saved.
+      </p>
       <div className="flex flex-wrap items-center gap-2">
         <label className="flex items-center gap-2 text-xs text-soft-foreground">
           <span>Timeout per command</span>
@@ -128,8 +138,14 @@ export function WorktreeSetupField({ config }: { config: ConfigResponse }) {
         </Button>
       </div>
       {health.data?.capabilities?.localHandoff === false ? (
-        <p data-slot="worktree-setup-readonly" className="text-[11px] text-soft-foreground">
-          Setup commands can be edited only on the machine running Cezar.
+        <p data-slot="worktree-setup-readonly" className="text-xs text-foreground">
+          Edit <code>worktreeSetup.commands</code> in{' '}
+          {configPath === null ? (
+            <>the project’s <code>.ai/cezar/config.json</code></>
+          ) : (
+            <code className="break-all">{configPath}</code>
+          )}{' '}
+          on the machine running Cezarion. Valid file edits apply to new worktrees; no restart is needed.
         </p>
       ) : null}
       {config.worktreeSetupIssue !== null ? (
