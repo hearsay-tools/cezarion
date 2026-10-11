@@ -18,7 +18,9 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const cli = join(packageRoot, 'dist/index.js');
 
 test('built worker CLI runs without cez on PATH; headless provision stays local and exits cleanly', { timeout: 120_000 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), "cez-worker's-package-"));
+  // Cezar may pin TMPDIR under a checkout; ancestor dependencies must not mask
+  // a missing dependency in this copied installation.
+  const root = await mkdtemp(join(process.platform === 'win32' ? tmpdir() : '/tmp', "cez-worker's-package-"));
   const cwd = join(root, 'empty working directory');
   await mkdir(cwd);
   const cleanEnv = { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DELEGATION_URL: '', CEZ_DELEGATION_TOKEN: '' };
@@ -35,7 +37,7 @@ test('built worker CLI runs without cez on PATH; headless provision stays local 
     const copied = join(root, "installation's copy"); await mkdir(copied);
     await cp(join(packageRoot, 'dist'), join(copied, 'dist'), { recursive: true });
     await writeFile(join(copied, 'package.json'), '{"type":"module"}');
-    await symlink(resolve(packageRoot, '../../node_modules'), join(copied, 'node_modules'), 'dir');
+    await symlink(join(packageRoot, 'node_modules'), join(copied, 'node_modules'), 'dir');
     const provision = await import(pathToFileURL(join(copied, 'dist/delegation/provision.js')).href);
     const invocation: string = provision.bundledWorkerInvocation();
     const shell = await execFile('/bin/sh', ['-c', `${invocation} inspect 00000000-0000-4000-8000-000000000000`], {
