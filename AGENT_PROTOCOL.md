@@ -1344,17 +1344,29 @@ Stop never grants permission for another writer or signals unrelated cwd holders
 
 R61–R66 (hearsay-tools/cezarion#934, `core/harness-autosave-settlement.test.ts`) drive
 provider failure, Stop during final autosave, and successful Finish through every
-`HARNESS_ADAPTERS` native wire, both fresh and on Continue. A real parent-owned
-process born after the autosave baseline remains alive after Git exits: execution
+`HARNESS_ADAPTERS` native wire, both fresh and on Continue. A real detached Git
+descendant, in a session of its own, remains alive after Git exits: execution
 must settle while reuse stays refused with the holder's PID, working files remain,
-and confirmed holder exit automatically releases the worktree hold. R61 replaces
+and confirmed holder exit automatically releases the worktree hold. An unrelated
+parent-owned process churns new processes in the worktree throughout: it is never
+named in the refusal and never signalled (hearsay-tools/cezarion#958). R61 replaces
 the manager/store after the observed holder moves cwd; R64 stops a Continue with
 a remaining workflow step and requires that queued tail to retire immediately.
 
+R67–R68 (hearsay-tools/cezarion#958, same file) Finish a fresh run and a Continue
+while an unrelated process keeps starting new processes in the worktree, as
+Squeal's Vitest workers do. The final autosave must commit, leave no cleanup
+evidence or hold, and leave the unrelated process running and unsignalled.
+
 Autosaves serialize per canonical worktree; Git auto-maintenance is disabled
 only for these commands. Holder discovery shares orphan recovery's cwd boundary,
-not OS containment: custom children that detach and leave the tree before they
-can be observed are outside that proof. Existing agent holders are left alone.
+not OS containment. A new cwd holder counts only when it is Git's: each command
+sets a fresh `CEZ_AUTOSAVE_OWNER` value that descendants inherit through detach
+and reparenting, an unmarked child of Git or of an attributed holder counts, and
+an environment that cannot be read counts (fail closed). A child that both clears
+its environment and leaves the tree before it can be observed is outside that
+proof. Transcript warnings stop after three cleanup changes; the durable evidence
+still follows each one. Existing agent holders are left alone.
 Windows uses bounded PowerShell process snapshots and creation-time checks,
 retaining observed ancestry after the Git leader exits and checking each process
 handle before shutdown. An intermediate process that appears and exits between

@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { realpathSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { processesWithCwdUnder, processStartToken, recordedProcessLive, type RecordedProcess } from './delegation/process-liveness.ts';
 
@@ -75,26 +76,97 @@ async function live(entry: RecordedProcess): Promise<boolean> {
 }
 
 /**
- * Conservative companion to owned-group proof, using orphan recovery's cwd
- * boundary. Never signal cwd-only matches: they may be unrelated agent tools.
- * Polling does not contain a custom child that detaches AND leaves the tree
- * before it can be observed; this is not an OS sandbox.
+ * Set on each autosave Git command with a fresh value. Descendants inherit it
+ * through fork, exec, setsid and reparenting; unrelated work in the worktree
+ * (Squeal's Vitest workers, agent tools) never carries it (hearsay-tools/cezarion#958).
  */
-export async function watchAutosaveHolders(cwd: string) {
+export const AUTOSAVE_OWNER_ENV = 'CEZ_AUTOSAVE_OWNER';
+
+/** `marked` is absent when the environment cannot be read; `gone` means the process exited. */
+export type OwnerProbe = (pid: number, marker: string) => Promise<{ marked?: boolean; parent?: number } | 'gone'>;
+
+const linuxOwnerProbe: OwnerProbe = async (pid, marker) => {
+  let stat: string;
+  try { stat = await readFile(`/proc/${pid}/stat`, 'utf8'); }
+  catch { return 'gone'; }
+  const parent = Number(stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)[1]);
+  try {
+    const environ = (await readFile(`/proc/${pid}/environ`, 'utf8')).split('\0');
+    return { marked: environ.includes(`${AUTOSAVE_OWNER_ENV}=${marker}`), parent };
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' || (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'gone' : { parent };
+  }
+};
+
+const darwinOwnerProbe: OwnerProbe = async (pid, marker) => {
+  const ps = await inspect('ps', ['-E', '-ww', '-o', 'ppid=,command=', '-p', String(pid)], 2_000);
+  const match = /^\s*(\d+)\s+(.*)$/s.exec(ps.stdout);
+  if (!match) {
+    try { process.kill(pid, 0); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return 'gone'; }
+    return {};
+  }
+  const line = ' ' + match[2]!.trim();
+  if (line.includes(` ${AUTOSAVE_OWNER_ENV}=${marker}`)) return { marked: true, parent: Number(match[1]) };
+  // `ps -E` silently omits an environment it may not read. Every ordinary
+  // process carries PATH, so its absence is uncertainty, never proof.
+  return { marked: /\sPATH=/.test(line) ? false : undefined, parent: Number(match[1]) };
+};
+
+export interface AutosaveOwner {
+  /** This command's `AUTOSAVE_OWNER_ENV` value. */
+  marker: string;
+  /** The Git leader, once spawned. */
+  root: () => number | undefined;
+}
+
+/**
+ * Conservative companion to owned-group proof, using orphan recovery's cwd
+ * boundary. A new holder counts only when it is Git's: its environment carries
+ * this command's marker, its parent is Git or an attributed holder, or its
+ * environment cannot be read (fail closed). Never signal cwd-only matches: they
+ * may be unrelated agent tools. Polling does not contain a child that both clears
+ * its environment and leaves the tree before it can be observed; this is not an
+ * OS sandbox.
+ */
+export async function watchAutosaveHolders(cwd: string, owner: AutosaveOwner,
+  probe: OwnerProbe = process.platform === 'darwin' ? darwinOwnerProbe : linuxOwnerProbe) {
   const baseline = await snapshot(cwd);
   if (baseline === 'unknown') return undefined;
   const observed = new Map<number, RecordedProcess>();
+  // Per incarnation, so an unrelated process is read once and never tracked.
+  const unrelated = new Set<string>();
   let diagnostics: { pids: number[]; processes: RecordedProcess[]; inspectionFailed: boolean } = { pids: [], processes: [], inspectionFailed: false };
   const alive = async () => {
     const current = await snapshot(cwd);
     if (current === 'unknown') { diagnostics = { ...diagnostics, inspectionFailed: true }; return true; }
+    const pending = new Map<number, { startToken?: string; parent?: number }>();
     for (const [pid, startToken] of current) {
       if (startToken !== undefined && baseline.get(pid) === startToken) continue;
       const previous = observed.get(pid);
-      if (!previous || (startToken !== undefined && previous.startToken !== startToken)) {
-        observed.set(pid, { pid, startToken });
+      if (previous && (startToken === undefined || previous.startToken === startToken)) continue;
+      if (startToken !== undefined && unrelated.has(`${pid}:${startToken}`)) continue;
+      const found = await probe(pid, owner.marker);
+      if (found === 'gone') continue;
+      if (found.marked !== false) observed.set(pid, { pid, startToken });
+      else pending.set(pid, { startToken, parent: found.parent });
+    }
+    // An unmarked child of Git or of an attributed holder cleared its environment.
+    const owns = async (parent: number | undefined) => {
+      if (parent === undefined || parent <= 1) return false;
+      if (parent === owner.root() || observed.has(parent)) return true;
+      const found = await probe(parent, owner.marker);
+      return found !== 'gone' && found.marked !== false;
+    };
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const [pid, entry] of pending) {
+        if (!await owns(entry.parent)) continue;
+        observed.set(pid, { pid, startToken: entry.startToken });
+        pending.delete(pid);
+        changed = true;
       }
     }
+    for (const [pid, entry] of pending) if (entry.startToken !== undefined) unrelated.add(`${pid}:${entry.startToken}`);
     // Once observed, a holder stays tracked even if it later changes cwd.
     const states = await Promise.all([...observed.values()].map(live));
     diagnostics = { pids: [...observed.keys()].filter((_, index) => states[index]), processes: [...observed.values()].filter((_, index) => states[index]), inspectionFailed: false };
