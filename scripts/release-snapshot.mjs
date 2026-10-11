@@ -116,7 +116,9 @@ console.log(
 const provenance = !dryRun && process.env.GITHUB_ACTIONS === 'true' ? ['--provenance'] : [];
 // Same cross-platform npm resolution as scripts/check-pack.mjs: under `npm run`,
 // npm_execpath is npm's own cli.js and runs through process.execPath everywhere.
-const npmExecpath = process.env.npm_execpath;
+// pnpm 12 sets npm_execpath to a native executable; these operations need npm.
+const npmExecpath = /(?:^|[\\/])npm-cli\.js$/.test(process.env.npm_execpath ?? '')
+  ? process.env.npm_execpath : undefined;
 const runNpm = (args, cwd) => {
   if (npmExecpath) {
     execFileSync(process.execPath, [npmExecpath, ...args], { cwd, stdio: 'inherit' });

@@ -361,7 +361,7 @@ test('the engines floor is proven on exactly the minimum Node, and verify requir
   const setup = job.steps.find(s => s.uses?.startsWith('actions/setup-node@'));
   assert.equal(setup.with['node-version'], floor.slice(2), 'the floor job must pin the engines minimum, not a range');
   const runs = job.steps.map(s => s.run);
-  for (const command of ['npm ci', 'npm run typecheck', 'npm run test:unit']) assert.ok(runs.includes(command), command);
+  for (const command of ['pnpm install --frozen-lockfile', 'npm run typecheck', 'npm run test:unit']) assert.ok(runs.includes(command), command);
   assert.ok(runs.some(r => r?.startsWith('npm test -- --shard=')));
   assert.ok(ci.jobs.verify.needs.includes('node-floor'));
   const gate = ci.jobs.verify.steps.find(s => s.name === 'Require every verification job');

@@ -29,9 +29,10 @@ async function fixture(t, base = 'main', { historyCommits = 0, subject = 'source
   };
   write('package.json', { name: 'release-fixture', private: true, workspaces: ['packages/*'] });
   const manifests = ['packages/cezar/package.json', 'packages/contract/package.json', 'packages/api-client/package.json', 'packages/web/package.json', 'alias-cezarion/package.json'];
-  for (const [i, file] of manifests.entries()) write(file, { name: `fixture-${i}`, version: '0.12.0', private: i !== 0 });
-  const npm = () => execFileSync('npm', ['install', '--package-lock-only', '--ignore-scripts', '--offline', '--no-audit', '--no-fund'], { cwd, stdio: 'pipe' });
-  npm();
+  for (const [i, file] of manifests.entries()) write(file, { name: `fixture-${i}`, version: '0.12.0', private: i !== 0, ...(i === 3 ? { dependencies: { 'fixture-1': '^0.12.0' } } : {}) });
+  write('pnpm-workspace.yaml', 'packages:\n  - packages/*\nlinkWorkspacePackages: true\n');
+  const pnpm = () => execFileSync('pnpm', ['install', '--lockfile-only', '--ignore-scripts', '--offline', '--no-frozen-lockfile'], { cwd, stdio: 'pipe' });
+  pnpm();
   git('add', '.');
   git('commit', '-m', 'initial history');
   for (let i = 0; i < historyCommits; i++) {
@@ -45,7 +46,7 @@ async function fixture(t, base = 'main', { historyCommits = 0, subject = 'source
   const stamp = () => {
     for (const file of manifests) {
       const pkg = JSON.parse(fs.readFileSync(path.join(cwd, file)));
-      write(file, { ...pkg, version: '0.12.1' });
+      write(file, { ...pkg, version: '0.12.1', ...(pkg.dependencies ? { dependencies: { 'fixture-1': '^0.12.1' } } : {}) });
     }
   };
   stamp();
@@ -198,7 +199,7 @@ process.exit(out.status ?? 1);
     return current;
   };
   const reset = () => { git('checkout', '--detach', '-f', sha); if (git('branch', '--list', 'release/v0.12.1')) git('branch', '-D', 'release/v0.12.1'); stamp(); outputs.date = '2026-09-09T20:00:00Z'; };
-  return { run, reset, git, write, npm, sha, state, outputs, errors, summary, workflow, remote };
+  return { run, reset, git, write, pnpm, cwd, sha, state, outputs, errors, summary, workflow, remote };
 }
 const bumpStep = 'Open version-bump PR (patch/minor/major only)';
 const releaseStep = 'Create GitHub Release';
@@ -220,8 +221,10 @@ test('retry after a pushed branch and denied PR reuses the original commit', asy
   for (const file of ['packages/cezar/package.json', 'packages/contract/package.json', 'packages/api-client/package.json', 'packages/web/package.json', 'alias-cezarion/package.json']) {
     assert.equal(JSON.parse(f.git('show', `${head}:${file}`)).version, '0.12.1');
   }
-  const lock = JSON.parse(f.git('show', `${head}:package-lock.json`));
-  for (const name of ['cezar', 'contract', 'api-client', 'web']) assert.equal(lock.packages[`packages/${name}`].version, '0.12.1');
+  const lock = require('yaml').parseAllDocuments(f.git('show', `${head}:pnpm-lock.yaml`)).at(-1).toJSON();
+  for (const name of ['cezar', 'contract', 'api-client', 'web']) assert.ok(lock.importers[`packages/${name}`]);
+  assert.equal(lock.importers['packages/web'].dependencies['fixture-1'].specifier, '^0.12.1');
+  assert.equal(f.git('show', `${head}:pnpm-lock.yaml`), fs.readFileSync(path.join(f.cwd, 'pnpm-lock.yaml'), 'utf8').trim(), 'release stages the refreshed canonical lock');
   f.reset();
   await f.run(bumpStep);
   assert.equal(f.outputs.bump_pr.status, 'reused');
@@ -578,7 +581,7 @@ test('a closed unmerged PR is reported for manual recovery without another PR', 
 test('an identical tree from a different source commit is a conflict', async (t) => {
   const f = await fixture(t);
   f.git('commit', '--allow-empty', '-m', 'different source');
-  f.npm();
+  f.pnpm();
   f.git('add', '.'); f.git('commit', '-m', 'same bump contents');
   f.git('push', 'origin', 'HEAD:refs/heads/release/v0.12.1');
   const before = f.git('ls-remote', 'origin', 'refs/heads/release/v0.12.1');

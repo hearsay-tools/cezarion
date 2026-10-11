@@ -2,14 +2,14 @@
 
 // Shared shape for bot-authored release/v* version-bump PRs. Keep the path
 // allowlist identical to release-finalization.cjs staging (packages/*/package.json,
-// alias-cezarion/package.json, package-lock.json). Callers must pass the live PR
+// alias-cezarion/package.json, pnpm-lock.yaml). Callers must pass the live PR
 // file list — author + branch alone is not enough after a human push.
 
 const { execFileSync } = require('node:child_process');
 const { appendFileSync } = require('node:fs');
 
 const RELEASE_BUMP_FILE_RE =
-  /^(packages\/[^/]+\/package\.json|alias-cezarion\/package\.json|package-lock\.json)$/;
+  /^(packages\/[^/]+\/package\.json|alias-cezarion\/package\.json|pnpm-lock\.yaml)$/;
 
 function isReleaseBumpFile(file) {
   return typeof file === 'string' && RELEASE_BUMP_FILE_RE.test(file);
@@ -112,6 +112,41 @@ function onlyVersionValueChanges(before, after, sharedPair) {
   return sawChange && Boolean(pair.from && pair.to);
 }
 
+// Compare generated pnpm YAML byte-for-byte except local workspace specifiers.
+// This trusted classifier runs before dependency installation (also in review),
+// so it deliberately needs no YAML library. Unknown formatting fails closed.
+// pnpm 12's package-manager document, settings, snapshots and integrity stay exact.
+function onlyWorkspaceLockStamps(before, after, pair) {
+  if (typeof before !== 'string' || typeof after !== 'string') return false;
+  const left = before.split('\n');
+  const right = after.split('\n');
+  if (left.length !== right.length) return false;
+  const workspaces = new Set(['packages/contract', 'packages/api-client', 'packages/cezar', 'packages/web']);
+  const links = {
+    "      '@open-mercato/cezar-contract':": '        version: link:../contract',
+    "      '@open-mercato/cezar-api-client':": '        version: link:../api-client',
+    "      '@wjarka/cezarion':": '        version: link:../cezar',
+  };
+  let section = '';
+  let importer = '';
+  let map = '';
+  for (let i = 0; i < left.length; i++) {
+    const line = left[i];
+    if (/^\S/.test(line)) { section = line; importer = ''; map = ''; }
+    if (/^  \S/.test(line)) { importer = line.slice(2, -1); map = ''; }
+    if (/^    \S/.test(line)) map = line.trim();
+    if (line === right[i]) continue;
+    if (section !== 'importers:' || !workspaces.has(importer)
+      || !['dependencies:', 'devDependencies:', 'optionalDependencies:', 'peerDependencies:'].includes(map)) return false;
+    const link = links[left[i - 1]];
+    if (!link || left[i + 1] !== link || right[i + 1] !== link || right[i - 1] !== left[i - 1]) return false;
+    const from = /^        specifier: (.+)$/.exec(line);
+    const to = /^        specifier: (.+)$/.exec(right[i]);
+    if (!from || !to || !onlyVersionValueChanges({ version: from[1] }, { version: to[1] }, pair)) return false;
+  }
+  return true;
+}
+
 function readRepoJsonFile({ repository, path: filePath, ref, env = process.env } = {}) {
   const out = execFileSync(
     'gh',
@@ -119,7 +154,8 @@ function readRepoJsonFile({ repository, path: filePath, ref, env = process.env }
     { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] },
   ).trim();
   if (!out) throw new Error(`empty content for ${filePath}@${ref}`);
-  return JSON.parse(Buffer.from(out, 'base64').toString('utf8'));
+  const text = Buffer.from(out, 'base64').toString('utf8');
+  return filePath === 'pnpm-lock.yaml' ? text : JSON.parse(text);
 }
 
 function filesAreVersionStampsOnly({
@@ -129,14 +165,18 @@ function filesAreVersionStampsOnly({
   headRef,
   env = process.env,
   readJsonFile = readRepoJsonFile,
+  readTextFile = readJsonFile,
 } = {}) {
   if (!repository || !baseRef || !headRef || !isManifestOnlyFiles(files)) return false;
   try {
     const pair = { from: null, to: null };
     for (const filePath of files) {
-      const before = readJsonFile({ repository, path: filePath, ref: baseRef, env });
-      const after = readJsonFile({ repository, path: filePath, ref: headRef, env });
-      if (!onlyVersionValueChanges(before, after, pair)) return false;
+      const read = filePath === 'pnpm-lock.yaml' ? readTextFile : readJsonFile;
+      const before = read({ repository, path: filePath, ref: baseRef, env });
+      const after = read({ repository, path: filePath, ref: headRef, env });
+      if (!(filePath === 'pnpm-lock.yaml'
+        ? onlyWorkspaceLockStamps(before, after, pair)
+        : onlyVersionValueChanges(before, after, pair))) return false;
     }
     return Boolean(pair.from && pair.to && pair.from !== pair.to);
   } catch {
@@ -171,7 +211,7 @@ function headShasMatch(expected, live) {
 
 // CI / review classify entry: EVENT_NAME, HEAD_REF, PR_AUTHOR, EXPECTED_HEAD_SHA,
 // LIVE_HEAD_SHA, BASE_SHA, and PR_FILES with PR_FILES_OK=1 (successful full list).
-// Then compare base/head JSON so only version-shaped leaves may change.
+// Then compare base/head manifests and generated lockfile so only version-shaped leaves may change.
 // Fail-closed to bump_pr=false on any missing/mismatched input.
 function classifyFromEnv(env = process.env, deps = {}) {
   const stampsOnly = deps.filesAreVersionStampsOnly || filesAreVersionStampsOnly;

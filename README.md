@@ -1260,8 +1260,17 @@ as in [Quick start](#quick-start)).
 ```bash
 git clone https://github.com/wjarka/cezar.git
 cd cezar
-npm install
+npm install --global pnpm@12.11.2
+pnpm install --frozen-lockfile
 ```
+
+Dependency installation uses pnpm 12.11.2 (pinned in `packageManager`) and
+`pnpm-lock.yaml`. Use pnpm for dependency changes; keep npm for the existing
+build/test scripts. Workspace dependencies are linked locally and esbuild's
+install hook is approved in `pnpm-workspace.yaml`. The store uses hardlinks when
+the checkout and store share a filesystem. Publishing and end-user installation
+continue to use npm. For this repository's Worktrees setup, use
+`pnpm install --frozen-lockfile` after the checked-out base branch contains the migration.
 
 **3. Build** — compiles the api-client and the server (`tsc → packages/cezar/dist/`) and the cockpit
 (`vite build → packages/cezar/web/dist/`), then runs the pack gate:
@@ -1342,7 +1351,7 @@ for targeted browser commands and the final-gate/evidence-reuse policy.
 
 Both `npm run typecheck:web` and
 `npm run typecheck -w @open-mercato/cezar-web` rebuild server declarations from
-the current checkout before checking web sources. Run `npm ci` in each new
+the current checkout before checking web sources. Run `pnpm install --frozen-lockfile` in each new
 worktree first. The full `npm run typecheck` starts with the web check, so it
 prepares declarations once before checking the remaining workspaces. Calling
 `tsc --noEmit` directly skips this preparation and can consume stale declarations.

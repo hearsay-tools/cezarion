@@ -117,7 +117,9 @@ console.log(
 // it (npm docs, #33).
 const provenance = !dryRun && process.env.GITHUB_ACTIONS === 'true' && token ? ['--provenance'] : [];
 // Same cross-platform npm resolution as scripts/release-snapshot.mjs.
-const npmExecpath = process.env.npm_execpath;
+// pnpm 12 sets npm_execpath to a native executable; these operations need npm.
+const npmExecpath = /(?:^|[\\/])npm-cli\.js$/.test(process.env.npm_execpath ?? '')
+  ? process.env.npm_execpath : undefined;
 const runNpm = (args, cwd, capture = false) => {
   const stdio = capture ? ['ignore', 'pipe', 'pipe'] : 'inherit';
   const encoding = capture ? 'utf8' : undefined;

@@ -689,7 +689,7 @@ exit 128
       reviewsOut: 'No issues found',
       headRef: 'release/v0.13.5',
       prAuthor: 'github-actions[bot]',
-      filesOut: 'packages/cezar/package.json\npackage-lock.json',
+      filesOut: 'packages/cezar/package.json\npnpm-lock.yaml',
     });
     assert.equal(outputs.can_review, 'false');
     assert.equal(outputs.patch_id, '');
@@ -714,7 +714,7 @@ exit 128
       reviewsOut: 'No issues found',
       headRef: 'release/v0.13.5',
       prAuthor: 'github-actions[bot]',
-      filesOut: 'packages/cezar/package.json\npackage-lock.json',
+      filesOut: 'packages/cezar/package.json\npnpm-lock.yaml',
       liveHead: 'd'.repeat(40),
     });
     assert.equal(outputs.can_review, 'true');
@@ -727,7 +727,7 @@ exit 128
       reviewsOut: 'No issues found',
       headRef: 'release/v0.13.5',
       prAuthor: 'github-actions[bot]',
-      filesOut: 'packages/cezar/package.json\npackage-lock.json',
+      filesOut: 'packages/cezar/package.json\npnpm-lock.yaml',
       filesOk: false,
     });
     assert.equal(outputs.can_review, 'true');
@@ -740,7 +740,7 @@ exit 128
       reviewsOut: 'No issues found',
       headRef: 'release/v0.13.5',
       prAuthor: 'human',
-      filesOut: 'packages/cezar/package.json\npackage-lock.json',
+      filesOut: 'packages/cezar/package.json\npnpm-lock.yaml',
     });
     assert.equal(outputs.can_review, 'true');
   });
@@ -752,7 +752,7 @@ exit 128
       reviewsOut: marker,
       headRef: 'release/v0.13.5',
       prAuthor: 'github-actions[bot]',
-      filesOut: 'packages/cezar/package.json\npackage-lock.json',
+      filesOut: 'packages/cezar/package.json\npnpm-lock.yaml',
     });
     assert.equal(outputs.can_review, 'true');
   });
