@@ -22,10 +22,10 @@ type DelegationWait = NonNullable<Exclude<Delegation, { role: 'invalid' }>['wait
 
 const linkClass = 'flex min-h-11 min-w-0 items-center rounded-md px-2 text-sm text-foreground hover:bg-muted break-words focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
 
-/** The worker ids this run is known to link, receipts first — the durable list that survives a
+/** The worker ids this run is known to link, newest receipts first — the durable list that survives a
  *  failed or offline relationships lookup (a fetched-only list would blink the links away). */
 function workerIdsOf(metadata: Delegation | undefined, data: RunRelationships | undefined): string[] {
-  const known = metadata?.role === 'root' ? metadata.receipts.map(receipt => receipt.workerId) : []
+  const known = metadata?.role === 'root' ? metadata.receipts.map(receipt => receipt.workerId).reverse() : []
   // #816: receipts are bounded by the 1,024 creation ceiling, so nothing is sliced away here.
   return [...new Set([...known, ...(data?.workers ?? []).map(worker => worker.workerId)])]
 }

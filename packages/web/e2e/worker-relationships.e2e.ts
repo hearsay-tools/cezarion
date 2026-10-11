@@ -134,9 +134,9 @@ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['l
     // #816: a settled worker row also carries a Clean up button after its link, so the tab
     // stops between the first and last worker link are counted from the rendered controls
     // instead of assumed to be links only. Read once after the 32-link wait above settled; the
-    // target is named (worker 32, which Enter opens below), never a positional row.
+    // target is named (the oldest worker, now last, which Enter opens below), never a positional row.
     const stops = browser.evaluate(`(() => { const controls = [...document.querySelectorAll('${region} a, ${region} button')];
-      const target = document.querySelector('${region} a[aria-label="Worker task ${ids[31]}"]');
+      const target = document.querySelector('${region} a[aria-label="Worker task ${ids[0]}"]');
       return controls.indexOf(target) - controls.indexOf(document.activeElement); })()`) as number
     for (let i = 0; i < stops; i++) browser.press('Tab')
     const facts = waitForSettledSample(browser, `(() => {
@@ -156,8 +156,8 @@ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['l
     browser.press('Enter')
     // In-app navigation, so the worker task arrives with its own dock state: collapsed at
     // phone width until `reveal` opens it.
-    browser.waitForFunction(`location.pathname === '${route(ids[31]!)}'`)
-    reveal(`Owned worker 32`)
+    browser.waitForFunction(`location.pathname === '${route(ids[0]!)}'`)
+    reveal(`Owned worker 1`)
     browser.waitForFunction(`document.querySelector('${region} a[aria-label="Parent task ${parentId}"]') !== null`)
     expect(browser.evaluate(`document.querySelector('${region} a[aria-label="Parent task ${parentId}"]').getAttribute('href')`)).toBe(route(parentId))
   }, 120_000)
