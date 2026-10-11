@@ -7,6 +7,7 @@ import { resetToasts, Toaster } from '@/components/ui/toaster'
 
 import { Composer, type ComposerProps } from './composer'
 import {
+  describeDictationError,
   foldResults,
   formatElapsed,
   type SpeechRecognitionLike,
@@ -31,7 +32,7 @@ class FakeRecognition implements SpeechRecognitionLike {
   stopped = false
   aborted = false
   onresult: ((event: SpeechResultEventLike) => void) | null = null
-  onerror: ((event: { error?: string }) => void) | null = null
+  onerror: ((event: { error?: string; message?: string }) => void) | null = null
   onend: (() => void) | null = null
 
   start(): void {
@@ -174,14 +175,77 @@ describe('the dictation overlay (paseo pattern)', () => {
     expect(screen.getByLabelText('Send')).toBeTruthy()
   })
 
-  it('a recognition error surfaces the browser word as a toast and returns to idle', async () => {
+  it('an unknown recognition error surfaces the browser word as a toast and returns to idle', async () => {
     stubSpeech()
     renderComposer()
     const recognition = startDictation()
-    act(() => recognition.onerror!({ error: 'no-speech' }))
-    expect(await screen.findByText('Dictation failed — no-speech')).toBeTruthy()
+    act(() => recognition.onerror!({ error: 'bad-grammar' }))
+    expect(await screen.findByText('Dictation failed — bad-grammar')).toBeTruthy()
     expect(document.querySelector('[data-slot="dictation-overlay"]')).toBeNull()
     expect(recognition.aborted).toBe(true)
+  })
+
+  // #928: Helium (ungoogled-chromium) keeps the API but cuts the Google speech service, so
+  // every attempt ends in the native `network` code — explain it, keep the draft, recover.
+  it('a network error explains the speech service, keeps the draft and restores the composer', async () => {
+    stubSpeech()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { textarea } = renderComposer()
+    fireEvent.change(textarea, { target: { value: 'my typed draft ' } })
+    const recognition = startDictation()
+    act(() => recognition.onresult!(result('half heard', false)))
+    act(() => recognition.onerror!({ error: 'network', message: 'service unreachable' }))
+
+    expect(await screen.findByText(/couldn't reach this browser's speech service/)).toBeTruthy()
+    expect(screen.getByText(/press Fn\/Globe twice/)).toBeTruthy()
+    expect(textarea.value).toBe('my typed draft ')
+    expect(document.querySelector('[data-slot="dictation-overlay"]')).toBeNull()
+    expect(recognition.aborted).toBe(true)
+    expect(recognition.onresult).toBeNull()
+    expect(screen.getByLabelText('Send')).toBeTruthy()
+    expect(screen.getByLabelText('Start dictation')).toBeTruthy()
+    expect(warn).toHaveBeenCalledWith('[dictation] recognition error', 'network', 'service unreachable')
+    warn.mockRestore()
+  })
+
+  it('Try again on a recognition error starts a fresh recognizer', async () => {
+    stubSpeech()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    renderComposer()
+    const first = startDictation()
+    act(() => first.onerror!({ error: 'no-speech' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }))
+
+    expect(FakeRecognition.instances).toHaveLength(2)
+    expect(FakeRecognition.instances[1]!.started).toBe(true)
+    expect(document.querySelector('[data-slot="dictation-overlay"]')).not.toBeNull()
+  })
+
+  it('an error that a retry cannot fix offers no Try again', async () => {
+    stubSpeech()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    renderComposer()
+    const recognition = startDictation()
+    act(() => recognition.onerror!({ error: 'language-not-supported' }))
+    expect(await screen.findByText(/can't recognize speech in/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+  })
+
+  it('Try again after the composer unmounts does not reopen the microphone', async () => {
+    stubSpeech()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { unmount } = render(
+      <QueryClientProvider client={createQueryClient()}>
+        <Composer onSubmit={vi.fn(() => Promise.resolve({}))} />
+      </QueryClientProvider>,
+    )
+    render(<Toaster />)
+    const recognition = startDictation()
+    act(() => recognition.onerror!({ error: 'no-speech' }))
+    const retry = await screen.findByRole('button', { name: 'Try again' })
+    unmount()
+    fireEvent.click(retry)
+    expect(FakeRecognition.instances).toHaveLength(1)
   })
 
   it('a mic that will not start (permissions) toasts honestly instead of hanging the overlay', async () => {
@@ -208,4 +272,25 @@ it('keeps execution Stop reachable while dictating without discarding either dra
   await waitFor(() => expect(onStop).toHaveBeenCalledOnce())
   expect(textarea.value).toBe('typed draft')
   expect(screen.getByText('spoken draft')).toBeTruthy()
+})
+
+describe('describeDictationError', () => {
+  it.each([
+    ['network', /speech service/, true],
+    ['service-not-allowed', /speech service/, false],
+    ['not-allowed', /Microphone access is blocked/, true],
+    ['audio-capture', /No microphone/, true],
+    ['language-not-supported', /can't recognize speech in pl-PL/, false],
+    ['no-speech', /No speech was heard/, true],
+    ['bad-grammar', /^Dictation failed — bad-grammar$/, true],
+    [undefined, /^Dictation failed$/, true],
+  ])('%s', (code, message, retryable) => {
+    const described = describeDictationError(code, 'pl-PL')
+    expect(described?.message).toMatch(message)
+    expect(described?.retryable).toBe(retryable)
+  })
+
+  it('stays silent on aborted: cancel already said what happened', () => {
+    expect(describeDictationError('aborted', 'en-US')).toBeNull()
+  })
 })

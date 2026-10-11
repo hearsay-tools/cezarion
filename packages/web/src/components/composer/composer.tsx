@@ -256,7 +256,13 @@ export function Composer({
   // highest-traffic skill surface — both reads and feeds the same stats as the pickers.
   const uiState = useUiState()
   const queryClient = useQueryClient()
-  const dictation = useDictation((message) => toast(message, { tone: 'danger' }))
+  // A recognition error leaves the draft alone; Try again goes through the same guard as the mic.
+  const dictation = useDictation((message, retry) =>
+    toast(message, {
+      tone: 'danger',
+      ...(retry ? { action: { label: 'Try again', onAction: () => { if (!editsBlocked()) retry() } } } : {}),
+    }),
+  )
 
   // On-mount only, by design: re-focusing on a later `autoFocus` flip would steal focus mid-visit.
   useEffect(() => {
