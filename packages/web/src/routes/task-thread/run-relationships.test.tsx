@@ -133,14 +133,17 @@ it('keeps last fetched worker status on a failed refresh and rejects malformed r
   expect(screen.queryByText('No workers')).toBeNull()
 })
 
-it('keeps every one of 32 worker links in the bounded list, independent of root receipts', async () => {
+it.each([true, false])('keeps every one of 32 worker links newest first (receipts: %s)', async withReceipts => {
   const workers = Array.from({ length: 32 }, (_, index) => ({
     ...worker, workerId: `20000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
   }))
-  setup({ ...root, delegation: { role: 'root', permissions: [], receipts: [] } }, async () => json({ workers }))
+  const receipts = withReceipts ? workers.map(worker => ({ requestId: worker.workerId, workerId: worker.workerId, requestHash: 'b'.repeat(64) })) : []
+  setup({ ...root, delegation: { role: 'root', permissions: [], receipts } }, async () => json({ workers: [...workers].reverse() }))
   const links = await screen.findAllByRole('link', { name: /^Worker task/ })
   expect(links).toHaveLength(32)
-  expect(links.at(-1)?.getAttribute('href')).toBe(`/p/sample/tasks/${workers.at(-1)!.workerId}`)
+  expect(links.map(link => link.getAttribute('href'))).toEqual(
+    [...workers].reverse().map(worker => `/p/sample/tasks/${worker.workerId}`),
+  )
   expect(links.every(link => link.className.includes('min-h-11'))).toBe(true)
   const list = screen.getByRole('list')
   expect(list.className).toContain('max-h-64')
