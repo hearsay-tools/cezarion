@@ -5,7 +5,9 @@ const { runInNewContext } = require('node:vm');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const yaml = require('yaml');
+const { createRequire } = require('node:module');
+// Resolve the parser from its declared workspace owner, including isolated pnpm installs.
+const yaml = createRequire(path.join(__dirname, '../../packages/cezar/package.json'))('yaml');
 
 const workflow = yaml.parse(fs.readFileSync(path.join(__dirname, '../workflows/ci.yml'), 'utf8'));
 const jobs = ['build-and-package', 'vitest', 'node-floor', 'cockpit-browser', 'publish-snapshot', 'prepare-pr-snapshot'];
