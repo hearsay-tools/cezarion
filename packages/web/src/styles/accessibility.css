@@ -17,6 +17,8 @@
   :where(button, a, input, select, textarea, summary, [tabindex], [role='button']):focus-visible,
   [data-slot='code-editor']:has(textarea:focus-visible),
   [data-slot='composer-editor']:has(> textarea:focus-visible) { outline-color: Highlight; }
+  /* Forced colors repaints transparent outlines. The shell owns visible focus. */
+  [data-slot='composer-editor'] > textarea:focus-visible { outline-width: 0; }
 }
 :where(button, [role='button'], a[data-slot='button']):not(:disabled):not([aria-disabled='true']):active {
   filter: brightness(0.9);

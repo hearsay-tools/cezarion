@@ -160,15 +160,21 @@ for (const theme of ['light', 'dark']) {
       browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
       focusWithKeyboard(browser, selector)
       const measure = () => waitForSettledSample<{
-        focused: boolean; inputInk: string; outline: string; width: number;
+        focused: boolean; inputInk: string; inputWidth: number; outline: string; outlineInk: string; highlightInk: string; width: number;
         outerTop: number; labelTop: number; labelVisible: boolean;
       }>(browser, `(() => {
         const input = document.querySelector('${selector}');
         const editor = input.closest('[data-slot="composer-editor"]');
         const label = editor.querySelector('label');
         const style = getComputedStyle(editor);
+        const probe = document.createElement('span');
+        probe.style.color = 'Highlight'; probe.style.forcedColorAdjust = 'none';
+        document.body.append(probe);
+        const highlightInk = getComputedStyle(probe).color;
+        probe.remove();
         return { focused: input.matches(':focus-visible'), inputInk: getComputedStyle(input).outlineColor,
-          outline: style.outlineStyle, width: parseFloat(style.outlineWidth),
+          inputWidth: parseFloat(getComputedStyle(input).outlineWidth),
+          outline: style.outlineStyle, outlineInk: style.outlineColor, highlightInk, width: parseFloat(style.outlineWidth),
           outerTop: editor.getBoundingClientRect().top - parseFloat(style.outlineOffset) - parseFloat(style.outlineWidth),
           labelTop: label.getBoundingClientRect().top, labelVisible: label.checkVisibility() };
       })()`)
@@ -177,12 +183,18 @@ for (const theme of ['light', 'dark']) {
       expect(focus.inputInk).toBe('rgba(0, 0, 0, 0)')
       expect(focus.outline).toBe('solid')
       expect(focus.width).toBeGreaterThanOrEqual(2)
+      const contrast = waitForSettledSample<ContrastSample>(browser,
+        contrastSampleExpression('[data-slot="composer-editor"]', 'outline-color'))
+      expect(contrast.ratio, JSON.stringify(contrast)).toBeGreaterThanOrEqual(3)
       if (focus.labelVisible) expect(focus.outerTop).toBeLessThan(focus.labelTop)
       browser.screenshot(`${artifacts}/composer-focus-${theme}-${width}.png`, { viewport: true })
       await withMedia([{ name: 'forced-colors', value: 'active' }], () => {
+        expect(browser.evaluate(`matchMedia('(forced-colors: active)').matches`)).toBe(true)
         const forced = measure()
         expect(forced.focused).toBe(true)
+        expect(forced.inputWidth).toBe(0)
         expect(forced.outline).toBe('solid')
+        expect(forced.outlineInk).toBe(forced.highlightInk)
         expect(forced.width).toBeGreaterThanOrEqual(2)
         if (forced.labelVisible) expect(forced.outerTop).toBeLessThan(forced.labelTop)
       })

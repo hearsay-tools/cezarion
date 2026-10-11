@@ -140,15 +140,20 @@ describe('task thread', () => {
         expect(focus.inputInk).toBe('rgba(0, 0, 0, 0)')
         expect(focus.outline).toBe('solid')
         expect(focus.width).toBeGreaterThanOrEqual(2)
+        const contrast = waitForSettledSample<ContrastSample>(browser,
+          contrastSampleExpression('[data-slot="composer-editor"]', 'outline-color'))
+        expect(contrast.ratio, JSON.stringify(contrast)).toBeGreaterThanOrEqual(3)
         browser.screenshot(`${artifactsDir}/reply-focus-${theme}-${width}.png`, { viewport: true })
         focusWithKeyboard(browser, attach)
-        const button = waitForSettledSample<{ focused: boolean; outline: string; width: number }>(browser, `(() => {
+        const button = waitForSettledSample<{ focused: boolean; outline: string; width: number; shellOutline: string }>(browser, `(() => {
           const el = document.querySelector('${attach}'), style = getComputedStyle(el);
-          return { focused: el.matches(':focus-visible'), outline: style.outlineStyle, width: parseFloat(style.outlineWidth) };
+          return { focused: el.matches(':focus-visible'), outline: style.outlineStyle, width: parseFloat(style.outlineWidth),
+            shellOutline: getComputedStyle(el.closest('[data-slot="composer-editor"]')).outlineStyle };
         })()`)
         expect(button.focused).toBe(true)
         expect(button.outline).toBe('solid')
         expect(button.width).toBeGreaterThanOrEqual(2)
+        expect(button.shellOutline).toBe('none')
       }
     } finally { restoreContrastQaDefaults(browser) }
   })
