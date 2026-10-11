@@ -31,7 +31,9 @@ if (!['link', 'global', 'uninstall'].includes(mode)) {
 }
 
 // npm invocation shim (identical to dev.mjs / check-pack.mjs).
-const npmExecpath = process.env.npm_execpath;
+// pnpm 12 sets npm_execpath to a native executable; these operations need npm.
+const npmExecpath = /(?:^|[\\/])npm-cli\.js$/.test(process.env.npm_execpath ?? '')
+  ? process.env.npm_execpath : undefined;
 const npmCli = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 function npm(args, { capture = false } = {}) {
   const viaNode = Boolean(npmExecpath);

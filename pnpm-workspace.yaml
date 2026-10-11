@@ -1,0 +1,11 @@
+packages:
+  - packages/contract
+  - packages/api-client
+  - packages/cezar
+  - packages/web
+
+packageImportMethod: hardlink
+linkWorkspacePackages: true
+enablePrePostScripts: true
+allowBuilds:
+  esbuild: true

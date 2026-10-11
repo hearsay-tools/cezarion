@@ -35,7 +35,9 @@ if (apiPort !== 4321) console.log(`dev: port 4321 is taken (another cockpit?) â€
 
 // Under `npm run`, npm_execpath is npm's own cli.js â€” running it through
 // process.execPath works on every platform (no .cmd shim needed on Windows).
-const npmExecpath = process.env.npm_execpath;
+// pnpm 12 sets npm_execpath to a native executable; these operations need npm.
+const npmExecpath = /(?:^|[\\/])npm-cli\.js$/.test(process.env.npm_execpath ?? '')
+  ? process.env.npm_execpath : undefined;
 const npmCli = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const run = (script, extraArgs) => {
   const args = ['run', script, '--', ...extraArgs];

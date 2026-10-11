@@ -73,17 +73,21 @@ jobs:
 
       # `lts/*` like every other workflow here: a nightly is built and verified on
       # the Node release line users are actually on that day (see ci.yml).
+      - name: Set up pnpm
+        if: steps.decide.outputs.publish == 'true'
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - name: Set up Node.js
         if: steps.decide.outputs.publish == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: lts/*
-          cache: npm
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
           registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
         if: steps.decide.outputs.publish == 'true'
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       # A nightly is an installable build, not a preview of a proposal — it carries
       # the same gate as a release. main is protected and every commit on it passed

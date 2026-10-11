@@ -118,11 +118,11 @@ function runScript(fixtureRoot: string, args: string[], extraEnv: Record<string,
 }
 
 async function writeNpmStub(root: string): Promise<{ stub: string; log: string }> {
-  const stub = join(root, 'npm-stub.mjs');
+  const stub = join(root, 'npm-cli.js');
   const log = join(root, 'npm-stub.log');
   await writeFile(
     stub,
-    `import { appendFileSync } from 'node:fs';
+    `const { appendFileSync } = require('node:fs');
 appendFileSync(process.env.NPM_STUB_LOG, \`\${process.argv.slice(2).join(' ')}\\n\`);
 `,
   );
@@ -286,12 +286,12 @@ test('a mid-set collision skips the already-published name and publishes the res
   const root = await makeFixture('0.1.5');
   try {
     await writeFile(join(root, 'github-output.txt'), '');
-    const stub = join(root, 'npm-stub.mjs');
+    const stub = join(root, 'npm-cli.js');
     const log = join(root, 'npm-stub.log');
     await writeFile(
       stub,
-      `import { appendFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+      `const { appendFileSync } = require('node:fs');
+const { execFileSync } = require('node:child_process');
 const args = process.argv.slice(2);
 appendFileSync(process.env.NPM_STUB_LOG, \`\${process.cwd()} \${args.join(' ')}\\n\`);
 if (args[0] === 'view') {
@@ -331,11 +331,11 @@ test('a publish failure that is not already on the registry still aborts', { tim
   const root = await makeFixture('0.1.5');
   try {
     await writeFile(join(root, 'github-output.txt'), '');
-    const stub = join(root, 'npm-stub.mjs');
+    const stub = join(root, 'npm-cli.js');
     const log = join(root, 'npm-stub.log');
     await writeFile(
       stub,
-      `import { appendFileSync } from 'node:fs';
+      `const { appendFileSync } = require('node:fs');
 const args = process.argv.slice(2);
 appendFileSync(process.env.NPM_STUB_LOG, \`\${process.cwd()} \${args.join(' ')}\\n\`);
 if (args[0] === 'view') process.exit(1);
@@ -383,7 +383,7 @@ for (const recordedHead of ['different', 'missing', 'matching']) {
         version: '0.1.6',
         ...(recordedHead === 'missing' ? {} : { gitHead }),
       };
-      const stub = join(root, 'npm-stub.mjs');
+      const stub = join(root, 'npm-cli.js');
       await writeFile(stub, `
 if (process.argv[2] === 'publish') process.exit(1);
 if (process.argv[2] === 'view') console.log(process.argv.includes('gitHead') ? ${JSON.stringify(JSON.stringify(metadata))} : '0.1.6');

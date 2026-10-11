@@ -25,6 +25,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
@@ -39,7 +41,7 @@ jobs:
           printf '%s\n' 'node --expose-gc --import tsx packages/cezar/scripts/measure-transcript-facts-lag.mjs' > timing-evidence/lag.command.txt
           printf '%s\n' 'node --expose-gc packages/cezar/scripts/measure-transcript-facts-health.mjs' > timing-evidence/health.command.txt
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
         timeout-minutes: 5
       - name: Build server before measurement
         id: build

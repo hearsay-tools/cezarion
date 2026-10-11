@@ -28,21 +28,22 @@ test('new PR workflow runs drafts with read-only permissions and pinned safe act
   const actions = job.steps.filter(item => item.uses);
   assert.deepEqual(actions.map(item => item.uses), [
     'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
+    'pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86',
     'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020',
     'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
   ]);
   assert.equal(actions[0].with['persist-credentials'], false);
   assert.equal(actions[0].with.ref, undefined, 'test the PR merge revision, not untrusted shell interpolation');
-  assert.equal(actions[1].with['node-version'], '24.20.0');
-  assert.equal(actions[2].if, 'always()');
-  assert.equal(actions[2].with.path, 'timing-evidence/');
-  assert.equal(actions[2].with['retention-days'], 14);
+  assert.equal(actions[2].with['node-version'], '24.20.0');
+  assert.equal(actions[3].if, 'always()');
+  assert.equal(actions[3].with.path, 'timing-evidence/');
+  assert.equal(actions[3].with['retention-days'], 14);
 });
 
 test('setup completes before serial probes; health still runs after lag failure only with a built runtime', () => {
   assert.equal(job.strategy, undefined);
   assert.deepEqual(job.steps.filter(item => item.run).map(item => item.id ?? item.run), [
-    'evidence', 'npm ci', 'build', 'lag', 'health',
+    'evidence', 'pnpm install --frozen-lockfile', 'build', 'lag', 'health',
   ]);
   assert.equal(step('build').run, 'npm run build:server');
   assert.equal(step('lag').if, undefined);

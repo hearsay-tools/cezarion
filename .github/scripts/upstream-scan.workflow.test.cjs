@@ -23,7 +23,7 @@ test('the weekly scan runs from the default branch with the trusted-checkout sha
   assert.equal(checkout.with.ref, '${{ github.sha }}');
   assert.equal(checkout.with['fetch-depth'], 0, 'the 3-way dry run and the range walk need full history');
   assert.ok(job.steps.some((s) => s.uses?.startsWith('actions/setup-node@')));
-  assert.ok(job.steps.some((s) => s.run === 'npm ci'), 'the scan needs the hoisted yaml dependency');
+  assert.ok(job.steps.some((s) => s.run === 'pnpm install --frozen-lockfile'), 'the scan needs the declared yaml dependency');
   const scanStep = job.steps.find((s) => s.id === 'scan');
   assert.match(scanStep.run, /node \.github\/scripts\/upstream-scan\.cjs/);
   assert.match(scanStep.run, /GITHUB_OUTPUT/);

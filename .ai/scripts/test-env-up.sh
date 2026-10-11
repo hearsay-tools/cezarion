@@ -53,14 +53,14 @@ TEST_ENV_CACHE_TTL_SECONDS=${TEST_ENV_CACHE_TTL_SECONDS:-600}
 # packages/cezar/web/dist (missing it would silently test the fallback hint page).
 # VITE_CEZ_E2E=1 is the cockpit e2e mode (#415): it pins useNow and every refetchInterval
 # in the served bundle. Production `npm run build` leaves the flag unset.
-BUILD_COMMAND="npm ci && VITE_CEZ_E2E=1 npm run build"
-BUILD_ARTIFACTS="node_modules/zod/package.json packages/cezar/dist/index.js packages/cezar/web/dist/index.html"
+BUILD_COMMAND="pnpm install --frozen-lockfile && VITE_CEZ_E2E=1 npm run build"
+BUILD_ARTIFACTS="packages/cezar/node_modules/zod/package.json packages/cezar/dist/index.js packages/cezar/web/dist/index.html"
 # A normal web build clears this Vite-emitted marker while leaving source fingerprints intact.
 E2E_BUILD_MARKER="$REPO_ROOT/packages/cezar/web/dist/.cez-e2e-build"
 # Fingerprint inputs — a change to any of these invalidates the cached build. Each workspace
 # contributes its own sources AND its own manifest: a dependency moved between packages
 # changes what gets bundled without touching a single source file.
-BUILD_INPUT_PATHS="packages/contract/src packages/contract/package.json packages/cezar/src packages/cezar/package.json packages/cezar/tsconfig.json packages/api-client/src packages/api-client/package.json packages/web/src packages/web/index.html packages/web/vite.config.ts packages/web/package.json package.json package-lock.json .ai/scripts/test-env-up.sh"
+BUILD_INPUT_PATHS="packages/contract/src packages/contract/package.json packages/cezar/src packages/cezar/package.json packages/cezar/tsconfig.json packages/api-client/src packages/api-client/package.json packages/web/src packages/web/index.html packages/web/vite.config.ts packages/web/package.json package.json pnpm-lock.yaml pnpm-workspace.yaml .ai/scripts/test-env-up.sh"
 
 # CEZ_DRY_RUN=1 swaps the agent CLIs for the bundled mock, so booting needs no
 # `claude` login and reaches no network — the whole point for CI/e2e.
@@ -573,7 +573,7 @@ write_descriptor() {
       testRunner: { name: "other", config: "packages/web/e2e/vitest.config.ts" },
       platform,
       startedAt: new Date().toISOString(),
-      notes: "Booted from a production build after npm ci with CEZ_DRY_RUN=1, so workspace links/runtime dependencies are present, the agent CLIs are mocked, and no agent login/network is needed. No backing services. Stop with .ai/scripts/test-env-down.sh. App log: .ai/qa/test-env-app.log.",
+      notes: "Booted from a production build after pnpm install --frozen-lockfile with CEZ_DRY_RUN=1, so workspace links/runtime dependencies are present, the agent CLIs are mocked, and no agent login/network is needed. No backing services. Stop with .ai/scripts/test-env-down.sh. App log: .ai/qa/test-env-app.log.",
     }, null, 2) + "\n");
   ' "$ENV_DESCRIPTOR" "$BASE_URL" "$PORT" "$APP_PID" \
     "CEZ_DRY_RUN=1 CEZ_HOME=.ai/qa/cez-home node packages/cezar/dist/index.js --port $PORT --no-open" \
