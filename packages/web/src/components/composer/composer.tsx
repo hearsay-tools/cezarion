@@ -256,11 +256,16 @@ export function Composer({
   // highest-traffic skill surface — both reads and feeds the same stats as the pickers.
   const uiState = useUiState()
   const queryClient = useQueryClient()
-  // A recognition error leaves the draft alone; Try again goes through the same guard as the mic.
+  // A recognition error leaves the draft alone; Try again goes through the same guard as the mic,
+  // read at click time: the toast outlives the render that raised it.
+  const disabledRef = useRef(disabled)
+  disabledRef.current = disabled
   const dictation = useDictation((message, retry) =>
     toast(message, {
       tone: 'danger',
-      ...(retry ? { action: { label: 'Try again', onAction: () => { if (!editsBlocked()) retry() } } } : {}),
+      ...(retry
+        ? { action: { label: 'Try again', onAction: () => { if (!disabledRef.current && !editsBlocked()) retry() } } }
+        : {}),
     }),
   )
 

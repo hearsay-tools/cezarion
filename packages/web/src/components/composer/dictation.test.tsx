@@ -231,6 +231,27 @@ describe('the dictation overlay (paseo pattern)', () => {
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
   })
 
+  it('Try again on a composer disabled since the error does not reopen the microphone', async () => {
+    stubSpeech()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('[]', { status: 200 }))))
+    const client = createQueryClient()
+    const onSubmit = vi.fn(() => Promise.resolve({}))
+    const tree = (disabled: boolean) => (
+      <QueryClientProvider client={client}>
+        <Composer onSubmit={onSubmit} disabled={disabled} />
+        <Toaster />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(tree(false))
+    const recognition = startDictation()
+    act(() => recognition.onerror!({ error: 'no-speech' }))
+    const retry = await screen.findByRole('button', { name: 'Try again' })
+    rerender(tree(true))
+    fireEvent.click(retry)
+    expect(FakeRecognition.instances).toHaveLength(1)
+  })
+
   it('Try again after the composer unmounts does not reopen the microphone', async () => {
     stubSpeech()
     vi.spyOn(console, 'warn').mockImplementation(() => {})
