@@ -293,6 +293,9 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     rmSync(codexHome, { recursive: true, force: true });
     return { a, codexHome };
   }
+  // finishedMixedChain already awaits two 15s until()s plus a 15s termination; the cell then
+  // waits again. Isolated recovery is ~1s; CI on #959 hit 16338ms against the 15s describe
+  // (#960). Cover the sequential waits rather than the observed 16s.
   it('continues a mixed chain into its last step\'s account after the first step\'s account home is gone (#465 review)', async () => {
     const { a } = await finishedMixedChain();
     expect(f.manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true);
@@ -300,7 +303,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     expect(f.store.getRun(a.child.workerId)?.error).toBeUndefined();
     expect(sessions[3]!.spec).toMatchObject({ resume: true, sessionId: 'review-session' });
     expect(sessions[3]!.spec.env?.CLAUDE_CONFIG_DIR).toBe(a.home);
-  });
+  }, 60_000);
   it('recovers a queued continuation of a mixed chain onto its last step\'s runner and session (#465 review)', async () => {
     const { a } = await finishedMixedChain();
     // The durable shape a crash leaves behind after a continuation was accepted but not yet
@@ -322,7 +325,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     expect(sessions[3]!.spec).toMatchObject({ resume: true, sessionId: 'review-session' });
     expect(sessions[3]!.spec.env?.CLAUDE_CONFIG_DIR).toBe(a.home);
     expect(sessions[3]!.spec.env?.CODEX_HOME).toBeUndefined();
-  });
+  }, 60_000);
   it.each(['queued', 'restart', 'continue'] as const)('still runs a single-runner worker whose identity evidence predates per-step entries on %s (#452)', async mode => {
     const a = await acceptIdentityWorker();
     // Evidence written before #452 carries only the run-level fields.
