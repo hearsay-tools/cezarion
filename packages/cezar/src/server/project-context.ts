@@ -185,6 +185,9 @@ export class ProjectContexts {
   private readonly semaphore: WorkspaceSemaphore;
   /** Bumped by `disposeAll`: a build that started before it is torn down, not registered. */
   private generation = 0;
+  /** Bumped per project by `dispose(id)`, for the same reason: project removal runs `dispose`
+   *  after the registry commit, and a build that read the registry before it must not land. */
+  private readonly epochs = new Map<string, number>();
 
   constructor(private readonly deps: ProjectContextDeps) {
     this.semaphore = deps.semaphore ?? new WorkspaceSemaphore();
@@ -198,12 +201,13 @@ export class ProjectContexts {
     const inFlight = this.building.get(projectId);
     if (inFlight) return inFlight;
     const generation = this.generation;
+    const epoch = this.epochs.get(projectId) ?? 0;
     const build = this.build(projectId);
     this.building.set(projectId, build);
     try {
       const ctx = await build;
-      if (generation !== this.generation) {
-        // Shut down while this build ran: nothing may outlive `disposeAll`.
+      if (generation !== this.generation || epoch !== (this.epochs.get(projectId) ?? 0)) {
+        // Shut down or removed while this build ran: nothing may outlive `dispose`.
         this.disposeBuilt(ctx);
         throw new ProjectContextsClosedError();
       }
@@ -240,7 +244,13 @@ export class ProjectContexts {
         await this.context(project.id);
         warmed.push(project.id);
       } catch (err) {
-        if (err instanceof ProjectContextsClosedError) break;
+        if (err instanceof ProjectContextsClosedError) {
+          // Shut down: stop. Removed mid-build: the next project.
+          if (generation !== this.generation) break;
+          continue;
+        }
+        // Removed from the registry after this list was read: nothing to prepare, nothing to say.
+        if (err instanceof ProjectContextError && err.reason === 'unknown-project') continue;
         console.warn(`[cez] project ${project.id} could not be prepared in the background: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
@@ -320,6 +330,8 @@ export class ProjectContexts {
    * nothing was built for `projectId`.
    */
   dispose(projectId: string, opts: { releasePreviews?: boolean } = {}): boolean {
+    // Also invalidates a build of this project still in flight (#667).
+    this.epochs.set(projectId, (this.epochs.get(projectId) ?? 0) + 1);
     const ctx = this.contexts.get(projectId);
     if (!ctx) return false;
     this.contexts.delete(projectId);

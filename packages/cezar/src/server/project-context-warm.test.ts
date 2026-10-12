@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { processStartToken } from '../delegation/process-liveness.ts';
+import type { CockpitOwnership } from './cockpit-ownership.ts';
 import { ProjectContexts, ProjectContextsClosedError, type ProjectWarmCandidate } from './project-context.ts';
 
 /**
@@ -145,5 +146,39 @@ describe('ProjectContexts.warmAll', () => {
     // The map stays usable: a later access builds normally.
     expect((await contexts.context('late')).id).toBe('late');
     contexts.disposeAll();
+  });
+
+  it('tears down a build that dispose(id) overtook, even one that started after the removal began (#667)', async () => {
+    // Project removal: the registry row is deleted, then `dispose(id)`. A warm build that read the
+    // registry just before that commit must not register the removed project afterwards.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const ownership = { acquire: () => gate } as unknown as CockpitOwnership;
+    const contexts = new ProjectContexts({ listProjects: async () => [{ id: 'gone', root: root(), status: 'not-git' }], ownership });
+    const built: string[] = [];
+    contexts.onContextBuilt((ctx) => built.push(ctx.id));
+    const building = contexts.context('gone');
+    expect(contexts.dispose('gone')).toBe(false);
+    release();
+    await expect(building).rejects.toBeInstanceOf(ProjectContextsClosedError);
+    expect(built).toEqual([]);
+    expect(contexts.peek('gone')).toBeUndefined();
+    contexts.disposeAll();
+  });
+
+  it('skips a project removed after the warm-up listed it, without a warning', async () => {
+    const kept = root();
+    const listed: ProjectWarmCandidate[] = [
+      { id: 'removed', root: root(), status: 'not-git', lastOpenedAt: '2026-10-12T00:00:00.000Z' },
+      { id: 'kept', root: kept, status: 'not-git', lastOpenedAt: '2026-10-11T00:00:00.000Z' },
+    ];
+    // The registry no longer holds `removed`: its build answers unknown-project.
+    const contexts = new ProjectContexts({ listProjects: async () => [listed[1]!] });
+    try {
+      expect(await contexts.warmAll(listed)).toEqual(['kept']);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      contexts.disposeAll();
+    }
   });
 });
