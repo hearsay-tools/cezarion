@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import * as worktrees from '../git-worktree.ts';
 import { RunStore } from '../runs/store.ts';
@@ -13,12 +13,14 @@ const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 
 // hearsay-tools/cezarion#934: native provider failures and Stop must settle
 // independently of the retained worktree-writer proof. Registered as R61–R66.
+// hearsay-tools/cezarion#958: the retained holder is Git's detached descendant;
+// an unrelated process churning in the worktree is neither named nor signalled.
 describe('harness parity — settlement during blocked autosave', () => {
   for (const backend of RUNNER_IDS) {
     for (const continuation of [false, true]) {
       for (const outcome of ['failed', 'cancelled', 'success'] as const) {
         const row = (outcome === 'failed' ? 61 : outcome === 'cancelled' ? 63 : 65) + Number(continuation);
-        it(`${backend} R${row} ${continuation ? 'Continue' : 'fresh'} ${outcome} settles with an unrelated holder`, async () => {
+        it(`${backend} R${row} ${continuation ? 'Continue' : 'fresh'} ${outcome} settles with a detached Git holder`, async () => {
           vi.stubEnv('CEZ_DELEGATION', '1');
           const save = worktrees.autosaveCommit;
           vi.spyOn(worktrees, 'autosaveCommit').mockImplementation((dir, reason, options) =>
@@ -47,8 +49,9 @@ describe('harness parity — settlement during blocked autosave', () => {
               const bin = mkdtempSync(join(tmpdir(), 'cez-settlement-git-'));
               const path = process.env.PATH;
               let replacement: { store: RunStore; manager: RunManager } | undefined;
-              let holder: ReturnType<typeof spawn> | undefined;
-              let holderExit: Promise<unknown> | undefined;
+              let unrelated: ReturnType<typeof spawn> | undefined;
+              let unrelatedExit: Promise<unknown> | undefined;
+              let holder: number | undefined;
               let saveTask: Promise<unknown> | undefined;
               const intercepted = vi.mocked(worktrees.autosaveCommit).getMockImplementation()!;
               vi.mocked(worktrees.autosaveCommit).mockImplementation((...args) => {
@@ -62,6 +65,10 @@ if (args.includes('add') && args.includes('-N') && fs.existsSync(${JSON.stringif
   fs.writeFileSync(${JSON.stringify(join(bin, 'unexpected-writer'))}, 'index mutation');
 }
 if (args.includes('status') && args.includes('--porcelain')) {
+  // Born after the holder baseline in a session of its own, outside Git's group.
+  const holder = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(`setInterval(() => { if (require('node:fs').existsSync(${JSON.stringify(join(bin, 'move'))})) process.chdir(${JSON.stringify(bin)}); }, 10)`)}], { detached: true, stdio: 'ignore' });
+  holder.unref();
+  fs.writeFileSync(${JSON.stringify(join(bin, 'holder'))}, String(holder.pid));
   fs.writeFileSync(${JSON.stringify(join(bin, 'pid'))}, String(process.pid));
   const timer = setInterval(() => {
     if (fs.existsSync(${JSON.stringify(join(bin, 'exit'))})) {
@@ -88,31 +95,44 @@ if (args.includes('status') && args.includes('--porcelain')) {
                 if (hasTail) expect(store.getRun(runId)?.steps.slice(0, 2).map(step => step.status)).toEqual(['done', 'pending']);
                 const dir = store.getRun(runId)!.worktreePath!;
                 writeFileSync(join(dir, 'progress.txt'), 'recover me\n');
-                // Parent-owned, outside Git's group, born after the holder baseline.
-                holder = spawn(process.execPath, ['-e', `setInterval(() => { if (require('node:fs').existsSync(${JSON.stringify(join(bin, 'move'))})) process.chdir(${JSON.stringify(bin)}); }, 10)`], { cwd: dir, stdio: 'ignore' });
-                holderExit = new Promise(resolve => holder!.once('exit', resolve));
+                holder = Number(readFileSync(join(bin, 'holder'), 'utf8'));
+                // The fixture scopes /proc to processes it has seen in its tree; enumerate
+                // once while Git still parents the holder, as a real host always lists it.
+                readdirSync('/proc');
+                // Parent-owned work in the worktree that keeps starting new processes (Squeal, agent tools).
+                unrelated = spawn(process.execPath, ['-e', `
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => require('node:fs').writeFileSync(${JSON.stringify(join(bin, 'signalled'))}, signal));
+setInterval(() => require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 40)'], { stdio: 'ignore' }), 20);`], { cwd: dir, stdio: 'ignore' });
+                unrelatedExit = new Promise(resolve => unrelated!.once('exit', resolve));
                 writeFileSync(join(bin, 'exit'), 'exit');
                 const gitPid = Number(readFileSync(join(bin, 'pid'), 'utf8'));
                 await waitFor(() => { try { process.kill(gitPid, 0); return false; } catch { return true; } });
                 if (outcome === 'cancelled') expect(manager.cancel(runId)).toBe(true);
-                await waitFor(() => store.readEvents(runId).some(event => event.type === 'note' && String(event.message).includes('termination not confirmed')), 5000);
+                // The first blocked report can precede the first holder poll under load ("process
+                // inspection pending; retained cwd holder PIDs: none", seen in the full suite at load
+                // 30+); the refusal below quotes the latest report, so wait for the one naming the holder.
+                await waitFor(() => store.readEvents(runId).some(event => event.type === 'note' && String(event.message).includes('termination not confirmed') &&
+                  String(event.message).includes(`holder PIDs: ${holder}`)), 5000);
                 await waitFor(() => !manager.isActive(runId), 3000);
                 expect(outcome === 'success' ? ['done', 'review'] : [outcome]).toContain(store.getRun(runId)?.status);
                 expect(store.getRun(runId)?.stopping).toBeUndefined();
                 expect(store.readWorkerExecution(runId)?.phase).toBe('complete');
                 const refusal = manager.continueRun(runId, { text: 'another writer' });
                 expect(refusal.ok).toBe(false);
-                expect(refusal.error).toContain(String(holder.pid));
+                expect(refusal.error).toContain(String(holder));
+                expect(refusal.error).not.toContain(String(unrelated.pid));
                 expect(manager.claimForPublish(runId)).toBeNull();
                 expect(manager.claimWorktreeReclaim(runId)).toBeNull();
                 expect(manager.claimForBranchCleanup([runId])).toBeNull();
-                expect(() => process.kill(holder!.pid!, 0)).not.toThrow();
+                expect(() => process.kill(holder!, 0)).not.toThrow();
+                expect(unrelated.exitCode).toBeNull();
+                expect(existsSync(join(bin, 'signalled'))).toBe(false);
                 expect(readFileSync(join(dir, 'progress.txt'), 'utf8')).toBe('recover me\n');
                 expect(existsSync(join(bin, 'unexpected-writer'))).toBe(false);
                 expect(existsSync(join(dir, 'unexpected-tail'))).toBe(false);
                 if (!continuation && outcome === 'failed') {
                   writeFileSync(join(bin, 'move'), 'move');
-                  await waitFor(() => readlinkSync(`/proc/${holder!.pid}/cwd`) === bin);
+                  await waitFor(() => readlinkSync(`/proc/${holder!}/cwd`) === bin);
                   manager.dispose(); store.close();
                   const reopened = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
                   replacement = { store: reopened, manager: new RunManager(reopened, repoRoot) };
@@ -124,8 +144,12 @@ if (args.includes('status') && args.includes('--porcelain')) {
                 }
               } finally {
                 process.env.PATH = path;
-                holder?.kill('SIGKILL');
-                await holderExit;
+                unrelated?.kill('SIGKILL');
+                await unrelatedExit;
+                if (holder) {
+                  try { process.kill(holder, 'SIGKILL'); } catch { /* gone */ }
+                  await waitFor(() => { try { process.kill(holder!, 0); return false; } catch { return true; } });
+                }
                 if (existsSync(join(bin, 'pid'))) {
                   try { process.kill(Number(readFileSync(join(bin, 'pid'), 'utf8')), 'SIGKILL'); } catch { /* gone */ }
                 }
@@ -152,6 +176,65 @@ if (args.includes('status') && args.includes('--porcelain')) {
           } finally { vi.restoreAllMocks(); vi.unstubAllEnvs(); }
         }, 60_000);
       }
+    }
+  }
+});
+
+// hearsay-tools/cezarion#958: processes merely born in the worktree during the final
+// save (Squeal's Vitest workers, agent tools) are not Git's. Registered as R67–R68.
+describe('harness parity — final autosave beside unrelated process churn', () => {
+  for (const backend of RUNNER_IDS) {
+    for (const continuation of [false, true]) {
+      const row = continuation ? 68 : 67;
+      it(`${backend} R${row} ${continuation ? 'Continue' : 'fresh'} Finish commits without holding cleanup`, async () => {
+        vi.stubEnv('CEZ_DELEGATION', '1');
+        const save = worktrees.autosaveCommit;
+        const saves: Promise<unknown>[] = [];
+        vi.spyOn(worktrees, 'autosaveCommit').mockImplementation((dir, reason, options) => {
+          const task = save(dir, reason, { ...options, timeoutMs: 1500, killGraceMs: 100, confirmMs: 100 });
+          saves.push(task);
+          return task;
+        });
+        vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+          await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId }) => {
+            manager.enqueueOwnedRun(runId);
+            await waitFor(() => store.getRun(runId)?.status === 'waiting');
+            if (continuation) {
+              manager.finish(runId);
+              await waitFor(() => !manager.isActive(runId));
+              await Promise.allSettled(saves);
+              expect(manager.continueRun(runId, { text: 'mock:baseline' }).ok).toBe(true);
+              await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
+            }
+            const dir = store.getRun(runId)!.worktreePath!;
+            const signalled = join(mkdtempSync(join(tmpdir(), 'cez-unrelated-')), 'signalled');
+            const unrelated = spawn(process.execPath, ['-e', `
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => require('node:fs').writeFileSync(${JSON.stringify(signalled)}, signal));
+setInterval(() => require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 40)'], { stdio: 'ignore' }), 20);`], { cwd: dir, stdio: 'ignore' });
+            const unrelatedExit = new Promise(resolve => unrelated.once('exit', resolve));
+            try {
+              writeFileSync(join(dir, 'progress.txt'), 'save me\n');
+              saves.length = 0;
+              expect(manager.finish(runId)).toBe(true);
+              await waitFor(() => !manager.isActive(runId), 5000);
+              expect(await Promise.all(saves)).toContain('committed');
+              const notes = store.readEvents(runId).filter(event => event.type === 'note').map(event => String(event.message));
+              expect(notes.filter(note => /autosave (failed|unsuccessful)|termination not confirmed|cleanup/.test(note))).toEqual([]);
+              expect(execFileSync('git', ['show', 'HEAD:progress.txt'], { cwd: dir, encoding: 'utf8' })).toBe('save me\n');
+              expect(manager.autosaveCleanupBlocker(runId)).toBeUndefined();
+              const release = manager.claimForPublish(runId);
+              expect(release).not.toBeNull(); release?.();
+              expect(unrelated.exitCode).toBeNull();
+              expect(existsSync(signalled)).toBe(false);
+            } finally {
+              unrelated.kill('SIGKILL');
+              await unrelatedExit;
+              rmSync(dirname(signalled), { recursive: true, force: true });
+            }
+          });
+        } finally { vi.restoreAllMocks(); vi.unstubAllEnvs(); }
+      }, 60_000);
     }
   }
 });
