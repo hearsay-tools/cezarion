@@ -1,7 +1,7 @@
 import { useMemo, type ReactNode } from 'react'
 import { TaskFileScope } from './task-file-scope'
 
-import type { ApiRun } from '@open-mercato/cezar-api-client'
+import type { AgentInput, ApiRun } from '@open-mercato/cezar-api-client'
 
 import { groupThreadItems, type ThreadBlock } from './thread-groups'
 import {
@@ -30,7 +30,7 @@ import type { ThreadAsk, ThreadEntry, ThreadPreviewServer, ThreadState } from '.
 import { usePreviewPane } from './preview/preview-state'
 import { PreviewServerCard } from './preview/server-card'
 import { useHealth } from '@/api/queries'
-import type { RecipientBackendMap, TaskTitleMap } from './conversation-presentation'
+import { conversationDeliveryLabel, type RecipientBackendMap, type TaskTitleMap } from './conversation-presentation'
 import { ConversationNavigation, type ConversationTarget } from './conversation-navigation'
 
 export interface TranscriptUserMessage {
@@ -90,6 +90,27 @@ export interface SessionTranscriptProps {
   recipientBackends?: RecipientBackendMap
 }
 
+function overlayAgentInputDelivery(input: AgentInput): 'queued' | 'delivered' | 'consumed' {
+  if (input.consumedAt) return 'consumed'
+  if (input.deliveredAt) return 'delivered'
+  return 'queued'
+}
+
+/** Receipts on the run record win over the enqueue-time event snapshot (#971). Copy notes; never mutate thread state. */
+function overlayAgentInputNotes(run: ApiRun, entries: readonly ThreadEntry[]): readonly ThreadEntry[] {
+  const receipts = new Map((run.agentInputs ?? []).map(input => [input.id, overlayAgentInputDelivery(input)] as const))
+  if (receipts.size === 0) return entries
+  let changed = false
+  const next = entries.map(entry => {
+    if (entry.kind !== 'note' || !entry.id.startsWith('agent-input:')) return entry
+    const delivery = receipts.get(entry.id.slice('agent-input:'.length))
+    if (!delivery || entry.delivery === delivery) return entry
+    changed = true
+    return { ...entry, delivery }
+  })
+  return changed ? next : entries
+}
+
 /** The main run record plus reduced turns, without rendering or backend inspection. */
 export function mainTranscriptSections(run: ApiRun, thread: ThreadState): TranscriptSection[] {
   const sections: TranscriptSection[] = []
@@ -132,7 +153,7 @@ export function mainTranscriptSections(run: ApiRun, thread: ThreadState): Transc
         : {}),
       ...(turn.startedAt !== undefined ? { startedAt: turn.startedAt } : {}),
       ...(turn.completed?.ts !== undefined ? { completedAt: turn.completed.ts } : {}),
-      entries: turn.items,
+      entries: overlayAgentInputNotes(run, turn.items),
     })
   }
   return sections
@@ -453,7 +474,7 @@ function ThreadEntryRenderer({
       return entry.attribution ? <div className="min-w-0 rounded-md border border-border px-4 py-3 text-sm">
         <p className="mb-2 break-all text-xs text-muted-foreground">{entry.attribution.source === 'agent'
           ? `Agent input from parent ${entry.attribution.parentRunId}`
-          : `Worker lifecycle context for parent ${entry.attribution.parentRunId}`}</p>
+          : `Worker lifecycle context for parent ${entry.attribution.parentRunId}`}{entry.delivery ? ` · ${conversationDeliveryLabel(entry.delivery)}` : ''}</p>
         <NoteLine note={entry} />
       </div> : <NoteLine note={entry} />
     case 'conversation':

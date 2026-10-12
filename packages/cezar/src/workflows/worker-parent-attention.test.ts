@@ -1,13 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { deriveAttention } from '@open-mercato/cezar-contract';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { withDelayedCommand, withHeldPipeResponse, withHeldPrintResponse } from '../core/owned-input-delivery.testkit.ts';
-import { MONITORING_TEXT, REJECTED_ASK_TEXT } from './monitoring-turn.testkit.ts';
+import { attentionFields } from '../task-cli/projections.ts';
+import { ASK_TEXT, MONITORING_TEXT, messagesPrompt, REJECTED_ASK_TEXT } from './monitoring-turn.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { manager, store, root, worker, until, semaphore, useWorkerWaitFixture, waitOf } from './worker-wait.testkit.ts';
+import { fixtureUpdateRun, manager, parent, queuedWake, register, store, root, terminal, worker, until, semaphore, useWorkerWaitFixture, waitOf } from './worker-wait.testkit.ts';
 
 // Exhaustive transport classification: a new runner must provide either the real
 // delayed-ACK race or an executable wire limitation, never an omitted/skip row.
@@ -134,4 +136,92 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
       expect(store.getRun(p.id)?.monitoringWakeAt).toBeUndefined();
     });
   }
+
+  const native = () => {
+    process.env.CEZ_DRY_RUN = '0';
+    process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
+    process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
+  };
+  const capacity = (id: string) => {
+    const run = store.getRun(id)!;
+    expect(waitOf(run)?.phase).toBe('wake-pending');
+    expect(run.hasPendingHumanAsk).not.toBe(true);
+    expect(run.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
+    expect(deriveAttention(run)).toMatchObject({ bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' });
+    expect(attentionFields(run)).toEqual({ attention: 'none', attentionLabel: 'waiting for capacity' });
+  };
+
+  it('queued wake after worker completion waits for capacity, not Needs you (#971)', async () => {
+    native();
+    const p = await parent('mock:hold', backend);
+    const w = await worker(p.id);
+    register(p.id, [w.id]);
+    manager.enqueueOwnedRun(w.id);
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+    await until(() => store.getRun(w.id)?.status === 'running');
+    const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:slow', runner: 'claude' });
+    try {
+      await until(() => store.getRun(w.id)?.status === 'waiting');
+      await until(() => store.getRun(blocker.id)?.status === 'running');
+      manager.finish(w.id);
+      await until(() => terminal.includes(store.getRun(w.id)?.status ?? ''));
+      expect(store.getRun(p.id)?.status).toBe('waiting');
+      capacity(p.id);
+    } finally {
+      manager.cancel(blocker.id);
+    }
+  });
+
+  it('queued wake after wait timeout waits for capacity, not Needs you (#971)', async () => {
+    native();
+    const p = await parent('mock:hold', backend);
+    const w = await worker(p.id, 'mock:slow');
+    const wait = register(p.id, [w.id]);
+    manager.enqueueOwnedRun(w.id);
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+    await until(() => store.getRun(w.id)?.status === 'running');
+    const delegation = store.getRun(p.id)!.delegation!;
+    if (delegation.role !== 'root' || !delegation.wait) throw Error('fixture');
+    store.commitDelegation([{ id: p.id, delegation: { ...delegation, wait: { ...wait, deadline: new Date().toISOString() } } }]);
+    manager.reconcileWorkerWaits();
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'wake-pending');
+    expect(waitOf(store.getRun(p.id))?.reason).toBe('timeout');
+    expect(store.getRun(p.id)?.status).toBe('waiting');
+    expect(store.getRun(w.id)?.status).toBe('running');
+    capacity(p.id);
+  });
+
+  it('queued leftover after restart waits for capacity, not Needs you (#971)', async () => {
+    native();
+    const { p } = await queuedWake(backend);
+    expect(store.getRun(p.id)?.status).toBe('queued');
+    capacity(p.id);
+  });
+
+  it('keeps a wake-pending parent with a pending human ask as Needs you (#971)', async () => {
+    native();
+    const p = await parent('mock:hold', backend);
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id);
+    const send = async (messages: string[], afterDelivery?: () => void) => {
+      const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
+      expect(manager.sendMessage(p.id, [{ type: 'text', text: messagesPrompt(backend, messages) }])).toBe(true);
+      afterDelivery?.();
+      await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && semaphore.busy() === 0);
+    };
+    await send([ASK_TEXT], () => {
+      expect(register(p.id, [w.id]).phase).toBe('registered');
+    });
+    expect(store.getRun(p.id)?.hasPendingHumanAsk).toBe(true);
+    expect(store.getRun(p.id)?.status).toBe('waiting');
+    expect(waitOf(store.getRun(p.id))?.phase).toBe('registered');
+    fixtureUpdateRun(w.id, { status: 'done' });
+    manager.reconcileWorkerWaits();
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'wake-pending');
+    const run = store.getRun(p.id)!;
+    expect(run.hasPendingHumanAsk).toBe(true);
+    expect(run.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
+    expect(deriveAttention(run)).toMatchObject({ bucket: 'waiting', label: 'needs you' });
+    expect(attentionFields(run)).toEqual({ attention: 'waiting', attentionLabel: 'needs you' });
+  });
 });

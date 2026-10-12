@@ -157,6 +157,18 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
     // outside it → a ring. Both violet: still in motion, just not on this turn.
     return { bucket: 'none', tone: 'running', shape: run.delegation.role === 'root' ? 'workers' : 'ring', pulse: false, label: dependencyLabel };
   }
+  if (
+    !hasPendingHumanAsk && !run.hasPendingHumanAsk
+    && (run.status === 'waiting' || run.status === 'queued')
+    && run.delegation?.role !== 'invalid'
+    && run.delegation?.wait?.phase === 'wake-pending'
+  ) {
+    // A queued automatic wake is a scheduler/capacity wait, not a human gate (#971).
+    // Covers both the parked session still open (`waiting`) and a leftover after restart
+    // / Continue (`queued`). Workers already settled; the ring is the same “waiting for
+    // a slot” shape as queued CI. Running still wins because it is checked later.
+    return { bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' };
+  }
   if (run.status === 'waiting') {
     return { bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' };
   }

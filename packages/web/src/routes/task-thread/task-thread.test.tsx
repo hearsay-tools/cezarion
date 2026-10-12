@@ -1355,8 +1355,18 @@ describe('TaskThreadRoute — read receipts', () => {
 it.each(['registered', 'parked', 'wake-pending'] as const)('uses honest dock copy for %s worker waits', phase => {
   renderView(<ThreadView run={run('waiting', { delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase, outcomes: [] } } })} thread={reduceThread([])} />)
   const hint = document.querySelector('[data-slot="paused-hint"]')
-  // A full record carries the worker ids, so the count is said (#617).
-  expect(hint?.textContent).toContain(phase === 'parked' ? 'Waiting on 1 worker' : 'waiting for your reply')
+  // A full record carries the worker ids, so the parked count is said (#617).
+  // A queued automatic wake is capacity waiting, not a human gate (#971).
+  expect(hint?.textContent).toContain(
+    phase === 'parked' ? 'Waiting on 1 worker'
+      : phase === 'wake-pending' ? 'Waiting for capacity — you can send a message to resume'
+        : 'waiting for your reply',
+  )
+  expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain(
+    phase === 'parked' ? 'waiting on 1 worker'
+      : phase === 'wake-pending' ? 'waiting for capacity'
+        : 'needs you',
+  )
 })
 it('keeps a visible human ask above parked worker context in the header and dock', () => {
   const thread = reduceThread([line(1, 'ask.requested', { requestId: 'ask', questions: [{ header: 'Choice', question: 'Choose a path', options: [{ label: 'Proceed', description: 'Continue' }] }] })])

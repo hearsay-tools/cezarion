@@ -50,13 +50,27 @@ it.each(['root', 'worker'] as const)('follows %s lifecycle after reply, timeout,
   const record = waiting(role)
   if (!record.delegation || record.delegation.role === 'invalid' || !record.delegation.wait) throw Error('fixture')
   for (const reason of ['outcome', 'timeout', 'cancelled'] as const) {
-    const resumed = { ...record, delegation: { ...record.delegation, wait: { ...record.delegation.wait, phase: 'wake-pending' as const, reason } } }
-    expect(deriveAttention(resumed).label).toBe('needs you')
+    const resumed = summaryOf({ ...record, delegation: { ...record.delegation, wait: { ...record.delegation.wait, phase: 'wake-pending' as const, reason } } })
+    expect(deriveAttention(resumed).label).toBe('waiting for capacity')
+    expect(wantsAttention(resumed)).toBe(false)
     expect(deriveAttention({ ...resumed, status: 'running' }).label).toBe('running')
   }
   expect(deriveAttention({ ...record, status: 'done' }).label).toBe('done')
   expect(deriveAttention({ ...record, status: 'cancelled' }).label).toBe('cancelled')
   expect(deriveAttention({ ...record, delegation: undefined }).label).toBe('needs you')
+})
+
+it('keeps a wake-pending parent with a pending human ask as Needs you', () => {
+  const record = waiting('root')
+  if (!record.delegation || record.delegation.role === 'invalid' || !record.delegation.wait) throw Error('fixture')
+  const asking = summaryOf({
+    ...record,
+    hasPendingHumanAsk: true,
+    delegation: { ...record.delegation, wait: { ...record.delegation.wait, phase: 'wake-pending' as const, reason: 'outcome' as const } },
+  })
+  expect(deriveAttention(asking).label).toBe('needs you')
+  expect(wantsAttention(asking)).toBe(true)
+  expect(bucketOf(asking, 'active')).toBe('Needs you')
 })
 
 

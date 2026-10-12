@@ -634,6 +634,55 @@ it.each(['agent', 'lifecycle'] as const)('renders attributed %s input without an
   const view = render(<SessionTranscript runId="r1" viewId="main" sections={mainTranscriptSections(run(), state)} mode="document" />)
   expect(view.getByText(source === 'agent' ? `Agent input from parent ${parentRunId}` : `Worker lifecycle context for parent ${parentRunId}`)).toBeTruthy()
   expect(view.getByText(input.text, { exact: false })).toBeTruthy()
+  expect(view.queryByText('Queued')).toBeNull()
+  expect(view.queryByText('Delivered')).toBeNull()
+  expect(view.queryByText('Read')).toBeNull()
   const answered = reduceThread([...events, ...asRunEvents([{ type: 'user-message', text: 'Human answer' }]).map(event => ({ ...event, seq: 3 }))])
   expect(answered.turns.flatMap(turn => turn.items).find(item => item.kind === 'ask')).toMatchObject({ resolved: true, answer: 'Human answer' })
+})
+
+it('overlays agent-input receipts onto attributed notes without mutating thread state (#971)', () => {
+  const parentRunId = '10000000-0000-4000-8000-000000000001'
+  const queuedId = '20000000-0000-4000-8000-000000000001'
+  const deliveredId = '20000000-0000-4000-8000-000000000002'
+  const awaitingId = '20000000-0000-4000-8000-000000000003'
+  const readId = '20000000-0000-4000-8000-000000000004'
+  const missingId = '20000000-0000-4000-8000-000000000005'
+  const createdAt = '2026-09-06T00:00:00.000Z'
+  const deliveredAt = '2026-09-06T00:01:00.000Z'
+  const consumedAt = '2026-09-06T00:02:00.000Z'
+  const events = asRunEvents([
+    { type: 'agent-input', input: { id: queuedId, source: 'lifecycle', parentRunId, text: 'Queued wake', createdAt } },
+    { type: 'agent-input', input: { id: deliveredId, source: 'lifecycle', parentRunId, text: 'Delivered wake', createdAt, deliveredAt } },
+    { type: 'agent-input', input: { id: awaitingId, source: 'lifecycle', parentRunId, text: 'Awaiting-read wake', createdAt, deliveredAt, awaitingRead: true } },
+    { type: 'agent-input', input: { id: readId, source: 'lifecycle', parentRunId, text: 'Read wake', createdAt, deliveredAt, consumedAt } },
+    { type: 'agent-input', input: { id: missingId, source: 'lifecycle', parentRunId, text: 'Missing receipt', createdAt } },
+  ])
+  const state = reduceThread(events)
+  const overlay = mainTranscriptSections(run({
+    agentInputs: [
+      { id: queuedId, source: 'lifecycle', parentRunId, text: 'Queued wake', createdAt },
+      { id: deliveredId, source: 'lifecycle', parentRunId, text: 'Delivered wake', createdAt, deliveredAt },
+      { id: awaitingId, source: 'lifecycle', parentRunId, text: 'Awaiting-read wake', createdAt, deliveredAt, awaitingRead: true },
+      { id: readId, source: 'lifecycle', parentRunId, text: 'Read wake', createdAt, deliveredAt, consumedAt },
+    ],
+  }), state)
+  const notes = overlay.flatMap(section => section.entries).filter((entry): entry is Extract<ThreadEntry, { kind: 'note' }> => entry.kind === 'note')
+  expect(notes.find(note => note.id === `agent-input:${queuedId}`)?.delivery).toBe('queued')
+  expect(notes.find(note => note.id === `agent-input:${deliveredId}`)?.delivery).toBe('delivered')
+  expect(notes.find(note => note.id === `agent-input:${awaitingId}`)?.delivery).toBe('delivered')
+  expect(notes.find(note => note.id === `agent-input:${readId}`)?.delivery).toBe('consumed')
+  expect(notes.find(note => note.id === `agent-input:${missingId}`)?.delivery).toBeUndefined()
+  expect(state.turns.flatMap(turn => turn.items).filter((item): item is Extract<ThreadEntry, { kind: 'note' }> => item.kind === 'note').every(note => note.delivery === undefined)).toBe(true)
+
+  const view = render(<SessionTranscript runId="r1" viewId="main" sections={overlay} mode="document" />)
+  const header = (text: string) => {
+    const note = [...view.container.querySelectorAll('[data-slot="note-line"]')].find(node => node.textContent?.replace(/^·\s*/, '') === text)
+    return note?.parentElement?.querySelector('p')?.textContent
+  }
+  expect(header('Queued wake')).toBe(`Worker lifecycle context for parent ${parentRunId} · Queued`)
+  expect(header('Delivered wake')).toBe(`Worker lifecycle context for parent ${parentRunId} · Delivered`)
+  expect(header('Awaiting-read wake')).toBe(`Worker lifecycle context for parent ${parentRunId} · Delivered`)
+  expect(header('Read wake')).toBe(`Worker lifecycle context for parent ${parentRunId} · Read`)
+  expect(header('Missing receipt')).toBe(`Worker lifecycle context for parent ${parentRunId}`)
 })
