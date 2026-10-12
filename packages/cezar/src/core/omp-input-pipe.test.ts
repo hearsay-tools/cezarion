@@ -90,7 +90,9 @@ describe('native live closed-input parity', () => {
       } finally {
         rmSync(cwd, { recursive: true, force: true });
       }
-    }, 10000);
+      // Marker wait is 5s; Codex then polls waitFor (10s default) after that.
+      // 10s total cannot cover both plus teardown (hearsay-tools/cezarion#976).
+    }, 20_000);
   }
 });
 
