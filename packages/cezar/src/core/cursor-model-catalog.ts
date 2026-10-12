@@ -32,6 +32,7 @@ const parameterizedModelsSchema = z.object({
     configOptions: z.array(z.object({
       id: z.string(),
       type: z.string(),
+      currentValue: z.string().optional(),
       options: z.array(z.object({ value: z.string() })).optional(),
     })).optional(),
   })).max(MAX_MODELS),
@@ -43,6 +44,8 @@ const rpcResponseSchema = z.object({
   error: z.object({ code: z.number() }).optional(),
 });
 
+export type CursorParameterizedModel = z.infer<typeof parameterizedModelsSchema>['models'][number];
+
 class UnsupportedPickerError extends Error {}
 
 /** Prefer the read-only ACP extension. Older agents still expose the opaque variant listing. */
@@ -51,25 +54,43 @@ export async function discoverCursorModels(options: CursorModelDiscoveryOptions)
     return [];
   }
   try {
-    return await discoverParameterizedModels(options);
+    const catalog = await discoverCursorParameterizedModels(options);
+    return catalog.map(model => {
+      const levels: NonNullable<ModelOption['effortLevels']> = [];
+      for (const config of model.configOptions ?? []) {
+        if (!['effort', 'reasoning', 'reasoning_effort'].includes(config.id) || config.type !== 'select') continue;
+        for (const option of config.options ?? []) {
+          const level = effortLevelSchema.safeParse(option.value);
+          if (level.success && !levels.includes(level.data)) levels.push(level.data);
+        }
+      }
+      return { id: model.value, label: model.name, description: '', effortLevels: levels };
+    });
   } catch (error) {
     if (!(error instanceof UnsupportedPickerError)) throw error;
     return discoverCursorVariantModels(options);
   }
 }
 
-function discoverParameterizedModels(options: CursorModelDiscoveryOptions): Promise<ModelOption[]> {
-  const child = (options.spawn ?? spawnCursor)(resolveCursorExecutable(options.bin), ['acp'], options.cwd);
+/** Read native parameter keys/defaults without creating a session or starting inference. */
+export function discoverCursorParameterizedModels(
+  options: CursorModelDiscoveryOptions & { env?: Record<string, string>; signal?: AbortSignal },
+): Promise<CursorParameterizedModel[]> {
+  if (options.signal?.aborted) return Promise.reject(new Error('Cursor model discovery cancelled'));
+  const spawn = options.spawn ?? ((bin: string, args: readonly string[], cwd: string) =>
+    nodeSpawn(bin, [...args], { cwd, env: buildChildEnv({ backend: 'cursor', extraEnv: options.env }) }));
+  const child = spawn(resolveCursorExecutable(options.bin), ['acp'], options.cwd);
   const hasExited = trackChildExit(child);
   return new Promise((resolve, reject) => {
     let settled = false;
     let pending = '';
     let outputChars = 0;
     let responseId = 1;
-    const finish = (error?: Error, models?: ModelOption[]) => {
+    const finish = (error?: Error, models?: CursorParameterizedModel[]) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      options.signal?.removeEventListener('abort', abort);
       child.stdin.end();
       if (!hasExited()) {
         child.kill('SIGTERM');
@@ -82,6 +103,7 @@ function discoverParameterizedModels(options: CursorModelDiscoveryOptions): Prom
       else resolve(models ?? []);
     };
     const fail = (reason: string) => finish(new Error(`Cursor model discovery ${reason}`));
+    const abort = () => fail('cancelled');
     const timeout = setTimeout(() => fail('timed out'), options.timeoutMs ?? DEFAULT_ACP_DISCOVERY_TIMEOUT_MS);
     timeout.unref?.();
     const send = (id: number, method: string, params: unknown) => {
@@ -127,20 +149,11 @@ function discoverParameterizedModels(options: CursorModelDiscoveryOptions): Prom
         const catalog = parameterizedModelsSchema.safeParse(response.result);
         if (!catalog.success) return fail('returned unrecognized models');
         const seen = new Set<string>();
-        const models: ModelOption[] = [];
-        for (const model of catalog.data.models) {
-          if (seen.has(model.value)) continue;
+        const models = catalog.data.models.filter(model => {
+          if (seen.has(model.value)) return false;
           seen.add(model.value);
-          const levels: NonNullable<ModelOption['effortLevels']> = [];
-          for (const config of model.configOptions ?? []) {
-            if (!['effort', 'reasoning', 'reasoning_effort'].includes(config.id) || config.type !== 'select') continue;
-            for (const option of config.options ?? []) {
-              const level = effortLevelSchema.safeParse(option.value);
-              if (level.success && !levels.includes(level.data)) levels.push(level.data);
-            }
-          }
-          models.push({ id: model.value, label: model.name, description: '', effortLevels: levels });
-        }
+          return true;
+        });
         finish(undefined, models);
       }
     });
@@ -149,6 +162,8 @@ function discoverParameterizedModels(options: CursorModelDiscoveryOptions): Prom
     child.stdin.once('error', () => fail('stdin failed'));
     child.once('error', () => fail('child failed'));
     child.once('close', () => fail('child closed before discovery completed'));
+    options.signal?.addEventListener('abort', abort, { once: true });
+    if (options.signal?.aborted) { abort(); return; }
     send(1, 'initialize', { protocolVersion: 1, clientCapabilities: { _meta: { parameterizedModelPicker: true } } });
   });
 }

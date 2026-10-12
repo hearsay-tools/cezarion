@@ -995,12 +995,13 @@ not disable a user or team marketplace copy. A previously confirmed Cursor
 session ID can also lose history inside Cursor without an error; Cezar resumes
 the recorded ID and checks that Cursor returns the same ID.
 Cursor provides no qualified token-usage telemetry; Cezar leaves usage unavailable
-instead of estimating it. In ACP mode, Cezar negotiates Cursor’s parameterized model picker and
-shows only the effort levels the selected model advertises. The runner applies
-`effort` or `reasoning` through ACP session config options before prompting;
-unsupported explicit values fail instead of silently using a default. Initial models
-are pinned with `--model`; opaque parameterized IDs and legacy model discovery
-remain compatibility paths for older CLIs.
+instead of estimating it. Cezar discovers Cursor's canonical model IDs and advertised
+effort levels through its read-only ACP catalog. Print mode accepts those IDs and
+applies effort using a complete native parameter selection passed with `--model`,
+retaining the account catalog's defaults for other parameters. Advertised legacy
+print variants remain supported. ACP sessions apply `effort` or `reasoning` through
+session config options before prompting; an unsupported explicit effort fails
+instead of silently choosing another level.
 
 Settings → Agent config exposes Cursor’s global `cli-config.json`, project
 `.cursor/cli.json` permissions, `.cursor/mcp.json`, and shared `AGENTS.md`.
