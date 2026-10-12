@@ -1033,6 +1033,21 @@ describe('useGlobalEvents — run events', () => {
     )
   })
 
+  it('refreshes the cross-project index when a project finishes preparing (#667)', async () => {
+    // Preparing a project resumes the runs a restart interrupted, before any stream listens to its
+    // store, so no run event follows. The index would otherwise keep showing them as failed.
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { source } = mount()
+
+    source.emit('project-ready', JSON.stringify({ project: 'some-other-project' }))
+
+    await vi.waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: workspaceQueryKeys.runsIndex }),
+    )
+    // Not registry news: the project list is unchanged.
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: workspaceQueryKeys.projects })
+  })
+
   it('still refuses to write another project\u2019s run into THIS scope\u2019s list', async () => {
     // The index is cross-project; the scoped caches are not. Widening one must not widen the other.
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])

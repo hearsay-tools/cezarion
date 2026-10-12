@@ -1,0 +1,149 @@
+import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { processStartToken } from '../delegation/process-liveness.ts';
+import { ProjectContexts, ProjectContextsClosedError, type ProjectWarmCandidate } from './project-context.ts';
+
+/**
+ * Background warm-up (#667): after the server listens, every registered project's context is
+ * built one at a time, most recently opened first, so the first click on a project finds it
+ * ready instead of paying the store open, the worktree sweeps and `recover()` on that click.
+ */
+describe('ProjectContexts.warmAll', () => {
+  const roots: string[] = [];
+  const children: ChildProcess[] = [];
+  let warn: ReturnType<typeof vi.spyOn>;
+
+  const root = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-warm-'));
+    roots.push(dir);
+    return dir;
+  };
+
+  beforeEach(() => {
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    warn.mockRestore();
+    for (const child of children.splice(0)) child.kill('SIGKILL');
+    for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function makeContexts(projects: ProjectWarmCandidate[]): { contexts: ProjectContexts; built: string[] } {
+    const contexts = new ProjectContexts({ listProjects: async () => projects });
+    const built: string[] = [];
+    contexts.onContextBuilt((ctx) => built.push(ctx.id));
+    return { contexts, built };
+  }
+
+  it('builds every project once, most recently opened first, and skips missing and built ones', async () => {
+    const projects: ProjectWarmCandidate[] = [
+      { id: 'old', root: root(), status: 'not-git', lastOpenedAt: '2026-10-01T00:00:00.000Z' },
+      { id: 'gone', root: join(tmpdir(), 'cez-warm-missing'), status: 'missing', lastOpenedAt: '2026-10-11T00:00:00.000Z' },
+      { id: 'new', root: root(), status: 'not-git', lastOpenedAt: '2026-10-10T00:00:00.000Z' },
+      { id: 'never', root: root(), status: 'not-git' },
+      { id: 'open', root: root(), status: 'not-git', lastOpenedAt: '2026-10-12T00:00:00.000Z' },
+    ];
+    const { contexts, built } = makeContexts(projects);
+    try {
+      await contexts.context('open');
+      built.length = 0;
+
+      const warmed = await contexts.warmAll(projects);
+
+      expect(warmed).toEqual(['new', 'old', 'never']);
+      expect(built).toEqual(['new', 'old', 'never']);
+      expect(contexts.ids().sort()).toEqual(['never', 'new', 'old', 'open']);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      contexts.disposeAll();
+    }
+  });
+
+  it('leaves a project another live cockpit owns alone', async () => {
+    const owned = root();
+    const dataDir = join(owned, '.ai/cezar');
+    mkdirSync(dataDir, { recursive: true });
+    const other = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { stdio: 'ignore' });
+    children.push(other);
+    const startToken = processStartToken(other.pid!);
+    writeFileSync(join(dataDir, 'cockpit.lock'), JSON.stringify({
+      pid: other.pid, token: randomUUID(), ...(startToken ? { startToken } : {}), url: 'http://127.0.0.1:1/',
+    }));
+    const { contexts, built } = makeContexts([{ id: 'owned', root: owned, status: 'not-git' }]);
+    try {
+      expect(await contexts.warmAll([{ id: 'owned', root: owned, status: 'not-git' }])).toEqual([]);
+      expect(built).toEqual([]);
+    } finally {
+      contexts.disposeAll();
+    }
+  });
+
+  it('logs a failed build once, keeps going, and caches nothing so the next click retries', async () => {
+    const broken = root();
+    // A data dir that is a file: the store cannot open.
+    mkdirSync(join(broken, '.ai'), { recursive: true });
+    writeFileSync(join(broken, '.ai/cezar'), 'not a directory');
+    const projects: ProjectWarmCandidate[] = [
+      { id: 'broken', root: broken, status: 'not-git', lastOpenedAt: '2026-10-12T00:00:00.000Z' },
+      { id: 'fine', root: root(), status: 'not-git', lastOpenedAt: '2026-10-11T00:00:00.000Z' },
+    ];
+    const { contexts } = makeContexts(projects);
+    try {
+      expect(await contexts.warmAll(projects)).toEqual(['fine']);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('broken');
+      expect(contexts.peek('broken')).toBeUndefined();
+
+      rmSync(join(broken, '.ai/cezar'));
+      expect((await contexts.context('broken')).id).toBe('broken');
+    } finally {
+      contexts.disposeAll();
+    }
+  });
+
+  it('shares one build with a click that lands while the warm-up is building', async () => {
+    const projects: ProjectWarmCandidate[] = [{ id: 'a', root: root(), status: 'not-git' }];
+    const { contexts, built } = makeContexts(projects);
+    try {
+      const warming = contexts.warmAll(projects);
+      const clicked = await contexts.context('a');
+      await warming;
+      expect(built).toEqual(['a']);
+      expect(contexts.peek('a')).toBe(clicked);
+    } finally {
+      contexts.disposeAll();
+    }
+  });
+
+  it('stops at shutdown: a build in flight is torn down and nothing after it starts', async () => {
+    const projects: ProjectWarmCandidate[] = [
+      { id: 'first', root: root(), status: 'not-git', lastOpenedAt: '2026-10-12T00:00:00.000Z' },
+      { id: 'second', root: root(), status: 'not-git', lastOpenedAt: '2026-10-11T00:00:00.000Z' },
+    ];
+    const { contexts, built } = makeContexts(projects);
+    const warming = contexts.warmAll(projects);
+    contexts.disposeAll();
+    expect(await warming).toEqual([]);
+    expect(built).toEqual([]);
+    expect(contexts.ids()).toEqual([]);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('tears down a build that finishes after disposeAll instead of registering it', async () => {
+    const projects: ProjectWarmCandidate[] = [{ id: 'late', root: root(), status: 'not-git' }];
+    const { contexts, built } = makeContexts(projects);
+    const building = contexts.context('late');
+    contexts.disposeAll();
+    await expect(building).rejects.toBeInstanceOf(ProjectContextsClosedError);
+    expect(built).toEqual([]);
+    expect(contexts.ids()).toEqual([]);
+    // The map stays usable: a later access builds normally.
+    expect((await contexts.context('late')).id).toBe('late');
+    contexts.disposeAll();
+  });
+});

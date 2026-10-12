@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import { AutomationStore } from '../automations/store.ts';
 import { reconcileAutomationReceipts } from '../automations/task-template.ts';
 import { DEFAULT_WORKTREE_RETENTION, resolveWorktreeRetention } from '../config.ts';
@@ -53,6 +54,16 @@ export interface ProjectContextSource {
   root: string;
   /** `missing` roots are never instantiated; `ok`/`not-git` both build. */
   status: 'ok' | 'missing' | 'not-git';
+}
+
+/** A registry row `warmAll` can order: `lastOpenedAt` is the registry's own ISO timestamp. */
+export interface ProjectWarmCandidate extends ProjectContextSource {
+  lastOpenedAt?: string;
+}
+
+/** The background warm-up (#667) is on unless `CEZ_PROJECT_WARMUP` is exactly `0`. */
+export function projectWarmupEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.CEZ_PROJECT_WARMUP !== '0';
 }
 
 export interface ProjectContextDeps {
@@ -127,6 +138,14 @@ export async function sweepRegisteredPreviewLeftovers(
   return killed;
 }
 
+/** A build that finished after `disposeAll`: its context was torn down, never registered. */
+export class ProjectContextsClosedError extends Error {
+  constructor() {
+    super('project contexts were disposed while this project was being built');
+    this.name = 'ProjectContextsClosedError';
+  }
+}
+
 export type ProjectContextFailure = 'unknown-project' | 'missing-root';
 
 /** Typed failure so the route layer can map reasons to statuses (404/409)
@@ -164,6 +183,8 @@ export class ProjectContexts {
   /** One semaphore for every manager this map builds — injected by boot,
    *  private-but-shared otherwise. */
   private readonly semaphore: WorkspaceSemaphore;
+  /** Bumped by `disposeAll`: a build that started before it is torn down, not registered. */
+  private generation = 0;
 
   constructor(private readonly deps: ProjectContextDeps) {
     this.semaphore = deps.semaphore ?? new WorkspaceSemaphore();
@@ -176,16 +197,54 @@ export class ProjectContexts {
     if (existing) return existing;
     const inFlight = this.building.get(projectId);
     if (inFlight) return inFlight;
+    const generation = this.generation;
     const build = this.build(projectId);
     this.building.set(projectId, build);
     try {
       const ctx = await build;
+      if (generation !== this.generation) {
+        // Shut down while this build ran: nothing may outlive `disposeAll`.
+        this.disposeBuilt(ctx);
+        throw new ProjectContextsClosedError();
+      }
       this.contexts.set(projectId, ctx);
       this.notifyBuilt(ctx);
       return ctx;
     } finally {
       this.building.delete(projectId);
     }
+  }
+
+  /**
+   * Build every project's context in the background (#667), so the first click on a project
+   * finds it ready. A lazy build costs the store open, the worktree sweeps and `recover()`, which
+   * resumes the runs a restart interrupted; paid on the click, that is seconds of a blank page.
+   *
+   * One project at a time, most recently opened first, yielding to the event loop between builds
+   * so a request is never queued behind several. A click on a project being warmed shares its
+   * build (`context()` caches the in-flight promise). Skipped: missing roots, built contexts, and
+   * a project another live cockpit owns, whose lock would otherwise be waited on for 15 s and then
+   * refused. A failed build is logged once and dropped; nothing is cached, so the next click
+   * builds again exactly as before. `disposeAll` stops the loop. Resolves with the ids built here.
+   */
+  async warmAll(projects: readonly ProjectWarmCandidate[]): Promise<string[]> {
+    const generation = this.generation;
+    const ordered = [...projects].sort((a, b) => (b.lastOpenedAt ?? '').localeCompare(a.lastOpenedAt ?? ''));
+    const warmed: string[] = [];
+    for (const project of ordered) {
+      await yieldToEventLoop();
+      if (generation !== this.generation) break;
+      if (project.status === 'missing' || this.contexts.has(project.id) || this.building.has(project.id)) continue;
+      if (ownedByAnotherCockpit(join(project.root, '.ai/cezar'))) continue;
+      try {
+        await this.context(project.id);
+        warmed.push(project.id);
+      } catch (err) {
+        if (err instanceof ProjectContextsClosedError) break;
+        console.warn(`[cez] project ${project.id} could not be prepared in the background: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    return warmed;
   }
 
   /**
@@ -254,6 +313,11 @@ export class ProjectContexts {
     const ctx = this.contexts.get(projectId);
     if (!ctx) return false;
     this.contexts.delete(projectId);
+    this.disposeBuilt(ctx, opts);
+    return true;
+  }
+
+  private disposeBuilt(ctx: ProjectContext, opts: { releasePreviews?: boolean } = {}): void {
     // The preview host is process-wide and outlives this context: a removed project's dev servers
     // and browsers go with it (#781). Shutdown leaves that to `PreviewHost.close()`.
     if (opts.releasePreviews !== false && this.deps.preview) {
@@ -266,11 +330,11 @@ export class ProjectContexts {
     this.managerCleanups.get(ctx.manager)?.();
     this.managerCleanups.delete(ctx.manager);
     teardown(ctx);
-    return true;
   }
 
-  /** Tear down every built context (process shutdown). */
+  /** Tear down every built context (process shutdown), and every build still running. */
   disposeAll(): void {
+    this.generation += 1;
     for (const id of this.ids()) this.dispose(id, { releasePreviews: false });
   }
 

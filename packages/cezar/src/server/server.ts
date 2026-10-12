@@ -207,7 +207,7 @@ import {
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { mergeWriteWorkspaceUiState, readWorkspaceUiState } from '../workspace/ui-state.ts';
 import { checkoutRepo, type CloneRunner } from './checkout.ts';
-import { armPreview, ProjectContextError, ProjectContexts, sweepRegisteredPreviewLeftovers, type ProjectContext } from './project-context.ts';
+import { armPreview, ProjectContextError, ProjectContexts, projectWarmupEnabled, sweepRegisteredPreviewLeftovers, type ProjectContext } from './project-context.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
 import { readUiState, uiStatePath } from '../ui-state.ts';
 import { agentHomePaths, expandTilde } from '../paths.ts';
@@ -661,7 +661,8 @@ export type WorkspaceEventName =
   | 'health'
   | 'model-catalog'
   | 'provider-status'
-  | 'automation-change';
+  | 'automation-change'
+  | 'project-ready';
 
 /**
  * The in-process bus for workspace-level SSE events. The registry-mutating
@@ -1390,6 +1391,10 @@ export function createApp(deps: ServerDeps) {
     if (ctx) taskWebhooks.attach(ctx);
   }
   contexts.onContextBuilt((ctx) => taskWebhooks.attach(ctx));
+  // #667: recovery ran inside the build, before any workspace stream attached to this project's
+  // store, so the runs it resumed sent no `run` event. Until a cockpit refetches, its cross-project
+  // index keeps the cold read's answer: every run the restart interrupted, shown as failed.
+  contexts.onContextBuilt((ctx) => workspaceEvents.emit('project-ready', { project: ctx.id }));
   const projectRegistryEntry = async (projectId: string): Promise<WorkspaceProject | undefined> => {
     const id = projectId === 'default' ? await resolveBootProject() : projectId;
     return (await loadWorkspaceConfig()).projects.find((entry) => entry.id === id);
@@ -6611,6 +6616,13 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       coordinator.start(all);
       // #781: every registered project's preview leftovers, not only the boot project's.
       void sweepRegisteredPreviewLeftovers(all, deps.previewHost).catch(() => 0);
+      // #667: build every other project's context now, so the first click on one does not pay
+      // its store open, worktree sweeps and recovery. The boot project is built already.
+      if (projectWarmupEnabled()) {
+        const bootId = deps.bootProjectId ?? 'default';
+        void sharedContexts.warmAll(all.filter((project) => project.id !== bootId && project.root !== deps.repoRoot))
+          .catch(() => undefined);
+      }
       // #801: with automations off there is nothing to warm — no remote to resolve, no receipts
       // to reconcile, and above all no scheduler to start. The skills-update coordinator above is
       // a separate feature and starts either way.
