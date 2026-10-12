@@ -177,8 +177,8 @@ export async function queuedWake(runner: RunnerId = 'claude') {
   const wait = register(p.id, [w.id]); checkpoint('queued-wake-registered');
   await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
   const delegation = store.getRun(p.id)!.delegation!;
-  if (delegation.role !== 'root') throw Error('fixture');
-  store.commitDelegation([{ id: p.id, delegation: { ...delegation, wait: { ...wait, deadline: new Date().toISOString() } } }]);
+  if (delegation.role !== 'root' || !delegation.wait) throw Error('fixture');
+  store.commitDelegation([{ id: p.id, delegation: { ...delegation, wait: { ...delegation.wait, deadline: new Date().toISOString() } } }]);
   await restart(); checkpoint('queued-wake-restarted');
   await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(w.id)?.sessionEverOpened === true); checkpoint('queued-wake-child-open');
   expect(store.getRun(p.id)?.status).toBe('queued');

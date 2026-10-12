@@ -176,13 +176,14 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
     native();
     const p = await parent('mock:hold', backend);
     const w = await worker(p.id, 'mock:slow');
-    const wait = register(p.id, [w.id]);
+    register(p.id, [w.id]);
     manager.enqueueOwnedRun(w.id);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
     await until(() => store.getRun(w.id)?.status === 'running');
     const delegation = store.getRun(p.id)!.delegation!;
     if (delegation.role !== 'root' || !delegation.wait) throw Error('fixture');
-    store.commitDelegation([{ id: p.id, delegation: { ...delegation, wait: { ...wait, deadline: new Date().toISOString() } } }]);
+    store.commitDelegation([{ id: p.id, delegation: { ...delegation, wait: { ...delegation.wait, deadline: new Date().toISOString() } } }]);
+    expect(waitOf(store.getRun(p.id))?.phase).toBe('parked');
     manager.reconcileWorkerWaits();
     await until(() => waitOf(store.getRun(p.id))?.phase === 'wake-pending');
     expect(waitOf(store.getRun(p.id))?.reason).toBe('timeout');
