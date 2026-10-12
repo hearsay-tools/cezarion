@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createQueryClient } from '@/api/query-client'
 import { setApiScope } from '@open-mercato/cezar-api-client'
 import { workspaceQueryKeys } from '@/api/queries'
+import { ProjectScopeProvider } from '@/api/project-scope-context'
 import type {
   HealthResponse,
   ProviderStatusResponse,
@@ -262,6 +263,7 @@ describe('sidebar wiring', () => {
     expect(repoChip()?.textContent).toMatch(/Loading project|Project unavailable/)
     expect(versionChip()).toBeNull()
     expect(navBadge()).toBeNull()
+    expect(inSidebar().queryByRole('button', { name: 'More views' })).toBeNull()
     // …and the app itself is up. The chips being empty is not a loading screen.
     expect(screen.getByText('route content')).toBeTruthy()
     expect(document.querySelector('[data-slot="sidebar"]')).not.toBeNull()
@@ -379,6 +381,59 @@ describe('sidebar wiring', () => {
     fireEvent.keyDown(screen.getByRole('button', { name: 'More views' }), { key: 'Enter' })
     expect((await screen.findByRole('menuitem', { name: /Inbox/ })).getAttribute('href')).toBe('/p/cezar/inbox')
     expect(screen.getByRole('menuitem', { name: 'Automations' }).getAttribute('href')).toBe('/p/cezar/automations')
+  })
+
+  it('keeps confirmed overflow capabilities while a new project health cache is pending', async () => {
+    const health = { ...HEALTH, capabilities: { ...HEALTH.capabilities, automations: true } }
+    serve({
+      '/api/v1/health': health,
+      '/api/v1/todos': [],
+      '/api/v1/p/shop/todos': [],
+      '/api/v1/projects': {
+        projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'shop' }],
+        bootProject: 'cezar', projectsDir: '/projects',
+      },
+      '/api/v1/run-summaries': [],
+      '/api/v1/p/shop/run-summaries': [],
+    })
+    const client = createQueryClient()
+    const tree = (scope: string | null) => (
+      <QueryClientProvider client={client}>
+        <ThemeProvider>
+          <MemoryRouter initialEntries={['/p/shop/']}>
+            <AppShellContainer>
+              <ProjectScopeProvider projectId={scope}><p>route content</p></ProjectScopeProvider>
+            </AppShellContainer>
+          </MemoryRouter>
+        </ThemeProvider>
+      </QueryClientProvider>
+    )
+    const { rerender } = render(tree(null))
+    await waitFor(() => expect(inSidebar().getByRole('button', { name: 'More views' })).toBeTruthy())
+
+    // Health is workspace-level on the wire, but the query key follows the provider's scope.
+    // Hold its next response so a subsequent shell render observes the empty sibling cache.
+    const originalFetch = fetchMock.getMockImplementation()!
+    let releaseHealth!: (response: Response) => void
+    const pendingHealth = new Promise<Response>(resolve => { releaseHealth = resolve })
+    fetchMock.mockImplementation((input, init) => String(input) === '/api/v1/health'
+      ? pendingHealth : originalFetch(input, init))
+    rerender(tree('shop'))
+    rerender(tree('shop'))
+    await waitFor(() => expect(client.getQueryState(['shop', 'health'])?.fetchStatus).toBe('fetching'))
+    expect(client.getQueryData(['shop', 'health'])).toBeUndefined()
+    expect(inSidebar().getByRole('button', { name: 'More views' })).toBeTruthy()
+    fireEvent.keyDown(inSidebar().getByRole('button', { name: 'More views' }), { key: 'Enter' })
+    expect((await screen.findByRole('menuitem', { name: /Inbox/ })).getAttribute('href')).toBe('/p/shop/inbox')
+    expect(screen.getByRole('menuitem', { name: 'Automations' }).getAttribute('href')).toBe('/p/shop/automations')
+
+    // A new authoritative response still wins, including explicit capability removal.
+    await act(async () => {
+      releaseHealth(new Response(JSON.stringify({ ...health, capabilities: {
+        ...health.capabilities, followups: false, automations: false,
+      } })))
+    })
+    await waitFor(() => expect(inSidebar().queryByRole('button', { name: 'More views' })).toBeNull())
   })
 
   it('keeps the archive filter beside the current project tasks', async () => {
