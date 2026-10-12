@@ -4,10 +4,10 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 
 - Upstream: [open-mercato/cezar](https://github.com/open-mercato/cezar) `main`
 - Fork point: `feb85666` (2026-08-31)
-- Last scan: 2026-10-05 to `dab947e9` ([report](scans/2026-10-05.md))
-- Entries: 130 · pending: 93 · planned: 1 · ported: 22 · partial: 1 · diverged: 6 · n/a: 7
+- Last scan: 2026-10-12 to `7af006de` ([report](scans/2026-10-12.md))
+- Entries: 215 · pending: 178 · planned: 1 · ported: 22 · partial: 1 · diverged: 6 · n/a: 7
 
-## Pending (93)
+## Pending (178)
 
 | Upstream | Date | Title | Conflicts | Note |
 | --- | --- | --- | --- | --- |
@@ -104,6 +104,91 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#907](https://github.com/open-mercato/cezar/pull/907) | 2026-10-04 | fix(ui): remember the engine pick on the GitHub and Inbox hand-offs (#906) (#907) | 5 |  |
 | [#1255](https://github.com/open-mercato/cezar/pull/1255) | 2026-10-04 | fix(web): preserve drafts on project switch (#1095) (#1255) | 4 |  |
 | [#1269](https://github.com/open-mercato/cezar/pull/1269) | 2026-10-04 | fix(web): offer the subtask runner's own models in the Dispatch settings (#1269) | 3 |  |
+| [#1282](https://github.com/open-mercato/cezar/pull/1282) | 2026-10-05 | fix(runs): retire a stale workflow park when a later turn does not park (#1282) | 2 |  |
+| [#1283](https://github.com/open-mercato/cezar/pull/1283) | 2026-10-05 | feat(cockpit): comment on diff lines and send them to the agent as a review (#1283) | 9 |  |
+| [#1265](https://github.com/open-mercato/cezar/pull/1265) | 2026-10-05 | feat(workflows): gate the check retry loop by exit code, for agentic e2e checks (#1265) | 5 |  |
+| [#1290](https://github.com/open-mercato/cezar/pull/1290) | 2026-10-06 | fix(runs): keep an unanswered CEZ:ASK under needs you after the idle close (#1290) | 11 |  |
+| [#1280](https://github.com/open-mercato/cezar/pull/1280) | 2026-10-06 | docs(specs): repository file browser on the Git tab (#1280) | 0 |  |
+| [#1278](https://github.com/open-mercato/cezar/pull/1278) | 2026-10-06 | fix(dispatch): derive runner lists in task and automation help (#1236) (#1278) | 0 |  |
+| [#1258](https://github.com/open-mercato/cezar/pull/1258) | 2026-10-06 | fix: explain unsupported agent identities (#1258) | 1 |  |
+| [#1246](https://github.com/open-mercato/cezar/pull/1246) | 2026-10-06 | test: cover screenshots queued before task startup (#1246) | 1 |  |
+| [#1297](https://github.com/open-mercato/cezar/pull/1297) | 2026-10-06 | fix(test): stabilize issue-804 teardown and template races (#1297) | 2 |  |
+| [#1294](https://github.com/open-mercato/cezar/pull/1294) | 2026-10-06 | fix(browser): support rootless staged agent-browser deps (#1294) | 2 |  |
+| [#1298](https://github.com/open-mercato/cezar/pull/1298) | 2026-10-06 | fix(web): wrap long model-picker descriptions (#1298) | 1 |  |
+| [#1244](https://github.com/open-mercato/cezar/pull/1244) | 2026-10-06 | fix(web): enlarge mobile step-rail touch target (#1244) | 2 |  |
+| [#1242](https://github.com/open-mercato/cezar/pull/1242) | 2026-10-06 | fix(settings): persist idle timeout configuration (#1242) | 1 |  |
+| [#1127](https://github.com/open-mercato/cezar/pull/1127) | 2026-10-06 | fix(automations): normalize legacy receipt identities (#1127) | 2 |  |
+| [#1230](https://github.com/open-mercato/cezar/pull/1230) | 2026-10-06 | fix(codex): quiesce events after teardown (#1230) | 3 |  |
+| [#1228](https://github.com/open-mercato/cezar/pull/1228) | 2026-10-06 | fix(core): gate cloud credentials by backend identity (#1228) | 1 |  |
+| [#1210](https://github.com/open-mercato/cezar/pull/1210) | 2026-10-06 | fix(web): keep invalid bookmark runners in composer (#1210) | 1 |  |
+| [#1229](https://github.com/open-mercato/cezar/pull/1229) | 2026-10-06 | fix(new-task): preserve attachments when discarding plans (#1229) | 1 |  |
+| [#1231](https://github.com/open-mercato/cezar/pull/1231) | 2026-10-06 | fix(skills): preserve YAML frontmatter and atomic writes (#1231) | 0 |  |
+| [#1256](https://github.com/open-mercato/cezar/pull/1256) | 2026-10-06 | fix(claude): explain headless permission denials (#1248) (#1256) | 3 |  |
+| [#1312](https://github.com/open-mercato/cezar/pull/1312) | 2026-10-06 | fix(ask): lift the CEZ:ASK question and option caps (#1312) | 5 |  |
+| [#1271](https://github.com/open-mercato/cezar/pull/1271) | 2026-10-06 | fix(auth): recognize OpenCode 2.x credential rows (#1271) | 0 |  |
+| [#1153](https://github.com/open-mercato/cezar/pull/1153) | 2026-10-06 | fix(server): reject directories as launchers (#1153) | 1 |  |
+| [#1208](https://github.com/open-mercato/cezar/pull/1208) | 2026-10-06 | fix(pi): preserve markers across content parts (#1208) | 1 |  |
+| [#1273](https://github.com/open-mercato/cezar/pull/1273) | 2026-10-06 | fix(ui): allow longer reusable prompt templates (#1273) | 2 |  |
+| [#1149](https://github.com/open-mercato/cezar/pull/1149) | 2026-10-06 | fix(server-install): fail macOS redeploy on restart errors (#1149) | 2 |  |
+| [#1174](https://github.com/open-mercato/cezar/pull/1174) | 2026-10-06 | fix(server-install): expose terminal nginx parse failures (#1174) | 2 |  |
+| [#1313](https://github.com/open-mercato/cezar/pull/1313) | 2026-10-07 | fix(web): jump to latest without reloading the thread (#1313) | 4 |  |
+| [#1328](https://github.com/open-mercato/cezar/pull/1328) | 2026-10-07 | Remove plan mode from task composer (#1328) | 8 |  |
+| [#1003](https://github.com/open-mercato/cezar/pull/1003) | 2026-10-08 | fix(server-install): allocate an instance's loopback port machine-wide, not per unix user (#1003) | 1 |  |
+| [#1324](https://github.com/open-mercato/cezar/pull/1324) | 2026-10-08 | feat: private, per-project MCP servers for every agent run (#1324) | 10 |  |
+| [#1322](https://github.com/open-mercato/cezar/pull/1322) | 2026-10-08 | feat: workflow node editor and graph execution (#1322) | 22 |  |
+| [#1327](https://github.com/open-mercato/cezar/pull/1327) | 2026-10-08 | feat: customizable cockpit branding (#1327) | 16 |  |
+| [#1339](https://github.com/open-mercato/cezar/pull/1339) | 2026-10-08 | test(e2e): repair four assertions that had gone stale against the UI (#1339) | 2 |  |
+| [#1299](https://github.com/open-mercato/cezar/pull/1299) | 2026-10-09 | feat(cockpit): browse the repository from the Git tab — tree, viewer and path filter (#1299) | 10 |  |
+| [#1082](https://github.com/open-mercato/cezar/pull/1082) | 2026-10-09 | feat(skills): unify browsing, activation, and preview (#1082) | 13 |  |
+| [#1336](https://github.com/open-mercato/cezar/pull/1336) | 2026-10-09 | feat(web): filter tasks by origin (Regular \| Automations \| All) + Tasks facets (#1336) | 12 |  |
+| [#1305](https://github.com/open-mercato/cezar/pull/1305) | 2026-10-09 | fix(cockpit): scroll the Changes tree and diff in their own columns (#1305) | 11 |  |
+| [#1311](https://github.com/open-mercato/cezar/pull/1311) | 2026-10-09 | fix(web): fit nested sidebar rows at minimum width; mark unread by weight only (#1311) | 8 |  |
+| [#1134](https://github.com/open-mercato/cezar/pull/1134) | 2026-10-09 | fix(runs): start a queued run with the workflow as it is at dequeue (#1134) | 2 |  |
+| [#1051](https://github.com/open-mercato/cezar/pull/1051) | 2026-10-09 | fix(task-thread): the Subtasks panel collapses and scrolls instead of owning the header (#1051) | 2 |  |
+| [#1254](https://github.com/open-mercato/cezar/pull/1254) | 2026-10-09 | test(cezar): turn LLM task naming off for the whole vitest run (#1254) | 1 |  |
+| [#1318](https://github.com/open-mercato/cezar/pull/1318) | 2026-10-09 | fix(git): avoid shared config locks during worktree creation (#1318) | 0 |  |
+| [#1348](https://github.com/open-mercato/cezar/pull/1348) | 2026-10-09 | test(graph): carry mock:done in the task so #1078's quick-task refresh keeps it (#1348) | 0 |  |
+| [#1179](https://github.com/open-mercato/cezar/pull/1179) | 2026-10-09 | fix(runners): OpenCode port 0, string Codex RPC ids, dead Claude stdin (#1179) | 4 |  |
+| [#1329](https://github.com/open-mercato/cezar/pull/1329) | 2026-10-09 | fix(git): keep SHA-pinned task diffs fresh (#1329) | 0 |  |
+| [#1331](https://github.com/open-mercato/cezar/pull/1331) | 2026-10-09 | fix(dispatch): defer reports for unanswered child asks (#1331) | 1 |  |
+| [#1249](https://github.com/open-mercato/cezar/pull/1249) | 2026-10-09 | fix(cockpit): keep an ask card's picks when the thread unmounts its row (#1249) | 1 |  |
+| [#1257](https://github.com/open-mercato/cezar/pull/1257) | 2026-10-09 | fix: grant attachment library to live sessions (#1257) | 2 |  |
+| [#1330](https://github.com/open-mercato/cezar/pull/1330) | 2026-10-09 | fix(tests): make automation gate warm-up deterministic (#1330) | 1 |  |
+| [#1342](https://github.com/open-mercato/cezar/pull/1342) | 2026-10-09 | fix(server): share SSE event and deletion subscriptions (#1342) | 1 |  |
+| [#1343](https://github.com/open-mercato/cezar/pull/1343) | 2026-10-09 | fix: refresh runner model catalogs in background (#1343) | 2 |  |
+| [#1333](https://github.com/open-mercato/cezar/pull/1333) | 2026-10-09 | fix(process-usage): reuse indexes per sample (#1214) (#1333) | 1 |  |
+| [#1332](https://github.com/open-mercato/cezar/pull/1332) | 2026-10-09 | fix(handoff): bound repeated heartbeat entries (#1332) | 0 |  |
+| [#1349](https://github.com/open-mercato/cezar/pull/1349) | 2026-10-10 | feat(cockpit): Markdown preview toggle in the Changes diff (#1349) | 8 |  |
+| [#1133](https://github.com/open-mercato/cezar/pull/1133) | 2026-10-10 | fix(cli): explain a missing CEZ_API_URL to a person, add `cez runs list`, document the /api/v1 API (#1133) | 4 |  |
+| [#1320](https://github.com/open-mercato/cezar/pull/1320) | 2026-10-10 | fix(github): keep PRs out of numeric issue search (#1320) | 1 |  |
+| [#1334](https://github.com/open-mercato/cezar/pull/1334) | 2026-10-10 | fix(windows): accept native absolute paths in the project registry, checkout and workspace settings (#1334) | 1 |  |
+| [#1360](https://github.com/open-mercato/cezar/pull/1360) | 2026-10-10 | chore(release): bump the release set to 0.15.0 and add the changelog entry (#1360) | 5 |  |
+| [#1361](https://github.com/open-mercato/cezar/pull/1361) | 2026-10-10 | docs(agents): keep comments, PR bodies and changelog entries short (#1361) | 0 |  |
+| [#1126](https://github.com/open-mercato/cezar/pull/1126) | 2026-10-10 | fix(workflows): keep check artifacts out of autosave commits (#1126) | 3 |  |
+| [#1363](https://github.com/open-mercato/cezar/pull/1363) | 2026-10-10 | fix(resources): Activity-Monitor RAM on macOS and a host glance that keeps updating (#1363) | 1 |  |
+| [#1362](https://github.com/open-mercato/cezar/pull/1362) | 2026-10-10 | feat: speed up GitHub tab with paged hydration (#1362) | 10 |  |
+| [#1364](https://github.com/open-mercato/cezar/pull/1364) | 2026-10-10 | chore: set up e2e browser tests (#1364) | 2 |  |
+| [#1291](https://github.com/open-mercato/cezar/pull/1291) | 2026-10-10 | feat(secrets): encrypted project/workspace secrets for check steps and cezar, never for agents (#1291) | 21 |  |
+| [#1365](https://github.com/open-mercato/cezar/pull/1365) | 2026-10-10 | docs(changelog): add the changes merged since 0.15.0 under Unreleased (#1365) | 1 |  |
+| [#1366](https://github.com/open-mercato/cezar/pull/1366) | 2026-10-11 | fix(github): make the paged GitHub list query valid on real GitHub (#1366) | 1 |  |
+| [#1373](https://github.com/open-mercato/cezar/pull/1373) | 2026-10-11 | fix(redaction): an sk- key never follows a letter, so task-… stays a word (#1373) | 0 |  |
+| [#1357](https://github.com/open-mercato/cezar/pull/1357) | 2026-10-11 | fix queued follow-up visibility without worktrees (#1357) | 1 |  |
+| [#1355](https://github.com/open-mercato/cezar/pull/1355) | 2026-10-11 | fix(automations): survive contended lease guard stalls (#1355) | 2 |  |
+| [#1353](https://github.com/open-mercato/cezar/pull/1353) | 2026-10-11 | fix: preserve per-step model identity (#545) (#1353) | 1 |  |
+| [#1350](https://github.com/open-mercato/cezar/pull/1350) | 2026-10-11 | fix(web): collapse Agents dock after completion (#1350) | 3 |  |
+| [#1374](https://github.com/open-mercato/cezar/pull/1374) | 2026-10-11 | fix(github): virtualize the list against its own pane and auto-load pages on scroll (#1374) | 1 |  |
+| [#1375](https://github.com/open-mercato/cezar/pull/1375) | 2026-10-11 | docs(changelog): add the changes merged since #1365 under Unreleased (#1375) | 1 |  |
+| [#1347](https://github.com/open-mercato/cezar/pull/1347) | 2026-10-11 | docs(changelog): draft weekly changes for October 9 (#1347) | 0 |  |
+| [#1376](https://github.com/open-mercato/cezar/pull/1376) | 2026-10-11 | docs(changelog): fold everything shipped in v0.15.0 into the 0.15.0 entry (#1376) | 1 |  |
+| [#1380](https://github.com/open-mercato/cezar/pull/1380) | 2026-10-11 | fix(cockpit): Changes file jumps scroll only the diff (#1380) | 3 |  |
+| [#1379](https://github.com/open-mercato/cezar/pull/1379) | 2026-10-11 | feat(web): refresh the ⭐ star count every 10 seconds (#1379) | 5 |  |
+| [#916](https://github.com/open-mercato/cezar/pull/916) | 2026-10-11 | fix(automations): filter the timeline before validating it (#914) (#916) | 0 |  |
+| [#1337](https://github.com/open-mercato/cezar/pull/1337) | 2026-10-11 | feat(web): regroup the run header around one next-step git button (#1337) | 20 |  |
+| [#1187](https://github.com/open-mercato/cezar/pull/1187) | 2026-10-11 | perf(history): cheap task reopen, streamed replay, tail seq resume (#1187) | 10 |  |
+| [#1310](https://github.com/open-mercato/cezar/pull/1310) | 2026-10-11 | feat(web): show the full command an agent ran in an expanded tool card (#1306) (#1310) | 1 |  |
+| [#1154](https://github.com/open-mercato/cezar/pull/1154) | 2026-10-12 | fix(runs): preserve DONE and ASK before task references (#1154) | 3 |  |
+| [#1381](https://github.com/open-mercato/cezar/pull/1381) | 2026-10-12 | feat: anonymous telemetry — usage metrics and error reports to improve cezar (#1381) | 21 |  |
+| [#1395](https://github.com/open-mercato/cezar/pull/1395) | 2026-10-12 | test(telemetry): key sends by endpoint, not arrival order (#1395) | 0 |  |
 
 ## Planned (1)
 
