@@ -585,6 +585,9 @@ const CONTROL_CRITERIA = [
   { id: 'R64', scenario: 'ask-snapshot' },
   { id: 'R65', scenario: 'baseline' },
   { id: 'R66', scenario: 'baseline' },
+  // hearsay-tools/cezarion#958: final autosave beside unrelated worktree process churn.
+  { id: 'R67', scenario: 'baseline' },
+  { id: 'R68', scenario: 'baseline' },
   { id: 'R26', scenario: 'ask-resume' },
   // workflows/ci-wait-refusal.test.ts: settled worker wake, private CI IPC, then delivery.
   { id: 'R27', scenario: 'hold' },
