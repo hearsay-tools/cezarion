@@ -2670,6 +2670,9 @@ export function createApp(deps: ServerDeps) {
         );
       }
 
+      // A background warm-up may be building this project right now: count its runs, and dispose
+      // it, only once that build has landed (#667).
+      await contexts.settle(id);
       const active = activeRunCount(id);
       if (active > 0) {
         return c.json(

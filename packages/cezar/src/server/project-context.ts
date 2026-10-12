@@ -292,6 +292,16 @@ export class ProjectContexts {
     }
   }
 
+  /**
+   * Wait for a build of `projectId` that is already running, never starting one; a failed build
+   * resolves too. Project removal waits here (#667): the background warm-up makes a build in flight
+   * likely, and a removal that ran past it would count no running tasks, dispose nothing, and let
+   * the build register a removed project's store and manager afterwards.
+   */
+  async settle(projectId: string): Promise<void> {
+    await this.building.get(projectId)?.catch(() => undefined);
+  }
+
   /** Already-built context, without triggering a build. */
   peek(projectId: string): ProjectContext | undefined {
     return this.contexts.get(projectId);
