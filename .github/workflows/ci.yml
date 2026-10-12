@@ -268,7 +268,7 @@ jobs:
           (cd alias-cezarion && npm pack --dry-run --ignore-scripts)
 
   vitest:
-    name: Vitest shard ${{ matrix.shard }}/2
+    name: Vitest shard ${{ matrix.shard }}/3
     # Docs-only and infra-only changes, and verified manifest-only bot release
     # bumps, do not need to repeat the suites already covered by the relevant
     # release or docs gate; infra-only diffs cannot reach the package sources
@@ -280,8 +280,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     runs-on: ubuntu-24.04
+    # Refreshed Oct 2026 timings split the two longest files across three shards.
+    # Keep the hang bound; measured runtime must stay below 11m15s (25% headroom).
     timeout-minutes: 15
 
     permissions:
@@ -323,7 +325,7 @@ jobs:
         run: npm run build:server
 
       - name: Run server and cockpit unit suites
-        run: npm test -- --shard=${{ matrix.shard }}/2 --maxWorkers=4
+        run: npm test -- --shard=${{ matrix.shard }}/3 --maxWorkers=4
 
   # Proves the engines floor. Every other job runs on `lts/*`, so none of them
   # would notice a `node:sqlite` call the floor does not have (#779). This one
