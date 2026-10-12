@@ -6621,7 +6621,9 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       void sweepRegisteredPreviewLeftovers(all, deps.previewHost).catch(() => 0);
       // #667: build every other project's context now, so the first click on one does not pay
       // its store open, worktree sweeps and recovery. The boot project is built already.
-      if (projectWarmupEnabled()) {
+      // Not after a close that landed while the registry was being read: `disposeAll` has run, and
+      // a warm-up started now would build contexts nothing will ever dispose.
+      if (projectWarmupEnabled() && server.listening) {
         const bootId = deps.bootProjectId ?? 'default';
         void sharedContexts.warmAll(all.filter((project) => project.id !== bootId && project.root !== deps.repoRoot))
           .catch(() => undefined);

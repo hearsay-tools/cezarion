@@ -94,4 +94,31 @@ describe('startServer project warm-up', () => {
       close();
     }
   }, 15_000);
+
+  it('starts nothing when the server closes before the project list arrives', async () => {
+    const warmAll = vi.spyOn(ProjectContexts.prototype, 'warmAll');
+    const bootId = (await registerProject(bootRoot)).id;
+    const otherId = (await registerProject(otherRoot)).id;
+    const store = RunStore.open(join(bootRoot, '.ai/cezar'), { keepLive: true });
+    const contexts = new ProjectContexts({ listProjects });
+    const server = startServer({
+      repoRoot: bootRoot,
+      bootProjectId: bootId,
+      store,
+      manager: { isActive: () => false } as unknown as RunManager,
+      version: '0.0.0-test',
+      contexts,
+    }, 0);
+    // Registered after startServer's own listener: the background start has asked for the
+    // registry, and the server closes in the same tick, before that read can answer.
+    await new Promise<void>((resolve) => server.once('listening', () => { server.close(); resolve(); }));
+    try {
+      await vi.waitFor(() => expect(SkillsUpdateCoordinator.prototype.start).toHaveBeenCalled(), { timeout: 10_000, interval: 20 });
+      expect(warmAll).not.toHaveBeenCalled();
+      expect(contexts.peek(otherId)).toBeUndefined();
+    } finally {
+      contexts.disposeAll();
+      store.close();
+    }
+  }, 15_000);
 });
