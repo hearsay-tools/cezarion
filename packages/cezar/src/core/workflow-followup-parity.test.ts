@@ -42,9 +42,10 @@ function turnStartsCarryingKeep(files: readonly string[]): number {
   return rpcLines(files).filter(msg => msg.method === 'turn/start' && JSON.stringify(msg.params ?? {}).includes(KEEP)).length;
 }
 
-/** Reverse-order rows must not `release()` until `turn/steer` is on the mock wire.
- *  sendMessage only queues the RPC; releasing first lets hold-gated complete with
- *  no pending steer, after which the reverse wrapper held the late error forever. */
+/** Wrapper rows must not `release()` until `turn/steer` is on the mock wire.
+ *  sendMessage only queues the RPC; releasing first lets the hold turn complete with
+ *  no pending steer, after which the reverse wrapper held the late error forever
+ *  and the coalesce wrapper held the late result forever (#938). */
 async function waitForHumanSteer(files: readonly string[]): Promise<void> {
   await waitFor(() => rpcLines(files).some(msg =>
     msg.method === 'turn/steer' && JSON.stringify(msg.params ?? {}).includes(KEEP)));
@@ -254,6 +255,7 @@ describe('mid-turn human follow-up parity — #486', () => {
           during: async ({ manager, runId, store }) => {
             await waitFor(() => store.readEvents(runId).some(e => e.type === 'turn.started'));
             expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:done` }])).toBe(true);
+            await waitForHumanSteer(files);
             release();
           },
         });

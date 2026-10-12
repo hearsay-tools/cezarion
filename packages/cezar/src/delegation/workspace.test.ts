@@ -66,7 +66,10 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
-describe('owned workspace committed isolation', () => {
+// Real git init/worktree/branch per cell. Isolated cases finish in 0.3-0.9s; under
+// shard load they overrun Vitest's 5s default (hearsay-tools/cezarion#948). Matches
+// the 15s git/manager bound on destruction-results and provision-workflows.
+describe('owned workspace committed isolation', { timeout: 15_000 }, () => {
   it('pins parent HEAD, excludes dirty tracked/untracked files, and never autosaves the parent', async () => {
     const { root, parentPath, first, second } = await fixture();
     const status = git(parentPath, 'status', '--porcelain');
@@ -215,7 +218,7 @@ describe('owned workspace committed isolation', () => {
   });
 });
 
-describe('readOwnedDiff', () => {
+describe('readOwnedDiff', { timeout: 15_000 }, () => {
   it('attributes worker commits and dirty/untracked work, not the parent commit, without changing the index', async () => {
     const { root, second } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), second);
@@ -315,7 +318,7 @@ function managerFor(store: RunStore, root: string) {
   const manager = createFixtureManager(store, root); managers.push(manager); return manager;
 }
 
-describe('RunManager.enqueueOwnedRun', () => {
+describe('RunManager.enqueueOwnedRun', { timeout: 15_000 }, () => {
   it('executes only the bundled quick-task from durable intent, pins before queuing and never autosaves parent edits', async () => {
     vi.stubEnv('CEZ_DRY_RUN', '1');
     const { root, parentPath, first, second } = await fixture();
@@ -356,7 +359,7 @@ describe('RunManager.enqueueOwnedRun', () => {
     expect(run.status).toBe('failed');
     expect(run.error).toContain('worktree creation failed');
     expect(store.readEvents(run.id).some(event => event.type === 'step-start')).toBe(false);
-  });
+  }, RUN_SETTLE_TEST_MS);
 
   it('rejects missing/root/terminal/destroying records before queueing', async () => {
     const { root, second } = await fixture();
@@ -373,7 +376,7 @@ describe('RunManager.enqueueOwnedRun', () => {
   });
 });
 
-describe('owned workspace continuation and queued recovery', () => {
+describe('owned workspace continuation and queued recovery', { timeout: 15_000 }, () => {
   it.each(['missing', 'invalid-marker'])('never resumes in the root or rematerializes after %s resource identity', async (failure) => {
     vi.stubEnv('CEZ_DRY_RUN', '1');
     const { root, second } = await fixture();
@@ -390,7 +393,7 @@ describe('owned workspace continuation and queued recovery', () => {
     expect(run.error).toContain('owned workspace unavailable');
     expect(store.readEvents(run.id).some(event => event.type === 'step-start')).toBe(false);
     if (failure === 'missing') expect(existsSync(workspace.path)).toBe(false);
-  });
+  }, RUN_SETTLE_TEST_MS);
 
   it('recovers an owned queued record with its bundled workflow, inherited settings and original start time', async () => {
     vi.stubEnv('CEZ_DRY_RUN', '1');
@@ -409,7 +412,7 @@ describe('owned workspace continuation and queued recovery', () => {
 });
 
 
-describe('removeOwnedWorkspace verified retryable destruction', () => {
+describe('removeOwnedWorkspace verified retryable destruction', { timeout: 15_000 }, () => {
   it('preserves owned resources when shared mutation coordination is unavailable', async () => {
     const { root, first } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), first);
@@ -885,7 +888,7 @@ describe('removeOwnedWorkspace verified retryable destruction', () => {
 });
 
 
-describe('owned resources bypass generic cleanup', () => {
+describe('owned resources bypass generic cleanup', { timeout: 15_000 }, () => {
   it('preserves an owned orphan and receipt even when its run index is absent', async () => {
     const { root, first } = await fixture(); const workspace = await createOwnedWorkspace(root, randomUUID(), first);
     expect(await pruneOrphans(root, new Set())).not.toContain(workspace.ownerRunId);

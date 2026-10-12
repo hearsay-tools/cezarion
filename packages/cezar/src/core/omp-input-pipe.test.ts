@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RUNNER_IDS } from './agent-runner.ts';
-import { HARNESS_ADAPTERS, exemptionFor, driveSeam } from './harness-parity.testkit.ts';
+import { HARNESS_ADAPTERS, exemptionFor, driveSeam, waitFor } from './harness-parity.testkit.ts';
 
 describe('OMP native input pipe', () => {
   it('fails queued-before-ready writes even when the child would exit zero', async () => {
@@ -43,7 +43,19 @@ describe('native live closed-input parity', () => {
             // passed through the production spawn; no normalized events are injected.
             await vi.waitFor(() => expect(existsSync(join(cwd, 'input-closed.pid'))).toBe(true), { timeout: 5000 });
             expect(session.open).toBe(true);
-            const receipt = session.sendAgentMessage([{ type: 'text', text: 'force broken native agent input write' }]);
+            // Codex can report `open` before the first main-thread turn exists, so
+            // sendAgentMessage still returns false (hearsay-tools/cezarion#969). Other
+            // runners already admit once `open` is true; do not change their S29 timing.
+            let receipt: false | Promise<void> = false;
+            if (backend === 'codex') {
+              await waitFor(() => {
+                if (receipt !== false) return true;
+                receipt = session.sendAgentMessage([{ type: 'text', text: 'force broken native agent input write' }]);
+                return receipt !== false || !session.open;
+              });
+            } else {
+              receipt = session.sendAgentMessage([{ type: 'text', text: 'force broken native agent input write' }]);
+            }
             expect(receipt).not.toBe(false);
             if (!receipt) throw new Error('native input was refused before exercising its transport');
             await receipt.catch((error: unknown) => { receiptError = error; });
@@ -78,7 +90,9 @@ describe('native live closed-input parity', () => {
       } finally {
         rmSync(cwd, { recursive: true, force: true });
       }
-    }, 10000);
+      // Marker wait is 5s; Codex then polls waitFor (10s default) after that.
+      // 10s total cannot cover both plus teardown (hearsay-tools/cezarion#976).
+    }, 20_000);
   }
 });
 

@@ -906,8 +906,10 @@ output transport must terminate the live child. OpenCode uses its real HTTP/SSE
 stream for the transport failure, while the other backends use stdout.
 Requested teardown remains successful. The matrix has no wire exemptions.
 
-**S29** (hearsay-tools/cezarion#906), in `core/omp-input-pipe.test.ts`, closes each
+**S29** (hearsay-tools/cezarion#906, hearsay-tools/cezarion#969), in `core/omp-input-pipe.test.ts`, closes each
 native input transport while the admitted turn's child is alive, then submits agent input.
+Codex waits until `sendAgentMessage` admits — `session.open` can be true before the first
+main-thread turn exists, so a one-shot send races the startup gate.
 Claude/Codex/Pi/OMP mocks close fd 0; OpenCode destroys the next native prompt HTTP socket
 while retaining SSE. The rejected receipt must retain input failure evidence, settlement
 must be bounded, and no successful native turn completion may be fabricated. OpenCode's
