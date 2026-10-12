@@ -204,4 +204,36 @@ describe('ProjectContexts.warmAll', () => {
     await expect(building).rejects.toBeInstanceOf(ProjectContextsClosedError);
     recover.mockRestore();
   });
+
+  it('never recovers a build whose shutdown landed while it waited for the lock (#667)', async () => {
+    // Before the manager exists there is nothing for `disposeAll` to stop, so the build itself
+    // has to notice it went stale before it opens the store and recovers.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const ownership = { acquire: () => gate } as unknown as CockpitOwnership;
+    const recover = vi.spyOn(RunManager.prototype, 'recover');
+    const contexts = new ProjectContexts({ listProjects: async () => [{ id: 'early', root: root(), status: 'not-git' }], ownership });
+    const building = contexts.context('early');
+    await Promise.resolve();
+    contexts.disposeAll();
+    release();
+    await expect(building).rejects.toBeInstanceOf(ProjectContextsClosedError);
+    expect(recover).not.toHaveBeenCalled();
+    recover.mockRestore();
+  });
+
+  it('never recovers a build whose project was removed while it read the registry (#667)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const recover = vi.spyOn(RunManager.prototype, 'recover');
+    const projects: ProjectWarmCandidate[] = [{ id: 'gone', root: root(), status: 'not-git' }];
+    const contexts = new ProjectContexts({ listProjects: async () => { await gate; return projects; } });
+    const building = contexts.context('gone');
+    contexts.dispose('gone');
+    release();
+    await expect(building).rejects.toBeInstanceOf(ProjectContextsClosedError);
+    expect(recover).not.toHaveBeenCalled();
+    recover.mockRestore();
+    contexts.disposeAll();
+  });
 });

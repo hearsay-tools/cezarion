@@ -205,7 +205,7 @@ export class ProjectContexts {
     if (inFlight) return inFlight;
     const generation = this.generation;
     const epoch = this.epochs.get(projectId) ?? 0;
-    const build = this.build(projectId);
+    const build = this.build(projectId, () => generation !== this.generation || epoch !== (this.epochs.get(projectId) ?? 0));
     this.building.set(projectId, build);
     try {
       const ctx = await build;
@@ -365,14 +365,18 @@ export class ProjectContexts {
     for (const id of this.ids()) this.dispose(id, { releasePreviews: false });
   }
 
-  private async build(projectId: string): Promise<ProjectContext> {
+  /** `stale` turns true once `dispose(id)` or `disposeAll` overtook this build. Checked after
+   *  each wait that comes before the manager exists, because until then nothing can stop it. */
+  private async build(projectId: string, stale: () => boolean): Promise<ProjectContext> {
     const projects = await this.deps.listProjects();
+    if (stale()) throw new ProjectContextsClosedError();
     const project = projects.find((p) => p.id === projectId);
     if (!project) throw new ProjectContextError('unknown-project', projectId);
     if (project.status === 'missing') throw new ProjectContextError('missing-root', projectId);
 
     const dataDir = join(project.root, '.ai/cezar');
     await this.deps.ownership?.acquire(dataDir);
+    if (stale()) throw new ProjectContextsClosedError();
     // keepLive + recover() (#367), same as serveCommand: runs that were live
     // when this project's context last existed are re-queued or resumed.
     // A store that cannot open throws `RunStoreOpenError` (#779): nothing is
