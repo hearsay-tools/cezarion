@@ -1,9 +1,16 @@
 import { execFileSync, spawn } from 'node:child_process';
 import fs, { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import * as fsPromises from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual };
+});
+
 import { autosaveCommit } from './git-worktree.ts';
 
 const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
@@ -170,12 +177,22 @@ if (args.includes('status')) {
       if (pid < 0 && signal === 0 && obscure) throw Object.assign(new Error('unreadable'), { code: 'EPERM' });
       return kill(pid, signal);
     });
+    // SIGKILL can leave a /proc zombie that autosave treats as proof of death,
+    // so the save settles and `onBlocked` never reports EPERM. Hide that pid
+    // from the async group scan while the probe is obscured (#950).
+    const actualReaddir = fsPromises.readdir.bind(fsPromises);
+    vi.spyOn(fsPromises, 'readdir').mockImplementation((async (path: Parameters<typeof actualReaddir>[0], options?: Parameters<typeof actualReaddir>[1]) => {
+      const entries = await actualReaddir(path, options as never);
+      if (String(path) !== '/proc' || !obscure) return entries;
+      const recorded = existsSync(join(bin, 'pid')) ? readFileSync(join(bin, 'pid'), 'utf8').trim().split('\n') : [];
+      return (entries as string[]).filter(entry => !recorded.includes(String(entry)));
+    }) as typeof fsPromises.readdir);
     let settled = false;
     const blocked = vi.fn();
     const job = autosaveCommit(repo, 'run finalize', { ...budget, onBlocked: blocked }).then(result => { settled = true; return result; });
     jobs.push(job);
     try {
-      await delay(1100);
+      await vi.waitFor(() => { expect(blocked).toHaveBeenCalled(); }, { timeout: 10_000, interval: 10 });
       expect(settled).toBe(false);
       expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('termination'));
       expect(blocked).toHaveBeenCalledWith(expect.stringContaining('EPERM'), expect.objectContaining({ groups: expect.any(Array) }));
