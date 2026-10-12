@@ -1,9 +1,11 @@
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { processStartToken } from '../delegation/process-liveness.ts';
+import { connectCdp } from './cdp.ts';
 import {
   ChromiumError,
   chromiumArgs,
@@ -561,4 +563,193 @@ setInterval(()=>{},1000);`,
       expect(() => process.kill(pid, 0)).toThrow();
     });
   });
+});
+
+const PREFERENCES = join('Default', 'Preferences');
+const LEAK_DETECTION_OFF = { profile: { password_manager_leak_detection: false } } as const;
+
+function readPreferences(profile: string): unknown {
+  return JSON.parse(readFileSync(join(profile, PREFERENCES), 'utf8'));
+}
+
+describe('launchChromium leak-detection Preferences (#972)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'cez-chromium-prefs-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const script = (name: string, body: string): string => {
+    const path = join(dir, name);
+    writeFileSync(path, `#!${process.execPath}\n${body}`);
+    chmodSync(path, 0o755);
+    return path;
+  };
+  const posix = process.platform !== 'win32';
+  const hangingChrome = (name: string): string =>
+    script(
+      name,
+      `const fs=require('fs');const path=require('path');
+const arg=process.argv.find(a=>a.startsWith('--user-data-dir='));
+fs.writeFileSync(path.join(arg.split('=')[1],'DevToolsActivePort'),'41240\\n/devtools/browser/abc\\n');
+setInterval(()=>{},1000);`,
+    );
+
+  it.skipIf(!posix)('writes leak detection off into a new profile before spawn', async () => {
+    const bin = hangingChrome('prefs-new');
+    const profile = join(dir, 'profile');
+    const { proc } = await launchChromium(bin, profile, {});
+    try {
+      expect(readPreferences(profile)).toEqual(LEAK_DETECTION_OFF);
+    } finally {
+      proc.kill();
+    }
+  });
+
+  it.skipIf(!posix)('merges leak detection off into an existing Preferences file without wiping other keys', async () => {
+    const bin = hangingChrome('prefs-existing');
+    const profile = join(dir, 'profile');
+    mkdirSync(join(profile, 'Default'), { recursive: true });
+    writeFileSync(
+      join(profile, PREFERENCES),
+      JSON.stringify({ profile: { name: 'Task', avatar_index: 3 }, session: { restore_on_startup: 4 } }),
+    );
+    const cookies = join(profile, 'Default', 'Cookies');
+    writeFileSync(cookies, 'sqlite-cookies');
+    const { proc } = await launchChromium(bin, profile, {});
+    try {
+      expect(readPreferences(profile)).toEqual({
+        profile: { name: 'Task', avatar_index: 3, password_manager_leak_detection: false },
+        session: { restore_on_startup: 4 },
+      });
+      expect(readFileSync(cookies, 'utf8')).toBe('sqlite-cookies');
+    } finally {
+      proc.kill();
+    }
+  });
+
+  it.skipIf(!posix)('replaces corrupt Preferences with a file that only turns leak detection off', async () => {
+    const bin = hangingChrome('prefs-corrupt');
+    const profile = join(dir, 'profile');
+    mkdirSync(join(profile, 'Default'), { recursive: true });
+    writeFileSync(join(profile, PREFERENCES), '{not-json');
+    const { proc } = await launchChromium(bin, profile, {});
+    try {
+      expect(readPreferences(profile)).toEqual(LEAK_DETECTION_OFF);
+    } finally {
+      proc.kill();
+    }
+  });
+});
+
+describe('launchChromium leak-detection Chromium regression (#972)', () => {
+  const bin = resolveChromium();
+  const posix = process.platform !== 'win32';
+  let dir: string;
+  let server: Server | undefined;
+  const procs: Array<{ kill: (signal?: NodeJS.Signals) => boolean }> = [];
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'cez-chromium-real-'));
+  });
+  afterEach(async () => {
+    for (const proc of procs.splice(0)) proc.kill('SIGKILL');
+    await new Promise<void>(resolve => (server ? server.close(() => resolve()) : resolve()));
+    server = undefined;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const listen = async (handler: (req: IncomingMessage, res: ServerResponse) => void): Promise<string> => {
+    server = createServer(handler);
+    await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve));
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('test server has no port');
+    return `http://127.0.0.1:${addr.port}`;
+  };
+
+  it.skipIf(!posix || !bin)(
+    'keeps leak detection off after a login and a navigation to another URL',
+    async () => {
+      const origin = await listen((req, res) => {
+        const html =
+          req.url === '/app'
+            ? '<!doctype html><title>app</title><button id="go">go</button>'
+            : `<!doctype html><title>login</title>
+<form method="post" action="/app">
+<label>user <input name="user" autocomplete="username"></label>
+<label>pass <input name="pass" type="password" autocomplete="current-password"></label>
+<button type="submit">sign in</button>
+</form>`;
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        res.end(html);
+      });
+      const profile = join(dir, 'profile');
+      const { proc, port } = await launchChromium(bin!, profile, { CEZ_PREVIEW_NO_SANDBOX: '1' });
+      procs.push(proc);
+      const targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as Array<{
+        type: string;
+        webSocketDebuggerUrl?: string;
+      }>;
+      const page = targets.find(target => target.type === 'page' && target.webSocketDebuggerUrl);
+      if (!page?.webSocketDebuggerUrl) throw new Error('Chromium opened no page');
+      const cdp = await connectCdp(page.webSocketDebuggerUrl);
+      try {
+        await cdp.send('Page.enable');
+        await cdp.send('Runtime.enable');
+        const loaded = new Promise<void>(resolve => {
+          const off = cdp.on('Page.loadEventFired', () => {
+            off();
+            resolve();
+          });
+        });
+        await cdp.send('Page.navigate', { url: `${origin}/login` });
+        await loaded;
+        await cdp.send('Runtime.evaluate', {
+          expression: `(() => {
+            const user = document.querySelector('input[name="user"]');
+            const pass = document.querySelector('input[name="pass"]');
+            user.value = 'preview-user';
+            pass.value = 'preview-password-1';
+            user.dispatchEvent(new Event('input', { bubbles: true }));
+            pass.dispatchEvent(new Event('input', { bubbles: true }));
+            document.querySelector('form').requestSubmit();
+          })()`,
+        });
+        await vi.waitFor(async () => {
+          const { result } = await cdp.send<{ result: { value?: string } }>('Runtime.evaluate', {
+            expression: 'location.pathname',
+            returnByValue: true,
+          });
+          expect(result.value).toBe('/app');
+        });
+        const next = new Promise<void>(resolve => {
+          const off = cdp.on('Page.loadEventFired', () => {
+            off();
+            resolve();
+          });
+        });
+        await cdp.send('Page.navigate', { url: `${origin}/app` });
+        await next;
+        const { result } = await cdp.send<{ result: { value?: boolean } }>('Runtime.evaluate', {
+          expression: `(() => {
+            const el = document.elementFromPoint(8, 8);
+            if (!el) return false;
+            el.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 8, clientY: 8 }));
+            return true;
+          })()`,
+          returnByValue: true,
+        });
+        expect(result.value).toBe(true);
+        const prefs = JSON.parse(readFileSync(join(profile, PREFERENCES), 'utf8')) as {
+          profile?: { password_manager_leak_detection?: unknown };
+        };
+        expect(prefs.profile?.password_manager_leak_detection).toBe(false);
+      } finally {
+        cdp.close();
+        proc.kill();
+      }
+    },
+  );
 });
