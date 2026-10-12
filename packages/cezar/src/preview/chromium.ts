@@ -1,5 +1,6 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, open, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, delimiter, dirname, join } from 'node:path';
@@ -364,10 +365,36 @@ export function chromiumArgs(profileDir: string, env: NodeJS.ProcessEnv): string
  */
 export const CHROMIUM_PID_FILE = 'chromium.pid.json';
 
+/** Chromium's leaked-password dialog is native chrome, so the preview never streams it and mouse
+ *  input freezes. Write `profile.password_manager_leak_detection: false` before launch so both a
+ *  new profile and an existing one (cookies live in SQLite, not this file) start with it off. */
+function disablePasswordManagerLeakDetection(profileDir: string): void {
+  const prefsPath = join(profileDir, 'Default', 'Preferences');
+  mkdirSync(dirname(prefsPath), { recursive: true });
+  let prefs: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(prefsPath, 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) prefs = parsed as Record<string, unknown>;
+  } catch {
+    /* missing or corrupt: write a file that only turns leak detection off */
+  }
+  const profile =
+    prefs.profile && typeof prefs.profile === 'object' && !Array.isArray(prefs.profile)
+      ? { ...(prefs.profile as Record<string, unknown>) }
+      : {};
+  profile.password_manager_leak_detection = false;
+  prefs.profile = profile;
+  const tmp = `${prefsPath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(prefs)}\n`, { encoding: 'utf8' });
+  renameSync(tmp, prefsPath);
+}
+
 /**
  * Starts headless Chromium on a loopback DevTools port of its choosing and resolves once it has
  * written `DevToolsActivePort` into the profile. Failure kills the process and says why. While it
- * runs, `CHROMIUM_PID_FILE` in the profile's parent names it.
+ * runs, `CHROMIUM_PID_FILE` in the profile's parent names it. Leak detection is turned off in
+ * the profile Preferences before spawn so Chrome's leaked-password dialog cannot freeze preview
+ * input (hearsay-tools/cezarion#972).
  */
 export async function launchChromium(
   bin: string,
@@ -376,6 +403,7 @@ export async function launchChromium(
   opts: { timeoutMs?: number } = {},
 ): Promise<{ proc: ChildProcess; port: number }> {
   mkdirSync(profileDir, { recursive: true });
+  disablePasswordManagerLeakDetection(profileDir);
   const portFile = join(profileDir, 'DevToolsActivePort');
   // A file from an earlier launch would hand back a port nobody listens on.
   rmSync(portFile, { force: true });
