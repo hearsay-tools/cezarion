@@ -6623,7 +6623,9 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       // its store open, worktree sweeps and recovery. The boot project is built already.
       // Not after a close that landed while the registry was being read: `disposeAll` has run, and
       // a warm-up started now would build contexts nothing will ever dispose.
-      if (projectWarmupEnabled() && server.listening) {
+      // Not in single-project mode either: every other project is out of reach there, and
+      // building one would resume its interrupted runs behind the operator's back.
+      if (projectWarmupEnabled() && server.listening && !resolveCapabilities(process.env, deps.bindHost).singleProject) {
         const bootId = deps.bootProjectId ?? 'default';
         void sharedContexts.warmAll(all.filter((project) => project.id !== bootId && project.root !== deps.repoRoot))
           .catch(() => undefined);
