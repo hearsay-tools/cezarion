@@ -188,6 +188,9 @@ export class ProjectContexts {
   /** Bumped per project by `dispose(id)`, for the same reason: project removal runs `dispose`
    *  after the registry commit, and a build that read the registry before it must not land. */
   private readonly epochs = new Map<string, number>();
+  /** Managers of builds still in flight. `dispose`/`disposeAll` stop them at once: `recover()`
+   *  checks `disposed` between its steps, so a stale build never pumps a re-queued run. */
+  private readonly buildingManagers = new Map<string, RunManager>();
 
   constructor(private readonly deps: ProjectContextDeps) {
     this.semaphore = deps.semaphore ?? new WorkspaceSemaphore();
@@ -332,6 +335,7 @@ export class ProjectContexts {
   dispose(projectId: string, opts: { releasePreviews?: boolean } = {}): boolean {
     // Also invalidates a build of this project still in flight (#667).
     this.epochs.set(projectId, (this.epochs.get(projectId) ?? 0) + 1);
+    this.buildingManagers.get(projectId)?.dispose();
     const ctx = this.contexts.get(projectId);
     if (!ctx) return false;
     this.contexts.delete(projectId);
@@ -357,6 +361,7 @@ export class ProjectContexts {
   /** Tear down every built context (process shutdown), and every build still running. */
   disposeAll(): void {
     this.generation += 1;
+    for (const manager of this.buildingManagers.values()) manager.dispose();
     for (const id of this.ids()) this.dispose(id, { releasePreviews: false });
   }
 
@@ -382,6 +387,7 @@ export class ProjectContexts {
     this.notifyStoreCreated(store);
     armPreview(store, dataDir, this.deps.preview);
     const manager = new RunManager(store, project.root, { semaphore: this.semaphore, preview: this.deps.preview, cezarPort: this.deps.cezarPort });
+    this.buildingManagers.set(projectId, manager);
     try {
       const cleanup = this.deps.prepareManager?.({ id: project.id, root: project.root, store, manager });
       if (cleanup) this.managerCleanups.set(manager, cleanup);
@@ -421,6 +427,8 @@ export class ProjectContexts {
       this.managerCleanups.delete(manager);
       teardown({ store, manager });
       throw err;
+    } finally {
+      if (this.buildingManagers.get(projectId) === manager) this.buildingManagers.delete(projectId);
     }
   }
 }

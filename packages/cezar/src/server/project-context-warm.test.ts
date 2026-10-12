@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { RunManager } from '../workflows/run.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
 import type { CockpitOwnership } from './cockpit-ownership.ts';
 import { ProjectContexts, ProjectContextsClosedError, type ProjectWarmCandidate } from './project-context.ts';
@@ -180,5 +181,27 @@ describe('ProjectContexts.warmAll', () => {
     } finally {
       contexts.disposeAll();
     }
+  });
+
+  it('disposes a manager whose build is still recovering, so recovery never starts work after shutdown (#667)', async () => {
+    // `disposeAll` used to wait for the build to land before tearing it down. Recovery kept running
+    // in between and could pump re-queued runs into agents after the server had closed.
+    let releaseRecover!: () => void;
+    const recovering = new Promise<void>((resolve) => { releaseRecover = resolve; });
+    const recover = vi.spyOn(RunManager.prototype, 'recover').mockImplementation(async function (this: RunManager) {
+      await recovering;
+    });
+    const projects: ProjectWarmCandidate[] = [{ id: 'busy', root: root(), status: 'not-git' }];
+    const contexts = new ProjectContexts({ listProjects: async () => projects });
+    const building = contexts.context('busy');
+    await vi.waitFor(() => expect(recover).toHaveBeenCalled());
+    const manager = recover.mock.contexts[0] as RunManager;
+
+    contexts.disposeAll();
+
+    expect((manager as unknown as { disposed: boolean }).disposed).toBe(true);
+    releaseRecover();
+    await expect(building).rejects.toBeInstanceOf(ProjectContextsClosedError);
+    recover.mockRestore();
   });
 });
