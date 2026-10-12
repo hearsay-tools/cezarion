@@ -87,6 +87,34 @@ normally skips Vitest, so that PR run alone cannot validate the new matrix.
 
 ## Candidate runner validation
 
-Pending a GitHub Actions dispatch at the candidate commit. Record each shard's
-job duration, test-file count, test count and conclusion here before claiming
-the headroom criterion is met.
+[Candidate run 38232651004, attempt 1](https://github.com/hearsay-tools/cezarion/actions/runs/38232651004/attempts/1)
+executed commit `4f5077e536c5774867eae837debab53038447aff` on October 12.
+
+| Vitest shard | Whole-job duration | Headroom | Files | Tests | Result |
+| --- | --- | --- | --- | --- | --- |
+| 1/3 | 10m13s | 31.9% | 223 | 4,915 | Passed |
+| 2/3 | 9m59s | 33.4% | 223 | 5,617 | Passed, 2 skipped |
+| 3/3 | 10m58s | 26.9% | 224 | 4,742 | 28 test failures, no job timeout |
+
+All 670 files and 15,274 tests were accounted for, matching the two Node-floor
+shards' inventory. Every Vitest job finished below 11m15s, but this first attempt
+is not a passing full-suite verification: shard 3 failed in workspace cleanup,
+task CLI watching, and run lifecycle tests; both Node-floor shards also had a
+single test failure. All four GitHub browser shards and build/package passed.
+On attempt 2, Vitest shard 3 finished in 8m37s (42.6% headroom), with 223
+files and 4,741 tests passing; a different case in the remaining file hit its
+5-second timeout. The prior 28 failures did not recur. Both Node-floor shards passed
+on retry. The final retry of the remaining Vitest job passed. Retain the failed attempts rather than
+reporting only a later successful retry. [Attempt 3](https://github.com/hearsay-tools/cezarion/actions/runs/38232651004/attempts/3)
+passed the remaining shard in **7m51s** (47.7% headroom), with all 224 files and
+4,742 tests passing. The aggregate is now green. Final successful Vitest job
+wall times are **10m13s / 9m59s / 7m51s**, leaving at least **31.9%** headroom.
+Retries were at the same candidate SHA; neither application code nor test budgets
+changed. One complete candidate run plus these retries demonstrates the current
+margin, not a guarantee against future suite growth or unrelated test flakes.
+
+The local four-lane browser run passed lanes 1, 3 and 4. Lane 2 and an initial
+focused retry failed before the CI-header fixture server listened. A direct
+Vite launch exposed `ENOSPC: System limit for number of file watchers reached`.
+The same 11-test fixture passed with `CHOKIDAR_USEPOLLING=1`; no application or
+test source changed to work around the host limit.
