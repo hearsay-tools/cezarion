@@ -40,7 +40,7 @@ export interface SpeechRecognitionLike {
   stop(): void
   abort(): void
   onresult: ((event: SpeechResultEventLike) => void) | null
-  onerror: ((event: { error?: string }) => void) | null
+  onerror: ((event: { error?: string; message?: string }) => void) | null
   onend: (() => void) | null
 }
 
@@ -93,10 +93,60 @@ export function foldResults(
   return { finalText: finals, interim }
 }
 
-export function useDictation(onError: (message: string) => void): Dictation {
+/** What the composer tells the user about a failed recognition, and whether trying again can
+ *  help. */
+export interface DictationError {
+  message: string
+  retryable: boolean
+}
+
+/**
+ * Plain words for the native `SpeechRecognitionErrorEvent.error` codes (#928). `null` means stay
+ * silent. `network` is the common one: Chrome sends audio to a Google speech service, and
+ * Chromium builds that cut Google services (Helium, ungoogled-chromium) keep the API but fail
+ * every attempt with it, however healthy the cockpit connection is. An unknown code keeps the
+ * browser's own word.
+ */
+export function describeDictationError(code: string | undefined, lang: string): DictationError | null {
+  switch (code) {
+    case 'aborted':
+      return null
+    case 'network':
+    case 'service-not-allowed':
+      return {
+        message:
+          "Dictation couldn't reach this browser's speech service. Some Chromium builds, such as Helium, block it. " +
+          'Use your system dictation instead (macOS: press Fn/Globe twice), or open the cockpit in Chrome or Safari.',
+        // `network` can be a passing outage in Chrome; a refused service stays refused.
+        retryable: code === 'network',
+      }
+    case 'not-allowed':
+      return {
+        message: "Microphone access is blocked. Allow it in this site's browser settings, then try again.",
+        retryable: true,
+      }
+    case 'audio-capture':
+      return { message: 'No microphone was found. Connect one, then try again.', retryable: true }
+    case 'language-not-supported':
+      return {
+        message: `This browser can't recognize speech in ${lang}. Use your system dictation instead (macOS: press Fn/Globe twice).`,
+        retryable: false,
+      }
+    case 'no-speech':
+      return { message: 'No speech was heard. Check the microphone, then try again.', retryable: true }
+    default:
+      return { message: `Dictation failed${code ? ` — ${code}` : ''}`, retryable: true }
+  }
+}
+
+/** `retry` restarts dictation; present only when the error is one trying again can fix. */
+export function useDictation(onError: (message: string, retry?: () => void) => void): Dictation {
   const [recording, setRecording] = React.useState<DictationState | null>(null)
   const recognitionRef = React.useRef<SpeechRecognitionLike | null>(null)
   const finalRef = React.useRef('')
+  // A toast's Try again can outlive the composer; it must not reopen the mic after unmount.
+  const mountedRef = React.useRef(false)
+  const startRef = React.useRef<() => void>(() => {})
   // The mic renders (or not) per browser capability; the ctor itself is re-read on start so a
   // test stub installed after mount still wins.
   const [supported] = React.useState(() => speechRecognitionCtor() !== undefined)
@@ -115,10 +165,18 @@ export function useDictation(onError: (message: string) => void): Dictation {
   }, [])
 
   // An unmounted composer must not keep the mic hot.
-  React.useEffect(() => teardown, [teardown])
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      teardown()
+    }
+  }, [teardown])
+
+  const retry = React.useCallback(() => startRef.current(), [])
 
   const start = React.useCallback(() => {
-    if (recognitionRef.current) return
+    if (!mountedRef.current || recognitionRef.current) return
     const Ctor = speechRecognitionCtor()
     if (!Ctor) return
     let recognition: SpeechRecognitionLike
@@ -134,18 +192,21 @@ export function useDictation(onError: (message: string) => void): Dictation {
         setRecording({ transcript: folded.finalText + folded.interim, startedAt })
       }
       recognition.onerror = (event) => {
-        // `no-speech` etc. — surface the browser's own word, then back to idle honestly.
-        onError(`Dictation failed${event.error ? ` — ${event.error}` : ''}`)
+        // The native details, so the next report carries what the toast summarizes.
+        console.warn('[dictation] recognition error', event.error, event.message)
+        const described = describeDictationError(event.error, recognition.lang)
         teardown()
+        if (described) onError(described.message, described.retryable ? retry : undefined)
       }
       recognition.start()
       recognitionRef.current = recognition
       setRecording({ transcript: '', startedAt })
     } catch {
-      onError('Dictation failed — the microphone could not be started')
+      onError('Dictation failed — the microphone could not be started', retry)
       teardown()
     }
-  }, [onError, teardown])
+  }, [onError, retry, teardown])
+  startRef.current = start
 
   const cancel = React.useCallback(() => teardown(), [teardown])
 
