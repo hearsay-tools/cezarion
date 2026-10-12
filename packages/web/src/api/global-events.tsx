@@ -732,7 +732,9 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           trackSseReconcile(() => reconcileRunLists(queryClient))
           // Discovery can finish between the cold HTTP read and SSE connection.
           // Cancel that read and reconcile once after the completion listener is attached.
-          for (const key of [queryKeys.health, workspaceQueryKeys.models('cursor')]) {
+          // The runs index likewise: a project that finished recovering in that gap sent its
+          // `project-ready` to nobody, and the index read may predate the recovery (#667).
+          for (const key of [queryKeys.health, workspaceQueryKeys.models('cursor'), workspaceQueryKeys.runsIndex]) {
             void queryClient.cancelQueries({ queryKey: key }).then(() => {
               if (!disposed) void queryClient.invalidateQueries({ queryKey: key })
             })

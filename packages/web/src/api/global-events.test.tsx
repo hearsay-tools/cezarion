@@ -1618,7 +1618,18 @@ describe('useGlobalEvents — reconcile doctrine', () => {
 
     source.open()
 
-    await waitFor(() => expect(invalidatedKeys(invalidate)).toEqual([workspaceQueryKeys.models('cursor'), queryKeys.health]))
+    await waitFor(() => expect(invalidatedKeys(invalidate)).toEqual([workspaceQueryKeys.models('cursor'), workspaceQueryKeys.runsIndex, queryKeys.health]))
+  })
+
+  it('reconciles the cross-project index on first open, covering a project-ready sent before it (#667)', async () => {
+    // `project-ready` is not replayed. An index read that started while a project was recovering,
+    // on a stream that attached only after the event, would otherwise keep the pre-recovery rows.
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { source } = mount()
+
+    source.open()
+
+    await waitFor(() => expect(invalidatedKeys(invalidate)).toContainEqual(workspaceQueryKeys.runsIndex))
   })
 
   it('refetches the authoritative endpoints on reconnect', async () => {
