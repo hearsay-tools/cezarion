@@ -422,6 +422,10 @@ describe('ClaudeCliRunner token usage', () => {
 it('steers non-human input behind a queued human turn but never after its CEZ:ASK', async () => {
   // Pre-#505 the queued human turn refused all agent input until it ended. Claude now
   // steers a mid-turn line into the running turn; only a pending CEZ:ASK still refuses.
+  // waitFor defaults to 10s and this cell awaits two of them sequentially.
+  // Vitest's 5s testTimeout already cut the isolated run off at ~4s and the
+  // Node 24.15.0 floor shard at 5s; 15s still cannot cover both waits plus
+  // teardown if the first transition is slow (hearsay-tools/cezarion#976).
   const { driveSeam, waitFor } = await import('./harness-parity.testkit.ts');
   await driveSeam('claude', 'hold', {
     whileOpen: async (session, { v1 }) => {
@@ -432,7 +436,7 @@ it('steers non-human input behind a queued human turn but never after its CEZ:AS
       expect(session.sendAgentMessage([{ type: 'text', text: 'must not answer the ask' }])).toBe(false);
     },
   });
-});
+}, 25_000);
 
 describe('Claude non-human stdin acknowledgement boundary', () => {
   it.each(['acknowledged', 'write error', 'closed'] as const)('%s settles only the reserved write and never a mere turn-end', async outcome => {

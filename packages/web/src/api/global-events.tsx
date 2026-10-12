@@ -75,7 +75,7 @@ const EVENT_NAMES = ['run', 'run-deleted', 'todos', 'usage', 'ping'] as const
  * projects query (the sidebar grows/loses a group without a reload) and fan out to whoever
  * subscribed via `onWorkspaceEvent`.
  */
-const WORKSPACE_EVENT_NAMES = ['project-added', 'project-removed', 'checkout-progress', 'automation-change'] as const
+const WORKSPACE_EVENT_NAMES = ['project-added', 'project-removed', 'checkout-progress', 'automation-change', 'project-ready'] as const
 
 type WorkspaceEventName = (typeof WORKSPACE_EVENT_NAMES)[number]
 
@@ -120,18 +120,23 @@ const RUNS_INDEX_REFRESH_DEBOUNCE_MS = 400
  *  in the effect cleanup. */
 function createRunsIndexRefresher(queryClient: QueryClient): {
   onEvent: (event: GlobalEvent) => void
+  refresh: () => void
   cancel: () => void
 } {
   let pending: ReturnType<typeof setTimeout> | undefined
+  const refresh = () => {
+    if (pending !== undefined) return
+    pending = setTimeout(() => {
+      pending = undefined
+      void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex })
+    }, RUNS_INDEX_REFRESH_DEBOUNCE_MS)
+  }
   return {
     onEvent(event) {
-      if (event.type !== 'run' && event.type !== 'run-deleted') return
-      if (pending !== undefined) return
-      pending = setTimeout(() => {
-        pending = undefined
-        void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex })
-      }, RUNS_INDEX_REFRESH_DEBOUNCE_MS)
+      if (event.type === 'run' || event.type === 'run-deleted') refresh()
     },
+    // A project finished preparing (#667): its recovery changed runs no stream had heard of yet.
+    refresh,
     cancel() {
       clearTimeout(pending)
       pending = undefined
@@ -727,7 +732,9 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           trackSseReconcile(() => reconcileRunLists(queryClient))
           // Discovery can finish between the cold HTTP read and SSE connection.
           // Cancel that read and reconcile once after the completion listener is attached.
-          for (const key of [queryKeys.health, workspaceQueryKeys.models('cursor')]) {
+          // The runs index likewise: a project that finished recovering in that gap sent its
+          // `project-ready` to nobody, and the index read may predate the recovery (#667).
+          for (const key of [queryKeys.health, workspaceQueryKeys.models('cursor'), workspaceQueryKeys.runsIndex]) {
             void queryClient.cancelQueries({ queryKey: key }).then(() => {
               if (!disposed) void queryClient.invalidateQueries({ queryKey: key })
             })
@@ -778,7 +785,11 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           // clicked. `checkout-progress` is deliberately NOT in this branch: a clone emits a
           // line every few hundred ms, and re-listing the registry on each would turn one clone
           // into a request flood (the dialog's own success handler invalidates once, at the end).
-          if (name !== 'checkout-progress' && name !== 'automation-change') {
+          if (name === 'project-ready') {
+            // Recovery ran before any stream listened to that project's store, so the index still
+            // holds the cold read: runs the restart interrupted, shown as failed (#667).
+            runsIndexRefresher.refresh()
+          } else if (name !== 'checkout-progress' && name !== 'automation-change') {
             void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.projects })
           }
           for (const listener of [...workspaceListeners]) listener(name, payload)

@@ -1033,6 +1033,21 @@ describe('useGlobalEvents — run events', () => {
     )
   })
 
+  it('refreshes the cross-project index when a project finishes preparing (#667)', async () => {
+    // Preparing a project resumes the runs a restart interrupted, before any stream listens to its
+    // store, so no run event follows. The index would otherwise keep showing them as failed.
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { source } = mount()
+
+    source.emit('project-ready', JSON.stringify({ project: 'some-other-project' }))
+
+    await vi.waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: workspaceQueryKeys.runsIndex }),
+    )
+    // Not registry news: the project list is unchanged.
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: workspaceQueryKeys.projects })
+  })
+
   it('still refuses to write another project\u2019s run into THIS scope\u2019s list', async () => {
     // The index is cross-project; the scoped caches are not. Widening one must not widen the other.
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
@@ -1603,7 +1618,18 @@ describe('useGlobalEvents — reconcile doctrine', () => {
 
     source.open()
 
-    await waitFor(() => expect(invalidatedKeys(invalidate)).toEqual([workspaceQueryKeys.models('cursor'), queryKeys.health]))
+    await waitFor(() => expect(invalidatedKeys(invalidate)).toEqual([workspaceQueryKeys.models('cursor'), workspaceQueryKeys.runsIndex, queryKeys.health]))
+  })
+
+  it('reconciles the cross-project index on first open, covering a project-ready sent before it (#667)', async () => {
+    // `project-ready` is not replayed. An index read that started while a project was recovering,
+    // on a stream that attached only after the event, would otherwise keep the pre-recovery rows.
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { source } = mount()
+
+    source.open()
+
+    await waitFor(() => expect(invalidatedKeys(invalidate)).toContainEqual(workspaceQueryKeys.runsIndex))
   })
 
   it('refetches the authoritative endpoints on reconnect', async () => {

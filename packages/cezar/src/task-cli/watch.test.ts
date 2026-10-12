@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runTaskCommand, type TaskIo } from './cli.ts';
 import { pollHitDeadline, abortedPoll, TIMEOUT_GRACE_MS } from './watch.ts';
 import { TaskCliError } from './http.ts';
@@ -273,8 +273,14 @@ describe('cez task watching', () => {
         const id = create();
         harness.store.updateRun(id, { status: 'running' });
         harness.store.appendEvent(id, { type: 'text', text: 'before' });
-        later(200, () => { harness.store.deleteRun(id); });
-        expect(await run(['log', id, '--follow', '--until', until, '--timeout-seconds', '10'])).toBe(1);
+        // Under load a 200ms timer can fire before SSE replays `before`, so the cell
+        // asserts [] instead of a mid-follow delete. Wait for the replay, then delete.
+        const following = run(['log', id, '--follow', '--until', until, '--timeout-seconds', '10']);
+        await vi.waitFor(() => {
+          expect(lines().filter((line) => line.type === 'text').map((line) => line.text)).toContain('before');
+        });
+        harness.store.deleteRun(id);
+        expect(await following).toBe(1);
         expect(lines().filter((line) => line.type === 'text').map((line) => line.text)).toEqual(['before']);
         expect(last()).toEqual({ id, status: 'missing', until, timedOut: false });
       });
