@@ -751,5 +751,7 @@ describe('launchChromium leak-detection Chromium regression (#972)', () => {
         proc.kill();
       }
     },
+    // launchChromium waits up to 30 s for DevToolsActivePort (#781); CI timed this cell out at the 5 s default (#978).
+    45_000,
   );
 });
