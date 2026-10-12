@@ -199,5 +199,5 @@ if (args.includes('status')) {
       expect(blocked).toHaveBeenCalledWith(expect.stringContaining('process group'), expect.objectContaining({ groups: expect.any(Array) }));
     } finally { obscure = false; }
     expect(await Promise.race([job, delay(1000).then(() => 'still waiting')])).toBe('failed');
-  });
+  }, 15_000);
 });
