@@ -186,7 +186,12 @@ home directory itself. Headless `cezar run` applies the same guards.
 
 Other registered projects get their `ProjectContext` on first API touch
 (sidebar expand, deep link). Recovery/pruning for a project runs when its
-context is built. A registered project whose `root` no longer exists (or is
+context is built. Since hearsay-tools/cezarion#667 the server also builds them
+in the background once it listens (`ProjectContexts.warmAll`), one at a time,
+most recently opened first, skipping projects another live cockpit owns;
+`CEZ_PROJECT_WARMUP=0` restores the purely lazy behaviour. Each finished build
+emits the workspace `project-ready` event, so cockpits refetch the
+cross-project runs index that recovery just changed. A registered project whose `root` no longer exists (or is
 unreadable) is listed with `status: 'missing'` and never instantiated.
 
 Concurrent `cezar serve` processes remain allowed (each picks its own port, as
