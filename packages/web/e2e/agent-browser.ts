@@ -869,6 +869,25 @@ export class AgentBrowser {
     this.run(['mouse', 'up'])
   }
 
+  /** `dragTo` for a drag that commits state the page measures asynchronously (dnd-kit sortables,
+   *  hearsay-tools/cezarion#438): press, move a few pixels, wait until `lifted` holds, move to the
+   *  target, wait until `over` holds, then release. Without the waits the whole stream lands in
+   *  a few milliseconds, before the sortable has measured its drop targets, and the release
+   *  resolves to no target — a race a human hand never produces. */
+  dragHeld(from: { x: number; y: number }, to: { x: number; y: number }, { lifted, over }: { lifted: string; over: string }): void {
+    this.run(['mouse', 'move', String(from.x), String(from.y)])
+    this.run(['mouse', 'down'])
+    try {
+      this.run(['mouse', 'move', String(from.x), String(from.y + Math.sign(to.y - from.y || 1) * 10)])
+      this.waitForFunction(lifted)
+      this.run(['mouse', 'move', String(Math.round((from.x + to.x) / 2)), String(Math.round((from.y + to.y) / 2))])
+      this.run(['mouse', 'move', String(to.x), String(to.y)])
+      this.waitForFunction(over)
+    } finally {
+      this.run(['mouse', 'up'])
+    }
+  }
+
   /** operation: assert (`eval`) — for DOM facts no selector query can express, such as a
    *  computed style resolved from a CSS custom property. */
   evaluate(js: string): unknown {
