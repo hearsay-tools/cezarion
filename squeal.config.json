@@ -27,6 +27,37 @@
       ".ai/browsers/agent-browser.md",
       "packages/web/e2e/**",
       "pnpm-lock.yaml"
+    ],
+    ".github/scripts/*.test.cjs": [
+      ".github/workflows/**",
+      ".github/scripts/**",
+      ".github/ISSUE_TEMPLATE/**",
+      ".github/codex/**",
+      ".github/schemas/**",
+      ".ai/scripts/e2e.sh",
+      "packages/web/e2e/vitest.config.ts",
+      "packages/cezar/package.json",
+      "packages/cezar/scripts/measure-transcript-facts-*.mjs"
+    ],
+    "scripts/squeal-browser.test.mjs": [
+      "package.json",
+      "packages/web/e2e/environment.ts",
+      ".ai/scripts/test-env-up.sh"
+    ],
+    "scripts/test-changed.test.mjs": ["scripts/test-changed.mjs", "package.json"],
+    "packages/cezar/test/unit/cursor-hang-stdin.test.ts": [
+      "packages/cezar/scripts/mock-cursor-hang-stdin.mjs"
+    ],
+    "packages/cezar/test/unit/test-env-launcher.test.ts": [
+      ".ai/scripts/test-env-up.sh",
+      ".ai/scripts/test-env-down.sh",
+      ".ai/scripts/resolve-browser-launch.mjs",
+      ".ai/browsers/agent-browser.md"
+    ],
+    "packages/cezar/test/unit/web-typecheck.test.ts": [
+      "package.json",
+      "packages/web/package.json",
+      "packages/cezar/package.json"
     ]
   },
   "env": {
