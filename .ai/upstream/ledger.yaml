@@ -272,13 +272,14 @@ entries:
     pr: 953
     title: "feat(sidebar): drag project groups to set their order, shared across devices (#952) (#953)"
     date: 2026-09-14
-    status: planned
+    status: ported
     hint:
       conflicts: 3
-    note: absent here; needs the contract field plus 4 hunks in project-groups
+    note: drag moved to the fork's project rail (ProjectGroups no longer renders); fallback is registry order, not lastOpenedAt
     fork:
       issue: 438
-    decided: 2026-09-18
+      pr: 999
+    decided: 2026-10-13
   - sha: ce4fa20b3580fc999294d2e1ae00828e9900ff9e
     pr: 973
     title: "feat(ui): filter the new-task base branch picker (#973)"
