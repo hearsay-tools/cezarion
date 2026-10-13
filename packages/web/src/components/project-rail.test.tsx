@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
 import { ProjectRail, type ProjectRailProps } from '@/components/project-rail'
 import { ThemeProvider } from '@/components/theme-provider'
+import { PROJECT_RAIL_EXPANDED_STORAGE_KEY } from '@/lib/project-rail-expanded'
 import type { ProjectSignal } from '@/lib/project-signal'
 
 beforeEach(() => {
@@ -419,5 +420,208 @@ describe('ProjectRail remembered pages', () => {
   it('keeps the home link when no resolver is given', () => {
     renderRail()
     expect(mark('open_mercato').querySelector('a')?.getAttribute('href')).toBe('/p/open_mercato/')
+  })
+})
+
+/**
+ * Reordering (hearsay-tools/cezarion#438, port of open-mercato/cezar#952). The merge rule is
+ * table-tested in `lib/project-order.test.ts` and the write in `lib/use-project-order.test.tsx`;
+ * here: the affordances, the keyboard path through dnd-kit, and the click guard a link needs.
+ */
+describe('ProjectRail reorder', () => {
+  const three = [project('alpha'), project('beta'), project('gamma')]
+  const order = () => [...document.querySelectorAll('[data-slot="rail-project"]')].map((el) => el.getAttribute('data-project-id'))
+  const grip = (id: string) => mark(id).querySelector('[data-slot="rail-project-grip"]') as HTMLButtonElement | null
+  const link = (id: string) => mark(id).querySelector('a') as HTMLAnchorElement
+
+  /** jsdom lays nothing out, and dnd-kit's keyboard path moves by measured rects: give each row
+   *  the 52px slot it has in the real rail. */
+  function layOutRows() {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const row = this.closest('[data-slot="rail-project"]')
+      const index = row ? order().indexOf(row.getAttribute('data-project-id')) : -1
+      const top = index === -1 ? 0 : index * 52
+      const height = index === -1 ? 0 : 52
+      return { x: 0, y: top, top, left: 0, right: 60, bottom: top + height, width: 60, height, toJSON: () => ({}) } as DOMRect
+    })
+  }
+  afterEach(() => vi.restoreAllMocks())
+
+  /** One key, then one macrotask: dnd-kit's keyboard sensor attaches its keydown listener in a
+   *  `setTimeout` after the lift, so a key fired straight after Space would land before it. */
+  async function press(element: HTMLElement, code: string) {
+    await act(async () => {
+      fireEvent.keyDown(element, { code, key: code === 'Space' ? ' ' : code })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+  }
+
+  it('renders the projects in the order it is given', () => {
+    renderRail({ projects: [project('gamma'), project('alpha'), project('beta')], canReorder: true, onReorder: () => {} })
+    expect(order()).toEqual(['gamma', 'alpha', 'beta'])
+  })
+
+  it('offers no reorder until the ui-state has loaded, without a writer, or with one project', () => {
+    setViewport(1600)
+    localStorage.setItem(PROJECT_RAIL_EXPANDED_STORAGE_KEY, '1')
+    renderRail({ projects: three, canReorder: false, onReorder: () => {} })
+    expect(grip('alpha')).toBeNull()
+    expect(link('alpha').hasAttribute('aria-describedby')).toBe(false)
+    cleanup()
+    renderRail({ projects: three, canReorder: true })
+    expect(grip('alpha')).toBeNull()
+    cleanup()
+    renderRail({ projects: [project('alpha')], canReorder: true, onReorder: () => {} })
+    expect(grip('alpha')).toBeNull()
+  })
+
+  it('gives every expanded row a labelled grip button that says where it is', () => {
+    setViewport(1600)
+    localStorage.setItem(PROJECT_RAIL_EXPANDED_STORAGE_KEY, '1')
+    renderRail({ projects: three, canReorder: true, onReorder: () => {} })
+    expect(screen.getByRole('navigation', { name: 'Projects' }).getAttribute('data-expanded')).toBe('true')
+    expect(grip('alpha')?.tagName).toBe('BUTTON')
+    expect(grip('alpha')?.getAttribute('aria-label')).toBe('Reorder alpha, position 1 of 3')
+    expect(grip('gamma')?.getAttribute('aria-label')).toBe('Reorder gamma, position 3 of 3')
+    // A sibling of the link, never inside it: a button in a link is invalid.
+    expect(link('alpha').contains(grip('alpha'))).toBe(false)
+    // Hover-led ink, always shown where there is no hover.
+    expect(grip('alpha')?.className).toContain('opacity-0')
+    expect(grip('alpha')?.className).toContain('[@media(hover:none)]:opacity-100')
+  })
+
+  it('keeps a collapsed mark a link, with the reorder instructions attached', () => {
+    renderRail({ projects: three, canReorder: true, onReorder: () => {} })
+    expect(screen.getByRole('navigation', { name: 'Projects' }).getAttribute('data-expanded')).toBe('false')
+    expect(grip('alpha')).toBeNull()
+    expect(link('alpha').getAttribute('role')).toBeNull()
+    const described = document.getElementById(link('alpha').getAttribute('aria-describedby') ?? '')
+    expect(described?.textContent).toContain('press Space to pick this project up')
+  })
+
+  it.each([
+    ['collapsed', false],
+    ['expanded', true],
+  ])('reorders from the keyboard when %s: Space, arrow, Space', async (_state, expanded) => {
+    if (expanded) {
+      setViewport(1600)
+      localStorage.setItem(PROJECT_RAIL_EXPANDED_STORAGE_KEY, '1')
+    }
+    const onReorder = vi.fn()
+    renderRail({ projects: three, canReorder: true, onReorder })
+    layOutRows()
+    const activator = expanded ? grip('alpha')! : link('alpha')
+    activator.focus()
+
+    await press(activator, 'Space')
+    await press(activator, 'ArrowDown')
+    await press(activator, 'Space')
+
+    expect(onReorder).toHaveBeenCalledTimes(1)
+    expect(onReorder).toHaveBeenCalledWith(['beta', 'alpha', 'gamma'])
+  })
+
+  it('shows the dropped order at once, before the store answers, then follows the store again', async () => {
+    // The store's new order reaches the rail a macrotask after the drop (TanStack Query notifies
+    // on `setTimeout(0)`), and dnd-kit clears the drag transform in the drop's own render. Without
+    // a local order the rail paints the OLD order for that frame and the row visibly snaps back.
+    const onReorder = vi.fn()
+    const { rerender } = renderRail({ projects: three, canReorder: true, onReorder })
+    layOutRows()
+    link('alpha').focus()
+
+    await press(link('alpha'), 'Space')
+    await press(link('alpha'), 'ArrowDown')
+    act(() => {
+      fireEvent.keyDown(link('alpha'), { code: 'Space', key: ' ' })
+    })
+
+    expect(onReorder).toHaveBeenCalledWith(['beta', 'alpha', 'gamma'])
+    expect(order()).toEqual(['beta', 'alpha', 'gamma'])
+
+    // A write that failed hands back the old order as a NEW array: the store wins.
+    rerender(
+      <ThemeProvider>
+        <MemoryRouter initialEntries={['/p/toolkit-dev/']}>
+          <ProjectRail projects={[...three]} signals={new Map()} version="0.15.0" singleProject={false} canReorder onReorder={onReorder} />
+        </MemoryRouter>
+      </ThemeProvider>,
+    )
+    expect(order()).toEqual(['alpha', 'beta', 'gamma'])
+  })
+
+  it('does not lift a collapsed mark on Enter, so the link still navigates', async () => {
+    const onReorder = vi.fn()
+    renderRail({ projects: three, canReorder: true, onReorder })
+    layOutRows()
+    link('alpha').focus()
+    await press(link('alpha'), 'Enter')
+    await press(link('alpha'), 'ArrowDown')
+    // Enter lifted nothing, so the arrow moved nothing and nothing was announced.
+    expect(onReorder).not.toHaveBeenCalled()
+    expect(mark('alpha').hasAttribute('data-dragging')).toBe(false)
+  })
+
+  it('lifts a collapsed mark by touch on a long press, and leaves a finger swipe to the browser', async () => {
+    const onReorder = vi.fn()
+    renderRail({ projects: three, canReorder: true, onReorder })
+    layOutRows()
+    const target = link('alpha')
+    const touch = (y: number) => ({ touches: [{ clientX: 30, clientY: y }], changedTouches: [{ clientX: 30, clientY: y }] })
+    const finger = { pointerType: 'touch', clientX: 30, clientY: 26, button: 0, isPrimary: true }
+
+    // A swipe: the pointer sensor steps aside for a finger, so a quick move lifts nothing and the
+    // browser is free to scroll the rail.
+    await act(async () => {
+      fireEvent.pointerDown(target, finger)
+      fireEvent.touchStart(target, touch(26))
+    })
+    await act(async () => {
+      fireEvent.pointerMove(target, { ...finger, clientY: 80 })
+      fireEvent.touchMove(target, touch(80))
+    })
+    expect(mark('alpha').hasAttribute('data-dragging')).toBe(false)
+    await act(async () => { fireEvent.touchEnd(target, touch(80)) })
+
+    // A long press lifts it, and the finger carries it one row down.
+    await act(async () => {
+      fireEvent.pointerDown(target, finger)
+      fireEvent.touchStart(target, touch(26))
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    })
+    expect(mark('alpha').hasAttribute('data-dragging')).toBe(true)
+    await act(async () => { fireEvent.touchMove(target, touch(60)) })
+    await act(async () => { fireEvent.touchMove(target, touch(80)) })
+    await act(async () => { fireEvent.touchEnd(target, touch(80)) })
+    expect(onReorder).toHaveBeenCalledWith(['beta', 'alpha', 'gamma'])
+  })
+
+  it('cancels the click that ends a pointer drag, so the link does not load a page', async () => {
+    const onReorder = vi.fn()
+    renderRail({ projects: three, canReorder: true, onReorder })
+    layOutRows()
+    const target = link('alpha')
+
+    await act(async () => {
+      fireEvent.pointerDown(target, { clientX: 30, clientY: 26, button: 0, isPrimary: true })
+    })
+    // dnd-kit's pointer sensor listens on the event TARGET (pointer-capture style), not document.
+    await act(async () => { fireEvent.pointerMove(target, { clientX: 30, clientY: 60 }) })
+    await act(async () => { fireEvent.pointerMove(target, { clientX: 30, clientY: 80 }) })
+    // A browser dispatches the trailing click in the same task as the pointerup, so both go in
+    // one synchronous block: no timer may run between them.
+    const afterDrag = new MouseEvent('click', { bubbles: true, cancelable: true })
+    act(() => {
+      fireEvent.pointerUp(target, { clientX: 30, clientY: 80 })
+      target.dispatchEvent(afterDrag)
+    })
+    expect(afterDrag.defaultPrevented).toBe(true)
+    expect(onReorder).toHaveBeenCalledWith(['beta', 'alpha', 'gamma'])
+
+    // The guard is released one tick later: a click elsewhere is no longer cancelled.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)) })
+    const later = new MouseEvent('click', { bubbles: true, cancelable: true })
+    document.body.dispatchEvent(later)
+    expect(later.defaultPrevented).toBe(false)
   })
 })

@@ -104,7 +104,8 @@ fi
 
 # ---- 3. run the specs -------------------------------------------------------
 cd "$REPO_ROOT"
-if npm test -- --config packages/web/e2e/vitest.config.ts "$@"; then
+# Bypass npm test's unit-project filters while retaining the installed Vitest binary.
+if npm exec -- vitest run --config packages/web/e2e/vitest.config.ts "$@"; then
   echo "TEST_E2E_STATUS=passed"
   exit 0
 fi

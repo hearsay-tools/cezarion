@@ -1,12 +1,14 @@
 import { defineConfig } from 'vitest/config'
 import CiTestSequencer from './.github/scripts/ci-test-sequencer.mjs'
 
-// Four packages, one `npm test`. Each owns its own vitest config — this file only names
+// Four unit packages, one `npm test`. Each owns its own vitest config — this file only names
 // them, so `npm test -w <pkg>` and the whole-repo run execute the identical setup:
 //   - packages/cezar     Node ESM (NodeNext, `.js` relative imports)
 //   - packages/contract   the zod contract, Node-free (its pure helpers, e.g. attention)
 //   - packages/api-client the Node-free typed client between the two
 //   - packages/web        DOM code, resolved exactly as Vite bundles it
+// Browser E2E is also discoverable by Squeal, which marks it slow. `npm test` selects only
+// the four unit projects; `npm run test:e2e` selects the browser config after bootstrap.
 export default defineConfig({
   test: {
     // The suites are still being grown; a project that currently matches no file must not
@@ -27,6 +29,7 @@ export default defineConfig({
       './packages/contract/vitest.config.ts',
       './packages/api-client/vitest.config.ts',
       './packages/web/vitest.config.ts',
+      './packages/web/e2e/vitest.config.ts',
     ],
   },
 })

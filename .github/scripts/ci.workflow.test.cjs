@@ -321,21 +321,21 @@ test('CI runs on push to main and publishes dev snapshots from main', () => {
   assert.doesNotMatch(publishIf, /heads\/develop/);
 });
 
-test('verification bindings use four local cockpit lanes while CI keeps serial shards', () => {
+test('verification bindings keep the final gate in CI and reserve local full browser runs', () => {
   const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.ai/agentic.config.json'), 'utf8'));
   const commands = config.validation.commands;
   assert.ok(commands.includes('npm run test:package'));
-  assert.ok(commands.includes('npm run test:e2e:local'));
-  assert.ok(!commands.includes('npm run test:e2e'));
+  assert.ok(commands.includes('npm run test:e2e'));
+  assert.ok(!commands.includes('npm run test:e2e:local'));
   const claude = fs.readFileSync(path.join(repoRoot, 'CLAUDE.md'), 'utf8');
   const agents = fs.readFileSync(path.join(repoRoot, 'AGENTS.md'), 'utf8');
   const row = claude.match(/^\| Verification \|([^|]+)\|/m);
   assert.ok(row, 'expected a Verification bindings row');
   assert.match(row[1], /npm run test:package/);
-  assert.match(row[1], /npm run test:e2e:local/);
-  assert.match(agents.match(/^\| Verification \|([^|]+)\|/m)?.[1] ?? '', /npm run test:e2e:local/);
-  assert.match(claude, /npm run test:e2e:local\s+# full local browser suite/);
-  assert.match(agents, /npm run test:e2e:local\s+# full local browser suite/);
+  assert.match(row[1], /Full gate in CI:.*`npm run test:e2e`/);
+  assert.match(agents.match(/^\| Verification \|([^|]+)\|/m)?.[1] ?? '', /Full gate in CI:.*`npm run test:e2e`/);
+  assert.match(claude, /npm run test:e2e:local\s+# explicitly requested full local browser run/);
+  assert.match(agents, /npm run test:e2e:local\s+# explicitly requested full local browser run/);
   const ciDocs = fs.readFileSync(path.join(repoRoot, 'docs/sdlc/ci.md'), 'utf8');
   assert.match(ciDocs, /npm run test:e2e:local/);
 });
