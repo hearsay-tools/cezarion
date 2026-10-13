@@ -897,6 +897,29 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
+**R72/R73** (hearsay-tools/cezarion#994), in `workflows/ci-wait-failure-parity.test.ts`,
+drive every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native provider-error
+wire with a pending CI wait, on fresh and scheduler-owned continuation attempts.
+The failed step retains its error, finish timestamp and `session.ended(error)`;
+the run remains monitoring with durable CI intent until automatic recovery delivers
+the observation. Later successful settlement must leave that failed attempt intact.
+Clean session closure while CI is pending still parks without failure. No runner
+exemptions or normalized-event injection.
+
+**R74** extends that native-wire matrix to a failed nonfinal workflow agent.
+CI recovery must retain the failed attempt, including across restart and CI
+acknowledgement, then execute the remaining agent and bounded check retry.
+Both passing checks and exhausted retries settle according to the workflow;
+a successful synthetic continuation never rewrites the failed source as done.
+
+**R75** drives accepted owned workflows through restart after CI acknowledgement
+and after a synthetic continuation durably queues the remaining workflow. Both
+must preserve the failed source and execute the tail with its bounded check retry.
+**R76** pins an authored check retry targeting that source: actual re-execution
+advances the logical step's latest iteration/result while the original failure's
+`session.ended(error)` and `step-end(failed)` remain in the append-only transcript.
+This is existing retry behavior, not per-iteration snapshots in `StepState`.
+
 **R7** also pins off-loop restart readiness (hearsay-tools/cezarion#906): every
 `RUNNER_IDS` backend uses its `HARNESS_ADAPTERS` native mock, then restarts with
 both root and worker facts sidecars removed. Recovery must never use the

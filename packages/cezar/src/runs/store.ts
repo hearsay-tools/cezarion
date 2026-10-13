@@ -173,6 +173,7 @@ export const runRecordSchema = z.object({
   queuedMessages: z.array(queuedMessageSchema).optional(),
   /** Durable Continue opening message; id is its synthetic step id. No base64 in the index. */
   continuationMessage: continuationMessageSchema.optional(),
+  workflowResumeStepId: contractRunRecordSchema.shape.workflowResumeStepId,
   /** A malformed explicit ASK must never be collected as worker success. */
   invalidAsk: z.boolean().optional(),
   delegation: storedDelegationStateSchema,

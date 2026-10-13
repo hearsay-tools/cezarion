@@ -200,6 +200,8 @@ export const runRecordSchema = z.object({
   stopping: z.boolean().optional(),
   /** Opening Continue message, retained until its first completed turn for crash recovery. */
   continuationMessage: continuationMessageSchema.optional(),
+  /** Original workflow agent awaiting CI recovery; independent of its failed attempt status. */
+  workflowResumeStepId: z.string().optional(),
   /** The last turn carried a malformed explicit structured question. */
   invalidAsk: z.boolean().optional(),
   /** Owned-run authority; absence is legacy, invalid is explicitly quarantined. */
