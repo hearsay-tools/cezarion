@@ -685,7 +685,7 @@ cez task list                                                # currentStepId (ru
 cez task status "$id"                                       # slim JSON: status, attention, question, branch, handoffUrl…
 cez task send "$id" 'Use the retry helper instead'            # delivered live, queued before start
 cez task send "$id" --resume 'Continue with the next step'    # resumed: reopen a settled session
-cez task log "$id" --follow --timeout-seconds 300             # JSON lines until it ends
+cez task log "$id" --follow --timeout-seconds 300             # JSON lines until it needs you or ends
 ```
 
 `list --status` accepts comma-separated values: `queued`, `running`, `waiting`, `review`,
@@ -730,11 +730,11 @@ Use `archive <id>` to hide a task from `list`, `unarchive <id>` to restore it, a
 `send`, `log`, `stop`, …) still accept a worker's id. `archive-finished` sweeps finished tasks (not scheduled runs waiting on a usage limit, and not owned workers, which leave with their parent) and prints
 `{"archived": count, "ids": [...], "pinnedIds": [...]}`. The single-task commands print `{"id": "…", "archived": true|false}`.
 Exit codes:
-`0` ok (`wait`/`start --wait`: the task ended `done`/`review` or stopped for attention), `1` task
+`0` ok (`wait`/`start --wait`/`log --follow`: the task ended `done`/`review` or stopped for attention), `1` task
 failed/cancelled or a message was not delivered, `2` no cockpit or the cockpit refused (its `error`
 is passed through), `3` timed out, `64` usage error. `cez task --help` lists every flag.
 
-**When a task needs you.** `status`, `list` and `wait` carry `attention` and `attentionLabel`,
+**When a task needs you.** `status`, `list`, `wait` and the final `log --follow` line carry `attention` and `attentionLabel`,
 derived by the same function the cockpit's Needs You uses, so the CLI and the cockpit cannot
 disagree. Read those rather than the raw status:
 
@@ -748,15 +748,17 @@ disagree. Read those rather than the raw status:
 - `attention: none` with "waiting on 2 workers" is a task parked on its own workers; it will wake
   by itself.
 
-`wait` and `start --wait` stop as soon as a task needs you or ends (`--until attention`, the
-default); `--until settled` waits for a terminal status only — for `--autonomous` runs, or a bot
-that wants an outcome:
+`wait`, `start --wait` and `log --follow` stop as soon as a task needs you or ends
+(`--until attention`, the default); `--until settled` waits for a terminal status only — for
+`--autonomous` runs, or a bot that wants an outcome:
 
 ```bash
 cez task wait "$id"                                        # stops when the task needs you, or ends
 cez task wait "$id" --until settled                        # done/review/failed/cancelled only
 cez task start --task-file task.md --wait                  # returns as soon as the agent parks
 cez task start --task-file task.md --wait --autonomous --until settled   # runs to completion
+cez task log "$id" --follow                                # streams until the task needs you, or ends
+cez task log "$id" --follow --until settled                # streams until done/review/failed/cancelled
 ```
 
 *Migrating from `--until settled`.* Before 0.16, `wait` and `start --wait` defaulted to
@@ -767,6 +769,13 @@ run in the `wait` output (and the `start --wait` object) now carries `attention`
 `attentionLabel`, and the output's top level says which `until` was in force, so a caller can tell
 "parked for follow-up" (`status: waiting`, `attention: waiting`) from "finished" (`status: done`,
 `attention: none`) without knowing cezar's status vocabulary.
+
+*`log --follow` (#931).* `log --follow` used to stop on a terminal status only, so tailing an
+interactive task streamed until `--timeout-seconds` and exited 3 after the agent had parked. It
+now takes the same `--until` with the same `attention` default, judged by the same function as
+`wait`; `--until` without `--follow` is a usage error. Every event is still printed before the
+final line, which is now `{"id", "status", "attention", "attentionLabel", "until", "timedOut"}`. A
+bot that tails to terminal state adds `--until settled`. `log` without `--follow` is unchanged.
 
 **A bot that lives behind an HTTP endpoint** does not have to poll. Set a **Task webhook** (URL
 and an optional Bearer token) in the project's **Settings → General**, and every task that opts
@@ -879,6 +888,7 @@ Useful environment variables:
 | `CEZ_BROWSE_ROOT=~/` | Default root for **Add project → Open local folder…**. The picker cannot navigate above it; a saved workspace value overrides the environment default and must name an existing folder. |
 | `CEZ_PROJECTS_DIR=~/cezar/projects` | Default destination for **Clone from GitHub**. Saved workspace settings override it, and missing directories are created recursively. |
 | `CEZ_SKILLS_AUTO_UPDATE=0` | Disable automatic checks and updates for upstream-CLI-tracked Open Mercato skill installations. On by default; a saved global Skills setting overrides this environment default. Checks are delayed, bounded, cached, and non-blocking. |
+| `CEZ_PROJECT_WARMUP=0` | Prepare each registered project only when it is first opened. By default the cockpit prepares every other registered project in the background once it listens, one at a time, most recently opened first: the run store opens and interrupted runs resume, so the first click on a project does not wait. A project another live cockpit serves is skipped. |
 | `CEZ_AUTONOMOUS_DEFAULT=0` | Seed the New Task Autonomous default (`0` or `1`). Without a seed, skills default on and workflows off; a saved global Resources setting overrides it. |
 | `CEZ_WORKTREE_DEFAULT=1` | Seed the New Task Worktree default (`0` or `1`). Without a seed, eligible runs default on; a saved global Resources setting overrides it. |
 | `CEZ_DISABLE_REPO_LOCK=1` | **Dangerous escape hatch:** allow any run executing in the repository root — an explicit `worktree=false` run, non-Git degradation, or a continuation whose worktree cannot be restored — to proceed without Cezar’s repository-root lease. Agents can overwrite each other’s files or Git state; isolated worktree runs are unaffected. Off by default; only the exact value `1` enables it. |
@@ -985,12 +995,13 @@ not disable a user or team marketplace copy. A previously confirmed Cursor
 session ID can also lose history inside Cursor without an error; Cezar resumes
 the recorded ID and checks that Cursor returns the same ID.
 Cursor provides no qualified token-usage telemetry; Cezar leaves usage unavailable
-instead of estimating it. In ACP mode, Cezar negotiates Cursor’s parameterized model picker and
-shows only the effort levels the selected model advertises. The runner applies
-`effort` or `reasoning` through ACP session config options before prompting;
-unsupported explicit values fail instead of silently using a default. Initial models
-are pinned with `--model`; opaque parameterized IDs and legacy model discovery
-remain compatibility paths for older CLIs.
+instead of estimating it. Cezar discovers Cursor's canonical model IDs and advertised
+effort levels through its read-only ACP catalog. Print mode accepts those IDs and
+applies effort using a complete native parameter selection passed with `--model`,
+retaining the account catalog's defaults for other parameters. Advertised legacy
+print variants remain supported. ACP sessions apply `effort` or `reasoning` through
+session config options before prompting; an unsupported explicit effort fails
+instead of silently choosing another level.
 
 Settings → Agent config exposes Cursor’s global `cli-config.json`, project
 `.cursor/cli.json` permissions, `.cursor/mcp.json`, and shared `AGENTS.md`.
@@ -1260,8 +1271,17 @@ as in [Quick start](#quick-start)).
 ```bash
 git clone https://github.com/wjarka/cezar.git
 cd cezar
-npm install
+npm install --global pnpm@12.11.2
+pnpm install --frozen-lockfile
 ```
+
+Dependency installation uses pnpm 12.11.2 (pinned in `packageManager`) and
+`pnpm-lock.yaml`. Use pnpm for dependency changes; keep npm for the existing
+build/test scripts. Workspace dependencies are linked locally and esbuild's
+install hook is approved in `pnpm-workspace.yaml`. The store uses hardlinks when
+the checkout and store share a filesystem. Publishing and end-user installation
+continue to use npm. For this repository's Worktrees setup, use
+`pnpm install --frozen-lockfile` after the checked-out base branch contains the migration.
 
 **3. Build** — compiles the api-client and the server (`tsc → packages/cezar/dist/`) and the cockpit
 (`vite build → packages/cezar/web/dist/`), then runs the pack gate:
@@ -1342,7 +1362,7 @@ for targeted browser commands and the final-gate/evidence-reuse policy.
 
 Both `npm run typecheck:web` and
 `npm run typecheck -w @open-mercato/cezar-web` rebuild server declarations from
-the current checkout before checking web sources. Run `npm ci` in each new
+the current checkout before checking web sources. Run `pnpm install --frozen-lockfile` in each new
 worktree first. The full `npm run typecheck` starts with the web check, so it
 prepares declarations once before checking the remaining workspaces. Calling
 `tsc --noEmit` directly skips this preparation and can consume stale declarations.

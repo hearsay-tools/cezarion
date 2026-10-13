@@ -18,6 +18,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { allocateProjectSlug, clearProjectProbeCache, listProjects, registerProject } from '../workspace/projects.ts';
 import { ProjectContexts } from './project-context.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
+import type { CockpitOwnership } from './cockpit-ownership.ts';
 import { loadWorkspaceConfig, mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { workspaceConfigPath } from '../paths.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -538,6 +539,29 @@ describe('workspace projects API', () => {
       const allowed = await del(other.id, { contexts });
       expect(allowed.status).toBe(200);
       // The store/manager handles are dropped with the entry (step 2.1's dispose).
+      expect(contexts.peek(other.id)).toBeUndefined();
+      contexts.disposeAll();
+    });
+
+    it('waits for a build in flight before checking and disposing, so nothing outlives the removal (#667)', async () => {
+      // The boot warm-up builds every project in the background; a removal that lands mid-build
+      // used to find no context, count no running tasks, dispose nothing, and leave the build to
+      // register a removed project's store and manager afterwards.
+      // The build is held open until a beat after the removal arrives.
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      // Past the registry lookup, as a real build is when recovery is what takes the time.
+      const ownership = { acquire: () => gate } as unknown as CockpitOwnership;
+      const contexts = new ProjectContexts({ listProjects, ownership });
+      const other = await registerProject(otherRoot);
+      const building = contexts.context(other.id);
+      setTimeout(release, 100);
+
+      const { status } = await del(other.id, { contexts });
+
+      expect(status).toBe(200);
+      expect(contexts.peek(other.id)).toBeUndefined();
+      await building.catch(() => undefined);
       expect(contexts.peek(other.id)).toBeUndefined();
       contexts.disposeAll();
     });

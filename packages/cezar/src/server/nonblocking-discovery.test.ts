@@ -19,13 +19,18 @@ function build(modelCatalog = new RunnerModelCatalog({ adapters: {} }), extra: P
   return createApp({ repoRoot: root, store: RunStore.open(join(root, '.ai/cezar')), manager: {} as RunManager, version: 'test', modelCatalog, ...extra });
 }
 
+// hearsay-tools/cezarion#974: the full Node 24.15 run took 1734ms against 1500ms.
+// This cell also builds the app and reads real Git/workspace metadata; its deadline
+// is a liveness bound, not a health latency benchmark. The never-resolving probe
+// still makes awaiting availability fail within the ordinary 5s unit-test budget.
 it('answers cold health while availability probes remain unresolved', async () => {
   vi.mocked(detectEnvironment).mockReturnValue(new Promise(() => {}));
   const app = build();
   const response = await apiRequest(app, '/api/v1/health');
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({ checks: [] });
-}, 1500);
+  expect(detectEnvironment).toHaveBeenCalledOnce();
+}, 5_000);
 
 it('answers cold Cursor models before discovery completes and returns them on the next read', async () => {
   let finish!: (models: ModelOption[]) => void;

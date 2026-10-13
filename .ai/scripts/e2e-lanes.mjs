@@ -2,7 +2,7 @@
 // One-command local browser gate: one build, four independent app/browser lanes.
 import { spawn, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,7 +36,26 @@ function copyCurrentEdits(repoRoot, laneRoot, baseRef) {
   }
 }
 
+function linkWorkspaceDependencies(repoRoot, laneRoot) {
+  const packages = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')).workspaces ?? [];
+  const local = new Map(packages.map(relative => [realpathSync(join(repoRoot, relative)), join(laneRoot, relative)]));
+  function mirror(source, target) {
+    mkdirSync(target, { recursive: true });
+    for (const entry of readdirSync(source)) {
+      const from = join(source, entry);
+      const to = join(target, entry);
+      if (entry.startsWith('@')) mirror(from, to);
+      else symlinkSync(local.get(realpathSync(from)) ?? from, to, 'dir');
+    }
+  }
+  for (const relative of packages) {
+    const source = join(repoRoot, relative, 'node_modules');
+    if (existsSync(source)) mirror(source, join(laneRoot, relative, 'node_modules'));
+  }
+}
+
 function linkBuiltAssets(repoRoot, laneRoot) {
+  linkWorkspaceDependencies(repoRoot, laneRoot);
   for (const relative of ['node_modules', 'packages/cezar/dist', 'packages/cezar/web/dist']) {
     const source = join(repoRoot, relative);
     if (!existsSync(source)) throw new Error(`missing shared E2E asset: ${source}`);
@@ -256,8 +275,8 @@ function retainEvidence(lane, logDir) {
 export function buildSource(repoRoot) {
   // Windows exposes npm as a .cmd shim, which execFileSync cannot launch directly.
   const npmOptions = { cwd: repoRoot, stdio: 'inherit', shell: process.platform === 'win32' };
-  if (!existsSync(join(repoRoot, 'node_modules/zod/package.json'))) {
-    execFileSync('npm', ['ci'], npmOptions);
+  if (!existsSync(join(repoRoot, 'packages/cezar/node_modules/zod/package.json'))) {
+    execFileSync('pnpm', ['install', '--frozen-lockfile'], npmOptions);
   }
   execFileSync('npm', ['run', 'build'], {
     ...npmOptions, env: { ...process.env, VITE_CEZ_E2E: '1' },
@@ -281,7 +300,7 @@ export async function runLocalSuite({ repoRoot = ownRoot, scratchRoot, buildSour
   process.on('SIGTERM', interrupt);
   try {
     await prepareBuild(repoRoot);
-    for (const relative of ['node_modules/zod/package.json', 'packages/cezar/dist/index.js', 'packages/cezar/web/dist/index.html', 'packages/cezar/web/dist/.cez-e2e-build']) {
+    for (const relative of ['packages/cezar/node_modules/zod/package.json', 'packages/cezar/dist/index.js', 'packages/cezar/web/dist/index.html', 'packages/cezar/web/dist/.cez-e2e-build']) {
       if (!existsSync(join(repoRoot, relative))) throw new Error(`E2E build did not provide ${relative}`);
     }
     const baseRef = git(repoRoot, 'rev-parse', 'HEAD').toString('utf8').trim();

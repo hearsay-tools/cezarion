@@ -15,7 +15,7 @@ export interface CursorRunnerOptions {
   bin?: string;
   inspect?: (bin: string, spec: AgentRunSpec, signal?: AbortSignal) => Promise<CursorPrintCapabilityResult>;
   makeAcp?: () => AgentRunner;
-  makePrint?: (models?: readonly ModelOption[]) => AgentRunner;
+  makePrint?: (models?: readonly ModelOption[], resolvedModel?: string) => AgentRunner;
 }
 
 /** Selects one Cursor transport before inference; persisted identity always wins over defaults. */
@@ -39,7 +39,7 @@ export class CursorRunner implements AgentRunner {
       { id: 'mock-default-model', label: 'Mock default', description: 'Default model' },
       { id: 'mock-default-model-xhigh', label: 'Mock high effort', description: 'Mock high effort' },
     ];
-    const select = async (signal: AbortSignal): Promise<{ transport: SessionTransport; note?: string; models?: readonly ModelOption[]; model?: string }> => {
+    const select = async (signal: AbortSignal): Promise<{ transport: SessionTransport; note?: string; models?: readonly ModelOption[]; model?: string; resolvedModel?: string }> => {
       if (this.options.sessionTransport === 'cursor-acp') return { transport: 'cursor-acp' };
       if (this.options.sessionTransport === 'cursor-print') {
         if (isBundledMock) {
@@ -48,7 +48,7 @@ export class CursorRunner implements AgentRunner {
         }
         const capability = await (this.options.inspect ?? inspectCursorPrintCapabilities)(bin, spec, signal);
         if (!capability.supported) throw new Error(`Cursor print session cannot resume: ${capability.reason}`);
-        return { transport: 'cursor-print', models: capability.models, model: capability.model };
+        return { transport: 'cursor-print', models: capability.models, model: capability.model, resolvedModel: capability.resolvedModel };
       }
       if (spec.resume) return { transport: 'cursor-acp' }; // Legacy untagged Cursor ID.
       if (isBundledMock) {
@@ -57,11 +57,11 @@ export class CursorRunner implements AgentRunner {
       }
       const capability = await (this.options.inspect ?? inspectCursorPrintCapabilities)(bin, spec, signal);
       return capability.supported
-        ? { transport: 'cursor-print', models: capability.models, model: capability.model }
+        ? { transport: 'cursor-print', models: capability.models, model: capability.model, resolvedModel: capability.resolvedModel }
         : { transport: 'cursor-acp', note: `Cursor marketplace plugins unavailable: ${capability.reason}` };
     };
-    const makeRunner = (transport: SessionTransport, models?: readonly ModelOption[]): AgentRunner => transport === 'cursor-print'
-      ? (this.options.makePrint?.(models) ?? new CursorPrintRunner({ bin: this.options.bin, models }))
+    const makeRunner = (transport: SessionTransport, models?: readonly ModelOption[], resolvedModel?: string): AgentRunner => transport === 'cursor-print'
+      ? (this.options.makePrint?.(models, resolvedModel) ?? new CursorPrintRunner({ bin: this.options.bin, models, resolvedModel }))
       : (this.options.makeAcp?.() ?? new CursorAcpRunner({ bin: this.options.bin }));
     return this.lastSession = new SelectingCursorSession(select, makeRunner, spec, onEvent, opts);
   }
@@ -83,8 +83,8 @@ class SelectingCursorSession implements AgentSession {
   private settled = false;
 
   constructor(
-    select: (signal: AbortSignal) => Promise<{ transport: SessionTransport; note?: string; models?: readonly ModelOption[]; model?: string }>,
-    makeRunner: (transport: SessionTransport, models?: readonly ModelOption[]) => AgentRunner,
+    select: (signal: AbortSignal) => Promise<{ transport: SessionTransport; note?: string; models?: readonly ModelOption[]; model?: string; resolvedModel?: string }>,
+    makeRunner: (transport: SessionTransport, models?: readonly ModelOption[], resolvedModel?: string) => AgentRunner,
     spec: AgentRunSpec,
     onEvent?: (event: AgentEvent) => void,
     opts: SessionOptions = {},
@@ -92,10 +92,10 @@ class SelectingCursorSession implements AgentSession {
     this.result = new Promise(resolve => { this.resolveResult = resolve; });
     void (async () => {
       try {
-        const { transport, note, models, model } = await select(this.controller.signal);
+        const { transport, note, models, model, resolvedModel } = await select(this.controller.signal);
         if (!this.active) return;
         if (note) onEvent?.({ type: 'note', message: note });
-        const runner = makeRunner(transport, models);
+        const runner = makeRunner(transport, models, resolvedModel);
         const selectedSpec = model && !spec.model ? { ...spec, model } : spec;
         const inner = runner.startSession(selectedSpec, event => onEvent?.(event.type === 'session'
           ? { ...event, sessionTransport: transport } : event), opts);

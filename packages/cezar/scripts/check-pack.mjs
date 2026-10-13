@@ -20,7 +20,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 
 // Under `npm run`, npm_execpath is npm's own cli.js — running it through
 // process.execPath works on every platform (no .cmd shim needed on Windows).
-const npmExecpath = process.env.npm_execpath;
+// pnpm 12 sets npm_execpath to a native executable; these operations need npm.
+const npmExecpath = /(?:^|[\\/])npm-cli\.js$/.test(process.env.npm_execpath ?? '')
+  ? process.env.npm_execpath : undefined;
 const packArgs = ['pack', '--dry-run', '--json'];
 const npmCli = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const stdout = npmExecpath

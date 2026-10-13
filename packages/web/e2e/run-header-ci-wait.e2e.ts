@@ -2,7 +2,8 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { resolve } from 'node:path'
+import { createRequire } from 'node:module'
+import { dirname, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { waitForSettledSample } from './visual-ready'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
@@ -14,6 +15,7 @@ import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from
 // Browser component coverage of the real header + production CSS. The parent integration
 // suite owns server lifecycle/SSE evidence; this fixture deliberately needs no CI controller.
 const webRoot = resolve(import.meta.dirname, '..')
+const viteCli = resolve(dirname(createRequire(import.meta.url).resolve('vite/package.json')), 'bin/vite.js')
 const fixtureName = `.ci-header-${process.pid}`
 const artifacts = resolve(webRoot, '../../.ai/qa/artifacts_e2e/run-header-ci-wait')
 const repository = `${'long-owner-'.repeat(3)}/${'long-repository-'.repeat(5)}`
@@ -63,7 +65,7 @@ beforeAll(async () => {
   const port = (probe.address() as { port: number }).port
   await new Promise<void>(done => probe.close(() => done()))
   url = `http://127.0.0.1:${port}/${fixtureName}.html`
-  server = spawn(process.execPath, [resolve(webRoot, '../../node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', String(port), '--strictPort'], { cwd: webRoot, stdio: 'ignore' })
+  server = spawn(process.execPath, [viteCli, '--host', '127.0.0.1', '--port', String(port), '--strictPort'], { cwd: webRoot, stdio: 'ignore' })
   await pollFor(async signal => (await fetch(url, { signal })).ok || undefined,
     () => 'CI header browser fixture did not start', { tries: 60 })
   browser = AgentBrowser.open(`ci-header-${process.pid}`)

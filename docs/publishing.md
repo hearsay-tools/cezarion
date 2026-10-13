@@ -468,3 +468,8 @@ upstream and are never written to from here.
 Failed Release and Nightly attempts create durable issues with job/step evidence.
 See [failure reporting](failure-reporting.md) for matching, permissions, duplicate
 handling, missing logs, and how to rerun a failed reporter without retrying a release.
+
+Contributor and release builds install with pinned pnpm and the frozen
+`pnpm-lock.yaml`. Release finalization refreshes only that lockfile after stamping
+the workspace versions. Packing, publishing, and npm consumer-install tests
+continue to use npm; end users do not need pnpm.

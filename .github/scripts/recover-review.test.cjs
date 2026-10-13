@@ -57,6 +57,7 @@ function harness(state = fixture(), beforeRead = () => {}) {
       owner: 'o', repo: 'n', event: state.event, maxRounds: '3', log: text => logs.push(text),
       // Hermetic content reader: version-only stamp between base and head refs.
       readJsonFile: ({ path: filePath, ref }) => {
+        if (filePath === 'pnpm-lock.yaml') return "lockfileVersion: '9.0'\nimporters: {}\n";
         const base = state.pulls[0]?.base?.sha || 'base';
         if (ref === base) return { name: filePath, version: '1.0.0' };
         return { name: filePath, version: '1.0.1' };
@@ -122,7 +123,7 @@ test('bot-authored release/v* bump PRs are never recovered for automated review'
   };
   h.state.pullFiles = [
     { filename: 'packages/cezar/package.json' },
-    { filename: 'package-lock.json' },
+    { filename: 'pnpm-lock.yaml' },
   ];
   const result = await recover(h);
   assert.equal(result.recovered, false);

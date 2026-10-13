@@ -20,7 +20,7 @@ const MANIFEST = [
   'packages/api-client/package.json',
   'packages/web/package.json',
   'alias-cezarion/package.json',
-  'package-lock.json',
+  'pnpm-lock.yaml',
 ];
 
 test('allowlist matches release-finalization staged paths only', () => {
@@ -34,7 +34,7 @@ test('allowlist matches release-finalization staged paths only', () => {
 
 test('manifest-only requires a non-empty allowlisted file set', () => {
   assert.equal(isManifestOnlyFiles(MANIFEST), true);
-  assert.equal(isManifestOnlyFiles(['package-lock.json']), true);
+  assert.equal(isManifestOnlyFiles(['pnpm-lock.yaml']), true);
   assert.equal(isManifestOnlyFiles([]), false);
   assert.equal(isManifestOnlyFiles(undefined), false);
   assert.equal(isManifestOnlyFiles([...MANIFEST, 'README.md']), false);
@@ -211,5 +211,26 @@ test('an upstream-scan PR never passes as a release bump, nor a release bump as 
     EXPECTED_HEAD_SHA: 'a'.repeat(40), LIVE_HEAD_SHA: 'a'.repeat(40), BASE_SHA: 'b'.repeat(40),
     GITHUB_REPOSITORY: 'example/project', PR_FILES_OK: '1', PR_FILES: '.ai/upstream/ledger.yaml' };
   assert.equal(classifyFromEnv(scan, { filesAreVersionStampsOnly: () => true }), false);
-  assert.equal(classifyUpstreamScanFromEnv({ ...scan, HEAD_REF: 'release/v1.2.3', PR_FILES: 'package-lock.json' }), false);
+  assert.equal(classifyUpstreamScanFromEnv({ ...scan, HEAD_REF: 'release/v1.2.3', PR_FILES: 'pnpm-lock.yaml' }), false);
+});
+
+
+test('pnpm workspace specifiers share manifest stamps, while all other bytes stay fixed', () => {
+  const { filesAreVersionStampsOnly } = require('./release-bump-pr.cjs');
+  const before = "lockfileVersion: '9.0'\n\nimporters:\n\n  packages/web:\n    dependencies:\n      '@open-mercato/cezar-api-client':\n        specifier: ^0.16.0\n        version: link:../api-client\n\npackages:\n  yaml@2.9.0:\n    resolution: {integrity: old}\n";
+  const after = before.replace('^0.16.0', '^0.16.1');
+  const check = (lock, manifest = { version: '0.16.1' }) => filesAreVersionStampsOnly({
+    repository: 'example/project', files: ['pnpm-lock.yaml', 'packages/cezar/package.json'],
+    baseRef: 'base', headRef: 'head',
+    readJsonFile: ({ ref }) => ref === 'base' ? { version: '0.16.0' } : manifest,
+    readTextFile: ({ ref }) => ref === 'base' ? before : lock,
+  });
+  assert.equal(check(after), true);
+  assert.equal(check(before), true, 'an unchanged lock can accompany a package version stamp');
+  for (const lock of [after.replace('integrity: old', 'integrity: new'),
+    after.replace('link:../api-client', 'link:../cezar'), after.replace('^0.16.1', '^9.0.0'),
+    after.replace('specifier: ^0.16.1', 'specifier: 0.16.1'), after + 'settings: {evil: true}\n',
+    after.replace('@open-mercato/cezar-api-client', 'unrelated'),
+    after.replace('packages/web:', 'packages/unknown:')]) assert.equal(check(lock), false, lock);
+  assert.equal(check(after, { version: '0.16.1', scripts: { postinstall: 'evil' } }), false);
 });

@@ -53,6 +53,12 @@ describe('a run stopped by a usage limit resumes itself', () => {
     }
   }
 
+  // hearsay-tools/cezarion#974: full Node 24.15 setup exceeded the default 10s
+  // hook at 10222ms before the watchdog cell ran. Five serial Git processes
+  // now each have a 10s deadline; cover their 50s budget plus 5s local setup.
+  const setupGitTimeoutMs = 10_000;
+  const setupGit = (args: string[]) => run('git', args, { cwd: repoRoot, timeout: setupGitTimeoutMs });
+
   beforeEach(async () => {
     savedEnv.CEZ_DRY_RUN = process.env.CEZ_DRY_RUN;
     savedEnv.CEZ_MOCK_LIMIT_RESET_SECONDS = process.env.CEZ_MOCK_LIMIT_RESET_SECONDS;
@@ -60,14 +66,14 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // Far enough out that the schedule is unambiguous and the timer never fires mid-test.
     process.env.CEZ_MOCK_LIMIT_RESET_SECONDS = '3600';
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-auto-resume-'));
-    await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
-    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
-    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
+    await setupGit(['init', '-q', '-b', 'main']);
+    await setupGit(['config', 'gc.auto', '0']);
+    await setupGit(['config', 'maintenance.auto', 'false']);
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
-    await run('git', ['add', '-A'], { cwd: repoRoot });
-    await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
+    await setupGit(['add', '-A']);
+    await setupGit([...GIT_ID, 'commit', '-q', '-m', 'base']);
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-  });
+  }, 5 * setupGitTimeoutMs + 5_000);
 
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);

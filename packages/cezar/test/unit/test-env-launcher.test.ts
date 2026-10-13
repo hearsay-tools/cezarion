@@ -40,12 +40,12 @@ function makeFixture(withSetsid: boolean): { root: string; path: string } {
   copyFileSync(join(repoRoot, '.ai/scripts/resolve-browser-launch.mjs'), join(root, '.ai/scripts/resolve-browser-launch.mjs'));
   writeFileSync(join(root, '.ai/browsers/agent-browser.md'), '# test provider\n');
   writeFileSync(join(root, 'package.json'), '{"private":true}\n');
-  writeFileSync(join(root, 'package-lock.json'), '{}\n');
+  writeFileSync(join(root, 'pnpm-lock.yaml'), '{}\n');
   // Backdate tracked sources so the #31 warm-reuse assertion never depends on
   // how fast the cold boot was relative to these writes.
   const safelyBeforeBoot = new Date(Date.now() - 30_000);
   utimesSync(join(root, 'package.json'), safelyBeforeBoot, safelyBeforeBoot);
-  utimesSync(join(root, 'package-lock.json'), safelyBeforeBoot, safelyBeforeBoot);
+  utimesSync(join(root, 'pnpm-lock.yaml'), safelyBeforeBoot, safelyBeforeBoot);
 
   const commands = ['cat', 'chmod', 'curl', 'date', 'dirname', 'find', 'grep', 'id', 'kill', 'mkdir', 'mv', 'nohup', 'pwd', 'rm', 'sh', 'sleep', 'tail', 'uname'];
   if (withSetsid) commands.push('setsid');
@@ -59,7 +59,7 @@ function makeFixture(withSetsid: boolean): { root: string; path: string } {
     // the workspace layout rather than invent its own.
     `#!/bin/sh
 set -eu
-mkdir -p node_modules/zod packages/cezar/dist packages/cezar/web/dist
+mkdir -p packages/cezar/node_modules/zod packages/cezar/dist packages/cezar/web/dist
 if [ "\${1-}" = run ] && [ "\${2-}" = build ]; then
   printf 'build\\n' >> .ai/build-invocations
   rm -f packages/cezar/web/dist/.cez-e2e-build
@@ -67,7 +67,7 @@ if [ "\${1-}" = run ] && [ "\${2-}" = build ]; then
     printf 'e2e\\n' > packages/cezar/web/dist/.cez-e2e-build
   fi
 fi
-printf '{"name":"zod"}' > node_modules/zod/package.json
+printf '{"name":"zod"}' > packages/cezar/node_modules/zod/package.json
 cat > packages/cezar/dist/index.js <<'EOF'
 const http = require('node:http');
 const port = Number(process.argv[process.argv.indexOf('--port') + 1]);
@@ -100,6 +100,7 @@ done
 `,
     { mode: 0o755 },
   );
+  symlinkSync('npm', join(root, 'bin/pnpm'));
   return { root, path: join(root, 'bin') };
 }
 

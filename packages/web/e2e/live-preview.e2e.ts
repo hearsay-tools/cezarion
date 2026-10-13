@@ -215,7 +215,8 @@ describe('live preview', () => {
       const observations: Array<Record<string, unknown>> = []
       const off = subscribe(event => { if (event.sessionId === firstSession && event.method === 'Network.webSocketClosed') closed++ })
       await request('Network.enable', {}, firstSession)
-      const second = await request('Target.createTarget', { url: 'about:blank' })
+      // Let the provider initialize/resume its target before this separate CDP connection navigates.
+      const second = { targetId: browser.newTab() }
       const secondSession = (await request('Target.attachToTarget', { targetId: second.targetId, flatten: true })).sessionId
       try {
         await request('Target.activateTarget', { targetId: second.targetId })

@@ -2,8 +2,9 @@ import { autosaveGroupExists, autosaveGroupSnapshotAlive, groupInspectionFailed 
 import type { AutosaveCleanupProof } from './autosave-cleanup.ts';
 import { processStartToken } from './delegation/process-liveness.ts';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
-import { watchAutosaveHolders } from './autosave-holders.ts';
+import { AUTOSAVE_OWNER_ENV, watchAutosaveHolders } from './autosave-holders.ts';
 import { watchWindowsAutosave } from './autosave-windows.ts';
 
 /** Internal budgets, shared by every autosave command; no user configuration required. */
@@ -15,6 +16,9 @@ export interface AutosaveOptions {
   /** Cleanup is still pending. Callers may settle execution only under a separate worktree hold. */
   onBlocked?: (message: string, proof: AutosaveCleanupProof) => void;
 }
+
+/** Transcript warnings while cleanup is blocked; the durable proof still follows every change. */
+const BLOCKED_WARNINGS = 3;
 
 /** A group consisting only of zombies cannot write, even before init reaps it. */
 async function groupAlive(pid: number, diagnostic: (message: string) => void): Promise<boolean> {
@@ -43,7 +47,9 @@ async function groupAlive(pid: number, diagnostic: (message: string) => void): P
  */
 export async function autosaveGit(cwd: string, args: string[], options: AutosaveOptions) {
   const windows = process.platform === 'win32' ? await watchWindowsAutosave() : undefined;
-  const holdersAlive = process.platform === 'win32' ? (windows ? Object.assign(async () => false, { diagnostics: () => ({ pids: [] as number[], processes: [], inspectionFailed: false }) }) : undefined) : await watchAutosaveHolders(cwd);
+  const marker = randomUUID();
+  let leader: number | undefined;
+  const holdersAlive = process.platform === 'win32' ? (windows ? Object.assign(async () => false, { diagnostics: () => ({ pids: [] as number[], processes: [], inspectionFailed: false }) }) : undefined) : await watchAutosaveHolders(cwd, { marker, root: () => leader });
   return new Promise<{ ok: boolean; stdout: string; code: number | null }>((resolve) => {
     const timeoutMs = options.timeoutMs ?? 30_000;
     const killGraceMs = options.killGraceMs ?? 1_000;
@@ -61,7 +67,10 @@ export async function autosaveGit(cwd: string, args: string[], options: Autosave
     const grouped = process.platform !== 'win32';
     // Git maintenance detaches and may move to the shared git directory.
     // Suppress it for this command only; never rewrite the repository config.
-    const child = spawn('git', ['-c', 'gc.auto=0', '-c', 'maintenance.auto=false', ...args], { cwd, detached: grouped, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('git', ['-c', 'gc.auto=0', '-c', 'maintenance.auto=false', ...args], {
+      cwd, detached: grouped, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, [AUTOSAVE_OWNER_ENV]: marker },
+    });
+    leader = child.pid;
     let stdout = '';
     let bytes = 0;
     let exited = false;
@@ -72,6 +81,7 @@ export async function autosaveGit(cwd: string, args: string[], options: Autosave
     let checking = false;
     let blocked = false;
     let lastBlocker = '';
+    let blockedWarnings = 0;
     let groupDiagnostic = 'process inspection pending';
     let groupPending = true;
     const leaderToken = child.pid === undefined ? undefined : processStartToken(child.pid);
@@ -87,7 +97,10 @@ export async function autosaveGit(cwd: string, args: string[], options: Autosave
       const signature = JSON.stringify({ message, proof });
       if (signature === lastBlocker) return;
       lastBlocker = signature;
-      warn(message);
+      // Changing descendant PIDs must not flood the transcript (hearsay-tools/cezarion#958).
+      if (blockedWarnings < BLOCKED_WARNINGS) warn(message);
+      else if (blockedWarnings === BLOCKED_WARNINGS) warn('further cleanup changes suppressed until cleanup is confirmed; worktree reuse stays blocked');
+      blockedWarnings++;
       try { options.onBlocked?.(message, proof); } catch { /* Retain cleanup if the caller cannot take its own hold. */ }
     };
     let killTimer: NodeJS.Timeout | undefined;

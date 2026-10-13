@@ -14,9 +14,10 @@ function fixture(t) {
   mkdirSync(join(repo, '.ai/scripts'), { recursive: true });
   mkdirSync(join(repo, 'packages/cezar/web/dist'), { recursive: true });
   mkdirSync(join(repo, 'packages/cezar/dist'), { recursive: true });
-  mkdirSync(join(repo, 'node_modules/zod'), { recursive: true });
+  mkdirSync(join(repo, 'node_modules'), { recursive: true });
+  mkdirSync(join(repo, 'packages/cezar/node_modules/zod'), { recursive: true });
   writeFileSync(join(repo, '.gitignore'), 'node_modules/\npackages/cezar/dist/\npackages/cezar/web/dist/\n.ai/qa/\n');
-  writeFileSync(join(repo, 'package.json'), '{"private":true}\n');
+  writeFileSync(join(repo, 'package.json'), '{"private":true,"workspaces":["packages/cezar"]}\n');
   writeFileSync(join(repo, 'kept.txt'), 'base\n');
   writeFileSync(join(repo, 'deleted.txt'), 'remove me\n');
   writeFileSync(join(repo, '.ai/scripts/e2e.sh'), '#!/bin/sh\nexit 0\n');
@@ -25,7 +26,7 @@ function fixture(t) {
   execFileSync('git', ['init', '-q', repo]);
   execFileSync('git', ['-C', repo, 'add', '.']);
   execFileSync('git', ['-C', repo, '-c', 'user.name=E2E Test', '-c', 'user.email=e2e@example.invalid', 'commit', '-qm', 'fixture']);
-  writeFileSync(join(repo, 'node_modules/zod/package.json'), '{}\n');
+  writeFileSync(join(repo, 'packages/cezar/node_modules/zod/package.json'), '{}\n');
   writeFileSync(join(repo, 'packages/cezar/dist/index.js'), 'built server\n');
   writeFileSync(join(repo, 'packages/cezar/web/dist/index.html'), 'built web\n');
   writeFileSync(join(repo, 'packages/cezar/web/dist/.cez-e2e-build'), '1\n');
@@ -58,7 +59,7 @@ test('each lane carries current edits and has private state with shared build as
     assert.equal(existsSync(join(lane2, '.ai/qa')), false);
     assert.equal(readFileSync(join(lane1, 'packages/cezar/web/dist/index.html'), 'utf8'), 'built web\n');
     assert.equal(readFileSync(join(lane2, 'packages/cezar/dist/index.js'), 'utf8'), 'built server\n');
-    assert.equal(readFileSync(join(lane1, 'node_modules/zod/package.json'), 'utf8'), '{}\n');
+    assert.equal(readFileSync(join(lane1, 'packages/cezar/node_modules/zod/package.json'), 'utf8'), '{}\n');
   } finally {
     removeLane({ repoRoot: repo, laneRoot: lane1 });
     removeLane({ repoRoot: repo, laneRoot: lane2 });
@@ -224,7 +225,7 @@ test('lane objects survive deletion of the source alternate lender', (t) => {
   const { root, repo: lender } = fixture(t);
   const repo = join(root, 'borrower');
   execFileSync('git', ['clone', '--shared', '--quiet', lender, repo]);
-  for (const asset of ['node_modules', 'packages/cezar/dist', 'packages/cezar/web/dist']) {
+  for (const asset of ['node_modules', 'packages/cezar/node_modules', 'packages/cezar/dist', 'packages/cezar/web/dist']) {
     cpSync(join(lender, asset), join(repo, asset), { recursive: true });
   }
   const lane = privateLane(t, repo, root);
@@ -307,7 +308,7 @@ test('a linked source worktree keeps its frozen base and asset identities in a p
   const { root, repo: original } = fixture(t);
   const repo = join(root, 'linked-source');
   gitText(original, 'worktree', 'add', '--detach', repo, 'HEAD');
-  for (const asset of ['node_modules', 'packages/cezar/dist', 'packages/cezar/web/dist']) {
+  for (const asset of ['node_modules', 'packages/cezar/node_modules', 'packages/cezar/dist', 'packages/cezar/web/dist']) {
     cpSync(join(original, asset), join(repo, asset), { recursive: true });
   }
   const before = gitText(original, 'worktree', 'list', '--porcelain');
@@ -315,8 +316,8 @@ test('a linked source worktree keeps its frozen base and asset identities in a p
   assert.notEqual(commonDir(lane), commonDir(repo));
   assert.equal(gitText(lane, 'rev-parse', 'HEAD^{tree}'), gitText(repo, 'rev-parse', 'HEAD^{tree}'));
   assert.equal(gitText(original, 'worktree', 'list', '--porcelain'), before);
-  for (const asset of ['node_modules', 'packages/cezar/dist', 'packages/cezar/web/dist']) {
-    assert.equal(realpathSync(join(lane, asset)), realpathSync(join(repo, asset)));
+  for (const asset of ['node_modules', 'packages/cezar/node_modules', 'packages/cezar/dist', 'packages/cezar/web/dist']) {
+    if (asset !== 'packages/cezar/node_modules') assert.equal(realpathSync(join(lane, asset)), realpathSync(join(repo, asset)));
   }
 });
 
@@ -456,7 +457,7 @@ for (const linkedSource of [false, true]) {
     assert.equal(gitText(main, 'status', '--porcelain'), '');
     const repo = linkedSource ? linked : main;
     if (linkedSource) {
-      for (const asset of ['node_modules', 'packages/cezar/dist', 'packages/cezar/web/dist']) cpSync(join(main, asset), join(repo, asset), { recursive: true });
+      for (const asset of ['node_modules', 'packages/cezar/node_modules', 'packages/cezar/dist', 'packages/cezar/web/dist']) cpSync(join(main, asset), join(repo, asset), { recursive: true });
     }
     assert.throws(() => createLane({ repoRoot: repo, scratchRoot: join(root, 'scratch'), index: 1 }), /unsupported.*attributes/i);
     assert.equal(existsSync(join(root, 'scratch/lane-1')), false);
@@ -565,4 +566,27 @@ assert.equal(readFileSync(lane+'/.git/config','utf8').includes('insteadOf'),fals
 `);
   const result = spawnSync(process.execPath, [script], { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: config } });
   assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
+
+test('pnpm lanes expose package dependencies and resolve workspace links inside the lane', (t) => {
+  const { root, repo } = fixture(t);
+  for (const pkg of ['contract', 'api-client', 'cezar', 'web']) {
+    mkdirSync(join(repo, 'packages', pkg, 'node_modules'), { recursive: true });
+  }
+  writeFileSync(join(repo, 'package.json'), JSON.stringify({private: true, workspaces: ['packages/contract','packages/api-client','packages/cezar','packages/web']}));
+  const modules = join(repo, 'packages/web/node_modules');
+  mkdirSync(join(modules, '@open-mercato'), { recursive: true });
+  symlinkSync('../../../api-client', join(modules, '@open-mercato/cezar-api-client'));
+  mkdirSync(join(modules, 'external'), { recursive: true });
+  writeFileSync(join(modules, 'external/package.json'), '{"name":"external"}');
+  writeFileSync(join(repo, 'packages/api-client/current.txt'), 'verified source');
+  const scratch = join(root, 'scratch'); mkdirSync(scratch);
+  const lane = createLane({ repoRoot: repo, scratchRoot: scratch, index: 1 });
+  try {
+    assert.equal(readFileSync(join(lane, 'packages/web/node_modules/external/package.json'), 'utf8'), '{"name":"external"}');
+    writeFileSync(join(lane, 'packages/api-client/current.txt'), 'lane source');
+    assert.equal(readFileSync(join(lane, 'packages/web/node_modules/@open-mercato/cezar-api-client/current.txt'), 'utf8'), 'lane source');
+    assert.equal(readFileSync(join(repo, 'packages/api-client/current.txt'), 'utf8'), 'verified source');
+  } finally { removeLane({ repoRoot: repo, laneRoot: lane }); }
 });

@@ -48,7 +48,7 @@ function serve(config: Partial<ConfigResponse> = {}) {
       const method = init?.method ?? 'GET'
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined
       requests.push({ method, url, body })
-      if (url === '/api/v1/config' && method === 'GET') return json(state)
+      if ((url === '/api/v1/config' || url === '/api/v1/p/other/config') && method === 'GET') return json(state)
       if (url === '/api/v1/config' && method === 'PUT') {
         if (body?.worktreeRetention !== undefined) {
           state.worktreeRetention = body.worktreeRetention as number
@@ -72,9 +72,14 @@ function serve(config: Partial<ConfigResponse> = {}) {
  *  `/api/v1/*` paths this file's fetch stub matches stay byte-identical. */
 function gateSeededClient(capabilities?: { localHandoff: boolean }) {
   const client = createQueryClient()
-  client.setQueryData(queryKeys.health, { bootProject: 'boot', ...(capabilities ? { capabilities } : {}) })
+  const health = { bootProject: 'boot', ...(capabilities ? { capabilities } : {}) }
+  client.setQueryData(queryKeys.health, health)
+  client.setQueryData(['other', 'health'], health)
   client.setQueryData(workspaceQueryKeys.projects, {
-    projects: [],
+    projects: [
+      { id: 'boot', root: '/host/boot', status: 'ok' },
+      { id: 'other', root: '/host/other project', status: 'ok' },
+    ],
     bootProject: 'boot',
     projectsDir: '~/cezar/projects',
   })
@@ -181,12 +186,38 @@ describe('Project settings → Worktrees: worktree setup commands (#917)', () =>
     requests.filter((r) => r.method === 'PUT' && r.url === '/api/v1/config' && r.body !== undefined && 'worktreeSetup' in (r.body as object))
   const LOCAL = { localHandoff: true }
 
+  it.each([
+    { localHandoff: true, worktreeSetup: null },
+    { localHandoff: false, worktreeSetup: null },
+    { localHandoff: true, worktreeSetup: { commands: [], timeoutSeconds: 900 } },
+    { localHandoff: false, worktreeSetup: { commands: [], timeoutSeconds: 900 } },
+  ])('an empty configuration says no commands will run ($localHandoff, $worktreeSetup)', async ({ localHandoff, worktreeSetup }) => {
+    serve({ worktreeSetup })
+    renderAt('/settings/worktrees', { localHandoff })
+    await waitFor(() => expect(commandsBox()).not.toBeNull())
+    expect(commandsBox()!.value).toBe('')
+    expect(commandsBox()!.placeholder).toBe('')
+    expect(screen.getByText('No setup commands configured. No commands will run in new worktrees.')).toBeTruthy()
+    expect(screen.getByText(/Example only:/).textContent).toContain('npm ci')
+    expect(saveSetup()!.disabled).toBe(true)
+  })
+
+  it('remote mode names the active host project config, rather than the boot project', async () => {
+    serve()
+    renderAt('/p/other/settings/worktrees', { localHandoff: false })
+    await waitFor(() => expect(commandsBox()).not.toBeNull())
+    expect(screen.getByText('/host/other project/.ai/cezar/config.json')).toBeTruthy()
+    expect(document.querySelector('[data-slot="worktree-setup-readonly"]')?.textContent).toContain('on the machine running Cezarion')
+    expect(screen.queryByText('/host/boot/.ai/cezar/config.json')).toBeNull()
+  })
+
   it('shows configured commands one per line and the timeout', async () => {
     serve({ worktreeSetup: { commands: ['npm ci', 'cp a b'], timeoutSeconds: 600 } })
     renderAt('/settings/worktrees', LOCAL)
     await waitFor(() => expect(commandsBox()).not.toBeNull())
     expect(screen.getByText('Prepare new worktrees')).toBeTruthy()
     expect(commandsBox()!.value).toBe('npm ci\ncp a b')
+    expect(screen.queryByText('No setup commands configured. No commands will run in new worktrees.')).toBeNull()
     expect(timeoutInput()!.value).toBe('600')
     expect(saveSetup()!.disabled).toBe(true)
   })
@@ -197,10 +228,12 @@ describe('Project settings → Worktrees: worktree setup commands (#917)', () =>
     await waitFor(() => expect(commandsBox()).not.toBeNull())
     expect(timeoutInput()!.value).toBe('900')
     fireEvent.change(commandsBox()!, { target: { value: '  npm ci  \n\n cp a b\n' } })
+    expect(screen.getByText('No setup commands configured. No commands will run in new worktrees.')).toBeTruthy()
     fireEvent.click(saveSetup()!)
     await waitFor(() => expect(setupPuts()).toHaveLength(1))
     expect(setupPuts()[0]?.body).toEqual({ worktreeSetup: { commands: ['npm ci', 'cp a b'] } })
     await waitFor(() => expect(screen.getByText('Worktree setup saved')).toBeTruthy())
+    expect(screen.queryByText('No setup commands configured. No commands will run in new worktrees.')).toBeNull()
   })
 
   it('saving a non-default timeout sends it', async () => {
@@ -229,10 +262,12 @@ describe('Project settings → Worktrees: worktree setup commands (#917)', () =>
     renderAt('/settings/worktrees', { localHandoff: false })
     await waitFor(() => expect(commandsBox()).not.toBeNull())
     expect(commandsBox()!.readOnly).toBe(true)
+    expect(commandsBox()!.value).toBe('npm ci')
+    expect(screen.queryByText('No setup commands configured. No commands will run in new worktrees.')).toBeNull()
     expect(timeoutInput()!.readOnly).toBe(true)
     expect(saveSetup()!.disabled).toBe(true)
     expect(document.querySelector('[data-slot="worktree-setup-readonly"]')?.textContent).toBe(
-      'Setup commands can be edited only on the machine running Cezar.',
+      'Edit worktreeSetup.commands in /host/boot/.ai/cezar/config.json on the machine running Cezarion. Valid file edits apply to new worktrees; no restart is needed.',
     )
   })
 

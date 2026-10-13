@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { discoverCursorModels, discoverCursorVariantModels, parseCursorModels, resolveCursorExecutable, spawnCursor } from './cursor-model-catalog.ts';
+import { discoverCursorModels, discoverCursorParameterizedModels, discoverCursorVariantModels, parseCursorModels, resolveCursorExecutable, spawnCursor } from './cursor-model-catalog.ts';
 
 // Shape observed from the installed `agent --list-models`, including its footer.
 const LIST = '\u001B[1mAvailable models\u001B[0m\n\nauto - Auto (default)\ncomposer-2.5 - Composer 2.5\nclaude-opus-5-thinking-high - Claude Opus 5 1M Thinking\n\nTip: use --model <id> (or /model <id> in interactive mode) to switch.\n';
@@ -260,6 +260,26 @@ describe('Cursor parameterized discovery', () => {
       await vi.advanceTimersByTimeAsync(2000);
       expect(fake.kill).toHaveBeenCalledWith('SIGKILL');
     }
+    fake.close();
+  });
+});
+
+// Print preflight owns its discovery child just as it owns its inference process.
+describe('Cursor parameter discovery cancellation', () => {
+  it('does not spawn when selection was already cancelled', async () => {
+    const controller = new AbortController(); controller.abort();
+    const spawn = vi.fn();
+    await expect(discoverCursorParameterizedModels({ cwd: '/repo', signal: controller.signal, spawn }))
+      .rejects.toThrow('cancelled');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+  it('terminates a discovery child when selection is cancelled', async () => {
+    const fake = fakeChild(); const controller = new AbortController();
+    const result = discoverCursorParameterizedModels({ cwd: '/repo', signal: controller.signal, spawn: () => fake.child });
+    controller.abort();
+    await expect(result).rejects.toThrow('cancelled');
+    expect(fake.child.stdin.writableEnded).toBe(true);
+    expect(fake.kill).toHaveBeenCalledWith('SIGTERM');
     fake.close();
   });
 });

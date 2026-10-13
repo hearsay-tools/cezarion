@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import type { AgentRunSpec } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { NATIVE_CURSOR_DELEGATION_TOOLS, SAFE_CURSOR_PRINT_TOOLS } from './cursor-print-tool-catalog.ts';
-import { parseCursorModels } from './cursor-model-catalog.ts';
+import { discoverCursorParameterizedModels, parseCursorModels } from './cursor-model-catalog.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
 
 const execute = promisify(execFile);
@@ -11,7 +11,7 @@ const QUALIFIED_VERSION = '2026.10.01-e373342';
 const INVALID_TOOL = '__cezar_probe_invalid__';
 const EXPECTED_TOOLS = new Set<string>([...SAFE_CURSOR_PRINT_TOOLS, ...NATIVE_CURSOR_DELEGATION_TOOLS]);
 export type CursorPrintCapabilityResult =
-  | { supported: true; models?: readonly ModelOption[]; model?: string }
+  | { supported: true; models?: readonly ModelOption[]; model?: string; resolvedModel?: string }
   | { supported: false; reason: string };
 
 /** Bounded, pre-inference checks against the exact build and native tool schema qualified for print. */
@@ -62,8 +62,43 @@ export async function inspectCursorPrintCapabilities(
   try { models = parseCursorModels((await execute(bin, ['--list-models'], options)).stdout); }
   catch { throw new Error('Cursor print capability preflight could not read selected-account models'); }
   const model = spec.model ?? models.find(option => option.description === 'Default model')?.id;
-  if (!model || !models.some(option => option.id === model)) {
-    throw new Error('Cursor print requested model is not advertised for the selected account');
+  if (!model) throw new Error('Cursor print requested model is not advertised for the selected account');
+  if (!models.some(option => option.id === model)) {
+    // The picker uses canonical ACP IDs; --list-models lists legacy aliases.
+    // Query the same account, retaining native parameter keys and defaults.
+    let catalog;
+    try { catalog = await discoverCursorParameterizedModels({ cwd: spec.cwd, bin, env: spec.env, signal }); }
+    catch { throw new Error('Cursor print capability preflight could not read selected-account model parameters'); }
+    const selected = catalog.find(option => option.value === model);
+    if (!selected) throw new Error('Cursor print requested model is not advertised for the selected account');
+    let resolvedModel = model;
+    if (spec.effort) {
+      const parameters = (selected.configOptions ?? []).filter(option => option.type === 'select');
+      const effort = parameters.find(option => ['effort', 'reasoning', 'reasoning_effort'].includes(option.id) &&
+        option.options?.some(value => value.value === spec.effort));
+      if (!effort) throw new Error('Cursor print requested effort is not advertised for the selected account');
+      const selection = /^([^\[\]]+)(?:\[([^\[\]]+)\])?$/.exec(model);
+      if (!selection) throw new Error('Cursor print cannot verify the requested model parameters');
+      const embedded = new Map<string, string>();
+      for (const entry of selection[2]?.split(',') ?? []) {
+        const pair = /^([a-zA-Z0-9_]+)=([a-zA-Z0-9_.-]+)$/.exec(entry);
+        if (!pair || embedded.has(pair[1]!)) throw new Error('Cursor print cannot verify the requested model parameters');
+        embedded.set(pair[1]!, pair[2]!);
+      }
+      const values = parameters.map(option => ({ id: option.id,
+        value: option === effort ? spec.effort! : embedded.get(option.id) ?? option.currentValue }));
+      if (values.some((option, index) => !option.value || !/^[a-zA-Z0-9_.-]+$/.test(option.value) ||
+        !/^[a-zA-Z0-9_]+$/.test(option.id) ||
+        !parameters[index]!.options?.some(value => value.value === option.value))) {
+        throw new Error('Cursor print cannot verify the requested model parameters');
+      }
+      // This qualified build accepts complete variant selections, not partial
+      // overrides. Preserve embedded selections, filling advertised defaults.
+      for (const option of values) embedded.set(option.id, option.value!);
+      resolvedModel = `${selection[1]}[${[...embedded].sort(([a], [b]) => a.localeCompare(b))
+        .map(([id, value]) => `${id}=${value}`).join(',')}]`;
+    }
+    return { supported: true, model, resolvedModel };
   }
   if (spec.effort) {
     const base = model.replace(/-(?:none|low|medium|high|xhigh|extra-high|max)$/, '');

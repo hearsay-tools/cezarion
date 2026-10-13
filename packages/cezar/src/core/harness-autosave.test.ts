@@ -41,8 +41,13 @@ describe('harness parity — autosave cleanup (#495)', () => {
             const kill = process.kill.bind(process);
             const probe = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
               const file = join(bin, 'pid');
-              if (signal === 0 && existsSync(file) && pid === -Number(readFileSync(file, 'utf8')) && obscure) {
-                throw Object.assign(new Error('unreadable'), { code: 'EPERM' });
+              // While obscure, keep the intercepted Git in an unproven state:
+              // EPERM on the group probe, and no TERM/KILL delivery. SIGKILL can
+              // otherwise leave a /proc zombie that autosave treats as proof of
+              // death, skipping the blocked-cleanup note (hearsay-tools/cezarion#950).
+              if (existsSync(file) && pid === -Number(readFileSync(file, 'utf8')) && obscure) {
+                if (signal === 0) throw Object.assign(new Error('unreadable'), { code: 'EPERM' });
+                return true;
               }
               return kill(pid, signal);
             });
@@ -61,8 +66,12 @@ if (args.includes('status') && args.includes('--porcelain')) {
             process.env.PATH = `${bin}:${path}`;
             try {
               expect(manager.finish(runId)).toBe(true);
-              await waitFor(() => store.readEvents(runId).some(event => event.type === 'note' && String(event.message).includes('termination not confirmed')), 5000);
-              await waitFor(() => !manager.isActive(runId), 3000);
+              // Under load the stubbed 700ms Git budget is not the wait: reaching
+              // autosave from finish is (hearsay-tools/cezarion#950). Wait for the
+              // intercepted Git spawn first, then for the blocked-cleanup note.
+              await waitFor(() => existsSync(join(bin, 'pid')));
+              await waitFor(() => store.readEvents(runId).some(event => event.type === 'note' && String(event.message).includes('termination not confirmed')));
+              await waitFor(() => !manager.isActive(runId));
               expect(store.readWorkerExecution(runId)?.phase).toBe('complete');
               expect(manager.claimForPublish(runId)).toBeNull();
               expect(manager.claimWorktreeReclaim(runId)).toBeNull();

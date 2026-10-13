@@ -45,9 +45,9 @@ async function bumpPr({ github, prGithub, context, core, nativeCi = false, sleep
   try {
     if (!/^\d+\.\d+\.\d+$/.test(version ?? '') || !base) throw new Error('Missing or invalid release version/base branch.');
     if (git('rev-parse', 'HEAD') !== context.sha) throw new Error('Checkout does not match the published source commit.');
-    command('npm', ['install', '--package-lock-only', '--ignore-scripts']);
+    command('pnpm', ['install', '--lockfile-only', '--ignore-scripts', '--no-frozen-lockfile']);
     // Use Git pathspecs, not a shell. Stage all stamped workspaces and the alias.
-    git('add', 'packages/*/package.json', 'alias-cezarion/package.json', 'package-lock.json');
+    git('add', 'packages/*/package.json', 'alias-cezarion/package.json', 'pnpm-lock.yaml');
     const changed = git('diff', '--cached', '--name-only').split('\n').filter(Boolean);
     if (changed.some((file) => !isReleaseBumpFile(file))) {
       throw new Error('Unexpected staged changes; refusing to include them in the version-bump branch.');

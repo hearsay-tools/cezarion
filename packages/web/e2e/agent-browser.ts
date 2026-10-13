@@ -502,6 +502,14 @@ export class AgentBrowser {
     this.run(['open', url])
   }
 
+  /** Create and initialize a tab through the provider before attaching a separate CDP client.
+   * Raw Target.createTarget can navigate before agent-browser resumes its debugger-paused target. */
+  newTab(): string {
+    const { targetId } = this.run(['tab', 'new', 'about:blank'])
+    if (typeof targetId !== 'string' || !targetId) throw new Error('agent-browser tab did not expose its CDP target')
+    return targetId
+  }
+
   /** operation: snapshot — the accessibility tree, as the string the descriptor documents. */
   snapshot(): string {
     return String(this.run(['snapshot', '-i']).snapshot ?? '')
