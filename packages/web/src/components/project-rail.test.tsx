@@ -521,6 +521,35 @@ describe('ProjectRail reorder', () => {
     expect(onReorder).toHaveBeenCalledWith(['beta', 'alpha', 'gamma'])
   })
 
+  it('shows the dropped order at once, before the store answers, then follows the store again', async () => {
+    // The store's new order reaches the rail a macrotask after the drop (TanStack Query notifies
+    // on `setTimeout(0)`), and dnd-kit clears the drag transform in the drop's own render. Without
+    // a local order the rail paints the OLD order for that frame and the row visibly snaps back.
+    const onReorder = vi.fn()
+    const { rerender } = renderRail({ projects: three, canReorder: true, onReorder })
+    layOutRows()
+    link('alpha').focus()
+
+    await press(link('alpha'), 'Space')
+    await press(link('alpha'), 'ArrowDown')
+    act(() => {
+      fireEvent.keyDown(link('alpha'), { code: 'Space', key: ' ' })
+    })
+
+    expect(onReorder).toHaveBeenCalledWith(['beta', 'alpha', 'gamma'])
+    expect(order()).toEqual(['beta', 'alpha', 'gamma'])
+
+    // A write that failed hands back the old order as a NEW array: the store wins.
+    rerender(
+      <ThemeProvider>
+        <MemoryRouter initialEntries={['/p/toolkit-dev/']}>
+          <ProjectRail projects={[...three]} signals={new Map()} version="0.15.0" singleProject={false} canReorder onReorder={onReorder} />
+        </MemoryRouter>
+      </ThemeProvider>,
+    )
+    expect(order()).toEqual(['alpha', 'beta', 'gamma'])
+  })
+
   it('does not lift a collapsed mark on Enter, so the link still navigates', async () => {
     const onReorder = vi.fn()
     renderRail({ projects: three, canReorder: true, onReorder })

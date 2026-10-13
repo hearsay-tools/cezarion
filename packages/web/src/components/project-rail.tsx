@@ -329,7 +329,19 @@ const RAIL_INSTRUCTIONS: ScreenReaderInstructions = {
  * and an anchor's default action is a full page load. A capture listener on `window` (ahead of
  * dnd-kit's on `document`) cancels it for the length of the drag and one tick after.
  */
-function useRailSorting(projects: readonly ProjectListEntry[], onReorder: ((ids: readonly string[]) => void) | undefined) {
+function useRailSorting(given: readonly ProjectListEntry[], onReorder: ((ids: readonly string[]) => void) | undefined) {
+  // The order a drop just chose, shown until the store's order arrives. The store answers a
+  // macrotask late (TanStack Query notifies its observers on `setTimeout(0)`), while dnd-kit
+  // clears the drag's transform in the drop's own render — so without this the rail paints one
+  // frame of the OLD order, the row snaps back towards its old slot, and then animates to its new
+  // one (seen in real Chrome, hearsay-tools/cezarion#438). Keyed on the `given` array it was set
+  // against: any new array from the store replaces it, including the one a failed write restores.
+  const [dropped, setDropped] = React.useState<{ base: readonly ProjectListEntry[]; ids: readonly string[] } | null>(null)
+  const projects = React.useMemo(() => {
+    if (dropped === null || dropped.base !== given) return given
+    const byId = new Map(given.map((project) => [project.id, project]))
+    return dropped.ids.flatMap((id) => byId.get(id) ?? [])
+  }, [dropped, given])
   const ids = React.useMemo(() => projects.map((project) => project.id), [projects])
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -361,9 +373,11 @@ function useRailSorting(projects: readonly ProjectListEntry[], onReorder: ((ids:
       // The WHOLE visible order is persisted, not just the moved id, so nothing re-sorts itself
       // on the next read.
       const next = moveProjectId(ids, ids.indexOf(String(active.id)), ids.indexOf(String(over.id)))
-      if (next.some((id, index) => id !== ids[index])) onReorder(next)
+      if (!next.some((id, index) => id !== ids[index])) return
+      setDropped({ base: given, ids: next })
+      onReorder(next)
     },
-    [disarmClickGuard, ids, onReorder],
+    [disarmClickGuard, given, ids, onReorder],
   )
 
   // dnd-kit's defaults would read out the project SLUG. The name and the position are what a
@@ -383,7 +397,7 @@ function useRailSorting(projects: readonly ProjectListEntry[], onReorder: ((ids:
     }
   }, [ids, projects])
 
-  return { ids, sensors, announcements, onDragStart: armClickGuard, onDragEnd, onDragCancel: disarmClickGuard }
+  return { projects, ids, sensors, announcements, onDragStart: armClickGuard, onDragEnd, onDragCancel: disarmClickGuard }
 }
 
 /** The bottom group's shared look: a 36px icon square collapsed, a 36px labelled row expanded.
@@ -543,13 +557,13 @@ export function ProjectRail({ projects, signals, version, singleProject, project
           onDragCancel={sorting.onDragCancel}
         >
           <SortableContext items={sorting.ids} strategy={verticalListSortingStrategy} disabled={!sortable}>
-            {projects.map((project, index) => (
+            {sorting.projects.map((project, index) => (
               <SortableRailProject
                 key={project.id}
                 expanded={expanded}
                 sortable={sortable}
                 position={index + 1}
-                total={projects.length}
+                total={sorting.projects.length}
                 project={project}
                 signal={signals?.get(project.id)}
                 known={signals !== null}
