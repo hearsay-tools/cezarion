@@ -1,20 +1,26 @@
 import { MonitorIcon, MoonIcon, SunIcon } from 'lucide-react'
 import type { ComponentType, ReactNode, SVGProps } from 'react'
 
+import { useProjects } from '@/api/queries'
 import { useAppearance } from '@/components/appearance-provider'
 import { useTheme } from '@/components/theme-provider'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { Accent, Density, Width } from '@/lib/appearance'
 import type { Theme } from '@/lib/theme'
+import { useProjectOrder } from '@/lib/use-project-order'
 
 /**
  * Settings → Appearance (R6 Step 1.3, spec §"Settings").
  *
- * Three knobs, each honest about where it persists:
+ * Each knob is honest about where it persists:
  *  - THEME rides the existing theme system (localStorage `cez-theme`, shared with the legacy
  *    cockpit and the pre-paint script) — per-browser by design, like every OS theme choice;
  *  - ACCENT + DENSITY persist in `ui-state.json` through the AppearanceProvider (additive
- *    `appearance` key), mirrored to localStorage for pre-paint.
+ *    `appearance` key), mirrored to localStorage for pre-paint;
+ *  - PROJECT ORDER (hearsay-tools/cezarion#438) lives in the same workspace file under
+ *    `sidebar.projectOrder`, so this section only offers the reset — the order itself is set by
+ *    dragging projects in the rail.
  *
  * Every control is a real one: accent swaps the action + chrome token family, density shrinks
  * the Tailwind spacing token (see index.css). No dead knobs.
@@ -109,6 +115,40 @@ function Field({ title, hint, children }: { title: string; hint: string; childre
   )
 }
 
+/**
+ * The undo for a project rail reordered by hand (hearsay-tools/cezarion#438, port of
+ * open-mercato/cezar#952) — the drag itself lives in the rail, where it belongs, but "put it
+ * back" needs a home that is not a gesture.
+ *
+ * Absent entirely until there is both more than one project and an order to forget: a reset
+ * button for state the user has never created is a control that can only do nothing.
+ */
+function ProjectOrderField() {
+  const projects = useProjects()
+  const { order, canReorder, reset } = useProjectOrder()
+  const multiProject = (projects.data?.projects.length ?? 0) > 1
+  if (!multiProject || order.length === 0) return null
+
+  return (
+    <Field
+      title="Project order"
+      hint="The project rail is in the order you dragged it into. Reset puts it back in the order the projects were added. Saved with your workspace, so every browser sees it."
+    >
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        data-slot="appearance-project-order-reset"
+        disabled={!canReorder}
+        onClick={reset}
+        className="w-fit"
+      >
+        Reset order
+      </Button>
+    </Field>
+  )
+}
+
 export function AppearanceSection() {
   const { theme, setTheme } = useTheme()
   const { accent, density, width, setAccent, setDensity, setWidth } = useAppearance()
@@ -141,6 +181,8 @@ export function AppearanceSection() {
       >
         <Segmented slot="appearance-width" label="Reading width" value={width} options={WIDTH_OPTIONS} onChange={setWidth} />
       </Field>
+
+      <ProjectOrderField />
       <div className="settings-appearance-preview settings-readout">
         <span className="text-[12px] text-soft-foreground">PREVIEW</span>
         <p className="mt-3 text-base">Review finalization retries</p>
