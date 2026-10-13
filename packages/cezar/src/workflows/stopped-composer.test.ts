@@ -76,7 +76,8 @@ describe('stopped composer engine', () => {
   it('exposes stopping until the process result settles and rejects Continue in that interval', async () => {
     const { root, store, manager } = fixture(); manager.dispose();
     const live = createFixtureManager(store, root); managers.push(live);
-    const run = live.startRun(workflow, { task: 'task' });
+    // This row owns session settlement, not Git setup; start the held mock directly.
+    const run = live.startRun(workflow, { task: 'task', worktree: false });
     await vi.waitFor(() => expect(captured.specs).toHaveLength(1));
     expect(live.cancel(run.id)).toBe(true);
     expect(store.getRun(run.id)).toHaveProperty('stopping', true);
