@@ -36,11 +36,15 @@
       ".github/schemas/**",
       ".ai/scripts/e2e.sh",
       ".ai/agentic.config.json",
+      ".ai/upstream/**",
+      ".ai/scripts/test-env-up.sh",
       "AGENTS.md",
       "CLAUDE.md",
       "docs/sdlc/ci.md",
       "package.json",
-      "packages/web/e2e/vitest.config.ts",
+      "pnpm-lock.yaml",
+      "vitest.config.ts",
+      "packages/web/e2e/**",
       "packages/cezar/package.json",
       "packages/cezar/scripts/measure-transcript-facts-*.mjs"
     ],
@@ -51,9 +55,10 @@
       "packages/web/e2e/vitest.config.ts",
       "packages/web/e2e/smoke.e2e.ts",
       "packages/web/e2e/environment.ts",
-      ".ai/scripts/test-env-up.sh"
+      ".ai/scripts/test-env-up.sh",
+      "pnpm-lock.yaml"
     ],
-    "scripts/test-changed.test.mjs": ["scripts/test-changed.mjs", "package.json"],
+    "scripts/test-changed.test.mjs": ["scripts/test-changed.mjs", "package.json", "pnpm-lock.yaml"],
     "packages/cezar/test/unit/cursor-hang-stdin.test.ts": [
       "packages/cezar/scripts/mock-cursor-hang-stdin.mjs"
     ],
