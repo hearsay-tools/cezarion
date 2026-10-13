@@ -37,6 +37,11 @@ scans:
     since: dab947e97e45b343d68b8baf59d2d6d9f6d56c14
     added: 85
     report: scans/2026-10-12.md
+  - date: 2026-10-13
+    upstreamHead: 42568d82e185296479a9cd9a8ec769f43d36c7ec
+    since: 7af006dea4b4fa6f6c98f46ba08d5759712c3fbc
+    added: 11
+    report: scans/2026-10-13.md
 entries:
   - sha: 3c8657688d48b7391d985560e1b0acda28e5ad9e
     pr: 943
@@ -330,10 +335,13 @@ entries:
     pr: 940
     title: "feat(tasks): in-task drafts survive leaving the task (#940)"
     date: 2026-09-14
-    status: pending
+    status: planned
     hint:
       conflicts: 9
-    note: fork keeps in-task drafts in memory only; new drafts store + contract, 9 conflicting hunks
+    note: Adapt bounded per-run and per-surface drafts, attachments and failed-send preservation to current reachable views and browser coordination; preserve drafts through archive retention.
+    fork:
+      issue: 1009
+    decided: 2026-10-13
   - sha: dac506f0a93eda59f8585e630da48307fae6a27b
     pr: 957
     title: "feat(attachments): per-project attachment library (#957)"
@@ -1117,16 +1125,24 @@ entries:
     pr: 1283
     title: "feat(cockpit): comment on diff lines and send them to the agent as a review (#1283)"
     date: 2026-10-05
-    status: pending
+    status: planned
     hint:
       conflicts: 9
+    fork:
+      issue: 1010
+    decided: 2026-10-13
+    note: Depends on hearsay-tools/cezarion#1009; adapt line/range comments, per-run draft reconciliation and review transcript rendering to the fork review gate.
   - sha: 05471fd98da42b50e019543d0718f44ccf7967d1
     pr: 1265
     title: "feat(workflows): gate the check retry loop by exit code, for agentic e2e checks (#1265)"
     date: 2026-10-05
-    status: pending
+    status: planned
     hint:
       conflicts: 5
+    fork:
+      issue: 1011
+    decided: 2026-10-13
+    note: Port onFail.retryOn while preserving absent/empty any-nonzero semantics, bounded retries and GUI serialization; exclude unrelated graph/planner changes.
   - sha: 02634469333fa565d3a7a1ce50a723fbb40c344d
     pr: 1290
     title: "fix(runs): keep an unanswered CEZ:ASK under needs you after the idle close (#1290)"
@@ -1236,9 +1252,13 @@ entries:
     pr: 1231
     title: "fix(skills): preserve YAML frontmatter and atomic writes (#1231)"
     date: 2026-10-06
-    status: pending
+    status: planned
     hint:
       conflicts: 0
+    fork:
+      issue: 1008
+    decided: 2026-10-13
+    note: Parser portion planned in hearsay-tools/cezarion#1008. Upstream atomic workspace-write changes remain unplanned; mark partial after the parser lands unless separate evidence proves equivalent writer guarantees.
   - sha: 049e47cac772d5c20f8158c0204e970f370b74de
     pr: 1256
     title: "fix(claude): explain headless permission denials (#1248) (#1256)"
@@ -1320,9 +1340,13 @@ entries:
     pr: 1324
     title: "feat: private, per-project MCP servers for every agent run (#1324)"
     date: 2026-10-08
-    status: pending
+    status: planned
     hint:
       conflicts: 10
+    fork:
+      issue: 1013
+    decided: 2026-10-13
+    note: Adapt private project MCP launch configuration to all six fork runners with native-wire coverage or explicit executable exemptions; preserve governed-worker grants and credential handling.
   - sha: 9230faac73fe0a7580e4c690df64832adaccd403
     pr: 1322
     title: "feat: workflow node editor and graph execution (#1322)"
@@ -1404,9 +1428,13 @@ entries:
     pr: 1318
     title: "fix(git): avoid shared config locks during worktree creation (#1318)"
     date: 2026-10-09
-    status: pending
+    status: planned
     hint:
       conflicts: 0
+    fork:
+      issue: 1006
+    decided: 2026-10-13
+    note: Port no-track worktree creation for both ordinary tasks and owned workers; preserve explicit bases, identity receipts and reattachment; re-check current callers before implementation.
   - sha: 31f10c948e4aa031a81103fe912205bc6c7d897c
     pr: 1348
     title: "test(graph): carry mock:done in the task so #1078's quick-task refresh keeps it (#1348)"
@@ -1439,9 +1467,13 @@ entries:
     pr: 1249
     title: "fix(cockpit): keep an ask card's picks when the thread unmounts its row (#1249)"
     date: 2026-10-09
-    status: pending
+    status: planned
     hint:
       conflicts: 1
+    fork:
+      issue: 1007
+    decided: 2026-10-13
+    note: Retain option selections and free-text answers across card remounts and navigation; preserve parent routing, human fallback and answer delivery.
   - sha: 9b7fd12a2358d44d596fcac3ffcb33b7385fe6c0
     pr: 1257
     title: "fix: grant attachment library to live sessions (#1257)"
@@ -1488,9 +1520,13 @@ entries:
     pr: 1349
     title: "feat(cockpit): Markdown preview toggle in the Changes diff (#1349)"
     date: 2026-10-10
-    status: pending
+    status: planned
     hint:
       conflicts: 8
+    fork:
+      issue: 1012
+    decided: 2026-10-13
+    note: Adapt Markdown previews to existing file readers and demand-bound browser coordination; do not copy upstream recurring polling.
   - sha: fd99a9d2cd24a421a5e6daa07877ddceeadf774c
     pr: 1133
     title: "fix(cli): explain a missing CEZ_API_URL to a person, add `cez runs list`, document the /api/v1 API (#1133)"
@@ -1701,3 +1737,84 @@ entries:
     status: pending
     hint:
       conflicts: 0
+  - sha: dc1cf96209aca72f76dce9ff395173b24653abad
+    pr: 1404
+    title: "fix(desktop): find Node 20+ wherever an installer or version manager put it (shell 0.1.4) (#1404)"
+    date: 2026-10-12
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 9bdf1f72ef0783e0b0db9b4ac146a2f13f6e57c3
+    pr: 1405
+    title: "feat(desktop): managed Node.js runtime, so the app has no prerequisite (shell 0.1.5) (#1405)"
+    date: 2026-10-12
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 0aa658013ffbe020d99ce8bbbc20b3041ee92802
+    pr: 1406
+    title: "feat(desktop): the shell reports its own failures, or offers a button to (shell 0.1.6) (#1406)"
+    date: 2026-10-12
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: 19518fbb56f44d6d217d3d4a5daf17a583aaf496
+    pr: 1407
+    title: 'fix(desktop): macOS privacy prompts name the agent, not "2.1.295" or "node" (#1407)'
+    date: 2026-10-12
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 0f6e6837d91cc90d185ecebe6f8bb4dd0e3c90ce
+    pr: 1409
+    title: "ci(desktop): give the macOS release legs room for Apple notarization (#1409)"
+    date: 2026-10-12
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 10d0c387cae9591fcbfd4283ed07f74a1336d6d1
+    pr: 1383
+    title: "fix(git): fork tasks from and open PRs on the PR-target remote, not a hard-coded origin (#1383)"
+    date: 2026-10-12
+    status: pending
+    hint:
+      conflicts: 8
+  - sha: d5df22c41caedb6b57ca102ffef47f6249db0a45
+    pr: 1384
+    title: "fix(web): keep multi-line code fences on separate lines in the thread (#1384)"
+    date: 2026-10-12
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: 2a14dcec4ac73636b85ba75775b623a0cb397c9b
+    pr: 1408
+    title: "fix: error popup should be reported (#1408)"
+    date: 2026-10-12
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: 5a5a2230e0e2d711b8f0975bb380610a3234db31
+    pr: 1356
+    title: "fix(web): contain oversized Markdown in task threads (#1356)"
+    date: 2026-10-12
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: 0504ec914a6ad4fc710baac89e33bbdd0f058ad4
+    pr: 1402
+    title: "feat: create a new project (fresh git repo, optional private GitHub repo, templates) (#1402)"
+    date: 2026-10-12
+    status: planned
+    hint:
+      conflicts: 4
+    fork:
+      issue: 1014
+    decided: 2026-10-13
+    note: Adapt local and explicitly chosen private GitHub/template project creation to the current registry and checkout flow; exclude upstream telemetry.
+  - sha: 42568d82e185296479a9cd9a8ec769f43d36c7ec
+    pr: 1398
+    title: "feat: branch naming instructions and project settings regrouping (#1398)"
+    date: 2026-10-12
+    status: pending
+    hint:
+      conflicts: 15
