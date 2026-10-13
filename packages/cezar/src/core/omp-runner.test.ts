@@ -217,10 +217,38 @@ const MOCK = fileURLToPath(new URL('../../scripts/mock-omp-rpc.mjs', import.meta
 describe('OmpRunner session over the mock', () => {
   let cwd: string;
   beforeEach(() => {
+    for (const child of spawned) {
+      if (child.exitCode === null && child.signalCode === null) {
+        try { child.kill('SIGKILL'); } catch { /* already gone */ }
+      }
+    }
+    spawned.length = 0;
     cwd = mkdtempSync(join(tmpdir(), 'cez-omp-run-'));
   });
-  afterEach(() => {
-    rmSync(cwd, { recursive: true, force: true });
+  // Ruling 13 respawn (and any still-starting child) can write into `cwd` after the test
+  // body returns. Reap first, including a child spawned after the first kill, so `rmSync`
+  // cannot beat `pids.txt` (hearsay-tools/cezarion#973).
+  afterEach(async () => {
+    const waitExit = (child: ChildProcess): Promise<void> => new Promise(resolve => {
+      if (child.exitCode !== null || child.signalCode !== null) { resolve(); return; }
+      const done = (): void => resolve();
+      child.once('exit', done);
+      if (child.exitCode !== null || child.signalCode !== null) { child.off('exit', done); resolve(); return; }
+      const timer = setTimeout(() => { child.off('exit', done); resolve(); }, 2_000);
+      timer.unref?.();
+    });
+    const deadline = Date.now() + 2_000;
+    do {
+      const children = spawned.splice(0);
+      if (children.length === 0) break;
+      await Promise.all(children.map(async (child) => {
+        if (child.exitCode === null && child.signalCode === null) {
+          try { child.kill('SIGKILL'); } catch { /* already gone */ }
+        }
+        await waitExit(child);
+      }));
+    } while (spawned.length > 0 && Date.now() < deadline);
+    rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     vi.unstubAllEnvs();
   });
 
@@ -711,13 +739,13 @@ process.exit(2);
 
   it('tears the live child down when stdout fails, escalating to SIGKILL', async () => {
     const bin = join(cwd, 'stubborn-omp.mjs');
-    writeFileSync(bin, "#!/usr/bin/env node\nprocess.on('SIGTERM', () => {});\nsetTimeout(() => undefined, 20_000);\n", { mode: 0o755 });
+    writeFileSync(bin, "#!/usr/bin/env node\nprocess.on('SIGTERM', () => {});\nprocess.stderr.write('ready\\n');\nsetTimeout(() => undefined, 20_000);\n", { mode: 0o755 });
     spawned.length = 0;
     const session = new OmpRunner({ bin, killGraceMs: 100 }).startSession(spec('x', { allowedTools: ['Read'] }), undefined, { autoEndAfterFirstTurn: false });
     const child = spawned.at(-1)!;
     const exited = new Promise<NodeJS.Signals | null>((resolve) => child.once('exit', (_code, signal) => resolve(signal)));
-    // Let the stub install its SIGTERM handler before the stream breaks.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // Wait until the stub has installed its SIGTERM handler; a fixed 300 ms sleep lost to it under load.
+    await once(child.stderr!, 'data');
     child.stdout!.destroy(new Error('stdout broke'));
     await expect(session.result).rejects.toThrow('stdout broke');
     // The run is reported failed; the CLI must not keep running tools in the worktree.
@@ -941,111 +969,152 @@ await import(${JSON.stringify(MOCK)});
   });
 
   describe('input accepted before the first frame, across a Ruling 13 respawn', () => {
+    /** CI under `--maxWorkers=4` can take well over vitest's 1s waitFor default to refuse, respawn and speak. */
+    const waitForChild = (assert: () => void) => vi.waitFor(assert, { timeout: 10_000 });
+    /** Always interrupt: a timed-out waitFor used to skip teardown and let the next afterEach delete `cwd` under a live child. */
+    async function withOpenSession<T>(session: AgentSession, body: (session: AgentSession) => Promise<T>): Promise<T> {
+      try {
+        return await body(session);
+      } finally {
+        session.interrupt();
+        await session.result.catch(() => undefined);
+      }
+    }
     /** The mock behind a wrapper that records each child's pid, so a test knows which child it talks to. */
     const pidBin = (): string => {
-      const bin = join(cwd, 'pid-omp.mjs');
+      const dir = cwd;
+      const bin = join(dir, 'pid-omp.mjs');
       writeFileSync(bin, `#!/usr/bin/env node
 import { appendFileSync } from 'node:fs';
-appendFileSync(${JSON.stringify(join(cwd, 'pids.txt'))}, process.pid + '\\n');
+appendFileSync(${JSON.stringify(join(dir, 'pids.txt'))}, process.pid + '\\n');
 await import(${JSON.stringify(MOCK)});
 `, { mode: 0o755 });
       return bin;
     };
-    const pids = (): number[] => readFileSync(join(cwd, 'pids.txt'), 'utf8').split('\n').filter(Boolean).map(Number);
+    const pids = (): number[] => {
+      const file = join(cwd, 'pids.txt');
+      return existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean).map(Number) : [];
+    };
     const refused = (prompt: string, extra: Partial<AgentRunSpec> = {}): AgentRunSpec =>
       spec(prompt, { allowedTools: ['Read', 'TodoWrite'], ...extra, env: { CEZ_MOCK_OMP_DISABLED_TOOLS: 'todo', ...extra.env } });
     const prompts = () => lines('commands.ndjson').filter(command => command.type === 'prompt');
 
     it('a human message sent right after start survives the respawn and reaches the second child once, in order', async () => {
       const events: AgentEvent[] = [];
-      const session = new OmpRunner({ bin: pidBin() }).startSession(
-        refused('mock:hold'), event => events.push(event), { autoEndAfterFirstTurn: false },
+      await withOpenSession(
+        new OmpRunner({ bin: pidBin() }).startSession(
+          refused('mock:hold'), event => events.push(event), { autoEndAfterFirstTurn: false },
+        ),
+        async session => {
+          // run.ts flushDeferred does exactly this, synchronously after startSession returns.
+          expect(session.sendMessage([{ type: 'text', text: 'while starting' }])).toBe(true);
+          expect(session.sendMessage([{ type: 'text', text: 'second one' }])).toBe(true);
+          await waitForChild(() => expect(prompts()).toHaveLength(3));
+          expect(pids()).toHaveLength(2);
+          expect(prompts().map(command => [command.id, command.message, command.streamingBehavior])).toEqual([
+            ['cezar-prompt-1', 'mock:hold', undefined],
+            ['cezar-prompt-2', 'while starting', 'steer'],
+            ['cezar-prompt-3', 'second one', 'steer'],
+          ]);
+          // The startup commands precede the first prompt, as for an unrefused child.
+          expect(lines('commands.ndjson').slice(0, 4).map(command => command.type)).toEqual([
+            'get_state', 'set_steering_mode', 'set_subagent_subscription', 'set_event_filter',
+          ]);
+          session.interrupt();
+          await session.result.catch(() => undefined);
+          expect(prompts()).toHaveLength(3);
+        },
       );
-      // run.ts flushDeferred does exactly this, synchronously after startSession returns.
-      expect(session.sendMessage([{ type: 'text', text: 'while starting' }])).toBe(true);
-      expect(session.sendMessage([{ type: 'text', text: 'second one' }])).toBe(true);
-      await vi.waitFor(() => expect(prompts()).toHaveLength(3));
-      expect(pids()).toHaveLength(2);
-      expect(prompts().map(command => [command.id, command.message, command.streamingBehavior])).toEqual([
-        ['cezar-prompt-1', 'mock:hold', undefined],
-        ['cezar-prompt-2', 'while starting', 'steer'],
-        ['cezar-prompt-3', 'second one', 'steer'],
-      ]);
-      // The startup commands precede the first prompt, as for an unrefused child.
-      expect(lines('commands.ndjson').slice(0, 4).map(command => command.type)).toEqual([
-        'get_state', 'set_steering_mode', 'set_subagent_subscription', 'set_event_filter',
-      ]);
-      session.interrupt();
-      await session.result.catch(() => undefined);
-      expect(prompts()).toHaveLength(3);
     });
 
     it('keeps the opener ack pending, so an agent message offered before the first frame is refused', async () => {
-      const session = new OmpRunner({ bin: pidBin() }).startSession(refused('mock:hold'), undefined, { autoEndAfterFirstTurn: false });
-      expect(session.sendAgentMessage([{ type: 'text', text: 'carried' }], ['in-1'])).toBe(false);
-      await vi.waitFor(() => expect(prompts()).toHaveLength(1));
-      session.interrupt();
-      await session.result.catch(() => undefined);
+      await withOpenSession(
+        new OmpRunner({ bin: pidBin() }).startSession(refused('mock:hold'), undefined, { autoEndAfterFirstTurn: false }),
+        async session => {
+          expect(session.sendAgentMessage([{ type: 'text', text: 'carried' }], ['in-1'])).toBe(false);
+          await waitForChild(() => expect(prompts()).toHaveLength(1));
+        },
+      );
     });
 
     it('a human message accepted before the first frame is written only once the child speaks', async () => {
-      const session = new OmpRunner({ bin: pidBin() }).startSession(
-        spec('mock:hold', { allowedTools: ['Read'] }), undefined, { autoEndAfterFirstTurn: false },
+      await withOpenSession(
+        new OmpRunner({ bin: pidBin() }).startSession(
+          spec('mock:hold', { allowedTools: ['Read'] }), undefined, { autoEndAfterFirstTurn: false },
+        ),
+        async session => {
+          expect(session.sendMessage([{ type: 'text', text: 'early' }])).toBe(true);
+          await waitForChild(() => expect(prompts().map(command => command.message)).toEqual(['mock:hold', 'early']));
+        },
       );
-      expect(session.sendMessage([{ type: 'text', text: 'early' }])).toBe(true);
-      await vi.waitFor(() => expect(prompts().map(command => command.message)).toEqual(['mock:hold', 'early']));
-      session.interrupt();
-      await session.result.catch(() => undefined);
     });
 
     it('pid is the live child after a respawn, and onPidChange reports it', async () => {
       const changes: number[] = [];
       const ui: UiEvent[] = [];
-      const session = new OmpRunner({ bin: pidBin() }).startSession(
-        refused('mock:hold'), undefined,
-        { autoEndAfterFirstTurn: false, onUiEvent: event => ui.push(event), onPidChange: pid => changes.push(pid) },
+      await withOpenSession(
+        new OmpRunner({ bin: pidBin() }).startSession(
+          refused('mock:hold'), undefined,
+          { autoEndAfterFirstTurn: false, onUiEvent: event => ui.push(event), onPidChange: pid => changes.push(pid) },
+        ),
+        async session => {
+          const first = session.pid;
+          await waitForChild(() => {
+            expect(ui.length).toBeGreaterThan(0);
+            expect(pids()).toHaveLength(2);
+          });
+          const [firstChild, secondChild] = pids();
+          expect(first).toBe(firstChild);
+          expect(session.pid).toBe(secondChild);
+          expect(session.pid).not.toBe(first);
+          expect(changes).toEqual([secondChild]);
+          // hearsay-tools/cezarion#890: the respawned child leads its own process group too.
+          if (process.platform !== 'win32') expect(sessionGroupOf(session.pid!)).toBe(session.pid);
+        },
       );
-      const first = session.pid;
-      await vi.waitFor(() => expect(ui.length).toBeGreaterThan(0));
-      const [firstChild, secondChild] = pids();
-      expect(pids()).toHaveLength(2);
-      expect(first).toBe(firstChild);
-      expect(session.pid).toBe(secondChild);
-      expect(session.pid).not.toBe(first);
-      expect(changes).toEqual([secondChild]);
-      // hearsay-tools/cezarion#890: the respawned child leads its own process group too.
-      if (process.platform !== 'win32') expect(sessionGroupOf(session.pid!)).toBe(session.pid);
-      session.interrupt();
-      await session.result.catch(() => undefined);
     });
 
     it('interrupt after a respawn aborts and kills the second child', async () => {
       const ui: UiEvent[] = [];
-      const session = new OmpRunner({ bin: pidBin() }).startSession(
-        refused('mock:hold'), undefined, { autoEndAfterFirstTurn: false, onUiEvent: event => ui.push(event) },
+      await withOpenSession(
+        new OmpRunner({ bin: pidBin() }).startSession(
+          refused('mock:hold'), undefined, { autoEndAfterFirstTurn: false, onUiEvent: event => ui.push(event) },
+        ),
+        async session => {
+          await waitForChild(() => {
+            expect(ui.length).toBeGreaterThan(0);
+            expect(pids()).toHaveLength(2);
+          });
+          const second = pids()[1]!;
+          session.interrupt();
+          await session.result.catch(() => undefined);
+          expect(lines('commands.ndjson').at(-1)).toEqual({ type: 'abort' });
+          expect(() => process.kill(second, 0)).toThrow();
+          expect(session.open).toBe(false);
+        },
       );
-      await vi.waitFor(() => expect(ui.length).toBeGreaterThan(0));
-      const second = pids()[1]!;
-      session.interrupt();
-      await session.result.catch(() => undefined);
-      expect(lines('commands.ndjson').at(-1)).toEqual({ type: 'abort' });
-      expect(() => process.kill(second, 0)).toThrow();
-      expect(session.open).toBe(false);
     });
 
     it('end after a respawn closes the second child and finishes the run', async () => {
       const ui: UiEvent[] = [];
       const events: AgentEvent[] = [];
-      const session = new OmpRunner({ bin: pidBin() }).startSession(
-        refused('mock:hold'), event => events.push(event), { autoEndAfterFirstTurn: false, onUiEvent: event => ui.push(event) },
+      await withOpenSession(
+        new OmpRunner({ bin: pidBin() }).startSession(
+          refused('mock:hold'), event => events.push(event), { autoEndAfterFirstTurn: false, onUiEvent: event => ui.push(event) },
+        ),
+        async session => {
+          await waitForChild(() => {
+            expect(ui.length).toBeGreaterThan(0);
+            expect(pids()).toHaveLength(2);
+          });
+          const second = pids()[1]!;
+          session.end();
+          await session.result.catch(() => undefined);
+          expect(() => process.kill(second, 0)).toThrow();
+          expect(session.open).toBe(false);
+          expect(events.filter(event => event.type === 'error')).toEqual([]);
+        },
       );
-      await vi.waitFor(() => expect(ui.length).toBeGreaterThan(0));
-      const second = pids()[1]!;
-      session.end();
-      await session.result.catch(() => undefined);
-      expect(() => process.kill(second, 0)).toThrow();
-      expect(session.open).toBe(false);
-      expect(events.filter(event => event.type === 'error')).toEqual([]);
     });
   });
 
