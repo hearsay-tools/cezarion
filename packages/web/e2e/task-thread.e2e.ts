@@ -77,7 +77,8 @@ beforeAll(async () => {
   for (const run of TYPO_RUNS) {
     writeFileSync(join(dataRoot, '.ai/cezar/runs', `${run.id}.ndjson`),
       readFileSync(resolve(import.meta.dirname, 'fixtures/thread-run.ndjson'), 'utf8')
-        .replaceAll('Ran git status --short', BARE_COMMAND))
+        .replaceAll('Ran git status --short', BARE_COMMAND)
+        .replaceAll('"command":"git status --short"', `"command":${JSON.stringify(BARE_COMMAND)}`))
   }
   // The agent screenshot the transcript's `image` line points at (served by the run itself).
   cpSync(

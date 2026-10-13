@@ -8,6 +8,7 @@ import { Link } from '@/lib/project-router'
 import { resolveApiUrl, isImageAttachmentName, type FileDiff, type ToolKind, type UiToolItem } from '@open-mercato/cezar-api-client'
 import { cn } from '@/lib/utils'
 
+import { fullExecCommand } from './exec-command'
 import { Markdown } from './markdown'
 import { splitToolTitle, streakLabel, type ContextGroupBlock, type WorkerConversationBatch, type WorkerConversationBlock } from './thread-groups'
 import { useThreadCardCache } from './thread-open-cards'
@@ -971,12 +972,13 @@ export function ToolCard({
   const { verb, detail } = item.toolKind === 'execute' && title.detail === undefined
     ? { verb: 'Ran', detail: item.title }
     : title
+  const expandedCommand = item.toolKind === 'execute' ? (fullExecCommand(item.input) ?? detail) : detail
   const hasContent =
     (item.output !== undefined && item.output !== '') ||
     (item.error !== undefined && item.error !== '') ||
     (item.diffs !== undefined && item.diffs.length > 0) ||
     nested.length > 0
-  const hasDetail = detail !== undefined || hasContent
+  const hasDetail = expandedCommand !== undefined || hasContent
   // Commands are expandable even when silent, without auto-opening a running empty card.
   const open = hasDetail && (userOpen ?? (hasContent && defaultOpen(item)))
 
@@ -1040,8 +1042,8 @@ export function ToolCard({
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="border-t border-border bg-card-2">
-          {detail !== undefined ? (
-            <pre data-slot="tool-command" className="px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{detail}</pre>
+          {expandedCommand !== undefined ? (
+            <pre data-slot="tool-command" className="px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{expandedCommand}</pre>
           ) : null}
           {item.error !== undefined && item.error !== '' ? (
             <div data-slot="tool-error" className="px-4 py-3 font-mono text-xs leading-[1.7] whitespace-pre-wrap text-danger">
