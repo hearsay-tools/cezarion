@@ -8,12 +8,12 @@ import type { ScheduleOccurrence } from './schedule-runner.ts';
 import type { AutomationStore } from './store.ts';
 import type { AutomationDefinition, GithubAutomationDefinition, ScheduleAutomationDefinition } from './types.ts';
 
-const GITHUB_PLACEHOLDERS = new Set([
+export const GITHUB_PLACEHOLDERS: ReadonlySet<string> = new Set([
   'github.kind', 'github.number', 'github.title', 'github.url', 'github.author',
   'github.assignees', 'github.labels', 'github.event',
 ]);
 /** What a SCHEDULED run can name: when it runs and where (spec 2026-10-02-scheduled-automations). */
-const SCHEDULE_PLACEHOLDERS = new Set(['date', 'time', 'project', 'automation']);
+export const SCHEDULE_PLACEHOLDERS: ReadonlySet<string> = new Set(['date', 'time', 'project', 'automation']);
 const PLACEHOLDER_RE = /\{\{([^{}]+)\}\}/g;
 
 export function validateAutomationPrompt(prompt: string, kind: AutomationDefinition['kind'] = 'github'): string | null {
