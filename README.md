@@ -794,6 +794,33 @@ the webhook only, never to the agent. Delivery is best-effort: 10 s timeout, 3 a
 failure shows in the thread without touching the task. The token is stored in `~/.cezar` and never
 sent back to a browser. Under `CEZ_DRY_RUN=1` nothing is sent; the payload is logged in the thread.
 
+### Automations from a task: `cez automation`
+
+`cez automation` creates and manages automations (see `CEZ_AUTOMATIONS=1`) on the cockpit that
+runs the task, so an agent asked to "do X every morning" or "whenever a PR opens" sets up an
+automation instead of a cron job. Like `cez task`, it prints one JSON object per invocation and
+exits 0 ok, 1 check failed, 2 refused or no cockpit, 3 check timed out, 64 usage.
+
+```sh
+cez automation schema                                    # the definition reference (needs no cockpit)
+cez automation add --name 'Weekday triage' --cron '0 7 * * 1-5' --prompt 'Triage new issues'
+cez automation add --name 'Review PRs' --on pull_request.opened --every 5m --label bug --prompt-file p.md
+cez automation create --file def.json [--enable]         # full JSON form; stdin when no flag is given
+cez automation update <id> --json '{"task":{"prompt":"…"}}'
+cez automation check <id> [--execute] · run <id> · list · show <id> · enable <id> · pause <id> · delete <id>
+```
+
+`add` and `create` send the same body and create the automation **paused** unless `--enable` is
+given; `--cron` accepts the four shapes a schedule can take (daily, weekdays, one weekday, every N
+hours) and anything else is a usage error pointing to the JSON form. `update` restates `enabled`
+and echoes the revision it read, so a concurrent edit in the cockpit is refused (exit 2), never
+overwritten. Mutating commands print the automation's cockpit page as `url`.
+
+The address comes from `CEZ_COCKPIT_URL` and `CEZ_PROJECT_ID`, which the cockpit puts in a task's
+environment. Without them, only an explicit `--url`, `--repo` or `CEZ_URL` looks for a cockpit;
+otherwise the command exits 2 and never starts a server. With automations off, the cockpit's `409`
+is relayed verbatim (exit 2).
+
 ## Workflow format
 
 A workflow is a small YAML file in `.ai/cezar/workflows/`:
