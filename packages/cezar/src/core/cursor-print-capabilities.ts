@@ -77,16 +77,26 @@ export async function inspectCursorPrintCapabilities(
       const effort = parameters.find(option => ['effort', 'reasoning', 'reasoning_effort'].includes(option.id) &&
         option.options?.some(value => value.value === spec.effort));
       if (!effort) throw new Error('Cursor print requested effort is not advertised for the selected account');
-      const values = parameters.map(option => ({ id: option.id, value: option === effort ? spec.effort! : option.currentValue }));
+      const selection = /^([^\[\]]+)(?:\[([^\[\]]+)\])?$/.exec(model);
+      if (!selection) throw new Error('Cursor print cannot verify the requested model parameters');
+      const embedded = new Map<string, string>();
+      for (const entry of selection[2]?.split(',') ?? []) {
+        const pair = /^([a-zA-Z0-9_]+)=([a-zA-Z0-9_.-]+)$/.exec(entry);
+        if (!pair || embedded.has(pair[1]!)) throw new Error('Cursor print cannot verify the requested model parameters');
+        embedded.set(pair[1]!, pair[2]!);
+      }
+      const values = parameters.map(option => ({ id: option.id,
+        value: option === effort ? spec.effort! : embedded.get(option.id) ?? option.currentValue }));
       if (values.some((option, index) => !option.value || !/^[a-zA-Z0-9_.-]+$/.test(option.value) ||
         !/^[a-zA-Z0-9_]+$/.test(option.id) ||
         !parameters[index]!.options?.some(value => value.value === option.value))) {
         throw new Error('Cursor print cannot verify the requested model parameters');
       }
       // This qualified build accepts complete variant selections, not partial
-      // overrides. Retain other advertised defaults (fast/context/thinking).
-      resolvedModel = `${model}[${values.sort((a, b) => a.id.localeCompare(b.id))
-        .map(option => `${option.id}=${option.value}`).join(',')}]`;
+      // overrides. Preserve embedded selections, filling advertised defaults.
+      for (const option of values) embedded.set(option.id, option.value!);
+      resolvedModel = `${selection[1]}[${[...embedded].sort(([a], [b]) => a.localeCompare(b))
+        .map(([id, value]) => `${id}=${value}`).join(',')}]`;
     }
     return { supported: true, model, resolvedModel };
   }

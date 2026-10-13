@@ -23,6 +23,13 @@ const catalog = [
     { id: 'reasoning', type: 'select', currentValue: 'medium', options: [{ value: 'medium', name: 'Medium' }, { value: 'high', name: 'High' }] },
   ] },
   { value: 'auto-smart', name: 'Auto', configOptions: [] },
+  { value: 'opaque[context=1m,effort=low]', name: 'Opaque', configOptions: [
+    { id: 'effort', type: 'select', currentValue: 'low', options: [{ value: 'low', name: 'Low' }, { value: 'high', name: 'High' }] },
+    { id: 'context', type: 'select', currentValue: '200k', options: [{ value: '200k', name: '200k' }, { value: '1m', name: '1M' }] },
+  ] },
+  { value: 'opaque[context=1m]', name: 'Opaque fixed context', configOptions: [
+    { id: 'effort', type: 'select', currentValue: 'low', options: [{ value: 'low', name: 'Low' }, { value: 'high', name: 'High' }] },
+  ] },
 ];
 function fixture(rows = catalog) {
   const cwd = mkdtempSync(join(tmpdir(), 'cez-cursor-model-selection-')); dirs.push(cwd);
@@ -57,6 +64,8 @@ describe('Cursor discovered models through print admission', () => {
     { model: 'grok-4.6', effort: 'high' as const, native: 'grok-4.6[effort=high,fast=true]' },
     { model: 'gpt-5.4-mini', effort: 'high' as const, native: 'gpt-5.4-mini[reasoning=high]' },
     { model: 'auto-smart', effort: undefined, native: 'auto-smart' },
+    { model: 'opaque[context=1m,effort=low]', effort: 'high' as const, native: 'opaque[context=1m,effort=high]' },
+    { model: 'opaque[context=1m]', effort: 'high' as const, native: 'opaque[context=1m,effort=high]' },
   ])('launches discovered $model with its native parameter selection', async ({ model, effort, native }) => {
     const f = fixture();
     const discovered = await discoverCursorModels({ cwd: f.cwd, bin: f.bin,
@@ -104,6 +113,16 @@ describe('Cursor discovered models through print admission', () => {
     ] }]);
     const events: AgentEvent[] = [];
     await new CursorRunner({ bin: f.bin }).run({ cwd: f.cwd, userPrompt: 'unused', model: 'grok-4.6',
+      effort: 'high', env: f.env }, event => events.push(event));
+    expect(events).toContainEqual(expect.objectContaining({ type: 'error', message: expect.stringContaining('verify') }));
+    expect(existsSync(f.log)).toBe(false);
+  });
+
+  it.each(['opaque[context=1m][fast=true]', 'opaque[context=1m,context=200k]',
+    'opaque[context=]', 'opaque[context=unlisted]'])('rejects unverifiable embedded parameters: %s', async model => {
+    const f = fixture([{ ...catalog[3]!, value: model }]);
+    const events: AgentEvent[] = [];
+    await new CursorRunner({ bin: f.bin }).run({ cwd: f.cwd, userPrompt: 'unused', model,
       effort: 'high', env: f.env }, event => events.push(event));
     expect(events).toContainEqual(expect.objectContaining({ type: 'error', message: expect.stringContaining('verify') }));
     expect(existsSync(f.log)).toBe(false);

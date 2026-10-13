@@ -585,7 +585,10 @@ native parameter keys, values and defaults. Explicit effort becomes a complete
 `--model` variant selection, such as `grok-4.6[effort=high,fast=true]` or
 `gpt-5.4-mini[reasoning=high]`; partial overrides are not qualified for this build.
 Other parameters retain advertised defaults. Unknown models, unsupported effort
-and incomplete defaults fail before inference. The validated native selection
+and incomplete defaults fail before inference. IDs with embedded parameters retain
+those selections in the same bracket group; explicit effort replaces the embedded
+effort, and other advertised defaults fill missing parameters. Malformed or
+duplicate embedded parameters fail before inference. The validated native selection
 is kept for every print turn and revalidated under the pinned account on Continue.
 Advertised legacy IDs keep their existing variant-selection path. The discovery
 child has a finite startup bound and is terminated when selection is cancelled.
