@@ -235,3 +235,30 @@ A future CLI may change native-question behavior; requalify it before
 offering native answer handling. Requalify all other rows and the final Cezar
 invocation before widening the qualified build. Existing Cursor ACP sessions
 and unqualified installations retain their marketplace-plugin limitation.
+
+## Canonical model selection regression, 2026-10-13
+
+The migration in hearsay-tools/cezarion#923 left fresh print admission reading
+legacy `--list-models` aliases while the picker retained canonical ACP IDs.
+Task `f142bec7-607c-4088-8866-70372ee05ab4` selected `grok-4.6` / `high` and
+failed before inference. The fix for hearsay-tools/cezarion#987 reads the selected
+account's read-only `cursor/list_available_models` metadata when an explicit ID
+is absent from the legacy listing.
+
+Live patched `CursorRunner` sessions on the same qualified CLI succeeded for
+`grok-4.6` / `high`, `gpt-5.4-mini` / `high`, and `auto-smart`. Each returned
+`CEZ_CURSOR_MODEL_OK` over print with the native delegation entries excluded.
+The allowlisted evidence is [`print-model-selection.json`](print-model-selection.json).
+Grok used `grok-4.6[effort=high,fast=true]`; GPT used
+`gpt-5.4-mini[reasoning=high]`. Native parameter keys and other defaults come
+from that account's ACP metadata. A partial `grok-4.6[effort=high]` was rejected
+by the CLI, so print preflight builds the complete advertised selection instead
+of guessing an alias or appending a universal effort key. The probes started
+small fresh sessions; the original failed issue task was not resumed.
+
+`cursor-model-selection.test.ts` drives native account discovery through the
+real transport facade and print runner, records native argv, and checks
+follow-up and exact Continue selection. Stashing only the capabilities fix made
+all canonical Grok/GPT/Auto admission cases fail with the original
+not-advertised error; restoring it passed. Unknown selections, missing account
+access, unsupported effort and incomplete defaults still refuse inference.

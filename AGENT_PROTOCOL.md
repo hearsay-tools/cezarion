@@ -578,6 +578,21 @@ qualified token usage. Project-local Claude settings do not reliably disable
 a user/team marketplace copy, and Cursor may silently lose history under an
 otherwise valid ID; Cezar only verifies the returned ID.
 
+Print model admission retains the canonical IDs discovered by the read-only
+`cursor/list_available_models` extension (hearsay-tools/cezarion#987). When a
+canonical ID is absent from `--list-models`, preflight reads that owning account's
+native parameter keys, values and defaults. Explicit effort becomes a complete
+`--model` variant selection, such as `grok-4.6[effort=high,fast=true]` or
+`gpt-5.4-mini[reasoning=high]`; partial overrides are not qualified for this build.
+Other parameters retain advertised defaults. Unknown models, unsupported effort
+and incomplete defaults fail before inference. IDs with embedded parameters retain
+those selections in the same bracket group; explicit effort replaces the embedded
+effort, and other advertised defaults fill missing parameters. Malformed or
+duplicate embedded parameters fail before inference. The validated native selection
+is kept for every print turn and revalidated under the pinned account on Continue.
+Advertised legacy IDs keep their existing variant-selection path. The discovery
+child has a finite startup bound and is terminated when selection is cancelled.
+
 ### Cursor ACP (hearsay-tools/cezarion#264)
 
 `cursor-acp-runner.ts` launches `agent --force acp` and holds one JSON-RPC stdio
