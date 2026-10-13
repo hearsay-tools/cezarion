@@ -35,12 +35,21 @@
       ".github/codex/**",
       ".github/schemas/**",
       ".ai/scripts/e2e.sh",
+      ".ai/agentic.config.json",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "docs/sdlc/ci.md",
+      "package.json",
       "packages/web/e2e/vitest.config.ts",
       "packages/cezar/package.json",
       "packages/cezar/scripts/measure-transcript-facts-*.mjs"
     ],
     "scripts/squeal-browser.test.mjs": [
       "package.json",
+      "vitest.config.ts",
+      "packages/*/vitest.config.ts",
+      "packages/web/e2e/vitest.config.ts",
+      "packages/web/e2e/smoke.e2e.ts",
       "packages/web/e2e/environment.ts",
       ".ai/scripts/test-env-up.sh"
     ],
