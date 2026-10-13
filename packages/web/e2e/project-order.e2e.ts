@@ -103,9 +103,18 @@ function waitForStoredOrder(expected: string[]): Promise<string[]> {
 
 /** Lift with Space and wait until the lift has HELD across consecutive polls. dnd-kit marks the
  *  row lifted at once but adds its keydown listener in a `setTimeout` after the lift
- *  (`KeyboardSensor.attach`), and an arrow that lands in that gap is dropped on the floor — the
- *  intermittent "moved nothing" in the first runs of this spec. A held sample spans a poll
- *  interval, which that zero-delay timer has always run inside. */
+ *  (`@dnd-kit/core` 6.3.1 `KeyboardSensor.attach`), and an arrow that lands in that gap is
+ *  dropped. A held sample spans a poll interval, which that zero-delay timer has always run
+ *  inside.
+ *
+ *  Provenance (hearsay-tools/cezarion#438, local, 2026-10-13): with a one-shot
+ *  `waitForFunction(data-dragging)` here instead, the collapsed-mark test failed 2 of 6 full-spec
+ *  runs of `npm run test:e2e -- project-order.e2e.ts`. Failure bundles
+ *  `.ai/qa/failures/project-order/reorders-a-collapsed-mark-…-20` and `-22` both time out on
+ *  `"e2e-order-a moved to position 3 of 4."` with focus on the lifted mark's link: the row was
+ *  lifted, the key reached the activator, and dnd-kit never saw it. The single test alone passed
+ *  4 of 4, because the earlier tests' load is what widens the gap. With this hold: 8 of 8 full-spec
+ *  runs passed. */
 function liftWithSpace(on: AgentBrowser, id: string): void {
   on.press('Space')
   on.waitForStable(`document.querySelector('${mark(id)}')?.hasAttribute('data-dragging') === true`, { holdMs: 150 })
@@ -113,7 +122,12 @@ function liftWithSpace(on: AgentBrowser, id: string): void {
 
 /** Press a key during a keyboard drag, then wait for dnd-kit's live region to say it took. Keys
  *  sent back to back land before the sortable has processed the previous move, which a hand on a
- *  keyboard never does — so each step waits for its own announcement. */
+ *  keyboard never does — so each step waits for its own announcement.
+ *
+ *  Provenance (hearsay-tools/cezarion#438, local): with two bare `press('ArrowUp')` calls, bundle
+ *  `.ai/qa/failures/project-order/reorders-from-the-keyboard-on-the-expanded-grip-…-2` ends on
+ *  the order `<boot>,e2e-order-a,e2e-order-c,e2e-order-b` — one step taken, the second arrow
+ *  lost — with focus still on the grip. */
 function pressAndHear(on: AgentBrowser, key: string, announcement: string): void {
   on.press(key)
   on.waitForFunction(

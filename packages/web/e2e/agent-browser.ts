@@ -873,7 +873,13 @@ export class AgentBrowser {
    *  hearsay-tools/cezarion#438): press, move a few pixels, wait until `lifted` holds, move to the
    *  target, wait until `over` holds, then release. Without the waits the whole stream lands in
    *  a few milliseconds, before the sortable has measured its drop targets, and the release
-   *  resolves to no target — a race a human hand never produces. */
+   *  resolves to no target — a race a human hand never produces.
+   *
+   *  Provenance (hearsay-tools/cezarion#438, local): with `dragTo`, the rail's pointer reorder in
+   *  `project-order.e2e.ts` failed 1 of 5 runs of that single test; bundles
+   *  `.ai/qa/failures/project-order/drags-a-collapsed-mark-…-1` and `-2` end on the unchanged
+   *  registry order with focus on the dragged mark's link. With `dragHeld`: 6 of 6, then 8 of 8,
+   *  full-spec runs passed. */
   dragHeld(from: { x: number; y: number }, to: { x: number; y: number }, { lifted, over }: { lifted: string; over: string }): void {
     this.run(['mouse', 'move', String(from.x), String(from.y)])
     this.run(['mouse', 'down'])
