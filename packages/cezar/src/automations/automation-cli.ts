@@ -307,7 +307,10 @@ async function execute(
       // `enabled`, which the route would refuse, so it is lifted into `enable`.
       const { enabled, ...definition } = body!;
       const enable = values.enable === true || enabled === true;
-      const sent = { ...definition, ...(enable ? { enable: true } : {}) };
+      // The schema reference documents a poll's `intervalSeconds` (300) and `filters` ({}) as
+      // defaults; the route requires both, so the CLI materializes what the reference promised.
+      const defaults = definition.kind === 'schedule' ? {} : { intervalSeconds: 300, filters: {} };
+      const sent = { ...defaults, ...definition, ...(enable ? { enable: true } : {}) };
       const { automation } = await call(path(), { method: 'POST', body: sent }, 201) as { automation: Definition };
       print(summary(automation));
       return EXIT.ok;

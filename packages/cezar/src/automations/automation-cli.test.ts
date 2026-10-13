@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startTestCockpit, type TestCockpit } from '../task-cli/cockpit.testkit.ts';
 import { EXIT } from '../task-cli/cli.ts';
@@ -62,6 +63,18 @@ describe('cez automation', () => {
     expect(await run(['list'])).toBe(EXIT.ok);
     expect((last().automations as unknown[]).length).toBe(32);
   }, 30_000);
+
+  it('create fills the poll defaults the schema reference documents, so a minimal poll is accepted', async () => {
+    // A poll is refused on a project without a github.com remote; give the test repo one.
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: harness.repoRoot });
+    execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: harness.repoRoot });
+    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/example/repo.git'], { cwd: harness.repoRoot });
+    const minimal = { name: 'Review PRs', events: ['pull_request.opened'], task: { prompt: 'Review {{github.number}}' } };
+    expect(await run(['create', '--json', JSON.stringify(minimal)]), out.join('\n')).toBe(EXIT.ok);
+    expect(posted.at(-1)?.body).toEqual({ ...minimal, intervalSeconds: 300, filters: {} });
+    expect(await run(['show', String(last().id)])).toBe(EXIT.ok);
+    expect(last().automation).toMatchObject({ kind: 'github', enabled: false, intervalSeconds: 300, filters: { lookbackDays: 7, maxRecords: 25 } });
+  });
 
   describe('add', () => {
     it('builds exactly the body create --json sends, paused unless --enable', async () => {
