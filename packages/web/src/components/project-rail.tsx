@@ -5,6 +5,7 @@ import {
   KeyboardSensor,
   MeasuringStrategy,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   type Announcements,
@@ -78,7 +79,9 @@ type RailSort = {
 
 /** The lifted row, faded in place and above its neighbours (no overlay copy: the row moves). */
 function dragClass(sort: RailSort | undefined) {
-  return sort?.isDragging ? 'relative z-10 opacity-40' : undefined
+  // No iOS link callout on a sortable row: a long press there lifts the project instead.
+  if (sort === undefined) return undefined
+  return sort.isDragging ? 'relative z-10 opacity-40 [-webkit-touch-callout:none]' : '[-webkit-touch-callout:none]'
 }
 
 /** One project's row: 52px tall so a pill above and below the mark never touches its neighbours. */
@@ -303,6 +306,27 @@ function SortableRailProject({
 /** A column, so a row moves up and down only: sideways it would leave a 60px rail. */
 const restrictToRailAxis: Modifier = ({ transform }) => ({ ...transform, x: 0 })
 
+/**
+ * The pointer sensor for a mouse or a pen only. A finger goes to the touch sensor below: a
+ * collapsed mark keeps the browser's default `touch-action` so the rail still scrolls under a
+ * swipe, and the browser cancels a pointer-driven drag the moment that swipe becomes a scroll.
+ * Both sensors cannot share a press — dnd-kit lets the first activator (`pointerdown`, before
+ * `touchstart`) own it — so this one has to step aside for touch.
+ */
+class RailPointerSensor extends PointerSensor {
+  static override activators = [
+    {
+      eventName: 'onPointerDown' as const,
+      handler: ({ nativeEvent }: React.PointerEvent, options: Parameters<(typeof PointerSensor.activators)[number]['handler']>[1]) =>
+        nativeEvent.pointerType !== 'touch' && PointerSensor.activators[0]!.handler({ nativeEvent } as React.PointerEvent, options),
+    },
+  ]
+}
+
+/** A finger lifts a project with a long press, so a swipe across the rail stays a scroll. The
+ *  tolerance lets a resting finger wobble without cancelling the press. */
+const RAIL_TOUCH_CONSTRAINT = { delay: 250, tolerance: 5 }
+
 /** Space lifts, so Enter on a collapsed mark still follows its link. */
 const RAIL_KEYBOARD_CODES = {
   start: [KeyboardCode.Space],
@@ -344,7 +368,8 @@ function useRailSorting(given: readonly ProjectListEntry[], onReorder: ((ids: re
   }, [dropped, given])
   const ids = React.useMemo(() => projects.map((project) => project.id), [projects])
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(RailPointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: RAIL_TOUCH_CONSTRAINT }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates, keyboardCodes: RAIL_KEYBOARD_CODES }),
   )
 

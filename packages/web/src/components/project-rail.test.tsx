@@ -562,6 +562,40 @@ describe('ProjectRail reorder', () => {
     expect(mark('alpha').hasAttribute('data-dragging')).toBe(false)
   })
 
+  it('lifts a collapsed mark by touch on a long press, and leaves a finger swipe to the browser', async () => {
+    const onReorder = vi.fn()
+    renderRail({ projects: three, canReorder: true, onReorder })
+    layOutRows()
+    const target = link('alpha')
+    const touch = (y: number) => ({ touches: [{ clientX: 30, clientY: y }], changedTouches: [{ clientX: 30, clientY: y }] })
+    const finger = { pointerType: 'touch', clientX: 30, clientY: 26, button: 0, isPrimary: true }
+
+    // A swipe: the pointer sensor steps aside for a finger, so a quick move lifts nothing and the
+    // browser is free to scroll the rail.
+    await act(async () => {
+      fireEvent.pointerDown(target, finger)
+      fireEvent.touchStart(target, touch(26))
+    })
+    await act(async () => {
+      fireEvent.pointerMove(target, { ...finger, clientY: 80 })
+      fireEvent.touchMove(target, touch(80))
+    })
+    expect(mark('alpha').hasAttribute('data-dragging')).toBe(false)
+    await act(async () => { fireEvent.touchEnd(target, touch(80)) })
+
+    // A long press lifts it, and the finger carries it one row down.
+    await act(async () => {
+      fireEvent.pointerDown(target, finger)
+      fireEvent.touchStart(target, touch(26))
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    })
+    expect(mark('alpha').hasAttribute('data-dragging')).toBe(true)
+    await act(async () => { fireEvent.touchMove(target, touch(60)) })
+    await act(async () => { fireEvent.touchMove(target, touch(80)) })
+    await act(async () => { fireEvent.touchEnd(target, touch(80)) })
+    expect(onReorder).toHaveBeenCalledWith(['beta', 'alpha', 'gamma'])
+  })
+
   it('cancels the click that ends a pointer drag, so the link does not load a page', async () => {
     const onReorder = vi.fn()
     renderRail({ projects: three, canReorder: true, onReorder })
