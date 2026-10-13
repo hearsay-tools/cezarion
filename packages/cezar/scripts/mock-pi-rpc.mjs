@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 // Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
 import { spawn as watchdogSpawn } from 'node:child_process';
-import { closeSync as watchdogCloseInput, writeFileSync as watchdogWritePid } from 'node:fs';
+import { closeSync as watchdogCloseInput, writeFileSync as watchdogWritePid, existsSync as promptAckReleased } from 'node:fs';
 function watchdogStall(prompt) {
   if (!prompt.includes('mock:no-progress')) return false;
   watchdogWritePid('watchdog.pid', String(process.pid));
   if (prompt.includes('input-closed')) {
     watchdogCloseInput(0);
     watchdogWritePid('input-closed.pid', String(process.pid));
-    setTimeout(() => process.exit(0), 300);
+    // The S29 acknowledgement gate keeps the native pipe closed while the test
+    // releases the initial prompt ACK. All other fixtures retain their exit.
+    setTimeout(() => process.exit(0), prompt.includes('mock:gate-prompt-ack') ? 15_000 : 300);
   }
   if (prompt.includes('ignore-term')) {
     process.removeAllListeners('SIGTERM');
@@ -346,9 +348,14 @@ async function handle(command) {
     sendText(['Pick one.\n\n', 'CEZ:ASK', ' ', ASK_MARKER_BODY]);
     sendTurnEnd();
   } else if (command.type === 'prompt' && /mock:(no-progress|busy-progress)/.test(command.message)) {
+    const gated = command.message.includes('mock:gate-prompt-ack');
+    if (gated) {
+      watchdogStall(command.message);
+      while (!promptAckReleased('input-ack.release')) await sleep(10);
+    }
     send({ id: command.id, type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' }); send({ type: 'turn_start' });
-    watchdogStall(command.message);
+    if (!gated) watchdogStall(command.message);
     if (command.message.includes('mock:busy-progress')) {
       for (let i = 0; i < 24; i++) { send({ type: 'tool_execution_update', toolCallId: 'busy', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'working' }] } }); await sleep(100); }
       sendTurnEnd();

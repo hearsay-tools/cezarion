@@ -31,7 +31,7 @@ export const CURSOR_PRINT_SPEC_SUPPORT: AgentRunSpecSupport = {
   additionalDirectories: { honored: true, via: '--add-dir per workspace root on every turn' },
   env: { honored: true, via: 'buildChildEnv with per-run env' },
   model: { honored: true, via: '--model opaque ID' },
-  effort: { honored: true, via: 'advertised opaque model variant selected by --model' },
+  effort: { honored: true, via: 'selected-account native parameter selection or advertised legacy variant passed with --model' },
   timeoutMs: { honored: true, via: 'logical wall-clock timer across print processes' },
   sessionId: { honored: true, via: 'exact --resume native ID after first turn' },
   resume: { honored: true, via: '--resume for a recorded native session' },
@@ -43,6 +43,8 @@ export interface CursorPrintRunnerOptions {
   timeoutMs?: number;
   /** The selected account's read-only model catalog, supplied by the facade. */
   models?: readonly ModelOption[];
+  /** Exact canonical selection validated by the selected-account preflight. */
+  resolvedModel?: string;
   /** Test override; production retains the shared 30-minute no-progress cap. */
   noProgressTimeoutMs?: number;
   processOptions?: Pick<CursorPrintProcessOptions, 'drainMs' | 'termGraceMs' | 'killGraceMs'>;
@@ -144,6 +146,7 @@ class CursorPrintSession implements AgentSession {
   }
 
   private resolveModel(): string | undefined {
+    if (this.options.resolvedModel) return this.options.resolvedModel;
     const model = this.spec.model;
     const catalog = this.options.models;
     if (model && catalog && !catalog.some(option => option.id === model) && !this.spec.effort) {

@@ -578,6 +578,21 @@ qualified token usage. Project-local Claude settings do not reliably disable
 a user/team marketplace copy, and Cursor may silently lose history under an
 otherwise valid ID; Cezar only verifies the returned ID.
 
+Print model admission retains the canonical IDs discovered by the read-only
+`cursor/list_available_models` extension (hearsay-tools/cezarion#987). When a
+canonical ID is absent from `--list-models`, preflight reads that owning account's
+native parameter keys, values and defaults. Explicit effort becomes a complete
+`--model` variant selection, such as `grok-4.6[effort=high,fast=true]` or
+`gpt-5.4-mini[reasoning=high]`; partial overrides are not qualified for this build.
+Other parameters retain advertised defaults. Unknown models, unsupported effort
+and incomplete defaults fail before inference. IDs with embedded parameters retain
+those selections in the same bracket group; explicit effort replaces the embedded
+effort, and other advertised defaults fill missing parameters. Malformed or
+duplicate embedded parameters fail before inference. The validated native selection
+is kept for every print turn and revalidated under the pinned account on Continue.
+Advertised legacy IDs keep their existing variant-selection path. The discovery
+child has a finite startup bound and is terminated when selection is cancelled.
+
 ### Cursor ACP (hearsay-tools/cezarion#264)
 
 `cursor-acp-runner.ts` launches `agent --force acp` and holds one JSON-RPC stdio
@@ -906,8 +921,10 @@ output transport must terminate the live child. OpenCode uses its real HTTP/SSE
 stream for the transport failure, while the other backends use stdout.
 Requested teardown remains successful. The matrix has no wire exemptions.
 
-**S29** (hearsay-tools/cezarion#906), in `core/omp-input-pipe.test.ts`, closes each
+**S29** (hearsay-tools/cezarion#906, hearsay-tools/cezarion#969), in `core/omp-input-pipe.test.ts`, closes each
 native input transport while the admitted turn's child is alive, then submits agent input.
+Codex waits until `sendAgentMessage` admits — `session.open` can be true before the first
+main-thread turn exists, so a one-shot send races the startup gate.
 Claude/Codex/Pi/OMP mocks close fd 0; OpenCode destroys the next native prompt HTTP socket
 while retaining SSE. The rejected receipt must retain input failure evidence, settlement
 must be bounded, and no successful native turn completion may be fabricated. OpenCode's
@@ -919,6 +936,9 @@ constructed.
 Pi and OMP additionally close admission immediately, report one fatal transport failure
 and reject their results even if the child would later exit zero. OMP's focused regression
 closes stdin before the native `ready` frame to exercise the queued startup outbox.
+Their S29 fixtures gate the initial native prompt acknowledgement after closing stdin;
+the cell waits for that acknowledgement to drain before submitting agent input, so a
+filesystem marker cannot race the runner's admission guard (hearsay-tools/cezarion#974).
 
 **S26–S28** (hearsay-tools/cezarion#890), in the same file, start every `RUNNER_IDS` backend's
 native mock with `mock:no-progress-leftover`. The mock leaves two children in its cwd: one in

@@ -34,7 +34,7 @@ prototype at `~/projects/cdp-screencast-proto` (server.mjs, client.html, smoke.m
 | URL reach | Direct sockets, same trust level as unrestricted Bash, no allow-list. Loopback and any destination the host can open without an HTTP proxy. Linux Chromium is launched with `--proxy-server=direct://` so it does not inherit `HTTP(S)_PROXY`: it will not send proxy auth the way curl does, and a hanging CONNECT on a render-blocking stylesheet blanks the pane. Destinations that exist only behind that proxy fail instead of hanging. |
 | Sandbox | Never added automatically. `CEZ_PREVIEW_NO_SANDBOX=1` (off by default, documented) is the only way to launch Chromium with `--no-sandbox`. The prototype's automatic `--no-sandbox` for root is dropped. |
 | Viewport presets | Labelled by size (`390 × 844`, `820 × 1180`, `1440 × 900`) plus Fit. Size only; no touch or user-agent emulation. |
-| Chromium profile | Kept per task under the task's preview directory so logins in the app under test survive a browser restart; deleted with the task. |
+| Chromium profile | Kept per task under the task's preview directory so logins in the app under test survive a browser restart; deleted with the task. Before each launch, `Default/Preferences` is merged with `profile.password_manager_leak_detection: false` so Chrome's leaked-password dialog cannot freeze preview input (hearsay-tools/cezarion#972). Cookies and storage stay in SQLite. |
 
 ## Agent tool: `cezar_preview_serve`
 

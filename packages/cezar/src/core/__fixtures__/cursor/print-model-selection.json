@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "case": "canonical-model-selection",
+  "issue": "hearsay-tools/cezarion#987",
+  "cliVersion": "2026.10.01-e373342",
+  "invocation": [
+    "-p",
+    "--force",
+    "--trust",
+    "--output-format stream-json",
+    "--model <complete native selection>",
+    "--allowed-tools <qualified non-delegation catalog>"
+  ],
+  "checks": [
+    {
+      "checkedAt": "2026-10-12T22:45:22.047Z",
+      "model": "grok-4.6",
+      "effort": "high",
+      "nativeSelection": "grok-4.6[effort=high,fast=true]",
+      "preflightSupported": true,
+      "sessionTransport": "cursor-print",
+      "expectedReplySeen": true
+    },
+    {
+      "checkedAt": "2026-10-12T22:45:49.463Z",
+      "model": "gpt-5.4-mini",
+      "effort": "high",
+      "nativeSelection": "gpt-5.4-mini[reasoning=high]",
+      "preflightSupported": true,
+      "sessionTransport": "cursor-print",
+      "expectedReplySeen": true
+    },
+    {
+      "checkedAt": "2026-10-12T22:46:18.774Z",
+      "model": "auto-smart",
+      "nativeSelection": "auto-smart",
+      "preflightSupported": true,
+      "sessionTransport": "cursor-print",
+      "expectedReplySeen": true
+    }
+  ],
+  "credentialsRecorded": false,
+  "originalTaskResumed": false,
+  "outcome": "pass"
+}

@@ -264,6 +264,17 @@ describe('GET /api/v1/workspace/events', () => {
     ]);
   });
 
+  it("announces a built context as project-ready, so cockpits refetch what its recovery changed (#667)", async () => {
+    const other = await registerProject(otherRoot);
+    const ws = await openStream('/api/v1/workspace/events');
+    await ws.readUntil('event: ping');
+
+    expect((await apiRequest(app, `/api/v1/p/${other.id}/runs`)).status).toBe(200);
+
+    const body = await ws.readUntil('event: project-ready');
+    expect(payloadsOf(body, 'project-ready')).toEqual([{ project: other.id }]);
+  });
+
   it("broadcasts a late-built context's runtime provider invalidation without a project stamp", async () => {
     const other = await buildOtherContext();
     const ws = await openStream('/api/v1/workspace/events');

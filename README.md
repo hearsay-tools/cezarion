@@ -888,6 +888,7 @@ Useful environment variables:
 | `CEZ_BROWSE_ROOT=~/` | Default root for **Add project → Open local folder…**. The picker cannot navigate above it; a saved workspace value overrides the environment default and must name an existing folder. |
 | `CEZ_PROJECTS_DIR=~/cezar/projects` | Default destination for **Clone from GitHub**. Saved workspace settings override it, and missing directories are created recursively. |
 | `CEZ_SKILLS_AUTO_UPDATE=0` | Disable automatic checks and updates for upstream-CLI-tracked Open Mercato skill installations. On by default; a saved global Skills setting overrides this environment default. Checks are delayed, bounded, cached, and non-blocking. |
+| `CEZ_PROJECT_WARMUP=0` | Prepare each registered project only when it is first opened. By default the cockpit prepares every other registered project in the background once it listens, one at a time, most recently opened first: the run store opens and interrupted runs resume, so the first click on a project does not wait. A project another live cockpit serves is skipped. |
 | `CEZ_AUTONOMOUS_DEFAULT=0` | Seed the New Task Autonomous default (`0` or `1`). Without a seed, skills default on and workflows off; a saved global Resources setting overrides it. |
 | `CEZ_WORKTREE_DEFAULT=1` | Seed the New Task Worktree default (`0` or `1`). Without a seed, eligible runs default on; a saved global Resources setting overrides it. |
 | `CEZ_DISABLE_REPO_LOCK=1` | **Dangerous escape hatch:** allow any run executing in the repository root — an explicit `worktree=false` run, non-Git degradation, or a continuation whose worktree cannot be restored — to proceed without Cezar’s repository-root lease. Agents can overwrite each other’s files or Git state; isolated worktree runs are unaffected. Off by default; only the exact value `1` enables it. |
@@ -994,12 +995,13 @@ not disable a user or team marketplace copy. A previously confirmed Cursor
 session ID can also lose history inside Cursor without an error; Cezar resumes
 the recorded ID and checks that Cursor returns the same ID.
 Cursor provides no qualified token-usage telemetry; Cezar leaves usage unavailable
-instead of estimating it. In ACP mode, Cezar negotiates Cursor’s parameterized model picker and
-shows only the effort levels the selected model advertises. The runner applies
-`effort` or `reasoning` through ACP session config options before prompting;
-unsupported explicit values fail instead of silently using a default. Initial models
-are pinned with `--model`; opaque parameterized IDs and legacy model discovery
-remain compatibility paths for older CLIs.
+instead of estimating it. Cezar discovers Cursor's canonical model IDs and advertised
+effort levels through its read-only ACP catalog. Print mode accepts those IDs and
+applies effort using a complete native parameter selection passed with `--model`,
+retaining the account catalog's defaults for other parameters. Advertised legacy
+print variants remain supported. ACP sessions apply `effort` or `reasoning` through
+session config options before prompting; an unsupported explicit effort fails
+instead of silently choosing another level.
 
 Settings → Agent config exposes Cursor’s global `cli-config.json`, project
 `.cursor/cli.json` permissions, `.cursor/mcp.json`, and shared `AGENTS.md`.

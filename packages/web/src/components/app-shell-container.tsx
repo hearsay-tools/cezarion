@@ -66,10 +66,12 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
   const applicationUpdate = useApplicationUpdate(shellHealth)
   // The global inbox is opt-in (#471). With the capability off there is no Inbox nav item to
   // badge and the endpoint can only answer [], so the query parks rather than polls.
-  const inboxAvailable = health.data?.capabilities.followups === true
+  // Capabilities describe the workspace even when navigation selects an empty health cache.
+  // Keep the last confirmed views until the new response supplies authoritative capabilities.
+  const inboxAvailable = shellHealth?.capabilities.followups === true
   // GitHub automations are opt-in too (#801) — same honesty rule: without the server's word for
   // it the nav must not offer a tab whose every request would 409.
-  const automationsAvailable = health.data?.capabilities.automations === true
+  const automationsAvailable = shellHealth?.capabilities.automations === true
   const todos = useTodos(inboxAvailable)
   // One query in the shell feeds every rendering of the active project's navigation (desktop,
   // mobile drawer, and grouped sidebar). Routes reuse this TanStack Query cache entry.
