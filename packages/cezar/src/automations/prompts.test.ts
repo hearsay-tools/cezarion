@@ -73,6 +73,13 @@ describe('automationsPrompt and the skill body', () => {
     expect(automationsPrompt(command)).toMatch(/cron job/);
   });
 
+  it('keeps the automation paused under an autonomy nudge: only the user\'s request enables it', () => {
+    for (const text of [automationsPrompt(command), createAutomationSkillBody(command)]) {
+      expect(text).toContain('A paused automation is the finished state of this task');
+      expect(text).toMatch(/continue autonomously, not to ask for confirmation, or to make reasonable assumptions is not that request/);
+    }
+  });
+
   it('embeds the full reference in the skill body', () => {
     expect(createAutomationSkillBody(command)).toContain(AUTOMATION_SCHEMA_REFERENCE);
     expect(CREATE_AUTOMATION_SKILL_NAME).toBe('create-cezarion-automation');

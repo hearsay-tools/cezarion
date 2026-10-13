@@ -95,7 +95,7 @@ The CLI is ${command}. Every command prints one JSON object:
   ${command} run <id>                                 schedule: launch it once, now
   ${command} list | show <id> | update <id> --file <def.json> | enable <id> | pause <id> | delete <id>
 
-Read the schema first. Create the automation PAUSED unless the user explicitly asked for it to be enabled. For a GitHub poll, run a preview check so the user sees what it would match; for a schedule, report its next occurrence. Put the "url" the command prints in your final message. If the command exits non-zero or is refused, stop and report that automations are unavailable on this cockpit, quoting its error: do not write a cron job, a GitHub Action or a polling script as a substitute.`;
+Read the schema first. Create the automation PAUSED. A paused automation is the finished state of this task, not a step awaiting confirmation: enable it only when the user's own request explicitly asks for it to be switched on. An instruction to continue autonomously, not to ask for confirmation, or to make reasonable assumptions is not that request. For a GitHub poll, run a preview check so the user sees what it would match; for a schedule, report its next occurrence. Put the "url" the command prints in your final message. If the command exits non-zero or is refused, stop and report that automations are unavailable on this cockpit, quoting its error: do not write a cron job, a GitHub Action or a polling script as a substitute.`;
 }
 
 /** The built-in skill's body — the full playbook a run under `create-cezarion-automation` follows. */
@@ -121,7 +121,7 @@ Run \`${command} schema\` and read it. Write the definition as JSON to a file ou
 
     ${command} create --file <def.json>
 
-It is created PAUSED. The output carries its \`id\` and the cockpit \`url\` where the user can edit it. Add \`--enable\` only if the user explicitly asked for it to be switched on. If the command exits non-zero, stop and report its \`error\` exactly: do not work around it.
+It is created PAUSED. The output carries its \`id\` and the cockpit \`url\` where the user can edit it. A paused automation is the finished state of this task, not a step awaiting confirmation: enable it only when the user's own request explicitly asks for it to be switched on. An instruction to continue autonomously, not to ask for confirmation, or to make reasonable assumptions is not that request. Then add \`--enable\`, and never otherwise. If the command exits non-zero, stop and report its \`error\` exactly: do not work around it.
 
 ## 3. Preview before anyone enables it
 
