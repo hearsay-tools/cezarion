@@ -389,7 +389,18 @@ jobs:
         run: npm run build:server
 
       - name: Run server and cockpit unit suites
-        run: npm test -- --shard=${{ matrix.shard }}/2 --maxWorkers=4
+        # Keep four workers and both ordinary reporters; retain host load and each
+        # test's measured duration/budget to diagnose hearsay-tools/cezarion#974.
+        run: npm test -- --shard=${{ matrix.shard }}/2 --maxWorkers=4 --reporter=default --reporter=github-actions --reporter=./.github/scripts/node-floor-reporter.mjs
+
+      - name: Upload floor measurements
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: node-floor-measurements-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/node-floor-shard-${{ matrix.shard }}.json
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Run Node unit suites
         if: matrix.shard == 1
