@@ -54,6 +54,15 @@ describe('cez automation', () => {
     return rest;
   };
 
+  it('list reads a catalog larger than the ordinary 3 MiB response cap', async () => {
+    const prompt = 'x'.repeat(100_000);
+    for (let index = 0; index < 32; index += 1) {
+      expect(await run(['add', '--name', `big ${index}`, '--cron', '0 4 * * *', '--prompt', prompt])).toBe(EXIT.ok);
+    }
+    expect(await run(['list'])).toBe(EXIT.ok);
+    expect((last().automations as unknown[]).length).toBe(32);
+  }, 30_000);
+
   describe('add', () => {
     it('builds exactly the body create --json sends, paused unless --enable', async () => {
       expect(await run(['add', '--name', 'N', '--cron', '0 7 * * 1-5', '--prompt', 'P'])).toBe(EXIT.ok);

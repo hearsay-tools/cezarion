@@ -72,8 +72,21 @@ function flagsOf(body: CreateAutomationInput): string {
   return parts.join(' ')
 }
 
-/** What the card prints. */
-export function cliOf(draft: AutomationDraft): string {
+/** The cockpit and project the copied line talks to. */
+export interface CliAddress {
+  origin: string
+  projectId: string
+}
+
+/**
+ * What the card prints. With an `address`, the line names this cockpit and project the way a
+ * task's env does (`CEZ_COCKPIT_URL`, `CEZ_PROJECT_ID`): `cez automation` never probes for a
+ * cockpit on its own, so a line pasted into an ordinary shell needs both to reach this one.
+ */
+export function cliOf(draft: AutomationDraft, address?: CliAddress): string {
   const body = toCreateBody(draft)
-  return bodyFlagExpressible(body) ? flagsOf(body) : `cez automation create --json ${shellQuote(JSON.stringify(body))}`
+  const command = bodyFlagExpressible(body) ? flagsOf(body) : `cez automation create --json ${shellQuote(JSON.stringify(body))}`
+  return address
+    ? `CEZ_COCKPIT_URL=${shellQuote(address.origin)} CEZ_PROJECT_ID=${shellQuote(address.projectId)} ${command}`
+    : command
 }

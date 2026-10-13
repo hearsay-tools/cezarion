@@ -86,29 +86,37 @@ describe('cliOf', () => {
 describe('Copy as CLI round-trips through a real shell into the cez automation request', () => {
   const dir = mkdtempSync(join(tmpdir(), 'cez-copy-as-cli-'))
   const stub = join(dir, 'argv.mjs')
-  writeFileSync(stub, 'process.stdout.write(JSON.stringify(process.argv.slice(2)))\n')
+  writeFileSync(stub, 'process.stdout.write(JSON.stringify({ argv: process.argv.slice(2), env: { CEZ_COCKPIT_URL: process.env.CEZ_COCKPIT_URL, CEZ_PROJECT_ID: process.env.CEZ_PROJECT_ID } }))\n')
+  const ADDRESS = { origin: 'http://127.0.0.1:4391', projectId: "it's-a-project" }
   afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
-  /** The copied line, run by `sh` with `cez automation` swapped for a stub that echoes argv. */
-  function shellArgv(line: string): string[] {
-    expect(line.startsWith('cez automation ')).toBe(true)
-    const command = `${shellQuote(process.execPath)} ${shellQuote(stub)} ${line.slice('cez automation '.length)}`
-    return JSON.parse(execFileSync('sh', ['-c', command], { encoding: 'utf8' })) as string[]
+  /**
+   * The copied line, run by `sh` with `cez automation` swapped for a stub that echoes argv and the
+   * address it received — from an ORDINARY shell: no CEZ_* in the environment, as a user pastes it.
+   */
+  function shellRun(line: string): { argv: string[]; env: NodeJS.ProcessEnv } {
+    const at = line.indexOf('cez automation ')
+    expect(at).toBeGreaterThan(0)
+    const command = `${line.slice(0, at)}${shellQuote(process.execPath)} ${shellQuote(stub)} ${line.slice(at + 'cez automation '.length)}`
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('CEZ_')))
+    return JSON.parse(execFileSync('sh', ['-c', command], { encoding: 'utf8', env })) as { argv: string[]; env: NodeJS.ProcessEnv }
   }
 
-  /** What `cez automation` would POST for that argv — its own parser, body builder and transport seam. */
-  async function posted(argv: string[]): Promise<Record<string, unknown>> {
+  /** What `cez automation` would POST for that argv and env — its own parser, body builder and transport seam. */
+  async function posted(argv: string[], env: NodeJS.ProcessEnv): Promise<{ url: string; body: Record<string, unknown> }> {
     let body: Record<string, unknown> | undefined
+    let url = ''
     const out: string[] = []
-    const code = await runAutomationCommand(argv, { CEZ_COCKPIT_URL: 'http://127.0.0.1:1', CEZ_PROJECT_ID: 'p' }, {
+    const code = await runAutomationCommand(argv, env, {
       stdout: (line) => out.push(line),
-      http: async (_url, init) => {
+      http: async (target, init) => {
+        url = target
         body = init?.body as Record<string, unknown>
         return { status: 201, data: { automation: { id: 'a1', name: 'x', enabled: false, revision: 1 } } }
       },
     })
     expect(code, out.join('\n')).toBe(0)
-    return body!
+    return { url, body: body! }
   }
 
   /** `enable: false` and an absent `enable` both create a paused automation. */
@@ -130,9 +138,11 @@ describe('Copy as CLI round-trips through a real shell into the cez automation r
   ]
 
   it.each(drafts)('%s', async (_name, draft, form) => {
-    const line = cliOf(draft)
-    const argv = shellArgv(line)
+    const { argv, env } = shellRun(cliOf(draft, ADDRESS))
     expect(argv[0]).toBe(form)
-    expect(paused(await posted(argv))).toEqual(paused(toCreateBody(draft)))
+    expect(env).toEqual({ CEZ_COCKPIT_URL: ADDRESS.origin, CEZ_PROJECT_ID: ADDRESS.projectId })
+    const request = await posted(argv, env)
+    expect(request.url).toBe(`${ADDRESS.origin}/api/v1/p/${encodeURIComponent(ADDRESS.projectId)}/automations`)
+    expect(paused(request.body)).toEqual(paused(toCreateBody(draft)))
   })
 })

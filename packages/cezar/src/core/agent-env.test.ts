@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildChildEnv, buildCommandEnv, looksSecret } from './agent-env.ts';
+import { RUNNER_IDS } from './agent-runner.ts';
 
 /**
  * #427: the spawned backend must NOT inherit the full host environment. It
@@ -33,6 +34,28 @@ describe('buildChildEnv — delegation session isolation', () => {
         expect(env.CEZ_DELEGATION_URL).toBe('http://127.0.0.1:5678');
         expect(env.cez_delegation_token).toBeUndefined();
         expect(env.Cez_Delegation_Url).toBeUndefined();
+      });
+    }
+  }
+});
+
+describe('buildChildEnv — cockpit address isolation (#774)', () => {
+  for (const backend of RUNNER_IDS) {
+    for (const full of ['0', '1']) {
+      it(`${backend} drops an inherited cockpit address with CEZ_AGENT_ENV_FULL=${full}, even when passed through`, () => {
+        const env = buildChildEnv({ backend, source: {
+          PATH: '/usr/bin', CEZ_AGENT_ENV_FULL: full, CEZ_ENV_PASSTHROUGH: 'CEZ_COCKPIT_URL,CEZ_PROJECT_ID',
+          CEZ_COCKPIT_URL: 'http://127.0.0.1:4321', cez_project_id: 'parent-project',
+        }, extraEnv: { CEZ_TASK_ID: 'nested' } });
+        expect(Object.keys(env).filter(name => /^CEZ_(COCKPIT_URL|PROJECT_ID)$/i.test(name))).toEqual([]);
+        expect(env.CEZ_TASK_ID).toBe('nested');
+      });
+
+      it(`${backend} keeps the address its own controller set with CEZ_AGENT_ENV_FULL=${full}`, () => {
+        const env = buildChildEnv({ backend, source: { CEZ_AGENT_ENV_FULL: full, CEZ_COCKPIT_URL: 'http://127.0.0.1:4321' },
+          extraEnv: { CEZ_COCKPIT_URL: 'http://127.0.0.1:5555', CEZ_PROJECT_ID: 'own' } });
+        expect(env.CEZ_COCKPIT_URL).toBe('http://127.0.0.1:5555');
+        expect(env.CEZ_PROJECT_ID).toBe('own');
       });
     }
   }

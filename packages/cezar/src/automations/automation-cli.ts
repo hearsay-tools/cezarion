@@ -33,7 +33,7 @@ export interface AutomationIo {
   readFile?: (path: string) => Promise<string>;
   discover?: (options: DiscoverOptions) => Promise<Cockpit>;
   /** The transport; tests stub it where the test app cannot answer (a check needs a GitHub remote). */
-  http?: (url: string, init?: { method?: string; body?: unknown }) => Promise<HttpResult>;
+  http?: (url: string, init?: { method?: string; body?: unknown; responseLimitBytes?: number }) => Promise<HttpResult>;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   /** How long `check` polls before exit 3. */
@@ -284,7 +284,7 @@ async function execute(
 ): Promise<number> {
   const http = io.http ?? fetchJson;
   const path = (suffix = '') => `${cockpit.api}/automations${id ? `/${encodeURIComponent(id)}` : ''}${suffix}`;
-  const call = async (url: string, init?: { method?: string; body?: unknown }, ok = 200): Promise<unknown> => {
+  const call = async (url: string, init?: { method?: string; body?: unknown; responseLimitBytes?: number }, ok = 200): Promise<unknown> => {
     const result = await http(url, init);
     if (result.status !== ok) refuse(result);
     return result.data;
@@ -358,7 +358,9 @@ async function execute(
       }
     }
     case 'list': {
-      const data = await call(path()) as {
+      // `GET /automations` is unpaginated and carries every full prompt, so it reads like
+      // `cez task list` reads `/runs`: no success-size cap, the deadline and error caps kept.
+      const data = await call(path(), { responseLimitBytes: Infinity }) as {
         available: boolean;
         reason?: string;
         automations: Array<Definition & {

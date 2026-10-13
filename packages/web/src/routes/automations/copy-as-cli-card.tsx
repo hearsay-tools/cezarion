@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { cliOf } from '@/lib/automation-cli'
+import { useActiveProjectId } from '@/lib/project-router'
 
 import type { AutomationDraft } from './editor-draft'
 
@@ -12,7 +13,9 @@ import type { AutomationDraft } from './editor-draft'
  * from the body Save sends (`cliOf` → `toCreateBody`), so the two cannot disagree.
  */
 export function CopyAsCliCard({ draft }: { draft: AutomationDraft }) {
-  const line = useMemo(() => cliOf(draft), [draft])
+  const projectId = useActiveProjectId()
+  const origin = window.location.origin
+  const line = useMemo(() => cliOf(draft, projectId ? { origin, projectId } : undefined), [draft, origin, projectId])
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => () => clearTimeout(timer.current), [])
