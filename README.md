@@ -571,8 +571,11 @@ seconds, and no setting changes that interval. Four watchers run concurrently;
 queued waits retain their original deadline. Results are bounded
 observations, not merge approval or evidence that every expected workflow appeared.
 The agent still decides its next action; CI success never completes the task or
-accepts review. A human message cancels the current wait, and CI never answers a
-pending human question. Controller recovery can replay an observation after an
+accepts review. A human message cancels the current wait and tells the agent that
+it must register a new wait if CI monitoring is still needed. The header retains
+the cancellation and explains that general monitoring does not restart that CI
+wait. A cancelled wait stays cancelled even when the task's next automatic check
+wakes the agent. CI never answers a pending human question. Controller recovery can replay an observation after an
 ambiguous delivery checkpoint, identified by its stable lifecycle input ID.
 
 The adapters are bundled for Claude (including `claude-cli`), Codex, OpenCode,

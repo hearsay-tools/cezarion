@@ -786,6 +786,14 @@ Settled observations retry admission and refused delivery once per second withou
 human input; withdrawal, terminal state and disposal stop retries.
 
 Human input withdraws the wait and removes its undelivered lifecycle input. A
+delivery-only status notice tells the agent that the retained withdrawn wait is
+no longer registered and names the PR, head and wait ID. The same notice reaches
+live messages, retried input, queued openings, Continue/recovery openings and
+ordinary monitoring wakes while no newer CI wait is active. It does not rewrite
+the user's transcript or register another wait; the agent must explicitly call
+`cezar_wait_for_ci` again if CI monitoring is still needed. The header explains
+that ordinary monitoring does not restart a withdrawn CI wait, and withdrawal
+takes precedence over an observation that was never delivered. A
 pending human question takes precedence and must never be answered with CI data.
 Stop, finish, review and deletion retire the wait without waking the agent.
 Project disposal aborts owned processes while retaining durable intent for recovery.
@@ -1393,6 +1401,14 @@ handle before shutdown. An intermediate process that appears and exits between
 snapshots can hide its descendants; this is observation, not kernel containment.
 If the platform probe is unavailable, autosave fails before spawning Git and
 cleanup continues with working files preserved.
+
+R69–R71 (`workflows/ci-wait.test.ts`) drive each `HARNESS_ADAPTERS` native input
+wire after human CI interruption. R69 requires the withdrawal notice on fresh,
+continued, recovered and refused-then-retried human input while preserving the
+original transcript. R70 requires an ordinary monitoring wake to carry the
+retained withdrawn status without restoring a CI wait or posing as human input.
+R71 covers queued and recovered custom workflow prompts without `{{task}}`;
+the notice is appended after template/skill expansion at agent delivery.
 
 R18/R19 (hearsay-tools/cezarion#548) use every runner's native message wire to check final-line ASK
 selection after an earlier prose mention, and quoted ASK examples without a

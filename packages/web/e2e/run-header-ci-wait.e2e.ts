@@ -129,6 +129,26 @@ describe('CI header browser accessibility', () => {
     }
   })
 
+  it('distinguishes withdrawn CI from a scheduled monitoring wake and clears the notice on registration', () => {
+    const withdrawn = { ...run, ciWait: undefined, lastCiWait: { ...wait, phase: 'withdrawn' },
+      monitoringWakeAt: '2026-09-22T12:05:00.000Z' }
+    for (const theme of ['light', 'dark']) {
+      browser.setViewport(360, 640)
+      browser.evaluate(`document.documentElement.style.zoom = '1'; document.documentElement.classList.toggle('light', ${theme === 'light'}); window.setCiRun(${JSON.stringify(withdrawn)})`)
+      const text = browser.waitForValue(`document.querySelector('${status}')?.textContent`,
+        value => typeof value === 'string' && value.includes('General monitoring does not restart this CI wait.'))
+      expect(text).toContain('CI wait cancelled')
+      expect(browser.text('[data-slot="monitoring-schedule"]')).toContain('Next automatic check')
+      expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= document.documentElement.clientWidth`)).toBe(true)
+      browser.screenshot(resolve(artifacts, `withdrawn-${theme}-360.png`), { viewport: true })
+    }
+    browser.evaluate(`window.setCiRun(${JSON.stringify(run)})`)
+    const registered = browser.waitForValue(`document.querySelector('${status}')?.textContent`,
+      value => typeof value === 'string' && value.includes('Waiting for CI'))
+    expect(registered).not.toContain('does not restart')
+    expect(browser.count('[data-slot="monitoring-schedule"]')).toBe(0)
+  })
+
   it('retains a readable recovery error without fabricating a PR link', () => {
     const recovered = { ...run, status: 'done', activity: undefined, ciWait: undefined,
       lastCiWaitError: 'CI wait unavailable — saved observation is unreadable; register a new wait.' }

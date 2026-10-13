@@ -9,6 +9,7 @@ import type { AgentSession } from '../core/agent-runner.ts';
 import type { CiWait, CiWaitResult } from '@open-mercato/cezar-contract';
 import { controlledWire, manager, parent, root, restart, semaphore, store, until, worker, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { ciNativeMessages } from './ci-wait-interruption.testkit.ts';
 
 // Tool transport is exercised by adapter parity; lifecycle tests control only external resources.
 const externalResource = vi.hoisted(() => ({ supervisor: {} }));
@@ -235,6 +236,117 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     external.settle(success());
     await until(() => store.getRun(run.id)?.status === 'waiting');
     expect(store.getRun(run.id)?.agentInputs?.some(input => input.id === receipt.id)).not.toBe(true);
+  });
+
+  const interruptionCases = RUNNER_IDS.flatMap(runner =>
+    (['fresh', 'continued', 'recovered', 'refused'] as const).map(mode => ({ runner, mode })));
+  it.each(interruptionCases)('$runner R69 $mode human interruption delivers the withdrawn CI status on its native wire', async ({ runner, mode }) => {
+    const external = github();
+    const adapter = HARNESS_ADAPTERS[runner];
+    process.env.CEZ_DRY_RUN = '0';
+    process.env[adapter.binEnv] = adapter.mockBin;
+    process.env.CEZ_MOCK_ARGS_FILE = join(root, 'args');
+    process.env.CEZ_MOCK_STDIN_FILE = join(root, 'stdin');
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: adapter.scenarios.hold!, runner });
+    await until(() => store.getRun(run.id)?.status === 'waiting');
+    if (mode === 'continued') {
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => !manager.isActive(run.id));
+      expect(manager.continueRun(run.id, { text: adapter.scenarios.hold! }).ok).toBe(true);
+      await until(() => store.getRun(run.id)?.status === 'waiting' && manager.isActive(run.id));
+    }
+    const wait = await register(run.id);
+    await until(() => store.getRun(run.id)?.ciWait?.phase === 'parked');
+    const text = `${adapter.scenarios.hold!}\nKeep monitoring CI`;
+    if (mode === 'recovered') {
+      await restart();
+      expect(manager.isActive(run.id)).toBe(false);
+      expect(manager.continueRun(run.id, { text }).ok).toBe(true);
+    } else {
+      if (mode === 'refused') {
+        const session = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(run.id)!.session;
+        const refusal = vi.spyOn(session, 'sendMessage').mockReturnValueOnce(false);
+        expect(manager.sendMessage(run.id, [{ type: 'text', text }])).toBe(false);
+        expect(store.getRun(run.id)?.lastCiWait?.phase).toBe('withdrawn');
+        refusal.mockRestore();
+      }
+      expect(manager.sendMessage(run.id, [{ type: 'text', text }])).toBe(true);
+    }
+    await until(() => ciNativeMessages(runner, root).some(prompt => prompt.includes(text)));
+    const delivered = ciNativeMessages(runner, root).filter(prompt => prompt.includes(text)).at(-1)!;
+    expect(delivered).toContain(text);
+    expect(delivered).toContain('is no longer registered');
+    expect(delivered).toContain(wait.id);
+    expect(delivered).toContain(pr);
+    expect(delivered).toContain(identity.headSha);
+    expect(delivered).toContain('cezar_wait_for_ci');
+    expect(store.getRun(run.id)?.ciWait).toBeUndefined();
+    expect(external.aborted()).toBe(true);
+    const human = store.readEvents(run.id).filter(event => event.type === 'user-message');
+    expect(human.some(event => event.text === text)).toBe(true);
+    expect(human.every(event => !String(event.text).includes('is no longer registered'))).toBe(true);
+  });
+
+  it.each(RUNNER_IDS)('%s R70 ordinary monitoring wakes carry withdrawn CI status without registering a wait', async runner => {
+    github();
+    const adapter = HARNESS_ADAPTERS[runner];
+    process.env.CEZ_DRY_RUN = '0';
+    process.env[adapter.binEnv] = adapter.mockBin;
+    process.env.CEZ_MOCK_ARGS_FILE = join(root, 'args');
+    process.env.CEZ_MOCK_STDIN_FILE = join(root, 'stdin');
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: adapter.scenarios['split-text']!, runner });
+    await until(() => store.getRun(run.id)?.activity === 'monitoring');
+    const wait = await register(run.id);
+    // Unique text parts on the follow-up: OpenCode's split-text mock reuses its opening part ID.
+    const followup = 'mock:turn-messages:' + Buffer.from(JSON.stringify(['Still waiting for CI.\nCEZ:MONITORING'])).toString('base64');
+    expect(manager.sendMessage(run.id, [{ type: 'text', text: followup }])).toBe(true);
+    const state = (manager as unknown as { active: Map<string, { monitoringWakeTimer?: NodeJS.Timeout }> }).active.get(run.id)!;
+    await until(() => !!state.monitoringWakeTimer);
+    const before = ciNativeMessages(runner, root).length;
+    (state.monitoringWakeTimer as NodeJS.Timeout & { _onTimeout(): void })._onTimeout();
+    await until(() => ciNativeMessages(runner, root).length > before);
+    const prompt = ciNativeMessages(runner, root).at(-1)!;
+    expect(prompt).toContain(wait.id);
+    expect(prompt).toContain('is no longer registered');
+    expect(prompt).toContain('cezar_wait_for_ci');
+    expect(store.getRun(run.id)?.ciWait).toBeUndefined();
+    expect(store.readEvents(run.id).filter(event => event.type === 'user-message')).toHaveLength(1);
+  });
+
+  const queuedCases = RUNNER_IDS.flatMap(runner =>
+    (['queued', 'recovered'] as const).map(mode => ({ runner, mode })));
+  it.each(queuedCases)('$runner R71 $mode custom workflow opening carries withdrawal independently of task templating', async ({ runner, mode }) => {
+    github();
+    const adapter = HARNESS_ADAPTERS[runner];
+    process.env.CEZ_DRY_RUN = '0';
+    process.env[adapter.binEnv] = adapter.mockBin;
+    process.env.CEZ_MOCK_ARGS_FILE = join(root, 'args');
+    process.env.CEZ_MOCK_STDIN_FILE = join(root, 'stdin');
+    const release = semaphore.register({ busySlots: () => 1, pump() {}, oldestQueuedAt: () => null });
+    try {
+      const task = 'Original user task';
+      const run = manager.startRun({ name: 'custom-ci', source: 'built-in', steps: [
+        { id: 'task', prompt: adapter.scenarios.hold! },
+      ] }, { task, runner });
+      expect(store.getRun(run.id)?.status).toBe('queued');
+      // Durable wait history recovered before this queued workflow could open a session.
+      const wait: CiWait = { ...identity, id: randomUUID(), generation: 'previous-session', turnId: randomUUID(),
+        timeoutSeconds: 30, registeredAt: new Date().toISOString(), deadline: new Date(Date.now() + 30_000).toISOString(), phase: 'parked' };
+      store.commitCiWait(run.id, wait);
+      expect(manager.enqueueMessage(run.id, [{ type: 'text', text: 'Keep monitoring CI' }])).not.toBeNull();
+      if (mode === 'recovered') await restart();
+      release();
+      await semaphore.release();
+      await until(() => ciNativeMessages(runner, root).length > 0);
+      const prompt = ciNativeMessages(runner, root)[0]!;
+      expect(prompt).toContain(adapter.scenarios.hold!);
+      expect(prompt).toContain(wait.id);
+      expect(prompt).toContain('is no longer registered');
+      expect(prompt).toContain('cezar_wait_for_ci');
+      expect(store.getRun(run.id)?.task).toBe(task);
+      expect(store.getRun(run.id)?.queuedMessages?.[0]?.text).toBe('Keep monitoring CI');
+      expect(store.getRun(run.id)?.ciWait).toBeUndefined();
+    } finally { release(); }
   });
   it('does not require worker delegation permissions', async () => {
     github();

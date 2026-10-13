@@ -259,6 +259,18 @@ describe('CI wait status', () => {
     renderHeader(run('running', { activity: 'monitoring', lastCiWait: ciWait({ phase: 'withdrawn' }) }))
     expect(screen.getByText('CI wait cancelled')).not.toBeNull()
     expect(screen.getByText('Parked — no automatic check scheduled')).not.toBeNull()
+    expect(screen.getByText('General monitoring does not restart this CI wait.')).not.toBeNull()
+  })
+
+  it('shows a withdrawn wait as cancelled even when its undelivered result passed', () => {
+    stubFetch()
+    renderHeader(run('running', { lastCiWait: ciWait({ phase: 'withdrawn', result: {
+      outcome: 'passed', headSha: '123456789abcdef', observedAt: '2026-09-22T12:02:00.000Z',
+      checks: [], totalChecks: 0, truncated: false,
+    } }) }))
+    expect(screen.getByText('CI wait cancelled')).not.toBeNull()
+    expect(screen.queryByText(/CI checks passed/)).toBeNull()
+    expect(screen.getByText('A new CI wait is needed to resume CI monitoring.')).not.toBeNull()
   })
 })
 

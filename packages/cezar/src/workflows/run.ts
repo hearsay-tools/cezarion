@@ -1912,6 +1912,16 @@ export class RunManager {
     this.ciWakeAdmitted.delete(runId);
   }
 
+  /** Reconstruct delivery context from durable state, including refused input and restart. */
+  private ciWaitWithdrawalNote(runId: string): string | undefined {
+    const run = this.store.getRun(runId);
+    const wait = run?.lastCiWait;
+    if (run?.ciWait || wait?.phase !== 'withdrawn') return undefined;
+    return `Cezar CI wait status: wait ${wait.id} for ${wait.prUrl} (head ${wait.headSha}) was withdrawn and is no longer registered. ` +
+      'Human input interrupts an active CI wait. If CI monitoring is still needed, call cezar_wait_for_ci again and end your turn after registration. ' +
+      'CEZ:MONITORING and ordinary automatic wake-ups do not register or restore a CI wait. Follow the current user request.';
+  }
+
   /** Snapshot of the actual active session, never guessed from partial run settings. */
   delegationExecutionSettings(runId: string): DelegationExecutionSettings {
     const state = this.active.get(runId);
@@ -5098,6 +5108,8 @@ export class RunManager {
     const deliverable: ContentBlock[] = persisted.length
       ? [...expanded, pastedAttachmentsNote(persisted)]
       : expanded.length ? expanded : [{ type: 'text', text: 'The user attached a document, but it could not be saved. Ask them to attach it again before discussing its contents.' }];
+    const ciNote = this.ciWaitWithdrawalNote(runId);
+    if (ciNote) deliverable.push({ type: 'text', text: ciNote });
     const answeringAskSeq = userAuthored ? this.pendingHumanAskSeq(runId) : undefined;
     // #505: an answer that opens a new turn (a CEZ:ASK answer at a boundary) carries the
     // held conversation messages in the same submission, after the answer.
@@ -6056,7 +6068,9 @@ export class RunManager {
     // through `deliverMessage`, so it needs the SAME delivery-only `/skill` rewrite the
     // live path applies (#811). Delivery-only: the `user-message` event above already
     // persisted the user's original text, and the transcript must keep showing that.
-    const openingPrompt = expandRegistrySlashSkillText(prompt, state.skills ?? []) + (setupNote ? `\n\n${setupNote}` : '');
+    const ciNote = this.ciWaitWithdrawalNote(runId);
+    const openingPrompt = expandRegistrySlashSkillText(prompt, state.skills ?? []) +
+      (setupNote ? `\n\n${setupNote}` : '') + (ciNote ? `\n\n${ciNote}` : '');
     state.agentSessionError = undefined;
     let session: AgentSession | undefined;
     if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
@@ -6701,6 +6715,8 @@ export class RunManager {
     // Opening prompts bypass deliverMessage. Expand before workflow and attachment
     // context so a leading registry skill matches, without changing the stored task.
     userPrompt = expandRegistrySlashSkillText(userPrompt, state.skills ?? []);
+    const ciNote = this.ciWaitWithdrawalNote(runId);
+    if (ciNote) userPrompt += `\n\n${ciNote}`;
     if (chainNote) userPrompt = `${chainNote}\n\n---\n\n${userPrompt}`;
     if (checkFailure) {
       userPrompt += `\n\nA verification command failed after the previous attempt. Fix the cause. Failing output:\n\n${checkFailure}`;
