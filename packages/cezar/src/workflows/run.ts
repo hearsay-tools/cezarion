@@ -69,6 +69,9 @@ import {
 import type { AgentEvent, ContentBlock, InputDelivery } from '../core/agent-runner.ts';
 import { inputDeliveryOf } from '../core/agent-runner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
+import { resolveCapabilities } from '../server/capabilities.ts';
+import { automationCliCommand, automationsPrompt } from '../automations/prompts.ts';
+import { createAutomationSkill } from '../automations/builtin-skill.ts';
 import { materializeSkillDir, waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/models.ts';
@@ -1531,6 +1534,7 @@ export class RunManager {
       CEZ_TASK_ID: runId,
       CEZ_TODOS_FILE: generateFollowups ? todosPath(this.dataDir) : '',
       ...agentTmpEnv(this.dataDir, runId),
+      ...(this.cockpit ? { CEZ_COCKPIT_URL: this.cockpit.origin, CEZ_PROJECT_ID: this.cockpit.projectId } : {}),
     };
   }
 
@@ -1652,6 +1656,36 @@ export class RunManager {
       profileId: resolved.profile.id,
       accountBinding: process.env.CEZ_DELEGATION === '1' ? captureWorkerAccount(resolved.profile, buildChildEnv({ backend, extraEnv: env })) : undefined,
     };
+  }
+
+  /**
+   * The cockpit serving this manager's project, set by `startServer` once it listens (#774).
+   * Every agent env then carries it as `CEZ_COCKPIT_URL`/`CEZ_PROJECT_ID`, which is how
+   * `cez automation` reaches the cockpit without probing ports. A headless `cez run` never
+   * sets it, so it is also the "a cockpit is attached" signal for the automations gate.
+   */
+  private cockpit?: { origin: string; projectId: string };
+  setCockpitAddress(address: { origin: string; projectId: string } | undefined): void {
+    this.cockpit = address ? { ...address } : undefined;
+  }
+  cockpitAddress(): { origin: string; projectId: string } | undefined {
+    return this.cockpit ? { ...this.cockpit } : undefined;
+  }
+  /** Automations on AND a cockpit attached: the one predicate behind the prompt part and the built-in skill. */
+  private automationsReachable(): boolean {
+    return !!this.cockpit && resolveCapabilities().automations;
+  }
+  /** The built-in skills this manager may offer now; empty unless automations are reachable. */
+  builtinSkills(): Skill[] {
+    return this.automationsReachable() ? [createAutomationSkill(automationCliCommand())] : [];
+  }
+  /** The automations part of every session's system prompt, or nothing. */
+  private automationsPart(): string | undefined {
+    return this.automationsReachable() ? automationsPrompt(automationCliCommand()) : undefined;
+  }
+  /** Every skill lookup in this manager goes through here, so the built-ins reach all of them. */
+  private discoverSkills(): Promise<Skill[]> {
+    return discoverSkills(this.repoRoot, { builtin: this.builtinSkills() });
   }
 
   private delegationProvisioner?: DelegationProvisioner;
@@ -5684,7 +5718,7 @@ export class RunManager {
     // sessions; a continuation builds its OWN ActiveRun, and without this the resumed session
     // expanded against an empty registry and leaked `/om-...` verbatim to the backend, which
     // answered "Unknown skill" (#811). Best-effort — discovery must never break Continue.
-    state.skills = await discoverSkills(this.repoRoot).catch(() => [] as Skill[]);
+    state.skills = await this.discoverSkills().catch(() => [] as Skill[]);
 
     this.store.updateRun(runId, {
       status: 'running',
@@ -6066,7 +6100,7 @@ export class RunManager {
               if (cached.some((candidate) => candidate.name === continuedSkillName)) settle();
             }, () => undefined);
           });
-          state.skills = await discoverSkills(this.repoRoot).catch(() => state.skills ?? []);
+          state.skills = await this.discoverSkills().catch(() => state.skills ?? []);
           skill = (state.skills ?? []).find((candidate) => candidate.name === continuedSkillName);
         } catch {
           // Best-effort — a slow or failing team-skills load must not fail Continue.
@@ -6123,6 +6157,7 @@ export class RunManager {
     const continuationTail = composeSystemPrompt(
       record?.systemPrompt,
       delegation?.instructions,
+      this.automationsPart(),
       artifactInstructions(continueProfile.env.CEZ_ARTIFACTS_DIR),
       generateFollowups ? HANDOFF_INSTRUCTIONS : HANDOFF_ONLY_INSTRUCTIONS,
     );
@@ -6490,7 +6525,7 @@ export class RunManager {
     // note rides the first agent step's opening message only, like the task's attachments.
     let startSetupNote = await this.prepareWorktree(runId, state, config.worktreeSetup, emit, 'start');
 
-    const skills = await discoverSkills(this.repoRoot);
+    const skills = await this.discoverSkills();
     // Every ActiveRun construction site must carry the registry — `runContinuation` builds
     // its own, and the one that skipped this leaked raw `/skill` text to the backend (#811).
     state.skills = skills;
@@ -7028,6 +7063,7 @@ export class RunManager {
             systemPrompt,
             extraSystemPrompt,
             delegation?.instructions,
+            this.automationsPart(),
             artifactInstructions(stepProfile.env.CEZ_ARTIFACTS_DIR),
             followupsEnabled() && input.generateFollowups !== false
               ? HANDOFF_INSTRUCTIONS
@@ -7394,7 +7430,7 @@ export class RunManager {
     try {
       let skillDescription: string | undefined;
       if (skillName) {
-        const skills = await discoverSkills(this.repoRoot).catch(() => [] as Skill[]);
+        const skills = await this.discoverSkills().catch(() => [] as Skill[]);
         skillDescription = skills.find((s) => s.name === skillName)?.description;
       }
       const result = await generateRunName(this.repoRoot, { task, skillName, skillDescription, ...live });
@@ -8223,7 +8259,7 @@ export function skillSystemPrompt(
     `Selected skill: /${skill.name}`,
     ...(skill.description ? [`Description: ${skill.description}`] : []),
   ];
-  if (skill.source && skill.source !== 'team' && skill.path) {
+  if (skill.source && skill.source !== 'team' && skill.source !== 'builtin' && skill.path) {
     const dir = dirname(skill.path);
     lines.push(
       '',

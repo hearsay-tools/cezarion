@@ -38,9 +38,10 @@ export type DelegationProject = { id: string; root: string; store: RunStore; man
  * path — else the named workflow or a one-step discovered skill task. Every agent step resolves its own runner and account (#452), so a
  * chain may mix providers; a chain with no agent step has nothing for a worker to run.
  */
-async function resolveSpawnWorkflow(root: string, request: WorkerSpawnRequest): Promise<WorkflowDef> {
+async function resolveSpawnWorkflow(project: Pick<DelegationProject, 'root' | 'manager'>, request: WorkerSpawnRequest): Promise<WorkflowDef> {
+  const root = project.root;
   if (request.skill !== undefined) {
-    const skills = await discoverSkills(root);
+    const skills = await discoverSkills(root, { builtin: project.manager.builtinSkills?.() ?? [] });
     if (!skills.some(skill => skill.name === request.skill)) throw new DelegationPolicyError('invalid_input', `Unknown skill "${request.skill}"; available: ${skills.map(skill => skill.name).join(', ')}`);
     return plannedWorkflow(skillTaskSteps(request.skill));
   }
@@ -492,7 +493,7 @@ export class DelegationService {
         return { workerId: worker.id, baselineSha: worker.delegation.workspace.baselineSha };
       }
       authorizeSpawn(caller, parent, project.id, id => project.store.getRun(id));
-      const catalog = await resolveSpawnWorkflow(project.root, request);
+      const catalog = await resolveSpawnWorkflow(project, request);
       const resolvedSteps = await resolveSpawnSteps(project.manager, parent.id, request, catalog, (step, settings) => this.validateModels(request, [{ step, settings }]));
       // Run-level fields hold the first agent step (cockpit columns, pre-#452 evidence readers);
       // the per-step list is what each launch binds.

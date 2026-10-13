@@ -106,7 +106,7 @@ import {
   type WorkflowDef,
 } from '../workflows/types.ts';
 import { planChain, slugify } from '../planner.ts';
-import { discoverSkills } from '../skills.ts';
+import { discoverSkills, type Skill } from '../skills.ts';
 import { SkillsUpdateConflictError, SkillsUpdateCoordinator, SkillsUpdateService, type SkillsUpdateState } from '../skills-update.ts';
 import { getTeamSkillsCached, refreshTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
 import { appendHandoffHeartbeat, handoffProgressExcerpt, readHandoff } from '../handoff.ts';
@@ -3348,7 +3348,7 @@ export function createApp(deps: ServerDeps) {
       // The cockpit follows it with `wait=1`, off the render path, so a cold
       // cache converges without polling or a manual reload (spec 005 / #555).
       if (c.req.valid('query').wait === '1') await waitForTeamSkills(repoRoot);
-      return c.json(await discoverSkills(repoRoot));
+      return c.json(await discoverSkills(repoRoot, { builtin: builtinSkillsOf(c.get('project').manager) }));
     })
 
     // The opt-in catalog for the "Import skills" panel: every skill a default
@@ -3380,7 +3380,7 @@ export function createApp(deps: ServerDeps) {
     .post('/skills/refresh', async (c) => {
       const { root: repoRoot } = c.get('project');
       await refreshTeamSkills(repoRoot);
-      return c.json(await discoverSkills(repoRoot));
+      return c.json(await discoverSkills(repoRoot, { builtin: builtinSkillsOf(c.get('project').manager) }));
     });
 
   // ---- chained family: GUI prefs / ui-state (project-scoped) ----
@@ -3503,7 +3503,7 @@ export function createApp(deps: ServerDeps) {
       const parsed = { data: c.req.valid('json') };
       const blocked = await providerActionError([(await loadConfig(repoRoot)).defaultRunner]);
       if (blocked) return c.json({ error: blocked }, 409);
-      return c.json(await planChain(repoRoot, parsed.data.task));
+      return c.json(await planChain(repoRoot, parsed.data.task, builtinSkillsOf(c.get('project').manager)));
     });
 
   // ---- GitHub automations --------------------------------------------------
@@ -5290,7 +5290,7 @@ export function createApp(deps: ServerDeps) {
 
         let workflow: WorkflowDef | undefined;
         if (todo.suggestedSkill) {
-          const skills = await discoverSkills(repoRoot);
+          const skills = await discoverSkills(repoRoot, { builtin: builtinSkillsOf(manager) });
           if (skills.some((s) => s.name === todo.suggestedSkill)) {
             workflow = {
               name: '(inbox)',
@@ -6413,6 +6413,11 @@ export function createApp(deps: ServerDeps) {
 }
 
 /** The host a thread link names (#589): the bound one, or loopback for a wildcard bind. */
+/** The built-in skills a project's manager offers (#774). Test apps inject partial managers. */
+function builtinSkillsOf(manager: Partial<Pick<RunManager, 'builtinSkills'>>): Skill[] {
+  return manager.builtinSkills?.() ?? [];
+}
+
 function taskWebhookHost(bindHost: string | undefined): string {
   if (!bindHost || bindHost === '0.0.0.0' || bindHost === '::') return '127.0.0.1';
   return bindHost.includes(':') ? `[${bindHost}]` : bindHost;
@@ -6435,6 +6440,13 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   const bootProjectId = deps.bootProjectId ?? 'default';
   const bootAutomationStore = automationCoordinator.store(bootProjectId, deps.repoRoot)!;
   const taskWebhooks = deps.taskWebhooks ?? new TaskWebhooks({ fetch: deps.taskWebhookFetch });
+  // #774: the bound origin every agent env carries (`CEZ_COCKPIT_URL`), so `cez automation` calls
+  // this cockpit instead of probing ports. Unset until `listening`; a project built after that is
+  // addressed in `prepareManager`, before its recovery resumes anything.
+  let cockpitOrigin: string | undefined;
+  const addressManager = (project: { id: string; manager: Pick<RunManager, 'setCockpitAddress'> }) => {
+    if (cockpitOrigin) project.manager.setCockpitAddress?.({ origin: cockpitOrigin, projectId: project.id });
+  };
   const sharedContexts = deps.contexts ?? new ProjectContexts({
     ownership: deps.ownership,
     listProjects,
@@ -6444,10 +6456,13 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     automationStore: (projectId, root) => automationCoordinator.store(projectId, root)!,
     prepareManager: (project) => {
       taskWebhooks.attach(project);
+      addressManager(project);
       return deps.delegation?.attachProject(project);
     },
     afterRecover: (project) => deps.delegation?.service.armDestroyRetries(project.id),
   });
+  // Injected contexts (tests) skip `prepareManager`.
+  sharedContexts.onContextBuilt(addressManager);
   // #801: GitHub automations are opt-in. Off, the flag must remove the BEHAVIOR and not merely
   // the UI — no scheduler, no GitHub polling, no launched runs — so every entry point into the
   // workspace scheduler below is gated on it. Read per call rather than captured, for the same
@@ -6688,7 +6703,13 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     const address = server.address();
     const bound = address && typeof address === 'object' ? address.port : port;
     listeningPort = bound;
-    taskWebhooks.setOrigin(`http://${taskWebhookHost(deps.bindHost)}:${bound}`);
+    cockpitOrigin = `http://${taskWebhookHost(deps.bindHost)}:${bound}`;
+    taskWebhooks.setOrigin(cockpitOrigin);
+    addressManager({ id: bootProjectId, manager: deps.manager });
+    for (const id of sharedContexts.ids()) {
+      const context = sharedContexts.peek(id);
+      if (context) addressManager(context);
+    }
   };
   if (server.listening) setTaskWebhookOrigin();
   else server.once('listening', setTaskWebhookOrigin);

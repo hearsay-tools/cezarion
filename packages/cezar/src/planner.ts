@@ -52,9 +52,9 @@ export interface PlanResult {
   fallback: boolean;
 }
 
-export async function planChain(repoRoot: string, task: string): Promise<PlanResult> {
+export async function planChain(repoRoot: string, task: string, builtin: readonly Skill[] = []): Promise<PlanResult> {
   const [skills, config, verifyCommands] = await Promise.all([
-    discoverSkills(repoRoot),
+    discoverSkills(repoRoot, { builtin }),
     loadConfig(repoRoot),
     detectVerifyCommands(repoRoot),
   ]);
