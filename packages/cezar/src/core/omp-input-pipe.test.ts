@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RUNNER_IDS } from './agent-runner.ts';
-import { HARNESS_ADAPTERS, exemptionFor, driveSeam, waitFor } from './harness-parity.testkit.ts';
+import { HARNESS_ADAPTERS, exemptionFor, driveSeam, promptFor, waitFor } from './harness-parity.testkit.ts';
 
 describe('OMP native input pipe', () => {
   it('fails queued-before-ready writes even when the child would exit zero', async () => {
@@ -37,15 +37,23 @@ describe('native live closed-input parity', () => {
       try {
         let receiptError: unknown;
         const obs = await driveSeam(backend, 'input-closed-live', {
-          spec: { cwd },
+          spec: { cwd, ...(backend === 'pi' || backend === 'omp' ? { userPrompt: `${promptFor(backend, 'input-closed-live')} mock:gate-prompt-ack` } : {}) },
           whileOpen: async session => {
             // The mock's real closeSync(0) precedes its marker. The session's cwd is
             // passed through the production spawn; no normalized events are injected.
             await vi.waitFor(() => expect(existsSync(join(cwd, 'input-closed.pid'))).toBe(true), { timeout: 5000 });
             expect(session.open).toBe(true);
+            if (backend === 'pi' || backend === 'omp') {
+              expect(session.holdsHumanInput?.()).toBe(true);
+              writeFileSync(join(cwd, 'input-ack.release'), 'release native prompt acknowledgement');
+              // hearsay-tools/cezarion#974: the fd-close marker can beat stdout's
+              // initial Pi/OMP prompt ACK (CI refused Pi input at 68ms). A native ACK gate
+              // reproduces that ordering; wait for admission before testing EPIPE.
+              await vi.waitFor(() => expect(session.holdsHumanInput?.()).toBe(false), { timeout: 5000 });
+            }
             // Codex can report `open` before the first main-thread turn exists, so
-            // sendAgentMessage still returns false (hearsay-tools/cezarion#969). Other
-            // runners already admit once `open` is true; do not change their S29 timing.
+            // sendAgentMessage still returns false (hearsay-tools/cezarion#969). Poll
+            // Codex admission; Pi/OMP admission is confirmed by the native ACK above.
             let receipt: false | Promise<void> = false;
             if (backend === 'codex') {
               await waitFor(() => {
@@ -56,6 +64,7 @@ describe('native live closed-input parity', () => {
             } else {
               receipt = session.sendAgentMessage([{ type: 'text', text: 'force broken native agent input write' }]);
             }
+
             expect(receipt).not.toBe(false);
             if (!receipt) throw new Error('native input was refused before exercising its transport');
             await receipt.catch((error: unknown) => { receiptError = error; });

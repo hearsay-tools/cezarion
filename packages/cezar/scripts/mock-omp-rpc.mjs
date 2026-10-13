@@ -132,7 +132,7 @@ function watchdogStall(message) {
   if (message.includes('input-closed')) {
     closeSync(0);
     writeFileSync('input-closed.pid', String(process.pid));
-    setTimeout(() => process.exit(0), 300);
+    setTimeout(() => process.exit(0), message.includes('mock:gate-prompt-ack') ? 15_000 : 300);
   }
   if (message.includes('ignore-term')) {
     process.removeAllListeners('SIGTERM');
@@ -329,6 +329,11 @@ async function handle(command) {
 
 async function prompt(command) {
   const message = command.message;
+  const gated = message.includes('mock:gate-prompt-ack');
+  if (gated) {
+    watchdogStall(message);
+    while (!existsSync('input-ack.release')) await sleep(10);
+  }
   if (message.includes('mock:local-command')) {
     // A prompt OMP finished itself (a slash command): the response says so, no prompt_result.
     respond(command, { agentInvoked: false });
@@ -451,7 +456,7 @@ async function prompt(command) {
   if (/mock:(no-progress|busy-progress)/.test(message)) {
     if (message.includes('mock:no-progress')) {
       // The turn never progresses and never settles.
-      watchdogStall(message);
+      if (!gated) watchdogStall(message);
       return;
     }
     for (let i = 0; i < 24; i++) {

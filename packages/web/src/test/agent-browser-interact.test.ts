@@ -10,7 +10,7 @@ import { AgentBrowser, configureFailureCapture } from '../../e2e/agent-browser'
  * Only the seam runs — no Chrome, no daemon — so what these prove is the command sequence the
  * seam emits per operation, which is the whole of the auto-wait contract (#405).
  */
-function fakeBrowser(opts: { waitFails?: boolean } = {}) {
+function fakeBrowser(opts: { waitFails?: boolean; tabTarget?: unknown } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'cez-fake-agent-browser-'))
   const log = join(dir, 'calls.ndjson')
   const script = join(dir, 'fake.mjs')
@@ -20,6 +20,8 @@ function fakeBrowser(opts: { waitFails?: boolean } = {}) {
     appendFileSync(process.env.FAKE_LOG, JSON.stringify(args) + '\\n')
     if (process.env.FAKE_WAIT_FAILS === '1' && args[2] === 'wait') {
       process.stdout.write(JSON.stringify({ success: false, error: 'Wait timed out after 25000ms' }))
+    } else if (args[2] === 'tab' && args[3] === 'new') {
+      process.stdout.write(JSON.stringify({ success: true, data: { targetId: ${JSON.stringify(opts.tabTarget === undefined ? 'target-two' : opts.tabTarget)} } }))
     } else {
       process.stdout.write(JSON.stringify({ success: true, data: { visible: true, result: 0 } }))
     }
@@ -55,13 +57,24 @@ afterEach(() => {
   for (const fake of fakes.splice(0)) fake.dispose()
   configureFailureCapture({ root: undefined })
 })
-function open(opts?: { waitFails?: boolean }) {
+function open(opts?: { waitFails?: boolean; tabTarget?: unknown }) {
   const fake = fakeBrowser(opts)
   fakes.push(fake)
   return fake
 }
 
 describe('AgentBrowser auto-wait (#405)', () => {
+  it('creates a tab through the provider lifecycle and returns its CDP target', () => {
+    const { browser, commands } = open()
+    expect(browser.newTab()).toBe('target-two')
+    expect(commands()).toEqual([['tab', 'new', 'about:blank']])
+  })
+
+  it.each([null, '', 42])('rejects a provider tab result without a usable target: %s', tabTarget => {
+    const { browser } = open({ tabTarget })
+    expect(() => browser.newTab()).toThrow(/tab.*target/i)
+  })
+
   it('click waits for the selector to appear before clicking it', () => {
     const { browser, commands } = open()
     browser.click('[aria-label="Tools"]')

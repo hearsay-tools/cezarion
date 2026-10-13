@@ -216,6 +216,9 @@ describe('public delegation completion integration', () => {
 
   // hearsay-tools/cezarion#632: `--runner` and `--backend` fill the same request field, so a retry
   // that switches spelling hashes identically and dedupes instead of reporting a payload conflict.
+  // hearsay-tools/cezarion#974: Node 24.15 floor shard 1 on 81e88a0f exceeded the
+  // default 5s at 5257ms. This cell waits for two native inputs (15s each) and
+  // two real tsx CLI processes (45s each); cover those serial bounds plus 5s.
   it('dedupes a --runner retry of a --backend spawn under the same request id', async () => {
     const p = await parent();
     const requestId = randomUUID();
@@ -225,7 +228,7 @@ describe('public delegation completion integration', () => {
     const retry = await command<WorkerSpawnResult>(p.id, args('--runner'));
     expect(retry.workerId).toBe(first.workerId);
     expect(store.listRuns().filter(run => run.delegation?.role === 'worker')).toHaveLength(1);
-  });
+  }, 125_000);
 
   it('reports a real provider failure and a stopped worker without allowing peer authority or premature success', async () => {
     const p = await parent(); const failed = await spawn(p.id, 'codex', 'Exercise provider failure'); const stopped = await spawn(p.id, 'claude', 'Exercise explicit stop');

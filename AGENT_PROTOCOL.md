@@ -936,6 +936,9 @@ constructed.
 Pi and OMP additionally close admission immediately, report one fatal transport failure
 and reject their results even if the child would later exit zero. OMP's focused regression
 closes stdin before the native `ready` frame to exercise the queued startup outbox.
+Their S29 fixtures gate the initial native prompt acknowledgement after closing stdin;
+the cell waits for that acknowledgement to drain before submitting agent input, so a
+filesystem marker cannot race the runner's admission guard (hearsay-tools/cezarion#974).
 
 **S26–S28** (hearsay-tools/cezarion#890), in the same file, start every `RUNNER_IDS` backend's
 native mock with `mock:no-progress-leftover`. The mock leaves two children in its cwd: one in

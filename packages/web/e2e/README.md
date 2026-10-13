@@ -259,6 +259,13 @@ sleep. HTTP request socket deadlines (`request.setTimeout`) are not unconditiona
 Its private fixture boots production server modules and exposes test control on a
 separate loopback listener. CDP observation stays inside `AgentBrowser.withCdp`.
 
+For an additional tab that a separate CDP connection will navigate, `browser.newTab()`
+returns the target ID after the provider initializes it. The provider pauses new targets
+until its daemon enables their domains and resumes them; raw `Target.createTarget` can
+race that work and leave `Page.navigate` waiting on a paused target. The live-preview
+spec uses the native tab operation, and `agent-browser-tabs.e2e.ts` holds a private
+daemon's background drain to pin this ordering without a sleep.
+
 Run the performance harness against a **production** build (omit `VITE_CEZ_E2E`):
 
 ```sh
