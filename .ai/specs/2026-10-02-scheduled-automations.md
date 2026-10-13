@@ -279,9 +279,35 @@ renders the "Automations are off" state when the capability is absent, as today.
 - Full gate before the PR: `npm run typecheck`, `npm test`, `npm run test:unit`, `npm run build`,
   `npm run test:package`, `npm run test:e2e:local`.
 
+## Stage 2: creation from a prompt (hearsay-tools/cezarion#774)
+
+Shipped after this stage. The decisions, so the code's comments have a record to cite:
+
+- **Address.** `startServer` hands every project's `RunManager` the bound origin and that project's
+  id on `listening` (`setCockpitAddress`); a project built later is addressed in `prepareManager`,
+  before its recovery. `agentEnv` exports them as `CEZ_COCKPIT_URL` and `CEZ_PROJECT_ID`. They are
+  new names on purpose: `CEZ_URL` stays the operator override of `cez task` / `cez discover`, and
+  upstream's `CEZ_API_URL` is its dispatch transport, which this fork does not have.
+- **CLI.** `cez automation schema|create|add|update|check|run|list|show|enable|pause|delete`
+  (`automations/automation-cli.ts`), a JSON client on the `task-cli` transport with its `EXIT` codes
+  (0 ok, 1 check failed, 2 refused or no cockpit, 3 check timed out, 64 usage). It reads the injected
+  address first; only an explicit `--url`, `--repo` or `CEZ_URL` runs discovery. With none of them
+  it exits 2 and its message never suggests starting `cez`. `add` builds the same body as `create`;
+  both create paused unless `--enable`. No dispatch flags.
+- **Gate.** One predicate, `CEZ_AUTOMATIONS=1` AND an address, decides both the short system-prompt
+  part (`automations/prompts.ts`, composed at both session construction sites) and the built-in
+  `create-cezarion-automation` skill (`automations/builtin-skill.ts`, `source: 'builtin'`), which
+  `discoverSkills` appends after the sorted catalog so a repo skill of the same name hides it. Every
+  skill lookup that runs under a cockpit passes it: the manager, `/skills`, the inbox launch, worker
+  spawn and the planner. The prompt names the CLI by this process's absolute command, as
+  `artifact publish` does, never `cez` on PATH.
+- **Cockpit.** A "Create an automation" built-in prompt template assigned to the skill, offered
+  while `capabilities.automations` is on; a Copy as CLI card in the editor, built from the exact
+  body Save sends, in POSIX single quotes, `--no-autonomous` when `autonomous: false`.
+
 ## Out of scope (stages 2 and 3, filed as follow-ups)
 
-Stage 2: `cez automation` CLI (JSON output, `cez task` exit codes), the built-in
+Stage 2 (now shipped, above): `cez automation` CLI (JSON output, `cez task` exit codes), the built-in
 `create-cezar-automation` skill (`source: 'builtin'`), the system-prompt part composed at both
 session construction sites, the composer template, Copy as CLI. Transport constraint recorded for
 stage 2 (owner, 2026-10-02): `cez task` has started a second cockpit when misused on a taken port,
