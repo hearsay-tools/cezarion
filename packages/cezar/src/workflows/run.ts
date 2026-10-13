@@ -1623,6 +1623,8 @@ export class RunManager {
     if (defSteps === undefined) return undefined;
     const owningStep = sessionId === undefined ? undefined : record?.steps.find((s) => s.sessionId === sessionId);
     if (sessionId !== undefined && owningStep === undefined) return undefined;
+    const ciSource = defSteps.find(step => step.id === record?.workflowResumeStepId && stepKind(step) === 'agent');
+    if (ciSource && record?.steps.find(step => step.id === ciSource.id)?.status === 'failed') return ciSource;
     return defSteps.find((s) => s.id === owningStep?.id) ?? [...defSteps].reverse().find((s) => stepKind(s) === 'agent');
   }
 
@@ -2427,7 +2429,11 @@ export class RunManager {
     }
     if (run.delegation?.role === 'worker') {
       try {
-        this.pendingJobs.set(run.id, this.ownedJob(run));
+        const job = this.ownedJob(run);
+        // Use the privately bound workflow, and the same durable pending-step
+        // cursor as root recovery. A queued tail must not replay a failed source.
+        this.pendingJobs.set(run.id, { ...job, startAt: Math.max(0, job.workflow.steps.findIndex(definition =>
+          run.steps.find(step => step.id === definition.id)?.status === 'pending')) });
         this.queue.push(run.id);
         this.store.appendEvent(run.id, { type: 'lifecycle', message: `${reason} — owned task re-queued` });
       } catch (error) {
@@ -2627,6 +2633,15 @@ export class RunManager {
             this.store.updateStep(run.id, step.id, { status: 'failed', error: 'invalid structured question', finishedAt });
           }
           this.store.updateRun(run.id, { status: 'failed', error: 'invalid structured question', finishedAt, currentStepId: undefined });
+          continue;
+        }
+        if (this.ciWorkflowResumeStepIndex(run) >= 0) {
+          // CI ACK retires ciWait, but not the failed workflow source. A closed
+          // worker at this boundary must resume before its remaining checks run.
+          const resumed = this.continueRun(run.id, { text: RESTART_CONTINUATION_PROMPT }, true);
+          this.store.appendEvent(run.id, { type: 'lifecycle', message: resumed.ok
+            ? 'cezar restarted — resuming the worker CI recovery from its last session'
+            : `cezar restarted — could not resume worker CI recovery (${resumed.error ?? 'unknown'})` });
           continue;
         }
         for (const step of run.steps) {
@@ -5209,6 +5224,10 @@ export class RunManager {
   private waitingWorkflowStepIndex(run: RunRecord): number {
     const steps = run.workflowDef?.steps ?? run.steps.filter(step => !isSyntheticContinuation(run, step));
     if (!steps.length) return -1;
+    // CI recovery can resume a failed attempt. Its cursor must survive both the
+    // synthetic continuation replacing currentStepId and CI delivery clearing ciWait.
+    const ciSource = this.ciWorkflowResumeStepIndex(run);
+    if (ciSource >= 0) return ciSource;
     const interrupted = steps.findIndex((step) => {
       const persisted = run.steps.find((candidate) => candidate.id === step.id);
       return stepKind(step) === 'agent' && persisted?.status === 'failed' && persisted.error === 'interrupted — cezar process exited during the run';
@@ -5222,6 +5241,12 @@ export class RunManager {
       if (persisted?.status === 'waiting' || persisted?.status === 'running') return index;
     }
     return -1;
+  }
+
+  private ciWorkflowResumeStepIndex(run: RunRecord): number {
+    if (!run.workflowResumeStepId) return -1;
+    return run.workflowDef?.steps.findIndex(step => step.id === run.workflowResumeStepId &&
+      stepKind(step) === 'agent' && run.steps.find(persisted => persisted.id === step.id)?.status === 'failed') ?? -1;
   }
 
   /**
@@ -5340,7 +5365,7 @@ export class RunManager {
     if (!disconnectedCiWait && !['done', 'failed', 'cancelled', 'review'].includes(run.status) && !(pendingHumanAsk && run.status === 'waiting') &&
       !(run.status === 'waiting' && !this.isActive(runId) && ((!hasRegisteredRunProcess(runId) &&
         (run.delegation === undefined || run.delegation.role === 'root')) ||
-        (deferForCapacity && run.delegation?.role === 'worker' && (!!this.workerWait(runId) || !!run.ciWait))))) {
+        (deferForCapacity && run.delegation?.role === 'worker' && (!!this.workerWait(runId) || !!run.ciWait || this.ciWorkflowResumeStepIndex(run) >= 0))))) {
       return { ok: false, error: `cannot continue a ${run.status} run` };
     }
     const sessionStep = [...run.steps].reverse().find((s) => s.sessionId);
@@ -6157,11 +6182,13 @@ export class RunManager {
       const result = await session.result.finally(() => state.agentInputFlight?.settled).finally(() => this.requeueUnreadAtClose(runId, state, session));
       if (this.preserveRunAfterDisposal(runId, state)) return;
       this.persistWorkerAssistantResult(runId, stepId, result.text);
+      // A durable CI wait keeps recovery live, not this failed attempt successful.
+      if (sessionError || state.agentInputError) throw new Error(sessionError ?? state.agentInputError);
       if (this.store.getRun(runId)?.ciWait && !state.cancelled) {
+        sink.sessionEnded('end_turn');
         this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
         return;
       }
-      if (sessionError || state.agentInputError) throw new Error(sessionError ?? state.agentInputError);
       if (!state.cancelled) {
         this.store.updateRun(runId, { continuationMessage: undefined });
         this.store.flush();
@@ -6179,8 +6206,11 @@ export class RunManager {
         const waitingIndex = completed ? this.waitingWorkflowStepIndex(completed) : -1;
         if (completed?.workflowDef && waitingIndex >= 0) {
           const waitingStep = completed.workflowDef.steps[waitingIndex]!;
-          this.store.updateStep(runId, waitingStep.id, { status: 'done', finishedAt: finishedAt() });
-          this.store.appendEvent(runId, { type: 'step-end', stepId: waitingStep.id, status: 'done' });
+          // The continuation succeeded, not the failed attempt it recovered.
+          if (waitingStep.id !== completed.workflowResumeStepId) {
+            this.store.updateStep(runId, waitingStep.id, { status: 'done', finishedAt: finishedAt() });
+            this.store.appendEvent(runId, { type: 'step-end', stepId: waitingStep.id, status: 'done' });
+          }
           // Finish accepts this resumed step before the async settlement gate,
           // but must not launch the remaining workflow. A later cancellation
           // may cancel still-live steps, never this completed one (R30).
@@ -6200,12 +6230,13 @@ export class RunManager {
                 worktree: completed.worktree,
               },
             };
-            this.store.updateRun(runId, { status: 'queued', currentStepId: undefined });
+            this.store.updateRun(runId, { status: 'queued', currentStepId: undefined, workflowResumeStepId: undefined });
             // The workflow remainder is a crash boundary. Persist it before the
             // finally block awaits worktree autosave and installs its in-memory job.
             this.store.flush();
             appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — remaining workflow queued`);
           } else {
+            this.store.updateRun(runId, { workflowResumeStepId: undefined });
             await this.settleSuccess(runId);
             appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=done`);
           }
@@ -6223,14 +6254,17 @@ export class RunManager {
       }
       if (this.preserveRunAfterDisposal(runId, state)) return;
       // Keep the provider failure that triggered teardown, even if teardown rejects.
-      if (this.store.getRun(runId)?.ciWait && !state.cancelled) {
-        this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
-        return;
-      }
       const message = sessionError ?? state.agentInputError ?? (err instanceof Error ? err.message : String(err));
       sink.sessionEnded('error', message);
       this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt: finishedAt() });
       appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
+      if (this.store.getRun(runId)?.ciWait && !state.cancelled) {
+        // Retain the wait and scheduler wake source while closing this attempt.
+        // settleSuccess only completes running/waiting steps, so its failure is durable.
+        this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
+        this.store.updateRun(runId, { status: 'running', activity: 'monitoring', error: `continue failed: ${message}` });
+        return;
+      }
       this.store.updateRun(runId, {
         status: 'failed',
         error: `continue failed: ${message}`,
@@ -6560,16 +6594,21 @@ export class RunManager {
           this.requeueWhileHeld(runId, workflow, input, taskBackend, state, i);
           return;
         }
+        // runAgentStep already emitted session.ended(error). Record the failed
+        // attempt before parking so later successful CI recovery cannot erase it.
+        if (failure) {
+          if (current?.ciWait) this.store.updateRun(runId, { workflowResumeStepId: step.id });
+          this.finishStep(runId, step.id, 'failed', failure, emit);
+          runError = `step "${step.id}" failed: ${failure}`;
+        }
         if (this.store.getRun(runId)?.ciWait && !state.cancelled) {
-          this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
+          this.store.updateRun(runId, { status: 'running', activity: 'monitoring',
+            ...(failure ? { error: runError! } : {}) });
+          this.store.flush(); // checkpoint the failed attempt and its recoverable workflow cursor before parking
           this.dropActive(runId);
           return;
         }
-        if (failure) {
-          this.finishStep(runId, step.id, 'failed', failure, emit);
-          runError = `step "${step.id}" failed: ${failure}`;
-          break;
-        }
+        if (failure) break;
         if (state.idleClosed || this.unansweredWorkflowAsk(runId, state)) break;
         this.finishStep(runId, step.id, 'done', undefined, emit);
         // Finish is an explicit stop, not an answer or permission to run checks.

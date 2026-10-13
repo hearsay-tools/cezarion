@@ -72,6 +72,11 @@ export class CursorPrintRunner implements AgentRunner {
 
 interface ActiveTurn {
   process: CursorPrintProcess;
+  args: readonly string[];
+  prompt: string;
+  env: NodeJS.ProcessEnv;
+  modelRetry: boolean;
+  modelRejection?: string;
   buffer: string;
   initSeen: boolean;
   resultSeen: boolean;
@@ -220,15 +225,31 @@ class CursorPrintSession implements AgentSession {
     if (this.pluginDir) args.push('--plugin-dir', this.pluginDir);
     for (const path of imagePaths) args.push('--image', path);
     const prompt = prependSystemPrompt(this.spec.systemPrompt, text);
+    this.launchTurn(args, prompt, receipt, false);
+  }
+
+  /** Reuse prepared input verbatim; retrying must not rebuild images or change resume identity. */
+  private launchTurn(args: readonly string[], prompt: string, receipt: ActiveTurn['receipt'], modelRetry: boolean,
+    env = buildChildEnv({ backend: 'cursor', extraEnv: this.spec.env })): void {
     let proc: CursorPrintProcess;
     try {
       proc = startCursorPrintProcess({
         bin: this.bin, args, cwd: this.spec.cwd,
-        env: buildChildEnv({ backend: 'cursor', extraEnv: this.spec.env }),
+        env,
         ...this.options.processOptions,
       }, {
         onStdout: chunk => this.onStdout(chunk),
-        onStderr: chunk => { this.activity(); if (this.active) this.active.stderr = (this.active.stderr + chunk).slice(-16_384); },
+        onStderr: chunk => {
+          this.activity();
+          if (!this.active) return;
+          const diagnostic = this.active.stderr + chunk;
+          // Keep the actionable prefix before the potentially enormous catalog truncates it.
+          const rejection = this.model && `Cannot use this model: ${this.model}.`;
+          if (rejection && diagnostic.split(/\r?\n/).some(line => line.startsWith(`${rejection} Available models:`))) {
+            this.active.modelRejection = rejection;
+          }
+          this.active.stderr = diagnostic.slice(-16_384);
+        },
         onOutputError: () => this.fail('Cursor print output transport failed'),
       });
     } catch (error) {
@@ -236,7 +257,7 @@ class CursorPrintSession implements AgentSession {
       this.fail('Cursor print spawn failed');
       return;
     }
-    const active: ActiveTurn = { process: proc, buffer: '', initSeen: false,
+    const active: ActiveTurn = { process: proc, args, prompt, env, modelRetry, buffer: '', initSeen: false,
       resultSeen: false, modelWorkSeen: false, turnText: '', stderr: '', receipt };
     this.active = active;
     this.turnCount += 1;
@@ -341,6 +362,19 @@ class CursorPrintSession implements AgentSession {
     this.active = undefined;
     if (this.noProgress) clearTimeout(this.noProgress);
     this.noProgress = undefined;
+    // This native rejection is before inference. Cursor's per-process parameter catalog
+    // may be unavailable even though account-scoped preflight validated the exact selection.
+    // One fresh process gets another chance; any init/work/result, signal, cancellation or
+    // unrelated provider error forbids replay. Logical timeout and queued input remain owned.
+    if (!this.closing && !this.errorReported && !spawnError && exitCode === 1 && signal === null &&
+      !active.initSeen && !active.modelWorkSeen && !active.resultSeen && active.modelRejection && !active.modelRetry) {
+      this.emit({ type: 'note', message: 'Retrying Cursor model admission once with the same selection before inference.' });
+      // A consumer can stop the session while handling the note.
+      if (!this.closing && this.isOpen) {
+        this.launchTurn(active.args, active.prompt, active.receipt, true, active.env);
+        return;
+      }
+    }
     if (active.receipt && !active.receipt.settled) {
       active.receipt.settled = true;
       if (active.resultSeen && !spawnError && exitCode === 0) active.receipt.resolve();
@@ -359,7 +393,7 @@ class CursorPrintSession implements AgentSession {
     if (spawnError) { this.fail('Cursor print process failed to start'); return; }
     if (exitCode !== 0 || signal !== null) {
       if (active.stderr.trim()) this.emit({ type: 'note', message: `Cursor print CLI stderr:\n${active.stderr}` });
-      const detail = sanitizeCursorProviderError(summarizeRunnerStderr(active.stderr));
+      const detail = sanitizeCursorProviderError(active.modelRejection ?? summarizeRunnerStderr(active.stderr));
       const boundary = active.resultSeen ? 'after a reported result' : 'without a result frame';
       this.fail(`Cursor print exited ${boundary} (code ${exitCode ?? signal ?? 'unknown'})${detail ? `: ${detail}` : ''}`);
       return;

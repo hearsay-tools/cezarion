@@ -589,6 +589,14 @@ const CONTROL_CRITERIA = [
   // hearsay-tools/cezarion#958: final autosave beside unrelated worktree process churn.
   { id: 'R67', scenario: 'baseline' },
   { id: 'R68', scenario: 'baseline' },
+  // hearsay-tools/cezarion#994: workflows/ci-wait-failure-parity.test.ts,
+  // failed fresh/continued CI attempts retain history through scheduler recovery.
+  { id: 'R72', scenario: 'provider-error' },
+  { id: 'R73', scenario: 'provider-error' },
+  // Nonfinal CI recovery retains failure history and runs the tail/check retries, including restart.
+  { id: 'R74', scenario: 'provider-error' },
+  { id: 'R75', scenario: 'provider-error' },
+  { id: 'R76', scenario: 'provider-error' },
   { id: 'R26', scenario: 'ask-resume' },
   // workflows/ci-wait-refusal.test.ts: settled worker wake, private CI IPC, then delivery.
   { id: 'R27', scenario: 'hold' },
