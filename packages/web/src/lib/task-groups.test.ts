@@ -657,8 +657,8 @@ describe('pin promotion preserves visible variant membership (#93)', () => {
 
 it.each(['registered', 'parked', 'wake-pending'] as const)('keeps %s worker waits in the appropriate existing group/count', phase => {
   const record = run({ status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase, outcomes: [] } } })
-  expect(bucketOf(record, 'active')).toBe(phase === 'parked' ? 'Working' : 'Needs you')
-  expect(listCounts([record, run({ status: 'waiting' })])).toEqual({ active: 2, archived: 0, waiting: phase === 'parked' ? 1 : 2 })
+  expect(bucketOf(record, 'active')).toBe(phase === 'registered' ? 'Needs you' : 'Working')
+  expect(listCounts([record, run({ status: 'waiting' })])).toEqual({ active: 2, archived: 0, waiting: phase === 'registered' ? 2 : 1 })
 })
 
 it('counts a parked parent question as Needs you from the run summary', () => {

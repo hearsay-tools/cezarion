@@ -14,7 +14,7 @@ import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager } from './run.ts';
 import { currentUsage } from '../core/process-usage.ts';
-import type { AgentSession } from '../core/agent-runner.ts';
+import type { AgentSession, RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { withDelayedCommand } from '../core/owned-input-delivery.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
@@ -113,9 +113,9 @@ rl.on('close', () => process.exit(0));
   return { initialReceived: () => existsSync(initial), received: () => existsSync(received) ? readFileSync(received, 'utf8').trim().split('\n').length : 0 };
 }
 
-export async function parent(task = 'mock:hold') {
+export async function parent(task = 'mock:hold', runner: RunnerId = 'claude') {
   checkpoint('parent-start');
-  const run = manager.startRun(QUICK_TASK_WORKFLOW, { task, runner: 'claude' });
+  const run = manager.startRun(QUICK_TASK_WORKFLOW, { task, runner });
   store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
   await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(run.id)?.sessionEverOpened === true);
   checkpoint('parent-session-open'); return run;
@@ -172,13 +172,13 @@ export async function collect(id: string) {
   const evidence = await collectWorkerEvidence(root, store, run);
   return store.commitWorkerResult(run.delegation?.role === 'worker' ? run.delegation.parentRunId : '', evidence.result, evidence.diffSnapshot);
 }
-export async function queuedWake() {
-  const p = await parent(); const w = await worker(p.id, 'mock:slow');
+export async function queuedWake(runner: RunnerId = 'claude') {
+  const p = await parent('mock:hold', runner); const w = await worker(p.id, 'mock:slow');
   const wait = register(p.id, [w.id]); checkpoint('queued-wake-registered');
   await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
   const delegation = store.getRun(p.id)!.delegation!;
-  if (delegation.role !== 'root') throw Error('fixture');
-  store.commitDelegation([{ id: p.id, delegation: { ...delegation, wait: { ...wait, deadline: new Date().toISOString() } } }]);
+  if (delegation.role !== 'root' || !delegation.wait) throw Error('fixture');
+  store.commitDelegation([{ id: p.id, delegation: { ...delegation, wait: { ...delegation.wait, deadline: new Date().toISOString() } } }]);
   await restart(); checkpoint('queued-wake-restarted');
   await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(w.id)?.sessionEverOpened === true); checkpoint('queued-wake-child-open');
   expect(store.getRun(p.id)?.status).toBe('queued');

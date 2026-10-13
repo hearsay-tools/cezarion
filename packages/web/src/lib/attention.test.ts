@@ -220,15 +220,54 @@ describe('tone vocabulary', () => {
 
 it.each(['registered', 'parked', 'wake-pending'] as const)('distinguishes worker wait %s without masking human attention', phase => {
   const record = run({ status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase, outcomes: [] } } })
-  expect(deriveAttention(record).label).toBe(phase === 'parked' ? 'waiting on 1 worker' : 'needs you')
-  expect(wantsAttention(record)).toBe(phase !== 'parked')
-  if (phase === 'parked') expect(deriveAttention(record).pulse).toBe(false)
+  if (phase === 'parked') {
+    expect(deriveAttention(record).label).toBe('waiting on 1 worker')
+    expect(wantsAttention(record)).toBe(false)
+    expect(deriveAttention(record).pulse).toBe(false)
+  } else if (phase === 'wake-pending') {
+    expect(deriveAttention(record)).toEqual({
+      bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity',
+    })
+    expect(wantsAttention(record)).toBe(false)
+  } else {
+    expect(deriveAttention(record).label).toBe('needs you')
+    expect(wantsAttention(record)).toBe(true)
+  }
 })
 
 it('keeps a parked parent with a pending human ask in list attention without transcript context', () => {
   const record = run({ status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })
   expect(deriveAttention(record)).toEqual({ bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' })
   expect(wantsAttention(record)).toBe(true)
+})
+
+it('keeps a wake-pending parent with a pending human ask in list attention', () => {
+  const record = run({ status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'wake-pending', outcomes: [] } } })
+  expect(deriveAttention(record)).toEqual({ bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' })
+  expect(wantsAttention(record)).toBe(true)
+})
+
+it('treats a queued leftover wake-pending parent as waiting for capacity, not queued', () => {
+  const record = run({ status: 'queued', delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'wake-pending', outcomes: [] } } })
+  expect(deriveAttention(record)).toEqual({
+    bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity',
+  })
+  expect(wantsAttention(record)).toBe(false)
+})
+
+it('keeps a running leftover wake-pending parent as running', () => {
+  const record = run({ status: 'running', delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'wake-pending', outcomes: [] } } })
+  expect(deriveAttention(record)).toEqual({
+    bucket: 'running', tone: 'running', shape: 'filled', pulse: true, label: 'running',
+  })
+})
+
+it('keeps a queued leftover wake-pending parent with a pending ask as queued', () => {
+  const record = run({ status: 'queued', hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'wake-pending', outcomes: [] } } })
+  expect(deriveAttention(record)).toEqual({
+    bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'queued',
+  })
+  expect(wantsAttention(record)).toBe(false)
 })
 
 /** The status key (#617): hue says the family, shape says whether it is waiting. One row per
@@ -244,6 +283,7 @@ describe('status key (#617)', () => {
     ['running', run({ status: 'running' }), { tone: 'running', shape: 'filled', pulse: true, label: 'running' }],
     ['monitoring', run({ status: 'running', activity: 'monitoring' }), { tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' }],
     ['waiting on workers', parkedRoot(), { tone: 'running', shape: 'workers', pulse: false, label: 'waiting on 2 workers' }],
+    ['waiting for capacity', parkedRoot({ phase: 'wake-pending' }), { tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' }],
     ['queued', run({ status: 'queued' }), { tone: 'neutral', shape: 'ring', pulse: false, label: 'queued' }],
     ['scheduled', run({ status: 'failed', autoResumeAt: '2026-08-03T19:33:53.000Z' }), { tone: 'neutral', shape: 'ring', pulse: false, label: 'scheduled' }],
     ['done', run({ status: 'done' }), { tone: 'success', shape: 'filled', pulse: false, label: 'done' }],

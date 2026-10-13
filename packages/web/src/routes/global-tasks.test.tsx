@@ -1130,7 +1130,11 @@ it('hides indexed workers while preserving parked-parent waiting phases', async 
   expect(screen.queryByText('Worker')).toBeNull()
   for (const phase of ['registered', 'parked', 'wake-pending']) {
     const row = document.querySelector(`[data-slot="global-task-row"][data-run-id="${phase}"]`)
-    expect(row?.textContent).toContain(phase === 'parked' ? 'waiting on workers' : 'needs you')
+    expect(row?.textContent).toContain(
+      phase === 'parked' ? 'waiting on workers'
+        : phase === 'wake-pending' ? 'waiting for capacity'
+          : 'needs you',
+    )
   }
 })
 

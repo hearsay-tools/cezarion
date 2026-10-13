@@ -94,8 +94,16 @@ describe('delegation rungs', () => {
   it.each(['registered', 'parked', 'wake-pending'] as const)('distinguishes worker wait %s without masking human attention', (phase) => {
     const record = parkedRoot({ phase, workerIds: ['child'], outcomes: [] });
     const attention = deriveAttention(record);
-    expect(attention.label).toBe(phase === 'parked' ? 'waiting on 1 worker' : 'needs you');
-    expect(attention.bucket).toBe(phase === 'parked' ? 'none' : 'waiting');
+    if (phase === 'parked') {
+      expect(attention).toMatchObject({ bucket: 'none', label: 'waiting on 1 worker' });
+    } else if (phase === 'wake-pending') {
+      // A queued automatic wake is a scheduler/capacity wait, not a human gate (#971).
+      expect(attention).toEqual({
+        bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity',
+      });
+    } else {
+      expect(attention).toMatchObject({ bucket: 'waiting', label: 'needs you' });
+    }
   });
 
   it('a root parked on its own workers is bucket none — the CLI must not stop an attention wait on it', () => {
@@ -111,6 +119,40 @@ describe('delegation rungs', () => {
     expect(deriveAttention(record)).toMatchObject({ bucket: 'waiting', label: 'needs you' });
     // …and the explicit argument the cockpit passes from transcript context says the same.
     expect(deriveAttention(parkedRoot({ workerIds: ['a'], outcomes: [] }), true)).toMatchObject({ bucket: 'waiting', label: 'needs you' });
+  });
+
+  it('a wake-pending parent with a pending human ask stays Needs you', () => {
+    const record = { ...parkedRoot({ phase: 'wake-pending', workerIds: ['a'], outcomes: [] }), hasPendingHumanAsk: true };
+    expect(deriveAttention(record)).toMatchObject({ bucket: 'waiting', label: 'needs you' });
+    expect(deriveAttention(parkedRoot({ phase: 'wake-pending', workerIds: ['a'], outcomes: [] }), true))
+      .toMatchObject({ bucket: 'waiting', label: 'needs you' });
+  });
+
+  it('a queued leftover wake-pending parent is waiting for capacity, not queued', () => {
+    const record = { ...parkedRoot({ phase: 'wake-pending', workerIds: ['a'], outcomes: [] }), status: 'queued' as const };
+    expect(deriveAttention(record)).toEqual({
+      bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity',
+    });
+  });
+
+  it('running still wins over leftover wake-pending', () => {
+    const record = { ...parkedRoot({ phase: 'wake-pending', workerIds: ['a'], outcomes: [] }), status: 'running' as const };
+    expect(deriveAttention(record)).toEqual({
+      bucket: 'running', tone: 'running', shape: 'filled', pulse: true, label: 'running',
+    });
+  });
+
+  it('a queued leftover wake-pending parent with a pending ask stays queued', () => {
+    const record = {
+      ...parkedRoot({ phase: 'wake-pending', workerIds: ['a'], outcomes: [] }),
+      status: 'queued' as const,
+      hasPendingHumanAsk: true,
+    };
+    expect(deriveAttention(record)).toEqual({
+      bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'queued',
+    });
+    expect(deriveAttention({ ...parkedRoot({ phase: 'wake-pending', workerIds: ['a'], outcomes: [] }), status: 'queued' as const }, true))
+      .toEqual({ bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'queued' });
   });
 
   it('counts only the workers that have not reported yet', () => {
