@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Link } from '@/lib/project-router'
 
 import { createRun, putUiState } from '@/api/client'
-import { queryKeys, useUiState } from '@/api/queries'
+import { queryKeys, useHealth, useUiState } from '@/api/queries'
 import type { GithubItem, Skill, WorkflowDef } from '@open-mercato/cezar-api-client'
 import { DEFAULT_AGENT_ACCOUNT_ID } from '@open-mercato/cezar-api-client'
 import { EnginePills, engineRunBody, useResolvedEngine, type EnginePick, type ResolvedEngine } from '@/components/engine-pills'
@@ -32,6 +32,7 @@ import {
   normalizePromptTemplates,
   resolveAutoApply,
   resolveInsertCaret,
+  templatesForCapabilities,
 } from '@/lib/prompt-templates'
 import {
   bumpSkillUsage,
@@ -97,6 +98,7 @@ export function HandToAgent({
 }) {
   const queryClient = useQueryClient()
   const uiState = useUiState()
+  const automationsOn = useHealth().data?.capabilities.automations === true
   const kindLabel = item.kind === 'pr' ? 'PR' : 'issue'
   // A skill deleted since it was toggled must not reach the server (legacy rule).
   const validSkills = selectedSkills.filter((name) => skills.some((skill) => skill.name === name))
@@ -127,8 +129,8 @@ export function HandToAgent({
   // Follow-up prompt templates (#413): built-in unless the user has edited them in Settings →
   // Prompt templates (`ui-state.json`'s `promptTemplates`).
   const templates = useMemo(
-    () => normalizePromptTemplates(uiState.data?.promptTemplates),
-    [uiState.data?.promptTemplates],
+    () => templatesForCapabilities(normalizePromptTemplates(uiState.data?.promptTemplates), { automations: automationsOn }),
+    [uiState.data?.promptTemplates, automationsOn],
   )
   const insertPromptTemplate = (snippet: string) => {
     const el = promptRef.current

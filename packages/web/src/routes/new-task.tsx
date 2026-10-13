@@ -49,6 +49,7 @@ import {
   autoApplyText,
   normalizePromptTemplates,
   resolveAutoApply,
+  templatesForCapabilities,
 } from '@/lib/prompt-templates'
 import {
   bumpSkillUsage,
@@ -217,8 +218,8 @@ export function NewTaskRoute() {
   const composerRef = useRef<ComposerHandle>(null)
   const draftPanelRef = useRef<HTMLDivElement>(null)
   const templates = useMemo(
-    () => normalizePromptTemplates(uiState.data?.promptTemplates),
-    [uiState.data?.promptTemplates],
+    () => templatesForCapabilities(normalizePromptTemplates(uiState.data?.promptTemplates), { automations: health.data?.capabilities.automations === true }),
+    [uiState.data?.promptTemplates, health.data?.capabilities.automations],
   )
   const autoText = autoApplyText(templates, source?.source === 'skill' ? [source.ref] : [])
   const draftTextRef = useRef(draft.text)
