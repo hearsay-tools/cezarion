@@ -85,7 +85,21 @@ if (process.env.CEZ_MOCK_STDIN_FILE && stdinPrompt) {
     `${JSON.stringify({ method: 'cursor-print/stdin', prompt: stdinPrompt })}\n`);
 }
 if (mode === 'delay-init') await new Promise(resolve => setTimeout(resolve, 10_000));
+const attempt = log ? readFileSync(log, 'utf8').trim().split('\n').length : 1;
+const rejectModel = () => process.stderr.write(`Cannot use this model: ${flag('--model')}. Available models: ${'other-model, '.repeat(1000)}\n`);
+if (mode === 'model-rejection-always' || (mode === 'model-rejection-once' && attempt === 1) ||
+  (mode === 'model-rejection-on-resume' && resumeId && attempt === 2)) {
+  rejectModel(); process.exit(1);
+}
+if (mode === 'model-rejection-held') {
+  rejectModel(); await waitForRelease(10_000); process.exit(1);
+}
+if (mode === 'unrelated-startup-error') { process.stderr.write('Account unavailable\n'); process.exit(1); }
 frame({ type: 'system', subtype: 'init', session_id: id, model: flag('--model') ?? 'auto', cwd: process.cwd() });
+if (mode === 'model-rejection-after-init' || mode === 'model-rejection-after-work') {
+  if (mode === 'model-rejection-after-work') assistant('Work already began');
+  rejectModel(); process.exit(1);
+}
 if (mode === 'no-result') process.exit(0);
 if (mode === 'portable-ask' && !resumeId) {
   const ask = 'CEZ:ASK {"questions":[{"header":"Library","question":"Which library?","multiSelect":false,"options":[{"label":"Vitest","description":"Use Vitest"},{"label":"Jest","description":"Use Jest"}]}]}';

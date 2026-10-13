@@ -262,3 +262,28 @@ follow-up and exact Continue selection. Stashing only the capabilities fix made
 all canonical Grok/GPT/Auto admission cases fail with the original
 not-advertised error; restoring it passed. Unknown selections, missing account
 access, unsupported effort and incomplete defaults still refuse inference.
+
+## Pre-inference model rejection recovery, 2026-10-13
+
+After hearsay-tools/cezarion#988 shipped, the original task successfully used
+the canonical Grok selection. Its CI continuation at 09:44:43 UTC nevertheless
+exited 1 with `Cannot use this model: grok-4.6[effort=high,fast=true]` before
+any init, work or result frame. Automatic Continue retried the same model,
+account and native session one second later and succeeded. The installed
+CLI gives parameterized model metadata a two-second deadline; the history
+does not establish whether that particular request timed out or failed.
+
+The hearsay-tools/cezarion#994 fix retries that exact early rejection once.
+The replacement process reuses prepared argv, stdin, environment, image
+paths and any resume ID. It retains the pending input receipt and the logical
+session deadline. Init, model work, result, provider error, cancellation,
+signal termination or a different startup error prevents replay. A second
+rejection surfaces the leading model diagnostic even when the catalog tail
+is long. No alias, model fallback or fresh-session fallback is introduced.
+
+`cursor-print-model-retry.test.ts` uses the native print mock to pin fresh,
+opening Continue and follow-up retries, the two-attempt bound, pending
+receipt, identical input and cancellation guards. The initial three recovery
+tests failed against the unchanged runner. These controlled regressions
+reproduce the observed wire failure; they do not claim a forced live metadata
+timeout was reproduced.
