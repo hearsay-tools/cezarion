@@ -25,15 +25,18 @@ The nested-worktree regression runs with `npm run test:unit`.
 
 ### Local iteration versus final verification
 
-Use explicit affected tests or `npm run test:changed` during implementation, and
-focused browser specs for affected UI flows. Run the final six-command gate once
-when implementation stabilizes; reuse recorded success across commit, PR creation,
-and review of unchanged inputs. Later code edits require affected gates again;
-shared configuration, dependencies, contract changes, or uncertain impact require
-the full gate. Review-only/Markdown-only edits do not invalidate runtime results.
-The handoff records revision/diff, commands, results and subsequent changes.
-The final local browser command is `npm run test:e2e:local`; it runs the full suite
-in four isolated lanes on a machine with about 8 GiB of free RAM.
+When Squeal is installed and validating the worktree, use its results during
+implementation. It covers unit Vitest, both fast node:test groups, and packaged
+CLI and cockpit browser E2E in the slow tier. Otherwise use affected tests and
+focused browser specs. `npm test` and `npm run test:watch` select only the four
+unit projects; Squeal also discovers the browser project from the root config.
+
+The final six-command gate and full-suite runs belong in CI. Do not run the
+complete local gate just to commit, open a PR, or complete a review. Record
+revision/diff, commands or Squeal status, results, and subsequent changes in the
+handoff, and rerun affected checks after later code edits. For an explicitly
+requested full local browser run or CI failure investigation, use
+`npm run test:e2e:local`: four isolated lanes, about 8 GiB of free RAM.
 
 `test:changed` uses the merge-base against local `origin/main` (falling back to
 `main`), plus staged, unstaged and untracked files; it never fetches. Override with
@@ -41,9 +44,11 @@ in four isolated lanes on a machine with about 8 GiB of free RAM.
 without executing it. Ordinary TS/JS source changes use Vitest's import graph.
 Contract/configuration/unknown input, removed paths, missing base or failed Git
 inspection run full Vitest. Clean and Markdown-only changes explicitly skip.
-No matching tests fails rather than reporting a pass; run `npm test` in that case.
+Inspect `--plan` before running it; if it selects the full suite, choose focused
+checks and leave full verification to CI. No matching tests fails rather than
+reporting a pass; select test files explicitly and report any coverage gap.
 This does not cover all runtime dependencies, Node tests, or browser tests and is
-not a final gate. `.ai/agentic.config.json` retains the complete final command list.
+not a final gate. `.ai/agentic.config.json` records CI's complete final command list.
 
 ### Runner regression coverage
 

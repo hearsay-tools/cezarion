@@ -2,9 +2,10 @@ import { defineConfig } from 'vitest/config'
 import CockpitTestSequencer from '../../../.github/scripts/cockpit-test-sequencer.mjs'
 
 /**
- * The e2e suite is deliberately NOT a project in the root vitest.config.ts: `npm test` is the
- * fast unit gate and must never need a running server or a browser. These specs run only via
- * `npm run test:e2e`, which boots the environment first.
+ * The root configuration exposes this project to Squeal's slow tier. `npm test` selects
+ * only unit projects, so the fast gate never needs a server or browser. Project globalSetup
+ * prepares the environment when Squeal runs a browser file directly; `npm run test:e2e`
+ * also bootstraps first so it can preserve the wrapper's passed/failed/skipped contract.
  *
  * Plain node environment and no React plugin — the specs shell out to agent-browser and drive
  * a real Chrome; nothing here is bundled or rendered in jsdom.
@@ -25,7 +26,7 @@ export default defineConfig({
     // and restores it afterwards — otherwise whatever the operator last registered in the
     // gitignored `.ai/qa/cez-home` decides whether the sidebar renders its flat or its grouped
     // shell, and every spec asserting flat-shell selectors becomes a coin flip. See the module.
-    globalSetup: ['./workspace-registry.ts'],
+    globalSetup: ['./environment.ts', './workspace-registry.ts'],
     // A real browser is slower than jsdom, but a smoke test that needs more than this is broken.
     testTimeout: 60_000,
     hookTimeout: 60_000,

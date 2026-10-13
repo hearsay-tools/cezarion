@@ -177,23 +177,47 @@ Rules that follow from that:
 
 A fresh task worktree (`.ai/cezar/worktrees/<runId>`) has no `node_modules`. Run `pnpm install --frozen-lockfile` in that worktree before the commands below — otherwise Node walks up to the main checkout and typecheck/tests compile against that tree's sources, not this one.
 
-**Iteration is targeted; the full gate is a final checkpoint, not a loop.** During
-implementation, run the affected test files/test names, or `npm run test:changed`.
-Use focused browser specs for affected UI flows, e.g.
+**If Squeal is installed and validating this worktree, use it for iteration.**
+Read the `SQUEAL` reports and follow its installed skill. `squeal.config.json`
+covers the four unit Vitest projects, both fast `node:test` groups from
+`npm run test:unit`, and both E2E suites in its slow tier: packaged CLI
+(`npm run test:package`) and cockpit browser (`npm run test:e2e`).
+Do not duplicate those background runs with `npm test`,
+`npm run test:unit`, `npm run test:package`, `npm run test:e2e`, or `npm run test:changed`.
+Use `squeal why <check>` for failure details and, when a result is needed,
+`squeal status --wait 60000`.
+Under Codex, use the absolute Squeal command printed in its messages when
+`squeal` is not on PATH. Fix regressions and report known failures, pending,
+stale, or unknown results accurately; zero known failures is not a full pass.
+
+Squeal is optional. If it is absent, no daemon is validating, or a needed result
+is unknown, run affected test files/test names through npm. Inspect
+`npm run test:changed -- --plan` before using `npm run test:changed`; if the plan
+falls back to a full run, choose focused checks and leave the full gate to CI.
+Packaged CLI E2E exercises built output: run `npm run build` after relevant source
+changes before relying on its results. The config declares the server and cockpit
+build artifacts as inputs. The browser project's globalSetup uses the existing
+test environment bootstrap to prepare or reuse the app and Chrome; a missing
+browser is an error in a Squeal run. `npm test` and `npm run test:watch` select
+only the four unit projects. Typecheck and build remain separate checks;
+run them when the change needs them. When Squeal is unavailable, use focused
+browser specs for affected UI flows, e.g.
 `npm run test:e2e -- smoke.e2e.ts -t 'test name'` (see `packages/web/e2e/README.md`).
 Do not run the entire Vitest or browser suite after each edit or each review round.
 
-Once implementation stabilizes, run the full gate below once before committing or
-opening the PR. Reuse that evidence when opening the PR from the same tested tree;
-a commit or review request alone does not invalidate it. Record the tested revision
-(or uncommitted diff), commands, outcomes, and any subsequent edits in the handoff.
-After later code changes, rerun affected gates; shared configuration, dependencies,
-contract changes, or uncertain impact require the full gate again. Review-only or
-Markdown-only edits do not invalidate successful runtime checks. A targeted run,
-a skipped browser suite, or an old pass for changed inputs never counts as a full
-pass. CI still enforces the required final checks independently.
+**The final gate and full-suite runs belong in CI.** Do not run the entire local
+gate, `squeal run --all`, or the full Vitest or browser suite just to finish a
+task, commit, open a PR, or complete a review. Run a full local suite only when
+explicitly requested or needed to investigate a CI failure. Squeal reuses cached
+results at startup (`baseline.onStart: "lookup-only"`) and validates edits without
+a cold-start full run; its Stop policy requires neither a full nor a slow suite.
+Record the tested revision (or uncommitted diff), commands or Squeal status,
+outcomes, and subsequent edits in the handoff. After later code changes, rerun
+affected checks. A targeted run, skipped browser suite, or old pass for changed
+inputs never counts as a full pass. CI independently enforces the complete gate
+in `.github/workflows/ci.yml`; check its required aggregate before merge.
 
-The final gate, in order:
+CI's final gate covers:
 
 ```bash
 npm run typecheck   # refresh server declarations, then check all four workspaces
@@ -201,7 +225,7 @@ npm test            # vitest — server + cockpit unit suites
 npm run test:unit   # node:test — fast core-module coverage (packages/cezar/test/unit/)
 npm run build       # tsc → dist/, vite → packages/cezar/web/dist/, then the check:pack tarball gate
 npm run test:package # pack/install the release tarball and exercise the built CLI (packages/cezar/test/e2e/)
-npm run test:e2e:local # full local browser suite: four isolated lanes; skipped is not a pass
+npm run test:e2e     # cockpit browser E2E in CI shards; skipped is not a pass
 ```
 
 For web-only verification, use `npm run typecheck:web` or
@@ -212,7 +236,7 @@ workspace checks.
 
 `npm test` and `npm run test:unit` are the fast unit gate: no server, no browser. They must stay that way. `npm run test:package` needs a completed `npm run build` (it packs the tarball). Pull request CI runs packaged CLI E2E and cockpit browser E2E as separate checks; the required aggregate fails if the cockpit suite is skipped or failed.
 
-**Run vitest through npm, never `npx vitest`.** It is a devDependency of this repo, so `npm test`
+**When a manual Vitest run is needed, use npm, never `npx vitest`.** It is a devDependency of this repo, so `npm test`
 uses the installed, version-pinned binary; `npx` will happily reach past it and fetch a different
 version from the registry, which is a slow, networked, silently-different test run. To narrow a run,
 pass vitest's own arguments after `--`:
@@ -223,26 +247,29 @@ npm test -- --testTimeout=30000 path/to/one.test.ts
 npm test -- -t "the name of one test"
 ```
 
-`npm run test:changed` compares the branch against the merge-base with local
-`origin/main` (or `main`), including staged, unstaged, and untracked files. Use
+When Squeal is unavailable, `npm run test:changed` compares the branch against
+the merge-base with local `origin/main` (or `main`), including staged, unstaged,
+and untracked files. Use
 `-- --base=<ref>` to override, or `-- --plan` to inspect without running tests.
 It selects Vitest tests through the import graph for ordinary source changes;
 shared/configuration/unknown inputs, deletions, or unavailable Git/base information
 fall back to full Vitest. Clean or Markdown-only changes explicitly skip iteration
-tests. No matching tests is an error: run `npm test` rather than treating it as a
-pass. Import graphs do not cover every runtime dependency, so this command is only
-iteration feedback, never a replacement for the final six-command gate.
+tests. No matching tests is an error: select the relevant test files explicitly
+and report any coverage gap rather than treating it as a pass. Import graphs do
+not cover every runtime dependency, so this command is only iteration feedback,
+never a replacement for CI's final gate.
 
 Cockpit browser E2E is a separate command from packaged CLI E2E — it boots the real app and
 drives it in a real Chrome through the `agent-browser` provider (`.ai/browsers/agent-browser.md`):
 
 ```bash
 npm run test:e2e    # .ai/scripts/e2e.sh → test-env-up.sh + vitest (packages/web/e2e/)
-npm run test:e2e:local # full local browser suite in four isolated lanes (~8 GiB peak)
+npm run test:e2e:local # explicitly requested full local browser run, four lanes (~8 GiB peak)
 ```
 
-Use `npm run test:e2e:local` for the final local full-suite gate. Keep `npm run test:e2e`
-for focused local specs and CI's serial shards. The four-lane command prints the same
+Use `npm run test:e2e` for focused local specs and CI's serial shards. Reserve
+`npm run test:e2e:local` for an explicitly requested full local browser run or CI
+failure investigation. The four-lane command prints the same
 `TEST_E2E_STATUS` marker, exits nonzero on `skipped` or `failed`, and retains per-lane
 logs under `.ai/qa/local-runs/`; see
 `packages/web/e2e/README.md` for its isolation and cleanup details.
@@ -296,7 +323,7 @@ row's value when the thing it names changes, rather than its label.
 | CI provider | GitHub Actions |
 | Issue tracker | GitHub Issues |
 | Stack | TypeScript (Node ≥24.15), pnpm workspaces (npm script metadata retained); Hono + Zod server; React 19 + Vite + Tailwind v4 cockpit |
-| Verification | `npm run typecheck`, `npm test`, `npm run test:unit`, `npm run build`, `npm run test:package`, `npm run test:e2e:local` |
+| Verification | Local: Squeal when installed and validating, otherwise focused npm checks. Full gate in CI: `npm run typecheck`, `npm test`, `npm run test:unit`, `npm run build`, `npm run test:package`, `npm run test:e2e` |
 | Automated reviewer | `AUTOMATED_REVIEWER=codex` |
 | Automated review rounds | `AUTOMATED_REVIEW_ROUNDS` (default 3) |
 | Commit convention | Conventional Commits |
