@@ -90,7 +90,7 @@ describe('ToolCard — states', () => {
   it('keeps the complete command in the tooltip and expanded row', () => {
     const command = 'cd /home/agent/projects/a-very-long-project-path && npm run typecheck'
     const item = goldenItem(bashAndScreenshot, 'toolu_mock_1', 'completed')
-    render(<ToolCard item={{ ...item, title: `Ran ${command}` }} />)
+    render(<ToolCard item={{ ...item, title: `Ran ${command}`, input: { command } }} />)
     const button = trigger(/Ran.*a-very-long-project-path/)
     expect(button.querySelector('code')?.getAttribute('title')).toBe(command)
     fireEvent.click(button)
@@ -100,7 +100,7 @@ describe('ToolCard — states', () => {
   it('keeps a bare OpenCode execute title in mono with an ellipsis and expandable full text', () => {
     const command = 'cd /home/agent/projects/long-project && npm run test -- --runInBand'
     const item = goldenItem(bashAndScreenshot, 'toolu_mock_1', 'completed')
-    render(<ToolCard item={{ ...item, name: 'shell', title: command }} />)
+    render(<ToolCard item={{ ...item, name: 'shell', title: command, input: { command } }} />)
     const button = screen.getByRole('button', { name: /npm run test/ })
     const code = button.querySelector('code')
     expect(code?.textContent).toBe(command)
@@ -113,7 +113,7 @@ describe('ToolCard — states', () => {
   it.each([undefined, ''])('expands a completed command with no output (%s)', (output) => {
     const command = 'cd /home/agent/projects/a-very-long-project-path && git diff --check'
     const item = goldenItem(bashAndScreenshot, 'toolu_mock_1', 'completed')
-    render(<ToolCard item={{ ...item, title: `Ran ${command}`, output }} />)
+    render(<ToolCard item={{ ...item, title: `Ran ${command}`, input: { command }, output }} />)
     const button = trigger(/Ran.*git diff --check/)
     expect((button as HTMLButtonElement).disabled).toBe(false)
     expect(document.querySelector('[data-slot="tool-command"]')).toBeNull()
