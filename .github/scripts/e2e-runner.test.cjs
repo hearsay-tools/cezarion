@@ -41,7 +41,7 @@ test('spec paths and a quoted test-name filter reach Vitest intact', (t) => {
   const r = run(t, ['--force', ...filters, '--force-rebuild']);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.boot, ['--force', '--force-rebuild']);
-  assert.deepEqual(r.tests, ['test', '--', '--config', 'packages/web/e2e/vitest.config.ts', ...filters]);
+  assert.deepEqual(r.tests, ['exec', '--', 'vitest', 'run', '--config', 'packages/web/e2e/vitest.config.ts', ...filters]);
   assert.match(r.stdout, /TEST_E2E_STATUS=passed/);
 });
 
@@ -50,14 +50,14 @@ test('long-form test filters and split shard arguments are forwarded in order', 
   const r = run(t, args);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.boot, []);
-  assert.deepEqual(r.tests, ['test', '--', '--config', 'packages/web/e2e/vitest.config.ts', ...args]);
+  assert.deepEqual(r.tests, ['exec', '--', 'vitest', 'run', '--config', 'packages/web/e2e/vitest.config.ts', ...args]);
 });
 
 test('an explicit separator ends wrapper flag parsing', (t) => {
   const r = run(t, ['--force', '--', '--force-rebuild']);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.boot, ['--force']);
-  assert.deepEqual(r.tests, ['test', '--', '--config', 'packages/web/e2e/vitest.config.ts', '--', '--force-rebuild']);
+  assert.deepEqual(r.tests, ['exec', '--', 'vitest', 'run', '--config', 'packages/web/e2e/vitest.config.ts', '--', '--force-rebuild']);
 });
 
 test('a filtered test failure still reports failed rather than passed', (t) => {

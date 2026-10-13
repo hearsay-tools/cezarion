@@ -20,8 +20,8 @@ Work enters through two paths: a free-form task brief handed to an agent, or a f
 | Intake | A ticket or task brief is filed in GitHub with enough detail to act on. | Anyone | Ticket exists |
 | Triage | Confirm the issue is real, still unfixed on `main`, and not already claimed or covered by an open PR. Read-only; stops the chain cleanly when there is nothing to do. | `om-verify-in-repo` or a human | Confirmed actionable, or closed as no-action |
 | Claim | The author claims the ticket so concurrent agents back off. See the claim protocol below. | `om-fix` / `om-auto-create-pr`, or a human | Claim visible on the ticket |
-| Implement | Locate the minimal change surface (`om-root-cause`, read-only), then implement the change with regression tests and run the validation gate. Task briefs without a ticket go through `om-auto-create-pr`, which plans, implements phase by phase in an isolated worktree, and runs the same gate. | `om-root-cause` + `om-fix`, `om-auto-create-pr`, or a human author | Change complete, validation gate green |
-| PR | Commit, push, and open a PR against `main` with normalized labels. On a hand-worked branch, `om-check-and-commit` runs the gate, fixes obvious drift, and pushes when green. | `om-open-pr`, `om-auto-create-pr`, or `om-check-and-commit` | Open, labeled PR |
+| Implement | Locate the minimal change surface (`om-root-cause`, read-only), then implement the change with regression tests and affected checks. Task briefs without a ticket go through `om-auto-create-pr`, which plans and implements phase by phase in an isolated worktree. CI owns the full validation gate. | `om-root-cause` + `om-fix`, `om-auto-create-pr`, or a human author | Change complete, affected checks recorded |
+| PR | Commit, push, and open a draft PR against `main` with normalized labels. On a hand-worked branch, `om-check-and-commit` fixes obvious drift and pushes with recorded affected checks; CI runs the final gate. | `om-open-pr`, `om-auto-create-pr`, or `om-check-and-commit` | Open, labeled draft PR |
 | Review loop | The reviewer reads the diff against the `om-code-review` checklist and approves or requests changes. Requested changes are addressed (`om-auto-continue-pr` resumes agent PRs from the tracking plan) and the PR is re-reviewed until approved. | `om-auto-review-pr` (single PR), `om-review-prs` (sweep), or a human | Approving review submitted |
 | QA | A PR carrying `needs-qa` waits for manual QA. A QA reviewer tests it and records the outcome. See the QA gate below. | QA reviewer (manual) | `qa-approved` applied, or `qa-failed` routes it back |
 | Merge | `om-merge-buddy` reports, read-only, which PRs can merge now and which are close but blocked. `om-approve-merge-pr` re-checks every gate, approves, and squash-merges. A PR may merge while behind `main` as long as its required check is green and GitHub can merge. | `om-merge-buddy` + `om-approve-merge-pr`, or a human | PR squash-merged into `main` |
@@ -92,13 +92,18 @@ The claim is released when the work finishes — on success and on failure alike
 
 ## Validation gate
 
-During implementation, use affected test files/names or `npm run test:changed`,
-and focused browser specs for changed UI flows. Do not repeat all suites for each
-edit or review round. `test:changed` is iteration feedback only; an import graph
-cannot establish complete runtime coverage.
+When Squeal is installed and validating the worktree, use its background results
+for iteration and follow its installed skill. It covers unit Vitest, both fast
+node:test groups, and packaged CLI and cockpit browser E2E in the slow tier.
+Otherwise use affected test files/names and focused browser specs for changed UI
+flows. Inspect `npm run test:changed -- --plan` before using `test:changed`; if
+it selects the full suite, choose focused checks. An import graph cannot
+establish complete runtime coverage.
 
-Run the full gate once when implementation stabilizes, before committing/opening
-the PR and before review sign-off, in this order:
+**The final gate and full-suite runs belong in CI.** Do not run the complete
+local gate just to finish a task, commit, open a PR, or complete a review. A full
+local run is reserved for an explicit request or investigating a CI failure.
+CI's final gate covers:
 
 - `npm run typecheck`
 - `npm test`
@@ -107,17 +112,17 @@ the PR and before review sign-off, in this order:
 - `npm run test:package`
 - `npm run test:e2e`
 
-Any non-zero exit fails the gate and blocks the PR. `npm test` is the fast server + cockpit unit/component suite (vitest) and `npm run test:unit` the node:test core-module suite; the build includes the `check:pack` tarball gate, and `npm run test:package` builds a release tarball, installs it into an isolated consumer, and exercises the offline CLI workflow. Packaged CLI E2E (`npm run test:package`) and cockpit browser E2E (`npm run test:e2e`) are separate checks; pull request CI rejects a skipped or failed cockpit suite. The implementing skills run the configured gate before opening a PR, and `om-check-and-commit` runs it before pushing a hand-worked branch. The command list lives in `.ai/agentic.config.json`; when it changes, update it there and in this section together.
+Any non-zero exit fails the gate and blocks merge. `npm test` selects the four unit Vitest projects and remains the fast server + cockpit unit/component suite; `npm run test:unit` covers the node:test core modules and root scripts. The build includes the `check:pack` tarball gate, and `npm run test:package` builds a release tarball, installs it into an isolated consumer, and exercises the offline CLI workflow. Packaged CLI E2E (`npm run test:package`) and cockpit browser E2E (`npm run test:e2e`) are separate checks; pull request CI rejects a skipped or failed cockpit suite. The command list lives in `.ai/agentic.config.json`; when it changes, update it there and in this section together. It records the complete CI gate, not a requirement to run every command locally before opening a PR.
 
 Reuse successful evidence for the same tested tree across commit, PR creation,
 and review; those actions do not themselves require another run. Record the tested
-revision (or uncommitted diff), commands/results, and subsequent changes in the
-handoff. Later code changes invalidate affected gates. Shared configuration,
-dependency or contract changes, or uncertain impact invalidate the full gate.
+revision (or uncommitted diff), commands or Squeal status, results, and subsequent
+changes in the handoff. Later code changes require affected checks again.
 Review-only or Markdown-only edits leave successful runtime evidence valid. Never
 reuse failed/inconclusive evidence or count a targeted run as a full pass. CI's
-independent required checks remain unchanged. The iteration command does not
-replace any entry in `.ai/agentic.config.json`'s final `validation.commands` list.
+independent required checks remain unchanged; check the required aggregate before
+merge. The iteration command does not replace any entry in
+`.ai/agentic.config.json`'s final `validation.commands` list.
 
 ### PR change surface
 
