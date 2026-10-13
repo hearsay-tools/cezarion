@@ -218,3 +218,13 @@ it('offers no Delete on a new automation', () => {
   mount()
   expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
 })
+
+it('shows Copy as CLI beside both kinds, following the draft', () => {
+  stubFetch(() => json(saved, 201))
+  mount()
+  fill()
+  expect(screen.getByText(/^cez automation (add|create) .*Weekly digest/)).not.toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'When GitHub changes' }))
+  expect(screen.getByRole('heading', { name: 'Copy as CLI' })).not.toBeNull()
+  expect(screen.getByText(/^cez automation (add|create) .*Weekly digest/)).not.toBeNull()
+})
