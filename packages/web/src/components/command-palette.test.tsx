@@ -373,17 +373,19 @@ describe('Projects group', () => {
     project({ id: 'docs', name: 'docs', lastOpenedAt: '2026-07-13T00:00:00Z' }),
   ]
 
-  it('lists the registry recency-first with the active project last, and switches project', async () => {
+  it('lists the registry in registry order with the active project last, and switches project', async () => {
     renderPalette({ projects: REGISTRY, entry: '/p/cezar/' })
     openWith({ metaKey: true })
     await screen.findByText('shop')
 
     const rows = [...document.querySelectorAll('[data-slot="palette-project"]')]
-    expect(rows.map((row) => row.getAttribute('data-project-id'))).toEqual(['docs', 'shop', 'cezar'])
+    // Registry order, not recency (hearsay-tools/cezarion#438): `docs` was opened later than
+    // `shop` and still follows it, the way the rail lists them.
+    expect(rows.map((row) => row.getAttribute('data-project-id'))).toEqual(['shop', 'docs', 'cezar'])
     // The branch is the disambiguator when two entries share a name; absent entries show none.
-    expect(rows[1]?.textContent).toContain('develop')
+    expect(rows[0]?.textContent).toContain('develop')
 
-    fireEvent.click(rows[1] as HTMLElement)
+    fireEvent.click(rows[0] as HTMLElement)
 
     // The tasks pane of the OTHER project — an explicit cross-project target, not the active scope.
     await waitFor(() => expect(location()).toBe('/p/shop/'))
@@ -1053,17 +1055,37 @@ describe('the pure ordering helpers', () => {
     expect(merged.map((task) => task.id)).toEqual(['parent', 'other-parent'])
   })
 
-  it('orderProjects sorts most-recently-opened first, active last, without mutating', () => {
+  it('orderProjects keeps registry order, active last, without mutating', () => {
     const input = [
       project({ id: 'old', lastOpenedAt: '2026-07-10T00:00:00Z' }),
       project({ id: 'here', lastOpenedAt: '2026-07-14T00:00:00Z' }),
       project({ id: 'recent', lastOpenedAt: '2026-07-12T00:00:00Z' }),
     ]
-    // `here` has the newest timestamp and still sinks — being where you already are outranks it.
-    expect(orderProjects(input, 'here').map((entry) => entry.id)).toEqual(['recent', 'old', 'here'])
-    // Unscoped (global settings) nothing is active, so it is pure recency.
-    expect(orderProjects(input, null).map((entry) => entry.id)).toEqual(['here', 'recent', 'old'])
+    // `here` sinks — being where you already are is the one row that can do nothing.
+    expect(orderProjects(input, 'here').map((entry) => entry.id)).toEqual(['old', 'recent', 'here'])
+    // Unscoped (global settings) nothing is active, so it is plain registry order: the rail's
+    // order, which `lastOpenedAt` (bumped on every boot) never reshuffles.
+    expect(orderProjects(input, null).map((entry) => entry.id)).toEqual(['old', 'here', 'recent'])
     expect(input.map((entry) => entry.id)).toEqual(['old', 'here', 'recent'])
+  })
+
+  it('orderProjects follows the rail’s hand-picked order, still sinking the active one', () => {
+    // hearsay-tools/cezarion#438: the rail's order reaches the palette, because a registry listed
+    // two ways in one cockpit reads as a glitch. Only the active-last rule is the palette's own.
+    const input = [
+      project({ id: 'old', lastOpenedAt: '2026-07-10T00:00:00Z' }),
+      project({ id: 'here', lastOpenedAt: '2026-07-14T00:00:00Z' }),
+      project({ id: 'recent', lastOpenedAt: '2026-07-12T00:00:00Z' }),
+    ]
+    const dragged = ['recent', 'here', 'old']
+    expect(orderProjects(input, null, dragged).map((entry) => entry.id)).toEqual(dragged)
+    // The picked order survives being split around the active project — `recent` still precedes
+    // `old`, which registry order alone would have reversed.
+    expect(orderProjects(input, 'here', dragged).map((entry) => entry.id)).toEqual([
+      'recent',
+      'old',
+      'here',
+    ])
   })
 })
 

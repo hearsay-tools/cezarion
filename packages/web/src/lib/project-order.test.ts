@@ -1,0 +1,124 @@
+import { describe, expect, it } from 'vitest'
+
+import {
+  canPersistProjectOrder,
+  moveProjectId,
+  normalizeProjectOrder,
+  orderProjects,
+  PROJECT_ORDER_LIMIT,
+} from './project-order'
+
+/** The one field the rule reads — the registry row's shape does not matter here. The timestamp
+ *  is carried to prove the rule ignores it (hearsay-tools/cezarion#438: registry order, not
+ *  recency, is the fallback). */
+const project = (id: string, lastOpenedAt: string) => ({ id, lastOpenedAt })
+
+const ids = (projects: Array<{ id: string }>) => projects.map((entry) => entry.id)
+
+describe('normalizeProjectOrder', () => {
+  it('passes a clean list through unchanged', () => {
+    expect(normalizeProjectOrder(['a', 'b', 'c'])).toEqual(['a', 'b', 'c'])
+  })
+
+  it('survives everything a hand-edited ui-state.json can hold', () => {
+    // `sidebar` is a loose bag on the wire, so this is a shape to absorb, not to reject.
+    expect(normalizeProjectOrder(['a', 'a', 3, '', '  ', null, ' b ', undefined])).toEqual(['a', 'b'])
+    expect(normalizeProjectOrder(undefined)).toEqual([])
+    expect(normalizeProjectOrder(null)).toEqual([])
+    expect(normalizeProjectOrder('a,b')).toEqual([])
+    expect(normalizeProjectOrder({ 0: 'a' })).toEqual([])
+  })
+
+  it('clamps to the contract cap so an over-long list still renders', () => {
+    const long = Array.from({ length: PROJECT_ORDER_LIMIT + 25 }, (_, index) => `p${index}`)
+    expect(normalizeProjectOrder(long)).toHaveLength(PROJECT_ORDER_LIMIT)
+    expect(normalizeProjectOrder(long)[0]).toBe('p0')
+  })
+})
+
+describe('orderProjects', () => {
+  const registry = [
+    project('old', '2026-07-01T00:00:00.000Z'),
+    project('newest', '2026-07-20T00:00:00.000Z'),
+    project('middle', '2026-07-10T00:00:00.000Z'),
+  ]
+
+  it('falls back to registry order, not recency, when nothing is stored', () => {
+    // The rail has always listed registry order; `lastOpenedAt` moves on every server boot.
+    expect(ids(orderProjects(registry, []))).toEqual(['old', 'newest', 'middle'])
+  })
+
+  it('applies the stored order', () => {
+    expect(ids(orderProjects(registry, ['old', 'newest', 'middle']))).toEqual([
+      'old',
+      'newest',
+      'middle',
+    ])
+  })
+
+  it('ignores stored ids that are no longer registered', () => {
+    expect(ids(orderProjects(registry, ['gone', 'old', 'also-gone', 'newest', 'middle']))).toEqual([
+      'old',
+      'newest',
+      'middle',
+    ])
+  })
+
+  it('floats projects registered after the last drag to the top, in registry order', () => {
+    // The user placed two projects; `newest` and a later `fresh` were never placed. Neither is
+    // dropped, and neither hides below the curated list — the thing you just added is visible.
+    const withFresh = [...registry, project('fresh', '2026-07-25T00:00:00.000Z')]
+    expect(ids(orderProjects(withFresh, ['old', 'middle']))).toEqual([
+      'newest',
+      'fresh',
+      'old',
+      'middle',
+    ])
+  })
+
+  it('is a permutation of the input — never drops, duplicates or invents a row', () => {
+    const ordered = orderProjects(registry, ['middle', 'middle', 'nope'])
+    expect(ordered).toHaveLength(registry.length)
+    expect([...ids(ordered)].sort()).toEqual([...ids(registry)].sort())
+  })
+
+  it('does not mutate its input', () => {
+    const input = [...registry]
+    orderProjects(input, ['old'])
+    expect(ids(input)).toEqual(['old', 'newest', 'middle'])
+  })
+
+  it('handles the degenerate registries', () => {
+    expect(orderProjects([], ['a'])).toEqual([])
+    expect(ids(orderProjects([project('a', '2026-07-01T00:00:00.000Z')], ['a']))).toEqual(['a'])
+  })
+})
+
+describe('moveProjectId', () => {
+  it('moves down and up', () => {
+    expect(moveProjectId(['a', 'b', 'c'], 0, 2)).toEqual(['b', 'c', 'a'])
+    expect(moveProjectId(['a', 'b', 'c'], 2, 0)).toEqual(['c', 'a', 'b'])
+    expect(moveProjectId(['a', 'b', 'c'], 1, 2)).toEqual(['a', 'c', 'b'])
+  })
+
+  it('is a no-op for a drop that resolved to nothing', () => {
+    expect(moveProjectId(['a', 'b'], 1, 1)).toEqual(['a', 'b'])
+    expect(moveProjectId(['a', 'b'], -1, 0)).toEqual(['a', 'b'])
+    expect(moveProjectId(['a', 'b'], 0, 7)).toEqual(['a', 'b'])
+  })
+
+  it('copies rather than splicing the caller’s array', () => {
+    const input = ['a', 'b', 'c']
+    moveProjectId(input, 0, 2)
+    expect(input).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('canPersistProjectOrder', () => {
+  it('allows a reorder only while the whole registry fits the stored list', () => {
+    expect(canPersistProjectOrder(2)).toBe(true)
+    expect(canPersistProjectOrder(PROJECT_ORDER_LIMIT)).toBe(true)
+    // One more and a drop would persist a truncated list that moves the project it left out.
+    expect(canPersistProjectOrder(PROJECT_ORDER_LIMIT + 1)).toBe(false)
+  })
+})

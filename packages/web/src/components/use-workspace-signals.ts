@@ -4,20 +4,29 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { useHealth, useProjects, useRunsIndex, workspaceQueryKeys } from '@/api/queries'
 import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
+import { canPersistProjectOrder, orderProjects } from '@/lib/project-order'
 import { signalsByProject, type ProjectSignal } from '@/lib/project-signal'
+import { useProjectOrder } from '@/lib/use-project-order'
 
 export type WorkspaceSignals = {
+  /** The registry in the user's order (`lib/project-order.ts`): registry order until they drag. */
   projects: readonly ProjectListEntry[]
   /** Null while the runs index has not loaded: activity is then unknown, not idle. */
   signals: ReadonlyMap<string, ProjectSignal> | null
   /** `capabilities.singleProject` (`CEZ_SINGLE_PROJECT=1`). Never inferred from the project count. */
   singleProject: boolean
+  /** The workspace ui-state has loaded, so a reorder can be written without dropping its siblings,
+   *  and the registry fits the stored order whole (`canPersistProjectOrder`). */
+  canReorder: boolean
+  /** Persist a full order (every id on screen, in its new order). */
+  onReorder: (ids: readonly string[]) => void
 }
 
 /**
  * The registry plus every project's four counts, read once for the whole shell. The desktop rail
  * and the mobile menu button and drawer all render from this one result, so they cannot disagree,
- * and the registry-change refresh below runs once, not once per surface.
+ * and the registry-change refresh below runs once, not once per surface. The hand-picked project
+ * order (hearsay-tools/cezarion#438) is applied here for the same reason: one place, every surface.
  *
  * Every mark reads the SSE-patched workspace runs index — the current project's too. No WebSocket
  * topic: remote mode opens no browser WebSocket, and a WS-driven signal would go stale in hosted
@@ -28,7 +37,10 @@ export type WorkspaceSignals = {
  */
 export function useWorkspaceSignals(): WorkspaceSignals | null {
   const queryClient = useQueryClient()
-  const projects = useProjects().data?.projects
+  const registered = useProjects().data?.projects
+  const { order, canReorder: uiStateLoaded, setOrder } = useProjectOrder()
+  const canReorder = uiStateLoaded && registered !== undefined && canPersistProjectOrder(registered.length)
+  const projects = React.useMemo(() => (registered ? orderProjects(registered, order) : undefined), [registered, order])
   const index = useRunsIndex().data
   const singleProject = useHealth().data?.capabilities.singleProject === true
   const signals = React.useMemo(() => (index ? signalsByProject(index.runs) : null), [index])
@@ -37,7 +49,8 @@ export function useWorkspaceSignals(): WorkspaceSignals | null {
   // changes. A project registered (or cloned, or removed) with runs already on disk would show no
   // signal until the next run event, so a change in WHICH projects exist asks for a fresh index.
   // Keyed on the id set so a rename or a `lastOpenedAt` bump does not refetch.
-  const registry = projects?.map((project) => project.id).join('\n')
+  // Sorted, so a reorder (which changes no membership) is not a registry change either.
+  const registry = registered?.map((project) => project.id).sort().join('\n')
   const seenRegistry = React.useRef<string | undefined>(undefined)
   React.useEffect(() => {
     if (registry === undefined) return
@@ -49,7 +62,7 @@ export function useWorkspaceSignals(): WorkspaceSignals | null {
   }, [queryClient, registry])
 
   return React.useMemo(
-    () => (projects ? { projects, signals, singleProject } : null),
-    [projects, signals, singleProject],
+    () => (projects ? { projects, signals, singleProject, canReorder, onReorder: setOrder } : null),
+    [projects, signals, singleProject, canReorder, setOrder],
   )
 }
