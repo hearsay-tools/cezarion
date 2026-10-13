@@ -21,6 +21,7 @@
 import { TranscriptFactsQueue } from '../runs/transcript-facts-queue.ts';
 import { historyPaths } from '../runs/history-file.ts';
 import { MONITORING_TURN_CRITERIA, MONITORING_ACK_CRITERIA, MONITORING_ORDER_CRITERIA } from '../workflows/monitoring-turn.testkit.ts';
+import { CI_INTERRUPTION_CRITERIA } from '../workflows/ci-wait-interruption.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -1733,6 +1734,7 @@ describe('harness parity — the matrix itself', () => {
     ...MONITORING_TURN_CRITERIA.map(c => c.id),
     ...MONITORING_ACK_CRITERIA.map(c => c.id),
     ...MONITORING_ORDER_CRITERIA.map(c => c.id),
+    ...CI_INTERRUPTION_CRITERIA.map(c => c.id),
     ...WORKFLOW_ASK_CRITERIA.map(c => c.id),
     ...FOLLOWUP_CRITERIA.map(c => c.id),
     ...ANSWER_DELIVERY_CRITERIA.map(c => c.id),
@@ -1750,7 +1752,7 @@ describe('harness parity — the matrix itself', () => {
   const scenarioOf = (id: string): ScenarioName => {
     const shutdown = SHUTDOWN_CRITERIA.find(c => c.id === id);
     if (shutdown) return shutdown.scenario;
-    const monitor = [...MONITORING_TURN_CRITERIA, ...MONITORING_ACK_CRITERIA, ...MONITORING_ORDER_CRITERIA].find(c => c.id === id);
+    const monitor = [...MONITORING_TURN_CRITERIA, ...MONITORING_ACK_CRITERIA, ...MONITORING_ORDER_CRITERIA, ...CI_INTERRUPTION_CRITERIA].find(c => c.id === id);
     if (monitor) return monitor.scenario;
     const ask = WORKFLOW_ASK_CRITERIA.find(c => c.id === id);
     if (ask) return ask.scenario;

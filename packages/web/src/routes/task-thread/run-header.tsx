@@ -951,7 +951,7 @@ function CiWaitStatus({ run }: { run: ApiRun }) {
         ? 'CI result ready — waiting for capacity'
         : 'CI result ready — current turn still working'
       : 'Waiting for CI'
-    : result ? outcomes[result.outcome] : wait.phase === 'withdrawn' ? 'CI wait cancelled' : 'CI wait unavailable'
+    : wait.phase === 'withdrawn' ? 'CI wait cancelled' : result ? outcomes[result.outcome] : 'CI wait unavailable'
   const timestamp = active ? wait.deadline : result?.observedAt
   const date = timestamp ? new Date(timestamp) : undefined
   const dateLabel = date && Number.isFinite(date.getTime())
@@ -971,6 +971,11 @@ function CiWaitStatus({ run }: { run: ApiRun }) {
           </a>
         ) : <span>{prLabel}</span>}
       </div>
+      {!active && wait.phase === 'withdrawn' ? (
+        <p>{run.activity === 'monitoring'
+          ? 'General monitoring does not restart this CI wait.'
+          : 'A new CI wait is needed to resume CI monitoring.'}</p>
+      ) : null}
       {dateLabel ? (
         <p>{active ? 'Deadline' : 'Observed'}{' '}<time dateTime={timestamp}>{dateLabel}</time></p>
       ) : active ? <p>CI deadline unavailable</p> : null}
