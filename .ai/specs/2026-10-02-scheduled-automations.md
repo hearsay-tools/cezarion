@@ -303,7 +303,10 @@ Shipped after this stage. The decisions, so the code's comments have a record to
   `artifact publish` does, never `cez` on PATH.
 - **Cockpit.** A "Create an automation" built-in prompt template assigned to the skill, offered
   while `capabilities.automations` is on; a Copy as CLI card in the editor, built from the exact
-  body Save sends, in POSIX single quotes, `--no-autonomous` when `autonomous: false`.
+  body Save sends, in POSIX single quotes, `--no-autonomous` when `autonomous: false`, and prefixed
+  with `CEZ_COCKPIT_URL`/`CEZ_PROJECT_ID` for this cockpit and project, so the line works when pasted
+  into an ordinary shell. The env curator drops inherited copies of both variables, so a nested
+  headless `cez run` never reaches its parent's project.
 
 ## Out of scope (stages 2 and 3, filed as follow-ups)
 
