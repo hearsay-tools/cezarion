@@ -29,6 +29,16 @@ export type OrderableProject = { id: string }
 export const PROJECT_ORDER_LIMIT = 200
 
 /**
+ * Whether a registry this size can be hand-ordered at all. The stored list holds at most
+ * `PROJECT_ORDER_LIMIT` ids, so past it a drag could only persist a truncated list; the ids cut
+ * off would then read as "never placed" and jump above the rest, undoing the drop. Rather than
+ * offer a drag that does not stick, the rail offers none, and the registry order stands.
+ */
+export function canPersistProjectOrder(count: number): boolean {
+  return count <= PROJECT_ORDER_LIMIT
+}
+
+/**
  * A stored order, made safe to use: strings only, blanks and duplicates dropped, capped.
  *
  * `ui-state.json` is a user-owned file the README invites people to edit, and the read schema is

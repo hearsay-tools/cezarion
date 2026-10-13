@@ -5,7 +5,7 @@ import { putWorkspaceUiState } from '@/api/client'
 import { useWorkspaceUiState, workspaceQueryKeys } from '@/api/queries'
 import { toast } from '@/components/ui/toaster'
 import type { WorkspaceUiState } from '@open-mercato/cezar-api-client'
-import { normalizeProjectOrder, PROJECT_ORDER_LIMIT } from './project-order'
+import { canPersistProjectOrder, normalizeProjectOrder } from './project-order'
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -84,8 +84,10 @@ export function useProjectOrder(): {
   const setOrder = React.useCallback(
     (ids: readonly string[]) => {
       const next = normalizeProjectOrder(ids)
-      if (next.length === 0) return
-      write(next.slice(0, PROJECT_ORDER_LIMIT))
+      // A list the store cannot hold whole is not written at all: a truncated one would move the
+      // projects it drops (see `canPersistProjectOrder`, which keeps the rail from offering it).
+      if (next.length === 0 || !canPersistProjectOrder(ids.length)) return
+      write(next)
     },
     [write],
   )

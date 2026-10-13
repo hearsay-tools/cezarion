@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { useHealth, useProjects, useRunsIndex, workspaceQueryKeys } from '@/api/queries'
 import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
-import { orderProjects } from '@/lib/project-order'
+import { canPersistProjectOrder, orderProjects } from '@/lib/project-order'
 import { signalsByProject, type ProjectSignal } from '@/lib/project-signal'
 import { useProjectOrder } from '@/lib/use-project-order'
 
@@ -15,7 +15,8 @@ export type WorkspaceSignals = {
   signals: ReadonlyMap<string, ProjectSignal> | null
   /** `capabilities.singleProject` (`CEZ_SINGLE_PROJECT=1`). Never inferred from the project count. */
   singleProject: boolean
-  /** The workspace ui-state has loaded, so a reorder can be written without dropping its siblings. */
+  /** The workspace ui-state has loaded, so a reorder can be written without dropping its siblings,
+   *  and the registry fits the stored order whole (`canPersistProjectOrder`). */
   canReorder: boolean
   /** Persist a full order (every id on screen, in its new order). */
   onReorder: (ids: readonly string[]) => void
@@ -37,7 +38,8 @@ export type WorkspaceSignals = {
 export function useWorkspaceSignals(): WorkspaceSignals | null {
   const queryClient = useQueryClient()
   const registered = useProjects().data?.projects
-  const { order, canReorder, setOrder } = useProjectOrder()
+  const { order, canReorder: uiStateLoaded, setOrder } = useProjectOrder()
+  const canReorder = uiStateLoaded && registered !== undefined && canPersistProjectOrder(registered.length)
   const projects = React.useMemo(() => (registered ? orderProjects(registered, order) : undefined), [registered, order])
   const index = useRunsIndex().data
   const singleProject = useHealth().data?.capabilities.singleProject === true

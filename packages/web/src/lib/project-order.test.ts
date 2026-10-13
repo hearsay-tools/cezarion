@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  canPersistProjectOrder,
   moveProjectId,
   normalizeProjectOrder,
   orderProjects,
@@ -110,5 +111,14 @@ describe('moveProjectId', () => {
     const input = ['a', 'b', 'c']
     moveProjectId(input, 0, 2)
     expect(input).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('canPersistProjectOrder', () => {
+  it('allows a reorder only while the whole registry fits the stored list', () => {
+    expect(canPersistProjectOrder(2)).toBe(true)
+    expect(canPersistProjectOrder(PROJECT_ORDER_LIMIT)).toBe(true)
+    // One more and a drop would persist a truncated list that moves the project it left out.
+    expect(canPersistProjectOrder(PROJECT_ORDER_LIMIT + 1)).toBe(false)
   })
 })
