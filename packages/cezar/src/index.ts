@@ -560,10 +560,10 @@ async function runCommand(
   };
   const onSigint = () => forward('SIGINT');
   const onSigterm = () => forward('SIGTERM');
-  const onSighup = () => forward('SIGHUP');
+  // Off a terminal the listener is a no-op that ignores the hangup (see onTerminal).
+  const onSighup = onTerminal() ? () => forward('SIGHUP') : () => {};
   process.on('SIGINT', onSigint); process.on('SIGTERM', onSigterm);
-  if (onTerminal()) process.on('SIGHUP', onSighup);
-  else ignoreHangupOffTerminal();
+  if (process.platform !== 'win32') process.on('SIGHUP', onSighup);
   try {
     // Headless tasks still appear in the cockpit later, so persist the same
     // task-local recovery event when a credential expires after the preflight.
