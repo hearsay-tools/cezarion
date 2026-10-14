@@ -29,7 +29,8 @@ const args = process.argv.slice(2)
 const command = args.indexOf('--session') + 2
 if (args[command] === 'tab' && args[command + 1] === 'new') {
   const pid = readFileSync(${JSON.stringify(pidFile)}, 'utf8').trim()
-  if (/^\d+$/.test(pid) && Number(pid) > 1) process.kill(Number(pid), 'SIGCONT')
+  // Doubled backslash: this is generated source, and a template literal turns \\d into d.
+  if (/^\\d+$/.test(pid) && Number(pid) > 1) process.kill(Number(pid), 'SIGCONT')
 }
 const child = spawnSync(${JSON.stringify(provider.command)}, args, { stdio: 'inherit', env: process.env })
 process.exit(child.status ?? 1)

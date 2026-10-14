@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync } from 'node:fs'
 
 const [root, buildRoot = process.cwd(), authMode] = process.argv.slice(2)
-const load = file => import(pathToFileURL(resolve(buildRoot, 'packages/cezar/dist', file)).href)
+const load = file => import(pathToFileURL(resolve(buildRoot, '.ai/qa/build/cezar/dist', file)).href)
 const { RunStore } = await load('runs/store.js')
 const { UiEventSink } = await load('runs/ui-event-sink.js')
 const { RunManager } = await load('workflows/run.js')
