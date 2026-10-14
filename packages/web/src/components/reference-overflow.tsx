@@ -28,6 +28,10 @@ export function ReferenceOverflow({
   // How it was opened decides whether focus moves into the list. A CLICK should hand the keyboard
   // the links; a hover must not yank focus out of whatever the reader was doing.
   const openedByHover = React.useRef(false)
+  // A mouse hovers before it presses, so by the click the list is often already open by hover.
+  // Radix would toggle it shut; the press keeps it open instead and takes it over as a click-open.
+  const pressOnHoverOpen = React.useRef(false)
+  const content = React.useRef<HTMLDivElement>(null)
   const closeTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   React.useEffect(() => () => clearTimeout(closeTimer.current), [])
 
@@ -72,10 +76,17 @@ export function ReferenceOverflow({
           // A real press — mouse, tap or keyboard — is not a hover, whatever happened before it.
           onPointerDown={(event) => {
             event.stopPropagation()
+            pressOnHoverOpen.current = open && openedByHover.current
             openedByHover.current = false
           }}
           onClick={(event) => {
             event.stopPropagation()
+            if (open && (pressOnHoverOpen.current || openedByHover.current)) {
+              event.preventDefault() // skips Radix's toggle
+              cancelClose()
+              content.current?.focus()
+            }
+            pressOnHoverOpen.current = false
             openedByHover.current = false
           }}
           className="no-hover:min-h-[44px] no-hover:min-w-[44px] max-md:min-h-[44px] max-md:min-w-[44px] shrink-0 rounded-full px-1 text-[11px] font-medium text-soft-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
@@ -84,6 +95,7 @@ export function ReferenceOverflow({
         </button>
       </PopoverTrigger>
       <PopoverContent
+        ref={content}
         align="start"
         collisionPadding={8}
         className="w-auto min-w-40 max-h-(--radix-popover-content-available-height) overflow-y-auto overscroll-contain p-1.5"

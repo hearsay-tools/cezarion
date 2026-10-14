@@ -25,7 +25,9 @@ const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
  * /api/v1/worktrees/reclaim` force-runs the enforcer. Both additive and
  * best-effort — never error.
  */
-describe('the worktrees API', () => {
+// Every case drives real git worktrees. Measured 2026-10-14: the slowest take 0.7-1.1 s alone, and the
+// dirty owned-worker reclaim passed 5 s in a Squeal warmup at load ~38 on 24 cores.
+describe('the worktrees API', { timeout: 30_000 }, () => {
   let repoRoot: string;
   let cezHome: string;
   let store: RunStore;
