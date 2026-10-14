@@ -510,6 +510,11 @@ export class AgentBrowser {
     return targetId
   }
 
+  /** Make `ref` (tab id, label or CDP target id) the session's active tab. */
+  switchTab(ref: string): void {
+    this.run(['tab', ref])
+  }
+
   /** operation: snapshot — the accessibility tree, as the string the descriptor documents. */
   snapshot(): string {
     return String(this.run(['snapshot', '-i']).snapshot ?? '')

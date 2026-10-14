@@ -217,6 +217,10 @@ describe('live preview', () => {
       await request('Network.enable', {}, firstSession)
       // Let the provider initialize/resume its target before this separate CDP connection navigates.
       const second = { targetId: browser.newTab() }
+      // `tab new` made the second tab the session's active one. Hand the session back before this
+      // CDP connection navigates and closes it, or the next provider command can land on the closed
+      // target ("Session with given id not found", PR #1019 Cockpit browser E2E shard 2/4).
+      browser.switchTab(first.targetId)
       const secondSession = (await request('Target.attachToTarget', { targetId: second.targetId, flatten: true })).sessionId
       try {
         await request('Target.activateTarget', { targetId: second.targetId })
