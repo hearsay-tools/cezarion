@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startTestCockpit, type TestCockpit } from '../task-cli/cockpit.testkit.ts';
 import { EXIT } from '../task-cli/cli.ts';
-import { TaskCliError, type Cockpit, type HttpResult } from '../task-cli/http.ts';
+import { fetchJson, TaskCliError, type Cockpit, type HttpResult } from '../task-cli/http.ts';
 import { automationPageUrl, bodyFromAddFlags, parseEvery, runAutomationCommand, type AutomationIo } from './automation-cli.ts';
 import { AUTOMATION_SCHEMA_REFERENCE } from './prompts.ts';
 
@@ -166,6 +166,29 @@ describe('cez automation', () => {
       const failing = async () => { throw new TaskCliError(2, { code: 'no-cockpit', error: 'no running cockpit serves /x', hint: 'start the cockpit in /x with: cez' }); };
       expect(await run(['list', '--url', 'http://127.0.0.1:1'], {}, { discover: failing })).toBe(EXIT.refused);
       expect(last()).toEqual({ code: 'no-cockpit', error: 'no running cockpit serves /x' });
+    });
+
+    // Review of #1018: a run recovery resumes can call the CLI before `startServer` replaces the
+    // listener's plain-text "Cockpit is starting" 503, which never reached the API.
+    it('retries the startup 503 and then serves the request; a JSON 503 is not retried', async () => {
+      let starting = 2;
+      const http: AutomationIo['http'] = async (url, init) => {
+        if (starting > 0) { starting -= 1; return { status: 503, data: 'Cockpit is starting; retry shortly.\n' }; }
+        return fetchJson(url, init);
+      };
+      expect(await run(['add', '--name', 'N', '--cron', '0 7 * * *', '--prompt', 'P'], env(), { http })).toBe(EXIT.ok);
+      expect(posted).toHaveLength(1);
+      const busy: AutomationIo['http'] = async () => ({ status: 503, data: { error: 'busy' } });
+      expect(await run(['list'], env(), { http: busy })).toBe(EXIT.refused);
+      expect(last()).toMatchObject({ status: 503, error: 'busy' });
+    });
+
+    it('gives up on the startup 503 after a bounded wait', async () => {
+      let calls = 0;
+      const http: AutomationIo['http'] = async () => { calls += 1; return { status: 503, data: 'Cockpit is starting; retry shortly.\n' }; };
+      expect(await run(['list'], env(), { http })).toBe(EXIT.refused);
+      expect(calls).toBeGreaterThan(1);
+      expect(calls).toBeLessThanOrEqual(61);
     });
 
     it('an unreachable origin exits 2', async () => {

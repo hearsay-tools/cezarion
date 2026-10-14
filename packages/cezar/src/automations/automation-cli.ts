@@ -66,6 +66,9 @@ for a cockpit instead.`;
 const NO_COCKPIT = 'no cockpit address — this command works inside a task run by a cockpit with automations on; stop and report that automations are unavailable';
 const CHECK_POLL_MS = 500;
 const CHECK_TIMEOUT_MS = 120_000;
+/** The startup 503 is retried for up to 30 s: 60 attempts, 500 ms apart. */
+const STARTUP_RETRIES = 60;
+const STARTUP_RETRY_MS = 500;
 
 /** The keys `PUT /automations/:id` accepts besides `enabled` and `expectedRevision`. */
 const EDITABLE_KEYS = ['name', 'description', 'kind', 'events', 'intervalSeconds', 'filters', 'schedule', 'task'] as const;
@@ -285,8 +288,16 @@ async function execute(
 ): Promise<number> {
   const http = io.http ?? fetchJson;
   const path = (suffix = '') => `${cockpit.api}/automations${id ? `/${encodeURIComponent(id)}` : ''}${suffix}`;
+  const sleep = io.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
   const call = async (url: string, init?: { method?: string; body?: unknown; responseLimitBytes?: number }, ok = 200): Promise<unknown> => {
-    const result = await http(url, init);
+    // `serve` holds its port with a placeholder listener that answers a plain-text 503 until
+    // `startServer` takes over, and recovery resumes runs inside that window (review of #1018).
+    // That 503 never reached the API, so even a POST is safe to resend; a JSON 503 is the API's.
+    let result = await http(url, init);
+    for (let attempt = 1; attempt < STARTUP_RETRIES && result.status === 503 && typeof result.data === 'string'; attempt += 1) {
+      await sleep(STARTUP_RETRY_MS);
+      result = await http(url, init);
+    }
     if (result.status !== ok) refuse(result);
     return result.data;
   };
@@ -348,7 +359,6 @@ async function execute(
       const { checkId } = await call(path('/check'), { method: 'POST', body: { mode } }, 202) as { checkId: string };
       const url = automationPageUrl(cockpit, id);
       const now = io.now ?? Date.now;
-      const sleep = io.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
       const deadline = now() + (io.timeoutMs ?? CHECK_TIMEOUT_MS);
       // The check record is workspace-level, keyed by the unguessable id the project route returned.
       for (;;) {
