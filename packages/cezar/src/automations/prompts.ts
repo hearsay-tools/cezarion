@@ -101,7 +101,7 @@ The CLI is ${command}. Every command prints one JSON object:
 
   ${command} schema                                   the definition shape, every key, every bound, the prompt placeholders
   ${command} create --file <def.json> [--enable]      create one from JSON (paused unless --enable); --json '<json>' or stdin work too
-  ${command} add --name <n> (--cron "0 4 * * *" | --on <event> --every 5m) --prompt <p> [--workflow w] [--runner r] [--model m] [--no-autonomous] [--label l] [--author a] [--enable]
+  ${command} add --name <n> (--cron "0 4 * * *" | --on <event> --every 5m) --prompt <p> [--workflow w] [--runner r] [--model m] [--no-autonomous] [--label l] [--author a] [--changed-label l] [--enable]
   ${command} check <id> [--execute]                   GitHub poll: preview what the filter matches right now (launches nothing without --execute)
   ${command} run <id>                                 schedule: launch it once, now
   ${command} list | show <id> | update <id> --file <def.json> | enable <id> | pause <id> | delete <id>

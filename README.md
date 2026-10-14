@@ -805,6 +805,7 @@ exits 0 ok, 1 check failed, 2 refused or no cockpit, 3 check timed out, 64 usage
 cez automation schema                                    # the definition reference (needs no cockpit)
 cez automation add --name 'Weekday triage' --cron '0 7 * * 1-5' --prompt 'Triage new issues'
 cez automation add --name 'Review PRs' --on pull_request.opened --every 5m --label bug --prompt-file p.md
+cez automation add --name 'Agent triage' --on issue.labeled --changed-label needs-agent --prompt 'Triage #{{github.number}}'
 cez automation create --file def.json [--enable]         # full JSON form; stdin when no flag is given
 cez automation update <id> --json '{"task":{"prompt":"…"}}'
 cez automation check <id> [--execute] · run <id> · list · show <id> · enable <id> · pause <id> · delete <id>

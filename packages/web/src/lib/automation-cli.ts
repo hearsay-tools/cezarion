@@ -19,7 +19,7 @@ export function shellQuote(value: string): string {
 /** The task keys `add` has flags for. `worktree` is not a flag: `add` always sends `true`. */
 const FLAG_TASK_KEYS: ReadonlySet<string> = new Set(['prompt', 'workflow', 'runner', 'model', 'autonomous', 'worktree'])
 /** The poll filters `add` has flags for, besides the two bounds it always sends at 7 and 25. */
-const FLAG_FILTER_LISTS: ReadonlySet<string> = new Set(['anyLabels', 'authors'])
+const FLAG_FILTER_LISTS: ReadonlySet<string> = new Set(['anyLabels', 'authors', 'changedLabels'])
 
 function bodyFlagExpressible(body: CreateAutomationInput): boolean {
   if (body.description !== undefined) return false
@@ -61,6 +61,7 @@ function flagsOf(body: CreateAutomationInput): string {
     parts.push(flag('on', body.events!.join(',')), `--every ${everyFlag(body.intervalSeconds ?? 300)}`)
     for (const label of body.filters?.anyLabels ?? []) parts.push(flag('label', label))
     for (const author of body.filters?.authors ?? []) parts.push(flag('author', author))
+    for (const label of body.filters?.changedLabels ?? []) parts.push(flag('changed-label', label))
   }
   const { task } = body
   if (task.workflow) parts.push(flag('workflow', task.workflow))

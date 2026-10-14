@@ -107,6 +107,22 @@ describe('cez automation', () => {
       });
     });
 
+    // Review of #1018: a label event needs `filters.changedLabels`, which `--label` (anyLabels) cannot say.
+    it('--changed-label defines a label event; a label event without it is a usage error', () => {
+      expect(bodyFromAddFlags({ name: 'G', on: 'issue.labeled', 'changed-label': ['needs-agent'] }, 'P')).toMatchObject({
+        events: ['issue.labeled'], filters: { changedLabels: ['needs-agent'] },
+      });
+      expect(() => bodyFromAddFlags({ name: 'G', on: 'issue.opened,issue.unlabeled' }, 'P')).toThrow(/--changed-label/);
+    });
+
+    it('add --on issue.labeled --changed-label creates a definition the cockpit accepts', async () => {
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: harness.repoRoot });
+      execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: harness.repoRoot });
+      execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/example/repo.git'], { cwd: harness.repoRoot });
+      expect(await run(['add', '--name', 'Triage', '--on', 'issue.labeled', '--changed-label', 'needs-agent', '--prompt', 'Triage {{github.number}}']), out.join('\n')).toBe(EXIT.ok);
+      expect(posted.at(-1)?.body).toMatchObject({ filters: { changedLabels: ['needs-agent'] } });
+    });
+
     it('parses --every', () => {
       expect(parseEvery('5m')).toBe(300);
       expect(parseEvery('2h')).toBe(7200);

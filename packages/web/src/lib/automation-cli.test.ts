@@ -133,6 +133,7 @@ describe('Copy as CLI round-trips through a real shell into the cez automation r
     ['an hourly schedule', scheduleDraft({ schedule: { type: 'hours', hour: 0, minute: 0, day: 1, every: 6 } }), 'add'],
     ['a poll with labels and authors', pollDraft({ prompt: HOSTILE, intervalSeconds: 90 }), 'add'],
     ['a poll with a label starting with a dash', pollDraft({ filters: { anyLabels: ['-wip'], lookbackDays: 7, maxRecords: 25 } }), 'add'],
+    ['a label event with a changed label', pollDraft({ events: ['issue.labeled'], filters: { changedLabels: ['needs-agent'], lookbackDays: 7, maxRecords: 25 } }), 'add'],
     ['a poll with exclusions', pollDraft({ prompt: HOSTILE, filters: { excludeLabels: ["won't fix"], lookbackDays: 3, maxRecords: 10 } }), 'create'],
     ['a cockpit-made schedule with a description', scheduleDraft({ prompt: HOSTILE, description: "It's `daily`", taskExtra: {} }), 'create'],
   ]

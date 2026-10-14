@@ -49,7 +49,7 @@ One JSON object per invocation; exit 0 ok, 1 check failed, 2 refused or no cockp
                                            paused unless --enable
   add --name <name> (--cron "<M H * * *>" | --on <event>[,<event>] [--every <5m|1h>])
       [--prompt <text> | --prompt-file <path>] [--workflow <w>] [--runner <id>] [--model <m>]
-      [--autonomous | --no-autonomous] [--label <l>]... [--author <a>]... [--enable]
+      [--autonomous | --no-autonomous] [--label <l>]... [--author <a>]... [--changed-label <l>]... [--enable]
                                            the same from flags. --cron takes "M H * * *" (daily), "M H * * 1-5"
                                            (weekdays), "M H * * D" (0 or 7 = Sunday) or "0 */N * * *"
                                            (N in 1,2,3,4,6,8,12); anything else needs the JSON form
@@ -81,6 +81,7 @@ const ADD_FLAGS = {
   workflow: { type: 'string' }, runner: { type: 'string' }, model: { type: 'string' },
   autonomous: { type: 'boolean' }, 'no-autonomous': { type: 'boolean' },
   label: { type: 'string', multiple: true }, author: { type: 'string', multiple: true },
+  'changed-label': { type: 'string', multiple: true },
   enable: { type: 'boolean' },
 } as const;
 
@@ -119,7 +120,7 @@ export function parseEvery(value: string): number {
 export interface AddFlags {
   name?: string; cron?: string; on?: string; every?: string;
   workflow?: string; runner?: string; model?: string; autonomous?: boolean; 'no-autonomous'?: boolean;
-  label?: string[]; author?: string[]; enable?: boolean;
+  label?: string[]; author?: string[]; 'changed-label'?: string[]; enable?: boolean;
 }
 
 /** The `add` flags as the `create` body they stand for. Anything they cannot say is exit 64. */
@@ -144,10 +145,15 @@ export function bodyFromAddFlags(values: AddFlags, prompt: string): CreateAutoma
     const filters: NonNullable<CreateAutomationInput['filters']> = { lookbackDays: 7, maxRecords: 25 };
     if (values.label?.length) filters.anyLabels = values.label;
     if (values.author?.length) filters.authors = values.author;
+    if (values['changed-label']?.length) filters.changedLabels = values['changed-label'];
+    const events = values.on!.split(',').map((event) => event.trim()).filter(Boolean) as AutomationEvent[];
+    if (!filters.changedLabels && events.some((event) => event === 'issue.labeled' || event === 'issue.unlabeled')) {
+      usageError('--on issue.labeled and issue.unlabeled need --changed-label <label>: the label whose change fires it');
+    }
     body = {
       name: values.name.trim(),
       kind: 'github',
-      events: values.on!.split(',').map((event) => event.trim()).filter(Boolean) as AutomationEvent[],
+      events,
       intervalSeconds: values.every ? parseEvery(values.every) : 300,
       filters,
       task,
