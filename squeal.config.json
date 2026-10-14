@@ -17,35 +17,54 @@
       "packages/cezar/web/dist/**",
       "packages/cezar/scripts/**",
       "packages/cezar/package.json",
-      "alias-cezarion/**",
-      "pnpm-lock.yaml"
+      "alias-cezarion/**"
     ],
     "packages/web/e2e/*.e2e.ts": [
       "packages/cezar/dist/**",
       "packages/cezar/web/dist/**",
       ".ai/scripts/test-env-up.sh",
       ".ai/browsers/agent-browser.md",
-      "packages/web/e2e/**",
-      "pnpm-lock.yaml"
+      "packages/web/e2e/**"
     ],
     ".github/scripts/*.test.cjs": [
       ".github/workflows/**",
-      ".github/scripts/**",
-      ".github/ISSUE_TEMPLATE/**",
-      ".github/codex/**",
-      ".github/schemas/**",
-      ".ai/scripts/e2e.sh",
+      ".github/scripts/**"
+    ],
+    ".github/scripts/automated-code-review.workflow.test.cjs": [
+      ".github/codex/prompts/review.md",
+      ".github/schemas/review-findings.schema.json",
+      "AGENTS.md"
+    ],
+    ".github/scripts/issue-intake.workflow.test.cjs": [
+      ".github/codex/prompts/issue-intake.md",
+      ".github/schemas/issue-intake.schema.json"
+    ],
+    ".github/scripts/issue-template.test.cjs": [
+      ".github/ISSUE_TEMPLATE/task.yml"
+    ],
+    ".github/scripts/ci.workflow.test.cjs": [
       ".ai/agentic.config.json",
-      ".ai/upstream/**",
-      ".ai/scripts/test-env-up.sh",
       "AGENTS.md",
       "CLAUDE.md",
       "docs/sdlc/ci.md",
-      "package.json",
-      "pnpm-lock.yaml",
-      "vitest.config.ts",
-      "packages/web/e2e/**",
-      "packages/cezar/package.json",
+      "package.json"
+    ],
+    ".github/scripts/cockpit-test-sequencer.test.cjs": [
+      "packages/web/e2e/**"
+    ],
+    ".github/scripts/e2e-fetch.test.cjs": [
+      "packages/web/e2e/fetch-setup.mjs"
+    ],
+    ".github/scripts/e2e-runner.test.cjs": [
+      ".ai/scripts/e2e.sh"
+    ],
+    ".github/scripts/upstream-ledger.test.cjs": [
+      ".ai/upstream/**"
+    ],
+    ".github/scripts/vitest-actions-report.test.cjs": [
+      "vitest.config.ts"
+    ],
+    ".github/scripts/transcript-facts-responsiveness.workflow.test.cjs": [
       "packages/cezar/scripts/measure-transcript-facts-*.mjs"
     ],
     "scripts/squeal-browser.test.mjs": [
@@ -55,10 +74,12 @@
       "packages/web/e2e/vitest.config.ts",
       "packages/web/e2e/smoke.e2e.ts",
       "packages/web/e2e/environment.ts",
-      ".ai/scripts/test-env-up.sh",
-      "pnpm-lock.yaml"
+      ".ai/scripts/test-env-up.sh"
     ],
-    "scripts/test-changed.test.mjs": ["scripts/test-changed.mjs", "package.json", "pnpm-lock.yaml"],
+    "scripts/test-changed.test.mjs": [
+      "scripts/test-changed.mjs",
+      "package.json"
+    ],
     "packages/cezar/test/unit/cursor-hang-stdin.test.ts": [
       "packages/cezar/scripts/mock-cursor-hang-stdin.mjs"
     ],
