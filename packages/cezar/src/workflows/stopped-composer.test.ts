@@ -37,7 +37,10 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   captured.specs.length = 0;
 });
-describe('stopped composer engine', () => {
+// The waits cover a run manager spawning its (mocked) session. vi.waitFor's 1 s default lost that
+// race under the full suite's load (PR #1019 CI, Vitest shard 3/3, the stopping row at 1084 ms).
+const SETTLE = { timeout: 8_000 };
+describe('stopped composer engine', { timeout: 15_000 }, () => {
   it('requeues the same untouched workflow durably, preserving prompt, attachments and execution inputs across restart', async () => {
     const { root, data, store, manager } = fixture();
     const accountDir = join(root, 'selected-account');
@@ -59,7 +62,7 @@ describe('stopped composer engine', () => {
     const reopened = RunStore.open(data, { keepLive: true });
     const next = createFixtureManager(reopened, root); managers.push(next);
     await next.recover();
-    await vi.waitFor(() => expect(captured.specs).toHaveLength(1));
+    await vi.waitFor(() => expect(captured.specs).toHaveLength(1), SETTLE);
     expect(captured.specs[0]).toMatchObject({ model: 'sonnet', effort: 'high', allowedTools: ['Read'], env: { CLAUDE_CONFIG_DIR: accountDir } });
     expect(JSON.stringify(captured.specs[0])).toContain('original task');
     expect(JSON.stringify(captured.specs[0])).toContain('new request');
@@ -78,12 +81,12 @@ describe('stopped composer engine', () => {
     const live = createFixtureManager(store, root); managers.push(live);
     // This row owns session settlement, not Git setup; start the held mock directly.
     const run = live.startRun(workflow, { task: 'task', worktree: false });
-    await vi.waitFor(() => expect(captured.specs).toHaveLength(1));
+    await vi.waitFor(() => expect(captured.specs).toHaveLength(1), SETTLE);
     expect(live.cancel(run.id)).toBe(true);
     expect(store.getRun(run.id)).toHaveProperty('stopping', true);
     expect(live.continueRun(run.id)).toMatchObject({ ok: false });
     captured.release?.();
-    await vi.waitFor(() => expect(store.getRun(run.id)?.status).toBe('cancelled'));
+    await vi.waitFor(() => expect(store.getRun(run.id)?.status).toBe('cancelled'), SETTLE);
     expect(store.getRun(run.id)?.stopping).not.toBe(true);
   });
   it('honors Stop during continuation startup and refuses buffered Send or a duplicate Continue', async () => {
@@ -95,7 +98,7 @@ describe('stopped composer engine', () => {
     expect(manager.continueRun(run.id)).toMatchObject({ ok: false });
     expect(manager.cancel(run.id)).toBe(true);
     expect(manager.deferMessage(run.id, [{ type: 'text', text: 'must remain draft' }])).toBe(false);
-    await vi.waitFor(() => expect(store.getRun(run.id)?.status).toBe('cancelled'));
+    await vi.waitFor(() => expect(store.getRun(run.id)?.status).toBe('cancelled'), SETTLE);
     expect(captured.specs).toHaveLength(0);
     expect(store.getRun(run.id)?.stopping).not.toBe(true);
   });

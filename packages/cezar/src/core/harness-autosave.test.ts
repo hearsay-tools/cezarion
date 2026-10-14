@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as worktrees from '../git-worktree.ts';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { withOwnedInputRun, waitFor } from './harness-parity.testkit.ts';
+import { killFromPidFile, readPid, writePidSource } from '../pid-file.testkit.ts';
 
 const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 // Real native frames on every HARNESS_ADAPTERS runner. Registered as R24/R25
@@ -45,7 +46,8 @@ describe('harness parity — autosave cleanup (#495)', () => {
               // EPERM on the group probe, and no TERM/KILL delivery. SIGKILL can
               // otherwise leave a /proc zombie that autosave treats as proof of
               // death, skipping the blocked-cleanup note (hearsay-tools/cezarion#950).
-              if (existsSync(file) && pid === -Number(readFileSync(file, 'utf8')) && obscure) {
+              const git = readPid(file);
+              if (git !== undefined && pid === -git && obscure) {
                 if (signal === 0) throw Object.assign(new Error('unreadable'), { code: 'EPERM' });
                 return true;
               }
@@ -56,7 +58,7 @@ const fs = require('node:fs');
 const args = process.argv.slice(2);
 if (args.includes('status') && args.includes('--porcelain')) {
   process.on('SIGTERM', () => {});
-  fs.writeFileSync(${JSON.stringify(join(bin, 'pid'))}, String(process.pid));
+  ${writePidSource(join(bin, 'pid'))}
   setInterval(() => {}, 1000);
 } else {
   const r = require('node:child_process').spawnSync(${JSON.stringify(realGit)}, args, {stdio:'inherit'});
@@ -81,9 +83,7 @@ if (args.includes('status') && args.includes('--porcelain')) {
               process.env.PATH = path;
               obscure = false;
               // Also reaps the old unbounded implementation during mutation tests.
-              if (existsSync(join(bin, 'pid'))) {
-                try { kill(Number(readFileSync(join(bin, 'pid'), 'utf8')), 'SIGKILL'); } catch { /* gone */ }
-              }
+              killFromPidFile(join(bin, 'pid'), 'SIGKILL', kill);
               probe.mockRestore();
               await Promise.allSettled(saves);
               await waitFor(() => !manager.isActive(runId));

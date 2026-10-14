@@ -115,10 +115,12 @@ with the existing environment reuse and skip-exit-0 behavior. For iteration use
 A literal `--` ends wrapper option parsing. A filtered pass is selection-only
 verification, not evidence that the complete browser gate passed.
 
-Local E2E reuse requires the `.cez-e2e-build` marker emitted by the same Vite
-build as the cockpit bundle. An ordinary production web build clears that marker;
-the next E2E boot rebuilds even when source files have not changed. This keeps
-the browser suite's E2E-only scroll and idle seams present (#649).
+The E2E bootstrap builds into the ignored `.ai/qa/build/cezar` mirror
+(`.ai/scripts/build-e2e.sh`) and never writes `packages/cezar/dist` or
+`packages/cezar/web/dist`, so a production `npm run build` and a browser run no
+longer overwrite each other. Local E2E reuse still requires the `.cez-e2e-build`
+marker emitted by the same Vite build as the cockpit bundle, which keeps the
+browser suite's E2E-only scroll and idle seams present (hearsay-tools/cezarion#649).
 
 The [sequential baseline](https://github.com/hearsay-tools/cezarion/actions/runs/34973823399/job/104396396906) took 13m16s: browser provision took about 6s, dependency install/build 15s, server startup 1s, and Vitest 764.16s (757.50s of tests across 43 files). The first four-shard CI run reduced the longest job to 6m22s; actual wall time depends on file balance and runner queueing.
 

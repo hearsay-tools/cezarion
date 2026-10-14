@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { startCursorPrintProcess } from './cursor-print-process.ts';
+import { requirePidText } from '../pid-file.testkit.ts';
 
 const env = { ...process.env };
 
@@ -16,8 +17,7 @@ describe('Cursor print process ownership', () => {
     }, { onStdout: chunk => { stdout += chunk; }, onStderr: () => {} });
     expect((await proc.exit).code).toBe(0);
     await proc.settled;
-    const descendantPid = Number(stdout.trim());
-    expect(descendantPid).toBeGreaterThan(0);
+    const descendantPid = requirePidText(stdout, 'cursor stdout');
     await expect.poll(() => {
       try { process.kill(descendantPid, 0); return true; } catch { return false; }
     }, { timeout: 1_000 }).toBe(false);

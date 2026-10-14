@@ -1,9 +1,10 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { unregisterRunProcess } from '../core/process-usage.ts';
+import { readPid, requirePid } from '../pid-file.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager } from './run.ts';
@@ -53,10 +54,8 @@ describe('Stop before the first Codex turn (#493)', { timeout: 15_000 }, () => {
         // settles even after SIGTERM has physically terminated the child.
         for (const record of store.listRuns()) manager.cancel(record.id);
         const ready = join(root, '.codex-startup-ready');
-        if (existsSync(ready)) {
-          const pid = Number(readFileSync(ready, 'utf8'));
-          await vi.waitFor(() => expect(processExited(pid)).toBe(true), waitOptions);
-        }
+        const pid = readPid(ready);
+        if (pid !== undefined) await vi.waitFor(() => expect(processExited(pid)).toBe(true), waitOptions);
         for (const record of store.listRuns()) unregisterRunProcess(record.id);
         manager.dispose();
         store.flush();
@@ -83,8 +82,7 @@ describe('Stop before the first Codex turn (#493)', { timeout: 15_000 }, () => {
       runId = prior.id;
     }
     const ready = join(a.root, '.codex-startup-ready');
-    await vi.waitFor(() => expect(existsSync(ready)).toBe(true), waitOptions);
-    const pid = Number(readFileSync(ready, 'utf8'));
+    const pid = await vi.waitFor(() => requirePid(ready), waitOptions);
     const stepId = a.store.getRun(runId)!.currentStepId!;
     expect(a.store.getRun(runId)).toMatchObject({ status: 'running', tokensUsed: 0 });
     expect(a.store.readEvents(runId).some(event => ['session', 'turn.started', 'turn-end', 'text'].includes(event.type))).toBe(false);

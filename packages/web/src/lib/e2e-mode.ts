@@ -1,8 +1,8 @@
 /**
  * Build-time gate for the cockpit e2e suite (#415).
  *
- * `VITE_CEZ_E2E=1` is set only when `.ai/scripts/test-env-up.sh` builds the bundle the
- * suite drives. A production `npm run build` leaves it unset, so `useNow` and every
+ * `VITE_CEZ_E2E=1` is set only when `.ai/scripts/build-e2e.sh` builds the bundle the
+ * suite drives, into `.ai/qa/build/cezar`. A production `npm run build` leaves it unset, so `useNow` and every
  * `refetchInterval` keep their live cadences.
  */
 export function isCockpitE2e(): boolean {

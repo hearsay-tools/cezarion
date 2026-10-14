@@ -1,12 +1,12 @@
 import type { ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, bootProjectId, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import {
   contrastSampleExpression,
   focusWithKeyboard,
@@ -20,7 +20,6 @@ import record from './fixtures/thread-run.record.json'
  * stay visible without hover, and keep their clipboard payloads. Unit coverage pins the
  * DOM contract; this exercises the real cockpit at phone and desktop widths.
  */
-const repoRoot = resolve(import.meta.dirname, '../../..')
 const sessionId = `e2e-assistant-reply-copy-${process.pid}`
 const RUN_ID = 'aaaaaaaa-0927-4222-8333-bbbbbbbbbbbb'
 const RUN = {
@@ -88,7 +87,7 @@ beforeAll(async () => {
   )
 
   server = spawnFixtureServer(
-    [join(repoRoot, 'packages/cezar/dist/index.js'), 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
+    [cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
   )
   baseUrl = await waitForFixtureServer(server)

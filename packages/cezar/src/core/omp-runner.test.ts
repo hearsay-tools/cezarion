@@ -28,6 +28,7 @@ import { sessionGroupOf } from './session-process.js';
 import { buildOmpArgs, OMP_BUILTIN_TOOL_NAMES, OMP_SPEC_SUPPORT, OmpRunner, ompTools } from './omp-runner.js';
 import { createRunner } from './runner-factory.js';
 import { allowedToolsForStep, DEFAULT_ALLOWED_TOOLS } from '../workflows/types.js';
+import { readPids } from '../pid-file.testkit.js';
 
 /** The OMP (Oh My Pi) runner (#595): argv, tool mapping, and the persistent RPC session. */
 
@@ -991,10 +992,7 @@ await import(${JSON.stringify(MOCK)});
 `, { mode: 0o755 });
       return bin;
     };
-    const pids = (): number[] => {
-      const file = join(cwd, 'pids.txt');
-      return existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean).map(Number) : [];
-    };
+    const pids = (): number[] => readPids(join(cwd, 'pids.txt'));
     const refused = (prompt: string, extra: Partial<AgentRunSpec> = {}): AgentRunSpec =>
       spec(prompt, { allowedTools: ['Read', 'TodoWrite'], ...extra, env: { CEZ_MOCK_OMP_DISABLED_TOOLS: 'todo', ...extra.env } });
     const prompts = () => lines('commands.ndjson').filter(command => command.type === 'prompt');

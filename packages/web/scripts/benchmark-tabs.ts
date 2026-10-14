@@ -39,7 +39,8 @@ const counts = values.counts ? values.counts.split(',').map(Number) : values.qui
 if (workloads.some(value => !['overview', 'repeated', 'distinct'].includes(value)) || counts.some(value => ![1, 3, 6, 10].includes(value))) throw new Error('Use overview/repeated/distinct and counts from 1,3,6,10')
 for (const workload of workloads) {
   for (const count of counts) for (const streaming of [false, true]) {
-    const fixture = await createTabFixture(buildRoot)
+    // The production build fingerprinted above, never the e2e mirror the specs serve.
+    const fixture = await createTabFixture(buildRoot, { serverPackage: 'packages/cezar' })
     const browser = AgentBrowser.open(`tabs-${process.pid}-${workload}-${count}-${Number(streaming)}`)
     try {
       browser.goto('about:blank')

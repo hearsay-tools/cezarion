@@ -48,6 +48,7 @@ vi.mock('./runner-runtime.ts', async (original) => ({
 import { RUNNER_IDS, type AgentEvent, type AgentSession, type RunnerId } from './agent-runner.js';
 import { createRunner } from './runner-factory.js';
 import { HARNESS_ADAPTERS, SHUTDOWN_CRITERIA, promptFor } from './harness-parity.testkit.js';
+import { killFromPidFile, readPid, requirePid } from '../pid-file.testkit.js';
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -64,9 +65,7 @@ function alive(pid: number): boolean {
 /** The two children the leftover scenario leaves in the session's cwd. */
 async function leftovers(cwd: string): Promise<{ group: number; session: number }> {
   return vi.waitFor(() => {
-    const [group, session] = ['leftover-group.pid', 'leftover-session.pid'].map(file => Number(readFileSync(join(cwd, file), 'utf8')));
-    expect(group).toBeGreaterThan(0);
-    expect(session).toBeGreaterThan(0);
+    const [group, session] = ['leftover-group.pid', 'leftover-session.pid'].map(file => requirePid(join(cwd, file)));
     return { group: group!, session: session! };
   }, { timeout: 5000 });
 }
@@ -88,7 +87,7 @@ async function withChild(backend: RunnerId, check: (session: AgentSession, child
     // write). Cursor can also replace its child while bootstrapping, so use the
     // native process that actually accepted this prompt, not the first spawn.
     const child = await vi.waitFor(() => {
-      const pid = Number(readFileSync(join(cwd, 'watchdog.pid'), 'utf8'));
+      const pid = readPid(join(cwd, 'watchdog.pid'));
       const accepted = spawned.find(candidate => candidate.pid === pid);
       expect(accepted).toBeDefined();
       return accepted!;
@@ -99,9 +98,7 @@ async function withChild(backend: RunnerId, check: (session: AgentSession, child
     for (const child of spawned) {
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
     }
-    for (const file of ['leftover-group.pid', 'leftover-session.pid']) {
-      try { process.kill(Number(readFileSync(join(cwd, file), 'utf8')), 'SIGKILL'); } catch { /* none, or gone */ }
-    }
+    for (const file of ['leftover-group.pid', 'leftover-session.pid']) killFromPidFile(join(cwd, file));
     await settled;
     rmSync(cwd, { recursive: true, force: true });
   }

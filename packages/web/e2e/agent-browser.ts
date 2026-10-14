@@ -27,10 +27,11 @@ process.once('exit', () => rmSync(fixtureGitSandbox, { recursive: true, force: t
  * (a pinned `runs.json` fixture, an empty repo, a second project).
  *
  * Exported from here rather than re-derived per spec because it is one fact about the build
- * layout, and it has already moved once: `npm run build` emits the server into the workspace
- * package (`packages/cezar/dist`), not into a root-level `dist/`.
+ * layout, and it has moved twice: from a root-level `dist/` into the workspace package, and
+ * then out of `packages/cezar/dist` (the production build) into the e2e bootstrap's ignored
+ * mirror, `.ai/qa/build/cezar` (`.ai/scripts/build-e2e.sh`).
  */
-export const cezarCli = resolve(repoRoot, 'packages/cezar/dist/index.js')
+export const cezarCli = resolve(repoRoot, '.ai/qa/build/cezar/dist/index.js')
 
 /**
  * Failure bundles (#408). A red cockpit shard used to leave nothing behind but
@@ -320,6 +321,10 @@ export function fixtureServeEnv(
   env.GIT_AUTHOR_EMAIL = 'tests@cezar.invalid'
   env.GIT_COMMITTER_NAME = 'Cezar Tests'
   env.GIT_COMMITTER_EMAIL = 'tests@cezar.invalid'
+  // Both of Git's "no repository" endings are a clean answer. When the ceiling is not an ancestor
+  // (a Squeal daemon's workers keep its long TMPDIR, the fixture still sits in /tmp) and /tmp is its
+  // own mount, the search stops there instead: "(or any parent up to mount point /)".
+  const notARepository = /^fatal: not a git repository \(or any (of the parent directories\): \.git|parent up to mount point )/
   const discovery = spawnSync('git', ['rev-parse', '--show-toplevel'], {
     cwd: fixtureRoot, env: { ...env, LC_ALL: 'C' }, encoding: 'utf8', timeout: 5_000,
   })
@@ -327,8 +332,7 @@ export function fixtureServeEnv(
     if (realpathSync(discovery.stdout.trim()) !== fixtureRoot) {
       throw new Error(`cezar e2e: Git resolves outside fixture ${fixtureRoot}; refusing server boot`)
     }
-  } else if (discovery.error || discovery.status !== 128 ||
-    !discovery.stderr.startsWith('fatal: not a git repository (or any of the parent directories): .git')) {
+  } else if (discovery.error || discovery.status !== 128 || !notARepository.test(discovery.stderr)) {
     throw new Error(`cezar e2e: cannot verify fixture repository ${fixtureRoot}; refusing server boot`, { cause: discovery.error })
   }
   return {
@@ -508,6 +512,11 @@ export class AgentBrowser {
     const { targetId } = this.run(['tab', 'new', 'about:blank'])
     if (typeof targetId !== 'string' || !targetId) throw new Error('agent-browser tab did not expose its CDP target')
     return targetId
+  }
+
+  /** Make `ref` (tab id, label or CDP target id) the session's active tab. */
+  switchTab(ref: string): void {
+    this.run(['tab', ref])
   }
 
   /** operation: snapshot — the accessibility tree, as the string the descriptor documents. */

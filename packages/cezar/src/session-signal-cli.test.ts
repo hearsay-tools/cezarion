@@ -8,6 +8,7 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from './runs/store.ts';
+import { requirePid } from './pid-file.testkit.ts';
 
 /**
  * cezar's own SIGINT and SIGTERM reach the agents (hearsay-tools/cezarion#890), through the real CLI.
@@ -27,10 +28,11 @@ const PACKAGE_DIR = fileURLToPath(new URL('../', import.meta.url));
 const MOCK_CLAUDE = fileURLToPath(new URL('../scripts/mock-claude.mjs', import.meta.url));
 const STALLING_AGENT = `#!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { renameSync, writeFileSync } from 'node:fs';
 const args = process.argv.slice(2);
 if (!args.includes('--input-format')) process.exit(spawnSync(process.execPath, [${JSON.stringify(MOCK_CLAUDE)}, ...args], { stdio: 'inherit' }).status ?? 1);
-writeFileSync('watchdog.pid', String(process.pid));
+writeFileSync('watchdog.pid.tmp', String(process.pid));
+renameSync('watchdog.pid.tmp', 'watchdog.pid');
 setInterval(() => {}, 1000);
 `;
 
@@ -61,8 +63,7 @@ async function agentPid(): Promise<number> {
     const worktrees = join(root, '.ai/cezar/worktrees');
     const file = readdirSync(worktrees).map(id => join(worktrees, id, 'watchdog.pid')).find(existsSync);
     expect(file).toBeDefined();
-    const pid = Number(readFileSync(file!, 'utf8'));
-    expect(pid).toBeGreaterThan(0);
+    const pid = requirePid(file!);
     agents.push(pid);
     return pid;
   }, { timeout: 30_000, interval: 100 });

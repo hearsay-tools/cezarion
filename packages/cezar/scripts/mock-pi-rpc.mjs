@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 // Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
 import { spawn as watchdogSpawn } from 'node:child_process';
-import { closeSync as watchdogCloseInput, writeFileSync as watchdogWritePid, existsSync as promptAckReleased } from 'node:fs';
+import { closeSync as watchdogCloseInput, renameSync as watchdogRename, writeFileSync as watchdogWrite, existsSync as promptAckReleased } from 'node:fs';
+// Publish a pid atomically (temporary sibling, then rename): a test reading it sees no
+// file or a whole pid, never the empty file whose Number() is 0 (hearsay-tools/cezarion#953).
+function watchdogWritePid(file, pid) { const tmp = `${file}.${process.pid}.tmp`; watchdogWrite(tmp, pid); watchdogRename(tmp, file); }
 function watchdogStall(prompt) {
   if (!prompt.includes('mock:no-progress')) return false;
   watchdogWritePid('watchdog.pid', String(process.pid));
@@ -24,7 +27,7 @@ function watchdogStall(prompt) {
   if (prompt.includes('leftover')) {
     // hearsay-tools/cezarion#890: one child stays in the session's process group and ignores
     // SIGTERM; one leaves the group with setsid. Both exit on their own as a cleanup backstop.
-    const leftover = (file) => `process.on('SIGTERM',()=>{}); require('fs').writeFileSync(${JSON.stringify(file)}, String(process.pid)); setTimeout(()=>{},20000)`;
+    const leftover = (file) => `process.on('SIGTERM',()=>{}); const fs = require('fs'); fs.writeFileSync(${JSON.stringify(`${file}.tmp`)}, String(process.pid)); fs.renameSync(${JSON.stringify(`${file}.tmp`)}, ${JSON.stringify(file)}); setTimeout(()=>{},20000)`;
     watchdogSpawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
     watchdogSpawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
   }
