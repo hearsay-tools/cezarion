@@ -260,6 +260,7 @@ test('network resets and secondary rate limits are retried like 5xx', () => {
   for (const stderr of [
     'read tcp: connection reset by peer',
     'Post "https://api.github.com/graphql": dial tcp: i/o timeout',
+    'Get "https://api.github.com/repos/o/r/actions/runs/42/jobs?per_page=100": dial tcp 140.82.112.6:443: connect: connection refused',
     'HTTP 429: Too Many Requests',
     'HTTP 403: You have exceeded a secondary rate limit',
   ]) {

@@ -47,7 +47,7 @@ function isTransientGhError(error) {
   if (/HTTP 5\d\d\b/.test(text)) return true;
   if (/HTTP 429\b/.test(text) || /secondary rate limit/i.test(text)) return true;
   if (/HTTP 4\d\d\b/.test(text)) return false;
-  return /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|connection reset|timed? ?out|TLS handshake|unexpected EOF|stream error/i.test(text);
+  return /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|connection reset|connection refused|timed? ?out|TLS handshake|unexpected EOF|stream error/i.test(text);
 }
 
 function withGhRetry(gh, sleep, delaysMs = GH_RETRY_DELAYS_MS) {
