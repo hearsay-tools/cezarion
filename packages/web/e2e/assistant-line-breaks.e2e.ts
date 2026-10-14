@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, bootProjectId, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import record from './fixtures/thread-run.record.json'
 
 /**
@@ -74,7 +74,7 @@ beforeAll(async () => {
     'utf8',
   )
 
-  server = spawnFixtureServer([join(repoRoot, 'packages/cezar/dist/index.js'), 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
   )
   baseUrl = await waitForFixtureServer(server)

@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 
 const ownRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const COUNT = 4;
+// build-e2e.sh's mirror of the server package; never the production packages/cezar/dist.
+const E2E_BUILD = '.ai/qa/build';
 
 function git(repoRoot, ...args) {
   return execFileSync('git', ['-C', repoRoot, ...args]);
@@ -56,7 +58,7 @@ function linkWorkspaceDependencies(repoRoot, laneRoot) {
 
 function linkBuiltAssets(repoRoot, laneRoot) {
   linkWorkspaceDependencies(repoRoot, laneRoot);
-  for (const relative of ['node_modules', 'packages/cezar/dist', 'packages/cezar/web/dist']) {
+  for (const relative of ['node_modules', E2E_BUILD]) {
     const source = join(repoRoot, relative);
     if (!existsSync(source)) throw new Error(`missing shared E2E asset: ${source}`);
     const target = join(laneRoot, relative);
@@ -278,9 +280,7 @@ export function buildSource(repoRoot) {
   if (!existsSync(join(repoRoot, 'packages/cezar/node_modules/zod/package.json'))) {
     execFileSync('pnpm', ['install', '--frozen-lockfile'], npmOptions);
   }
-  execFileSync('npm', ['run', 'build'], {
-    ...npmOptions, env: { ...process.env, VITE_CEZ_E2E: '1' },
-  });
+  execFileSync('sh', ['.ai/scripts/build-e2e.sh'], npmOptions);
 }
 
 export async function runLocalSuite({ repoRoot = ownRoot, scratchRoot, buildSource: prepareBuild = buildSource } = {}) {
@@ -300,7 +300,7 @@ export async function runLocalSuite({ repoRoot = ownRoot, scratchRoot, buildSour
   process.on('SIGTERM', interrupt);
   try {
     await prepareBuild(repoRoot);
-    for (const relative of ['packages/cezar/node_modules/zod/package.json', 'packages/cezar/dist/index.js', 'packages/cezar/web/dist/index.html', 'packages/cezar/web/dist/.cez-e2e-build']) {
+    for (const relative of ['packages/cezar/node_modules/zod/package.json', `${E2E_BUILD}/cezar/dist/index.js`, `${E2E_BUILD}/cezar/web/dist/index.html`, `${E2E_BUILD}/cezar/web/dist/.cez-e2e-build`]) {
       if (!existsSync(join(repoRoot, relative))) throw new Error(`E2E build did not provide ${relative}`);
     }
     const baseRef = git(repoRoot, 'rev-parse', 'HEAD').toString('utf8').trim();

@@ -27,10 +27,11 @@ process.once('exit', () => rmSync(fixtureGitSandbox, { recursive: true, force: t
  * (a pinned `runs.json` fixture, an empty repo, a second project).
  *
  * Exported from here rather than re-derived per spec because it is one fact about the build
- * layout, and it has already moved once: `npm run build` emits the server into the workspace
- * package (`packages/cezar/dist`), not into a root-level `dist/`.
+ * layout, and it has moved twice: from a root-level `dist/` into the workspace package, and
+ * then out of `packages/cezar/dist` (the production build) into the e2e bootstrap's ignored
+ * mirror, `.ai/qa/build/cezar` (`.ai/scripts/build-e2e.sh`).
  */
-export const cezarCli = resolve(repoRoot, 'packages/cezar/dist/index.js')
+export const cezarCli = resolve(repoRoot, '.ai/qa/build/cezar/dist/index.js')
 
 /**
  * Failure bundles (#408). A red cockpit shard used to leave nothing behind but

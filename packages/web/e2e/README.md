@@ -29,7 +29,8 @@ command lands. The seam closes that gap in two places:
 first. The value it hands back is the very sample the matcher accepted, so the state checked
 and the state read are the same one. Use `waitForStable` when that first truth can leave
 again inside one CLI round-trip — the hold is what `#409` could not see. The suite build
-sets `VITE_CEZ_E2E=1` so `useNow` and every `refetchInterval` stay off, and the cockpit
+(`.ai/scripts/build-e2e.sh`, into the ignored `.ai/qa/build/cezar`, never the production
+`packages/cezar/dist`) sets `VITE_CEZ_E2E=1` so `useNow` and every `refetchInterval` stay off, and the cockpit
 exposes `window.__cezIdle` (false while a query, SSE reconcile, or WS topic is in flight). `hoverVisiblePoint` in `contrast.ts` is the worked
 example: scroll, hit-test and the point come from one polled expression, and the pointer
 moves to that point. Its predecessor polled a predicate and then recomputed the point in a
@@ -187,8 +188,8 @@ command remains the single-environment runner used by CI and focused local runs.
 
 Each lane is a temporary checkout at the current `HEAD`, with independent Git administration
 and owned objects, plus this checkout's tracked edits and untracked source files copied in. It gets a private `.ai/qa` directory, `CEZ_HOME`,
-port, environment descriptor, and agent-browser namespace. `node_modules` and the two built
-asset directories are symlinks to the source checkout; the lane bootstrap checks the E2E
+port, environment descriptor, and agent-browser namespace. `node_modules` and the E2E build
+(`.ai/qa/build`) are symlinks to the source checkout; the lane bootstrap checks the E2E
 build marker and cannot rebuild through those links. Do not edit source or rebuild the
 shared assets while a four-lane run is active.
 
@@ -205,9 +206,9 @@ Shard output, boot logs, descriptors, app logs, and failure bundles remain under
 Both statuses exit nonzero for this final local gate.
 
 To force a race that CI hits and your machine does not, slow the server down behind an
-environment variable rather than editing the spec. Specs that boot their own cezar spawn
-`packages/cezar/dist/index.js`, so patch the built route in
-`packages/cezar/dist/server/server.js`:
+environment variable rather than editing the spec. The shared env and the specs that boot
+their own cezar (`cezarCli`) both run the E2E build in `.ai/qa/build/cezar`, so patch the
+built route in `.ai/qa/build/cezar/dist/server/server.js`:
 
 ```js
 // inside the handler the spec is racing, before it answers
@@ -215,10 +216,11 @@ if (process.env.E2E_DELAY_MS) await new Promise((r) => setTimeout(r, Number(proc
 ```
 
 Run the single test with `E2E_DELAY_MS=1500` and watch it go red the way CI did, fix the
-wait, watch it go green, then restore `dist` (`npm run build`, or `git checkout` is no help
-because `dist` is not tracked). Boot the env before patching: the first
-`test-env-up.sh` in a fresh worktree runs `npm ci && npm run build` and would erase the patch.
-The shared env's own server is not restarted by a `dist` patch; `--force-rebuild` is.
+wait, watch it go green, then restore the build (`--force-rebuild`, or
+`sh .ai/scripts/build-e2e.sh`; `git checkout` is no help because it is not tracked). Boot the
+env before patching: the first `test-env-up.sh` in a fresh worktree runs
+`pnpm install --frozen-lockfile && sh .ai/scripts/build-e2e.sh` and would erase the patch.
+The shared env's own server is not restarted by a patch; `--force-rebuild` is.
 
 ## Observable completion and budgets (#764)
 
