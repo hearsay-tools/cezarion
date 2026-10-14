@@ -56,7 +56,8 @@ test('compares against merge-base, not unrelated changes on main', t => {
 
 for (const path of ['package.json', 'vitest.config.ts', '.github/workflows/ci.yml', 'packages/contract/src/runs.ts', 'packages/web/src/global.css', 'packages/cezar/src/fixtures/data.json']) {
   test(`falls back to full Vitest for shared/configuration/unknown input: ${path}`, t => {
-    const { cwd, put } = fixture(t); put(path);
+    // A JSON input must parse: any `--require` preload (NODE_OPTIONS) makes node read the nearest package.json.
+    const { cwd, put } = fixture(t); put(path, path.endsWith('.json') ? '{}\n' : undefined);
     const p = plan(cwd);
     assert.equal(p.mode, 'full');
     assert.deepEqual(p.args, ['test']);

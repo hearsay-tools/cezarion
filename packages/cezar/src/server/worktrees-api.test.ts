@@ -25,7 +25,8 @@ const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
  * /api/v1/worktrees/reclaim` force-runs the enforcer. Both additive and
  * best-effort — never error.
  */
-describe('the worktrees API', () => {
+// Every case drives real git worktrees: ~1 s idle, several times that on a loaded host.
+describe('the worktrees API', { timeout: 30_000 }, () => {
   let repoRoot: string;
   let cezHome: string;
   let store: RunStore;

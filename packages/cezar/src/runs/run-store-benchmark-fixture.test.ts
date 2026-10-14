@@ -6,7 +6,8 @@ import { parseRunRecords, reconcileLoadedRun } from './store.ts';
 
 /** Smoke test for the #779 benchmark fixture: it must be reproducible and must be what the real
  *  store would load, or the benchmark measures a file cezar never writes. */
-describe('run-store benchmark fixture', () => {
+// The larger cells generate thousands of records twice over: ~2 s idle, several times that on a loaded host.
+describe('run-store benchmark fixture', { timeout: 30_000 }, () => {
   it('is deterministic for a size, profile and seed', () => {
     const first = generateRunFixture({ runs: 60, profile: 'legacy' });
     expect(JSON.stringify(generateRunFixture({ runs: 60, profile: 'legacy' }))).toBe(JSON.stringify(first));
