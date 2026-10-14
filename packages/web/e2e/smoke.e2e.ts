@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
-import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
 import { readSharedProjects, writeSharedProjects } from './workspace-registry'
 
 /**
@@ -677,7 +677,7 @@ describe('mobile shell', () => {
  */
 describe('global SSE stream', () => {
   // Where `src/index.ts` puts the data dir, for the server booted from this worktree.
-  const dataDir = resolve(import.meta.dirname, '../../../.ai/cezar')
+  const dataDir = resolve(servedRoot(), '.ai/cezar')
   const todosFile = resolve(dataDir, 'todos.json')
   const BADGE = '[data-slot="inbox-count"]'
   let previousTodos: string | null = null

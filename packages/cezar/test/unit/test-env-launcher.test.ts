@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { afterEach, test } from 'node:test';
 import { parsePid, readPid, requirePid, writePidSource } from '../../src/pid-file.testkit.ts';
 
@@ -42,6 +42,8 @@ function makeFixture(withSetsid: boolean): { root: string; path: string } {
   copyFileSync(join(repoRoot, '.ai/scripts/test-env-down.sh'), join(root, '.ai/scripts/test-env-down.sh'));
   copyFileSync(join(repoRoot, '.ai/scripts/resolve-browser-launch.mjs'), join(root, '.ai/scripts/resolve-browser-launch.mjs'));
   copyFileSync(join(repoRoot, '.ai/scripts/build-e2e.sh'), join(root, '.ai/scripts/build-e2e.sh'));
+  copyFileSync(join(repoRoot, '.ai/scripts/e2e-served-repo.mjs'), join(root, '.ai/scripts/e2e-served-repo.mjs'));
+  copyFileSync(join(repoRoot, '.ai/scripts/e2e-lanes.mjs'), join(root, '.ai/scripts/e2e-lanes.mjs'));
   // The real postbuild bundles the contract; here it only records which dist it was handed.
   mkdirSync(join(root, 'packages/cezar/scripts'), { recursive: true });
   writeFileSync(join(root, 'packages/cezar/scripts/inline-contract.mjs'),
@@ -55,7 +57,7 @@ function makeFixture(withSetsid: boolean): { root: string; path: string } {
   utimesSync(join(root, 'package.json'), safelyBeforeBoot, safelyBeforeBoot);
   utimesSync(join(root, 'pnpm-lock.yaml'), safelyBeforeBoot, safelyBeforeBoot);
 
-  const commands = ['cat', 'chmod', 'curl', 'date', 'dirname', 'find', 'grep', 'id', 'kill', 'ln', 'mkdir', 'mv', 'nohup', 'pwd', 'rm', 'sh', 'sleep', 'tail', 'uname'];
+  const commands = ['cat', 'chmod', 'curl', 'date', 'dirname', 'find', 'git', 'grep', 'id', 'kill', 'ln', 'mkdir', 'mv', 'nohup', 'pwd', 'rm', 'sh', 'sleep', 'tail', 'uname'];
   if (withSetsid) commands.push('setsid');
   for (const command of commands) symlinkSync(commandPath(command), join(root, 'bin', command));
   symlinkSync(process.execPath, join(root, 'bin/node'));
@@ -73,6 +75,7 @@ server() {
   cat > "$1/index.js" <<'EOF'
 const http = require('node:http');
 const port = Number(process.argv[process.argv.indexOf('--port') + 1]);
+require('node:fs').writeFileSync('.ai/app-argv', process.argv.slice(2).join('\\n'));
 http.createServer((req, res) => {
   res.writeHead(200, { 'content-type': req.url === '/api/health' ? 'application/json' : 'text/html' });
   res.end(req.url === '/api/health' ? '{"ok":true}' : '<!doctype html>');
@@ -134,6 +137,15 @@ done
     { mode: 0o755 },
   );
   symlinkSync('npm', join(root, 'bin/pnpm'));
+  // The served project is a clone of this checkout, so the fixture is a repository whose
+  // generated state is ignored the way the real one's is.
+  writeFileSync(join(root, '.gitignore'), '/.ai/qa/\n/bin/\nnode_modules/\n/packages/cezar/dist/\n/packages/cezar/web/\n/.ai/build-invocations\n/.ai/inline-contract-dist\n/.ai/app-argv\n/app.pid\n');
+  const git = (...args: string[]) => execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@cezar.invalid', ...args], {
+    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, stdio: 'ignore',
+  });
+  git('init', '-q', '-b', 'main');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'fixture');
   return { root, path: join(root, 'bin') };
 }
 
@@ -226,12 +238,16 @@ test('a prebuilt lane boots without rebuilding shared assets and records its nam
   };
   prebuildE2e(fixture, env);
   rmSync(join(fixture.root, '.ai/build-invocations'));
+  writeFileSync(join(fixture.root, '.git/cezar-e2e-lane.json'), '{"version":1}\n');
 
   const up = spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-up.sh')], {
     encoding: 'utf8', env, timeout: 20_000,
   });
   assert.equal(up.status, 0, up.stderr);
   assert.equal(descriptor(fixture.root).browser.namespace, 'cez-e2e-lane-2');
+  // A lane is already an isolated clone (e2e-lanes.mjs), so it serves itself.
+  assert.equal(descriptor(fixture.root).servedRoot, fixture.root);
+  assert.equal(existsSync(join(fixture.root, '.ai/qa/served')), false);
   assert.equal(descriptor(fixture.root).browser.installed, true);
   assert.equal(spawnSync('/bin/sh', ['-c', 'test ! -e .ai/build-invocations'], { cwd: fixture.root }).status, 0);
   launchedPids.add(descriptor(fixture.root).app.pid);
@@ -241,6 +257,7 @@ test('a prebuilt lane boots without rebuilding shared assets and records its nam
 
 function descriptor(root: string): {
   baseUrl: string;
+  servedRoot: string;
   app: { pid: number; startCommand: string };
   startedAt: string;
   browser: {
@@ -253,6 +270,7 @@ function descriptor(root: string): {
 } {
   return JSON.parse(readFileSync(join(root, '.ai/qa/test-env.json'), 'utf8')) as {
     baseUrl: string;
+    servedRoot: string;
     app: { pid: number; startCommand: string };
     startedAt: string;
     browser: {
@@ -264,6 +282,76 @@ function descriptor(root: string): {
     };
   };
 }
+
+test('a cold boot serves an isolated clone of the checkout, never the checkout itself', () => {
+  const fixture = makeFixture(false);
+  const env = { ...process.env, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
+  const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
+  // The clone carries the checkout's current edits, committed or not.
+  writeFileSync(join(fixture.root, 'package.json'), '{"private":true,"edited":true}\n');
+  writeFileSync(join(fixture.root, 'untracked.md'), 'new\n');
+
+  const cold = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(cold.status, 0, cold.stderr);
+  const first = descriptor(fixture.root);
+  launchedPids.add(first.app.pid);
+  const served = join(fixture.root, '.ai/qa/served', basename(fixture.root));
+  assert.equal(first.servedRoot, served);
+  // What the app was really started with, not what the descriptor says it was.
+  const argv = readFileSync(join(fixture.root, '.ai/app-argv'), 'utf8').split('\n');
+  assert.equal(argv[argv.indexOf('--repo') + 1], served);
+  // Its own administration: a linked worktree would share the checkout's refs and queue (#795).
+  assert.equal(realpathSync(execFileSync('git', ['-C', served, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' }).trim()),
+    realpathSync(join(served, '.git')));
+  assert.equal(readFileSync(join(served, 'package.json'), 'utf8'), '{"private":true,"edited":true}\n');
+  assert.equal(readFileSync(join(served, 'untracked.md'), 'utf8'), 'new\n');
+
+  const warm = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.match(warm.stdout, /TEST_ENV_REUSED=1/, `warm boot refused reuse:\n${warm.stderr}`);
+
+  // A descriptor from before the served clone (it served the checkout) is never reused.
+  const legacy = JSON.parse(readFileSync(join(fixture.root, '.ai/qa/test-env.json'), 'utf8')) as Record<string, unknown>;
+  delete legacy.servedRoot;
+  writeFileSync(join(fixture.root, '.ai/qa/test-env.json'), JSON.stringify(legacy));
+  const rebooted = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(rebooted.status, 0, rebooted.stderr);
+  assert.match(rebooted.stdout, /TEST_ENV_REUSED=0/);
+  assert.match(rebooted.stderr, /the served project is not/);
+  launchedPids.add(descriptor(fixture.root).app.pid);
+  assert.equal(descriptor(fixture.root).servedRoot, served);
+  spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
+});
+
+test('the served clone never replaces a directory it did not create', () => {
+  const fixture = makeFixture(false);
+  const env = { ...process.env, PATH: fixture.path, E2E_PREBUILT_ASSETS: '1' };
+  prebuildE2e(fixture, env);
+  const served = join(fixture.root, '.ai/qa/served', basename(fixture.root));
+  mkdirSync(served, { recursive: true });
+  writeFileSync(join(served, 'keep.txt'), 'not a clone\n');
+
+  const result = spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-up.sh')], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /refusing to replace .* not a served E2E clone/);
+  assert.equal(readFileSync(join(served, 'keep.txt'), 'utf8'), 'not a clone\n');
+  assert.equal(existsSync(join(fixture.root, '.ai/app-argv')), false, 'the app must not start without its project');
+});
+
+test('a failed cold boot leaves no descriptor of the env it replaced', () => {
+  const fixture = unhealthyFixture('exited');
+  // What main carried for a month: a running-status descriptor of a long-dead env whose browser
+  // check had failed. Specs read its notes and reported a missing browser instead of the boot error.
+  writeFileSync(join(fixture.root, '.ai/qa/test-env.json'), JSON.stringify({
+    status: 'running', baseUrl: 'http://127.0.0.1:9', startedByThisRepo: true, app: {},
+    browser: { installed: false, notes: 'live browser launch failed after autonomous install' },
+  }));
+  const result = spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-up.sh')], {
+    encoding: 'utf8', env: { ...fixture.env, TEST_ENV_HEALTH_TIMEOUT_SECONDS: '5' }, timeout: 9_000, killSignal: 'SIGKILL',
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /the app exited during boot/);
+  assert.equal(existsSync(join(fixture.root, '.ai/qa/test-env.json')), false);
+});
 
 function unhealthyFixture(mode: 'stalled' | 'unavailable' | 'exited') {
   const fixture = makeFixture(false);

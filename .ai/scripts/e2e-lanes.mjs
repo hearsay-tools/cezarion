@@ -150,12 +150,13 @@ function laneMetadata(repoRoot) {
   return { remotes, core, symbolic, effective };
 }
 
-export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD' }) {
-  const laneRoot = join(scratchRoot, `lane-${index}`);
+// A checkout of `repoRoot` at `root` that shares nothing with it: its own objects, refs and
+// administration, the base commit plus the current edits. removeLane() owns its cleanup.
+export function cloneIsolatedCheckout({ repoRoot, root: laneRoot, baseRef = 'HEAD' }) {
   const source = realpathSync(repoRoot);
   const base = git(repoRoot, 'rev-parse', '--verify', `${baseRef}^{commit}`).toString('utf8').trim();
   const metadata = laneMetadata(repoRoot);
-  mkdirSync(scratchRoot, { recursive: true });
+  mkdirSync(dirname(laneRoot), { recursive: true });
   mkdirSync(laneRoot); // Exclusive reservation: failure cleanup never owns a preexisting path.
   try {
     // #795: linked worktrees share the host's 120s mutation queue. Each lane needs its
@@ -192,6 +193,16 @@ export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD' }) {
       version: 1, source, root: realpathSync(laneRoot),
     }), { flag: 'wx' });
     copyCurrentEdits(repoRoot, laneRoot, base);
+    return laneRoot;
+  } catch (error) {
+    rmSync(laneRoot, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD' }) {
+  const laneRoot = cloneIsolatedCheckout({ repoRoot, root: join(scratchRoot, `lane-${index}`), baseRef });
+  try {
     linkBuiltAssets(repoRoot, laneRoot);
     return laneRoot;
   } catch (error) {

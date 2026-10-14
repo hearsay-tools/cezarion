@@ -179,6 +179,26 @@ probe is bounded by the remaining budget. On timeout the launcher prints elapsed
 seconds and the last 20 lines of `.ai/qa/test-env-app.log`, then stops the app.
 This budget covers the health wait, excluding build and browser preparation.
 
+## The project the shared env serves
+
+The shared server never serves this checkout. Each cold boot serves a fresh isolated clone at
+`.ai/qa/served/<checkout name>`, made by `.ai/scripts/e2e-served-repo.mjs` with the same
+construction as a local lane: own objects and refs, current `HEAD`, plus this checkout's tracked
+edits and untracked source files. The descriptor records it as `servedRoot`. The server's runs,
+task worktrees and `.ai/cezar` state live there. Serving the checkout put them in the checkout's
+own `.ai/cezar`, and in the main checkout that is the live cockpit's data dir: the cockpit refused
+the second server (`A cockpit already serves …`), and a boot that got through would have written
+test runs into it. A lane is already such a clone and serves itself.
+
+A spec that seeds state for the server to read — skills, workflows, `.ai/cezar/config.json`,
+a registry root for the boot project — writes it under `servedRoot()` from `agent-browser.ts`,
+never under a path derived from `import.meta.dirname`. The server never reads those paths.
+Evidence and artifacts stay in this checkout's `.ai/qa`.
+
+A cold boot deletes the previous descriptor before it starts anything. If the boot then fails,
+specs report that no env exists and point at `.ai/qa/test-env-app.log`. Before this change they
+attached to the old env's dead `baseUrl` and repeated its browser notes.
+
 ## Full local suite in four lanes
 
 Run `npm run test:e2e:local` for the complete suite on a machine with roughly **8 GiB

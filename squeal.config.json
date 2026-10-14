@@ -38,6 +38,8 @@
       "pnpm-workspace.yaml",
       ".ai/scripts/test-env-up.sh",
       ".ai/scripts/build-e2e.sh",
+      ".ai/scripts/e2e-served-repo.mjs",
+      ".ai/scripts/e2e-lanes.mjs",
       ".ai/browsers/agent-browser.md",
       "packages/web/e2e/**"
     ],
@@ -111,6 +113,8 @@
       ".ai/scripts/test-env-down.sh",
       ".ai/scripts/build-e2e.sh",
       ".ai/scripts/resolve-browser-launch.mjs",
+      ".ai/scripts/e2e-served-repo.mjs",
+      ".ai/scripts/e2e-lanes.mjs",
       ".ai/browsers/agent-browser.md"
     ],
     "packages/cezar/test/unit/web-typecheck.test.ts": [

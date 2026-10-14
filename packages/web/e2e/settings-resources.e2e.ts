@@ -2,7 +2,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { AgentBrowser, readTestEnv } from './agent-browser'
+import { AgentBrowser, readTestEnv, servedRoot } from './agent-browser'
 import { waitForConfig } from './poll'
 
 /**
@@ -20,7 +20,7 @@ import { waitForConfig } from './poll'
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const sessionId = `e2e-settings-resources-${process.pid}`
 const DESKTOP = { width: 1440, height: 900 }
-const dataDir = resolve(import.meta.dirname, '../../../.ai/cezar')
+const dataDir = resolve(servedRoot(), '.ai/cezar')
 const configFile = resolve(dataDir, 'config.json')
 
 let browser: AgentBrowser
