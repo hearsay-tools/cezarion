@@ -130,11 +130,14 @@ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['l
     open()
     browser.waitForFunction(`document.querySelectorAll('${region} a').length === 32`)
     browser.setReducedMotion()
-    browser.evaluate(`document.querySelector('${region} a').focus()`)
     // #816: a settled worker row also carries a Clean up button after its link, so the tab
     // stops between the first and last worker link are counted from the rendered controls
-    // instead of assumed to be links only. Read once after the 32-link wait above settled; the
-    // target is named (the oldest worker, now last, which Enter opens below), never a positional row.
+    // instead of assumed to be links only. The buttons arrive with the worker inspection, after
+    // the links: wait for all 32 before counting, or the count comes up short and focus stops
+    // mid-list (#913). The target is named (the oldest worker, now last, which Enter opens
+    // below), never a positional row.
+    browser.waitForFunction(`document.querySelectorAll('${region} button[aria-label^="Clean up worker"], ${region} button[aria-label^="Retry clean up of worker"]').length === 32`)
+    browser.evaluate(`document.querySelector('${region} a').focus()`)
     const stops = browser.evaluate(`(() => { const controls = [...document.querySelectorAll('${region} a, ${region} button')];
       const target = document.querySelector('${region} a[aria-label="Worker task ${ids[0]}"]');
       return controls.indexOf(target) - controls.indexOf(document.activeElement); })()`) as number
