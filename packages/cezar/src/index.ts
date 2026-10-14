@@ -28,7 +28,7 @@ import { ensureDataGitignore } from './data-gitignore.ts';
 import { TaskWebhooks } from './runs/webhook.ts';
 import { RunManager } from './workflows/run.ts';
 import { loadWorkflows } from './workflows/load.ts';
-import { startServer, WorkspaceEventBus } from './server/server.ts';
+import { cockpitOriginFor, startServer, WorkspaceEventBus } from './server/server.ts';
 import {
   ProviderRuntimeAuthObserver,
   recoverWithProviderRuntimeAuthObservation,
@@ -280,7 +280,13 @@ async function serveCommand(
   // The port the cockpit bound, once `startServer` listens; the preview tool refuses it.
   let boundPort: number | undefined;
   const cezarPort = () => boundPort;
-  const manager = new RunManager(store, repoRoot, { semaphore, preview: previewHost, cezarPort });
+  // #774: the listener is already bound, so the boot manager knows its address before recovery
+  // resumes anything; startServer re-sets the same value once it serves.
+  const listenerAddress = listener.address();
+  const cockpit = listenerAddress && typeof listenerAddress === 'object'
+    ? { origin: cockpitOriginFor(bindHost, listenerAddress.port), projectId: bootProjectId ?? 'default' }
+    : undefined;
+  const manager = new RunManager(store, repoRoot, { semaphore, preview: previewHost, cezarPort, cockpit });
   const delegation = await DelegationController.start();
   delegation.attachProject({ id: bootProjectId ?? 'default', root: repoRoot, store, manager });
   const providerAuth = new ProviderAuthService();

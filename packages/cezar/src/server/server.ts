@@ -6423,6 +6423,11 @@ function taskWebhookHost(bindHost: string | undefined): string {
   return bindHost.includes(':') ? `[${bindHost}]` : bindHost;
 }
 
+/** The origin a local client reaches this cockpit at: `CEZ_COCKPIT_URL` and the task webhook's links (#774, #594). */
+export function cockpitOriginFor(bindHost: string | undefined, port: number): string {
+  return `http://${taskWebhookHost(bindHost)}:${port}`;
+}
+
 const NO_WEBHOOK_ERROR =
   'this project has no task webhook — set one in Settings → General → Task webhook, or start without notify';
 
@@ -6703,7 +6708,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     const address = server.address();
     const bound = address && typeof address === 'object' ? address.port : port;
     listeningPort = bound;
-    cockpitOrigin = `http://${taskWebhookHost(deps.bindHost)}:${bound}`;
+    cockpitOrigin = cockpitOriginFor(deps.bindHost, bound);
     taskWebhooks.setOrigin(cockpitOrigin);
     addressManager({ id: bootProjectId, manager: deps.manager });
     for (const id of sharedContexts.ids()) {

@@ -1386,12 +1386,14 @@ export class RunManager {
   constructor(
     private readonly store: RunStore,
     private readonly repoRoot: string,
-    options: { semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; finalMessageNudgeReplyMs?: number; preview?: PreviewHostLike; cezarPort?: () => number | undefined } = {},
+    options: { semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; finalMessageNudgeReplyMs?: number; preview?: PreviewHostLike; cezarPort?: () => number | undefined; cockpit?: { origin: string; projectId: string } } = {},
   ) {
     this.dataDir = join(repoRoot, '.ai/cezar');
     this.workerScratchCleanup = new WorkerScratchCleanup(store, this.dataDir, id => this.isActive(id) || this.executions.has(id) || this.reclaiming.has(id) || !!this.autosaveCleanupBlocker(id));
     this.preview = options.preview;
     this.cezarPort = options.cezarPort;
+    // #774: `serve` knows its bound origin before it recovers, so recovered runs carry it too.
+    if (options.cockpit) this.setCockpitAddress(options.cockpit);
     this.unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.finalMessageNudgeReplyMs = options.finalMessageNudgeReplyMs ?? FINAL_MESSAGE_NUDGE_REPLY_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();

@@ -135,6 +135,29 @@ describe('automations prompt part and cockpit address (#774)', () => {
     expect(manager!.builtinSkills().map((skill) => skill.name)).toEqual([CREATE_AUTOMATION_SKILL_NAME]);
   });
 
+  // Review of #1018: `serve` recovers the boot project before `startServer` runs, so an address
+  // set by the server arrives after recovery has already resumed runs. The address is a
+  // constructor option so the boot manager carries it from its first session.
+  it('a manager built with its address carries it into the runs recovery resumes', async () => {
+    process.env.CEZ_AUTOMATIONS = '1';
+    const { id } = store.createRun({
+      title: 't',
+      workflow: 'quick-task',
+      task: 'do it',
+      worktree: false,
+      steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+    });
+    store.updateRun(id, { workflowDef: TASK_DEF });
+    manager!.dispose();
+    manager = createFixtureManager(store, repoRoot, { cockpit: ADDRESS });
+    await manager.recover();
+    const { spec } = await specAt(0);
+    expect(spec.env?.CEZ_COCKPIT_URL).toBe(ADDRESS.origin);
+    expect(spec.env?.CEZ_PROJECT_ID).toBe(ADDRESS.projectId);
+    expect(spec.systemPrompt).toContain(PROMPT_HEADING);
+    await settled(id);
+  });
+
   it('clearing the address stops the next session from carrying it', async () => {
     process.env.CEZ_AUTOMATIONS = '1';
     manager!.setCockpitAddress(ADDRESS);
