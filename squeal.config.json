@@ -20,9 +20,23 @@
       "alias-cezarion/**"
     ],
     "packages/web/e2e/*.e2e.ts": [
-      "packages/cezar/dist/**",
-      "packages/cezar/web/dist/**",
+      "packages/contract/src/**",
+      "packages/contract/package.json",
+      "packages/api-client/src/**",
+      "packages/api-client/package.json",
+      "packages/cezar/src/**",
+      "packages/cezar/scripts/**",
+      "packages/cezar/package.json",
+      "packages/cezar/tsconfig.json",
+      "packages/web/src/**",
+      "packages/web/public/**",
+      "packages/web/index.html",
+      "packages/web/vite.config.ts",
+      "packages/web/package.json",
+      "package.json",
+      "pnpm-workspace.yaml",
       ".ai/scripts/test-env-up.sh",
+      ".ai/scripts/build-e2e.sh",
       ".ai/browsers/agent-browser.md",
       "packages/web/e2e/**"
     ],
@@ -86,6 +100,7 @@
     "packages/cezar/test/unit/test-env-launcher.test.ts": [
       ".ai/scripts/test-env-up.sh",
       ".ai/scripts/test-env-down.sh",
+      ".ai/scripts/build-e2e.sh",
       ".ai/scripts/resolve-browser-launch.mjs",
       ".ai/browsers/agent-browser.md"
     ],
