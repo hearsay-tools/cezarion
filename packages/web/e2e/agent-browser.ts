@@ -321,6 +321,10 @@ export function fixtureServeEnv(
   env.GIT_AUTHOR_EMAIL = 'tests@cezar.invalid'
   env.GIT_COMMITTER_NAME = 'Cezar Tests'
   env.GIT_COMMITTER_EMAIL = 'tests@cezar.invalid'
+  // Both of Git's "no repository" endings are a clean answer. When the ceiling is not an ancestor
+  // (a Squeal daemon's workers keep its long TMPDIR, the fixture still sits in /tmp) and /tmp is its
+  // own mount, the search stops there instead: "(or any parent up to mount point /)".
+  const notARepository = /^fatal: not a git repository \(or any (of the parent directories\): \.git|parent up to mount point )/
   const discovery = spawnSync('git', ['rev-parse', '--show-toplevel'], {
     cwd: fixtureRoot, env: { ...env, LC_ALL: 'C' }, encoding: 'utf8', timeout: 5_000,
   })
@@ -328,8 +332,7 @@ export function fixtureServeEnv(
     if (realpathSync(discovery.stdout.trim()) !== fixtureRoot) {
       throw new Error(`cezar e2e: Git resolves outside fixture ${fixtureRoot}; refusing server boot`)
     }
-  } else if (discovery.error || discovery.status !== 128 ||
-    !discovery.stderr.startsWith('fatal: not a git repository (or any of the parent directories): .git')) {
+  } else if (discovery.error || discovery.status !== 128 || !notARepository.test(discovery.stderr)) {
     throw new Error(`cezar e2e: cannot verify fixture repository ${fixtureRoot}; refusing server boot`, { cause: discovery.error })
   }
   return {
