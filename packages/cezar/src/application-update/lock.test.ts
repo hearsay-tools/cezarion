@@ -11,13 +11,25 @@ function path() { const root = mkdtempSync(join(tmpdir(), 'cez-update-lock-')); 
 describe('npm-compatible directory lock', () => {
   it('waits for an owner and releases after its operation', async () => {
     const lock = path();
+    const order: string[] = [];
     let release!: () => void;
-    const first = withDirectoryLock(lock, () => new Promise<void>((resolve) => { release = resolve; }));
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    const second = withDirectoryLock(lock, async () => 'second', 1000);
-    release();
+    // Wait for the first owner's operation itself, not a fixed 10 ms: under load the lock was not
+    // taken yet and `release` was still unassigned (#900).
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => { started = resolve; });
+    const first = withDirectoryLock(lock, () => new Promise<void>((resolve) => {
+      order.push('first');
+      release = () => { order.push('first released'); resolve(); };
+      started();
+    }));
+    await running;
+    const second = withDirectoryLock(lock, async () => { order.push('second'); return 'second'; }, 1000);
+    // Released on a later turn, so a second call that did not wait would run before it. A slow
+    // machine only delays the release, which cannot fail this.
+    setTimeout(() => release(), 50);
     await expect(first).resolves.toBeUndefined();
     await expect(second).resolves.toBe('second');
+    expect(order).toEqual(['first', 'first released', 'second']);
     expect(existsSync(lock)).toBe(false);
   });
 
