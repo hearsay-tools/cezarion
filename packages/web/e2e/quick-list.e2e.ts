@@ -1368,9 +1368,17 @@ describe('a row under width contention, in a column the user can widen', () => {
     const overflow = `${META_ROW} [data-slot="reference-overflow"]`
     expect(browser.evaluate(`document.querySelector('${overflow}')?.textContent`)).toBe('+2')
     browser.click(overflow)
-    browser.waitForFunction(`document.querySelector('[data-slot="reference-overflow-list"]') !== null`)
-    expect(browser.evaluate(`document.querySelector('[data-slot="reference-overflow-list"]').textContent`)).toContain('#12345')
-    expect(browser.evaluate(`document.querySelectorAll('[data-slot="reference-overflow-list"] a').length`)).toBe(2)
+    // One sample, read as it passes the wait (#409, hearsay-tools/cezarion#1027). Under a loaded
+    // Squeal slow tier the list existed at the wait and was gone at the next read (bundle
+    // `.ai/qa/failures/quick-list/drops-the-age-whole-…-1`, trigger `aria-expanded="false"`):
+    // the click had toggled a hover-opened list shut. reference-overflow.test.tsx pins that fix.
+    const list = browser.waitForValue(`(() => {
+      const list = document.querySelector('[data-slot="reference-overflow-list"]')
+      const links = list?.querySelectorAll('a').length ?? 0
+      return links > 0 ? { text: list.textContent, links } : null
+    })()`) as { text: string; links: number }
+    expect(list.text).toContain('#12345')
+    expect(list.links).toBe(2)
     browser.press('Escape')
     expect(narrow.glyphInside && narrow.glyphFirst).toBe(true)
     // Stable: the decision does not flip across repeated frames at the same width.
