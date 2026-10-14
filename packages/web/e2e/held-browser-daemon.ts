@@ -2,6 +2,16 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path'
 import { AgentBrowser, readTestEnv } from './agent-browser'
 
+/**
+ * The provider's daemon pid. An empty or partial file must never become pid 0: `kill(0)`
+ * stops this runner's whole process group (hearsay-tools/cezarion#953).
+ */
+function daemonPidOf(pidFile: string): number {
+  const text = readFileSync(pidFile, 'utf8').trim()
+  if (!/^\d+$/.test(text) || Number(text) <= 1) throw new Error(`${pidFile} holds no complete pid: ${JSON.stringify(text)}`)
+  return Number(text)
+}
+
 /** A private provider daemon whose next native tab command releases a held target drain. */
 export function createHeldBrowserDaemon(launchArgs: string[] = []) {
   // Hold only this test's daemon, so raw CDP cannot depend on its background target drain.
@@ -18,7 +28,8 @@ import { spawnSync } from 'node:child_process'
 const args = process.argv.slice(2)
 const command = args.indexOf('--session') + 2
 if (args[command] === 'tab' && args[command + 1] === 'new') {
-  process.kill(Number(readFileSync(${JSON.stringify(pidFile)}, 'utf8')), 'SIGCONT')
+  const pid = readFileSync(${JSON.stringify(pidFile)}, 'utf8').trim()
+  if (/^\d+$/.test(pid) && Number(pid) > 1) process.kill(Number(pid), 'SIGCONT')
 }
 const child = spawnSync(${JSON.stringify(provider.command)}, args, { stdio: 'inherit', env: process.env })
 process.exit(child.status ?? 1)
@@ -33,7 +44,7 @@ process.exit(child.status ?? 1)
   return {
     browser,
     hold: () => {
-      daemonPid = Number(readFileSync(pidFile, 'utf8'))
+      daemonPid = daemonPidOf(pidFile)
       process.kill(daemonPid, 'SIGSTOP')
     },
     close: () => {

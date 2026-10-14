@@ -56,6 +56,25 @@ const clearHostBinAndModeOverrides = (): void => {
   for (const key of HOST_BIN_AND_MODE_KEYS) delete process.env[key]
 }
 
+// A task session's own context (hearsay-tools/cezarion#953). Inherited, it pointed the
+// suite at the LIVE task: the mocks appended to its handoff file, and fixtures could reach
+// its delegation API and tool socket. Unlike the keys above, these are cleared once per
+// test file, not per test, so a suite that simulates a nested cezar in `beforeAll`
+// (`system-prompt.test.ts` sets CEZ_TODOS_FILE) keeps its value.
+const HOST_TASK_KEYS = [
+  'CEZ_ARTIFACTS_DIR',
+  'CEZ_HANDOFF_FILE',
+  'CEZ_TODOS_FILE',
+  'CEZ_TASK_ID',
+  'CEZ_PROJECT_ROOT', // Set for worktree setup commands.
+  'CEZ_DELEGATION_URL',
+  'CEZ_DELEGATION_TOKEN',
+  'CEZ_TOOL_SOCKET',
+  'CEZ_TOOL_TOKEN',
+] as const
+
+for (const key of HOST_TASK_KEYS) delete process.env[key]
+
 const pinSandboxTemp = (): void => {
   process.env.TMPDIR = sandboxTemp
   process.env.TMP = sandboxTemp

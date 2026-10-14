@@ -4,6 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlin
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, test } from 'node:test';
+import { parsePid, readPid, requirePid, writePidSource } from '../../src/pid-file.testkit.ts';
 
 // The scripts under test are the REPO's, not this package's: `.ai/` is agent-pipeline tooling
 // that spans every workspace, so it stays at the root.
@@ -13,6 +14,8 @@ const launchedPids = new Set<number>();
 
 afterEach(() => {
   for (const pid of launchedPids) {
+    // A descriptor written from an empty pid holds 0, and kill(0) is this runner's own group (#953).
+    if (parsePid(String(pid)) === undefined) continue;
     try {
       process.kill(pid, 'SIGKILL');
     } catch {
@@ -267,8 +270,7 @@ function unhealthyFixture(mode: 'stalled' | 'unavailable' | 'exited') {
   const env = { ...process.env, PATH: fixture.path, E2E_PREBUILT_ASSETS: '1' };
   prebuildE2e(fixture, env);
   writeFileSync(join(fixture.root, E2E_BUILD, 'dist/index.js'), `
-const fs = require('node:fs');
-fs.writeFileSync('app.pid', String(process.pid));
+${writePidSource('app.pid')}
 for (let i = 1; i <= 25; i++) console.log('boot-line-' + i);
 ${mode === 'exited' ? 'process.exit(1);' : `
 require('node:http').createServer((req, res) => {
@@ -286,7 +288,7 @@ test('health timeout bounds elapsed time even when a real HTTP probe stalls', as
     encoding: 'utf8', env: { ...fixture.env, TEST_ENV_HEALTH_TIMEOUT_SECONDS: '5' }, timeout: 9_000, killSignal: 'SIGKILL',
   });
   const elapsed = (performance.now() - started) / 1_000;
-  const pid = Number(readFileSync(join(fixture.root, 'app.pid'), 'utf8'));
+  const pid = requirePid(join(fixture.root, 'app.pid'));
   launchedPids.add(pid);
   assert.equal(result.status, 1, `launcher did not enforce its health deadline (${elapsed}s): ${result.stderr}`);
   assert.ok(elapsed >= 4 && elapsed < 8, `five-second health wait took ${elapsed}s`);
@@ -327,9 +329,8 @@ fi
     encoding: 'utf8', env, timeout: 9_000, killSignal: 'SIGKILL',
   });
   // The accelerated clock can exhaust the budget before Node begins executing.
-  if (existsSync(join(fixture.root, 'app.pid'))) {
-    launchedPids.add(Number(readFileSync(join(fixture.root, 'app.pid'), 'utf8')));
-  }
+  const pid = readPid(join(fixture.root, 'app.pid'));
+  if (pid !== undefined) launchedPids.add(pid);
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stderr, /health wait timed out after 180s/);
 });
@@ -375,8 +376,8 @@ for (const withSetsid of [true, false]) {
 
       const coldCommand = withSetsid ? commandPath('setsid') : '/bin/sh';
       const coldArgs = withSetsid
-        ? ['/bin/sh', '-c', 'echo $$ > "$2"; sh "$1"', 'launcher-parent', up, callerPidFile]
-        : ['-c', 'echo $$ > "$2"; sh "$1"', 'launcher-parent', up, callerPidFile];
+        ? ['/bin/sh', '-c', 'echo $$ > "$2.tmp"; mv "$2.tmp" "$2"; sh "$1"', 'launcher-parent', up, callerPidFile]
+        : ['-c', 'echo $$ > "$2.tmp"; mv "$2.tmp" "$2"; sh "$1"', 'launcher-parent', up, callerPidFile];
       const cold = spawnSync(coldCommand, coldArgs, {
         cwd: tmpdir(),
         encoding: 'utf8',
@@ -389,7 +390,7 @@ for (const withSetsid of [true, false]) {
       const first = descriptor(fixture.root);
       launchedPids.add(first.app.pid);
       if (withSetsid) {
-        const callerPid = Number(readFileSync(callerPidFile, 'utf8').trim());
+        const callerPid = requirePid(callerPidFile);
         try {
           process.kill(-callerPid, 'SIGTERM');
         } catch (error) {

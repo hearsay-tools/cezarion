@@ -5,6 +5,7 @@ import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { expect, it } from 'vitest';
+import { killFromPidFile, writePidSource } from './pid-file.testkit.ts';
 import { readPersistedRuns } from './runs/run-store.testkit.ts';
 
 const exec = promisify(execFile);
@@ -23,7 +24,7 @@ it.each(['slow', 'retry-delay'] as const)('headless completion cancels %s reposi
   writeFileSync(fakeGh, `#!${process.execPath}
 const fs = require('node:fs');
 if (!process.argv.includes('nameWithOwner')) process.exit(1);
-fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+${writePidSource(pidFile)}
 fs.writeFileSync(${JSON.stringify(started)}, String(Date.now()));
 if (${JSON.stringify(mode)} === 'retry-delay') {
   fs.writeFileSync(${JSON.stringify(stopped)}, 'transient failure');
@@ -65,9 +66,7 @@ setInterval(() => {}, 1000);
     expect(records).toHaveLength(1);
     expect(['done', 'review']).toContain(records[0].status);
   } finally {
-    if (existsSync(pidFile)) {
-      try { process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGTERM'); } catch { /* already exited */ }
-    }
+    killFromPidFile(pidFile, 'SIGTERM');
     rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 }, CLI_TIMEOUT_MS + 10_000);

@@ -2,8 +2,21 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type ChildProcess } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// The launch timeout SIGKILLs its child; the test reads the child from the spawn itself.
+// A pid file the fake writes is no proof: under load the timeout can kill the fake before
+// its first statement runs, and the file never appears (hearsay-tools/cezarion#953).
+const { spawned } = vi.hoisted(() => ({ spawned: [] as ChildProcess[] }));
+vi.mock('node:child_process', async (original) => {
+  const actual = await original<typeof import('node:child_process')>();
+  return { ...actual, spawn: ((...args: Parameters<typeof actual.spawn>) => {
+    const child = actual.spawn(...args);
+    spawned.push(child);
+    return child;
+  }) as typeof actual.spawn };
+});
 import { processStartToken } from '../delegation/process-liveness.ts';
 import { connectCdp } from './cdp.ts';
 import {
@@ -551,16 +564,17 @@ setInterval(()=>{},1000);`,
   });
 
   it.skipIf(!posix)('kills the process and reports kind timeout when the port never appears', async () => {
-    const pidFile = join(dir, 'pid');
-    const bin = script('hang', `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));setInterval(()=>{},1000);`);
+    const bin = script('hang', `setInterval(()=>{},1000);`);
     const err = await launchChromium(bin, join(dir, 'profile'), {}, { timeoutMs: 400 }).catch(e => e);
     expect(err).toBeInstanceOf(ChromiumError);
     expect(err.kind).toBe('timeout');
     // The owner's diagnostics name the binary and the deadline it missed.
     expect(err.message).toBe(`Chromium did not open its DevTools port within 0.4 s (${bin})`);
-    const pid = Number(readFileSync(pidFile, 'utf8'));
+    const child = spawned.find(candidate => candidate.spawnfile === bin);
+    expect(child?.pid).toBeGreaterThan(1);
     await vi.waitFor(() => {
-      expect(() => process.kill(pid, 0)).toThrow();
+      expect(child!.signalCode).toBe('SIGKILL');
+      expect(() => process.kill(child!.pid!, 0)).toThrow();
     });
   });
 });

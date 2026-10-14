@@ -8,6 +8,7 @@ import { RunStore } from '../runs/store.ts';
 import { RunManager } from '../workflows/run.ts';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { HARNESS_ADAPTERS, withOwnedInputRun, waitFor } from './harness-parity.testkit.ts';
+import { killFromPidFile, requirePid, writePidSource } from '../pid-file.testkit.ts';
 
 const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 
@@ -69,7 +70,7 @@ if (args.includes('status') && args.includes('--porcelain')) {
   const holder = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(`setInterval(() => { if (require('node:fs').existsSync(${JSON.stringify(join(bin, 'move'))})) process.chdir(${JSON.stringify(bin)}); }, 10)`)}], { detached: true, stdio: 'ignore' });
   holder.unref();
   fs.writeFileSync(${JSON.stringify(join(bin, 'holder'))}, String(holder.pid));
-  fs.writeFileSync(${JSON.stringify(join(bin, 'pid'))}, String(process.pid));
+  ${writePidSource(join(bin, 'pid'))}
   const timer = setInterval(() => {
     if (fs.existsSync(${JSON.stringify(join(bin, 'exit'))})) {
       clearInterval(timer); process.exit(0);
@@ -95,7 +96,7 @@ if (args.includes('status') && args.includes('--porcelain')) {
                 if (hasTail) expect(store.getRun(runId)?.steps.slice(0, 2).map(step => step.status)).toEqual(['done', 'pending']);
                 const dir = store.getRun(runId)!.worktreePath!;
                 writeFileSync(join(dir, 'progress.txt'), 'recover me\n');
-                holder = Number(readFileSync(join(bin, 'holder'), 'utf8'));
+                holder = requirePid(join(bin, 'holder'));
                 // The fixture scopes /proc to processes it has seen in its tree; enumerate
                 // once while Git still parents the holder, as a real host always lists it.
                 readdirSync('/proc');
@@ -105,7 +106,7 @@ for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => r
 setInterval(() => require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 40)'], { stdio: 'ignore' }), 20);`], { cwd: dir, stdio: 'ignore' });
                 unrelatedExit = new Promise(resolve => unrelated!.once('exit', resolve));
                 writeFileSync(join(bin, 'exit'), 'exit');
-                const gitPid = Number(readFileSync(join(bin, 'pid'), 'utf8'));
+                const gitPid = requirePid(join(bin, 'pid'));
                 await waitFor(() => { try { process.kill(gitPid, 0); return false; } catch { return true; } });
                 if (outcome === 'cancelled') expect(manager.cancel(runId)).toBe(true);
                 // The first blocked report can precede the first holder poll under load ("process
@@ -150,9 +151,7 @@ setInterval(() => require('node:child_process').spawn(process.execPath, ['-e', '
                   try { process.kill(holder, 'SIGKILL'); } catch { /* gone */ }
                   await waitFor(() => { try { process.kill(holder!, 0); return false; } catch { return true; } });
                 }
-                if (existsSync(join(bin, 'pid'))) {
-                  try { process.kill(Number(readFileSync(join(bin, 'pid'), 'utf8')), 'SIGKILL'); } catch { /* gone */ }
-                }
+                killFromPidFile(join(bin, 'pid'));
                 await saveTask;
                 if (replacement) {
                   await waitFor(() => !existsSync(join(repoRoot, '.ai/cezar/runs', `${runId}.autosave-cleanup.json`)));

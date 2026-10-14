@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+// Publish a pid atomically (temporary sibling, then rename): a test reading it sees no
+// file or a whole pid, never the empty file whose Number() is 0 (hearsay-tools/cezarion#953).
+function watchdogWritePid(file, pid) { const tmp = `${file}.${process.pid}.tmp`; writeFileSync(tmp, pid); renameSync(tmp, file); }
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -156,12 +159,12 @@ if (prompt.includes('mock:ci-wait') || process.env.CEZ_MOCK_CI_PR) {
   finish(response); process.exit(0);
 }
 if (prompt.includes('mock:no-progress')) {
-  writeFileSync('watchdog.pid', String(process.pid));
+  watchdogWritePid('watchdog.pid', String(process.pid));
   if (prompt.includes('ignore-term')) process.on('SIGTERM', () => {});
   if (prompt.includes('held-pipe')) spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'],
     { stdio: ['ignore', process.stdout, process.stderr] });
   if (prompt.includes('leftover')) {
-    const leftover = (file) => `process.on('SIGTERM',()=>{}); require('fs').writeFileSync(${JSON.stringify(file)}, String(process.pid)); setTimeout(()=>{},20000)`;
+    const leftover = (file) => `process.on('SIGTERM',()=>{}); const fs = require('fs'); fs.writeFileSync(${JSON.stringify(`${file}.tmp`)}, String(process.pid)); fs.renameSync(${JSON.stringify(`${file}.tmp`)}, ${JSON.stringify(file)}); setTimeout(()=>{},20000)`;
     spawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
     spawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
   }

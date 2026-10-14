@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { autosaveGit } from './autosave-git.ts';
 import { autosaveCommit } from './git-worktree.ts';
+import { killFromPidFile, requirePid, writePidSource } from './pid-file.testkit.ts';
 
 const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -29,11 +30,7 @@ describe.runIf(process.platform === 'linux')('autosave holder attribution (#958)
   });
   afterEach(async () => {
     for (const child of unrelated.splice(0)) child.kill('SIGKILL');
-    if (existsSync(join(bin, 'pid'))) {
-      for (const pid of readFileSync(join(bin, 'pid'), 'utf8').trim().split('\n')) {
-        try { process.kill(Number(pid), 'SIGKILL'); } catch { /* gone */ }
-      }
-    }
+    killFromPidFile(join(bin, 'pid'));
     await Promise.allSettled(jobs.splice(0));
     vi.restoreAllMocks(); vi.unstubAllEnvs();
     rmSync(repo, { recursive: true, force: true });
@@ -80,7 +77,7 @@ setTimeout(() => {}, ${ms});`], { cwd: repo, stdio: 'ignore' });
     const descendant = join(bin, 'detached.cjs');
     writeFileSync(descendant, `
 const fs = require('node:fs');
-fs.appendFileSync(${JSON.stringify(join(bin, 'pid'))}, String(process.pid) + '\\n');
+${writePidSource(join(bin, 'pid'), { append: true })}
 setTimeout(() => { fs.writeFileSync('late.txt', 'last write'); process.exit(0); }, 1200);
 `);
     writeFileSync(join(bin, 'git'), `#!${process.execPath}\n
@@ -96,7 +93,7 @@ setTimeout(() => process.exit(0), 50);
     jobs.push(job);
     await delay(700);
     expect(settled).toBe(false);
-    const holder = Number(readFileSync(join(bin, 'pid'), 'utf8'));
+    const holder = requirePid(join(bin, 'pid'));
     const proofs = blocked.mock.calls.map(([, proof]) => proof as { processes: { pid: number }[] });
     expect(proofs.at(-1)?.processes.map(entry => entry.pid)).toEqual([holder]);
     expect(proofs.flatMap(proof => proof.processes.map(entry => entry.pid))).not.toContain(other.pid);
@@ -111,7 +108,7 @@ setTimeout(() => process.exit(0), 50);
     writeFileSync(descendant, `
 const fs = require('node:fs');
 const cp = require('node:child_process');
-fs.appendFileSync(${JSON.stringify(join(bin, 'pid'))}, String(process.pid) + '\\n');
+${writePidSource(join(bin, 'pid'), { append: true })}
 // Each short-lived child is a new Git descendant in the worktree.
 const timer = setInterval(() => cp.spawn(process.execPath, ['-e', 'setTimeout(() => {}, 40)'], { stdio: 'ignore' }), 25);
 setTimeout(() => { clearInterval(timer); setTimeout(() => process.exit(0), 100); }, 1600);
@@ -130,7 +127,7 @@ setTimeout(() => process.exit(0), 50);
     expect(new Set(blocked.mock.calls.map(([, proof]) => JSON.stringify(proof))).size).toBeGreaterThan(5);
     expect(warnings.length).toBeLessThanOrEqual(6);
     expect(warnings.at(-1)).toContain('suppressed');
-    const holder = Number(readFileSync(join(bin, 'pid'), 'utf8'));
+    const holder = requirePid(join(bin, 'pid'));
     expect(gone(holder)).toBe(true);
   });
 });

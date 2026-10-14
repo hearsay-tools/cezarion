@@ -1,10 +1,11 @@
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
+import { readPid, requirePid } from '../pid-file.testkit.ts';
 
 
 // These fixtures exercise checks and Git, never the auxiliary LLM namer.
@@ -35,7 +36,7 @@ async function waitFor(pred: () => boolean, what: string, ms = 15_000): Promise<
 }
 
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-const pidOf = (file: string) => Number(readFileSync(file, 'utf8').trim());
+const pidOf = requirePid;
 
 function startCheck(f: ReturnType<typeof fixture>, command: string) {
   const run = f.manager.startRun({ name: 'chk', source: 'built-in', steps: [{ id: 'c', command }] }, { task: 't', worktree: false });
@@ -49,8 +50,8 @@ describe('Stop on a workflow check (#496)', () => {
   it('kills a check that ignores SIGTERM and confirms the group is gone', async () => {
     const f = fixture();
     const pidFile = join(f.root, 'pid');
-    const id = startCheck(f, `trap '' TERM; echo $$ > ${pidFile}; while true; do sleep 0.1; done`);
-    await waitFor(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8').trim() !== '', 'check start');
+    const id = startCheck(f, `trap '' TERM; echo $$ > ${pidFile}.tmp; mv ${pidFile}.tmp ${pidFile}; while true; do sleep 0.1; done`);
+    await waitFor(() => readPid(pidFile) !== undefined, 'check start');
     const pid = pidOf(pidFile);
     const t0 = Date.now();
     expect(f.manager.cancel(id)).toBe(true);
@@ -64,8 +65,8 @@ describe('Stop on a workflow check (#496)', () => {
   it('kills descendants that hold the output pipes open', async () => {
     const f = fixture();
     const pidFile = join(f.root, 'child');
-    const id = startCheck(f, `(trap '' TERM; while true; do sleep 0.1; done) & echo $! > ${pidFile}; wait`);
-    await waitFor(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8').trim() !== '', 'child start');
+    const id = startCheck(f, `(trap '' TERM; while true; do sleep 0.1; done) & echo $! > ${pidFile}.tmp; mv ${pidFile}.tmp ${pidFile}; wait`);
+    await waitFor(() => readPid(pidFile) !== undefined, 'child start');
     const child = pidOf(pidFile);
     f.manager.cancel(id);
     await waitFor(() => !f.manager.isActive(id), 'run to release');

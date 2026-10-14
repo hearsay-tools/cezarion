@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { readableHolder } from './non-dumpable.testkit.ts';
 import { inspectGeneration, processesWithCwdUnder, processStartToken, recordedProcessLive } from './process-liveness.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
+import { requirePidText } from '../pid-file.testkit.ts';
 
 describe.runIf(process.platform === 'linux')('fixture process enumeration safety', () => {
   it('retains real unrecorded holders and independently reads recorded PIDs outside the scope', async () => {
@@ -54,8 +55,7 @@ else:
     let holder: { pid: number; startToken?: string } | undefined;
     try {
       const [data] = await once(launcher.stdout, 'data');
-      const pid = Number(String(data).trim());
-      expect(Number.isSafeInteger(pid)).toBe(true);
+      const pid = requirePidText(String(data), 'launcher stdout');
       holder = { pid, startToken: processStartToken(pid) };
       expect(processesWithCwdUnder(root)).toContain(pid); // observe while ancestry is intact
       launcher.stdin.end(); await exited;
@@ -225,8 +225,7 @@ describe.runIf(process.platform === 'darwin')('macOS fixture process enumeration
     let holder: { pid: number; startToken?: string } | undefined;
     try {
       const [data] = await once(launcher.stdout, 'data');
-      const pid = Number(String(data).trim());
-      expect(Number.isSafeInteger(pid)).toBe(true);
+      const pid = requirePidText(String(data), 'launcher stdout');
       holder = { pid, startToken: processStartToken(pid) };
       expect(processesWithCwdUnder(root)).toContain(pid);
       launcher.stdin.end(); await exited;

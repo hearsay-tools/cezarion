@@ -5,7 +5,10 @@
 // are imported lazily.
 import readline from 'node:readline';
 import { spawn } from 'node:child_process';
-import { appendFileSync, closeSync, existsSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, renameSync, writeFileSync } from 'node:fs';
+// Publish a pid atomically (temporary sibling, then rename): a test reading it sees no
+// file or a whole pid, never the empty file whose Number() is 0 (hearsay-tools/cezarion#953).
+function watchdogWritePid(file, pid) { const tmp = `${file}.${process.pid}.tmp`; writeFileSync(tmp, pid); renameSync(tmp, file); }
 
 const argv = process.argv.slice(2);
 if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify(argv)}\n`);
@@ -128,10 +131,10 @@ let resumeAfterAsk = false;
 
 /** Same as mock-pi-rpc.mjs `watchdogStall`: a turn that never progresses (no-progress rows). */
 function watchdogStall(message) {
-  writeFileSync('watchdog.pid', String(process.pid));
+  watchdogWritePid('watchdog.pid', String(process.pid));
   if (message.includes('input-closed')) {
     closeSync(0);
-    writeFileSync('input-closed.pid', String(process.pid));
+    watchdogWritePid('input-closed.pid', String(process.pid));
     setTimeout(() => process.exit(0), message.includes('mock:gate-prompt-ack') ? 15_000 : 300);
   }
   if (message.includes('ignore-term')) {
@@ -146,7 +149,7 @@ function watchdogStall(message) {
   if (message.includes('leftover')) {
     // hearsay-tools/cezarion#890: one child stays in the session's process group and ignores
     // SIGTERM; one leaves the group with setsid. Both exit on their own as a cleanup backstop.
-    const leftover = (file) => `process.on('SIGTERM',()=>{}); require('fs').writeFileSync(${JSON.stringify(file)}, String(process.pid)); setTimeout(()=>{},20000)`;
+    const leftover = (file) => `process.on('SIGTERM',()=>{}); const fs = require('fs'); fs.writeFileSync(${JSON.stringify(`${file}.tmp`)}, String(process.pid)); fs.renameSync(${JSON.stringify(`${file}.tmp`)}, ${JSON.stringify(file)}); setTimeout(()=>{},20000)`;
     spawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
     spawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
   }

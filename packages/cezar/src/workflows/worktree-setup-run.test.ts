@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { withOwnedInputRun } from '../core/harness-parity.testkit.ts';
+import { readPid, requirePid } from '../pid-file.testkit.ts';
 import { handoffPath } from '../handoff.ts';
 import { reclaimWorktree } from '../runs/retention.ts';
 import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
@@ -159,10 +160,10 @@ describe('worktree setup on task start (#917)', () => {
 
   it('Stop during setup cancels the run and kills the group', async () => {
     const pidFile = join(tmpdir(), `cez-wsetup-pid-${process.pid}-${Date.now()}`);
-    const f = await fixture({ worktreeSetup: { commands: [`trap '' TERM; echo $$ > ${pidFile}; while true; do sleep 0.1; done`] } });
+    const f = await fixture({ worktreeSetup: { commands: [`trap '' TERM; echo $$ > ${pidFile}.tmp; mv ${pidFile}.tmp ${pidFile}; while true; do sleep 0.1; done`] } });
     const record = f.manager.startRun(WORKFLOW, { task: 'do the thing' });
-    await waitFor(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8').trim() !== '', 'setup to start');
-    const pid = Number(readFileSync(pidFile, 'utf8').trim());
+    await waitFor(() => readPid(pidFile) !== undefined, 'setup to start');
+    const pid = requirePid(pidFile);
     rmSync(pidFile, { force: true });
     expect(f.manager.cancel(record.id)).toBe(true);
     await waitFor(() => f.store.getRun(record.id)?.status === 'cancelled', 'run to cancel');
