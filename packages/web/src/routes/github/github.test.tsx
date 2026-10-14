@@ -307,9 +307,19 @@ function dragGithubList(from: number, to: number) {
   fireEvent.pointerUp(handle, { pointerId: 1, clientX: to })
 }
 
+/** The PR files request leaves only after the route has rendered the PR list from its first
+ *  responses, and that render is synchronous CPU work. Measured at load 48-72 (#901): the event
+ *  loop stayed blocked 400-1250 ms before `/changes` was requested, then the response rendered
+ *  within ~580 ms. Wait for the request itself on a budget sized for the blocked render, and
+ *  leave Testing Library's default on the fetch-and-render step that follows. */
+async function changesRequested(sent: SentRequest[], n: number) {
+  await waitFor(() => expect(sent.map((request) => request.path)).toContain(`/api/v1/github/prs/${n}/changes`), { timeout: 10_000 })
+}
+
 it('/github/prs/:n/changes renders PR-only file review navigation and completeness', async () => {
-  stubFetch()
+  const sent = stubFetch()
   renderAt('/github/prs/137/changes')
+  await changesRequested(sent, 137)
   expect(await screen.findByText('2 changed files')).not.toBeNull()
   expect(screen.getByRole('navigation', { name: 'Pull request detail' }).textContent).toContain('ConversationChanges')
   expect(screen.getByRole('status').textContent).toContain('One patch was omitted.')
