@@ -207,11 +207,21 @@ describe('cez automation', () => {
       const id = String(last().id);
       expect(await run(['update', id, '--json', JSON.stringify({ task: { prompt: 'new prompt' } })])).toBe(EXIT.ok);
       expect(posted[1]).toMatchObject({ method: 'PUT' });
+      // Review of #1018: a prompt-only update keeps every other task setting.
       expect(posted[1]?.body).toEqual({
         name: 'Nightly', kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 },
-        task: { prompt: 'new prompt' }, enabled: true, expectedRevision: 1,
+        task: { prompt: 'new prompt', worktree: true, autonomous: true }, enabled: true, expectedRevision: 1,
       });
       expect(last()).toMatchObject({ id, enabled: true, revision: 2, url: automationPageUrl(cockpit, id) });
+    });
+
+    it('update merges task key by key, and null removes a task key', async () => {
+      const withRunner = { ...definition, task: { ...definition.task, runner: 'codex', model: 'gpt-x' } };
+      expect(await run(['create', '--json', JSON.stringify(withRunner)])).toBe(EXIT.ok);
+      const id = String(last().id);
+      expect(await run(['update', id, '--json', JSON.stringify({ task: { prompt: 'p2', model: null } })])).toBe(EXIT.ok);
+      expect(posted[1]?.body).toMatchObject({ task: { prompt: 'p2', worktree: true, autonomous: true, runner: 'codex' } });
+      expect((posted[1]?.body as { task: Record<string, unknown> }).task).not.toHaveProperty('model');
     });
 
     it('update against a stale revision exits 2 and overwrites nothing', async () => {

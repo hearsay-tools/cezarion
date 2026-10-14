@@ -812,7 +812,8 @@ cez automation check <id> [--execute] · run <id> · list · show <id> · enable
 
 `add` and `create` send the same body and create the automation **paused** unless `--enable` is
 given; `--cron` accepts the four shapes a schedule can take (daily, weekdays, one weekday, every N
-hours) and anything else is a usage error pointing to the JSON form. `update` restates `enabled`
+hours) and anything else is a usage error pointing to the JSON form. `update` replaces each key
+it is given, except `task`, which merges key by key (`null` removes one); it restates `enabled`
 and echoes the revision it read, so a concurrent edit in the cockpit is refused (exit 2), never
 overwritten. Mutating commands print the automation's cockpit page as `url`.
 

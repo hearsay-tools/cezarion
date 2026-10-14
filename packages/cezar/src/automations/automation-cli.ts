@@ -54,7 +54,8 @@ One JSON object per invocation; exit 0 ok, 1 check failed, 2 refused or no cockp
                                            (weekdays), "M H * * D" (0 or 7 = Sunday) or "0 */N * * *"
                                            (N in 1,2,3,4,6,8,12); anything else needs the JSON form
   update <id> [--file <def.json> | --json '<json>']
-                                           replace the editable keys you give; the rest keep their value
+                                           replace the editable keys you give; the rest keep their value;
+                                           "task" merges key by key, and null removes a task key
   check <id> [--execute]                   GitHub poll: preview its matches (launches nothing), or --execute
   run <id>                                 schedule: launch it once now
   list | show <id> | enable <id> | pause <id> | delete <id>
@@ -321,6 +322,13 @@ async function execute(
       for (const key of EDITABLE_KEYS) {
         const value = key in body! ? body![key] : current[key];
         if (value !== undefined) next[key] = value;
+      }
+      // `task` merges key by key, so a prompt-only update keeps the workflow, runner, model and
+      // the rest; `null` removes a key. Every other key replaces what is stored.
+      if (isRecord(body!.task) && isRecord(current.task)) {
+        const task: Record<string, unknown> = { ...current.task, ...body!.task };
+        for (const [key, value] of Object.entries(task)) if (value === null) delete task[key];
+        next.task = task;
       }
       // A PUT restates `enabled` (an edit may not silently pause a running automation) and echoes
       // the revision it read, so a concurrent cockpit edit is a 409, not a clobber.

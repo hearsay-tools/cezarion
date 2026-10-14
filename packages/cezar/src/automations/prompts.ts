@@ -94,6 +94,7 @@ The CLI is ${command}. Every command prints one JSON object:
   ${command} check <id> [--execute]                   GitHub poll: preview what the filter matches right now (launches nothing without --execute)
   ${command} run <id>                                 schedule: launch it once, now
   ${command} list | show <id> | update <id> --file <def.json> | enable <id> | pause <id> | delete <id>
+                                                      (update replaces each key given; "task" merges key by key, null removes one)
 
 Read the schema first. Create the automation PAUSED. A paused automation is the finished state of this task, not a step awaiting confirmation: enable it only when the user's own request explicitly asks for it to be switched on. An instruction to continue autonomously, not to ask for confirmation, or to make reasonable assumptions is not that request. For a GitHub poll, run a preview check so the user sees what it would match; for a schedule, report its next occurrence. Put the "url" the command prints in your final message. If the command exits non-zero or is refused, stop and report that automations are unavailable on this cockpit, quoting its error: do not write a cron job, a GitHub Action or a polling script as a substitute.`;
 }
