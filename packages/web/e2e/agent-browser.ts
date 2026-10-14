@@ -51,6 +51,8 @@ export const cezarCli = resolve(repoRoot, '.ai/qa/build/cezar/dist/index.js')
  * through a stand-in binary. The root is overridable for the same reason.
  */
 const defaultFailureRoot = resolve(repoRoot, '.ai/qa/failures')
+/** How long `goto` lets the current document load its font faces before navigating (#808). */
+const FONT_SETTLE_MS = 10_000
 const failureCapture: { root: string; spec: string; test: string } = {
   root: defaultFailureRoot,
   spec: 'unknown-spec',
@@ -520,7 +522,27 @@ export class AgentBrowser {
 
   /** operation: open */
   goto(url: string): void {
+    this.settleFontsBeforeLeaving()
     this.run(['open', url])
+  }
+
+  /** #808: never tear a document down while one of its font faces is still fetching. Chrome keeps
+   *  that half-loaded font in the renderer's memory cache, and every later document that reuses
+   *  the entry waits on it forever: `document.fonts.status` stays `loading`, so every settled
+   *  sample in the session times out. Waiting for `document.fonts.ready` was not enough: under
+   *  load the Skills page read `loaded` here and the next document still stuck (A/B run fix-5),
+   *  so a face can start after the check. Load every declared face up front: none can start
+   *  between this check and the navigation, and later documents only ever find finished entries.
+   *  Bounded, and a page that cannot answer navigates as before. */
+  private settleFontsBeforeLeaving(): void {
+    try {
+      this.run(['eval', `(async () => {
+        if (!document.fonts) return true
+        const faces = Promise.allSettled([...document.fonts].map(face => face.load()))
+        await Promise.race([faces, new Promise(r => setTimeout(r, ${FONT_SETTLE_MS}))])
+        return true
+      })()`], FONT_SETTLE_MS + 5_000)
+    } catch { /* about:blank, a crashed tab or a closed session: navigate anyway */ }
   }
 
   /** Create and initialize a tab through the provider before attaching a separate CDP client.
