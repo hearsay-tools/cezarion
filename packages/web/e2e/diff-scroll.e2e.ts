@@ -48,6 +48,19 @@ const LINES_PER_FILE = 8
 const MAIN = `document.querySelector('[data-slot="main"]')`
 const domSize = () => Number(browser.evaluate(`document.querySelectorAll('*').length`))
 const lineCount = () => browser.count('[data-slot="diff-line"]')
+/**
+ * Sampled-expression prelude: hold the diff scroller at `top`, re-applying it each sample rather
+ * than once before sampling (#409). A one-shot assignment was lost once under a loaded Squeal
+ * slow tier (hearsay-tools/cezarion#1029, bundle `.ai/qa/failures/diff-scroll/keeps-the-per-file-
+ * header-sticky-…-1`: the view sat at scroll 0) and six loaded reruns did not reproduce it, so the
+ * sample also reports the offset, the height and whether the scroller element was replaced.
+ */
+const holdScroll = (top: number) => `const scroller = ${MAIN}
+      const replaced = scroller.dataset.e2eScroll === undefined && window.__e2eScrolled === true
+      if (Math.abs(scroller.scrollTop - ${top}) > 16) scroller.scrollTop = ${top}
+      scroller.dataset.e2eScroll = '1'; window.__e2eScrolled = true
+      const at = { scrollTop: Math.round(scroller.scrollTop), scrollHeight: scroller.scrollHeight, replaced }
+      const held = Math.abs(at.scrollTop - ${top}) <= 16`
 
 let browser: AgentBrowser
 let server: ChildProcess
@@ -161,13 +174,13 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
 
   it('keeps the per-file header sticky while virtualized — the layout hazard virtua poses', () => {
     openChanges('virtual')
-    browser.waitForFunction(`(() => { ${MAIN}.scrollTop = 900; return true })()`)
 
     // A header whose card still covers the viewport top must be pinned AT that top edge, not
     // scrolled away with its card. virtua absolutely-positions every item, which is exactly
     // the layout that could silently kill `position: sticky`.
     const pinned = waitForSettledSample(browser, `(() => {
-      const scroller = ${MAIN}
+      ${holdScroll(900)}
+      if (!held) return { straddling: false, ...at }
       const top = scroller.getBoundingClientRect().top
       for (const card of document.querySelectorAll('[data-slot="diff-file"]')) {
         const box = card.getBoundingClientRect()
@@ -177,8 +190,8 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
           return { straddling: true, headerTop: Math.round(header.getBoundingClientRect().top - top), cardTop: Math.round(box.top - top) }
         }
       }
-      return { straddling: false }
-    })()`) as { straddling: boolean; headerTop?: number; cardTop?: number }
+      return { straddling: false, ...at }
+    })()`, (sample: { straddling: boolean }) => sample.straddling) as { straddling: boolean; headerTop?: number; cardTop?: number }
 
     expect(pinned.straddling, 'no card straddled the fold — the sticky check did not run').toBe(true)
     // Sticky means the header sits at the scrollport top even though its card began above it.
@@ -190,20 +203,20 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
 
   it('mounts cards that actually cover the viewport after scrolling (startMargin is real)', () => {
     openChanges('virtual')
-    browser.waitForFunction(`(() => { ${MAIN}.scrollTop = 1200; return true })()`)
 
     // virtua positions its window from the scroll offset MINUS the distance down to the list
     // (`startMargin`). Get that wrong — measuring it before the scroller ref is attached pins
     // it at 0 — and the window is computed for a point further down the list than the reader
     // is at, leaving an uncovered band at the top of the viewport once the buffer runs out.
     const gap = waitForSettledSample(browser, `(() => {
-      const scroller = ${MAIN}
+      ${holdScroll(1200)}
+      if (!held) return { gap: null, ...at }
       const fold = scroller.getBoundingClientRect().top
       const tops = [...document.querySelectorAll('[data-slot="diff-file"]')]
         .map((card) => card.getBoundingClientRect().top - fold)
-      if (tops.length === 0) return null
-      return Math.round(Math.min(...tops))
-    })()`) as number | null
+      if (tops.length === 0) return { gap: null, ...at }
+      return { gap: Math.round(Math.min(...tops)), ...at }
+    })()`, (sample: { gap: number | null }) => sample.gap !== null).gap as number | null
 
     expect(gap, 'no diff cards mounted at all').not.toBeNull()
     // The topmost mounted card starts at or above the fold — no uncovered band.
