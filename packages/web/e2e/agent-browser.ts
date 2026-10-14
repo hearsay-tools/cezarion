@@ -234,6 +234,8 @@ function probeScript(reason: FailureReason): string {
 
 type EnvDescriptor = {
   baseUrl: string
+  /** The project the shared server serves: an isolated clone, never this checkout. */
+  servedRoot?: string
   browser: {
     installed: boolean
     command: string
@@ -277,10 +279,25 @@ export function readTestEnv(): EnvDescriptor {
     return JSON.parse(readFileSync(descriptorPath, 'utf8')) as EnvDescriptor
   } catch (cause) {
     throw new Error(
-      `cezar e2e: cannot read ${descriptorPath}. Run \`npm run test:e2e\`, which boots the env first.`,
+      `cezar e2e: cannot read ${descriptorPath}. Run \`npm run test:e2e\`, which boots the env first; ` +
+        'if it did, the boot failed — see .ai/qa/test-env-app.log and .ai/qa/test-env-build.log.',
       { cause },
     )
   }
+}
+
+/**
+ * The root of the project the shared server serves — where a spec seeds skills, workflows and
+ * `.ai/cezar` state the server should read. test-env-up.sh serves an isolated clone of the
+ * checkout, so a path derived from this file's location reaches a directory the server never
+ * reads (and, in the main checkout, the live cockpit's own data dir).
+ */
+export function servedRoot(): string {
+  const { servedRoot: root } = readTestEnv()
+  if (!root) {
+    throw new Error(`cezar e2e: ${descriptorPath} names no servedRoot. Re-run .ai/scripts/test-env-up.sh --force.`)
+  }
+  return root
 }
 
 /**

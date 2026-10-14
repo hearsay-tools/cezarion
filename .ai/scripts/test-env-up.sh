@@ -22,6 +22,11 @@
 #   2026-10-14 build the e2e bundle into the ignored .ai/qa/build/cezar mirror via
 #             build-e2e.sh and boot from there; packages/cezar/dist and web/dist (the
 #             production build, a declared Squeal input) are never written by a test boot.
+#   2026-10-14 serve an isolated clone (.ai/qa/served/<name>, e2e-served-repo.mjs) instead
+#             of the checkout: in the main checkout the live cockpit owns .ai/cezar and
+#             refused the server. Drop the old descriptor before a cold boot, so a failed
+#             boot reports its own error rather than a dead env's browser notes. A reuse
+#             syncs the clone to the checkout's current edits; a moved HEAD cold-boots.
 set -eu
 
 # ---- project-specific parameters -------------------------------------------
@@ -40,6 +45,15 @@ APP_LOG="$QA_DIR/test-env-app.log"
 BROWSER_DESCRIPTOR=".ai/browsers/agent-browser.md"
 BROWSER_LAUNCH_JSON="$QA_DIR/browser-launch.json"
 BROWSER_DOCTOR_JSON="$QA_DIR/browser-doctor.json"
+# The project the server serves, and every spec that seeds project state writes into
+# (descriptor `servedRoot`). A fresh clone per cold boot, so the server's runs, worktrees
+# and seeded files never land in this checkout's own .ai/cezar. A local lane is already
+# such a clone (e2e-lanes.mjs) and serves itself.
+if [ -f "$REPO_ROOT/.git/cezar-e2e-lane.json" ]; then
+  SERVED_ROOT=$REPO_ROOT
+else
+  SERVED_ROOT="$QA_DIR/served/${REPO_ROOT##*/}"
+fi
 
 PREFERRED_PORT=4321
 HEALTH_PATH="/api/v1/health"
@@ -198,6 +212,7 @@ try_reuse() {
   requested_single_project=false
   [ "${CEZ_SINGLE_PROJECT:-}" = 1 ] && requested_single_project=true
   [ "$(json_get "$ENV_DESCRIPTOR" environment.singleProject)" = "$requested_single_project" ] || { log "not reusing: single-project mode changed"; return 1; }
+  [ "$(json_get "$ENV_DESCRIPTOR" servedRoot)" = "$SERVED_ROOT" ] && [ -d "$SERVED_ROOT" ] || { log "not reusing: the served project is not $SERVED_ROOT"; return 1; }
   { [ -n "$pid" ] && [ -n "$url" ]; } || { log "not reusing: descriptor has no app pid or base URL"; return 1; }
   # A state file is a claim, not proof: the PID must still be alive…
   kill -0 "$pid" 2>/dev/null || { log "not reusing: app pid $pid is gone"; return 1; }
@@ -236,6 +251,15 @@ try_reuse() {
     [ -z "$newer" ] || { log "source changed since boot ($newer)"; return 1; }
   fi
 
+  # The server reads its project live. Bring the clone to the checkout's current edits, as
+  # serving the checkout itself did; a moved HEAD needs a fresh clone, so a cold boot.
+  if [ "$SERVED_ROOT" != "$REPO_ROOT" ]; then
+    node "$SCRIPT_DIR/e2e-served-repo.mjs" --sync "$REPO_ROOT" "$SERVED_ROOT" || {
+      log "not reusing: the served project cannot follow this checkout (HEAD moved, or the sync failed)"
+      return 1
+    }
+  fi
+
   BASE_URL=$url
   BROWSER_INSTALLED=$(json_get "$ENV_DESCRIPTOR" browser.installed)
   [ "$BROWSER_INSTALLED" = true ] && BROWSER_INSTALLED=1 || BROWSER_INSTALLED=0
@@ -253,6 +277,18 @@ teardown_stale() {
     sleep 1
     kill -9 "$pid" 2>/dev/null || true
   fi
+  # A cold boot replaces the env, so its descriptor goes now: specs that run after a failed
+  # boot must report "no env", not attach to a dead baseUrl or repeat its browser notes.
+  rm -f "$ENV_DESCRIPTOR"
+}
+
+prepare_served_repo() {
+  [ "$SERVED_ROOT" = "$REPO_ROOT" ] && return 0
+  log "cloning the served project into $SERVED_ROOT"
+  node "$SCRIPT_DIR/e2e-served-repo.mjs" "$REPO_ROOT" "$SERVED_ROOT" >/dev/null || {
+    log "cannot prepare the served project at $SERVED_ROOT"
+    exit 1
+  }
 }
 
 # ---- 4. build cache ---------------------------------------------------------
@@ -501,10 +537,10 @@ start_app() {
   log "starting cezar on $BASE_URL (CEZ_DRY_RUN=1)"
   # --no-open: a test boot must never hijack the operator's browser.
   if command -v setsid >/dev/null 2>&1; then
-    (cd "$REPO_ROOT" && exec setsid nohup node "$E2E_BUILD_ROOT/dist/index.js" --port "$PORT" --no-open --repo "$REPO_ROOT" \
+    (cd "$REPO_ROOT" && exec setsid nohup node "$E2E_BUILD_ROOT/dist/index.js" --port "$PORT" --no-open --repo "$SERVED_ROOT" \
       >"$APP_LOG" 2>&1 </dev/null) &
   else
-    (cd "$REPO_ROOT" && exec nohup node "$E2E_BUILD_ROOT/dist/index.js" --port "$PORT" --no-open --repo "$REPO_ROOT" \
+    (cd "$REPO_ROOT" && exec nohup node "$E2E_BUILD_ROOT/dist/index.js" --port "$PORT" --no-open --repo "$SERVED_ROOT" \
       >"$APP_LOG" 2>&1 </dev/null) &
   fi
   APP_PID=$!
@@ -547,7 +583,7 @@ write_descriptor() {
   [ "${CEZ_SINGLE_PROJECT:-}" = 1 ] && SINGLE_PROJECT=true
   node -e '
     const fs = require("fs");
-    const [out, baseUrl, port, pid, cmd, bInstalled, bCmd, bVer, bNotes, desc, singleProject, platform, launchPath] = process.argv.slice(1);
+    const [out, baseUrl, port, pid, cmd, bInstalled, bCmd, bVer, bNotes, desc, singleProject, platform, launchPath, servedRoot] = process.argv.slice(1);
     let launch = {};
     try { launch = JSON.parse(fs.readFileSync(launchPath, "utf8")); } catch { /* resolver absent */ }
     const browser = {
@@ -567,6 +603,7 @@ write_descriptor() {
       status: "running",
       mode: "prod",
       baseUrl,
+      servedRoot,
       startedByThisRepo: true,
       startScript: ".ai/scripts/test-env-up.sh",
       stopScript: ".ai/scripts/test-env-down.sh",
@@ -578,13 +615,13 @@ write_descriptor() {
       testRunner: { name: "other", config: "packages/web/e2e/vitest.config.ts" },
       platform,
       startedAt: new Date().toISOString(),
-      notes: "Booted from the VITE_CEZ_E2E=1 build in .ai/qa/build/cezar (never packages/cezar/dist) after pnpm install --frozen-lockfile with CEZ_DRY_RUN=1, so workspace links/runtime dependencies are present, the agent CLIs are mocked, and no agent login/network is needed. No backing services. Stop with .ai/scripts/test-env-down.sh. App log: .ai/qa/test-env-app.log.",
+      notes: "Booted from the VITE_CEZ_E2E=1 build in .ai/qa/build/cezar (never packages/cezar/dist) after pnpm install --frozen-lockfile with CEZ_DRY_RUN=1, so workspace links/runtime dependencies are present, the agent CLIs are mocked, and no agent login/network is needed. Serves servedRoot, an isolated clone of this checkout. No backing services. Stop with .ai/scripts/test-env-down.sh. App log: .ai/qa/test-env-app.log.",
     }, null, 2) + "\n");
   ' "$ENV_DESCRIPTOR" "$BASE_URL" "$PORT" "$APP_PID" \
-    "CEZ_DRY_RUN=1 CEZ_HOME=.ai/qa/cez-home node $E2E_BUILD_ROOT/dist/index.js --port $PORT --no-open" \
+    "CEZ_DRY_RUN=1 CEZ_HOME=.ai/qa/cez-home node $E2E_BUILD_ROOT/dist/index.js --port $PORT --no-open --repo $SERVED_ROOT" \
     "$BROWSER_INSTALLED" "$BROWSER_COMMAND" "$BROWSER_VERSION" "$BROWSER_NOTES" "$BROWSER_DESCRIPTOR" \
     "$SINGLE_PROJECT" "$(uname -s 2>/dev/null | grep -qi Linux && { grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null && echo wsl2 || echo linux; } || echo darwin)" \
-    "$BROWSER_LAUNCH_JSON"
+    "$BROWSER_LAUNCH_JSON" "$SERVED_ROOT"
 }
 
 # ---- main -------------------------------------------------------------------
@@ -599,6 +636,7 @@ fi
 teardown_stale
 ensure_browser
 ensure_build
+prepare_served_repo
 start_app
 write_descriptor
 emit 0

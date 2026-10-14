@@ -150,12 +150,13 @@ function laneMetadata(repoRoot) {
   return { remotes, core, symbolic, effective };
 }
 
-export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD' }) {
-  const laneRoot = join(scratchRoot, `lane-${index}`);
+// A checkout of `repoRoot` at `root` that shares nothing with it: its own objects, refs and
+// administration, the base commit plus the current edits. removeLane() owns its cleanup.
+export function cloneIsolatedCheckout({ repoRoot, root: laneRoot, baseRef = 'HEAD' }) {
   const source = realpathSync(repoRoot);
   const base = git(repoRoot, 'rev-parse', '--verify', `${baseRef}^{commit}`).toString('utf8').trim();
   const metadata = laneMetadata(repoRoot);
-  mkdirSync(scratchRoot, { recursive: true });
+  mkdirSync(dirname(laneRoot), { recursive: true });
   mkdirSync(laneRoot); // Exclusive reservation: failure cleanup never owns a preexisting path.
   try {
     // #795: linked worktrees share the host's 120s mutation queue. Each lane needs its
@@ -192,6 +193,39 @@ export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD' }) {
       version: 1, source, root: realpathSync(laneRoot),
     }), { flag: 'wx' });
     copyCurrentEdits(repoRoot, laneRoot, base);
+    return laneRoot;
+  } catch (error) {
+    rmSync(laneRoot, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+// Bring a clone from cloneIsolatedCheckout back to the checkout's current edits, in place, for
+// a server that keeps serving it: paths the checkout changed are copied again, and paths only
+// the clone still has changed go back to the base. False when the checkout's HEAD moved; that
+// needs a fresh clone.
+export function syncCurrentEdits({ repoRoot, root }) {
+  const owner = JSON.parse(readFileSync(join(root, '.git/cezar-e2e-lane.json'), 'utf8'));
+  if (owner.version !== 1 || owner.source !== realpathSync(repoRoot) || owner.root !== realpathSync(root)) {
+    throw new Error('refusing to sync an unowned E2E checkout');
+  }
+  const head = git(repoRoot, 'rev-parse', 'HEAD').toString('utf8').trim();
+  if (git(root, 'rev-parse', 'HEAD').toString('utf8').trim() !== head) return false;
+  const wanted = changedPaths(repoRoot, head);
+  for (const relative of changedPaths(root, head)) {
+    if (wanted.has(relative)) continue;
+    rmSync(join(root, relative), { recursive: true, force: true });
+    if (git(root, 'ls-tree', '--name-only', head, '--', relative).length) {
+      git(root, 'checkout', '--quiet', head, '--', relative);
+    }
+  }
+  copyCurrentEdits(repoRoot, root, head);
+  return true;
+}
+
+export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD' }) {
+  const laneRoot = cloneIsolatedCheckout({ repoRoot, root: join(scratchRoot, `lane-${index}`), baseRef });
+  try {
     linkBuiltAssets(repoRoot, laneRoot);
     return laneRoot;
   } catch (error) {

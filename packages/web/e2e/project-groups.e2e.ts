@@ -5,14 +5,14 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
-import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
 import { readSharedProjects, snapshotSharedHome, writeSharedProjects } from './workspace-registry'
 
 /** Registry → rail → scoped project header, tabs and task list in a real browser. */
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const sessionId = `e2e-project-groups-${process.pid}`
-const repoRoot = resolve(import.meta.dirname, '../../..')
+const repoRoot = servedRoot()
 
 const DESKTOP = { width: 1440, height: 900 }
 

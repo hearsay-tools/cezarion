@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { AgentBrowser, readTestEnv } from './agent-browser'
+import { AgentBrowser, readTestEnv, servedRoot } from './agent-browser'
 
 /**
  * Settings → Bookmarklets end-to-end against the shared dry-run environment.
@@ -29,7 +29,7 @@ const sessionId = `e2e-settings-bookmarklets-${process.pid}`
 
 const DESKTOP = { width: 1440, height: 900 }
 
-const skillsDir = resolve(import.meta.dirname, '../../../.ai/skills')
+const skillsDir = resolve(servedRoot(), '.ai/skills')
 const ALPHA = 'e2e-bm-alpha-skill'
 const BETA = 'e2e-bm-beta-skill'
 
