@@ -94,6 +94,14 @@
       "scripts/test-changed.mjs",
       "package.json"
     ],
+    "packages/cezar/src/pid-file.testkit.test.ts": [
+      "packages/cezar/src/**/*.test.ts",
+      "packages/cezar/src/**/*.testkit.ts",
+      "packages/cezar/test/**/*.ts"
+    ],
+    "packages/cezar/src/test-task-env.test.ts": [
+      "scripts/test-git-env.mjs"
+    ],
     "packages/cezar/test/unit/cursor-hang-stdin.test.ts": [
       "packages/cezar/scripts/mock-cursor-hang-stdin.mjs"
     ],
