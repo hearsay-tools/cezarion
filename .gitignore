@@ -6,6 +6,9 @@ dist/
 # Scratch dirs from .github/scripts/vitest-actions-report.test.cjs
 .tmp-vitest-ga-*/
 
+# Browser-spec fixtures served from the Vite root (packages/web/e2e/run-header-ci-wait.e2e.ts)
+/packages/web/.e2e-fixtures/
+
 # Build artifact: the one README lives at the repo root and is copied into the published
 # package by packages/cezar/scripts/sync-readme.mjs. Never edit the copy.
 /packages/cezar/README.md

@@ -16,7 +16,9 @@ import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from
 // suite owns server lifecycle/SSE evidence; this fixture deliberately needs no CI controller.
 const webRoot = resolve(import.meta.dirname, '..')
 const viteCli = resolve(dirname(createRequire(import.meta.url).resolve('vite/package.json')), 'bin/vite.js')
-const fixtureName = `.ci-header-${process.pid}`
+// The fixture must sit under the Vite root to share its config and `./src` imports, but in a
+// gitignored directory: a tracked-tree file would be a new worktree revision on every run.
+const fixtureDir = resolve(webRoot, '.e2e-fixtures', `ci-header-${process.pid}`)
 const artifacts = resolve(webRoot, '../../.ai/qa/artifacts_e2e/run-header-ci-wait')
 const repository = `${'long-owner-'.repeat(3)}/${'long-repository-'.repeat(5)}`
 const wait: NonNullable<ApiRun['ciWait']> = {
@@ -38,15 +40,16 @@ const link = `${status} a`
 
 beforeAll(async () => {
   mkdirSync(artifacts, { recursive: true })
-  writeFileSync(resolve(webRoot, `${fixtureName}.html`), `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><div id="root"></div><script type="module" src="/${fixtureName}.tsx"></script></body></html>`)
-  writeFileSync(resolve(webRoot, `${fixtureName}.tsx`), `
+  mkdirSync(fixtureDir, { recursive: true })
+  writeFileSync(resolve(fixtureDir, 'index.html'), `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><div id="root"></div><script type="module" src="./fixture.tsx"></script></body></html>`)
+  writeFileSync(resolve(fixtureDir, 'fixture.tsx'), `
     import React, { useState } from 'react';
     import { createRoot } from 'react-dom/client';
     import { QueryClientProvider } from '@tanstack/react-query';
     import { MemoryRouter } from 'react-router';
-    import { createQueryClient } from './src/api/query-client';
-    import { RunHeader } from './src/routes/task-thread/run-header';
-    import './src/styles/index.css';
+    import { createQueryClient } from '../../src/api/query-client';
+    import { RunHeader } from '../../src/routes/task-thread/run-header';
+    import '../../src/styles/index.css';
     window.fetch = async input => {
       const path = new URL(input instanceof Request ? input.url : String(input), location.href).pathname;
       return new Response(JSON.stringify(path.endsWith('/run-summaries') ? [] : {}), {headers: {'content-type': 'application/json'}});
@@ -64,7 +67,7 @@ beforeAll(async () => {
   await once(probe, 'listening')
   const port = (probe.address() as { port: number }).port
   await new Promise<void>(done => probe.close(() => done()))
-  url = `http://127.0.0.1:${port}/${fixtureName}.html`
+  url = `http://127.0.0.1:${port}/.e2e-fixtures/ci-header-${process.pid}/index.html`
   server = spawn(process.execPath, [viteCli, '--host', '127.0.0.1', '--port', String(port), '--strictPort'], { cwd: webRoot, stdio: 'ignore' })
   await pollFor(async signal => (await fetch(url, { signal })).ok || undefined,
     () => 'CI header browser fixture did not start', { tries: 60 })
@@ -76,7 +79,7 @@ beforeAll(async () => {
 afterAll(async () => {
   browser?.close()
   await stopFixtureServer(server)
-  for (const extension of ['html', 'tsx']) rmSync(resolve(webRoot, `${fixtureName}.${extension}`), { force: true })
+  rmSync(fixtureDir, { recursive: true, force: true })
 })
 
 describe('CI header browser accessibility', () => {
