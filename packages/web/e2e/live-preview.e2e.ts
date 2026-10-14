@@ -219,7 +219,12 @@ describe('live preview', () => {
       const second = { targetId: browser.newTab() }
       // `tab new` made the second tab the session's active one. Hand the session back before this
       // CDP connection navigates and closes it, or the next provider command can land on the closed
-      // target ("Session with given id not found", PR #1019 Cockpit browser E2E shard 2/4).
+      // target. Evidence: CI run 38474591376 (hearsay-tools/cezarion#1019, shard 2/4), artifact
+      // cockpit-failures-shard-2, bundle live-preview/registers-runs-streams-takes-a-click-and-stops-1:
+      // `wait button[aria-label="More"]` failed with CDP "Session with given id not found", yet
+      // the bundle's snapshot.txt, captured right after on the first tab, lists the More button.
+      // Locally, closing the tab with `tab close` instead fails at once ("No target with given id
+      // found"): the provider still tracks the tab this connection navigated.
       browser.switchTab(first.targetId)
       const secondSession = (await request('Target.attachToTarget', { targetId: second.targetId, flatten: true })).sessionId
       try {
