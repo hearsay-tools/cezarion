@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SCHEDULE_HOURS_OPTIONS, SCHEDULE_TYPES } from '@open-mercato/cezar-contract';
+import { createAutomationInputSchema, SCHEDULE_HOURS_OPTIONS, SCHEDULE_TYPES } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { GITHUB_PLACEHOLDERS, SCHEDULE_PLACEHOLDERS } from './task-template.ts';
 import { automationDefinitionObjectSchema, automationEventSchema, automationFiltersSchema, automationTaskSchema } from './types.ts';
@@ -44,6 +44,18 @@ describe('AUTOMATION_SCHEMA_REFERENCE', () => {
     const named = new Set([...AUTOMATION_SCHEMA_REFERENCE.matchAll(/\{\{([^{}]+)\}\}/g)].map((match) => match[1]!));
     named.delete('task'); // the workflow step token in the inline-steps example, not an automation placeholder
     expect([...named].sort()).toEqual([...GITHUB_PLACEHOLDERS, ...SCHEDULE_PLACEHOLDERS].sort());
+  });
+
+  // Review of #1018: agents copy these examples into `--json`/`--file`, so each must be a valid
+  // definition as written, with no comments inside it.
+  it('prints examples that parse as JSON and that the create route accepts', () => {
+    const blocks = [...AUTOMATION_SCHEMA_REFERENCE.matchAll(/^\{\n[\s\S]*?^\}$/gm)].map((match) => match[0]);
+    expect(blocks).toHaveLength(2);
+    for (const block of blocks) {
+      const parsed = JSON.parse(block) as unknown;
+      const created = createAutomationInputSchema.safeParse(parsed);
+      expect(created.success, JSON.stringify(created.error?.issues)).toBe(true);
+    }
   });
 
   it('describes no dispatch: the fork delegates through governed workers', () => {

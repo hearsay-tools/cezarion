@@ -31,53 +31,64 @@ export function automationCliCommand(): string {
  * The definition reference, as `cez automation schema` prints it and as the skill body embeds it.
  * One string so the two never disagree; `prompts.test.ts` pins it to the storage schema.
  */
-export const AUTOMATION_SCHEMA_REFERENCE = `An automation definition is one JSON object. Two kinds: a GitHub poll ("kind": "github") or a schedule ("kind": "schedule").
+export const AUTOMATION_SCHEMA_REFERENCE = `An automation definition is one JSON object. Two kinds: a GitHub poll ("kind": "github") or a schedule ("kind": "schedule"). Both examples below are valid definitions as written; the keys they use are explained after them.
 
 A GitHub poll:
 
 {
-  "name": "Review every new pull request",          // required, 1-200 chars
-  "description": "What this automation is for",      // optional, up to 2000 chars
-  "kind": "github",                                  // optional here — omitted means a GitHub poll
-  "events": ["pull_request.opened"],                 // 1-4 of: pull_request.opened, issue.opened, issue.labeled, issue.unlabeled
-  "intervalSeconds": 300,                            // how often GitHub is polled, in seconds, 60-86400 (default 300)
-  "filters": {                                       // may be {}; every key optional; a candidate must pass ALL given filters
-    "authors": ["octocat"],                          //   GitHub logins that opened it
-    "assignees": ["octocat"],                        //   current assignees
-    "allLabels": ["bug"],                            //   must carry every one of these labels
-    "anyLabels": ["bug", "regression"],              //   must carry at least one of these
-    "excludeLabels": ["wontfix"],                    //   must carry none of these
-    "changedLabels": ["needs-agent"],                //   REQUIRED for issue.labeled / issue.unlabeled: the label whose change fires it
-    "lookbackDays": 7,                               //   1-90 (default 7): how far back one poll looks
-    "maxRecords": 25                                 //   1-100 (default 25): the most candidates one poll considers
-  },
-  "task": {                                          // the ordinary task each match launches
+  "name": "Review every new pull request",
+  "description": "What this automation is for",
+  "kind": "github",
+  "events": ["pull_request.opened"],
+  "intervalSeconds": 300,
+  "filters": { "excludeLabels": ["wontfix"], "lookbackDays": 7, "maxRecords": 25 },
+  "task": {
     "prompt": "Review pull request #{{github.number}} ({{github.title}}) at {{github.url}}: read the diff, run the tests, and post your findings as a review.",
-    "workflow": "quick-task",                        // optional: a workflow name — OR inline "steps", never both
-    "steps": [{ "id": "task", "skill": "some-skill", "prompt": "{{task}}" }],  // to run a skill: one agent step naming it
-    "runner": "claude",                              // optional: ${RUNNER_IDS.join(' | ')}
-    "model": "sonnet",                               // optional
-    "effort": "high",                                // optional
-    "variants": 1,                                   // 1 | 2 | 3 competing runs per match
-    "worktree": true,                                // isolate each run in its own git worktree (recommended)
-    "autonomous": true,                              // never park to ask — an automation has no one watching (recommended)
-    "generateFollowups": false,
-    "systemPrompt": "Extra guidance for every launched run"  // optional
+    "workflow": "quick-task",
+    "variants": 1,
+    "worktree": true,
+    "autonomous": true,
+    "generateFollowups": false
   }
 }
 
-A schedule — same "name", "description" and "task", but "kind": "schedule" and a "schedule" instead of events/intervalSeconds/filters:
+A schedule:
 
 {
   "name": "Nightly dependency bump",
   "kind": "schedule",
-  "schedule": { "type": "daily", "hour": 4, "minute": 0 },   // "daily" | "weekdays" (Mon-Fri) at hour:minute; "weekly" adds "day" (1 = Monday … 7 = Sunday); "hours" uses "every" (1 | 2 | 3 | 4 | 6 | 8 | 12), from 00:00
+  "schedule": { "type": "daily", "hour": 4, "minute": 0 },
   "task": { "prompt": "Run npm outdated, bump patch and minor versions, run the tests, open a draft PR if anything changed. Today is {{date}}." }
 }
 
-For a GitHub poll, name, events and task are required; for a schedule, name, kind, schedule and task. Schedules run in the cockpit's own time zone.
+Top-level keys:
+- "name": required, 1-200 characters.
+- "description": optional, up to 2000 characters.
+- "kind": "github" (the default when omitted) or "schedule".
+- "events" (GitHub poll, required): 1-4 of pull_request.opened, issue.opened, issue.labeled, issue.unlabeled.
+- "intervalSeconds" (GitHub poll): how often GitHub is polled, 60-86400 seconds; default 300.
+- "filters" (GitHub poll): may be {}; every key is optional, and a candidate must pass ALL the given filters.
+- "schedule" (schedule, required): "type" is "daily" or "weekdays" (Mon-Fri) at "hour" and "minute"; "weekly" adds "day" (1 = Monday ... 7 = Sunday); "hours" uses "every" (1 | 2 | 3 | 4 | 6 | 8 | 12) from 00:00. Schedules run in the cockpit's own time zone.
+- "task": the ordinary task each match or occurrence launches.
 
-Prompt placeholders, substituted per launch — GitHub poll: {{github.kind}} (issue | pull request), {{github.number}}, {{github.title}}, {{github.url}}, {{github.author}}, {{github.assignees}}, {{github.labels}} and {{github.event}}; schedule: {{date}}, {{time}}, {{project}} and {{automation}}. Any other placeholder is rejected. The matched item's details (or the scheduled instant) are also appended to every launched task as untrusted context, so the prompt need not repeat them.
+"filters" keys:
+- "authors": GitHub logins that opened it. "assignees": current assignees.
+- "allLabels": must carry every one of these labels. "anyLabels": must carry at least one. "excludeLabels": must carry none.
+- "changedLabels": REQUIRED for issue.labeled and issue.unlabeled: the label whose change fires it.
+- "lookbackDays": 1-90 (default 7), how far back one poll looks. "maxRecords": 1-100 (default 25), the most candidates one poll considers.
+
+"task" keys:
+- "prompt": required, the prompt template.
+- "workflow": a workflow name. OR "steps", never both. To run a skill, use one agent step naming it: "steps": [{ "id": "task", "skill": "some-skill", "prompt": "{{task}}" }].
+- "runner": ${RUNNER_IDS.join(' | ')}. "model" and "effort": optional overrides.
+- "variants": 1 | 2 | 3 competing runs per match.
+- "worktree": isolate each run in its own git worktree (recommended: true).
+- "autonomous": never park to ask; an automation has no one watching (recommended: true).
+- "generateFollowups": true or false. "systemPrompt": extra guidance for every launched run.
+
+For a GitHub poll, name, events and task are required; for a schedule, name, kind, schedule and task.
+
+Prompt placeholders, substituted per launch. GitHub poll: {{github.kind}} (issue | pull request), {{github.number}}, {{github.title}}, {{github.url}}, {{github.author}}, {{github.assignees}}, {{github.labels}} and {{github.event}}. Schedule: {{date}}, {{time}}, {{project}} and {{automation}}. Any other placeholder is rejected. The matched item's details (or the scheduled instant) are also appended to every launched task as untrusted context, so the prompt need not repeat them.
 
 A new automation is PAUSED unless created with --enable. Enabling a GitHub poll establishes a current-time baseline: only pull requests and issues that appear AFTER it are ever launched, never the backlog. Enabling a schedule arms its next occurrence.`;
 
