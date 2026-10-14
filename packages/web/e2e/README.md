@@ -188,7 +188,10 @@ edits and untracked source files. The descriptor records it as `servedRoot`. The
 task worktrees and `.ai/cezar` state live there. Serving the checkout put them in the checkout's
 own `.ai/cezar`, and in the main checkout that is the live cockpit's data dir: the cockpit refused
 the second server (`A cockpit already serves …`), and a boot that got through would have written
-test runs into it. A lane is already such a clone and serves itself.
+test runs into it. A lane is already such a clone and serves itself. A reused server keeps
+reading the clone live, as it read the checkout: each `test-env-up.sh` that reuses it first
+syncs the clone to the checkout's current edits (`--sync`), and a moved `HEAD` cold-boots
+with a fresh clone.
 
 A spec that seeds state for the server to read — skills, workflows, `.ai/cezar/config.json`,
 a registry root for the boot project — writes it under `servedRoot()` from `agent-browser.ts`,

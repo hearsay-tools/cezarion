@@ -25,7 +25,8 @@
 #   2026-10-14 serve an isolated clone (.ai/qa/served/<name>, e2e-served-repo.mjs) instead
 #             of the checkout: in the main checkout the live cockpit owns .ai/cezar and
 #             refused the server. Drop the old descriptor before a cold boot, so a failed
-#             boot reports its own error rather than a dead env's browser notes.
+#             boot reports its own error rather than a dead env's browser notes. A reuse
+#             syncs the clone to the checkout's current edits; a moved HEAD cold-boots.
 set -eu
 
 # ---- project-specific parameters -------------------------------------------
@@ -248,6 +249,15 @@ try_reuse() {
       }
     ' "$started" $BUILD_INPUT_PATHS 2>/dev/null || true)
     [ -z "$newer" ] || { log "source changed since boot ($newer)"; return 1; }
+  fi
+
+  # The server reads its project live. Bring the clone to the checkout's current edits, as
+  # serving the checkout itself did; a moved HEAD needs a fresh clone, so a cold boot.
+  if [ "$SERVED_ROOT" != "$REPO_ROOT" ]; then
+    node "$SCRIPT_DIR/e2e-served-repo.mjs" --sync "$REPO_ROOT" "$SERVED_ROOT" || {
+      log "not reusing: the served project cannot follow this checkout (HEAD moved, or the sync failed)"
+      return 1
+    }
   fi
 
   BASE_URL=$url

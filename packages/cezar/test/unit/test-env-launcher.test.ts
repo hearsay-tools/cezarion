@@ -306,8 +306,37 @@ test('a cold boot serves an isolated clone of the checkout, never the checkout i
   assert.equal(readFileSync(join(served, 'package.json'), 'utf8'), '{"private":true,"edited":true}\n');
   assert.equal(readFileSync(join(served, 'untracked.md'), 'utf8'), 'new\n');
 
+  // A reused server keeps reading its project live, as it read the checkout: the clone follows
+  // the checkout's edits, including a reverted file and a deleted one. agent-browser.md is
+  // tracked and, unlike package.json, not a build input, so editing it keeps the server.
+  const provider = join(fixture.root, '.ai/browsers/agent-browser.md');
+  const committedProvider = readFileSync(provider, 'utf8');
+  writeFileSync(provider, '# edited after boot\n');
+  writeFileSync(join(fixture.root, 'untracked.md'), 'edited\n');
+  writeFileSync(join(fixture.root, 'later.md'), 'later\n');
   const warm = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
   assert.match(warm.stdout, /TEST_ENV_REUSED=1/, `warm boot refused reuse:\n${warm.stderr}`);
+  assert.equal(readFileSync(join(served, '.ai/browsers/agent-browser.md'), 'utf8'), '# edited after boot\n');
+  assert.equal(readFileSync(join(served, 'untracked.md'), 'utf8'), 'edited\n');
+  assert.equal(readFileSync(join(served, 'later.md'), 'utf8'), 'later\n');
+  writeFileSync(provider, committedProvider);
+  rmSync(join(fixture.root, 'later.md'));
+  const synced = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.match(synced.stdout, /TEST_ENV_REUSED=1/, `warm boot refused reuse:\n${synced.stderr}`);
+  assert.equal(readFileSync(join(served, '.ai/browsers/agent-browser.md'), 'utf8'), committedProvider);
+  assert.equal(existsSync(join(served, 'later.md')), false);
+
+  // A commit moves HEAD past the clone's base: that takes a fresh clone, so a cold boot.
+  execFileSync('git', ['-C', fixture.root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@cezar.invalid', 'commit', '-q', '--allow-empty', '-m', 'later'], {
+    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+  });
+  const moved = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(moved.status, 0, moved.stderr);
+  assert.match(moved.stdout, /TEST_ENV_REUSED=0/);
+  assert.match(moved.stderr, /cannot follow this checkout/);
+  launchedPids.add(descriptor(fixture.root).app.pid);
+  assert.equal(execFileSync('git', ['-C', served, 'rev-parse', 'HEAD'], { encoding: 'utf8' }),
+    execFileSync('git', ['-C', fixture.root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }));
 
   // A descriptor from before the served clone (it served the checkout) is never reused.
   const legacy = JSON.parse(readFileSync(join(fixture.root, '.ai/qa/test-env.json'), 'utf8')) as Record<string, unknown>;

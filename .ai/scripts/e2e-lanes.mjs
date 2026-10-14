@@ -200,6 +200,29 @@ export function cloneIsolatedCheckout({ repoRoot, root: laneRoot, baseRef = 'HEA
   }
 }
 
+// Bring a clone from cloneIsolatedCheckout back to the checkout's current edits, in place, for
+// a server that keeps serving it: paths the checkout changed are copied again, and paths only
+// the clone still has changed go back to the base. False when the checkout's HEAD moved; that
+// needs a fresh clone.
+export function syncCurrentEdits({ repoRoot, root }) {
+  const owner = JSON.parse(readFileSync(join(root, '.git/cezar-e2e-lane.json'), 'utf8'));
+  if (owner.version !== 1 || owner.source !== realpathSync(repoRoot) || owner.root !== realpathSync(root)) {
+    throw new Error('refusing to sync an unowned E2E checkout');
+  }
+  const head = git(repoRoot, 'rev-parse', 'HEAD').toString('utf8').trim();
+  if (git(root, 'rev-parse', 'HEAD').toString('utf8').trim() !== head) return false;
+  const wanted = changedPaths(repoRoot, head);
+  for (const relative of changedPaths(root, head)) {
+    if (wanted.has(relative)) continue;
+    rmSync(join(root, relative), { recursive: true, force: true });
+    if (git(root, 'ls-tree', '--name-only', head, '--', relative).length) {
+      git(root, 'checkout', '--quiet', head, '--', relative);
+    }
+  }
+  copyCurrentEdits(repoRoot, root, head);
+  return true;
+}
+
 export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD' }) {
   const laneRoot = cloneIsolatedCheckout({ repoRoot, root: join(scratchRoot, `lane-${index}`), baseRef });
   try {
