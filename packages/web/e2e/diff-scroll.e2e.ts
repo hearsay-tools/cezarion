@@ -51,9 +51,12 @@ const lineCount = () => browser.count('[data-slot="diff-line"]')
 /**
  * Sampled-expression prelude: hold the diff scroller at `top`, re-applying it each sample rather
  * than once before sampling (#409). A one-shot assignment was lost once under a loaded Squeal
- * slow tier (hearsay-tools/cezarion#1029, bundle `.ai/qa/failures/diff-scroll/keeps-the-per-file-
- * header-sticky-…-1`: the view sat at scroll 0) and six loaded reruns did not reproduce it, so the
- * sample also reports the offset, the height and whether the scroller element was replaced.
+ * slow tier (hearsay-tools/cezarion#1029). Squeal run 08779938, 2026-10-14T22:01Z, left the bundle
+ * `.ai/qa/failures/diff-scroll/keeps-the-per-file-header-sticky-while-virtualized-the-layout-hazard-virtua-pose-1/`
+ * (local, not a CI artifact): the view sat at scroll 0. Six loaded reruns did not reproduce it.
+ * Forced reproduction: resetting `scrollTop` to 0 30 ms after the one-shot assignment fails the
+ * old spec with this exact error, and this prelude passes it. The sample also reports the offset,
+ * the height and whether the scroller element was replaced, so a recurrence names its cause.
  */
 const holdScroll = (top: number) => `const scroller = ${MAIN}
       const replaced = scroller.dataset.e2eScroll === undefined && window.__e2eScrolled === true
