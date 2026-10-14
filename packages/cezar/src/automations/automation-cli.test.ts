@@ -183,6 +183,21 @@ describe('cez automation', () => {
       expect(last()).toMatchObject({ status: 503, error: 'busy' });
     });
 
+    it('every command retries the startup 503, delete included', async () => {
+      expect(await run(['add', '--name', 'N', '--cron', '0 7 * * *', '--prompt', 'P'])).toBe(EXIT.ok);
+      const id = String(last().id);
+      const startingOnce = (): AutomationIo['http'] => {
+        let starting = true;
+        return async (url, init) => {
+          if (starting) { starting = false; return { status: 503, data: 'Cockpit is starting; retry shortly.\n' }; }
+          return fetchJson(url, init);
+        };
+      };
+      for (const argv of [['list'], ['show', id], ['run', id], ['pause', id], ['enable', id], ['update', id, '--json', '{"name":"M"}'], ['delete', id]]) {
+        expect(await run(argv, env(), { http: startingOnce() }), argv.join(' ')).toBe(EXIT.ok);
+      }
+    });
+
     it('gives up on the startup 503 after a bounded wait', async () => {
       let calls = 0;
       const http: AutomationIo['http'] = async () => { calls += 1; return { status: 503, data: 'Cockpit is starting; retry shortly.\n' }; };

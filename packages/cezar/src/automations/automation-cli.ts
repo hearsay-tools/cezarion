@@ -289,7 +289,9 @@ async function execute(
   const http = io.http ?? fetchJson;
   const path = (suffix = '') => `${cockpit.api}/automations${id ? `/${encodeURIComponent(id)}` : ''}${suffix}`;
   const sleep = io.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
-  const call = async (url: string, init?: { method?: string; body?: unknown; responseLimitBytes?: number }, ok = 200): Promise<unknown> => {
+  type Init = { method?: string; body?: unknown; responseLimitBytes?: number };
+  // Every request goes through `send`, so no command can miss the startup retry.
+  const send = async (url: string, init?: Init): Promise<HttpResult> => {
     // `serve` holds its port with a placeholder listener that answers a plain-text 503 until
     // `startServer` takes over, and recovery resumes runs inside that window (review of #1018).
     // That 503 never reached the API, so even a POST is safe to resend; a JSON 503 is the API's.
@@ -298,6 +300,10 @@ async function execute(
       await sleep(STARTUP_RETRY_MS);
       result = await http(url, init);
     }
+    return result;
+  };
+  const call = async (url: string, init?: Init, ok = 200): Promise<unknown> => {
+    const result = await send(url, init);
     if (result.status !== ok) refuse(result);
     return result.data;
   };
@@ -422,7 +428,7 @@ async function execute(
       return EXIT.ok;
     }
     case 'delete': {
-      const result = await http(path(), { method: 'DELETE' });
+      const result = await send(path(), { method: 'DELETE' });
       if (result.status < 200 || result.status >= 300) refuse(result);
       print({ id, deleted: true });
       return EXIT.ok;
