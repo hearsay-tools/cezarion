@@ -120,6 +120,9 @@ it('lays out New Task pickers in reading order without clipping at desktop, narr
       browser.click(`[data-testid="effort-pill-menu"] [role="menuitemradio"]:nth-child(${effortIndex})`)
       browser.waitForFunction(`document.querySelector('[data-slot="effort-pill"]')?.textContent?.includes('medium') === true`)
       browser.waitForFunction(`document.querySelector('[data-testid="effort-pill-menu"]') === null`)
+      // The opencode default model reaches the pill after the runner switch. Measure the long
+      // value, not `Model · auto` (#946).
+      browser.waitForFunction(`document.querySelector('[data-slot="model-pill"]')?.textContent?.includes('opencode/muse-spark-1.3-contributor-free') === true`)
       expect(browser.text('[data-slot="runner-pill"]')).toContain('opencode')
       expect(browser.text('[data-slot="effort-pill"]')).toContain('medium')
       const boxes = layout()
