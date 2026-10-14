@@ -644,6 +644,8 @@ describe('the bookmarklet panel (spec 011)', () => {
     await waitFor(() =>
       expect(document.querySelectorAll('[data-slot="bm-list"] [data-slot="bm-row"]')).toHaveLength(3),
     )
+    // Copy is disabled until the launch key has loaded (hearsay-tools/cezarion#896).
+    await waitFor(() => expect(document.querySelector('[data-slot="bm-list"] [data-slot="bm-link"]')?.getAttribute('href')).toMatch(/^javascript:/))
 
     fireEvent.change(document.querySelector('[data-slot="bm-filter"]')!, { target: { value: 'zebra' } })
     const rows = [...document.querySelectorAll('[data-slot="bm-list"] [data-slot="bm-row"]')]
@@ -658,7 +660,10 @@ describe('the bookmarklet panel (spec 011)', () => {
   it('a clicked drag-source link never navigates — it only explains the gesture', async () => {
     serve()
     renderAt('/skills?skill=__bm')
-    await waitFor(() => expect(document.querySelector('[data-slot="bm-generic"] [data-slot="bm-link"]')).not.toBeNull())
+    // The launcher is a drag source only once the launch key has loaded (hearsay-tools/cezarion#896).
+    await waitFor(() =>
+      expect(document.querySelector('[data-slot="bm-generic"] [data-slot="bm-link"]')?.getAttribute('data-ready')).toBe('true'),
+    )
 
     fireEvent.click(document.querySelector('[data-slot="bm-generic"] [data-slot="bm-link"]')!)
     await waitFor(() =>

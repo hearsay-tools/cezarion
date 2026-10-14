@@ -48,8 +48,10 @@ export function BookmarkletsSection() {
 /**
  * The bookmarklet generator panel (spec 011, ported from the legacy cockpit): draggable
  * `javascript:` links against the protected `/new?skill=&key=` contract (`lib/bookmarklet`).
- * A failed key fetch degrades exactly like legacy — the links still generate, auto-start
- * just will not arm.
+ * No launcher is generated until the launch key has loaded (hearsay-tools/cezarion#896): a
+ * keyless launcher dragged mid-fetch saved a bookmarklet the target scope rejects forever. While
+ * the key is pending, or if it cannot be fetched, the rows render without an `href`, are not
+ * draggable, and their Copy button is disabled.
  *
  * Project-scoped since the multi-project spec (step 3.6): the pane lives under each project's
  * settings, and the links it makes carry that project's URL prefix AND that project's launch
@@ -67,7 +69,9 @@ export function BookmarkletPanel({ skills }: { skills: readonly Skill[] }) {
   // THIS project's own launch key: `useLaunchKey` goes through the scoped API client, so under
   // `/p/<id>/settings` it reads `/api/p/<id>/launch-key` — that repo's `.ai/cezar/launch-key`,
   // which is the only secret the target cockpit scope will accept (multi-project spec, 3.6).
-  const key = launchKey.data?.key ?? ''
+  // Null until the key has loaded — never the empty string: a launcher generated with `key=`
+  // looks fine, drags fine, and is silently useless (hearsay-tools/cezarion#896).
+  const key = launchKey.data?.key || null
   // Bake THIS cockpit's origin into the bookmarklets so a click opens the very instance that
   // generated them — no localhost port-scan (GitHub's CSP blocks that fetch). See bookmarklet.ts.
   const origin = window.location.origin
@@ -118,11 +122,23 @@ export function BookmarkletPanel({ skills }: { skills: readonly Skill[] }) {
         Off by default. Re-drag the launchers after changing this option.
       </p>
 
+      {key === null ? (
+        <p
+          data-slot="bm-key-state"
+          role={launchKey.isError ? 'alert' : 'status'}
+          className={`text-xs leading-relaxed ${launchKey.isError ? 'text-destructive' : 'text-soft-foreground'}`}
+        >
+          {launchKey.isError
+            ? `Could not load this project's launch key, so the launchers are unavailable: ${launchKey.error.message}`
+            : "Loading this project's launch key…"}
+        </p>
+      ) : null}
+
       <div data-slot="bm-generic" className="rounded-lg border border-border bg-muted/30 p-3.5">
         {/* Generic launcher: no skill, auto forced off — it only prefills the form. */}
         <BookmarkletRow
           label={repoName ? `cezar (${repoName}): this PR/issue` : 'cezar: this PR/issue'}
-          url={bookmarkletUrl('', false, key, origin, projectId)}
+          url={key === null ? null : bookmarkletUrl('', false, key, origin, projectId)}
           generic
           hint="Prefills the form only—never auto-starts, even when auto-submit is on."
         />
@@ -145,7 +161,7 @@ export function BookmarkletPanel({ skills }: { skills: readonly Skill[] }) {
             <BookmarkletRow
               key={skill.path}
               label={repoName ? `/${skill.name} (${repoName})` : `/${skill.name}`}
-              url={bookmarkletUrl(skill.name, auto, key, origin, projectId)}
+              url={key === null ? null : bookmarkletUrl(skill.name, auto, key, origin, projectId)}
             />
           ))
         ) : (
@@ -175,7 +191,8 @@ function BookmarkletRow({
   generic = false,
 }: {
   label: string
-  url: string
+  /** Null while the launch key is unavailable: the row renders, but is no drag source. */
+  url: string | null
   hint?: string
   generic?: boolean
 }) {
@@ -185,9 +202,12 @@ function BookmarkletRow({
   // the attribute imperatively is the honest escape hatch.
   const anchor = useRef<HTMLAnchorElement>(null)
   useEffect(() => {
-    anchor.current?.setAttribute('href', url)
+    if (url === null) anchor.current?.removeAttribute('href')
+    else anchor.current?.setAttribute('href', url)
   }, [url])
+  const ready = url !== null
   const copy = async () => {
+    if (url === null) return
     try {
       await navigator.clipboard.writeText(url)
       toast('Bookmarklet URL copied.')
@@ -203,15 +223,17 @@ function BookmarkletRow({
           (spec 011 §5), so a plain click just explains the gesture. */}
         <a
           ref={anchor}
-          draggable
+          draggable={ready}
           data-slot="bm-link"
-          title="Drag me to your bookmarks bar"
+          data-ready={ready}
+          aria-disabled={ready ? undefined : true}
+          title={ready ? 'Drag me to your bookmarks bar' : 'Waiting for the launch key'}
           aria-label={`${generic ? 'Drag to bookmarks' : 'Drag launcher'}: ${label}`}
           onClick={(event) => {
             event.preventDefault()
-            toast('Drag me to your bookmarks bar')
+            toast(ready ? 'Drag me to your bookmarks bar' : 'This launcher is not ready: it has no launch key yet.')
           }}
-          className={`inline-flex min-h-11 min-w-0 items-center rounded-md border border-border px-3 text-xs font-medium transition-colors hover:bg-muted ${generic ? 'bg-accent-strong/10 text-accent-text' : 'bg-card text-foreground'}`}
+          className={`inline-flex aria-disabled:cursor-not-allowed aria-disabled:opacity-60 min-h-11 min-w-0 items-center rounded-md border border-border px-3 text-xs font-medium transition-colors hover:bg-muted ${generic ? 'bg-accent-strong/10 text-accent-text' : 'bg-card text-foreground'}`}
         >
           <span className="break-words">{label}</span>
         </a>
@@ -219,8 +241,9 @@ function BookmarkletRow({
           type="button"
           data-slot="bm-copy"
           title="Copy the bookmarklet URL"
+          disabled={!ready}
           onClick={() => void copy()}
-          className="min-h-11 shrink-0 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="min-h-11 disabled:cursor-not-allowed disabled:opacity-60 shrink-0 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           Copy URL
         </button>

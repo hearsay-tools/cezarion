@@ -222,3 +222,56 @@ describe('BookmarkletPanel launcher interactions', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(anchor.getAttribute('href')))
   })
 })
+
+/**
+ * hearsay-tools/cezarion#896: the launchers used to render with `key=''` while the launch-key
+ * query was still in flight, so a launcher dragged in that window saved a keyless bookmarklet.
+ * No row may carry a `javascript:` href until the key has loaded, and a failed fetch must not
+ * fall back to a keyless one either.
+ */
+describe('BookmarkletPanel launch-key readiness (hearsay-tools/cezarion#896)', () => {
+  const links = () => [...document.querySelectorAll<HTMLAnchorElement>('[data-slot="bm-link"]')]
+
+  it('generates no launcher while the launch key is still loading', async () => {
+    let releaseKey: (response: Response) => void = () => {}
+    fetchMock.mockImplementation(async (input) => {
+      const path = String(input)
+      if (path === '/api/v1/launch-key') return new Promise<Response>((resolve) => (releaseKey = resolve))
+      if (path === '/api/v1/health') return Response.json(HEALTH)
+      return Response.json({ error: 'not found' }, { status: 404 })
+    })
+    const view = renderPanel()
+
+    // Health resolves (the label gains the repo name) while the key is still pending.
+    await waitFor(() => expect(label('/om-fix (cezar)')).toBeTruthy())
+    expect(links()).toHaveLength(2)
+    for (const link of links()) {
+      expect(link.getAttribute('href')).toBeNull()
+      expect(link.getAttribute('draggable')).toBe('false')
+      expect(link.getAttribute('aria-disabled')).toBe('true')
+    }
+    for (const copy of view.getAllByRole('button', { name: 'Copy URL' })) {
+      expect((copy as HTMLButtonElement).disabled).toBe(true)
+    }
+    expect(view.getByRole('status').textContent).toContain('launch key')
+
+    releaseKey(Response.json({ key: 'sekret' }))
+    await waitFor(() => expect(hrefOf('bm-generic')).toContain('key=sekret&ref='))
+    expect(hrefOf('bm-list')).toContain('key=sekret&ref=')
+    for (const link of links()) expect(link.getAttribute('draggable')).toBe('true')
+    expect(view.queryByRole('status')).toBeNull()
+  })
+
+  it('generates no keyless launcher when the launch key cannot be fetched', async () => {
+    // A 4xx is never retried (query-client.ts), so the query settles into its error state at once.
+    serve({ '/api/v1/health': HEALTH })
+    const view = renderPanel()
+
+    await waitFor(() => expect(view.getByRole('alert').textContent).toContain('launch key'))
+    expect(links()).toHaveLength(2)
+    for (const link of links()) {
+      expect(link.getAttribute('href')).toBeNull()
+      expect(link.getAttribute('draggable')).toBe('false')
+    }
+  })
+})
