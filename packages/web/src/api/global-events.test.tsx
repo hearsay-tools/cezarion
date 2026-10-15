@@ -2131,6 +2131,21 @@ describe('requested list attachment and recovery lifecycle (#795)', () => {
     expect(fetch).toHaveBeenCalledTimes(3)
   })
 
+  it('publishes __cezLive only between the attachment ping and the next open or unmount (hearsay-tools/cezarion#1069)', async () => {
+    const view = mount()
+    const { source } = view
+    source.open()
+    expect(window.__cezLive).toBe(false)
+    source.emit('ping', '')
+    expect(window.__cezLive).toBe(true)
+    source.open() // a reconnect: events between the drop and the next barrier ping may be lost
+    expect(window.__cezLive).toBe(false)
+    source.emit('ping', '')
+    expect(window.__cezLive).toBe(true)
+    view.unmount()
+    expect(window.__cezLive).toBe(false)
+  })
+
   it('marks disabled cached aliases stale and never fetches or invents untouched lists at attachment', async () => {
     client.setQueryData(['other', 'runs', 'list'], [runRecord('r1')])
     renderHook(() => useProjectRuns('other', false), { wrapper })

@@ -3,7 +3,7 @@ import { onLiveReconcile } from './live-coordinator'
 import { useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 
-import { trackSseReconcile } from '@/lib/cez-idle'
+import { setWorkspaceLive, trackSseReconcile } from '@/lib/cez-idle'
 import { applyProviderStatusRow, parseProviderStatusEventRow } from '@/lib/provider-status'
 import {
   applyRunDeleted,
@@ -721,6 +721,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
 
       source.addEventListener('open', () => {
         attachmentNeedsReconcile = true
+        setWorkspaceLive(false)
         // Not the first one: at boot the queries are fetching anyway, and invalidating them here
         // would only ask the same questions twice. Every later open is a *re*connect — we were
         // disconnected, events happened without us, and the cache is now a guess.
@@ -753,6 +754,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
             // snapshots taken in that gap, without touching never-requested list keys.
             attachmentNeedsReconcile = false
             trackSseReconcile(() => reconcileRunLists(queryClient))
+            setWorkspaceLive(true)
           }
           // The cross-project index first, and BEFORE the scope filter below — it is the one
           // cache that spans every project, so another project's news is exactly what it is news
@@ -883,6 +885,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
     return () => {
       stopReconcile()
       disposed = true
+      setWorkspaceLive(false)
       clearTimeout(reopenTimer)
       runListBatcher.flush()
       runListBatcher.cancel()
