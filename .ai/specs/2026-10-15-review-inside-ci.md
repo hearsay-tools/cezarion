@@ -43,7 +43,7 @@ Open findings fail the CI run, not just a separate workflow. Consumers:
 
 - After flaky verification, **Re-run failed jobs** reruns the failed shards, `verify` and the skipped review. Nothing needs recovering.
 - `postReview` reads reviews and the live head again before posting, so no rerun exceeds the round cap, posts twice on one head, or posts on a stale head.
-- To re-check after resolving or replying to findings, re-run **Review / review-round**.
+- After resolving findings by hand, re-run **Review / review-round** to recount. A pushback reply needs the model to judge it, and the patch-ID guard skips the model on an unchanged patch. So run `workflow_dispatch` with `pr_number` first, which skips that guard and applies verdicts, then re-run **Review / review-round**.
 - `workflow_dispatch` reviews one PR outside the cap. Its checks attach to the dispatched branch, not the PR head, as before.
 - The workflow-level concurrency group includes `github.event_name`, so a manual dispatch never cancels the review inside a CI run.
 

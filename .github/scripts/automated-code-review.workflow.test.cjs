@@ -826,6 +826,8 @@ test('the Automated Code Review check fails on new or still-open finding threads
     assert.equal(result.status, status, `${label}: ${result.stdout}${result.stderr}`);
   }
   assert.match(run({ NEW_THREADS: '2', OPEN_THREADS: '2' }).stdout, /opened 2 new finding thread/);
+  // Re-running the round alone never judges a pushback reply: the patch-ID guard skips the model.
+  assert.match(run({ NEW_THREADS: '2', OPEN_THREADS: '2' }).stdout, /run this workflow manually with pr_number, then re-run Review \/ review-round/);
   assert.match(run({ OPEN_THREADS: '3' }).stdout, /3 automated review thread\(s\) are still unresolved/);
 });
 
