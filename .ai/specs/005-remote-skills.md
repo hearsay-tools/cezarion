@@ -55,7 +55,10 @@ lokalnych z `.ai/skills/`.
    Continue po zniknięciu worktree) dostaje kopię per commit w
    `~/.cache/cez/skill-files/<owner>__<name>/<commit>/<skill>/` (atomowy
    rename, kopie nieużywane od 7 dni są usuwane), a prompt skilla podaje jej
-   absolutną ścieżkę.
+   absolutną ścieżkę. Obie ścieżki czytają pliki z commita, z którego wczytano
+   body skilla (`team.commit`, hearsay-tools/cezarion#428), a nie z miejsca, do którego ref
+   przesunął się od tego czasu; `ref` rozwiązywany jest tylko wtedy, gdy tego
+   commita brak lub nie ma go w klonie.
 6. **API/GUI**: `GET /api/skills` zwraca też `source: 'team'`;
    `POST /api/skills/refresh` robi fetch; etykiety i przycisk w zakładce.
 

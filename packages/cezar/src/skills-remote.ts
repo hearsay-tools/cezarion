@@ -357,18 +357,25 @@ const TEAM_SKILL_MARKER = '.cezar-team-skill.json';
 
 interface SkillDirSource {
   bareDir: string;
-  /** The immutable commit `skill.team.ref` resolves to right now. */
+  /** The immutable commit the files are read at. */
   commit: string;
   /** The skill's directory inside the skills repo. */
   srcDir: string;
 }
 
-/** Where a directory team skill's files live in its bare clone, or null. */
+/**
+ * Where a directory team skill's files live in its bare clone, or null. They are
+ * read at `skill.team.commit`, the commit its body was listed at (#428), so the
+ * files match the prompt even when another project has since fetched the ref
+ * further. Only a skill without that commit, or one the clone no longer holds,
+ * resolves `skill.team.ref` instead.
+ */
 async function resolveSkillDirSource(skill: Skill): Promise<SkillDirSource | null> {
   if (!skill.team?.dir || !skill.team.path.endsWith('SKILL.md')) return null;
   const bareDir = bareDirFor(skill.team.repo);
   if (!existsSync(join(bareDir, 'HEAD'))) return null;
-  const commit = await resolveRef(bareDir, skill.team.ref);
+  const listed = skill.team.commit && isPinnedSha(skill.team.commit) ? await resolveRef(bareDir, skill.team.commit) : null;
+  const commit = listed ?? (await resolveRef(bareDir, skill.team.ref));
   if (commit === null) return null;
   return { bareDir, commit, srcDir: skill.team.path.slice(0, -'/SKILL.md'.length) };
 }

@@ -311,6 +311,20 @@ test('materializeSkillDir marks its worktree copies and replaces a marked copy a
   }
 });
 
+test('materializeSkillDir copies the commit the skill was listed at, not where the ref moved since', async (t) => {
+  const { repoRoot, greeter, publish, v1 } = await dirSkillFixture(t);
+  // Another project fetches main to v2 between listing and materializing.
+  publish({ 'SKILL.md': 'say hi v2\n', 'references/notes.md': 'notes v2\n' });
+
+  assert.equal(await materializeSkillDir(repoRoot, greeter), true);
+  for (const agentDir of ['.claude', '.agents', '.cursor']) {
+    const dest = join(repoRoot, agentDir, 'skills', 'greeter');
+    assert.equal(readFileSync(join(dest, 'SKILL.md'), 'utf8'), 'say hi v1\n', agentDir);
+    assert.equal(readFileSync(join(dest, 'references', 'notes.md'), 'utf8'), 'notes v1\n', agentDir);
+    assert.equal(JSON.parse(readFileSync(join(dest, TEAM_SKILL_MARKER), 'utf8')).commit, v1, agentDir);
+  }
+});
+
 test('materializeSkillDir replaces a marked copy whose file became a directory upstream', async (t) => {
   const { repoRoot, publish, list } = await dirSkillFixture(t);
   publish({ 'SKILL.md': 'say hi\n', 'references/guide': 'guide as one file\n' });

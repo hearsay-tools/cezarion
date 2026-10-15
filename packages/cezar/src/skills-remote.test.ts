@@ -237,6 +237,13 @@ describe('materializeSkillToCache — the per-commit copy for runs without a tas
     return dir;
   }
 
+  /** The skill as a fresh listing reads it now — its body and `team.commit` at the current `main`. */
+  async function listGreeter(repo: string) {
+    const greeter = (await listRemoteSkills({ repo, ref: 'main' })).find((skill) => skill.name === 'greeter');
+    if (!greeter) throw new Error('expected the directory skill to be listed');
+    return greeter;
+  }
+
   /** A temp `$HOME` and a bare-cloned source whose `greeter` directory skill can move upstream. */
   async function greeterSource() {
     const home = scratch('cez-team-home-');
@@ -247,8 +254,7 @@ describe('materializeSkillToCache — the per-commit copy for runs without a tas
       'references/notes.md': 'notes v1\n',
     });
     dirs.push(source.sourceDir);
-    const greeter = (await listRemoteSkills({ repo, ref: 'main' })).find((skill) => skill.name === 'greeter');
-    if (!greeter) throw new Error('expected the directory skill to be listed');
+    const greeter = await listGreeter(repo);
     // Keyed exactly like the bare clone, under a sibling cache root.
     const cacheRoot = join(home, '.cache', 'cez', 'skill-files', basename(bareDirFor(repo)));
     return { home, repo, source, greeter, cacheRoot };
@@ -270,21 +276,43 @@ describe('materializeSkillToCache — the per-commit copy for runs without a tas
 
     // A newer commit gets its own directory; the old one is still fresh, so it stays.
     const v2 = await source.update({ 'SKILL.md': 'say hi v2\n' });
-    const second = await materializeSkillToCache(greeter);
+    const second = await materializeSkillToCache(await listGreeter(repo));
     expect(second).toBe(join(cacheRoot, v2, 'greeter'));
     expect(readFileSync(join(second!, 'SKILL.md'), 'utf8')).toBe('say hi v2\n');
     expect(existsSync(join(second!, 'references'))).toBe(false);
     expect(existsSync(first!)).toBe(true);
   });
 
-  it('prunes commit dirs untouched for a week', async () => {
+  it('copies the commit the skill was listed at, not where the ref moved since', async () => {
     const { source, greeter, cacheRoot } = await greeterSource();
+    // Another project fetches main to v2 between listing and materializing.
+    await source.update({ 'SKILL.md': 'say hi v2\n' });
+
+    const dir = await materializeSkillToCache(greeter);
+    expect(dir).toBe(join(cacheRoot, source.commit, 'greeter'));
+    expect(readFileSync(join(dir!, 'SKILL.md'), 'utf8')).toBe('say hi v1\n');
+    expect(readFileSync(join(dir!, 'references', 'notes.md'), 'utf8')).toBe('notes v1\n');
+  });
+
+  it('falls back to the ref when the listed commit is absent or not in the clone', async () => {
+    const { source, greeter, cacheRoot } = await greeterSource();
+    const v2 = await source.update({ 'SKILL.md': 'say hi v2\n' });
+    const team = greeter.team!;
+    for (const commit of [undefined, 'f'.repeat(40)]) {
+      const dir = await materializeSkillToCache({ ...greeter, team: { ...team, commit } });
+      expect(dir, String(commit)).toBe(join(cacheRoot, v2, 'greeter'));
+      expect(readFileSync(join(dir!, 'SKILL.md'), 'utf8')).toBe('say hi v2\n');
+    }
+  });
+
+  it('prunes commit dirs untouched for a week', async () => {
+    const { repo, source, greeter, cacheRoot } = await greeterSource();
     expect(await materializeSkillToCache(greeter)).toBe(join(cacheRoot, source.commit, 'greeter'));
     const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1_000);
     utimesSync(join(cacheRoot, source.commit), eightDaysAgo, eightDaysAgo);
 
     const v2 = await source.update({ 'SKILL.md': 'say hi v2\n' });
-    expect(await materializeSkillToCache(greeter)).toBe(join(cacheRoot, v2, 'greeter'));
+    expect(await materializeSkillToCache(await listGreeter(repo))).toBe(join(cacheRoot, v2, 'greeter'));
     expect(existsSync(join(cacheRoot, source.commit))).toBe(false);
   });
 
