@@ -117,6 +117,51 @@ line; the fix is a wait, never a baseline entry.
    SIGKILL if graceful shutdown takes more than five seconds. The unit check rejects bare
    fixture-server kills in e2e specs.
 
+One more rule is enforced by review, not by the scan: **a wait added or changed to fix a flake
+cites its evidence in the comment at the site.** The comment names the failure bundle path (or
+the single-test reproduction that went red, with its command or delay) and the before/after run
+counts. The evidence in a PR description or a review thread does not count: the next reader
+meets the wait, not the PR, and the automated review sends a bare wait back
+(hearsay-tools/cezarion#1000).
+
+A local bundle path names evidence nobody else can open. `.ai/qa/failures/` is gitignored, and
+a later run, a cleanup or a removed worktree deletes it. So write the full directory name (the
+test segment is the test name with each run of characters other than letters, digits, `.`, `_`
+and `-` turned into one `-`, cut to 80 characters, then `-<n>`), not a path shortened with `…`. Next to it, cite something that lasts:
+for a CI failure, the run and its `cockpit-failures-shard-<n>` artifact (see
+[Reading a failure bundle](#reading-a-failure-bundle)). For a local one, the PR comment that
+records what the bundle's `probe.json` showed. `setViewport` in `agent-browser.ts` is the durable
+form: "`cockpit-failures-shard-2` artifacts 11255134650, 11255508374 and 11259950580 (draft
+PR #791)".
+
+The worked example for the counts is `liftWithSpace` in `project-order.e2e.ts`, quoted as it
+stands:
+
+```ts
+ *  Provenance (hearsay-tools/cezarion#438, local, 2026-10-13): with a one-shot
+ *  `waitForFunction(data-dragging)` here instead, the collapsed-mark test failed 2 of 6 full-spec
+ *  runs of `npm run test:e2e -- project-order.e2e.ts`. Failure bundles
+ *  `.ai/qa/failures/project-order/reorders-a-collapsed-mark-…-20` and `-22` both time out on
+ *  `"e2e-order-a moved to position 3 of 4."` with focus on the lifted mark's link: the row was
+ *  lifted, the key reached the activator, and dnd-kit never saw it. The single test alone passed
+ *  4 of 4, because the earlier tests' load is what widens the gap. With this hold: 8 of 8 full-spec
+ *  runs passed.
+```
+
+It names the command, what the bundles' `probe.json` showed, the before count (2 of 6) and the
+after count (8 of 8). It also shows the gap this rule now closes. The paths are shortened, and the
+bundles were local and are gone. The naming rule spells them out as
+`.ai/qa/failures/project-order/reorders-a-collapsed-mark-from-the-keyboard-with-Space-leaving-Enter-to-the-link-20`
+and
+`.ai/qa/failures/project-order/reorders-a-collapsed-mark-from-the-keyboard-with-Space-leaving-Enter-to-the-link-22`.
+Those names are derived from the rule, not read from disk. What survives is the
+diagnosis recorded in the comment and in the hearsay-tools/cezarion#999 review reply from
+commit `740b35ff`. A reproduction stands in for a bundle the same way:
+`task-handoff.e2e.ts`'s `window.__cezLive` wait cites "Reproduced 3/3 by delaying the built
+server's workspace-events attach 4 s behind E2E_DELAY_MS; 0/3 with this wait"
+(hearsay-tools/cezarion#1069). Anyone can rerun that from the
+[single-test recipe](#reproducing-one-test-locally).
+
 One site to know about: `selection-states.e2e.ts` asserts `matches(':hover')` after
 `hoverVisiblePoint`. That is a one-shot assertion, not a wait, and it holds because that spec adds
 `--blink-settings=primaryHoverType=2` to `AGENT_BROWSER_ARGS` before it attaches. Rule 1
@@ -296,6 +341,33 @@ switches on it can remount, losing an open dialog, popover, menu or focus
 `overflow: hidden` and the shell is `h-dvh`, so the document is exactly the viewport.
 `{ full: true }` exists for a page whose document really scrolls, and the seam refuses it
 while an overlay is open. `{ viewport: true }` on older call sites is now redundant.
+
+## Driving dnd-kit sortables (hearsay-tools/cezarion#1001)
+
+A dnd-kit sortable measures, attaches and announces asynchronously, and agent-browser sends a
+whole drag in a few milliseconds. The project rail's reorder (hearsay-tools/cezarion#438) took
+about 40 single-spec runs to stabilize against four races. The next sortable will meet the same
+four; each has a fix already in the tree:
+
+| Race | What happens | What handles it |
+| --- | --- | --- |
+| Drop targets measured only after the lift | dnd-kit's default `MeasuringStrategy.WhileDragging` measures droppables in an effect after the drag starts, so a quick pointer release or an early arrow key resolves to no target and the drop silently does nothing | Product side: the rail passes `measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}` (`RAIL_MEASURING` in [`project-rail.tsx`](../src/components/project-rail.tsx)). Spec side: [`AgentBrowser.dragHeld`](agent-browser.ts) waits for the drop to resolve before releasing |
+| The keyboard listener attaches late | `@dnd-kit/core` 6.3.1 `KeyboardSensor.attach` adds its keydown listener in a `setTimeout` after the lift. The row is marked lifted at once, so an arrow sent as soon as `data-dragging` appears is dropped | `liftWithSpace` in [`project-order.e2e.ts`](project-order.e2e.ts): press Space, then `waitForStable` on `data-dragging` with `holdMs: 150`. A held sample spans a poll interval, which the zero-delay timer has always run inside |
+| The live region holds only the newest announcement | The `DndLiveRegion-*` element renders one string that each announcement replaces, so the "Picked up …" text can be gone before a poll reads it and a wait on it never matches | Wait for the lift on `data-dragging` (above), and wait for each move on its OWN announcement (below), never on an earlier one |
+| Keys sent back to back lose moves | A second arrow lands before the sortable has processed the first move, and one step is lost | `pressAndHear` in [`project-order.e2e.ts`](project-order.e2e.ts): press one key, then wait until a `[id^="DndLiveRegion"]` element contains that key's announcement (`"<id> moved to position 3 of 4."`, `"<id> dropped at position 2 of 4."`) before the next |
+
+For a pointer drag use `dragHeld(from, to, { lifted, over })` instead of `dragTo`: it presses,
+moves ten pixels, waits for `lifted`, moves through the midpoint to the target, waits for `over`,
+then releases (in a `finally`, so a timed-out wait never leaves the button down). In the rail,
+`lifted` is the mark's `data-dragging` attribute and `over` is the live region announcing the
+target position, which proves the targets were measured. Take both points from one
+`waitForValue` that also checks the rows are laid out, as `project-order.e2e.ts` does.
+
+For a keyboard drag: focus the activator with `focusWithKeyboard`, `liftWithSpace`, one
+`pressAndHear` per arrow, and a final `pressAndHear` for the drop key. Then read the order from
+the DOM and from the server, not from the announcement. A sortable whose lift key is not Space,
+or whose announcements differ, needs its own pair of helpers in the same shape. If a second spec
+needs them, move them into a shared module rather than copying them.
 
 
 ## Browser-tab connection benchmark
