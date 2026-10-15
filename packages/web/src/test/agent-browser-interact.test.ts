@@ -159,11 +159,21 @@ describe('AgentBrowser screenshots never flip the desktop layout under an overla
     }
   })
 
+  // A comment that names the flag (task-handoff.e2e.ts says "never `--full`") is not a use of it.
+  const PASSES_FULL = /['"`]--full\b/
+  const withoutComments = (source: string) =>
+    source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+
+  it('a comment naming --full is not a use of it', () => {
+    expect(PASSES_FULL.test(withoutComments("    // Viewport capture, never `--full`, here.\n/* or '--full' */\n"))).toBe(false)
+    expect(PASSES_FULL.test(withoutComments("  await run(['screenshot', '--full'])\n"))).toBe(true)
+  })
+
   it('no spec or helper reaches --full except through the guarded seam', () => {
     const e2eDir = join(import.meta.dirname, '../../e2e')
     const offenders = readdirSync(e2eDir)
       .filter((name) => name.endsWith('.ts') && name !== 'agent-browser.ts')
-      .filter((name) => /['"`]--full\b/.test(readFileSync(join(e2eDir, name), 'utf8')))
+      .filter((name) => PASSES_FULL.test(withoutComments(readFileSync(join(e2eDir, name), 'utf8'))))
     expect(offenders).toEqual([])
     const seam = readFileSync(join(e2eDir, 'agent-browser.ts'), 'utf8')
     expect(seam.match(/'--full'/g)).toHaveLength(1)
