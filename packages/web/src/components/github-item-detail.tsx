@@ -280,7 +280,7 @@ function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: (
             : state.canMerge ? 'Ready to merge'
               : state.eligibility === 'unknown' ? 'Merge blocked · Requirements unknown' : 'Merge blocked'
   const reviewState: MergeRequirementState =
-    state.reviewDecision === 'approved' ? 'passing'
+    state.reviewDecision === 'approved' || state.reviewDecision === 'not-required' ? 'passing'
       : state.reviewDecision === 'unknown' ? 'unknown'
         : 'failing'
   const conflictState: MergeRequirementState =

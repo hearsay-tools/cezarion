@@ -360,7 +360,7 @@ export const githubPrMergeStateSchema = z.object({
   baseRef: z.string(),
   headSha: z.string(),
   mergeable: z.enum(['mergeable', 'conflicting', 'unknown']),
-  reviewDecision: z.enum(['approved', 'changes-requested', 'review-required', 'unknown']),
+  reviewDecision: z.enum(['approved', 'changes-requested', 'review-required', 'not-required', 'unknown']),
   checks: z.array(githubPrCheckSchema),
   methods: z.array(githubMergeMethodSchema),
   defaultMethod: githubMergeMethodSchema.nullable(),

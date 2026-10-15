@@ -18,6 +18,7 @@ import {
   __clearRepoHandleCacheForTests,
   resolveRepoHandle,
   detectGithubCached,
+  createGithubDriver,
   fetchGithubComments,
   fetchTimelinePages,
   fetchCommentCounts,
@@ -208,6 +209,20 @@ describe('normalizeMergeState', () => {
     expect(normalizeMergeState({ ...ready, mergeable: 'CONFLICTING' }, policy).canOverride).toBe(false);
   });
 
+  it('keeps an unreported required check pending instead of treating the rollup as complete', () => {
+    const result = normalizeMergeState(ready, { allow_squash_merge: true }, {
+      readable: true, requiredChecks: ['test', 'not-reported'],
+    });
+    expect(result.canMerge).toBe(false);
+    expect(result.checks).toContainEqual({ name: 'not-reported', state: 'pending', required: true });
+  });
+
+  it('never permits an unknown required check conclusion', () => {
+    const result = normalizeMergeState({ ...ready, statusCheckRollup: [{ name: 'test', conclusion: 'UNKNOWN' }] },
+      { allow_squash_merge: true }, { readable: true, requiredChecks: ['test'] });
+    expect(result).toMatchObject({ eligibility: 'unknown', canMerge: false });
+  });
+
   it('requires explicit override intent before attempting an overridable merge', () => {
     const state = normalizeMergeState({ ...ready, reviewDecision: 'REVIEW_REQUIRED' }, {
       allow_merge_commit: true,
@@ -217,6 +232,254 @@ describe('normalizeMergeState', () => {
     expect(mergePreflightAllowed(state)).toBe(false);
     expect(mergePreflightAllowed(state, true)).toBe(true);
     expect(mergePreflightAllowed({ ...state, canOverride: false }, true)).toBe(false);
+  });
+});
+
+/** Native gh/API fixtures for hearsay-tools/cezarion#1016: exercise discovery and the
+ * same fresh preflight used by the merge endpoint, rather than injecting normalized policy. */
+describe('GitHub merge requirements', () => {
+  const pr = {
+    number: 128, title: 'Ruleset PR', url: 'https://github.com/acme/demo/pull/128',
+    state: 'OPEN', isDraft: false, headRefName: 'fix/merge', baseRefName: 'release/next',
+    headRefOid: '0123456789abcdef0123456789abcdef01234567', mergeable: 'MERGEABLE',
+    mergeStateStatus: 'CLEAN', reviewDecision: '',
+    statusCheckRollup: [{ __typename: 'CheckRun', name: 'test', conclusion: 'SUCCESS' }],
+  };
+  const reviewRule = {
+    type: 'pull_request', parameters: {
+      required_approving_review_count: 0, require_code_owner_review: false,
+      require_last_push_approval: false, required_review_thread_resolution: true,
+    },
+  };
+  const checkRule = { type: 'required_status_checks', parameters: {
+    required_status_checks: [{ context: 'test', integration_id: 15368 }],
+    strict_required_status_checks_policy: false,
+  } };
+  const root = '/merge-requirements';
+  const driver = createGithubDriver(root, { owner: 'acme', repo: 'demo' });
+  let currentPr: Record<string, unknown>;
+  let rules: unknown;
+  let branch: unknown;
+  let protection: unknown;
+  let threads: unknown[];
+  let failures: Set<string>;
+  let calls: string[][];
+
+  beforeEach(() => {
+    vi.stubEnv('CEZ_DRY_RUN', '0');
+    evictGithubProjectCaches(root);
+    currentPr = { ...pr };
+    rules = [[reviewRule, checkRule]];
+    // GitHub reports protected=true for rulesets, with legacy protection disabled.
+    branch = { name: 'release/next', protected: true, protection: { enabled: false } };
+    protection = {
+      required_status_checks: { contexts: ['legacy'], checks: [{ context: 'legacy', app_id: 42 }] },
+      required_pull_request_reviews: {
+        required_approving_review_count: 2, require_code_owner_reviews: false, require_last_push_approval: false,
+      },
+      required_conversation_resolution: { enabled: true },
+    };
+    threads = [{ data: { repository: { pullRequest: { reviewThreads: {
+      nodes: [{ isResolved: true }], pageInfo: { hasNextPage: false, endCursor: null },
+    } } } } }];
+    failures = new Set();
+    calls = [];
+    execFileMock.mockImplementation((...args: unknown[]) => {
+      const argv = args[1] as string[];
+      calls.push(argv);
+      const cb = args.at(-1) as (error: unknown, output: unknown) => void;
+      const path = argv[1] ?? '';
+      let key: string;
+      let output: unknown;
+      if (argv[0] === 'pr') { key = 'pr'; output = currentPr; }
+      else if (path === 'graphql') { key = 'threads'; output = threads.length > 1 ? threads.shift() : threads[0]; }
+      else if (path.includes('/rules/branches/')) { key = 'rules'; output = rules; }
+      else if (path.endsWith('/protection')) { key = 'protection'; output = protection; }
+      else if (path.includes('/branches/')) { key = 'branch'; output = branch; }
+      else if (path === 'repos/acme/demo') { key = 'repo'; output = { allow_squash_merge: true }; }
+      else if (argv.includes('PUT')) { key = 'merge'; output = { merged: true }; }
+      else { key = 'unexpected'; output = undefined; }
+      if (failures.has(key) || output === undefined) {
+        cb(Object.assign(new Error(`gh: Not Found (HTTP 404): ${key}`), { code: 1 }), null);
+      } else cb(null, { stdout: JSON.stringify(output), stderr: '' });
+    });
+  });
+  afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+
+  async function state() {
+    const result = await driver.prMergeState!(128, { refresh: true });
+    expect(result.available).toBe(true);
+    if (!result.available) throw new Error(result.reason);
+    return result.mergeState;
+  }
+
+  it('reads effective rules for the encoded target branch and permits satisfied zero-approval rules', async () => {
+    const result = await state();
+    expect(result).toMatchObject({ reviewDecision: 'not-required', eligibility: 'ready', canMerge: true, canOverride: false });
+    expect(result.checks).toContainEqual({ name: 'test', state: 'passing', required: true });
+    expect(calls.some((args) => args[1]?.includes('/rules/branches/release%2Fnext'))).toBe(true);
+    expect(calls.find((args) => args[1]?.includes('/rules/branches/'))).toEqual(expect.arrayContaining(['--paginate', '--slurp']));
+  });
+
+  it('combines paginated rulesets and legacy protection and synthesizes missing required checks', async () => {
+    rules = [[reviewRule], [checkRule]];
+    branch = { protected: true, protection: { enabled: true } };
+    currentPr.reviewDecision = 'APPROVED';
+    const result = await state();
+    expect(result.canMerge).toBe(false);
+    expect(result.checks).toContainEqual({ name: 'legacy', state: 'pending', required: true });
+    expect(result.checks.find((check) => check.name === 'test')?.required).toBe(true);
+  });
+
+  it('reads legacy-only approval and conversation policies', async () => {
+    rules = [[]];
+    branch = { protected: true, protection: { enabled: true } };
+    currentPr.statusCheckRollup = [{ name: 'legacy', conclusion: 'SUCCESS' }];
+    currentPr.reviewDecision = 'APPROVED';
+    expect(await state()).toMatchObject({ reviewDecision: 'approved', canMerge: true });
+    currentPr.reviewDecision = '';
+    expect(await state()).toMatchObject({ reviewDecision: 'unknown', canMerge: false });
+  });
+
+  it('confirms an absent policy using readable empty rules and an unprotected branch', async () => {
+    rules = [[]];
+    branch = { protected: false };
+    expect(await state()).toMatchObject({ reviewDecision: 'not-required', canMerge: true });
+    expect(calls.some((args) => args[1] === 'graphql')).toBe(false);
+  });
+
+  it.each(['rules', 'branch', 'protection'])('keeps an unreadable %s policy unknown', async (failure) => {
+    branch = { protected: true };
+    failures.add(failure);
+    // A branch read failure must not become absence when the protection read also fails.
+    if (failure === 'branch') failures.add('protection');
+    const result = await state();
+    expect(result).toMatchObject({ eligibility: 'unknown', canMerge: false });
+    expect(result.checks[0]?.required).toBeNull();
+  });
+
+  it.each([
+    { rules: [[{ type: 'pull_request', parameters: {} }]] },
+    { rules: [[{ type: 'required_status_checks', parameters: {} }]] },
+    { rules: { message: 'Not Found' } },
+  ])('keeps malformed or incomplete effective policy unknown: %j', async (fixture) => {
+    rules = fixture.rules;
+    expect(await state()).toMatchObject({ eligibility: 'unknown', canMerge: false });
+  });
+
+  it.each(['APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED', 'SURPRISE'])(
+    'preserves an explicit %s review decision', async (decision) => {
+      currentPr.reviewDecision = decision;
+      const result = await state();
+      expect(result.reviewDecision).toBe({ APPROVED: 'approved', CHANGES_REQUESTED: 'changes-requested', REVIEW_REQUIRED: 'review-required', SURPRISE: 'unknown' }[decision]);
+      expect(result.canMerge).toBe(decision === 'APPROVED');
+    },
+  );
+
+  it.each(['require_code_owner_review', 'require_last_push_approval'])(
+    'does not infer optional reviews when %s is required', async (flag) => {
+      rules = [[{ ...reviewRule, parameters: { ...reviewRule.parameters, [flag]: true } }, checkRule]];
+      expect(await state()).toMatchObject({ reviewDecision: 'unknown', canMerge: false });
+    },
+  );
+
+  it.each([0, 1])('respects required reviewer-group minimum_approvals=%i', async (minimum) => {
+    rules = [[{ ...reviewRule, parameters: { ...reviewRule.parameters, required_reviewers: [
+      { minimum_approvals: minimum, reviewer: { id: 123, type: 'Team' } },
+    ] } }, checkRule]];
+    expect(await state()).toMatchObject({
+      reviewDecision: minimum === 0 ? 'not-required' : 'unknown', canMerge: minimum === 0,
+    });
+  });
+
+  it('keeps a missing legacy last-push approval flag unknown', async () => {
+    rules = [[]];
+    branch = { protected: true, protection: { enabled: true } };
+    protection = { required_status_checks: null, required_conversation_resolution: { enabled: false },
+      required_pull_request_reviews: { required_approving_review_count: 0, require_code_owner_reviews: false } };
+    expect(await state()).toMatchObject({ eligibility: 'unknown', canMerge: false });
+  });
+
+  it('blocks unresolved required threads even when the aggregate status is CLEAN', async () => {
+    threads = [{ data: { repository: { pullRequest: { reviewThreads: {
+      nodes: [{ isResolved: false }], pageInfo: { hasNextPage: false, endCursor: null },
+    } } } } }];
+    const result = await state();
+    expect(result.canMerge).toBe(false);
+    expect(result.blockers).toContainEqual(expect.objectContaining({ code: 'review-threads' }));
+  });
+
+  it('checks every thread page rather than assuming the first page is complete', async () => {
+    threads = [
+      { data: { repository: { pullRequest: { reviewThreads: { nodes: [{ isResolved: true }], pageInfo: { hasNextPage: true, endCursor: 'next' } } } } } },
+      { data: { repository: { pullRequest: { reviewThreads: { nodes: [{ isResolved: false }], pageInfo: { hasNextPage: false, endCursor: null } } } } } },
+    ];
+    expect((await state()).canMerge).toBe(false);
+    expect(calls.filter((args) => args[1] === 'graphql')).toHaveLength(2);
+  });
+
+  it('keeps unreadable required thread resolution unknown', async () => {
+    failures.add('threads');
+    expect(await state()).toMatchObject({ eligibility: 'unknown', canMerge: false });
+  });
+
+  it.each([
+    { nodes: [], pageInfo: { hasNextPage: true, endCursor: null } },
+    { nodes: [{ isResolved: true }], pageInfo: { hasNextPage: true, endCursor: 'repeated' } },
+  ])('does not mistake incomplete thread pagination for resolution: %j', async (page) => {
+    threads = [{ data: { repository: { pullRequest: { reviewThreads: page } } } }];
+    expect(await state()).toMatchObject({ eligibility: 'unknown', canMerge: false });
+  });
+
+  it('rejects partial GraphQL data returned alongside errors', async () => {
+    threads = [{ data: { repository: { pullRequest: { reviewThreads: {
+      nodes: [], pageInfo: { hasNextPage: false, endCursor: null },
+    } } } }, errors: [{ message: 'Access denied' }] }];
+    expect(await state()).toMatchObject({ eligibility: 'unknown', canMerge: false });
+  });
+
+  it('does not require threads when both legacy and ruleset policies disable resolution', async () => {
+    rules = [[]];
+    branch = { protected: true, protection: { enabled: true } };
+    protection = { required_status_checks: null, required_pull_request_reviews: null, required_conversation_resolution: { enabled: false } };
+    failures.add('threads');
+    expect(await state()).toMatchObject({ reviewDecision: 'not-required', canMerge: true });
+    expect(calls.some((args) => args[1] === 'graphql')).toBe(false);
+  });
+
+  it('intersects allowed merge methods across effective rules and repository settings', async () => {
+    rules = [[{ ...reviewRule, parameters: { ...reviewRule.parameters, allowed_merge_methods: ['rebase'] } }, checkRule]];
+    expect(await state()).toMatchObject({ methods: [], canMerge: false, canOverride: false });
+  });
+
+  it('recognizes legacy status contexts by context and targetUrl', async () => {
+    currentPr.statusCheckRollup = [{ __typename: 'StatusContext', context: 'test', state: 'SUCCESS', targetUrl: 'https://example.com/status' }];
+    const result = await state();
+    expect(result.canMerge).toBe(true);
+    expect(result.checks).toEqual([{ name: 'test', state: 'passing', required: true, url: 'https://example.com/status' }]);
+  });
+
+  it('never treats an unknown required check result as passing', async () => {
+    currentPr.reviewDecision = 'APPROVED';
+    currentPr.statusCheckRollup = [{ name: 'test', conclusion: 'NEW_CONCLUSION' }];
+    expect(await state()).toMatchObject({ eligibility: 'unknown', canMerge: false });
+  });
+
+  it.each([
+    { isDraft: true }, { mergeable: 'CONFLICTING' }, { mergeStateStatus: 'BLOCKED' },
+    { mergeStateStatus: 'BEHIND' }, { mergeStateStatus: 'UNKNOWN' },
+  ])('keeps GitHub restrictions blocking with zero approvals: %j', async (restriction) => {
+    Object.assign(currentPr, restriction);
+    expect((await state()).canMerge).toBe(false);
+  });
+
+  it('refetches requirements before merging and refuses a newly missing check without PUT', async () => {
+    currentPr.reviewDecision = 'APPROVED';
+    expect((await state()).canMerge).toBe(true);
+    rules = [[reviewRule, { ...checkRule, parameters: { required_status_checks: [{ context: 'new-check' }] } }]];
+    const result = await driver.mergePR!(128, { method: 'squash', expectedHeadSha: pr.headRefOid, overrideRules: false });
+    expect(result.merged).toBe(false);
+    expect(calls.some((args) => args.includes('PUT'))).toBe(false);
   });
 });
 

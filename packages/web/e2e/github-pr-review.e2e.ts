@@ -27,12 +27,16 @@ afterAll(() => {
   browser?.close()
 })
 
-it.each(['ready', 'unknown', 'conflicting'].flatMap(state => [1440, 402].flatMap(width => ['light', 'dark'].map(theme => ({ state, width, theme })))))('preserves PR $state review at $width / $theme', async ({ state, width, theme }) => {
+it.each([
+  ...['ready', 'unknown', 'conflicting'].flatMap(state => [1440, 402].flatMap(width => ['light', 'dark'].map(theme => ({ state, width, theme })))),
+  ...[1440, 360].flatMap(width => ['light', 'dark'].map(theme => ({ state: 'not-required', width, theme }))),
+])('preserves PR $state review at $width / $theme', async ({ state, width, theme }) => {
+  const ready = state === 'ready' || state === 'not-required'
   const gh = await api<GithubPayload>('/api/v1/github')
   const item = gh.prs[0]!
   const stateBrowser = AgentBrowser.open(`${sessionId}-pr-${state}-${width}-${theme}`)
   try {
-    stateBrowser.setViewport(width, 1000)
+    stateBrowser.setViewport(width, state === 'not-required' ? 640 : 1000)
     stateBrowser.goto(`${baseUrl}${scoped('/')}`)
     stateBrowser.waitForFunction(`document.querySelector('[data-slot="main"]') !== null`)
     const mergeState = {
@@ -40,10 +44,10 @@ it.each(['ready', 'unknown', 'conflicting'].flatMap(state => [1440, 402].flatMap
       mergeState: {
         number: item.number, title: item.title, url: `https://github.com/mock/repo/pull/${item.number}`,
         state: 'open', isDraft: false, headRef: 'fixture/review', baseRef: 'main', headSha: '0123456789abcdef0123456789abcdef01234567',
-        mergeable: state === 'conflicting' ? 'conflicting' : 'mergeable', reviewDecision: state === 'ready' ? 'approved' : 'unknown',
+        mergeable: state === 'conflicting' ? 'conflicting' : 'mergeable', reviewDecision: state === 'not-required' ? 'not-required' : ready ? 'approved' : 'unknown',
         checks: [{ name: 'fixture-check', state: 'passing', required: state === 'unknown' ? null : true }],
-        methods: ['squash'], defaultMethod: 'squash', eligibility: state === 'ready' ? 'ready' : state === 'unknown' ? 'unknown' : 'blocked',
-        blockers: [], canMerge: state === 'ready', canOverride: state === 'unknown',
+        methods: ['squash'], defaultMethod: 'squash', eligibility: ready ? 'ready' : state === 'unknown' ? 'unknown' : 'blocked',
+        blockers: [], canMerge: ready, canOverride: state === 'unknown',
       },
     }
     stateBrowser.evaluate(`(() => {
@@ -60,13 +64,22 @@ it.each(['ready', 'unknown', 'conflicting'].flatMap(state => [1440, 402].flatMap
     stateBrowser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; document.querySelector('[data-slot="gh-merge-box"]').scrollIntoView({block:'center'})`)
     settleVisual(stateBrowser, '[data-slot="gh-merge-box"]', { theme, width: 'wide' })
     expect(stateBrowser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
-    expect(stateBrowser.text('[data-slot="gh-merge-box"]')).toContain(state === 'ready' ? 'Ready to merge' : state === 'unknown' ? 'Requirements unknown' : 'Conflicts must be resolved')
+    expect(stateBrowser.text('[data-slot="gh-merge-box"]')).toContain(ready ? 'Ready to merge' : state === 'unknown' ? 'Requirements unknown' : 'Conflicts must be resolved')
+    if (state === 'not-required') {
+      expect(stateBrowser.evaluate(`(() => {
+        const box = document.querySelector('[data-slot="gh-merge-box"]');
+        const review = [...box.querySelectorAll('li')].find(el => el.textContent === 'Reviews: not required');
+        return Boolean(review?.querySelector('[data-slot="gh-merge-status-passing"]')) &&
+          !box.querySelector('input[type="checkbox"]') &&
+          [...box.querySelectorAll('button')].some(el => el.textContent === 'Squash and merge' && !el.disabled);
+      })()`)).toBe(true)
+    }
     if (state === 'unknown') {
       expect(stateBrowser.evaluate(`document.querySelector('[data-slot="gh-merge-box"] input[type="checkbox"]').checked`)).toBe(false)
       expect(stateBrowser.evaluate(`[...document.querySelectorAll('[data-slot="gh-merge-box"] button')].find(el => el.textContent === 'Squash and merge').disabled`)).toBe(true)
     }
     stateBrowser.screenshot(`${artifactsDir}/revised-pr-${state}-${width}-${theme}.png`, { viewport: true })
-    if (state === 'ready') {
+    if (ready) {
       stateBrowser.evaluate(`[...document.querySelectorAll('[data-slot="gh-merge-box"] button')].find(el => el.textContent === 'Squash and merge').click()`)
       stateBrowser.waitForFunction(`document.querySelector('[data-slot="gh-merge-confirm"]') !== null`)
       expect(stateBrowser.text('[data-slot="gh-merge-confirm"]')).toContain('exact reviewed head')
