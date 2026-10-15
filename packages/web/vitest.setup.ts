@@ -1,5 +1,6 @@
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { configure } from '@testing-library/react'
 import { afterAll, afterEach, beforeEach } from 'vitest'
 
 import { highlighterSettledForTests } from '@/lib/highlighter'
@@ -29,3 +30,12 @@ afterAll(() => rmSync(gitSandbox, { recursive: true, force: true }))
 // budget (#601; measured 223ms vs 62ms on the Files-tab snapshot case). Free when nothing
 // highlighted: settling an empty list resolves on the next microtask.
 afterEach(() => highlighterSettledForTests())
+
+// Testing Library's async utilities (waitFor, findBy*) give up after 1000 ms by default, which a
+// loaded host overruns with no product change (hearsay-tools/cezarion#1055: two waits failed at
+// load ~120 after 1.25 s and 1.7 s). Measured on the 24-core dev host: the label-colours wait
+// in task-github-item.test.tsx took ~1.0 s at a 1-min load of ~135, and 0.8-2.6 s with the host
+// oversubscribed to a load of ~235. 3000 ms covers that, and still ends 2 s before Vitest's
+// 5000 ms per-test timeout so a genuine miss reports its assertion, not "Test timed out". A wait
+// that asserts something does NOT happen within a window keeps its own short explicit timeout.
+configure({ asyncUtilTimeout: 3_000 })

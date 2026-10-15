@@ -72,7 +72,7 @@ it('saves all four caps, reloads preferences, and separates projects', async () 
 it('shows loading and a recoverable load error', async () => {
   failGet = true; setup()
   expect(screen.getByText('Loading sidebar settings…')).not.toBeNull()
-  await screen.findByText(/Load unavailable/, {}, { timeout: 3000 })
+  await screen.findByText(/Load unavailable/)
   failGet = false
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
   await waitFor(() => expect(overall().value).toBe('10'))
