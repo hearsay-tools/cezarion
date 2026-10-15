@@ -2543,7 +2543,12 @@ export class RunManager {
     // indexed queries instead.
     for (const run of this.store.listRuns().filter(inScope)) {
       // A restarted controller cannot answer an old transport's permission RPC.
-      if (!this.isActive(run.id) && run.hasPendingPermission) this.store.updateRun(run.id, { hasPendingPermission: false });
+      if (!this.isActive(run.id) && run.hasPendingPermission) {
+        // A permission wait interrupted an unfinished native turn. Route it
+        // through interrupted-turn recovery, never the settled-worker fallback.
+        this.store.updateRun(run.id, { hasPendingPermission: false,
+          ...(run.status === 'waiting' && !run.stopping && !this.workerExecutionStopped(run.id) ? { status: 'running' as const } : {}) });
+      }
       this.store.clearExpiredInboxClaims(run.id, new Date().toISOString());
       this.armInboxClaimExpiry(run.id);
       // #505: the session that accepted this input died before the model read it.

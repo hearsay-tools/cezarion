@@ -2004,7 +2004,9 @@ outstanding permission events even outside the newest visible page.
 Turn completion/failure, `serverRequest/resolved`, Stop, session closure and
 transport loss retire pending approvals; writable transports receive a rejection
 before closing. Expiry disables the old card. Recovery creates a new native
-session generation and never replays a stored approval decision.
+session generation for an interrupted approval turn and never replays a stored
+approval decision. An owned worker awaiting approval remains unfinished on
+restart; recovery cannot classify its wait as successful completion.
 
 The wire contract follows the [official app-server documentation](https://developers.openai.com/codex/app-server/)
 and Codex 0.160.1's generated JSON schemas. Focused native-runner tests pin
