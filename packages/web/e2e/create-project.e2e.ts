@@ -110,7 +110,12 @@ describe('New project', () => {
     it(`creates a local project from the keyboard, ${theme}`, async () => {
       browser.goto(`${baseUrl}/p/${bootId}/`)
       applyContrastQaVariant(browser, desktop(theme))
-      focusWithKeyboard(browser, RAIL_ADD)
+      // The rail's Add project trigger is the page's FIRST focusable control, so
+      // `focusWithKeyboard` has no predecessor to Tab from (Squeal slow tier, revision 44: "no
+      // visible keyboard predecessor", bundle .ai/qa/failures/create-project/). Focus it directly
+      // and wait for it: the keyboard path under test starts at the Enter that opens the menu.
+      browser.evaluate(`document.querySelector(${JSON.stringify(RAIL_ADD)}).focus()`)
+      browser.waitForFunction(`document.activeElement?.matches(${JSON.stringify(RAIL_ADD)}) === true`)
       browser.press('Enter')
       // Radix focuses the first item of a menu opened from the keyboard: New project comes first.
       browser.waitForFunction(`document.activeElement?.getAttribute('data-slot') === 'add-project-new'`)
