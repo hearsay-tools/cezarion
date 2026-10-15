@@ -22,6 +22,12 @@ test('successful current same-repo target verification permits only its attempt 
     assert.deepEqual(await resolveSnapshot(f.options), { pr: 7, head: SHA, runId: 42, runNumber: 15, attempt: 1, artifactId: 90 });
   }
 });
+test('review findings that fail the CI run do not block a verified, prepared snapshot', async () => {
+  const f = fixture();
+  f.state.run.conclusion = 'failure';
+  f.state.jobs.push({ name: 'Automated Code Review', conclusion: 'failure', status: 'completed' });
+  assert.deepEqual(await resolveSnapshot(f.options), { pr: 7, head: SHA, runId: 42, runNumber: 15, attempt: 1, artifactId: 90 });
+});
 for (const [name, mutate] of Object.entries({
   fork: s => { s.pull.head.repo.full_name = 'fork/n'; },
   stale: s => { s.pull.head.sha = 'b'.repeat(40); },
@@ -30,6 +36,8 @@ for (const [name, mutate] of Object.entries({
   push: s => { s.run.event = 'push'; },
   failed: s => { s.jobs[0].conclusion = 'failure'; },
   cancelled: s => { s.run.conclusion = 'cancelled'; },
+  unfinished: s => { s.run.status = 'in_progress'; s.run.conclusion = null; },
+  failedWithReviewGreen: s => { s.run.conclusion = 'failure'; s.jobs[0].conclusion = 'failure'; },
   missingArtifact: s => { s.artifacts = []; },
   duplicateArtifact: s => { s.artifacts.push({ ...s.artifacts[0], id: 91 }); },
   expired: s => { s.artifacts[0].expired = true; },

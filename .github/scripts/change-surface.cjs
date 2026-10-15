@@ -18,7 +18,7 @@ const docsAllowlisted = [
 // docs/superpowers/specs/2026-09-25-infra-only-change-surface-design.md).
 // Exact-file allowlist on purpose: a new or renamed file fails closed to
 // full-matrix until deliberately listed here, and harness files — ci.yml,
-// automated-code-review.yml, recover-automated-review.yml, ci-benchmark.yml,
+// automated-code-review.yml, ci-benchmark.yml,
 // release.yml and nightly.yml (both run `npm test` themselves — #565 review),
 // change-surface.cjs, require-e2e-passed.cjs, ci-test-sequencer.mjs,
 // automated-review.cjs, release-bump-pr.cjs, the *.workflow.test.cjs pins —

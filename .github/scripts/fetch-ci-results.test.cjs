@@ -3,14 +3,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { parseArgs, resolveCiResults, renderCiResults, collectCiResults, writeCiResults, waitForCiRun } = require('./fetch-ci-results.cjs');
+const { parseArgs, resolveCiResults, renderCiResults, collectCiResults, writeCiResults } = require('./fetch-ci-results.cjs');
 
 const VERIFY = 'Unit, build, E2E, and package';
 const run = (overrides = {}) => ({ databaseId: 42, status: 'in_progress', conclusion: '', url: 'https://github.com/o/n/actions/runs/42', event: 'pull_request', headSha: 'abc', ...overrides });
 const job = (overrides = {}) => ({ databaseId: 101, name: VERIFY, status: 'completed', conclusion: 'success', startedAt: '2026-09-08T10:00:00Z', completedAt: '2026-09-08T10:01:00Z', url: 'https://github.com/o/n/actions/runs/42/job/101', steps: [], ...overrides });
+const required = h => collectCiResults({ ...h.options, requireSuccess: true });
 const publish = (overrides = {}) => job({ databaseId: 102, name: 'Publish npm snapshot', status: 'in_progress', conclusion: '', completedAt: '0001-01-01T00:00:00Z', ...overrides });
 
-// Only the network and clock are replaced: real polling, selection and rendering run.
+// Only the network and clock are replaced: real selection, retries and rendering run.
 function harness(snapshots) {
   let t = 0;
   let snapshot;
@@ -43,16 +44,17 @@ function harness(snapshots) {
     }
     throw new Error(`unexpected gh ${args.join(' ')}`);
   };
-  return { gh, calls, elapsed: () => t, options: { gh, repo: 'o/n', headSha: 'abc', now: () => t, sleep: ms => { t += ms; }, timeoutMs: 30, pollIntervalMs: 10 } };
+  return { gh, calls, elapsed: () => t, options: { gh, repo: 'o/n', headSha: 'abc', sleep: ms => { t += ms; } } };
 }
 
-test('verification completion releases review while publishing is still running', () => {
-  const h = harness([{ jobs: [job(), publish()] }]);
-  const result = waitForCiRun(h.options);
-  assert.equal(result.databaseId, 42);
+// The review runs inside the same ci.yml run, after verify: the run itself is still in
+// progress, with publishing and the review's own jobs unfinished.
+test('verification completion releases review while the run, publishing and review are still running', () => {
+  const reviewJob = job({ databaseId: 103, name: 'Review / codex-review', status: 'in_progress', conclusion: '' });
+  const h = harness([{ jobs: [job(), publish(), reviewJob] }]);
+  const context = required(h);
   assert.equal(h.elapsed(), 0);
   assert.ok(!h.calls.some(args => args[1] === 'watch'));
-  const context = collectCiResults(h.options);
   assert.equal(context.status, 'completed');
   assert.equal(context.conclusion, 'success');
   const text = renderCiResults(context);
@@ -62,12 +64,10 @@ test('verification completion releases review while publishing is still running'
 
 test('trusted pull request target CI runs can provide review verification', () => {
   const h = harness([{ runs: [run({ event: 'pull_request_target' })], jobs: [job(), publish()] }]);
-  const selected = waitForCiRun(h.options);
-  assert.equal(selected.databaseId, 42);
-  assert.equal(collectCiResults(h.options).conclusion, 'success');
+  assert.equal(required(h).conclusion, 'success');
 });
 
-test('review polling prefers a live target run over a cancelled pull_request run', () => {
+test('review context prefers a live target run over a cancelled pull_request run', () => {
   const cancelled = run({ databaseId: 41, event: 'pull_request', status: 'completed', conclusion: 'cancelled' });
   const target = run({ databaseId: 42, event: 'pull_request_target', status: 'in_progress', conclusion: '' });
   const h = harness([{
@@ -77,25 +77,22 @@ test('review polling prefers a live target run over a cancelled pull_request run
       42: [job(), publish()],
     },
   }]);
-  const selected = waitForCiRun(h.options);
-  assert.equal(selected.databaseId, 42);
-  assert.equal(collectCiResults(h.options).conclusion, 'success');
+  assert.equal(required(h).conclusion, 'success');
 });
 
 for (const state of ['queued', 'in_progress', 'completed']) {
-  test(`pending verification waits when publishing is ${state}`, () => {
+  test(`unfinished verification blocks review when publishing is ${state}`, () => {
     const h = harness([
       { jobs: [job({ status: 'in_progress', conclusion: '' }), publish({ status: state, conclusion: state === 'completed' ? 'success' : '' })] },
-      { jobs: [job(), publish()] },
     ]);
-    waitForCiRun(h.options);
-    assert.equal(h.elapsed(), 10);
+    assert.throws(() => required(h), /verification.*did not succeed.*pending/i);
+    assert.equal(h.elapsed(), 0, 'nothing waits: the caller starts review only after verify');
   });
 }
 
 test('failed verification blocks review but standalone context retains failed shard details and logs', () => {
   const h = harness([{ jobs: [job({ conclusion: 'failure' }), job({ databaseId: 103, name: 'Vitest shard 1/2', conclusion: 'failure' }), publish()] }]);
-  assert.throws(() => waitForCiRun(h.options), /verification.*failure/i);
+  assert.throws(() => required(h), /verification.*failure/i);
   const result = collectCiResults(h.options);
   assert.equal(result.status, 'completed');
   assert.equal(result.conclusion, 'failure');
@@ -108,7 +105,7 @@ test('failed verification blocks review but standalone context retains failed sh
 for (const conclusion of ['failure', 'timed_out', 'cancelled', 'skipped', 'neutral', 'action_required', null, '']) {
   test(`completed verification ${conclusion} blocks model work`, () => {
     const h = harness([{ jobs: [job({ conclusion }), publish()] }]);
-    assert.throws(() => waitForCiRun(h.options), /verification.*(did not succeed|failure|timed_out|cancelled|skipped|neutral|action_required)/i);
+    assert.throws(() => required(h), /verification.*(did not succeed|failure|timed_out|cancelled|skipped|neutral|action_required|pending)/i);
     assert.equal(collectCiResults(h.options).conclusion, conclusion || null);
   });
 }
@@ -123,32 +120,29 @@ test('publishing failure does not change successful verification or fetch public
 
 test('wrong head SHA and push runs cannot release review or populate context', () => {
   const wrong = [run({ headSha: 'oldsha' }), run({ event: 'push' })];
-  const h = harness([{ runs: wrong, jobs: [job()] }, { runs: [...wrong, run()], jobs: [job()] }]);
-  waitForCiRun(h.options);
-  assert.equal(h.elapsed(), 10);
   const pending = harness([{ runs: wrong, jobs: [job()] }]);
   assert.equal(collectCiResults(pending.options).status, 'pending');
+  assert.throws(() => required(harness([{ runs: wrong, jobs: [job()] }])), /did not succeed/);
 });
 
 for (const missing of ['run', 'job', 'completion']) {
-  test(`bounded timeout when verification ${missing} never appears`, () => {
-    const h = harness([{ runs: missing === 'run' ? [] : [run()], jobs: missing === 'job' ? [publish()] : [job(missing === 'completion' ? { status: 'queued', conclusion: '' } : missing === 'conclusion' ? { conclusion: '' } : {})] }]);
-    assert.throws(() => waitForCiRun(h.options), /timed out/i);
-    assert.equal(h.elapsed(), 30);
+  test(`missing verification ${missing} is pending and blocks review`, () => {
+    const h = harness([{ runs: missing === 'run' ? [] : [run()], jobs: missing === 'job' ? [publish()] : [job(missing === 'completion' ? { status: 'queued', conclusion: '' } : {})] }]);
     assert.equal(collectCiResults(h.options).status, 'pending');
+    assert.throws(() => required(h), /did not succeed/);
   });
 }
 
-test('ambiguous verification jobs fail closed in both wait and collection', () => {
+test('ambiguous verification jobs fail closed in both required and standalone collection', () => {
   const h = harness([{ jobs: [job(), job({ databaseId: 999 })] }]);
-  assert.throws(() => waitForCiRun(h.options), /ambiguous/i);
+  assert.throws(() => required(h), /ambiguous/i);
   assert.throws(() => collectCiResults(h.options), /ambiguous/i);
 });
 
 for (const field of ['listError', 'jobsError']) {
   test(`${field} fails closed instead of approving verification`, () => {
     const h = harness([{ jobs: [job()], [field]: new Error('API unavailable') }]);
-    assert.throws(() => waitForCiRun(h.options), /API unavailable/);
+    assert.throws(() => required(h), /API unavailable/);
     assert.throws(() => collectCiResults(h.options), /API unavailable/);
   });
 }
@@ -183,17 +177,16 @@ test('writeCiResults writes the context file when verification is pending', () =
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('parseArgs accepts --wait without --out and still requires --out otherwise', () => {
-  assert.deepEqual(parseArgs(['--repo', 'o/n', '--head-sha', 'abc', '--wait']), { repo: 'o/n', headSha: 'abc', wait: true });
+test('parseArgs requires --out; the --wait polling mode is gone', () => {
   assert.throws(() => parseArgs(['--repo', 'o/n', '--head-sha', 'abc']), /Usage: fetch-ci-results\.cjs/);
+  assert.throws(() => parseArgs(['--repo', 'o/n', '--head-sha', 'abc', '--wait']), /Usage: fetch-ci-results\.cjs/);
 });
 
 
-test('required-success context fetch rejects a same-SHA rerun that changed after the wait', () => {
+test('required-success context fetch rejects a same-SHA rerun that is no longer green', () => {
   for (const next of [[], [job({ status: 'queued', conclusion: '' })], [job({ conclusion: 'failure' })]]) {
-    const h = harness([{ jobs: [job()] }, { jobs: next }]);
-    waitForCiRun(h.options);
-    assert.throws(() => collectCiResults({ ...h.options, requireSuccess: true }), /verification.*did not succeed/i);
+    const h = harness([{ jobs: next }]);
+    assert.throws(() => required(h), /verification.*did not succeed/i);
   }
   const missing = harness([{ runs: [], jobs: [] }]);
   assert.throws(() => collectCiResults({ ...missing.options, requireSuccess: true }), /verification.*did not succeed/i);
@@ -214,10 +207,10 @@ test('parseArgs supports required-success context collection', () => {
   const h = harness([{ runs: [legacy, old, latest], jobsById: {
     41: [job()], 45: [job()], 44: [job({ conclusion: 'cancelled' })],
   } }]);
-  assert.throws(() => waitForCiRun(h.options), /cancelled/);
+  assert.throws(() => required(h), /cancelled/);
 });
 
-// hearsay-tools/cezarion#1020: one 502 from the jobs endpoint failed wait-for-ci with every job green.
+// hearsay-tools/cezarion#1020: one 502 from the jobs endpoint failed the CI lookup with every job green.
 const JOBS_URL = 'https://api.github.com/repos/o/n/actions/runs/42/jobs?per_page=100';
 function ghFailure(stderr) {
   return Object.assign(new Error(`Command failed: gh\n${stderr}`), { status: 1, stderr });
@@ -242,10 +235,10 @@ const isJobs = args => args[0] === 'run' && args[1] === 'view';
 const isList = args => args[0] === 'run' && args[1] === 'list';
 
 for (const [name, pick] of [['run jobs lookup', isJobs], ['run list lookup', isList]]) {
-  test(`--wait retries a single transient 502 from the ${name}`, () => {
+  test(`required collection retries a single transient 502 from the ${name}`, () => {
     const h = harness([{ jobs: [job(), publish()] }]);
     const f = flaky(h, pick, 1, http502);
-    assert.equal(waitForCiRun(f.options).databaseId, 42);
+    assert.equal(collectCiResults({ ...f.options, requireSuccess: true }).conclusion, 'success');
     assert.equal(f.attempts(), 2);
   });
 }
@@ -270,14 +263,14 @@ test('network resets and secondary rate limits are retried like 5xx', () => {
   ]) {
     const h = harness([{ jobs: [job()] }]);
     const f = flaky(h, isJobs, 1, () => ghFailure(stderr));
-    assert.equal(waitForCiRun(f.options).databaseId, 42, stderr);
+    assert.equal(collectCiResults({ ...f.options, requireSuccess: true }).conclusion, 'success', stderr);
   }
 });
 
 test('persistent 5xx fails after bounded attempts and names the failing URL', () => {
   const h = harness([{ jobs: [job()] }]);
   const f = flaky(h, isJobs, Infinity, http502);
-  assert.throws(() => waitForCiRun(f.options), (error) => {
+  assert.throws(() => collectCiResults({ ...f.options, requireSuccess: true }), (error) => {
     assert.match(error.message, /failed after 4 attempts/);
     assert.ok(error.message.includes(JOBS_URL), error.message);
     assert.match(error.message, /gh run view 42/);
@@ -290,7 +283,7 @@ test('persistent 5xx fails after bounded attempts and names the failing URL', ()
 test('a 404 is not retried', () => {
   const h = harness([{ jobs: [job()] }]);
   const f = flaky(h, isJobs, Infinity, http404);
-  assert.throws(() => waitForCiRun(f.options), /HTTP 404/);
+  assert.throws(() => collectCiResults({ ...f.options, requireSuccess: true }), /HTTP 404/);
   assert.equal(f.attempts(), 1);
   assert.equal(h.elapsed(), 0);
 });

@@ -2,9 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { DEFAULT_WAIT_TIMEOUT_MS } = require('./fetch-ci-results.cjs');
 
 const workflowPath = path.join(__dirname, '..', 'workflows', 'automated-code-review.yml');
+const ciPath = path.join(__dirname, '..', 'workflows', 'ci.yml');
 const legacyWorkflowPath = path.join(__dirname, '..', 'workflows', 'claude-code-review.yml');
 const schemaPath = path.join(__dirname, '..', 'schemas', 'review-findings.schema.json');
 const promptPath = path.join(__dirname, '..', 'codex', 'prompts', 'review.md');
@@ -215,9 +215,7 @@ test('automated review workflow keeps its round cap, provider, permission, and c
 
   assert.equal(fs.existsSync(legacyWorkflowPath), false, 'the legacy independent Claude review workflow must not run beside the selector');
   assert.match(workflow, /^name: Automated Code Review$/m);
-  assert.match(workflow, /pull_request_target:\n(?:[^\n]*\n)*?    types: \[opened, synchronize, reopened\]/);
-  assert.match(workflow, /branches:\n      - main/);
-  assert.match(workflow, /concurrency:\n  group: automated-code-review-pr-\$\{\{ github\.event\.pull_request\.number \|\| inputs\.pr_number \}\}\n  cancel-in-progress: true/);
+  assert.match(workflow, /concurrency:\n  group: automated-code-review-\$\{\{ github\.event_name \}\}-pr-\$\{\{ github\.event\.pull_request\.number \|\| inputs\.pr_number \}\}\n  cancel-in-progress: true/);
   assert.match(workflow, /AUTOMATED_REVIEWER: \$\{\{ vars\.AUTOMATED_REVIEWER \}\}/);
   assert.match(workflow, /openai\/codex-action@[0-9a-f]{40} {2}# v[0-9.]+\n/, 'codex-action must be pinned to a commit SHA, not a floating tag (openai/codex-action#150)');
   assert.match(workflow, /sandbox: read-only/);
@@ -240,7 +238,7 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(round, /can_review=false/);
 
   const claude = job(workflow, 'claude-review');
-  assert.match(claude, /needs: \[validate-provider, review-round, wait-for-ci\]/);
+  assert.match(claude, /needs: \[validate-provider, review-round\]\n/);
   assert.match(claude, /needs\.review-round\.outputs\.can_review == 'true'/);
   assert.match(claude, /permissions:\n      actions: read\n      contents: read/);
   assert.match(claude, /pull-requests: read/);
@@ -248,8 +246,8 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(claude, /github_token: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
   assert.doesNotMatch(claude, /id-token: write/, 'the Claude job authenticates with GITHUB_TOKEN, not the OIDC app-token exchange, which rejects pull_request_target tokens');
   assert.match(claude, /anthropic_api_key: \$\{\{ secrets\.ANTHROPIC_API_KEY \}\}/);
-  assert.equal((workflow.match(/ANTHROPIC_API_KEY/g) || []).length, 1, 'only the Claude job may reference ANTHROPIC_API_KEY');
-  assert.equal((workflow.match(/secrets\.GITHUB_TOKEN/g) || []).length, 9, 'validate-provider bump classify, read-only round guard, wait-for-ci, and provider context fetches use secrets.GITHUB_TOKEN');
+  assert.equal((workflow.match(/secrets\.ANTHROPIC_API_KEY/g) || []).length, 1, 'only the Claude job may reference ANTHROPIC_API_KEY');
+  assert.equal((workflow.match(/secrets\.GITHUB_TOKEN/g) || []).length, 8, 'validate-provider bump classify, read-only round guard, and provider context fetches use secrets.GITHUB_TOKEN');
   assert.match(claude, /anthropics\/claude-code-action@[0-9a-f]{40}/);
   assert.match(claude, /ref: refs\/pull\/\$\{\{ needs\.review-round\.outputs\.pr_number \}\}\/merge/);
   assert.match(claude, /fetch-depth: 0/);
@@ -283,6 +281,8 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.deepEqual(JSON.parse(inlineSchema[1]), sharedSchema);
   assert.match(claude, /name: Write Claude review artifact/);
   assert.match(claude, /name: review-output/);
+  assert.match(claude, /outputs:\n      artifact_id: \$\{\{ steps\.upload\.outputs\.artifact-id \}\}/);
+  assert.match(claude, /- name: Upload Claude review output\n        id: upload\n/);
   assert.match(claude, /path: review-output\/review-findings\.json/);
   assert.match(claude, /if-no-files-found: error/);
   assert.deepEqual(
@@ -291,31 +291,18 @@ test('automated review workflow keeps its round cap, provider, permission, and c
     'Claude may run only the intended read-only Git subcommands',
   );
 
-  const wait = job(workflow, 'wait-for-ci');
-  assert.match(wait, /needs: \[validate-provider, review-round\]/);
-  assert.match(wait, /needs\.review-round\.outputs\.can_review == 'true'/);
-  // hearsay-tools/cezarion#1060: a job timeout is recorded as cancelled, which recovery skips, so the
-  // script's own deadline must fire first, with room for checkout.
-  const waitJobMinutes = Number(wait.match(/^ {4}timeout-minutes: (\d+)$/m)?.[1]);
-  assert.ok(waitJobMinutes * 60_000 >= DEFAULT_WAIT_TIMEOUT_MS + 3 * 60_000,
-    `wait-for-ci's job limit (${waitJobMinutes} min) must exceed the wait script's deadline by at least 3 minutes`);
-  assert.match(wait, /permissions:\n      actions: read/);
-  assert.match(wait, /ref: \$\{\{ needs\.review-round\.outputs\.base_sha \}\}/);
-  assert.match(wait, /persist-credentials: false/);
-  assert.match(wait, /HEAD_SHA: \$\{\{ needs\.review-round\.outputs\.head_sha \}\}/);
-  assert.match(wait, /fetch-ci-results\.cjs/);
-  assert.match(wait, /--wait/);
-  assert.match(wait, /--head-sha "\$HEAD_SHA"/);
-  assert.doesNotMatch(wait, /--out /);
-  assert.doesNotMatch(wait, /verify\.yml/);
+  // ci.yml starts this workflow only after verify succeeds: nothing in it may poll for CI.
+  assert.doesNotMatch(workflow, /wait-for-ci|--wait\b/);
 
   const codex = job(workflow, 'codex-review');
-  assert.match(codex, /needs: \[validate-provider, review-round, wait-for-ci\]/);
+  assert.match(codex, /needs: \[validate-provider, review-round\]\n/);
+  assert.match(codex, /outputs:\n      artifact_id: \$\{\{ steps\.upload\.outputs\.artifact-id \}\}/);
+  assert.match(codex, /- name: Upload Codex review output\n        id: upload\n/);
   assert.match(codex, /needs\.review-round\.outputs\.can_review == 'true'/);
   assert.match(codex, /permissions:\n      actions: read\n      contents: read\n      pull-requests: read/);
   assert.doesNotMatch(codex, /pull-requests: write/);
   assert.match(codex, /openai-api-key: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
-  assert.equal((workflow.match(/OPENAI_API_KEY/g) || []).length, 1, 'only the Codex job may reference OPENAI_API_KEY');
+  assert.equal((workflow.match(/secrets\.OPENAI_API_KEY/g) || []).length, 1, 'only the Codex job may reference OPENAI_API_KEY');
   assert.doesNotMatch(codex, /allow-bots: true/);
   assert.match(codex, /allow-bot-users: 'claude\[bot\]'/);
   assert.match(codex, /allow-users: '\*'/);
@@ -388,7 +375,10 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(poster, /name: Checkout trusted validator/);
   assert.match(poster, /ref: \$\{\{ needs\.review-round\.outputs\.base_sha \}\}/);
   assert.doesNotMatch(poster, /refs\/pull\/\$\{\{ github\.event\.pull_request\.number \}\}\/merge/);
-  assert.match(poster, /actions\/download-artifact@[0-9a-f]{40}[\s\S]*?name: review-output/);
+  assert.doesNotMatch(poster, /name: review-output/, 'a name is not trusted: PR code in the same CI run can upload one');
+  assert.match(poster, /actions\/download-artifact@[0-9a-f]{40}[^\n]*\n\s+with:\n\s+artifact-ids: \$\{\{ needs\.validate-provider\.outputs\.provider == 'claude' && needs\.claude-review\.outputs\.artifact_id \|\| needs\.codex-review\.outputs\.artifact_id \}\}\n\s+merge-multiple: true\n\s+path: review-output\n/);
+  assert.ok(poster.indexOf("name: Require the provider's review artifact ID") < poster.indexOf('name: Download review output'),
+    'an empty artifact ID downloads every artifact in the run, so it must fail before the download');
   assert.match(poster, /actions\/github-script@[0-9a-f]{40}/);
   assert.match(poster, /require\('\.\/\.github\/scripts\/automated-review\.cjs'\)/);
   assert.doesNotMatch(poster, /codex-review\.js/);
@@ -411,7 +401,8 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   const aggregate = job(workflow, 'review-complete');
   assert.match(aggregate, /if: \$\{\{ always\(\) \}\}/);
   assert.match(aggregate, /needs: \[validate-provider, review-round, claude-review, codex-review, post-review\]/);
-  assert.match(aggregate, /name: Automated Code Review/);
+  assert.match(aggregate, /name: Review verdict/);
+  assert.doesNotMatch(aggregate, /name: Automated Code Review/, 'the required check name belongs to ci.yml, not to a called job');
   assert.match(aggregate, /\[ "\$VALIDATE_RESULT" = 'success' \] \|\| exit 1/);
   assert.match(aggregate, /claude\) \[ "\$CLAUDE_RESULT" = 'success' \] \|\| exit 1 ;;/);
   assert.match(aggregate, /codex\) \[ "\$CODEX_RESULT" = 'success' \] \|\| exit 1 ;;/);
@@ -456,7 +447,6 @@ test('automated review rounds read AUTOMATED_REVIEW_ROUNDS and ignore the cap on
   const workflow = fs.readFileSync(workflowPath, 'utf8');
   const round = job(workflow, 'review-round');
   const claude = job(workflow, 'claude-review');
-  const wait = job(workflow, 'wait-for-ci');
   const codex = job(workflow, 'codex-review');
   const poster = job(workflow, 'post-review');
 
@@ -483,7 +473,6 @@ test('automated review rounds read AUTOMATED_REVIEW_ROUNDS and ignore the cap on
   assert.match(poster, /ignoreCap: process\.env\.IGNORE_CAP === 'true'/);
   assert.match(poster, /maxRounds,/);
   assert.doesNotMatch(claude, /github\.event\.pull_request\./);
-  assert.doesNotMatch(wait, /github\.event\.pull_request\./);
   assert.doesNotMatch(codex, /github\.event\.pull_request\./);
   assert.doesNotMatch(poster, /context\.payload\.pull_request/);
 });
@@ -770,22 +759,18 @@ test('post-review stamps the computed patch-id onto posted reviews', () => {
   assert.match(poster, /patchId: process\.env\.PATCH_ID/);
 });
 
-test('both model jobs require successful verification and trusted context rechecks', async () => {
+test('both model jobs run on provider and round alone, and recheck verification before model work', async () => {
   const { parse } = await import('yaml');
   const { runInNewContext } = require('node:vm');
   const workflow = parse(fs.readFileSync(workflowPath, 'utf8'));
   const expression = condition => condition.replace(/^\$\{\{\s*|\s*\}\}$/g, '').replace(/needs\.([\w-]+)/g, "needs['$1']");
   for (const provider of ['codex', 'claude']) {
     const modelJob = workflow.jobs[`${provider}-review`];
-    assert.ok(modelJob.needs.includes('wait-for-ci'));
-    for (const result of ['success', 'failure', 'cancelled', 'skipped']) {
-      const needs = {
-        'validate-provider': { outputs: { provider } },
-        'review-round': { outputs: { can_review: 'true' } },
-        'wait-for-ci': { result },
-      };
-      assert.equal(runInNewContext(expression(modelJob.if), { needs }), result === 'success', `${provider}: ${result}`);
-      assert.equal(runInNewContext(expression(workflow.jobs['wait-for-ci'].if), { needs }), true, `${provider} waits`);
+    // The verification gate is ci.yml's `review: needs: verify`, pinned in the next test.
+    assert.deepEqual(modelJob.needs, ['validate-provider', 'review-round']);
+    for (const [selected, canReview, runs] of [[provider, 'true', true], [provider, 'false', false], [provider === 'codex' ? 'claude' : 'codex', 'true', false]]) {
+      const needs = { 'validate-provider': { outputs: { provider: selected } }, 'review-round': { outputs: { can_review: canReview } } };
+      assert.equal(runInNewContext(expression(modelJob.if), { needs }), runs, `${provider}: provider=${selected} can_review=${canReview}`);
     }
     const modelIndex = modelJob.steps.findIndex(step => step.uses?.includes(provider === 'codex' ? 'openai/codex-action' : 'anthropics/claude-code-action'));
     const contextIndex = modelJob.steps.findIndex(step => step.run?.includes('--require-success'));
@@ -841,6 +826,8 @@ test('the Automated Code Review check fails on new or still-open finding threads
     assert.equal(result.status, status, `${label}: ${result.stdout}${result.stderr}`);
   }
   assert.match(run({ NEW_THREADS: '2', OPEN_THREADS: '2' }).stdout, /opened 2 new finding thread/);
+  // Re-running the round alone never judges a pushback reply: the patch-ID guard skips the model.
+  assert.match(run({ NEW_THREADS: '2', OPEN_THREADS: '2' }).stdout, /run this workflow manually with pr_number, then re-run Review \/ review-round/);
   assert.match(run({ OPEN_THREADS: '3' }).stdout, /3 automated review thread\(s\) are still unresolved/);
 });
 
@@ -850,4 +837,134 @@ test('App-authored upstream-scan PRs skip review through the trusted classifier'
   const round = job(workflow, 'review-round');
   assert.match(validator, /c\.classifyFromEnv\(\) \|\| c\.classifyUpstreamScanFromEnv\?\.\(\)/);
   assert.match(round, /c\.classifyFromEnv\(\) \|\| c\.classifyUpstreamScanFromEnv\?\.\(\)/);
+});
+
+test('the review is a called workflow plus a manual dispatch, never its own pull request trigger', async () => {
+  const { parse } = await import('yaml');
+  const workflow = parse(fs.readFileSync(workflowPath, 'utf8'));
+  assert.deepEqual(Object.keys(workflow.on).sort(), ['workflow_call', 'workflow_dispatch']);
+  assert.deepEqual(workflow.on.workflow_call.secrets, {
+    ANTHROPIC_API_KEY: { required: false },
+    OPENAI_API_KEY: { required: false },
+  }, 'only the selected provider needs its key, so neither is required');
+  assert.equal(workflow.on.workflow_dispatch.inputs.pr_number.required, true);
+  assert.equal(fs.existsSync(path.join(__dirname, '..', 'workflows', 'recover-automated-review.yml')), false,
+    'no review waits on CI any more, so there is no failed wait to recover');
+  assert.equal(fs.existsSync(path.join(__dirname, 'recover-review.cjs')), false);
+});
+
+test('ci.yml starts the review after verify and owns the required Automated Code Review check', async () => {
+  const { parse } = await import('yaml');
+  const { runInNewContext } = require('node:vm');
+  const { spawnSync } = require('node:child_process');
+  const ci = parse(fs.readFileSync(ciPath, 'utf8'));
+  const review = parse(fs.readFileSync(workflowPath, 'utf8'));
+  const evaluate = (value, context) => runInNewContext(value.replace(/^\$\{\{\s*|\s*\}\}$/g, '').replace(/needs\.([\w-]+)/g, "needs['$1']"), { always: () => true, ...context });
+  const github = (event_name, base) => ({ event_name, event: { pull_request: base ? { base: { ref: base } } : undefined } });
+  const routing = [
+    [github('pull_request_target', 'main'), true],
+    [github('pull_request_target', 'release/v1.2.3'), false],
+    [github('push'), false],
+    [github('workflow_dispatch'), false],
+  ];
+
+  const caller = ci.jobs.review;
+  assert.equal(caller.uses, './.github/workflows/automated-code-review.yml');
+  assert.equal(caller.needs, 'verify', 'the review starts when verification succeeds, so no job waits for CI');
+  assert.deepEqual(caller.secrets, {
+    ANTHROPIC_API_KEY: '${{ secrets.ANTHROPIC_API_KEY }}',
+    OPENAI_API_KEY: '${{ secrets.OPENAI_API_KEY }}',
+  }, 'pass the model keys alone, never `secrets: inherit`');
+  for (const [context, expected] of routing) assert.equal(evaluate(caller.if, { github: context }), expected, JSON.stringify(context));
+
+  // A called job asking for more than the caller grants fails the whole run; granting more
+  // than any called job uses widens every called job's ceiling for nothing.
+  const rank = { none: 0, read: 1, write: 2 };
+  const union = {};
+  for (const [name, called] of Object.entries(review.jobs)) {
+    assert.ok(called.permissions, `${name} must declare its own permissions so it never inherits the caller's ceiling`);
+    for (const [scope, level] of Object.entries(called.permissions)) {
+      if ((rank[level] ?? 0) > (rank[union[scope]] ?? 0)) union[scope] = level;
+    }
+  }
+  assert.deepEqual(caller.permissions, union);
+
+  const named = Object.values(ci.jobs).filter(j => typeof j.name === 'string' && j.name.includes('Automated Code Review'));
+  assert.equal(named.length, 1, 'exactly one ci.yml job carries the required check name');
+  const result = ci.jobs['review-result'];
+  assert.deepEqual(result.needs, ['verify', 'review']);
+  assert.deepEqual(result.permissions, {});
+  for (const [context, expected] of routing) {
+    assert.equal(evaluate(result.if, { github: context }), expected, JSON.stringify(context));
+    // A skipped job reports success: under the required name it would pass the check unreviewed.
+    assert.equal(evaluate(result.name, { github: context }) === 'Automated Code Review', expected, JSON.stringify(context));
+  }
+
+  const [step] = result.steps;
+  const run = env => spawnSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c', step.run], {
+    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', ...env }, encoding: 'utf8',
+  });
+  assert.equal(run({ VERIFY_RESULT: 'success', REVIEW_RESULT: 'success' }).status, 0);
+  for (const reviewResult of ['failure', 'cancelled', 'skipped', '']) {
+    assert.notEqual(run({ VERIFY_RESULT: 'success', REVIEW_RESULT: reviewResult }).status, 0, `review ${reviewResult}`);
+  }
+  for (const verifyResult of ['failure', 'cancelled', 'skipped']) {
+    const failed = run({ VERIFY_RESULT: verifyResult, REVIEW_RESULT: 'skipped' });
+    assert.notEqual(failed.status, 0, `verify ${verifyResult}`);
+    assert.match(failed.stderr, /Re-run failed jobs/);
+  }
+});
+
+test("post-review refuses to download without the provider job's artifact ID", async () => {
+  const { parse } = await import('yaml');
+  const { spawnSync } = require('node:child_process');
+  const workflow = parse(fs.readFileSync(workflowPath, 'utf8'));
+  const guard = workflow.jobs['post-review'].steps.find(step => step.name === "Require the provider's review artifact ID");
+  assert.ok(guard, 'post-review must check the artifact ID before downloading');
+  assert.equal(guard.if, "needs.review-round.outputs.can_review == 'true'");
+  const download = workflow.jobs['post-review'].steps.find(step => step.name === 'Download review output');
+  assert.equal(guard.env.ARTIFACT_ID, download.with['artifact-ids'], 'the guard checks the ID the download uses');
+  const run = id => spawnSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c', guard.run], {
+    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', ARTIFACT_ID: id }, encoding: 'utf8',
+  }).status;
+  assert.equal(run('4242'), 0);
+  for (const id of ['', '0', 'abc', '42,43', '42 ']) assert.notEqual(run(id), 0, JSON.stringify(id));
+});
+
+// The CI failure sweep files a recurring-failure issue when one error line repeats across
+// unrelated PRs. Open findings are not CI failures, so the review gates must not emit one.
+test('review findings never reach the CI failure sweep as an error cause', async () => {
+  const { parse } = await import('yaml');
+  const { spawnSync } = require('node:child_process');
+  const { causesForStep } = require('./failure-diagnostics.cjs');
+  const run = (script, env) => spawnSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c', script], {
+    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', ...env }, encoding: 'utf8',
+  });
+  // GitHub renders a ::<level>:: workflow command into the job log as ##[<level>].
+  const swept = (result, stepName) => causesForStep({
+    run: { id: 1, run_attempt: 1 }, job: { id: 2 }, step: { number: 3, name: stepName },
+    log: (result.stdout + result.stderr).replace(/^::(\w+)::/gm, '##[$1]'),
+  }).map(cause => cause.kind);
+
+  const review = parse(fs.readFileSync(workflowPath, 'utf8'));
+  const [verdict] = review.jobs['review-complete'].steps;
+  const passing = {
+    VALIDATE_RESULT: 'success', REVIEW_ROUND_RESULT: 'success', CAN_REVIEW: 'true', PROVIDER: 'codex',
+    CLAUDE_RESULT: 'skipped', CODEX_RESULT: 'success', POST_RESULT: 'success', NEW_THREADS: '0', OPEN_THREADS: '0',
+  };
+  for (const findings of [{ NEW_THREADS: '1', OPEN_THREADS: '1' }, { OPEN_THREADS: '2' }]) {
+    const result = run(verdict.run, { ...passing, ...findings });
+    assert.equal(result.status, 1, 'findings still fail the check');
+    assert.deepEqual(swept(result, verdict.name), ['unknown'], JSON.stringify(findings));
+  }
+  // A broken review is a real failure and stays an error the sweep can group.
+  assert.deepEqual(swept(run(verdict.run, { ...passing, NEW_THREADS: '', OPEN_THREADS: '' }), verdict.name), ['error']);
+
+  const ci = parse(fs.readFileSync(ciPath, 'utf8'));
+  const [gate] = ci.jobs['review-result'].steps;
+  for (const env of [{ VERIFY_RESULT: 'success', REVIEW_RESULT: 'failure' }, { VERIFY_RESULT: 'failure', REVIEW_RESULT: 'skipped' }]) {
+    const result = run(gate.run, env);
+    assert.equal(result.status, 1, JSON.stringify(env));
+    assert.deepEqual(swept(result, gate.name), ['unknown'], JSON.stringify(env));
+  }
 });

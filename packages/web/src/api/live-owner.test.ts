@@ -116,6 +116,31 @@ describe('shared live ownership', () => {
     expect(port.frames.some(frame => frame.type === 'frame' && frame.frame.event === 'reconnect')).toBe(true)
     owner.dispose()
   })
+  it('tells workspace subscribers at once when an attached feed ends, before its retry (hearsay-tools/cezarion#1069)', async () => {
+    let end!: () => void
+    deps.stream = (kind, demand, frame, signal) => {
+      streams.push({ kind, demand, frame, signal })
+      return new Promise(resolve => { end = resolve; signal.addEventListener('abort', () => resolve(), { once: true }) })
+    }
+    const owner = createLiveOwner(deps)
+    const port = new Port(); owner.attach(port); port.sync('a', [workspace])
+    await vi.advanceTimersByTimeAsync(0)
+    streams[0]!.frame({ event: 'ping', data: '', id: '' })
+    const events = (p: Port) => p.frames.filter(frame => frame.type === 'frame').map(frame => frame.frame.event)
+    end()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(events(port)).toEqual(['ping', 'disconnect'])
+    // A document arriving during the retry gap gets no synthetic ready ping.
+    const late = new Port(); owner.attach(late); late.sync('b', [workspace])
+    await vi.advanceTimersByTimeAsync(0)
+    expect(events(late)).toEqual([])
+    await vi.advanceTimersByTimeAsync(1_500)
+    expect(streams).toHaveLength(2)
+    expect(events(port)).toEqual(['ping', 'disconnect', 'reconnect'])
+    expect(events(late)).toEqual(['reconnect'])
+    owner.dispose()
+  })
+
   it('delivers the latest topic snapshot to a late subscriber without another socket', async () => {
     let publish!: (value: unknown) => void
     deps.topic = vi.fn((_topic, listener) => { publish = listener; return () => {} })
