@@ -9,7 +9,10 @@ import { fixture } from './service.testkit.ts';
 import { createDelegationRoutes } from './routes.ts';
 import { createDelegationApp, startDelegationTransport } from './transport.ts';
 
-describe('bundled worker CLI', () => {
+// Every test spawns real worker worktrees through git. Alone at load 91 they take 0.25-1.2 s
+// (the transport round trips, with `wait`'s ~1 s, are the slowest); the Node 24.15 floor shard
+// runs them about 4x slower, where two of them passed 5 s (hearsay-tools/cezarion#974).
+describe('bundled worker CLI', { timeout: 20_000 }, () => {
   let f: ReturnType<typeof fixture>, transport: Awaited<ReturnType<typeof startDelegationTransport>>;
   let output: ReturnType<typeof vi.spyOn>, env: NodeJS.ProcessEnv;
   beforeEach(async () => {
@@ -238,9 +241,7 @@ describe('bundled worker CLI', () => {
     expect(await runWorkerCommand(['destroy', incompleteId], env)).toBe(1);
     expect(json()).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
     expect(JSON.stringify(output.mock.calls)).not.toContain(f.token);
-    // Ten worker-CLI round trips, including `wait`'s ~1 s and the first `destroy`'s ~0.7 s:
-    // 1.8-2.3 s alone at load 47, 5.4 s on the Node floor shard (hearsay-tools/cezarion#974).
-  }, 20_000);
+  });
   it('reads an explicit context document as UTF-8 text and rejects competing or oversize sources', async () => {
     const file = join(f.root, 'context.txt'); writeFileSync(file, 'Selected context: café');
     const args = ['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--backend', 'claude', '--model', 'sonnet', '--context-file', file, 'work'];
