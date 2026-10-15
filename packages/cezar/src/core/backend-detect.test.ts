@@ -57,7 +57,7 @@ describe('probeOmp', () => {
 // hearsay-tools/cezarion#1042: codex and opencode were the only agent probes that still spawned
 // their real CLI under CEZ_DRY_RUN=1, delaying every dry-run cockpit's banner by the slower of the two.
 describe('detectEnvironment: codex and opencode probes', () => {
-  const keys = ['CEZ_DRY_RUN', 'CEZ_CODEX_BIN', 'CEZ_OPENCODE_BIN', 'CEZ_CLAUDE_BIN', 'CEZ_PI_BIN', 'CEZ_CURSOR_BIN', 'CEZ_OMP_BIN'] as const;
+  const keys = ['CEZ_DRY_RUN', 'CEZ_CODEX_BIN', 'CEZ_OPENCODE_BIN', 'CEZ_CLAUDE_BIN', 'CEZ_PI_BIN', 'CEZ_CURSOR_BIN', 'CEZ_OMP_BIN', 'PATH'] as const;
   const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   let root: string;
 
@@ -90,11 +90,35 @@ describe('detectEnvironment: codex and opencode probes', () => {
 
   it('spawns neither CLI under CEZ_DRY_RUN=1 and reports both mocks present', async () => {
     process.env.CEZ_DRY_RUN = '1';
+    // No override: the fakes are what `codex` and `opencode` would resolve to on PATH.
+    delete process.env.CEZ_CODEX_BIN;
+    delete process.env.CEZ_OPENCODE_BIN;
+    process.env.PATH = `${root}:${saved.PATH ?? ''}`;
     const rows = await detectEnvironment();
     expect(spawned('codex')).toBe(false);
     expect(spawned('opencode')).toBe(false);
     expect(rows.find((row) => row.name === 'codex')).toEqual({ name: 'codex', available: true, version: 'mock (CEZ_DRY_RUN=1)' });
     expect(rows.find((row) => row.name === 'opencode')).toEqual({ name: 'opencode', available: true, version: 'mock (CEZ_DRY_RUN=1)' });
+  });
+
+  // The runners resolve CEZ_*_BIN before the bundled mock, so an override is what a
+  // dry-run task would start, and the probe must check it.
+  it('probes an explicit CEZ_CODEX_BIN / CEZ_OPENCODE_BIN even under CEZ_DRY_RUN=1', async () => {
+    process.env.CEZ_DRY_RUN = '1';
+    const rows = await detectEnvironment();
+    expect(spawned('codex')).toBe(true);
+    expect(spawned('opencode')).toBe(true);
+    expect(rows.find((row) => row.name === 'codex')).toMatchObject({ available: true, version: 'codex-cli 9.9.9' });
+    expect(rows.find((row) => row.name === 'opencode')).toMatchObject({ available: true, version: '8.8.8' });
+  });
+
+  it('reports a missing override as unavailable under CEZ_DRY_RUN=1', async () => {
+    process.env.CEZ_DRY_RUN = '1';
+    process.env.CEZ_CODEX_BIN = join(root, 'absent');
+    process.env.CEZ_OPENCODE_BIN = join(root, 'absent');
+    const rows = await detectEnvironment();
+    expect(rows.find((row) => row.name === 'codex')).toMatchObject({ name: 'codex', available: false });
+    expect(rows.find((row) => row.name === 'opencode')).toMatchObject({ name: 'opencode', available: false });
   });
 
   it('still spawns both and reads the real version without dry-run', async () => {
