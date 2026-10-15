@@ -1778,6 +1778,12 @@ describe('native approval transcript integration', () => {
     expect(screen.getByText('Run a native command?')).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Decline command' }) as HTMLButtonElement).disabled).toBe(false)
   })
+  it('directs a permission wait to the approval choices instead of ordinary input', () => {
+    renderView(<ThreadView run={run('waiting', { hasPendingPermission: true })} thread={reduceThread([request])} />)
+    const hint = document.querySelector('[data-slot="paused-hint"]')
+    expect(hint?.textContent).toContain('Choose an approval option above to continue')
+    expect(hint?.textContent).not.toContain('send a message')
+  })
   it('sends an approval to the scoped native endpoint with exact option IDs', async () => {
     renderView(<ThreadView run={run('running')} thread={reduceThread([request])} />)
     fireEvent.click(screen.getByRole('button', { name: 'Decline command' }))

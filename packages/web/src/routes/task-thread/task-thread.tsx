@@ -451,7 +451,9 @@ export function ThreadView({
               className="flex items-center gap-2 px-1 text-xs text-muted-foreground"
             >
               <StatusDot tone={attention.tone} shape={attention.shape} pulse={attention.pulse} />
-              {attention.bucket === 'waiting' ? 'The agent is paused, waiting for your reply' : `${attention.label.charAt(0).toUpperCase()}${attention.label.slice(1)} — you can send a message to resume`}
+              {attention.bucket === 'permission' ? 'Choose an approval option above to continue'
+                : attention.bucket === 'waiting' ? 'The agent is paused, waiting for your reply'
+                  : `${attention.label.charAt(0).toUpperCase()}${attention.label.slice(1)} — you can send a message to resume`}
             </div>
           ) : null}
 
