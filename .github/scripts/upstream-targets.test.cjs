@@ -293,6 +293,15 @@ test('renderTargetsReport prints unknown drift when the baseline is unknown', ()
   assert.doesNotMatch(md, /0 commits/);
 });
 
+test('renderTargetsReport says why the dry run is unknown when HEAD could not be snapshotted', () => {
+  assert.doesNotMatch(renderTargetsReport(report()), /^- Dry run:/m, 'a dry run that ran needs no header line');
+  const r = report({ dryRunError: 'cannot snapshot HEAD: ENOSPC: no space left on device' });
+  for (const f of r.sections[0].files) f.dryRun = 'unknown';
+  const md = renderTargetsReport(r);
+  assert.match(md, /^- Dry run: unknown — cannot snapshot HEAD: ENOSPC: no space left on device$/m);
+  assert.match(md, /^- Dry run now: 0 conflict · 0 missing · 0 clean · 4 unknown/m);
+});
+
 test('renderTargetsReport says why reachability is unknown when the build failed', () => {
   const r = report({ reach: { roots: 3, reachable: 0, error: 'Could not resolve "./gone"' } });
   r.sections[0].files[3].reachability = 'unknown';
@@ -301,10 +310,16 @@ test('renderTargetsReport says why reachability is unknown when the build failed
   assert.match(md, /`packages\/web\/src\/lib\/project-order\.ts` \| M \| [^|]+ \| [^|]*\| unknown \|/);
 });
 
-test('collectReachability on this repo reaches the cockpit, the CLI, its path-loaded entries and the contract', async () => {
+test('collectReachability on this repo\'s HEAD snapshot reaches the cockpit, the CLI, its path-loaded entries and the contract', async () => {
   const path = require('node:path');
   const { collectReachability } = require('./upstream-reachability.cjs');
-  const reach = await collectReachability(path.resolve(__dirname, '../..'));
+  const { withHeadSnapshot } = require('./upstream-scan.cjs');
+  // `targets` bundles the files it checks out of HEAD, not the work tree; a file production code
+  // imports that the snapshot leaves out would fail the build here.
+  const reach = await withHeadSnapshot(path.resolve(__dirname, '../..'), (snapshot) => {
+    assert.equal(snapshot.error, null);
+    return collectReachability(snapshot.tree);
+  });
   assert.equal(reach.error, null);
   for (const file of [
     'packages/web/src/components/project-rail.tsx',
@@ -455,6 +470,115 @@ test('collectTargets reads drift as unknown for a ledger row HEAD never committe
   assert.equal(report.sections[0].files[0].drift, null);
   assert.match(renderTargetsReport(report), /^## .*baseline unknown/m);
   assert.notEqual(report.sections[1].baseline, null);
+});
+
+/** What `collectTargets` must leave alone: the fixture's status and its real index, byte for byte.
+ *  `--no-optional-locks` keeps `git status` itself from refreshing the index. */
+function repoState(fx) {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  return {
+    status: fx.git('--no-optional-locks', 'status', '--porcelain', '--untracked-files=all'),
+    index: fs.readFileSync(path.join(fx.dir, '.git', 'index')).toString('base64'),
+  };
+}
+
+/** Points `os.tmpdir()` at a fresh directory for one test, so the snapshot's temp dirs can be counted. */
+function privateTmp(t) {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const saved = process.env.TMPDIR;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cez-upstream-tmp-'));
+  process.env.TMPDIR = dir;
+  t.after(() => {
+    if (saved === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = saved;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  return { dir, leftovers: () => fs.readdirSync(dir).filter((n) => n.startsWith('cez-targets-')) };
+}
+
+test('collectTargets judges reachability on HEAD, not on uncommitted edits', async (t) => {
+  const { collectTargets } = require('./upstream-scan.cjs');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const tmp = privateTmp(t);
+  // HEAD's entry imports live.tsx; the work tree's no longer does.
+  fx.write('packages/web/src/main.tsx', 'export const app = []\n');
+  const before = repoState(fx);
+  const report = await collectTargets([fx.upstream.slice(0, 8)], { cwd: fx.dir, fetch: false });
+  assert.equal(report.reach.error, null);
+  assert.ok(report.reach.inputs.has('packages/web/src/main.tsx'), 'reachable paths stay repo-relative');
+  const live = report.sections[0].files.find((f) => f.path === 'packages/web/src/live.tsx');
+  assert.equal(live.reachability, 'production');
+  assert.deepEqual(repoState(fx), before, 'the work tree and the real index are untouched');
+  assert.deepEqual(tmp.leftovers(), []);
+});
+
+test('collectTargets dry-runs against HEAD, not against a staged index', async (t) => {
+  const { collectTargets } = require('./upstream-scan.cjs');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const tmp = privateTmp(t);
+  // Base exports 1, upstream 2, HEAD 3: a conflict. The staged base version would apply clean.
+  fx.write('packages/web/src/live.tsx', 'export const Live = 1\n// two\n// three\n');
+  fx.git('add', 'packages/web/src/live.tsx');
+  assert.match(fx.git('show', 'HEAD:packages/web/src/live.tsx'), /Live = 3/);
+  const before = repoState(fx);
+  const report = await collectTargets([fx.upstream.slice(0, 8)], { cwd: fx.dir, fetch: false });
+  const byPath = Object.fromEntries(report.sections[0].files.map((f) => [f.path, f.dryRun]));
+  assert.deepEqual(byPath, {
+    'README.md': 'clean',
+    'packages/web/src/dead.tsx': 'clean',
+    'packages/web/src/gone.ts': 'missing',
+    'packages/web/src/live.tsx': 'conflict',
+  });
+  assert.equal(report.dryRunError, null);
+  assert.deepEqual(repoState(fx), before, 'the work tree and the real index are untouched');
+  assert.deepEqual(tmp.leftovers(), []);
+});
+
+test('withHeadSnapshot checks HEAD out under os.tmpdir() and removes it when the work inside throws', async (t) => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { withHeadSnapshot } = require('./upstream-scan.cjs');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const tmp = privateTmp(t);
+  fx.write('packages/web/src/main.tsx', 'export const app = []\n');
+  let seen = null;
+  await assert.rejects(withHeadSnapshot(fx.dir, (snapshot) => {
+    seen = { ...snapshot, leftovers: tmp.leftovers(), main: fs.readFileSync(path.join(snapshot.tree, 'packages/web/src/main.tsx'), 'utf8') };
+    throw new Error('boom');
+  }), /boom/);
+  assert.equal(seen.error, null);
+  assert.equal(seen.leftovers.length, 1);
+  assert.match(seen.main, /import \{ Live \}/, 'HEAD\'s file, not the work tree\'s');
+  assert.equal(fs.existsSync(path.join(seen.tree, 'README.md')), false, 'only what reachability reads');
+  assert.deepEqual(tmp.leftovers(), []);
+});
+
+test('collectTargets reads reachability and the dry run as unknown, with the reason, when HEAD cannot be snapshotted', async (t) => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { collectTargets } = require('./upstream-scan.cjs');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const tmp = privateTmp(t);
+  const notADir = path.join(tmp.dir, 'not-a-dir');
+  fs.writeFileSync(notADir, '');
+  process.env.TMPDIR = notADir;
+  const report = await collectTargets([fx.upstream.slice(0, 8)], { cwd: fx.dir, fetch: false });
+  assert.match(report.reach.error, /^cannot snapshot HEAD: ENOTDIR/);
+  assert.match(report.dryRunError, /^cannot snapshot HEAD: ENOTDIR/);
+  const byPath = Object.fromEntries(report.sections[0].files.map((f) => [f.path, f]));
+  assert.equal(byPath['packages/web/src/live.tsx'].reachability, 'unknown');
+  assert.equal(byPath['packages/web/src/dead.tsx'].reachability, 'unknown', 'never test-only without a build');
+  for (const f of report.sections[0].files) assert.equal(f.dryRun, 'unknown', f.path);
+  const md = renderTargetsReport(report);
+  assert.match(md, /^- Reachability: unknown — cannot snapshot HEAD: ENOTDIR/m);
+  assert.match(md, /^- Dry run: unknown — cannot snapshot HEAD: ENOTDIR/m);
 });
 
 test('collectTargets names the prefix that matches no row, several rows, or a commit this clone lacks', async (t) => {

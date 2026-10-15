@@ -240,13 +240,14 @@ function renderSection(ledger, section) {
 
 /** The Markdown report a planner reads before the design gate: one section per upstream commit. */
 function renderTargetsReport(report) {
-  const { ledger, head, reach, sections } = report;
+  const { ledger, head, reach, dryRunError, sections } = report;
   const flagged = sections.reduce((n, s) => n + s.files.filter((f) => flagsOf(f).length > 0).length, 0);
   const lines = [
     '# Upstream port targets',
     '',
     `- Fork \`HEAD\`: \`${head.short}\` (${head.date}) · ${plural(sections.length, 'upstream commit')} checked · ${plural(flagged, 'file')} flagged`,
     `- Reachability: ${reach.error ? `unknown — ${reach.error}` : `esbuild from ${plural(reach.roots, 'root')}, ${plural(reach.reachable, 'file')} reachable`}`,
+    ...(dryRunError ? [`- Dry run: unknown — ${dryRunError}`] : []),
     '- Flags: `test-only` = no production entry reaches it · `missing` = upstream changes a path the fork no longer has · `drifted` = fork commits touched it since the ledger row landed',
     '',
   ];

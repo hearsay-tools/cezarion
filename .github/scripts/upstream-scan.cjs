@@ -20,12 +20,15 @@
 // `targets` takes ledger sha prefixes and prints a Markdown report on the files
 // those upstream commits touch, as the fork's HEAD has them now: present or
 // gone, reached by production code or only by tests, changed since the row
-// landed, and a fresh per-file dry run (hearsay-tools/cezarion#1002). Advisory:
-// exit 0 whenever the report printed; exit 1 with one line on stderr otherwise.
+// landed, and a fresh per-file dry run (hearsay-tools/cezarion#1002). Every
+// verdict describes the committed HEAD: uncommitted changes, staged or not, are
+// ignored; only `ledger.yaml` is read from the work tree. Advisory: exit 0
+// whenever the report printed; exit 1 with one line on stderr otherwise.
 'use strict';
 
 const { execFileSync, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { parseArgs } = require('node:util');
 const yaml = require('yaml');
@@ -38,8 +41,8 @@ const { collectReachability } = require('./upstream-reachability.cjs');
 const UPSTREAM_REF = 'refs/cez-upstream/main';
 const root = path.resolve(__dirname, '../..');
 
-function git(args, { cwd = root } = {}) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+function git(args, { cwd = root, env, input } = {}) {
+  return execFileSync('git', args, { cwd, env, input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
 }
 
 /** Exit status 0 means yes; for `cat-file -e`, which answers by exit code alone. */
@@ -68,10 +71,15 @@ function fetchUpstream(ledger, cwd = root) {
 
 /** What a 3-way dry run of one upstream commit onto HEAD says. `git apply --check --3way`
  *  exits 0 AND reports its conflicts on stderr, so both streams are read whatever the exit
- *  code — an exit-code-only check would call everything clean. */
-function applyCheckOutput(sha, cwd = root) {
+ *  code — an exit-code-only check would call everything clean. Given `index`, a private index
+ *  holding HEAD (`withHeadSnapshot`), the run reads that index alone (`--cached`), so nothing
+ *  staged or edited in the checkout can change the verdict. The index path reaches the child's
+ *  environment only. */
+function applyCheckOutput(sha, cwd = root, index = null) {
   const patch = git(['format-patch', '-1', '--stdout', sha], { cwd });
-  const result = spawnSync('git', ['apply', '--check', '--3way', '-'], { cwd, input: patch, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const args = ['apply', '--check', '--3way', ...(index ? ['--cached'] : []), '-'];
+  const env = index ? { ...process.env, GIT_INDEX_FILE: index } : undefined;
+  const result = spawnSync('git', args, { cwd, env, input: patch, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   if (result.error) throw result.error;
   return `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
 }
@@ -180,21 +188,61 @@ function targetFile(file, { baseline, reach, dryRun, cwd }) {
   };
 }
 
-/** The data behind `targets`: fork HEAD, the reachability run, one section per ledger row. */
+/** What reachability reads from a checkout (upstream-reachability.cjs): package sources,
+ *  manifests and pages, and the repo scripts whose `dist/` imports are roots. */
+const SNAPSHOT_PATH_RE = /^(?:packages\/[^/]+\/(?:src\/|scripts\/|package\.json$|index\.html$)|scripts\/)/;
+
+/** Runs `fn` on a copy of HEAD outside the repository: `index`, a private index holding HEAD's
+ *  tree, for the dry run; and `tree`, the files reachability reads, checked out of that index.
+ *  Uncommitted changes, staged or not, reach neither, and the real index and work tree are never
+ *  written. A part that could not be built is null and `error` says why. `checkout-index` rather
+ *  than `git archive`: it reuses the one index, filters paths here (a pathspec that matches
+ *  nothing fails the archive), needs no `tar`, and ignores `export-ignore`. The temp dir is
+ *  removed whether `fn` resolves or throws. */
+async function withHeadSnapshot(cwd, fn) {
+  const snapshot = { index: null, tree: null, error: null };
+  let dir = null;
+  try {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cez-targets-'));
+    const real = fs.realpathSync(dir);
+    const env = { ...process.env, GIT_INDEX_FILE: path.join(real, 'index') };
+    git(['read-tree', 'HEAD'], { cwd, env });
+    snapshot.index = env.GIT_INDEX_FILE;
+    const tree = path.join(real, 'tree');
+    fs.mkdirSync(tree);
+    const files = git(['ls-files', '-z'], { cwd, env }).split('\0').filter((f) => SNAPSHOT_PATH_RE.test(f));
+    git(['checkout-index', `--prefix=${tree}${path.sep}`, '-z', '--stdin'], { cwd, env, input: files.join('\0') });
+    snapshot.tree = tree;
+  } catch (err) {
+    snapshot.error = `cannot snapshot HEAD: ${oneLine(err)}`;
+  }
+  try {
+    return await fn(snapshot);
+  } finally {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** The data behind `targets`: fork HEAD, the reachability run, one section per ledger row.
+ *  Reachability and the dry run read a snapshot of HEAD; existence and drift read HEAD itself. */
 async function collectTargets(prefixes, { cwd = root, fetch = true } = {}) {
   const { ledger, problems } = loadLedger(cwd);
   if (problems.length) throw new Error(`${LEDGER_PATH} is invalid: ${problems[0]}${problems.length > 1 ? ` (and ${problems.length - 1} more)` : ''}`);
   const entries = entriesFor(ledger, prefixes);
   ensureUpstreamCommits(ledger, entries, { cwd, fetch });
   const [sha, short, date] = git(['log', '-1', `--format=%H${FIELD}%h${FIELD}%cs`, 'HEAD'], { cwd }).trim().split(FIELD);
-  const reach = await collectReachability(cwd);
-  const sections = entries.map((entry) => {
-    const { intro, baseline } = ledgerBaseline(entry, cwd);
-    const files = parseNameStatus(git(['diff-tree', '-r', '-z', '--no-commit-id', '--name-status', '-M', entry.sha], { cwd }));
-    const dryRun = parseApplyCheckByFile(applyCheckOutput(entry.sha, cwd));
-    return { entry, intro, baseline, files: files.map((f) => targetFile(f, { baseline, reach, dryRun, cwd })) };
+  return withHeadSnapshot(cwd, async (snapshot) => {
+    const reach = snapshot.tree
+      ? await collectReachability(snapshot.tree)
+      : { roots: 0, reachable: 0, inputs: new Set(), error: snapshot.error };
+    const sections = entries.map((entry) => {
+      const { intro, baseline } = ledgerBaseline(entry, cwd);
+      const files = parseNameStatus(git(['diff-tree', '-r', '-z', '--no-commit-id', '--name-status', '-M', entry.sha], { cwd }));
+      const dryRun = snapshot.index ? parseApplyCheckByFile(applyCheckOutput(entry.sha, cwd, snapshot.index)) : new Map();
+      return { entry, intro, baseline, files: files.map((f) => targetFile(f, { baseline, reach, dryRun, cwd })) };
+    });
+    return { ledger, head: { sha, short, date }, reach, dryRunError: snapshot.index ? null : snapshot.error, sections };
   });
-  return { ledger, head: { sha, short, date }, reach, sections };
 }
 
 /** One line for stderr: git's own `fatal:` line when git failed, else the error's first line. */
@@ -241,6 +289,6 @@ function main() {
   scan({ date: values.date, head: values.head, fetch: !values['no-fetch'] });
 }
 
-module.exports = { conflictHint, collectTargets, UPSTREAM_REF };
+module.exports = { conflictHint, collectTargets, withHeadSnapshot, UPSTREAM_REF };
 
 if (require.main === module) main();
