@@ -242,6 +242,84 @@ test('materializeSkillDir seeds Claude, Agents, and Cursor skill dirs and exclud
   );
 });
 
+// ---- materialization: marked worktree copies replace, unmarked ones overlay (#1024) ----
+
+const TEAM_SKILL_MARKER = '.cezar-team-skill.json';
+
+/**
+ * A temp `$HOME` (the bare-clone cache follows it), a skills repo
+ * whose `greeter/` directory skill can be rewritten upstream, and a git project root.
+ */
+async function dirSkillFixture(t: { after: (fn: () => void) => void }) {
+  const home = mkdtempSync(join(tmpdir(), 'cez-home-'));
+  const srcDir = mkdtempSync(join(tmpdir(), 'cez-src-'));
+  const repoRoot = mkdtempSync(join(tmpdir(), 'cez-root-'));
+  const prevHome = process.env.HOME;
+  process.env.HOME = home;
+  t.after(() => {
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    for (const d of [home, srcDir, repoRoot]) rmSync(d, { recursive: true, force: true });
+  });
+  const g = (args: string[], cwd: string) => execFileSync('git', args, { cwd, encoding: 'utf8' }).toString().trim();
+  g(['-c', 'init.defaultBranch=main', 'init'], srcDir);
+  g(['config', 'user.email', 'test@example.com'], srcDir);
+  g(['config', 'user.name', 'Test'], srcDir);
+  g(['-c', 'init.defaultBranch=main', 'init'], repoRoot);
+  /** Make `greeter/` upstream hold exactly `files`, commit, and fetch it into the bare clone. */
+  const publish = (files: Record<string, string>): string => {
+    rmSync(join(srcDir, 'greeter'), { recursive: true, force: true });
+    for (const [rel, body] of Object.entries(files)) {
+      mkdirSync(dirname(join(srcDir, 'greeter', rel)), { recursive: true });
+      writeFileSync(join(srcDir, 'greeter', rel), body);
+    }
+    g(['add', '-A'], srcDir);
+    g(['commit', '-m', 'greeter'], srcDir);
+    const bare = bareDirFor(srcDir);
+    if (existsSync(join(bare, 'HEAD'))) g(['fetch', '-q', 'origin', '+refs/heads/*:refs/heads/*'], bare);
+    return g(['rev-parse', 'HEAD'], srcDir);
+  };
+  const v1 = publish({ 'SKILL.md': 'say hi v1\n', 'references/notes.md': 'notes v1\n', 'references/old.md': 'old\n' });
+  await ensureBareClone(srcDir);
+  const greeter = (await listRemoteSkills({ repo: srcDir, ref: 'main' })).find((s) => s.name === 'greeter');
+  assert.ok(greeter, 'expected the directory skill to be listed');
+  return { srcDir, repoRoot, greeter, publish, v1 };
+}
+
+test('materializeSkillDir marks its worktree copies and replaces a marked copy at a newer commit', async (t) => {
+  const { srcDir, repoRoot, greeter, publish, v1 } = await dirSkillFixture(t);
+  assert.equal(await materializeSkillDir(repoRoot, greeter), true);
+  for (const agentDir of ['.claude', '.agents', '.cursor']) {
+    const marker = JSON.parse(readFileSync(join(repoRoot, agentDir, 'skills', 'greeter', TEAM_SKILL_MARKER), 'utf8'));
+    assert.deepEqual(marker, { repo: srcDir, ref: 'main', path: 'greeter/SKILL.md', commit: v1 });
+  }
+
+  // Upstream drops references/old.md and changes SKILL.md.
+  const v2 = publish({ 'SKILL.md': 'say hi v2\n', 'references/notes.md': 'notes v1\n' });
+  assert.equal(await materializeSkillDir(repoRoot, greeter), true);
+  for (const agentDir of ['.claude', '.agents', '.cursor']) {
+    const dest = join(repoRoot, agentDir, 'skills', 'greeter');
+    assert.equal(readFileSync(join(dest, 'SKILL.md'), 'utf8'), 'say hi v2\n');
+    assert.equal(readFileSync(join(dest, 'references', 'notes.md'), 'utf8'), 'notes v1\n');
+    assert.equal(existsSync(join(dest, 'references', 'old.md')), false, `${agentDir}: a file dropped upstream must not linger`);
+    assert.equal(JSON.parse(readFileSync(join(dest, TEAM_SKILL_MARKER), 'utf8')).commit, v2);
+  }
+});
+
+test('materializeSkillDir overlays an unmarked existing dir without deleting or marking it', async (t) => {
+  const { repoRoot, greeter } = await dirSkillFixture(t);
+  const own = join(repoRoot, '.claude', 'skills', 'greeter');
+  mkdirSync(own, { recursive: true });
+  writeFileSync(join(own, 'mine.md'), 'the user wrote this\n');
+
+  assert.equal(await materializeSkillDir(repoRoot, greeter), true);
+  assert.equal(readFileSync(join(own, 'mine.md'), 'utf8'), 'the user wrote this\n');
+  assert.equal(readFileSync(join(own, 'SKILL.md'), 'utf8'), 'say hi v1\n');
+  assert.equal(existsSync(join(own, TEAM_SKILL_MARKER)), false, 'an unmarked dir must never become ours');
+  // The destinations cezar created itself are still marked.
+  assert.equal(existsSync(join(repoRoot, '.agents', 'skills', 'greeter', TEAM_SKILL_MARKER)), true);
+});
+
 // ---- per-project team-skills cache isolation (multi-project workspace, 2.6) --
 
 test('team-skills cache is keyed by repoRoot — projects never see each other\'s skills', async (t) => {
