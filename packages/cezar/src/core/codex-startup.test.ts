@@ -554,6 +554,16 @@ describe('Codex native approvals (hearsay-tools/cezarion#1049)', () => {
     expect(responses()).toEqual([{ id: 'approval_1', result: { decision: 'acceptForSession' } }]);
   });
 
+  it('offers fallback native command choices when availableDecisions is null', async () => {
+    // Codex 0.160.1's generated CommandExecutionRequestApprovalParams declares
+    // availableDecisions as array | null; null carries the same meaning as absent.
+    await running(); await request(command, { ...base, availableDecisions: null });
+    const event = requested()[0]; expect(event).toBeDefined();
+    expect(event!.options.map(option => option.kind)).toEqual(['allow_once', 'allow_always', 'reject_once', 'reject_once']);
+    expect(respond(event!.requestId, event!.options[2]!.id)).toBe(true);
+    expect(responses()).toEqual([{ id: 'approval_1', result: { decision: 'decline' } }]);
+  });
+
   it.each(['decline', 'cancel'])('returns %s unchanged and permits a later continuation', async (decision) => {
     await running(); await request(command, { ...base, availableDecisions: [decision] });
     const event = requested()[0]; expect(event).toBeDefined();
