@@ -59,8 +59,13 @@ export function GithubTemplateInput({
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault()
             if (suggestions.length === 0) return
-            const step = event.key === 'ArrowDown' ? 1 : -1
-            setActive((current) => (current + step + suggestions.length) % suggestions.length)
+            const down = event.key === 'ArrowDown'
+            // With nothing highlighted, Down starts at the first suggestion and Up at the last.
+            setActive((current) =>
+              current < 0
+                ? down ? 0 : suggestions.length - 1
+                : (current + (down ? 1 : -1) + suggestions.length) % suggestions.length,
+            )
           } else if (event.key === 'Enter' && active >= 0) {
             // Enter picks the highlighted suggestion; it never submits the form behind it.
             event.preventDefault()
