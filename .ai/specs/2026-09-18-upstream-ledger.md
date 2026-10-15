@@ -79,7 +79,9 @@ against these rules on every `npm run test:unit`, so a `ported` row without a fo
    squash subject), title, date, and a conflict hint from `git apply --check --3way --cached` of
    that commit's patch against a private index holding the committed `HEAD`, built once per scan
    in a temp directory and removed afterwards, so nothing uncommitted in the checkout changes the
-   count. Append as `pending`. Existing rows are never touched.
+   count; attributes are read from that `HEAD` too (`git --attr-source=<sha>`). When that index
+   cannot be built (temp dir unusable, a git without `--attr-source`), the scan writes one warning
+   to stderr and records the rows without a hint. Append as `pending`. Existing rows are never touched.
 4. Append a `scans` row and write `scans/<date>.md`. Print a JSON summary on stdout.
 
 No new commits means no file changes and `added: 0`.
@@ -105,7 +107,10 @@ starts, and every verdict describes that commit, even if another commit lands mi
 and drift read it directly. The dry run and reachability read a snapshot of it built in a temp
 directory outside the repository: a private `GIT_INDEX_FILE` loaded with `git read-tree <sha>`, which
 `git apply --check --3way --cached` reads, and the files reachability needs, checked out of that
-index with `git checkout-index`. Uncommitted changes, staged or not, are ignored, the real index
+index with `git checkout-index`. Both read Git attributes from the same commit
+(`git --attr-source=<sha>`), so an uncommitted `.gitattributes` picks neither a merge driver nor a
+smudge filter, while committed attributes and repository config still apply; a git without the
+option reads `unknown`. Uncommitted changes, staged or not, are ignored, the real index
 and work tree are never written, and the temp directory is removed whether the run succeeds or
 fails. Only `ledger.yaml` is read from the work tree, so a local, uncommitted row still works.
 

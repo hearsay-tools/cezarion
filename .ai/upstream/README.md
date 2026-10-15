@@ -61,7 +61,8 @@ Set `status`, add `decided: YYYY-MM-DD`, and fill the fields that status require
 | `n/a` | nothing to port: release bumps, upstream-only docs | `reason` |
 
 `hint.conflicts` is the number of files a 3-way dry run of the upstream commit could not apply
-onto the fork's committed `HEAD` when the scan ran; uncommitted changes never count. It is
+onto the fork's committed `HEAD` when the scan ran; uncommitted changes never count. A scan that
+cannot build its private copy of `HEAD` warns on stderr and records its rows without a `hint`. It is
 advisory and goes stale as the fork moves. `targets` re-runs the dry run against the current fork
 and reports it per file. A free-form `note` is allowed on any row.
 
@@ -90,7 +91,8 @@ whenever it printed, flags or not.
 
 Every verdict describes the committed `HEAD` the report names. Uncommitted changes, staged or
 not, are ignored: the dry run and the reachability bundle read a snapshot of `HEAD` taken outside
-the checkout, and the real index and work tree are never written. `ledger.yaml` is the exception.
+the checkout, and the real index and work tree are never written. Git attributes come from
+`HEAD` too, so an uncommitted `.gitattributes` cannot change a merge or a checkout. `ledger.yaml` is the exception.
 It is read from the work tree, so a row you have not committed yet still works; its drift then
 reads `unknown`.
 

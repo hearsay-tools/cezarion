@@ -78,15 +78,24 @@ function resolveHead(cwd = root) {
   return git(['rev-parse', '--verify', 'HEAD^{commit}'], { cwd }).trim();
 }
 
+/** `--attr-source` for every git child that reads the snapshot: attributes come from `head`'s tree,
+ *  so an uncommitted `.gitattributes` can pick neither a merge driver for the dry run nor a smudge
+ *  filter for `checkout-index`. Committed attributes and the repository's config still apply.
+ *  The global option, not `GIT_ATTR_SOURCE`: a git without it (before 2.41) rejects the option
+ *  instead of silently ignoring an unknown env var. */
+const attrSource = (head) => `--attr-source=${head}`;
+
 /** A private index holding `head`'s tree, in a new `cez-targets-*` dir under os.tmpdir(); the
- *  real index is never written. The caller calls `remove()`; a failure here leaves no dir. */
+ *  real index is never written. The caller calls `remove()`; a failure here leaves no dir.
+ *  `read-tree` reads no attributes, but takes `--attr-source` too, so a git without it fails here,
+ *  where callers degrade, rather than in a dry run whose rejected option would read as clean. */
 function headIndex(cwd, head) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cez-targets-'));
   const remove = () => fs.rmSync(dir, { recursive: true, force: true });
   try {
     const real = fs.realpathSync(dir);
     const index = path.join(real, 'index');
-    git(['read-tree', head], { cwd, env: { ...process.env, GIT_INDEX_FILE: index } });
+    git([attrSource(head), 'read-tree', head], { cwd, env: { ...process.env, GIT_INDEX_FILE: index } });
     return { dir: real, index, remove };
   } catch (err) {
     remove();
@@ -94,29 +103,39 @@ function headIndex(cwd, head) {
   }
 }
 
-/** What a 3-way dry run of one upstream commit onto `index` says, a private index holding HEAD
+/** What a 3-way dry run of one upstream commit onto `index` says, a private index holding `head`
  *  (`headIndex`). `git apply --check --3way` exits 0 AND reports its conflicts on stderr, so both
  *  streams are read whatever the exit code — an exit-code-only check would call everything clean.
- *  The run reads that index alone (`--cached`), so nothing staged or edited in the checkout can
- *  change the verdict. The index path reaches the child's environment only. */
-function applyCheckOutput(sha, cwd, index) {
+ *  The run reads that index alone (`--cached`) and `head`'s attributes (`attrSource`), so nothing
+ *  staged or edited in the checkout can change the verdict. The index path reaches the child's
+ *  environment only. */
+function applyCheckOutput(sha, cwd, index, head) {
   const patch = git(['format-patch', '-1', '--stdout', sha], { cwd });
   const env = { ...process.env, GIT_INDEX_FILE: index };
-  const result = spawnSync('git', ['apply', '--check', '--3way', '--cached', '-'], { cwd, env, input: patch, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const result = spawnSync('git', [attrSource(head), 'apply', '--check', '--3way', '--cached', '-'], { cwd, env, input: patch, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   if (result.error) throw result.error;
   return `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
 }
 
 /** Files a 3-way dry run of each upstream commit cannot apply onto HEAD, by sha. Advisory, dated.
- *  One private index holding HEAD serves every commit and is removed afterwards. */
+ *  One private index holding HEAD serves every commit and is removed afterwards. When that index
+ *  cannot be built (a temp dir that is not a directory or is full, a git without `--attr-source`),
+ *  one warning goes to stderr and no commit gets a hint: the scan still records its rows. */
 function conflictHints(shas, cwd = root) {
   const hints = {};
   if (shas.length === 0) return hints;
-  const { index, remove } = headIndex(cwd, resolveHead(cwd));
+  const head = resolveHead(cwd);
+  let built;
   try {
-    for (const sha of shas) hints[sha] = parseApplyCheck(applyCheckOutput(sha, cwd, index));
+    built = headIndex(cwd, head);
+  } catch (err) {
+    process.stderr.write(`upstream-scan: cannot build a private index of HEAD, so new rows get no conflict hints: ${oneLine(err)}\n`);
+    return hints;
+  }
+  try {
+    for (const sha of shas) hints[sha] = parseApplyCheck(applyCheckOutput(sha, cwd, built.index, head));
   } finally {
-    remove();
+    built.remove();
   }
   return hints;
 }
@@ -225,8 +244,9 @@ const SNAPSHOT_PATH_RE = /^(?:packages\/[^/]+\/(?:src\/|scripts\/|package\.json$
 
 /** Runs `fn` on a copy of `head` outside the repository: `index`, a private index holding its
  *  tree (`headIndex`), for the dry run; and `tree`, the files reachability reads, checked out of
- *  that index. Uncommitted changes, staged or not, reach neither, and the real index and work
- *  tree are never written. A part that could not be built is null and `error` says why.
+ *  that index with `head`'s attributes (`attrSource`). Uncommitted changes, staged or not, reach
+ *  neither, and the real index and work tree are never written. A part that could not be built is
+ *  null and `error` says why.
  *  `checkout-index` rather than `git archive`: it reuses the one index, filters paths here (a
  *  pathspec that matches nothing fails the archive), needs no `tar`, and ignores
  *  `export-ignore`. The temp dir is removed whether `fn` resolves or throws. */
@@ -240,7 +260,7 @@ async function withHeadSnapshot(cwd, head, fn) {
     const tree = path.join(built.dir, 'tree');
     fs.mkdirSync(tree);
     const files = git(['ls-files', '-z'], { cwd, env }).split('\0').filter((f) => SNAPSHOT_PATH_RE.test(f));
-    git(['checkout-index', `--prefix=${tree}${path.sep}`, '-z', '--stdin'], { cwd, env, input: files.join('\0') });
+    git([attrSource(head), 'checkout-index', `--prefix=${tree}${path.sep}`, '-z', '--stdin'], { cwd, env, input: files.join('\0') });
     snapshot.tree = tree;
   } catch (err) {
     snapshot.error = `cannot snapshot HEAD: ${oneLine(err)}`;
@@ -270,7 +290,7 @@ async function collectTargets(prefixes, { cwd = root, fetch = true } = {}) {
     const sections = entries.map((entry) => {
       const { intro, baseline } = ledgerBaseline(entry, head, cwd);
       const files = parseNameStatus(git(['diff-tree', '-r', '-z', '--no-commit-id', '--name-status', '-M', entry.sha], { cwd }));
-      const dryRun = snapshot.index ? parseApplyCheckByFile(applyCheckOutput(entry.sha, cwd, snapshot.index)) : new Map();
+      const dryRun = snapshot.index ? parseApplyCheckByFile(applyCheckOutput(entry.sha, cwd, snapshot.index, head)) : new Map();
       return { entry, intro, baseline, files: files.map((f) => targetFile(f, { head, baseline, reach, dryRun, cwd })) };
     });
     return { ledger, head: { sha: head, short, date }, reach, dryRunError: snapshot.index ? null : snapshot.error, sections };

@@ -549,6 +549,89 @@ test('collectTargets dry-runs against HEAD, not against a staged index', async (
   assert.deepEqual(tmp.leftovers(), []);
 });
 
+test('collectTargets dry-runs with HEAD\'s attributes, not an uncommitted .gitattributes', async (t) => {
+  const { collectTargets } = require('./upstream-scan.cjs');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const tmp = privateTmp(t);
+  // A union merge would resolve live.tsx's conflict; HEAD names no merge driver.
+  fx.write('.gitattributes', 'packages/web/src/live.tsx merge=union\n');
+  const before = repoState(fx);
+  const report = await collectTargets([fx.upstream.slice(0, 8)], { cwd: fx.dir, fetch: false });
+  assert.equal(report.dryRunError, null);
+  const live = report.sections[0].files.find((f) => f.path === 'packages/web/src/live.tsx');
+  assert.equal(live.dryRun, 'conflict');
+  assert.deepEqual(repoState(fx), before, 'the work tree and the real index are untouched');
+  assert.deepEqual(tmp.leftovers(), []);
+});
+
+test('collectTargets checks HEAD out with HEAD\'s attributes, not an uncommitted .gitattributes', async (t) => {
+  const { collectTargets } = require('./upstream-scan.cjs');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const tmp = privateTmp(t);
+  // The fixture's own config, never a global one. A dirty attribute naming it would strip main.tsx's imports.
+  fx.git('config', 'filter.review.smudge', 'sed /import/d');
+  fx.write('.gitattributes', 'packages/web/src/main.tsx filter=review\n');
+  const before = repoState(fx);
+  const report = await collectTargets([fx.upstream.slice(0, 8)], { cwd: fx.dir, fetch: false });
+  assert.equal(report.reach.error, null);
+  const live = report.sections[0].files.find((f) => f.path === 'packages/web/src/live.tsx');
+  assert.equal(live.reachability, 'production');
+  assert.deepEqual(repoState(fx), before, 'the work tree and the real index are untouched');
+  assert.deepEqual(tmp.leftovers(), []);
+});
+
+/** Puts a `git` that rejects `--attr-source` first on PATH for one test, as a git older than 2.41
+ *  does; every other call reaches the real git. A child spawned afterwards inherits it. */
+function gitWithoutAttrSource(t) {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { execFileSync } = require('node:child_process');
+  const real = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'cez-old-git-'));
+  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\ncase "$1" in --attr-source*) echo "unknown option: $1" >&2; exit 129;; esac\nexec '${real}' "$@"\n`, { mode: 0o755 });
+  const saved = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${saved}`;
+  t.after(() => {
+    process.env.PATH = saved;
+    fs.rmSync(bin, { recursive: true, force: true });
+  });
+}
+
+test('collectTargets reads reachability and the dry run as unknown on a git that cannot pin attributes to HEAD', async (t) => {
+  const { collectTargets } = require('./upstream-scan.cjs');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const tmp = privateTmp(t);
+  gitWithoutAttrSource(t);
+  const report = await collectTargets([fx.upstream.slice(0, 8)], { cwd: fx.dir, fetch: false });
+  assert.match(report.reach.error, /^cannot snapshot HEAD: unknown option: --attr-source/);
+  assert.match(report.dryRunError, /^cannot snapshot HEAD: unknown option: --attr-source/);
+  const live = report.sections[0].files.find((f) => f.path === 'packages/web/src/live.tsx');
+  assert.equal(live.reachability, 'unknown');
+  assert.equal(live.dryRun, 'unknown');
+  assert.deepEqual(tmp.leftovers(), []);
+});
+
+test('collectTargets keeps applying attributes HEAD commits', async (t) => {
+  const { collectTargets } = require('./upstream-scan.cjs');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  // Guard, green with or without attribute pinning: committed attributes and the repository's
+  // own filter config are HEAD's behaviour, even with the work tree's copy deleted.
+  fx.git('config', 'filter.review.smudge', 'sed /import/d');
+  fx.write('.gitattributes', 'packages/web/src/live.tsx merge=union\npackages/web/src/main.tsx filter=review\n');
+  fx.git('add', '.gitattributes');
+  fx.git('commit', '-q', '-m', 'chore: attributes');
+  require('node:fs').rmSync(require('node:path').join(fx.dir, '.gitattributes'));
+  const report = await collectTargets([fx.upstream.slice(0, 8)], { cwd: fx.dir, fetch: false });
+  const live = report.sections[0].files.find((f) => f.path === 'packages/web/src/live.tsx');
+  assert.equal(live.dryRun, 'clean', 'the committed union merge driver applies');
+  assert.equal(live.reachability, 'test-only', 'the committed smudge filter strips main.tsx\'s imports');
+});
+
 test('collectTargets reads every verdict at the HEAD it started from when a commit lands mid-run', async (t) => {
   const { collectTargets } = require('./upstream-scan.cjs');
   const fx = forkFixture();
@@ -673,21 +756,34 @@ test('upstream-scan rejects an unknown command before it scans', (t) => {
   }
 });
 
-test('upstream-scan records each new commit\'s conflict hint against HEAD, not against a staged index', (t) => {
-  const fs = require('node:fs');
-  const path = require('node:path');
-  const yaml = require('yaml');
-  const fx = forkFixture();
-  t.after(fx.cleanup);
-  const tmp = privateTmp(t);
-  // A later upstream commit takes live.tsx from 2 to 4. HEAD has 3: a conflict. The staged copy
-  // of upstream's 2 would apply clean.
+/** A commit on upstream the ledger lacks, taking live.tsx from 2 to 4, with
+ *  `refs/cez-upstream/main` at it. HEAD has 3, so a 3-way dry run conflicts. */
+function laterUpstreamCommit(fx) {
   fx.git('checkout', '-q', 'upstream');
   fx.write('packages/web/src/live.tsx', 'export const Live = 4\n// two\n// three\n');
   fx.git('commit', '-q', '-am', 'fix(web): a later upstream change (#13)');
   const later = fx.git('rev-parse', 'HEAD');
   fx.git('checkout', '-q', 'main');
   fx.git('update-ref', 'refs/cez-upstream/main', 'upstream');
+  return later;
+}
+
+/** The ledger row a fixture scan appended for `sha`. */
+function scannedRow(fx, sha) {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const yaml = require('yaml');
+  return yaml.parse(fs.readFileSync(path.join(fx.dir, '.ai/upstream/ledger.yaml'), 'utf8')).entries.find((e) => e.sha === sha);
+}
+
+test('upstream-scan records each new commit\'s conflict hint against HEAD, not against a staged index', (t) => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const tmp = privateTmp(t);
+  // The staged copy of upstream's 2 would apply clean.
+  const later = laterUpstreamCommit(fx);
   fx.write('packages/web/src/live.tsx', 'export const Live = 2\n// two\n// three\n');
   fx.git('add', 'packages/web/src/live.tsx');
   const cli = fixtureCli(fx);
@@ -696,9 +792,70 @@ test('upstream-scan records each new commit\'s conflict hint against HEAD, not a
   const result = cli('--no-fetch', '--date', '2026-10-16');
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).added, 1);
-  const row = yaml.parse(fs.readFileSync(path.join(fx.dir, '.ai/upstream/ledger.yaml'), 'utf8')).entries.find((e) => e.sha === later);
-  assert.deepEqual(row.hint, { conflicts: 1 });
+  assert.deepEqual(scannedRow(fx, later).hint, { conflicts: 1 });
   assert.equal(index(), before, 'the real index is untouched');
+  assert.deepEqual(tmp.leftovers(), []);
+});
+
+test('upstream-scan records each new commit\'s conflict hint with HEAD\'s attributes, not an uncommitted .gitattributes', (t) => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const tmp = privateTmp(t);
+  // A union merge would resolve live.tsx's conflict; HEAD names no merge driver.
+  const later = laterUpstreamCommit(fx);
+  fx.write('.gitattributes', 'packages/web/src/live.tsx merge=union\n');
+  const cli = fixtureCli(fx);
+  const index = () => fs.readFileSync(path.join(fx.dir, '.git', 'index')).toString('base64');
+  const before = index();
+  const result = cli('--no-fetch', '--date', '2026-10-16');
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(scannedRow(fx, later).hint, { conflicts: 1 });
+  assert.equal(index(), before, 'the real index is untouched');
+  assert.deepEqual(tmp.leftovers(), []);
+});
+
+test('upstream-scan records rows without a hint, and warns, when it cannot build its private index', (t) => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const tmp = privateTmp(t);
+  const later = laterUpstreamCommit(fx);
+  const notADir = path.join(tmp.dir, 'not-a-dir');
+  fs.writeFileSync(notADir, '');
+  process.env.TMPDIR = notADir;
+  const cli = fixtureCli(fx);
+  const result = cli('--no-fetch', '--date', '2026-10-16');
+  assert.equal(result.status, 0, result.stderr);
+  const lines = result.stdout.split('\n');
+  assert.deepEqual(lines.slice(1), [''], 'exactly one JSON line on stdout');
+  const summary = JSON.parse(lines[0]);
+  assert.equal(summary.added, 1);
+  assert.ok(fs.existsSync(path.join(fx.dir, summary.report)), 'the scan report is written');
+  const row = scannedRow(fx, later);
+  assert.equal(row.status, 'pending');
+  assert.equal('hint' in row, false);
+  const warning = result.stderr.trim().split('\n');
+  assert.equal(warning.length, 1, result.stderr);
+  assert.match(warning[0], /^upstream-scan: .*no conflict hints.*ENOTDIR/);
+});
+
+test('upstream-scan records rows without a hint, never a clean one, on a git that cannot pin attributes to HEAD', (t) => {
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const tmp = privateTmp(t);
+  const later = laterUpstreamCommit(fx);
+  gitWithoutAttrSource(t);
+  const cli = fixtureCli(fx);
+  const result = cli('--no-fetch', '--date', '2026-10-16');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).added, 1);
+  assert.equal('hint' in scannedRow(fx, later), false, 'a rejected option must not read as zero conflicts');
+  const warning = result.stderr.trim().split('\n');
+  assert.equal(warning.length, 1, result.stderr);
+  assert.match(warning[0], /^upstream-scan: .*no conflict hints.*unknown option: --attr-source/);
   assert.deepEqual(tmp.leftovers(), []);
 });
 
