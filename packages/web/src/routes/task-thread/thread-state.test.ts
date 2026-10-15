@@ -121,6 +121,29 @@ describe('reduceThread — hook items (#961)', () => {
     ])
     expect(hookIds(turns.flatMap((turn) => turn.items))).toEqual(['hook_s'])
   })
+
+  it('a SessionStart hook between the user message and turn.started stays in that one turn', () => {
+    // Claude's wire order: the prompt, then SessionStart hook_response, then the turn.
+    const { turns } = reduceThread([
+      line(1, 'user-message', { text: 'go', imageCount: 0 }),
+      line(2, 'item.completed', { item: { kind: 'hook', id: 'hook_s', event: 'SessionStart', status: 'completed', entries: [{ kind: 'context', text: 'ctx' }] } }),
+      line(3, 'turn.started', { turnId: 'turn_1' }),
+      line(4, 'item.completed', { item: { kind: 'message', id: 'm1', role: 'assistant', text: 'hi' } }),
+      line(5, 'turn.completed', { turnId: 'turn_1', stopReason: 'end_turn' }),
+    ])
+    expect(turns).toHaveLength(1)
+    expect(turns[0]!.userMessage?.text).toBe('go')
+    expect(kinds(turns[0]!.items)).toEqual(['hook', 'message'])
+    expect(turns[0]!.completed?.stopReason).toBe('end_turn')
+  })
+
+  it('a hook does not drop the v1 tools of its turn', () => {
+    const { turns } = reduceThread([
+      line(1, 'tool-call', { id: 't1', name: 'Bash', input: { command: 'ls' } }),
+      line(2, 'item.completed', { item: { kind: 'hook', id: 'hook_p', event: 'PostToolUse', status: 'completed', entries: [{ kind: 'context', text: 'ctx' }] } }),
+    ])
+    expect(kinds(turns.flatMap((turn) => turn.items))).toEqual(['tool', 'hook'])
+  })
 })
 
 describe('reduceThread — item ids across workflow steps', () => {
