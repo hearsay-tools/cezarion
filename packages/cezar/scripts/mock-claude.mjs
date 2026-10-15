@@ -64,7 +64,7 @@ const emit = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
 
 // `--help` lists the options cezar feature-detects (#505).
 if (process.argv.includes('--help')) {
-  process.stdout.write('Usage: claude [options]\n  --input-format <format>\n  --replay-user-messages  Re-emit user messages from stdin back on stdout\n');
+  process.stdout.write('Usage: claude [options]\n  --input-format <format>\n  --replay-user-messages  Re-emit user messages from stdin back on stdout\n  --include-hook-events  Include all hook lifecycle events in the output stream\n');
   process.exit(0);
 }
 

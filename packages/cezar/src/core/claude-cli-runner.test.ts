@@ -1,6 +1,6 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from './agent-runner.ts';
 import { isSignalTerminationExit, prependSystemPrompt } from './agent-runner.ts';
-import { buildClaudeArgs, ClaudeCliRunner } from './claude-cli-runner.ts';
+import { buildClaudeArgs, ClaudeCliRunner, claudeHelpFeatures } from './claude-cli-runner.ts';
 import { EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS, KILL_GRACE_MS } from './runner-runtime.ts';
 import type { UiEvent } from './ui-events.ts';
 
@@ -43,6 +43,34 @@ describe('buildClaudeArgs systemPrompt', () => {
 
   it('omits the flag entirely when no systemPrompt is set', () => {
     expect(buildClaudeArgs(spec)).not.toContain('--append-system-prompt');
+  });
+});
+
+describe('buildClaudeArgs hook events (#961)', () => {
+  const spec = { prompt: 'p', cwd: '/tmp' };
+
+  it('passes --include-hook-events when the CLI supports it', () => {
+    expect(buildClaudeArgs(spec, {}, { replayUserMessages: true, includeHookEvents: true })).toContain('--include-hook-events');
+  });
+
+  it('omits --include-hook-events for an older CLI', () => {
+    expect(buildClaudeArgs(spec, {}, { replayUserMessages: true, includeHookEvents: false })).not.toContain('--include-hook-events');
+    expect(buildClaudeArgs(spec, {}, { replayUserMessages: true })).not.toContain('--include-hook-events');
+  });
+
+  it('probes help once for both features', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-claude-help-'));
+    try {
+      const bin = join(dir, 'claude');
+      const count = join(dir, 'count');
+      writeFileSync(bin, `#!/bin/sh\necho x >> '${count}'\necho '  --replay-user-messages  Re-emit user messages'\n`);
+      chmodSync(bin, 0o755);
+      expect(claudeHelpFeatures(bin)).toEqual({ replayUserMessages: true, includeHookEvents: false });
+      expect(claudeHelpFeatures(bin)).toEqual({ replayUserMessages: true, includeHookEvents: false });
+      expect(readFileSync(count, 'utf8').trim().split('\n')).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
