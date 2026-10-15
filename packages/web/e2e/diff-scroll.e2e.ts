@@ -57,8 +57,9 @@ const lineCount = () => browser.count('[data-slot="diff-line"]')
  * Forced reproduction: resetting `scrollTop` to 0 30 ms after the one-shot assignment fails the
  * old spec with this exact error, and this prelude passes it. The sample also reports the offset,
  * the height and whether the scroller element was replaced, so a recurrence names its cause.
+ * `top` is a number or a page expression, so a caller can move its target between samples.
  */
-const holdScroll = (top: number) => `const scroller = ${MAIN}
+const holdScroll = (top: number | string) => `const scroller = ${MAIN}
       const replaced = scroller.dataset.e2eScroll === undefined && window.__e2eScrolled === true
       if (Math.abs(scroller.scrollTop - ${top}) > 16) scroller.scrollTop = ${top}
       scroller.dataset.e2eScroll = '1'; window.__e2eScrolled = true
@@ -181,8 +182,19 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
     // A header whose card still covers the viewport top must be pinned AT that top edge, not
     // scrolled away with its card. virtua absolutely-positions every item, which is exactly
     // the layout that could silently kill `position: sticky`.
+    //
+    // The offset starts at 900 and steps 60 px down while no card straddles the fold. A fixed
+    // offset depends on the height of every card above it, and the fixture's first cards are
+    // files cezar itself writes (`.ai/cezar/.gitignore`, `.cez-home/config.json`).
+    // hearsay-tools/cezarion#1037 added one `.gitignore` line, and the fold then sat at the
+    // boundary between those two cards: no card had more than 40 px below it.
+    // `diff-scroll.e2e.ts` failed 4/4 locally on that branch (load 22-27) and on two CI attempts
+    // of run 38662243293, shard 4/4. The bundle screenshot shows the `.cez-home/config.json`
+    // header just below the fold. Every card is far taller than 60 + 40 px, so one step leaves
+    // that band. The cap of 10 steps keeps a real sticky failure a failure.
     const pinned = waitForSettledSample(browser, `(() => {
-      ${holdScroll(900)}
+      window.__e2eStickyTop ??= 900
+      ${holdScroll('window.__e2eStickyTop')}
       if (!held) return { straddling: false, ...at }
       const top = scroller.getBoundingClientRect().top
       for (const card of document.querySelectorAll('[data-slot="diff-file"]')) {
@@ -193,6 +205,7 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
           return { straddling: true, headerTop: Math.round(header.getBoundingClientRect().top - top), cardTop: Math.round(box.top - top) }
         }
       }
+      if (window.__e2eStickyTop < 900 + 10 * 60) window.__e2eStickyTop += 60
       return { straddling: false, ...at }
     })()`, (sample: { straddling: boolean }) => sample.straddling) as { straddling: boolean; headerTop?: number; cardTop?: number }
 
