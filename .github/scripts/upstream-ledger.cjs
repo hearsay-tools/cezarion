@@ -205,4 +205,4 @@ function renderLedger(ledger) {
   return `${lines.join('\n')}\n`;
 }
 
-module.exports = { LEDGER_PATH, LOG_FORMAT, STATUSES, parseLog, parseApplyCheck, validateLedger, scanRange, applyScan, renderScanReport, renderLedger, upstreamLink, forkLink, tally };
+module.exports = { LEDGER_PATH, LOG_FORMAT, STATUSES, parseLog, parseApplyCheck, validateLedger, scanRange, applyScan, renderScanReport, renderLedger, upstreamLink, forkLink, tally, cell };
