@@ -308,7 +308,7 @@ export interface UiPlanUpdatedEvent {
 }
 
 /**
- * RESERVED — wired when auto-approve becomes optional. Types only for now.
+ * Native tool/permission approval, answered separately from ordinary input.
  * claude: `control_request can_use_tool`; codex: the per-item
  * `requestApproval` JSON-RPC requests; opencode: `permission.updated`.
  */
@@ -317,14 +317,16 @@ export interface UiPermissionRequestedEvent {
   requestId: string;
   itemId?: string;
   title: string;
+  details?: string;
   options: PermissionOption[];
 }
 
-/** RESERVED — the counterpart resolution (see `permission.requested`). */
+/** A human response or expiry of a pending native approval. */
 export interface UiPermissionResolvedEvent {
   type: 'permission.resolved';
   requestId: string;
-  optionId: string;
+  optionId?: string;
+  reason?: string;
 }
 
 /** One option in an AskUser question — see `src/core/ask.ts`. */

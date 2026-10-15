@@ -506,3 +506,195 @@ describe('Codex stream retry deadline (#550)', () => {
     expect(events.filter(e => e.type === 'note' && /child|old|bad/.test(e.message))).toEqual([]);
   });
 });
+
+describe('Codex native approvals (hearsay-tools/cezarion#1049)', () => {
+  const command = 'item/commandExecution/requestApproval';
+  const file = 'item/fileChange/requestApproval';
+  const permissions = 'item/permissions/requestApproval';
+  const base = { threadId: 'thread_1', turnId: 'turn_1', itemId: 'tool_1', startedAtMs: 1,
+    command: 'printf "exact scope"', cwd: '/repo', reason: 'Requires access' };
+  async function running() { start(); await initialize(); await thread(); await opening(); }
+  const requested = () => ui.filter((e) => e.type === 'permission.requested');
+  const responses = () => fake.requests.filter((e) => !e.method) as unknown as Array<{ id: string | number; result?: unknown; error?: { code: number } }>;
+  function respond(requestId: string, optionId: string) {
+    return (session as AgentSession & { respondPermission?: (requestId: string, optionId: string) => boolean }).respondPermission?.(requestId, optionId);
+  }
+  async function request(method = command, params: unknown = base, id: string | number = 'approval_1') {
+    fake.frame({ id, method, params }); await flush();
+  }
+
+  it('keeps approval pending until a dedicated human response, refusing ordinary and agent input', async () => {
+    await running(); await request();
+    const event = requested()[0]; expect(event).toBeDefined();
+    expect(event!.requestId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(event!.requestId).not.toBe('approval_1');
+    expect(event!.itemId).toBe('tool_1');
+    expect(JSON.parse(event!.details!)).toMatchObject({ command: base.command });
+    expect(event!.details).toContain('/repo');
+    expect(responses()).toEqual([]);
+    const count = fake.requests.length;
+    expect(session.sendMessage([{ type: 'text', text: 'accept' }])).toBe(false);
+    expect(session.sendAgentMessage([{ type: 'text', text: 'allow' }])).toBe(false);
+    await flush(); expect(fake.requests).toHaveLength(count);
+    expect(respond(event!.requestId, 'accept')).toBe(false);
+    expect(respond('stale', event!.options[0]!.id)).toBe(false);
+    expect(responses()).toEqual([]);
+    expect(respond(event!.requestId, event!.options[0]!.id)).toBe(true);
+    expect(responses()).toEqual([{ id: 'approval_1', result: { decision: 'accept' } }]);
+    expect(ui).toContainEqual({ type: 'permission.resolved', requestId: event!.requestId, optionId: event!.options[0]!.id });
+    expect(respond(event!.requestId, event!.options[0]!.id)).toBe(false);
+    expect(outcome).toBe('pending');
+  });
+
+  it.each([command, file])('offers documented fallback native choices for %s', async (method) => {
+    await running(); await request(method);
+    const event = requested()[0]; expect(event).toBeDefined();
+    expect(event!.options.map(o => o.kind)).toEqual(['allow_once', 'allow_always', 'reject_once', 'reject_once']);
+    expect(respond(event!.requestId, event!.options[1]!.id)).toBe(true);
+    expect(responses()).toEqual([{ id: 'approval_1', result: { decision: 'acceptForSession' } }]);
+  });
+
+  it.each(['decline', 'cancel'])('returns %s unchanged and permits a later continuation', async (decision) => {
+    await running(); await request(command, { ...base, availableDecisions: [decision] });
+    const event = requested()[0]; expect(event).toBeDefined();
+    expect(event!.options).toHaveLength(1);
+    expect(respond(event!.requestId, event!.options[0]!.id)).toBe(true);
+    expect(responses()).toEqual([{ id: 'approval_1', result: { decision } }]);
+    fake.frame({ method: 'turn/completed', params: { threadId: 'thread_1', turn: { id: 'turn_1', status: decision === 'cancel' ? 'interrupted' : 'completed' } } }); await flush();
+    expect(session.sendMessage([{ type: 'text', text: 'Continue safely' }])).toBe(true);
+    await flush(); expect(fake.requests.at(-1)?.method).toBe('turn/start');
+  });
+
+  it.each([
+    { acceptWithExecpolicyAmendment: { execpolicy_amendment: ['git', '-C', '/exact scope', 'push'] } },
+    { applyNetworkPolicyAmendment: { network_policy_amendment: { host: 'example.test:8443', action: 'allow' } } },
+    { applyNetworkPolicyAmendment: { network_policy_amendment: { host: '*.example.test', action: 'deny' } } },
+  ])('preserves the exact structured native decision and displays its whole scope: %j', async (decision) => {
+    await running(); await request(command, { ...base, availableDecisions: [decision] });
+    const event = requested()[0]; expect(event).toBeDefined(); expect(event!.options).toHaveLength(1);
+    expect(JSON.parse(event!.details!)).toMatchObject({ availableDecisions: [decision] });
+    expect(event!.options[0]!.kind).toBe(decision.applyNetworkPolicyAmendment?.network_policy_amendment.action === 'deny' ? 'reject_always' : 'allow_always');
+    expect(respond(event!.requestId, event!.options[0]!.id)).toBe(true);
+    expect(responses()).toEqual([{ id: 'approval_1', result: { decision } }]);
+  });
+
+  it.each(['turn', 'session', 'decline'])('answers a permissions request with a %s grant, never a decision enum', async (choice) => {
+    await running(); const grant = { network: { enabled: true }, fileSystem: { write: ['/exact/path'] } };
+    await request(permissions, { ...base, permissions: grant });
+    const event = requested()[0]; expect(event).toBeDefined(); expect(event!.options).toHaveLength(3);
+    const option = event!.options[choice === 'turn' ? 0 : choice === 'session' ? 1 : 2]!;
+    expect(respond(event!.requestId, option.id)).toBe(true);
+    expect(responses()).toEqual([{ id: 'approval_1', result: { permissions: choice === 'decline' ? {} : grant, scope: choice === 'session' ? 'session' : 'turn' } }]);
+  });
+
+  it('retains concurrent requests and keeps input blocked until both are answered', async () => {
+    await running(); await request(); await request(file, { ...base, grantRoot: '/other' }, 0);
+    const [a, b] = requested(); expect(a).toBeDefined(); expect(b).toBeDefined(); expect(a!.requestId).not.toBe(b!.requestId);
+    expect(respond(b!.requestId, b!.options[2]!.id)).toBe(true);
+    expect(session.sendAgentMessage([{ type: 'text', text: 'worker' }])).toBe(false);
+    expect(respond(a!.requestId, a!.options[2]!.id)).toBe(true);
+    expect(responses()).toEqual([{ id: 0, result: { decision: 'decline' } }, { id: 'approval_1', result: { decision: 'decline' } }]);
+    const delivery = session.sendAgentMessage([{ type: 'text', text: 'worker' }]);
+    expect(delivery).not.toBe(false);
+    fake.respond('turn/steer', {}); await delivery;
+  });
+
+  it.each(['turn/completed', 'turn/failed', 'serverRequest/resolved', 'interrupt', 'end', 'exit', 'pipe'])('expires pending approvals on %s', async (action) => {
+    await running(); await request(); const event = requested()[0]; expect(event).toBeDefined();
+    if (action === 'interrupt' || action === 'end') session[action]();
+    else if (action === 'exit') fake.exit(0);
+    else if (action === 'pipe') fake.child.stdin.destroy(new Error('EPIPE'));
+    else fake.frame({ method: action, params: action === 'serverRequest/resolved'
+      ? { threadId: 'thread_1', requestId: 'approval_1' }
+      : { threadId: 'thread_1', turn: { id: 'turn_1', status: action === 'turn/failed' ? 'failed' : 'completed' } } });
+    await flush();
+    expect(ui).toContainEqual(expect.objectContaining({ type: 'permission.resolved', requestId: event!.requestId, reason: expect.any(String) }));
+    expect(respond(event!.requestId, event!.options[0]!.id)).toBe(false);
+    if (action === 'interrupt' || action === 'end') expect(responses()).toContainEqual({ id: 'approval_1', error: { code: -32000, message: expect.any(String) } });
+    if (action === 'serverRequest/resolved') expect(responses()).toEqual([]);
+  });
+
+  it.each(['foreign', 'stale', 'no-turn'])('refuses %s approvals without creating a UI capability', async (state) => {
+    await running();
+    if (state === 'no-turn') { fake.frame({ method: 'turn/completed', params: { threadId: 'thread_1', turn: { id: 'turn_1', status: 'completed' } } }); await flush(); }
+    await request(command, { ...base, ...(state === 'foreign' ? { threadId: 'other' } : state === 'stale' ? { turnId: 'old' } : {}) });
+    expect(requested()).toEqual([]); expect(responses()).toEqual([{ id: 'approval_1', error: { code: -32602, message: expect.any(String) } }]);
+  });
+
+  it.each([
+    null, [], {}, { ...base, cwd: 123 }, { ...base, itemId: '' },
+    { ...base, availableDecisions: [] }, { ...base, availableDecisions: ['unknown'] },
+    { ...base, availableDecisions: [{ acceptWithExecpolicyAmendment: { execpolicy_amendment: [123] } }] },
+  ])('rejects malformed command approval %j with -32602', async params => {
+    await running(); await request(command, params);
+    expect(requested()).toEqual([]); expect(responses()).toEqual([{ id: 'approval_1', error: { code: -32602, message: expect.any(String) } }]);
+  });
+
+  it.each(['execCommandApproval', 'applyPatchApproval', 'item/unknown/requestApproval', 'turn/completed'])('answers unsupported request %s with -32601 rather than notifying', async method => {
+    await running(); await request(method, base, 0);
+    expect(responses()).toEqual([{ id: 0, error: { code: -32601, message: expect.any(String) } }]);
+    expect(events.some(e => e.type === 'turn-end')).toBe(false);
+  });
+
+  it('keeps notifications distinct and ignores a foreign resolution or stale turn completion', async () => {
+    await running(); fake.frame({ method: command, params: base }); await flush(); expect(requested()).toEqual([]);
+    await request(); const event = requested()[0]; expect(event).toBeDefined();
+    fake.frame({ method: 'serverRequest/resolved', params: { threadId: 'other', requestId: 'approval_1' } });
+    fake.frame({ method: 'turn/completed', params: { threadId: 'thread_1', turn: { id: 'old', status: 'completed' } } }); await flush();
+    expect(respond(event!.requestId, event!.options[0]!.id)).toBe(true);
+    expect(responses()).toEqual([{ id: 'approval_1', result: { decision: 'accept' } }]);
+  });
+
+  it('rejects the server request if its UI sink throws, then keeps reading transport', async () => {
+    start(); await initialize(); await thread(); await opening();
+    ui.push = ((event: UiEvent) => { if (event.type.startsWith('permission.')) throw new Error('sink failed'); return Array.prototype.push.call(ui, event); }) as typeof ui.push;
+    await request();
+    expect(responses()).toEqual([{ id: 'approval_1', error: { code: -32000, message: expect.any(String) } }]);
+    await request('unknown', {}, 'unknown');
+    expect(responses()).toContainEqual({ id: 'unknown', error: { code: -32601, message: expect.any(String) } });
+    expect(session.open).toBe(true);
+  });
+
+  it('correlates numeric and string ids independently even when an id collides with a client RPC', async () => {
+    await running();
+    await request(command, base, 0); await request(command, base, '0');
+    const [a, b] = requested(); expect(a).toBeDefined(); expect(b).toBeDefined();
+    expect(respond(b!.requestId, b!.options[0]!.id)).toBe(true);
+    expect(respond(a!.requestId, a!.options[2]!.id)).toBe(true);
+    expect(responses()).toEqual([{ id: '0', result: { decision: 'accept' } }, { id: 0, result: { decision: 'decline' } }]);
+    expect(session.sendMessage([{ type: 'text', text: 'ordinary input' }])).toBe(true); await flush();
+    const rpcId = fake.requests.at(-1)!.id!;
+    fake.frame({ id: rpcId, method: 'unknown', result: {} }); await flush();
+    expect(responses().at(-1)).toEqual({ id: rpcId, error: { code: -32601, message: expect.any(String) } });
+    expect(session.holdsHumanInput()).toBe(true);
+  });
+
+  it('invalidates an ambiguous duplicate native id rather than permitting a second answer', async () => {
+    await running(); await request(); const event = requested()[0]; expect(event).toBeDefined();
+    await request(file);
+    expect(responses()).toEqual([{ id: 'approval_1', error: { code: -32602, message: expect.any(String) } }]);
+    expect(requested()).toHaveLength(1);
+    expect(ui).toContainEqual(expect.objectContaining({ type: 'permission.resolved', requestId: event!.requestId, reason: expect.any(String) }));
+    expect(respond(event!.requestId, event!.options[0]!.id)).toBe(false);
+  });
+
+  it.each([
+    [file, { ...base, grantRoot: 123 }], [file, { ...base, availableDecisions: [{ acceptWithExecpolicyAmendment: { execpolicy_amendment: ['git'] } }] }],
+    [permissions, { ...base, permissions: { network: { enabled: 'true' } } }],
+    [permissions, { ...base, permissions: { fileSystem: { write: [123] } } }],
+    [permissions, { ...base, permissions: { fileSystem: { entries: [{ access: 'allow', path: { type: 'path', path: '/scope' } }] } } }],
+    [permissions, { ...base, permissions: { unknownPrivilege: true } }],
+  ])('rejects malformed %s payload %j', async (method, params) => {
+    await running(); await request(method, params);
+    expect(requested()).toEqual([]);
+    expect(responses()).toEqual([{ id: 'approval_1', error: { code: -32602, message: expect.any(String) } }]);
+  });
+
+  it('does not publish worker readiness when startup completes during a pending approval', async () => {
+    start(); expect(session.sendAgentMessage([{ type: 'text', text: 'worker' }])).toBe(false);
+    await initialize(); await thread(); started(); await request();
+    fake.respond('turn/start', { turn: { id: 'turn_1', status: 'inProgress', items: [] } }); await flush();
+    expect(requested()).toHaveLength(1); expect(readyHints).toBe(0);
+    expect(session.sendAgentMessage([{ type: 'text', text: 'worker' }])).toBe(false);
+  });
+});
