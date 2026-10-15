@@ -119,15 +119,15 @@ const FIRST_CONTROL_HOLD_MS = 500
  * A target with no visible control before it (the rail's Add project trigger when no project is
  * registered, hearsay-tools/cezarion#1091) starts from a `tabindex="-1"` anchor the lookup
  * prepends to `<body>` and focuses. The anchor and its hold stamp go after the Tab and on every
- * failure. Blurring the active element is not enough: Chrome keeps its sequential focus
- * navigation starting point where focus, or the last click, was. Evidence (local, 2026-10-16, a
- * throwaway spec on the shared env with an empty registry, focus parked by `.focus()` on the
- * sidebar resize handle or by a click on the page heading, 3 runs each): a bare Tab, and
- * `activeElement.blur()` then Tab, both landed on the main view's Active tab
- * (`data-slot="overview-tab"`) 6 of 6. Focusing `<body>` under a temporary `tabindex="-1"`, and
- * focusing this anchor, both landed on Add project 6 of 6. The anchor won because each poll finds
- * it by id and one removal undoes it, where a body attribute would need its old value carried
- * across polls.
+ * failure, including one whose probe the matcher never saw. Blurring the active element is not
+ * enough: Chrome keeps its sequential focus navigation starting point where focus, or the last
+ * click, was. Evidence (local, 2026-10-16, a throwaway spec on the shared env with an empty
+ * registry, focus parked by `.focus()` on the sidebar resize handle or by a click on the page
+ * heading, 3 runs each): a bare Tab, and `activeElement.blur()` then Tab, both landed on the main
+ * view's Active tab (`data-slot="overview-tab"`) 6 of 6. Focusing `<body>` under a temporary
+ * `tabindex="-1"`, and focusing this anchor, both landed on Add project 6 of 6. The anchor won
+ * because each poll finds it by id and one removal undoes it, where a body attribute would need
+ * its old value carried across polls.
  *
  * A target can render before its predecessor does (the rail mounts once the projects query
  * answers), and a Tab from the top would then land on the late arrival. Today's callers wait for
@@ -140,11 +140,14 @@ export function focusWithKeyboard(browser: AgentBrowser, selector: string): void
   const target = JSON.stringify(selector)
   const describe = `(el) => el ? el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + [...el.classList].slice(0, 3).map((c) => '.' + c).join('') : null`
   const dropTabStart = `document.getElementById('${TAB_START_ID}')?.remove(); delete window.__cezE2eFirstSince`
-  // Whether the last lookup took the top path, which can leave its anchor or hold stamp in the
-  // page. Every other lookup drops both itself.
-  let fromTop = false
+  // Set only when the lookup ends on the predecessor path, whose accepted sample dropped the
+  // anchor and the hold stamp itself. Any other end cleans up once below, including a lookup that
+  // failed on a probe the matcher never saw (a late sample, a transport error), which still ran
+  // in the page. `finished` keeps a cleanup failure from masking the error that got us there.
+  let fromPredecessor = false
+  let finished = false
   try {
-    browser.waitForValue<{ ready: boolean; predecessor: string | null; top?: 'page busy' | 'holding' | 'anchor' }>(
+    const start = browser.waitForValue<{ ready: boolean; predecessor: string | null; top?: 'page busy' | 'holding' | 'anchor' }>(
       `(() => {
     const describe = ${describe}
     const target = document.querySelector(${target})
@@ -171,12 +174,10 @@ export function focusWithKeyboard(browser: AgentBrowser, selector: string): void
     controls[index - 1].focus()
     return { ready: document.activeElement === controls[index - 1], predecessor: describe(controls[index - 1]) }
   })()`,
-      (state) => {
-        fromTop = state.top !== undefined
-        return state.ready
-      },
+      (state) => state.ready,
       { failure: `no keyboard start for ${selector}: no visible predecessor, and not the settled first control` },
     )
+    fromPredecessor = start.top === undefined
     browser.press('Tab')
     try {
       browser.waitForValue<{ onTarget: boolean; active: string | null }>(
@@ -192,8 +193,15 @@ export function focusWithKeyboard(browser: AgentBrowser, selector: string): void
       const active = (error.lastValue as { active?: string | null } | undefined)?.active ?? 'nothing'
       throw new Error(`focus never reached ${selector}; it is on ${active} (failure bundle: ${error.bundle})`, { cause: error })
     }
+    finished = true
   } finally {
-    if (fromTop) browser.evaluate(`(() => { ${dropTabStart} })()`)
+    if (!fromPredecessor) {
+      try {
+        browser.evaluate(`(() => { ${dropTabStart} })()`)
+      } catch (cleanupError) {
+        if (finished) throw cleanupError
+      }
+    }
   }
 }
 

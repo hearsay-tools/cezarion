@@ -97,18 +97,23 @@ function shortTimeout(ms = 400) {
 const actions = (commands: string[][]) => commands.map(([action]) => action)
 
 /** Script only the probe transport and its completed-sample time. Failure capture still
- * invokes the real fake CLI and writes its artifacts, outside the polling deadline. */
-function scriptProbes(browser: AgentBrowser, expression: string, samples: Array<{ value: unknown; durationMs: number }>) {
+ * invokes the real fake CLI and writes its artifacts, outside the polling deadline. A sample with
+ * an `error` fails the probe's transport, after its duration, the way a timed-out CLI call does.
+ * A predicate scripts expressions a helper builds itself; samples are consumed in call order. */
+type ScriptedProbe = { value: unknown; durationMs: number } | { error: Error; durationMs: number }
+function scriptProbes(browser: AgentBrowser, expression: string | ((js: string) => boolean), samples: ScriptedProbe[]) {
   let now = 0
   const budgets: Array<number | undefined> = []
+  const scripted = typeof expression === 'string' ? (js: string | undefined) => js === expression : (js: string | undefined) => js !== undefined && expression(js)
   const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
   const transport = browser as unknown as { run: (args: string[], timeoutMs?: number) => Record<string, unknown> }
   const invoke = transport.run.bind(browser)
   const run = vi.spyOn(transport, 'run').mockImplementation((args, timeoutMs) => {
-    if (args[0] === 'eval' && args[1] === expression) {
+    if (args[0] === 'eval' && scripted(args[1])) {
       const sample = samples[Math.min(budgets.length, samples.length - 1)]!
       budgets.push(timeoutMs)
       now += sample.durationMs
+      if ('error' in sample) throw sample.error
       return { result: sample.value }
     }
     return invoke(args, timeoutMs)
@@ -314,24 +319,79 @@ describe('focusWithKeyboard (#409)', () => {
     expect(commands()[3]?.[1]).toContain(`document.getElementById('cez-e2e-tab-start')?.remove()`)
   })
 
+  // The cases below script the start lookup and the focus read through the transport and the
+  // clock (`scriptProbes`), so a late or failed probe is a fact of the script, not a race between
+  // the fake CLI and a short wall-clock budget on a loaded host.
+  const lookup = (js: string) => js.includes('__cezE2eFirstSince ??=')
+  const focusRead = (js: string) => js.includes('onTarget:')
+  const cleanup = `document.getElementById('cez-e2e-tab-start')?.remove(); delete window.__cezE2eFirstSince`
+  const cleanups = (commands: string[][]) => commands.filter(([action, js]) => action === 'eval' && js?.includes(cleanup)).length
+
   it('names the element that took focus from the top of the document, and still removes the anchor (#1091)', () => {
-    shortTimeout()
-    const { browser, commands } = open([
-      { ready: true, predecessor: null, top: 'anchor' },
-      { onTarget: false, active: 'button#late-predecessor' },
+    shortTimeout(100)
+    const { browser, commands } = open([])
+    const probes = scriptProbes(browser, (js) => lookup(js) || focusRead(js), [
+      { value: { ready: true, predecessor: null, top: 'anchor' }, durationMs: 10 },
+      { value: { onTarget: false, active: 'button#late-predecessor' }, durationMs: 60 },
     ])
-    expect(() => focusWithKeyboard(browser, selector)).toThrow(
-      /focus never reached button\[data-slot="model-pill"\]; it is on button#late-predecessor/,
-    )
-    expect(commands().at(-1)?.[1]).toContain(`document.getElementById('cez-e2e-tab-start')?.remove()`)
+    try {
+      expect(() => focusWithKeyboard(browser, selector)).toThrow(
+        /focus never reached button\[data-slot="model-pill"\]; it is on button#late-predecessor/,
+      )
+    } finally {
+      probes.restore()
+    }
+    expect(cleanups(commands())).toBe(1)
+    expect(commands().at(-1)?.[1]).toContain(cleanup)
   })
 
   it('a first control that never settles fails without a Tab, and drops its hold stamp (#1091)', () => {
-    shortTimeout()
-    const { browser, commands } = open([{ ready: false, predecessor: null, top: 'holding' }])
-    expect(() => focusWithKeyboard(browser, selector)).toThrow(/no keyboard start for button\[data-slot="model-pill"\]/)
+    shortTimeout(100)
+    const { browser, commands } = open([])
+    const probes = scriptProbes(browser, lookup, [{ value: { ready: false, predecessor: null, top: 'holding' }, durationMs: 60 }])
+    try {
+      expect(() => focusWithKeyboard(browser, selector)).toThrow(/no keyboard start for button\[data-slot="model-pill"\]/)
+    } finally {
+      probes.restore()
+    }
     expect(actions(commands())).not.toContain('press')
-    expect(commands().at(-1)?.[1]).toContain('delete window.__cezE2eFirstSince')
+    expect(cleanups(commands())).toBe(1)
+    expect(commands().at(-1)?.[1]).toContain(cleanup)
+  })
+
+  // The matcher never sees these probes, yet each ran in the page and may have stamped the hold
+  // or prepended and focused the anchor. Cleanup must not depend on the matcher having seen it.
+  it.each([
+    { name: 'a sample that completes past the deadline', probe: { value: { ready: true, predecessor: null, top: 'anchor' }, durationMs: 150 } },
+    { name: 'a transport error', probe: { error: new Error('agent-browser eval timed out'), durationMs: 150 } },
+  ])('cleans up the top path after $name, with no Tab (#1091)', ({ probe }) => {
+    shortTimeout(100)
+    const { browser, commands } = open([])
+    const probes = scriptProbes(browser, lookup, [probe])
+    try {
+      expect(() => focusWithKeyboard(browser, selector)).toThrow(/no keyboard start for button\[data-slot="model-pill"\]/)
+      expect(probes.budgets).toHaveLength(1)
+    } finally {
+      probes.restore()
+    }
+    expect(actions(commands())).not.toContain('press')
+    expect(cleanups(commands())).toBe(1)
+  })
+
+  it('keeps the original error when the cleanup itself fails (#1091)', () => {
+    shortTimeout(100)
+    const { browser } = open([])
+    const probes = scriptProbes(browser, (js) => lookup(js) || js.includes(cleanup), [
+      { value: { ready: true, predecessor: null, top: 'anchor' }, durationMs: 150 },
+      { error: new Error('cleanup transport down'), durationMs: 0 },
+    ])
+    try {
+      expect(() => focusWithKeyboard(browser, selector)).toThrow(/no keyboard start for button\[data-slot="model-pill"\]/)
+      // The lookup, then the cleanup: the cleanup ran and failed, and the lookup's error won.
+      expect(probes.budgets).toHaveLength(2)
+    } finally {
+      probes.restore()
+    }
   })
 })
 
