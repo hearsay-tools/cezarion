@@ -33,7 +33,7 @@ beforeAll(async () => {
   ]))
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
-  }, { timeoutMs: 20_000 })
+  })
   baseUrl = await waitForFixtureServer(server)
   project = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(`controls-${process.pid}`)

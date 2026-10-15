@@ -70,11 +70,31 @@ interface OwnedFixture {
 }
 const ownedFixtures = new WeakMap<ChildProcess, OwnedFixture>()
 
+/**
+ * Wall-clock budget from spawn to a healthy owned listener (hearsay-tools/cezarion#986).
+ *
+ * The budget used to be `tries: 60` × 250 ms ≈ 15 s, inherited from the old health poll of an
+ * already-booted server. A cockpit boot announces only after detectEnvironment, store open,
+ * worktree reconcile and recovery, and that path is CPU-bound: measured 1.7 s idle, 6–10 s with
+ * four concurrent boots at load ~80 on the 24-core host (`.ai/qa/986/trace-4.log`, 2026-10-15).
+ * Four-lane run `1791923143645-2565641` (load ~30) failed four specs at 14.7–14.8 s with the
+ * child alive and stdout empty; Squeal's slow tier in the main checkout (revision 79) failed
+ * task-github-items and task-handoff the same way. The banner is written synchronously to the
+ * pipe as one burst, so empty stdout means the child had not reached it — not lost output.
+ * Reproduction: an env-gated 20 s delay before the banner in the built dist, red at 14.8 s
+ * before this change, green after. 45 s stays inside the default 60 s hook timeout with room
+ * for fixture setup, so a genuinely hung boot still fails here with the child's diagnostics.
+ * A dead child fails at once (exit is checked every probe), so the budget only bounds a live one.
+ */
+export const FIXTURE_BOOT_BUDGET_MS = 45_000
+
 /** Spawn immediately so callers can attach their existing log hooks before readiness. */
 export function spawnFixtureServer(args: readonly string[], options: SpawnOptions, readiness: PollOptions = {}): ChildProcess {
-  const poll = { tries: 60, ...readiness }
-  // Preserve each site's original health budget, now shared from spawn through announcement.
-  const budget = poll.timeoutMs ?? poll.tries * Math.max(poll.intervalMs ?? 250, 250)
+  // The budget is wall-clock only. An attempt cap silently shortened every explicit
+  // `timeoutMs`: waiting for the announcement costs no time per attempt, so 60 tries ended a
+  // 20 s budget at 15 s (touch-targets in run `1791923143645-2565641`, hearsay-tools/cezarion#986).
+  const budget = readiness.timeoutMs ?? FIXTURE_BOOT_BUDGET_MS
+  const poll: PollOptions = { ...readiness, tries: readiness.tries ?? Number.POSITIVE_INFINITY, timeoutMs: budget }
   const deadline = Math.min(Date.now() + budget, poll.deadline ?? Infinity)
   const child = spawn(process.execPath, [...args], { ...options, stdio: ['ignore', 'pipe', 'pipe'] })
   child.stdout?.setEncoding('utf8')
