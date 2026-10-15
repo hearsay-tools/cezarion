@@ -1981,7 +1981,7 @@ the transport. Notifications have no reply.
 Approvals emit the `permission.requested` event with an opaque, fresh
 request ID, item ID when present, a title, full action/scope details and offered
 options. Command `availableDecisions`, when supplied, is authoritative, including
-structured execution-policy and network-policy amendments. Absent lists use the
+structured execution-policy and network-policy amendments. Absent or null lists use the
 native command/file decision defaults. Permission-profile requests instead grant
 only the requested profile with an explicit turn or session scope, or return an
 empty grant. Cezar never changes the administrator's approval policy.

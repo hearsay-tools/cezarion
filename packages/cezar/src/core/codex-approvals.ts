@@ -49,7 +49,7 @@ const commandParams = common.extend({
   proposedExecpolicyAmendment: z.array(z.string()).nullable().optional(),
   proposedNetworkPolicyAmendments: z.array(networkAmendment).nullable().optional(),
   additionalPermissions: permissionProfile.nullable().optional(),
-  availableDecisions: z.array(commandDecision).min(1).optional(),
+  availableDecisions: z.array(commandDecision).min(1).nullable().optional(),
 });
 const fileParams = common.extend({ grantRoot: nullableText, availableDecisions: z.array(simpleDecision).min(1).optional() });
 const permissionsParams = common.extend({ cwd: z.string(), permissions: permissionProfile });
