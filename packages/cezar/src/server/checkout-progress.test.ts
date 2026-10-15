@@ -12,3 +12,9 @@ it('retains only bounded latest progress, expires it, and evicts oldest tokens',
   now = 300_000;
   expect(cache.get('127')).toBeNull();
 });
+it('keeps a bounded warning on the terminal event', () => {
+  const cache = new CheckoutProgressCache(() => 0);
+  cache.record({ checkoutId: 'a', name: 'n', phase: 'done', warning: 'w'.repeat(5000) });
+  expect(cache.get('a')?.phase).toBe('done');
+  expect(cache.get('a')?.warning).toHaveLength(4096);
+});
