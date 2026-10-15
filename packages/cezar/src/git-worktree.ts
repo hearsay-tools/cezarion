@@ -412,8 +412,11 @@ async function removeWorktreeLocked(
 
 /**
  * Why an autosave commit happened. Only `periodic` is gated (behind
- * `CEZ_AUTOSAVE=1`, #471) — the three flushes always run so the branch ends
- * holding the finished state. Before this was recorded, all four wrote the bare
+ * `CEZ_AUTOSAVE=1`, #471) — the three flushes always run so the task branch
+ * ends holding the finished state. The turn-end and run-finalize flushes (and
+ * the periodic timer) name the task branch, so they commit only while HEAD is
+ * that branch (hearsay-tools/cezarion#1004); `pre-PR` commits on whatever HEAD
+ * is. Before this was recorded, all four wrote the bare
  * message `cezar autosave`, so a user who had opted out of the periodic timer
  * still saw `cezar autosave` in `git log` and reasonably concluded the opt-out
  * was broken. Only commit *spacing* (~90 s ⇒ timer) told them apart.
@@ -426,8 +429,28 @@ export type AutosaveReason = 'periodic' | 'turn end' | 'run finalize' | 'pre-PR'
  * the *last* one, so anything other than `committed`/`nothing-to-do` there
  * means the branch leaves the box without the run's final state and the user
  * has to be told (see createDraftPr). A bare boolean could not carry that.
+ * `skipped` happens only when the caller names a task branch and HEAD is not
+ * on it (hearsay-tools/cezarion#1004); the pre-PR flush never names one.
  */
-export type AutosaveResult = 'committed' | 'nothing-to-do' | 'refused' | 'failed';
+export type AutosaveResult = 'committed' | 'nothing-to-do' | 'refused' | 'failed' | 'skipped';
+
+/**
+ * The facts behind a `committed` or `skipped` save, for the caller's report
+ * (hearsay-tools/cezarion#1004). `branch` is HEAD's branch name, `null` on a
+ * detached HEAD; `sha` is the short hash of the autosave commit.
+ */
+export type AutosaveOutcome =
+  | { result: 'committed'; sha: string; branch: string | null }
+  | { result: 'skipped'; branch: string | null; changedPaths: number };
+
+export interface AutosaveCommitOptions extends AutosaveOptions {
+  /** The task's own branch (`cez/<id8>`). Given, the save commits only while HEAD is
+   *  `refs/heads/<taskBranch>`; on any other branch or a detached HEAD it leaves the
+   *  index and working tree alone and returns `skipped`. */
+  taskBranch?: string;
+  /** Receives the facts behind a `committed` or `skipped` result. Never called otherwise. */
+  onOutcome?: (outcome: AutosaveOutcome) => void;
+}
 
 /**
  * Leftover merge-conflict markers, anchored at line start as git writes them.
@@ -472,8 +495,11 @@ const autosaves = new Map<string, Promise<AutosaveResult>>();
 
 /**
  * Stage and commit everything in the worktree as a "cezar autosave" commit
- * (janitor pattern) — the agent's progress is always recoverable from the
- * `cez/<id8>` branch history. Quietly a no-op when nothing changed.
+ * (janitor pattern) — the agent's progress is recoverable from the `cez/<id8>`
+ * branch history. Quietly a no-op when nothing changed. With `taskBranch`, a
+ * worktree whose HEAD the agent moved to another branch (or detached) is left
+ * uncommitted instead: an autosave commit there lands in the agent's own PR
+ * history (hearsay-tools/cezarion#1004).
  *
  * The message carries `reason` so the opt-in periodic timer and the always-on
  * flushes are distinguishable in `git log`; the `cezar autosave` prefix is kept
@@ -483,7 +509,7 @@ const autosaves = new Map<string, Promise<AutosaveResult>>();
  * markers: the incident behind #471 was an autosave capturing a half-resolved
  * merge, and a blind `git add -A` would do it again.
  */
-export async function autosaveCommit(dir: string, reason: AutosaveReason, options: AutosaveOptions = {}): Promise<AutosaveResult> {
+export async function autosaveCommit(dir: string, reason: AutosaveReason, options: AutosaveCommitOptions = {}): Promise<AutosaveResult> {
   let key = resolve(dir);
   try { key = realpathSync(dir); } catch { /* Missing/unreadable dir fails through Git. */ }
   const previous = autosaves.get(key);
@@ -500,6 +526,22 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
     const status = await git(dir, ['status', '--porcelain']);
     if (!status.ok) return 'failed';
     if (!status.stdout.trim()) return 'nothing-to-do';
+    const { taskBranch, onOutcome } = options;
+    const report = (outcome: AutosaveOutcome) => {
+      try { onOutcome?.(outcome); } catch { /* Reporting must not change what the save did. */ }
+    };
+    let head: string | null = null;
+    if (taskBranch !== undefined || onOutcome) {
+      // Exit 1 under -q is a detached HEAD; anything else is a failed read.
+      const ref = await git(dir, ['symbolic-ref', '-q', 'HEAD']);
+      if (!ref.ok && ref.code !== 1) return 'failed';
+      head = ref.ok ? ref.stdout.trim() : null;
+    }
+    const branch = head?.startsWith('refs/heads/') ? head.slice('refs/heads/'.length) : head;
+    if (taskBranch !== undefined && head !== `refs/heads/${taskBranch}`) {
+      report({ result: 'skipped', branch, changedPaths: status.stdout.split('\n').filter(Boolean).length });
+      return 'skipped';
+    }
     const unresolved = await unresolvedConflicts(dir, status.stdout);
     if (unresolved) {
       // Losing one recovery point beats poisoning the branch with a commit that
@@ -529,7 +571,12 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
       '-m',
       `cezar autosave (${reason})`,
     ]);
-    return commit.ok ? 'committed' : 'failed';
+    if (!commit.ok) return 'failed';
+    if (onOutcome) {
+      const sha = await git(dir, ['rev-parse', '--short', 'HEAD']);
+      if (sha.ok && sha.stdout.trim()) report({ result: 'committed', sha: sha.stdout.trim(), branch });
+    }
+    return 'committed';
   }
 }
 
