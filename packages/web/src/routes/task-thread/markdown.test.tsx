@@ -46,6 +46,15 @@ describe('Markdown', () => {
     expect(document.querySelector('[data-slot="link-safety-dialog"]')).toBeNull()
   })
 
+  it('confirms a link the author already scoped to this task, which only a rewrite skips', () => {
+    // artifact-project-links.e2e.ts pins the same rule in a real browser: a published artifact
+    // URL in its owner's thread is not a file reference cezar resolved, so it keeps the confirm.
+    const href = '/p/owner/tasks/owner-task/files?artifact=4c15e25b-a08c-438d-a32b-fd1a8c6c90e2'
+    render(<TaskFileContext.Provider value={{ runId: 'owner-task', projectId: 'owner' }}><Markdown>{`[Report](${href})`}</Markdown></TaskFileContext.Provider>)
+    fireEvent.click(screen.getByRole('link', { name: 'Report' }))
+    expect(document.querySelector('[data-slot="link-safety-dialog"]')).not.toBeNull()
+  })
+
   it('retains external link semantics and confirmation inside task context', () => {
     render(<TaskFileContext.Provider value={{ runId: 'task-one' }}><Markdown>{'[Website](https://example.com)'}</Markdown></TaskFileContext.Provider>)
     fireEvent.click(screen.getByRole('link', { name: 'Website' }))

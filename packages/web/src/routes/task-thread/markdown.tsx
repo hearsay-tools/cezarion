@@ -9,7 +9,7 @@ import {
 import { SYN_THEME, highlight, highlightSync, supportedLanguages } from '@/lib/highlighter'
 
 import { LinkSafetyDialog } from './link-safety-dialog'
-import { isTaskFileHref, TaskFileContext, taskFileHref, type TaskFileContextValue } from './file-links'
+import { TaskFileContext, taskFileHref } from './file-links'
 import { TaskLink } from './task-link'
 
 /**
@@ -95,26 +95,6 @@ function remarkHardBreaks() {
 const HARD_BREAKS = [...Object.values(defaultRemarkPlugins), remarkHardBreaks]
 
 /**
- * Rewrite a task's file references to its Files route (`taskFileHref`).
- *
- * A PURE function of its options, never a closure over render state: Streamdown caches its
- * unified processors module-wide, keyed by each plugin's function NAME plus its JSON options.
- * A closure plugin is therefore built once, by whichever message renders first, and reused with
- * that message's captured context for every later one, so task B's links opened task A's
- * Files tab. Passing the context as options puts it in the cache key.
- */
-function remarkTaskLinks(context: TaskFileContextValue) {
-  const walk = (node: MdastNode): void => {
-    if ((node.type === 'link' || node.type === 'definition') && node.url) {
-      const target = taskFileHref(node.url, context)
-      if (target) node.url = target
-    }
-    node.children?.forEach(walk)
-  }
-  return walk
-}
-
-/**
  * A compact preview still uses the real Markdown parser, but it cannot expose links or block
  * structure: ReasoningItem places an invisible collapsible trigger over this text, so a nested
  * focusable anchor would create a second control under the button. Disallowed block elements are
@@ -137,8 +117,15 @@ const LINK_SAFETY: LinkSafetyConfig = {
 /** Where a refused document image points: the reserved `.invalid` TLD never resolves. */
 const REFUSED_IMAGE = 'https://refused.invalid/'
 
-/** A fresh cache key per `documentImages` closure; see that plugin. */
-let documentImageInstances = 0
+/**
+ * A fresh cache key per `Markdown` memo, for its closure plugins. Streamdown caches its unified
+ * processors module-wide, keyed by each plugin's function NAME plus its JSON options, so a
+ * closure plugin is built once, by whichever instance renders first, and every later instance
+ * gets that one's captured state: task B's file links opened task A's Files tab, and the
+ * internal-link record filled a Set no component read. An `instance` option keys each memo's
+ * plugins apart; a processor evicted from the cache is rebuilt from the same closures.
+ */
+let markdownInstances = 0
 
 /**
  * Memoized per message (Streamdown additionally memoizes per block): during streaming only the
@@ -169,14 +156,26 @@ export const Markdown = memo(function Markdown({
 }) {
   const fileContext = useContext(TaskFileContext)
   const contextual = useMemo(() => {
+    const instance = { instance: ++markdownInstances }
+    const internal = new Set<string>()
+    // Only a link this walk REWROTE skips the link-safety confirm. A cockpit URL the author
+    // wrote themselves, even one naming this task, keeps it: `taskFileHref` returns null for it.
+    function taskLinks() {
+      const walk = (node: MdastNode): void => {
+        if ((node.type === 'link' || node.type === 'definition') && node.url && fileContext) {
+          const target = taskFileHref(node.url, fileContext)
+          if (target) { node.url = target; internal.add(target) }
+        }
+        node.children?.forEach(walk)
+      }
+      return walk
+    }
     const resolvedImages = new Set<string>()
     // Images resolve HERE, on the mdast, because Streamdown's harden step blocks every relative
     // `src` before a component could see it (with its own unthemed "Image blocked" pill). The
     // resolved URL is made absolute so harden lets it through; a refused one becomes a URL that
     // can never resolve, so it too reaches the `img` component below, which renders an <img>
     // ONLY for URLs this walk produced and the inert `[Image: …]` text for everything else.
-    // This plugin needs the resolver, a function JSON cannot carry into Streamdown's processor
-    // cache key (see `remarkTaskLinks`), so a per-memo `instance` option keys it instead.
     function documentImages() {
       const walk = (node: MdastNode): void => {
         if (node.type === 'image' && node.url && imageSrc) {
@@ -188,14 +187,15 @@ export const Markdown = memo(function Markdown({
       }
       return walk
     }
-    const images = document && imageSrc ? [[documentImages, { instance: ++documentImageInstances }] satisfies [typeof documentImages, { instance: number }]] : []
+    const links = fileContext ? [[taskLinks, instance] satisfies [typeof taskLinks, typeof instance]] : []
+    const images = document && imageSrc ? [[documentImages, instance] satisfies [typeof documentImages, typeof instance]] : []
     return {
-      remark: [...(breaks ? HARD_BREAKS : Object.values(defaultRemarkPlugins)), ...(fileContext ? [[remarkTaskLinks, fileContext] satisfies [typeof remarkTaskLinks, TaskFileContextValue]] : []), ...images],
+      remark: [...(breaks ? HARD_BREAKS : Object.values(defaultRemarkPlugins)), ...links, ...images],
       components: {
         ...(fileContext || document ? { a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
           // A snapshot has no live directory. Relative links cannot silently target the host.
           if (document && !fileContext && !/^(?:https?:|mailto:|#)/i.test(href ?? '')) return <span>{children}</span>
-          return <TaskLink href={href} internal={Boolean(fileContext && href && isTaskFileHref(href, fileContext))}>{children}</TaskLink>
+          return <TaskLink href={href} internal={internal.has(href ?? '')}>{children}</TaskLink>
         } } : {}),
         ...(document ? { img: ({ src, alt }: { src?: unknown; alt?: string }) => {
           if (typeof src === 'string' && resolvedImages.has(src)) return <img src={src} alt={alt ?? ''} loading="lazy" />
