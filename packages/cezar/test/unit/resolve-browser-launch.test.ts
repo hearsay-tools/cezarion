@@ -11,6 +11,7 @@ const {
   isContainerHost,
   resolveBrowserLaunch,
   buildAgentBrowserArgv,
+  tmpdirExceedsSocketBudget,
   CHROME_SINGLETON_OVERHEAD,
 } = await import(pathToFileURL(resolverPath).href);
 
@@ -181,6 +182,41 @@ test('Windows and already-short POSIX paths are not rewritten', () => {
     unixSocketMax: 107,
   });
   assert.deepEqual(short.runtimeEnv, {});
+});
+
+// hearsay-tools/cezarion#1090: each process that launches Chrome asks this
+// predicate about its OWN TMPDIR instead of reusing the test env booter's answer.
+test('tmpdirExceedsSocketBudget measures the caller TMPDIR against the platform limit', () => {
+  const linuxAt = 'x'.repeat(107 - CHROME_SINGLETON_OVERHEAD);
+  assert.equal(tmpdirExceedsSocketBudget({ TMPDIR: linuxAt }, 'linux'), false);
+  assert.equal(tmpdirExceedsSocketBudget({ TMPDIR: `${linuxAt}x` }, 'linux'), true);
+  assert.equal(tmpdirExceedsSocketBudget({ TMPDIR: '/tmp' }, 'linux'), false);
+  const darwinAt = 'x'.repeat(103 - CHROME_SINGLETON_OVERHEAD);
+  assert.equal(tmpdirExceedsSocketBudget({ TMPDIR: darwinAt }, 'darwin'), false);
+  assert.equal(tmpdirExceedsSocketBudget({ TMPDIR: `${darwinAt}x` }, 'darwin'), true);
+  // A darwin-over path still fits Linux's larger budget.
+  assert.equal(tmpdirExceedsSocketBudget({ TMPDIR: `${darwinAt}x` }, 'linux'), false);
+  assert.equal(tmpdirExceedsSocketBudget({ TMPDIR: `${linuxAt}x` }, 'linux', 200), false);
+});
+
+test('tmpdirExceedsSocketBudget is false on Windows and without a temp variable', () => {
+  const long = `/${'x'.repeat(200)}`;
+  assert.equal(tmpdirExceedsSocketBudget({ TMPDIR: long, TMP: long, TEMP: long }, 'win32'), false);
+  assert.equal(tmpdirExceedsSocketBudget({}, 'linux'), false);
+  assert.equal(tmpdirExceedsSocketBudget({ TMPDIR: '' }, 'darwin'), false);
+});
+
+test('tmpdirExceedsSocketBudget falls back to TMP, then TEMP, when TMPDIR is unset', () => {
+  const long = `/${'x'.repeat(200)}`;
+  assert.equal(tmpdirExceedsSocketBudget({ TMP: long }, 'linux'), true);
+  assert.equal(tmpdirExceedsSocketBudget({ TEMP: long }, 'linux'), true);
+  assert.equal(tmpdirExceedsSocketBudget({ TMPDIR: '/tmp', TEMP: long }, 'linux'), false);
+});
+
+test('tmpdirExceedsSocketBudget counts bytes, not characters', () => {
+  const over = `${'x'.repeat(107 - CHROME_SINGLETON_OVERHEAD - 1)}é`;
+  assert.equal(over.length + CHROME_SINGLETON_OVERHEAD, 107);
+  assert.equal(tmpdirExceedsSocketBudget({ TMPDIR: over }, 'linux'), true);
 });
 
 // hearsay-tools/cezarion#1022: the per-run agent TMPDIR budget and this e2e

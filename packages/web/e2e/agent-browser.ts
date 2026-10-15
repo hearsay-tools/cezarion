@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { tmpdirExceedsSocketBudget } from '../../../.ai/scripts/resolve-browser-launch.mjs'
 
 /**
  * The agent-browser provider seam. Every e2e spec drives the app through this module and
@@ -261,6 +262,8 @@ type EnvDescriptor = {
     version: string
     notes: string
     launchArgs?: string[]
+    /** Extra spawn env. Its TMPDIR/TMP/TEMP are test-env-up.sh's doctor/probe answer and are
+     *  ignored here: the seam decides those from its caller's env (hearsay-tools/cezarion#1090). */
     runtimeEnv?: Record<string, string>
     namespace?: string
   }
@@ -270,6 +273,8 @@ type EnvDescriptor = {
  *  One blink setting only: launch args are comma-joined for the CLI, and a second
  *  `primaryHoverType=…,availableHoverTypes=…` pair would split into a bogus flag. */
 export const HOVER_POINTER_ARGS = ['--blink-settings=primaryHoverType=2']
+
+const TEMP_ENV_KEYS = ['TMPDIR', 'TMP', 'TEMP']
 
 export function browserSpawnPlan(
   browser: EnvDescriptor['browser'],
@@ -288,7 +293,18 @@ export function browserSpawnPlan(
   if (launchArgs.length) argv.push('--args', launchArgs.join(','))
   argv.push('--session', session, ...command)
   if (!command.includes('--json')) argv.push('--json')
-  return { argv, env: { ...env, ...browser.runtimeEnv } }
+  // Temp dirs are decided from this caller's own env, never the descriptor's runtimeEnv: that is
+  // the answer for whoever booted the shared env (hearsay-tools/cezarion#1090). The e2e
+  // globalSetup already shortens an over-budget one; this covers callers outside it, such as
+  // scripts/benchmark-tabs.ts. runtimeEnv's other keys still apply (held-browser-daemon.ts).
+  const spawnEnv: NodeJS.ProcessEnv = { ...env }
+  for (const [key, value] of Object.entries(browser.runtimeEnv ?? {})) {
+    if (!TEMP_ENV_KEYS.includes(key)) spawnEnv[key] = value
+  }
+  if (tmpdirExceedsSocketBudget(env, process.platform)) {
+    for (const key of TEMP_ENV_KEYS) spawnEnv[key] = '/tmp'
+  }
+  return { argv, env: spawnEnv }
 }
 
 /** The shared descriptor written by .ai/scripts/test-env-up.sh — QA and e2e attach to the
