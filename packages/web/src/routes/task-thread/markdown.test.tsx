@@ -31,6 +31,21 @@ describe('Markdown', () => {
     expect(screen.getByRole('link', { name: 'Report' }).getAttribute('href')).toBe(href)
   })
 
+  it('stamps each task its own Files route, not the first task rendered (processor cache)', () => {
+    // Streamdown caches its unified processors module-wide, keyed by plugin NAME + JSON options.
+    // A link plugin that captured its context in a closure was reused for every later task, so
+    // task B's links opened task A's Files tab.
+    render(<TaskFileContext.Provider value={{ runId: 'run-a', projectId: 'one' }}><Markdown>{'[first](/tmp/a.md)'}</Markdown></TaskFileContext.Provider>)
+    expect(screen.getByRole('link', { name: 'first' }).getAttribute('href')).toBe('/p/one/tasks/run-a/files?path=%2Ftmp%2Fa.md')
+    cleanup()
+    render(<TaskFileContext.Provider value={{ runId: 'run-b', projectId: 'two', basePath: 'docs/guide.md' }}><Markdown>{'[second](next.md)'}</Markdown></TaskFileContext.Provider>)
+    const second = screen.getByRole('link', { name: 'second' })
+    expect(second.getAttribute('href')).toBe('/p/two/tasks/run-b/files?path=docs%2Fnext.md')
+    // Still recognised as this task's own file: it navigates without the link-safety confirm.
+    fireEvent.click(second)
+    expect(document.querySelector('[data-slot="link-safety-dialog"]')).toBeNull()
+  })
+
   it('retains external link semantics and confirmation inside task context', () => {
     render(<TaskFileContext.Provider value={{ runId: 'task-one' }}><Markdown>{'[Website](https://example.com)'}</Markdown></TaskFileContext.Provider>)
     fireEvent.click(screen.getByRole('link', { name: 'Website' }))

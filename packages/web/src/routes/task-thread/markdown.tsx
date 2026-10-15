@@ -9,7 +9,7 @@ import {
 import { SYN_THEME, highlight, highlightSync, supportedLanguages } from '@/lib/highlighter'
 
 import { LinkSafetyDialog } from './link-safety-dialog'
-import { TaskFileContext, taskFileHref } from './file-links'
+import { isTaskFileHref, TaskFileContext, taskFileHref, type TaskFileContextValue } from './file-links'
 import { TaskLink } from './task-link'
 
 /**
@@ -95,6 +95,26 @@ function remarkHardBreaks() {
 const HARD_BREAKS = [...Object.values(defaultRemarkPlugins), remarkHardBreaks]
 
 /**
+ * Rewrite a task's file references to its Files route (`taskFileHref`).
+ *
+ * A PURE function of its options, never a closure over render state: Streamdown caches its
+ * unified processors module-wide, keyed by each plugin's function NAME plus its JSON options.
+ * A closure plugin is therefore built once, by whichever message renders first, and reused with
+ * that message's captured context for every later one, so task B's links opened task A's
+ * Files tab. Passing the context as options puts it in the cache key.
+ */
+function remarkTaskLinks(context: TaskFileContextValue) {
+  const walk = (node: MdastNode): void => {
+    if ((node.type === 'link' || node.type === 'definition') && node.url) {
+      const target = taskFileHref(node.url, context)
+      if (target) node.url = target
+    }
+    node.children?.forEach(walk)
+  }
+  return walk
+}
+
+/**
  * A compact preview still uses the real Markdown parser, but it cannot expose links or block
  * structure: ReasoningItem places an invisible collapsible trigger over this text, so a nested
  * focusable anchor would create a second control under the button. Disallowed block elements are
@@ -135,24 +155,13 @@ export const Markdown = memo(function Markdown({
 }) {
   const fileContext = useContext(TaskFileContext)
   const contextual = useMemo(() => {
-    const internal = new Set<string>()
-    function taskLinks() {
-      const walk = (node: MdastNode): void => {
-        if ((node.type === 'link' || node.type === 'definition') && node.url && fileContext) {
-          const target = taskFileHref(node.url, fileContext)
-          if (target) { node.url = target; internal.add(target) }
-        }
-        node.children?.forEach(walk)
-      }
-      return walk
-    }
     return {
-      remark: [...(breaks ? HARD_BREAKS : Object.values(defaultRemarkPlugins)), taskLinks],
+      remark: [...(breaks ? HARD_BREAKS : Object.values(defaultRemarkPlugins)), ...(fileContext ? [[remarkTaskLinks, fileContext] satisfies [typeof remarkTaskLinks, TaskFileContextValue]] : [])],
       components: {
         ...(fileContext || document ? { a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
           // A snapshot has no live directory. Relative links cannot silently target the host.
           if (document && !fileContext && !/^(?:https?:|mailto:|#)/i.test(href ?? '')) return <span>{children}</span>
-          return <TaskLink href={href} internal={internal.has(href ?? '')}>{children}</TaskLink>
+          return <TaskLink href={href} internal={Boolean(fileContext && href && isTaskFileHref(href, fileContext))}>{children}</TaskLink>
         } } : {}),
         ...(document ? { img: ({ alt }: { alt?: string }) => <span className="text-muted-foreground">[Image: {alt || 'embedded image'}]</span> } : {}),
       },

@@ -36,3 +36,10 @@ export function taskFileHref(destination: string, context: TaskFileContextValue)
   }
   return `${prefix}${files}?path=${encodeURIComponent(path)}${fragment}`
 }
+
+/** True when `href` points at this task's own Files route, the only destination `taskFileHref`
+ *  produces. Such a link navigates in place, without the link-safety confirm. */
+export function isTaskFileHref(href: string, context: TaskFileContextValue): boolean {
+  const prefix = context.projectId ? `/p/${encodeURIComponent(context.projectId)}` : ''
+  return href.startsWith(`${prefix}/tasks/${encodeURIComponent(context.runId)}/files?`)
+}
