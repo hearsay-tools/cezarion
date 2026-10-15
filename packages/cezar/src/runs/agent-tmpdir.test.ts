@@ -10,6 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { createServer } from 'node:net';
@@ -17,8 +18,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AgentTempDirError,
+  CHROME_SINGLETON_OVERHEAD,
+  DARWIN_UNIX_SOCKET_MAX,
   MAX_SOCKET_SAFE_DIR_LENGTH,
+  agentShortTmpDir,
   agentTmpDir,
+  agentTmpDirLocations,
   agentTmpDirEnabled,
   agentTmpEnv,
   firstSocketSafeDir,
@@ -27,6 +32,22 @@ import {
   sweepAgentTmpDirs,
 } from './agent-tmpdir.ts';
 import { seedRuns } from './run-store.testkit.ts';
+
+/** Lets a test make `renameSync` of one path fail as a cross-filesystem move
+ *  would (`EXDEV`); every other call passes through untouched. */
+const fsFaults = vi.hoisted(() => ({ exdevFrom: undefined as string | undefined }));
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    renameSync: (from: import('node:fs').PathLike, to: import('node:fs').PathLike) => {
+      if (fsFaults.exdevFrom !== undefined && String(from) === fsFaults.exdevFrom) {
+        throw Object.assign(new Error(`EXDEV: cross-device link not permitted, rename '${String(from)}'`), { code: 'EXDEV' });
+      }
+      return actual.renameSync(from, to);
+    },
+  };
+});
 
 /**
  * #785: every agent shared the host's temp directory, and when that directory
@@ -48,8 +69,8 @@ describe('agentTmpEnv — per-run temp directory (#785)', () => {
 
   it('gives the run its own directory and creates it before the backend spawns', () => {
     const env = agentTmpEnv(dataDir, 'run-a', {});
-    expect(env.TMPDIR).toBe(agentTmpDir(dataDir, 'run-a'));
-    expect(env.TMPDIR).toBe(join(dataDir, 'tmp', 'run-a'));
+    expect(env.TMPDIR).toBe(agentShortTmpDir(dataDir, 'run-a'));
+    expect(env.TMPDIR).toBe(join(dataDir, 't', 'run-a'));
     expect(existsSync(env.TMPDIR as string)).toBe(true);
   });
 
@@ -67,9 +88,9 @@ describe('agentTmpEnv — per-run temp directory (#785)', () => {
   });
 
   it('fails with a named, actionable error when the directory cannot be created', () => {
-    // `<dataDir>/tmp` occupied by a FILE — mkdir cannot make the run's directory
+    // `<dataDir>/t` occupied by a FILE — mkdir cannot make the run's directory
     // under it. Deterministic and portable, unlike simulating a quota.
-    writeFileSync(join(dataDir, 'tmp'), 'not a directory', 'utf8');
+    writeFileSync(join(dataDir, 't'), 'not a directory', 'utf8');
     let thrown: unknown;
     try {
       agentTmpEnv(dataDir, 'run-c', {});
@@ -78,7 +99,7 @@ describe('agentTmpEnv — per-run temp directory (#785)', () => {
     }
     expect(thrown).toBeInstanceOf(AgentTempDirError);
     expect((thrown as Error).message).toContain('agent temp directory is not writable');
-    expect((thrown as Error).message).toContain(join(dataDir, 'tmp', 'run-c'));
+    expect((thrown as Error).message).toContain(join(dataDir, 't', 'run-c'));
     // The remedy names the opt-out, so the message alone is enough to act on.
     expect((thrown as Error).message).toContain('CEZ_AGENT_TMPDIR=0');
   });
@@ -89,7 +110,7 @@ describe('agentTmpEnv — per-run temp directory (#785)', () => {
   it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
     'fails when the directory exists but rejects writes',
     () => {
-      const dir = agentTmpDir(dataDir, 'run-d');
+      const dir = agentShortTmpDir(dataDir, 'run-d');
       mkdirSync(dir, { recursive: true });
       chmodSync(dir, 0o500);
       try {
@@ -100,9 +121,10 @@ describe('agentTmpEnv — per-run temp directory (#785)', () => {
     },
   );
 
-  it('a writable directory passes, and the probe leaves nothing behind', () => {
+  it('a writable directory passes, and the probe leaves nothing behind but the run marker', () => {
     const env = agentTmpEnv(dataDir, 'run-e', {});
-    expect(readdirSync(env.TMPDIR as string)).toEqual([]);
+    expect(readdirSync(env.TMPDIR as string)).toEqual(['.cez-run']);
+    expect(readFileSync(join(env.TMPDIR as string, '.cez-run'), 'utf8')).toBe('run-e');
   });
 
   describe('CEZ_AGENT_TMPDIR=0 opt-out', () => {
@@ -112,6 +134,7 @@ describe('agentTmpEnv — per-run temp directory (#785)', () => {
         const env = agentTmpEnv(dataDir, 'run-f', { CEZ_AGENT_TMPDIR: '0', TMPDIR: host });
         expect(env).toEqual({});
         expect(existsSync(agentTmpDir(dataDir, 'run-f'))).toBe(false);
+        expect(existsSync(agentShortTmpDir(dataDir, 'run-f'))).toBe(false);
       } finally {
         rmSync(host, { recursive: true, force: true });
       }
@@ -147,7 +170,7 @@ describe('reaping the per-run temp directories (#785)', () => {
   let dataDir: string;
 
   beforeEach(() => {
-    dataDir = mkdtempSync(join(realpathSync(tmpdir()), 'cez-agent-tmpdir-reap-'));
+    dataDir = mkdtempSync(join(realpathSync(tmpdir()), 'cez-reap-'));
   });
 
   afterEach(() => {
@@ -182,7 +205,7 @@ describe('reaping the per-run temp directories (#785)', () => {
     agentTmpEnv(dataDir, 'live', {});
     removeAgentTmpDir(dataDir, id);
     expect(existsSync(join(dataDir, 'runs.db'))).toBe(true);
-    expect(existsSync(agentTmpDir(dataDir, 'live'))).toBe(true);
+    expect(existsSync(agentShortTmpDir(dataDir, 'live'))).toBe(true);
   });
 
   it('sweeps orphans left by a crash while keeping the live runs', () => {
@@ -191,8 +214,106 @@ describe('reaping the per-run temp directories (#785)', () => {
     agentTmpEnv(dataDir, 'orphan-2', {});
     const reaped = sweepAgentTmpDirs(dataDir, ['live']);
     expect(reaped.sort()).toEqual(['orphan-1', 'orphan-2']);
-    expect(existsSync(agentTmpDir(dataDir, 'live'))).toBe(true);
-    expect(existsSync(agentTmpDir(dataDir, 'orphan-1'))).toBe(false);
+    expect(existsSync(agentShortTmpDir(dataDir, 'live'))).toBe(true);
+    expect(existsSync(agentShortTmpDir(dataDir, 'orphan-1'))).toBe(false);
+  });
+
+  // hearsay-tools/cezarion#1037: a marker cut short mid-write must never make a
+  // kept run's scratch look like an orphan.
+  it.each([
+    ['empty', ''],
+    ['shorter than the directory name', 'kept-ru'],
+    ['a prefix of the kept run id', 'kept-run-a'],
+    ['not a run id', 'kept-run\u0000'],
+  ])('keeps a short directory whose marker is %s', (_, marker) => {
+    const dir = agentTmpEnv(dataDir, 'kept-run-abc', {}).TMPDIR as string;
+    writeFileSync(join(dir, 'note.txt'), 'scratch Continue needs');
+    writeFileSync(join(dir, '.cez-run'), marker);
+    expect(sweepAgentTmpDirs(dataDir, ['kept-run-abc'])).toEqual([]);
+    expect(readFileSync(join(dir, 'note.txt'), 'utf8')).toBe('scratch Continue needs');
+  });
+
+  // hearsay-tools/cezarion#1037: the legacy `tmp/` loop reaps an orphan whose
+  // id shares its first eight characters with a kept run. If that kept run
+  // created (or adopted) its short directory and crashed before publishing its
+  // marker, the markerless directory is the kept run's Continue scratch.
+  it('never reaps a kept run’s markerless short directory while sweeping a colliding legacy orphan', () => {
+    const kept = '0d0d0d0d-1111-4222-8333-444455556666';
+    const orphan = '0d0d0d0d-9999-4222-8333-444455556666';
+    mkdirSync(agentTmpDir(dataDir, orphan), { recursive: true });
+    writeFileSync(join(agentTmpDir(dataDir, orphan), 'note.txt'), 'orphan');
+    const short = agentShortTmpDir(dataDir, kept);
+    expect(short).toBe(agentShortTmpDir(dataDir, orphan));
+    mkdirSync(short, { recursive: true });
+    writeFileSync(join(short, 'note.txt'), 'scratch Continue needs');
+    expect(sweepAgentTmpDirs(dataDir, [kept])).toEqual([orphan]);
+    expect(existsSync(agentTmpDir(dataDir, orphan))).toBe(false);
+    expect(readFileSync(join(short, 'note.txt'), 'utf8')).toBe('scratch Continue needs');
+    // The kept run's next spawn claims it and keeps its files.
+    expect(agentTmpEnv(dataDir, kept, {}).TMPDIR).toBe(short);
+    expect(readFileSync(join(short, 'note.txt'), 'utf8')).toBe('scratch Continue needs');
+  });
+
+  it('publishes the run marker whole and leaves no pending file behind', () => {
+    const dir = agentTmpEnv(dataDir, 'whole-marker', {}).TMPDIR as string;
+    expect(readdirSync(dir)).toEqual(['.cez-run']);
+    expect(readFileSync(join(dir, '.cez-run'), 'utf8')).toBe('whole-marker');
+  });
+
+  // hearsay-tools/cezarion#1022 moved the agent's TMPDIR from `tmp/<runId>` to
+  // `t/<id8>`. A directory minted before the upgrade is still this run's
+  // scratch: the reap and the startup sweep must still find it.
+  it('reaps and sweeps a directory minted in the pre-#1022 layout', () => {
+    const live = '0a0a0a0a-1111-4222-8333-444455556666';
+    const ended = '0b0b0b0b-1111-4222-8333-444455556666';
+    const orphan = '0c0c0c0c-1111-4222-8333-444455556666';
+    for (const id of [live, ended, orphan]) {
+      mkdirSync(agentTmpDir(dataDir, id), { recursive: true });
+      writeFileSync(join(agentTmpDir(dataDir, id), 'note.txt'), id);
+    }
+    removeAgentTmpDir(dataDir, ended);
+    expect(existsSync(agentTmpDir(dataDir, ended))).toBe(false);
+    expect(sweepAgentTmpDirs(dataDir, [live])).toEqual([orphan]);
+    expect(readFileSync(join(agentTmpDir(dataDir, live), 'note.txt'), 'utf8')).toBe(live);
+    expect(existsSync(agentTmpDir(dataDir, orphan))).toBe(false);
+  });
+
+  // A live run from before the upgrade keeps its files across the Continue that
+  // first hands it the new directory (#515's promise survives the move).
+  it('moves a pre-#1022 run’s scratch into its new directory on the next spawn', () => {
+    const id = '0d0d0d0d-1111-4222-8333-444455556666';
+    const legacy = agentTmpDir(dataDir, id);
+    mkdirSync(legacy, { recursive: true });
+    writeFileSync(join(legacy, 'note.txt'), 'keep across the upgrade');
+    const dir = agentTmpEnv(dataDir, id, {}).TMPDIR as string;
+    expect(dir).toBe(agentShortTmpDir(dataDir, id));
+    expect(readFileSync(join(dir, 'note.txt'), 'utf8')).toBe('keep across the upgrade');
+    expect(existsSync(legacy)).toBe(false);
+  });
+
+  // Eight characters of a run id are not unique by construction. A run whose
+  // short name another run already holds must neither share nor reap it.
+  it('never shares or reaps a short directory another run’s marker claims', () => {
+    const first = 'collide-run-1';
+    const second = 'collide-run-2';
+    expect(agentShortTmpDir(dataDir, first)).toBe(agentShortTmpDir(dataDir, second));
+    const mine = agentTmpEnv(dataDir, first, {}).TMPDIR as string;
+    writeFileSync(join(mine, 'note.txt'), 'first');
+    const theirs = agentTmpEnv(dataDir, second, {}).TMPDIR as string;
+    try {
+      expect(theirs).not.toBe(mine);
+      expect(basename(theirs)).toMatch(/^cez-agent-[0-9a-f]{12}$/);
+      expect(agentTmpDirLocations(dataDir, second)).not.toContain(mine);
+      removeAgentTmpDir(dataDir, second);
+      expect(existsSync(theirs)).toBe(false);
+      expect(readFileSync(join(mine, 'note.txt'), 'utf8')).toBe('first');
+      sweepAgentTmpDirs(dataDir, [first]);
+      expect(readFileSync(join(mine, 'note.txt'), 'utf8')).toBe('first');
+      removeAgentTmpDir(dataDir, first);
+      expect(existsSync(mine)).toBe(false);
+    } finally {
+      rmSync(theirs, { recursive: true, force: true });
+    }
   });
 
   // BACKWARD_COMPATIBILITY §3: `.ai/cezar/` is a protected surface. The sweep is
@@ -276,22 +397,196 @@ describe('socket-safe temp directory length (#387)', () => {
 
   it('stays repo-local up to the cap and falls back one byte past it', () => {
     const root = osRoot();
-    // `join(dataDir, 'tmp', 'run-a')` = root + '/' + pad + '/' + 'tmp/run-a'.
-    const padFor = (target: number): string =>
-      'p'.repeat(target - root.length - 'tmp/run-a'.length - 2);
-    const at = join(root, padFor(78));
-    const over = join(root, 'q'.repeat(79 - root.length - 'tmp/run-a'.length - 2));
-    expect(join(at, 'tmp', 'run-a').length).toBe(78);
-    expect(join(over, 'tmp', 'run-a').length).toBe(79);
+    // `agentShortTmpDir(dataDir, 'run-a')` = root + '/' + pad + '/' + 't/run-a'.
+    const cap = MAX_SOCKET_SAFE_DIR_LENGTH;
+    const at = join(root, 'p'.repeat(cap - root.length - 't/run-a'.length - 2));
+    const over = join(root, 'q'.repeat(cap + 1 - root.length - 't/run-a'.length - 2));
+    expect(join(at, 't', 'run-a').length).toBe(cap);
+    expect(join(over, 't', 'run-a').length).toBe(cap + 1);
     try {
-      expect(agentTmpEnv(at, 'run-a', {}).TMPDIR).toBe(join(at, 'tmp', 'run-a'));
+      expect(agentTmpEnv(at, 'run-a', {}).TMPDIR).toBe(join(at, 't', 'run-a'));
       const fell = agentTmpEnv(over, 'run-a', {}).TMPDIR as string;
       minted.push(fell);
-      expect(fell).not.toBe(join(over, 'tmp', 'run-a'));
+      expect(fell).not.toBe(join(over, 't', 'run-a'));
       expect(fell.length).toBeLessThanOrEqual(MAX_SOCKET_SAFE_DIR_LENGTH);
     } finally {
       rmSync(at, { recursive: true, force: true });
       rmSync(over, { recursive: true, force: true });
+    }
+  });
+
+  // hearsay-tools/cezarion#1022: Chromium binds its singleton one directory
+  // BELOW TMPDIR — `<tmpdir>/org.chromium.Chromium.XXXXXX/SingletonSocket`,
+  // 45 bytes — and the old 78-byte ceiling sized it as 16 bytes directly under
+  // TMPDIR. An ordinary checkout's `.ai/cezar/tmp/<uuid>` was 77 bytes: under
+  // that ceiling, and 77 + 45 past sun_path, so every browser launched inside a
+  // task failed with `Socket path too long` until it ran with TMPDIR=/tmp.
+  it('keeps a checkout whose old 77-byte task directory broke Chromium repo-local, and binds its socket', async () => {
+    const runId = '0f1e2d3c-4b5a-49f8-8a11-aabbccddeeff';
+    // The uuid and `.ai/cezar/tmp/` alone take 51 of the 77 bytes, so the
+    // checkout sits under the short platform root, not the vitest sandbox.
+    const root = mkdtempSync(join(realpathSync('/tmp'), 'cez-1022-'));
+    // `<repo>/.ai/cezar/tmp/<uuid>` = root + '/' + pad + '/.ai/cezar/tmp/' + 36.
+    const repo = join(root, 'r'.repeat(77 - root.length - '/.ai/cezar/tmp/'.length - runId.length - 1));
+    const dataDir = join(repo, '.ai', 'cezar');
+    expect(Buffer.byteLength(join(dataDir, 'tmp', runId))).toBe(77);
+    try {
+      const dir = agentTmpEnv(dataDir, runId, {}).TMPDIR as string;
+      // Still on the run's own disk, inside its own data directory (#785).
+      expect(dir).toBe(join(dataDir, 't', runId.slice(0, 8)));
+      expect(Buffer.byteLength(dir) + CHROME_SINGLETON_OVERHEAD).toBeLessThanOrEqual(DARWIN_UNIX_SOCKET_MAX);
+      // The exact shape Chromium binds (`ProcessSingleton` under a
+      // `base::CreateNewTempDirectory` named after the browser).
+      const singletonDir = join(dir, 'org.chromium.Chromium.Ab12Cd');
+      mkdirSync(singletonDir);
+      const server = createServer();
+      const bound = new Promise<void>((resolve, reject) => {
+        server.once('listening', resolve);
+        server.once('error', reject);
+      });
+      server.listen(join(singletonDir, 'SingletonSocket'));
+      await bound;
+      server.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // The acceptance arithmetic for the default checkout shapes on both
+  // platforms: read-only resolution, so nothing is created at these paths.
+  it.each([
+    ['/home/wiktor/projects/cezarion', 'linux'],
+    ['/home/someuser/projects/my-service', 'linux'],
+    ['/Users/wiktorjarka/projects/cezarion', 'macOS'],
+    ['/Users/someuser/projects/my-service', 'macOS'],
+  ])('a default checkout at %s (%s) gets a repo-local TMPDIR Chromium can bind under', (repo) => {
+    const runId = '0f1e2d3c-4b5a-49f8-8a11-aabbccddeeff';
+    const dataDir = join(repo, '.ai', 'cezar');
+    const dir = resolveAgentTmpDir(dataDir, runId);
+    expect(dir).toBe(join(dataDir, 't', '0f1e2d3c'));
+    expect(Buffer.byteLength(dir) + CHROME_SINGLETON_OVERHEAD).toBeLessThanOrEqual(DARWIN_UNIX_SOCKET_MAX);
+  });
+
+  /** A fallback recorded under the pre-#1022 78-byte ceiling: a 75-byte
+   *  digest-named directory under a long root, owned by `data`, holding a note,
+   *  and the `.cez-fallback` pointer naming it. */
+  const legacyFallback = (data: string, runId: string): { longRoot: string; recorded: string } => {
+    const longRoot = join(osRoot(), 'l'.repeat(75 - osRoot().length - '/cez-agent-'.length - 12 - 1));
+    const digest = createHash('sha256').update(`${data}:${runId}`).digest('hex').slice(0, 12);
+    const recorded = join(longRoot, `cez-agent-${digest}`);
+    expect(Buffer.byteLength(recorded)).toBe(75);
+    mkdirSync(recorded, { recursive: true, mode: 0o700 });
+    writeFileSync(join(recorded, '.cez-owner'),
+      createHash('sha256').update(`cez-agent-owner:${data}`).digest('hex').slice(0, 16));
+    writeFileSync(join(recorded, 'note.txt'), 'keep');
+    mkdirSync(join(recorded, 'nested'));
+    writeFileSync(join(recorded, 'nested', 'deep.txt'), 'deep');
+    mkdirSync(agentTmpDir(data, runId), { recursive: true });
+    writeFileSync(join(agentTmpDir(data, runId), '.cez-fallback'), recorded);
+    return { longRoot, recorded };
+  };
+
+  /** The migrated directory: socket-safe, same digest name, scratch intact,
+   *  pointer rewritten, old directory and in-flight record gone. */
+  const expectMigrated = (data: string, runId: string, recorded: string, tmp: string): void => {
+    expect(Buffer.byteLength(tmp) + CHROME_SINGLETON_OVERHEAD).toBeLessThanOrEqual(DARWIN_UNIX_SOCKET_MAX);
+    expect(basename(tmp)).toBe(basename(recorded));
+    expect(readFileSync(join(tmp, 'note.txt'), 'utf8')).toBe('keep');
+    expect(readFileSync(join(tmp, 'nested', 'deep.txt'), 'utf8')).toBe('deep');
+    expect(readFileSync(join(tmp, '.cez-owner'), 'utf8')).toBe(
+      createHash('sha256').update(`cez-agent-owner:${data}`).digest('hex').slice(0, 16));
+    expect(existsSync(recorded)).toBe(false);
+    expect(readFileSync(join(agentTmpDir(data, runId), '.cez-fallback'), 'utf8')).toBe(tmp);
+    expect(existsSync(join(agentTmpDir(data, runId), '.cez-fallback-previous'))).toBe(false);
+  };
+
+  // hearsay-tools/cezarion#1037: a run that recorded a fallback under the
+  // pre-#1022 78-byte ceiling must keep its scratch on Continue and still be
+  // reaped — but must not be handed that path again, because a 59–78 byte
+  // TMPDIR plus Chromium's 45-byte nested singleton is past sun_path. The
+  // scratch moves to the fallback that fits now.
+  it('moves a fallback recorded under the pre-#1022 ceiling into the new budget, keeping its scratch', () => {
+    const data = deepDataDir();
+    const runId = 'legacy-fallback-run';
+    const { longRoot, recorded } = legacyFallback(data, runId);
+    try {
+      const tmp = agentTmpEnv(data, runId, {}).TMPDIR as string;
+      minted.push(tmp);
+      expectMigrated(data, runId, recorded, tmp);
+      // A later spawn reuses the migrated directory as it is.
+      expect(agentTmpEnv(data, runId, {}).TMPDIR).toBe(tmp);
+      removeAgentTmpDir(data, runId);
+      expect(existsSync(tmp)).toBe(false);
+      expect(existsSync(agentTmpDir(data, runId))).toBe(false);
+    } finally {
+      rmSync(longRoot, { recursive: true, force: true });
+    }
+  });
+
+  // The usual real case: the legacy root and the new one are different
+  // filesystems, so `rename` fails with EXDEV and the scratch is copied.
+  it('copies a legacy fallback across filesystems when rename reports EXDEV', () => {
+    const data = deepDataDir();
+    const runId = 'legacy-exdev-run';
+    const { longRoot, recorded } = legacyFallback(data, runId);
+    fsFaults.exdevFrom = recorded;
+    try {
+      const tmp = agentTmpEnv(data, runId, {}).TMPDIR as string;
+      minted.push(tmp);
+      expectMigrated(data, runId, recorded, tmp);
+      // The copy path ran: the old directory went under a removal receipt.
+      expect(existsSync(join(agentTmpDir(data, runId), '.cez-fallback-removal.json'))).toBe(true);
+      sweepAgentTmpDirs(data, []);
+      expect(existsSync(tmp)).toBe(false);
+      expect(existsSync(agentTmpDir(data, runId))).toBe(false);
+    } finally {
+      fsFaults.exdevFrom = undefined;
+      rmSync(longRoot, { recursive: true, force: true });
+    }
+  });
+
+  // A crash after the pointer was rewritten and part of the copy landed: the
+  // old directory is still listed (its root is one no env names), nothing is
+  // lost, and the next spawn finishes the move.
+  it('converges after a crash mid-migration without losing scratch', () => {
+    const data = deepDataDir();
+    const runId = 'legacy-crash-run';
+    const { longRoot, recorded } = legacyFallback(data, runId);
+    fsFaults.exdevFrom = recorded;
+    try {
+      const target = resolveAgentTmpDir(data, runId);
+      expect(target).not.toBe(recorded);
+      expect(existsSync(target)).toBe(false);
+      // The state step 2 leaves, plus a partial copy.
+      writeFileSync(join(agentTmpDir(data, runId), '.cez-fallback-previous'), recorded);
+      writeFileSync(join(agentTmpDir(data, runId), '.cez-fallback'), target);
+      mkdirSync(target, { mode: 0o700 });
+      writeFileSync(join(target, '.cez-owner'),
+        createHash('sha256').update(`cez-agent-owner:${data}`).digest('hex').slice(0, 16));
+      writeFileSync(join(target, 'note.txt'), 'ke');
+      minted.push(target);
+      expect(agentTmpDirLocations(data, runId)).toEqual(expect.arrayContaining([recorded, target]));
+      // A sweep with the run kept touches neither side.
+      sweepAgentTmpDirs(data, [runId]);
+      expect(existsSync(recorded)).toBe(true);
+      expect(agentTmpEnv(data, runId, {}).TMPDIR).toBe(target);
+      expectMigrated(data, runId, recorded, target);
+    } finally {
+      fsFaults.exdevFrom = undefined;
+      rmSync(longRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to move a legacy fallback whose ownership marker is not this dataDir’s', () => {
+    const data = deepDataDir();
+    const runId = 'legacy-foreign-run';
+    const { longRoot, recorded } = legacyFallback(data, runId);
+    writeFileSync(join(recorded, '.cez-owner'), 'someone-else');
+    try {
+      expect(() => agentTmpEnv(data, runId, {})).toThrow(AgentTempDirError);
+      expect(readFileSync(join(recorded, 'note.txt'), 'utf8')).toBe('keep');
+    } finally {
+      rmSync(longRoot, { recursive: true, force: true });
     }
   });
 
@@ -319,9 +614,9 @@ describe('socket-safe temp directory length (#387)', () => {
     // 'é' is one JS character but two UTF-8 bytes: the kernel bounds the byte
     // length, so a directory whose string length fits while its byte length
     // crosses the cap must still fall back.
-    const pad = 'é'.repeat(Math.max(1, Math.floor((90 - Buffer.byteLength(root)) / 2)));
+    const pad = 'é'.repeat(MAX_SOCKET_SAFE_DIR_LENGTH - Buffer.byteLength(root) - '/t/run-a'.length - 1);
     const dir = join(root, pad);
-    const local = join(dir, 'tmp', 'run-a');
+    const local = join(dir, 't', 'run-a');
     expect(local.length).toBeLessThanOrEqual(MAX_SOCKET_SAFE_DIR_LENGTH);
     expect(Buffer.byteLength(local)).toBeGreaterThan(MAX_SOCKET_SAFE_DIR_LENGTH);
     const resolved = resolveAgentTmpDir(dir, 'run-a');
