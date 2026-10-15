@@ -17,6 +17,40 @@ import { killFromPidFile, readPids, requirePid, writePidSource } from './pid-fil
 const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 const budget = { timeoutMs: 500, killGraceMs: 100, confirmMs: 100 };
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const shQuote = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`;
+
+/*
+ * Timing bounds, derived from the product's contract (hearsay-tools/cezarion#1107).
+ *
+ * The budget bounds each Git COMMAND, not the save. `autosaveGit` arms `timeoutMs` at spawn,
+ * sends SIGKILL `killGraceMs` after the timeout and, if termination is still unobserved
+ * `confirmMs` later, reports the save blocked so Stop can settle under a separate hold
+ * (hearsay-tools/cezarion#934). Settlement itself waits for observed termination: it is
+ * never timer-driven, so it lags SIGKILL by the observation in flight plus one 50 ms poll,
+ * and each observation scans /proc.
+ *
+ * The old `delay(2500)` race timed the whole save instead: up to four Git commands that
+ * succeed before the stalled one, plus the stalled command's budget. Each of those commands
+ * was a Node fake that launched real Git, so the race also charged four Node startups. In
+ * the #902 gate (load 75-100 on 24 cores) the resistant-commit case grew from 1085 ms idle
+ * to 2780 ms, and the zero-prefix status case from 736 ms to 1377 ms: the slowdown scales
+ * with the commands BEFORE the stalled one, not with the shutdown. Injecting 380 ms into
+ * each pass-through invocation reproduces `still waiting` while the stalled command still
+ * went from SIGTERM to settled in 190 ms.
+ *
+ * So the tight assertion measures what the budget bounds, from the product's own
+ * "command timed out" warning to settlement. `SHUTDOWN_MARGIN_MS` absorbs observation
+ * latency: the post-SIGKILL settle measured 85-110 ms and each /proc scan 115-205 ms at
+ * load ~15, so 2 s allows roughly ten scans' worth of scheduler delay. A kill that
+ * never lands or comes late still fails: it overruns this bound, or the whole-save ceiling.
+ * The ceiling only guards against a hang. Every command either exits or is aborted at
+ * `timeoutMs`, so five commands (status, add, config x2, commit) bound the save.
+ */
+const SHUTDOWN_MARGIN_MS = 2_000;
+const OBSERVE_POLL_MS = 50;
+const shutdownBoundMs = budget.killGraceMs + budget.confirmMs + SHUTDOWN_MARGIN_MS;
+const observeBoundMs = OBSERVE_POLL_MS + SHUTDOWN_MARGIN_MS;
+const saveCeilingMs = 5 * budget.timeoutMs + shutdownBoundMs;
 
 describe('autosave shutdown (#495)', () => {
   let repo: string;
@@ -57,30 +91,44 @@ describe('autosave shutdown (#495)', () => {
     rmSync(bin, { recursive: true, force: true });
   });
   function intercept(command: string, behavior: 'stall' | 'fail') {
-    writeFileSync(join(bin, 'git'), `#!${process.execPath}\n
+    // Only the intercepted command pays a Node startup. Every other one execs real Git, as in
+    // production, so a loaded host cannot push a pass-through past `timeoutMs` (#1107).
+    const fake = join(bin, 'fake-git.cjs');
+    writeFileSync(fake, `
 const fs = require('node:fs');
-const cp = require('node:child_process');
-const args = process.argv.slice(2);
-if (args.includes(${JSON.stringify(command)})) {
-  ${writePidSource(join(bin, 'pid'), { append: true })}
-  ${behavior === 'fail' ? 'process.exit(128);' : `process.on('SIGTERM', () => fs.writeFileSync(${JSON.stringify(join(bin, 'term'))}, 'received'));
-  setInterval(() => {}, 1000);`}
-} else {
-  const result = cp.spawnSync(${JSON.stringify(realGit)}, args, { stdio: 'inherit' });
-  process.exit(result.status ?? 1);
-}
+${writePidSource(join(bin, 'pid'), { append: true })}
+${behavior === 'fail' ? 'process.exit(128);' : `process.on('SIGTERM', () => fs.writeFileSync(${JSON.stringify(join(bin, 'term'))}, 'received'));
+setInterval(() => {}, 1000);`}
+`);
+    writeFileSync(join(bin, 'git'), `#!/bin/sh
+for arg do
+  if [ "$arg" = ${shQuote(command)} ]; then exec ${shQuote(process.execPath)} ${shQuote(fake)} "$@"; fi
+done
+exec ${shQuote(realGit)} "$@"
 `, { mode: 0o755 });
     vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
   }
-  async function save() {
-    const job = autosaveCommit(repo, 'run finalize', budget);
+  /** The save's result, and how long it took to settle after the product's timeout warning. */
+  async function save(): Promise<{ result: string; shutdownMs?: number }> {
+    let abortedAt: number | undefined;
+    const job = autosaveCommit(repo, 'run finalize', {
+      ...budget,
+      onWarning: message => { if (abortedAt === undefined && message.includes('command timed out')) abortedAt = performance.now(); },
+    });
     jobs.push(job);
-    return Promise.race([job, delay(2500).then(() => 'still waiting')]);
+    const settled = job.then(result => ({ result, ...(abortedAt === undefined ? {} : { shutdownMs: performance.now() - abortedAt }) }));
+    return Promise.race([settled, delay(saveCeilingMs).then(() => ({ result: 'still waiting' }))]);
+  }
+  /** A stalled command was aborted on its timeout and its shutdown settled within budget. */
+  function expectBoundedShutdown(outcome: { result: string; shutdownMs?: number }) {
+    expect(outcome.result).toBe('failed');
+    expect(outcome.shutdownMs).toBeDefined();
+    expect(outcome.shutdownMs).toBeLessThanOrEqual(shutdownBoundMs);
   }
   for (const command of ['status', 'add', 'config', 'commit']) {
     it(`terminates resistant ${command}, reports failure and preserves files`, async () => {
       intercept(command, 'stall');
-      expect(await save()).toBe('failed');
+      expectBoundedShutdown(await save());
       expect(existsSync(join(bin, 'term'))).toBe(true);
       const pid = requirePid(join(bin, 'pid'));
       expect(() => process.kill(pid, 0)).toThrow();
@@ -92,14 +140,14 @@ if (args.includes(${JSON.stringify(command)})) {
     it(`does not claim a save or commit after ${command} fails`, async () => {
       if (command === 'add') execFileSync(realGit, ['add', 'work.txt'], { cwd: repo });
       intercept(command, 'fail');
-      expect(await save()).toBe('failed');
+      expect((await save()).result).toBe('failed');
       expect(() => execFileSync(realGit, ['rev-parse', '--verify', 'HEAD'], { cwd: repo, stdio: 'pipe' })).toThrow();
     });
   }
   it('preserves a pre-existing agent while saving its worktree', async () => {
     const agent = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: repo, stdio: 'ignore' });
     try {
-      expect(await save()).toBe('committed');
+      expect((await save()).result).toBe('committed');
       expect(() => process.kill(agent.pid!, 0)).not.toThrow();
     } finally {
       agent.kill('SIGKILL');
@@ -129,7 +177,7 @@ const timer = setInterval(() => {
 }, 5);
 `, { mode: 0o755 });
     vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
-    expect(await save()).toBe('failed');
+    expectBoundedShutdown(await save());
     const pid = requirePid(join(bin, 'pid'));
     // Linux init may retain an exited grandchild as a zombie; it cannot write.
     if (existsSync(`/proc/${pid}/stat`)) {
@@ -157,13 +205,19 @@ if (args.includes('status')) {
 } else process.exit(0);
 `, { mode: 0o755 });
     vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
-    let settled = false;
-    const job = autosaveCommit(repo, 'run finalize', budget).then(result => { settled = true; return result; });
+    // Settlement must wait for the descendant's last write, then follow its exit within one
+    // observation (#1107): timed from that write, not from a wall clock that also charges the
+    // fake's and the descendant's Node startups.
+    const late = join(repo, 'late.txt');
+    const job = autosaveCommit(repo, 'run finalize', budget).then(result => ({
+      result, lateWrittenMs: existsSync(late) ? Date.now() - fs.statSync(late).mtimeMs : undefined,
+    }));
     jobs.push(job);
-    await delay(1000);
-    expect(settled).toBe(false);
-    expect(await Promise.race([job, delay(2000).then(() => 'still waiting')])).toBe('failed');
-    expect(readFileSync(join(repo, 'late.txt'), 'utf8')).toBe('last write');
+    const outcome = await Promise.race([job, delay(1400 + saveCeilingMs).then(() => ({ result: 'still waiting', lateWrittenMs: undefined }))]);
+    expect(outcome.result).toBe('failed');
+    expect(outcome.lateWrittenMs).toBeDefined();
+    expect(outcome.lateWrittenMs).toBeLessThanOrEqual(observeBoundMs);
+    expect(readFileSync(late, 'utf8')).toBe('last write');
   });
   it('keeps the save pending when termination cannot be proven', async () => {
     intercept('status', 'stall');
@@ -194,6 +248,7 @@ if (args.includes('status')) {
       expect(blocked).toHaveBeenCalledWith(expect.stringContaining('EPERM'), expect.objectContaining({ groups: expect.any(Array) }));
       expect(blocked).toHaveBeenCalledWith(expect.stringContaining('process group'), expect.objectContaining({ groups: expect.any(Array) }));
     } finally { obscure = false; }
-    expect(await Promise.race([job, delay(1000).then(() => 'still waiting')])).toBe('failed');
+    // Once the group probe is readable again, one poll and one observation settle the save.
+    expect(await Promise.race([job, delay(observeBoundMs).then(() => 'still waiting')])).toBe('failed');
   }, 15_000);
 });
