@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -9,6 +9,8 @@ import {
   createWorktree,
   parseShortstat,
   resolveBaseRef,
+  worktreeDiff,
+  worktreeDiffStat,
   worktreeShortstat,
   worktreeSizeBytes,
 } from './git-worktree.ts';
@@ -208,6 +210,46 @@ describe('worktreeShortstat (real git)', () => {
     await run('git', ['reset', '-q'], { cwd: repo });
     const stat = await worktreeShortstat(repo, 'main');
     expect(stat).toEqual({ adds: 0, dels: 0, files: 0 });
+  });
+
+  // hearsay-tools/cezarion#1080: the turn-end stat ran `add -N` and `diff` on the real
+  // index beside the turn-end autosave, and after a blocked save had settled the run.
+  it('reads untracked and force-added files without writing the worktree index', async () => {
+    const r = await fixtureRepo('cez-private-index-');
+    await run('git', ['checkout', '-q', '-b', 'task'], { cwd: r });
+    writeFileSync(join(r, '.gitignore'), 'ignored.txt\n');
+    writeFileSync(join(r, 'ignored.txt'), 'forced\n');
+    await run('git', ['add', '-f', 'ignored.txt'], { cwd: r }); // staged membership survives
+    writeFileSync(join(r, 'base.txt'), 'changed\n');
+    writeFileSync(join(r, 'new.txt'), 'x\ny\n');
+    const index = join(r, '.git', 'index');
+    const before = readFileSync(index);
+    expect(await worktreeShortstat(r, 'main')).toEqual({ adds: 5, dels: 1, files: 4 });
+    const diff = await worktreeDiff(r, 'main');
+    for (const path of ['base.txt', 'new.txt', 'ignored.txt', '.gitignore']) expect(diff).toContain(`+++ b/${path}`);
+    expect(await worktreeDiffStat(r, 'main')).toContain('4 files changed');
+    expect(readFileSync(index).equals(before)).toBe(true);
+    const status = (await run('git', ['status', '--porcelain'], { cwd: r })).stdout;
+    expect(status).toContain('?? new.txt'); // never intent-to-added in the real index
+  });
+
+  // With no writable tmpdir the private index moves into the git dir, never onto the real index.
+  it('keeps the worktree index untouched when the tmpdir is not writable', async () => {
+    const r = await fixtureRepo('cez-private-index-fallback-');
+    await run('git', ['checkout', '-q', '-b', 'task'], { cwd: r });
+    writeFileSync(join(r, 'new.txt'), 'x\ny\n');
+    const index = join(r, '.git', 'index');
+    const before = readFileSync(index);
+    const saved = process.env.TMPDIR;
+    process.env.TMPDIR = join(r, 'missing-tmpdir');
+    try {
+      expect(await worktreeShortstat(r, 'main')).toEqual({ adds: 2, dels: 0, files: 1 });
+    } finally {
+      if (saved === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = saved;
+    }
+    expect(readFileSync(index).equals(before)).toBe(true);
+    expect(readdirSync(join(r, '.git')).filter((name) => name.startsWith('cez-diff-index-'))).toEqual([]);
   });
 
   it('answers null when the path is not a git worktree', async () => {
