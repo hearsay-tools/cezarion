@@ -641,6 +641,7 @@ describe('Codex native approvals (hearsay-tools/cezarion#1049)', () => {
     await request(); const event = requested()[0]; expect(event).toBeDefined();
     fake.frame({ method: 'serverRequest/resolved', params: { threadId: 'other', requestId: 'approval_1' } });
     fake.frame({ method: 'turn/completed', params: { threadId: 'thread_1', turn: { id: 'old', status: 'completed' } } }); await flush();
+    expect(ui.some(event => event.type === 'turn.completed')).toBe(false);
     expect(respond(event!.requestId, event!.options[0]!.id)).toBe(true);
     expect(responses()).toEqual([{ id: 'approval_1', result: { decision: 'accept' } }]);
   });

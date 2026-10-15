@@ -310,6 +310,9 @@ class CodexSession implements AgentSession {
           if (!this.open && (msg.id !== undefined || (!PASSIVE_OUTPUT_METHODS.has(msg.method ?? '') && !finalOutcome))) continue;
           // Child turn lifecycle must reach neither channel (#600).
           if (this.isForeignTurnLifecycle(msg)) continue;
+          // The UI mapper must not retire a live approval on an older turn's tail.
+          if ((msg.method === 'turn/completed' || msg.method === 'turn/failed') && this.activeTurnId &&
+              turnIdOf(msg.params ?? {}) && turnIdOf(msg.params ?? {}) !== this.activeTurnId) continue;
           // Stale/child retry errors must neither fail nor warn on this turn.
           if (msg.method === 'error' && !this.isCurrentTurn((msg.params ?? {}) as Record<string, unknown>)) continue;
           this.opts.onActivity?.();
