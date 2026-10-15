@@ -1,6 +1,6 @@
 # Upstream ledger
 
-Status: accepted · Date: 2026-09-18 · Relates: `.ai/upstream/`, `.github/scripts/upstream-ledger.cjs`, `.github/workflows/upstream-scan.yml`
+Status: accepted · Date: 2026-09-18 · Relates: `.ai/upstream/`, `.github/scripts/upstream-ledger.cjs`, `.github/scripts/upstream-targets.cjs`, `.github/scripts/upstream-reachability.cjs`, `.github/workflows/upstream-scan.yml`
 
 ## TLDR
 
@@ -81,6 +81,54 @@ against these rules on every `npm run test:unit`, so a `ported` row without a fo
 4. Append a `scans` row and write `scans/<date>.md`. Print a JSON summary on stdout.
 
 No new commits means no file changes and `added: 0`.
+
+### Port start check
+
+A scan's `note` and `hint` describe the fork when the scan ran. Port issue
+hearsay-tools/cezarion#438 was planned from such a note. By the time the port started, the
+component it named was reachable only from tests, and nine fork commits had touched it. Nothing
+re-checked the targets when the port began (hearsay-tools/cezarion#1002).
+
+`node .github/scripts/upstream-scan.cjs targets <sha>… [--no-fetch]` does that check. Each argument
+is a ledger sha prefix that must match exactly one row. A commit missing locally is fetched into
+`refs/cez-upstream/main` with the scan's own fetch, never through a remote. The command prints a
+Markdown report with one section per commit, in the order given, and exits 0 whenever the report
+printed. It exits 1 with one line on stderr for no arguments, an unknown or ambiguous prefix, an
+invalid ledger, or a git failure.
+
+The fork side is the checkout's `HEAD`. The baseline is the first parent of the commit that added
+the row's full sha to `ledger.yaml` (`git log --reverse -S<sha> HEAD -- .ai/upstream/ledger.yaml`).
+The ledger schema does not change. A row `HEAD` never committed has no baseline, and its drift
+reads `unknown`, never "no change".
+
+The file list comes from the upstream commit's own diff. A rename is judged by its old path,
+because that is where the fork's code would be. Each file gets four columns: whether the path
+exists at `HEAD` (and, when it does not, the last fork commit that touched it), reachability,
+drift since the baseline (non-merge commits and line churn), and a per-file 3-way dry run against
+`HEAD`. Three flags summarise them:
+
+- `test-only`: reachability is `test-only`.
+- `missing`: upstream modifies, deletes or renames a path that does not exist at `HEAD`.
+- `drifted`: at least one fork commit touched the path since the baseline.
+
+Reachability is one in-memory esbuild bundle (`write: false`, `metafile: true`); its inputs are
+the production-reachable files. The roots are each `packages/*/index.html` module script (the
+cockpit's `src/main.tsx`) and the `bin` and `exports` of every published manifest, mapped from
+`dist/*.js` to `src/*.ts`. The private `contract` and `api-client` packages are not roots: they
+count only when web or the CLI imports them, and they bundle from source. Files the CLI starts by
+path through `new URL(…, import.meta.url)` become further roots until the set stops growing.
+Each TypeScript file also keeps its type-only imports, which esbuild would otherwise erase,
+so a module used only for its types still counts as reachable. Every other bare specifier stays
+external, and CSS, assets and Vite `?query` data imports load as empty modules. Only non-test
+source files under `packages/*/src/` are judged; everything else reads `n/a`.
+
+A broken check must not produce false flags. When esbuild is missing, finds no entry points, or
+fails, every judged file reads `unknown`, never `test-only`, and the report's first lines say why.
+
+The pure half (the per-file dry-run parser, path classification, `new URL` extraction, flags and
+the renderer) lives in `.github/scripts/upstream-targets.cjs`; the bundle in
+`upstream-reachability.cjs`; git in `upstream-scan.cjs`. `upstream-targets.test.cjs` covers each
+part, runs the bundle on the real tree, and drives the command against a fixture repository.
 
 ### Workflow
 
