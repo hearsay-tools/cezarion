@@ -267,4 +267,5 @@ module.exports = {
   waitForCiRun,
   isTransientGhError,
   withGhRetry,
+  DEFAULT_WAIT_TIMEOUT_MS,
 };

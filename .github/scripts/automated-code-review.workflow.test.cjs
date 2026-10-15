@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { DEFAULT_WAIT_TIMEOUT_MS } = require('./fetch-ci-results.cjs');
 
 const workflowPath = path.join(__dirname, '..', 'workflows', 'automated-code-review.yml');
 const legacyWorkflowPath = path.join(__dirname, '..', 'workflows', 'claude-code-review.yml');
@@ -293,7 +294,11 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   const wait = job(workflow, 'wait-for-ci');
   assert.match(wait, /needs: \[validate-provider, review-round\]/);
   assert.match(wait, /needs\.review-round\.outputs\.can_review == 'true'/);
-  assert.match(wait, /timeout-minutes: 20/);
+  // hearsay-tools/cezarion#1060: a job timeout is recorded as cancelled, which recovery skips, so the
+  // script's own deadline must fire first, with room for checkout.
+  const waitJobMinutes = Number(wait.match(/^ {4}timeout-minutes: (\d+)$/m)?.[1]);
+  assert.ok(waitJobMinutes * 60_000 >= DEFAULT_WAIT_TIMEOUT_MS + 3 * 60_000,
+    `wait-for-ci's job limit (${waitJobMinutes} min) must exceed the wait script's deadline by at least 3 minutes`);
   assert.match(wait, /permissions:\n      actions: read/);
   assert.match(wait, /ref: \$\{\{ needs\.review-round\.outputs\.base_sha \}\}/);
   assert.match(wait, /persist-credentials: false/);
