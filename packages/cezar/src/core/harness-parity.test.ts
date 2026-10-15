@@ -592,6 +592,10 @@ const CONTROL_CRITERIA = [
   // hearsay-tools/cezarion#958: final autosave beside unrelated worktree process churn.
   { id: 'R67', scenario: 'baseline' },
   { id: 'R68', scenario: 'baseline' },
+  // hearsay-tools/cezarion#1004: harness-autosave-branch.test.ts, run-finalize and turn-end
+  // saves leave work on an agent-checked-out branch uncommitted and report it in the handoff.
+  { id: 'R77', scenario: 'baseline' },
+  { id: 'R78', scenario: 'baseline' },
   // hearsay-tools/cezarion#994: workflows/ci-wait-failure-parity.test.ts,
   // failed fresh/continued CI attempts retain history through scheduler recovery.
   { id: 'R72', scenario: 'provider-error' },

@@ -1419,6 +1419,15 @@ while an unrelated process keeps starting new processes in the worktree, as
 Squeal's Vitest workers do. The final autosave must commit, leave no cleanup
 evidence or hold, and leave the unrelated process running and unsignalled.
 
+R77–R78 (hearsay-tools/cezarion#1004, `core/harness-autosave-branch.test.ts`) check
+another branch out in an owned worker's worktree on every `HARNESS_ADAPTERS` native
+wire, leave a file, and settle the session: R77 on the initial run (`run finalize`),
+R78 on a Continue (`turn end`). The save commits nothing, the foreign branch tip does
+not move, and the handoff Progress log and a cockpit note both name the branch and
+the uncommitted path count. R78's first settle, still on the task branch, pins the
+other half: the commit is reported with its short sha, the branch and the
+`git reset --soft <sha>~1` fold-back command.
+
 Autosaves serialize per canonical worktree; Git auto-maintenance is disabled
 only for these commands. Holder discovery shares orphan recovery's cwd boundary,
 not OS containment. A new cwd holder counts only when it is Git's: each command
