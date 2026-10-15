@@ -293,6 +293,15 @@ test('renderTargetsReport prints unknown drift when the baseline is unknown', ()
   assert.doesNotMatch(md, /0 commits/);
 });
 
+test('renderTargetsReport shows churn that no non-merge commit accounts for, without flagging it', () => {
+  const r = report();
+  // A merge that resolved a conflict in the file: churn since the baseline, no non-merge commit.
+  r.sections[0].files[2].drift = { commits: 0, added: 1, deleted: 1 };
+  const md = renderTargetsReport(r);
+  assert.match(md, /^\| `docs\/a\\\|b\.md` \| M \| present \| {2}\| n\/a \| 0 commits, \+1 −1 \| clean \|$/m);
+  assert.match(md, /^\| `CHANGELOG\.md` \| M \| present \| {2}\| n\/a \| 0 commits \| conflict \|$/m, 'no churn, no numbers');
+});
+
 test('renderTargetsReport says why the dry run is unknown when HEAD could not be snapshotted', () => {
   assert.doesNotMatch(renderTargetsReport(report()), /^- Dry run:/m, 'a dry run that ran needs no header line');
   const r = report({ dryRunError: 'cannot snapshot HEAD: ENOSPC: no space left on device' });

@@ -192,9 +192,11 @@ function forkCell(fork) {
   return `absent, last touched by \`${fork.lastTouch.short}\` ${cell(fork.lastTouch.subject)}`;
 }
 
+/** Churn shows whenever there is any: it comes from the whole `baseline..HEAD` diff, so a merge
+ *  that resolved a conflict in the file has churn and no non-merge commit to count. */
 function driftCell(drift) {
   if (!drift) return 'unknown';
-  if (drift.commits === 0) return '0 commits';
+  if (drift.commits === 0 && drift.added === 0 && drift.deleted === 0) return '0 commits';
   return `${plural(drift.commits, 'commit')}, +${drift.added} −${drift.deleted}`;
 }
 
