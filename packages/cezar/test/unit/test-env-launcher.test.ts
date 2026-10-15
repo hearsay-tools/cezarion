@@ -389,9 +389,13 @@ test('ambient CEZ_* never reaches the shared server; --server-env does and keys 
   assert.deepEqual(JSON.parse(readFileSync(join(fixture.root, '.ai/qa/test-env.json'), 'utf8')).environment,
     { singleProject: true, serverEnv: 'CEZ_SINGLE_PROJECT=1' });
 
-  for (const bad of ['--server-env=CEZ_HOME=/elsewhere', '--server-env=PATH=/x', '--server-env=CEZ_X=a b']) {
-    const refused = spawnSync('/bin/sh', [up, bad], { encoding: 'utf8', env, timeout: 20_000 });
-    assert.equal(refused.status, 2, bad);
+  for (const bad of [
+    ['--server-env=CEZ_HOME=/elsewhere'], ['--server-env=PATH=/x'], ['--server-env=CEZ_X=a b'],
+    // Same name twice: a sorted key could not tell the two orders apart.
+    ['--server-env=CEZ_X=0', '--server-env=CEZ_X=1'],
+  ]) {
+    const refused = spawnSync('/bin/sh', [up, ...bad], { encoding: 'utf8', env, timeout: 20_000 });
+    assert.equal(refused.status, 2, bad.join(' '));
     assert.match(refused.stderr, /invalid --server-env/);
   }
   spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });

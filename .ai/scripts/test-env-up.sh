@@ -120,6 +120,11 @@ for arg in "$@"; do
         echo "invalid --server-env: $assignment (want CEZ_NAME=value, no whitespace; CEZ_DRY_RUN and CEZ_HOME are pinned)" >&2
         exit 2
       fi
+      # One assignment per name: the key below is sorted, so CEZ_X=0 CEZ_X=1 and its reverse
+      # would share a key while booting different values.
+      case " $SERVER_ENV " in
+        *" $name="*) echo "invalid --server-env: $name is given twice" >&2; exit 2 ;;
+      esac
       export "$assignment"
       SERVER_ENV="$SERVER_ENV $assignment" ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
