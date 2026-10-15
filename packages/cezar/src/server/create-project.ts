@@ -30,7 +30,10 @@ import { GH_CREDENTIAL_HELPER_CONFIG, cleanupCheckout, isValidCheckoutName, pars
  *
  * - Before it, any failure (or a client disconnect) removes the local folder.
  * - From it on, the request's abort signal is no longer passed down: the run
- *   finishes, so whether the remote exists is never unknown.
+ *   finishes rather than stopping somewhere cezar cannot report on.
+ * - If it FAILS, that is not proof nothing was created (a timeout or a dropped
+ *   connection can land after GitHub acted), so the name is checked again and
+ *   the error says whether the repository exists now.
  * - After it, a failed remote/credential/push step KEEPS the local repo and
  *   answers `ok` with a `warning` naming the repository and the commands that
  *   finish the job — the caller registers it. Deleting the folder would leave a
@@ -70,8 +73,10 @@ export const spawnCommandRunner: CommandRunner = (cmd, args, opts) =>
       cwd: opts.cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: COMMAND_TIMEOUT_MS,
-      // Non-interactive on purpose: a prompt nobody can see would pin the request.
-      env: { ...process.env, GH_PROMPT_DISABLED: '1', GIT_TERMINAL_PROMPT: '0' },
+      // Non-interactive on purpose: a prompt nobody can see would pin the request. GH_HOST is
+      // pinned because every URL, remote and command this flow names is github.com — an ambient
+      // GH_HOST (GitHub Enterprise) would list owners on, and create the repository on, another server.
+      env: { ...process.env, GH_PROMPT_DISABLED: '1', GIT_TERMINAL_PROMPT: '0', ...(cmd === 'gh' ? { GH_HOST: 'github.com' } : {}) },
     });
     const tail: string[] = [];
     let stdout = '';
@@ -285,7 +290,8 @@ export async function createProject(opts: CreateProjectOptions): Promise<CreateP
   };
   const credentialStep: FinishingStep = {
     label: 'configuring GitHub credentials',
-    command: "git config --local credential.https://github.com.helper '!gh auth git-credential'",
+    // Both operations, as run: a helper inherited from the global config must be cleared too.
+    command: GH_CREDENTIAL_HELPER_CONFIG.map((args) => ['git', 'config', '--local', ...args].map(shellQuote).join(' ')).join(' && '),
     run: async () => {
       // PR #968: route this repo's github.com HTTPS credentials through `gh`, as `checkout.ts` does.
       for (const args of GH_CREDENTIAL_HELPER_CONFIG) {
@@ -294,6 +300,19 @@ export async function createProject(opts: CreateProjectOptions): Promise<CreateP
       }
       return { ok: true, stdout: '' };
     },
+  };
+  /** `gh repo create` failed — which does not prove GitHub did nothing. Check the name again and
+   *  say what the user finds there; never adopt (or delete) a repository cezar cannot prove it made. */
+  const createFailed = async (error: string): Promise<CreateProjectFailure> => {
+    const recheck = await exec('gh', ['api', `repos/${slug}`, '--jq', '.full_name'], false, process.cwd());
+    if (recheck.ok) {
+      const recovery = template
+        ? `If this attempt created it, add it with Add project → Clone from GitHub (${slug}).`
+        : 'If this attempt created it, it is empty — delete it on GitHub and create the project again, or choose another name.';
+      return fail(500, `${error}\nThe private repository ${webUrl(slug!)} exists on GitHub now. ${recovery}`);
+    }
+    if (isNotFound(recheck.error)) return fail(500, error);
+    return fail(500, `${error}\nCould not check whether ${webUrl(slug!)} was created — look on GitHub before trying again.`);
   };
   const done = (kind: 'local' | 'github' | 'template', warning: string | undefined): CreateProjectResult => {
     emit({ phase: 'done', ...(warning ? { warning } : {}) });
@@ -304,9 +323,10 @@ export async function createProject(opts: CreateProjectOptions): Promise<CreateP
     if (opts.signal?.aborted) return fail(500, CANCELLED);
     say(`Creating private repository ${slug} from ${template}…`);
     const created = await exec('gh', ['repo', 'create', slug, '--private', '--template', template], false);
-    if (!created.ok) return fail(500, created.error);
+    if (!created.ok) return createFailed(created.error);
     // Template generation is asynchronous on GitHub: an immediate clone can
-    // land an empty repo. Wait until the first commit is visible.
+    // land an empty repo. Wait until the first commit is visible — and since
+    // the wait gives up eventually, the clone is checked for a commit below.
     const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     for (let attempt = 0; attempt < TEMPLATE_WAIT_ATTEMPTS; attempt++) {
       const probe = await exec('gh', ['api', `repos/${slug}/commits?per_page=1`, '--jq', 'length'], false);
@@ -324,6 +344,17 @@ export async function createProject(opts: CreateProjectOptions): Promise<CreateP
         ok: false,
         status: 500,
         error: `${cloned.error}\nThe private repository ${webUrl(slug)} was created on GitHub — add it with Add project → Clone from GitHub (${slug}).`,
+      });
+    }
+    // git clones an empty remote without complaint, and a project with no
+    // commit cannot host a task: that is a failed clone, not a success.
+    const head = await exec('git', ['rev-parse', '--verify', '--quiet', 'HEAD'], false);
+    if (!head.ok) {
+      await cleanupCheckout(root, target);
+      return refuse({
+        ok: false,
+        status: 500,
+        error: `GitHub had not finished generating ${slug} from ${template}, so the clone has no commit. The private repository ${webUrl(slug)} was created on GitHub — once it shows the template's files, add it with Add project → Clone from GitHub (${slug}).`,
       });
     }
     return done('template', await finishAfterCreate([credentialStep]));
@@ -348,7 +379,7 @@ export async function createProject(opts: CreateProjectOptions): Promise<CreateP
   if (opts.signal?.aborted) return fail(500, CANCELLED);
   say(`Creating private repository ${slug}…`);
   const created = await exec('gh', ['repo', 'create', slug, '--private'], false);
-  if (!created.ok) return fail(500, created.error);
+  if (!created.ok) return createFailed(created.error);
   // HTTPS remote + gh credential helper, exactly as a clone gets (#968); the
   // push then goes through plain git, proving the setup a task push relies on.
   const warning = await finishAfterCreate([
@@ -480,6 +511,11 @@ function cloneUrl(slug: string): string {
 
 function webUrl(slug: string): string {
   return `https://github.com/${slug}`;
+}
+
+/** POSIX single-quoting for a copyable command: bare when safe, `''` when empty. */
+function shellQuote(arg: string): string {
+  return /^[A-Za-z0-9_./:@=-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
 function firstLine(text: string): string {

@@ -57,13 +57,18 @@ ownership-token `mkdir` (an existing folder is a 409 and is never touched).
 | --- | --- |
 | Before `gh repo create` (including a closed tab) | Local folder removed; nothing exists anywhere |
 | Initial commit (usually no git identity) | Local folder removed; the error says how to set `user.name`/`user.email`. **Diverges from upstream**, which registered a repo without a base commit; a task worktree needs one |
-| `gh repo create` itself | Local folder removed; gh's message shown |
+| `gh repo create` itself | Local folder removed; gh's message shown. A failure does not prove GitHub did nothing (a timeout or dropped connection can land after it acted), so the name is checked again and the error says whether the repository exists now and how to recover |
 | After it: remote, credentials or push | **Kept and registered**; `warning` names the repository and every remaining command. The dialog stays open to show it. Deleting the folder would leave a GitHub name a retry could never take |
-| Template clone | Local folder removed (nothing to keep); the error names the repository and says to use **Clone from GitHub** |
+| Template clone, or a clone with no commit (generation outlasted the wait) | Local folder removed (nothing to keep); the error names the repository and says to use **Clone from GitHub** |
 | Registration | The repository is kept; the error names its path |
 
-From `gh repo create` on, the request's abort signal is no longer passed down, so the remote's
-existence is never unknown. cezar never deletes a GitHub repository.
+From `gh repo create` on, the request's abort signal is no longer passed down, so the run never
+stops somewhere it cannot report on. cezar never deletes a GitHub repository, and never adopts
+one it cannot prove it made.
+
+Every `gh` command runs with `GH_HOST=github.com`: every URL, remote and command this flow names
+is github.com, and an ambient `GH_HOST` (GitHub Enterprise) would otherwise list owners on, and
+create the repository on, another server.
 
 ## Hosted mode
 

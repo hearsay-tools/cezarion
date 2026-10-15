@@ -213,8 +213,8 @@ describe('createProject', () => {
   });
 
   for (const [step, failing, finish] of [
-    ['adding the origin remote', ['git', 'remote'], "git remote add origin https://github.com/acme/fresh.git && git config --local credential.https://github.com.helper '!gh auth git-credential' && git push -u origin main"],
-    ['configuring GitHub credentials', ['git', 'config'], "git config --local credential.https://github.com.helper '!gh auth git-credential' && git push -u origin main"],
+    ['adding the origin remote', ['git', 'remote'], "git remote add origin https://github.com/acme/fresh.git && git config --local --replace-all credential.https://github.com.helper '' && git config --local --add credential.https://github.com.helper '!gh auth git-credential' && git push -u origin main"],
+    ['configuring GitHub credentials', ['git', 'config'], "git config --local --replace-all credential.https://github.com.helper '' && git config --local --add credential.https://github.com.helper '!gh auth git-credential' && git push -u origin main"],
     ['pushing main', ['git', 'push'], 'git push -u origin main'],
   ] as const) {
     it(`${step} fails after the remote exists → kept, registered-ready, with a warning`, async () => {
@@ -259,6 +259,7 @@ describe('createProject', () => {
       ['gh', 'api', 'repos/acme/fresh/commits?per_page=1', '--jq', 'length'],
       ['gh', 'api', 'repos/acme/fresh/commits?per_page=1', '--jq', 'length'],
       ['gh', 'repo', 'clone', 'https://github.com/acme/fresh.git', target, '--', '--progress'],
+      ['git', 'rev-parse', '--verify', '--quiet', 'HEAD'],
       ['git', 'config', '--local', '--replace-all', 'credential.https://github.com.helper', ''],
       ['git', 'config', '--local', '--add', 'credential.https://github.com.helper', '!gh auth git-credential'],
     ]);
@@ -281,6 +282,78 @@ describe('createProject', () => {
         'fatal: could not read from remote\nThe private repository https://github.com/acme/fresh was created on GitHub — add it with Add project → Clone from GitHub (acme/fresh).',
     });
     expect(existsSync(join(root, 'fresh'))).toBe(false);
+  });
+
+  for (const [label, probe] of [
+    ['never shows a commit', { ok: true, stdout: '0\n' }],
+    ['cannot be probed', fail('gh: HTTP 502')],
+  ] as const) {
+    it(`template: a repository that ${label} and clones empty → cleaned up, named, nothing registered`, async () => {
+      const { run } = recordingRunner((c) => {
+        if (isCall(c, 'gh', 'api', 'repos/acme/fresh/commits?per_page=1')) return probe;
+        // git clones an empty remote happily; what it leaves has no HEAD.
+        if (isCall(c, 'git', 'rev-parse')) return fail('');
+        return undefined;
+      });
+      const slept: number[] = [];
+      const result = await createProject({
+        name: 'fresh',
+        github: { owner: 'acme', template: 'tmpl/x' },
+        projectsDir: root,
+        onProgress,
+        run,
+        sleep: async (ms) => void slept.push(ms),
+      });
+      expect(slept).toHaveLength(15);
+      expect(result).toMatchObject({
+        ok: false,
+        status: 500,
+        error:
+          "GitHub had not finished generating acme/fresh from tmpl/x, so the clone has no commit. The private repository https://github.com/acme/fresh was created on GitHub — once it shows the template's files, add it with Add project → Clone from GitHub (acme/fresh).",
+      });
+      expect(existsSync(join(root, 'fresh'))).toBe(false);
+      expect(events.at(-1)?.phase).toBe('error');
+    });
+  }
+
+  for (const [label, template, recovery] of [
+    ['empty', undefined, 'If this attempt created it, it is empty — delete it on GitHub and create the project again, or choose another name.'],
+    ['template', 'tmpl/x', 'If this attempt created it, add it with Add project → Clone from GitHub (acme/fresh).'],
+  ] as const) {
+    it(`${label}: gh repo create fails but the repository exists afterwards → the error says so`, async () => {
+      let existenceChecks = 0;
+      const { run } = recordingRunner((c) => {
+        if (isCall(c, 'gh', 'repo', 'create')) return fail('error connecting to api.github.com\nmore');
+        // Free at the pre-check, present after the failed create: the request reached GitHub.
+        if (isCall(c, 'gh', 'api', 'repos/acme/fresh')) {
+          return existenceChecks++ === 0 ? fail('gh: Not Found (HTTP 404)') : { ok: true, stdout: 'acme/fresh\n' };
+        }
+        return undefined;
+      });
+      const result = await createProject({ name: 'fresh', github: { owner: 'acme', template }, projectsDir: root, onProgress, run, sleep: async () => {} });
+      expect(result).toMatchObject({
+        ok: false,
+        status: 500,
+        error: `error connecting to api.github.com\nmore\nThe private repository https://github.com/acme/fresh exists on GitHub now. ${recovery}`,
+      });
+      expect(existsSync(join(root, 'fresh'))).toBe(false);
+    });
+  }
+
+  it('gh repo create fails and the existence re-check fails too → the error says to look on GitHub first', async () => {
+    let existenceChecks = 0;
+    const { run } = recordingRunner((c) => {
+      if (isCall(c, 'gh', 'repo', 'create')) return fail('context deadline exceeded');
+      if (isCall(c, 'gh', 'api', 'repos/acme/fresh')) {
+        return existenceChecks++ === 0 ? fail('gh: Not Found (HTTP 404)') : fail('error connecting to api.github.com');
+      }
+      return undefined;
+    });
+    const result = await createProject({ name: 'fresh', github: { owner: 'acme' }, projectsDir: root, onProgress, run });
+    expect(result).toMatchObject({
+      ok: false,
+      error: 'context deadline exceeded\nCould not check whether https://github.com/acme/fresh was created — look on GitHub before trying again.',
+    });
   });
 
   it('template: a failed credential helper after the clone keeps the project with a warning', async () => {
@@ -383,5 +456,28 @@ describe('listGithubOwners', () => {
       available: false,
       reason: expect.stringContaining('gh auth login'),
     });
+  });
+});
+
+describe('spawnCommandRunner', () => {
+  let bin: string;
+  const saved = { PATH: process.env.PATH, GH_HOST: process.env.GH_HOST };
+  beforeEach(() => {
+    bin = mkdtempSync(join(realpathSync(tmpdir()), 'cez-fake-gh-'));
+    writeFileSync(join(bin, 'gh'), '#!/bin/sh\nprintf "%s" "$GH_HOST"\n', { mode: 0o755 });
+  });
+  afterEach(() => {
+    process.env.PATH = saved.PATH;
+    if (saved.GH_HOST === undefined) delete process.env.GH_HOST;
+    else process.env.GH_HOST = saved.GH_HOST;
+    rmSync(bin, { recursive: true, force: true });
+  });
+
+  it('pins gh to github.com even when the environment points it at an Enterprise host', async () => {
+    // Every URL, remote and repair command this flow prints is github.com; an ambient GH_HOST
+    // would otherwise list owners, pre-check and CREATE on another server.
+    process.env.PATH = `${bin}:${saved.PATH ?? ''}`;
+    process.env.GH_HOST = 'ghe.example.com';
+    expect(await spawnCommandRunner('gh', ['api', 'user'], { cwd: bin })).toEqual({ ok: true, stdout: 'github.com' });
   });
 });
