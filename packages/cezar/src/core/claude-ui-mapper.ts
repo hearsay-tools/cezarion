@@ -31,7 +31,10 @@ import type {
   StopReason,
   TokenUsage,
   ToolLocation,
+  HookEntryKind,
+  HookStatus,
   UiEvent,
+  UiHookItem,
   UiMessageItem,
   UiReasoningItem,
   UiSessionStartedEvent,
@@ -39,6 +42,7 @@ import type {
   UiTurnCompletedEvent,
   UiUsageUpdatedEvent,
 } from './ui-events.ts';
+import { hookEventName, isVisibleHookItem } from './hook-items.ts';
 import { toolDisplay } from './tool-display.ts';
 
 export interface ClaudeUiMapperState {
@@ -112,7 +116,10 @@ export function mapClaudeMessage(msg: unknown, state: ClaudeUiMapperState): Clau
   if (!isRecord(msg)) return { events: [], state };
   switch (msg.type) {
     case 'system':
-      return msg.subtype === 'init' ? mapInit(msg, state) : { events: [], state };
+      if (msg.subtype === 'init') return mapInit(msg, state);
+      // `hook_started`/`hook_progress` render nothing: hooks are completion-only (#961).
+      if (msg.subtype === 'hook_response') return { events: mapHookResponse(msg), state };
+      return { events: [], state };
     case 'assistant':
       return mapAssistant(msg, state);
     case 'user':
@@ -144,6 +151,71 @@ function mapInit(msg: Record<string, unknown>, state: ClaudeUiMapperState): Clau
   // Flush turns that began before init (the seeded first user message).
   for (const turnId of state.pendingTurnIds) events.push({ type: 'turn.started', turnId });
   return { events, state: { ...state, sessionStarted: true, pendingTurnIds: [] } };
+}
+
+// ---- system/hook_response → hook item (#961) --------------------------------
+
+/**
+ * One finished hook run. Status comes from how it exited AND from what its JSON
+ * said: exit 2 is Claude's blocking error, and a hook can also block with exit 0
+ * through `decision: "block"`, `continue: false` or a `permissionDecision` deny.
+ * Entries are what the agent received, never the raw JSON wrapper.
+ */
+function mapHookResponse(msg: Record<string, unknown>): UiEvent[] {
+  const hookId = str(msg.hook_id);
+  const event = str(msg.hook_event);
+  if (hookId === undefined || event === undefined) return [];
+  const stdout = typeof msg.stdout === 'string' ? msg.stdout : '';
+  const stderr = typeof msg.stderr === 'string' ? msg.stderr : '';
+  const exitCode = num(msg.exit_code);
+  const parsed = parseHookJson(stdout);
+  const entries: UiHookItem['entries'] = [];
+  const add = (kind: HookEntryKind, text: unknown): void => {
+    if (typeof text === 'string' && text.trim() !== '') entries.push({ kind, text: text.trim() });
+  };
+  let blockedByOutput = false;
+  if (parsed) {
+    const specific = isRecord(parsed.hookSpecificOutput) ? parsed.hookSpecificOutput : {};
+    add('context', specific.additionalContext);
+    add('warning', parsed.systemMessage);
+    if (parsed.decision === 'block') { blockedByOutput = true; add('stop', parsed.reason); }
+    if (parsed.continue === false) blockedByOutput = true;
+    add('stop', parsed.stopReason);
+    if (specific.permissionDecision === 'deny') { blockedByOutput = true; add('stop', specific.permissionDecisionReason); }
+    if (specific.permissionDecision === 'ask') add('feedback', specific.permissionDecisionReason);
+  } else {
+    add('context', stdout);
+  }
+  let status: HookStatus = 'completed';
+  if (msg.outcome === 'cancelled') status = 'cancelled';
+  else if (exitCode === 2) status = 'blocked';
+  else if (msg.outcome === 'error' || (exitCode !== undefined && exitCode !== 0)) status = 'failed';
+  else if (blockedByOutput) status = 'blocked';
+  if (status !== 'completed') add('error', stderr);
+
+  const item: UiHookItem = { kind: 'hook', id: `hook_${hookId}`, event, status, entries };
+  const name = str(msg.hook_name);
+  if (name !== undefined && name !== event) item.name = name;
+  if (stdout.trim() !== '') item.stdout = stdout;
+  if (stderr.trim() !== '') item.stderr = stderr;
+  if (exitCode !== undefined) item.exitCode = exitCode;
+  const parentItemId = str(msg.parent_tool_use_id);
+  if (parentItemId !== undefined) item.parentItemId = parentItemId;
+  item.event = hookEventName(item.event);
+  return isVisibleHookItem(item) ? [{ type: 'item.completed', item }] : [];
+}
+
+/** A hook's stdout as a JSON object, or undefined when it is plain text (or JSON
+ *  that is not an object — `"text"`, `[1,2]`, `null` read as text). */
+function parseHookJson(stdout: string): Record<string, unknown> | undefined {
+  const trimmed = stdout.trim();
+  if (!trimmed.startsWith('{')) return undefined;
+  try {
+    const value: unknown = JSON.parse(trimmed);
+    return isRecord(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // ---- assistant blocks → message/reasoning/tool items -----------------------

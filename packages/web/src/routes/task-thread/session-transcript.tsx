@@ -532,6 +532,9 @@ function ThreadEntryRenderer({
       return <ProviderAuthRequiredCard incident={entry} />
     case 'preview-server':
       return <PreviewServerEntry entry={entry} />
+    case 'hook':
+      // Placeholder until the HookCard lands (#961, plan task 5): hooks stay hidden, as before.
+      return null
     default:
       return assertNever(entry)
   }

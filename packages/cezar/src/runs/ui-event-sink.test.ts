@@ -291,7 +291,7 @@ describe('live-vs-disk equivalence', () => {
         if (!item) continue;
         if (e.field === 'output' && item.kind === 'tool') {
           item.output = (item.output ?? '') + (e.delta as string);
-        } else if (e.field !== 'output' && item.kind !== 'tool') {
+        } else if (e.field !== 'output' && (item.kind === 'message' || item.kind === 'reasoning')) {
           item.text += e.delta as string;
         }
       }
@@ -379,6 +379,6 @@ describe('reasoning text survives persist → replay (#528)', () => {
     }
     const reasoning = replayed.get('item_rsn_1');
     expect(reasoning?.kind).toBe('reasoning');
-    expect(reasoning?.kind !== 'tool' && reasoning?.text).toBe('The session cookie is dropped on refresh.');
+    expect(reasoning?.kind === 'reasoning' && reasoning.text).toBe('The session cookie is dropped on refresh.');
   });
 });

@@ -755,7 +755,7 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
         const item = located.entry.entry
         if (event.field === 'output' && item.kind === 'tool') {
           item.output = (item.output ?? '') + delta
-        } else if (event.field !== 'output' && item.kind !== 'tool') {
+        } else if (event.field !== 'output' && (item.kind === 'message' || item.kind === 'reasoning')) {
           item.text += delta
         }
         break

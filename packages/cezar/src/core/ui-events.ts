@@ -197,7 +197,44 @@ export interface UiToolItem {
   parentItemId?: string;
 }
 
-export type UiItem = UiMessageItem | UiReasoningItem | UiToolItem;
+/** How a native hook run ended. `blocked` covers a blocking exit (claude exit 2) and a
+ *  hook whose output blocked the agent (`decision: "block"`, `continue: false`,
+ *  `permissionDecision: "deny"`, codex `blocked`); `cancelled` is claude `cancelled` and
+ *  codex `stopped`. There is no running phase: hooks are emitted on completion only. */
+export type HookStatus = 'completed' | 'failed' | 'blocked' | 'cancelled';
+
+/** The role of one piece of hook output — codex `HookOutputEntryKind` verbatim. */
+export type HookEntryKind = 'context' | 'feedback' | 'warning' | 'error' | 'stop';
+
+/**
+ * One native hook run that told the agent something, failed, was cancelled or
+ * blocked (#961). A silent successful run is never emitted.
+ * claude: `system/hook_response` (all events with `--include-hook-events`, else
+ * SessionStart/Setup only); codex: `hook/completed`. opencode, pi, omp and cursor
+ * run hooks in-process and report none.
+ *
+ * `entries` is what the agent received, extracted per backend (claude parses the
+ * hook's JSON stdout; codex sends typed entries); `stdout`/`stderr` stay raw.
+ */
+export interface UiHookItem {
+  kind: 'hook';
+  id: string;
+  /** Native event, PascalCase: `SessionStart`, `PreToolUse`, `Stop`. */
+  event: string;
+  /** Native label when richer than `event`: `SessionStart:startup`, `PreToolUse:Bash`. */
+  name?: string;
+  /** Where the hook is defined, when the wire says (codex `sourcePath`). */
+  source?: string;
+  status: HookStatus;
+  entries: Array<{ kind: HookEntryKind; text: string }>;
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number;
+  durationMs?: number;
+  parentItemId?: string;
+}
+
+export type UiItem = UiMessageItem | UiReasoningItem | UiToolItem | UiHookItem;
 
 /* ------------------------------------------------------------------ */
 /* Events — discriminated on `type`                                    */
