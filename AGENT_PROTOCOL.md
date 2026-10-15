@@ -106,6 +106,7 @@ interface AgentSession {
   readonly pid?: number;             // root of the run's process tree (resource telemetry, open-mercato/cezar#348)
   sendMessage(content: ContentBlock[]): boolean;  // human input; false when closed
   sendAgentMessage(content: ContentBlock[], inputIds?: readonly string[]): false | Promise<void>; // reserve now, harness acceptance later
+  respondPermission?(requestId: string, optionId: string): boolean; // explicit offered native approval choice
   discardQueuedMessages(): void;     // drop mid-turn follow-ups; CEZ:ASK park calls this
   holdsHumanInput(): boolean;        // true while a sendMessage follow-up is held undelivered (hearsay-tools/cezarion#486). Queueing runners drop on discardQueuedMessages and return false; write-through/steer wires report true until the harness settles that line (their discard is a no-op). A drain with no new turn notifies onAgentInputReady so run.ts re-settles.
   end(): void;                       // graceful: end input, SIGTERM→SIGKILL watchdog
@@ -482,8 +483,8 @@ type UiEvent =
   | UiItemUpdatedEvent       // 'item.updated'     — item (status flips, streamed snapshots)
   | UiItemCompletedEvent     // 'item.completed'   — item (final snapshot, safe to persist)
   | UiPlanUpdatedEvent       // 'plan.updated'     — entries: PlanEntry[] (FULL replacement, ACP semantics)
-  | UiPermissionRequestedEvent  // 'permission.requested' — RESERVED (types only; wired when approvals become optional)
-  | UiPermissionResolvedEvent   // 'permission.resolved'  — RESERVED
+  | UiPermissionRequestedEvent  // 'permission.requested' — native approval choices
+  | UiPermissionResolvedEvent   // 'permission.resolved' — human decision or expiry
   | UiAskRequestedEvent      // 'ask.requested'    — requestId, questions[] (AskUser; the cockpit renders option chips)
   | UiUsageUpdatedEvent      // 'usage.updated'    — usage: TokenUsage, costUsd? (cumulative-for-session)
   | UiImageEvent;            // 'image'            — itemId?, mediaType, data (base64; manager re-emits URL)
@@ -896,6 +897,15 @@ The integration verification ledger must record actual outcomes separately from
 this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
+
+**P1** (hearsay-tools/cezarion#1049) routes an approval from the native Codex
+mock through `RunManager`, the cockpit HTTP decision route, and the exact
+JSON-RPC reply. Decline and cancel both reach `turn/completed`, including in
+an autonomous run; ordinary user/agent text cannot grant permission. The
+exhaustive `RUNNER_IDS` / `HARNESS_ADAPTERS` row registers named executable
+exemptions for native wires that cannot carry Codex app-server approval
+requests and their `availableDecisions` union.
+
 
 **R72/R73** (hearsay-tools/cezarion#994), in `workflows/ci-wait-failure-parity.test.ts`,
 drive every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native provider-error
@@ -1957,6 +1967,49 @@ this reproduces the reported diagnostic pattern, not an independently captured
 enterprise-account trace. `codex-permissions.test.ts` additionally covers sandbox
 and profile requirements, read-only policy, unknown discovery, network restriction
 and mid-turn steering. Removing the startup selection must fail the managed cells.
+
+### Codex approval routing (hearsay-tools/cezarion#1049)
+
+A JSON-RPC message with a method and a numeric or string ID is a server
+request, never a notification. Cezar handles modern command execution, file
+change and permission approval requests as well as `item/tool/requestUserInput`.
+Every other server request receives `-32601` (method not supported); a malformed
+supported request receives `-32602`. Unsupported legacy approvals, dynamic tools,
+MCP elicitation, token refresh and attestation therefore cannot silently stall
+the transport. Notifications have no reply.
+
+Approvals emit the `permission.requested` event with an opaque, fresh
+request ID, item ID when present, a title, full action/scope details and offered
+options. Command `availableDecisions`, when supplied, is authoritative, including
+structured execution-policy and network-policy amendments. Absent lists use the
+native command/file decision defaults. Permission-profile requests instead grant
+only the requested profile with an explicit turn or session scope, or return an
+empty grant. Cezar never changes the administrator's approval policy.
+
+The cockpit shows the request under Needs you and sends only `{ requestId,
+optionId }` to `POST /api/v1/runs/:id/permissions` (or its project alias). The
+runner alone retains each exact native response and exposes the optional
+`AgentSession.respondPermission(requestId, optionId): boolean` seam. An unknown,
+expired or already answered request, or a non-offered option, is refused without
+writing a grant. Free text, agent messages, autonomous nudges and a worker's
+parent cannot answer approvals. Permission decisions never use Continue.
+
+Concurrent requests retain separate identities and resolve independently through
+`permission.resolved`. RunManager parks the run, releases its workspace slot,
+pauses autonomous input and the managed no-progress timer, and resumes only when
+all approvals have resolved. `hasPendingPermission` is an optional live-attention
+scalar on records and summaries; it grants nothing. Compact history retains
+outstanding permission events even outside the newest visible page.
+
+Turn completion/failure, `serverRequest/resolved`, Stop, session closure and
+transport loss retire pending approvals; writable transports receive a rejection
+before closing. Expiry disables the old card. Recovery creates a new native
+session generation and never replays a stored approval decision.
+
+The wire contract follows the [official app-server documentation](https://developers.openai.com/codex/app-server/)
+and Codex 0.160.1's generated JSON schemas. Focused native-runner tests pin
+structured decisions, malformed/unhandled requests, concurrent requests and
+teardown. P1 pins the manager/API path and terminal continuation.
 
 <a id="recoverable-opencode-skill-discovery-723"></a>
 

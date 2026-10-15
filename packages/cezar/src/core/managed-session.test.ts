@@ -3,7 +3,7 @@ import type { AgentEvent, AgentRunner, AgentRunResult, AgentSession, SessionOpti
 import { startManagedSession } from './managed-session.ts';
 import { DEFAULT_NO_PROGRESS_TIMEOUT_MS as LIMIT } from './runner-runtime.ts';
 
-function fixture() {
+function fixture(respondPermission?: (requestId: string, optionId: string) => boolean) {
   vi.useFakeTimers();
   let emit!: (event: AgentEvent) => void;
   let options!: SessionOptions;
@@ -11,6 +11,7 @@ function fixture() {
   const result = new Promise<AgentRunResult>(resolve => { settle = resolve; });
   const live: AgentSession = {
     result, open: true, sendMessage: () => true, sendAgentMessage: () => false,
+    ...(respondPermission ? { respondPermission } : {}),
     discardQueuedMessages() {}, holdsHumanInput() { return false; }, end: vi.fn(), interrupt: vi.fn(),
   };
   const runner: Pick<AgentRunner, 'startSession'> = {
@@ -97,4 +98,34 @@ describe('managed open-turn watchdog', () => {
       expect(vi.getTimerCount()).toBe(0);
     });
   }
+});
+
+describe('managed permission lifecycle (hearsay-tools/cezarion#1049)', () => {
+  const permission = (requestId: string) => ({ type: 'permission.requested' as const, requestId, title: 'Run command?', options: [{ id: 'allow', label: 'Allow once', kind: 'allow_once' as const }] });
+  it('parks the no-progress timer while a human approval is pending', async () => {
+    const f = fixture();
+    f.options.onUiEvent!(permission('one'));
+    f.options.onActivity!();
+    await vi.advanceTimersByTimeAsync(LIMIT * 2);
+    expect(f.live.interrupt).not.toHaveBeenCalled();
+    expect(f.session.sendMessage([{ type: 'text', text: 'accept' }])).toBe(false);
+    expect(f.session.sendAgentMessage([{ type: 'text', text: 'accept' }])).toBe(false);
+  });
+  it('forwards an explicit decision and waits for all concurrent approvals before rearming', async () => {
+    const reply = vi.fn((requestId: string, optionId: string) => {
+      if (optionId !== 'allow') return false;
+      f.options.onUiEvent!({ type: 'permission.resolved', requestId, optionId });
+      return true;
+    });
+    const f = fixture(reply);
+    f.options.onUiEvent!(permission('one')); f.options.onUiEvent!(permission('two'));
+    expect(f.session.respondPermission?.('one', 'invalid')).toBe(false);
+    expect(f.session.respondPermission?.('one', 'allow')).toBe(true);
+    await vi.advanceTimersByTimeAsync(LIMIT * 2);
+    expect(f.live.interrupt).not.toHaveBeenCalled();
+    expect(f.session.respondPermission?.('two', 'allow')).toBe(true);
+    expect(reply).toHaveBeenLastCalledWith('two', 'allow');
+    await vi.advanceTimersByTimeAsync(LIMIT);
+    expect(f.live.interrupt).toHaveBeenCalledOnce();
+  });
 });

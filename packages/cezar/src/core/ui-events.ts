@@ -22,6 +22,8 @@
  * Mirrored into `packages/api-client/src/protocol/`.
  */
 
+import type { PermissionOption as ContractPermissionOption, PermissionOptionKind as ContractPermissionOptionKind, PermissionRequest, PermissionResolution } from '@open-mercato/cezar-contract';
+
 /** The backend that produced a session — mirrors `RunnerId` in
  *  `agent-runner.ts` (kept structurally identical; a type-level test
  *  guards against drift so this module stays dependency-free). */
@@ -129,13 +131,8 @@ export interface ToolLocation {
 }
 
 /** A choice offered by a permission request (ACP option kinds). */
-export type PermissionOptionKind = 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always';
-
-export interface PermissionOption {
-  id: string;
-  label: string;
-  kind: PermissionOptionKind;
-}
+export type PermissionOptionKind = ContractPermissionOptionKind;
+export type PermissionOption = ContractPermissionOption;
 
 /* ------------------------------------------------------------------ */
 /* Items — ONE id-keyed stream for text, reasoning and tools           */
@@ -309,25 +306,13 @@ export interface UiPlanUpdatedEvent {
 
 /**
  * Native tool/permission approval, answered separately from ordinary input.
- * claude: `control_request can_use_tool`; codex: the per-item
- * `requestApproval` JSON-RPC requests; opencode: `permission.updated`.
+ * Codex emits per-item `requestApproval` JSON-RPC requests. Other runners
+ * retain their existing native permission handling.
  */
-export interface UiPermissionRequestedEvent {
-  type: 'permission.requested';
-  requestId: string;
-  itemId?: string;
-  title: string;
-  details?: string;
-  options: PermissionOption[];
-}
+export type UiPermissionRequestedEvent = PermissionRequest;
 
 /** A human response or expiry of a pending native approval. */
-export interface UiPermissionResolvedEvent {
-  type: 'permission.resolved';
-  requestId: string;
-  optionId?: string;
-  reason?: string;
-}
+export type UiPermissionResolvedEvent = PermissionResolution;
 
 /** One option in an AskUser question — see `src/core/ask.ts`. */
 export interface UiAskOption {

@@ -74,6 +74,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `serve-start-exit` | the backend server's first start exits before listening; the next start answers `baseline` |
  */
 export const SCENARIOS = [
+  'approval',
   'multi-pr-refs',
   'auto-resumed',
   'turn-messages',
@@ -239,6 +240,9 @@ export const ANSWER_DELIVERY_CRITERIA = [
   { id: 'I5', scenario: 'ask-snapshot', name: 'holds conversation input behind an unanswered or a newer question' },
 ] as const;
 
+/** Native Codex server-request approvals, exercised through the manager and HTTP route. */
+export const PERMISSION_CRITERIA = [{ id: 'P1', scenario: 'approval', name: 'routes explicit native approval decisions and settles the turn' }] as const;
+
 export interface HarnessAdapter {
   readonly backend: RunnerId;
   /** Every human ask wire this runner exposes; marker fallback when none exists. */
@@ -342,6 +346,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_CODEX_BIN',
     mockBin: CODEX_MOCK,
     scenarios: {
+      approval: 'mock:approval',
       'input-closed-live': 'mock:no-progress-input-closed',
       'multi-pr-refs': 'mock:multi-pr-refs',
       'turn-messages': 'mock:turn-messages',
@@ -598,6 +603,10 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
+  ...(['claude', 'opencode', 'pi', 'cursor', 'omp'] as const).map(backend => ({
+    criterion: 'P1', backend, kind: 'scenario-unconstructible' as const,
+    reason: `${backend}'s native wire does not carry Codex app-server JSON-RPC approval requests or its availableDecisions union. This cell checks that native request/response protocol; ordinary human questions remain covered by R26.`,
+  })),
   {
     criterion: 'S29', backend: 'cursor', kind: 'scenario-unconstructible',
     reason: 'Cursor print writes the prompt to stdin once per turn and then closes stdin. It refuses agent input while busy and queues human follow-ups for a new per-turn child, so this admitted-turn/live-followup cell has no writable input transport to close. ACP stdin behavior is a separate legacy transport, not the HARNESS_ADAPTERS cursor-print wire.',

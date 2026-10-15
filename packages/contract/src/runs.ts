@@ -283,6 +283,8 @@ export const runRecordSchema = z.object({
   /** Derived from valid human questions and matching delivery receipts in durable history.
    * List attention only; never authorization to deliver an answer or wake a worker. */
   hasPendingHumanAsk: z.boolean().optional(),
+  /** Live native approval attention; grants themselves never persist. */
+  hasPendingPermission: z.boolean().optional(),
   /** Exact ISO-8601 deadline for the next automatic monitoring check. */
   monitoringWakeAt: z.string().optional(),
   /** The current live monitoring epoch exhausted its 40 automatic checks. */
@@ -426,6 +428,7 @@ export const runSummarySchema = z.object({
   status: runStatusSchema,
   activity: runActivitySchema.optional(),
   hasPendingHumanAsk: runRecordSchema.shape.hasPendingHumanAsk,
+  hasPendingPermission: runRecordSchema.shape.hasPendingPermission,
   /** Only the relationship role and wait phase used by list attention. */
   delegation: runDelegationSummarySchema.optional(),
   createdAt: z.string(),
@@ -526,7 +529,7 @@ export type RunIndexEntry = z.infer<typeof runIndexEntrySchema>;
 
 /** Keys a summary copies verbatim from the record when the record has them. */
 const SUMMARY_OPTIONAL_KEYS = [
-  'titleSummary', 'titleOrigin', 'activity', 'hasPendingHumanAsk', 'finishedAt', 'seenAt',
+  'titleSummary', 'titleOrigin', 'activity', 'hasPendingHumanAsk', 'hasPendingPermission', 'finishedAt', 'seenAt',
   'autoResumeAt', 'branch', 'startedAt', 'pullRequestUrl', 'pullRequests', 'referencedPullRequestUrl', 'prNumber',
   'issueNumber', 'referencedIssueUrl', 'markerRefs', 'costUsd', 'peakRssBytes', 'peakProcCount',
   'groupId', 'variant', 'pinned', 'runner', 'model', 'notify', 'diffStat', 'inputTokens',
