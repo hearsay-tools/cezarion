@@ -322,6 +322,33 @@ switches on it can remount, losing an open dialog, popover, menu or focus
 `{ full: true }` exists for a page whose document really scrolls, and the seam refuses it
 while an overlay is open. `{ viewport: true }` on older call sites is now redundant.
 
+## Driving dnd-kit sortables (hearsay-tools/cezarion#1001)
+
+A dnd-kit sortable measures, attaches and announces asynchronously, and agent-browser sends a
+whole drag in a few milliseconds. The project rail's reorder (hearsay-tools/cezarion#438) took
+about 40 single-spec runs to stabilize against four races. The next sortable will meet the same
+four; each has a fix already in the tree:
+
+| Race | What happens | What handles it |
+| --- | --- | --- |
+| Drop targets measured only after the lift | dnd-kit's default `MeasuringStrategy.WhileDragging` measures droppables in an effect after the drag starts, so a quick pointer release or an early arrow key resolves to no target and the drop silently does nothing | Product side: the rail passes `measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}` (`RAIL_MEASURING` in [`project-rail.tsx`](../src/components/project-rail.tsx)). Spec side: [`AgentBrowser.dragHeld`](agent-browser.ts) waits for the drop to resolve before releasing |
+| The keyboard listener attaches late | `@dnd-kit/core` 6.3.1 `KeyboardSensor.attach` adds its keydown listener in a `setTimeout` after the lift. The row is marked lifted at once, so an arrow sent as soon as `data-dragging` appears is dropped | `liftWithSpace` in [`project-order.e2e.ts`](project-order.e2e.ts): press Space, then `waitForStable` on `data-dragging` with `holdMs: 150`. A held sample spans a poll interval, which the zero-delay timer has always run inside |
+| The live region holds only the newest announcement | The `DndLiveRegion-*` element renders one string that each announcement replaces, so the "Picked up …" text can be gone before a poll reads it and a wait on it never matches | Wait for the lift on `data-dragging` (above), and wait for each move on its OWN announcement (below), never on an earlier one |
+| Keys sent back to back lose moves | A second arrow lands before the sortable has processed the first move, and one step is lost | `pressAndHear` in [`project-order.e2e.ts`](project-order.e2e.ts): press one key, then wait until a `[id^="DndLiveRegion"]` element contains that key's announcement (`"<id> moved to position 3 of 4."`, `"<id> dropped at position 2 of 4."`) before the next |
+
+For a pointer drag use `dragHeld(from, to, { lifted, over })` instead of `dragTo`: it presses,
+moves ten pixels, waits for `lifted`, moves through the midpoint to the target, waits for `over`,
+then releases (in a `finally`, so a timed-out wait never leaves the button down). In the rail,
+`lifted` is the mark's `data-dragging` attribute and `over` is the live region announcing the
+target position, which proves the targets were measured. Take both points from one
+`waitForValue` that also checks the rows are laid out, as `project-order.e2e.ts` does.
+
+For a keyboard drag: focus the activator with `focusWithKeyboard`, `liftWithSpace`, one
+`pressAndHear` per arrow, and a final `pressAndHear` for the drop key. Then read the order from
+the DOM and from the server, not from the announcement. A sortable whose lift key is not Space,
+or whose announcements differ, needs its own pair of helpers in the same shape. If a second spec
+needs them, move them into a shared module rather than copying them.
+
 
 ## Browser-tab connection benchmark
 
