@@ -695,6 +695,15 @@ export function agentTmpDirMayExist(dataDir: string, runId: string): boolean {
  * trying them all is pure safety.
  */
 export function removeAgentTmpDir(dataDir: string, runId: string): void {
+  reapAgentTmpDir(dataDir, runId, false);
+}
+
+/** `spareUnclaimedShort` keeps a markerless short directory: the startup sweep
+ *  sets it when a kept run's `agentShortTmpDir` lands on the same name, because
+ *  that run may have created or adopted the directory and crashed before
+ *  publishing its marker (hearsay-tools/cezarion#1037) — it is that run's
+ *  Continue scratch, not this orphan's. */
+function reapAgentTmpDir(dataDir: string, runId: string, spareUnclaimedShort: boolean): void {
   if (!safeRunId(runId)) return;
   const local = agentTmpDir(dataDir, runId);
   try {
@@ -712,7 +721,7 @@ export function removeAgentTmpDir(dataDir: string, runId: string): void {
     const short = agentShortTmpDir(dataDir, runId);
     const claim = shortTmpDirClaim(short, runId);
     if (claim === 'unknown') return;
-    if (claim !== 'other') rmSync(short, { recursive: true, force: true });
+    if (claim === 'ours' || (claim === 'free' && !spareUnclaimedShort)) rmSync(short, { recursive: true, force: true });
     // The durable location and partial-removal receipts are last, never before a fallback.
     rmSync(local, { recursive: true, force: true });
   } catch {
@@ -748,6 +757,9 @@ export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>)
   const keep = new Set([...keepRunIds, ...workers]);
   const reaped: string[] = [];
   let entries: string[];
+  // Short names a kept run resolves to. Computed before the legacy loop, which
+  // must spare them too: a markerless one is a kept run's, mid-mint.
+  const claimedShort = new Set([...keep].filter(safeRunId).map((id) => basename(agentShortTmpDir(dataDir, id))));
   const root = agentTmpRoot(dataDir);
   if (existsSync(root)) {
     try {
@@ -761,7 +773,7 @@ export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>)
       if (keep.has(name) || !safeRunId(name)) continue;
       try {
         const locations = agentTmpDirLocations(dataDir, name).filter(dir => existsSync(dir));
-        removeAgentTmpDir(dataDir, name);
+        reapAgentTmpDir(dataDir, name, claimedShort.has(basename(agentShortTmpDir(dataDir, name))));
         reaped.push(...locations.filter(dir => !existsSync(dir)).map(dir => basename(dir)));
       } catch {
         // best-effort: a locked directory is retried on the next boot.
@@ -773,7 +785,6 @@ export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>)
   // that keeps a kept run's directory, and a colliding name's, alive.
   const shortRoot = join(dataDir, SHORT_TMP_ROOT);
   if (existsSync(shortRoot)) {
-    const claimedShort = new Set([...keep].filter(safeRunId).map((id) => basename(agentShortTmpDir(dataDir, id))));
     let shortEntries: string[];
     try {
       shortEntries = readdirSync(shortRoot, { withFileTypes: true })

@@ -233,6 +233,27 @@ describe('reaping the per-run temp directories (#785)', () => {
     expect(readFileSync(join(dir, 'note.txt'), 'utf8')).toBe('scratch Continue needs');
   });
 
+  // hearsay-tools/cezarion#1037: the legacy `tmp/` loop reaps an orphan whose
+  // id shares its first eight characters with a kept run. If that kept run
+  // created (or adopted) its short directory and crashed before publishing its
+  // marker, the markerless directory is the kept run's Continue scratch.
+  it('never reaps a kept run’s markerless short directory while sweeping a colliding legacy orphan', () => {
+    const kept = '0d0d0d0d-1111-4222-8333-444455556666';
+    const orphan = '0d0d0d0d-9999-4222-8333-444455556666';
+    mkdirSync(agentTmpDir(dataDir, orphan), { recursive: true });
+    writeFileSync(join(agentTmpDir(dataDir, orphan), 'note.txt'), 'orphan');
+    const short = agentShortTmpDir(dataDir, kept);
+    expect(short).toBe(agentShortTmpDir(dataDir, orphan));
+    mkdirSync(short, { recursive: true });
+    writeFileSync(join(short, 'note.txt'), 'scratch Continue needs');
+    expect(sweepAgentTmpDirs(dataDir, [kept])).toEqual([orphan]);
+    expect(existsSync(agentTmpDir(dataDir, orphan))).toBe(false);
+    expect(readFileSync(join(short, 'note.txt'), 'utf8')).toBe('scratch Continue needs');
+    // The kept run's next spawn claims it and keeps its files.
+    expect(agentTmpEnv(dataDir, kept, {}).TMPDIR).toBe(short);
+    expect(readFileSync(join(short, 'note.txt'), 'utf8')).toBe('scratch Continue needs');
+  });
+
   it('publishes the run marker whole and leaves no pending file behind', () => {
     const dir = agentTmpEnv(dataDir, 'whole-marker', {}).TMPDIR as string;
     expect(readdirSync(dir)).toEqual(['.cez-run']);
