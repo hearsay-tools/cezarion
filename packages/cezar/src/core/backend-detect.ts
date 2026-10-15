@@ -67,6 +67,12 @@ async function probeClaude(): Promise<BackendCheck> {
 }
 
 async function probeCodex(): Promise<BackendCheck> {
+  // Dry-run stands the runner up on its bundled mock, so report it present without
+  // spawning the real CLI: `opencode --version` alone cost ~1-3 s per dry-run boot
+  // under load (hearsay-tools/cezarion#1042).
+  if (process.env.CEZ_DRY_RUN === '1') {
+    return { name: 'codex', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
+  }
   const bin = process.env.CEZ_CODEX_BIN ?? 'codex';
   try {
     const { stdout } = await exec(bin, ['--version'], { timeout: 10_000 });
@@ -86,6 +92,10 @@ async function probeCodex(): Promise<BackendCheck> {
 }
 
 async function probeOpencode(): Promise<BackendCheck> {
+  // Dry-run stands the runner up on its bundled mock (hearsay-tools/cezarion#1042).
+  if (process.env.CEZ_DRY_RUN === '1') {
+    return { name: 'opencode', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
+  }
   const bin = process.env.CEZ_OPENCODE_BIN ?? 'opencode';
   try {
     const { stdout } = await exec(bin, ['--version'], { timeout: 10_000 });
