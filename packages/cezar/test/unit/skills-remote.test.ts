@@ -279,15 +279,20 @@ async function dirSkillFixture(t: { after: (fn: () => void) => void }) {
     if (existsSync(join(bare, 'HEAD'))) g(['fetch', '-q', 'origin', '+refs/heads/*:refs/heads/*'], bare);
     return g(['rev-parse', 'HEAD'], srcDir);
   };
+  /** The skill as a fresh listing reads it now — its body and `team.commit` at the current `main`. */
+  const list = async () => {
+    const skill = (await listRemoteSkills({ repo: srcDir, ref: 'main' })).find((s) => s.name === 'greeter');
+    assert.ok(skill, 'expected the directory skill to be listed');
+    return skill;
+  };
   const v1 = publish({ 'SKILL.md': 'say hi v1\n', 'references/notes.md': 'notes v1\n', 'references/old.md': 'old\n' });
   await ensureBareClone(srcDir);
-  const greeter = (await listRemoteSkills({ repo: srcDir, ref: 'main' })).find((s) => s.name === 'greeter');
-  assert.ok(greeter, 'expected the directory skill to be listed');
-  return { srcDir, repoRoot, greeter, publish, v1 };
+  const greeter = await list();
+  return { srcDir, repoRoot, greeter, publish, list, v1 };
 }
 
 test('materializeSkillDir marks its worktree copies and replaces a marked copy at a newer commit', async (t) => {
-  const { srcDir, repoRoot, greeter, publish, v1 } = await dirSkillFixture(t);
+  const { srcDir, repoRoot, greeter, publish, list, v1 } = await dirSkillFixture(t);
   assert.equal(await materializeSkillDir(repoRoot, greeter), true);
   for (const agentDir of ['.claude', '.agents', '.cursor']) {
     const marker = JSON.parse(readFileSync(join(repoRoot, agentDir, 'skills', 'greeter', TEAM_SKILL_MARKER), 'utf8'));
@@ -296,13 +301,39 @@ test('materializeSkillDir marks its worktree copies and replaces a marked copy a
 
   // Upstream drops references/old.md and changes SKILL.md.
   const v2 = publish({ 'SKILL.md': 'say hi v2\n', 'references/notes.md': 'notes v1\n' });
-  assert.equal(await materializeSkillDir(repoRoot, greeter), true);
+  assert.equal(await materializeSkillDir(repoRoot, await list()), true);
   for (const agentDir of ['.claude', '.agents', '.cursor']) {
     const dest = join(repoRoot, agentDir, 'skills', 'greeter');
     assert.equal(readFileSync(join(dest, 'SKILL.md'), 'utf8'), 'say hi v2\n');
     assert.equal(readFileSync(join(dest, 'references', 'notes.md'), 'utf8'), 'notes v1\n');
     assert.equal(existsSync(join(dest, 'references', 'old.md')), false, `${agentDir}: a file dropped upstream must not linger`);
     assert.equal(JSON.parse(readFileSync(join(dest, TEAM_SKILL_MARKER), 'utf8')).commit, v2);
+  }
+});
+
+test('materializeSkillDir replaces a marked copy whose file became a directory upstream', async (t) => {
+  const { repoRoot, publish, list } = await dirSkillFixture(t);
+  publish({ 'SKILL.md': 'say hi\n', 'references/guide': 'guide as one file\n' });
+  assert.equal(await materializeSkillDir(repoRoot, await list()), true);
+
+  publish({ 'SKILL.md': 'say hi\n', 'references/guide/new.md': 'guide split up\n' });
+  assert.equal(await materializeSkillDir(repoRoot, await list()), true);
+  for (const agentDir of ['.claude', '.agents', '.cursor']) {
+    const dest = join(repoRoot, agentDir, 'skills', 'greeter');
+    assert.equal(readFileSync(join(dest, 'references', 'guide', 'new.md'), 'utf8'), 'guide split up\n', agentDir);
+  }
+});
+
+test('materializeSkillDir replaces a marked copy whose directory became a file upstream', async (t) => {
+  const { repoRoot, publish, list } = await dirSkillFixture(t);
+  publish({ 'SKILL.md': 'say hi\n', 'references/guide/part.md': 'guide in parts\n' });
+  assert.equal(await materializeSkillDir(repoRoot, await list()), true);
+
+  publish({ 'SKILL.md': 'say hi\n', 'references/guide': 'guide merged back\n' });
+  assert.equal(await materializeSkillDir(repoRoot, await list()), true);
+  for (const agentDir of ['.claude', '.agents', '.cursor']) {
+    const dest = join(repoRoot, agentDir, 'skills', 'greeter');
+    assert.equal(readFileSync(join(dest, 'references', 'guide'), 'utf8'), 'guide merged back\n', agentDir);
   }
 });
 
@@ -318,6 +349,17 @@ test('materializeSkillDir overlays an unmarked existing dir without deleting or 
   assert.equal(existsSync(join(own, TEAM_SKILL_MARKER)), false, 'an unmarked dir must never become ours');
   // The destinations cezar created itself are still marked.
   assert.equal(existsSync(join(repoRoot, '.agents', 'skills', 'greeter', TEAM_SKILL_MARKER)), true);
+});
+
+test('materializeSkillDir never clears a type conflict inside an unmarked dir', async (t) => {
+  const { repoRoot, publish, list } = await dirSkillFixture(t);
+  const own = join(repoRoot, '.claude', 'skills', 'greeter');
+  mkdirSync(join(own, 'references'), { recursive: true });
+  writeFileSync(join(own, 'references', 'guide'), 'the user wrote this\n');
+
+  publish({ 'SKILL.md': 'say hi\n', 'references/guide/new.md': 'guide split up\n' });
+  await materializeSkillDir(repoRoot, await list()).catch(() => false);
+  assert.equal(readFileSync(join(own, 'references', 'guide'), 'utf8'), 'the user wrote this\n');
 });
 
 // ---- per-project team-skills cache isolation (multi-project workspace, 2.6) --

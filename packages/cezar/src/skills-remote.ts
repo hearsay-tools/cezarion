@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, readdir, readFile, rename, rm, rmdir, stat, unlink, utimes, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, rename, rm, rmdir, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { loadConfig, type SkillsRepoSource } from './config.ts';
@@ -396,6 +396,25 @@ async function writeSkillFiles(destDir: string, files: Map<string, string>): Pro
   }
 }
 
+/**
+ * Clear the paths in `dir` whose type the new files contradict: a directory
+ * where a file goes, and a non-directory where a file's parent directory goes.
+ * Without this an upstream `references/guide` that became `references/guide/x.md`
+ * (or back) fails the write with EEXIST/EISDIR. Only for a marked copy.
+ */
+async function clearTypeConflicts(dir: string, files: Map<string, string>): Promise<void> {
+  const kind = async (path: string) => (await lstat(path).catch(() => null))?.isDirectory();
+  for (const rel of files.keys()) {
+    const parts = rel.split('/');
+    for (let depth = 1; depth < parts.length; depth++) {
+      const ancestor = join(dir, ...parts.slice(0, depth));
+      if ((await kind(ancestor)) === false) await unlink(ancestor);
+    }
+    const target = join(dir, rel);
+    if (await kind(target)) await rm(target, { recursive: true, force: true });
+  }
+}
+
 /** Remove every entry under `dir` whose `/`-joined relative path is not kept, then empty directories. */
 async function removeUnlisted(dir: string, keep: Set<string>, prefix = ''): Promise<void> {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -427,7 +446,8 @@ async function removeUnlisted(dir: string, keep: Set<string>, prefix = ''): Prom
  *
  * A destination this function created carries `TEAM_SKILL_MARKER` and is
  * replaced on the next call, so files a newer commit dropped do not linger. The
- * marker is written before the files and stale files are removed after them,
+ * marker is written first, then paths whose file/directory type changed
+ * upstream are cleared, the files written, and stale files removed after them,
  * so a crash leaves a marked, complete-or-mixed copy the next run replaces —
  * never a half-empty one. An existing directory without the marker may be the
  * user's own: it is overlaid as before, never pruned, and never marked.
@@ -450,6 +470,7 @@ export async function materializeSkillDir(repoRoot: string, skill: Skill): Promi
     if (ours) {
       await mkdir(destDir, { recursive: true });
       await writeFile(join(destDir, TEAM_SKILL_MARKER), marker, 'utf8');
+      await clearTypeConflicts(destDir, files);
     }
     await writeSkillFiles(destDir, files);
     if (ours) await removeUnlisted(destDir, new Set([...files.keys(), TEAM_SKILL_MARKER]));
