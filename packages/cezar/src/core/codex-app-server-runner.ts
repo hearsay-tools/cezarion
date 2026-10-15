@@ -17,8 +17,10 @@ import type {
 import { isSignalTerminationExit, prependSystemPrompt, trackChildExit } from './agent-runner.ts';
 import { signalSession } from './session-process.ts';
 import {
+  afterExitDrain,
   AUTO_END_DELAY_MS,
   DEFAULT_RUN_TIMEOUT_MS,
+  exitDrainBudget,
   KILL_GRACE_MS,
 } from './runner-runtime.ts';
 import { parseAskRequest, type AskQuestion } from './ask.ts';
@@ -52,9 +54,6 @@ import {
 const STARTUP_TIMEOUT_MS = 60_000;
 // A retry episode gets one budget, regardless of error/warning frequency.
 const STREAM_RETRY_TIMEOUT_MS = 60_000;
-// After real process exit, allow buffered output to drain before closing pipes
-// a descendant may have inherited. This timer never proves termination.
-const EXIT_DRAIN_MS = 250;
 
 export interface CodexRunnerOptions {
   /** Override the binary name/path; defaults to `codex` on PATH. */
@@ -246,7 +245,9 @@ class CodexSession implements AgentSession {
     // Observe termination BEFORE bootstrap. Pending RPCs cannot own the only
     // path to discovering that their process has already gone (#493).
     const exited = waitForCodexAppServerExit(this.child);
-    let drainTimer: NodeJS.Timeout | undefined;
+    // After real process exit, allow buffered output to drain before closing pipes
+    // a descendant may have inherited. This drain never proves termination.
+    let cancelDrain: (() => void) | undefined;
     this.child.on('error', (err: NodeJS.ErrnoException) => {
       if (this.child.pid === undefined) {
         this.spawnFailed = codexSpawnError(err, bin);
@@ -263,8 +264,7 @@ class CodexSession implements AgentSession {
       // Do not discard final buffered text on a healthy exit. Revoke RPCs
       // immediately, then bound pipe draining ONLY after physical termination.
       this.rpc.close('codex app-server exited');
-      drainTimer = setTimeout(() => this.child.stdout.destroy(), EXIT_DRAIN_MS);
-      drainTimer.unref?.();
+      cancelDrain = afterExitDrain(() => this.child.stdout.destroy(), exitDrainBudget(code));
       if (this.stopKillTimer) clearTimeout(this.stopKillTimer);
     });
     const stderrChunks: string[] = [];
@@ -332,7 +332,7 @@ class CodexSession implements AgentSession {
         await reader;
       } finally {
         if (deadline) clearTimeout(deadline);
-        if (drainTimer) clearTimeout(drainTimer);
+        cancelDrain?.();
         if (this.stopKillTimer) clearTimeout(this.stopKillTimer);
         if (this.eofTermTimer) clearTimeout(this.eofTermTimer);
         if (this.eofKillTimer) clearTimeout(this.eofKillTimer);

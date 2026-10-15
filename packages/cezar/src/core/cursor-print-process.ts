@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
-import { EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS } from './runner-runtime.ts';
+import { finished } from 'node:stream/promises';
+import {
+  afterExitDrain, CRASH_EXIT_DRAIN_MS, EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS, isCrashExit,
+} from './runner-runtime.ts';
 
 export interface CursorPrintProcessOptions {
   bin: string;
@@ -71,14 +74,23 @@ export function startCursorPrintProcess(
   });
   const settled = (async () => {
     let failedExit = false;
-    try { failedExit = (await exit).code !== 0; } catch { failedExit = true; }
+    let exitCode: number | null = null;
+    try { exitCode = (await exit).code; failedExit = exitCode !== 0; } catch { failedExit = true; }
     if (termTimer) clearTimeout(termTimer);
     if (killTimer) clearTimeout(killTimer);
     // The leader can exit while a child retains stdout/stderr. End its owned
     // process group, allow buffered final frames, then force pipe closure.
     // On a crash, allow a short bounded drain for a descendant's final
-    // diagnostic before terminating the group (#499/S19).
-    if (failedExit) await new Promise(resolve => setTimeout(resolve, 200));
+    // diagnostic before terminating the group (#499/S19). It is the shared
+    // crash budget, counted so a host stall cannot spend it, and ends early
+    // once both pipes have closed (hearsay-tools/cezarion#887).
+    if (failedExit) {
+      await new Promise<void>(resolve => {
+        const cancel = afterExitDrain(resolve, isCrashExit(exitCode) ? CRASH_EXIT_DRAIN_MS : 200, true);
+        void Promise.all([child.stdout, child.stderr].map(stream => finished(stream, { cleanup: true }).catch(() => undefined)))
+          .then(() => { cancel(); resolve(); });
+      });
+    }
     signal('SIGTERM');
     const drainMs = options.drainMs ?? 250;
     await new Promise<void>(resolve => { drainTimer = setTimeout(resolve, drainMs); });

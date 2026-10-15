@@ -17,9 +17,11 @@ export function crashWithStderr(prompt, malformedFrame) {
   if (prompt.includes('mock:crash-stderr-held-pipe')) {
     // Start the drain deadline only after the descendant is ready. Otherwise
     // cold Node startup competes with the runner's bounded post-exit drain.
+    // The late line comes 250ms after the leader's exit, late enough that a
+    // runner that stops draining reliably fails S19 (hearsay-tools/cezarion#887).
     const child = spawn(process.execPath, ['-e', `
       process.on('disconnect', () => {
-        setTimeout(() => process.stderr.write('late buffered crash diagnostic\\n'), 40);
+        setTimeout(() => process.stderr.write('late buffered crash diagnostic\\n'), 250);
         setTimeout(() => {}, 5000);
       });
       process.send('ready');
