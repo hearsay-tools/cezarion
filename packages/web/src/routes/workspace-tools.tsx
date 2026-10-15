@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useHealth, useProjects } from '@/api/queries'
 import { AddProjectDialog } from '@/components/add-project-dialog'
 import { CloneProjectDialog } from '@/components/clone-project-dialog'
+import { CreateProjectDialog } from '@/components/create-project-dialog'
 import { StatusDot } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toaster'
@@ -14,7 +15,7 @@ export function WorkspaceToolsRoute() {
   const health = useHealth()
   const projects = useProjects()
   const repository = githubRepoBase(health.data?.repo?.remote)
-  const [projectAction, setProjectAction] = useState<'local' | 'clone' | null>(null)
+  const [projectAction, setProjectAction] = useState<'new' | 'local' | 'clone' | null>(null)
   const [copying, setCopying] = useState(false)
   const copyDiagnostics = async () => {
     if (!health.data || copying) return
@@ -34,13 +35,14 @@ export function WorkspaceToolsRoute() {
       <h1 className="text-[28px] font-normal leading-[1.5] max-md:text-[24px]">Workspace tools</h1>
       {health.data?.capabilities.singleProject !== true ? <section className="space-y-4 rounded-xl border border-border bg-card p-6 max-md:p-4" aria-labelledby="add-project-heading">
         <h2 id="add-project-heading" className="text-lg font-normal leading-[1.5]">Add project</h2>
-        <p className="text-[13px] leading-[1.5] text-muted-foreground">Open an existing local folder or clone a GitHub repository.</p>
+        <p className="text-[13px] leading-[1.5] text-muted-foreground">Start a new repository, open an existing local folder, or clone a GitHub repository.</p>
         <dl className="space-y-4 text-[13px] leading-[1.5] text-muted-foreground">
           {health.data?.repoRoot ? <div className="flex flex-wrap gap-x-3"><dt>Local folder</dt><dd className="min-w-0 break-all">{health.data.repo?.root ?? health.data.repoRoot}</dd></div> : null}
           {repository ? <div className="flex flex-wrap gap-x-3"><dt>Repository</dt><dd className="min-w-0 break-all">{repository.replace(/^https:\/\//, '')}</dd></div> : null}
           {projects.data?.projectsDir ? <div className="flex flex-wrap gap-x-3"><dt>Checkout folder</dt><dd className="min-w-0 break-all">{projects.data.projectsDir}</dd></div> : null}
         </dl>
         <div className="flex flex-wrap gap-3">
+          <Button variant="outline" className="h-10 rounded-lg px-[15px] text-xs font-normal leading-[18px]" onClick={() => setProjectAction('new')}>New project</Button>
           <Button variant="outline" className="h-10 rounded-lg px-[15px] text-xs font-normal leading-[18px]" onClick={() => setProjectAction('local')}>Open local folder</Button>
           <Button variant="outline" className="h-10 rounded-lg px-[15px] text-xs font-normal leading-[18px]" onClick={() => setProjectAction('clone')}>Clone from GitHub</Button>
         </div>
@@ -76,6 +78,7 @@ export function WorkspaceToolsRoute() {
           <Button variant="outline" className="h-10 rounded-lg px-[15px] text-xs font-normal leading-[18px]" disabled={!health.data || copying} onClick={() => void copyDiagnostics()}>{copying ? 'Copying…' : 'Copy diagnostics'}</Button>
         </div>
       </section>
+      {projectAction === 'new' ? <CreateProjectDialog open onOpenChange={(open) => { if (!open) setProjectAction(null) }} /> : null}
       {projectAction === 'local' ? <AddProjectDialog open onOpenChange={(open) => { if (!open) setProjectAction(null) }} /> : null}
       {projectAction === 'clone' ? <CloneProjectDialog open onOpenChange={(open) => { if (!open) setProjectAction(null) }} /> : null}
     </div>
