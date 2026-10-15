@@ -142,6 +142,16 @@ describe('Hand off to webhook', () => {
     browser.waitForFunction(`document.querySelector(${JSON.stringify(chip)}) !== null`)
     const glyph = `document.querySelector('[data-run-id="desktop"] [data-slot="task-row-notify"]')`
     browser.waitForFunction(`${glyph} !== null`)
+    // With the list response held below, the only path that clears the glyph is the stop's `run`
+    // event on the workspace stream. The chip and glyph above come from REST, so they do not show
+    // the stream is attached: a stop clicked before the first post-open `ping` (written only after
+    // the server's store listeners attach, #795) is never delivered, and the barrier's recovery
+    // GET is the off-state response this test holds, so the glyph can never clear
+    // (hearsay-tools/cezarion#1069). Evidence: guard-full bundle task-handoff/keeps-the-live-glyph-
+    // when-an-older-stop-notifying-list-response-arrives-after-re-1 (POST recorded in the
+    // timeline, sidebar glyph still shown, probe on the wait below). Reproduced 3/3 by delaying
+    // the built server's workspace-events attach 4 s behind E2E_DELAY_MS; 0/3 with this wait.
+    browser.waitForFunction(`window.__cezLive === true`)
     // Hold only the real server's off-state list response, leaving POST, SSE and detail native.
     // This is a route-response fixture, not a rewrite of any React-owned node.
     browser.evaluate(`(() => {
