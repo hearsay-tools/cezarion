@@ -53,7 +53,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { checkpointFallbackRemoval, fallbackIdentity, readFallbackRemovals, type FallbackRemoval } from './agent-tmpdir-removal.ts';
 import { workerEvidenceRunIds } from './worker-execution.ts';
 import type { Dirent } from 'node:fs';
-import { existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 
@@ -226,7 +226,9 @@ export const MAX_SOCKET_SAFE_DIR_LENGTH = DARWIN_UNIX_SOCKET_MAX - CHROME_SINGLE
 /** The pre-hearsay-tools/cezarion#1022 ceiling. Only reading a recorded fallback
  *  pointer still accepts it: a run that recorded one under the old ceiling must
  *  keep its scratch on Continue and must still be reaped, and the digest
- *  equality check — not the length — is what validates the pointer. */
+ *  equality check — not the length — is what validates the pointer. Such a
+ *  pointer is never handed to an agent again: `migrateLegacyFallback` moves its
+ *  scratch to a directory inside the new budget first. */
 const LEGACY_MAX_SOCKET_SAFE_DIR_LENGTH = 78;
 
 function fitsSocketBudget(path: string): boolean {
@@ -331,8 +333,15 @@ function fallbackTmpDir(root: string, dataDir: string, runId: string): string {
  * the task's files. Only a digest-named absolute path is accepted on read. */
 const LOCATION_FILE = '.cez-fallback';
 
-function recordedFallback(dataDir: string, runId: string): string | undefined {
-  const marker = join(agentTmpDir(dataDir, runId), LOCATION_FILE);
+/** The location a pointer migration is moving scratch AWAY from
+ *  (hearsay-tools/cezarion#1037). It exists only between rewriting
+ *  `.cez-fallback` and finishing the move, so a crash in that window still
+ *  leaves the old directory in every holder scan, reap and sweep — the old root
+ *  may be one no later env lists. */
+const PREVIOUS_LOCATION_FILE = '.cez-fallback-previous';
+
+function recordedFallback(dataDir: string, runId: string, file = LOCATION_FILE): string | undefined {
+  const marker = join(agentTmpDir(dataDir, runId), file);
   let dir: string;
   try {
     dir = readFileSync(marker, 'utf8');
@@ -345,6 +354,75 @@ function recordedFallback(dataDir: string, runId: string): string | undefined {
     throw new AgentTempDirError(marker, new Error('invalid recorded fallback directory'));
   }
   return dir;
+}
+
+/** Replace a location record whole: write a private name, then `rename` over
+ *  the record, so a crash leaves the old pointer or the new one, never a torn
+ *  one. The private name never follows an existing file (`wx`). */
+function rewriteLocation(dataDir: string, runId: string, file: string, dir: string): void {
+  const target = join(agentTmpDir(dataDir, runId), file);
+  const pending = `${target}.${randomUUID()}.tmp`;
+  writeFileSync(pending, dir, { encoding: 'utf8', flag: 'wx' });
+  try {
+    renameSync(pending, target);
+  } finally {
+    rmSync(pending, { force: true });
+  }
+}
+
+/**
+ * Move the scratch of a fallback recorded under the pre-hearsay-tools/cezarion#1022
+ * ceiling to `dir`, the socket-safe directory resolution now picks
+ * (hearsay-tools/cezarion#1037). Handing the old path back would keep a 59–78
+ * byte TMPDIR that Chromium's nested singleton socket cannot bind under.
+ *
+ * Order is what makes a crash safe, and every re-run converges:
+ *   1. record the old location in `.cez-fallback-previous`, so it stays in
+ *      scans and reaps whatever the env is later;
+ *   2. point `.cez-fallback` at `dir`;
+ *   3. move the files — `rename` when `dir` does not exist yet, otherwise (or on
+ *      `EXDEV`, the usual case across temp roots) copy into `dir` and remove the
+ *      old directory under a removal receipt, so a removal cut short after the
+ *      owner marker went still proves the directory ours on retry;
+ *   4. drop `.cez-fallback-previous`.
+ * The old directory is moved only when its `.cez-owner` marker is this
+ * dataDir's (or a receipt proves it was); anything else refuses the spawn.
+ */
+function migrateLegacyFallback(dataDir: string, runId: string, dir: string): void {
+  const recorded = recordedFallback(dataDir, runId);
+  const from = recordedFallback(dataDir, runId, PREVIOUS_LOCATION_FILE)
+    ?? (recorded !== undefined && recorded !== dir ? recorded : undefined);
+  if (from === undefined) return;
+  const local = agentTmpDir(dataDir, runId);
+  if (from !== dir) {
+    rewriteLocation(dataDir, runId, PREVIOUS_LOCATION_FILE, from);
+    if (recorded !== dir) rewriteLocation(dataDir, runId, LOCATION_FILE, dir);
+    const removals = readFallbackRemovals(local);
+    if (!fallbackOwnedOrAbsent(dataDir, from, removals)) {
+      throw new AgentTempDirError(from, new Error('ownership marker was replaced — remove the directory to re-mint it'));
+    }
+    if (existsSync(from)) moveFallbackScratch(dataDir, local, from, dir, removals);
+  }
+  rmSync(join(local, PREVIOUS_LOCATION_FILE), { force: true });
+}
+
+function moveFallbackScratch(dataDir: string, local: string, from: string, to: string, removals: FallbackRemoval[]): void {
+  if (!existsSync(to)) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err;
+    }
+  }
+  mkdirSync(to, { recursive: true, mode: 0o700 });
+  // The destination keeps (or gets) its own marker; the source's is never
+  // copied over it, so a foreign marker still refuses instead of being replaced.
+  writeOwnerMarker(to, dataDir);
+  const marker = join(from, OWNER_FILE);
+  cpSync(from, to, { recursive: true, force: true, verbatimSymlinks: true, preserveTimestamps: true, filter: (src) => src !== marker });
+  checkpointFallbackRemoval(local, from, removals);
+  rmSync(from, { recursive: true, force: true });
 }
 
 function recordFallback(dataDir: string, runId: string, dir: string): void {
@@ -374,23 +452,34 @@ export function firstSocketSafeDir(paths: readonly string[]): string | undefined
  * claims it, and otherwise a short
  * digest-named directory under the first OS temp root whose candidate fits —
  * the env-honouring root first, the platform default when `TMPDIR` itself is
- * too deep (#387, #440). A recorded location wins across host-env changes.
+ * too deep (#387, #440). A recorded location wins across host-env changes
+ * while it fits the budget; one recorded under the pre-#1022 ceiling resolves
+ * to the fallback that fits now, where `agentTmpEnv` moves its scratch.
  * Read-only resolution — nothing is created, nothing is
  * probed; `agentTmpEnv` owns the side effects.
  */
 export function resolveAgentTmpDir(dataDir: string, runId: string): string {
   const recorded = recordedFallback(dataDir, runId);
-  if (recorded) return recorded;
+  // A pointer recorded under the pre-#1022 ceiling is not reused: resolution
+  // picks a fallback that fits, and `agentTmpEnv` moves the scratch there.
+  if (recorded && fitsSocketBudget(recorded)) return recorded;
   // An id that is not a plain identifier never names a repo-local directory;
   // the digest-named fallback is safe for any input.
   const local = safeRunId(runId) ? agentShortTmpDir(dataDir, runId) : agentTmpDir(dataDir, runId);
-  if (safeRunId(runId) && fitsSocketBudget(local)) {
+  // A legacy pointer's scratch moves to another fallback, never into the
+  // repo-local directory: the control directory keeps owning its location.
+  if (!recorded && safeRunId(runId) && fitsSocketBudget(local)) {
     const claim = shortTmpDirClaim(local, runId);
     if (claim === 'free' || claim === 'ours') return local;
   }
   const candidates = osTempRoots().map((root) => fallbackTmpDir(root, dataDir, runId));
   const fallback = firstSocketSafeDir(candidates);
   if (fallback) return fallback;
+  if (recorded) {
+    throw new AgentTempDirError(recorded, new Error(
+      `recorded fallback is past the ${MAX_SOCKET_SAFE_DIR_LENGTH}-byte unix socket budget and no OS temp root has a candidate that fits`,
+    ));
+  }
   // Nothing fits — every root, the platform default included, has a candidate
   // past the cap. Minting any would hand the agent a temp directory that
   // cannot serve unix sockets: the silent failure #387 is about. Fail the
@@ -507,6 +596,7 @@ export function agentTmpEnv(
       // In the shared OS root the directory carries its ownership marker, so a
       // startup sweep from another project can tell it apart from stale
       // scratch (the sweep skips anything whose marker is missing or foreign).
+      migrateLegacyFallback(dataDir, runId, dir);
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       writeOwnerMarker(dir, dataDir);
       recordFallback(dataDir, runId, dir);
@@ -524,10 +614,12 @@ export function agentTmpEnv(
 function fallbackLocations(dataDir: string, runId: string): { paths: string[]; removals: FallbackRemoval[]; complete: boolean } {
   const paths = new Set(osTempRoots().map(root => fallbackTmpDir(root, dataDir, runId)));
   let complete = true, removals: FallbackRemoval[] = [];
-  try {
-    const recorded = recordedFallback(dataDir, runId);
-    if (recorded) paths.add(recorded);
-  } catch { complete = false; }
+  for (const file of [LOCATION_FILE, PREVIOUS_LOCATION_FILE]) {
+    try {
+      const recorded = recordedFallback(dataDir, runId, file);
+      if (recorded) paths.add(recorded);
+    } catch { complete = false; }
+  }
   // Independent evidence: a damaged receipt must never discard a readable pointer (#738).
   try {
     removals = readFallbackRemovals(agentTmpDir(dataDir, runId));

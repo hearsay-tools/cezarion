@@ -33,6 +33,22 @@ import {
 } from './agent-tmpdir.ts';
 import { seedRuns } from './run-store.testkit.ts';
 
+/** Lets a test make `renameSync` of one path fail as a cross-filesystem move
+ *  would (`EXDEV`); every other call passes through untouched. */
+const fsFaults = vi.hoisted(() => ({ exdevFrom: undefined as string | undefined }));
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    renameSync: (from: import('node:fs').PathLike, to: import('node:fs').PathLike) => {
+      if (fsFaults.exdevFrom !== undefined && String(from) === fsFaults.exdevFrom) {
+        throw Object.assign(new Error(`EXDEV: cross-device link not permitted, rename '${String(from)}'`), { code: 'EXDEV' });
+      }
+      return actual.renameSync(from, to);
+    },
+  };
+});
+
 /**
  * #785: every agent shared the host's temp directory, and when that directory
  * stopped accepting writes the Claude backend's output capture silently
@@ -430,28 +446,124 @@ describe('socket-safe temp directory length (#387)', () => {
     expect(Buffer.byteLength(dir) + CHROME_SINGLETON_OVERHEAD).toBeLessThanOrEqual(DARWIN_UNIX_SOCKET_MAX);
   });
 
-  // A run that recorded a fallback under the pre-#1022 78-byte ceiling must
-  // keep it on Continue and still be reaped — not fail its spawn on a pointer
-  // the new, tighter ceiling would never have written.
-  it('honours a fallback pointer recorded under the pre-#1022 ceiling', () => {
-    const data = deepDataDir();
-    const runId = 'legacy-fallback-run';
+  /** A fallback recorded under the pre-#1022 78-byte ceiling: a 75-byte
+   *  digest-named directory under a long root, owned by `data`, holding a note,
+   *  and the `.cez-fallback` pointer naming it. */
+  const legacyFallback = (data: string, runId: string): { longRoot: string; recorded: string } => {
     const longRoot = join(osRoot(), 'l'.repeat(75 - osRoot().length - '/cez-agent-'.length - 12 - 1));
     const digest = createHash('sha256').update(`${data}:${runId}`).digest('hex').slice(0, 12);
     const recorded = join(longRoot, `cez-agent-${digest}`);
     expect(Buffer.byteLength(recorded)).toBe(75);
+    mkdirSync(recorded, { recursive: true, mode: 0o700 });
+    writeFileSync(join(recorded, '.cez-owner'),
+      createHash('sha256').update(`cez-agent-owner:${data}`).digest('hex').slice(0, 16));
+    writeFileSync(join(recorded, 'note.txt'), 'keep');
+    mkdirSync(join(recorded, 'nested'));
+    writeFileSync(join(recorded, 'nested', 'deep.txt'), 'deep');
+    mkdirSync(agentTmpDir(data, runId), { recursive: true });
+    writeFileSync(join(agentTmpDir(data, runId), '.cez-fallback'), recorded);
+    return { longRoot, recorded };
+  };
+
+  /** The migrated directory: socket-safe, same digest name, scratch intact,
+   *  pointer rewritten, old directory and in-flight record gone. */
+  const expectMigrated = (data: string, runId: string, recorded: string, tmp: string): void => {
+    expect(Buffer.byteLength(tmp) + CHROME_SINGLETON_OVERHEAD).toBeLessThanOrEqual(DARWIN_UNIX_SOCKET_MAX);
+    expect(basename(tmp)).toBe(basename(recorded));
+    expect(readFileSync(join(tmp, 'note.txt'), 'utf8')).toBe('keep');
+    expect(readFileSync(join(tmp, 'nested', 'deep.txt'), 'utf8')).toBe('deep');
+    expect(readFileSync(join(tmp, '.cez-owner'), 'utf8')).toBe(
+      createHash('sha256').update(`cez-agent-owner:${data}`).digest('hex').slice(0, 16));
+    expect(existsSync(recorded)).toBe(false);
+    expect(readFileSync(join(agentTmpDir(data, runId), '.cez-fallback'), 'utf8')).toBe(tmp);
+    expect(existsSync(join(agentTmpDir(data, runId), '.cez-fallback-previous'))).toBe(false);
+  };
+
+  // hearsay-tools/cezarion#1037: a run that recorded a fallback under the
+  // pre-#1022 78-byte ceiling must keep its scratch on Continue and still be
+  // reaped — but must not be handed that path again, because a 59–78 byte
+  // TMPDIR plus Chromium's 45-byte nested singleton is past sun_path. The
+  // scratch moves to the fallback that fits now.
+  it('moves a fallback recorded under the pre-#1022 ceiling into the new budget, keeping its scratch', () => {
+    const data = deepDataDir();
+    const runId = 'legacy-fallback-run';
+    const { longRoot, recorded } = legacyFallback(data, runId);
     try {
-      mkdirSync(recorded, { recursive: true, mode: 0o700 });
-      writeFileSync(join(recorded, '.cez-owner'),
-        createHash('sha256').update(`cez-agent-owner:${data}`).digest('hex').slice(0, 16));
-      writeFileSync(join(recorded, 'note.txt'), 'keep');
-      mkdirSync(agentTmpDir(data, runId), { recursive: true });
-      writeFileSync(join(agentTmpDir(data, runId), '.cez-fallback'), recorded);
-      expect(agentTmpEnv(data, runId, {}).TMPDIR).toBe(recorded);
-      expect(readFileSync(join(recorded, 'note.txt'), 'utf8')).toBe('keep');
+      const tmp = agentTmpEnv(data, runId, {}).TMPDIR as string;
+      minted.push(tmp);
+      expectMigrated(data, runId, recorded, tmp);
+      // A later spawn reuses the migrated directory as it is.
+      expect(agentTmpEnv(data, runId, {}).TMPDIR).toBe(tmp);
       removeAgentTmpDir(data, runId);
-      expect(existsSync(recorded)).toBe(false);
+      expect(existsSync(tmp)).toBe(false);
       expect(existsSync(agentTmpDir(data, runId))).toBe(false);
+    } finally {
+      rmSync(longRoot, { recursive: true, force: true });
+    }
+  });
+
+  // The usual real case: the legacy root and the new one are different
+  // filesystems, so `rename` fails with EXDEV and the scratch is copied.
+  it('copies a legacy fallback across filesystems when rename reports EXDEV', () => {
+    const data = deepDataDir();
+    const runId = 'legacy-exdev-run';
+    const { longRoot, recorded } = legacyFallback(data, runId);
+    fsFaults.exdevFrom = recorded;
+    try {
+      const tmp = agentTmpEnv(data, runId, {}).TMPDIR as string;
+      minted.push(tmp);
+      expectMigrated(data, runId, recorded, tmp);
+      // The copy path ran: the old directory went under a removal receipt.
+      expect(existsSync(join(agentTmpDir(data, runId), '.cez-fallback-removal.json'))).toBe(true);
+      sweepAgentTmpDirs(data, []);
+      expect(existsSync(tmp)).toBe(false);
+      expect(existsSync(agentTmpDir(data, runId))).toBe(false);
+    } finally {
+      fsFaults.exdevFrom = undefined;
+      rmSync(longRoot, { recursive: true, force: true });
+    }
+  });
+
+  // A crash after the pointer was rewritten and part of the copy landed: the
+  // old directory is still listed (its root is one no env names), nothing is
+  // lost, and the next spawn finishes the move.
+  it('converges after a crash mid-migration without losing scratch', () => {
+    const data = deepDataDir();
+    const runId = 'legacy-crash-run';
+    const { longRoot, recorded } = legacyFallback(data, runId);
+    fsFaults.exdevFrom = recorded;
+    try {
+      const target = resolveAgentTmpDir(data, runId);
+      expect(target).not.toBe(recorded);
+      expect(existsSync(target)).toBe(false);
+      // The state step 2 leaves, plus a partial copy.
+      writeFileSync(join(agentTmpDir(data, runId), '.cez-fallback-previous'), recorded);
+      writeFileSync(join(agentTmpDir(data, runId), '.cez-fallback'), target);
+      mkdirSync(target, { mode: 0o700 });
+      writeFileSync(join(target, '.cez-owner'),
+        createHash('sha256').update(`cez-agent-owner:${data}`).digest('hex').slice(0, 16));
+      writeFileSync(join(target, 'note.txt'), 'ke');
+      minted.push(target);
+      expect(agentTmpDirLocations(data, runId)).toEqual(expect.arrayContaining([recorded, target]));
+      // A sweep with the run kept touches neither side.
+      sweepAgentTmpDirs(data, [runId]);
+      expect(existsSync(recorded)).toBe(true);
+      expect(agentTmpEnv(data, runId, {}).TMPDIR).toBe(target);
+      expectMigrated(data, runId, recorded, target);
+    } finally {
+      fsFaults.exdevFrom = undefined;
+      rmSync(longRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to move a legacy fallback whose ownership marker is not this dataDir’s', () => {
+    const data = deepDataDir();
+    const runId = 'legacy-foreign-run';
+    const { longRoot, recorded } = legacyFallback(data, runId);
+    writeFileSync(join(recorded, '.cez-owner'), 'someone-else');
+    try {
+      expect(() => agentTmpEnv(data, runId, {})).toThrow(AgentTempDirError);
+      expect(readFileSync(join(recorded, 'note.txt'), 'utf8')).toBe('keep');
     } finally {
       rmSync(longRoot, { recursive: true, force: true });
     }
