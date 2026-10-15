@@ -99,49 +99,101 @@ export function contrastSampleExpression(selector: string, foregroundProperty = 
   })()`
 }
 
+/** The `tabindex="-1"` anchor a first-control `focusWithKeyboard` presses Tab from. */
+const TAB_START_ID = 'cez-e2e-tab-start'
+/** How long a target must stay the first visible control, on an idle page, before the Tab starts from the top. */
+const FIRST_CONTROL_HOLD_MS = 500
+
 /**
- * Focuses the target through a real Tab key from the preceding visible control.
+ * Focuses the target through a real Tab key, from the preceding visible control or, when the
+ * target is the first one, from the top of the document.
  *
- * Three steps, each waited on rather than sampled (#409). The predecessor lookup polls until the
- * target and a focusable control before it exist, and refuses what `.focus()` refuses: an
- * element with a box but `visibility: hidden` is skipped by the browser's tab order too, so
- * focusing it would put the Tab that follows somewhere else. `press('Tab')` is its own CLI call,
- * and focus can land asynchronously after it (a menu that moves focus in an effect), so the
- * last step waits until `document.activeElement` IS the target and, when it never is, names the
- * element that took focus instead.
+ * Three steps, each waited on rather than sampled (#409). The start lookup polls until the
+ * target exists and focuses where the Tab starts from. Its filter refuses what `.focus()`
+ * refuses: an element with a box but `visibility: hidden` is skipped by the browser's tab order
+ * too, so focusing it would put the Tab that follows somewhere else. `press('Tab')` is its own
+ * CLI call, and focus can land asynchronously after it (a menu that moves focus in an effect), so
+ * the last step waits until `document.activeElement` IS the target and, when it never is, names
+ * the element that took focus instead.
+ *
+ * A target with no visible control before it (the rail's Add project trigger when no project is
+ * registered, hearsay-tools/cezarion#1091) starts from a `tabindex="-1"` anchor the lookup
+ * prepends to `<body>` and focuses. The anchor and its hold stamp go after the Tab and on every
+ * failure. Blurring the active element is not enough: Chrome keeps its sequential focus
+ * navigation starting point where focus, or the last click, was. Evidence (local, 2026-10-16, a
+ * throwaway spec on the shared env with an empty registry, focus parked by `.focus()` on the
+ * sidebar resize handle or by a click on the page heading, 3 runs each): a bare Tab, and
+ * `activeElement.blur()` then Tab, both landed on the main view's Active tab
+ * (`data-slot="overview-tab"`) 6 of 6. Focusing `<body>` under a temporary `tabindex="-1"`, and
+ * focusing this anchor, both landed on Add project 6 of 6. The anchor won because each poll finds
+ * it by id and one removal undoes it, where a body attribute would need its old value carried
+ * across polls.
+ *
+ * A target can render before its predecessor does (the rail mounts once the projects query
+ * answers), and a Tab from the top would then land on the late arrival. Today's callers wait for
+ * that predecessor, so the top path waits too: the page must be idle (`__cezIdle`) and the target
+ * first for 500 ms, and a predecessor that appears in that time sends the call down the old path.
+ * Checked the same way: a predecessor inserted 200 ms after load took the old path, and a page
+ * held busy failed with `top: 'page busy'` and nothing left in the DOM.
  */
 export function focusWithKeyboard(browser: AgentBrowser, selector: string): void {
   const target = JSON.stringify(selector)
   const describe = `(el) => el ? el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + [...el.classList].slice(0, 3).map((c) => '.' + c).join('') : null`
-  browser.waitForValue<{ ready: boolean; predecessor: string | null }>(
-    `(() => {
+  const dropTabStart = `document.getElementById('${TAB_START_ID}')?.remove(); delete window.__cezE2eFirstSince`
+  // Whether the last lookup took the top path, which can leave its anchor or hold stamp in the
+  // page. Every other lookup drops both itself.
+  let fromTop = false
+  try {
+    browser.waitForValue<{ ready: boolean; predecessor: string | null; top?: 'page busy' | 'holding' | 'anchor' }>(
+      `(() => {
     const describe = ${describe}
     const target = document.querySelector(${target})
-    if (!target) return { ready: false, predecessor: null }
     const controls = [...document.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')]
       .filter((element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden')
-    const index = controls.indexOf(target)
-    if (index < 1) return { ready: false, predecessor: null }
+    const index = target ? controls.indexOf(target) : -1
+    if (index !== 0) { ${dropTabStart} }
+    if (index === -1) return { ready: false, predecessor: null }
+    if (index === 0) {
+      if (window.__cezIdle === false) { ${dropTabStart}; return { ready: false, predecessor: null, top: 'page busy' } }
+      window.__cezE2eFirstSince ??= performance.now()
+      if (performance.now() - window.__cezE2eFirstSince < ${FIRST_CONTROL_HOLD_MS}) return { ready: false, predecessor: null, top: 'holding' }
+      let anchor = document.getElementById('${TAB_START_ID}')
+      if (!anchor) {
+        anchor = document.createElement('div')
+        anchor.id = '${TAB_START_ID}'
+        anchor.tabIndex = -1
+        anchor.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none'
+        document.body.prepend(anchor)
+      }
+      anchor.focus()
+      return { ready: document.activeElement === anchor, predecessor: null, top: 'anchor' }
+    }
     controls[index - 1].focus()
     return { ready: document.activeElement === controls[index - 1], predecessor: describe(controls[index - 1]) }
   })()`,
-    (state) => state.ready,
-    { failure: `no visible keyboard predecessor for ${selector}` },
-  )
-  browser.press('Tab')
-  try {
-    browser.waitForValue<{ onTarget: boolean; active: string | null }>(
-      `(() => {
+      (state) => {
+        fromTop = state.top !== undefined
+        return state.ready
+      },
+      { failure: `no keyboard start for ${selector}: no visible predecessor, and not the settled first control` },
+    )
+    browser.press('Tab')
+    try {
+      browser.waitForValue<{ onTarget: boolean; active: string | null }>(
+        `(() => {
     const describe = ${describe}
     const target = document.querySelector(${target})
     return { onTarget: !!target && document.activeElement === target, active: describe(document.activeElement) }
   })()`,
-      (state) => state.onTarget,
-    )
-  } catch (error) {
-    if (!(error instanceof WaitForValueError)) throw error
-    const active = (error.lastValue as { active?: string | null } | undefined)?.active ?? 'nothing'
-    throw new Error(`focus never reached ${selector}; it is on ${active} (failure bundle: ${error.bundle})`, { cause: error })
+        (state) => state.onTarget,
+      )
+    } catch (error) {
+      if (!(error instanceof WaitForValueError)) throw error
+      const active = (error.lastValue as { active?: string | null } | undefined)?.active ?? 'nothing'
+      throw new Error(`focus never reached ${selector}; it is on ${active} (failure bundle: ${error.bundle})`, { cause: error })
+    }
+  } finally {
+    if (fromTop) browser.evaluate(`(() => { ${dropTabStart} })()`)
   }
 }
 

@@ -295,11 +295,43 @@ describe('focusWithKeyboard (#409)', () => {
     )
   })
 
-  it('a target with no visible predecessor fails after polling, naming the selector', () => {
+  it('a target that never offers a keyboard start fails after polling, naming the selector', () => {
     shortTimeout()
     const { browser, commands } = open([{ ready: false, predecessor: null }])
-    expect(() => focusWithKeyboard(browser, selector)).toThrow(/no visible keyboard predecessor for button/)
+    expect(() => focusWithKeyboard(browser, selector)).toThrow(/no keyboard start for button\[data-slot="model-pill"\]/)
     expect(actions(commands())).not.toContain('press')
+  })
+
+  it('starts the first focusable control from the top of the document, then removes the anchor (#1091)', () => {
+    const { browser, commands } = open([
+      { ready: true, predecessor: null, top: 'anchor' },
+      { onTarget: true, active: 'button.model-pill' },
+    ])
+    focusWithKeyboard(browser, selector)
+    expect(actions(commands())).toEqual(['eval', 'press', 'eval', 'eval'])
+    // A late predecessor would take the Tab, so the top path waits for an idle page.
+    expect(commands()[0]?.[1]).toContain('__cezIdle')
+    expect(commands()[3]?.[1]).toContain(`document.getElementById('cez-e2e-tab-start')?.remove()`)
+  })
+
+  it('names the element that took focus from the top of the document, and still removes the anchor (#1091)', () => {
+    shortTimeout()
+    const { browser, commands } = open([
+      { ready: true, predecessor: null, top: 'anchor' },
+      { onTarget: false, active: 'button#late-predecessor' },
+    ])
+    expect(() => focusWithKeyboard(browser, selector)).toThrow(
+      /focus never reached button\[data-slot="model-pill"\]; it is on button#late-predecessor/,
+    )
+    expect(commands().at(-1)?.[1]).toContain(`document.getElementById('cez-e2e-tab-start')?.remove()`)
+  })
+
+  it('a first control that never settles fails without a Tab, and drops its hold stamp (#1091)', () => {
+    shortTimeout()
+    const { browser, commands } = open([{ ready: false, predecessor: null, top: 'holding' }])
+    expect(() => focusWithKeyboard(browser, selector)).toThrow(/no keyboard start for button\[data-slot="model-pill"\]/)
+    expect(actions(commands())).not.toContain('press')
+    expect(commands().at(-1)?.[1]).toContain('delete window.__cezE2eFirstSince')
   })
 })
 

@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { waitForSettledSample } from './visual-ready'
 import { expandedRailSampleExpression } from './project-rail-ready'
 import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
-import { contrastSampleExpression, hoverVisiblePoint, type ContrastSample } from './contrast'
+import { contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
 import { readSharedProjects, snapshotSharedHome, writeSharedProjects } from './workspace-registry'
 
 /**
@@ -258,6 +258,24 @@ describe('project rail', () => {
     expect(ink('green')).toBe('rgb(255, 255, 255)')
     expect(style(`${mark(OTHER.id)} [data-segment="red"]`, 'backgroundColor')).toBe('rgb(220, 38, 38)')
     browser.evaluate(`localStorage.setItem('cez-theme', 'dark')`)
+  })
+
+  it('reaches the Add project trigger through a real Tab when it is the first focusable control (#1091)', () => {
+    const RAIL_ADD = 'button[aria-label="Add project"][data-origin="rail"]'
+    // No registered project, so no marks: Add project is the page's first focusable control, as
+    // it is whenever the boot project goes unregistered (a server booted inside a task worktree).
+    const seeded = readSharedProjects()
+    writeSharedProjects([])
+    try {
+      browser.goto(baseUrl + `/p/${bootProject}/`)
+      browser.waitForFunction(`document.querySelector('${RAIL_ADD}') !== null && document.querySelector('[data-slot="rail-project"]') === null`)
+      // Park focus further down, so the helper has to start from the top of the document rather
+      // than from where focus was. A Tab on a page nobody has focused reaches the first control anyway.
+      browser.evaluate(`document.querySelector('[data-slot="sidebar-resize-handle"]').focus()`)
+      focusWithKeyboard(browser, RAIL_ADD)
+    } finally {
+      writeSharedProjects(seeded)
+    }
   })
 
   it('contains no status dots and is hidden on mobile', () => {
