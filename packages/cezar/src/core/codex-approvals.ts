@@ -99,6 +99,8 @@ export function codexApproval(method: string, rpcId: number | string, raw: unkno
       }
     }
   }
+  const { threadId: _threadId, turnId: _turnId, itemId: _itemId, approvalId: _approvalId, startedAtMs: _startedAtMs, availableDecisions: _availableDecisions, ...details } = params;
+  const scopedDecisions = Array.isArray(_availableDecisions) ? _availableDecisions.filter(decision => typeof decision === 'object') : [];
   return {
     rpcId, turnId: params.turnId, responses,
     event: { type: 'permission.requested', requestId, itemId: params.itemId,
@@ -106,8 +108,8 @@ export function codexApproval(method: string, rpcId: number | string, raw: unkno
         : method === 'item/fileChange/requestApproval' ? 'Codex requests file changes'
           : params.networkApprovalContext ? 'Codex requests network access'
             : params.kind === 'writeStdin' ? 'Codex requests terminal input' : 'Codex requests command execution',
-      // Retain all native context, including exact proposed rules and permission
+      // Retain action context, including exact proposed rules and permission
       // paths. Never abbreviate an amendment into an ambiguous "always allow".
-      details: JSON.stringify(raw, null, 2), options },
+      details: JSON.stringify({ ...details, ...(scopedDecisions.length ? { availableDecisions: scopedDecisions } : {}) }, null, 2), options },
   };
 }

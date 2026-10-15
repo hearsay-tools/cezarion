@@ -1,11 +1,23 @@
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import type { UiEvent } from './ui-events.ts';
+import { codexApproval } from './codex-approvals.ts';
 import { CodexAppServerRunner } from './codex-app-server-runner.ts';
 
 const bin = fileURLToPath(new URL('../../scripts/mock-codex-app-server.mjs', import.meta.url));
 
 describe('Codex approvals over the native mock wire (hearsay-tools/cezarion#1049)', () => {
+  it('shows action and scope details without transport bookkeeping', () => {
+    const approval = codexApproval('item/commandExecution/requestApproval', 5, { threadId: 'thread-secret-id', turnId: 'turn-secret-id', itemId: 'item-secret-id', startedAtMs: 1, command: 'git status --short', cwd: '/repo', reason: 'Network is restricted', availableDecisions: ['decline'], additionalPermissions: { network: { enabled: true } } })!;
+    expect(approval.event.details).toContain('git status --short');
+    expect(approval.event.details).toContain('/repo');
+    expect(approval.event.details).toContain('Network is restricted');
+    expect(approval.event.details).toContain("\"enabled\": true");
+    expect(approval.event.details).not.toContain('secret-id');
+    expect(approval.event.details).not.toContain('availableDecisions');
+    expect(approval.event.details).not.toContain('startedAtMs');
+  });
+
   it.each(['accept', 'decline', 'cancel'])('waits for an explicit %s response and echoes the exact native reply', async decision => {
     const ui: UiEvent[] = [];
     const session = new CodexAppServerRunner({ bin, timeoutMs: 0 }).startSession({ cwd: process.cwd(), userPrompt: 'mock:approval' }, undefined,
