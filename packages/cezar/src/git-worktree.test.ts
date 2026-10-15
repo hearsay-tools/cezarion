@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -234,6 +234,27 @@ describe('worktreeShortstat (real git)', () => {
   });
 
   // With no writable tmpdir the private index moves into the git dir, never onto the real index.
+  // hearsay-tools/cezarion#1088: a plain copy of the index is newer than every entry, so git's
+  // racy check skipped the content read and a same-size, same-second edit vanished from the stat.
+  it('counts a same-size edit made in the same second as the index write', async () => {
+    let r = '';
+    for (let attempt = 0; attempt < 5 && !r; attempt += 1) {
+      const candidate = await fixtureRepo('cez-racy-index-');
+      writeFileSync(join(candidate, 'a.txt'), 'one\ntwo\nthree\n');
+      await run('git', ['add', 'a.txt'], { cwd: candidate });
+      await run('git', [...GIT_ID, 'commit', '-q', '-m', 'a'], { cwd: candidate });
+      writeFileSync(join(candidate, 'a.txt'), 'one\nTWO\nthree\n'); // same size
+      const second = (path: string): number => Math.floor(statSync(path).mtimeMs / 1000);
+      // Racy only when the edit and the index write share a second; retry the rare straddle.
+      if (second(join(candidate, 'a.txt')) === second(join(candidate, '.git', 'index'))) r = candidate;
+    }
+    expect(r).not.toBe('');
+    const indexSecond = Math.floor(statSync(join(r, '.git', 'index')).mtimeMs / 1000);
+    // A copy made in a later second is what hid the edit; wait out the second rather than guess.
+    while (Math.floor(Date.now() / 1000) <= indexSecond) await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await worktreeShortstat(r, 'main')).toEqual({ adds: 1, dels: 1, files: 1 });
+  });
+
   it('keeps the worktree index untouched when the tmpdir is not writable', async () => {
     const r = await fixtureRepo('cez-private-index-fallback-');
     await run('git', ['checkout', '-q', '-b', 'task'], { cwd: r });
