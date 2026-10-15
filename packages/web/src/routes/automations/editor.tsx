@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Link } from '@/lib/project-router'
 import { usableRunners } from '@/lib/provider-status'
 import { RUNNERS, modelsForRunner } from '../new-task-form'
+import { CopyAsCliCard } from './copy-as-cli-card'
 import { fromDefinition, toCreateBody, toUpdateBody, type AutomationDraft } from './editor-draft'
 import { GithubFields, pollSentence } from './editor-github-fields'
 import { ScheduleFields } from './editor-schedule-fields'
@@ -220,6 +221,7 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
                 <p className="text-sm break-words text-muted-foreground">{pollSentence(draft)}</p>
               </section>
             )}
+          <CopyAsCliCard draft={draft} />
         </aside>
       </form>
     </PageFrame>

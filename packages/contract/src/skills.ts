@@ -15,7 +15,8 @@ export const skillSchema = z.object({
   interactive: z.literal(true).optional(),
   body: z.string(),
   path: z.string(),
-  source: z.enum(['ai', 'cezar', 'agents', 'global', 'team']),
+  /** `builtin`: shipped by cezar itself and listed last (#774), so a repo skill of the same name wins. */
+  source: z.enum(['ai', 'cezar', 'agents', 'global', 'team', 'builtin']),
   /** Team skills only: where the definition lives in its skills repo. */
   team: z
     .object({

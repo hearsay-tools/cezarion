@@ -794,6 +794,35 @@ the webhook only, never to the agent. Delivery is best-effort: 10 s timeout, 3 a
 failure shows in the thread without touching the task. The token is stored in `~/.cezar` and never
 sent back to a browser. Under `CEZ_DRY_RUN=1` nothing is sent; the payload is logged in the thread.
 
+### Automations from a task: `cez automation`
+
+`cez automation` creates and manages automations (see `CEZ_AUTOMATIONS=1`) on the cockpit that
+runs the task, so an agent asked to "do X every morning" or "whenever a PR opens" sets up an
+automation instead of a cron job. Like `cez task`, it prints one JSON object per invocation and
+exits 0 ok, 1 check failed, 2 refused or no cockpit, 3 check timed out, 64 usage.
+
+```sh
+cez automation schema                                    # the definition reference (needs no cockpit)
+cez automation add --name 'Weekday triage' --cron '0 7 * * 1-5' --prompt 'Triage new issues'
+cez automation add --name 'Review PRs' --on pull_request.opened --every 5m --label bug --prompt-file p.md
+cez automation add --name 'Agent triage' --on issue.labeled --changed-label needs-agent --prompt 'Triage #{{github.number}}'
+cez automation create --file def.json [--enable]         # full JSON form; stdin when no flag is given
+cez automation update <id> --json '{"task":{"prompt":"…"}}'
+cez automation check <id> [--execute] · run <id> · list · show <id> · enable <id> · pause <id> · delete <id>
+```
+
+`add` and `create` send the same body and create the automation **paused** unless `--enable` is
+given; `--cron` accepts the four shapes a schedule can take (daily, weekdays, one weekday, every N
+hours) and anything else is a usage error pointing to the JSON form. `update` replaces each key
+it is given, except `task`, which merges key by key (`null` removes one); it restates `enabled`
+and echoes the revision it read, so a concurrent edit in the cockpit is refused (exit 2), never
+overwritten. Mutating commands print the automation's cockpit page as `url`.
+
+The address comes from `CEZ_COCKPIT_URL` and `CEZ_PROJECT_ID`, which the cockpit puts in a task's
+environment. Without them, only an explicit `--url`, `--repo` or `CEZ_URL` looks for a cockpit;
+otherwise the command exits 2 and never starts a server. With automations off, the cockpit's `409`
+is relayed verbatim (exit 2).
+
 ## Workflow format
 
 A workflow is a small YAML file in `.ai/cezar/workflows/`:
@@ -871,6 +900,7 @@ Useful environment variables:
 | `CEZ_DELEGATION=1` | Enable owned workers and the private loopback listener for this controller. Off by default; works with the cockpit and headless `cez run`. When disabled, terminal cleanup checkpoints skip conversation/wait history reconciliation; explicit recovery and cleanup termination safeguards remain active. Session instructions and credentials are automatic. |
 | `CEZ_DELEGATION_URL`, `CEZ_DELEGATION_TOKEN` | Internal generated session values; do not configure or copy them. Tokens rotate on Continue/restart and are revoked when the session/controller closes. |
 | `CEZ_URL` | Cockpit origin for `cez task` and operator `cez discover` (e.g. a hosted `CEZ_REMOTE` cockpit). Unset, they find the local cockpit serving this checkout on ports 4321–4370. Parent discovery uses its delegation controller instead. |
+| `CEZ_COCKPIT_URL`, `CEZ_PROJECT_ID` | Set by the cockpit in every agent's environment once it listens: the bound origin and the run's project. `cez automation` calls that address; a headless `cez run` sets neither. Do not configure them. |
 | `CEZ_DRY_RUN=1` | Use bundled mocks for all five agent backends — the cockpit works offline for demos and development. Explicit backend binary overrides still win. |
 | `CEZ_AGENT_MODELS_LOCKED=1` | Globally lock each runner to the model configured in its native Claude/Codex/OpenCode settings while keeping runner selection available. Exact `1` also delegates authentication and provider enablement to those native agents, so Cezar skips its credential probes and provider-disable preferences. Existing Cezar presets are preserved but ignored, and an environment change requires a restart. The config-file equivalent is `"modelsLocked": true` in global `~/.cezar/config.json` or one repository's `.ai/cezar/config.json`; config-file locks do not disable provider checks. |
 | `CEZ_APPROVAL_GATE=1` | Opt into Claude's interactive approval UI; by default, unapproved tools are denied without interrupting the run. Ignored when `CEZ_CLAUDE_PERMISSION_MODE` is a recognized value (`dontAsk`, `acceptEdits`, or `bypass`). |

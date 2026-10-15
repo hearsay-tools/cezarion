@@ -351,6 +351,11 @@ function curateEnv(
     'CEZ_TOOL_SOCKET',
     'CEZ_DELEGATION_TOKEN',
     'CEZ_DELEGATION_URL',
+    // The cockpit address (#774) names THIS run's cockpit and project. A nested headless
+    // `cez run` sets none, and must not inherit its parent's: that would let it change
+    // automations in a project it does not belong to.
+    'CEZ_COCKPIT_URL',
+    'CEZ_PROJECT_ID',
   ]);
 
   // Escape hatch: restore legacy full-inheritance (opt-in, off by default).

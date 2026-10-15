@@ -20,7 +20,7 @@ export interface Skill {
   interactive?: true;
   body: string;
   path: string;
-  source: 'ai' | 'cezar' | 'agents' | 'global' | 'team';
+  source: 'ai' | 'cezar' | 'agents' | 'global' | 'team' | 'builtin';
   /** Team skills only: where the definition lives in its skills repo. */
   team?: {
     repo: string;
@@ -89,8 +89,12 @@ function globalSkillDirs(): Array<{ dir: string; source: Skill['source'] }> {
  * names show. A repo that sets its own `skillsRepos` gates nothing regardless. This is the
  * single chokepoint, so the decision is identical for every consumer — catalog, composer
  * picker, planner, runner.
+ *
+ * `builtin` skills (#774) come from the caller, which alone knows whether they may be offered
+ * (`RunManager.builtinSkills`). They are appended AFTER the sort, lowest precedence: any
+ * discovered skill of the same name hides them.
  */
-export async function discoverSkills(repoRoot: string): Promise<Skill[]> {
+export async function discoverSkills(repoRoot: string, options: { builtin?: readonly Skill[] } = {}): Promise<Skill[]> {
   const [lists, gatedRepos, uiState] = await Promise.all([
     Promise.all([
       ...SKILL_DIRS.map(({ dir, source }) => readMarkdownSkills(resolve(repoRoot, dir), source)),
@@ -114,6 +118,11 @@ export async function discoverSkills(repoRoot: string): Promise<Skill[]> {
     }
   }
   merged.sort((a, b) => a.name.localeCompare(b.name));
+  for (const skill of options.builtin ?? []) {
+    if (seen.has(skill.name)) continue;
+    seen.add(skill.name);
+    merged.push({ ...skill });
+  }
   return merged;
 }
 

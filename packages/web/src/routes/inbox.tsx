@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/components/ui/toaster'
 import { shortAge } from '@/lib/format'
-import { insertTemplate, normalizePromptTemplates } from '@/lib/prompt-templates'
+import { insertTemplate, normalizePromptTemplates, templatesForCapabilities } from '@/lib/prompt-templates'
 import { isHttpUrl } from '@/lib/utils'
 
 /**
@@ -173,7 +173,8 @@ function TodoCard({
   const [notesOpen, setNotesOpen] = useState(false)
   const [notes, setNotes] = useState('')
   const notesRef = useRef<HTMLTextAreaElement>(null)
-  const templates = normalizePromptTemplates(uiState.data?.promptTemplates)
+  const automationsOn = useHealth().data?.capabilities.automations === true
+  const templates = templatesForCapabilities(normalizePromptTemplates(uiState.data?.promptTemplates), { automations: automationsOn })
   const insertNotesTemplate = (snippet: string) => {
     const el = notesRef.current
     const caret = el?.selectionStart ?? notes.length

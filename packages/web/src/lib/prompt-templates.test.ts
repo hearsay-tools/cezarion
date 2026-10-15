@@ -10,6 +10,7 @@ import {
   normalizePromptTemplates,
   resolveAutoApply,
   resolveInsertCaret,
+  templatesForCapabilities,
   templatesForSkills,
   type PromptTemplate,
 } from './prompt-templates'
@@ -400,5 +401,30 @@ describe('resolveAutoApply', () => {
       expect(resolveAutoApply('', '', 'AUTO', '')).toEqual(resolveAutoApply('', '', 'AUTO'))
       expect(resolveAutoApply('mine', '', 'AUTO', '')).toEqual(resolveAutoApply('mine', '', 'AUTO'))
     })
+  })
+})
+
+describe('the Create an automation template (#774)', () => {
+  const template = DEFAULT_PROMPT_TEMPLATES.find((entry) => entry.id === 'create-automation')
+
+  it('ships as a default assigned to the built-in skill, asking for the trigger and the task', () => {
+    expect(template).toMatchObject({ id: 'create-automation', label: 'Create an automation', skills: ['create-cezarion-automation'] })
+    expect(template?.text).toMatch(/trigger/i)
+    expect(template?.text).toMatch(/schedule/i)
+    expect(template?.text).toMatch(/GitHub/)
+    expect(template?.text).toMatch(/task/i)
+  })
+
+  it('auto-applies when its skill is picked', () => {
+    expect(autoApplyText(DEFAULT_PROMPT_TEMPLATES, ['create-cezarion-automation'])).toBe(template?.text)
+  })
+
+  it('is dropped when the cockpit has automations off, kept when on', () => {
+    const all = normalizePromptTemplates(undefined)
+    expect(templatesForCapabilities(all, { automations: false }).map((entry) => entry.id)).not.toContain('create-automation')
+    expect(templatesForCapabilities(all, {}).map((entry) => entry.id)).not.toContain('create-automation')
+    expect(templatesForCapabilities(all, { automations: true })).toEqual(all)
+    // Everything else passes through untouched, in order.
+    expect(templatesForCapabilities(all, { automations: false })).toEqual(all.filter((entry) => entry.id !== 'create-automation'))
   })
 })

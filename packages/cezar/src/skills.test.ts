@@ -165,6 +165,30 @@ describe('discoverSkills local entrypoints', () => {
  * #365 gates the vendor team source (`process.env.VITEST`), and plant fixtures
  * under a temp `$HOME` so `os.homedir()` still resolves them when the gate is off.
  */
+describe('discoverSkills built-in skills (#774)', () => {
+  const builtin = (name: string): Skill => ({ name, body: 'BUILT-IN', path: `builtin:${name}`, source: 'builtin' });
+
+  it('appends built-ins after the sorted catalog and lets a discovered skill of the same name win', async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), 'cezar-skills-'));
+    tempDirs.push(repoRoot);
+    const skillsDir = join(repoRoot, '.ai/cezar/skills');
+    await mkdir(skillsDir, { recursive: true });
+    await writeFile(join(skillsDir, 'zz-last.md'), 'Body');
+    await writeFile(join(skillsDir, 'shadowed.md'), 'REPO');
+
+    const skills = (await discoverSkills(repoRoot, { builtin: [builtin('aa-first'), builtin('shadowed')] }))
+      .filter((skill) => skill.source === 'cezar' || skill.source === 'builtin');
+    expect(skills.map((skill) => `${skill.source}:${skill.name}`)).toEqual(['cezar:shadowed', 'cezar:zz-last', 'builtin:aa-first']);
+    expect(skills.find((skill) => skill.name === 'shadowed')?.body).toBe('REPO');
+  });
+
+  it('lists no built-in when the caller passes none', async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), 'cezar-skills-'));
+    tempDirs.push(repoRoot);
+    expect((await discoverSkills(repoRoot)).some((skill) => skill.source === 'builtin')).toBe(false);
+  });
+});
+
 describe('discoverSkills global dirs', () => {
   const planted = {
     agents: 'cez-vitest-global-agents',
