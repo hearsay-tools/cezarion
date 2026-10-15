@@ -84,7 +84,7 @@ describe('Hand off to webhook', () => {
     const tip = browser.waitForValue(`document.querySelector(${JSON.stringify('[data-webhook-destination]')})?.getAttribute('title') || null`) as string
     expect(tip).toContain('bot.example/hooks/cez')
     expect(text).toContain('The note goes to the webhook only, not to the agent.')
-    // Viewport capture, never `--full`, while the dialog is open (hearsay-tools/cezarion#979).
+    // Viewport capture, never a full-page one, while the dialog is open (hearsay-tools/cezarion#979).
     // agent-browser's full-page capture resizes the window to 1x1 and back, so the md media
     // query flips for a frame; when React commits that frame the run header swaps to its phone
     // layout, `HandoffAction` remounts and its dialog state is lost. The `fill` below then finds
