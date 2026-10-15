@@ -41,10 +41,21 @@ lokalnych z `.ai/skills/`.
    wygrywa — zasada "repo użytkownika jest źródłem prawdy".
 5. **Seed do kontekstu agenta**: body skilla nadal idzie w
    `--append-system-prompt` (jak dziś). Dla skilli katalogowych (`SKILL.md` +
-   references) — materializacja katalogu do `<cwd>/.claude/skills/<name>/`
-   ORAZ `<cwd>/.agents/skills/<name>/` (claude vs codex/pi, hearsay-tools/cezarion#286), z wpisem
-   każdego z obu do `.git/info/exclude` (wzorzec janitora), żeby każdy backend
-   widział references na dysku.
+   references) — materializacja katalogu do `<worktree>/.claude/skills/<name>/`,
+   `<worktree>/.agents/skills/<name>/` ORAZ `<worktree>/.cursor/skills/<name>/`
+   (claude vs codex/pi vs Cursor, hearsay-tools/cezarion#286, hearsay-tools/cezarion#413), z wpisem
+   każdego do `.git/info/exclude` (wzorzec janitora), żeby każdy backend
+   widział references na dysku. Tylko we własnym worktree zadania
+   (hearsay-tools/cezarion#1024): w głównym checkoucie te katalogi to lokalne skille, które
+   przesłaniałyby źródło zespołowe w każdym kolejnym runie i nigdy by się nie
+   odświeżały. Każda kopia ma znacznik `.cezar-team-skill.json`; kopia ze
+   znacznikiem jest przy następnej materializacji zastępowana, katalog bez
+   znacznika (może należeć do użytkownika) tylko nadpisywany plikami, nigdy
+   czyszczony. Run bez własnego worktree (worktree wyłączony, projekt bez gita,
+   Continue po zniknięciu worktree) dostaje kopię per commit w
+   `~/.cache/cez/skill-files/<owner>__<name>/<commit>/<skill>/` (atomowy
+   rename, kopie nieużywane od 7 dni są usuwane), a prompt skilla podaje jej
+   absolutną ścieżkę.
 6. **API/GUI**: `GET /api/skills` zwraca też `source: 'team'`;
    `POST /api/skills/refresh` robi fetch; etykiety i przycisk w zakładce.
 
