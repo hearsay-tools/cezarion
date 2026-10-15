@@ -21,6 +21,9 @@ node .github/scripts/upstream-scan.cjs render     # regenerate LEDGER.md after e
 node .github/scripts/upstream-scan.cjs targets <sha>…  # re-check a port's files against the fork now
 ```
 
+Any other first argument is an error: the command prints a one-line usage message and exits 2
+before it touches git or a file, so a mistyped `target` never runs the scan.
+
 The scan fetches upstream into `refs/cez-upstream/main`. Never add a git remote named
 `upstream` in this repository: `gh` prefers it over `origin`, and cezar's own GitHub tab
 would start showing the upstream repository.
@@ -85,15 +88,22 @@ It prints a Markdown report, one section per upstream commit, with a row for eve
 commit touches. Put the flagged rows in front of the planner. The report is advisory: it exits 0
 whenever it printed, flags or not.
 
+Every verdict describes the committed `HEAD` the report names. Uncommitted changes, staged or
+not, are ignored: the dry run and the reachability bundle read a snapshot of `HEAD` taken outside
+the checkout, and the real index and work tree are never written. `ledger.yaml` is the exception.
+It is read from the work tree, so a row you have not committed yet still works; its drift then
+reads `unknown`.
+
 | Flag | Means | Do this |
 | --- | --- | --- |
 | `test-only` | No production entry point reaches the file; only tests import it. | Find the live code that replaced the component before porting into it. hearsay-tools/cezarion#438 is the worked example: the drag went into the project rail (hearsay-tools/cezarion#999), and hearsay-tools/cezarion#997 removed the dead component. |
 | `missing` | Upstream modifies, deletes or renames a path the fork no longer has. | The fork removed or moved it. The report names the last fork commit that touched the path; that commit says where the code went. |
-| `drifted` | Fork commits touched the file since the ledger row landed. | Read those commits before trusting the row's `note` or `hint`. The commit count and line churn show how much changed. |
+| `drifted` | Fork commits touched the file since the ledger row landed. | Read those commits before trusting the row's `note` or `hint`. The commit count and line churn show how much changed. Churn beside `0 commits` (unflagged) means a merge commit changed the file. |
 
 Drift counts from the parent of the commit that added the row to `ledger.yaml`. A row that
-`main` never committed has no such commit, so its drift reads `unknown`. Reachability reads
-`unknown` when the bundle behind it fails; the report's first lines say why.
+`main` never committed has no such commit, so its drift reads `unknown`. Reachability and the
+dry run read `unknown` when the bundle or the `HEAD` snapshot behind them fails; the report's
+first lines say why.
 
 ## Citation provenance
 

@@ -94,18 +94,28 @@ is a ledger sha prefix that must match exactly one row. A commit missing locally
 `refs/cez-upstream/main` with the scan's own fetch, never through a remote. The command prints a
 Markdown report with one section per commit, in the order given, and exits 0 whenever the report
 printed. It exits 1 with one line on stderr for no arguments, an unknown or ambiguous prefix, an
-invalid ledger, or a git failure.
+invalid ledger, or a git failure. A first argument that is not `validate`, `render` or `targets`
+exits 2 with a one-line usage message before git or the filesystem is touched; only no argument
+at all runs the scan, which fetches and rewrites the ledger.
 
-The fork side is the checkout's `HEAD`. The baseline is the first parent of the commit that added
-the row's full sha to `ledger.yaml` (`git log --reverse -S<sha> HEAD -- .ai/upstream/ledger.yaml`).
-The ledger schema does not change. A row `HEAD` never committed has no baseline, and its drift
+The fork side is the checkout's committed `HEAD`, and every verdict describes it. Existence and
+drift read `HEAD` directly. The dry run and reachability read a snapshot of it built in a temp
+directory outside the repository: a private `GIT_INDEX_FILE` loaded with `git read-tree HEAD`, which
+`git apply --check --3way --cached` reads, and the files reachability needs, checked out of that
+index with `git checkout-index`. Uncommitted changes, staged or not, are ignored, the real index
+and work tree are never written, and the temp directory is removed whether the run succeeds or
+fails. Only `ledger.yaml` is read from the work tree, so a local, uncommitted row still works.
+
+The baseline is the first parent of the commit that added the row's full sha to `ledger.yaml`
+(`git log --reverse -S<sha> HEAD -- .ai/upstream/ledger.yaml`). The ledger schema does not change. A row `HEAD` never committed has no baseline, and its drift
 reads `unknown`, never "no change".
 
 The file list comes from the upstream commit's own diff. A rename is judged by its old path,
 because that is where the fork's code would be. Each file gets four columns: whether the path
 exists at `HEAD` (and, when it does not, the last fork commit that touched it), reachability,
 drift since the baseline (non-merge commits and line churn), and a per-file 3-way dry run against
-`HEAD`. Three flags summarise them:
+`HEAD`. Churn comes from the whole `baseline..HEAD` diff, so it shows even beside `0 commits`: a
+merge commit can change a file no non-merge commit touched. Three flags summarise them:
 
 - `test-only`: reachability is `test-only`.
 - `missing`: upstream modifies, deletes or renames a path that does not exist at `HEAD`.
@@ -127,6 +137,8 @@ source files under `packages/*/src/` are judged; everything else reads `n/a`.
 
 A broken check must not produce false flags. When esbuild is missing, finds no entry points, or
 fails, every judged file reads `unknown`, never `test-only`, and the report's first lines say why.
+When the `HEAD` snapshot cannot be built, reachability and the dry run read `unknown` the same
+way, with the reason.
 
 The pure half (the per-file dry-run parser, path classification, `new URL` extraction, flags and
 the renderer) lives in `.github/scripts/upstream-targets.cjs`; the bundle in
