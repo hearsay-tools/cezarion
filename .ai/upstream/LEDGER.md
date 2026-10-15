@@ -5,7 +5,7 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 - Upstream: [open-mercato/cezar](https://github.com/open-mercato/cezar) `main`
 - Fork point: `feb85666` (2026-08-31)
 - Last scan: 2026-10-13 to `42568d82` ([report](scans/2026-10-13.md))
-- Entries: 226 · pending: 180 · planned: 9 · ported: 23 · partial: 1 · diverged: 6 · n/a: 7
+- Entries: 226 · pending: 180 · planned: 8 · ported: 24 · partial: 1 · diverged: 6 · n/a: 7
 
 ## Pending (180)
 
@@ -192,7 +192,7 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#1356](https://github.com/open-mercato/cezar/pull/1356) | 2026-10-12 | fix(web): contain oversized Markdown in task threads (#1356) | 1 |  |
 | [#1398](https://github.com/open-mercato/cezar/pull/1398) | 2026-10-12 | feat: branch naming instructions and project settings regrouping (#1398) | 15 |  |
 
-## Planned (9)
+## Planned (8)
 
 | Upstream | Date | Title | Fork | Decided | Reason / note |
 | --- | --- | --- | --- | --- | --- |
@@ -203,10 +203,9 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#1324](https://github.com/open-mercato/cezar/pull/1324) | 2026-10-08 | feat: private, per-project MCP servers for every agent run (#1324) | [issue #1013](https://github.com/hearsay-tools/cezarion/issues/1013) | 2026-10-13 | Adapt private project MCP launch configuration to all six fork runners with native-wire coverage or explicit executable exemptions; preserve governed-worker grants and credential handling. |
 | [#1318](https://github.com/open-mercato/cezar/pull/1318) | 2026-10-09 | fix(git): avoid shared config locks during worktree creation (#1318) | [issue #1006](https://github.com/hearsay-tools/cezarion/issues/1006) | 2026-10-13 | Port no-track worktree creation for both ordinary tasks and owned workers; preserve explicit bases, identity receipts and reattachment; re-check current callers before implementation. |
 | [#1249](https://github.com/open-mercato/cezar/pull/1249) | 2026-10-09 | fix(cockpit): keep an ask card's picks when the thread unmounts its row (#1249) | [issue #1007](https://github.com/hearsay-tools/cezarion/issues/1007) | 2026-10-13 | Retain option selections and free-text answers across card remounts and navigation; preserve parent routing, human fallback and answer delivery. |
-| [#1349](https://github.com/open-mercato/cezar/pull/1349) | 2026-10-10 | feat(cockpit): Markdown preview toggle in the Changes diff (#1349) | [issue #1012](https://github.com/hearsay-tools/cezarion/issues/1012) | 2026-10-13 | Adapt Markdown previews to existing file readers and demand-bound browser coordination; do not copy upstream recurring polling. |
 | [#1402](https://github.com/open-mercato/cezar/pull/1402) | 2026-10-12 | feat: create a new project (fresh git repo, optional private GitHub repo, templates) (#1402) | [issue #1014](https://github.com/hearsay-tools/cezarion/issues/1014) | 2026-10-13 | Adapt local and explicitly chosen private GitHub/template project creation to the current registry and checkout flow; exclude upstream telemetry. |
 
-## Ported (23)
+## Ported (24)
 
 | Upstream | Date | Title | Fork | Decided | Reason / note |
 | --- | --- | --- | --- | --- | --- |
@@ -233,6 +232,7 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#1014](https://github.com/open-mercato/cezar/pull/1014) | 2026-09-17 | fix(providers): a runtime auth rejection verifies itself before it sticks (#1014) | [PR #598](https://github.com/hearsay-tools/cezarion/pull/598), [issue #431](https://github.com/hearsay-tools/cezarion/issues/431) | 2026-09-25 |  |
 | [#1009](https://github.com/open-mercato/cezar/pull/1009) | 2026-09-17 | fix(server-deploy): fail the deploy when the service did not actually restart (#1009) | [PR #644](https://github.com/hearsay-tools/cezarion/pull/644), [issue #430](https://github.com/hearsay-tools/cezarion/issues/430), [2d328382](https://github.com/hearsay-tools/cezarion/commit/2d328382), [0dfb93c6](https://github.com/hearsay-tools/cezarion/commit/0dfb93c6), [3e676ecd](https://github.com/hearsay-tools/cezarion/commit/3e676ecd) | 2026-09-27 |  |
 | [#994](https://github.com/open-mercato/cezar/pull/994) | 2026-09-18 | fix(server-install): ubuntu-vps vhost emits a standalone http2 directive nginx < 1.25.1 rejects (#994) | [PR #648](https://github.com/hearsay-tools/cezarion/pull/648), [issue #429](https://github.com/hearsay-tools/cezarion/issues/429), [5847c428](https://github.com/hearsay-tools/cezarion/commit/5847c4282c26ba56fb95d833efc4f391e53b8600) | 2026-09-27 |  |
+| [#1349](https://github.com/open-mercato/cezar/pull/1349) | 2026-10-10 | feat(cockpit): Markdown preview toggle in the Changes diff (#1349) | [PR #1076](https://github.com/hearsay-tools/cezarion/pull/1076), [issue #1012](https://github.com/hearsay-tools/cezarion/issues/1012) | 2026-10-15 | Re-implemented by hearsay-tools/cezarion#1076 on the existing file readers with no recurring polling; adds a per-file switch and phone support, and loads repository images only (never remote ones). |
 
 ## Partial (1)
 
