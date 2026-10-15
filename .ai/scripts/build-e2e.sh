@@ -35,4 +35,17 @@ node packages/cezar/scripts/inline-contract.mjs "$OUT/dist"
 # VITE_CEZ_E2E=1 is the cockpit e2e mode (hearsay-tools/cezarion#415): it pins useNow and
 # every refetchInterval in the bundle, and makes Vite emit the `.cez-e2e-build` marker the
 # bootstrap checks.
-VITE_CEZ_E2E=1 npm run build -w @open-mercato/cezar-web -- --outDir "$OUT/web/dist"
+#
+# NODE_ENV=production because Vite derives the bundle's mode from an inherited NODE_ENV, and
+# Squeal reaches this script through the e2e project's globalSetup, inside Vitest, which sets
+# NODE_ENV=test (hearsay-tools/cezarion#1087). That produced a development bundle: the React dev
+# runtime and `import.meta.env.DEV`, so the cockpit started its SharedWorker from the dev-server
+# path `/assets/live-worker-*.ts`. The worker failed, every document fell back to finite HTTP
+# polling, and `window.__cezLive` never became true. Evidence: Squeal's three red runs of
+# task-handoff's #795 test (main 27253ca, worktrees a01dc132 and dadba797) were all served
+# such a bundle; the copied main build failed the spec 3/3 with `/run-event-batches` every 2 s
+# in the page's resource timing. Reproduced 1/1 by forcing a Vitest-driven rebuild
+# (`touch` this file, then `npm exec -- vitest run --config packages/web/e2e/vitest.config.ts`).
+# Pinned here, on the bundle step only, so every caller gets the production bundle CI tests.
+# Not exported: `pnpm install` before this script must still install devDependencies.
+NODE_ENV=production VITE_CEZ_E2E=1 npm run build -w @open-mercato/cezar-web -- --outDir "$OUT/web/dist"
