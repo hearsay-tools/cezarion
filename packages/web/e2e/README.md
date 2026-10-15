@@ -152,7 +152,9 @@ It names the command, what the bundles' `probe.json` showed, the before count (2
 after count (8 of 8). It also shows the gap this rule now closes. The paths are shortened, and the
 bundles were local and are gone. The naming rule spells them out as
 `.ai/qa/failures/project-order/reorders-a-collapsed-mark-from-the-keyboard-with-Space-leaving-Enter-to-the-link-20`
-and `…-link-22`. Those names are derived from the rule, not read from disk. What survives is the
+and
+`.ai/qa/failures/project-order/reorders-a-collapsed-mark-from-the-keyboard-with-Space-leaving-Enter-to-the-link-22`.
+Those names are derived from the rule, not read from disk. What survives is the
 diagnosis recorded in the comment and in the hearsay-tools/cezarion#999 review reply from
 commit `740b35ff`. A reproduction stands in for a bundle the same way:
 `task-handoff.e2e.ts`'s `window.__cezLive` wait cites "Reproduced 3/3 by delaying the built
