@@ -465,15 +465,20 @@ async function removeUnlisted(dir: string, keep: Set<string>, prefix = ''): Prom
   }
 }
 
+/** Where `materializeSkillDir` puts a worktree copy: `<dir>/skills/<name>/`, in this order. */
+export const TEAM_SKILL_AGENT_DIRS = ['.claude', '.agents', '.cursor'] as const;
+
 /**
  * Copy a directory skill (SKILL.md + references/…) out of the bare clone into
  * `<worktree>/.claude/skills/<name>/` (claude),
  * `<worktree>/.agents/skills/<name>/` (codex/pi — the canonical dir SKILL_DIRS
  * scans first), and `<worktree>/.cursor/skills/<name>/` (Cursor), and keep all
  * destinations out of the user's git via `.git/info/exclude`.
- * Returns false when no destination was written (not a directory skill, no
- * clone, every destination outside the worktree…). (#286 — writing only the
- * claude dir left codex/pi without the companion files on disk.)
+ * Returns the absolute directories it wrote, in `TEAM_SKILL_AGENT_DIRS` order;
+ * empty when none was (not a directory skill, no clone, every destination
+ * outside the worktree…). A destination skipped while others were written is
+ * missing from the list, so the caller can name a copy that did land. (#286 —
+ * writing only the claude dir left codex/pi without the companion files on disk.)
  *
  * Only ever for a run's OWN task worktree (#1024): those three directories in
  * the main checkout are local skills to `discoverSkills`, so a copy left there
@@ -497,18 +502,18 @@ async function removeUnlisted(dir: string, keep: Set<string>, prefix = ''): Prom
  * never a half-empty one. An existing directory without the marker may be the
  * user's own: it is overlaid as before, never pruned, and never marked.
  */
-export async function materializeSkillDir(repoRoot: string, skill: Skill): Promise<boolean> {
+export async function materializeSkillDir(repoRoot: string, skill: Skill): Promise<string[]> {
   const source = await resolveSkillDirSource(skill);
-  if (!source || !skill.team) return false;
+  if (!source || !skill.team) return [];
   const files = await readSkillDirFiles(source);
-  if (files.size === 0) return false;
+  if (files.size === 0) return [];
   const { repo, ref, path } = skill.team;
   const marker = `${JSON.stringify({ repo, ref, path, commit: source.commit }, null, 2)}\n`;
 
   const root = await realpath(repoRoot).catch(() => null);
-  if (root === null) return false;
+  if (root === null) return [];
   const written: string[] = [];
-  for (const agentDir of ['.claude', '.agents', '.cursor']) {
+  for (const agentDir of TEAM_SKILL_AGENT_DIRS) {
     const destDir = join(repoRoot, agentDir, 'skills', skill.name);
     if (!(await landsInside(root, destDir))) continue;
     // lstat: a marker that is a link elsewhere does not make the dir ours.
@@ -524,7 +529,7 @@ export async function materializeSkillDir(repoRoot: string, skill: Skill): Promi
     written.push(agentDir);
   }
   for (const agentDir of written) await excludeFromGit(repoRoot, `${agentDir}/skills/${skill.name}/`);
-  return written.length > 0;
+  return written.map((agentDir) => resolve(repoRoot, agentDir, 'skills', skill.name));
 }
 
 /** A per-commit copy nobody has used for this long is pruned. */

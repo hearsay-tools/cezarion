@@ -12,7 +12,7 @@ import { buildChildEnv } from '../core/agent-env.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import {
   parseAskMarkerResult,
   stripAskMarker,
@@ -72,7 +72,7 @@ import { discoverSkills, type Skill } from '../skills.ts';
 import { resolveCapabilities } from '../server/capabilities.ts';
 import { automationCliCommand, automationsPrompt } from '../automations/prompts.ts';
 import { createAutomationSkill } from '../automations/builtin-skill.ts';
-import { materializeSkillDir, materializeSkillToCache, waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
+import { materializeSkillDir, materializeSkillToCache, TEAM_SKILL_AGENT_DIRS, waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
@@ -1701,15 +1701,25 @@ export class RunManager {
    * directories are LOCAL skills to `discoverSkills` that would shadow the team
    * source for every later run; it gets a per-commit cache copy instead, which
    * the skill prompt names. So does a worktree where no copy landed, such as one
-   * whose three agent dirs all link out of it. Returns the step-start note and,
-   * for a cache copy, that directory; undefined when nothing landed on disk.
+   * whose three agent dirs all link out of it. A worktree that took only some
+   * copies — one agent dir links out of it — has the prompt name the first that
+   * landed, since the runner's own dir may be the one skipped. Returns the
+   * step-start note and, for a cache or partial copy, the directory the prompt
+   * names; undefined when nothing landed on disk.
    */
   private async materializeTeamSkill(runId: string, cwd: string, skill: Skill): Promise<{ note: string; filesDir?: string } | undefined> {
     if (skill.source !== 'team' || !skill.team?.dir) return undefined;
-    if (this.isOwnTaskWorktree(runId, cwd) && await materializeSkillDir(cwd, skill).catch(() => false)) {
+    const written = this.isOwnTaskWorktree(runId, cwd) ? await materializeSkillDir(cwd, skill).catch(() => []) : [];
+    if (written.length === TEAM_SKILL_AGENT_DIRS.length) {
       return {
         note: `team skill "${skill.name}" materialized to .claude/skills/${skill.name}/ ` +
           `.agents/skills/${skill.name}/, and .cursor/skills/${skill.name}/`,
+      };
+    }
+    if (written.length > 0) {
+      return {
+        note: `team skill "${skill.name}" materialized to ${written.map((dir) => `${relative(cwd, dir)}/`).join(' and ')}`,
+        filesDir: written[0],
       };
     }
     const filesDir = await materializeSkillToCache(skill).catch(() => null);
@@ -8326,7 +8336,8 @@ export function makeRunTitle(task: string, workflow: WorkflowDef): string {
  * on disk: its files are materialized per run (`RunManager.materializeTeamSkill`).
  * Inside the run's task worktree they need no pointer; a run without one, or
  * whose worktree took no copy, gets a per-commit cache copy, passed here as
- * `teamFilesDir` (#1024).
+ * `teamFilesDir` (#1024). A worktree that took only some of its copies passes
+ * the first one it did take.
  */
 export function skillSystemPrompt(
   skill: Pick<Skill, 'name' | 'description' | 'body'> & Partial<Pick<Skill, 'path' | 'source'>>,

@@ -39,6 +39,11 @@ const TEAM_SKILL_BODY = 'TEAM-PLAYBOOK-BODY-790';
 const MISSING_SKILL_LIFECYCLE = `skill /${TEAM_SKILL} is not in the skill registry — its instructions were not re-sent to the continued session`;
 const MATERIALIZED_NOTE = `team skill "${TEAM_SKILL}" materialized to`;
 
+/** All three in-worktree copies, which `materializeSkillDir` reports written. */
+function writtenSkillDirs(worktree: string): string[] {
+  return ['.claude', '.agents', '.cursor'].map((agentDir) => join(worktree, agentDir, 'skills', TEAM_SKILL));
+}
+
 function teamDirSkill(): Skill {
   return {
     name: TEAM_SKILL,
@@ -157,17 +162,17 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
   it('Stop during materializeSkillDir never launches the continued session', async () => {
     const skill = teamDirSkill();
     vi.spyOn(skills, 'discoverSkills').mockResolvedValue([skill]);
-    let release!: (seeded: boolean) => void;
-    const held = new Promise<boolean>((resolve) => { release = resolve; });
+    let release!: (written: string[]) => void;
+    const held = new Promise<string[]>((resolve) => { release = resolve; });
     const materialize = vi.spyOn(skillsRemote, 'materializeSkillDir').mockReturnValue(held);
     const id = terminalSkillRun(TEAM_SKILL);
-    await attachWorktree(id);
+    const worktree = await attachWorktree(id);
 
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
     await vi.waitFor(() => expect(materialize).toHaveBeenCalledTimes(1), { timeout: LAUNCH_WAIT_MS });
     expect(launches).toEqual([]);
     expect(manager.cancel(id)).toBe(true);
-    release(true);
+    release(writtenSkillDirs(worktree));
     await vi.waitFor(() => expect(!manager.isActive(id) || launches.length > 0).toBe(true), { timeout: LAUNCH_WAIT_MS });
     expect(launches).toEqual([]);
     expect(store.getRun(id)?.status).toBe('cancelled');
@@ -285,7 +290,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
   it('Continue of a team directory skill rematerializes without a note', async () => {
     const skill = teamDirSkill();
     vi.spyOn(skills, 'discoverSkills').mockResolvedValue([skill]);
-    const materialize = vi.spyOn(skillsRemote, 'materializeSkillDir').mockResolvedValue(true);
+    const materialize = vi.spyOn(skillsRemote, 'materializeSkillDir').mockImplementation(async (root) => writtenSkillDirs(root));
     const id = terminalSkillRun(TEAM_SKILL);
     const worktree = await attachWorktree(id);
 

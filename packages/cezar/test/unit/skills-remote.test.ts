@@ -175,6 +175,11 @@ test('listRemoteSkills clones a local repo, pins the SHA, and refuses a bad ref'
 
 // ---- materialization: every supported agent skill dir gets the directory skill ----
 
+/** The absolute `greeter` copies `materializeSkillDir` writes under `repoRoot`, in its order. */
+function skillDests(repoRoot: string, ...agentDirs: string[]): string[] {
+  return (agentDirs.length ? agentDirs : ['.claude', '.agents', '.cursor']).map((agentDir) => join(repoRoot, agentDir, 'skills', 'greeter'));
+}
+
 test('materializeSkillDir seeds Claude, Agents, and Cursor skill dirs and excludes them from git', async (t) => {
   const home = mkdtempSync(join(tmpdir(), 'cez-home-'));
   const srcDir = mkdtempSync(join(tmpdir(), 'cez-src-'));
@@ -210,8 +215,12 @@ test('materializeSkillDir seeds Claude, Agents, and Cursor skill dirs and exclud
   // Target project root: a git repo so the shared info/exclude exists.
   g(['-c', 'init.defaultBranch=main', 'init'], repoRoot);
 
-  const ok = await materializeSkillDir(repoRoot, greeter);
-  assert.equal(ok, true, 'materializeSkillDir should have seeded the directory skill');
+  // It names every directory it wrote, so a caller can tell a skipped one apart.
+  assert.deepEqual(
+    await materializeSkillDir(repoRoot, greeter),
+    skillDests(repoRoot),
+    'materializeSkillDir should have seeded the directory skill',
+  );
 
   // Every destination gets the full directory (SKILL.md + references/) —
   // Claude reads .claude/skills, codex/pi read .agents/skills, and Cursor reads
@@ -293,7 +302,7 @@ async function dirSkillFixture(t: { after: (fn: () => void) => void }) {
 
 test('materializeSkillDir marks its worktree copies and replaces a marked copy at a newer commit', async (t) => {
   const { srcDir, repoRoot, greeter, publish, list, v1 } = await dirSkillFixture(t);
-  assert.equal(await materializeSkillDir(repoRoot, greeter), true);
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), skillDests(repoRoot));
   for (const agentDir of ['.claude', '.agents', '.cursor']) {
     const marker = JSON.parse(readFileSync(join(repoRoot, agentDir, 'skills', 'greeter', TEAM_SKILL_MARKER), 'utf8'));
     assert.deepEqual(marker, { repo: srcDir, ref: 'main', path: 'greeter/SKILL.md', commit: v1 });
@@ -301,7 +310,7 @@ test('materializeSkillDir marks its worktree copies and replaces a marked copy a
 
   // Upstream drops references/old.md and changes SKILL.md.
   const v2 = publish({ 'SKILL.md': 'say hi v2\n', 'references/notes.md': 'notes v1\n' });
-  assert.equal(await materializeSkillDir(repoRoot, await list()), true);
+  assert.deepEqual(await materializeSkillDir(repoRoot, await list()), skillDests(repoRoot));
   for (const agentDir of ['.claude', '.agents', '.cursor']) {
     const dest = join(repoRoot, agentDir, 'skills', 'greeter');
     assert.equal(readFileSync(join(dest, 'SKILL.md'), 'utf8'), 'say hi v2\n');
@@ -316,7 +325,7 @@ test('materializeSkillDir copies the commit the skill was listed at, not where t
   // Another project fetches main to v2 between listing and materializing.
   publish({ 'SKILL.md': 'say hi v2\n', 'references/notes.md': 'notes v2\n' });
 
-  assert.equal(await materializeSkillDir(repoRoot, greeter), true);
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), skillDests(repoRoot));
   for (const agentDir of ['.claude', '.agents', '.cursor']) {
     const dest = join(repoRoot, agentDir, 'skills', 'greeter');
     assert.equal(readFileSync(join(dest, 'SKILL.md'), 'utf8'), 'say hi v1\n', agentDir);
@@ -328,10 +337,10 @@ test('materializeSkillDir copies the commit the skill was listed at, not where t
 test('materializeSkillDir replaces a marked copy whose file became a directory upstream', async (t) => {
   const { repoRoot, publish, list } = await dirSkillFixture(t);
   publish({ 'SKILL.md': 'say hi\n', 'references/guide': 'guide as one file\n' });
-  assert.equal(await materializeSkillDir(repoRoot, await list()), true);
+  assert.deepEqual(await materializeSkillDir(repoRoot, await list()), skillDests(repoRoot));
 
   publish({ 'SKILL.md': 'say hi\n', 'references/guide/new.md': 'guide split up\n' });
-  assert.equal(await materializeSkillDir(repoRoot, await list()), true);
+  assert.deepEqual(await materializeSkillDir(repoRoot, await list()), skillDests(repoRoot));
   for (const agentDir of ['.claude', '.agents', '.cursor']) {
     const dest = join(repoRoot, agentDir, 'skills', 'greeter');
     assert.equal(readFileSync(join(dest, 'references', 'guide', 'new.md'), 'utf8'), 'guide split up\n', agentDir);
@@ -341,10 +350,10 @@ test('materializeSkillDir replaces a marked copy whose file became a directory u
 test('materializeSkillDir replaces a marked copy whose directory became a file upstream', async (t) => {
   const { repoRoot, publish, list } = await dirSkillFixture(t);
   publish({ 'SKILL.md': 'say hi\n', 'references/guide/part.md': 'guide in parts\n' });
-  assert.equal(await materializeSkillDir(repoRoot, await list()), true);
+  assert.deepEqual(await materializeSkillDir(repoRoot, await list()), skillDests(repoRoot));
 
   publish({ 'SKILL.md': 'say hi\n', 'references/guide': 'guide merged back\n' });
-  assert.equal(await materializeSkillDir(repoRoot, await list()), true);
+  assert.deepEqual(await materializeSkillDir(repoRoot, await list()), skillDests(repoRoot));
   for (const agentDir of ['.claude', '.agents', '.cursor']) {
     const dest = join(repoRoot, agentDir, 'skills', 'greeter');
     assert.equal(readFileSync(join(dest, 'references', 'guide'), 'utf8'), 'guide merged back\n', agentDir);
@@ -357,7 +366,7 @@ test('materializeSkillDir overlays an unmarked existing dir without deleting or 
   mkdirSync(own, { recursive: true });
   writeFileSync(join(own, 'mine.md'), 'the user wrote this\n');
 
-  assert.equal(await materializeSkillDir(repoRoot, greeter), true);
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), skillDests(repoRoot));
   assert.equal(readFileSync(join(own, 'mine.md'), 'utf8'), 'the user wrote this\n');
   assert.equal(readFileSync(join(own, 'SKILL.md'), 'utf8'), 'say hi v1\n');
   assert.equal(existsSync(join(own, TEAM_SKILL_MARKER)), false, 'an unmarked dir must never become ours');
@@ -372,7 +381,7 @@ test('materializeSkillDir never clears a type conflict inside an unmarked dir', 
   writeFileSync(join(own, 'references', 'guide'), 'the user wrote this\n');
 
   publish({ 'SKILL.md': 'say hi\n', 'references/guide/new.md': 'guide split up\n' });
-  await materializeSkillDir(repoRoot, await list()).catch(() => false);
+  await materializeSkillDir(repoRoot, await list()).catch(() => []);
   assert.equal(readFileSync(join(own, 'references', 'guide'), 'utf8'), 'the user wrote this\n');
 });
 
@@ -392,7 +401,7 @@ test('materializeSkillDir skips a destination whose symlinked agent dir leads ou
   symlinkSync(outside, join(repoRoot, '.claude'));
 
   publish({ 'SKILL.md': 'say hi\n', 'references/guide/part.md': 'guide in parts\n' });
-  assert.equal(await materializeSkillDir(repoRoot, await list()), true);
+  assert.deepEqual(await materializeSkillDir(repoRoot, await list()), skillDests(repoRoot, '.agents', '.cursor'));
   assert.deepEqual(readdirSync(outside), [], 'nothing may be created through the escaping link');
   for (const agentDir of ['.agents', '.cursor']) {
     const dest = join(repoRoot, agentDir, 'skills', 'greeter');
@@ -406,7 +415,7 @@ test('materializeSkillDir skips a destination whose symlinked agent dir leads ou
   writeFileSync(join(theirs, 'references', 'guide', 'mine.md'), 'the user wrote this\n');
   writeFileSync(join(theirs, 'mine.md'), 'the user wrote this too\n');
   publish({ 'SKILL.md': 'say hi\n', 'references/guide': 'guide merged back\n' });
-  assert.equal(await materializeSkillDir(repoRoot, await list()), true);
+  assert.deepEqual(await materializeSkillDir(repoRoot, await list()), skillDests(repoRoot, '.agents', '.cursor'));
   assert.equal(readFileSync(join(theirs, 'references', 'guide', 'mine.md'), 'utf8'), 'the user wrote this\n');
   assert.equal(readFileSync(join(theirs, 'mine.md'), 'utf8'), 'the user wrote this too\n');
   assert.equal(existsSync(join(theirs, 'SKILL.md')), false);
@@ -420,7 +429,7 @@ test('materializeSkillDir skips a destination whose symlinked agent dir leads ou
   assert.equal(exclude.includes('.agents/skills/greeter/'), true);
 });
 
-test('materializeSkillDir writes nothing and returns false when every destination leads out of the worktree', async (t) => {
+test('materializeSkillDir writes nothing and returns no dirs when every destination leads out of the worktree', async (t) => {
   const { repoRoot, greeter } = await dirSkillFixture(t);
   const outside = outsideDir(t);
   for (const agentDir of ['.claude', '.agents', '.cursor']) {
@@ -433,7 +442,7 @@ test('materializeSkillDir writes nothing and returns false when every destinatio
   mkdirSync(join(repoRoot, '.cursor', 'skills'), { recursive: true });
   symlinkSync(linkedName, join(repoRoot, '.cursor', 'skills', 'greeter'));
 
-  assert.equal(await materializeSkillDir(repoRoot, greeter), false);
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), []);
   for (const agentDir of ['.claude', '.agents', '.cursor']) {
     assert.deepEqual(readdirSync(join(outside, agentDir)), [], agentDir);
   }
@@ -445,14 +454,14 @@ test('materializeSkillDir follows a symlinked agent dir that stays inside the wo
   mkdirSync(join(repoRoot, '.agents'));
   symlinkSync('.agents', join(repoRoot, '.claude')); // a tracked relative link
 
-  assert.equal(await materializeSkillDir(repoRoot, greeter), true);
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), skillDests(repoRoot));
   assert.equal(readFileSync(join(repoRoot, '.claude', 'skills', 'greeter', 'SKILL.md'), 'utf8'), 'say hi v1\n');
   assert.equal(readFileSync(join(repoRoot, '.agents', 'skills', 'greeter', 'references', 'notes.md'), 'utf8'), 'notes v1\n');
 });
 
 test('materializeSkillDir unlinks symlinks inside a marked copy instead of following them out', async (t) => {
   const { repoRoot, greeter } = await dirSkillFixture(t);
-  assert.equal(await materializeSkillDir(repoRoot, greeter), true);
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), skillDests(repoRoot));
   const outside = outsideDir(t);
   writeFileSync(join(outside, 'kept.md'), 'outside file\n');
   mkdirSync(join(outside, 'dir'));
@@ -465,7 +474,7 @@ test('materializeSkillDir unlinks symlinks inside a marked copy instead of follo
   symlinkSync(join(outside, 'dir'), join(dest, 'references')); // where a file's parent goes
   symlinkSync(join(outside, 'dir'), join(dest, 'escape')); // nothing goes here
 
-  assert.equal(await materializeSkillDir(repoRoot, greeter), true);
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), skillDests(repoRoot));
   assert.equal(lstatSync(join(dest, 'SKILL.md')).isFile(), true);
   assert.equal(readFileSync(join(dest, 'SKILL.md'), 'utf8'), 'say hi v1\n');
   assert.equal(lstatSync(join(dest, 'references')).isDirectory(), true);
@@ -485,7 +494,7 @@ test('materializeSkillDir never takes a dir whose marker is a symlink for its ow
   writeFileSync(join(outside, 'file.json'), 'outside file\n');
   symlinkSync(join(outside, 'file.json'), join(own, TEAM_SKILL_MARKER));
 
-  assert.equal(await materializeSkillDir(repoRoot, greeter), true);
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), skillDests(repoRoot));
   assert.equal(readFileSync(join(outside, 'file.json'), 'utf8'), 'outside file\n');
   assert.equal(readFileSync(join(own, 'mine.md'), 'utf8'), 'the user wrote this\n', 'an unmarked dir is never pruned');
 });
@@ -497,7 +506,7 @@ test('materializeSkillDir never writes through a symlink inside an unmarked dir 
   const outside = outsideDir(t);
   symlinkSync(outside, join(own, 'references'));
 
-  assert.equal(await materializeSkillDir(repoRoot, greeter), true);
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), skillDests(repoRoot));
   assert.deepEqual(readdirSync(outside), []);
   assert.equal(readFileSync(join(own, 'SKILL.md'), 'utf8'), 'say hi v1\n');
   assert.equal(lstatSync(join(own, 'references')).isSymbolicLink(), true, 'the user\'s own link is kept');

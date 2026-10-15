@@ -191,4 +191,49 @@ describe('team directory skills never land in the main checkout (#1024)', { time
     expect(store.readEvents(worktreeRun.id).some((event) => event.type === 'note' &&
       event.message === `team skill "${TEAM_SKILL}" materialized to ${filesDir}`)).toBe(true);
   });
+
+  /** The step-start notes of a run that name where a team skill was materialized. */
+  function materializedNotes(runId: string): string[] {
+    return store.readEvents(runId)
+      .filter((event) => event.type === 'note' && String(event.message).startsWith(`team skill "${TEAM_SKILL}" materialized to`))
+      .map((event) => String(event.message));
+  }
+
+  it('a worktree whose .claude links out of it names a copy that did land in the prompt', async () => {
+    await seedTeamSource();
+    const outside = mkdtempSync(join(tmpdir(), 'cez-team-dir-outside-'));
+    cleanup.push(outside);
+    symlinkSync(outside, join(repoRoot, '.claude'));
+    for (const agentDir of ['.agents', '.cursor']) {
+      mkdirSync(join(repoRoot, agentDir));
+      writeFileSync(join(repoRoot, agentDir, '.keep'), '');
+    }
+    await execFileAsync('git', ['add', '-A'], { cwd: repoRoot });
+    await execFileAsync('git', [...GIT_ID, 'commit', '-q', '-m', 'linked .claude'], { cwd: repoRoot });
+
+    const worktreeRun = await runToEnd(undefined);
+    const filesDir = join(worktreeRun.spec.cwd, '.agents', 'skills', TEAM_SKILL);
+    expect(worktreeRun.spec.cwd).not.toBe(repoRoot);
+    expect(lstatSync(join(worktreeRun.spec.cwd, '.claude')).isSymbolicLink()).toBe(true);
+    expect(existsSync(join(outside, 'skills')), '.claude outside the worktree').toBe(false);
+    // Every runner reads the named copy, whichever agent dir it would scan itself.
+    expect(worktreeRun.spec.systemPrompt).toContain(`Skill files are installed on disk at: ${filesDir}`);
+    expect(readFileSync(join(filesDir, 'references', 'notes.md'), 'utf8')).toBe(NOTES);
+    expect(materializedNotes(worktreeRun.id)).toEqual([
+      `team skill "${TEAM_SKILL}" materialized to .agents/skills/${TEAM_SKILL}/ and .cursor/skills/${TEAM_SKILL}/`,
+    ]);
+  });
+
+  it('a worktree that takes all three copies keeps the note and names no path', async () => {
+    await seedTeamSource();
+
+    const worktreeRun = await runToEnd(undefined);
+    expect(worktreeRun.spec.cwd).not.toBe(repoRoot);
+    expect(worktreeRun.spec.systemPrompt).toContain(V1_BODY);
+    expect(worktreeRun.spec.systemPrompt).not.toContain('Skill files are installed on disk at:');
+    expect(materializedNotes(worktreeRun.id)).toEqual([
+      `team skill "${TEAM_SKILL}" materialized to .claude/skills/${TEAM_SKILL}/ ` +
+        `.agents/skills/${TEAM_SKILL}/, and .cursor/skills/${TEAM_SKILL}/`,
+    ]);
+  });
 });
