@@ -132,6 +132,17 @@ writing `key: maybeUndefined` types a key as always-present that `JSON.stringify
 wire (spread it conditionally), and an object-literal `type: 'x'` widens to `string` during hono's
 inference, erasing a discriminant consumers narrow on (`as const`).
 
+A request schema is just as exact about what the route TAKES: it refuses everything its handler
+would refuse for a shape reason — a pattern, a length, a character set — so a body the middleware
+admits never comes back a 400 from the handler, and `AppType` never promises an input the route
+turns away. Export a shared rule ONCE from `packages/contract` and use that constant in the schema,
+the handler and the cockpit; the handler never refuses, on shape alone, a value the schema let
+through. What a schema cannot know — a name already taken, a run another process holds — stays the
+handler's to refuse. hearsay-tools/cezarion#1081 is the worked example:
+`createProjectInputSchema.name` used `GITHUB_REPO_NAME_PATTERN`, which admitted a leading `-`, `.`
+or `_`, and the handler then refused those names through `isValidCheckoutName`. Its fix exports one
+`PROJECT_NAME_PATTERN` from `packages/contract/src/projects.ts` for all three.
+
 ## Repository layout
 
 Four pnpm workspaces (npm script metadata retained) under a `private` root that publishes nothing itself:
