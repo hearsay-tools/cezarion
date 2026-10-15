@@ -405,6 +405,9 @@ export class OmpRunner implements AgentRunner {
     // Every prompt carries an id: a local completion or failure ends the turn only when it
     // answers the prompt that opened it, never a steer (the mapper gates on this id).
     const humanAcks = new Set<string>();
+    // A human prompt OMP acknowledged with no turn open runs as OMP's next agent run. It stays
+    // held until that agent_start, so the ack is not a turn boundary (hearsay-tools/cezarion#1112).
+    const humanAwaitingStart = new Set<string>();
     let agentAck: { id: string; resolve: () => void; reject: (error: Error) => void } | undefined;
     const rejectAgentAck = (error = new Error('omp closed before prompt acknowledgement')) => {
       const pending = agentAck; agentAck = undefined;
@@ -597,6 +600,7 @@ export class OmpRunner implements AgentRunner {
           // The mapper closed its turn on this frame: v1 ends the turn with it.
           const endsTurn = turnOpen && ompUi.turnId === null;
           if (!isRecord(value)) continue;
+          if (value.type === 'prompt_result' && value.agentInvoked === false) humanAwaitingStart.delete(string(value.id) ?? '');
 
           if (value.type === 'response' && value.command === 'get_state' && value.success === true && isRecord(value.data)) {
             const discovered = string(value.data.sessionId);
@@ -641,7 +645,10 @@ export class OmpRunner implements AgentRunner {
               if (value.success === true) { acked.add(pending.id); pending.resolve(); }
               else pending.reject(new Error(rpcError(value)));
             } else if (id) {
-              humanAcks.delete(id);
+              // `agentInvoked: false` is a prompt OMP finished itself: no agent run follows.
+              const runsAgent = !(isRecord(value.data) && value.data.agentInvoked === false);
+              if (humanAcks.delete(id) && value.success === true && runsAgent && !ompUi.turnId) humanAwaitingStart.add(id);
+              else humanAwaitingStart.delete(id);
             }
             readyAfterAck();
           } else if (value.type === 'response' && value.success === false) {
@@ -679,6 +686,8 @@ export class OmpRunner implements AgentRunner {
               latchedProviderError = undefined;
             }
           } else if (value.type === 'agent_start') {
+            // emitUi above already reported this run's turn.started.
+            humanAwaitingStart.clear();
             // Only a prompt OMP acknowledged before this agent_start can be in its turn (#505).
             carried = new Set(submissions.pendingIds().filter(id => acked.has(id)));
             turnFailed = false;
@@ -847,9 +856,10 @@ export class OmpRunner implements AgentRunner {
         if (!sendMessage(content, id, inputIds)) { agentAck = undefined; return false; }
         return acknowledged;
       },
-      discardQueuedMessages: () => undefined,
-      holdsHumanInput: () => humanAcks.size > 0,
-      heldHumanInputCount: () => humanAcks.size,
+      // A written prompt cannot be unwritten; only stop reporting an acknowledged one as held.
+      discardQueuedMessages: () => { humanAwaitingStart.clear(); },
+      holdsHumanInput: () => humanAcks.size > 0 || humanAwaitingStart.size > 0,
+      heldHumanInputCount: () => humanAcks.size + humanAwaitingStart.size,
       end,
       interrupt,
       // The live child: a Ruling 13 respawn replaces it (`onPidChange` tells the caller who read it).

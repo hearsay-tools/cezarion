@@ -257,7 +257,10 @@ rl.on('line', (line) => {
   // Every raw command, in arrival order, for tests that pin what the runner wrote.
   if (process.env.CEZ_MOCK_OMP_COMMANDS_FILE) appendFileSync(process.env.CEZ_MOCK_OMP_COMMANDS_FILE, `${line}\n`);
   const command = JSON.parse(line);
-  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && activeTurn) {
+  // hearsay-tools/cezarion#1112: a deferred-start steer is not admitted into the running turn;
+  // OMP acknowledges it as its next prompt once that turn settles, with no turn open.
+  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && activeTurn &&
+    !command.message.includes('mock:deferred-turn-start')) {
     record({ userText: command.message, imageCount: (command.images ?? []).length, streamingBehavior: 'steer' });
     // Steers OMP never hands to the running agent: none of them may end its turn.
     if (command.message.includes('mock:steer-rejected')) {
@@ -396,6 +399,8 @@ async function prompt(command) {
     }
   } else {
   respond(command);
+  // hearsay-tools/cezarion#1112: the acknowledged prompt opens its native run late.
+  if (message.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
   beginTurn(command);
   }
   if (message.includes('mock:multi-pr-refs')) {

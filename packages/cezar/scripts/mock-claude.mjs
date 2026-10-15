@@ -146,6 +146,8 @@ async function respond(userText, imageCount, uuid) {
     const { crashWithStderr } = await import('./mock-runner-crash.mjs');
     if (crashWithStderr(userText, '{"type":"assistant","message":')) return;
   }
+  // hearsay-tools/cezarion#1112: the line waits in the pipe before the model reads it.
+  if (userText.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
   emitReplay(uuid, userText);
   if (userText.includes('mock:autonomous') || userText.startsWith('Continue working autonomously until the task is fully complete.')) {
     const { autonomousReply } = await import('./mock-autonomous.mjs');

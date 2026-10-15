@@ -126,7 +126,10 @@ const rl = readline.createInterface({ input: process.stdin });
 let queue = Promise.resolve();
 rl.on('line', (line) => {
   const command = JSON.parse(line);
-  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && activeTurn) {
+  // hearsay-tools/cezarion#1112: a deferred-start steer is not admitted into the running turn;
+  // pi acknowledges it as its next prompt once that turn settles, with no turn open.
+  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && activeTurn &&
+    !command.message.includes('mock:deferred-turn-start')) {
     if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: command.message, imageCount: 0, streamingBehavior: 'steer' })}\n`);
     activeTurn.steers.push(command.message);
     write({ id: command.id, type: 'response', command: 'prompt', success: true });
@@ -387,6 +390,8 @@ async function handle(command) {
     const monitoringMarker = command.message.includes('mock:monitoring') ? '\n\nCEZ:MONITORING' : '';
     const responseText = `Investigating: ${command.message}${monitoringMarker}`;
     send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    // hearsay-tools/cezarion#1112: the acknowledged prompt opens its native run late.
+    if (command.message.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
     send({ type: 'agent_start' });
     send({ type: 'turn_start' });
     send({

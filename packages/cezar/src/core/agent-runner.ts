@@ -298,7 +298,10 @@ export interface AgentSession {
    *  Queueing runners drop on `discardQueuedMessages` and return false immediately.
    *  Write-through/steer wires report true until the harness settles that line
    *  (their discard is a no-op). A drain with no new turn must call
-   *  `onAgentInputReady` so run.ts can re-settle the idle boundary. */
+   *  `onAgentInputReady` so run.ts can re-settle the idle boundary. A drain that
+   *  opens a new native turn keeps reporting true until that turn's `turn.started`
+   *  has been emitted: a spawn, an ack or a queue shift is not a turn start, and
+   *  run.ts parks a boundary whose hold reads false (hearsay-tools/cezarion#1112). */
   holdsHumanInput(): boolean;
   /** Count of human follow-ups still held behind `holdsHumanInput`. Every built-in
    *  runner reports it from the same state `holdsHumanInput` reads

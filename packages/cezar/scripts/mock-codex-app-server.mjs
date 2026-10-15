@@ -248,6 +248,8 @@ rl.on('line', async (line) => {
       if (silent.isLateTurnStartNudge(turnText)) await waitForMockRelease(silent.LATE_REPLY_MS);
       else if (silent.isLateNudge(turnText)) await silent.sleep(silent.LATE_REPLY_MS);
     }
+    // hearsay-tools/cezarion#1112: the acknowledged turn/start reports turn/started late.
+    if (turnText.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
     if (!turnText.includes('mock:no-progress-ack-only')) {
     emit({ method: 'turn/started', params: { turn: { id: 'turn_mock_1', status: 'inProgress', items: [] } } });
     }

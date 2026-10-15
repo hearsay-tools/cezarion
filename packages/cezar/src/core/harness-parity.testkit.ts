@@ -183,6 +183,7 @@ export const FOLLOWUP_CRITERIA = [
   { id: 'H1', scenario: 'hold-done', name: 'keeps a mid-turn human follow-up across a DONE turn' },
   { id: 'H2', scenario: 'hold-ask', name: 'drops a mid-turn human follow-up when the turn parks on ASK' },
   { id: 'H3', scenario: 'hold-gated', name: 'does not park or nudge between a markerless turn and a mid-turn follow-up' },
+  { id: 'H4', scenario: 'hold-gated', name: 'does not park before a held follow-up whose native turn starts late' },
 ] as const;
 
 /** #426: workflow-autonomous-parity.test.ts, real native wires on both turn-end paths. */

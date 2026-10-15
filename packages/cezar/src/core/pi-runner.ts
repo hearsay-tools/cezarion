@@ -180,6 +180,9 @@ export class PiRunner implements AgentRunner {
     let agentInputReady = false;
     let promptSerial = 0;
     let humanPromptAcks = 0;
+    // A human prompt pi acknowledged with no turn open runs as pi's next agent run. It stays
+    // held until that agent_start, so the ack is not a turn boundary (hearsay-tools/cezarion#1112).
+    let humanAwaitingStart = 0;
     let agentAck: { id: string; resolve: () => void; reject: (error: Error) => void } | undefined;
     const rejectAgentAck = (error = new Error('pi closed before prompt acknowledgement')) => {
       const pending = agentAck; agentAck = undefined;
@@ -381,7 +384,9 @@ export class PiRunner implements AgentRunner {
                 pending.reject(new Error(message));
               }
             } else if (value.id === undefined) {
+              const held = humanPromptAcks > 0;
               humanPromptAcks = Math.max(0, humanPromptAcks - 1);
+              if (held && value.success === true && !piUi.turnId) humanAwaitingStart += 1;
               if (value.success === false) onEvent?.({ type: 'error', message: rpcError(value) });
             }
             readyAfterAck();
@@ -412,6 +417,8 @@ export class PiRunner implements AgentRunner {
               latchedProviderError = undefined;
             }
           } else if (value.type === 'agent_start') {
+            // emitUi above already reported this run's turn.started.
+            humanAwaitingStart = 0;
             // Pi handles commands in stream order: only a prompt it acknowledged before this
             // agent_start can be in the turn it starts (#505 CI race).
             carried = new Set(submissions.pendingIds().filter(id => acked.has(id)));
@@ -560,9 +567,10 @@ export class PiRunner implements AgentRunner {
         }
         return acknowledged;
       },
-      discardQueuedMessages: () => undefined,
-      holdsHumanInput: () => humanPromptAcks > 0,
-      heldHumanInputCount: () => humanPromptAcks,
+      // A written prompt cannot be unwritten; only stop reporting an acknowledged one as held.
+      discardQueuedMessages: () => { humanAwaitingStart = 0; },
+      holdsHumanInput: () => humanPromptAcks > 0 || humanAwaitingStart > 0,
+      heldHumanInputCount: () => humanPromptAcks + humanAwaitingStart,
       end,
       interrupt,
       pid: child.pid,

@@ -1184,7 +1184,7 @@ this HTTP-only ordering and test root idle expiry/Continue on their native wires
 Owned-worker terminal settlement and explicit question/worker/CI waits retain
 their existing policies.
 
-**H1–H3** (hearsay-tools/cezarion#486) live in `core/workflow-followup-parity.test.ts`
+**H1–H4** (hearsay-tools/cezarion#486, H4 hearsay-tools/cezarion#1112) live in `core/workflow-followup-parity.test.ts`
 and the same parity guard. A human follow-up sent via `manager.sendMessage` while a
 turn is running must reach the agent without a resend when that turn ends with
 `CEZ:DONE` (H1), must be dropped when the same turn parks on a portable `CEZ:ASK`
@@ -1206,7 +1206,15 @@ human `turn/steer` whose completed-then-response ordering left no active turn; i
 restarts an accepted-but-unread steer with `turn/start` under the same
 `clientUserMessageId`, and skips that restart when the turn already echoed the id.
 A Codex human `turn/start` keeps `holdsHumanInput()` true until `turn/started`
-(or until that turn will never start: start error, close, interrupt).
+(or until that turn will never start: start error, close, interrupt). The same holds
+for every drain that opens a new native turn (H4, hearsay-tools/cezarion#1112): a Cursor
+print follow-up stays held from the queue shift until its process's init frame, and a Pi
+or OMP human prompt acknowledged with no turn open stays held until its `agent_start`.
+Without that, the 250 ms recheck found the hold drained and parked the run `waiting`
+while the follow-up's turn was still starting, and that turn then ran under Needs you.
+H4 sends the follow-up with `mock:deferred-turn-start`, which every mock honors by
+starting that turn 800 ms late (`scripts/mock-deferred-turn-start.mjs`), and asserts no
+turn starts after the first park.
 OMP named wire limit: a human prompt rejected after `session_settled` is only a note
 and is not restarted — real OMP settles only at `queuedMessageCount === 0`, so a
 steer accepted before settle is read in-turn (I2), and a post-settle rejection has
