@@ -55,7 +55,7 @@ it.each(['boot', 'owner', 'aliased-owner'])('preserves the registered %s project
     const alias = join(root, 'alias');
     if (owner === 'aliased-owner') await symlink(project, alias, 'dir');
     const registry = JSON.stringify({ projects: [
-      { id: 'unrelated', root: process.cwd() },
+      { id: 'unrelated', root: join(root, 'unrelated') },
       { id: owner, root: owner === 'aliased-owner' ? alias : project },
     ] });
     await writeFile(join(home, 'config.json'), registry);
@@ -122,19 +122,28 @@ describe('owningProjectId (#925)', () => {
       expect(aliased).not.toBe(dir);
 
       expect(owningProjectId(
-        [{ id: 'owner', root: project }, { id: 'unrelated', root: process.cwd() }],
+        [{ id: 'owner', root: project }, { id: 'unrelated', root: join(root, 'unrelated') }],
         aliased,
         runId,
       )).toBe('owner');
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
-  it('never names a project whose storage is a different directory', () => {
-    const runId = randomUUID();
-    expect(owningProjectId([{ id: 'other', root: process.cwd() }], join(process.cwd(), '.ai/cezar/runs', `${runId}-artifacts`), randomUUID())).toBeUndefined();
+  // Every probe stays inside a temporary root. Spelled under `process.cwd()` they reached into
+  // the checkout, including a live cockpit's `.ai/cezar/runs`. A fresh random path there on
+  // every run also kept Squeal from ever recording this file: its input closure never repeated.
+  it('never names a project whose storage is a different directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'cez-artifact-other-'));
+    try {
+      const runId = randomUUID();
+      expect(owningProjectId([{ id: 'other', root }], join(root, '.ai/cezar/runs', `${runId}-artifacts`), randomUUID())).toBeUndefined();
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
-  it('reads an absent directory as unowned rather than throwing', () => {
-    expect(owningProjectId([{ id: 'other', root: process.cwd() }], join(process.cwd(), 'absent-runs', `${randomUUID()}-artifacts`), randomUUID())).toBeUndefined();
+  it('reads an absent directory as unowned rather than throwing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'cez-artifact-absent-'));
+    try {
+      expect(owningProjectId([{ id: 'other', root }], join(root, 'absent-runs', `${randomUUID()}-artifacts`), randomUUID())).toBeUndefined();
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 });
