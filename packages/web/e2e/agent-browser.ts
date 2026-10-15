@@ -51,7 +51,8 @@ export const cezarCli = resolve(repoRoot, '.ai/qa/build/cezar/dist/index.js')
  * through a stand-in binary. The root is overridable for the same reason.
  */
 const defaultFailureRoot = resolve(repoRoot, '.ai/qa/failures')
-/** How long `goto` lets the current document load its font faces before navigating (#808). */
+/** How long `goto` lets the current document load its font faces before navigating
+ *  (hearsay-tools/cezarion#808). */
 const FONT_SETTLE_MS = 10_000
 const failureCapture: { root: string; spec: string; test: string } = {
   root: defaultFailureRoot,
@@ -526,14 +527,16 @@ export class AgentBrowser {
     this.run(['open', url])
   }
 
-  /** #808: never tear a document down while one of its font faces is still fetching. Chrome keeps
-   *  that half-loaded font in the renderer's memory cache, and every later document that reuses
-   *  the entry waits on it forever: `document.fonts.status` stays `loading`, so every settled
-   *  sample in the session times out. Waiting for `document.fonts.ready` was not enough: under
-   *  load the Skills page read `loaded` here and the next document still stuck (A/B run fix-5),
-   *  so a face can start after the check. Load every declared face up front: none can start
-   *  between this check and the navigation, and later documents only ever find finished entries.
-   *  Bounded, and a page that cannot answer navigates as before. */
+  /** hearsay-tools/cezarion#808: never tear a document down while one of its font faces is
+   *  still fetching. Chrome keeps that half-loaded font in the renderer's memory cache, and every
+   *  later document that reuses the entry waits on it forever: `document.fonts.status` stays
+   *  `loading`, so every settled sample in the session times out. Reproduced locally by holding
+   *  one font fetch open with CDP `Fetch` (every later document stuck), and seen in smoke runs
+   *  under full CPU load after the Skills page. Waiting for `document.fonts.ready` was not enough:
+   *  one of 5 loaded smoke runs read `loaded` here and the next document still stuck, so a face
+   *  can start after the check. Loading every declared face up front means none can start
+   *  between this check and the navigation (8/8 smoke runs at load 35-94). Bounded, and a page
+   *  that cannot answer navigates as before. */
   private settleFontsBeforeLeaving(): void {
     try {
       this.run(['eval', `(async () => {

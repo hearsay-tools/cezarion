@@ -47,7 +47,9 @@ const hrefOf = (selector: string) =>
  *  never read it before it is a real, KEYED URL. Waiting for the `javascript:` prefix alone raced
  *  the key fetch: the panel used to emit `key=&ref=` first, and the key assertion read that
  *  (hearsay-tools/cezarion#896). The predicate pins a non-empty `key=` so the read that follows
- *  sees the URL a person would actually drag. */
+ *  sees the URL a person would actually drag. Reproduced locally by delaying the server's
+ *  `launch-key` response 4 s: `main` fails with `expected 'javascript:(()=>{…' to contain
+ *  'key=…'` (bundle `the-generated-key-is-the-server-s-own-…-1`); this spec and panel pass. */
 const waitForGeneratedHref = (selector: string) =>
   browser.waitForFunction(
     `/^javascript:.*&key=[^&]+&ref=/.test(decodeURIComponent(document.querySelector('${selector}')?.getAttribute('href') ?? ''))`,
