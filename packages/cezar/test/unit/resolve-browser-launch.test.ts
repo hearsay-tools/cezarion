@@ -182,3 +182,23 @@ test('Windows and already-short POSIX paths are not rewritten', () => {
   });
   assert.deepEqual(short.runtimeEnv, {});
 });
+
+// hearsay-tools/cezarion#1022: the per-run agent TMPDIR budget and this e2e
+// resolver measure the same Chromium socket. The service cannot import a repo
+// script, so each writes the numbers down; this is what keeps them one value.
+test('the agent TMPDIR budget and the resolver agree on Chromium’s SingletonSocket', async () => {
+  const resolver = await import(pathToFileURL(resolverPath).href);
+  const agentTmp = await import('../../src/runs/agent-tmpdir.js');
+  assert.equal(agentTmp.CHROME_SINGLETON_OVERHEAD, resolver.CHROME_SINGLETON_OVERHEAD);
+  assert.equal(agentTmp.DARWIN_UNIX_SOCKET_MAX, resolver.DARWIN_UNIX_SOCKET_MAX);
+  assert.equal(
+    agentTmp.MAX_SOCKET_SAFE_DIR_LENGTH,
+    resolver.DARWIN_UNIX_SOCKET_MAX - resolver.CHROME_SINGLETON_OVERHEAD,
+  );
+  // A directory at the budget is one the resolver leaves alone on either platform.
+  const atBudget = `/${'x'.repeat(agentTmp.MAX_SOCKET_SAFE_DIR_LENGTH - 1)}`;
+  for (const platform of ['linux', 'darwin']) {
+    const launch = resolveBrowserLaunch({ env: { TMPDIR: atBudget }, host: desktopHost, platform });
+    assert.deepEqual(launch.runtimeEnv, {}, platform);
+  }
+});

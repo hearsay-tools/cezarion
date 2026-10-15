@@ -18,7 +18,8 @@ export function ensureDataGitignore(repoRoot: string): void {
     'runs.db-shm',
     'runs/',
     'worktrees/',
-    'tmp/', // per-run agent temp directories (#785)
+    'tmp/', // per-run agent temp control directories (#785)
+    't/', // per-run agent TMPDIRs, short enough for Chromium's socket (hearsay-tools/cezarion#1022)
     'todos.json',
     'todos.json.tmp',
     'launch-key',
