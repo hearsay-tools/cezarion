@@ -119,6 +119,15 @@ describe('claude hook_response (#961)', () => {
     });
   });
 
+  it('reads no entries from stdout on a nonzero exit, which Claude ignores', () => {
+    const stdout = JSON.stringify({ hookSpecificOutput: { additionalContext: 'never delivered' } });
+    for (const exit_code of [1, 2]) {
+      const item = only(response({ stdout, stderr: 'blocked: tests red', exit_code, outcome: 'error' }));
+      expect(item.entries).toEqual([{ kind: 'error', text: 'blocked: tests red' }]);
+      expect(item.stdout).toBe(stdout);
+    }
+  });
+
   it('emits nothing for a silent successful hook', () => {
     expect(hookItems(response({}))).toEqual([]);
   });

@@ -168,7 +168,9 @@ function mapHookResponse(msg: Record<string, unknown>): UiEvent[] {
   const stdout = typeof msg.stdout === 'string' ? msg.stdout : '';
   const stderr = typeof msg.stderr === 'string' ? msg.stderr : '';
   const exitCode = num(msg.exit_code);
-  const parsed = parseHookJson(stdout);
+  // Claude reads a hook's stdout only on exit 0; on any other exit it ignores it
+  // (exit 2 feeds stderr back instead), so stdout stays raw output, not entries.
+  const parsed = exitCode === undefined || exitCode === 0 ? parseHookJson(stdout) : undefined;
   const entries: UiHookItem['entries'] = [];
   const add = (kind: HookEntryKind, text: unknown): void => {
     if (typeof text === 'string' && text.trim() !== '') entries.push({ kind, text: text.trim() });
@@ -183,7 +185,7 @@ function mapHookResponse(msg: Record<string, unknown>): UiEvent[] {
     add('stop', parsed.stopReason);
     if (specific.permissionDecision === 'deny') { blockedByOutput = true; add('stop', specific.permissionDecisionReason); }
     if (specific.permissionDecision === 'ask') add('feedback', specific.permissionDecisionReason);
-  } else {
+  } else if (exitCode === undefined || exitCode === 0) {
     add('context', stdout);
   }
   let status: HookStatus = 'completed';
