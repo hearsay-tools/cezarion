@@ -189,7 +189,7 @@ includes "stopped for attention".
 | 0 | success; `wait`/`start --wait`: every judged run ended `done`/`review` or stopped for attention (`--mode all`), or one did (`--mode any`); `log --follow`: the run ended `done`/`review` or stopped for attention |
 | 1 | run ended `failed`/`cancelled` (`log --follow`: or vanished), or a send was not delivered |
 | 2 | no cockpit/project, or the cockpit refused (its `{ error }` passed through) |
-| 3 | `wait`/`log --follow` timed out; partial outcomes printed (under `--until attention` this includes a run still `running`/`monitoring` or parked on its workers) |
+| 3 | `wait`/`log --follow` timed out; partial outcomes printed (under `--until attention` this includes a run still `running`/`monitoring` or parked on its workers). A timed-out `wait` prints each run's status from the last poll that answered before the deadline, and `unknown` when none did: the deadline is not extended for a poll still in flight (hearsay-tools/cezarion#1066) |
 | 64 | usage error: `{ code: "invalid_input", error, usage }` |
 
 ## Around the edges
