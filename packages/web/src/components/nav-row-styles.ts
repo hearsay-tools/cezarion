@@ -2,9 +2,8 @@ import { cn } from '@/lib/utils'
 
 /*
  * One selection language for the sidebar (#617 addendum 01c): a selected nav item looks like a
- * selected task row. The single-project nav (`app-shell.tsx`), every project group's nav
- * (`project-groups.tsx`), New task on `/new` and the footer's active icon all read their classes
- * from here, so the fills the addendum requires to match cannot drift apart. No teal: the brand
+ * selected task row. New task on `/new` (`app-shell.tsx`) and the rail footer's active icon
+ * (`project-rail.tsx`) share that fill through these classes. No teal: the brand
  * accent stays out of the sidebar list, and badges take the colour of what they mean.
  */
 

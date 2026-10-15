@@ -11,7 +11,7 @@ import { readSharedProjects, snapshotSharedHome, writeSharedProjects } from './w
 /** Registry → rail → scoped project header, tabs and task list in a real browser. */
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
-const sessionId = `e2e-project-groups-${process.pid}`
+const sessionId = `e2e-project-sidebar-${process.pid}`
 const repoRoot = servedRoot()
 
 const DESKTOP = { width: 1440, height: 900 }
@@ -86,7 +86,7 @@ beforeAll(async () => {
   // `ui-state.json` too: the collapse assertion below reads it to prove nothing was written
   // there, and a developer's scratch home must not come out of this run holding a seeded map.
   restoreHome = snapshotSharedHome('config.json', 'ui-state.json')
-  seedDir = mkdtempSync(join(tmpdir(), 'cezar-e2e-groups-'))
+  seedDir = mkdtempSync(join(tmpdir(), 'cezar-e2e-sidebar-'))
 
   // The boot entry as the registry already has it when it is registered — its `lastOpenedAt` is
   // what puts it first in the sidebar's most-recently-opened order, so the seeded siblings get
