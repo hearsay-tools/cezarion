@@ -1,7 +1,7 @@
 import { permissionDecisionSchema, runIdParamSchema as permissionRunIdParamSchema } from '@open-mercato/cezar-contract';
 import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
 import { CheckoutProgressCache } from './checkout-progress.ts';
-import { checkoutProgressParamsSchema } from '@open-mercato/cezar-contract';
+import { checkoutProgressParamsSchema, createProjectInputSchema, type CreateProjectResponse, type GithubOwnersResponse } from '@open-mercato/cezar-contract';
 import { createLiveRoutes } from './live-routes.ts';
 import { subscribeRunFeed } from './run-event-feed.ts';
 import { sidebarLimitsSchema } from '@open-mercato/cezar-contract';
@@ -208,6 +208,7 @@ import {
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { mergeWriteWorkspaceUiState, readWorkspaceUiState } from '../workspace/ui-state.ts';
 import { checkoutRepo, type CloneRunner } from './checkout.ts';
+import { createProject, listGithubOwners, type CommandRunner } from './create-project.ts';
 import { armPreview, ProjectContextError, ProjectContexts, projectWarmupEnabled, sweepRegisteredPreviewLeftovers, type ProjectContext } from './project-context.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
 import { readUiState, uiStatePath } from '../ui-state.ts';
@@ -301,6 +302,10 @@ export interface ServerDeps {
    *  route's guards, cleanup and error surfacing are exercised for real
    *  against real temp dirs, without a network or a `gh` binary. */
   cloneRunner?: CloneRunner;
+  /** How `POST /api/v1/projects/create` and `GET /api/v1/projects/github-owners`
+   *  run `git`/`gh` (spec 2026-10-15-create-new-project). Defaults to real
+   *  commands (or the `CEZ_DRY_RUN=1` fake); injected by tests. */
+  projectCommandRunner?: CommandRunner;
   /** What the Git view's branch classifier asks GitHub (issue 08). Defaults to the ref-status
    *  cache plus one cached `gh pr list`; tests inject a fake forge. */
   branchForge?: BranchForge;
@@ -400,6 +405,9 @@ const selectAgentProfileSchema = z.object({
 }).strict();
 
 /** The hosted-mode refusal, worded like the agent-config one it mirrors. */
+const HOSTED_GITHUB_CREATE_REFUSAL = 'Creating GitHub repositories is available from a local cockpit only';
+const HOSTED_GITHUB_OWNERS_REASON = 'GitHub repositories can be created from a local cockpit only';
+
 const hostedProfileRefusal = {
   error: 'agent accounts are managed from the machine that owns the checkout (this cockpit runs in hosted mode)',
 };
@@ -2865,7 +2873,84 @@ export function createApp(deps: ServerDeps) {
         return c.json({ error: `${error} (the clone is at ${result.target})` }, registered.status);
       }
       return c.json(registered.body, 200);
+    })
+
+    // ---- new project (spec 2026-10-15-create-new-project) ------------------
+    // "Add project → New project": a fresh git repo at `<projectsDir>/<name>`,
+    // optionally backed by a new PRIVATE GitHub repository (never public — the
+    // body has no visibility field to set), optionally from a template. Same
+    // progress stream and cache, same `registerFolder` commit, same
+    // `{ error, reason }` degradation as the clone route above.
+    //
+    // A hosted cockpit creates LOCAL projects only: GitHub creation would act
+    // with the host's `gh` account on a remote viewer's behalf, and the owner
+    // list would show that viewer the host's login and organisations.
+    .get('/projects/github-owners', async (c) => {
+      if (!capabilities().localHandoff) {
+        const body: GithubOwnersResponse = { available: false, reason: HOSTED_GITHUB_OWNERS_REASON };
+        return c.json(body);
+      }
+      return c.json(await listGithubOwners(deps.projectCommandRunner));
+    })
+
+    .post('/projects/create', jsonZodValidator(() => createProjectInputSchema, { message: 'project name must be a valid GitHub repository name — letters, digits, ".", "-" and "_" only, no spaces' }), async (c) => {
+      if (capabilities().singleProject) {
+        return c.json(singleProjectRefusal('adding projects'), 409);
+      }
+      const { name, github, checkoutId } = c.req.valid('json');
+      if (github && !capabilities().localHandoff) {
+        return c.json({ error: HOSTED_GITHUB_CREATE_REFUSAL }, 409);
+      }
+      const projectsDir = expandTilde(await workspaceProjectsDir());
+      // `registerFolder` re-checks hosted containment, but only AFTER the
+      // repository exists; asked here first, an out-of-root checkout root
+      // refuses before anything is created.
+      if (!capabilities().localHandoff && !(await isInsideHostedBrowseRoot(join(projectsDir, name)))) {
+        return c.json({ error: 'folder is outside the browsable root' }, 400);
+      }
+      const result = await createProject({
+        name,
+        github,
+        checkoutId,
+        projectsDir,
+        onProgress: (event) => { checkoutProgress.record(event); workspaceEvents.emit('checkout-progress', event); },
+        // Cancels only the steps before `gh repo create` (create-project.ts).
+        signal: c.req.raw.signal,
+        ...(deps.projectCommandRunner ? { run: deps.projectCommandRunner } : {}),
+      });
+      if (!result.ok) {
+        return c.json(
+          'reason' in result ? { error: result.error, reason: result.reason } : { error: result.error },
+          result.status,
+        );
+      }
+      // GitHub-backed projects register as `checkout` (they have an origin the
+      // clone flow would also produce); a local-only repo is `local`.
+      const registered = await registerFolder(result.target, result.slug ? 'checkout' : 'local');
+      if (registered.status !== 200) {
+        // As with a clone: the repository is the user's now, so it stays.
+        const { body } = registered;
+        const error = 'error' in body && body.error ? body.error : 'could not register the new project';
+        return c.json({ error: `${error} (the project is at ${result.target})` }, registered.status);
+      }
+      const body: CreateProjectResponse = { ...registered.body, ...(result.warning ? { warning: result.warning } : {}) };
+      return c.json(body, 200);
     });
+
+  /** Hosted containment for a path that may not exist yet: lexical for the
+   *  path itself, realpath for its nearest existing ancestor (a symlink inside
+   *  the browse root may point out of it). Same rule as `registerFolder`. */
+  const isInsideHostedBrowseRoot = async (candidate: string): Promise<boolean> => {
+    const browseRoot = resolveBrowseRoot(await workspaceBrowseRoot());
+    if (!(await isLexicallyInsideBrowseRoot(browseRoot, candidate))) return false;
+    let existing = candidate;
+    while (!(await stat(existing).then(() => true, () => false))) {
+      const parent = dirname(existing);
+      if (parent === existing) return false;
+      existing = parent;
+    }
+    return isInsideBrowseRoot(browseRoot, existing);
+  };
 
   // Register an existing folder (multi-project spec, "Add project" — the
   // folder-browser dialog's commit step, step 4.2). Workspace-level like its
