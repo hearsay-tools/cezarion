@@ -264,6 +264,28 @@ describe('the Git view Uncommitted changes section (/git/changes)', () => {
 
 // ---- commits ----------------------------------------------------------------------------------
 
+describe('the Git view Uncommitted changes Markdown preview (hearsay-tools/cezarion#1012)', () => {
+  it('previews the patch new side, labelled when it is only the changed sections', async () => {
+    const guide = {
+      path: 'docs/guide.md',
+      status: 'modified' as const,
+      adds: 1,
+      dels: 1,
+      binary: false,
+      patch: 'diff --git a/docs/guide.md b/docs/guide.md\n@@ -3,2 +3,2 @@\n ## Usage\n-old\n+new\n',
+    }
+    stubFetch({ 'GET /api/v1/repo/changes': () => jsonResponse({ ...CHANGES, files: [guide] }) })
+    renderAt('/git/changes')
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="diff-file"]')).toHaveLength(1))
+    const toggle = document.querySelector<HTMLButtonElement>('[data-slot="markdown-preview-toggle"]')!
+    expect(toggle.closest('.hidden')).toBeNull()
+
+    fireEvent.click(toggle)
+    await waitFor(() => expect(document.querySelector('[data-slot="diff-markdown-preview"] h2')?.textContent).toBe('Usage'))
+    expect(document.querySelector('[data-slot="diff-markdown-preview"]')?.textContent).toContain('Showing the changed sections only.')
+  })
+})
+
 describe('the Git view Recently on main section', () => {
   it.each(['/git', '/git/commits'])('%s is Recently on the checked-out branch, titled with a meta line and no tabs', async (entry) => {
     stubFetch()

@@ -50,6 +50,16 @@ export interface DiffProps {
   /** Soft-wrap long lines instead of horizontal scrolling. Default `false`. */
   wrap?: boolean
   /**
+   * Markdown preview (hearsay-tools/cezarion#1012). Absent ⇒ the feature is off: no per-file
+   * switch, every file renders as a diff. Present ⇒ each previewable Markdown card
+   * (`canPreviewMarkdown`) gets a Preview switch, and this value is the shared default: `true`
+   * renders those files as documents. A per-file choice overrides it until this value changes.
+   * The document is the new side only: the full text through `loadFileText` when wired, else
+   * what the patch carries, labelled when that is only the changed sections. Relative images
+   * load through `imageSrc`. The fallback renderer ignores it, as it ignores `split`.
+   */
+  preview?: boolean
+  /**
    * Expandable context needs file bytes the patch doesn't carry: given a path, resolve the
    * file's current (new-side) text — the Changes tab wires `/api/runs/:id/files` here (1.5).
    * Resolve `null` when unavailable (binary, deleted, too large); the gap stays collapsed.

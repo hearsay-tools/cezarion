@@ -4,11 +4,11 @@ import { useMemo, useRef, useState } from 'react'
 import { ApiError } from '@/api/client'
 import { useRepoChanges } from '@/api/queries'
 import { CenteredState } from '@/components/centered-state'
-import { Diff, type DiffHandle, type DiffMode } from '@/components/diff'
+import { canPreviewMarkdown, Diff, type DiffHandle, type DiffMode } from '@/components/diff'
 import { useIsDesktop } from '@/lib/use-desktop'
 
 import { ChangesTree } from '../task-git/changes-tree'
-import { DiffViewToggles } from '../task-git/diff-controls'
+import { DiffViewToggles, MarkdownPreviewToggle } from '../task-git/diff-controls'
 import { buildFileTree } from '../task-git/file-tree'
 import { AnimatedDiffStat } from '../task-git/git-toolbar'
 
@@ -28,6 +28,7 @@ export function RepoChangesSection() {
 
   const [mode, setMode] = useState<DiffMode>('unified')
   const [wrap, setWrap] = useState(false)
+  const [preview, setPreview] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const diffRef = useRef<DiffHandle | null>(null)
 
@@ -36,6 +37,7 @@ export function RepoChangesSection() {
 
   const files = changes.data?.files ?? []
   const tree = useMemo(() => buildFileTree(files), [files])
+  const hasMarkdown = useMemo(() => files.some(canPreviewMarkdown), [files])
 
   const effectiveMode: DiffMode = desktop ? mode : 'unified'
   const effectiveWrap = desktop ? wrap : true
@@ -54,9 +56,13 @@ export function RepoChangesSection() {
       >
         <span className="text-sm">{changes.data ? `${changes.data.stat.files} files changed ·` : 'Uncommitted changes'}</span>
         {changes.data ? <AnimatedDiffStat stat={changes.data.stat} /> : null}
-        {/* Same rule as the task toolbar: toggles exist ≥md only — phones force unified+wrap. */}
-        <span className="ml-auto hidden items-center gap-1 md:flex">
-          <DiffViewToggles mode={mode} wrap={wrap} onModeChange={setMode} onWrapChange={setWrap} />
+        <span className="ml-auto flex items-center gap-1">
+          {/* Same rule as the task toolbar: these toggles exist ≥md only — phones force unified+wrap. */}
+          <span className="hidden items-center gap-1 md:flex">
+            <DiffViewToggles mode={mode} wrap={wrap} onModeChange={setMode} onWrapChange={setWrap} />
+          </span>
+          {/* Every width, like the task toolbar's — see `MarkdownPreviewToggle`. */}
+          {hasMarkdown ? <MarkdownPreviewToggle preview={preview} onPreviewChange={setPreview} /> : null}
         </span>
       </div>
 
@@ -91,7 +97,16 @@ export function RepoChangesSection() {
             <h2 className="mb-3 border-b border-border pb-3 text-xs font-semibold">Changed files</h2>
             <ChangesTree root={tree} selected={selected} onSelect={selectFile} />
           </aside>
-          <Diff files={files} viewRef={diffRef} mode={effectiveMode} wrap={effectiveWrap} className="min-w-0 flex-1" />
+          <Diff
+            files={files}
+            viewRef={diffRef}
+            mode={effectiveMode}
+            wrap={effectiveWrap}
+            // No file route serves the main checkout, so the preview shows the patch's new side
+            // and no image: `loadFileText` and `imageSrc` stay unwired here.
+            preview={preview}
+            className="min-w-0 flex-1"
+          />
         </div>
       )}
     </section>

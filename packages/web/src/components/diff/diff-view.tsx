@@ -1,4 +1,4 @@
-import { ChevronRightIcon } from 'lucide-react'
+import { ChevronRightIcon, EyeIcon } from 'lucide-react'
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
 
@@ -15,6 +15,8 @@ import {
   widestLineChars,
 } from './diff-scroll'
 import { ImagePreview, shouldPreviewImage } from './image-preview'
+import { canPreviewMarkdown } from './markdown'
+import { MarkdownPreview } from './markdown-preview'
 
 import {
   buildSplitRows,
@@ -68,6 +70,7 @@ export function DiffView({
   files,
   mode = 'unified',
   wrap = false,
+  preview,
   loadFileText,
   imageSrc,
   onOpenInApp,
@@ -89,6 +92,18 @@ export function DiffView({
   // same files (the Changes tab polls every 4s while a run is active) keeps both.
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   const [expandedByFile, setExpandedByFile] = useState<ReadonlyMap<string, ExpandedGaps>>(() => new Map())
+
+  // Per-file Markdown preview choices, overriding the shared `preview` default. A change of that
+  // default clears them: the toolbar switch means "all Markdown files", every time it is pressed.
+  const [previewOverrides, setPreviewOverrides] = useState<ReadonlyMap<string, boolean>>(() => new Map())
+  const [previewDefault, setPreviewDefault] = useState(preview)
+  if (previewDefault !== preview) {
+    setPreviewDefault(preview)
+    setPreviewOverrides(new Map())
+  }
+  const setFilePreview = useCallback((key: string, value: boolean) => {
+    setPreviewOverrides((previous) => new Map(previous).set(key, value))
+  }, [])
 
   const toggleFile = useCallback((key: string) => {
     setCollapsed((previous) => {
@@ -141,11 +156,16 @@ export function DiffView({
 
   const card = (file: DiffFileChange) => {
     const key = fileKey(file)
+    const previewable = preview !== undefined && canPreviewMarkdown(file)
+    const previewed = previewable && (previewOverrides.get(key) ?? preview)
     return (
       <DiffFileCard
         file={file}
         open={!collapsed.has(key)}
         onToggle={() => toggleFile(key)}
+        preview={previewed}
+        onPreviewChange={previewable ? (value) => setFilePreview(key, value) : undefined}
+        loadFileText={loadFileText}
         expanded={expandedByFile.get(key) ?? NO_GAPS}
         onExpand={(gap) => void expandGap(file, gap)}
         mode={mode}
@@ -289,6 +309,9 @@ function DiffFileCard({
   onExpand,
   mode,
   wrap,
+  preview,
+  onPreviewChange,
+  loadFileText,
   canExpand,
   imageSrc,
   onOpenInApp,
@@ -296,6 +319,11 @@ function DiffFileCard({
   file: DiffFileChange
   open: boolean
   onToggle: () => void
+  /** Render this (Markdown) file as a document — already narrowed by `canPreviewMarkdown`. */
+  preview: boolean
+  /** Present only on a previewable Markdown card of a diff that offers the preview. */
+  onPreviewChange?: (preview: boolean) => void
+  loadFileText?: (path: string) => Promise<string | null>
   expanded: ExpandedGaps
   onExpand: (gap: ContextGap) => void
   mode: 'unified' | 'split'
@@ -315,13 +343,13 @@ function DiffFileCard({
           The offset is a consumer-set CSS var so the file header parks BELOW a sticky page
           header (Git / run header) rather than colliding with it; `z-10` keeps it beneath the
           page header's higher layer. Defaults to 0 for consumers without a sticky header. */}
-      <header className="sticky top-[var(--diff-sticky-top,0px)] z-10 rounded-t-md border-b border-border/50 bg-card">
+      <header className="sticky top-[var(--diff-sticky-top,0px)] z-10 flex items-center rounded-t-md border-b border-border/50 bg-card">
         <button
           type="button"
           data-slot="diff-file-header"
           aria-expanded={open}
           onClick={onToggle}
-          className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/50"
+          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left hover:bg-muted/50"
         >
           <ChevronRightIcon
             className={cn('size-3.5 shrink-0 text-soft-foreground transition-transform', open && 'rotate-90')}
@@ -355,8 +383,31 @@ function DiffFileCard({
             <DiffStatLabel stat={{ adds: file.adds, dels: file.dels, files: 1 }} className="text-[11px]" />
           </span>
         </button>
+        {/* A sibling of the collapse button, never inside it: one button cannot hold another.
+            Compact beside the path on a desktop mouse, a full 44px target on a phone-width
+            screen or any touch pointer. */}
+        {onPreviewChange ? (
+          <button
+            type="button"
+            data-slot="diff-file-preview-toggle"
+            aria-pressed={preview}
+            aria-label={`Preview ${file.path} as a document`}
+            title={preview ? 'Show this file as a diff' : 'Preview this file as a document'}
+            onClick={() => onPreviewChange(!preview)}
+            className={cn(
+              'mr-1.5 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium max-md:h-11 max-md:px-3 pointer-coarse:h-11 pointer-coarse:px-3',
+              'focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring',
+              preview ? 'bg-muted text-foreground' : 'text-soft-foreground hover:bg-muted/50 hover:text-foreground',
+            )}
+          >
+            <EyeIcon aria-hidden="true" className="size-3.5" />
+            Preview
+          </button>
+        ) : null}
       </header>
-      {open ? (
+      {open && preview ? (
+        <MarkdownPreview file={file} loadFileText={loadFileText} imageSrc={imageSrc} />
+      ) : open ? (
         <DiffFileBody
           file={file}
           expanded={expanded}

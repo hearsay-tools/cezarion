@@ -70,6 +70,30 @@ describe('Markdown', () => {
     expect(container.textContent).toContain('private')
   })
 
+  it('loads a document image only through the imageSrc resolver, and keeps refused ones as text', () => {
+    const imageSrc = vi.fn((src: string) => (src === 'img/ok.png' ? '/raw/docs/img/ok.png' : null))
+    const { container } = render(
+      <Markdown document imageSrc={imageSrc}>
+        {'![allowed](img/ok.png)\n\n![refused](../../escape.png)\n\n![remote](https://example.com/tracker.png)'}
+      </Markdown>,
+    )
+    const images = container.querySelectorAll('img')
+    expect(images).toHaveLength(1)
+    expect(images[0]?.getAttribute('src')).toBe(new URL('/raw/docs/img/ok.png', window.location.href).href)
+    expect(images[0]?.getAttribute('alt')).toBe('allowed')
+    expect(imageSrc).toHaveBeenCalledWith('img/ok.png')
+    expect(imageSrc).toHaveBeenCalledWith('../../escape.png')
+    expect(container.textContent).toContain('[Image: refused]')
+    expect(container.textContent).toContain('[Image: remote]')
+  })
+
+  it('gives every document its own image resolver, never an earlier one (processor cache)', () => {
+    render(<Markdown document imageSrc={() => '/raw/one.png'}>{'![shot](shot.png)'}</Markdown>)
+    cleanup()
+    const { container } = render(<Markdown document imageSrc={() => '/raw/two.png'}>{'![shot](shot.png)'}</Markdown>)
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(new URL('/raw/two.png', window.location.href).href)
+  })
+
   it('renders a ts fence as a code block with language chip and copy button, tokens on --syn-*', async () => {
     render(<Markdown>{'Before.\n\n```ts\nconst answer: number = 42;\n```'}</Markdown>)
 

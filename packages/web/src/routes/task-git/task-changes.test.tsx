@@ -359,6 +359,41 @@ describe('the Changes tab route', () => {
 
 // ---- the toolbar as a pure projector of policy fixtures ---------------------------------------
 
+describe('the Changes tab Markdown preview (hearsay-tools/cezarion#1012)', () => {
+  const toggle = () => document.querySelector<HTMLButtonElement>('[data-slot="markdown-preview-toggle"]')
+
+  it('offers the toggle at every width and previews the complete worktree file', async () => {
+    const sent = stubFetch({
+      'GET /api/v1/runs/r1/files?path=notes.md': () =>
+        jsonResponse({ type: 'file', path: 'notes.md', size: 30, binary: false, tooLarge: false, content: '# Notes\n\none\n\ntwo' }),
+    })
+    renderChangesRoute()
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="diff-file"]')).toHaveLength(2))
+    const button = toggle()!
+    expect(button.getAttribute('aria-pressed')).toBe('false')
+    // Phones keep it: unlike unified/split and wrap, it is not inside the ≥md-only group.
+    expect(button.closest('.hidden')).toBeNull()
+
+    fireEvent.click(button)
+    expect(button.getAttribute('aria-pressed')).toBe('true')
+    await waitFor(() => expect(document.querySelector('[data-slot="diff-markdown-preview"] h1')?.textContent).toBe('Notes'))
+    expect(sent.some((request) => request.path === '/api/v1/runs/r1/files?path=notes.md')).toBe(true)
+    // The TypeScript file keeps its diff rows.
+    expect(document.querySelector('[data-path="src/util/a.ts"] [data-slot="diff-line"]')).not.toBeNull()
+  })
+
+  it('has no toggle when nothing in the diff is previewable Markdown', async () => {
+    stubFetch({
+      'GET /api/v1/runs/r1/changes': () =>
+        jsonResponse({ ...CHANGES, files: CHANGES.files.filter((file) => file.path !== 'notes.md') }),
+    })
+    renderChangesRoute()
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="diff-file"]')).toHaveLength(1))
+    expect(toggle()).toBeNull()
+    expect(document.querySelector('[data-slot="diff-file-preview-toggle"]')).toBeNull()
+  })
+})
+
 describe('GitToolbar renders policy fixtures verbatim', () => {
   const noop = () => {}
   const renderToolbar = (bar: GitActionBar) =>

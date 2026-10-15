@@ -275,3 +275,162 @@ describe('Diff facade — an SVG is text, not a picture (#365 regression)', () =
     expect(document.querySelector('pre')?.textContent).toContain('M2 2h12v12H2z')
   })
 })
+
+describe('Diff facade — Markdown preview (hearsay-tools/cezarion#1012)', () => {
+  const GUIDE: DiffFileChange = {
+    path: 'docs/guide.md',
+    status: 'modified',
+    adds: 1,
+    dels: 1,
+    patch: [
+      'diff --git a/docs/guide.md b/docs/guide.md',
+      '@@ -4,3 +4,3 @@',
+      ' ## Usage',
+      '-Old step',
+      '+New step',
+      ' ![shot](img/shot.png)',
+      '',
+    ].join('\n'),
+  }
+  const withPatch = (file: DiffFileChange, extra: string): DiffFileChange => ({ ...file, patch: `${file.patch}${extra}\n` })
+  const preview = () => document.querySelector('[data-slot="diff-markdown-preview"]')
+  const perFile = (path: string) => screen.getByRole('button', { name: `Preview ${path} as a document` })
+
+  it('offers nothing when the consumer does not opt in, and keeps the diff rows', async () => {
+    await renderDiff(<Diff files={[GUIDE]} />, 'docs/guide.md')
+    expect(screen.queryByRole('button', { name: /as a document/ })).toBeNull()
+    expect(preview()).toBeNull()
+    expect(document.querySelector('[data-slot="diff-line"]')).not.toBeNull()
+  })
+
+  it('renders Markdown as a document while other files keep their diff', async () => {
+    await renderDiff(<Diff files={[MODIFIED, GUIDE]} preview />)
+    const guide = findCard('docs/guide.md')
+    expect(guide.querySelector('[data-slot="diff-markdown-preview"] h2')?.textContent).toBe('Usage')
+    expect(guide.textContent).toContain('New step')
+    expect(guide.textContent).not.toContain('Old step')
+    expect(guide.querySelector('[data-slot="diff-line"]')).toBeNull()
+    expect(findCard('src/a.ts').querySelector('[data-slot="diff-line"]')).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'Preview src/a.ts as a document' })).toBeNull()
+  })
+
+  it('never previews a deleted or binary Markdown file', async () => {
+    const deleted: DiffFileChange = { ...GUIDE, path: 'gone.md', status: 'deleted' }
+    const binary: DiffFileChange = { path: 'blob.md', status: 'modified', adds: 0, dels: 0, binary: true, patch: '' }
+    await renderDiff(<Diff files={[deleted, binary]} preview />, 'gone.md')
+    expect(preview()).toBeNull()
+    expect(screen.queryByRole('button', { name: /as a document/ })).toBeNull()
+  })
+
+  it('says when the patch shows only the changed sections, and not for a whole added file', async () => {
+    await renderDiff(<Diff files={[GUIDE, ADDED]} preview />, 'docs/guide.md')
+    expect(findCard('docs/guide.md').textContent).toContain('Showing the changed sections only.')
+    expect(findCard('README.md').querySelector('h1')?.textContent).toBe('Title')
+    expect(findCard('README.md').textContent).not.toContain('changed sections')
+  })
+
+  it('shows the complete current file from loadFileText, without the partial note', async () => {
+    const loadFileText = vi.fn().mockResolvedValue('# Guide\n\nIntro\n\n## Usage\n\nNew step')
+    await renderDiff(<Diff files={[GUIDE]} preview loadFileText={loadFileText} />, 'docs/guide.md')
+    await waitFor(() => expect(findCard('docs/guide.md').querySelector('h1')?.textContent).toBe('Guide'))
+    expect(loadFileText).toHaveBeenCalledWith('docs/guide.md')
+    expect(findCard('docs/guide.md').textContent).not.toContain('changed sections')
+  })
+
+  it('shows a loading line until the first text lands, then keeps it up while a changed patch reloads', async () => {
+    let resolveNext: (text: string) => void = () => {}
+    const loadFileText = vi.fn(() => new Promise<string>((resolve) => (resolveNext = resolve)))
+    const { rerender } = await renderDiff(<Diff files={[GUIDE]} preview loadFileText={loadFileText} />, 'docs/guide.md')
+    expect(findCard('docs/guide.md').textContent).toContain('Loading preview…')
+    resolveNext('# First version')
+    await waitFor(() => expect(findCard('docs/guide.md').querySelector('h1')?.textContent).toBe('First version'))
+
+    rerender(<Diff files={[withPatch(GUIDE, '+More')]} preview loadFileText={loadFileText} />)
+    await waitFor(() => expect(loadFileText).toHaveBeenCalledTimes(2))
+    expect(findCard('docs/guide.md').textContent).not.toContain('Loading preview…')
+    expect(findCard('docs/guide.md').querySelector('h1')?.textContent).toBe('First version')
+    resolveNext('# Second version')
+    await waitFor(() => expect(findCard('docs/guide.md').querySelector('h1')?.textContent).toBe('Second version'))
+  })
+
+  it('does not refetch when a refresh returns the same patch', async () => {
+    const loadFileText = vi.fn().mockResolvedValue('# Guide')
+    const { rerender } = await renderDiff(<Diff files={[GUIDE]} preview loadFileText={loadFileText} />, 'docs/guide.md')
+    await waitFor(() => expect(findCard('docs/guide.md').querySelector('h1')).not.toBeNull())
+    rerender(<Diff files={[{ ...GUIDE }]} preview loadFileText={(path) => loadFileText(path)} />)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(loadFileText).toHaveBeenCalledTimes(1)
+  })
+
+  it('falls back to the changed sections, and says why, when the full file cannot be loaded', async () => {
+    const loadFileText = vi.fn().mockResolvedValue(null)
+    await renderDiff(<Diff files={[GUIDE]} preview loadFileText={loadFileText} />, 'docs/guide.md')
+    await waitFor(() =>
+      expect(findCard('docs/guide.md').textContent).toContain(
+        'The full file could not be loaded. Showing the changed sections only.',
+      ),
+    )
+    expect(findCard('docs/guide.md').textContent).toContain('New step')
+  })
+
+  it('lets one file override the shared setting, until the shared setting changes', async () => {
+    const { rerender } = await renderDiff(<Diff files={[GUIDE, ADDED]} preview={false} />, 'docs/guide.md')
+    expect(preview()).toBeNull()
+    expect(perFile('docs/guide.md').getAttribute('aria-pressed')).toBe('false')
+
+    fireEvent.click(perFile('docs/guide.md'))
+    expect(findCard('docs/guide.md').querySelector('[data-slot="diff-markdown-preview"]')).not.toBeNull()
+    expect(findCard('README.md').querySelector('[data-slot="diff-markdown-preview"]')).toBeNull()
+    expect(perFile('docs/guide.md').getAttribute('aria-pressed')).toBe('true')
+    // The switch is not the collapse button: the card stays open.
+    expect(findCard('docs/guide.md').querySelector('[data-slot="diff-file-header"]')?.getAttribute('aria-expanded')).toBe('true')
+
+    rerender(<Diff files={[GUIDE, ADDED]} preview />)
+    expect(document.querySelectorAll('[data-slot="diff-markdown-preview"]')).toHaveLength(2)
+    fireEvent.click(perFile('README.md'))
+    expect(findCard('README.md').querySelector('[data-slot="diff-markdown-preview"]')).toBeNull()
+
+    rerender(<Diff files={[GUIDE, ADDED]} preview={false} />)
+    expect(preview()).toBeNull()
+    rerender(<Diff files={[GUIDE, ADDED]} preview />)
+    expect(document.querySelectorAll('[data-slot="diff-markdown-preview"]')).toHaveLength(2)
+  })
+
+  it('loads relative images through imageSrc, resolved within the repository', async () => {
+    const imageSrc = vi.fn((path: string) => `/raw?path=${encodeURIComponent(path)}`)
+    const escaping = withPatch(GUIDE, '+![out](../../secret.png)')
+    await renderDiff(<Diff files={[escaping]} preview imageSrc={imageSrc} />, 'docs/guide.md')
+    const images = findCard('docs/guide.md').querySelectorAll('img')
+    expect(images).toHaveLength(1)
+    expect(images[0]?.getAttribute('src')).toBe(new URL('/raw?path=docs%2Fimg%2Fshot.png', window.location.href).href)
+    expect(imageSrc).toHaveBeenCalledWith('docs/img/shot.png')
+    expect(imageSrc).not.toHaveBeenCalledWith(expect.stringContaining('secret'))
+    expect(findCard('docs/guide.md').textContent).toContain('[Image: out]')
+  })
+
+  it('refuses every image when the consumer serves no file bytes', async () => {
+    await renderDiff(<Diff files={[GUIDE]} preview />, 'docs/guide.md')
+    expect(findCard('docs/guide.md').querySelector('img')).toBeNull()
+    expect(findCard('docs/guide.md').textContent).toContain('[Image: shot]')
+  })
+
+  it('says so when a renamed file carries no text to preview', async () => {
+    const renamed: DiffFileChange = { path: 'docs/new.md', oldPath: 'docs/old.md', status: 'renamed', adds: 0, dels: 0, patch: '' }
+    await renderDiff(<Diff files={[renamed]} preview />, 'docs/new.md')
+    expect(findCard('docs/new.md').textContent).toContain('No content changes to preview.')
+  })
+
+  it('is ignored by the zero-dependency fallback renderer, like split mode', () => {
+    render(<DiffFallback files={[GUIDE]} preview />)
+    expect(preview()).toBeNull()
+    expect(document.body.textContent).toContain('+New step')
+  })
+})
+
+function findCard(path: string): HTMLElement {
+  const card = Array.from(document.querySelectorAll<HTMLElement>('[data-slot="diff-file"]')).find(
+    (element) => element.dataset.path === path,
+  )
+  if (!card) throw new Error(`no diff card for ${path}`)
+  return card
+}

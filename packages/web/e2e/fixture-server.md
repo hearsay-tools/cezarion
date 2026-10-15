@@ -39,6 +39,7 @@ with a separately resolved built CLI path.
 | empty-states.e2e.ts | 53 | OS-bound initial port; original 15 s |
 | git-sidebar.e2e.ts | 110 | OS-bound initial port; original 15 s |
 | github-sidebar.e2e.ts | 167 | OS-bound initial port; original 15 s |
+| markdown-preview.e2e.ts | 64 | OS-bound initial port; original 15 s |
 | mobile-tab-bar.e2e.ts | 76 | OS-bound initial port; original 15 s |
 | mobile-task-controls.e2e.ts | 43 | Original 20 s retained |
 | new-task-hierarchy.e2e.ts | 52 | OS-bound initial port; original 15 s |
@@ -111,6 +112,10 @@ hearsay-tools/cezarion#941 adds `good-css.e2e.ts`: one CLI construction with
 port 0, the shared owned-listener health budget, and awaited shutdown before
 fixture removal. The guard now pins 54 starts across 46 specs.
 
+hearsay-tools/cezarion#1012 adds `markdown-preview.e2e.ts`: one CLI construction
+with port 0, child-owned readiness within the original 15 s deadline, and awaited
+shutdown before fixture removal. The guard now pins 55 starts across 47 specs.
+
 ## Boot budget (hearsay-tools/cezarion#986)
 
 The original per-site budget was `tries: 60` × 250 ms, about 15 s, carried over from the
@@ -140,7 +145,7 @@ setup. A child that exits still fails at once.
   zero-config repo-identity discovery rather than a requested health endpoint.
   Application-update tests use their own IPC actual-listener acknowledgement with
   exact-restart identity checks, or packaged mock servers with fixed explicit binds.
-  They are distinct from the 54 cockpit-spec CLI preference/health constructions.
+  They are distinct from the 55 cockpit-spec CLI preference/health constructions.
 - In-process Hono/server tests use their returned listener or app and do not spawn
   an adaptive CLI port. Browser mock API fixtures do not spawn this CLI.
 
