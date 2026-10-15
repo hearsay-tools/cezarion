@@ -223,4 +223,5 @@ module.exports = {
   collectCiResults,
   writeCiResults,
   waitForCiRun,
+  DEFAULT_WAIT_TIMEOUT_MS,
 };
