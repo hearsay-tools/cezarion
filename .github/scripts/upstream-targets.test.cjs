@@ -322,10 +322,11 @@ test('renderTargetsReport says why reachability is unknown when the build failed
 test('collectReachability on this repo\'s HEAD snapshot reaches the cockpit, the CLI, its path-loaded entries and the contract', async () => {
   const path = require('node:path');
   const { collectReachability } = require('./upstream-reachability.cjs');
-  const { withHeadSnapshot } = require('./upstream-scan.cjs');
+  const { resolveHead, withHeadSnapshot } = require('./upstream-scan.cjs');
   // `targets` bundles the files it checks out of HEAD, not the work tree; a file production code
   // imports that the snapshot leaves out would fail the build here.
-  const reach = await withHeadSnapshot(path.resolve(__dirname, '../..'), (snapshot) => {
+  const repo = path.resolve(__dirname, '../..');
+  const reach = await withHeadSnapshot(repo, resolveHead(repo), (snapshot) => {
     assert.equal(snapshot.error, null);
     return collectReachability(snapshot.tree);
   });
@@ -548,16 +549,36 @@ test('collectTargets dry-runs against HEAD, not against a staged index', async (
   assert.deepEqual(tmp.leftovers(), []);
 });
 
+test('collectTargets reads every verdict at the HEAD it started from when a commit lands mid-run', async (t) => {
+  const { collectTargets } = require('./upstream-scan.cjs');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const started = fx.git('rev-parse', 'HEAD');
+  const running = collectTargets([fx.upstream.slice(0, 8)], { cwd: fx.dir, fetch: false });
+  // The call returns at its first await, the reachability build; existence and drift are read
+  // after it. Another session commits in the same checkout meanwhile: gone.ts is back, live.tsx moves.
+  fx.write('packages/web/src/gone.ts', 'export const gone = 3\n');
+  fx.write('packages/web/src/live.tsx', 'export const Live = 5\n// two\n// three\n');
+  fx.git('add', '.');
+  fx.git('commit', '-q', '-m', 'feat(web): lands mid-run');
+  assert.notEqual(fx.git('rev-parse', 'HEAD'), started);
+  const report = await running;
+  assert.equal(report.head.sha, started);
+  const byPath = Object.fromEntries(report.sections[0].files.map((f) => [f.path, f]));
+  assert.deepEqual(byPath['packages/web/src/gone.ts'].fork, { exists: false, lastTouch: { short: fx.dropGone, subject: 'refactor(web): drop gone' } });
+  assert.deepEqual(byPath['packages/web/src/live.tsx'].drift, { commits: 1, added: 1, deleted: 1 });
+});
+
 test('withHeadSnapshot checks HEAD out under os.tmpdir() and removes it when the work inside throws', async (t) => {
   const fs = require('node:fs');
   const path = require('node:path');
-  const { withHeadSnapshot } = require('./upstream-scan.cjs');
+  const { resolveHead, withHeadSnapshot } = require('./upstream-scan.cjs');
   const fx = forkFixture();
   t.after(fx.cleanup);
   const tmp = privateTmp(t);
   fx.write('packages/web/src/main.tsx', 'export const app = []\n');
   let seen = null;
-  await assert.rejects(withHeadSnapshot(fx.dir, (snapshot) => {
+  await assert.rejects(withHeadSnapshot(fx.dir, resolveHead(fx.dir), (snapshot) => {
     seen = { ...snapshot, leftovers: tmp.leftovers(), main: fs.readFileSync(path.join(snapshot.tree, 'packages/web/src/main.tsx'), 'utf8') };
     throw new Error('boom');
   }), /boom/);
@@ -650,6 +671,35 @@ test('upstream-scan rejects an unknown command before it scans', (t) => {
     assert.equal(result.stderr.trim().split('\n').length, 1, result.stderr);
     assert.deepEqual(state(), before, args.join(' '));
   }
+});
+
+test('upstream-scan records each new commit\'s conflict hint against HEAD, not against a staged index', (t) => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const yaml = require('yaml');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const tmp = privateTmp(t);
+  // A later upstream commit takes live.tsx from 2 to 4. HEAD has 3: a conflict. The staged copy
+  // of upstream's 2 would apply clean.
+  fx.git('checkout', '-q', 'upstream');
+  fx.write('packages/web/src/live.tsx', 'export const Live = 4\n// two\n// three\n');
+  fx.git('commit', '-q', '-am', 'fix(web): a later upstream change (#13)');
+  const later = fx.git('rev-parse', 'HEAD');
+  fx.git('checkout', '-q', 'main');
+  fx.git('update-ref', 'refs/cez-upstream/main', 'upstream');
+  fx.write('packages/web/src/live.tsx', 'export const Live = 2\n// two\n// three\n');
+  fx.git('add', 'packages/web/src/live.tsx');
+  const cli = fixtureCli(fx);
+  const index = () => fs.readFileSync(path.join(fx.dir, '.git', 'index')).toString('base64');
+  const before = index();
+  const result = cli('--no-fetch', '--date', '2026-10-16');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).added, 1);
+  const row = yaml.parse(fs.readFileSync(path.join(fx.dir, '.ai/upstream/ledger.yaml'), 'utf8')).entries.find((e) => e.sha === later);
+  assert.deepEqual(row.hint, { conflicts: 1 });
+  assert.equal(index(), before, 'the real index is untouched');
+  assert.deepEqual(tmp.leftovers(), []);
 });
 
 test('renderTargetsReport keeps a multi-line ledger note on its bullet line', () => {

@@ -150,10 +150,10 @@ test('the committed ledger is valid and every scan report it names exists', () =
   }
 });
 
-test('conflictHint counts a real conflicting commit even though git apply --check exits 0', () => {
+test('conflictHints counts a real conflicting commit even though git apply --check exits 0', () => {
   const { execFileSync } = require('node:child_process');
   const os = require('node:os');
-  const { conflictHint } = require('./upstream-scan.cjs');
+  const { conflictHints } = require('./upstream-scan.cjs');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cez-upstream-hint-'));
   const run = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } }).trim();
   run('init', '-q', '-b', 'main');
@@ -168,7 +168,7 @@ test('conflictHint counts a real conflicting commit even though git apply --chec
   run('checkout', '-q', 'main');
   fs.writeFileSync(path.join(dir, 'a.txt'), 'one\nOURS\nthree\n');
   run('commit', '-q', '-am', 'ours');
-  assert.equal(conflictHint(theirs, dir), 1, 'a.txt conflicts, b.txt applies clean');
+  assert.deepEqual(conflictHints([theirs], dir), { [theirs]: 1 }, 'a.txt conflicts, b.txt applies clean');
   assert.equal(run('status', '--porcelain'), '', 'the dry run leaves the tree untouched');
 });
 

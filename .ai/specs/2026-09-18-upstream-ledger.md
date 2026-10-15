@@ -76,8 +76,10 @@ against these rules on every `npm run test:unit`, so a `ported` row without a fo
 2. Range is `<last scan's upstreamHead>..refs/cez-upstream/main`, or `<origin.mergeBase>..` on the
    first scan.
 3. For every commit in the range not already in the ledger: record sha, PR number (from the
-   squash subject), title, date, and a conflict hint from `git apply --check --3way` of that
-   commit's patch against `HEAD`. Append as `pending`. Existing rows are never touched.
+   squash subject), title, date, and a conflict hint from `git apply --check --3way --cached` of
+   that commit's patch against a private index holding the committed `HEAD`, built once per scan
+   in a temp directory and removed afterwards, so nothing uncommitted in the checkout changes the
+   count. Append as `pending`. Existing rows are never touched.
 4. Append a `scans` row and write `scans/<date>.md`. Print a JSON summary on stdout.
 
 No new commits means no file changes and `added: 0`.
@@ -98,9 +100,10 @@ invalid ledger, or a git failure. A first argument that is not `validate`, `rend
 exits 2 with a one-line usage message before git or the filesystem is touched; only no argument
 at all runs the scan, which fetches and rewrites the ledger.
 
-The fork side is the checkout's committed `HEAD`, and every verdict describes it. Existence and
-drift read `HEAD` directly. The dry run and reachability read a snapshot of it built in a temp
-directory outside the repository: a private `GIT_INDEX_FILE` loaded with `git read-tree HEAD`, which
+The fork side is the checkout's committed `HEAD`, resolved to one commit sha when the command
+starts, and every verdict describes that commit, even if another commit lands mid-run. Existence
+and drift read it directly. The dry run and reachability read a snapshot of it built in a temp
+directory outside the repository: a private `GIT_INDEX_FILE` loaded with `git read-tree <sha>`, which
 `git apply --check --3way --cached` reads, and the files reachability needs, checked out of that
 index with `git checkout-index`. Uncommitted changes, staged or not, are ignored, the real index
 and work tree are never written, and the temp directory is removed whether the run succeeds or

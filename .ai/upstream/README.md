@@ -61,9 +61,9 @@ Set `status`, add `decided: YYYY-MM-DD`, and fill the fields that status require
 | `n/a` | nothing to port: release bumps, upstream-only docs | `reason` |
 
 `hint.conflicts` is the number of files a 3-way dry run of the upstream commit could not apply
-onto this fork when the scan ran. It is advisory and goes stale as the fork moves. `targets`
-re-runs the dry run against the current fork and reports it per file. A free-form `note` is
-allowed on any row.
+onto the fork's committed `HEAD` when the scan ran; uncommitted changes never count. It is
+advisory and goes stale as the fork moves. `targets` re-runs the dry run against the current fork
+and reports it per file. A free-form `note` is allowed on any row.
 
 ## Starting a port
 
