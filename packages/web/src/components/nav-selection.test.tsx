@@ -116,7 +116,7 @@ describe('sidebar tokens and the last teal (#617 01c)', () => {
   })
 
   it('leaves no teal token in the sidebar sources but the header ShieldCheck, which says why', () => {
-    for (const file of ['project-groups.tsx', 'task-quick-list.tsx', 'nav-row-styles.ts']) {
+    for (const file of ['sidebar-view-tabs.tsx', 'task-quick-list.tsx', 'nav-row-styles.ts']) {
       expect(src(file).match(new RegExp(TEAL, 'g')), file).toBeNull()
     }
     const shell = src('app-shell.tsx').split('\n')
