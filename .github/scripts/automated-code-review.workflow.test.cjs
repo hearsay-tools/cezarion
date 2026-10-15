@@ -839,7 +839,7 @@ test('the Automated Code Review check fails on new or still-open finding threads
   const stillOpen = run({ OPEN_THREADS: '3' });
   assert.match(opened.stdout, /opened 2 new finding thread/);
   assert.match(stillOpen.stdout, /3 automated review thread\(s\) are still unresolved/);
-  // Re-running the round alone never judges a pushback reply: the patch-ID guard skips the model.
+  // Re-running a CI round never judges a pushback reply: the patch-ID guard skips the model on an unchanged patch.
   for (const result of [opened, stillOpen]) {
     assert.match(result.stdout, /run this workflow manually with pr_number, then re-run Review \/ review-round/);
     assert.match(result.stdout, /gh workflow run automated-code-review\.yml -f pr_number=42\b/);

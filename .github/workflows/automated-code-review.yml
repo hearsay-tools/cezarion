@@ -634,8 +634,8 @@ jobs:
             echo "::notice::$1"
             echo "$1" >> "$GITHUB_STEP_SUMMARY"
           }
-          # A re-run never judges a pushback reply: the patch-ID guard skips the model
-          # on an unchanged patch. A manual dispatch skips that guard.
+          # Re-running a CI round never judges a pushback reply: the patch-ID guard skips
+          # the model on an unchanged patch. A manual dispatch skips that guard.
           rejudge="To have pushback replies judged, run this workflow manually with pr_number, then re-run Review / review-round in the CI run to recount. Dispatch command: gh workflow run automated-code-review.yml -f pr_number=$PR_NUMBER"
           if [ "$NEW_THREADS" -gt 0 ]; then
             verdict "This review opened $NEW_THREADS new finding thread(s). Address them and push. $rejudge"
