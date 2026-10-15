@@ -2,10 +2,11 @@ import { inspectGeneration } from './process-liveness.ts';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { copyFile, lstat, mkdir, mkdtemp, open, readdir, realpath, rename, rm } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, open, readdir, realpath, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
+import { copyGitIndex } from '../git-index-copy.ts';
 import { delegationStateSchema, workerWorkspaceSchema } from '@open-mercato/cezar-contract';
 import type { WorkerDestroyResult, WorkerDiff, WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { branchFor, createWorktree, DIFF_CAP, worktreePathFor } from '../git-worktree.ts';
@@ -245,7 +246,7 @@ export async function readOwnedDiff(repoRoot: string, run: RunRecord): Promise<W
     // Preserve staged membership (including force-added ignored files) without
     // letting diff preparation mutate the worker's own linked-worktree index.
     const workerIndex = await checkedGit(workspace.path, ['rev-parse', '--path-format=absolute', '--git-path', 'index']);
-    await copyFile(workerIndex, index);
+    await copyGitIndex(workerIndex, index);
     await checkedGit(workspace.path, ['add', '-N', '.'], index);
     const { base } = await resolveTaskDiffBase(
       (args) => git(workspace.path, args, index), workspace.baselineSha,
