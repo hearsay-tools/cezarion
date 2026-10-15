@@ -3,10 +3,11 @@ import { execFile } from 'node:child_process';
 import { autosaveGit, type AutosaveOptions } from './autosave-git.ts';
 import { workerWorkspaceSchema } from '@open-mercato/cezar-contract';
 import { existsSync, realpathSync, type Dirent } from 'node:fs';
-import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { resolveTaskDiffBase } from './git-diff-base.ts';
+import { copyGitIndex } from './git-index-copy.ts';
 import { isSafeGitRef } from './git-refs.ts';
 import { withWorktreeMutation, type WorktreeGit } from './git-worktree-lock.ts';
 
@@ -657,7 +658,7 @@ async function withPrivateIndex<T>(worktreePath: string, read: (git: IndexGit) =
     const indexed: IndexGit = (args) => git(worktreePath, args, undefined, env);
     let seeded = false;
     if (realIndex) {
-      try { await copyFile(realIndex, index); seeded = true; } catch { /* No index yet: seed from HEAD. */ }
+      try { await copyGitIndex(realIndex, index); seeded = true; } catch { /* No index yet: seed from HEAD. */ }
     }
     if (!seeded) await indexed(['read-tree', 'HEAD']);
     return await read(indexed);
