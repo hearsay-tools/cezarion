@@ -43,7 +43,7 @@ beforeAll(async () => {
   } satisfies RunRecord]))
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root, { CEZ_SKILLS_AUTO_UPDATE: '0' }), stdio: 'ignore',
-  }, { timeoutMs: 20_000 })
+  })
   baseUrl = await waitForFixtureServer(server)
   project = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(`touch-${process.pid}`)

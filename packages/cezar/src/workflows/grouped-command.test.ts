@@ -1,8 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CHECK_KILL_GRACE_MS, CHECK_TERMINATION_CONFIRM_MS, runGroupedCommand } from './grouped-command.ts';
+import { readPid, requirePid } from '../pid-file.testkit.ts';
 
 /**
  * The process-group runner check steps and worktree setup (#917) share. Check-step Stop
@@ -23,7 +24,8 @@ const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catc
 async function waitForFile(path: string, ms = 10_000): Promise<number> {
   const end = Date.now() + ms;
   while (Date.now() < end) {
-    if (existsSync(path) && readFileSync(path, 'utf8').trim() !== '') return Number(readFileSync(path, 'utf8').trim());
+    const pid = readPid(path);
+    if (pid !== undefined) return pid;
     await new Promise((r) => setTimeout(r, 20));
   }
   throw new Error(`timed out waiting for ${path}`);
@@ -51,13 +53,12 @@ describe('runGroupedCommand', () => {
     const timeoutMs = 2_000;
     const result = await runGroupedCommand({
       ...base(dir),
-      command: `trap '' TERM; echo $$ > ${pidFile}; while true; do sleep 0.1; done`,
+      command: `trap '' TERM; echo $$ > ${pidFile}.tmp; mv ${pidFile}.tmp ${pidFile}; while true; do sleep 0.1; done`,
       timeoutMs,
     });
     expect(result.timedOut).toBe(true);
     expect(result.output.endsWith('(timed out after 2s)')).toBe(true);
-    expect(existsSync(pidFile)).toBe(true);
-    expect(alive(Number(readFileSync(pidFile, 'utf8').trim()))).toBe(false);
+    expect(alive(requirePid(pidFile))).toBe(false);
     expect(Date.now() - started).toBeLessThan(timeoutMs + CHECK_KILL_GRACE_MS + CHECK_TERMINATION_CONFIRM_MS + 2_000);
   }, 30_000);
 
@@ -87,7 +88,7 @@ describe('runGroupedCommand', () => {
     let stop: () => void = () => undefined;
     const pending = runGroupedCommand({
       ...base(dir),
-      command: `echo $$ > ${pidFile}; while true; do sleep 0.1; done`,
+      command: `echo $$ > ${pidFile}.tmp; mv ${pidFile}.tmp ${pidFile}; while true; do sleep 0.1; done`,
       setInterrupt: (fn) => { stop = fn; },
     });
     const pid = await waitForFile(pidFile);

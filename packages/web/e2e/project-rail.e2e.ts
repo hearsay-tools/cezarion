@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
 import { expandedRailSampleExpression } from './project-rail-ready'
-import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, readTestEnv } from './agent-browser'
+import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
 import { contrastSampleExpression, hoverVisiblePoint, type ContrastSample } from './contrast'
 import { readSharedProjects, snapshotSharedHome, writeSharedProjects } from './workspace-registry'
 
@@ -25,7 +25,7 @@ import { readSharedProjects, snapshotSharedHome, writeSharedProjects } from './w
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const sessionId = `e2e-project-rail-${process.pid}`
-const repoRoot = resolve(import.meta.dirname, '../../..')
+const repoRoot = servedRoot()
 const DESKTOP = { width: 1440, height: 900 }
 const MOBILE = { width: 390, height: 844 }
 

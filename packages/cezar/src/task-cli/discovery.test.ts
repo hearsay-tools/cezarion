@@ -109,6 +109,22 @@ describe('discoverCockpit', () => {
     expect(found).toEqual({ origin: `http://127.0.0.1:${port}`, projectId: 'remote-b', api: `http://127.0.0.1:${port}/api/v1/p/remote-b`, hasWebhook: false });
   });
 
+  it('abandons a probe stuck on a silent port when its signal aborts (hearsay-tools/cezarion#1039)', async () => {
+    const repo = gitRepo();
+    const silent = createServer(() => { /* accepts, never answers */ });
+    servers.push(silent);
+    await new Promise<void>((resolve) => silent.listen(0, '127.0.0.1', resolve));
+    const port = (silent.address() as AddressInfo).port;
+    const controller = new AbortController();
+    const started = Date.now();
+    const pending = discoverCockpit({ repoDir: repo, ports: [port], timeoutMs: 60_000, signal: controller.signal }).catch((e: unknown) => e);
+    setTimeout(() => controller.abort(), 100);
+    const error = await pending;
+    expect((error as TaskCliError).body).toMatchObject({ code: 'no-cockpit' });
+    expect(Date.now() - started).toBeLessThan(10_000);
+    silent.closeAllConnections();
+  });
+
   it('with --url pointing at nothing, reports the url as unreachable (exit 2)', async () => {
     const repo = gitRepo();
     const error = await discoverCockpit({ url: 'http://127.0.0.1:1', repoDir: repo }).catch((e: unknown) => e);

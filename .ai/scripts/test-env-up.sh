@@ -19,6 +19,17 @@
 #             returns left the next failure undiagnosable (#31).
 #   2026-09-03 keep milliseconds in startedAt so find -newermt does not treat
 #             files from the boot's own second as changed (#36).
+#   2026-10-14 build the e2e bundle into the ignored .ai/qa/build/cezar mirror via
+#             build-e2e.sh and boot from there; packages/cezar/dist and web/dist (the
+#             production build, a declared Squeal input) are never written by a test boot.
+#   2026-10-14 serve an isolated clone (.ai/qa/served/<name>, e2e-served-repo.mjs) instead
+#             of the checkout: in the main checkout the live cockpit owns .ai/cezar and
+#             refused the server. Drop the old descriptor before a cold boot, so a failed
+#             boot reports its own error rather than a dead env's browser notes. A reuse
+#             syncs the clone to the checkout's current edits; a moved HEAD cold-boots.
+#   2026-10-15 scrub every ambient CEZ_* before boot (hearsay-tools/cezarion#1045): an agent's
+#             shell inherits the live cockpit's opt-ins, which CI never sets. Opt-ins are
+#             requested with --server-env=CEZ_NAME=value and are part of the reuse key.
 set -eu
 
 # ---- project-specific parameters -------------------------------------------
@@ -37,6 +48,15 @@ APP_LOG="$QA_DIR/test-env-app.log"
 BROWSER_DESCRIPTOR=".ai/browsers/agent-browser.md"
 BROWSER_LAUNCH_JSON="$QA_DIR/browser-launch.json"
 BROWSER_DOCTOR_JSON="$QA_DIR/browser-doctor.json"
+# The project the server serves, and every spec that seeds project state writes into
+# (descriptor `servedRoot`). A fresh clone per cold boot, so the server's runs, worktrees
+# and seeded files never land in this checkout's own .ai/cezar. A local lane is already
+# such a clone (e2e-lanes.mjs) and serves itself.
+if [ -f "$REPO_ROOT/.git/cezar-e2e-lane.json" ]; then
+  SERVED_ROOT=$REPO_ROOT
+else
+  SERVED_ROOT="$QA_DIR/served/${REPO_ROOT##*/}"
+fi
 
 PREFERRED_PORT=4321
 HEALTH_PATH="/api/v1/health"
@@ -47,20 +67,31 @@ if ! node -e 'const s=process.argv[1]; process.exit(/^[1-9][0-9]*$/.test(s) && N
 fi
 TEST_ENV_CACHE_TTL_SECONDS=${TEST_ENV_CACHE_TTL_SECONDS:-600}
 
-# The preparation chain: install workspace links/dependencies, server `tsc` →
-# packages/cezar/dist/, then `vite build` → packages/cezar/web/dist/. All are required — a
-# fresh worktree has no node_modules, and the server serves the React cockpit from
-# packages/cezar/web/dist (missing it would silently test the fallback hint page).
-# VITE_CEZ_E2E=1 is the cockpit e2e mode (#415): it pins useNow and every refetchInterval
-# in the served bundle. Production `npm run build` leaves the flag unset.
-BUILD_COMMAND="pnpm install --frozen-lockfile && VITE_CEZ_E2E=1 npm run build"
-BUILD_ARTIFACTS="packages/cezar/node_modules/zod/package.json packages/cezar/dist/index.js packages/cezar/web/dist/index.html"
-# A normal web build clears this Vite-emitted marker while leaving source fingerprints intact.
-E2E_BUILD_MARKER="$REPO_ROOT/packages/cezar/web/dist/.cez-e2e-build"
+# The preparation chain: install workspace links/dependencies, then build-e2e.sh — server
+# `tsc` → .ai/qa/build/cezar/dist/ and `vite build` → .ai/qa/build/cezar/web/dist/, in a
+# mirror of the server package that links back to its scripts and node_modules. All are
+# required — a fresh worktree has no node_modules, and the server serves the React cockpit
+# from <its package>/web/dist (missing it would silently test the fallback hint page).
+# The bundle is built with VITE_CEZ_E2E=1, the cockpit e2e mode (#415). The production
+# packages/cezar/dist and packages/cezar/web/dist are never written here.
+E2E_BUILD_ROOT=.ai/qa/build/cezar
+BUILD_COMMAND="pnpm install --frozen-lockfile && sh .ai/scripts/build-e2e.sh"
+BUILD_ARTIFACTS="packages/cezar/node_modules/zod/package.json $E2E_BUILD_ROOT/dist/index.js $E2E_BUILD_ROOT/web/dist/index.html"
+# Vite emits this marker only under VITE_CEZ_E2E=1: proof the bundle is an e2e one.
+E2E_BUILD_MARKER="$REPO_ROOT/$E2E_BUILD_ROOT/web/dist/.cez-e2e-build"
 # Fingerprint inputs — a change to any of these invalidates the cached build. Each workspace
 # contributes its own sources AND its own manifest: a dependency moved between packages
 # changes what gets bundled without touching a single source file.
-BUILD_INPUT_PATHS="packages/contract/src packages/contract/package.json packages/cezar/src packages/cezar/package.json packages/cezar/tsconfig.json packages/api-client/src packages/api-client/package.json packages/web/src packages/web/index.html packages/web/vite.config.ts packages/web/package.json package.json pnpm-lock.yaml pnpm-workspace.yaml .ai/scripts/test-env-up.sh"
+BUILD_INPUT_PATHS="packages/contract/src packages/contract/package.json packages/cezar/src packages/cezar/package.json packages/cezar/tsconfig.json packages/api-client/src packages/api-client/package.json packages/cezar/scripts/inline-contract.mjs packages/web/src packages/web/public packages/web/index.html packages/web/vite.config.ts packages/web/package.json package.json pnpm-lock.yaml pnpm-workspace.yaml .ai/scripts/test-env-up.sh .ai/scripts/build-e2e.sh"
+
+# No ambient CEZ_* reaches the server (hearsay-tools/cezarion#1045). An agent's shell inherits
+# the live cockpit's opt-ins (CEZ_PREVIEW=1, CEZ_AUTOMATIONS=1, …) and its per-task plumbing
+# (CEZ_TASK_ID, CEZ_DELEGATION_*, …), so a local boot differed from CI in ways nobody chose.
+# Every CEZ_* goes rather than a list of known opt-ins: a list is one new flag away from the
+# same leak. A run that wants a flag asks for it with --server-env=CEZ_NAME=value below.
+for name in $(node -e 'for (const key of Object.keys(process.env)) if (/^CEZ_\w+$/i.test(key)) console.log(key)'); do
+  unset "$name"
+done
 
 # CEZ_DRY_RUN=1 swaps the agent CLIs for the bundled mock, so booting needs no
 # `claude` login and reaches no network — the whole point for CI/e2e.
@@ -74,13 +105,37 @@ export CEZ_HOME="$QA_DIR/cez-home"
 
 FORCE=0
 FORCE_REBUILD=0
+# The explicit opt-ins, sorted and space-joined: what the server boots with on top of the two
+# pins above, and the reuse key (a running env booted with other flags is not this env).
+SERVER_ENV=
 for arg in "$@"; do
   case "$arg" in
     --force) FORCE=1 ;;
     --force-rebuild) FORCE_REBUILD=1 ;;
+    --server-env=*)
+      assignment=${arg#--server-env=}
+      name=${assignment%%=*}
+      if ! printf '%s\n' "$assignment" | grep -Eq '^CEZ_[A-Z0-9_]+=[^[:space:]]*$' \
+        || [ "$name" = CEZ_DRY_RUN ] || [ "$name" = CEZ_HOME ]; then
+        echo "invalid --server-env: $assignment (want CEZ_NAME=value, no whitespace; CEZ_DRY_RUN and CEZ_HOME are pinned)" >&2
+        exit 2
+      fi
+      # One assignment per name: the key below is sorted, so CEZ_X=0 CEZ_X=1 and its reverse
+      # would share a key while booting different values.
+      case " $SERVER_ENV " in
+        *" $name="*) echo "invalid --server-env: $name is given twice" >&2; exit 2 ;;
+      esac
+      export "$assignment"
+      SERVER_ENV="$SERVER_ENV $assignment" ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
   esac
 done
+set -f
+SERVER_ENV=$(node -e 'process.stdout.write([...new Set(process.argv.slice(1))].sort().join(" "))' $SERVER_ENV)
+set +f
+# Recorded as "none" rather than empty, so a descriptor written before the key existed (and
+# possibly booted with ambient opt-ins) never matches and is cold-booted once.
+SERVER_ENV_KEY=${SERVER_ENV:-none}
 
 # ---- generic contract logic -------------------------------------------------
 
@@ -133,7 +188,7 @@ json_get() { node -e '
 
 # ---- 2. lock — one bootstrap at a time --------------------------------------
 # Released when the bootstrap finishes rather than held for the environment's lifetime:
-# the server `readFileSync`s packages/cezar/dist/ and packages/cezar/web/dist/ per request, so a later rebuild under a
+# the server `readFileSync`s its web/dist per request, so a later rebuild under a
 # running app is picked up on the next reload instead of corrupting it. The reuse check's
 # "source newer than startedAt" test is what keeps a stale build from being tested.
 LOCK_HELD=0
@@ -190,9 +245,8 @@ try_reuse() {
   pid=$(json_get "$ENV_DESCRIPTOR" app.pid)
   url=$(json_get "$ENV_DESCRIPTOR" baseUrl)
   started=$(json_get "$ENV_DESCRIPTOR" startedAt)
-  requested_single_project=false
-  [ "${CEZ_SINGLE_PROJECT:-}" = 1 ] && requested_single_project=true
-  [ "$(json_get "$ENV_DESCRIPTOR" environment.singleProject)" = "$requested_single_project" ] || { log "not reusing: single-project mode changed"; return 1; }
+  [ "$(json_get "$ENV_DESCRIPTOR" environment.serverEnv)" = "$SERVER_ENV_KEY" ] || { log "not reusing: the requested --server-env set changed (now: $SERVER_ENV_KEY)"; return 1; }
+  [ "$(json_get "$ENV_DESCRIPTOR" servedRoot)" = "$SERVED_ROOT" ] && [ -d "$SERVED_ROOT" ] || { log "not reusing: the served project is not $SERVED_ROOT"; return 1; }
   { [ -n "$pid" ] && [ -n "$url" ]; } || { log "not reusing: descriptor has no app pid or base URL"; return 1; }
   # A state file is a claim, not proof: the PID must still be alive…
   kill -0 "$pid" 2>/dev/null || { log "not reusing: app pid $pid is gone"; return 1; }
@@ -231,6 +285,15 @@ try_reuse() {
     [ -z "$newer" ] || { log "source changed since boot ($newer)"; return 1; }
   fi
 
+  # The server reads its project live. Bring the clone to the checkout's current edits, as
+  # serving the checkout itself did; a moved HEAD needs a fresh clone, so a cold boot.
+  if [ "$SERVED_ROOT" != "$REPO_ROOT" ]; then
+    node "$SCRIPT_DIR/e2e-served-repo.mjs" --sync "$REPO_ROOT" "$SERVED_ROOT" || {
+      log "not reusing: the served project cannot follow this checkout (HEAD moved, or the sync failed)"
+      return 1
+    }
+  fi
+
   BASE_URL=$url
   BROWSER_INSTALLED=$(json_get "$ENV_DESCRIPTOR" browser.installed)
   [ "$BROWSER_INSTALLED" = true ] && BROWSER_INSTALLED=1 || BROWSER_INSTALLED=0
@@ -248,6 +311,18 @@ teardown_stale() {
     sleep 1
     kill -9 "$pid" 2>/dev/null || true
   fi
+  # A cold boot replaces the env, so its descriptor goes now: specs that run after a failed
+  # boot must report "no env", not attach to a dead baseUrl or repeat its browser notes.
+  rm -f "$ENV_DESCRIPTOR"
+}
+
+prepare_served_repo() {
+  [ "$SERVED_ROOT" = "$REPO_ROOT" ] && return 0
+  log "cloning the served project into $SERVED_ROOT"
+  node "$SCRIPT_DIR/e2e-served-repo.mjs" "$REPO_ROOT" "$SERVED_ROOT" >/dev/null || {
+    log "cannot prepare the served project at $SERVED_ROOT"
+    exit 1
+  }
 }
 
 # ---- 4. build cache ---------------------------------------------------------
@@ -276,7 +351,7 @@ artifacts_present() {
 }
 
 ensure_build() {
-  # Local parallel lanes link to a single, already-built source checkout. Never run npm in
+  # Local parallel lanes link to a single, already-built source checkout. Never build in
   # a lane: it would replace shared symlink targets while other lanes are reading them.
   if [ "${E2E_PREBUILT_ASSETS:-}" = 1 ]; then
     artifacts_present && [ -f "$E2E_BUILD_MARKER" ] || {
@@ -493,13 +568,13 @@ start_app() {
   port_free "$PORT" || PORT=$(free_port)
   BASE_URL="http://127.0.0.1:$PORT"
 
-  log "starting cezar on $BASE_URL (CEZ_DRY_RUN=1)"
+  log "starting cezar on $BASE_URL (CEZ_DRY_RUN=1${SERVER_ENV:+ $SERVER_ENV})"
   # --no-open: a test boot must never hijack the operator's browser.
   if command -v setsid >/dev/null 2>&1; then
-    (cd "$REPO_ROOT" && exec setsid nohup node packages/cezar/dist/index.js --port "$PORT" --no-open --repo "$REPO_ROOT" \
+    (cd "$REPO_ROOT" && exec setsid nohup node "$E2E_BUILD_ROOT/dist/index.js" --port "$PORT" --no-open --repo "$SERVED_ROOT" \
       >"$APP_LOG" 2>&1 </dev/null) &
   else
-    (cd "$REPO_ROOT" && exec nohup node packages/cezar/dist/index.js --port "$PORT" --no-open --repo "$REPO_ROOT" \
+    (cd "$REPO_ROOT" && exec nohup node "$E2E_BUILD_ROOT/dist/index.js" --port "$PORT" --no-open --repo "$SERVED_ROOT" \
       >"$APP_LOG" 2>&1 </dev/null) &
   fi
   APP_PID=$!
@@ -542,7 +617,7 @@ write_descriptor() {
   [ "${CEZ_SINGLE_PROJECT:-}" = 1 ] && SINGLE_PROJECT=true
   node -e '
     const fs = require("fs");
-    const [out, baseUrl, port, pid, cmd, bInstalled, bCmd, bVer, bNotes, desc, singleProject, platform, launchPath] = process.argv.slice(1);
+    const [out, baseUrl, port, pid, cmd, bInstalled, bCmd, bVer, bNotes, desc, singleProject, platform, launchPath, servedRoot, serverEnv] = process.argv.slice(1);
     let launch = {};
     try { launch = JSON.parse(fs.readFileSync(launchPath, "utf8")); } catch { /* resolver absent */ }
     const browser = {
@@ -562,24 +637,25 @@ write_descriptor() {
       status: "running",
       mode: "prod",
       baseUrl,
+      servedRoot,
       startedByThisRepo: true,
       startScript: ".ai/scripts/test-env-up.sh",
       stopScript: ".ai/scripts/test-env-down.sh",
       app: { startCommand: cmd, port: Number(port), healthPath: "/api/v1/health", pid: Number(pid) },
       services: [],
       credentials: [],
-      environment: { singleProject: singleProject === "true" },
+      environment: { singleProject: singleProject === "true", serverEnv },
       browser,
       testRunner: { name: "other", config: "packages/web/e2e/vitest.config.ts" },
       platform,
       startedAt: new Date().toISOString(),
-      notes: "Booted from a production build after pnpm install --frozen-lockfile with CEZ_DRY_RUN=1, so workspace links/runtime dependencies are present, the agent CLIs are mocked, and no agent login/network is needed. No backing services. Stop with .ai/scripts/test-env-down.sh. App log: .ai/qa/test-env-app.log.",
+      notes: "Booted from the VITE_CEZ_E2E=1 build in .ai/qa/build/cezar (never packages/cezar/dist) after pnpm install --frozen-lockfile with CEZ_DRY_RUN=1, so workspace links/runtime dependencies are present, the agent CLIs are mocked, and no agent login/network is needed. Serves servedRoot, an isolated clone of this checkout. No backing services. Stop with .ai/scripts/test-env-down.sh. App log: .ai/qa/test-env-app.log.",
     }, null, 2) + "\n");
   ' "$ENV_DESCRIPTOR" "$BASE_URL" "$PORT" "$APP_PID" \
-    "CEZ_DRY_RUN=1 CEZ_HOME=.ai/qa/cez-home node packages/cezar/dist/index.js --port $PORT --no-open" \
+    "${SERVER_ENV:+$SERVER_ENV }CEZ_DRY_RUN=1 CEZ_HOME=.ai/qa/cez-home node $E2E_BUILD_ROOT/dist/index.js --port $PORT --no-open --repo $SERVED_ROOT" \
     "$BROWSER_INSTALLED" "$BROWSER_COMMAND" "$BROWSER_VERSION" "$BROWSER_NOTES" "$BROWSER_DESCRIPTOR" \
     "$SINGLE_PROJECT" "$(uname -s 2>/dev/null | grep -qi Linux && { grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null && echo wsl2 || echo linux; } || echo darwin)" \
-    "$BROWSER_LAUNCH_JSON"
+    "$BROWSER_LAUNCH_JSON" "$SERVED_ROOT" "$SERVER_ENV_KEY"
 }
 
 # ---- main -------------------------------------------------------------------
@@ -594,6 +670,7 @@ fi
 teardown_stale
 ensure_browser
 ensure_build
+prepare_served_repo
 start_app
 write_descriptor
 emit 0

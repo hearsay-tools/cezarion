@@ -216,3 +216,81 @@ test('parseArgs supports required-success context collection', () => {
   } }]);
   assert.throws(() => waitForCiRun(h.options), /cancelled/);
 });
+
+// hearsay-tools/cezarion#1020: one 502 from the jobs endpoint failed wait-for-ci with every job green.
+const JOBS_URL = 'https://api.github.com/repos/o/n/actions/runs/42/jobs?per_page=100';
+function ghFailure(stderr) {
+  return Object.assign(new Error(`Command failed: gh\n${stderr}`), { status: 1, stderr });
+}
+const http502 = () => ghFailure(`HTTP 502: Server Error (${JOBS_URL})\n`);
+const http404 = () => ghFailure(`HTTP 404: Not Found (${JOBS_URL})\n`);
+
+// Fails the first `failures` calls matching `pick` with `error()`, then passes through.
+function flaky(h, pick, failures, error) {
+  let failed = 0;
+  let attempts = 0;
+  const gh = (args) => {
+    if (pick(args)) {
+      attempts += 1;
+      if (failed < failures) { failed += 1; throw error(); }
+    }
+    return h.gh(args);
+  };
+  return { options: { ...h.options, gh }, attempts: () => attempts };
+}
+const isJobs = args => args[0] === 'run' && args[1] === 'view';
+const isList = args => args[0] === 'run' && args[1] === 'list';
+
+for (const [name, pick] of [['run jobs lookup', isJobs], ['run list lookup', isList]]) {
+  test(`--wait retries a single transient 502 from the ${name}`, () => {
+    const h = harness([{ jobs: [job(), publish()] }]);
+    const f = flaky(h, pick, 1, http502);
+    assert.equal(waitForCiRun(f.options).databaseId, 42);
+    assert.equal(f.attempts(), 2);
+  });
+}
+
+test('collectCiResults retries a transient 502 from the jobs lookup', () => {
+  const h = harness([{ jobs: [job(), publish()] }]);
+  const f = flaky(h, isJobs, 1, http502);
+  assert.equal(collectCiResults({ ...f.options, requireSuccess: true }).conclusion, 'success');
+});
+
+test('network resets and secondary rate limits are retried like 5xx', () => {
+  for (const stderr of [
+    'read tcp: connection reset by peer',
+    'Post "https://api.github.com/graphql": dial tcp: i/o timeout',
+    'Get "https://api.github.com/repos/o/r/actions/runs/42/jobs?per_page=100": dial tcp 140.82.112.6:443: connect: connection refused',
+    'Get "https://api.github.com/graphql": dial tcp: lookup api.github.com on 127.0.0.53:53: no such host',
+    'Get "https://api.github.com/graphql": dial tcp: lookup api.github.com: Temporary failure in name resolution',
+    'Get "https://api.github.com/graphql": dial tcp 140.82.112.6:443: connect: network is unreachable',
+    'Get "https://api.github.com/graphql": write tcp 10.1.0.4:51234->140.82.112.6:443: write: broken pipe',
+    'HTTP 429: Too Many Requests',
+    'HTTP 403: You have exceeded a secondary rate limit',
+  ]) {
+    const h = harness([{ jobs: [job()] }]);
+    const f = flaky(h, isJobs, 1, () => ghFailure(stderr));
+    assert.equal(waitForCiRun(f.options).databaseId, 42, stderr);
+  }
+});
+
+test('persistent 5xx fails after bounded attempts and names the failing URL', () => {
+  const h = harness([{ jobs: [job()] }]);
+  const f = flaky(h, isJobs, Infinity, http502);
+  assert.throws(() => waitForCiRun(f.options), (error) => {
+    assert.match(error.message, /failed after 4 attempts/);
+    assert.ok(error.message.includes(JOBS_URL), error.message);
+    assert.match(error.message, /gh run view 42/);
+    return true;
+  });
+  assert.equal(f.attempts(), 4);
+  assert.ok(h.elapsed() < 60_000, `backoff stays well under a minute, slept ${h.elapsed()}ms`);
+});
+
+test('a 404 is not retried', () => {
+  const h = harness([{ jobs: [job()] }]);
+  const f = flaky(h, isJobs, Infinity, http404);
+  assert.throws(() => waitForCiRun(f.options), /HTTP 404/);
+  assert.equal(f.attempts(), 1);
+  assert.equal(h.elapsed(), 0);
+});

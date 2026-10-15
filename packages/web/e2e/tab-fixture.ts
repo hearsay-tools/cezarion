@@ -3,12 +3,15 @@ import { resolve } from 'node:path'
 import { fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 
-/** Production CLI over a private workspace; pages share a browser, never host state. */
-export async function createTabFixture(buildRoot = process.cwd(), options: { remote?: boolean; basicAuth?: boolean } = {}) {
+/** Production CLI over a private workspace; pages share a browser, never host state. `serverPackage`
+ * is the cezar package directory to serve: the specs' e2e build mirror by default, and
+ * `<root>/packages/cezar` for the production-build benchmark. */
+export async function createTabFixture(buildRoot = process.cwd(), options: { remote?: boolean; basicAuth?: boolean; serverPackage?: string } = {}) {
+  const serverPackage = resolve(buildRoot, options.serverPackage ?? '.ai/qa/build/cezar')
   const root = mkdtempSync('/tmp/cez-tabs-')
   const env = fixtureServeEnv(root, { CEZ_REMOTE: options.remote ? '1' : '0' })
   for (const key of ['CEZ_TASK_ID', 'CEZ_HANDOFF_FILE', 'CEZ_ARTIFACTS_DIR']) delete env[key]
-  const server = spawnFixtureServer([resolve('packages/web/scripts/tab-fixture-server.mjs'), root, buildRoot, ...(options.basicAuth ? ['basic-auth'] : [])], { env }, { timeoutMs: 60_000 })
+  const server = spawnFixtureServer([resolve('packages/web/scripts/tab-fixture-server.mjs'), root, serverPackage, ...(options.basicAuth ? ['basic-auth'] : [])], { env }, { timeoutMs: 60_000 })
   let controlOrigin = ''
   server.stdout?.on('data', chunk => { const match = /control → (http:\/\/127\.0\.0\.1:\d+)/.exec(String(chunk)); if (match) controlOrigin = match[1]! })
   try {

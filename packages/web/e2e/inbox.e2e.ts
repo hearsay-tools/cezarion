@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { AgentBrowser, readTestEnv } from './agent-browser'
+import { AgentBrowser, readTestEnv, servedRoot } from './agent-browser'
 
 /**
  * The inbox (R6 Step 1.2) end-to-end against the shared dry-run environment.
@@ -23,7 +23,7 @@ const sessionId = `e2e-inbox-${process.pid}`
 const DESKTOP = { width: 1440, height: 900 }
 
 // Where `src/index.ts` puts the data dir, for the server booted from this worktree.
-const dataDir = resolve(import.meta.dirname, '../../../.ai/cezar')
+const dataDir = resolve(servedRoot(), '.ai/cezar')
 const todosFile = resolve(dataDir, 'todos.json')
 
 const CARD = '[data-slot="todo-card"]'
@@ -81,7 +81,7 @@ describe('the inbox against the live dry-run server', () => {
   it('an enabled empty inbox renders the shared CenteredState template', ({ skip }) => {
     skip(
       !followupsAvailable,
-      'the inbox is opt-in; run CEZ_FOLLOWUPS=1 npm run test:e2e -- --force',
+      'the inbox is opt-in; run npm run test:e2e -- --server-env=CEZ_FOLLOWUPS=1',
     )
     writeTodos([])
     browser.goto(`${baseUrl}/inbox`)
@@ -96,7 +96,7 @@ describe('the inbox against the live dry-run server', () => {
   it('real cards render LIVE from a server-side todos.json write — no reload', ({ skip }) => {
     skip(
       !followupsAvailable,
-      'the inbox is opt-in; run CEZ_FOLLOWUPS=1 npm run test:e2e -- --force',
+      'the inbox is opt-in; run npm run test:e2e -- --server-env=CEZ_FOLLOWUPS=1',
     )
     // An agent files two follow-ups while the page just sits there on /inbox.
     writeTodos([
@@ -144,7 +144,7 @@ describe('the inbox against the live dry-run server', () => {
   it('lays the runnable card’s Runner · Model · Effort row out for a phone without overflow (#724)', ({ skip }) => {
     skip(
       !followupsAvailable,
-      'the inbox is opt-in; run CEZ_FOLLOWUPS=1 npm run test:e2e -- --force',
+      'the inbox is opt-in; run npm run test:e2e -- --server-env=CEZ_FOLLOWUPS=1',
     )
     browser.setViewport(360, 640)
     try {
@@ -197,7 +197,7 @@ describe('the inbox against the live dry-run server', () => {
   it('Dismiss checks the entry off — card gone, server inbox down to one', async ({ skip }) => {
     skip(
       !followupsAvailable,
-      'the inbox is opt-in; run CEZ_FOLLOWUPS=1 npm run test:e2e -- --force',
+      'the inbox is opt-in; run npm run test:e2e -- --server-env=CEZ_FOLLOWUPS=1',
     )
     browser.click(`${CARD}[data-id="e2e-inbox-1"] [data-action="todo-dismiss"]`)
 

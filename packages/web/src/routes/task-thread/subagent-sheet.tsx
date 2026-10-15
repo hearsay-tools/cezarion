@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 import type { SubagentSummary } from './subagent-dock'
-import type { ThreadAsk, ThreadEntry } from './thread-state'
+import type { ThreadAsk, ThreadPermission, ThreadEntry } from './thread-state'
 import { SessionTranscript, agentTranscriptSections } from './session-transcript'
 import type { RecipientBackendMap, TaskTitleMap } from './conversation-presentation'
 
@@ -20,6 +20,7 @@ import type { RecipientBackendMap, TaskTitleMap } from './conversation-presentat
 export function SubagentSheet({
   runId,
   renderAsk,
+  renderPermission,
   agent,
   entries,
   onClose,
@@ -28,6 +29,7 @@ export function SubagentSheet({
 }: {
   runId: string
   renderAsk?: (ask: ThreadAsk) => ReactNode
+  renderPermission?: (permission: ThreadPermission) => ReactNode
   /** The selected agent, or `undefined` when the sheet is closed. */
   agent: SubagentSummary | undefined
   /** That agent's child entries, in stream order (`subagentChildren`). */
@@ -46,7 +48,7 @@ export function SubagentSheet({
         className="flex min-h-0 w-full gap-0 p-0 sm:max-w-xl"
       >
         {agent !== undefined ? (
-          <SheetBody runId={runId} renderAsk={renderAsk} agent={agent} entries={entries} taskTitles={taskTitles} recipientBackends={recipientBackends} />
+          <SheetBody runId={runId} renderAsk={renderAsk} renderPermission={renderPermission} agent={agent} entries={entries} taskTitles={taskTitles} recipientBackends={recipientBackends} />
         ) : null}
       </SheetContent>
     </Sheet>
@@ -56,6 +58,7 @@ export function SubagentSheet({
 function SheetBody({
   runId,
   renderAsk,
+  renderPermission,
   agent,
   entries,
   taskTitles,
@@ -63,6 +66,7 @@ function SheetBody({
 }: {
   runId: string
   renderAsk?: (ask: ThreadAsk) => ReactNode
+  renderPermission?: (permission: ThreadPermission) => ReactNode
   agent: SubagentSummary
   entries: ThreadEntry[]
   taskTitles?: TaskTitleMap
@@ -94,7 +98,7 @@ function SheetBody({
         viewId={`agent:${agent.id}`}
         sections={agentTranscriptSections(agent.id, entries)}
         mode="panel"
-        renderAsk={renderAsk}
+        renderAsk={renderAsk} renderPermission={renderPermission}
         taskTitles={taskTitles}
         recipientBackends={recipientBackends}
         empty={

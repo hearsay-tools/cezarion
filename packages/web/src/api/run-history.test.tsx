@@ -141,7 +141,7 @@ describe('useRunHistory', () => {
     const { wrapper } = harness()
     const { result } = renderHook(() => useRunHistory('run-1'), { wrapper })
 
-    await waitFor(() => expect(result.current.fallback).toBe(true), { timeout: 3_000 })
+    await waitFor(() => expect(result.current.fallback).toBe(true))
     expect(result.current.isPending).toBe(false)
     expect(result.current.hasOlder).toBe(false)
   })
@@ -165,7 +165,7 @@ describe('useRunHistory', () => {
       return state
     }, { wrapper })
     try {
-      await waitFor(() => expect(result.current.fallback).toBe(true), { timeout: 3_000 })
+      await waitFor(() => expect(result.current.fallback).toBe(true))
       const source = FakeEventSource.instances.at(-1)!
       await act(() => source.emit('run-event', JSON.stringify(page(1).events[0])))
       expect(result.current.visibleEvents.map(event => event.seq)).toEqual([1])

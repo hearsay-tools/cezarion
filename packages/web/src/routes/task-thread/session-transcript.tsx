@@ -1,5 +1,6 @@
 import { useMemo, type ReactNode } from 'react'
 import { TaskFileScope } from './task-file-scope'
+import { PermissionCard } from './permission-card'
 
 import type { AgentInput, ApiRun } from '@open-mercato/cezar-api-client'
 
@@ -26,7 +27,7 @@ import {
   type ThreadRow,
   type ThreadScrollControls,
 } from './thread-scroller'
-import type { ThreadAsk, ThreadEntry, ThreadPreviewServer, ThreadState } from './thread-state'
+import type { ThreadAsk, ThreadPermission, ThreadEntry, ThreadPreviewServer, ThreadState } from './thread-state'
 import { usePreviewPane } from './preview/preview-state'
 import { PreviewServerCard } from './preview/server-card'
 import { useHealth } from '@/api/queries'
@@ -82,6 +83,7 @@ export interface SessionTranscriptProps {
   empty?: ReactNode
   /** Injects the run-aware reply behavior without coupling this view to run data or stores. */
   renderAsk?: (ask: ThreadAsk) => ReactNode
+  renderPermission?: (permission: ThreadPermission) => ReactNode
   messageActions?: Readonly<Record<string, TranscriptMessageActions>>
   /** Main-document integration preserves the shell's existing dock-owned jump pill. */
   scrollControls?: ThreadScrollControls
@@ -112,7 +114,9 @@ function overlayAgentInputNotes(run: ApiRun, entries: readonly ThreadEntry[]): r
 }
 
 /** The main run record plus reduced turns, without rendering or backend inspection. */
-export function mainTranscriptSections(run: ApiRun, thread: ThreadState): TranscriptSection[] {
+export function mainTranscriptSections(run: ApiRun, thread: ThreadState, currentThread: ThreadState = thread): TranscriptSection[] {
+  const currentPermissions = new Map(currentThread.turns.flatMap(turn => turn.items).filter((entry): entry is ThreadPermission => entry.kind === 'permission').map(entry => [entry.requestId, entry]))
+  const visiblePermissions = new Set<string>()
   const sections: TranscriptSection[] = []
   if (run.task) {
     sections.push({
@@ -153,9 +157,17 @@ export function mainTranscriptSections(run: ApiRun, thread: ThreadState): Transc
         : {}),
       ...(turn.startedAt !== undefined ? { startedAt: turn.startedAt } : {}),
       ...(turn.completed?.ts !== undefined ? { completedAt: turn.completed.ts } : {}),
-      entries: overlayAgentInputNotes(run, turn.items),
+      entries: overlayAgentInputNotes(run, turn.items.map(entry => {
+        if (entry.kind !== 'permission') return entry
+        visiblePermissions.add(entry.requestId)
+        return currentPermissions.get(entry.requestId) ?? (entry.status === 'pending' ? { ...entry, status: 'expired' as const } : entry)
+      })),
     })
   }
+  // Compact context keeps live approvals older than the visible page. Put those cards at
+  // the live edge until loading older history supplies their original transcript position.
+  const missing = [...currentPermissions.values()].filter(entry => entry.status === 'pending' && !visiblePermissions.has(entry.requestId))
+  if (missing.length > 0) sections.push({ id: 'pending-permissions', entries: missing, inDaySequence: false })
   return sections
 }
 
@@ -247,6 +259,7 @@ export function SessionTranscript({
   mode,
   empty,
   renderAsk,
+  renderPermission,
   messageActions,
   scrollControls,
   renderMode,
@@ -278,9 +291,9 @@ export function SessionTranscript({
     () =>
       rowModels.map((row) => ({
         key: row.key,
-        node: renderRowContent(row, messageActions?.[row.key], renderAsk, runId, taskTitles, recipientBackends),
+        node: renderRowContent(row, messageActions?.[row.key], renderAsk, renderPermission, runId, taskTitles, recipientBackends),
       })),
-    [messageActions, renderAsk, rowModels, runId, taskTitles, recipientBackends],
+    [messageActions, renderAsk, renderPermission, rowModels, runId, taskTitles, recipientBackends],
   )
   const rowMode = renderMode ?? threadRenderMode('', rows.length)
 
@@ -325,6 +338,7 @@ function renderRowContent(
   row: TranscriptRowModel,
   actions: TranscriptMessageActions | undefined,
   renderAsk: ((ask: ThreadAsk) => ReactNode) | undefined,
+  renderPermission: ((permission: ThreadPermission) => ReactNode) | undefined,
   runId: string,
   taskTitles?: TaskTitleMap,
   recipientBackends?: RecipientBackendMap,
@@ -346,7 +360,7 @@ function renderRowContent(
         <ThreadBlockRenderer
           block={row.content.block}
           scope={row.scope}
-          renderAsk={renderAsk}
+          renderAsk={renderAsk} renderPermission={renderPermission}
           runId={runId}
           taskTitles={taskTitles}
           recipientBackends={recipientBackends}
@@ -382,6 +396,7 @@ function ThreadBlockRenderer({
   block,
   scope,
   renderAsk,
+  renderPermission,
   runId,
   taskTitles,
   recipientBackends,
@@ -389,13 +404,14 @@ function ThreadBlockRenderer({
   block: ThreadBlock
   scope: string
   renderAsk?: (ask: ThreadAsk) => ReactNode
+  renderPermission?: (permission: ThreadPermission) => ReactNode
   runId: string
   taskTitles?: TaskTitleMap
   recipientBackends?: RecipientBackendMap
 }): ReactNode {
   switch (block.kind) {
     case 'entry':
-      return <ThreadEntryRenderer entry={block.entry} scope={scope} renderAsk={renderAsk} runId={runId} taskTitles={taskTitles} recipientBackends={recipientBackends} />
+      return <ThreadEntryRenderer entry={block.entry} scope={scope} renderAsk={renderAsk} renderPermission={renderPermission} runId={runId} taskTitles={taskTitles} recipientBackends={recipientBackends} />
     case 'tool-card':
       return (
         <ToolCard
@@ -403,7 +419,7 @@ function ThreadBlockRenderer({
           nested={block.children}
           cacheKey={`${scope}:${block.id}`}
           renderNested={(entries, nestedScope) => (
-            <GroupedEntries entries={entries} scope={nestedScope} renderAsk={renderAsk} runId={runId} taskTitles={taskTitles} recipientBackends={recipientBackends} />
+            <GroupedEntries entries={entries} scope={nestedScope} renderAsk={renderAsk} renderPermission={renderPermission} runId={runId} taskTitles={taskTitles} recipientBackends={recipientBackends} />
           )}
         />
       )
@@ -413,7 +429,7 @@ function ThreadBlockRenderer({
       return (
         <ToolStreak count={block.count}>
           {block.blocks.map((inner) => (
-            <ThreadBlockRenderer key={inner.id} block={inner} scope={scope} renderAsk={renderAsk} runId={runId} taskTitles={taskTitles} recipientBackends={recipientBackends} />
+            <ThreadBlockRenderer key={inner.id} block={inner} scope={scope} renderAsk={renderAsk} renderPermission={renderPermission} runId={runId} taskTitles={taskTitles} recipientBackends={recipientBackends} />
           ))}
         </ToolStreak>
       )
@@ -428,6 +444,7 @@ function GroupedEntries({
   entries,
   scope,
   renderAsk,
+  renderPermission,
   runId,
   taskTitles,
   recipientBackends,
@@ -435,12 +452,13 @@ function GroupedEntries({
   entries: readonly ThreadEntry[]
   scope: string
   renderAsk?: (ask: ThreadAsk) => ReactNode
+  renderPermission?: (permission: ThreadPermission) => ReactNode
   runId: string
   taskTitles?: TaskTitleMap
   recipientBackends?: RecipientBackendMap
 }) {
   return groupThreadItems([...entries]).map((block) => (
-    <ThreadBlockRenderer key={block.id} block={block} scope={scope} renderAsk={renderAsk} runId={runId} taskTitles={taskTitles} recipientBackends={recipientBackends} />
+    <ThreadBlockRenderer key={block.id} block={block} scope={scope} renderAsk={renderAsk} renderPermission={renderPermission} runId={runId} taskTitles={taskTitles} recipientBackends={recipientBackends} />
   ))
 }
 
@@ -448,6 +466,7 @@ function ThreadEntryRenderer({
   entry,
   scope,
   renderAsk,
+  renderPermission,
   runId,
   taskTitles,
   recipientBackends,
@@ -455,6 +474,7 @@ function ThreadEntryRenderer({
   entry: ThreadEntry
   scope: string
   renderAsk?: (ask: ThreadAsk) => ReactNode
+  renderPermission?: (permission: ThreadPermission) => ReactNode
   runId: string
   taskTitles?: TaskTitleMap
   recipientBackends?: RecipientBackendMap
@@ -506,6 +526,8 @@ function ThreadEntryRenderer({
           The agent asked a question. Open the main session to answer it.
         </div>
       )
+    case 'permission':
+      return renderPermission ? renderPermission(entry) : <PermissionCard permission={entry} runId={runId} />
     case 'provider-auth-required':
       return <ProviderAuthRequiredCard incident={entry} />
     case 'preview-server':

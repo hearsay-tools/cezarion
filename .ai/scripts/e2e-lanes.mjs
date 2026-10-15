@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 
 const ownRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const COUNT = 4;
+// build-e2e.sh's mirror of the server package; never the production packages/cezar/dist.
+const E2E_BUILD = '.ai/qa/build';
 
 function git(repoRoot, ...args) {
   return execFileSync('git', ['-C', repoRoot, ...args]);
@@ -56,7 +58,7 @@ function linkWorkspaceDependencies(repoRoot, laneRoot) {
 
 function linkBuiltAssets(repoRoot, laneRoot) {
   linkWorkspaceDependencies(repoRoot, laneRoot);
-  for (const relative of ['node_modules', 'packages/cezar/dist', 'packages/cezar/web/dist']) {
+  for (const relative of ['node_modules', E2E_BUILD]) {
     const source = join(repoRoot, relative);
     if (!existsSync(source)) throw new Error(`missing shared E2E asset: ${source}`);
     const target = join(laneRoot, relative);
@@ -148,12 +150,13 @@ function laneMetadata(repoRoot) {
   return { remotes, core, symbolic, effective };
 }
 
-export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD' }) {
-  const laneRoot = join(scratchRoot, `lane-${index}`);
+// A checkout of `repoRoot` at `root` that shares nothing with it: its own objects, refs and
+// administration, the base commit plus the current edits. removeLane() owns its cleanup.
+export function cloneIsolatedCheckout({ repoRoot, root: laneRoot, baseRef = 'HEAD' }) {
   const source = realpathSync(repoRoot);
   const base = git(repoRoot, 'rev-parse', '--verify', `${baseRef}^{commit}`).toString('utf8').trim();
   const metadata = laneMetadata(repoRoot);
-  mkdirSync(scratchRoot, { recursive: true });
+  mkdirSync(dirname(laneRoot), { recursive: true });
   mkdirSync(laneRoot); // Exclusive reservation: failure cleanup never owns a preexisting path.
   try {
     // #795: linked worktrees share the host's 120s mutation queue. Each lane needs its
@@ -190,6 +193,39 @@ export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD' }) {
       version: 1, source, root: realpathSync(laneRoot),
     }), { flag: 'wx' });
     copyCurrentEdits(repoRoot, laneRoot, base);
+    return laneRoot;
+  } catch (error) {
+    rmSync(laneRoot, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+// Bring a clone from cloneIsolatedCheckout back to the checkout's current edits, in place, for
+// a server that keeps serving it: paths the checkout changed are copied again, and paths only
+// the clone still has changed go back to the base. False when the checkout's HEAD moved; that
+// needs a fresh clone.
+export function syncCurrentEdits({ repoRoot, root }) {
+  const owner = JSON.parse(readFileSync(join(root, '.git/cezar-e2e-lane.json'), 'utf8'));
+  if (owner.version !== 1 || owner.source !== realpathSync(repoRoot) || owner.root !== realpathSync(root)) {
+    throw new Error('refusing to sync an unowned E2E checkout');
+  }
+  const head = git(repoRoot, 'rev-parse', 'HEAD').toString('utf8').trim();
+  if (git(root, 'rev-parse', 'HEAD').toString('utf8').trim() !== head) return false;
+  const wanted = changedPaths(repoRoot, head);
+  for (const relative of changedPaths(root, head)) {
+    if (wanted.has(relative)) continue;
+    rmSync(join(root, relative), { recursive: true, force: true });
+    if (git(root, 'ls-tree', '--name-only', head, '--', relative).length) {
+      git(root, 'checkout', '--quiet', head, '--', relative);
+    }
+  }
+  copyCurrentEdits(repoRoot, root, head);
+  return true;
+}
+
+export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD' }) {
+  const laneRoot = cloneIsolatedCheckout({ repoRoot, root: join(scratchRoot, `lane-${index}`), baseRef });
+  try {
     linkBuiltAssets(repoRoot, laneRoot);
     return laneRoot;
   } catch (error) {
@@ -278,9 +314,7 @@ export function buildSource(repoRoot) {
   if (!existsSync(join(repoRoot, 'packages/cezar/node_modules/zod/package.json'))) {
     execFileSync('pnpm', ['install', '--frozen-lockfile'], npmOptions);
   }
-  execFileSync('npm', ['run', 'build'], {
-    ...npmOptions, env: { ...process.env, VITE_CEZ_E2E: '1' },
-  });
+  execFileSync('sh', ['.ai/scripts/build-e2e.sh'], npmOptions);
 }
 
 export async function runLocalSuite({ repoRoot = ownRoot, scratchRoot, buildSource: prepareBuild = buildSource } = {}) {
@@ -300,7 +334,7 @@ export async function runLocalSuite({ repoRoot = ownRoot, scratchRoot, buildSour
   process.on('SIGTERM', interrupt);
   try {
     await prepareBuild(repoRoot);
-    for (const relative of ['packages/cezar/node_modules/zod/package.json', 'packages/cezar/dist/index.js', 'packages/cezar/web/dist/index.html', 'packages/cezar/web/dist/.cez-e2e-build']) {
+    for (const relative of ['packages/cezar/node_modules/zod/package.json', `${E2E_BUILD}/cezar/dist/index.js`, `${E2E_BUILD}/cezar/web/dist/index.html`, `${E2E_BUILD}/cezar/web/dist/.cez-e2e-build`]) {
       if (!existsSync(join(repoRoot, relative))) throw new Error(`E2E build did not provide ${relative}`);
     }
     const baseRef = git(repoRoot, 'rev-parse', 'HEAD').toString('utf8').trim();

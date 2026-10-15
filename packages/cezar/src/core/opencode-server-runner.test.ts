@@ -347,6 +347,14 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const count = (events: AgentEvent[], type: string) => events.filter((e) => e.type === type).length;
+  /** An answer can only be routed once the runner holds the pending question, and `ask.requested`
+   *  is emitted at exactly that point — it is what a user answers. `mock.questionGets` only says
+   *  the mock SERVED the GET: answering then raced the runner still reading the response, and the
+   *  answer was queued as plain text (#899). The tests that answer also hold that response for
+   *  QUESTION_GET_DELAY_MS, so the old order fails every run instead of under load. */
+  const waitForAsk = (uiEvents: UiEvent[], n = 1) =>
+    waitFor(() => uiEvents.filter((e) => e.type === 'ask.requested').length === n);
+  const QUESTION_GET_DELAY_MS = 150;
 
   interface Harness {
     child: ChildProcessWithoutNullStreams;
@@ -1160,7 +1168,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   });
 
   it('queues messages sent during a successful question reply and prompts in order after idle', async () => {
-    await withSession({ questionReplyDelayMs: 180 }, async ({ events, mock, session }) => {
+    await withSession({ questionReplyDelayMs: 180, questionGetDelayMs: QUESTION_GET_DELAY_MS }, async ({ events, uiEvents, mock, session }) => {
       await waitFor(() => mock.promptPosts.length === 1);
       mock.pendingQuestions.push({ id: 'q_queue', sessionID: 'ses_test' });
       sendQuestion(mock, {
@@ -1172,7 +1180,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
           },
         ],
       });
-      await waitFor(() => mock.questionGets.length === 1);
+      await waitForAsk(uiEvents);
 
       session.sendMessage([{ type: 'text', text: 'Choice: One' }]);
       await waitFor(() => mock.questionReplies.length === 1);
@@ -1194,8 +1202,8 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
 
   it('keeps queued text through a failed reply until a later explicit answer succeeds', async () => {
     await withSession(
-      { questionReplyStatus: 500, questionReplyDelayMs: 120 },
-      async ({ events, mock, session }) => {
+      { questionReplyStatus: 500, questionReplyDelayMs: 120, questionGetDelayMs: QUESTION_GET_DELAY_MS },
+      async ({ events, uiEvents, mock, session }) => {
         await waitFor(() => mock.promptPosts.length === 1);
         mock.pendingQuestions.push({ id: 'q_queue_retry', sessionID: 'ses_test' });
         sendQuestion(mock, {
@@ -1207,7 +1215,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
             },
           ],
         });
-        await waitFor(() => mock.questionGets.length === 1);
+        await waitForAsk(uiEvents);
 
         session.sendMessage([{ type: 'text', text: 'Choice: One' }]);
         await waitFor(() => mock.questionReplies.length === 1);
@@ -1309,7 +1317,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   });
 
   it('keeps post-idle messages queued until a delayed reply succeeds and drains them FIFO', async () => {
-    await withSession({ questionReplyDelayMs: 260 }, async ({ events, mock, session }) => {
+    await withSession({ questionReplyDelayMs: 260, questionGetDelayMs: QUESTION_GET_DELAY_MS }, async ({ events, uiEvents, mock, session }) => {
       await waitFor(() => mock.promptPosts.length === 1);
       mock.pendingQuestions.push({ id: 'q_idle_success', sessionID: 'ses_test' });
       sendQuestion(mock, {
@@ -1321,7 +1329,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
           },
         ],
       });
-      await waitFor(() => mock.questionGets.length === 1);
+      await waitForAsk(uiEvents);
 
       session.sendMessage([{ type: 'text', text: 'Choice: One' }]);
       await waitFor(() => mock.questionReplies.length === 1);

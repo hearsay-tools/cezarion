@@ -15,6 +15,9 @@
  * runs only when `dist` actually names it. Delete this the day the contract is published, or the
  * day nothing here imports a contract VALUE.
  *
+ * An optional first argument names a different `dist` to post-process — the cockpit e2e build
+ * (`.ai/scripts/build-e2e.sh`) emits into an ignored mirror instead of this package's `dist`.
+ *
  * DECLARATIONS ship next to the bundle, and that is not optional. The scan below matches `.d.ts`
  * as well as `.js`, so emitted type imports get repointed too (`dist/ui-state.d.ts` names
  * `WorkspaceUiState`). esbuild emits JavaScript only, so a bundle on its own leaves those
@@ -27,12 +30,12 @@
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const dist = join(here, '..', 'dist');
+const dist = process.argv[2] ? resolve(process.argv[2]) : join(here, '..', 'dist');
 const contractRoot = join(here, '..', '..', 'contract');
 const entry = join(contractRoot, 'src', 'index.ts');
 const outdir = join(dist, 'contract');

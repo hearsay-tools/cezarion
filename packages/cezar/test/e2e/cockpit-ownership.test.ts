@@ -23,9 +23,15 @@ test('cockpit ownership rejects live duplicates, recovers after death, and isola
     execFileSync('git', ['commit', '--allow-empty', '-qm', 'fixture'], { cwd: directory });
   }
   const start = (directory: string) => {
+    // CEZ_PROJECT_WARMUP=0 (hearsay-tools/cezarion#1025): every cockpit here shares CEZ_HOME, so
+    // `repo` is registered for the `other` cockpit too. Warm-up claims each project it builds for
+    // the process lifetime and skips only projects a LIVE cockpit owns; a warm-up that reached
+    // `repo` after the first cockpit died took its lock, and both restarted contenders refused in
+    // favour of `other`. This test is about boot-time ownership and reclaiming a dead owner's lock;
+    // warm-up's own skip-the-owned-project rule is covered by project-context-warm.test.ts.
     const child = spawn(process.execPath, ['--import', 'tsx', cli, '--repo', directory, '--port', '0', '--no-open'], {
       cwd: packageRoot,
-      env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_NO_BANNER: '1', CEZ_SKILLS_AUTO_UPDATE: '0', CEZ_AUTONAME: '0', CEZ_REMOTE: '0' },
+      env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_NO_BANNER: '1', CEZ_SKILLS_AUTO_UPDATE: '0', CEZ_AUTONAME: '0', CEZ_REMOTE: '0', CEZ_PROJECT_WARMUP: '0' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     children.push(child);
@@ -82,10 +88,12 @@ test('cockpit ownership rejects live duplicates, recovers after death, and isola
     await kill(first.child);
     const contenders = [start(repo), start(repo)];
     const outcomes = await Promise.all(contenders.map((item) => item.outcome()));
-    assert.equal(outcomes.filter((item) => item.url).length, 1, JSON.stringify(outcomes));
-    assert.equal(outcomes.filter((item) => item.code === 1).length, 1, JSON.stringify(outcomes));
+    // Name every cockpit that could hold the lock, so a failure says who won it.
+    const report = JSON.stringify({ killed: live.url, other: different.url, outcomes });
+    assert.equal(outcomes.filter((item) => item.url).length, 1, report);
+    assert.equal(outcomes.filter((item) => item.code === 1).length, 1, report);
     const restarted = outcomes.find((item) => item.url)!;
-    assert.ok(outcomes.find((item) => item.code === 1)!.output.includes(restarted.url!), JSON.stringify(outcomes));
+    assert.ok(outcomes.find((item) => item.code === 1)!.output.includes(restarted.url!), report);
     assert.equal((await fetch(`${restarted.url}/api/v1/health`)).status, 200);
   } finally {
     await Promise.all(children.map(kill));

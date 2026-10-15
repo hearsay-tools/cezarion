@@ -12,6 +12,7 @@ vi.mock('node:fs/promises', async importOriginal => {
 });
 
 import { autosaveCommit } from './git-worktree.ts';
+import { killFromPidFile, readPids, requirePid, writePidSource } from './pid-file.testkit.ts';
 
 const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 const budget = { timeoutMs: 500, killGraceMs: 100, confirmMs: 100 };
@@ -36,7 +37,7 @@ describe('autosave shutdown (#495)', () => {
       const readdir = fs.readdirSync;
       vi.spyOn(fs, 'readdirSync').mockImplementation(((...args: unknown[]) => {
         if (String(args[0]) !== '/proc') return Reflect.apply(readdir, fs, args);
-        const recorded = existsSync(join(bin, 'pid')) ? readFileSync(join(bin, 'pid'), 'utf8').trim().split('\n') : [];
+        const recorded = readPids(join(bin, 'pid')).map(String);
         return readdir('/proc').filter(pid => {
           if (!/^\d+$/.test(pid) || recorded.includes(pid)) return true;
           try { fs.readlinkSync(`/proc/${pid}/cwd`); return true; }
@@ -49,11 +50,7 @@ describe('autosave shutdown (#495)', () => {
   afterEach(async () => {
     vi.restoreAllMocks(); syncBuiltinESMExports();
     // Also reaps the intentionally unbounded implementation during the red run.
-    if (existsSync(join(bin, 'pid'))) {
-      for (const pid of readFileSync(join(bin, 'pid'), 'utf8').trim().split('\n')) {
-        try { process.kill(Number(pid), 'SIGKILL'); } catch { /* gone */ }
-      }
-    }
+    killFromPidFile(join(bin, 'pid'));
     await Promise.allSettled(jobs.splice(0));
     vi.unstubAllEnvs();
     rmSync(repo, { recursive: true, force: true });
@@ -65,7 +62,7 @@ const fs = require('node:fs');
 const cp = require('node:child_process');
 const args = process.argv.slice(2);
 if (args.includes(${JSON.stringify(command)})) {
-  fs.appendFileSync(${JSON.stringify(join(bin, 'pid'))}, String(process.pid) + '\\n');
+  ${writePidSource(join(bin, 'pid'), { append: true })}
   ${behavior === 'fail' ? 'process.exit(128);' : `process.on('SIGTERM', () => fs.writeFileSync(${JSON.stringify(join(bin, 'term'))}, 'received'));
   setInterval(() => {}, 1000);`}
 } else {
@@ -85,7 +82,7 @@ if (args.includes(${JSON.stringify(command)})) {
       intercept(command, 'stall');
       expect(await save()).toBe('failed');
       expect(existsSync(join(bin, 'term'))).toBe(true);
-      const pid = Number(readFileSync(join(bin, 'pid'), 'utf8'));
+      const pid = requirePid(join(bin, 'pid'));
       expect(() => process.kill(pid, 0)).toThrow();
       expect(readFileSync(join(repo, 'work.txt'), 'utf8')).toBe('keep this work\n');
       expect(execFileSync(realGit, ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' })).toContain('work.txt');
@@ -120,9 +117,8 @@ if (args.includes(${JSON.stringify(command)})) {
   it('terminates descendants after the Git leader exits with closed pipes', async () => {
     const descendant = join(bin, 'descendant.cjs');
     writeFileSync(descendant, `
-const fs = require('node:fs');
 process.on('SIGTERM', () => {});
-fs.writeFileSync(${JSON.stringify(join(bin, 'pid'))}, String(process.pid));
+${writePidSource(join(bin, 'pid'))}
 setInterval(() => {}, 1000);
 `);
     writeFileSync(join(bin, 'git'), `#!${process.execPath}\n
@@ -134,7 +130,7 @@ const timer = setInterval(() => {
 `, { mode: 0o755 });
     vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
     expect(await save()).toBe('failed');
-    const pid = Number(readFileSync(join(bin, 'pid'), 'utf8'));
+    const pid = requirePid(join(bin, 'pid'));
     // Linux init may retain an exited grandchild as a zombie; it cannot write.
     if (existsSync(`/proc/${pid}/stat`)) {
       const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
@@ -146,7 +142,7 @@ const timer = setInterval(() => {
     const descendant = join(bin, 'detached.cjs');
     writeFileSync(descendant, `
 const fs = require('node:fs');
-fs.writeFileSync(${JSON.stringify(join(bin, 'pid'))}, String(process.pid));
+${writePidSource(join(bin, 'pid'))}
 setTimeout(() => { fs.writeFileSync('late.txt', 'last write'); process.exit(0); }, 1400);
 `);
     writeFileSync(join(bin, 'git'), `#!${process.execPath}\n
@@ -184,7 +180,7 @@ if (args.includes('status')) {
     vi.spyOn(fsPromises, 'readdir').mockImplementation((async (path: Parameters<typeof actualReaddir>[0], options?: Parameters<typeof actualReaddir>[1]) => {
       const entries = await actualReaddir(path, options as never);
       if (String(path) !== '/proc' || !obscure) return entries;
-      const recorded = existsSync(join(bin, 'pid')) ? readFileSync(join(bin, 'pid'), 'utf8').trim().split('\n') : [];
+      const recorded = readPids(join(bin, 'pid')).map(String);
       return (entries as string[]).filter(entry => !recorded.includes(String(entry)));
     }) as typeof fsPromises.readdir);
     let settled = false;

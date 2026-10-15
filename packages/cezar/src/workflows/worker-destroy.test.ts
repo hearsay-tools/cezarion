@@ -1,5 +1,6 @@
 import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
+import { readPid, requirePid, requirePidText } from '../pid-file.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
@@ -504,13 +505,13 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
   it('keeps workflow checks inside the termination barrier until the check process closes', async () => {
     const w = await worker(); const script = join(root, 'controlled-check.cjs');
-    writeFileSync(script, "process.on('SIGTERM',()=>{}); require('node:fs').writeFileSync('check.pid', String(process.pid)); setInterval(()=>{},1000);");
+    writeFileSync(script, "process.on('SIGTERM',()=>{}); const fs = require('node:fs'); fs.writeFileSync('check.pid.tmp', String(process.pid)); fs.renameSync('check.pid.tmp', 'check.pid'); setInterval(()=>{},1000);");
     const engine = manager as unknown as { execute(...args: unknown[]): Promise<unknown> };
     const real = engine.execute.bind(manager);
     engine.execute = (...args) => real(args[0], { name: 'check barrier fixture', steps: [{ id: 'task', command: `exec '${process.execPath}' '${script}'` }] }, args[2]);
     const pidPath = join(workspace(w).path, 'check.pid'); let pid: number | undefined;
     releases.push(() => { if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { /* already closed */ } } });
-    manager.enqueueOwnedRun(w.id); await until(() => existsSync(pidPath)); pid = Number(readFileSync(pidPath, 'utf8'));
+    manager.enqueueOwnedRun(w.id); await until(() => readPid(pidPath) !== undefined); pid = requirePid(pidPath);
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 30)).toBe(false);
     expect(existsSync(workspace(w).path)).toBe(true);
     process.kill(pid, 'SIGKILL'); pid = undefined;
@@ -1060,7 +1061,7 @@ console.log(String(m.pid)); ${opts.leader === 'exit' ? "m.unref(); process.stdin
           const proc = spawnSessionLeader(process.execPath, ['-e', script], { cwd: workspace(w).path, env: process.env });
           leader = proc;
           releases.push(() => { try { process.kill(-proc.pid!, 'SIGKILL'); } catch { /* gone */ } });
-          proc.stdout.once('data', chunk => ready(Number(String(chunk).trim())));
+          proc.stdout.once('data', chunk => ready(requirePidText(String(chunk), 'member stdout')));
           const result = new Promise<{ text: string; toolCalls: []; tokensUsed: number }>(resolve => proc.once('exit', () => resolve({ text: '', toolCalls: [], tokensUsed: 0 })));
           return { pid: proc.pid, result, open: true, sendMessage: () => true, sendAgentMessage: () => Promise.resolve(), discardQueuedMessages: () => {}, holdsHumanInput: () => false,
             interrupt: () => signalSession(proc, 'SIGTERM'), end: () => signalSession(proc, 'SIGTERM') };
@@ -1121,7 +1122,7 @@ console.log(String(m.pid)); ${opts.leader === 'exit' ? "m.unref(); process.stdin
       // the shape a double-fork daemon leaves once a freed number is reused.
       const script = `const m = require('child_process').spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)"], { stdio: 'ignore' }); console.log(String(m.pid)); m.unref(); setTimeout(() => process.exit(0), 50);`;
       const foreign = spawn(process.execPath, ['-e', script], { cwd: tmpdir(), detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
-      const member = Number(String(await new Promise<Buffer>(resolve => foreign.stdout!.once('data', resolve))).trim());
+      const member = requirePidText(String(await new Promise<Buffer>(resolve => foreign.stdout!.once('data', resolve))), 'member stdout');
       releases.push(() => { try { process.kill(member, 'SIGKILL'); } catch { /* gone */ } });
       await new Promise(resolve => foreign.once('exit', resolve));
       expect(alive(member)).toBe(true);

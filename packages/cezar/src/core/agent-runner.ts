@@ -278,6 +278,8 @@ export interface AgentSession {
   readonly pid?: number;
   /** Write a user message into the live session. False when it is closed. */
   sendMessage(content: ContentBlock[]): boolean;
+  /** Resolve a native approval using opaque runner-owned request/option ids. */
+  respondPermission?(requestId: string, optionId: string): boolean;
   /** Synchronous non-human reservation: false refuses without writing; a Promise
    * confirms the HARNESS ACCEPTED the input — mid-turn on a `steer` runner — not that
    * the model consumed it (#505). Reject retains caller ownership for replay.

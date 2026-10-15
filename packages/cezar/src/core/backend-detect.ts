@@ -67,7 +67,15 @@ async function probeClaude(): Promise<BackendCheck> {
 }
 
 async function probeCodex(): Promise<BackendCheck> {
-  const bin = process.env.CEZ_CODEX_BIN ?? 'codex';
+  // Dry-run stands the runner up on its bundled mock, so report it present without
+  // spawning the real CLI: `opencode --version` alone cost ~1-3 s per dry-run boot
+  // under load (hearsay-tools/cezarion#1042). An explicit CEZ_CODEX_BIN outranks the
+  // mock in the runner too, so it is still probed.
+  const override = process.env.CEZ_CODEX_BIN;
+  if (process.env.CEZ_DRY_RUN === '1' && override === undefined) {
+    return { name: 'codex', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
+  }
+  const bin = override ?? 'codex';
   try {
     const { stdout } = await exec(bin, ['--version'], { timeout: 10_000 });
     return {
@@ -86,7 +94,13 @@ async function probeCodex(): Promise<BackendCheck> {
 }
 
 async function probeOpencode(): Promise<BackendCheck> {
-  const bin = process.env.CEZ_OPENCODE_BIN ?? 'opencode';
+  // Dry-run stands the runner up on its bundled mock (hearsay-tools/cezarion#1042),
+  // unless CEZ_OPENCODE_BIN overrides it there as well.
+  const override = process.env.CEZ_OPENCODE_BIN;
+  if (process.env.CEZ_DRY_RUN === '1' && override === undefined) {
+    return { name: 'opencode', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
+  }
+  const bin = override ?? 'opencode';
   try {
     const { stdout } = await exec(bin, ['--version'], { timeout: 10_000 });
     return {

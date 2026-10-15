@@ -361,7 +361,10 @@ jobs:
     needs: [validate-provider, review-round]
     if: needs.review-round.outputs.can_review == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Above fetch-ci-results.cjs's own 20-minute wait, so a slow CI queue ends this job as a
+    # failure, which Recover Automated Review retries, not a timeout, which GitHub records as
+    # cancelled and recovery skips (hearsay-tools/cezarion#1060).
+    timeout-minutes: 25
     permissions:
       actions: read
       contents: read

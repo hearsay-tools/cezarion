@@ -59,10 +59,11 @@ const openThread = (id: string) => {
   browser.waitForFunction(`document.querySelector(${JSON.stringify(handoff)}) !== null`)
 }
 
-/** Screenshots are evidence of the settled UI, so they wait out Radix's open/close animations. */
-const settledShot = (name: string) => {
+/** Screenshots are evidence of the settled UI, so they wait out Radix's open/close animations.
+ *  `viewport: true` for an open desktop dialog: see the hand-off dialog test below. */
+const settledShot = (name: string, { viewport = false } = {}) => {
   browser.waitForFunction(`document.getAnimations().every(a => a.playState !== 'running' || a.effect?.getComputedTiming().iterations === Infinity)`)
-  browser.screenshot(join(artifacts, name))
+  browser.screenshot(join(artifacts, name), { viewport })
 }
 
 const box = (selector: string) => waitForSettledSample(browser, `(() => {
@@ -83,7 +84,16 @@ describe('Hand off to webhook', () => {
     const tip = browser.waitForValue(`document.querySelector(${JSON.stringify('[data-webhook-destination]')})?.getAttribute('title') || null`) as string
     expect(tip).toContain('bot.example/hooks/cez')
     expect(text).toContain('The note goes to the webhook only, not to the agent.')
-    settledShot('desktop-dialog.png')
+    // Viewport capture, never `--full`, while the dialog is open (hearsay-tools/cezarion#979).
+    // agent-browser's full-page capture resizes the window to 1x1 and back, so the md media
+    // query flips for a frame; when React commits that frame the run header swaps to its phone
+    // layout, `HandoffAction` remounts and its dialog state is lost. The `fill` below then finds
+    // no note field (hearsay-tools/cezarion#971 lane-3 bundle: `openDialogs: []`, the Hand off
+    // button still rendered). Reproduced with an instrumented copy of these steps at load 35-64:
+    // full-page capture closed the dialog in 4 of 30 iterations, each logging `resize 1x1
+    // md=false` and a `run-title-row` -> `run-details-actions` swap; viewport capture closed it
+    // in 0 of 30 and fired no resize. The dialog is fixed-position, so the viewport holds it all.
+    settledShot('desktop-dialog.png', { viewport: true })
 
     browser.fill('[data-slot="handoff-note"]', 'Take over from here')
     browser.click(submit)

@@ -30,3 +30,5 @@ export * from './discovery.ts';
 
 export * from './live.ts';
 export * from './live-coordination.ts';
+
+export * from './permissions.ts';

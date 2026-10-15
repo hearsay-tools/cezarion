@@ -33,7 +33,8 @@ function e2eBuildMarker(): Plugin {
       e2eBuild = value === '1' || value === 'true'
     },
     generateBundle() {
-      // #649: a later production build empties outDir and removes this proof of the e2e bundle.
+      // hearsay-tools/cezarion#649: the e2e bootstrap reuses only a bundle carrying this proof
+      // that it was built in the e2e mode.
       if (e2eBuild) this.emitFile({ type: 'asset', fileName: '.cez-e2e-build', source: 'e2e\n' })
     },
   }
@@ -62,7 +63,8 @@ export default defineConfig({
     // Built INTO the server package, because the CLI ships and serves it: `resolveWebDir()`
     // looks for `<pkg>/web/dist` next to its own `dist/`, and `files` puts it in the tarball.
     // A cross-package output is the honest expression of that coupling — the cockpit bundle is
-    // an artifact of the service, not a separately shipped thing.
+    // an artifact of the service, not a separately shipped thing. The cockpit e2e build
+    // (`.ai/scripts/build-e2e.sh`) passes `--outDir` to keep its bundle out of this directory.
     outDir: resolve(packagesDir, 'cezar/web/dist'),
     emptyOutDir: true,
     rolldownOptions: {

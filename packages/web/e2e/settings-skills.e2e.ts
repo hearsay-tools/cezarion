@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
 import {
   applyContrastQaVariant,
   contrastQaVariants,
@@ -28,7 +28,7 @@ const sessionId = `e2e-settings-skills-${process.pid}`
 
 const DESKTOP = { width: 1440, height: 900 }
 
-const skillsDir = resolve(import.meta.dirname, '../../../.ai/skills')
+const skillsDir = resolve(servedRoot(), '.ai/skills')
 const ALPHA = 'e2e-alpha-skill'
 const BETA = 'e2e-beta-skill'
 

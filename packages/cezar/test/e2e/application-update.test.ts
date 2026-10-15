@@ -15,6 +15,7 @@ import { withDirectoryLock } from '../../dist/application-update/lock.js';
 import { armRestartHelper } from '../../dist/application-update/launcher.js';
 import { stopChild } from './stop-child.js';
 import { tickWriterSource } from './tick-writer.js';
+import { killFromPidFile, requirePid, writePidSource } from '../../src/pid-file.testkit.ts';
 
 const execFile = promisify(execFileCallback);
 const npm = async (args: string[], env: NodeJS.ProcessEnv) => execFile('npm', args, { env, timeout: 90_000, maxBuffer: 2_000_000 });
@@ -465,14 +466,14 @@ test('a SIGTERM-resistant promotion child is reaped before compromised-lock fail
   try {
     const lock = join(fixture.stateDir, 'operation.lock');
     await writeFile(fixture.plan.npmBin, `#!/usr/bin/env node
-const fs=require('node:fs'); fs.writeFileSync(${JSON.stringify(pidPath)},String(process.pid));
+const fs=require('node:fs'); ${writePidSource(pidPath)}
 process.on('SIGTERM',()=>fs.writeFileSync(${JSON.stringify(join(fixture.root, 'term-received'))},'yes'));
 fs.renameSync(${JSON.stringify(lock)},${JSON.stringify(join(fixture.stateDir, 'stolen-lock'))});
 fs.mkdirSync(${JSON.stringify(lock)});
 ${tickWriterSource(ticks)}
 let n=0; setInterval(()=>writeTick(++n),25);`, { mode: 0o700 });
     await assert.rejects(runHelper(fixture.plan), /ownership changed/);
-    pid = Number(await readFile(pidPath, 'utf8'));
+    pid = requirePid(pidPath);
     // Reaping is the completion acknowledgement: a dead writer cannot mutate again.
     assert.throws(() => process.kill(pid, 0), 'owned npm must be reaped before reading final ticks');
     const finalTicks = await readFile(ticks, 'utf8');
@@ -483,8 +484,7 @@ let n=0; setInterval(()=>writeTick(++n),25);`, { mode: 0o700 });
     assert.equal((await readJson(fixture.recordPath)).state.status, 'restarting');
     assert.equal(existsSync(fixture.recovery), true);
   } finally {
-    if (!pid && existsSync(pidPath)) pid = Number(await readFile(pidPath, 'utf8'));
-    if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { /* already reaped */ } }
+    killFromPidFile(pidPath);
     await rm(fixture.root, { recursive: true, force: true });
   }
 });
@@ -502,7 +502,7 @@ test('a SIGTERM-resistant staging child is reaped before Apply settles', { timeo
     await writeFile(join(original, 'dist/index.js'), '');
     await writeFile(join(original, 'web/dist/index.html'), '');
     await writeFile(npmBin, `#!/usr/bin/env node
-const fs=require('node:fs'); const path=require('node:path'); fs.writeFileSync(${JSON.stringify(pidPath)},String(process.pid));
+const fs=require('node:fs'); const path=require('node:path'); ${writePidSource(pidPath)}
 process.on('SIGTERM',()=>fs.writeFileSync(${JSON.stringify(join(root, 'term-received'))},'yes'));
 const update=path.join(${JSON.stringify(home)},'application-updates',fs.readdirSync(path.join(${JSON.stringify(home)},'application-updates'))[0]);
 const lock=path.join(update,'operation.lock'); fs.renameSync(lock,path.join(update,'stolen-lock')); fs.mkdirSync(lock);
@@ -511,7 +511,7 @@ let n=0; setInterval(()=>writeTick(++n),25);`, { mode: 0o700 });
     const service = new ApplicationUpdateService({ packageRoot: original, launchEntry: join(original, 'dist/index.js'),
       npmPrefix: prefix, npmCache: cache, npmBin, home, targetVersion: () => '2.0.0' });
     await assert.rejects(service.apply(), /owns this installation/);
-    pid = Number(await readFile(pidPath, 'utf8'));
+    pid = requirePid(pidPath);
     // Reaping is the completion acknowledgement: a dead writer cannot mutate again.
     assert.throws(() => process.kill(pid, 0), 'owned npm must be reaped before reading final ticks');
     const finalTicks = await readFile(ticks, 'utf8');
@@ -521,8 +521,7 @@ let n=0; setInterval(()=>writeTick(++n),25);`, { mode: 0o700 });
     assert.throws(() => process.kill(pid, 0), 'owned npm must be reaped');
     assert.equal((await readJson(join(original, 'package.json'))).version, '1.0.0');
   } finally {
-    if (!pid && existsSync(pidPath)) pid = Number(await readFile(pidPath, 'utf8'));
-    if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { /* already reaped */ } }
+    killFromPidFile(pidPath);
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -618,8 +617,7 @@ writeFileSync(${JSON.stringify(join(fixture.root, 'ack'))}, String(pid));`);
     });
     const code = await new Promise<number | null>((resolve) => orchestrator.once('exit', resolve));
     assert.equal(code, 0, 'orchestrator must receive helper acknowledgement before exiting');
-    const helperPid = Number(await readFile(join(fixture.root, 'ack'), 'utf8'));
-    assert.ok(helperPid > 0);
+    requirePid(join(fixture.root, 'ack')); // the helper acknowledged with its pid
     assert.equal(existsSync(join(fixture.stateDir, 'helper', 'helper.js')), true);
     let health: { version: string; repoRoot: string; pid: number } | undefined;
     for (let attempt = 0; attempt < 150; attempt += 1) {

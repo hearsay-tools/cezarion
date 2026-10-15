@@ -5,8 +5,10 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync } from 'node:fs'
 
-const [root, buildRoot = process.cwd(), authMode] = process.argv.slice(2)
-const load = file => import(pathToFileURL(resolve(buildRoot, 'packages/cezar/dist', file)).href)
+// serverPackage: a cezar package directory holding dist/ and web/dist/ (the e2e mirror for the
+// specs, packages/cezar for the production-build benchmark).
+const [root, serverPackage = resolve('.ai/qa/build/cezar'), authMode] = process.argv.slice(2)
+const load = file => import(pathToFileURL(resolve(serverPackage, 'dist', file)).href)
 const { RunStore } = await load('runs/store.js')
 const { UiEventSink } = await load('runs/ui-event-sink.js')
 const { RunManager } = await load('workflows/run.js')

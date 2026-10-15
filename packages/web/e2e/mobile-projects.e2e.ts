@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
-import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
 import { readSharedProjects, snapshotSharedHome, writeSharedProjects } from './workspace-registry'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, restoreContrastQaDefaults, type ContrastSample } from './contrast'
 
@@ -63,7 +63,7 @@ beforeAll(async () => {
   writeSharedProjects([
     existingBoot ?? {
       id: projectId,
-      root: resolve(import.meta.dirname, '../../..'),
+      root: servedRoot(),
       name: projectId,
       addedAt: '2026-07-20T00:00:00Z',
       lastOpenedAt: '2026-07-20T12:00:00Z',

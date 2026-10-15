@@ -30,6 +30,10 @@ it('captures late read scope while switching projects and ignores ambient scope'
   const rendered = render(tree('shop'))
   await waitFor(() => expect(release).toBeTypeOf('function'))
   rendered.rerender(tree('other'))
+  // Join the second project's in-flight read before polling for its render: under host load the
+  // read and its render together outlasted waitFor's 1 s budget (hearsay-tools/cezarion#996). The
+  // render still needs the poll, because the query cache notifies observers on a later tick.
+  await act(() => client.fetchQuery({ queryKey: ['other', 'ui-state'] }))
   await waitFor(() => expect(screen.getByRole('status').textContent).toBe('7'))
   await act(async () => release())
   expect(screen.getByRole('status').textContent).toBe('7')

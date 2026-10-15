@@ -29,7 +29,8 @@ command lands. The seam closes that gap in two places:
 first. The value it hands back is the very sample the matcher accepted, so the state checked
 and the state read are the same one. Use `waitForStable` when that first truth can leave
 again inside one CLI round-trip — the hold is what `#409` could not see. The suite build
-sets `VITE_CEZ_E2E=1` so `useNow` and every `refetchInterval` stay off, and the cockpit
+(`.ai/scripts/build-e2e.sh`, into the ignored `.ai/qa/build/cezar`, never the production
+`packages/cezar/dist`) sets `VITE_CEZ_E2E=1` so `useNow` and every `refetchInterval` stay off, and the cockpit
 exposes `window.__cezIdle` (false while a query, SSE reconcile, or WS topic is in flight). `hoverVisiblePoint` in `contrast.ts` is the worked
 example: scroll, hit-test and the point come from one polled expression, and the pointer
 moves to that point. Its predecessor polled a predicate and then recomputed the point in a
@@ -156,15 +157,21 @@ rules (`CODE_REVIEW.md`) send it back.
 The whole suite takes about 14 minutes; one test takes seconds.
 
 ```bash
-env -u CEZ_AUTOMATIONS npm run test:e2e -- <spec>.e2e.ts -t '<test name>'
+npm run test:e2e -- <spec>.e2e.ts -t '<test name>'
 # Multiple spec filters and Vitest options work too:
 npm run test:e2e -- smoke.e2e.ts composer.e2e.ts --force-rebuild
+# Boot the shared server with an opt-in feature on (repeatable):
+npm run test:e2e -- inbox.e2e.ts --server-env=CEZ_FOLLOWUPS=1
 ```
 
-`CEZ_AUTOMATIONS` is unset because CI never sets it and four tests render differently with it.
+No ambient `CEZ_*` variable reaches an e2e cockpit (hearsay-tools/cezarion#1045), so a run from
+an agent's shell, which inherits the live cockpit's `CEZ_PREVIEW=1` and `CEZ_AUTOMATIONS=1`,
+boots what CI boots. The shared server takes opt-ins only from `--server-env=CEZ_NAME=value`,
+and a running server booted with a different set is replaced rather than reused. A spec that
+boots its own server passes its flags in `fixtureServeEnv(root, { … })`.
 The wrapper boots or reuses the environment, installs Chrome if needed, and exports
 the browser's temporary-directory settings from `.ai/qa/test-env.json` (including
-the socket-path workaround). `--force` and `--force-rebuild` go only to bootstrap;
+the socket-path workaround). `--force`, `--force-rebuild` and `--server-env` go only to bootstrap;
 other arguments, including `--shard=N/M`, spec paths and quoted test-name patterns,
 are passed intact to Vitest. A literal `--` ends wrapper option parsing.
 With no arguments the full sequential suite still runs. A filtered run's
@@ -178,6 +185,29 @@ probe is bounded by the remaining budget. On timeout the launcher prints elapsed
 seconds and the last 20 lines of `.ai/qa/test-env-app.log`, then stops the app.
 This budget covers the health wait, excluding build and browser preparation.
 
+## The project the shared env serves
+
+The shared server never serves this checkout. Each cold boot serves a fresh isolated clone at
+`.ai/qa/served/<checkout name>`, made by `.ai/scripts/e2e-served-repo.mjs` with the same
+construction as a local lane: own objects and refs, current `HEAD`, plus this checkout's tracked
+edits and untracked source files. The descriptor records it as `servedRoot`. The server's runs,
+task worktrees and `.ai/cezar` state live there. Serving the checkout put them in the checkout's
+own `.ai/cezar`, and in the main checkout that is the live cockpit's data dir: the cockpit refused
+the second server (`A cockpit already serves …`), and a boot that got through would have written
+test runs into it. A lane is already such a clone and serves itself. A reused server keeps
+reading the clone live, as it read the checkout: each `test-env-up.sh` that reuses it first
+syncs the clone to the checkout's current edits (`--sync`), and a moved `HEAD` cold-boots
+with a fresh clone.
+
+A spec that seeds state for the server to read — skills, workflows, `.ai/cezar/config.json`,
+a registry root for the boot project — writes it under `servedRoot()` from `agent-browser.ts`,
+never under a path derived from `import.meta.dirname`. The server never reads those paths.
+Evidence and artifacts stay in this checkout's `.ai/qa`.
+
+A cold boot deletes the previous descriptor before it starts anything. If the boot then fails,
+specs report that no env exists and point at `.ai/qa/test-env-app.log`. Before this change they
+attached to the old env's dead `baseUrl` and repeated its browser notes.
+
 ## Full local suite in four lanes
 
 Run `npm run test:e2e:local` for the complete suite on a machine with roughly **8 GiB
@@ -187,8 +217,8 @@ command remains the single-environment runner used by CI and focused local runs.
 
 Each lane is a temporary checkout at the current `HEAD`, with independent Git administration
 and owned objects, plus this checkout's tracked edits and untracked source files copied in. It gets a private `.ai/qa` directory, `CEZ_HOME`,
-port, environment descriptor, and agent-browser namespace. `node_modules` and the two built
-asset directories are symlinks to the source checkout; the lane bootstrap checks the E2E
+port, environment descriptor, and agent-browser namespace. `node_modules` and the E2E build
+(`.ai/qa/build`) are symlinks to the source checkout; the lane bootstrap checks the E2E
 build marker and cannot rebuild through those links. Do not edit source or rebuild the
 shared assets while a four-lane run is active.
 
@@ -205,9 +235,9 @@ Shard output, boot logs, descriptors, app logs, and failure bundles remain under
 Both statuses exit nonzero for this final local gate.
 
 To force a race that CI hits and your machine does not, slow the server down behind an
-environment variable rather than editing the spec. Specs that boot their own cezar spawn
-`packages/cezar/dist/index.js`, so patch the built route in
-`packages/cezar/dist/server/server.js`:
+environment variable rather than editing the spec. The shared env and the specs that boot
+their own cezar (`cezarCli`) both run the E2E build in `.ai/qa/build/cezar`, so patch the
+built route in `.ai/qa/build/cezar/dist/server/server.js`:
 
 ```js
 // inside the handler the spec is racing, before it answers
@@ -215,10 +245,11 @@ if (process.env.E2E_DELAY_MS) await new Promise((r) => setTimeout(r, Number(proc
 ```
 
 Run the single test with `E2E_DELAY_MS=1500` and watch it go red the way CI did, fix the
-wait, watch it go green, then restore `dist` (`npm run build`, or `git checkout` is no help
-because `dist` is not tracked). Boot the env before patching: the first
-`test-env-up.sh` in a fresh worktree runs `npm ci && npm run build` and would erase the patch.
-The shared env's own server is not restarted by a `dist` patch; `--force-rebuild` is.
+wait, watch it go green, then restore the build (`--force-rebuild`, or
+`sh .ai/scripts/build-e2e.sh`; `git checkout` is no help because it is not tracked). Boot the
+env before patching: the first `test-env-up.sh` in a fresh worktree runs
+`pnpm install --frozen-lockfile && sh .ai/scripts/build-e2e.sh` and would erase the patch.
+The shared env's own server is not restarted by a patch; `--force-rebuild` is.
 
 ## Observable completion and budgets (#764)
 
@@ -255,6 +286,16 @@ Packaged fixtures' audited polling, shutdown simulation and process escalation t
 an adjacent `// e2e-wait: condition-poll|shutdown-grace|process-deadline — reason` annotation.
 These annotations describe fixture mechanisms, never readiness; do not exempt an observation
 sleep. HTTP request socket deadlines (`request.setTimeout`) are not unconditional sleeps.
+
+## Screenshots capture the viewport (hearsay-tools/cezarion#1046)
+
+`browser.screenshot(path)` captures the viewport. agent-browser's full-page capture resizes
+the window to 1x1 and back, so the `md` breakpoint flips for a frame and any subtree that
+switches on it can remount, losing an open dialog, popover, menu or focus
+(hearsay-tools/cezarion#979). A cockpit page never needs it: `html, body` are
+`overflow: hidden` and the shell is `h-dvh`, so the document is exactly the viewport.
+`{ full: true }` exists for a page whose document really scrolls, and the seam refuses it
+while an overlay is open. `{ viewport: true }` on older call sites is now redundant.
 
 
 ## Browser-tab connection benchmark

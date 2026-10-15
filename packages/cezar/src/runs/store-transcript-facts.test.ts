@@ -263,4 +263,29 @@ describe('off-loop store readiness (hearsay-tools/cezarion#906)', () => {
     expect(completed).toEqual([live.parentId, live.workerId, historical.parentId, historical.workerId, other.id]);
     for (const id of ids) expect(existsSync(historyPaths(dir, id).facts)).toBe(true);
   });
+
+  it('enumerates a large store across event-loop turns, after open, and skips runs deleted meanwhile (hearsay-tools/cezarion#949)', async () => {
+    const { dir, store } = openStore();
+    const family = seedSettledFamily(store, dir);
+    const others = Array.from({ length: 120 }, () => store.createRun({ title: 'other', task: 'task', workflow: 'w', steps: [] }).id);
+    for (const id of others) store.updateRun(id, { status: 'done' });
+    store.close(); stores.pop();
+    const requested: string[] = [];
+    const request = TranscriptFactsQueue.prototype.request;
+    vi.spyOn(TranscriptFactsQueue.prototype, 'request').mockImplementation(function (this: TranscriptFactsQueue<unknown>, id, demand) {
+      requested.push(id);
+      return request.call(this, id, demand);
+    });
+    const scans = vi.spyOn(RunStore.prototype, 'listConversationRootIds');
+    const reopened = RunStore.open(dir); stores.push(reopened);
+    // Drain every microtask open() queued: the scan must wait for a later turn of the loop.
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(scans).not.toHaveBeenCalled();
+    expect(reopened.deleteRun(others[0]!)).toBe(true);
+    await reopened.factsWarmIdle();
+    expect(scans).toHaveBeenCalledTimes(1);
+    expect(requested.slice(0, 2)).toEqual([family.parentId, family.workerId]);
+    expect(requested).not.toContain(others[0]);
+    expect(new Set(requested)).toEqual(new Set([family.parentId, family.workerId, ...others.slice(1)]));
+  });
 });

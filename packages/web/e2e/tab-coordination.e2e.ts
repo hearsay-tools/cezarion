@@ -70,7 +70,9 @@ it.each([false, true])('ten mixed tabs (separate visible windows: %s) share work
       }
       await request('Target.activateTarget', { targetId: pages[primary]!.targetId })
       await pollFor(async () => streams.size === 2 && sockets.size === 1 ? true : undefined,
-        () => `live union: ${streams.size} SSE, ${sockets.size} WS, ${workers.size} workers`, { timeoutMs: 20_000 })
+        // Each worker stays paused under waitForDebuggerOnStart until its setup lands; a failed setup
+        // misses the 15 s lease and every tab falls back to finite HTTP, so name it with the counts.
+        () => `live union: ${streams.size} SSE, ${sockets.size} WS, ${workers.size} workers; worker setup errors: ${workerSetupErrors.map(String).join('; ') || 'none'}`, { timeoutMs: 20_000 })
       expect(workers.size).toBe(1)
       expect(protocols.has('http/1.1')).toBe(true)
       const visibility = await Promise.all(pages.map(page => read(request, page.sessionId, 'document.visibilityState')))

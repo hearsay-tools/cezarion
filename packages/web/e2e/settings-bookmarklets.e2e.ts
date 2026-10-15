@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { AgentBrowser, readTestEnv } from './agent-browser'
+import { AgentBrowser, readTestEnv, servedRoot } from './agent-browser'
 
 /**
  * Settings → Bookmarklets end-to-end against the shared dry-run environment.
@@ -29,7 +29,7 @@ const sessionId = `e2e-settings-bookmarklets-${process.pid}`
 
 const DESKTOP = { width: 1440, height: 900 }
 
-const skillsDir = resolve(import.meta.dirname, '../../../.ai/skills')
+const skillsDir = resolve(servedRoot(), '.ai/skills')
 const ALPHA = 'e2e-bm-alpha-skill'
 const BETA = 'e2e-bm-beta-skill'
 
@@ -43,10 +43,16 @@ let bootProject = ''
 const linkIn = (slot: string) => `[data-slot="${slot}"] [data-slot="bm-link"]`
 const hrefOf = (selector: string) =>
   decodeURIComponent(String(browser.evaluate(`document.querySelector('${selector}').getAttribute('href')`)))
-/** The generated href lands imperatively after mount — never read it before it is a real URL. */
+/** The generated href lands imperatively after mount, and only once the launch key has loaded —
+ *  never read it before it is a real, KEYED URL. Waiting for the `javascript:` prefix alone raced
+ *  the key fetch: the panel used to emit `key=&ref=` first, and the key assertion read that
+ *  (hearsay-tools/cezarion#896). The predicate pins a non-empty `key=` so the read that follows
+ *  sees the URL a person would actually drag. Reproduced locally by delaying the server's
+ *  `launch-key` response 4 s: `main` fails with `expected 'javascript:(()=>{…' to contain
+ *  'key=…'` (bundle `the-generated-key-is-the-server-s-own-…-1`); this spec and panel pass. */
 const waitForGeneratedHref = (selector: string) =>
   browser.waitForFunction(
-    `(document.querySelector('${selector}')?.getAttribute('href') ?? '').startsWith('javascript:')`,
+    `/^javascript:.*&key=[^&]+&ref=/.test(decodeURIComponent(document.querySelector('${selector}')?.getAttribute('href') ?? ''))`,
   )
 /**
  * Backspace the filter empty the way a user does. `fill(selector, '')` cannot do this: it

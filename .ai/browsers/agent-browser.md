@@ -117,6 +117,10 @@ Cockpit e2e applies `.ai/scripts/resolve-browser-launch.mjs` in
 `.ai/scripts/test-env-up.sh` (doctor) and `packages/web/e2e/agent-browser.ts`
 (every later invocation). Those two sites share the resolved namespace, Chrome
 args, and socket-safe TMPDIR. The recipes in this file install and probe only.
+Outside that seam, a cezar task's own `TMPDIR` is already socket-safe: it is
+at most 58 bytes, sized for Chromium's
+`<TMPDIR>/org.chromium.Chromium.XXXXXX/SingletonSocket` (hearsay-tools/cezarion#1022),
+so ad-hoc agent-browser calls inside a task need no `TMPDIR=/tmp` override.
 
 ```bash
 "$AGENT_BROWSER_BIN" doctor --json --offline
@@ -199,14 +203,6 @@ ignore only an already-closed-session error.
   profile unless the operator explicitly requested that profile.
 - Keep all operation targets local to the application under test. Do not enable
   a cloud provider or send credentials to a remote browser service.
-- Outside the e2e seam, give agent-browser a socket-safe `TMPDIR` yourself.
-  Chrome binds `<TMPDIR>/org.chromium.Chromium.XXXXXX/SingletonSocket` (up to 45
-  bytes past `TMPDIR`), and a cezar task's own `TMPDIR` can be 77 bytes, so
-  launches fail with `Socket path too long`. Prefix ad-hoc calls with
-  `TMPDIR=/tmp` when `TMPDIR` is longer than 62 bytes (58 on macOS), the same
-  rule `.ai/scripts/resolve-browser-launch.mjs` applies. The agent-browser
-  daemon keeps the environment it started with: after a failed launch, `close`
-  that session, or start a new `--session`, before retrying.
 - `hover` and `mouse move` drive the pointer over CDP, and that move does not set
   CSS `:hover` on wrapping inline elements. Never wait on `matches(':hover')`; assert
   what the hover reveals instead. A one-shot `:hover` check holds only under

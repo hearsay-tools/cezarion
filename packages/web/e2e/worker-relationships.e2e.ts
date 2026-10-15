@@ -53,7 +53,7 @@ beforeAll(async () => {
   execFileSync('git', ['init', '-q', '-b', 'main', other])
   mkdirSync(join(root, '.cez-home'), { recursive: true })
   writeFileSync(join(root, '.cez-home/config.json'), JSON.stringify({ projects: [{ id: 'other-project', name: 'Other project', root: other, source: 'local', addedAt: now, lastOpenedAt: now }] }))
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env: fixtureServeEnv(root, { CEZ_DELEGATION: '0', CEZ_AUTONAME: '0' }), stdio: ['ignore', 'pipe', 'pipe'] }, { timeoutMs: 20_000 })
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env: fixtureServeEnv(root, { CEZ_DELEGATION: '0', CEZ_AUTONAME: '0' }), stdio: ['ignore', 'pipe', 'pipe'] })
   server.stdout?.on('data', chunk => { diagnostic += String(chunk) }); server.stderr?.on('data', chunk => { diagnostic += String(chunk) })
   try { base = await waitForFixtureServer(server) }
   catch (error) { throw new Error(`${String(error)}\n${diagnostic}`, { cause: error }) }
@@ -130,11 +130,18 @@ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['l
     open()
     browser.waitForFunction(`document.querySelectorAll('${region} a').length === 32`)
     browser.setReducedMotion()
-    browser.evaluate(`document.querySelector('${region} a').focus()`)
     // #816: a settled worker row also carries a Clean up button after its link, so the tab
     // stops between the first and last worker link are counted from the rendered controls
-    // instead of assumed to be links only. Read once after the 32-link wait above settled; the
-    // target is named (the oldest worker, now last, which Enter opens below), never a positional row.
+    // instead of assumed to be links only. The buttons arrive with the worker inspection, after
+    // the links: wait for all 32 before counting, or the count comes up short and focus stops
+    // mid-list (hearsay-tools/cezarion#913). Evidence: CI run 37643183029, job 112867230820
+    // (hearsay-tools/cezarion#912), artifact `cockpit-failures-shard-2`, bundle
+    // `360x640-dark-keyboard-reaches-last-worker-…-1`: probe.json shows focus parked on the
+    // worker link in row 20, and its snapshot already lists all 32 Clean up buttons, so they
+    // rendered after the count. The target is named
+    // (the oldest worker, now last, which Enter opens below), never a positional row.
+    browser.waitForFunction(`document.querySelectorAll('${region} button[aria-label^="Clean up worker"], ${region} button[aria-label^="Retry clean up of worker"]').length === 32`)
+    browser.evaluate(`document.querySelector('${region} a').focus()`)
     const stops = browser.evaluate(`(() => { const controls = [...document.querySelectorAll('${region} a, ${region} button')];
       const target = document.querySelector('${region} a[aria-label="Worker task ${ids[0]}"]');
       return controls.indexOf(target) - controls.indexOf(document.activeElement); })()`) as number

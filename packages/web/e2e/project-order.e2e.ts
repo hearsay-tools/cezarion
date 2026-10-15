@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
 import { focusWithKeyboard } from './contrast'
 import { pollFor, pollJson } from './poll'
 import { readSharedProjects, snapshotSharedHome, writeSharedProjects } from './workspace-registry'
@@ -22,7 +22,7 @@ import { readSharedProjects, snapshotSharedHome, writeSharedProjects } from './w
 
 const sessionId = `e2e-project-order-${process.pid}`
 const secondSessionId = `e2e-project-order-second-${process.pid}`
-const repoRoot = resolve(import.meta.dirname, '../../..')
+const repoRoot = servedRoot()
 const DESKTOP = { width: 1600, height: 900 }
 const [A, B, C] = ['e2e-order-a', 'e2e-order-b', 'e2e-order-c'] as const
 const EXTRA = [A, B, C]

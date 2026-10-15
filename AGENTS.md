@@ -275,7 +275,11 @@ logs under `.ai/qa/local-runs/`; see
 `packages/web/e2e/README.md` for its isolation and cleanup details.
 
 It boots the app on a free port with `CEZ_DRY_RUN=1` (agent CLIs mocked — no login, no
-network), reuses an already-healthy instance instead of double-booting, and writes
+network) from the `VITE_CEZ_E2E=1` build that `.ai/scripts/build-e2e.sh` writes into the
+ignored `.ai/qa/build/cezar` — never `packages/cezar/dist` or `packages/cezar/web/dist`, which
+stay the production build — serves an isolated clone of the checkout at `.ai/qa/served/<name>`, never
+the checkout itself, whose `.ai/cezar` may be the live cockpit's (specs seed state under
+`servedRoot()`), reuses an already-healthy instance instead of double-booting, and writes
 `.ai/qa/test-env.json` so QA skills attach to the same instance. Stop it with
 `.ai/scripts/test-env-down.sh`. Local exit contract:
 

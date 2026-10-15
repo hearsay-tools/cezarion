@@ -14,8 +14,10 @@
  *
  * Three properties fix that, and this module owns all of them:
  *
- *   1. **Isolation** — each run gets `<dataDir>/tmp/<runId>`, on the same disk
- *      as the run's own state rather than a shared tmpfs, reaped when the run
+ *   1. **Isolation** — each run gets its own directory under `<dataDir>`
+ *      (`t/<first 8 chars of the run id>` since hearsay-tools/cezarion#1022,
+ *      `tmp/<runId>` before it — see `agentShortTmpDir`), on the same disk as
+ *      the run's own state rather than a shared tmpfs, reaped when the run
  *      ends. `buildChildEnv` applies the per-run env last, so these values win
  *      over the host's without any allowlist change.
  *   2. **Fail loud** — the directory is write-probed before the backend spawns.
@@ -23,14 +25,17 @@
  *      named, actionable error instead of spawning an agent that will run blind.
  *   3. **Short enough to bind** (#387) — tools bind *named* unix sockets under
  *      `TMPDIR` (tsx's IPC server lays down `<tmpdir>/tsx-<uid>/<pid>.pipe`,
- *      Chrome a `SingletonSocket`), and the kernel caps a socket path at
+ *      Chromium `<tmpdir>/org.chromium.Chromium.XXXXXX/SingletonSocket`), and
+ *      the kernel caps a socket path at
  *      `sun_path` — 108 bytes on Linux, 104 on macOS, NUL included. A checkout
  *      deep enough (Cezar's own nested task worktrees land past 100 chars)
  *      pushed every such bind past the cap and broke `npm install` and
  *      typechecking inside the run. A directory that would land too deep
  *      resolves instead to a short digest-named directory under the OS temp
  *      root — still per-run, still probed, still reaped. A repo whose own path
- *      already fits keeps today's directory, byte for byte. When the ambient
+ *      fits keeps its scratch repo-local; the budget leaves room for Chromium's
+ *      nested `SingletonSocket` (hearsay-tools/cezarion#1022), and the short
+ *      `t/<id8>` name is what keeps ordinary checkouts inside it. When the ambient
  *      `TMPDIR` itself is too deep for that root's candidate (#440 — routine
  *      inside a cezar task session, whose `TMPDIR` is the checkout's own
  *      scratch tree per #785), the next root is the platform's own temp root
@@ -44,11 +49,11 @@
  * graceful-degradation rule says a new check must never become the only way to
  * run.
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { checkpointFallbackRemoval, fallbackIdentity, readFallbackRemovals, type FallbackRemoval } from './agent-tmpdir-removal.ts';
 import { workerEvidenceRunIds } from './worker-execution.ts';
 import type { Dirent } from 'node:fs';
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 
@@ -62,30 +67,173 @@ function safeRunId(id: string): boolean {
   return /^[A-Za-z0-9._-]+$/.test(id) && id !== '.' && id !== '..';
 }
 
-/** Where a run's agent-scoped temp directory lives. */
+/**
+ * The run's CONTROL directory, `<dataDir>/tmp/<runId>`: it holds the recorded
+ * fallback location (`.cez-fallback`) and the partial-removal receipts, and its
+ * entries are what the startup sweep reads run ids from. Before
+ * hearsay-tools/cezarion#1022 it was also the TMPDIR handed to the agent; a
+ * directory minted then is still a location every holder scan, reap and sweep
+ * covers, and `agentTmpEnv` moves its contents to `agentShortTmpDir` on the
+ * run's next spawn.
+ */
 export function agentTmpDir(dataDir: string, runId: string): string {
   return join(dataDir, 'tmp', runId);
 }
 
-/** The root every per-run directory hangs off — the ONLY tree this module
- *  removes anything from (`runs/`, `runs.json` and `worktrees/` are siblings). */
+/** The root every control directory hangs off (`runs/`, `runs.db` and
+ *  `worktrees/` are siblings this module never touches). */
 function agentTmpRoot(dataDir: string): string {
   return join(dataDir, 'tmp');
 }
 
+const SHORT_TMP_ROOT = 't';
+const SHORT_TMP_NAME_LENGTH = 8;
+const RUN_FILE = '.cez-run';
+
+/**
+ * The repo-local TMPDIR handed to the run's agent (hearsay-tools/cezarion#1022):
+ * `<dataDir>/t/<first 8 chars of the run id>`.
+ *
+ * Why a short name rather than a lower cap alone: the socket budget below
+ * leaves 58 bytes for the whole directory, and `<dataDir>/tmp/<36-char uuid>`
+ * spends 41 of them on its own suffix — on an ordinary checkout
+ * (`/home/<user>/projects/<repo>/.ai/cezar/tmp/<uuid>`, ~77 bytes) every run
+ * would leave the repo for the `/tmp/cez-agent-*` fallback, giving up #785's
+ * "same disk as the run's state". `t/<id8>` costs 11 bytes, which keeps any
+ * checkout whose `.ai/cezar` is at most 47 bytes repo-local — that is
+ * `/home/<user>/projects/<repo>` and `/Users/<user>/projects/<repo>` for
+ * ordinary user and repo names. Deeper checkouts still fall back, as before.
+ *
+ * Eight characters are the run id's leading hex group — the same `<id8>` the
+ * task's `cez/<id8>` branch carries, so a human can map the directory to its
+ * task. Eight characters are not unique by construction (non-uuid ids, or a
+ * 32-bit collision), so the directory carries a `.cez-run` marker naming the
+ * full run id: a run finding the name claimed by another run resolves to the
+ * OS-root fallback instead, and reap and sweep never remove a directory whose
+ * marker names a run other than the one being reaped.
+ */
+export function agentShortTmpDir(dataDir: string, runId: string): string {
+  return join(dataDir, SHORT_TMP_ROOT, runId.slice(0, SHORT_TMP_NAME_LENGTH));
+}
+
+/** Who the short directory belongs to: nobody yet (`free` — no marker, or no
+ *  directory), this run, another run, or nobody can tell (an unreadable
+ *  marker). Unknown is never treated as ours: it is not reused, not removed,
+ *  and it keeps the directory in holder scans. */
+type ShortClaim = 'free' | 'ours' | 'other' | 'unknown';
+
+/** The marker's run id; `null` when there is none, `undefined` when unreadable
+ *  or malformed. A marker that is not a run id this directory's name could
+ *  belong to (a stray file, or a write cut short before
+ *  hearsay-tools/cezarion#1037 made it atomic) is unknown ownership, never a
+ *  foreign run, so the sweep keeps the directory.
+ *  `ENOTDIR` (a file where `t/` or the directory should be) is "none": the
+ *  spawn then tries to mint the directory and fails loudly with
+ *  `AgentTempDirError`, rather than quietly leaving the repo. */
+function readRunMarker(dir: string): string | null | undefined {
+  try {
+    const owner = readFileSync(join(dir, RUN_FILE), 'utf8');
+    return safeRunId(owner) && owner.slice(0, SHORT_TMP_NAME_LENGTH) === basename(dir) ? owner : undefined;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? null : undefined;
+  }
+}
+
+function shortTmpDirClaim(dir: string, runId: string): ShortClaim {
+  const owner = readRunMarker(dir);
+  if (owner === null) return 'free';
+  if (owner === undefined) return 'unknown';
+  return owner === runId ? 'ours' : 'other';
+}
+
+/** Mint the `.cez-run` marker without ever following an existing name, and
+ *  refuse when the name turns out to be another run's — the read in
+ *  `resolveAgentTmpDir` already steered away from one, so this only fires on a
+ *  race or a replaced marker. The id is written to a private name first and
+ *  hard-linked into place: `link` publishes it whole or not at all and, like
+ *  `wx`, fails on an existing name, so a crash mid-write can never leave a
+ *  partial marker for the sweep to misread (hearsay-tools/cezarion#1037). */
+function writeRunMarker(dir: string, runId: string): void {
+  const marker = join(dir, RUN_FILE);
+  const pending = `${marker}.${process.pid}.${randomUUID()}`;
+  writeFileSync(pending, runId, { encoding: 'utf8', flag: 'wx' });
+  try {
+    linkSync(pending, marker);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    if (readRunMarker(dir) !== runId) {
+      throw new AgentTempDirError(dir, new Error('directory belongs to another run'));
+    }
+  } finally {
+    unlinkSync(pending);
+  }
+}
+
+/**
+ * Carry a pre-hearsay-tools/cezarion#1022 run's scratch over to its new
+ * directory, so a Continue after the upgrade keeps its files (#515). Only a
+ * control directory that was the old TMPDIR qualifies — one holding a fallback
+ * pointer or removal receipt is control state and stays where the reap looks
+ * for it. Same filesystem (both under dataDir), so the rename is atomic; any
+ * failure just leaves a fresh directory, and the old one is still reaped.
+ */
+function adoptLegacyTmpDir(dataDir: string, runId: string, short: string): void {
+  const legacy = agentTmpDir(dataDir, runId);
+  try {
+    if (existsSync(short) || !lstatSync(legacy).isDirectory()) return;
+    if (readdirSync(legacy).some((name) => name.startsWith('.cez-fallback'))) return;
+    mkdirSync(dirname(short), { recursive: true });
+    renameSync(legacy, short);
+  } catch {
+    // best-effort: nothing to adopt, or it could not be moved.
+  }
+}
+
+/**
+ * The bytes Chromium appends to TMPDIR for its singleton socket —
+ * `/org.chromium.Chromium.XXXXXX/SingletonSocket`, 45 bytes (Google Chrome's
+ * `/com.google.Chrome.XXXXXX/...` is 41). The longest name any known tool lays
+ * down under TMPDIR: tsx's `/tsx-<uid>/<pid>.pipe` is ~22.
+ *
+ * Mirrors `CHROME_SINGLETON_OVERHEAD` in `.ai/scripts/resolve-browser-launch.mjs`,
+ * which the e2e seam applies to its own browser launches. The published
+ * package cannot import a repo script, so the value is written twice and
+ * `packages/cezar/test/unit/resolve-browser-launch.test.ts` asserts they agree.
+ */
+export const CHROME_SINGLETON_OVERHEAD = '/org.chromium.Chromium.XXXXXX/SingletonSocket'.length;
+
+/** `sockaddr_un.sun_path` on macOS, the tighter platform: 104 bytes, NUL
+ *  included (Linux has 108). Mirrors `DARWIN_UNIX_SOCKET_MAX` in
+ *  `.ai/scripts/resolve-browser-launch.mjs`, under the same agreement test. */
+export const DARWIN_UNIX_SOCKET_MAX = 103;
+
 /**
  * The longest a per-run temp directory may be so that tools binding named
  * unix sockets under it still work (#387), measured in UTF-8 bytes — the
- * kernel bounds the encoded path, not the JavaScript character count.
- * `sockaddr_un.sun_path` holds 108 bytes on Linux and 104 on macOS, NUL
- * included; the longest name a known tool lays down under TMPDIR is tsx's IPC
- * socket, `<tmpdir>/tsx-<uid>/<pid>.pipe`, ~22 bytes (Chrome's
- * `SingletonSocket` is 16). A 78-byte ceiling leaves ≥25 bytes of headroom on
- * the tighter platform — past anything these tools generate — while keeping
- * ordinary checkouts on their repo-local scratch: only a genuinely deep path,
- * like the 100-character directories #387 reports, moves to the fallback.
+ * kernel bounds the encoded path, not the JavaScript character count. It is
+ * the tighter platform's `sun_path` minus Chromium's singleton-socket suffix:
+ * 103 − 45 = 58. One value for every platform, so a checkout resolves the
+ * same way wherever it runs.
+ *
+ * It was 78 until hearsay-tools/cezarion#1022, sized for a `SingletonSocket`
+ * directly under TMPDIR. Chrome nests it one directory deeper, so a 77-byte
+ * task TMPDIR (an ordinary checkout's `.ai/cezar/tmp/<uuid>`) failed every
+ * browser launch with `Socket path too long`.
  */
-export const MAX_SOCKET_SAFE_DIR_LENGTH = 78;
+export const MAX_SOCKET_SAFE_DIR_LENGTH = DARWIN_UNIX_SOCKET_MAX - CHROME_SINGLETON_OVERHEAD;
+
+/** The pre-hearsay-tools/cezarion#1022 ceiling. Only reading a recorded fallback
+ *  pointer still accepts it: a run that recorded one under the old ceiling must
+ *  keep its scratch on Continue and must still be reaped, and the digest
+ *  equality check — not the length — is what validates the pointer. Such a
+ *  pointer is never handed to an agent again: `migrateLegacyFallback` moves its
+ *  scratch to a directory inside the new budget first. */
+const LEGACY_MAX_SOCKET_SAFE_DIR_LENGTH = 78;
+
+function fitsSocketBudget(path: string): boolean {
+  return Buffer.byteLength(path, 'utf8') <= MAX_SOCKET_SAFE_DIR_LENGTH;
+}
 
 /** The OS temp root, symlink-resolved: `bind(2)` bounds the path the kernel
  *  walks, so the check must measure what the path resolves to, not what it
@@ -185,8 +333,15 @@ function fallbackTmpDir(root: string, dataDir: string, runId: string): string {
  * the task's files. Only a digest-named absolute path is accepted on read. */
 const LOCATION_FILE = '.cez-fallback';
 
-function recordedFallback(dataDir: string, runId: string): string | undefined {
-  const marker = join(agentTmpDir(dataDir, runId), LOCATION_FILE);
+/** The location a pointer migration is moving scratch AWAY from
+ *  (hearsay-tools/cezarion#1037). It exists only between rewriting
+ *  `.cez-fallback` and finishing the move, so a crash in that window still
+ *  leaves the old directory in every holder scan, reap and sweep — the old root
+ *  may be one no later env lists. */
+const PREVIOUS_LOCATION_FILE = '.cez-fallback-previous';
+
+function recordedFallback(dataDir: string, runId: string, file = LOCATION_FILE): string | undefined {
+  const marker = join(agentTmpDir(dataDir, runId), file);
   let dir: string;
   try {
     dir = readFileSync(marker, 'utf8');
@@ -195,10 +350,79 @@ function recordedFallback(dataDir: string, runId: string): string | undefined {
     throw new AgentTempDirError(marker, err);
   }
   if (!isAbsolute(dir) || dir !== fallbackTmpDir(dirname(dir), dataDir, runId)
-      || Buffer.byteLength(dir, 'utf8') > MAX_SOCKET_SAFE_DIR_LENGTH) {
+      || Buffer.byteLength(dir, 'utf8') > LEGACY_MAX_SOCKET_SAFE_DIR_LENGTH) {
     throw new AgentTempDirError(marker, new Error('invalid recorded fallback directory'));
   }
   return dir;
+}
+
+/** Replace a location record whole: write a private name, then `rename` over
+ *  the record, so a crash leaves the old pointer or the new one, never a torn
+ *  one. The private name never follows an existing file (`wx`). */
+function rewriteLocation(dataDir: string, runId: string, file: string, dir: string): void {
+  const target = join(agentTmpDir(dataDir, runId), file);
+  const pending = `${target}.${randomUUID()}.tmp`;
+  writeFileSync(pending, dir, { encoding: 'utf8', flag: 'wx' });
+  try {
+    renameSync(pending, target);
+  } finally {
+    rmSync(pending, { force: true });
+  }
+}
+
+/**
+ * Move the scratch of a fallback recorded under the pre-hearsay-tools/cezarion#1022
+ * ceiling to `dir`, the socket-safe directory resolution now picks
+ * (hearsay-tools/cezarion#1037). Handing the old path back would keep a 59–78
+ * byte TMPDIR that Chromium's nested singleton socket cannot bind under.
+ *
+ * Order is what makes a crash safe, and every re-run converges:
+ *   1. record the old location in `.cez-fallback-previous`, so it stays in
+ *      scans and reaps whatever the env is later;
+ *   2. point `.cez-fallback` at `dir`;
+ *   3. move the files — `rename` when `dir` does not exist yet, otherwise (or on
+ *      `EXDEV`, the usual case across temp roots) copy into `dir` and remove the
+ *      old directory under a removal receipt, so a removal cut short after the
+ *      owner marker went still proves the directory ours on retry;
+ *   4. drop `.cez-fallback-previous`.
+ * The old directory is moved only when its `.cez-owner` marker is this
+ * dataDir's (or a receipt proves it was); anything else refuses the spawn.
+ */
+function migrateLegacyFallback(dataDir: string, runId: string, dir: string): void {
+  const recorded = recordedFallback(dataDir, runId);
+  const from = recordedFallback(dataDir, runId, PREVIOUS_LOCATION_FILE)
+    ?? (recorded !== undefined && recorded !== dir ? recorded : undefined);
+  if (from === undefined) return;
+  const local = agentTmpDir(dataDir, runId);
+  if (from !== dir) {
+    rewriteLocation(dataDir, runId, PREVIOUS_LOCATION_FILE, from);
+    if (recorded !== dir) rewriteLocation(dataDir, runId, LOCATION_FILE, dir);
+    const removals = readFallbackRemovals(local);
+    if (!fallbackOwnedOrAbsent(dataDir, from, removals)) {
+      throw new AgentTempDirError(from, new Error('ownership marker was replaced — remove the directory to re-mint it'));
+    }
+    if (existsSync(from)) moveFallbackScratch(dataDir, local, from, dir, removals);
+  }
+  rmSync(join(local, PREVIOUS_LOCATION_FILE), { force: true });
+}
+
+function moveFallbackScratch(dataDir: string, local: string, from: string, to: string, removals: FallbackRemoval[]): void {
+  if (!existsSync(to)) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err;
+    }
+  }
+  mkdirSync(to, { recursive: true, mode: 0o700 });
+  // The destination keeps (or gets) its own marker; the source's is never
+  // copied over it, so a foreign marker still refuses instead of being replaced.
+  writeOwnerMarker(to, dataDir);
+  const marker = join(from, OWNER_FILE);
+  cpSync(from, to, { recursive: true, force: true, verbatimSymlinks: true, preserveTimestamps: true, filter: (src) => src !== marker });
+  checkpointFallbackRemoval(local, from, removals);
+  rmSync(from, { recursive: true, force: true });
 }
 
 function recordFallback(dataDir: string, runId: string, dir: string): void {
@@ -219,26 +443,43 @@ function recordFallback(dataDir: string, runId: string, dir: string): void {
  *  with the real candidates, tests with synthetic ones, so the nothing-fits
  *  branch stays exercised even though a real platform root is always short. */
 export function firstSocketSafeDir(paths: readonly string[]): string | undefined {
-  return paths.find((path) => Buffer.byteLength(path, 'utf8') <= MAX_SOCKET_SAFE_DIR_LENGTH);
+  return paths.find(fitsSocketBudget);
 }
 
 /**
- * The temp directory this run should use: the repo-local per-run directory
- * when it is short enough for unix-socket paths, and otherwise a short
+ * The temp directory this run should use: the repo-local `agentShortTmpDir`
+ * when it is short enough for unix-socket paths and no other run's marker
+ * claims it, and otherwise a short
  * digest-named directory under the first OS temp root whose candidate fits —
  * the env-honouring root first, the platform default when `TMPDIR` itself is
- * too deep (#387, #440). A recorded location wins across host-env changes.
+ * too deep (#387, #440). A recorded location wins across host-env changes
+ * while it fits the budget; one recorded under the pre-#1022 ceiling resolves
+ * to the fallback that fits now, where `agentTmpEnv` moves its scratch.
  * Read-only resolution — nothing is created, nothing is
  * probed; `agentTmpEnv` owns the side effects.
  */
 export function resolveAgentTmpDir(dataDir: string, runId: string): string {
   const recorded = recordedFallback(dataDir, runId);
-  if (recorded) return recorded;
-  const local = agentTmpDir(dataDir, runId);
-  if (Buffer.byteLength(local, 'utf8') <= MAX_SOCKET_SAFE_DIR_LENGTH) return local;
+  // A pointer recorded under the pre-#1022 ceiling is not reused: resolution
+  // picks a fallback that fits, and `agentTmpEnv` moves the scratch there.
+  if (recorded && fitsSocketBudget(recorded)) return recorded;
+  // An id that is not a plain identifier never names a repo-local directory;
+  // the digest-named fallback is safe for any input.
+  const local = safeRunId(runId) ? agentShortTmpDir(dataDir, runId) : agentTmpDir(dataDir, runId);
+  // A legacy pointer's scratch moves to another fallback, never into the
+  // repo-local directory: the control directory keeps owning its location.
+  if (!recorded && safeRunId(runId) && fitsSocketBudget(local)) {
+    const claim = shortTmpDirClaim(local, runId);
+    if (claim === 'free' || claim === 'ours') return local;
+  }
   const candidates = osTempRoots().map((root) => fallbackTmpDir(root, dataDir, runId));
   const fallback = firstSocketSafeDir(candidates);
   if (fallback) return fallback;
+  if (recorded) {
+    throw new AgentTempDirError(recorded, new Error(
+      `recorded fallback is past the ${MAX_SOCKET_SAFE_DIR_LENGTH}-byte unix socket budget and no OS temp root has a candidate that fits`,
+    ));
+  }
   // Nothing fits — every root, the platform default included, has a candidate
   // past the cap. Minting any would hand the agent a temp directory that
   // cannot serve unix sockets: the silent failure #387 is about. Fail the
@@ -344,18 +585,24 @@ export function agentTmpEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
   if (!agentTmpDirEnabled(env)) return {};
-  const local = agentTmpDir(dataDir, runId);
   const dir = resolveAgentTmpDir(dataDir, runId);
+  const repoLocal = safeRunId(runId) && dir === agentShortTmpDir(dataDir, runId);
   try {
-    mkdirSync(dir, dir === local ? { recursive: true } : { recursive: true, mode: 0o700 });
-    // In the shared OS root the directory carries its ownership marker, so a
-    // startup sweep from another project can tell it apart from stale
-    // scratch (the sweep skips anything whose marker is missing or foreign).
-    if (dir !== local) {
+    if (repoLocal) {
+      adoptLegacyTmpDir(dataDir, runId, dir);
+      mkdirSync(dir, { recursive: true });
+      writeRunMarker(dir, runId);
+    } else {
+      // In the shared OS root the directory carries its ownership marker, so a
+      // startup sweep from another project can tell it apart from stale
+      // scratch (the sweep skips anything whose marker is missing or foreign).
+      migrateLegacyFallback(dataDir, runId, dir);
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
       writeOwnerMarker(dir, dataDir);
       recordFallback(dataDir, runId, dir);
     }
   } catch (err) {
+    if (err instanceof AgentTempDirError) throw err;
     throw new AgentTempDirError(dir, err);
   }
   probeWritable(dir);
@@ -367,10 +614,12 @@ export function agentTmpEnv(
 function fallbackLocations(dataDir: string, runId: string): { paths: string[]; removals: FallbackRemoval[]; complete: boolean } {
   const paths = new Set(osTempRoots().map(root => fallbackTmpDir(root, dataDir, runId)));
   let complete = true, removals: FallbackRemoval[] = [];
-  try {
-    const recorded = recordedFallback(dataDir, runId);
-    if (recorded) paths.add(recorded);
-  } catch { complete = false; }
+  for (const file of [LOCATION_FILE, PREVIOUS_LOCATION_FILE]) {
+    try {
+      const recorded = recordedFallback(dataDir, runId, file);
+      if (recorded) paths.add(recorded);
+    } catch { complete = false; }
+  }
   // Independent evidence: a damaged receipt must never discard a readable pointer (#738).
   try {
     removals = readFallbackRemovals(agentTmpDir(dataDir, runId));
@@ -402,7 +651,8 @@ export function agentTmpDirOwnershipProven(dataDir: string, runId: string): bool
   if (!safeRunId(runId)) return false;
   try {
     const { paths, removals, complete } = fallbackLocations(dataDir, runId);
-    return complete && paths.every(path => fallbackOwnedOrAbsent(dataDir, path, removals));
+    return complete && shortTmpDirClaim(agentShortTmpDir(dataDir, runId), runId) !== 'unknown'
+      && paths.every(path => fallbackOwnedOrAbsent(dataDir, path, removals));
   } catch { return false; }
 }
 
@@ -416,7 +666,11 @@ export function agentTmpDirLocations(dataDir: string, runId: string): string[] {
 export function agentTmpDirLocationEvidence(dataDir: string, runId: string): { paths: string[]; complete: boolean } {
   if (!safeRunId(runId)) return { paths: [], complete: false };
   const { paths, complete } = fallbackLocations(dataDir, runId);
-  return { paths: [agentTmpDir(dataDir, runId), ...paths], complete };
+  // The short directory is listed unless its marker positively names another
+  // run: an unreadable marker is uncertainty, and uncertainty stays in scans.
+  const short = agentShortTmpDir(dataDir, runId);
+  const shorts = shortTmpDirClaim(short, runId) === 'other' ? [] : [short];
+  return { paths: [agentTmpDir(dataDir, runId), ...shorts, ...paths], complete };
 }
 
 /** Only ENOENT proves cleanup finished. Permission/read errors retain the durable intent. */
@@ -432,13 +686,24 @@ export function agentTmpDirMayExist(dataDir: string, runId: string): boolean {
  * Session close alone is not completion: a live task's Continue must retain
  * its files. Never throws — reaping must not break a terminal transition.
  *
- * The repo-local directory and the digest name under EVERY root are tried,
+ * The repo-local directories (the short one unless its marker names another
+ * run, and the control directory) and the digest name under EVERY root are
+ * tried,
  * because the resolution depends on the lengths of `dataDir` and the ambient
  * `TMPDIR`, either of which a Continue, a re-base or a changed env can move
  * between mint and reap; removing a name that was never minted is a no-op, so
  * trying them all is pure safety.
  */
 export function removeAgentTmpDir(dataDir: string, runId: string): void {
+  reapAgentTmpDir(dataDir, runId, false);
+}
+
+/** `spareUnclaimedShort` keeps a markerless short directory: the startup sweep
+ *  sets it when a kept run's `agentShortTmpDir` lands on the same name, because
+ *  that run may have created or adopted the directory and crashed before
+ *  publishing its marker (hearsay-tools/cezarion#1037) — it is that run's
+ *  Continue scratch, not this orphan's. */
+function reapAgentTmpDir(dataDir: string, runId: string, spareUnclaimedShort: boolean): void {
   if (!safeRunId(runId)) return;
   const local = agentTmpDir(dataDir, runId);
   try {
@@ -451,6 +716,12 @@ export function removeAgentTmpDir(dataDir: string, runId: string): void {
       rmSync(path, { recursive: true, force: true });
       try { lstatSync(path); return; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }
+    // The short directory goes only when it is this run's (or unclaimed): a
+    // colliding name may be another run's live scratch.
+    const short = agentShortTmpDir(dataDir, runId);
+    const claim = shortTmpDirClaim(short, runId);
+    if (claim === 'unknown') return;
+    if (claim === 'ours' || (claim === 'free' && !spareUnclaimedShort)) rmSync(short, { recursive: true, force: true });
     // The durable location and partial-removal receipts are last, never before a fallback.
     rmSync(local, { recursive: true, force: true });
   } catch {
@@ -461,9 +732,14 @@ export function removeAgentTmpDir(dataDir: string, runId: string): void {
 /**
  * Remove every per-run directory that is not in `keepRunIds` — the startup
  * sweep, so a crash (which never reaches the terminal-transition reap) cannot
- * accumulate them forever. Three confined sets are swept and nothing else:
+ * accumulate them forever. Four confined sets are swept and nothing else:
  *
  *   - `<dataDir>/tmp`, where entries ARE the run ids (reports the ids reaped);
+ *   - `<dataDir>/t` (hearsay-tools/cezarion#1022), where an entry is removed
+ *     when its `.cez-run` marker names a run that is not kept, or when it has
+ *     no marker and no kept run's `agentShortTmpDir` lands on it (reports the
+ *     marker's run id, else the name); an unreadable marker is never ours to
+ *     remove;
  *   - the `cez-agent-<12 hex>` directories under EVERY OS temp root — the
  *     env-honouring root and the platform default (#440) — where the name
  *     digests the dataDir and is not reversible to a run id (reports the
@@ -481,6 +757,9 @@ export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>)
   const keep = new Set([...keepRunIds, ...workers]);
   const reaped: string[] = [];
   let entries: string[];
+  // Short names a kept run resolves to. Computed before the legacy loop, which
+  // must spare them too: a markerless one is a kept run's, mid-mint.
+  const claimedShort = new Set([...keep].filter(safeRunId).map((id) => basename(agentShortTmpDir(dataDir, id))));
   const root = agentTmpRoot(dataDir);
   if (existsSync(root)) {
     try {
@@ -494,8 +773,35 @@ export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>)
       if (keep.has(name) || !safeRunId(name)) continue;
       try {
         const locations = agentTmpDirLocations(dataDir, name).filter(dir => existsSync(dir));
-        removeAgentTmpDir(dataDir, name);
+        reapAgentTmpDir(dataDir, name, claimedShort.has(basename(agentShortTmpDir(dataDir, name))));
         reaped.push(...locations.filter(dir => !existsSync(dir)).map(dir => basename(dir)));
+      } catch {
+        // best-effort: a locked directory is retried on the next boot.
+      }
+    }
+  }
+  // The hearsay-tools/cezarion#1022 short directories. Every entry here is this
+  // dataDir's own, so no ownership marker is needed — only the claim check
+  // that keeps a kept run's directory, and a colliding name's, alive.
+  const shortRoot = join(dataDir, SHORT_TMP_ROOT);
+  if (existsSync(shortRoot)) {
+    let shortEntries: string[];
+    try {
+      shortEntries = readdirSync(shortRoot, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name);
+    } catch {
+      shortEntries = [];
+    }
+    for (const name of shortEntries) {
+      if (!safeRunId(name)) continue;
+      const owner = readRunMarker(join(shortRoot, name));
+      if (owner === undefined) continue; // unreadable marker: unknown ownership is never ours to remove.
+      // A marker that is a proper prefix of a kept run's id is that run's, cut short.
+      if (owner === null ? claimedShort.has(name) : [...keep].some((id) => id.startsWith(owner))) continue;
+      try {
+        rmSync(join(shortRoot, name), { recursive: true, force: true });
+        reaped.push(owner ?? name);
       } catch {
         // best-effort: a locked directory is retried on the next boot.
       }

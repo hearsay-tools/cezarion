@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
-import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
 import { readSharedProjects, writeSharedProjects } from './workspace-registry'
 
 /**
@@ -677,7 +677,7 @@ describe('mobile shell', () => {
  */
 describe('global SSE stream', () => {
   // Where `src/index.ts` puts the data dir, for the server booted from this worktree.
-  const dataDir = resolve(import.meta.dirname, '../../../.ai/cezar')
+  const dataDir = resolve(servedRoot(), '.ai/cezar')
   const todosFile = resolve(dataDir, 'todos.json')
   const BADGE = '[data-slot="inbox-count"]'
   let previousTodos: string | null = null
@@ -715,7 +715,7 @@ describe('global SSE stream', () => {
   it('live-updates the inbox badge from a server-side change, with no reload', ({ skip }) => {
     skip(
       !followupsAvailable,
-      'the shared environment has the opt-in inbox disabled; run CEZ_FOLLOWUPS=1 npm run test:e2e -- --force',
+      'the shared environment has the opt-in inbox disabled; run npm run test:e2e -- --server-env=CEZ_FOLLOWUPS=1',
     )
     writeTodos([])
     browser.goto(baseUrl + scoped('/'))

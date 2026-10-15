@@ -1,5 +1,5 @@
 import { execFileSync, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +10,7 @@ vi.mock('./runner-runtime.ts', async (original) => ({
 }));
 
 import { forwardToSessionGroups, procStatExited, sessionGroupOf, signalSession, spawnSessionLeader } from './session-process.ts';
+import { requirePid } from '../pid-file.testkit.ts';
 
 /** A zombie has exited; only its reaper's wait remains. */
 function alive(pid: number): boolean {
@@ -28,7 +29,7 @@ const DEFAULT_TERM = 'setTimeout(()=>{},20000)';
 function leaderScript(member: string, opts: { detached?: boolean; exit?: boolean } = {}): string {
   return `const { spawn } = require('child_process');
 const m = spawn(process.execPath, ['-e', ${JSON.stringify(member)}], { stdio: 'ignore', detached: ${!!opts.detached} });
-require('fs').writeFileSync('member.pid', String(m.pid));
+require('fs').writeFileSync('member.pid.tmp', String(m.pid)); require('fs').renameSync('member.pid.tmp', 'member.pid');
 ${opts.exit ? 'm.unref(); process.exit(0);' : "console.log('ready'); setTimeout(()=>{},20000);"}`;
 }
 
@@ -62,8 +63,7 @@ describe.skipIf(process.platform === 'win32')('session process groups (hearsay-t
     dirs.push(cwd);
     const leader = spawnSessionLeader(process.execPath, ['-e', script], { cwd, env: process.env });
     pids.push(leader.pid!);
-    await vi.waitFor(() => expect(existsSync(join(cwd, 'member.pid')) && readFileSync(join(cwd, 'member.pid'), 'utf8')).toMatch(/^\d+$/), { timeout: 5000 });
-    const member = Number(readFileSync(join(cwd, 'member.pid'), 'utf8'));
+    const member = await vi.waitFor(() => requirePid(join(cwd, 'member.pid')), { timeout: 5000 });
     pids.push(member);
     return { leader, member, cwd };
   }

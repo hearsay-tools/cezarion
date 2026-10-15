@@ -438,6 +438,8 @@ interface ActiveRun {
   /** Live claude session of the currently running agent step, if any. */
   session?: AgentSession;
   pendingHumanAsk: boolean;
+  /** Native grants belong only to this live session generation. */
+  pendingPermissions?: Set<string>;
   agentInputError?: string;
   agentInputFlight?: { session: AgentSession; inputIds: readonly string[]; settled?: Promise<void> };
   /** The current session's declared input delivery (#505). */
@@ -2576,6 +2578,13 @@ export class RunManager {
     // column, and finished runs have nothing to recover. The worker passes below go through
     // indexed queries instead.
     for (const run of this.store.listRuns().filter(inScope)) {
+      // A restarted controller cannot answer an old transport's permission RPC.
+      if (!this.isActive(run.id) && run.hasPendingPermission) {
+        // A permission wait interrupted an unfinished native turn. Route it
+        // through interrupted-turn recovery, never the settled-worker fallback.
+        this.store.updateRun(run.id, { hasPendingPermission: false,
+          ...(run.status === 'waiting' && !run.stopping && !this.workerExecutionStopped(run.id) ? { status: 'running' as const } : {}) });
+      }
       this.store.clearExpiredInboxClaims(run.id, new Date().toISOString());
       this.armInboxClaimExpiry(run.id);
       // #505: the session that accepted this input died before the model read it.
@@ -2835,6 +2844,8 @@ export class RunManager {
    * `active` directly would execute a run the store could evict mid-turn (the #811 shape).
    */
   private activate(runId: string, state: ActiveRun): void {
+    state.pendingPermissions = new Set();
+    if (this.store.getRun(runId)?.hasPendingPermission) this.store.updateRun(runId, { hasPendingPermission: false });
     this.active.set(runId, state);
     this.store.pin(runId, 'active');
   }
@@ -2842,6 +2853,8 @@ export class RunManager {
   /** Remove a run from the live registries — keeps `waiting ⊆ active`. */
   private dropActive(runId: string): void {
     const state = this.active.get(runId);
+    state?.pendingPermissions?.clear();
+    if (this.store.getRun(runId)?.hasPendingPermission) this.store.updateRun(runId, { hasPendingPermission: false });
     state?.releaseRepoRoot?.();
     state?.revokeCiTools?.();
     if (state) {
@@ -5093,6 +5106,16 @@ export class RunManager {
     return delivered;
   }
 
+  /** Only an explicit option from the permission card may answer a native grant. */
+  respondPermission(runId: string, requestId: string, optionId: string): boolean {
+    const state = this.active.get(runId);
+    const run = this.store.getRun(runId);
+    if (this.disposed || !state?.session?.open || state.cancelled || state.finishRequested || !run || run.stopping ||
+        this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run) ||
+        !state.pendingPermissions?.has(requestId)) return false;
+    return state.session.respondPermission?.(requestId, optionId) ?? false;
+  }
+
   /** Restore active lifecycle/accounting when either Cezar or the backend
    * resumes work in a parked session. */
   private resumeParkedRun(runId: string, state: ActiveRun): void {
@@ -5119,7 +5142,7 @@ export class RunManager {
    * bookkeeping without masquerading as user-authored transcript messages. */
   private deliverMessage(runId: string, content: PastedContent[], userAuthored: boolean): boolean {
     const state = this.active.get(runId);
-    if (!state?.session?.open || state.cancelled) return false;
+    if (!state?.session?.open || state.cancelled || state.pendingPermissions?.size) return false;
     const run = this.store.getRun(runId);
     if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return false;
 
@@ -5678,6 +5701,7 @@ export class RunManager {
       delegationSettings: undefined, revokeDelegation: undefined,
       cancelled: false, interrupt: () => undefined, cwd,
       pendingHumanAsk: this.hasPendingHumanAsk(runId),
+      pendingPermissions: new Set(),
       autonomous: record?.autonomous === true, autoContinues: 0,
     };
     this.activate(runId, state);
@@ -6346,6 +6370,7 @@ export class RunManager {
     const state: ActiveRun = {
       delegationSettings: undefined, revokeDelegation: undefined,
       pendingHumanAsk: this.hasPendingHumanAsk(runId),
+      pendingPermissions: new Set(),
       cancelled: false,
       interrupt: () => undefined,
       cwd: this.repoRoot,
@@ -7244,6 +7269,34 @@ export class RunManager {
       if (state.autonomousNudgePending) { state.autonomousNudgePending = undefined; this.clearIdleTimer(state); }
       this.clearHeldHumanInputTimer(state);
       state.atTurnBoundary = undefined; state.doneAtBoundary = undefined; state.parkAfterAck = undefined;
+    }
+    if (event.type === 'permission.requested') {
+      (state.pendingPermissions ??= new Set()).add(event.requestId);
+      this.prepareHumanAsk(runId, state);
+      state.session?.discardQueuedMessages();
+      this.withdrawWorkerWait(runId);
+      this.clearIdleTimer(state);
+      this.clearUnreadInputTimer(state);
+      this.clearHeldHumanInputTimer(state);
+      this.monitoring.delete(runId);
+      this.clearMonitoringWakeTimer(state, runId);
+      this.waiting.add(runId);
+      this.store.updateRun(runId, { status: 'waiting', activity: undefined, hasPendingPermission: true });
+      if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
+      this.releaseSlot();
+      // Authorization is the human's, even when this run is an owned worker.
+      return;
+    }
+    if (event.type === 'permission.resolved' && state.pendingPermissions?.delete(event.requestId)) {
+      if (!state.pendingPermissions.size) {
+        this.store.updateRun(runId, { hasPendingPermission: false });
+        state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
+        if (!state.pendingHumanAsk && state.session?.open && !this.store.getRun(runId)?.stopping) {
+          this.resumeParkedRun(runId, state);
+          this.flushAgentInputs(runId);
+        }
+      }
+      return;
     }
     if (event.type === 'ask.requested') {
       this.prepareHumanAsk(runId, state);

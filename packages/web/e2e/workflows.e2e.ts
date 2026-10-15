@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { waitForSettledSample } from './visual-ready'
 import { parse } from 'yaml'
 
-import { AgentBrowser, readTestEnv } from './agent-browser'
+import { AgentBrowser, readTestEnv, servedRoot } from './agent-browser'
 import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
 
 /**
@@ -23,7 +23,7 @@ const sessionId = `e2e-workflows-${process.pid}`
 
 const DESKTOP = { width: 1440, height: 900 }
 
-const repoRoot = resolve(import.meta.dirname, '../../..')
+const repoRoot = servedRoot()
 const skillsDir = resolve(repoRoot, '.ai/skills')
 const ALPHA = 'e2e-wb-alpha'
 const BETA = 'e2e-wb-beta'

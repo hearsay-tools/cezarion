@@ -495,17 +495,17 @@ async function waitForHealth(healthUrl: string, timeoutMs: number): Promise<bool
 // ---- run (headless) ----------------------------------------------------------
 
 /**
- * Headless `run` stays headless (#504). A cockpit already serving this repo lists the run, but
- * cannot control it while this process owns it (#779, plan step 3), and gets none of its live
- * events — say so once, on stderr. Capped so it never delays the run, and silent on any failure.
+ * The "a cockpit is running" hint for headless `run` (task-cli/hint.ts). Loaded lazily, never
+ * awaited: discovery overlaps the run (hearsay-tools/cezarion#1039), and the returned stop
+ * abandons it when the run ends, so it can neither delay the run nor keep the process alive.
  */
-async function hintRunningCockpit(repoRoot: string): Promise<void> {
-  const { discoverCockpit } = await import('./task-cli/discovery.ts');
-  const found = await Promise.race([
-    discoverCockpit({ repoDir: repoRoot, timeoutMs: 300 }).catch(() => undefined),
-    new Promise<undefined>((done) => setTimeout(() => done(undefined), 600).unref()),
-  ]);
-  if (found) console.error(`a cockpit is running at ${found.origin}; use "cez task start" to run this task there instead`);
+function hintRunningCockpit(repoRoot: string): () => void {
+  let stopped = false;
+  let stop: (() => void) | undefined;
+  void import('./task-cli/hint.ts').then(({ startCockpitHint }) => {
+    if (!stopped) stop = startCockpitHint(repoRoot);
+  }, () => { /* best effort */ });
+  return () => { stopped = true; stop?.(); };
 }
 
 async function runCommand(
@@ -519,7 +519,20 @@ async function runCommand(
     process.exitCode = 1;
     return;
   }
-  await hintRunningCockpit(repoRoot);
+  const stopHint = hintRunningCockpit(repoRoot);
+  try {
+    await runHeadless(repoRoot, task, workflowName, model);
+  } finally {
+    stopHint();
+  }
+}
+
+async function runHeadless(
+  repoRoot: string,
+  task: string,
+  workflowName: string | undefined,
+  model: string | undefined,
+): Promise<void> {
   await initWorkspace(repoRoot);
   const { workflows, issues } = await loadWorkflows(repoRoot);
   for (const issue of issues) console.error(`! skipped ${issue.path}: ${issue.message}`);

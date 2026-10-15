@@ -307,9 +307,19 @@ function dragGithubList(from: number, to: number) {
   fireEvent.pointerUp(handle, { pointerId: 1, clientX: to })
 }
 
+/** The PR files request leaves only after the route has rendered the PR list from its first
+ *  responses, and that render is synchronous CPU work. Measured at load 48-72 (#901): the event
+ *  loop stayed blocked 400-1250 ms before `/changes` was requested, then the response rendered
+ *  within ~580 ms. Wait for the request itself on a budget sized for the blocked render, and
+ *  leave Testing Library's default on the fetch-and-render step that follows. */
+async function changesRequested(sent: SentRequest[], n: number) {
+  await waitFor(() => expect(sent.map((request) => request.path)).toContain(`/api/v1/github/prs/${n}/changes`), { timeout: 10_000 })
+}
+
 it('/github/prs/:n/changes renders PR-only file review navigation and completeness', async () => {
-  stubFetch()
+  const sent = stubFetch()
   renderAt('/github/prs/137/changes')
+  await changesRequested(sent, 137)
   expect(await screen.findByText('2 changed files')).not.toBeNull()
   expect(screen.getByRole('navigation', { name: 'Pull request detail' }).textContent).toContain('ConversationChanges')
   expect(screen.getByRole('status').textContent).toContain('One patch was omitted.')
@@ -2942,7 +2952,7 @@ describe('cross-state search fallback (#730)', () => {
     renderAt('/github/prs')
     await waitFor(() => expect(rows()).toHaveLength(1))
     fireEvent.change(searchBox(), { target: { value: query } })
-    await waitFor(() => expect(hits()?.textContent).toContain(MERGED_PR.title), { timeout: 3000 })
+    await waitFor(() => expect(hits()?.textContent).toContain(MERGED_PR.title))
     expect(rows().map(row => row.dataset.number)).toEqual(['14507', '4507'])
     expect(sent.filter(r => r.path.includes('/github/search?'))).toHaveLength(1)
   })
@@ -3006,7 +3016,7 @@ describe('cross-state search fallback (#730)', () => {
     renderAt('/github/prs')
     await waitFor(() => expect(rows()).toHaveLength(1))
     fireEvent.change(searchBox(), { target: { value: '4507' } })
-    await waitFor(() => expect(hits()).not.toBeNull(), { timeout: 3000 })
+    await waitFor(() => expect(hits()).not.toBeNull())
     fireEvent.click(hits()!.querySelector('a')!)
     await waitFor(() => expect(detail()?.textContent).toContain(MERGED_PR.title))
     fireEvent.change(searchBox(), { target: { value: 'intermediate keystrokes' } })
@@ -3041,7 +3051,7 @@ describe('cross-state search fallback (#730)', () => {
     fireEvent.change(searchBox(), { target: { value: '4507' } })
     await waitFor(() => expect(
       document.querySelector('[data-slot="gh-row"][data-number="4507"] [data-slot="gh-row-checks"]')?.getAttribute('data-checks'),
-    ).toBe('passing'), { timeout: 3000 })
+    ).toBe('passing'))
     expect(sent.some(r => r.path === checksPath)).toBe(true)
     const requests = sent.filter(r => r.path.startsWith('/api/v1/github/checks?'))
     expect(requests.every(r => new URL(r.path, 'http://localhost').searchParams.get('prs')!.split(',').length <= 100)).toBe(true)
@@ -3062,7 +3072,7 @@ describe('cross-state search fallback (#730)', () => {
 
     fireEvent.change(searchBox(), { target: { value: '4507' } })
 
-    await waitFor(() => expect(hits()).not.toBeNull(), { timeout: 3000 })
+    await waitFor(() => expect(hits()).not.toBeNull())
     expect(hits()?.textContent).toContain('reconcile payment-session amount')
     expect(hits()?.textContent).toContain('Found on GitHub')
     expect(sent.some((r) => r.path === '/api/v1/github/search?kind=pr&q=4507')).toBe(true)
@@ -3099,14 +3109,13 @@ describe('cross-state search fallback (#730)', () => {
     await waitFor(() => expect(rows()).toHaveLength(2)) // the two OPEN issues
 
     fireEvent.change(searchBox(), { target: { value: '4507' } })
-    await waitFor(() => expect(hits()).not.toBeNull(), { timeout: 3000 })
+    await waitFor(() => expect(hits()).not.toBeNull())
 
     fireEvent.click(within(hits() as HTMLElement).getByRole('link'))
 
     // The query survived the navigation, so the hit is still rendered AND still selectable.
     await waitFor(
-      () => expect(detail()?.textContent).toContain('payment session amount drifts'),
-      { timeout: 3000 },
+      () => expect(detail()?.textContent).toContain('payment session amount drifts')
     )
     expect(searchBox().value).toBe('4507')
     expect(hits()).not.toBeNull()
@@ -3122,13 +3131,12 @@ describe('cross-state search fallback (#730)', () => {
     await waitFor(() => expect(rows()).toHaveLength(1))
 
     fireEvent.change(searchBox(), { target: { value: '4507' } })
-    await waitFor(() => expect(hits()).not.toBeNull(), { timeout: 3000 })
+    await waitFor(() => expect(hits()).not.toBeNull())
 
     fireEvent.click(within(hits() as HTMLElement).getByRole('link'))
 
     await waitFor(
-      () => expect(detail()?.textContent).toContain('reconcile payment-session amount'),
-      { timeout: 3000 },
+      () => expect(detail()?.textContent).toContain('reconcile payment-session amount')
     )
     expect(searchBox().value).toBe('4507')
     expect(hits()).not.toBeNull()
@@ -3146,8 +3154,7 @@ describe('cross-state search fallback (#730)', () => {
     fireEvent.change(searchBox(), { target: { value: '4507' } })
 
     await waitFor(
-      () => expect(detail()?.textContent).toContain('reconcile payment-session amount'),
-      { timeout: 3000 },
+      () => expect(detail()?.textContent).toContain('reconcile payment-session amount')
     )
   })
 
@@ -3178,8 +3185,7 @@ describe('cross-state search fallback (#730)', () => {
     fireEvent.change(searchBox(), { target: { value: '4507' } })
 
     await waitFor(
-      () => expect(document.querySelector('[data-slot="gh-empty"]')?.textContent).toContain('Searching GitHub'),
-      { timeout: 3000 },
+      () => expect(document.querySelector('[data-slot="gh-empty"]')?.textContent).toContain('Searching GitHub')
     )
   })
 
@@ -3197,8 +3203,7 @@ describe('cross-state search fallback (#730)', () => {
       () =>
         expect(document.querySelector('[data-slot="gh-empty"]')?.textContent).toContain(
           'rate limit exceeded',
-        ),
-      { timeout: 3000 },
+        )
     )
   })
 
@@ -3211,7 +3216,7 @@ describe('cross-state search fallback (#730)', () => {
     await waitFor(() => expect(rows()).toHaveLength(1))
 
     fireEvent.change(searchBox(), { target: { value: '4507' } })
-    await waitFor(() => expect(hits()).not.toBeNull(), { timeout: 3000 })
+    await waitFor(() => expect(hits()).not.toBeNull())
 
     // The verdict was already null in this state; what #838 fixes is the `px-4 py-4` container
     // still rendering around it, which read as an empty ~2 rem band above "Found on GitHub".
@@ -3229,8 +3234,7 @@ describe('cross-state search fallback (#730)', () => {
       () =>
         expect(document.querySelector('[data-slot="gh-empty"]')?.textContent).toContain(
           'open, closed or merged',
-        ),
-      { timeout: 3000 },
+        )
     )
   })
 
@@ -3280,8 +3284,7 @@ describe('cross-state search fallback (#730)', () => {
     fireEvent.change(searchBox(), { target: { value: 'Stream' } })
     await waitFor(
       () =>
-        expect(sent.some((r) => r.path === '/api/v1/github/search?kind=pr&q=Stream')).toBe(true),
-      { timeout: 3000 },
+        expect(sent.some((r) => r.path === '/api/v1/github/search?kind=pr&q=Stream')).toBe(true)
     )
     // Let the response land in the cache before the filter is cleared, so the assertion below is
     // about a cached payload outliving its `enabled` flag and not about a request in flight.
@@ -3324,7 +3327,7 @@ describe('cross-state search fallback (#730)', () => {
     await waitFor(() => expect(rows()).toHaveLength(1))
 
     fireEvent.change(searchBox(), { target: { value: '4507' } })
-    await waitFor(() => expect(hits()).not.toBeNull(), { timeout: 3000 })
+    await waitFor(() => expect(hits()).not.toBeNull())
 
     // `Stream` matches the open #137 locally, so it enters the list above — while the hits still
     // hold the payload keyed on `4507`, which contains #137 too.
@@ -3400,8 +3403,7 @@ describe('cross-state search fallback (#730)', () => {
         const verdict = document.querySelector('[data-slot="gh-empty"]')?.textContent ?? ''
         expect(verdict).toContain('GitHub could not be searched')
         expect(verdict).not.toContain('open, closed or merged')
-      },
-      { timeout: 3000 },
+      }
     )
   })
 })
@@ -3430,7 +3432,7 @@ describe('cross-state search preserves fork filters', () => {
     renderAt('/github')
     fireEvent.change(await screen.findByRole('combobox', { name: 'Project board' }), { target: { value: 'P2' } })
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'payment' } })
-    await waitFor(() => expect(hits()).not.toBeNull(), { timeout: 3000 })
+    await waitFor(() => expect(hits()).not.toBeNull())
     expect(hitTitles()).not.toContain('payment first')
     fireEvent.click(screen.getByRole('button', { name: 'Assigned to me' }))
     expect(hitTitles()).not.toContain('payment second')
@@ -3498,7 +3500,7 @@ describe('cross-state search preserves fork filters', () => {
     renderAt('/github')
     fireEvent.change(await screen.findByRole('combobox', { name: 'Project board' }), { target: { value: 'P2' } })
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'remote' } })
-    await waitFor(() => expect(document.querySelector('[data-slot="gh-empty"]')?.textContent).toContain('Project board lookup timed out.'), { timeout: 3000 })
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-empty"]')?.textContent).toContain('Project board lookup timed out.'))
     expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('remote')
     expect((screen.getByRole('combobox', { name: 'Project board' }) as HTMLSelectElement).value).toBe('P2')
     expect(hits()).toBeNull()

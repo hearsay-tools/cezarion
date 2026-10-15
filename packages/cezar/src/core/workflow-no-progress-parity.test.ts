@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { requirePid } from '../pid-file.testkit.ts';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
@@ -61,7 +61,7 @@ describe('managed open-turn inactivity — #470', () => {
           // Let the real native wire and process exit settle; no synthetic turn events.
           if (row.id === 'N5' || row.id === 'N7') {
             await waitFor(() => store.readEvents(runId).some(e => e.type === 'error' && typeof e.message === 'string' && e.message.includes('no progress')));
-            const pid = Number(readFileSync(join(store.getRun(runId)!.worktreePath!, 'watchdog.pid'), 'utf8'));
+            const pid = requirePid(join(store.getRun(runId)!.worktreePath!, 'watchdog.pid'));
             if (row.id === 'N5') {
               expect(() => process.kill(pid, 0)).not.toThrow();
               expect(manager.isActive(runId)).toBe(true);

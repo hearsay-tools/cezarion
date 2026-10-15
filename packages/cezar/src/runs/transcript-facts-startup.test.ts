@@ -42,6 +42,12 @@ vi.mock('node:worker_threads', async (importOriginal) => {
 
 afterEach(() => { startup.gate = undefined; vi.useRealTimers(); });
 
+// Every case boots a native worker that compiles the production bootstrap through tsx. At host
+// load ~120 one case took 5.07 s, past vitest's 5 s default; at load ~160 they took up to 12.6 s
+// and the child-process case 17.5 s (hearsay-tools/cezarion#1056). Nothing here asserts on speed.
+const STARTUP_TEST_TIMEOUT_MS = 60_000;
+const CHILD_DRAIN_TIMEOUT_MS = 45_000;
+
 it.each(['stop', 'forget', 'timeout'] as const)('%s settles startup consumers without interrupting native imports', async (action) => {
   const dir = mkdtempSync(join(tmpdir(), 'cez-facts-startup-'));
   mkdirSync(join(dir, 'runs'));
@@ -75,7 +81,7 @@ it.each(['stop', 'forget', 'timeout'] as const)('%s settles startup consumers wi
     await exited;
     rmSync(dir, { recursive: true, force: true });
   }
-});
+}, STARTUP_TEST_TIMEOUT_MS);
 
 it('bounds cleanup of a cancelled initializer that never becomes ready', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'cez-facts-startup-stalled-'));
@@ -104,7 +110,7 @@ it('bounds cleanup of a cancelled initializer that never becomes ready', async (
     await exited;
     rmSync(dir, { recursive: true, force: true });
   }
-});
+}, STARTUP_TEST_TIMEOUT_MS);
 
 it('drains cancelled native startup before the parent process exits', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'cez-facts-startup-exit-'));
@@ -142,8 +148,9 @@ it('drains cancelled native startup before the parent process exits', async () =
     // No parent-side timer or keepalive: queue shutdown must drain its worker.
   `);
   try {
-    await promisify(execFile)(process.execPath, [script], { timeout: 5000 });
+    // A hung drain still fails here, as a killed child, because this bound sits under the test's.
+    await promisify(execFile)(process.execPath, [script], { timeout: CHILD_DRAIN_TIMEOUT_MS });
     expect(existsSync(marker)).toBe(true);
     expect(existsSync(historyPaths(dir, 'a').facts)).toBe(false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
-});
+}, STARTUP_TEST_TIMEOUT_MS);

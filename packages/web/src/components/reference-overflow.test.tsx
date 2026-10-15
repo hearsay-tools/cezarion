@@ -77,6 +77,23 @@ describe('shared reference overflow', () => {
     expect([...panel.querySelectorAll('a')].map(link => link.getAttribute('href'))).toEqual(references.map(ref => `/p/other-project/tasks/run/pr/${ref.number}`))
     fireEvent.keyDown(trigger, { key: 'Escape' })
   })
+  // A mouse always hovers before it clicks. Once the hover-open has rendered, Radix's click toggle
+  // would close the list the reader just pressed; e2e only saw it under load, when the commit won.
+  it('keeps a hover-opened list open when the mouse then clicks it, and hands focus to the list', async () => {
+    list(1)
+    const trigger = screen.getByRole('button', { name: 'Show all 5 references for Split work' })
+    fireEvent.pointerEnter(trigger, { pointerType: 'mouse' })
+    expect(document.querySelector('[data-slot="reference-overflow-list"]')).not.toBeNull()
+    fireEvent.pointerDown(trigger, { pointerType: 'mouse' })
+    fireEvent.click(trigger)
+    const panel = document.querySelector('[data-slot="reference-overflow-list"]')
+    expect(panel).not.toBeNull()
+    await waitFor(() => expect(panel!.contains(document.activeElement)).toBe(true))
+    // A second click is an ordinary toggle again.
+    fireEvent.pointerDown(trigger, { pointerType: 'mouse' })
+    fireEvent.click(trigger)
+    await waitFor(() => expect(document.querySelector('[data-slot="reference-overflow-list"]')).toBeNull())
+  })
   it('keeps scope and focus when overflow is portaled', async () => {
     list()
     const trigger = screen.getByRole('button', { name: 'Show all 5 references for Split work' })

@@ -1,3 +1,5 @@
+import { createApp } from '../server/server.ts';
+import { apiRequest } from '../server/loopback-request.testkit.ts';
 /**
  * Harness parity — the session and lifecycle matrix.
  *
@@ -59,6 +61,7 @@ import {
   exemptionFor,
   HARNESS_ADAPTERS,
   SHUTDOWN_CRITERIA,
+  PERMISSION_CRITERIA,
   WORKFLOW_TIMEOUT_CRITERIA,
   NO_PROGRESS_CRITERIA,
   AUTONOMOUS_CRITERIA,
@@ -1739,6 +1742,7 @@ describe('OpenCode durable input acknowledgements', () => {
 describe('harness parity — the matrix itself', () => {
   const allIds = [
     ...SHUTDOWN_CRITERIA.map(c => c.id),
+    ...PERMISSION_CRITERIA.map(c => c.id),
     ...MONITORING_TURN_CRITERIA.map(c => c.id),
     ...MONITORING_ACK_CRITERIA.map(c => c.id),
     ...MONITORING_ORDER_CRITERIA.map(c => c.id),
@@ -1758,6 +1762,8 @@ describe('harness parity — the matrix itself', () => {
     ...RUN_CRITERIA.map((c) => c.id),
   ];
   const scenarioOf = (id: string): ScenarioName => {
+    const permission = PERMISSION_CRITERIA.find(c => c.id === id);
+    if (permission) return permission.scenario;
     const shutdown = SHUTDOWN_CRITERIA.find(c => c.id === id);
     if (shutdown) return shutdown.scenario;
     const monitor = [...MONITORING_TURN_CRITERIA, ...MONITORING_ACK_CRITERIA, ...MONITORING_ORDER_CRITERIA, ...CI_INTERRUPTION_CRITERIA].find(c => c.id === id);
@@ -2626,6 +2632,67 @@ describe('harness parity — multi-pr collection', () => {
           }, { beforeStart: ({ repoRoot }) => { dataDir = join(repoRoot, '.ai/cezar'); } });
         expect(observed.record?.pullRequests?.some(pr => pr.number === 999)).toBe(false);
       }, 150_000);
+    }
+  }
+});
+
+
+describe('native permission routing (hearsay-tools/cezarion#1049)', () => {
+  for (const backend of RUNNER_IDS) {
+    const exemption = exemptionFor('P1', backend);
+    if (exemption) {
+      it(`${backend} P1 exemption — ${exemption.reason}`, () => {
+        expect(exemption.kind).toBe('scenario-unconstructible');
+        expect(HARNESS_ADAPTERS[backend].scenarios.approval).toBeUndefined();
+      });
+      continue;
+    }
+    for (const decision of ['decline', 'cancel'] as const) {
+      it(`${backend} P1 ${decision} answers the native request through the cockpit API`, async () => {
+        let repoRoot = '';
+        const observation = await driveRun(backend, 'approval', run => !!run && ['done', 'review'].includes(run.status), 30_000, async ({ store, manager, runId }) => {
+          // Continue builds ActiveRun at a second site. Old capabilities must stay
+          // retired while a fresh native approval parks the resumed generation.
+          const first = store.readEvents(runId).find(event => event.type === 'permission.requested')!;
+          await waitFor(() => !manager.isActive(runId));
+          expect(manager.continueRun(runId, { text: 'mock:approval' })).toEqual({ ok: true });
+          await waitFor(() => store.readEvents(runId).filter(event => event.type === 'permission.requested').length === 2);
+          const request = store.readEvents(runId).filter(event => event.type === 'permission.requested')[1]!;
+          expect(request.requestId).not.toBe(first.requestId);
+          expect(store.getRun(runId)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
+          const old = (first.options as Array<{ id: string }>)[0]!;
+          expect(manager.respondPermission(runId, first.requestId as string, old.id)).toBe(false);
+          const choice = (request.options as Array<{ id: string; label: string }>).find(option => option.label.toLowerCase().includes(decision))!;
+          expect(manager.respondPermission(runId, request.requestId as string, choice.id)).toBe(true);
+          await waitFor(() => ['done', 'review'].includes(store.getRun(runId)?.status ?? '') && !manager.isActive(runId));
+        }, {
+          autonomous: true,
+          beforeStart: context => { repoRoot = context.repoRoot; },
+          during: async ({ store, manager, runId }) => {
+            await waitFor(() => store.readEvents(runId).some(event => event.type === 'permission.requested'));
+            expect(store.getRun(runId)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
+            const request = store.readEvents(runId).find(event => event.type === 'permission.requested')!;
+            const options = request.options as Array<{ id: string; label: string }>;
+            const choice = options.find(option => option.label.toLowerCase().includes(decision));
+            expect(choice).toBeDefined();
+            expect(manager.sendMessage(runId, [{ type: 'text', text: 'accept' }])).toBe(false);
+            expect(manager.respondPermission(runId, request.requestId as string, 'not-offered')).toBe(false);
+            const app = createApp({ repoRoot, store, manager, version: 'test' });
+            const response = await apiRequest(app, `/api/v1/runs/${runId}/permissions`, {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ requestId: request.requestId, optionId: choice!.id }),
+            });
+            expect(response.status).toBe(200);
+            expect(await response.json()).toEqual({ delivered: true });
+            expect(manager.respondPermission(runId, request.requestId as string, choice!.id)).toBe(false);
+          },
+        });
+        expect(observation.events).toContainEqual(expect.objectContaining({ type: 'permission.resolved', optionId: expect.any(String) }));
+        expect(observation.events).toContainEqual(expect.objectContaining({ type: 'turn.completed' }));
+        expect(observation.events.filter(event => event.type === 'text').map(event => event.text).join('')).toContain(`Approval response: {"decision":"${decision}"}`);
+        expect(observation.record?.hasPendingPermission).toBe(false);
+        expect(observation.events.some(event => event.type === 'ask.requested')).toBe(false);
+      }, 45_000);
     }
   }
 });
