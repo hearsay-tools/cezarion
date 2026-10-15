@@ -1,6 +1,11 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+// Mirrored by CHROME_SINGLETON_OVERHEAD and DARWIN_UNIX_SOCKET_MAX in
+// packages/cezar/src/runs/agent-tmpdir.ts, which size every task's TMPDIR
+// (hearsay-tools/cezarion#1022); the published package cannot import this
+// script, so packages/cezar/test/unit/resolve-browser-launch.test.ts asserts
+// the two agree. Change both together.
 export const CHROME_SINGLETON_OVERHEAD = '/org.chromium.Chromium.XXXXXX/SingletonSocket'.length;
 export const UNIX_SOCKET_MAX = 107;
 export const DARWIN_UNIX_SOCKET_MAX = 103;

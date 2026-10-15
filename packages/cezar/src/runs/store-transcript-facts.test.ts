@@ -29,6 +29,24 @@ afterEach(() => {
 });
 
 describe('RunStore transcript facts (#880)', () => {
+  // hearsay-tools/cezarion#1059: reopening a store with runs that never emitted booted a facts
+  // Worker for nothing; across runs/store.test.ts that was ~200 workers outliving their tests.
+  it('warms runs that have no transcript without starting a worker', async () => {
+    const { dir, store } = openStore();
+    for (let i = 0; i < 3; i++) store.createRun({ title: `t${i}`, workflow: 'w', task: 'task', steps: [] });
+    store.close();
+    stores.pop();
+    const dispatch = vi.spyOn(Worker.prototype, 'postMessage');
+    try {
+      const reopened = openStore(dir).store;
+      await reopened.factsWarmIdle();
+      expect(reopened.listRunSummaries().runs).toHaveLength(3);
+      expect(dispatch).not.toHaveBeenCalled();
+    } finally {
+      dispatch.mockRestore();
+    }
+  });
+
   it('appendEvent keeps hasPendingHumanAsk without re-reading the transcript', () => {
     const { store } = openStore();
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });

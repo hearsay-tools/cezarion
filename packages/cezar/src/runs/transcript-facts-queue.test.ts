@@ -7,7 +7,7 @@ import type { FactsLoadResult } from './transcript-facts-load.ts';
 import type { FactsJobMessage, FactsJobReply } from './transcript-facts-worker.ts';
 import { brotliCompressSync } from 'node:zlib';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { TranscriptFactsIndex } from './transcript-facts.ts';
+import { emptyFacts, TranscriptFactsIndex } from './transcript-facts.ts';
 import { REFRESH_FACTS, TranscriptFactsQueue } from './transcript-facts-queue.ts';
 import * as factsFold from './transcript-facts-fold.ts';
 import { compressHistory, historyPaths } from './history-file.ts';
@@ -303,6 +303,22 @@ it('warming already-ready sidecars yields without starting a worker', async () =
   expect(reader.peek('a')?.projectionIds).toEqual(['a']);
   expect(reader.peek('b')?.projectionIds).toEqual(['b']);
   expect(dispatch).not.toHaveBeenCalled();
+});
+
+// hearsay-tools/cezarion#1059: every store open warmed its runs through a Worker even when a run
+// had no transcript yet, so a suite of 132 stores booted ~200 workers (tsx and an esbuild child
+// each, in source mode) that outlived their tests and starved the shard.
+it('runs without a transcript settle as empty without starting a worker', async () => {
+  const dispatch = vi.spyOn(Worker.prototype, 'postMessage');
+  const reader = index();
+  await reader.warm(['a', 'b']);
+  expect(await reader.ready('a')).toEqual(emptyFacts());
+  expect(reader.peek('b')).toEqual(emptyFacts());
+  expect(reader.get('c')).toEqual(emptyFacts());
+  expect(dispatch).not.toHaveBeenCalled();
+  // The empty answer is a cache like any other: a transcript written later replaces it.
+  seed('a');
+  expect(reader.get('a')?.projectionIds).toEqual(['a']);
 });
 
 it('a queued sync refresh consumes the active owner before dispatching another job', async () => {

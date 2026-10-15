@@ -9,7 +9,7 @@ import { type RunEvent } from '@open-mercato/cezar-contract';
 import { historyPaths, historyStat } from './history-file.ts';
 
 export { emptyFacts, foldEvent, foldText, stampOf, PROSE_HUMAN_GATE, workerOutcomeKey, type PendingAskFacts, type ArchiveStamp, type TranscriptFacts } from './transcript-facts-fold.ts';
-import { foldEvent, sameStamp, stampOf, type ArchiveStamp, type TranscriptFacts } from './transcript-facts-fold.ts';
+import { emptyFacts, foldEvent, sameStamp, stampOf, type ArchiveStamp, type TranscriptFacts } from './transcript-facts-fold.ts';
 import { readFactsSidecar, type FactsLoadResult } from './transcript-facts-load.ts';
 
 import { REFRESH_FACTS, TranscriptFactsQueue } from './transcript-facts-queue.ts';
@@ -41,9 +41,29 @@ export class TranscriptFactsIndex {
     const cached = this.entries.get(runId);
     if (cached && this.current(runId, cached.facts)) return cached.facts;
     const stored = readFactsSidecar(historyPaths(this.dataDir, runId).facts);
-    if (!stored || !this.current(runId, stored)) return undefined;
-    this.entries.set(runId, { facts: stored, written: stored.bytes });
-    return stored;
+    if (stored && this.current(runId, stored)) {
+      this.entries.set(runId, { facts: stored, written: stored.bytes });
+      return stored;
+    }
+    // No transcript at all (a run that has not emitted yet) has empty facts and nothing to
+    // decode — the answer `loadTranscriptFacts` gives, settled here with one stat. Sending it to
+    // the worker cost a whole Worker boot per run (hearsay-tools/cezarion#1059).
+    if (!this.hasTranscript(runId)) {
+      const facts = emptyFacts();
+      this.entries.set(runId, { facts, written: 0 });
+      return facts;
+    }
+    return undefined;
+  }
+
+  /** True when the run has a plain or archived transcript, or when that cannot be told. */
+  private hasTranscript(runId: string): boolean {
+    try {
+      const { plainSize, archive } = historyStat(this.dataDir, runId);
+      return plainSize !== undefined || archive !== undefined;
+    } catch {
+      return true;
+    }
   }
 
   async ready(runId: string): Promise<Readonly<TranscriptFacts> | undefined> {

@@ -117,6 +117,10 @@ Cockpit e2e applies `.ai/scripts/resolve-browser-launch.mjs` in
 `.ai/scripts/test-env-up.sh` (doctor) and `packages/web/e2e/agent-browser.ts`
 (every later invocation). Those two sites share the resolved namespace, Chrome
 args, and socket-safe TMPDIR. The recipes in this file install and probe only.
+Outside that seam, a cezar task's own `TMPDIR` is already socket-safe: it is
+at most 58 bytes, sized for Chromium's
+`<TMPDIR>/org.chromium.Chromium.XXXXXX/SingletonSocket` (hearsay-tools/cezarion#1022),
+so ad-hoc agent-browser calls inside a task need no `TMPDIR=/tmp` override.
 
 ```bash
 "$AGENT_BROWSER_BIN" doctor --json --offline
