@@ -118,6 +118,8 @@ for (const theme of ['light', 'dark']) {
       expect(browser.evaluate(`matchMedia('(forced-colors: active)').matches`)).toBe(true)
       const outline = waitForSettledSample<string>(browser, `getComputedStyle(document.querySelector('[data-slot="code-editor"]')).outlineStyle`)
       expect(outline).toBe('solid')
+      const innerOutline = waitForSettledSample<string>(browser, `getComputedStyle(document.querySelector('${input}')).outlineWidth`)
+      expect(innerOutline).toBe('0px')
     })
   })
 }
