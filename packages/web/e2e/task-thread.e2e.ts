@@ -59,7 +59,8 @@ const HOOK_LINES = [
     entries: [{ kind: 'context', text: 'SQUEAL · revision 4\n✗ thread-items.test.tsx › ToolCard renders hook rows — new failure' }],
     stdout: '{"hookSpecificOutput":{"hookEventName":"PostToolBatch","additionalContext":"SQUEAL · revision 4"}}', exitCode: 0 } },
   { type: 'item.completed', ts: '2026-07-14T20:27:40.000Z', stepId: 'task', item: { kind: 'hook', id: 'hook_fail', event: 'Stop', status: 'failed',
-    entries: [{ kind: 'error', text: 'squeal status timed out after 2000 ms' }], stderr: 'squeal status timed out after 2000 ms\n', exitCode: 1 } },
+    entries: [{ kind: 'error', text: 'squeal status timed out after 2000 ms' }], stderr: 'squeal status timed out after 2000 ms\n', exitCode: 1,
+    source: '/home/agent/.claude/plugins/squeal/hooks/stop.sh' } },
 ]
 const BARE_COMMAND = 'cd /home/agent/projects/very-long-project && npm run test:e2e -- --reporter verbose --runInBand'
 
@@ -687,7 +688,12 @@ describe('task thread', () => {
     try {
       for (const variant of contrastQaVariants) {
         applyContrastQaVariant(browser, variant)
-        for (const selector of ['[data-slot="hook-entry"][data-kind="context"]', '[data-slot="hook-entry"][data-kind="error"]']) {
+        for (const selector of [
+          '[data-slot="hook-entry"][data-kind="context"]',
+          '[data-slot="hook-entry"][data-kind="error"]',
+          '[data-slot="hook-source"]',
+          '[data-slot="hook-raw-toggle"]',
+        ]) {
           const sample = waitForSettledSample<ContrastSample>(browser, contrastSampleExpression(selector, 'color', 'parent'))
           expect(sample.ratio, `${variant.id} ${selector}: ${sample.foreground} on ${sample.background}`).toBeGreaterThanOrEqual(4.5)
         }

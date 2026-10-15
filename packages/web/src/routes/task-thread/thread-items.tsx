@@ -1131,11 +1131,11 @@ export function HookCard({ item, cacheKey }: { item: UiHookItem; cacheKey?: stri
             </pre>
           ))}
           {item.source !== undefined ? (
-            <p className="px-3 pb-2 font-mono text-[11px] text-soft-foreground [overflow-wrap:anywhere]">{item.source}</p>
+            <p data-slot="hook-source" className="px-3 pb-2 font-mono text-[11px] text-muted-foreground [overflow-wrap:anywhere]">{item.source}</p>
           ) : null}
           {hasRaw ? (
             <Collapsible className="border-t border-border">
-              <CollapsibleTrigger className="group flex w-full items-center gap-1 px-3 py-1 text-left text-xs text-soft-foreground hover:text-muted-foreground">
+              <CollapsibleTrigger data-slot="hook-raw-toggle" className="group flex w-full items-center gap-1 px-3 py-1 text-left text-xs text-muted-foreground hover:text-foreground">
                 <ChevronRightIcon aria-hidden className="size-3 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
                 {`Raw output${typeof item.exitCode === 'number' ? ` · exit ${item.exitCode}` : ''}`}
               </CollapsibleTrigger>
