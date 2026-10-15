@@ -391,8 +391,10 @@ BROWSER_LAUNCH_ARGS_CSV=""
 BROWSER_RUNTIME_TMPDIR=""
 
 # Container Chrome needs `--no-sandbox`; Cezar worktree TMPDIR makes SingletonSocket
-# exceed sockaddr_un. Resolve once, pass the same flags/env to doctor and every later
-# invocation. Doctor's own launch test ignores `--args`, so a live `open` probe is what
+# exceed sockaddr_un. Resolve once, pass the same flags/env to doctor and the probe, and
+# record the flags for every later invocation. The TMPDIR in the descriptor is THIS boot's
+# answer only: a caller reusing the env decides its own (hearsay-tools/cezarion#1090).
+# Doctor's own launch test ignores `--args`, so a live `open` probe is what
 # decides installed vs "Chrome is present but bootstrap settings were unusable".
 resolve_browser_launch() {
   if ! node "$SCRIPT_DIR/resolve-browser-launch.mjs" > "$BROWSER_LAUNCH_JSON" 2>/dev/null; then
