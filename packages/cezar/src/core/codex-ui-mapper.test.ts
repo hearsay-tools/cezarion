@@ -71,7 +71,51 @@ const GOLDEN_FIXTURES = [
   'collab-agent-tool-call',
   'collab-tool-call',
   'sub-agent-activity',
+  // Codex 0.160.1 `hook/started` + `hook/completed` (generated schema, #961).
+  'hooks',
 ] as const;
+
+describe('codex hook/completed (#961)', () => {
+  const run = (fields: Record<string, unknown>) => ({
+    id: 'r1',
+    eventName: 'stop',
+    handlerType: 'command',
+    executionMode: 'sync',
+    scope: 'turn',
+    sourcePath: '/h/hooks.json',
+    displayOrder: 0,
+    startedAt: 1,
+    entries: [],
+    status: 'completed',
+    ...fields,
+  });
+  const frame = (method: string, fields: Record<string, unknown>) => ({
+    method,
+    params: { threadId: 't1', turnId: 'u1', run: run(fields) },
+  });
+
+  it('hook/started emits nothing', () => {
+    expect(mapCodexNotification(frame('hook/started', { status: 'running', entries: [{ kind: 'context', text: 'x' }] }), createCodexUiState()).events).toEqual([]);
+  });
+
+  it('does not duplicate statusMessage already present as an entry', () => {
+    const { events } = mapCodexNotification(
+      frame('hook/completed', { status: 'failed', statusMessage: 'boom', entries: [{ kind: 'error', text: 'boom' }] }),
+      createCodexUiState(),
+    );
+    expect(events).toHaveLength(1);
+    expect((events[0] as { item: { entries: unknown[] } }).item.entries).toEqual([{ kind: 'error', text: 'boom' }]);
+  });
+
+  it('ignores a hook/completed whose status is still running', () => {
+    expect(mapCodexNotification(frame('hook/completed', { status: 'running', entries: [{ kind: 'context', text: 'x' }] }), createCodexUiState()).events).toEqual([]);
+  });
+
+  it('turns a completed statusMessage into a warning entry', () => {
+    const { events } = mapCodexNotification(frame('hook/completed', { statusMessage: 'slow' }), createCodexUiState());
+    expect((events[0] as { item: { entries: unknown[] } }).item.entries).toEqual([{ kind: 'warning', text: 'slow' }]);
+  });
+});
 
 describe('codex → v2 golden fixtures', () => {
   for (const fixture of GOLDEN_FIXTURES) {

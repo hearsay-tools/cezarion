@@ -1,0 +1,84 @@
+[
+  {
+    "type": "session.started",
+    "sessionId": "th_01K0HOOKS7Q2",
+    "backend": "codex"
+  },
+  {
+    "type": "turn.started",
+    "turnId": "turn_01K0HOOK1A"
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "hook",
+      "id": "hook_hook_run_1",
+      "event": "SessionStart",
+      "source": "/home/u/.codex/plugins/cache/hearsay/squeal/0.1.168/hooks/hooks.json",
+      "status": "completed",
+      "entries": [
+        {
+          "kind": "context",
+          "text": "SQUEAL · registered at revision 0\nKnown failures: 0"
+        }
+      ],
+      "durationMs": 41
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "hook",
+      "id": "hook_hook_run_3",
+      "event": "Stop",
+      "source": "/home/u/.codex/plugins/cache/hearsay/squeal/0.1.168/hooks/hooks.json",
+      "status": "failed",
+      "entries": [
+        {
+          "kind": "error",
+          "text": "squeal status timed out"
+        }
+      ],
+      "durationMs": 2000
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "hook",
+      "id": "hook_hook_run_4",
+      "event": "PreToolUse",
+      "source": "/home/u/.codex/plugins/cache/hearsay/squeal/0.1.168/hooks/hooks.json",
+      "status": "blocked",
+      "entries": [
+        {
+          "kind": "stop",
+          "text": "tests are red"
+        }
+      ],
+      "durationMs": 12
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "hook",
+      "id": "hook_hook_run_5",
+      "event": "PostToolUse",
+      "source": "/home/u/.codex/plugins/cache/hearsay/squeal/0.1.168/hooks/hooks.json",
+      "status": "cancelled",
+      "entries": [
+        {
+          "kind": "error",
+          "text": "cancelled by user"
+        }
+      ],
+      "durationMs": 7
+    }
+  },
+  {
+    "type": "turn.completed",
+    "turnId": "turn_01K0HOOK1A",
+    "stopReason": "end_turn"
+  }
+]
