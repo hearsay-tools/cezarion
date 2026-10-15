@@ -1429,13 +1429,14 @@ entries:
     pr: 1318
     title: "fix(git): avoid shared config locks during worktree creation (#1318)"
     date: 2026-10-09
-    status: planned
+    status: ported
     hint:
       conflicts: 0
     fork:
+      pr: 1075
       issue: 1006
-    decided: 2026-10-13
-    note: Port no-track worktree creation for both ordinary tasks and owned workers; preserve explicit bases, identity receipts and reattachment; re-check current callers before implementation.
+    decided: 2026-10-15
+    note: No-track creation on both fresh paths (ordinary tasks and owned workers, upstream patched only the task path); reattach unchanged; real-Git regressions cover both under a held config lock.
   - sha: 31f10c948e4aa031a81103fe912205bc6c7d897c
     pr: 1348
     title: "test(graph): carry mock:done in the task so #1078's quick-task refresh keeps it (#1348)"

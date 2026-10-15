@@ -528,7 +528,6 @@
     "packages/web/src/components/nav-selection.test.tsx": 1017,
     "packages/web/src/components/picker-pill.test.tsx": 1132,
     "packages/web/src/components/pill.test.tsx": 84,
-    "packages/web/src/components/project-groups.test.tsx": 2236,
     "packages/web/src/components/project-rail.test.tsx": 749,
     "packages/web/src/components/project-switch.integration.test.tsx": 978,
     "packages/web/src/components/provider-banner-container.test.tsx": 449,
