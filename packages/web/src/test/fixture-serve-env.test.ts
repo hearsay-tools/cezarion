@@ -92,3 +92,20 @@ it('allows a fixture to request hosted mode explicitly', () => {
   vi.stubEnv('CEZ_REMOTE', '0')
   expect(fixtureServeEnv(root(), { CEZ_REMOTE: '1' }).CEZ_REMOTE).toBe('1')
 })
+// hearsay-tools/cezarion#1045: the live cockpit's opt-ins reach an agent's shell; a fixture
+// cockpit must boot with every feature off unless the spec asks for it.
+it('drops ambient CEZ_* opt-in flags and cockpit plumbing from the fixture environment', () => {
+  for (const name of ['CEZ_PREVIEW', 'CEZ_PREVIEW_NO_SANDBOX', 'CEZ_AUTOMATIONS', 'CEZ_FOLLOWUPS', 'CEZ_SINGLE_PROJECT']) vi.stubEnv(name, '1')
+  vi.stubEnv('CEZ_TASK_ID', 'ambient-task')
+  const env = fixtureServeEnv(root())
+  expect(Object.keys(env).filter(key => key.startsWith('CEZ_')).sort())
+    .toEqual(['CEZ_DRY_RUN', 'CEZ_HOME', 'CEZ_REMOTE', 'CEZ_SKILLS_AUTO_UPDATE'])
+})
+it('keeps the CEZ_* flags a spec passes explicitly', () => {
+  vi.stubEnv('CEZ_PREVIEW', '1')
+  vi.stubEnv('CEZ_AUTOMATIONS', '1')
+  const env = fixtureServeEnv(root(), { CEZ_AUTOMATIONS: '1', CEZ_FOLLOWUPS: '1' })
+  expect(env.CEZ_AUTOMATIONS).toBe('1')
+  expect(env.CEZ_FOLLOWUPS).toBe('1')
+  expect(env.CEZ_PREVIEW).toBeUndefined()
+})

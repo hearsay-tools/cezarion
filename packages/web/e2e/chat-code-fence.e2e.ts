@@ -99,7 +99,7 @@ interface Measure { lines: Line[]; lineHeight: number; codeLeft: number }
  *
  *  Reproduction: the failure needs CPU contention and does not show on an idle host (5/5 green).
  *  Start one busy loop per core (`sh -c 'while :; do :; done' &`, `nproc` times), then run
- *  `env -u CEZ_AUTOMATIONS npm test -- --config packages/web/e2e/vitest.config.ts
+ *  `npm test -- --config packages/web/e2e/vitest.config.ts
  *  packages/web/e2e/chat-code-fence.e2e.ts` 15 times. Without this wait: 6/15 red, each
  *  `mobile-dark-comfortable assistant fence 1 row 1: expected -847.59375 to be greater than
  *  17.6`; with it: 0/15. The original failure, seen while verifying #751, is recorded on #758

@@ -76,6 +76,7 @@ server() {
 const http = require('node:http');
 const port = Number(process.argv[process.argv.indexOf('--port') + 1]);
 require('node:fs').writeFileSync('.ai/app-argv', process.argv.slice(2).join('\\n'));
+require('node:fs').writeFileSync('.ai/app-cez-env', Object.keys(process.env).filter((key) => key.startsWith('CEZ_')).sort().map((key) => key + '=' + process.env[key]).join('\\n'));
 http.createServer((req, res) => {
   res.writeHead(200, { 'content-type': req.url === '/api/health' ? 'application/json' : 'text/html' });
   res.end(req.url === '/api/health' ? '{"ok":true}' : '<!doctype html>');
@@ -139,7 +140,7 @@ done
   symlinkSync('npm', join(root, 'bin/pnpm'));
   // The served project is a clone of this checkout, so the fixture is a repository whose
   // generated state is ignored the way the real one's is.
-  writeFileSync(join(root, '.gitignore'), '/.ai/qa/\n/bin/\nnode_modules/\n/packages/cezar/dist/\n/packages/cezar/web/\n/.ai/build-invocations\n/.ai/inline-contract-dist\n/.ai/app-argv\n/app.pid\n');
+  writeFileSync(join(root, '.gitignore'), '/.ai/qa/\n/bin/\nnode_modules/\n/packages/cezar/dist/\n/packages/cezar/web/\n/.ai/build-invocations\n/.ai/inline-contract-dist\n/.ai/app-argv\n/.ai/app-cez-env\n/app.pid\n');
   const git = (...args: string[]) => execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@cezar.invalid', ...args], {
     env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, stdio: 'ignore',
   });
@@ -348,6 +349,55 @@ test('a cold boot serves an isolated clone of the checkout, never the checkout i
   assert.match(rebooted.stderr, /the served project is not/);
   launchedPids.add(descriptor(fixture.root).app.pid);
   assert.equal(descriptor(fixture.root).servedRoot, served);
+  spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
+});
+
+// hearsay-tools/cezarion#1045: an agent's shell inherits the live cockpit's opt-ins. The shared
+// server boots with none of them unless the run asks with --server-env, which is the reuse key.
+test('ambient CEZ_* never reaches the shared server; --server-env does and keys reuse', () => {
+  const fixture = makeFixture(false);
+  const env = {
+    ...process.env, PATH: fixture.path, E2E_PREBUILT_ASSETS: '1',
+    CEZ_PREVIEW: '1', CEZ_AUTOMATIONS: '1', CEZ_FOLLOWUPS: '1', CEZ_SINGLE_PROJECT: '1', CEZ_TASK_ID: 'ambient',
+  };
+  prebuildE2e(fixture, env);
+  const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
+  const appEnv = () => readFileSync(join(fixture.root, '.ai/app-cez-env'), 'utf8').split('\n')
+    .filter((line) => !line.startsWith('CEZ_HOME='));
+  const boot = (...args: string[]) => {
+    const result = spawnSync('/bin/sh', [up, ...args], { encoding: 'utf8', env, timeout: 20_000 });
+    assert.equal(result.status, 0, result.stderr);
+    launchedPids.add(descriptor(fixture.root).app.pid);
+    return result;
+  };
+
+  boot();
+  assert.deepEqual(appEnv(), ['CEZ_DRY_RUN=1']);
+  const plain = JSON.parse(readFileSync(join(fixture.root, '.ai/qa/test-env.json'), 'utf8')) as { environment: unknown };
+  assert.deepEqual(plain.environment, { singleProject: false, serverEnv: 'none' });
+
+  const opted = boot('--server-env=CEZ_FOLLOWUPS=1', '--server-env=CEZ_AUTOMATIONS=1');
+  assert.match(opted.stdout, /TEST_ENV_REUSED=0/);
+  assert.match(opted.stderr, /--server-env set changed/);
+  assert.deepEqual(appEnv(), ['CEZ_AUTOMATIONS=1', 'CEZ_DRY_RUN=1', 'CEZ_FOLLOWUPS=1']);
+  assert.match(descriptor(fixture.root).app.startCommand, /^CEZ_AUTOMATIONS=1 CEZ_FOLLOWUPS=1 CEZ_DRY_RUN=1 /);
+  // Order does not matter; the same set reuses the running server.
+  assert.match(boot('--server-env=CEZ_AUTOMATIONS=1', '--server-env=CEZ_FOLLOWUPS=1').stdout, /TEST_ENV_REUSED=1/);
+
+  const single = boot('--server-env=CEZ_SINGLE_PROJECT=1');
+  assert.match(single.stdout, /TEST_ENV_REUSED=0/);
+  assert.deepEqual(JSON.parse(readFileSync(join(fixture.root, '.ai/qa/test-env.json'), 'utf8')).environment,
+    { singleProject: true, serverEnv: 'CEZ_SINGLE_PROJECT=1' });
+
+  for (const bad of [
+    ['--server-env=CEZ_HOME=/elsewhere'], ['--server-env=PATH=/x'], ['--server-env=CEZ_X=a b'],
+    // Same name twice: a sorted key could not tell the two orders apart.
+    ['--server-env=CEZ_X=0', '--server-env=CEZ_X=1'],
+  ]) {
+    const refused = spawnSync('/bin/sh', [up, ...bad], { encoding: 'utf8', env, timeout: 20_000 });
+    assert.equal(refused.status, 2, bad.join(' '));
+    assert.match(refused.stderr, /invalid --server-env/);
+  }
   spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
 });
 

@@ -81,7 +81,7 @@ describe('the inbox against the live dry-run server', () => {
   it('an enabled empty inbox renders the shared CenteredState template', ({ skip }) => {
     skip(
       !followupsAvailable,
-      'the inbox is opt-in; run CEZ_FOLLOWUPS=1 npm run test:e2e -- --force',
+      'the inbox is opt-in; run npm run test:e2e -- --server-env=CEZ_FOLLOWUPS=1',
     )
     writeTodos([])
     browser.goto(`${baseUrl}/inbox`)
@@ -96,7 +96,7 @@ describe('the inbox against the live dry-run server', () => {
   it('real cards render LIVE from a server-side todos.json write — no reload', ({ skip }) => {
     skip(
       !followupsAvailable,
-      'the inbox is opt-in; run CEZ_FOLLOWUPS=1 npm run test:e2e -- --force',
+      'the inbox is opt-in; run npm run test:e2e -- --server-env=CEZ_FOLLOWUPS=1',
     )
     // An agent files two follow-ups while the page just sits there on /inbox.
     writeTodos([
@@ -144,7 +144,7 @@ describe('the inbox against the live dry-run server', () => {
   it('lays the runnable card’s Runner · Model · Effort row out for a phone without overflow (#724)', ({ skip }) => {
     skip(
       !followupsAvailable,
-      'the inbox is opt-in; run CEZ_FOLLOWUPS=1 npm run test:e2e -- --force',
+      'the inbox is opt-in; run npm run test:e2e -- --server-env=CEZ_FOLLOWUPS=1',
     )
     browser.setViewport(360, 640)
     try {
@@ -197,7 +197,7 @@ describe('the inbox against the live dry-run server', () => {
   it('Dismiss checks the entry off — card gone, server inbox down to one', async ({ skip }) => {
     skip(
       !followupsAvailable,
-      'the inbox is opt-in; run CEZ_FOLLOWUPS=1 npm run test:e2e -- --force',
+      'the inbox is opt-in; run npm run test:e2e -- --server-env=CEZ_FOLLOWUPS=1',
     )
     browser.click(`${CARD}[data-id="e2e-inbox-1"] [data-action="todo-dismiss"]`)
 

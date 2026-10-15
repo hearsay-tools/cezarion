@@ -157,15 +157,21 @@ rules (`CODE_REVIEW.md`) send it back.
 The whole suite takes about 14 minutes; one test takes seconds.
 
 ```bash
-env -u CEZ_AUTOMATIONS npm run test:e2e -- <spec>.e2e.ts -t '<test name>'
+npm run test:e2e -- <spec>.e2e.ts -t '<test name>'
 # Multiple spec filters and Vitest options work too:
 npm run test:e2e -- smoke.e2e.ts composer.e2e.ts --force-rebuild
+# Boot the shared server with an opt-in feature on (repeatable):
+npm run test:e2e -- inbox.e2e.ts --server-env=CEZ_FOLLOWUPS=1
 ```
 
-`CEZ_AUTOMATIONS` is unset because CI never sets it and four tests render differently with it.
+No ambient `CEZ_*` variable reaches an e2e cockpit (hearsay-tools/cezarion#1045), so a run from
+an agent's shell, which inherits the live cockpit's `CEZ_PREVIEW=1` and `CEZ_AUTOMATIONS=1`,
+boots what CI boots. The shared server takes opt-ins only from `--server-env=CEZ_NAME=value`,
+and a running server booted with a different set is replaced rather than reused. A spec that
+boots its own server passes its flags in `fixtureServeEnv(root, { … })`.
 The wrapper boots or reuses the environment, installs Chrome if needed, and exports
 the browser's temporary-directory settings from `.ai/qa/test-env.json` (including
-the socket-path workaround). `--force` and `--force-rebuild` go only to bootstrap;
+the socket-path workaround). `--force`, `--force-rebuild` and `--server-env` go only to bootstrap;
 other arguments, including `--shard=N/M`, spec paths and quoted test-name patterns,
 are passed intact to Vitest. A literal `--` ends wrapper option parsing.
 With no arguments the full sequential suite still runs. A filtered run's

@@ -15,7 +15,7 @@ function run(t, args = [], { installed = true, exit = 0, bootExit = 0 } = {}) {
   fs.mkdirSync(path.join(root, 'bin'));
   fs.copyFileSync(path.join(__dirname, '../../.ai/scripts/e2e.sh'), path.join(root, '.ai/scripts/e2e.sh'));
   fs.writeFileSync(path.join(root, '.ai/qa/test-env.json'), JSON.stringify({ browser: { installed } }));
-  fs.writeFileSync(path.join(root, '.ai/scripts/test-env-up.sh'), `#!/bin/sh\nfor arg do\n case "$arg" in --force|--force-rebuild) ;; *) exit 2;; esac\ndone\nprintf "%s\\n" "$@" > boot-args\nexit ${bootExit}\n`);
+  fs.writeFileSync(path.join(root, '.ai/scripts/test-env-up.sh'), `#!/bin/sh\nfor arg do\n case "$arg" in --force|--force-rebuild|--server-env=*) ;; *) exit 2;; esac\ndone\nprintf "%s\\n" "$@" > boot-args\nexit ${bootExit}\n`);
   for (const name of ['npm', 'npx']) {
     fs.writeFileSync(path.join(root, 'bin', name), `#!/bin/sh\nprintf '%s\\n' "$@" > test-args\nexit ${exit}\n`, { mode: 0o755 });
   }
@@ -34,6 +34,27 @@ test('shard reaches the test process and bootstrap flags reach only boot', (t) =
   assert.ok(!r.tests.includes('--force'));
   assert.ok(!r.tests.includes('--force-rebuild'));
   assert.match(r.stdout, /TEST_E2E_STATUS=passed/);
+});
+
+// hearsay-tools/cezarion#1045: shared-server opt-ins are bootstrap flags, never Vitest arguments.
+test('--server-env opt-ins reach only boot, in order', (t) => {
+  const r = run(t, ['--server-env=CEZ_FOLLOWUPS=1', 'smoke.e2e.ts', '--server-env=CEZ_AUTOMATIONS=1']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.boot, ['--server-env=CEZ_FOLLOWUPS=1', '--server-env=CEZ_AUTOMATIONS=1']);
+  assert.ok(r.tests.includes('smoke.e2e.ts'));
+  assert.ok(!r.tests.some((arg) => arg.startsWith('--server-env')));
+});
+
+// A whitespace-bearing opt-in must not split into two valid bootstrap flags when flattened.
+test('--server-env carrying whitespace is refused before boot', (t) => {
+  for (const arg of ['--server-env=CEZ_X=1 --force-rebuild', '--server-env=CEZ_X=1\n--force']) {
+    const r = run(t, [arg, 'smoke.e2e.ts']);
+    assert.equal(r.status, 2, r.stderr);
+    assert.deepEqual(r.boot, []);
+    assert.deepEqual(r.tests, []);
+    assert.match(r.stderr, /invalid --server-env/);
+    assert.match(r.stderr, /TEST_E2E_STATUS=failed/);
+  }
 });
 
 test('spec paths and a quoted test-name filter reach Vitest intact', (t) => {

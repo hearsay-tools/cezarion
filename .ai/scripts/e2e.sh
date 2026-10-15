@@ -39,6 +39,11 @@ EOF
 # A literal -- ends wrapper parsing as well as Vitest option parsing.
 FORCE=
 FORCE_REBUILD=
+# --server-env=CEZ_NAME=value opt-ins for the shared server (hearsay-tools/cezarion#1045);
+# They are space-joined below, so one carrying whitespace is refused HERE: flattened first, a
+# quoted '--server-env=CEZ_X=1 --force-rebuild' would reach test-env-up.sh as two valid flags.
+# test-env-up.sh validates the rest of the shape.
+SERVER_ENV=
 FORWARD_ONLY=0
 for arg in "$@"; do
   shift
@@ -49,6 +54,11 @@ for arg in "$@"; do
   case "$arg" in
     --force) FORCE=--force ;;
     --force-rebuild) FORCE_REBUILD=--force-rebuild ;;
+    --server-env=*[[:space:]]*)
+      echo "invalid --server-env: $arg (no whitespace)" >&2
+      echo "TEST_E2E_STATUS=failed" >&2
+      exit 2 ;;
+    --server-env=*) SERVER_ENV="$SERVER_ENV $arg" ;;
     --) FORWARD_ONLY=1; set -- "$@" "$arg" ;;
     *) set -- "$@" "$arg" ;;
   esac
@@ -59,6 +69,9 @@ bootstrap() {
   set --
   if [ -n "$FORCE" ]; then set -- "$@" "$FORCE"; fi
   if [ -n "$FORCE_REBUILD" ]; then set -- "$@" "$FORCE_REBUILD"; fi
+  set -f
+  for assignment in $SERVER_ENV; do set -- "$@" "$assignment"; done
+  set +f
   sh "$SCRIPT_DIR/test-env-up.sh" "$@"
 }
 

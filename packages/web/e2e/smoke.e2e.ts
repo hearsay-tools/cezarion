@@ -715,7 +715,7 @@ describe('global SSE stream', () => {
   it('live-updates the inbox badge from a server-side change, with no reload', ({ skip }) => {
     skip(
       !followupsAvailable,
-      'the shared environment has the opt-in inbox disabled; run CEZ_FOLLOWUPS=1 npm run test:e2e -- --force',
+      'the shared environment has the opt-in inbox disabled; run npm run test:e2e -- --server-env=CEZ_FOLLOWUPS=1',
     )
     writeTodos([])
     browser.goto(baseUrl + scoped('/'))
