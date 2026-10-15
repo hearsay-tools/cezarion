@@ -136,6 +136,11 @@ function canonicalPath(path: string): string {
  * branch after its directory/registration was removed. Existing non-empty
  * unregistered paths are never deleted because they may hold recoverable
  * uncommitted work.
+ *
+ * Both fresh `-b` paths pass `--no-track` (port of open-mercato/cezar#1318): every
+ * diff/base decision passes the resolved ref explicitly, so a task branch needs no
+ * upstream, and from an `origin/<name>` base git would otherwise write `branch.*`
+ * keys to the repository-wide config, making concurrent starts contend on its lock.
  */
 export async function createWorktree(
   repoRoot: string,
@@ -183,7 +188,7 @@ async function createWorktreeLocked(
     await mkdir(dirname(absolutePath), { recursive: true });
     // Reserve the previously absent path exclusively; Git accepts our empty directory.
     await mkdir(absolutePath);
-    const created = await git(repoRoot, ['worktree', 'add', '-b', branch, absolutePath, base], 30_000);
+    const created = await git(repoRoot, ['worktree', 'add', '--no-track', '-b', branch, absolutePath, base], 30_000);
     if (!created.ok) throw new Error(`git worktree add failed: ${created.stderr.trim()}`);
     return worktreeInfo(absolutePath, branch, base);
   }
@@ -245,7 +250,7 @@ async function createWorktreeLocked(
     return worktreeInfo(absolutePath, branch, base);
   }
 
-  const create = await git(repoRoot, ['worktree', 'add', '-b', branch, absolutePath, base]);
+  const create = await git(repoRoot, ['worktree', 'add', '--no-track', '-b', branch, absolutePath, base]);
   if (!create.ok) {
     throw new Error(`git worktree add failed: ${create.stderr.trim() || create.stdout.trim()}`);
   }
