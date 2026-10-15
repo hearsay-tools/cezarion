@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runTaskCommand, type TaskIo } from './cli.ts';
 import { pollHitDeadline, abortedPoll, TIMEOUT_GRACE_MS } from './watch.ts';
 import { TaskCliError } from './http.ts';
+import { runRecordSchema, toRunSummary } from '@open-mercato/cezar-contract';
 import { startTestCockpit, type TestCockpit } from './cockpit.testkit.ts';
 
 /** `cez task wait` / `log` / `log --follow` / `start --wait` (#504). */
@@ -34,11 +35,9 @@ describe('cez task watching', () => {
       expect(last()).toMatchObject({ runs: [{ id, status: 'failed' }] });
     });
 
-    it('exits 3 on timeout and still prints the statuses', async () => {
-      const id = create();
-      expect(await run(['wait', id, '--timeout-seconds', '1'])).toBe(3);
-      expect(last()).toMatchObject({ timedOut: true, runs: [{ id, status: 'queued' }] });
-    });
+    // What a timed-out wait prints for each run depends on whether a poll answered before the
+    // deadline, which a real cockpit cannot be timed into (hearsay-tools/cezarion#1066). Both cases
+    // are pinned against the scripted cockpit below.
 
     it('--mode any returns on the first settled run, --mode all waits for every run', async () => {
       const a = create('a');
@@ -336,13 +335,30 @@ describe('cez task watching against a scripted cockpit', () => {
 
   it('wait answers timeout (exit 3) on time even when a poll is slower than the budget', async () => {
     handler = (req, res) => {
-      if (req.url === '/api/v1/p/default/run-summaries') setTimeout(() => json(res, [apiRun('queued')]), 4_000);
+      if (req.url === '/api/v1/p/default/run-summaries') setTimeout(() => json(res, [toRunSummary(runRecordSchema.parse(apiRun('queued')))]), 4_000);
       else { res.statusCode = 404; res.end(); }
     };
     const started = Date.now();
     expect(await run(['wait', 'r1', '--timeout-seconds', '1'])).toBe(3);
     expect(Date.now() - started).toBeLessThan(3_000);
-    expect(JSON.parse(out.at(-1)!)).toMatchObject({ timedOut: true, runs: [{ id: 'r1' }] });
+    // No poll answered before the deadline, so the status is not known (hearsay-tools/cezarion#1066):
+    // the deadline wins over a late answer.
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ timedOut: true, runs: [{ id: 'r1', status: 'unknown' }] });
+  });
+
+  it('a timed-out wait prints the last status a poll read, even when a later poll is cut off (hearsay-tools/cezarion#1066)', async () => {
+    // The first poll answers at once; every later one hangs past the deadline and is aborted.
+    let polls = 0;
+    handler = (req, res) => {
+      if (req.url !== '/api/v1/p/default/run-summaries') { res.statusCode = 404; res.end(); return; }
+      polls += 1;
+      if (polls === 1) json(res, [toRunSummary(runRecordSchema.parse(apiRun('queued')))]);
+    };
+    const started = Date.now();
+    expect(await run(['wait', 'r1', '--timeout-seconds', '2'])).toBe(3);
+    expect(Date.now() - started).toBeLessThan(4_000);
+    expect(polls).toBeGreaterThan(1);
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ timedOut: true, runs: [{ id: 'r1', status: 'queued' }] });
   });
 
   it('wait reports a connection lost mid-budget as unavailable (exit 2), not a timeout', async () => {
