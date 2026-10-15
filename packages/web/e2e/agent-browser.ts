@@ -1021,8 +1021,14 @@ export class AgentBrowser {
    *  full-page capture (`screenshot --full`) resizes the window to 1x1 and back, so the `md`
    *  media query reads false for a frame; when React commits during it, every subtree that
    *  switches on the desktop breakpoint remounts and drops its local state — an open dialog,
-   *  popover or menu, focus (hearsay-tools/cezarion#979: the hand-off dialog closed in 4 of 30
-   *  instrumented iterations). It also stitches by scrolling, which re-pins a virtualized
+   *  popover or menu, focus. Reproduction (local, deterministic): at 1440x900 on any cockpit
+   *  page, `eval` a `matchMedia('(min-width: 768px)')` change listener, then take one capture
+   *  each way: every `screenshot --full` fires change events on it, and a viewport
+   *  capture fires none; at 390x844 neither does (hearsay-tools/cezarion#1046). The failure it
+   *  causes: in an instrumented copy of task-handoff.e2e.ts's steps, run 30 times at load 35-64,
+   *  full-page capture closed the hand-off dialog 4 times, each logging `resize 1x1 md=false`,
+   *  and viewport capture 0 times (hearsay-tools/cezarion#979, PR hearsay-tools/cezarion#1044).
+   *  It also stitches by scrolling, which re-pins a virtualized
    *  thread and unmounts its jump pill. And it buys a cockpit page nothing: `html, body` are
    *  `overflow: hidden` and the shell is exactly `h-dvh` (src/styles/index.css), so the
    *  document is never taller than the viewport; content below the fold lives in inner
