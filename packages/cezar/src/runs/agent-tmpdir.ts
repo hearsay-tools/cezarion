@@ -49,11 +49,11 @@
  * graceful-degradation rule says a new check must never become the only way to
  * run.
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { checkpointFallbackRemoval, fallbackIdentity, readFallbackRemovals, type FallbackRemoval } from './agent-tmpdir-removal.ts';
 import { workerEvidenceRunIds } from './worker-execution.ts';
 import type { Dirent } from 'node:fs';
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 
@@ -122,13 +122,18 @@ export function agentShortTmpDir(dataDir: string, runId: string): string {
  *  and it keeps the directory in holder scans. */
 type ShortClaim = 'free' | 'ours' | 'other' | 'unknown';
 
-/** The marker's run id; `null` when there is none, `undefined` when unreadable.
+/** The marker's run id; `null` when there is none, `undefined` when unreadable
+ *  or malformed. A marker that is not a run id this directory's name could
+ *  belong to (a stray file, or a write cut short before
+ *  hearsay-tools/cezarion#1037 made it atomic) is unknown ownership, never a
+ *  foreign run, so the sweep keeps the directory.
  *  `ENOTDIR` (a file where `t/` or the directory should be) is "none": the
  *  spawn then tries to mint the directory and fails loudly with
  *  `AgentTempDirError`, rather than quietly leaving the repo. */
 function readRunMarker(dir: string): string | null | undefined {
   try {
-    return readFileSync(join(dir, RUN_FILE), 'utf8');
+    const owner = readFileSync(join(dir, RUN_FILE), 'utf8');
+    return safeRunId(owner) && owner.slice(0, SHORT_TMP_NAME_LENGTH) === basename(dir) ? owner : undefined;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     return code === 'ENOENT' || code === 'ENOTDIR' ? null : undefined;
@@ -142,18 +147,26 @@ function shortTmpDirClaim(dir: string, runId: string): ShortClaim {
   return owner === runId ? 'ours' : 'other';
 }
 
-/** Mint the `.cez-run` marker without ever following an existing name (`wx`),
- *  and refuse when the name turns out to be another run's — the read in
+/** Mint the `.cez-run` marker without ever following an existing name, and
+ *  refuse when the name turns out to be another run's — the read in
  *  `resolveAgentTmpDir` already steered away from one, so this only fires on a
- *  race or a replaced marker. */
+ *  race or a replaced marker. The id is written to a private name first and
+ *  hard-linked into place: `link` publishes it whole or not at all and, like
+ *  `wx`, fails on an existing name, so a crash mid-write can never leave a
+ *  partial marker for the sweep to misread (hearsay-tools/cezarion#1037). */
 function writeRunMarker(dir: string, runId: string): void {
+  const marker = join(dir, RUN_FILE);
+  const pending = `${marker}.${process.pid}.${randomUUID()}`;
+  writeFileSync(pending, runId, { encoding: 'utf8', flag: 'wx' });
   try {
-    writeFileSync(join(dir, RUN_FILE), runId, { encoding: 'utf8', flag: 'wx' });
+    linkSync(pending, marker);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
     if (readRunMarker(dir) !== runId) {
       throw new AgentTempDirError(dir, new Error('directory belongs to another run'));
     }
+  } finally {
+    unlinkSync(pending);
   }
 }
 
@@ -681,7 +694,8 @@ export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>)
       if (!safeRunId(name)) continue;
       const owner = readRunMarker(join(shortRoot, name));
       if (owner === undefined) continue; // unreadable marker: unknown ownership is never ours to remove.
-      if (owner === null ? claimedShort.has(name) : keep.has(owner)) continue;
+      // A marker that is a proper prefix of a kept run's id is that run's, cut short.
+      if (owner === null ? claimedShort.has(name) : [...keep].some((id) => id.startsWith(owner))) continue;
       try {
         rmSync(join(shortRoot, name), { recursive: true, force: true });
         reaped.push(owner ?? name);
