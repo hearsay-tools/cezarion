@@ -122,8 +122,20 @@ cites its evidence in the comment at the site.** The comment names the failure b
 the single-test reproduction that went red, with its command or delay) and the before/after run
 counts. The evidence in a PR description or a review thread does not count: the next reader
 meets the wait, not the PR, and the automated review sends a bare wait back
-(hearsay-tools/cezarion#1000). The worked example is `liftWithSpace` in
-`project-order.e2e.ts`:
+(hearsay-tools/cezarion#1000).
+
+A local bundle path names evidence nobody else can open. `.ai/qa/failures/` is gitignored, and
+a later run, a cleanup or a removed worktree deletes it. So write the full directory name (the
+test segment is the test name with each run of characters other than letters, digits, `.`, `_`
+and `-` turned into one `-`, cut to 80 characters, then `-<n>`), not a path shortened with `…`. Next to it, cite something that lasts:
+for a CI failure, the run and its `cockpit-failures-shard-<n>` artifact (see
+[Reading a failure bundle](#reading-a-failure-bundle)). For a local one, the PR comment that
+records what the bundle's `probe.json` showed. `setViewport` in `agent-browser.ts` is the durable
+form: "`cockpit-failures-shard-2` artifacts 11255134650, 11255508374 and 11259950580 (draft
+PR #791)".
+
+The worked example for the counts is `liftWithSpace` in `project-order.e2e.ts`, quoted as it
+stands:
 
 ```ts
  *  Provenance (hearsay-tools/cezarion#438, local, 2026-10-13): with a one-shot
@@ -136,11 +148,17 @@ meets the wait, not the PR, and the automated review sends a bare wait back
  *  runs passed.
 ```
 
-It names the command, the bundles and what their `probe.json` showed, the before count (2 of 6)
-and the after count (8 of 8). A reproduction stands in for a bundle the same way:
+It names the command, what the bundles' `probe.json` showed, the before count (2 of 6) and the
+after count (8 of 8). It also shows the gap this rule now closes. The paths are shortened, and the
+bundles were local and are gone. The naming rule spells them out as
+`.ai/qa/failures/project-order/reorders-a-collapsed-mark-from-the-keyboard-with-Space-leaving-Enter-to-the-link-20`
+and `…-link-22`. Those names are derived from the rule, not read from disk. What survives is the
+diagnosis recorded in the comment and in the hearsay-tools/cezarion#999 review reply from
+commit `740b35ff`. A reproduction stands in for a bundle the same way:
 `task-handoff.e2e.ts`'s `window.__cezLive` wait cites "Reproduced 3/3 by delaying the built
 server's workspace-events attach 4 s behind E2E_DELAY_MS; 0/3 with this wait"
-(hearsay-tools/cezarion#1069).
+(hearsay-tools/cezarion#1069). Anyone can rerun that from the
+[single-test recipe](#reproducing-one-test-locally).
 
 One site to know about: `selection-states.e2e.ts` asserts `matches(':hover')` after
 `hoverVisiblePoint`. That is a one-shot assertion, not a wait, and it holds because that spec adds
