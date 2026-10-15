@@ -159,6 +159,9 @@ describe('AgentBrowser screenshots never flip the desktop layout under an overla
     }
   })
 
+  // Deliberately a raw-text match: comments count too. A lexer this side of the TypeScript
+  // parser misses real uses (comment markers inside strings or regex literals), while a false
+  // positive costs only rewording, so name the full-page flag in prose without quoting it.
   it('no spec or helper reaches --full except through the guarded seam', () => {
     const e2eDir = join(import.meta.dirname, '../../e2e')
     const offenders = readdirSync(e2eDir)
