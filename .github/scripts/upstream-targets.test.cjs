@@ -695,6 +695,66 @@ test('every git call of targets reads attributes from the HEAD it resolved', asy
   }
 });
 
+/** Moves the fixture's upstream branch into a bare repo outside it and drops its objects from the
+ *  fixture, so `targets` must fetch the commit. A FIXTURE-local `insteadOf` rewrites
+ *  `https://github.com/<ledger upstream repo>` to that bare repo; `GIT_ALLOW_PROTOCOL=file` for the
+ *  test means a rewrite that failed is refused instead of reaching github.com. */
+function localUpstream(t, fx) {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const yaml = require('yaml');
+  const { pathToFileURL } = require('node:url');
+  const { upstream } = yaml.parse(fs.readFileSync(path.join(fx.dir, '.ai/upstream/ledger.yaml'), 'utf8'));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cez-upstream-remote-')));
+  const bare = path.join(root, ...upstream.repo.split('/'));
+  fx.git('init', '-q', '--bare', '-b', upstream.branch, bare);
+  fx.git('push', '-q', bare, `upstream:${upstream.branch}`);
+  fx.git('branch', '-q', '-D', 'upstream');
+  fx.git('reflog', 'expire', '--expire=now', '--all');
+  fx.git('gc', '-q', '--prune=now');
+  fx.git('config', `url.${pathToFileURL(root).href}/.insteadOf`, 'https://github.com/');
+  const saved = process.env.GIT_ALLOW_PROTOCOL;
+  process.env.GIT_ALLOW_PROTOCOL = 'file';
+  t.after(() => {
+    if (saved === undefined) delete process.env.GIT_ALLOW_PROTOCOL;
+    else process.env.GIT_ALLOW_PROTOCOL = saved;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+}
+
+test('the fetch of targets, and the existence checks after it, read attributes from the HEAD it resolved', async (t) => {
+  const { spawnSync } = require('node:child_process');
+  const path = require('node:path');
+  const { collectTargets, UPSTREAM_REF } = require('./upstream-scan.cjs');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  localUpstream(t, fx);
+  const hasCommit = () => spawnSync('git', ['cat-file', '-e', `${fx.upstream}^{commit}`], { cwd: fx.dir }).status === 0;
+  assert.equal(hasCommit(), false, 'the fork fixture lacks the upstream commit');
+  const head = fx.git('rev-parse', 'HEAD');
+  const calls = gitCallLog(t);
+  const report = await collectTargets([fx.upstream.slice(0, 8)], { cwd: fx.dir, fetch: true });
+  const logged = calls();
+  assert.equal(report.head.sha, head);
+  const [resolve, ...pinned] = logged;
+  assert.deepEqual(resolve, ['rev-parse', '--verify', 'HEAD^{commit}']);
+  for (const args of pinned) assert.equal(args[0], `--attr-source=${head}`, args.join(' '));
+  const fetches = pinned.flatMap((args, i) => (subcommandOf(args) === 'fetch' ? [i] : []));
+  assert.equal(fetches.length, 1, 'the guard saw exactly one fetch call');
+  const [at] = fetches;
+  assert.ok(pinned.slice(0, at).some((args) => subcommandOf(args) === 'cat-file'), 'a missing commit is what fetches');
+  assert.ok(pinned.slice(at + 1).some((args) => subcommandOf(args) === 'cat-file' && args.includes('-e')), 'the guard saw an existence check after the fetch');
+  assert.equal(report.sections[0].entry.sha, fx.upstream);
+  assert.match(renderTargetsReport(report), new RegExp(`^## \`${fx.upstream.slice(0, 8)}\` `, 'm'));
+  // The fetch lands in the fixture's own ref, adds no remote, and leaves this checkout's ref alone.
+  assert.equal(hasCommit(), true);
+  assert.equal(fx.git('rev-parse', UPSTREAM_REF), fx.upstream);
+  assert.equal(fx.git('remote'), '');
+  const here = spawnSync('git', ['rev-parse', '--verify', '--quiet', UPSTREAM_REF], { cwd: path.resolve(__dirname, '../..'), encoding: 'utf8' });
+  assert.notEqual(here.stdout.trim(), fx.upstream);
+});
+
 test('collectTargets keeps applying attributes HEAD commits', async (t) => {
   const { collectTargets } = require('./upstream-scan.cjs');
   const fx = forkFixture();
