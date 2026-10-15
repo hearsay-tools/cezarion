@@ -67,9 +67,13 @@ afterEach(async () => {
 });
 
 // Real git init/worktree/branch per cell. Isolated cases finish in 0.3-0.9s; under
-// shard load they overrun Vitest's 5s default (hearsay-tools/cezarion#948). Matches
-// the 15s git/manager bound on destruction-results and provision-workflows.
-describe('owned workspace committed isolation', { timeout: 15_000 }, () => {
+// shard load they overrun Vitest's 5s default (hearsay-tools/cezarion#948). Some CI
+// runners also run the first ~3 minutes of Vitest shard 3/3 2-20x slower across every
+// file; there the cases took 5-15.7s and timed out at 15s (runs 38364071255,
+// 38703103918, 38704816191; hearsay-tools/cezarion#1059). Twice that peak.
+const WORKSPACE_TEST_TIMEOUT_MS = 30_000;
+
+describe('owned workspace committed isolation', { timeout: WORKSPACE_TEST_TIMEOUT_MS }, () => {
   it('pins parent HEAD, excludes dirty tracked/untracked files, and never autosaves the parent', async () => {
     const { root, parentPath, first, second } = await fixture();
     const status = git(parentPath, 'status', '--porcelain');
@@ -218,7 +222,7 @@ describe('owned workspace committed isolation', { timeout: 15_000 }, () => {
   });
 });
 
-describe('readOwnedDiff', { timeout: 15_000 }, () => {
+describe('readOwnedDiff', { timeout: WORKSPACE_TEST_TIMEOUT_MS }, () => {
   it('attributes worker commits and dirty/untracked work, not the parent commit, without changing the index', async () => {
     const { root, second } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), second);
@@ -318,7 +322,7 @@ function managerFor(store: RunStore, root: string) {
   const manager = createFixtureManager(store, root); managers.push(manager); return manager;
 }
 
-describe('RunManager.enqueueOwnedRun', { timeout: 15_000 }, () => {
+describe('RunManager.enqueueOwnedRun', { timeout: WORKSPACE_TEST_TIMEOUT_MS }, () => {
   it('executes only the bundled quick-task from durable intent, pins before queuing and never autosaves parent edits', async () => {
     vi.stubEnv('CEZ_DRY_RUN', '1');
     const { root, parentPath, first, second } = await fixture();
@@ -376,7 +380,7 @@ describe('RunManager.enqueueOwnedRun', { timeout: 15_000 }, () => {
   });
 });
 
-describe('owned workspace continuation and queued recovery', { timeout: 15_000 }, () => {
+describe('owned workspace continuation and queued recovery', { timeout: WORKSPACE_TEST_TIMEOUT_MS }, () => {
   it.each(['missing', 'invalid-marker'])('never resumes in the root or rematerializes after %s resource identity', async (failure) => {
     vi.stubEnv('CEZ_DRY_RUN', '1');
     const { root, second } = await fixture();
@@ -412,7 +416,7 @@ describe('owned workspace continuation and queued recovery', { timeout: 15_000 }
 });
 
 
-describe('removeOwnedWorkspace verified retryable destruction', { timeout: 15_000 }, () => {
+describe('removeOwnedWorkspace verified retryable destruction', { timeout: WORKSPACE_TEST_TIMEOUT_MS }, () => {
   it('preserves owned resources when shared mutation coordination is unavailable', async () => {
     const { root, first } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), first);
@@ -888,7 +892,7 @@ describe('removeOwnedWorkspace verified retryable destruction', { timeout: 15_00
 });
 
 
-describe('owned resources bypass generic cleanup', { timeout: 15_000 }, () => {
+describe('owned resources bypass generic cleanup', { timeout: WORKSPACE_TEST_TIMEOUT_MS }, () => {
   it('preserves an owned orphan and receipt even when its run index is absent', async () => {
     const { root, first } = await fixture(); const workspace = await createOwnedWorkspace(root, randomUUID(), first);
     expect(await pruneOrphans(root, new Set())).not.toContain(workspace.ownerRunId);
