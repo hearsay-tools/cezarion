@@ -47,7 +47,9 @@ function isTransientGhError(error) {
   if (/HTTP 5\d\d\b/.test(text)) return true;
   if (/HTTP 429\b/.test(text) || /secondary rate limit/i.test(text)) return true;
   if (/HTTP 4\d\d\b/.test(text)) return false;
-  return /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|connection reset|connection refused|timed? ?out|TLS handshake|unexpected EOF|stream error/i.test(text);
+  // `gh` is Go: its transport errors read `dial tcp …`, `lookup <host> …`, `write tcp …` rather
+  // than Node's E-codes, so match Go's net-error shapes as a class, not one phrase at a time.
+  return /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|\b(?:dial|read|write) tcp\b|\blookup \S+|no such host|name resolution|network is unreachable|broken pipe|connection reset|connection refused|timed? ?out|TLS handshake|unexpected EOF|stream error/i.test(text);
 }
 
 function withGhRetry(gh, sleep, delaysMs = GH_RETRY_DELAYS_MS) {

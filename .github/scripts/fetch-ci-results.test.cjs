@@ -261,6 +261,10 @@ test('network resets and secondary rate limits are retried like 5xx', () => {
     'read tcp: connection reset by peer',
     'Post "https://api.github.com/graphql": dial tcp: i/o timeout',
     'Get "https://api.github.com/repos/o/r/actions/runs/42/jobs?per_page=100": dial tcp 140.82.112.6:443: connect: connection refused',
+    'Get "https://api.github.com/graphql": dial tcp: lookup api.github.com on 127.0.0.53:53: no such host',
+    'Get "https://api.github.com/graphql": dial tcp: lookup api.github.com: Temporary failure in name resolution',
+    'Get "https://api.github.com/graphql": dial tcp 140.82.112.6:443: connect: network is unreachable',
+    'Get "https://api.github.com/graphql": write tcp 10.1.0.4:51234->140.82.112.6:443: write: broken pipe',
     'HTTP 429: Too Many Requests',
     'HTTP 403: You have exceeded a secondary rate limit',
   ]) {
