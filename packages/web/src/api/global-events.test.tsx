@@ -2142,6 +2142,11 @@ describe('requested list attachment and recovery lifecycle (#795)', () => {
     expect(window.__cezLive).toBe(false)
     source.emit('ping', '')
     expect(window.__cezLive).toBe(true)
+    source.drop() // the shared feed ended and waits out its retry: nothing reaches the reducers
+    expect(window.__cezLive).toBe(false)
+    source.open()
+    source.emit('ping', '')
+    expect(window.__cezLive).toBe(true)
     view.unmount()
     expect(window.__cezLive).toBe(false)
   })

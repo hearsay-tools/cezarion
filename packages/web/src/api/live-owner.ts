@@ -37,6 +37,9 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
   const reads = new Map<string, ReadJob>()
   let tick: ReturnType<typeof setInterval> | undefined
   let scheduled = false, disposed = false, workspaceReady = false
+  // The workspace feed ended after it was ready and waits out its retry delay. Documents were told
+  // at once (`disconnect`), so the next start still owes them a `reconnect` (hearsay-tools/cezarion#1069).
+  let workspaceDropped = false
   let generation: string | undefined
   const held = (kind?: LiveDemand['kind']) => [...documents].flatMap(doc => [...doc.entries.values()]
     .filter(entry => !entry.paused && (!kind || entry.demand.kind === kind)).map(entry => ({ doc, entry })))
@@ -84,8 +87,9 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
     const controller = new AbortController()
     lane.controller = controller; lane.lastFrame = Date.now()
     if (kind === 'workspace') {
-      if (workspaceReady) for (const { doc, entry } of held('workspace')) deliver(doc, entry, { event: 'reconnect', data: '', id: '' })
+      if (workspaceReady || workspaceDropped) for (const { doc, entry } of held('workspace')) deliver(doc, entry, { event: 'reconnect', data: '', id: '' })
       workspaceReady = false
+      workspaceDropped = false
     }
     const runs = new Map<string, LiveRunDemand>()
     if (kind === 'runs') for (const { entry } of held('run')) {
@@ -111,6 +115,13 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
     }, controller.signal).catch(failure).finally(() => {
       if (lane.controller !== controller || controller.signal.aborted || disposed) return
       lane.controller = undefined
+      // Say so now, not after the retry delay: until the next attachment ping nothing reaches the
+      // documents, and a late subscriber must not get the synthetic ready ping either.
+      if (kind === 'workspace' && workspaceReady) {
+        for (const { doc, entry } of held('workspace')) deliver(doc, entry, { event: 'disconnect', data: '', id: '' })
+        workspaceReady = false
+        workspaceDropped = true
+      }
       lane.retry = setTimeout(() => { lane.retry = undefined; startLane(kind) }, 1_500)
     })
   }

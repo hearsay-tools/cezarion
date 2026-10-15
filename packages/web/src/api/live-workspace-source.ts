@@ -16,6 +16,12 @@ export class LiveWorkspaceSource extends EventTarget {
       reset: () => { if (this.readyState !== 2) { this.readyState = 0; ready() } },
       frame: frame => {
         if ('data' in frame && frame.event === 'reconnect') { this.readyState = 0; ready(); return }
+        // The shared feed dropped and is retrying: CONNECTING, as a native EventSource reports
+        // between attempts. The `reconnect` that follows reopens (hearsay-tools/cezarion#1069).
+        if ('data' in frame && frame.event === 'disconnect') {
+          if (this.readyState === 1) { this.readyState = 0; this.dispatchEvent(new Event('error')) }
+          return
+        }
         if ('data' in frame) this.dispatchEvent(new MessageEvent(frame.event, { data: frame.data }))
       },
     })
