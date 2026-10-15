@@ -172,3 +172,9 @@ describe('delegation rungs', () => {
     expect(deriveAttention(invalid)).toMatchObject({ bucket: 'waiting', label: 'needs you' });
   });
 });
+
+it('keeps a native permission prompt above worker-wait attention (hearsay-tools/cezarion#1049)', () => {
+  const waiting = { status: 'waiting' as const, hasPendingPermission: true,
+    delegation: { role: 'root' as const, wait: { phase: 'parked' as const, workerIds: ['child'] } } };
+  expect(deriveAttention(waiting as AttentionInput)).toMatchObject({ bucket: 'permission', label: 'needs permission' });
+});

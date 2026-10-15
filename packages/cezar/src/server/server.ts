@@ -1,3 +1,4 @@
+import { permissionDecisionSchema, runIdParamSchema as permissionRunIdParamSchema } from '@open-mercato/cezar-contract';
 import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
 import { CheckoutProgressCache } from './checkout-progress.ts';
 import { checkoutProgressParamsSchema } from '@open-mercato/cezar-contract';
@@ -4302,6 +4303,17 @@ export function createApp(deps: ServerDeps) {
 
     // Live-session participation (spec 002): deliver a user message (text +
     // pasted screenshots) into the run's open claude session.
+    .post('/runs/:id/permissions', paramZodValidator(permissionRunIdParamSchema), jsonZodValidator(permissionDecisionSchema), (c) => {
+      const { store, manager } = c.get('project');
+      const { id } = c.req.valid('param');
+      if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
+      const { requestId, optionId } = c.req.valid('json');
+      if (!manager.respondPermission(id, requestId, optionId)) {
+        return c.json({ error: 'permission request is no longer available or option is invalid' }, 409);
+      }
+      return c.json({ delivered: true as const });
+    })
+
     .post('/runs/:id/messages', jsonZodValidator(messageSchema), async (c) => {
       const { store, manager } = c.get('project');
       const id = c.req.param('id');

@@ -1,6 +1,6 @@
 import type { ExtractSchema } from 'hono/types';
 import { describe, expect, it } from 'vitest';
-import { archiveFinishedRequestSchema, pinRunInputSchema, setWorkspaceUiStateInputSchema } from '@open-mercato/cezar-contract';
+import { archiveFinishedRequestSchema, permissionDecisionSchema, pinRunInputSchema, setWorkspaceUiStateInputSchema } from '@open-mercato/cezar-contract';
 import type { z } from 'zod';
 import type { AppType } from './app-type.ts';
 
@@ -67,6 +67,7 @@ describe('every mutating route carries a typed body into AppType', () => {
     Assert<HasTypedBody<'/api/v1/runs/archive-finished', '$post'>>,
     Assert<HasTypedBody<'/api/v1/runs/:id/continue', '$post'>>,
     Assert<HasTypedBody<'/api/v1/runs/:id/messages', '$post'>>,
+    Assert<HasTypedBody<'/api/v1/runs/:id/permissions', '$post'>>,
     Assert<HasTypedBody<'/api/v1/runs/:id/open-in', '$post'>>,
     Assert<HasTypedBody<'/api/v1/runs/:id/git/commit', '$post'>>,
     Assert<HasTypedBody<'/api/v1/runs/:id/queued-messages/:msgId', '$patch'>>,
@@ -78,6 +79,8 @@ describe('every mutating route carries a typed body into AppType', () => {
     Assert<HasTypedBody<'/api/v1/workspace/application-update/apply', '$post'>>,
     Assert<HasTypedBody<'/api/v1/workspace/application-update/restart', '$post'>>,
   ];
+
+  type _PermissionInput = Assert<Mutual<z.infer<typeof permissionDecisionSchema>, Schema['/api/v1/runs/:id/permissions']['$post']['input']['json']>>;
 
   type WorkspaceUiStatePutBody = Schema['/api/v1/workspace/ui-state']['$put']['input']['json'];
   type _WorkspaceUiStateInputCheck = Assert<
@@ -103,6 +106,7 @@ describe('every mutating route carries a typed body into AppType', () => {
 
   type _InputChecks = [
     Assert<HasTypedInput<'/api/v1/runs/:id/pin', '$post', 'param'>>,
+    Assert<HasTypedInput<'/api/v1/runs/:id/permissions', '$post', 'param'>>,
     Assert<HasTypedInput<'/api/v1/providers/:provider/enabled', '$put', 'param'>>,
     Assert<HasTypedInput<'/api/v1/providers/:provider/retry', '$post', 'param'>>,
     Assert<HasTypedInput<'/api/v1/worktrees/:runId/reclaim', '$post', 'param'>>,

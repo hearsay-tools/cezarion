@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import type {
   apiRunSchema,
+  permissionDecisionResponseSchema,
   fileLinkResultSchema,
   filePreviewDataSchema,
   artifactListSchema,
@@ -69,6 +70,7 @@ describe('src/contract/runs.ts matches the runs routes exactly', () => {
   type ArchiveFinished200 = InferResponseType<Runs['archive-finished']['$post'], 200>;
   type Cancel200 = InferResponseType<Run['cancel']['$post'], 200>;
   type Message200 = InferResponseType<Run['messages']['$post'], 200>;
+  type _PermissionResponse = Assert<Exact<z.infer<typeof permissionDecisionResponseSchema>, InferResponseType<Run['permissions']['$post'], 200>>>;
   type QueuedPatch200 = InferResponseType<Run['queued-messages'][':msgId']['$patch'], 200>;
   type QueuedDelete200 = InferResponseType<Run['queued-messages'][':msgId']['$delete'], 200>;
   type Finish200 = InferResponseType<Run['finish']['$post'], 200>;

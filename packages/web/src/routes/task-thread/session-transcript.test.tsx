@@ -686,3 +686,35 @@ it('overlays agent-input receipts onto attributed notes without mutating thread 
   expect(header('Read wake')).toBe(`Worker lifecycle context for parent ${parentRunId} · Read`)
   expect(header('Missing receipt')).toBe(`Worker lifecycle context for parent ${parentRunId}`)
 })
+
+describe('compact current permission context', () => {
+  const permissionEvents = (resolved = false) => asRunEvents([
+    { type: 'permission.requested', requestId: 'older', title: 'Older approval', options: [{ id: 'allow', label: 'Allow once', kind: 'allow_once' }] },
+    ...(resolved ? [{ type: 'permission.resolved', requestId: 'older', optionId: 'allow' }] : []),
+  ])
+  it('shows pending cards outside the visible history page exactly once', () => {
+    const current = reduceThread(permissionEvents())
+    const visible = reduceThread(asRunEvents([{ type: 'text', text: 'Latest page' }]))
+    const sections = mainTranscriptSections(run(), visible, current)
+    expect(sections.flatMap(section => section.entries).filter(entry => entry.kind === 'permission')).toMatchObject([{ requestId: 'older', status: 'pending' }])
+    expect(mainTranscriptSections(run(), current, current).flatMap(section => section.entries).filter(entry => entry.kind === 'permission')).toHaveLength(1)
+  })
+  it('overlays current resolution onto an older visible card without mutating either state', () => {
+    const visible = reduceThread(permissionEvents())
+    const current = reduceThread(permissionEvents(true))
+    expect(mainTranscriptSections(run(), visible, current).flatMap(section => section.entries).filter(entry => entry.kind === 'permission')).toMatchObject([{ requestId: 'older', status: 'resolved', optionId: 'allow' }])
+    expect(visible.turns.flatMap(turn => turn.items).filter(entry => entry.kind === 'permission')).toMatchObject([{ requestId: 'older', status: 'pending' }])
+  })
+  it('disables a visible pending card retired from authoritative current context', () => {
+    const visible = reduceThread(permissionEvents())
+    const current = reduceThread([])
+    expect(mainTranscriptSections(run(), visible, current).flatMap(section => section.entries).filter(entry => entry.kind === 'permission')).toMatchObject([{ requestId: 'older', status: 'expired' }])
+  })
+  it('renders permission entries in document and panel transcripts', () => {
+    const entries = reduceThread(permissionEvents()).turns.flatMap(turn => turn.items)
+    const { rerender } = render(<SessionTranscript runId="r1" viewId="permission" sections={agentTranscriptSections('a', entries)} mode="document" />)
+    expect(screen.getByText('Older approval')).toBeTruthy()
+    rerender(<SessionTranscript runId="r1" viewId="permission" sections={agentTranscriptSections('a', entries)} mode="panel" />)
+    expect(screen.getByText('Older approval')).toBeTruthy()
+  })
+})

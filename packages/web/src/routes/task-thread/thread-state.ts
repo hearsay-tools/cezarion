@@ -15,6 +15,7 @@ import {
   type StopReason,
   type UiAskQuestion,
   type UiItem,
+  type UiPermissionRequestedEvent,
   type UiToolItem,
 } from '@open-mercato/cezar-api-client'
 
@@ -113,6 +114,15 @@ export interface ThreadAsk {
   answeredBy?: 'human' | 'parent'
 }
 
+/** Native approvals belong to the live request that offered the choices, never a later turn. */
+export type ThreadPermission = Omit<UiPermissionRequestedEvent, 'type'> & {
+  kind: 'permission'
+  id: string
+  status: 'pending' | 'resolved' | 'expired'
+  optionId?: string
+  reason?: string
+}
+
 /** A persisted, cezar-owned recovery marker for a provider's runtime authentication failure. */
 export interface ThreadProviderAuthRequired {
   kind: 'provider-auth-required'
@@ -139,7 +149,7 @@ export interface ThreadPreviewServer {
 
 /** Event time belongs to the web transcript, not the backend UiItem protocol. */
 export type ThreadMessage = Extract<UiItem, { kind: 'message' }> & { ts?: string }
-export type ThreadEntry = Exclude<UiItem, { kind: 'message' }> | ThreadMessage | ThreadNote | ThreadImage | ThreadAsk | ThreadProviderAuthRequired | ThreadConversationMessage | ThreadPreviewServer
+export type ThreadEntry = Exclude<UiItem, { kind: 'message' }> | ThreadMessage | ThreadNote | ThreadImage | ThreadAsk | ThreadPermission | ThreadProviderAuthRequired | ThreadConversationMessage | ThreadPreviewServer
 
 export interface ThreadTurn {
   /** Stable source-derived render key. The opening event sequence survives prepended pages;
@@ -424,6 +434,12 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
    *  it client-side (only one ask is ever pending — the agent asks once, then
    *  parks `waiting` until the user answers). */
   let pendingAsk: ThreadAsk | undefined
+  const permissions = new Map<string, ThreadPermission>()
+  const expirePermissions = () => {
+    for (const permission of permissions.values()) {
+      if (permission.status === 'pending') permission.status = 'expired'
+    }
+  }
 
   const newTurn = (sourceSeq?: number): DraftTurn => {
     turnSeq += 1
@@ -683,6 +699,7 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
         break
       }
       case 'turn.completed': {
+        expirePermissions()
         const turnId = str(event.turnId)
         // Newest match first (lib is ES2022, so no findLast): per-session turn ids repeat
         // across steps, and a completion always belongs to the most recent turn wearing it.
@@ -899,11 +916,50 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
         }
         break
       }
+      case 'session.started': {
+        expirePermissions()
+        break
+      }
       case 'session.ended': {
+        expirePermissions()
         sessionEnded = {
           reason: (str(event.reason) ?? 'end_turn') as StopReason,
           ...(str(event.message) !== undefined ? { message: str(event.message) } : {}),
         }
+        break
+      }
+      case 'permission.requested': {
+        const requestId = str(event.requestId)
+        const title = str(event.title)
+        if (!requestId || !title || permissions.has(requestId) || !Array.isArray(event.options) || event.options.length === 0) break
+        const options = event.options
+        if (!options.every((option): option is UiPermissionRequestedEvent['options'][number] =>
+          isRecord(option) && typeof option.id === 'string' && option.id !== '' && typeof option.label === 'string' && option.label !== '' &&
+          ['allow_once', 'allow_always', 'reject_once', 'reject_always'].includes(String(option.kind)),
+        )) break
+        if (new Set(options.map(option => option.id)).size !== options.length) break
+        const permission: ThreadPermission = {
+          kind: 'permission', id: `permission:${requestId}`, requestId, title,
+          options: options.map(option => ({ ...option })), status: 'pending',
+          ...(str(event.itemId) !== undefined ? { itemId: str(event.itemId) } : {}),
+          ...(str(event.details) !== undefined ? { details: str(event.details) } : {}),
+        }
+        permissions.set(requestId, permission)
+        currentTurn().entries.push({ origin: 'meta', entry: permission })
+        break
+      }
+      case 'permission.resolved': {
+        const permission = permissions.get(str(event.requestId) ?? '')
+        if (!permission || permission.status !== 'pending') break
+        const optionId = str(event.optionId)
+        if (optionId !== undefined && permission.options.some(option => option.id === optionId)) {
+          permission.status = 'resolved'
+          permission.optionId = optionId
+        } else {
+          permission.status = 'expired'
+        }
+        const reason = str(event.reason)
+        if (reason !== undefined) permission.reason = reason
         break
       }
       case 'ask.requested': {
@@ -964,7 +1020,7 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
       case 'session':
         break
 
-      // session.started, usage.updated, permission.* and anything future: header/telemetry
+      // session.started, usage.updated and anything future: header/telemetry
       // material or not yet rendered — never guessed at in the thread body. (Deliberate
       // divergence from the legacy raw-JSON-note fallback: an unknown type renders as
       // nothing rather than as debug output.)

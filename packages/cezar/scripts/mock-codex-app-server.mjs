@@ -82,6 +82,7 @@ const emit = (obj) => {
 let lateStartAck;
 let startSerial = 0;
 let resumeAfterAsk = false;
+let pendingApprovalTurn;
 const rl = createInterface({ input: process.stdin });
 let echoSerial = 0;
 let ciWire;
@@ -126,6 +127,15 @@ rl.on('line', async (line) => {
     return;
   }
   if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify(msg)}\n`);
+  if ((msg.id === 'approval-1' || msg.id === 'approval-unsupported-1') && pendingApprovalTurn && (msg.result || msg.error)) {
+    const turnId = pendingApprovalTurn; pendingApprovalTurn = undefined;
+    const text = `${msg.error ? `Approval error: ${msg.error.code}` : `Approval response: ${JSON.stringify(msg.result)}`}\nCEZ:DONE`;
+    emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId,
+      item: { type: 'agentMessage', id: 'item_approval_reply', text } } });
+    emit({ method: 'serverRequest/resolved', params: { threadId: 'th_mock_1', requestId: msg.id } });
+    emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: turnId, status: msg.result?.decision === 'cancel' ? 'interrupted' : 'completed' } } });
+    return;
+  }
   if (msg.id === 'ask-bad-1' && msg.error) {
     // The runner rejected the malformed payload with -32602, as it must. A real
     // app-server carries on from there, so the turn still completes — a mock
@@ -523,6 +533,17 @@ rl.on('line', async (line) => {
       // No completion for this second child item: parent turn-end must not flush it into v1.
       emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_child', turnId: 'turn_child', itemId: 'item_child_partial', delta: 'Child review still streaming.' } });
       emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
+      return;
+    }
+    if (turnText.includes('mock:approval')) {
+      pendingApprovalTurn = 'turn_mock_1';
+      const unsupported = turnText.includes('mock:approval-unsupported');
+      emit({ id: unsupported ? 'approval-unsupported-1' : 'approval-1',
+        method: unsupported ? 'item/unsupported/requestApproval' : 'item/commandExecution/requestApproval',
+        params: { threadId: 'th_mock_1', turnId: pendingApprovalTurn, itemId: 'item_approval_1',
+          startedAtMs: 1, command: 'git status --short', cwd: '/repo', reason: 'Native approval requested',
+          availableDecisions: ['accept', 'acceptForSession', 'decline', 'cancel'] } });
+      // No turn/completed until the matching native JSON-RPC response arrives.
       return;
     }
     if (process.env.MOCK_CODEX_ASK === '1' || turnText.includes('mock:native-codex-ask')) {

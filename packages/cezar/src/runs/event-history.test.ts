@@ -529,3 +529,14 @@ describe('compressed transcript parity', () => {
     }
   });
 });
+
+it('retains every pending approval in compact context until its exact resolution (hearsay-tools/cezarion#1049)', async () => {
+  const permission = (seq: number, requestId: string) => ({ seq, type: 'permission.requested', requestId, title: 'Run gh?', options: [{ id: 'once', label: 'Allow once', kind: 'allow_once' }] });
+  const events = [permission(1, 'one'), permission(2, 'two'), { seq: 3, type: 'user-message', text: 'accept' }];
+  const pending = await contextFrom(events);
+  expect(pending.contextEvents.filter(event => event.type === 'permission.requested').map(event => event.requestId)).toEqual(['one', 'two']);
+  const resolved = await contextFrom([...events, { seq: 4, type: 'permission.resolved', requestId: 'one', optionId: 'once' }]);
+  expect(resolved.contextEvents.filter(event => event.type === 'permission.requested').map(event => event.requestId)).toEqual(['two']);
+  const ended = await contextFrom([...events, { seq: 4, type: 'session.ended', reason: 'closed' }]);
+  expect(ended.contextEvents.some(event => event.type === 'permission.requested')).toBe(false);
+});

@@ -95,6 +95,20 @@ export async function createGitHubFixture(sessionId: string) {
     waitForGitHubSurface(scoped(pathname), target)
   }
 
+  /** Click a sub-tab, then wait until the server stores the choice that click persists.
+   *
+   *  The tab click PUTs `githubView` from the page (`saveGithubView`, routes/github/github.tsx)
+   *  and nobody awaits it. A later `rememberGithubView` from the spec could then land BEFORE
+   *  that write, and the stale view wins: the next cold load of `/github` restores `prs` and
+   *  redirects to `/github/prs` (hearsay-tools/cezarion#985, lane-2 log of four-lane run
+   *  `1791814128473-3173965`: active URL `/github/prs`, PRs `aria-current`, after the
+   *  long-title loop had just remembered `issues`). Reproduced by an env-gated hold in the e2e
+   *  server build that applies the page's `prs` PUT just after the spec's next PUT: the
+   *  long-title test failed on `waitForGitHubSurface` with the same URL and tab markup, and
+   *  passes with this wait. Read from the page so the seam stays synchronous; the unscoped
+   *  path is the boot project's, which `rememberGithubView` writes. agent-browser's `eval`
+   *  awaits a returned promise and reports its settled value (a 1.5 s `setTimeout` promise
+   *  returns `42` after 1508 ms), so each sample is the server's stored view, not a wrapper. */
   function clickGitHubTab(path: '/github' | '/github/prs', target: AgentBrowser = browser): void {
     const href = scoped(path)
     try {
@@ -104,6 +118,10 @@ export async function createGitHubFixture(sessionId: string) {
       throw githubNavFailure(target, cause)
     }
     waitForGitHubSurface(href, target)
+    const view = path === '/github' ? 'issues' : 'prs'
+    target.waitForValue(
+      `fetch('/api/v1/ui-state', { cache: 'no-store' }).then(r => r.json()).then(s => s.githubView === ${JSON.stringify(view)} || null)`,
+    )
   }
 
   return { browser, baseUrl, forgeAvailable, api, scoped, rememberGithubView, waitForGitHubSurface, openGitHub, clickGitHubTab }

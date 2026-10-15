@@ -62,20 +62,9 @@ export interface Attention {
   label: string;
 }
 
-/**
- * Whether a run is blocked on a permission prompt.
- *
- * Always false today, on purpose. The `permission` bucket is in the ladder because the spec puts
- * it there and because R2 reserves the `permission.*` agent events that will feed it — but cezar
- * emits none of them yet, and `RunRecord` carries no field that means "a tool wants approval".
- * Inventing one (say, treating every `waiting` as a permission prompt) would put a bucket in the
- * UI that no data backs. So the slot stays, wired to the truth: nothing.
- *
- * When R2 lands the events, this is the only function that changes. It reads the record alone —
- * no cockpit-only state — so the CLI and the cockpit answer it identically.
- */
-function hasPendingPermission(_run: AttentionInput): boolean {
-  return false;
+/** Permission attention comes only from a live native request, never from waiting alone. */
+function hasPendingPermission(run: AttentionInput): boolean {
+  return run.hasPendingPermission === true && (run.status === 'waiting' || run.status === 'running');
 }
 
 /**
@@ -100,7 +89,7 @@ function isUnseen(_run: AttentionInput): boolean {
  *  the same canonical function instead of inventing a second status-to-tone mapping. `activity`
  *  is optional (#490), so status-only callers keep working unchanged. Delegation uses the slim
  *  contract projection: full run records, `ApiRun`s and workspace index rows all carry it. */
-export type AttentionInput = Pick<RunRecord, 'status' | 'activity' | 'autoResumeAt' | 'hasPendingHumanAsk'> & Pick<RunIndexEntry, 'delegation'>;
+export type AttentionInput = Pick<RunRecord, 'status' | 'activity' | 'autoResumeAt' | 'hasPendingHumanAsk' | 'hasPendingPermission'> & Pick<RunIndexEntry, 'delegation'>;
 
 /** Dependency wording shared by attention and relationship details (#375). A worker can only
  * wait on requests to its parent; only roots can wait for worker completion. */

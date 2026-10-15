@@ -61,7 +61,7 @@ async function boundedText(response: Response, limit: number): Promise<string> {
 export interface HttpResult { status: number; data: unknown }
 
 /** One request to an absolute URL. JSON bodies are parsed; anything else comes back as text. */
-export async function fetchJson(url: string, init: { method?: string; body?: unknown; timeoutMs?: number; responseLimitBytes?: number } = {}): Promise<HttpResult> {
+export async function fetchJson(url: string, init: { method?: string; body?: unknown; timeoutMs?: number; responseLimitBytes?: number; signal?: AbortSignal } = {}): Promise<HttpResult> {
   let response: Response;
   let text: string;
   try {
@@ -70,7 +70,9 @@ export async function fetchJson(url: string, init: { method?: string; body?: unk
       redirect: 'error',
       headers: init.body === undefined ? {} : { 'content-type': 'application/json' },
       ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
-      signal: AbortSignal.timeout(init.timeoutMs ?? REQUEST_TIMEOUT_MS),
+      signal: init.signal
+        ? AbortSignal.any([AbortSignal.timeout(init.timeoutMs ?? REQUEST_TIMEOUT_MS), init.signal])
+        : AbortSignal.timeout(init.timeoutMs ?? REQUEST_TIMEOUT_MS),
     });
     text = await boundedText(response, response.ok ? (init.responseLimitBytes ?? RESPONSE_BYTES) : RESPONSE_BYTES);
   } catch (error) {
