@@ -8360,7 +8360,7 @@ export function skillSystemPrompt(
       '',
       `Skill files are installed on disk at: ${teamFilesDir}`,
       `Read any file this skill references (for example references/*.md) from that absolute directory. ` +
-        `It is a copy of the skill at the commit this run uses, kept outside your working directory.`,
+        `It is a copy of the skill at the commit this run uses.`,
     );
   }
   lines.push('', 'Skill instructions:', skill.body.trim());

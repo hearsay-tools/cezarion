@@ -44,12 +44,20 @@ describe('skillSystemPrompt — installed-path hint for worktree agents', () => 
   it('points a team skill at the files dir cezar materialized for it (#1024)', () => {
     const filesDir = '/home/u/.cache/cez/skill-files/org__skills/abc123/om-code-review';
     const out = skillSystemPrompt({ ...base, source: 'team', path: 'org/skills@main:om-code-review/SKILL.md' }, filesDir);
-    expect(out).toContain(`Skill files are installed on disk at: ${filesDir}`);
-    expect(out).toContain('references/*.md');
-    // A repo-root run has no separate worktree; the copy lives outside the working directory.
+    // A repo-root run has no separate worktree, and the copy may sit in the cache or
+    // in the run's own worktree, so the wording claims neither location.
     expect(out).not.toContain('separate worktree');
-    expect(out).toContain('outside your working directory');
-    expect(out.trimEnd().endsWith('Do the review.')).toBe(true);
+    expect(out).toBe([
+      'Selected skill: /om-code-review',
+      'Description: Review a diff.',
+      '',
+      `Skill files are installed on disk at: ${filesDir}`,
+      'Read any file this skill references (for example references/*.md) from that absolute directory. ' +
+        'It is a copy of the skill at the commit this run uses.',
+      '',
+      'Skill instructions:',
+      'Do the review.',
+    ].join('\n'));
   });
 });
 
