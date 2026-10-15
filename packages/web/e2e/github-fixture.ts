@@ -106,7 +106,9 @@ export async function createGitHubFixture(sessionId: string) {
    *  server build that applies the page's `prs` PUT just after the spec's next PUT: the
    *  long-title test failed on `waitForGitHubSurface` with the same URL and tab markup, and
    *  passes with this wait. Read from the page so the seam stays synchronous; the unscoped
-   *  path is the boot project's, which `rememberGithubView` writes. */
+   *  path is the boot project's, which `rememberGithubView` writes. agent-browser's `eval`
+   *  awaits a returned promise and reports its settled value (a 1.5 s `setTimeout` promise
+   *  returns `42` after 1508 ms), so each sample is the server's stored view, not a wrapper. */
   function clickGitHubTab(path: '/github' | '/github/prs', target: AgentBrowser = browser): void {
     const href = scoped(path)
     try {
