@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import { GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, type GithubItemResponse, type GithubProjectsData } from '@open-mercato/cezar-contract';
 import { fetchIssueProjects, fetchViewerLogin } from './github-filters.ts';
+import { fetchGithubMergeRequirements, type GithubMergeRequirements } from './github-merge-requirements.ts';
 import { autosaveCommit } from '../../git-worktree.ts';
 import { refNumberFromUrl } from '../../runs/run-search.ts';
 import type {
@@ -216,7 +217,9 @@ const ghPrViewSchema = z.object({
 });
 
 const mergeCheckSchema = z.object({
-  name: z.string().default('Check'),
+  name: z.string().optional(),
+  context: z.string().optional(),
+  targetUrl: z.string().nullish(),
   state: z.string().nullish(),
   status: z.string().nullish(),
   conclusion: z.string().nullish(),
@@ -2969,7 +2972,7 @@ function mergeCheckState(check: z.infer<typeof mergeCheckSchema>): ForgePrCheck[
 export function normalizeMergeState(
   raw: unknown,
   policyRaw: unknown,
-  requirements: { readable: boolean; requiredChecks: string[] } = {
+  requirements: GithubMergeRequirements = {
     readable: false,
     requiredChecks: [],
   },
@@ -2991,19 +2994,29 @@ export function normalizeMergeState(
         ? 'changes-requested'
         : pr.reviewDecision?.toUpperCase() === 'REVIEW_REQUIRED'
           ? 'review-required'
-          : 'unknown';
-  const checks: ForgePrCheck[] = (pr.statusCheckRollup ?? []).map((check) => ({
-    name: check.name,
-    state: mergeCheckState(check),
-    required: requirements.readable ? requirements.requiredChecks.includes(check.name) : null,
-    ...(check.detailsUrl?.startsWith('https://') || check.detailsUrl?.startsWith('http://')
-      ? { url: check.detailsUrl }
-      : {}),
-  }));
+          : !pr.reviewDecision?.trim() && requirements.readable && requirements.requiredApprovingReviews === 0
+            ? 'not-required'
+            : 'unknown';
+  const checks: ForgePrCheck[] = (pr.statusCheckRollup ?? []).map((check) => {
+    const name = check.name ?? check.context ?? 'Check';
+    const url = check.detailsUrl ?? check.targetUrl;
+    return {
+      name,
+      state: mergeCheckState(check),
+      required: requirements.readable ? requirements.requiredChecks.includes(name) : null,
+      ...(url?.startsWith('https://') || url?.startsWith('http://') ? { url } : {}),
+    };
+  });
+  if (requirements.readable) {
+    for (const name of requirements.requiredChecks) {
+      if (!checks.some((check) => check.name === name)) checks.push({ name, state: 'pending', required: true });
+    }
+  }
   const methods: ForgeMergeMethod[] = [];
-  if (policy.allow_squash_merge) methods.push('squash');
-  if (policy.allow_merge_commit) methods.push('merge');
-  if (policy.allow_rebase_merge) methods.push('rebase');
+  const methodAllowed = (method: ForgeMergeMethod) => requirements.allowedMergeMethods?.includes(method) ?? true;
+  if (policy.allow_squash_merge && methodAllowed('squash')) methods.push('squash');
+  if (policy.allow_merge_commit && methodAllowed('merge')) methods.push('merge');
+  if (policy.allow_rebase_merge && methodAllowed('rebase')) methods.push('rebase');
   const defaultMethod =
     policy.squash_merge_commit_title && methods.includes('squash')
       ? 'squash'
@@ -3027,7 +3040,14 @@ export function normalizeMergeState(
   } else if (reviewDecision === 'changes-requested' || reviewDecision === 'review-required') {
     eligibility = 'blocked';
     blockers.push({ code: 'reviews', message: reviewDecision === 'changes-requested' ? 'Changes were requested.' : 'A required review is missing.' });
-  } else if (reviewDecision === 'unknown' || !requirements.readable) {
+  } else if ((requirements.unresolvedThreads ?? 0) > 0) {
+    eligibility = 'blocked';
+    blockers.push({ code: 'review-threads', message: 'Required review threads must be resolved before merging.' });
+  } else if (
+    reviewDecision === 'unknown' || !requirements.readable ||
+    (requirements.requiresThreadResolution && requirements.unresolvedThreads == null) ||
+    checks.some((check) => check.required === true && check.state === 'unknown')
+  ) {
     eligibility = 'unknown';
     blockers.push({
       code: 'rules-unknown',
@@ -3036,6 +3056,7 @@ export function normalizeMergeState(
   } else if (checks.some((check) => check.state === 'pending') || pr.mergeStateStatus?.toUpperCase() === 'UNSTABLE') {
     eligibility = 'pending';
     blockers.push({ code: 'pending', message: 'Checks or GitHub mergeability are still pending.' });
+  // GitHub's aggregate still enforces other rules and required check provider identities.
   } else if (
     mergeable !== 'mergeable' ||
     !['CLEAN', 'HAS_HOOKS'].includes(pr.mergeStateStatus?.toUpperCase() ?? '') ||
@@ -3111,20 +3132,13 @@ async function fetchPrMergeState(
       'number,title,url,state,isDraft,headRefName,baseRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup',
     ]);
     const parsedPr = mergePrSchema.parse(JSON.parse(prOut));
-    const [policyOut, requiredChecks] = await Promise.all([
+    const [policyOut, requirements] = await Promise.all([
       gh(repoRoot, ['api', `repos/${repoRef.owner}/${repoRef.repo}`]),
-      gh(repoRoot, [
-        'api',
-        `repos/${repoRef.owner}/${repoRef.repo}/branches/${encodeURIComponent(parsedPr.baseRefName)}/protection/required_status_checks`,
-        '--jq',
-        '[.contexts[]?, .checks[]?.context] | unique',
-      ])
-        .then((output) => ({ readable: true, requiredChecks: z.array(z.string()).parse(JSON.parse(output)) }))
-        .catch(() => ({ readable: false, requiredChecks: [] as string[] })),
+      fetchGithubMergeRequirements((args) => gh(repoRoot, args), repoRef.owner, repoRef.repo, parsedPr.baseRefName, number),
     ]);
     const value: ForgePrMergeStateResult = {
       available: true,
-      mergeState: normalizeMergeState(parsedPr, JSON.parse(policyOut), requiredChecks),
+      mergeState: normalizeMergeState(parsedPr, JSON.parse(policyOut), requirements),
     };
     mergeStateCache.set(key, { at: Date.now(), value });
     return value;

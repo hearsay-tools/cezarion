@@ -143,25 +143,7 @@ export interface ForgePrCheck {
   url?: string;
 }
 
-export interface ForgePrMergeState {
-  number: number;
-  title: string;
-  url: string;
-  state: 'open' | 'closed' | 'merged';
-  isDraft: boolean;
-  headRef: string;
-  baseRef: string;
-  headSha: string;
-  mergeable: 'mergeable' | 'conflicting' | 'unknown';
-  reviewDecision: 'approved' | 'changes-requested' | 'review-required' | 'unknown';
-  checks: ForgePrCheck[];
-  methods: ForgeMergeMethod[];
-  defaultMethod: ForgeMergeMethod | null;
-  eligibility: 'ready' | 'blocked' | 'pending' | 'unauthorized' | 'terminal' | 'unknown';
-  blockers: Array<{ code: string; message: string }>;
-  canMerge: boolean;
-  canOverride: boolean;
-}
+export type ForgePrMergeState = import('@open-mercato/cezar-contract').GithubPrMergeState;
 
 export type ForgePrMergeStateResult =
   | { available: true; mergeState: ForgePrMergeState }

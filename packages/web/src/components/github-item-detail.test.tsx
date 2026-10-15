@@ -8,7 +8,7 @@ import { queryKeys } from '@/api/queries'
 import { createQueryClient } from '@/api/query-client'
 import { ReferenceChip } from '@/components/reference-chip'
 import { ReferenceStatusProvider } from '@/components/reference-status'
-import { setApiScope, type GithubItem } from '@open-mercato/cezar-api-client'
+import { setApiScope, type GithubItem, type GithubPrMergeStateResponse } from '@open-mercato/cezar-api-client'
 
 import { GithubItemDetail } from './github-item-detail'
 
@@ -24,7 +24,7 @@ const PR_42: GithubItem = {
   comments: 0,
 }
 
-const MERGE_STATE = {
+const MERGE_STATE: Extract<GithubPrMergeStateResponse, { available: true }> = {
   available: true,
   mergeState: {
     number: 42,
@@ -47,7 +47,7 @@ const MERGE_STATE = {
   },
 }
 
-const CONFLICTING_STATE = {
+const CONFLICTING_STATE: typeof MERGE_STATE = {
   ...MERGE_STATE,
   mergeState: { ...MERGE_STATE.mergeState, mergeable: 'conflicting', eligibility: 'blocked', canMerge: false },
 }
@@ -98,6 +98,29 @@ describe('GithubItemDetail outside the GitHub view', () => {
     renderDetail(PR_42)
     await waitFor(() => expect(document.querySelector('[data-slot="gh-merge-box"]')?.textContent).toContain('Ready to merge'))
   })
+
+  it('shows confirmed optional reviews as passing and enables normal merging', async () => {
+    mergeState = { ...MERGE_STATE, mergeState: { ...MERGE_STATE.mergeState, reviewDecision: 'not-required', checks: [{ name: 'test', state: 'passing', required: true }] } }
+    renderDetail(PR_42)
+    const label = await screen.findByText('Reviews: not required')
+    expect(label.closest('li')?.querySelector('[data-slot="gh-merge-status-passing"]')).not.toBeNull()
+    expect(screen.getByText('test · passing · required')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Squash and merge' }).hasAttribute('disabled')).toBe(false)
+    expect(screen.queryByText('Merge without waiting for requirements')).toBeNull()
+  })
+
+  it.each(['approved', 'changes-requested', 'review-required', 'unknown'] as const)(
+    'preserves the %s review label and merge controls', async (reviewDecision) => {
+      const ready = reviewDecision === 'approved'
+      mergeState = { ...MERGE_STATE, mergeState: {
+        ...MERGE_STATE.mergeState, reviewDecision, canMerge: ready, canOverride: !ready,
+        eligibility: ready ? 'ready' : reviewDecision === 'unknown' ? 'unknown' : 'blocked',
+      } }
+      renderDetail(PR_42)
+      await screen.findByText(`Reviews: ${reviewDecision.replaceAll('-', ' ')}`)
+      expect(screen.getByRole('button', { name: 'Squash and merge' }).hasAttribute('disabled')).toBe(!ready)
+    },
+  )
 
   it('renders no Files changed link for an issue', () => {
     renderDetail({ ...PR_42, kind: 'issue', url: 'https://github.com/acme/demo/issues/42' })
