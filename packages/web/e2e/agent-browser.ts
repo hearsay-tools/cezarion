@@ -316,6 +316,12 @@ export function servedRoot(): string {
  *
  * The shared test env pins the same variable under `.ai/qa/cez-home`
  * (`.ai/scripts/test-env-up.sh`); this is that rule for the specs that boot their own server.
+ *
+ * No ambient `CEZ_*` variable reaches the fixture (hearsay-tools/cezarion#1045). An agent's shell
+ * inherits the live cockpit's opt-ins (`CEZ_PREVIEW=1`, `CEZ_AUTOMATIONS=1`, …) and its per-task
+ * plumbing (`CEZ_TASK_ID`, `CEZ_DELEGATION_*`, …); spreading them turned features on that CI never
+ * enables, and with preview on the task view rebuilt when health arrived and closed the hand-off
+ * dialog. A spec that needs a flag passes it in `extra`, which is applied after the scrub.
  */
 export function fixtureServeEnv(
   dataRoot: string,
@@ -325,7 +331,11 @@ export function fixtureServeEnv(
   // Git has multiple redirection mechanisms (including numbered config entries).
   // None belongs to a disposable fixture. Use this exact environment for discovery
   // and the child; otherwise a safe preflight can precede an unsafe CLI boot.
-  const env: NodeJS.ProcessEnv = { ...process.env, ...extra }
+  // Every ambient CEZ_* goes, not a list of known opt-ins: a denylist is one forgotten flag away
+  // from this leak again (the unit-test scrub of hearsay-tools/cezarion#820 missed CEZ_FOLLOWUPS),
+  // and nothing a fixture needs arrives through the parent's environment.
+  const ambient = Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('CEZ_'))
+  const env: NodeJS.ProcessEnv = { ...Object.fromEntries(ambient), ...extra }
   for (const key of Object.keys(env)) if (key.toUpperCase().startsWith('GIT_')) delete env[key]
   // Cezar pins TMPDIR inside the ambient checkout. Without a ceiling, discovery
   // climbs into that checkout and a non-Git fixture looks nested and unsafe.

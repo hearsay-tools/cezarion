@@ -61,7 +61,7 @@ describe('automations on the shared environment', () => {
   it('creates a GitHub check paused, previews safely, enables from a baseline, and exposes the log', async ({ skip }) => {
     skip(
       !automationsAvailable,
-      'automations are opt-in; run CEZ_AUTOMATIONS=1 npm run test:e2e -- --force',
+      'automations are opt-in; run npm run test:e2e -- --server-env=CEZ_AUTOMATIONS=1',
     )
     const name = `E2E issue triage ${process.pid}`
     browser.goto(`${baseUrl}/p/${bootProject}/automations/new`)

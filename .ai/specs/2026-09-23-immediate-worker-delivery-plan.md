@@ -891,7 +891,7 @@ it('steers held messages behind a native-ask answer on codex (#505)', async () =
 
 ```bash
 npm run typecheck && npm test && npm run test:unit && npm run build && TMPDIR=/tmp npm run test:package
-env -u CEZ_AUTOMATIONS npm run test:e2e
+npm run test:e2e
 ```
 
 Expected: all green; `TEST_E2E_STATUS=passed`.
