@@ -566,7 +566,7 @@ class OpencodeSession implements AgentSession {
     }
     const hasExited = trackChildExit(child);
     boundOutputDrainAfterExit(child);
-    // `exit` settles process liveness, not its pipes. The shared 250ms drain
+    // `exit` settles process liveness, not its pipes. The shared post-exit drain
     // bound prevents an inherited descendant pipe from retaining this session.
     const outputDrained = Promise.all([child.stdout, child.stderr].map(stream =>
       finished(stream, { cleanup: true }).catch(() => undefined),
