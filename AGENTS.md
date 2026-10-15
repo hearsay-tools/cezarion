@@ -221,6 +221,13 @@ affected checks. A targeted run, skipped browser suite, or old pass for changed
 inputs never counts as a full pass. CI independently enforces the complete gate
 in `.github/workflows/ci.yml`; check its required aggregate before merge.
 
+A full local Vitest run (or one shard) that fails only under host load can still
+back a PR. Record the load average (`uptime`) and the failed files, rerun those
+files (`npm test -- <files>`) until they pass, state both in the PR's
+Verification, and let CI's Vitest shards decide. Squeal reports and
+`squeal why <check>` output are the same evidence. The rerun is not a full pass;
+green CI shards are. A failure in a file the branch touches never qualifies: fix it.
+
 CI's final gate covers:
 
 ```bash
