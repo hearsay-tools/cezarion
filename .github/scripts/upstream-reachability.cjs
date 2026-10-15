@@ -7,7 +7,9 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { isPackageSource, urlEntrySpecifiers, urlEntryCandidates, staticImportSpecifiers } = require('./upstream-targets.cjs');
+const {
+  isPackageSource, urlEntrySpecifiers, urlEntryCandidates, staticImportSpecifiers, distSourceCandidates, isRepoScript, distImportCandidates,
+} = require('./upstream-targets.cjs');
 
 /** Rounds of "bundle, then add the files the bundle starts by path" before giving up. */
 const MAX_ROUNDS = 5;
@@ -37,10 +39,13 @@ function packageDirs(cwd) {
   } catch { return []; }
 }
 
+function firstFile(cwd, candidates) {
+  return candidates.find((f) => isFile(path.join(cwd, f)));
+}
+
 /** The first existing source file a manifest target names: `dist/x.js` maps to `src/x.ts`. */
 function sourceOf(cwd, pkgDir, target) {
-  const rel = path.posix.join(pkgDir, target.replace(/^\.\/dist\/|^dist\//, 'src/'));
-  return [rel, ...urlEntryCandidates(rel, `./${path.posix.basename(rel)}`)].find((f) => isFile(path.join(cwd, f)));
+  return firstFile(cwd, distSourceCandidates(pkgDir, target));
 }
 
 function exportTargets(exportsField) {
@@ -53,12 +58,32 @@ function exportTargets(exportsField) {
   return out;
 }
 
+/** Package source that repo scripts reach through a package's built `dist/`, which no bundle
+ *  from source sees (`scripts/release.mjs`, `packages/cezar/scripts/check-pack.mjs`). The
+ *  scripts themselves are not bundled; only the source files they name become roots. */
+function scriptDistEntries(cwd) {
+  const found = new Set();
+  for (const dir of ['scripts', ...packageDirs(cwd).map((d) => `${d}/scripts`)]) {
+    let names = [];
+    try { names = fs.readdirSync(path.join(cwd, dir)).sort(); } catch { continue; }
+    for (const file of names.map((n) => `${dir}/${n}`).filter(isRepoScript)) {
+      const text = fs.readFileSync(path.join(cwd, file), 'utf8');
+      for (const candidates of distImportCandidates(file, text)) {
+        const entry = firstFile(cwd, candidates);
+        if (entry) found.add(entry);
+      }
+    }
+  }
+  return found;
+}
+
 /** Production entry points: each `packages/*\/index.html` module script (the cockpit's
- *  `/src/main.tsx`), and the `bin` and `exports` of every published manifest mapped from
- *  `dist/*.js` to `src/*.ts`. Private libraries (contract, api-client) are not roots: they
- *  count as reachable only when web or the CLI imports them. */
+ *  `/src/main.tsx`), the `bin` and `exports` of every published manifest mapped from
+ *  `dist/*.js` to `src/*.ts`, and the source behind every `dist/` file a repo script imports.
+ *  Private libraries (contract, api-client) are not roots: they count as reachable only when
+ *  web or the CLI imports them. */
 function entryPoints(cwd) {
-  const roots = new Set();
+  const roots = scriptDistEntries(cwd);
   for (const pkgDir of packageDirs(cwd)) {
     let html = '';
     try { html = fs.readFileSync(path.join(cwd, pkgDir, 'index.html'), 'utf8'); } catch { /* no page */ }

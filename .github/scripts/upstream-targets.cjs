@@ -141,6 +141,34 @@ function staticImportSpecifiers(text) {
   return found;
 }
 
+/** Where a package's built file comes from: `dist/x.js` in `pkgDir` maps to `src/x.js`, `src/x.ts`
+ *  and `src/x.tsx`, most literal first. A target outside `dist/` is its own only candidate. */
+function distSourceCandidates(pkgDir, target) {
+  const rel = path.posix.join(pkgDir, target.replace(/^\.\/dist\/|^dist\//, 'src/'));
+  return urlEntryCandidates(rel, `./${path.posix.basename(rel)}`);
+}
+
+/** A repo script that may load a package's built output: root `scripts/*.mjs` and
+ *  `packages/*\/scripts/*.{mjs,cjs,js}`, tests excluded. */
+function isRepoScript(file) {
+  if (TEST_FILE_RE.test(path.posix.basename(file))) return false;
+  return /^scripts\/[^/]+\.mjs$/.test(file) || /^packages\/[^/]+\/scripts\/[^/]+\.(?:mjs|cjs|js)$/.test(file);
+}
+
+/** The package source a repo script uses through its package's built output, as one
+ *  `distSourceCandidates` list per file: each relative static import, and each relative literal in
+ *  a `new URL(…, import.meta.url)`, that names `packages/<pkg>/dist/<x>.js`. A directory such as
+ *  `'../dist/'` names no file and maps to nothing. */
+function distImportCandidates(scriptFile, text) {
+  const found = [];
+  for (const specifier of new Set([...staticImportSpecifiers(text), ...urlEntrySpecifiers(text)])) {
+    if (!/^\.\.?\//.test(specifier)) continue;
+    const m = /^(packages\/[^/]+)\/(dist\/.+\.js)$/.exec(path.posix.join(path.posix.dirname(scriptFile), specifier));
+    if (m) found.push(distSourceCandidates(m[1], m[2]));
+  }
+  return found;
+}
+
 /** Every flag that applies to one file, in a fixed order. */
 function fileFlags(file) {
   const flags = [];
@@ -237,6 +265,9 @@ module.exports = {
   urlEntrySpecifiers,
   urlEntryCandidates,
   staticImportSpecifiers,
+  distSourceCandidates,
+  isRepoScript,
+  distImportCandidates,
   fileFlags,
   renderTargetsReport,
 };

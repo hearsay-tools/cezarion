@@ -114,7 +114,10 @@ drift since the baseline (non-merge commits and line churn), and a per-file 3-wa
 Reachability is one in-memory esbuild bundle (`write: false`, `metafile: true`); its inputs are
 the production-reachable files. The roots are each `packages/*/index.html` module script (the
 cockpit's `src/main.tsx`) and the `bin` and `exports` of every published manifest, mapped from
-`dist/*.js` to `src/*.ts`. The private `contract` and `api-client` packages are not roots: they
+`dist/*.js` to `src/*.ts`. Repo scripts (root `scripts/*.mjs` and `packages/*/scripts/*.{mjs,cjs,js}`,
+tests excluded) that load a package's built `dist/x.js`, by static import or `new URL(…,
+import.meta.url)`, make its `src/x.ts` a root too; the scripts themselves are not bundled.
+The private `contract` and `api-client` packages are not roots: they
 count only when web or the CLI imports them, and they bundle from source. Files the CLI starts by
 path through `new URL(…, import.meta.url)` become further roots until the set stops growing.
 Each TypeScript file also keeps its type-only imports, which esbuild would otherwise erase,

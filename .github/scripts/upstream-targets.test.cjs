@@ -9,6 +9,8 @@ const {
   urlEntrySpecifiers,
   urlEntryCandidates,
   staticImportSpecifiers,
+  distImportCandidates,
+  isRepoScript,
   fileFlags,
   renderTargetsReport,
 } = require('./upstream-targets.cjs');
@@ -160,6 +162,51 @@ test('staticImportSpecifiers lists every static import and re-export, type-only 
   ]);
 });
 
+test('distImportCandidates maps a script\'s imports of a built dist/ back to package source', () => {
+  const candidates = (js) => [js, js.replace(/\.js$/, '.ts'), js.replace(/\.js$/, '.tsx')];
+  // scripts/release.mjs:49, verbatim.
+  assert.deepEqual(
+    distImportCandidates('scripts/release.mjs', 'import { isPublishable, RELEASE_MANIFEST_DIRS } from \'../packages/cezar/dist/release/manifests.js\';'),
+    [candidates('packages/cezar/src/release/manifests.js')],
+  );
+  // packages/cezar/scripts/check-pack.mjs:17, verbatim.
+  assert.deepEqual(
+    distImportCandidates('packages/cezar/scripts/check-pack.mjs', 'import { findPackGaps } from \'../dist/pack-check.js\';'),
+    [candidates('packages/cezar/src/pack-check.js')],
+  );
+  assert.deepEqual(
+    distImportCandidates('packages/cezar/scripts/omp-ci-wait.mjs', 'const built = new URL(\'../dist/ci-wait/tools.js\', import.meta.url);'),
+    [candidates('packages/cezar/src/ci-wait/tools.js')],
+  );
+  // packages/cezar/scripts/measure-transcript-facts-health.mjs:19: a directory names no file.
+  assert.deepEqual(distImportCandidates('packages/cezar/scripts/x.mjs', 'const runtime = { url: new URL(\'../dist/\', import.meta.url), ext: \'js\' };'), []);
+  assert.deepEqual(distImportCandidates('packages/cezar/scripts/x.mjs', [
+    'import { a } from \'node:fs\'',
+    'import { b } from \'./sibling.mjs\'',
+    'const source = new URL(\'../src/ci-wait/tools.ts\', import.meta.url);',
+    'const page = new URL(\'../web/dist/index.html\', import.meta.url);',
+    'const other = new URL(\'../dist/cli.d.ts\', import.meta.url);',
+  ].join('\n')), [], 'only a .js file under a package dist/ counts; the bundled cockpit under web/dist is not one');
+});
+
+test('isRepoScript admits root and package scripts, never their tests', () => {
+  const table = {
+    'scripts/release.mjs': true,
+    'scripts/release-snapshot.mjs': true,
+    'packages/cezar/scripts/check-pack.mjs': true,
+    'packages/cezar/scripts/a.cjs': true,
+    'packages/cezar/scripts/a.js': true,
+    'scripts/test-changed.test.mjs': false,
+    'packages/cezar/scripts/a.test.mjs': false,
+    'scripts/a.js': false,
+    'packages/cezar/scripts/benchmark-run-store.ts': false,
+    'packages/cezar/scripts/nested/a.mjs': false,
+    'packages/cezar/src/a.mjs': false,
+    '.github/scripts/upstream-scan.cjs': false,
+  };
+  for (const [file, expected] of Object.entries(table)) assert.equal(isRepoScript(file), expected, file);
+});
+
 test('fileFlags names every flag that applies', () => {
   const live = { status: 'M', forkExists: true, reachability: 'production', drift: { commits: 0, added: 0, deleted: 0 } };
   assert.deepEqual(fileFlags(live), []);
@@ -271,6 +318,11 @@ test('collectReachability on this repo reaches the cockpit, the CLI, its path-lo
     'packages/cezar/src/core/ui-events.ts',
     'packages/cezar/src/server/forge/types.ts',
     'packages/web/src/components/diff/types.ts',
+    // Repo scripts import these from the built dist/ (scripts/release.mjs, check-pack.mjs).
+    'packages/cezar/src/release/manifests.ts',
+    'packages/cezar/src/release/stable.ts',
+    'packages/cezar/src/release/snapshot.ts',
+    'packages/cezar/src/pack-check.ts',
   ]) assert.ok(reach.inputs.has(file), `${file} is reachable`);
   assert.ok([...reach.inputs].some((f) => /^packages\/contract\/src\/[^/]+\.ts$/.test(f)), 'the contract is reached through its importers');
   assert.equal(reach.inputs.has('packages/web/src/components/project-rail.test.tsx'), false, 'tests are not production');
