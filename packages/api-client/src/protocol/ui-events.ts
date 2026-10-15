@@ -9,11 +9,14 @@
  * declaration here and the server's own, so a drift fails
  * `npm run typecheck` (the gate) instead of the UI at runtime.
  *
- * This module MUST stay import-free so the NodeNext-side guard can reach it.
+ * Shared permission vocabulary is inferred from the Node-free contract schemas.
  * The field-level contract docs (per-backend mappings, ACP rationale) live on
  * the server original — they are about how runners EMIT these events; this
  * side only consumes them.
  */
+
+import type { PermissionRequest, PermissionResolution } from '@open-mercato/cezar-contract'
+export type { PermissionOption, PermissionOptionKind } from '@open-mercato/cezar-contract'
 
 /** The backend that produced a session. */
 export type UiBackend = 'claude' | 'codex' | 'opencode' | 'pi' | 'cursor' | 'omp'
@@ -78,19 +81,6 @@ export interface ToolLocation {
   path: string
   line?: number
 }
-
-/** A choice offered by a permission request (ACP option kinds). */
-export type PermissionOptionKind = 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always'
-
-export interface PermissionOption {
-  id: string
-  label: string
-  kind: PermissionOptionKind
-}
-
-/* ------------------------------------------------------------------ */
-/* Items — ONE id-keyed stream for text, reasoning and tools           */
-/* ------------------------------------------------------------------ */
 
 /** A chat message. */
 export interface UiMessageItem {
@@ -214,21 +204,11 @@ export interface UiPlanUpdatedEvent {
   entries: PlanEntry[]
 }
 
-/** RESERVED — wired when auto-approve becomes optional. Types only for now. */
-export interface UiPermissionRequestedEvent {
-  type: 'permission.requested'
-  requestId: string
-  itemId?: string
-  title: string
-  options: PermissionOption[]
-}
+/** A native approval request, answerable only through its offered option IDs. */
+export type UiPermissionRequestedEvent = PermissionRequest
 
-/** RESERVED — the counterpart resolution (see `permission.requested`). */
-export interface UiPermissionResolvedEvent {
-  type: 'permission.resolved'
-  requestId: string
-  optionId: string
-}
+/** A human response or expiry of a pending native approval. */
+export type UiPermissionResolvedEvent = PermissionResolution
 
 /** One option in an AskUser question — see the server `src/core/ask.ts`. */
 export interface UiAskOption {

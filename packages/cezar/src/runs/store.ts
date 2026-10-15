@@ -259,6 +259,7 @@ export const runRecordSchema = z.object({
    *  Optional/absent on old runs; cleared when the run resumes or ends. */
   activity: z.enum(['monitoring']).optional(),
   hasPendingHumanAsk: contractRunRecordSchema.shape.hasPendingHumanAsk.catch(undefined),
+  hasPendingPermission: contractRunRecordSchema.shape.hasPendingPermission.catch(undefined),
   /** Exact server-computed deadline for the next automatic monitoring check. */
   monitoringWakeAt: z.string().datetime().optional().catch(undefined),
   /** True only for the live epoch that exhausted all automatic monitoring checks. */
@@ -961,7 +962,7 @@ export function rescopeRun(run: RunRecord, handle?: RepoHandle | null): boolean 
 function loadNormalizedFields(run: RunRecord): string {
   return JSON.stringify([
     run.stopping, run.status, run.finishedAt, run.error, run.activity, run.monitoringWakeAt, run.autoResumeAt,
-    run.monitoringWakeCapReached, run.referencedPullRequestUrl, run.pullRequests, run.hasPendingHumanAsk, run.steps.map((step) => step.status),
+    run.monitoringWakeCapReached, run.referencedPullRequestUrl, run.pullRequests, run.hasPendingHumanAsk, run.hasPendingPermission, run.steps.map((step) => step.status),
   ]);
 }
 

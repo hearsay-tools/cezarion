@@ -30,6 +30,7 @@ import { InputSubmissions } from './input-submissions.ts';
 import { codexStreamError } from './codex-stream-error.ts';
 import { codexTurnOutcome } from './codex-turn-outcome.ts';
 import { codexNetworkIsRestricted, codexPermissionOverrides } from './codex-permissions.ts';
+import { CODEX_APPROVAL_METHODS, codexApproval, type CodexApproval } from './codex-approvals.ts';
 import { cezarToolEnvNames } from '../ci-wait/tools.ts';
 import {
   CodexAppServerRpc,
@@ -186,6 +187,7 @@ class CodexSession implements AgentSession {
   private agentSubmissionPending = false;
   private turnBoundaryVersion = 0;
   private pendingUserInput: PendingUserInput | undefined;
+  private readonly pendingApprovals = new Map<string, CodexApproval>();
   private readonly toolCalls: AgentToolCallRecord[] = [];
   private readonly textChunks: string[] = [];
   /** Streamed agentMessage deltas buffered per item — v1 `text` is emitted
@@ -263,6 +265,7 @@ class CodexSession implements AgentSession {
       }
       // Do not discard final buffered text on a healthy exit. Revoke RPCs
       // immediately, then bound pipe draining ONLY after physical termination.
+      this.expireApprovals('codex app-server exited', false);
       this.rpc.close('codex app-server exited');
       cancelDrain = afterExitDrain(() => this.child.stdout.destroy(), exitDrainBudget(code));
       if (this.stopKillTimer) clearTimeout(this.stopKillTimer);
@@ -293,6 +296,12 @@ class CodexSession implements AgentSession {
           let msg: CodexAppServerMessage;
           try { msg = JSON.parse(line) as CodexAppServerMessage; }
           catch { continue; }
+          // A method+id is a server REQUEST, even if its method happens to name
+          // a lifecycle notification. It must never reach the notification mapper.
+          if (typeof msg.method === 'string' && (typeof msg.id === 'number' || typeof msg.id === 'string')) {
+            if (this.open) this.dispatch(msg);
+            continue;
+          }
           // Explicit shutdown suppresses late lifecycle, not passive output.
           // Natural exit can overtake the final turn frame: retain its outcome
           // without restoring ACK/ask/input authority on the dead connection.
@@ -301,6 +310,9 @@ class CodexSession implements AgentSession {
           if (!this.open && (msg.id !== undefined || (!PASSIVE_OUTPUT_METHODS.has(msg.method ?? '') && !finalOutcome))) continue;
           // Child turn lifecycle must reach neither channel (#600).
           if (this.isForeignTurnLifecycle(msg)) continue;
+          // The UI mapper must not retire a live approval on an older turn's tail.
+          if ((msg.method === 'turn/completed' || msg.method === 'turn/failed') && this.activeTurnId &&
+              turnIdOf(msg.params ?? {}) && turnIdOf(msg.params ?? {}) !== this.activeTurnId) continue;
           // Stale/child retry errors must neither fail nor warn on this turn.
           if (msg.method === 'error' && !this.isCurrentTurn((msg.params ?? {}) as Record<string, unknown>)) continue;
           this.opts.onActivity?.();
@@ -425,7 +437,7 @@ class CodexSession implements AgentSession {
     if (this.open && !this.startupComplete) { this.refusedBeforeStartup = true; return false; }
     // A human prompt still on its way to the wire goes first (#505 local review).
     if (this.open && this.humanPromptsPending > 0) { this.refusedForHuman = true; return false; }
-    if (!this.open || this.pendingUserInput || this.agentSubmissionPending) return false;
+    if (!this.open || this.pendingUserInput || this.pendingApprovals.size || this.agentSubmissionPending) return false;
     this.agentInputReady = false;
     this.agentSubmissionPending = true;
     if (this.autoEndTimer) clearTimeout(this.autoEndTimer);
@@ -441,7 +453,7 @@ class CodexSession implements AgentSession {
     }).finally(() => {
       this.agentSubmissionPending = false;
       if (this.inFlightSubmissionId === submissionId) this.inFlightSubmissionId = undefined;
-      if (this.stdinOpen && this.agentInputReady && !this.pendingUserInput) {
+      if (this.stdinOpen && this.agentInputReady && !this.pendingUserInput && !this.pendingApprovals.size) {
         this.opts.onAgentInputReady?.();
         this.scheduleAutoEnd();
       }
@@ -449,7 +461,7 @@ class CodexSession implements AgentSession {
   }
 
   private scheduleAutoEnd(): void {
-    if (!this.opts.autoEndAfterFirstTurn || !this.open || this.autoEndTimer || this.agentSubmissionPending) return;
+    if (!this.opts.autoEndAfterFirstTurn || !this.open || this.autoEndTimer || this.agentSubmissionPending || this.pendingApprovals.size) return;
     this.autoEndTimer = setTimeout(() => {
       this.autoEndTimer = undefined;
       if (this.opts.shouldAutoEnd?.() !== false) this.end();
@@ -459,7 +471,7 @@ class CodexSession implements AgentSession {
 
   sendMessage(content: ContentBlock[]): boolean {
     this.agentInputReady = false;
-    if (!this.open) return false;
+    if (!this.open || this.pendingApprovals.size) return false;
     if (this.autoEndTimer) {
       clearTimeout(this.autoEndTimer);
       this.autoEndTimer = undefined;
@@ -557,7 +569,7 @@ class CodexSession implements AgentSession {
   private notifyHumanInputDrained(): void {
     // A just-accepted turn/start may not have `activeTurnId` yet; run.ts ignores
     // settle once turn.started clears atTurnBoundary. Do not block on activeTurnId.
-    if (this.humanPromptsPending > 0 || this.humanReadyOnTurnStart || !this.open || this.pendingUserInput || this.agentSubmissionPending) return;
+    if (this.humanPromptsPending > 0 || this.humanReadyOnTurnStart || !this.open || this.pendingUserInput || this.pendingApprovals.size || this.agentSubmissionPending) return;
     if (this.refusedForHuman) this.refusedForHuman = false;
     this.opts.onAgentInputReady?.();
   }
@@ -606,6 +618,8 @@ class CodexSession implements AgentSession {
   private closeInput(reason: string): void {
     this.clearStreamRetry();
     this.stdinOpen = false;
+    // Respond while stdin is still writable, before rpc.close or EOF/TERM.
+    this.expireApprovals(reason);
     this.humanReadyOnTurnStart = false;
     for (const id of [...this.unreadHumanSteers.keys()]) {
       this.unreadHumanSteers.delete(id);
@@ -647,7 +661,7 @@ class CodexSession implements AgentSession {
     // Input refused during startup can now steer the opening turn (#505).
     if (this.refusedBeforeStartup) queueMicrotask(() => {
       this.refusedBeforeStartup = false;
-      if (this.open && !this.pendingUserInput && !this.agentSubmissionPending) this.opts.onAgentInputReady?.();
+      if (this.open && !this.pendingUserInput && !this.pendingApprovals.size && !this.agentSubmissionPending) this.opts.onAgentInputReady?.();
     });
   }
 
@@ -794,6 +808,12 @@ class CodexSession implements AgentSession {
   }
 
   private dispatch(msg: CodexAppServerMessage): void {
+    if (typeof msg.method === 'string' && (typeof msg.id === 'number' || typeof msg.id === 'string')) {
+      if (msg.method === 'item/tool/requestUserInput') this.handleUserInputRequest(msg.id, msg.params ?? {});
+      else if (CODEX_APPROVAL_METHODS.has(msg.method)) this.handleApprovalRequest(msg.method, msg.id, msg.params);
+      else this.rpc.respond({ id: msg.id, error: { code: -32601, message: `unsupported server request: ${msg.method}` } });
+      return;
+    }
     const humanClient = typeof msg.id === 'number' ? this.humanPromptByRpc.get(msg.id) : undefined;
     if (this.rpc.dispatchResponse(msg)) {
       // #486: settle human-prompt bookkeeping in RPC dispatch order, before the next line.
@@ -820,11 +840,60 @@ class CodexSession implements AgentSession {
       }
       return;
     }
-    if (msg.method === 'item/tool/requestUserInput' && (typeof msg.id === 'number' || typeof msg.id === 'string')) {
-      this.handleUserInputRequest(msg.id, msg.params ?? {});
+    if (typeof msg.method === 'string') this.handleNotification(msg.method, msg.params ?? {});
+  }
+
+  private handleApprovalRequest(method: string, rpcId: number | string, params: unknown): void {
+    const duplicate = [...this.pendingApprovals.entries()].find(([, pending]) => pending.rpcId === rpcId);
+    const approval = codexApproval(method, rpcId, params);
+    const routing = params as Record<string, unknown> | undefined;
+    if (!approval || !this.activeTurnId || routing?.threadId !== this.threadId || approval.turnId !== this.activeTurnId ||
+      duplicate) {
+      this.rpc.respond({ id: rpcId, error: { code: -32602, message: 'malformed, stale or unsupported approval routing' } });
+      // One native id cannot identify two requests. Its error settles the wire;
+      // revoke the old UI capability so it cannot produce a second response.
+      if (duplicate) this.expireApproval(duplicate[0], 'duplicate native request id', false);
       return;
     }
-    if (typeof msg.method === 'string') this.handleNotification(msg.method, msg.params ?? {});
+    this.clearStreamRetry();
+    this.agentInputReady = false;
+    if (this.autoEndTimer) clearTimeout(this.autoEndTimer);
+    this.autoEndTimer = undefined;
+    this.pendingApprovals.set(approval.event.requestId, approval);
+    try {
+      if (!this.opts.onUiEvent) throw new Error('approval UI unavailable');
+      this.opts.onUiEvent(approval.event);
+    } catch {
+      // A missing/throwing consumer cannot leave a native RPC waiting forever.
+      this.expireApproval(approval.event.requestId, 'approval UI unavailable');
+    }
+  }
+
+  respondPermission(requestId: string, optionId: string): boolean {
+    const approval = this.pendingApprovals.get(requestId);
+    const response = approval?.responses.get(optionId);
+    if (!this.open || !approval || !response || approval.turnId !== this.activeTurnId) return false;
+    this.pendingApprovals.delete(requestId);
+    this.rpc.respond({ id: approval.rpcId, result: response });
+    this.emitPermissionResolved(requestId, this.open ? { optionId } : { reason: 'approval response transport failed' });
+    return this.open;
+  }
+
+  private emitPermissionResolved(requestId: string, resolution: { optionId?: string; reason?: string }): void {
+    try { this.opts.onUiEvent?.({ type: 'permission.resolved', requestId, ...resolution }); }
+    catch { /* A failed consumer must not strand other pending RPCs. */ }
+  }
+
+  private expireApproval(requestId: string, reason: string, respond = true): void {
+    const approval = this.pendingApprovals.get(requestId);
+    if (!approval) return;
+    this.pendingApprovals.delete(requestId);
+    if (respond) this.rpc.respond({ id: approval.rpcId, error: { code: -32000, message: reason } });
+    this.emitPermissionResolved(requestId, { reason });
+  }
+
+  private expireApprovals(reason: string, respond = true): void {
+    for (const requestId of this.pendingApprovals.keys()) this.expireApproval(requestId, reason, respond);
   }
 
   private handleUserInputRequest(rpcId: number | string, params: Record<string, unknown>): void {
@@ -904,6 +973,13 @@ class CodexSession implements AgentSession {
       this.clearStreamRetry();
     }
     switch (method) {
+      case 'serverRequest/resolved': {
+        if (params.threadId !== this.threadId) break;
+        for (const [requestId, approval] of this.pendingApprovals) {
+          if (approval.rpcId === params.requestId) this.expireApproval(requestId, 'resolved by Codex', false);
+        }
+        break;
+      }
       case 'error':
         this.handleStreamError(params);
         break;
@@ -917,7 +993,10 @@ class CodexSession implements AgentSession {
           this.firstTurnStarted = true;
           this.checkStartupComplete();
         }
-        if (turnIdOf(params) !== this.activeTurnId) this.clearStreamRetry();
+        if (turnIdOf(params) !== this.activeTurnId) {
+          this.clearStreamRetry();
+          this.expireApprovals('a new turn started');
+        }
         this.activeTurnId = turnIdOf(params) ?? this.activeTurnId;
         if (this.humanReadyOnTurnStart) {
           this.humanReadyOnTurnStart = false;
@@ -982,7 +1061,9 @@ class CodexSession implements AgentSession {
       case 'turn/completed':
       case 'turn/failed': {
         if (this.isForeignThreadTurn(params)) break; // don't end the parent turn on a child turn (#600)
+        if (this.activeTurnId && turnIdOf(params) && turnIdOf(params) !== this.activeTurnId) break;
         if (this.isCurrentTurn(params)) this.clearStreamRetry();
+        this.expireApprovals('turn ended');
         this.turnBoundaryVersion += 1;
         this.pendingUserInput = undefined;
         this.activeTurnId = undefined;

@@ -16,6 +16,7 @@ export function startManagedSession(
   let turnOpen = true;
   let stopped = false;
   let phase = 0;
+  const pendingPermissions = new Set<string>();
   const pause = (): void => {
     phase += 1;
     turnOpen = false;
@@ -33,7 +34,7 @@ export function startManagedSession(
     }, DEFAULT_NO_PROGRESS_TIMEOUT_MS);
     timer.unref?.();
   };
-  const begin = (): void => { if (!stopped) { phase += 1; turnOpen = true; activity(); } };
+  const begin = (): void => { if (!stopped && !pendingPermissions.size) { phase += 1; turnOpen = true; activity(); } };
   // Includes a backend that accepts the opening prompt but never announces a turn.
   begin();
   try {
@@ -47,6 +48,8 @@ export function startManagedSession(
       onUiEvent: event => {
         if (event.type === 'turn.started') begin();
         if (event.type === 'ask.requested') pause();
+        if (event.type === 'permission.requested') { pendingPermissions.add(event.requestId); pause(); }
+        if (event.type === 'permission.resolved' && pendingPermissions.delete(event.requestId) && !pendingPermissions.size) begin();
         opts.onUiEvent?.(event);
       },
     });
@@ -58,6 +61,7 @@ export function startManagedSession(
     get pid() { return live.pid; },
     get open() { return live.open; },
     sendMessage(content) {
+      if (pendingPermissions.size) return false;
       const wasOpen = turnOpen;
       if (!wasOpen) begin(); // Native question answers resume the same turn ID.
       const accepted = live.sendMessage(content);
@@ -65,6 +69,7 @@ export function startManagedSession(
       return accepted;
     },
     sendAgentMessage(content, ids) {
+      if (pendingPermissions.size) return false;
       const wasOpen = turnOpen;
       if (!wasOpen) begin();
       const admissionPhase = phase;
@@ -77,6 +82,7 @@ export function startManagedSession(
         return accepted.catch(error => { rollback(); throw error; });
       } catch (error) { rollback(); throw error; }
     },
+    ...(live.respondPermission ? { respondPermission: (requestId: string, optionId: string) => live.respondPermission!(requestId, optionId) } : {}),
     discardQueuedMessages: () => live.discardQueuedMessages(),
     holdsHumanInput: () => live.holdsHumanInput(),
     ...(live.heldHumanInputCount ? { heldHumanInputCount: () => live.heldHumanInputCount!() } : {}),
