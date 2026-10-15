@@ -1,10 +1,16 @@
 name: Automated Code Review
 
+# ci.yml calls this workflow once its verification job succeeds, so no runner
+# sits polling for CI (spec .ai/specs/2026-10-15-review-inside-ci.md). Under
+# workflow_call, github.* is the caller's pull_request_target event.
+# workflow_dispatch reviews one PR on demand, outside the round cap.
 on:
-  pull_request_target:
-    types: [opened, synchronize, reopened]
-    branches:
-      - main
+  workflow_call:
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: false
+      OPENAI_API_KEY:
+        required: false
   workflow_dispatch:
     inputs:
       pr_number:
@@ -12,8 +18,11 @@ on:
         required: true
         type: number
 
+# ci.yml's own group already cancels a superseded CI run, review included. The
+# event name keeps a manual dispatch from cancelling the review inside a CI run,
+# which would turn that PR's required check red.
 concurrency:
-  group: automated-code-review-pr-${{ github.event.pull_request.number || inputs.pr_number }}
+  group: automated-code-review-${{ github.event_name }}-pr-${{ github.event.pull_request.number || inputs.pr_number }}
   cancel-in-progress: true
 
 jobs:
@@ -223,10 +232,12 @@ jobs:
           echo "change_surface=$change_surface" >> "$GITHUB_OUTPUT"
 
   claude-review:
-    needs: [validate-provider, review-round, wait-for-ci]
-    if: needs.validate-provider.outputs.provider == 'claude' && needs.review-round.outputs.can_review == 'true' && needs['wait-for-ci'].result == 'success'
+    needs: [validate-provider, review-round]
+    if: needs.validate-provider.outputs.provider == 'claude' && needs.review-round.outputs.can_review == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
     permissions:
       actions: read
       contents: read
@@ -351,45 +362,20 @@ jobs:
             fs.writeFileSync('review-output/review-findings.json', process.env.REVIEW_OUTPUT, 'utf8');
 
       - name: Upload Claude review output
+        id: upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: review-output
           path: review-output/review-findings.json
           if-no-files-found: error
 
-  wait-for-ci:
-    needs: [validate-provider, review-round]
-    if: needs.review-round.outputs.can_review == 'true'
-    runs-on: ubuntu-latest
-    # Above fetch-ci-results.cjs's own 20-minute wait, so a slow CI queue ends this job as a
-    # failure, which Recover Automated Review retries, not a timeout, which GitHub records as
-    # cancelled and recovery skips (hearsay-tools/cezarion#1060).
-    timeout-minutes: 25
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - name: Checkout trusted wait script
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.review-round.outputs.base_sha }}
-          persist-credentials: false
-
-      - name: Wait for successful ci.yml verification on this head SHA
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ needs.review-round.outputs.head_sha }}
-        run: |
-          node .github/scripts/fetch-ci-results.cjs \
-            --repo "$GITHUB_REPOSITORY" \
-            --head-sha "$HEAD_SHA" \
-            --wait
-
   codex-review:
-    needs: [validate-provider, review-round, wait-for-ci]
-    if: needs.validate-provider.outputs.provider == 'codex' && needs.review-round.outputs.can_review == 'true' && needs['wait-for-ci'].result == 'success'
+    needs: [validate-provider, review-round]
+    if: needs.validate-provider.outputs.provider == 'codex' && needs.review-round.outputs.can_review == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
     permissions:
       actions: read
       contents: read
@@ -480,6 +466,7 @@ jobs:
           fi
 
       - name: Upload Codex review output
+        id: upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: review-output
@@ -507,11 +494,27 @@ jobs:
           ref: ${{ needs.review-round.outputs.base_sha }}
           persist-credentials: false
 
+      # Inside ci.yml this run also holds jobs that execute PR code, and any of
+      # them can upload an artifact named review-output. Download only the exact
+      # artifact the provider job uploaded: an artifact ID is immutable. An empty
+      # ID would make download-artifact fetch every artifact in the run, so it
+      # fails here instead.
+      - name: Require the provider's review artifact ID
+        if: needs.review-round.outputs.can_review == 'true'
+        env:
+          ARTIFACT_ID: ${{ needs.validate-provider.outputs.provider == 'claude' && needs.claude-review.outputs.artifact_id || needs.codex-review.outputs.artifact_id }}
+        run: |
+          if ! [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::The review job reported no artifact ID ('$ARTIFACT_ID'), so there is no trusted review to post." >&2
+            exit 1
+          fi
+
       - name: Download review output
         if: needs.review-round.outputs.can_review == 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: review-output
+          artifact-ids: ${{ needs.validate-provider.outputs.provider == 'claude' && needs.claude-review.outputs.artifact_id || needs.codex-review.outputs.artifact_id }}
+          merge-multiple: true
           path: review-output
 
       - name: Validate and post review findings
@@ -590,7 +593,9 @@ jobs:
   review-complete:
     needs: [validate-provider, review-round, claude-review, codex-review, post-review]
     if: ${{ always() }}
-    name: Automated Code Review
+    # ci.yml's own "Automated Code Review" job is the required check; this one
+    # shows there as "Review / Review verdict" and names the reason it failed.
+    name: Review verdict
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -622,7 +627,7 @@ jobs:
           fi
           # Findings are already posted; red here means "address them", not a broken review.
           if [ "$NEW_THREADS" -gt 0 ]; then
-            echo "::error::This review opened $NEW_THREADS new finding thread(s). Address them and push, or reply with pushback and re-run this workflow."
+            echo "::error::This review opened $NEW_THREADS new finding thread(s). Address them and push, or reply with pushback and re-run Review / review-round in this CI run."
             exit 1
           fi
           if [ "$OPEN_THREADS" -gt 0 ]; then

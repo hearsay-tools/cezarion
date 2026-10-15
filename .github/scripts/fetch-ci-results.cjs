@@ -168,9 +168,6 @@ function writeCiResults({ out, result }) {
   fs.writeFileSync(out, renderCiResults(result), 'utf8');
 }
 
-const DEFAULT_WAIT_TIMEOUT_MS = 20 * 60 * 1000;
-const DEFAULT_WAIT_POLL_MS = 15_000;
-
 function listCiRuns(gh, repo, headSha) {
   return JSON.parse(
     gh([
@@ -194,39 +191,10 @@ function defaultSleep(ms) {
   execFileSync('sleep', [String(ms / 1000)]);
 }
 
-function waitForCiRun({
-  gh: rawGh,
-  repo,
-  headSha,
-  now = Date.now,
-  sleep = defaultSleep,
-  timeoutMs = DEFAULT_WAIT_TIMEOUT_MS,
-  pollIntervalMs = DEFAULT_WAIT_POLL_MS,
-}) {
-  const gh = withGhRetry(rawGh, sleep);
-  const deadline = now() + timeoutMs;
-  while (true) {
-    const run = pickPullRequestRun(listCiRuns(gh, repo, headSha), headSha);
-    const verification = run && verificationJob(listRunJobs(gh, repo, run));
-    if (verification?.status === 'completed') {
-      if (verification.conclusion === 'success') return run;
-      throw new Error(`ci.yml verification did not succeed for ${headSha}: ${verification.conclusion || 'missing conclusion'}`);
-    }
-    if (now() >= deadline) {
-      throw new Error(`Timed out waiting for ci.yml pull_request verification for ${headSha}`);
-    }
-    sleep(Math.min(pollIntervalMs, Math.max(0, deadline - now())));
-  }
-}
-
 function parseArgs(argv) {
   const parsed = {};
   for (let i = 0; i < argv.length; i += 1) {
     const key = argv[i];
-    if (key === '--wait') {
-      parsed.wait = true;
-      continue;
-    }
     if (key === '--require-success') {
       parsed.requireSuccess = true;
       continue;
@@ -238,8 +206,8 @@ function parseArgs(argv) {
     else continue;
     i += 1;
   }
-  if (!parsed.repo || !parsed.headSha || (!parsed.wait && !parsed.out)) {
-    throw new Error('Usage: fetch-ci-results.cjs --repo owner/name --head-sha SHA (--out path | --wait)');
+  if (!parsed.repo || !parsed.headSha || !parsed.out) {
+    throw new Error('Usage: fetch-ci-results.cjs --repo owner/name --head-sha SHA --out path [--require-success]');
   }
   return parsed;
 }
@@ -247,14 +215,10 @@ function parseArgs(argv) {
 if (require.main === module) {
   const args = parseArgs(process.argv.slice(2));
   const gh = (argv) => execFileSync('gh', argv, { encoding: 'utf8' });
-  if (args.wait) {
-    waitForCiRun({ gh, repo: args.repo, headSha: args.headSha });
-  } else {
-    writeCiResults({
-      out: args.out,
-      result: collectCiResults({ gh, repo: args.repo, headSha: args.headSha, requireSuccess: args.requireSuccess }),
-    });
-  }
+  writeCiResults({
+    out: args.out,
+    result: collectCiResults({ gh, repo: args.repo, headSha: args.headSha, requireSuccess: args.requireSuccess }),
+  });
 }
 
 module.exports = {
@@ -264,8 +228,6 @@ module.exports = {
   renderCiResults,
   collectCiResults,
   writeCiResults,
-  waitForCiRun,
   isTransientGhError,
   withGhRetry,
-  DEFAULT_WAIT_TIMEOUT_MS,
 };

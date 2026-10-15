@@ -9,9 +9,9 @@ has one concurrency group, so a new head cancels its predecessor without a
 competing same-head `pull_request` run. Failed or cancelled verification never
 satisfies the required aggregate.
 
-Review polling and recovery use the newest target run for the current head.
-They fall back to legacy `pull_request` CI only when no target run exists,
-never when target verification failed or was cancelled.
+The review's CI context uses the newest target run for the current head. It
+falls back to legacy `pull_request` CI only when no target run exists, never
+when target verification failed or was cancelled.
 
 Local typechecking starts with `pnpm install --frozen-lockfile` in the checkout being verified, including
 nested task worktrees. Both `npm run typecheck:web` and
@@ -146,17 +146,21 @@ The Vitest sequencer assigns discovered tests to shards by measured duration usi
 
 The push-only `.github/workflows/ci-benchmark.yml` workflow runs controlled experiments on `bench/156-*` branches. It uses a fixed application baseline, records failures and resource usage, and performs publication experiments only as dry runs. Reproduction instructions and retained results are in [the issue 156 benchmark report](../benchmarks/ci-performance-156.md). Automated review remains enabled throughout.
 
-Both Codex and Claude automated review wait for the **Unit, build, E2E, and package** verification job in the `ci.yml` pull-request run for the exact head SHA. The selected provider starts only when that job succeeds, while npm snapshot publication can continue independently. Failed, timed-out, cancelled, skipped or inconclusive verification blocks the model job. Standalone CI context collection still reports verification's actual conclusion and failed verification jobs; individual completed-job logs avoid waiting for the whole workflow archive. Missing or unfinished verification stays pending until the bounded wait expires, and ambiguous jobs or job-query errors fail the wait. The context-fetch step rechecks success immediately before model work, so a same-SHA rerun cannot turn a prior successful wait into permission to review a pending or failed build. The wait and both context-fetch scripts still execute from the trusted base checkout. The required CI check and the publication gate are unchanged.
+Automated code review runs inside the `ci.yml` pull-request run, as the `review` job that calls `automated-code-review.yml` with `needs: verify`. GitHub starts it only when the **Unit, build, E2E, and package** job succeeds, so no runner sits polling for CI. Failed, cancelled or skipped verification leaves the review skipped. The model jobs still run on the trusted base's scripts, and their context fetch rechecks that verification succeeded for the exact head SHA immediately before model work. Standalone CI context collection still reports verification's actual conclusion and failed verification jobs; individual completed-job logs avoid waiting for the whole workflow archive. Ambiguous jobs or job-query errors fail the recheck.
+
+The required **Automated Code Review** check is the `review-result` job in `ci.yml`, because a called workflow's jobs show as `Review / <job>`. It succeeds only when the called review succeeds. The called workflow's **Review verdict** job carries the reasons: new finding threads, still-open threads, or a failed provider or poster. Outside a pull request into `main` the job is skipped under another name, since a skipped job reports success and must never satisfy the required check. Open findings therefore fail the whole CI run. Snapshot publication still proceeds, because it reads the verification and preparation jobs, not the run's conclusion; it does start only after the review finishes.
+
+Every job in this run can upload artifacts, including jobs that build PR code, such as `prepare-pr-snapshot`, which runs alongside the review. The poster therefore downloads the review output by the artifact ID the provider job reported, never by name, and fails when that ID is missing. Model keys reach only this call: `ci.yml` passes `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` explicitly, never `secrets: inherit`, and only the matching provider job references each key.
 
 Bot-authored `release/v*` version-bump PRs skip Vitest, cockpit browser E2E, and automated code review only when all of these hold: PR author is `github-actions[bot]` or the exact bot configured in `RELEASE_APP_BOT_LOGIN`, head is `release/v*`, the live file list matches the release-finalization allowlist (`packages/*/package.json`, `alias-cezarion/package.json`, `pnpm-lock.yaml`), the event head SHA still matches the live PR head, the file-list fetch succeeded in full, and base→head manifests differ only by one shared old→new semver pair (optional caret; same keys/structure — no added scripts, deps, or arbitrary retargets), and the pnpm lockfile stays byte-identical except matching local workspace specifiers (including its pnpm package-manager document).
 
- The shared check lives in `.github/scripts/release-bump-pr.cjs` (loaded from the trusted base checkout) and feeds CI `classify-pr`, automated review `can_review`, and recovery. The required CI aggregate still runs `build-and-package` and accepts `skipped` for Vitest/cockpit only on that verified shape. Automated review keeps the named **Automated Code Review** check green without a model round when it skips. A human-authored `release/v*` PR still runs the full matrix and review. Manual `workflow_dispatch` of automated review is unchanged.
+ The shared check lives in `.github/scripts/release-bump-pr.cjs` (loaded from the trusted base checkout) and feeds CI `classify-pr` and automated review `can_review`. The required CI aggregate still runs `build-and-package` and accepts `skipped` for Vitest/cockpit only on that verified shape. Automated review keeps the named **Automated Code Review** check green without a model round when it skips. A human-authored `release/v*` PR still runs the full matrix and review. Manual `workflow_dispatch` of automated review is unchanged.
 
 Release finalization creates bump PRs with a repository-scoped GitHub App token,
 which emits native `pull_request_target` CI. It waits for that run and never
 starts a competing dispatch. The App client only creates the PR; verification
 keeps read-only permissions and the required aggregate name stays unchanged.
-CI, review, and review recovery recognize the configured `RELEASE_APP_BOT_LOGIN`
+CI and review recognize the configured `RELEASE_APP_BOT_LOGIN`
 as well as legacy `github-actions[bot]` bumps, with the same file and version
 checks. See [release App setup](../publishing.md#release-app-setup).
 
@@ -204,19 +208,13 @@ The runner selection and three updated split-suite weights were measured togethe
 
 The release workflow's verification job also uses `blacksmith-4vcpu-ubuntu-2404`, with its existing commands and default Vitest worker policy. Two successful matched release-verification pairs reduced median queue-inclusive job time from 438 to 354.5 seconds; one failure on each provider is retained in the report. Stable and snapshot npm publishing remain on GitHub-hosted runners.
 
-### Recovery after a CI retry
+### Re-running a review
 
-`recover-automated-review.yml` listens for CI completion and reconciles the live open same-repository PR on `main`, its current head, and the newest CI run and exact attempt. Successful aggregate verification can recover an automatic review that failed only at `wait-for-ci`. Snapshot publication's conclusion does not authorize or veto recovery. The normal review path still starts as soon as verification succeeds; the recovery listener runs when the workflow completes.
+A flaky verification failure needs no separate recovery workflow. **Re-run failed jobs** on the CI run reruns the failed shards, `verify`, and every job downstream of it, including the review. The poster reads the PR's reviews and live head again just before posting, so a rerun never exceeds `AUTOMATED_REVIEW_ROUNDS`, never posts a second review on one head, and never posts on a stale head.
 
-Recovery reruns the original failed `wait-for-ci` job and its dependent jobs. It does not dispatch a new review or retry CI. Before that API write, it resolves eligibility again: current PR/head/attempt, review activity, posted reviews, bot eligibility, and `AUTOMATED_REVIEW_ROUNDS` (default 3). Successful ancestor outputs retained by GitHub job reruns do not substitute for these fresh checks. Active or completed reviews, same-head reviews, exhausted limits, forks, stale events, and failures in a provider or publisher are skipped with a reason in the workflow log and summary. Manual `workflow_dispatch` review runs remain outside automatic recovery.
+To re-check a PR after replying to or resolving findings, re-run **Review / review-round** in its CI run rather than the whole run. That reruns the round and every review job after it: an unchanged patch skips the model and only recounts the open threads. A manual review of any PR, outside the round cap, is `workflow_dispatch` of `automated-code-review.yml` with `pr_number`. Its checks attach to the dispatched branch, not the PR head, so it posts a review but does not change the PR's required check.
 
-The listener also handles automatic-review completion: if CI finished while the original waiter was still failing, that later completion reconciles the successful CI attempt. A failed gate that started after successful verification cannot be recovered again from the same success. Recovery events serialize by head without cancelling an in-flight recovery; the original review retains its PR concurrency, provider selection, and posting safeguards.
-
-The recovery job executes only the default-branch script, with `actions: write` for the rerun API and read access to contents and pull requests. It checks out no PR code, downloads no artifacts, persists no credentials, and has no model secrets. Existing provider jobs remain read-only, and only the separate trusted publisher can write review findings.
-
-**Validation limit:** GitHub loads `workflow_run` listeners from the default branch. A PR changing this listener cannot exercise its new trigger before merge. Local mocked API histories execute the recovery helper and the workflow entry script, including failure→success, changing caps/reviews, stale heads/attempts, duplicates, and completion ordering. They do not prove delivery of a live GitHub event.
-
-**Post-merge observation:** use a dedicated same-repository draft PR against `main`, never a shared PR or a main-branch run. On its next genuine CI failure (or deliberately cancel only that disposable PR's CI run), wait for the original review's `wait-for-ci` to fail. Record the PR head, CI run/attempt, and review run/attempt. Retry that CI run with `gh run rerun <ci-run-id> --failed`; do not push or restart review. After successful verification and CI completion, check the **Recover Automated Review** summary: it must identify that CI attempt and the original review run/job. Confirm the original review has a new attempt, the selected provider alone runs, and exactly one automated review is posted on the unchanged head. Re-run the recovery listener once through GitHub's **Re-run jobs** control: it must explain an active/completed-review skip without another model job or review. Record the run URLs and close the disposable PR without merging. If the CI retry fails again, recovery must remain skipped; do not weaken a test to manufacture success.
+**Validation limit:** `pull_request_target` loads `ci.yml` from the base branch, so the PR introducing this layout is reviewed by the previous standalone workflow. After it merges, use a disposable same-repository draft PR: confirm one green run with a single posted review, then fail one verification job on purpose and confirm that **Re-run failed jobs** runs the review once verification passes. Record the run URLs and close the PR without merging.
 
 ### Stable release recovery
 
@@ -275,7 +273,7 @@ The archive publisher becomes active after landing on the default branch; old
 CI attempts without prepared archives cannot publish through it. Live evidence
 for the introducing PR demonstrates event routing, not execution of its new
 target workflow definition. Local regression tests cover both supported base
-names, push/manual routing, classification, cancellation, recovery and snapshot
+names, push/manual routing, classification, cancellation and snapshot
 eligibility. There was no remote `develop` at migration time; live validation
 there is deferred. Create any future `develop` from a revision containing the
 target workflow before opening PRs against it.
