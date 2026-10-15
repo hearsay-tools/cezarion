@@ -1522,13 +1522,14 @@ entries:
     pr: 1349
     title: "feat(cockpit): Markdown preview toggle in the Changes diff (#1349)"
     date: 2026-10-10
-    status: planned
+    status: ported
     hint:
       conflicts: 8
     fork:
       issue: 1012
-    decided: 2026-10-13
-    note: Adapt Markdown previews to existing file readers and demand-bound browser coordination; do not copy upstream recurring polling.
+      pr: 1076
+    decided: 2026-10-15
+    note: Re-implemented by hearsay-tools/cezarion#1076 on the existing file readers with no recurring polling; adds a per-file switch and phone support, and loads repository images only (never remote ones).
   - sha: fd99a9d2cd24a421a5e6daa07877ddceeadf774c
     pr: 1133
     title: "fix(cli): explain a missing CEZ_API_URL to a person, add `cez runs list`, document the /api/v1 API (#1133)"

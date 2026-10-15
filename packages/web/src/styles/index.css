@@ -668,6 +668,60 @@
   display: block;
 }
 
+/* ---------- diff Markdown preview (hearsay-tools/cezarion#1012) ----------
+ * Reading scale for a whole Markdown FILE in the Changes diff, layered on the chat rules above
+ * and scoped to the preview, so the thread and the Files tab keep their own scale: body a step
+ * up, headings with real hierarchy and forge-style rules under h1/h2, roomier block spacing.
+ * Same unlayered reasoning; the attribute selector outranks the `.thread-markdown` rules. The
+ * column width is the preview's own `max-w-[72ch]` wrapper. */
+
+[data-slot='diff-markdown-preview'] .thread-markdown {
+  font-size: 15px;
+  line-height: 1.7;
+}
+[data-slot='diff-markdown-preview'] .thread-markdown :is(h1, h2, h3, h4, h5, h6) {
+  margin-block: 1.6em 0.6em;
+  line-height: 1.3;
+}
+/* Streamdown's own first-child reset lives in the utilities layer, which the unlayered heading
+ * margin above outranks: restate it, or a file opening with `# Title` starts ~40px down. */
+[data-slot='diff-markdown-preview'] .thread-markdown > :first-child {
+  margin-top: 0;
+}
+[data-slot='diff-markdown-preview'] .thread-markdown h1 {
+  font-size: 1.75em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+}
+[data-slot='diff-markdown-preview'] .thread-markdown h2 {
+  font-size: 1.4em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--border);
+}
+[data-slot='diff-markdown-preview'] .thread-markdown h3 {
+  font-size: 1.2em;
+}
+[data-slot='diff-markdown-preview'] .thread-markdown :is(h4, h5, h6) {
+  font-size: 1em;
+}
+[data-slot='diff-markdown-preview'] .thread-markdown :is(p, ul, ol, table, blockquote) {
+  margin-block: 0.9em;
+}
+[data-slot='diff-markdown-preview'] .thread-markdown li + li {
+  margin-top: 0.3em;
+}
+[data-slot='diff-markdown-preview'] .thread-markdown hr {
+  margin-block: 2em;
+  border-color: var(--border);
+}
+[data-slot='diff-markdown-preview'] .thread-markdown img {
+  max-width: 100%;
+  border-radius: 6px;
+}
+[data-slot='diff-markdown-preview'] .thread-markdown [data-streamdown='code-block'] pre {
+  font-size: 13px;
+}
+
 /* A persistent shape distinguishes current navigation from its hover fill. Positioned inside
  * the existing row: no layout shift, target-size change, or interference with focus rings. */
 .selection-row {

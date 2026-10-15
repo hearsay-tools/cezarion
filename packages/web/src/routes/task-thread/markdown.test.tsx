@@ -31,6 +31,30 @@ describe('Markdown', () => {
     expect(screen.getByRole('link', { name: 'Report' }).getAttribute('href')).toBe(href)
   })
 
+  it('stamps each task its own Files route, not the first task rendered (processor cache)', () => {
+    // Streamdown caches its unified processors module-wide, keyed by plugin NAME + JSON options.
+    // A link plugin that captured its context in a closure was reused for every later task, so
+    // task B's links opened task A's Files tab.
+    render(<TaskFileContext.Provider value={{ runId: 'run-a', projectId: 'one' }}><Markdown>{'[first](/tmp/a.md)'}</Markdown></TaskFileContext.Provider>)
+    expect(screen.getByRole('link', { name: 'first' }).getAttribute('href')).toBe('/p/one/tasks/run-a/files?path=%2Ftmp%2Fa.md')
+    cleanup()
+    render(<TaskFileContext.Provider value={{ runId: 'run-b', projectId: 'two', basePath: 'docs/guide.md' }}><Markdown>{'[second](next.md)'}</Markdown></TaskFileContext.Provider>)
+    const second = screen.getByRole('link', { name: 'second' })
+    expect(second.getAttribute('href')).toBe('/p/two/tasks/run-b/files?path=docs%2Fnext.md')
+    // Still recognised as this task's own file: it navigates without the link-safety confirm.
+    fireEvent.click(second)
+    expect(document.querySelector('[data-slot="link-safety-dialog"]')).toBeNull()
+  })
+
+  it('confirms a link the author already scoped to this task, which only a rewrite skips', () => {
+    // artifact-project-links.e2e.ts pins the same rule in a real browser: a published artifact
+    // URL in its owner's thread is not a file reference cezar resolved, so it keeps the confirm.
+    const href = '/p/owner/tasks/owner-task/files?artifact=4c15e25b-a08c-438d-a32b-fd1a8c6c90e2'
+    render(<TaskFileContext.Provider value={{ runId: 'owner-task', projectId: 'owner' }}><Markdown>{`[Report](${href})`}</Markdown></TaskFileContext.Provider>)
+    fireEvent.click(screen.getByRole('link', { name: 'Report' }))
+    expect(document.querySelector('[data-slot="link-safety-dialog"]')).not.toBeNull()
+  })
+
   it('retains external link semantics and confirmation inside task context', () => {
     render(<TaskFileContext.Provider value={{ runId: 'task-one' }}><Markdown>{'[Website](https://example.com)'}</Markdown></TaskFileContext.Provider>)
     fireEvent.click(screen.getByRole('link', { name: 'Website' }))
@@ -53,6 +77,30 @@ describe('Markdown', () => {
     const { container } = render(<Markdown document>{'![private](https://example.com/tracker.png)'}</Markdown>)
     expect(container.querySelector('img')).toBeNull()
     expect(container.textContent).toContain('private')
+  })
+
+  it('loads a document image only through the imageSrc resolver, and keeps refused ones as text', () => {
+    const imageSrc = vi.fn((src: string) => (src === 'img/ok.png' ? '/raw/docs/img/ok.png' : null))
+    const { container } = render(
+      <Markdown document imageSrc={imageSrc}>
+        {'![allowed](img/ok.png)\n\n![refused](../../escape.png)\n\n![remote](https://example.com/tracker.png)'}
+      </Markdown>,
+    )
+    const images = container.querySelectorAll('img')
+    expect(images).toHaveLength(1)
+    expect(images[0]?.getAttribute('src')).toBe(new URL('/raw/docs/img/ok.png', window.location.href).href)
+    expect(images[0]?.getAttribute('alt')).toBe('allowed')
+    expect(imageSrc).toHaveBeenCalledWith('img/ok.png')
+    expect(imageSrc).toHaveBeenCalledWith('../../escape.png')
+    expect(container.textContent).toContain('[Image: refused]')
+    expect(container.textContent).toContain('[Image: remote]')
+  })
+
+  it('gives every document its own image resolver, never an earlier one (processor cache)', () => {
+    render(<Markdown document imageSrc={() => '/raw/one.png'}>{'![shot](shot.png)'}</Markdown>)
+    cleanup()
+    const { container } = render(<Markdown document imageSrc={() => '/raw/two.png'}>{'![shot](shot.png)'}</Markdown>)
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(new URL('/raw/two.png', window.location.href).href)
   })
 
   it('renders a ts fence as a code block with language chip and copy button, tokens on --syn-*', async () => {

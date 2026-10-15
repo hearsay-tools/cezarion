@@ -114,6 +114,19 @@ const LINK_SAFETY: LinkSafetyConfig = {
   renderModal: (props) => <LinkSafetyDialog {...props} />,
 }
 
+/** Where a refused document image points: the reserved `.invalid` TLD never resolves. */
+const REFUSED_IMAGE = 'https://refused.invalid/'
+
+/**
+ * A fresh cache key per `Markdown` memo, for its closure plugins. Streamdown caches its unified
+ * processors module-wide, keyed by each plugin's function NAME plus its JSON options, so a
+ * closure plugin is built once, by whichever instance renders first, and every later instance
+ * gets that one's captured state: task B's file links opened task A's Files tab, and the
+ * internal-link record filled a Set no component read. An `instance` option keys each memo's
+ * plugins apart; a processor evicted from the cache is rebuilt from the same closures.
+ */
+let markdownInstances = 0
+
 /**
  * Memoized per message (Streamdown additionally memoizes per block): during streaming only the
  * message whose `children` string actually grew re-renders — the research doc's one hard rule
@@ -121,21 +134,32 @@ const LINK_SAFETY: LinkSafetyConfig = {
  *
  * `breaks` opts into hard line breaks — set it for chat messages (user and assistant), leave it
  * off for documents and compact previews (see `remarkHardBreaks`).
+ *
+ * `imageSrc` lets a `document` load images after all: given an image's own `src`, it answers the
+ * URL to fetch, or `null` to keep the inert `[Image: …]` text. Without it a document fetches no
+ * image (a published snapshot has no live directory to resolve against). The diff's Markdown
+ * preview (hearsay-tools/cezarion#1012) passes one that resolves repository paths only. Pass a
+ * stable function: the memo compares it by identity.
  */
 export const Markdown = memo(function Markdown({
   children,
   breaks = false,
   inline = false,
   document = false,
+  imageSrc,
 }: {
   children: string
   breaks?: boolean
   inline?: boolean
   document?: boolean
+  imageSrc?: (src: string) => string | null
 }) {
   const fileContext = useContext(TaskFileContext)
   const contextual = useMemo(() => {
+    const instance = { instance: ++markdownInstances }
     const internal = new Set<string>()
+    // Only a link this walk REWROTE skips the link-safety confirm. A cockpit URL the author
+    // wrote themselves, even one naming this task, keeps it: `taskFileHref` returns null for it.
     function taskLinks() {
       const walk = (node: MdastNode): void => {
         if ((node.type === 'link' || node.type === 'definition') && node.url && fileContext) {
@@ -146,24 +170,46 @@ export const Markdown = memo(function Markdown({
       }
       return walk
     }
+    const resolvedImages = new Set<string>()
+    // Images resolve HERE, on the mdast, because Streamdown's harden step blocks every relative
+    // `src` before a component could see it (with its own unthemed "Image blocked" pill). The
+    // resolved URL is made absolute so harden lets it through; a refused one becomes a URL that
+    // can never resolve, so it too reaches the `img` component below, which renders an <img>
+    // ONLY for URLs this walk produced and the inert `[Image: …]` text for everything else.
+    function documentImages() {
+      const walk = (node: MdastNode): void => {
+        if (node.type === 'image' && node.url && imageSrc) {
+          const resolved = imageSrc(node.url)
+          node.url = resolved ? new URL(resolved, window.location.href).href : REFUSED_IMAGE
+          if (resolved) resolvedImages.add(node.url)
+        }
+        node.children?.forEach(walk)
+      }
+      return walk
+    }
+    const links = fileContext ? [[taskLinks, instance] satisfies [typeof taskLinks, typeof instance]] : []
+    const images = document && imageSrc ? [[documentImages, instance] satisfies [typeof documentImages, typeof instance]] : []
     return {
-      remark: [...(breaks ? HARD_BREAKS : Object.values(defaultRemarkPlugins)), taskLinks],
+      remark: [...(breaks ? HARD_BREAKS : Object.values(defaultRemarkPlugins)), ...links, ...images],
       components: {
         ...(fileContext || document ? { a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
           // A snapshot has no live directory. Relative links cannot silently target the host.
           if (document && !fileContext && !/^(?:https?:|mailto:|#)/i.test(href ?? '')) return <span>{children}</span>
           return <TaskLink href={href} internal={internal.has(href ?? '')}>{children}</TaskLink>
         } } : {}),
-        ...(document ? { img: ({ alt }: { alt?: string }) => <span className="text-muted-foreground">[Image: {alt || 'embedded image'}]</span> } : {}),
+        ...(document ? { img: ({ src, alt }: { src?: unknown; alt?: string }) => {
+          if (typeof src === 'string' && resolvedImages.has(src)) return <img src={src} alt={alt ?? ''} loading="lazy" />
+          return <span className="text-muted-foreground">[Image: {alt || 'embedded image'}]</span>
+        } } : {}),
       },
     }
-  }, [fileContext, breaks, document])
+  }, [fileContext, breaks, document, imageSrc])
   return (
     <Streamdown
       className={inline ? 'thread-markdown thread-markdown-inline' : 'thread-markdown'}
       plugins={{ code: shikiPlugin }}
       shikiTheme={[SYN_THEME, SYN_THEME]}
-      remarkPlugins={fileContext ? contextual.remark : breaks ? HARD_BREAKS : undefined}
+      remarkPlugins={fileContext || (document && imageSrc) ? contextual.remark : breaks ? HARD_BREAKS : undefined}
       allowedElements={inline ? INLINE_ELEMENTS : undefined}
       unwrapDisallowed={inline || undefined}
       components={inline ? INLINE_COMPONENTS : fileContext || document ? contextual.components : undefined}

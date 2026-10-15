@@ -1,4 +1,4 @@
-import { CircleHelpIcon, WrapTextIcon } from 'lucide-react'
+import { CircleHelpIcon, EyeIcon, WrapTextIcon } from 'lucide-react'
 import { GitBranchIcon, Columns2Icon } from '@/components/design-icons'
 
 import type { DiffMode } from '@/components/diff'
@@ -46,6 +46,38 @@ export function DiffViewToggles({
         <WrapTextIcon aria-hidden="true" />
       </Button>
     </>
+  )
+}
+
+/**
+ * The Markdown preview switch (hearsay-tools/cezarion#1012): every previewable Markdown file in
+ * the diff at once, and pressing it clears the per-file choices made in the cards. NOT one of
+ * the ≥md-only toggles above: phones force unified+wrap because a 360px screen has no room for
+ * split, but a rendered document reads better there than anywhere, so callers render this one
+ * at every width. Callers render it only when the diff holds a file `canPreviewMarkdown`
+ * accepts, so the button never sits there doing nothing.
+ */
+export function MarkdownPreviewToggle({
+  preview,
+  onPreviewChange,
+}: {
+  preview: boolean
+  onPreviewChange: (preview: boolean) => void
+}) {
+  const label = preview ? 'Show Markdown as a diff' : 'Preview Markdown'
+  return (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      data-slot="markdown-preview-toggle"
+      aria-pressed={preview}
+      aria-label="Preview Markdown"
+      title={label}
+      className={cn('size-11', preview && 'bg-muted text-foreground')}
+      onClick={() => onPreviewChange(!preview)}
+    >
+      <EyeIcon aria-hidden="true" />
+    </Button>
   )
 }
 

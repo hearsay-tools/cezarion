@@ -7,7 +7,7 @@ import { ApiError, createRunPr, getRunFile, openRunFileInApp, openRunInCli, push
 import { queryKeys, useHealth, useRepo, useRun, useRunChanges } from '@/api/queries'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
-import { Diff, type DiffHandle, type DiffMode } from '@/components/diff'
+import { canPreviewMarkdown, Diff, type DiffHandle, type DiffMode } from '@/components/diff'
 import { toast } from '@/components/ui/toaster'
 import { gitActionPolicy, type GitActionId } from '@/lib/git-actions'
 import { useIsDesktop } from '@/lib/use-desktop'
@@ -51,6 +51,7 @@ function ChangesView({ run }: { run: ApiRun }) {
 
   const [mode, setMode] = useState<DiffMode>('unified')
   const [wrap, setWrap] = useState(false)
+  const [preview, setPreview] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [commitOpen, setCommitOpen] = useState(false)
   const diffRef = useRef<DiffHandle | null>(null)
@@ -135,6 +136,7 @@ function ChangesView({ run }: { run: ApiRun }) {
 
   const files = changes.data?.files ?? []
   const tree = useMemo(() => buildFileTree(files), [files])
+  const hasMarkdown = useMemo(() => files.some(canPreviewMarkdown), [files])
 
   // Phones force the readable combination; the toggles only exist ≥md (toolbar hides them).
   const effectiveMode: DiffMode = desktop ? mode : 'unified'
@@ -157,8 +159,10 @@ function ChangesView({ run }: { run: ApiRun }) {
         stat={changes.data?.stat}
         mode={effectiveMode}
         wrap={effectiveWrap}
+        preview={preview}
         onModeChange={setMode}
         onWrapChange={setWrap}
+        onPreviewChange={hasMarkdown ? setPreview : undefined}
         onAction={onAction}
       />
 
@@ -209,6 +213,10 @@ function ChangesView({ run }: { run: ApiRun }) {
             viewRef={diffRef}
             mode={effectiveMode}
             wrap={effectiveWrap}
+            // Phones included: a rendered document is the one view a narrow screen reads well.
+            // The preview's full text reloads only when this diff's coordinated read changes a
+            // file's patch, so it adds no polling of its own.
+            preview={preview}
             loadFileText={(path) => loadWorktreeText(run.id, path)}
             imageSrc={(path) => runFileRawUrl(run.id, path)}
             onOpenInApp={
