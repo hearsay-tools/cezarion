@@ -396,6 +396,12 @@ composer names the project it will run in.
 **Adding a project** — the **+** button on the desktop rail (or in the mobile
 navigation drawer):
 
+- ✨ **New project…** creates a git repository with one empty commit in the checkout
+  root and registers it. Optionally — only when you switch it on — it also creates a
+  **private** GitHub repository under your account or one of your organizations, empty or
+  from a GitHub template. If GitHub setup fails after the repository exists, the local
+  project is kept and the dialog shows the command that finishes it. A hosted cockpit
+  creates local projects only.
 - 📂 **Open local folder…** browses from the configured browse root
   (**Settings → Projects**, default `~/`) in a folder picker and
   registers the folder you pick.
@@ -919,7 +925,7 @@ Useful environment variables:
 | `CEZ_CURSOR_BIN=/path/to/agent` | Override the Cursor CLI (`agent`) executable. |
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME` | The agents' **own** variables, honoured where the vendor documents one. Setting one moves that agent's **default account** — the config folder cezar discovers. A *second* login of the same CLI is deliberately not an environment setting, since one process-wide value cannot differ per project: add it under **Settings → Agent accounts** and pick it per project. |
 | `CEZ_BROWSE_ROOT=~/` | Default root for **Add project → Open local folder…**. The picker cannot navigate above it; a saved workspace value overrides the environment default and must name an existing folder. |
-| `CEZ_PROJECTS_DIR=~/cezar/projects` | Default destination for **Clone from GitHub**. Saved workspace settings override it, and missing directories are created recursively. |
+| `CEZ_PROJECTS_DIR=~/cezar/projects` | Default destination for **Clone from GitHub** and **New project**. Saved workspace settings override it, and missing directories are created recursively. |
 | `CEZ_SKILLS_AUTO_UPDATE=0` | Disable automatic checks and updates for upstream-CLI-tracked Open Mercato skill installations. On by default; a saved global Skills setting overrides this environment default. Checks are delayed, bounded, cached, and non-blocking. |
 | `CEZ_PROJECT_WARMUP=0` | Prepare each registered project only when it is first opened. By default the cockpit prepares every other registered project in the background once it listens, one at a time, most recently opened first: the run store opens and interrupted runs resume, so the first click on a project does not wait. A project another live cockpit serves is skipped. |
 | `CEZ_AUTONOMOUS_DEFAULT=0` | Seed the New Task Autonomous default (`0` or `1`). Without a seed, skills default on and workflows off; a saved global Resources setting overrides it. |
