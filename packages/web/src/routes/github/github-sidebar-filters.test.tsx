@@ -256,7 +256,7 @@ describe('a blocked filter never lets the cross-state search leak rows', () => {
     renderAt('/github?filter=assigned')
     await waitFor(() => expect(numbers()).toEqual([1]))
     type('Search issues', 'zebra')
-    await waitFor(() => expect(numbers()).toEqual([1234]), { timeout: 3000 })
+    await waitFor(() => expect(numbers()).toEqual([1234]))
   })
 })
 
