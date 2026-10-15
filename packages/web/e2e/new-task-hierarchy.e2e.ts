@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
+// fixture-server starts: 1
 
 /** Real-browser geometry and state preservation for the New Task execution disclosure.
  * Uses an isolated dry-run server; the unit suite pins the exact submission payloads. */

@@ -10,6 +10,7 @@ import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './f
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
 import record from './fixtures/thread-run.record.json'
+// fixture-server starts: 1
 
 // Real store/history/reducer/rendering, not live provider execution. Deliberately
 // interleave work between non-blocking sends and replies, unlike the old QA fixture.

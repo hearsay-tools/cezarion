@@ -7,6 +7,7 @@ import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import { contrastSampleExpression, dismissWithEscape, type ContrastSample } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { settleVisual, waitForSettledSample } from './visual-ready'
+// fixture-server starts: 1
 
 let browser: AgentBrowser
 let server: ChildProcess

@@ -7,6 +7,7 @@ import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { waitForSettledSample } from './visual-ready'
 import { focusWithKeyboard } from './contrast'
+// fixture-server starts: 1
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e/sidebar-limits')
 let browser: AgentBrowser

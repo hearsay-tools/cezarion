@@ -8,6 +8,7 @@ import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { settleVisual } from './visual-ready'
+// fixture-server starts: 1
 
 // Real publication output, two registered projects and real disk-backed task records.
 // No request stubs: the browser must retrieve the owner's snapshot through the scoped API.

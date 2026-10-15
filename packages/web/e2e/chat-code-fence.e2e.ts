@@ -8,6 +8,7 @@ import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './f
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, restoreContrastQaDefaults } from './contrast'
 import record from './fixtures/thread-run.record.json'
+// fixture-server starts: 1
 
 /**
  * #742: a fenced code block in chat must keep one source line per visual line, in the user's

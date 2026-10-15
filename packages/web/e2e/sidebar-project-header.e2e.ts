@@ -8,6 +8,7 @@ import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { focusWithKeyboard } from './contrast'
+// fixture-server starts: 1
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const fixtures: Array<{ root: string; server: ChildProcess; url: string; project: string; remote: boolean }> = []

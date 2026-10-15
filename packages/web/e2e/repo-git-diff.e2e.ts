@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
 import { assertDiffCoverage } from './repo-diff-coverage'
+// fixture-server starts: 1
 
 /**
  * Repo Git diff completeness over generated fixtures — the live `repo-git.e2e.ts` suite

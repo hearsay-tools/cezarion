@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { pollFor } from './poll'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
+// fixture-server starts: 1
 
 /**
  * Live preview, end to end (#781): the dry-run mock agent registers a dev server through the

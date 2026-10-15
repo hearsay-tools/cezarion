@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { AgentBrowser, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { pollFor } from './poll'
+// fixture-server starts: 1
 
 /**
  * Global Resources monitoring controls against an isolated fixture server.

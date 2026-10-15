@@ -7,6 +7,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import { focusWithKeyboard, contrastSampleExpression, type ContrastSample } from './contrast'
 import { waitForSettledSample } from './visual-ready'
+// fixture-server starts: 1
 
 // Real application controls and computed CSS, not copies of primitive class strings.
 let browser: AgentBrowser

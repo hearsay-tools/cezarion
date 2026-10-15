@@ -8,6 +8,7 @@ import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForStatus } from './poll'
+// fixture-server starts: 1
 
 /**
  * The Changes views' Markdown preview (hearsay-tools/cezarion#1012) in a real browser: what jsdom

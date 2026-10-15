@@ -115,7 +115,9 @@ line; the fix is a wait, never a baseline entry.
    `await stopFixtureServer(server)` before `rmSync(dataRoot, ...)`. The server flushes state after
    SIGTERM, so `kill()` alone does not settle cleanup. The helper waits for `exit` and sends
    SIGKILL if graceful shutdown takes more than five seconds. The unit check rejects bare
-   fixture-server kills in e2e specs.
+   fixture-server kills in e2e specs. A spec that starts its own fixture server declares the
+   count on one line after its imports, `// fixture-server starts: N`, and a unit guard checks
+   it (see `fixture-server.md`).
 
 One more rule is enforced by review, not by the scan: **a wait added or changed to fix a flake
 cites its evidence in the comment at the site.** The comment names the failure bundle path (or

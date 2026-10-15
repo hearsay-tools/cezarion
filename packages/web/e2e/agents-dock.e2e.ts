@@ -8,6 +8,7 @@ import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import record from './fixtures/subagents-run.record.json'
+// fixture-server starts: 2
 
 /**
  * The grouped sub-agent display (spec `.ai/specs/2026-07-20-grouped-subagent-display.md`,

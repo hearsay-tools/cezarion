@@ -9,6 +9,7 @@ import type { RunRecord } from '@open-mercato/cezar-api-client'
 
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+// fixture-server starts: 1
 
 /**
  * Task GitHub item tabs (#692) end-to-end: a task that references an own-repo PR and issue gets

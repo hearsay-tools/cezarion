@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForConfig, waitForStatus } from './poll'
+// fixture-server starts: 1
 
 /**
  * Worktree setup (hearsay-tools/cezarion#917, spec `.ai/specs/2026-10-07-worktree-setup.md`)

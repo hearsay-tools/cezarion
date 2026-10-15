@@ -9,6 +9,7 @@ import type { ApiRun, CreateRunInput, RunRecord, WorkspaceConfigResponse } from 
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
 import { pollFor } from './poll'
+// fixture-server starts: 1
 
 const sessionId = `e2e-composer-defaults-${process.pid}`
 
