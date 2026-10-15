@@ -205,6 +205,20 @@ async function respond(userText, imageCount, uuid) {
     emit({ type: 'result', subtype: 'success', result: text, user_message_uuids: [uuid, ...steered.map(s => s.uuid)].filter(Boolean), usage: { input_tokens: 20, output_tokens: 10 } });
     return;
   }
+  // #961: hook_response frames as `--include-hook-events` emits them (CLI 2.1.301) — one
+  // mid-turn, one after the run parked (Squeal's async `waiter` completes this late).
+  if (!userText.includes('[cez-namer]') && userText.includes('mock:hook-after-park')) {
+    const hook = (id, event, text) => ({
+      type: 'system', subtype: 'hook_response', hook_id: `hook-${id}-${turn}`, hook_name: event, hook_event: event,
+      stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: text } }), stderr: '', exit_code: 0, outcome: 'success',
+    });
+    emit(hook('mid', 'PostToolBatch', 'Mid-turn hook context.'));
+    emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Watching.\nCEZ:MONITORING' }] } });
+    emit({ type: 'result', subtype: 'success', result: 'Watching.\nCEZ:MONITORING', usage: { input_tokens: 10, output_tokens: 5 } });
+    await afterParityPark(userText);
+    emit(hook('late', 'Stop', 'Late hook processed.'));
+    return;
+  }
   // Native child attribution from __fixtures__/claude/subagent-task.ndjson.
   if (!userText.includes('[cez-namer]') && userText.includes('mock:subagent-after-park')) {
     const task = `toolu_park_${turn}`;

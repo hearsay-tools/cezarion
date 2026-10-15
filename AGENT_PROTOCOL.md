@@ -756,6 +756,10 @@ or a new fixture set forgets one — a named row fails. The matrix:
 - `turn.completed` with a `stopReason`
 - sub-agent **nesting** via `parentItemId` where the upstream wire attributes
   child work to a parent
+- hook items (`hook_response` / `hook/completed`, hearsay-tools/cezarion#961) — Claude
+  and Codex only. OpenCode 1.18.35, Pi 1.0.4, OMP 18.8.0 and Cursor
+  2026.10.01-e373342 run hooks in-process or report none, and carry the named
+  `NO_HOOK_TELEMETRY` exemption with an inverse assertion
 
 A new backend must produce every row its wire supports. A genuine upstream gap
 requires a named, versioned exemption with an inverse assertion; Cursor token
@@ -1339,6 +1343,13 @@ waiting to test owned-input draining. Neither replaces R26. New runners must
 supply a nonempty ask-kind inventory and native prompts, or a named executable
 wire exemption. The prose guard rejects counted runner rosters in this contract,
 the hearsay-tools/cezarion#68 spec and harness-parity comments so adding an id cannot stale their counts.
+
+R77 (hearsay-tools/cezarion#961) is R15's shape for hooks: a native hook frame mid-turn, a
+monitoring park, then a late hook frame released after the park (Squeal's async `waiter`
+completes this late). Status, activity and the wake deadline survive, no turn opens, and
+both hooks persist as distinct `item.completed` hook items. Only Claude and Codex have a
+hook wire; the other runners carry `scenario-unconstructible` exemptions naming the version
+surveyed.
 
 R15 (hearsay-tools/cezarion#121/#401) releases native child updates only after the run has parked,
 then checks that status, activity and the monitoring wake deadline survive.
