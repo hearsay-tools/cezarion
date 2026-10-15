@@ -1044,7 +1044,7 @@ describe('TaskThreadRoute', () => {
         : new Response(JSON.stringify({ error: 'server unavailable' }), { status: 503, headers: { 'content-type': 'application/json' } }))
     }))
     renderRoute('r1')
-    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Could not load this task'), { timeout: 3_000 })
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Could not load this task'))
     expect(document.querySelector('[data-slot="centered-state"]')?.getAttribute('data-tone')).toBe('danger')
     expect(screen.queryByText('Task not found')).toBeNull()
   })
