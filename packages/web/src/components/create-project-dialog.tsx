@@ -5,7 +5,7 @@ import { getCheckoutProgress } from '@/api/client'
 import { onWorkspaceEvent } from '@/api/global-events'
 import { onLiveReconcile } from '@/api/live-coordinator'
 import { useCreateProject, useGithubOwners, useProjects } from '@/api/queries'
-import { GITHUB_REPO_NAME_PATTERN, type CheckoutProgressEvent, type GithubOwner } from '@open-mercato/cezar-api-client'
+import { PROJECT_NAME_PATTERN, type CheckoutProgressEvent, type GithubOwner } from '@open-mercato/cezar-api-client'
 import { TriangleAlertIcon } from '@/components/design-icons'
 import { GithubTemplateInput } from '@/components/github-template-input'
 import { Button } from '@/components/ui/button'
@@ -99,7 +99,7 @@ export function CreateProjectDialog({
   const effectiveStart = github ? start : 'empty'
 
   const trimmed = name.trim()
-  const nameValid = GITHUB_REPO_NAME_PATTERN.test(trimmed) && /^[A-Za-z0-9]/.test(trimmed)
+  const nameValid = PROJECT_NAME_PATTERN.test(trimmed)
   const projectsDir = (projects.data?.projectsDir ?? '').replace(/\/+$/, '')
   const ready =
     nameValid &&

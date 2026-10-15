@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { GITHUB_REPO_NAME_PATTERN, type GithubOwner, type GithubOwnersResponse } from '@open-mercato/cezar-contract';
+import { PROJECT_NAME_PATTERN, type GithubOwner, type GithubOwnersResponse } from '@open-mercato/cezar-contract';
 import { GH_CREDENTIAL_HELPER_CONFIG, cleanupCheckout, isValidCheckoutName, parseRepoRef, type CheckoutProgressEvent } from './checkout.ts';
 
 /**
@@ -204,7 +204,7 @@ export async function createProject(opts: CreateProjectOptions): Promise<CreateP
   // GitHub's repository-name rules, even for a local-only project: the name is
   // the folder AND (now or later) the repo, and GitHub would silently rewrite
   // anything else — `my project` becomes `my-project` there but not on disk.
-  if (!GITHUB_REPO_NAME_PATTERN.test(name) || !isValidCheckoutName(name)) {
+  if (!PROJECT_NAME_PATTERN.test(name) || !isValidCheckoutName(name)) {
     return {
       ok: false,
       status: 400,

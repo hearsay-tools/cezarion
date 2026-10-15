@@ -199,11 +199,13 @@ export const checkoutProjectInputSchema = z.object({
 export type CheckoutProjectInput = z.infer<typeof checkoutProjectInputSchema>;
 
 /**
- * A GitHub repository name, as GitHub itself accepts it: letters, digits, `.`, `-` and `_`, at
- * most 100 characters, and never `.` or `..`. A new project's name must be one — it is the folder
- * name and, with `github`, the repository name, so a name GitHub would rewrite is refused.
+ * A new project's name: GitHub's repository-name characters (letters, digits, `.`, `-`, `_`, at
+ * most 100), starting with a letter or digit as every checkout folder must. It is the folder name
+ * and, with `github`, the repository name, so a name GitHub would rewrite is refused — and the
+ * schema, the server and the dialog share this ONE rule, so the middleware never passes a name the
+ * handler then rejects.
  */
-export const GITHUB_REPO_NAME_PATTERN = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,100}$/;
+export const PROJECT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 
 /**
  * `POST /api/v1/projects/create` (spec 2026-10-15-create-new-project, a port of
@@ -214,7 +216,7 @@ export const GITHUB_REPO_NAME_PATTERN = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,100}$/;
  * `checkout-progress`, keyed by `checkoutId`, like the clone flow.
  */
 export const createProjectInputSchema = z.object({
-  name: z.string().trim().regex(GITHUB_REPO_NAME_PATTERN),
+  name: z.string().trim().regex(PROJECT_NAME_PATTERN),
   github: z
     .object({
       owner: z.string().trim().min(1).max(64),
