@@ -7,7 +7,7 @@
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -166,5 +166,29 @@ describe('team directory skills never land in the main checkout (#1024)', { time
     }
     expect(store.readEvents(worktreeRun.id).some((event) => event.type === 'note' &&
       String(event.message).startsWith(`team skill "${TEAM_SKILL}" materialized to .claude/skills/${TEAM_SKILL}/`))).toBe(true);
+  });
+
+  it('a worktree whose agent dirs all link out of it gets the cache copy instead', async () => {
+    const { repo, source } = await seedTeamSource();
+    const outside = mkdtempSync(join(tmpdir(), 'cez-team-dir-outside-'));
+    cleanup.push(outside);
+    for (const agentDir of AGENT_SKILL_DIRS) {
+      mkdirSync(join(outside, agentDir));
+      symlinkSync(join(outside, agentDir), join(repoRoot, agentDir));
+    }
+    await execFileAsync('git', ['add', '-A'], { cwd: repoRoot });
+    await execFileAsync('git', [...GIT_ID, 'commit', '-q', '-m', 'linked agent dirs'], { cwd: repoRoot });
+
+    const worktreeRun = await runToEnd(undefined);
+    const filesDir = join(home, '.cache', 'cez', 'skill-files', basename(bareDirFor(repo)), source.commit, TEAM_SKILL);
+    expect(worktreeRun.spec.cwd).not.toBe(repoRoot);
+    expect(lstatSync(join(worktreeRun.spec.cwd, '.claude')).isSymbolicLink()).toBe(true);
+    for (const agentDir of AGENT_SKILL_DIRS) {
+      expect(existsSync(join(outside, agentDir, 'skills')), `${agentDir} outside the worktree`).toBe(false);
+    }
+    expect(worktreeRun.spec.systemPrompt).toContain(`Skill files are installed on disk at: ${filesDir}`);
+    expect(readFileSync(join(filesDir, 'references', 'notes.md'), 'utf8')).toBe(NOTES);
+    expect(store.readEvents(worktreeRun.id).some((event) => event.type === 'note' &&
+      event.message === `team skill "${TEAM_SKILL}" materialized to ${filesDir}`)).toBe(true);
   });
 });

@@ -51,8 +51,13 @@ lokalnych z `.ai/skills/`.
    odświeżały. Każda kopia ma znacznik `.cezar-team-skill.json`; kopia ze
    znacznikiem jest przy następnej materializacji zastępowana, katalog bez
    znacznika (może należeć do użytkownika) tylko nadpisywany plikami, nigdy
-   czyszczony. Run bez własnego worktree (worktree wyłączony, projekt bez gita,
-   Continue po zniknięciu worktree) dostaje kopię per commit w
+   czyszczony. Nic nie jest zapisywane ani usuwane poza `realpath(<worktree>)`:
+   katalog docelowy, który symlink wyprowadza poza worktree (np. `.claude`
+   podlinkowany do głównego checkoutu), jest pomijany w całości, a symlink
+   wewnątrz kopii ze znacznikiem jest usuwany, nigdy nie podążamy za nim.
+   Run bez własnego worktree (worktree wyłączony, projekt bez gita,
+   Continue po zniknięciu worktree) albo taki, którego worktree nie przyjął
+   żadnej kopii, dostaje kopię per commit w
    `~/.cache/cez/skill-files/<owner>__<name>/<commit>/<skill>/` (atomowy
    rename, kopie nieużywane od 7 dni są usuwane), a prompt skilla podaje jej
    absolutną ścieżkę. Obie ścieżki czytają pliki z commita, z którego wczytano

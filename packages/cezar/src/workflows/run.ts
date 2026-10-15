@@ -1700,17 +1700,17 @@ export class RunManager {
    * Continue whose worktree is gone — is the main checkout or unknown, where those
    * directories are LOCAL skills to `discoverSkills` that would shadow the team
    * source for every later run; it gets a per-commit cache copy instead, which
-   * the skill prompt names. Returns the step-start note and, for a cache copy,
-   * that directory; undefined when nothing landed on disk.
+   * the skill prompt names. So does a worktree where no copy landed, such as one
+   * whose three agent dirs all link out of it. Returns the step-start note and,
+   * for a cache copy, that directory; undefined when nothing landed on disk.
    */
   private async materializeTeamSkill(runId: string, cwd: string, skill: Skill): Promise<{ note: string; filesDir?: string } | undefined> {
     if (skill.source !== 'team' || !skill.team?.dir) return undefined;
-    if (this.isOwnTaskWorktree(runId, cwd)) {
-      const seeded = await materializeSkillDir(cwd, skill).catch(() => false);
-      return seeded ? {
+    if (this.isOwnTaskWorktree(runId, cwd) && await materializeSkillDir(cwd, skill).catch(() => false)) {
+      return {
         note: `team skill "${skill.name}" materialized to .claude/skills/${skill.name}/ ` +
           `.agents/skills/${skill.name}/, and .cursor/skills/${skill.name}/`,
-      } : undefined;
+      };
     }
     const filesDir = await materializeSkillToCache(skill).catch(() => null);
     return filesDir ? { note: `team skill "${skill.name}" materialized to ${filesDir}`, filesDir } : undefined;
@@ -8324,8 +8324,9 @@ export function makeRunTitle(task: string, workflow: WorkflowDef): string {
  * current `npx skills`-installed copy, so a worktree agent and the main
  * checkout read the exact same, up-to-date files. A team skill's `path` is not
  * on disk: its files are materialized per run (`RunManager.materializeTeamSkill`).
- * Inside the run's task worktree they need no pointer; a run without one gets a
- * per-commit cache copy, passed here as `teamFilesDir` (#1024).
+ * Inside the run's task worktree they need no pointer; a run without one, or
+ * whose worktree took no copy, gets a per-commit cache copy, passed here as
+ * `teamFilesDir` (#1024).
  */
 export function skillSystemPrompt(
   skill: Pick<Skill, 'name' | 'description' | 'body'> & Partial<Pick<Skill, 'path' | 'source'>>,
