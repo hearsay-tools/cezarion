@@ -105,6 +105,7 @@ case "$*" in
   'exec -w @wjarka/cezarion -- tsc '*) server "\${out:-packages/cezar/dist}" ;;
   'run build -w @open-mercato/cezar-web'*)
     printf '%s\\n' "\${VITE_CEZ_E2E:-production}" >> .ai/build-invocations
+    printf '%s\\n' "\${NODE_ENV-unset}" >> .ai/build-node-env
     web "\${out:-packages/cezar/web/dist}"
     ;;
   'run build')
@@ -140,7 +141,7 @@ done
   symlinkSync('npm', join(root, 'bin/pnpm'));
   // The served project is a clone of this checkout, so the fixture is a repository whose
   // generated state is ignored the way the real one's is.
-  writeFileSync(join(root, '.gitignore'), '/.ai/qa/\n/bin/\nnode_modules/\n/packages/cezar/dist/\n/packages/cezar/web/\n/.ai/build-invocations\n/.ai/inline-contract-dist\n/.ai/app-argv\n/.ai/app-cez-env\n/app.pid\n');
+  writeFileSync(join(root, '.gitignore'), '/.ai/qa/\n/bin/\nnode_modules/\n/packages/cezar/dist/\n/packages/cezar/web/\n/.ai/build-invocations\n/.ai/build-node-env\n/.ai/inline-contract-dist\n/.ai/app-argv\n/.ai/app-cez-env\n/app.pid\n');
   const git = (...args: string[]) => execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@cezar.invalid', ...args], {
     env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, stdio: 'ignore',
   });
@@ -205,6 +206,22 @@ test('the bootstrap builds into the ignored mirror and never writes the producti
   assert.equal(statSync(join(fixture.root, 'packages/cezar/dist/index.js')).mtimeMs, productionMtime);
   spawnSync('/bin/sh', [down], { encoding: 'utf8', env, timeout: 20_000 });
   launchedPids.delete(descriptor(fixture.root).app.pid);
+});
+
+// hearsay-tools/cezarion#1087: Squeal drives the e2e Vitest project directly, so its globalSetup
+// runs test-env-up.sh -> build-e2e.sh with Vitest's NODE_ENV=test inherited. Vite then built a
+// development bundle (import.meta.env.DEV true): the cockpit pointed its SharedWorker at the
+// dev-server-only `/assets/live-worker-*.ts`, the worker failed, every document fell back to
+// finite HTTP polling and `window.__cezLive` never became true.
+test('the e2e cockpit is a production bundle whatever NODE_ENV the caller inherited', () => {
+  const fixture = makeFixture(false);
+  for (const inherited of ['test', 'development', undefined]) {
+    const env: NodeJS.ProcessEnv = { ...process.env, PATH: fixture.path };
+    if (inherited === undefined) delete env.NODE_ENV;
+    else env.NODE_ENV = inherited;
+    prebuildE2e(fixture, env);
+  }
+  assert.deepEqual(readFileSync(join(fixture.root, '.ai/build-node-env'), 'utf8').trim().split('\n'), ['production', 'production', 'production']);
 });
 
 test('a mirror without the e2e marker refuses live reuse and the build cache', () => {
