@@ -36,6 +36,9 @@ import type {
   CancelResponse,
   ChangesPayload,
   CheckoutProjectInput,
+  CreateProjectInput,
+  CreateProjectResponse,
+  GithubOwnersResponse,
   ConfigResponse,
   DeleteBranchesInput,
   DeleteBranchesResponse,
@@ -143,6 +146,7 @@ import {
   runHistoryPageSchema,
   archivedRunsResponseSchema,
   runsSearchResponseSchema,
+  githubOwnersResponseSchema,
   repoPullBranchesResponseSchema,
   repoPullConfirmationSchema,
   repoPullResponseSchema,
@@ -1268,6 +1272,32 @@ export async function registerProject(root: string): Promise<RegisterProjectResp
  */
 export async function checkoutProject(input: CheckoutProjectInput): Promise<RegisterProjectResponse> {
   return unwrap(await cez.api.v1.projects.checkout.$post({ json: input }), '/projects/checkout')
+}
+
+/**
+ * Create a new project — a git repo in the checkout root, optionally backed by a new private
+ * GitHub repository — and register it (`POST /api/v1/projects/create`, spec
+ * 2026-10-15-create-new-project). Same contract as `checkoutProject`: every non-2xx is a failure
+ * the dialog shows verbatim, there is no timeout of our own, and progress arrives as
+ * `checkout-progress` keyed by `input.checkoutId`. A 200 may carry `warning`: the project exists
+ * and is registered, but its GitHub repository was left unfinished.
+ */
+export async function createProject(input: CreateProjectInput): Promise<CreateProjectResponse> {
+  return unwrap(await cez.api.v1.projects.create.$post({ json: input }), '/projects/create')
+}
+
+/**
+ * The accounts a new GitHub repository may belong to (`GET /api/v1/projects/github-owners`).
+ * Validated: the dialog renders `owners[]` directly, and a server older than this route's shape
+ * (or a proxy) must reject the query — which the dialog reads as "GitHub unavailable" — rather
+ * than throw mid-render.
+ */
+export async function getGithubOwners(opts?: ReadOptions): Promise<GithubOwnersResponse> {
+  return unwrapValidated(
+    await cez.api.v1.projects['github-owners'].$get({}, init(opts)),
+    '/projects/github-owners',
+    githubOwnersResponseSchema,
+  )
 }
 
 /**
