@@ -274,7 +274,7 @@ export function PickerPill({
       <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
       <DropdownMenuContent ref={contentRef} align="start" data-testid={`${slot}-menu`}>
         {searchPlaceholder ? (
-          <div className="mb-1 flex min-h-11 items-center gap-2 border-b border-border px-2">
+          <div data-slot="picker-search" className="mbe-1 flex min-h-11 min-w-56 items-center gap-2 border-b border-border px-2">
             <SearchIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
             <input
               ref={searchRef}
@@ -298,7 +298,7 @@ export function PickerPill({
                   event.stopPropagation()
                 }
               }}
-              className="h-11 w-48 min-w-0 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              className="h-11 w-0 min-w-0 flex-1 bg-transparent text-sm placeholder:text-muted-foreground"
             />
           </div>
         ) : null}

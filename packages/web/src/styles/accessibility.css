@@ -13,12 +13,24 @@
  * An inner textarea outline would overlap the label and duplicate that frame. */
 [data-slot='composer-editor']:has(> textarea:focus-visible) { outline-offset: -1px; }
 [data-slot='composer-editor'] > textarea:focus-visible { outline: 2px solid transparent; }
+/* Search is one control, including its icon. Keep the frame inside scrolling
+ * menus and clipped command surfaces, without changing their layout on focus. */
+:is([data-slot='picker-search'], [data-slot='command-input-wrapper']):has(> input:focus-visible) {
+  outline: 2px solid var(--link-foreground);
+  outline-offset: -2px;
+}
+:is([data-slot='picker-search'], [data-slot='command-input-wrapper']) > input:focus-visible {
+  outline: 2px solid transparent;
+}
 @media (forced-colors: active) {
   :where(button, a, input, select, textarea, summary, [tabindex], [role='button']):focus-visible,
   [data-slot='code-editor']:has(textarea:focus-visible),
-  [data-slot='composer-editor']:has(> textarea:focus-visible) { outline-color: Highlight; }
+  [data-slot='composer-editor']:has(> textarea:focus-visible),
+  :is([data-slot='picker-search'], [data-slot='command-input-wrapper']):has(> input:focus-visible) { outline-color: Highlight; }
   /* Forced colors repaints transparent outlines. The shell owns visible focus. */
-  [data-slot='composer-editor'] > textarea:focus-visible { outline-width: 0; }
+  [data-slot='composer-editor'] > textarea:focus-visible,
+  [data-slot='code-editor'] textarea:focus-visible,
+  :is([data-slot='picker-search'], [data-slot='command-input-wrapper']) > input:focus-visible { outline-width: 0; }
 }
 :where(button, [role='button'], a[data-slot='button']):not(:disabled):not([aria-disabled='true']):active {
   filter: brightness(0.9);

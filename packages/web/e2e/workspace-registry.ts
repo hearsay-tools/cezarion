@@ -19,7 +19,7 @@ import { readTestEnv } from './agent-browser'
  * So the run pins it: `setup()` below (wired as vitest `globalSetup`) trims the registry to the
  * boot project alone before any spec opens a page, and puts it back verbatim afterwards. Specs
  * that assert the flat shell then get the flat shell, always. A spec that wants the OTHER shape
- * asks for it explicitly — `project-groups.e2e.ts` seeds its own multi-project registry through
+ * asks for it explicitly — `project-sidebar.e2e.ts` seeds its own multi-project registry through
  * `snapshotSharedHome` + `writeSharedProjects` and restores it in `afterAll`.
  *
  * `fixtureServeEnv` (agent-browser.ts) is this rule for the specs that boot their own server.
