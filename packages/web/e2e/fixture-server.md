@@ -111,6 +111,10 @@ hearsay-tools/cezarion#941 adds `good-css.e2e.ts`: one CLI construction with
 port 0, the shared owned-listener health budget, and awaited shutdown before
 fixture removal. The guard now pins 54 starts across 46 specs.
 
+hearsay-tools/cezarion#1023 adds `search-focus.e2e.ts`: one CLI construction
+with port 0, child-owned listener readiness and awaited shutdown before fixture
+removal. The guard now pins 55 starts across 47 specs.
+
 ## Boot budget (hearsay-tools/cezarion#986)
 
 The original per-site budget was `tries: 60` × 250 ms, about 15 s, carried over from the
@@ -140,7 +144,7 @@ setup. A child that exits still fails at once.
   zero-config repo-identity discovery rather than a requested health endpoint.
   Application-update tests use their own IPC actual-listener acknowledgement with
   exact-restart identity checks, or packaged mock servers with fixed explicit binds.
-  They are distinct from the 54 cockpit-spec CLI preference/health constructions.
+  They are distinct from the 55 cockpit-spec CLI preference/health constructions.
 - In-process Hono/server tests use their returned listener or app and do not spawn
   an adaptive CLI port. Browser mock API fixtures do not spawn this CLI.
 
