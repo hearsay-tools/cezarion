@@ -629,25 +629,30 @@ type IndexGit = (args: string[]) => Promise<GitResult>;
  * the same diff; only the side effect is gone. Same technique as
  * `collectChanges` on the main tree and `readOwnedDiff` for workers.
  *
- * When no private copy can be made (no writable tmpdir) this falls back to
- * the real index — the pre-#1080 behaviour — rather than reporting no diff,
- * which would settle reviewable work as `done`.
+ * The scratch copy lives in the OS tmpdir, or, when that is not writable, next
+ * to the real index in the worktree's git dir. Only when neither can be
+ * written does this read through the real index, rather than reporting no
+ * diff (which would settle reviewable work as `done`): git takes `index.lock`
+ * in that same directory, so there it cannot write the real index either.
  */
 async function withPrivateIndex<T>(worktreePath: string, read: (git: IndexGit) => Promise<T>): Promise<T> {
+  const real = await git(worktreePath, ['rev-parse', '--path-format=absolute', '--git-path', 'index']);
+  const realIndex = real.ok ? real.stdout.trim() : '';
   let scratch: string | undefined;
-  try {
-    scratch = await mkdtemp(join(tmpdir(), 'cez-diff-index-'));
-  } catch {
-    return read((args) => git(worktreePath, args));
+  for (const parent of [tmpdir(), ...(realIndex ? [dirname(realIndex)] : [])]) {
+    try {
+      scratch = await mkdtemp(join(parent, 'cez-diff-index-'));
+      break;
+    } catch { /* Not writable: try the next location. */ }
   }
+  if (!scratch) return read((args) => git(worktreePath, args));
   try {
     const index = join(scratch, 'index');
     const env = { ...process.env, GIT_INDEX_FILE: index };
     const indexed: IndexGit = (args) => git(worktreePath, args, undefined, env);
-    const real = await git(worktreePath, ['rev-parse', '--path-format=absolute', '--git-path', 'index']);
     let seeded = false;
-    if (real.ok && real.stdout.trim()) {
-      try { await copyFile(real.stdout.trim(), index); seeded = true; } catch { /* No index yet: seed from HEAD. */ }
+    if (realIndex) {
+      try { await copyFile(realIndex, index); seeded = true; } catch { /* No index yet: seed from HEAD. */ }
     }
     if (!seeded) await indexed(['read-tree', 'HEAD']);
     return await read(indexed);

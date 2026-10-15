@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -200,6 +200,25 @@ describe('worktreeShortstat (real git)', () => {
     expect(readFileSync(index).equals(before)).toBe(true);
     const status = (await run('git', ['status', '--porcelain'], { cwd: r })).stdout;
     expect(status).toContain('?? new.txt'); // never intent-to-added in the real index
+  });
+
+  // With no writable tmpdir the private index moves into the git dir, never onto the real index.
+  it('keeps the worktree index untouched when the tmpdir is not writable', async () => {
+    const r = await fixtureRepo('cez-private-index-fallback-');
+    await run('git', ['checkout', '-q', '-b', 'task'], { cwd: r });
+    writeFileSync(join(r, 'new.txt'), 'x\ny\n');
+    const index = join(r, '.git', 'index');
+    const before = readFileSync(index);
+    const saved = process.env.TMPDIR;
+    process.env.TMPDIR = join(r, 'missing-tmpdir');
+    try {
+      expect(await worktreeShortstat(r, 'main')).toEqual({ adds: 2, dels: 0, files: 1 });
+    } finally {
+      if (saved === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = saved;
+    }
+    expect(readFileSync(index).equals(before)).toBe(true);
+    expect(readdirSync(join(r, '.git')).filter((name) => name.startsWith('cez-diff-index-'))).toEqual([]);
   });
 
   it('answers null when the path is not a git worktree', async () => {
