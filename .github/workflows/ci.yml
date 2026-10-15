@@ -122,7 +122,7 @@ jobs:
           esac
           echo "surface=$surface" >> "$GITHUB_OUTPUT"
 
-  # Shared with automated-code-review / recover-review via release-bump-pr.cjs:
+  # Shared with automated-code-review via release-bump-pr.cjs:
   # bot author + release/v* head is not enough — the live PR file list must match
   # the release-finalization allowlist or Vitest/E2E still run.
   classify-pr:
@@ -520,6 +520,54 @@ jobs:
             test "$NODE_FLOOR_RESULT" = success
             test "$COCKPIT_BROWSER_RESULT" = success
           fi
+
+  # Automated code review (spec .ai/specs/2026-10-15-review-inside-ci.md). It
+  # starts only after verify succeeds, so no job waits on CI. Model keys go to
+  # this call alone, never `secrets: inherit`. The called jobs narrow these
+  # permissions per job; only the trusted poster gets the write scopes.
+  review:
+    name: Review
+    needs: verify
+    if: github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main'
+    permissions:
+      actions: read
+      contents: write
+      issues: read
+      pull-requests: write
+    uses: ./.github/workflows/automated-code-review.yml
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+  # The required "Automated Code Review" check. A called workflow's jobs show as
+  # "Review / <job>", so the required name has to live here. Outside a PR into
+  # main it carries another name: a skipped job reports success, and a skipped
+  # "Automated Code Review" must never satisfy the required check.
+  review-result:
+    name: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main' && 'Automated Code Review' || 'Automated Code Review (not a pull request into main)' }}
+    needs: [verify, review]
+    if: always() && github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require a completed review
+        env:
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          REVIEW_RESULT: ${{ needs.review.result }}
+        run: |
+          if [ "$REVIEW_RESULT" = success ]; then
+            exit 0
+          fi
+          # Notices, not errors: the CI failure sweep groups identical error lines
+          # across PRs, and this line repeats on every PR with open findings. The
+          # failing verify or Review job carries the actual diagnostic.
+          if [ "$VERIFY_RESULT" != success ]; then
+            echo "::notice::Verification ended '$VERIFY_RESULT', so the review did not run. Fix it, then use Re-run failed jobs: the review runs once verification succeeds." >&2
+            exit 1
+          fi
+          echo "::notice::The review ended '$REVIEW_RESULT'. Its Review verdict job names the reason." >&2
+          exit 1
 
   # npm preview publishing (spec .ai/specs/2026-07-18-npm-preview-publish.md, #482).
   # Publishes `dev` snapshots from `main` after a fully green verify run.
