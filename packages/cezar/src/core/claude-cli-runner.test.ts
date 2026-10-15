@@ -47,7 +47,7 @@ describe('buildClaudeArgs systemPrompt', () => {
 });
 
 describe('buildClaudeArgs hook events (#961)', () => {
-  const spec = { prompt: 'p', cwd: '/tmp' };
+  const spec = { userPrompt: 'p', cwd: '/tmp' };
 
   it('passes --include-hook-events when the CLI supports it', () => {
     expect(buildClaudeArgs(spec, {}, { replayUserMessages: true, includeHookEvents: true })).toContain('--include-hook-events');
