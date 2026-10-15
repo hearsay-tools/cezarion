@@ -76,7 +76,7 @@ import { materializeSkillDir, waitForCachedTeamSkills, waitForTeamSkills } from 
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
-import { autosaveCommit, type AutosaveReason, createWorktree, resolveBaseRef, worktreeDiff, worktreeShortstat } from '../git-worktree.ts';
+import { autosaveCommit, type AutosaveOutcome, type AutosaveReason, createWorktree, resolveBaseRef, worktreeDiff, worktreeShortstat } from '../git-worktree.ts';
 import { runGroupedCommand } from './grouped-command.ts';
 import {
   resolveWorktreeSetup,
@@ -382,9 +382,24 @@ export { CHECK_KILL_GRACE_MS, CHECK_TERMINATION_CONFIRM_MS } from './grouped-com
 /** The periodic autosave timer is opt-in (#471): off, a task branch carries only the
  *  agent's own commits plus the turn-end/pre-PR flushes — no mid-run "cezar autosave"
  *  noise interleaving PR history. The flushes (`autosaveCommit` at turn end and before
- *  a draft PR) are NOT gated: the branch must still end holding the finished state. */
+ *  a draft PR) are NOT gated: the task branch must still end holding the finished state.
+ *  The turn-end and run-finalize flushes and the timer commit only while HEAD is that
+ *  branch, though (hearsay-tools/cezarion#1004): on a branch the agent checked out they
+ *  commit nothing. */
 export function periodicAutosaveEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CEZ_AUTOSAVE === '1';
+}
+
+/** The handoff line and cockpit note for a save that committed or left work behind
+ *  (hearsay-tools/cezarion#1004): a resumed session reads this, not `git log`. */
+function autosaveReportLine(reason: AutosaveReason, outcome: AutosaveOutcome, taskBranch: string | undefined): string {
+  const where = outcome.branch ?? 'detached HEAD';
+  if (outcome.result === 'committed') {
+    return `${reason}: cezar autosave committed ${outcome.sha} on ${where}; ` +
+      `to fold it into your own commits while it is HEAD, run \`git reset --soft ${outcome.sha}~1\``;
+  }
+  return `${reason}: ${outcome.changedPaths} changed path(s) left uncommitted on ${where}; ` +
+    `cezar does not autosave on a branch other than the task branch ${taskBranch ?? '(unrecorded)'}`;
 }
 
 /**
@@ -6719,7 +6734,8 @@ export class RunManager {
       break;
     }
 
-    // Final autosave: the branch always ends holding the finished state.
+    // Final autosave: the task branch ends holding the finished state; on a branch the
+    // agent checked out, the work stays uncommitted and the handoff says so (#1004).
     this.clearAutosaveTimer(state);
     await this.saveWorktree(runId, state, 'run finalize');
 
@@ -8065,7 +8081,10 @@ export class RunManager {
     return this.autosaveTasks.get(runId)?.blocker ?? autosaveCleanupBlocker(this.dataDir, runId);
   }
 
-  /** Keep a separate maintenance hold until autosave proves all its processes exited. */
+  /** Keep a separate maintenance hold until autosave proves all its processes exited.
+   *  Commits only while HEAD is the run's recorded branch (hearsay-tools/cezarion#1004), and
+   *  reports a commit or a skip in the handoff and as a note; a run with no recorded branch
+   *  keeps committing on whatever HEAD is. */
   private async saveWorktree(runId: string, state: ActiveRun, reason: AutosaveReason): Promise<void> {
     if (state.cwd === this.repoRoot) return;
     for (;;) {
@@ -8085,7 +8104,16 @@ export class RunManager {
     let release: (() => void) | undefined;
     let retained = false;
     let cleanupConfirmed = false;
+    let taskBranch: string | undefined;
+    try { taskBranch = this.store.getRun(runId)?.branch; } catch { /* A closed store keeps the old rule. */ }
+    // The periodic timer keeps the branch rule but reports nothing: one line per 90 s tick
+    // would bury the handoff, and the turn-end or run-finalize flush that always follows the
+    // timer reports the final state, which is what a resumed session reads.
+    const reports = reason !== 'periodic';
+    let outcome: AutosaveOutcome | undefined;
     const task = autosaveCommit(state.cwd, reason, {
+      ...(taskBranch ? { taskBranch } : {}),
+      ...(reports ? { onOutcome: (reported: AutosaveOutcome) => { outcome = reported; } } : {}),
       onWarning: note,
       onBlocked: (message, proof) => {
         retainAutosaveCleanup(this.dataDir, runId, state.cwd, message, proof);
@@ -8104,6 +8132,11 @@ export class RunManager {
       cleanupConfirmed = true;
       if (result === 'failed') note(`${reason} autosave failed; working files remain in ${state.cwd}`);
       else if (result === 'refused') note(`${reason} autosave refused because of unresolved conflicts; working files remain in ${state.cwd}`);
+      else if (outcome) {
+        const message = autosaveReportLine(reason, outcome, taskBranch);
+        note(message);
+        try { appendHandoffHeartbeat(this.dataDir, runId, message); } catch { /* The handoff is a journal, never a reason to fail. */ }
+      }
     }, error => note(`${reason} autosave failed: ${String(error)}; working files remain in ${state.cwd}`)).finally(() => {
       if (this.autosaveTasks.get(runId) === entry) this.autosaveTasks.delete(runId);
       if (retained && cleanupConfirmed) {
