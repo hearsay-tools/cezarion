@@ -281,6 +281,16 @@ an adjacent `// e2e-wait: condition-poll|shutdown-grace|process-deadline — rea
 These annotations describe fixture mechanisms, never readiness; do not exempt an observation
 sleep. HTTP request socket deadlines (`request.setTimeout`) are not unconditional sleeps.
 
+## Screenshots capture the viewport (hearsay-tools/cezarion#1046)
+
+`browser.screenshot(path)` captures the viewport. agent-browser's full-page capture resizes
+the window to 1x1 and back, so the `md` breakpoint flips for a frame and any subtree that
+switches on it can remount, losing an open dialog, popover, menu or focus
+(hearsay-tools/cezarion#979). A cockpit page never needs it: `html, body` are
+`overflow: hidden` and the shell is `h-dvh`, so the document is exactly the viewport.
+`{ full: true }` exists for a page whose document really scrolls, and the seam refuses it
+while an overlay is open. `{ viewport: true }` on older call sites is now redundant.
+
 
 ## Browser-tab connection benchmark
 

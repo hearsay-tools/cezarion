@@ -161,6 +161,22 @@ export class WaitForValueError extends Error {
 }
 
 /**
+ * What `screenshot({ full: true })` refuses to resize the window under
+ * (hearsay-tools/cezarion#1046): dialogs, menus, listboxes, Radix popper content and anything
+ * Radix marks `data-state="open"` (popovers, selects, collapsibles), plus native popovers.
+ * Evaluates to a short description of the first match, or null.
+ */
+export const OPEN_OVERLAY_PROBE = `(() => {
+  const selectors = ['[role="dialog"]', '[role="alertdialog"]', '[role="menu"]', '[role="listbox"]', '[data-radix-popper-content-wrapper]', '[data-state="open"]', ':popover-open']
+  for (const selector of selectors) {
+    let el = null
+    try { el = document.querySelector(selector) } catch { continue }
+    if (el) return selector + ' <' + el.tagName.toLowerCase() + (el.getAttribute('data-slot') ? ' data-slot=' + el.getAttribute('data-slot') : '') + '>'
+  }
+  return null
+})()`
+
+/**
  * The in-page probe. Built as one expression so a single `eval` fetches everything, and
  * every branch is wrapped so a selector the CSS engine rejects (agent-browser also accepts
  * `text=` and `@ref`) records the rejection instead of failing the probe.
@@ -1026,14 +1042,39 @@ export class AgentBrowser {
   /** operation: screenshot. The descriptor requires an absolute path — a relative
    *  multi-segment path is read as a selector by the CLI.
    *
-   *  `viewport: true` captures the visible viewport only. Full-page capture stitches by
-   *  scrolling through the document, which is both pathological on a virtualized thread and
-   *  destroys scroll-dependent UI state (it re-pins the thread and unmounts the jump pill) —
-   *  any spec asserting such state after the shot must use the viewport mode. */
-  screenshot(path: string, { viewport = false } = {}): string {
+   *  Captures the viewport by default (hearsay-tools/cezarion#1046). agent-browser's
+   *  full-page capture (`screenshot --full`) resizes the window to 1x1 and back, so the `md`
+   *  media query reads false for a frame; when React commits during it, every subtree that
+   *  switches on the desktop breakpoint remounts and drops its local state — an open dialog,
+   *  popover or menu, focus. Reproduction (local, deterministic): at 1440x900 on any cockpit
+   *  page, `eval` a `matchMedia('(min-width: 768px)')` change listener, then take one capture
+   *  each way: every `screenshot --full` fires change events on it, and a viewport
+   *  capture fires none; at 390x844 neither does (hearsay-tools/cezarion#1046). The failure it
+   *  causes: in an instrumented copy of task-handoff.e2e.ts's steps, run 30 times at load 35-64,
+   *  full-page capture closed the hand-off dialog 4 times, each logging `resize 1x1 md=false`,
+   *  and viewport capture 0 times (hearsay-tools/cezarion#979, PR hearsay-tools/cezarion#1044).
+   *  It also stitches by scrolling, which re-pins a virtualized
+   *  thread and unmounts its jump pill. And it buys a cockpit page nothing: `html, body` are
+   *  `overflow: hidden` and the shell is exactly `h-dvh` (src/styles/index.css), so the
+   *  document is never taller than the viewport; content below the fold lives in inner
+   *  scrollers that neither mode captures.
+   *
+   *  `full: true` opts into `--full` for a page whose document really scrolls (none of the
+   *  cockpit's). It refuses while an overlay is open — the seam checks the page first and
+   *  throws naming what it found, rather than taking a capture that may close it.
+   *  `viewport` is accepted for the call sites written when full-page was the default; it no
+   *  longer selects anything. */
+  screenshot(path: string, { full = false }: { full?: boolean; viewport?: boolean } = {}): string {
     const absolute = resolve(path)
     mkdirSync(dirname(absolute), { recursive: true })
-    this.run(viewport ? ['screenshot', absolute] : ['screenshot', '--full', absolute])
+    if (full) {
+      const overlay = this.run(['eval', OPEN_OVERLAY_PROBE]).result
+      if (overlay) {
+        throw new Error(`cezar e2e: refusing a full-page screenshot while an overlay is open (${String(overlay)}); `
+          + 'the 1x1 resize flips the md breakpoint and can close it — capture the viewport instead (hearsay-tools/cezarion#1046)')
+      }
+    }
+    this.run(full ? ['screenshot', '--full', absolute] : ['screenshot', absolute])
     if (statSync(absolute).size === 0) throw new Error(`cezar e2e: empty screenshot at ${absolute}`)
     return absolute
   }
