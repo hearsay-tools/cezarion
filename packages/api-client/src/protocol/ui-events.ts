@@ -214,20 +214,22 @@ export interface UiPlanUpdatedEvent {
   entries: PlanEntry[]
 }
 
-/** RESERVED — wired when auto-approve becomes optional. Types only for now. */
+/** A native approval request, answerable only through its offered option IDs. */
 export interface UiPermissionRequestedEvent {
   type: 'permission.requested'
   requestId: string
   itemId?: string
   title: string
+  details?: string
   options: PermissionOption[]
 }
 
-/** RESERVED — the counterpart resolution (see `permission.requested`). */
+/** An explicit native decision, or expiry when no option was selected. */
 export interface UiPermissionResolvedEvent {
   type: 'permission.resolved'
   requestId: string
-  optionId: string
+  optionId?: string
+  reason?: string
 }
 
 /** One option in an AskUser question — see the server `src/core/ask.ts`. */

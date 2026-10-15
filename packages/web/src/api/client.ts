@@ -73,6 +73,8 @@ import type {
   MessageInput,
   EditQueuedMessageResponse,
   MessageResponse,
+  PermissionDecision,
+  PermissionDecisionResponse,
   RemoveQueuedMessageResponse,
   OpenInCliResponse,
   OpenProjectInResponse,
@@ -1765,6 +1767,17 @@ export async function pushRun(id: string): Promise<GitPushResponse> {
       param: { projectId: queryScope(), id: encodeURIComponent(id) },
     }),
     runPath(id, '/git/push'),
+  )
+}
+
+/** Deliver one native approval choice. An expired request must never become a new turn. */
+export async function decidePermission(id: string, decision: PermissionDecision): Promise<PermissionDecisionResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].runs[':id'].permissions.$post({
+      param: { projectId: queryScope(), id: encodeURIComponent(id) },
+      json: decision,
+    }),
+    runPath(id, '/permissions'),
   )
 }
 

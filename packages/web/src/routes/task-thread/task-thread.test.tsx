@@ -59,6 +59,7 @@ function renderView(
         : path === '/api/v1/models?runner=codex' ? { runner: 'codex', models: [], source: 'unavailable', stale: false }
         : path === '/api/v1/providers/status' ? providerStatus
         : path === '/api/v1/health' ? health
+        : path.endsWith('/permissions') ? { delivered: true }
         : path.endsWith('/relationships') ? { workers: [] }
         : []
       return Promise.resolve(
@@ -1616,7 +1617,8 @@ describe('the composer action row (#281)', () => {
                 ],
               }
             : path === '/api/v1/health' ? {}
-            : path.endsWith('/relationships') ? { workers: [] }
+            : path.endsWith('/permissions') ? { delivered: true }
+        : path.endsWith('/relationships') ? { workers: [] }
             : []
         return Promise.resolve(jsonResponse(body))
       }),
@@ -1762,5 +1764,32 @@ describe('the composer action row (#281)', () => {
     renderThread(run(status))
     expect(archiveButton()).toBeNull()
     expect(composerActions().querySelector('[aria-label="Stop"]')).not.toBeNull()
+  })
+})
+
+
+describe('native approval transcript integration', () => {
+  const request = line(1, 'permission.requested', {
+    requestId: 'native-a', title: 'Run a native command?', details: 'npm test',
+    options: [{ id: 'decline', label: 'Decline command', kind: 'reject_once' }],
+  })
+  it('keeps a live compact-context approval outside visible pagination actionable', () => {
+    renderView(<ThreadView run={run('running')} thread={reduceThread([line(5, 'text', { text: 'Newest page' })])} currentThread={reduceThread([request])} />)
+    expect(screen.getByText('Run a native command?')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Decline command' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+  it('sends an approval to the scoped native endpoint with exact option IDs', async () => {
+    renderView(<ThreadView run={run('running')} thread={reduceThread([request])} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Decline command' }))
+    await waitFor(() => expect(document.querySelector('[data-slot="permission-card"]')?.textContent).toContain('Decision sent: Decline command'))
+    const calls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/permissions'))
+    expect(calls).toHaveLength(1)
+    expect(JSON.parse(String(calls[0]?.[1]?.body))).toEqual({ requestId: 'native-a', optionId: 'decline' })
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => /\/(?:continue|messages)$/.test(String(url)))).toBe(false)
+  })
+  it('keeps a stale pending approval disabled after session closure', () => {
+    renderView(<ThreadView run={run('done')} thread={reduceThread([request])} />)
+    expect(document.querySelector('[data-slot="permission-card"]')?.textContent).toContain('Approval expired')
+    expect((screen.getByRole('button', { name: 'Decline command' }) as HTMLButtonElement).disabled).toBe(true)
   })
 })

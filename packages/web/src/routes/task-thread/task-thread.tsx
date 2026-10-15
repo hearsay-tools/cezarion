@@ -42,6 +42,7 @@ import { useStopAction } from './stop-action'
 import { RunHeader } from './run-header'
 import { RunActivityDock } from './run-activity-dock'
 import { AskCard } from './ask-card'
+import { PermissionCard } from './permission-card'
 import { useAskAnswer } from './ask-answer'
 import { useRunRecordReconcile } from './run-reconcile'
 import { useActiveProviderAvailability } from './active-provider'
@@ -60,6 +61,7 @@ import {
   threadFilePaths,
   threadFooter,
   type ThreadAsk,
+  type ThreadPermission,
   type ThreadState,
 } from './thread-state'
 
@@ -278,7 +280,7 @@ export function ThreadView({
     [queued, patchRunAsync, editQueuedAsync, removeQueuedAsync],
   )
 
-  const sections = useMemo(() => mainTranscriptSections(run, thread), [run, thread])
+  const sections = useMemo(() => mainTranscriptSections(run, thread, currentThread), [run, thread, currentThread])
   const rows = useMemo(() => buildTranscriptRows(sections, run.id), [sections, run.id])
   // A delegated run's conversation names its parent and workers; once archived they may be past
   // the run list's window (#864), so the relationships answer carries their titles too. The same
@@ -287,6 +289,7 @@ export function ThreadView({
   const relationships = useRunRelationships(run.id, { enabled: delegated })
   const taskTitles = useMemo(() => titlesFromRuns(run, runs.data, relationships.data?.titles), [run, runs.data, relationships.data])
   const recipientBackends = useMemo(() => recipientBackendsFromRuns(run, runs.data), [run, runs.data])
+  const renderPermission = useCallback((permission: ThreadPermission) => <PermissionCard permission={permission} runId={run.id} sessionOpen={sessionOpen} />, [run.id, sessionOpen])
   const renderAsk = useCallback((ask: ThreadAsk) => <AskCard ask={ask} run={run} />, [run])
   const messageActions = useMemo<Readonly<Record<string, TranscriptMessageActions>> | undefined>(() => {
     if (edit === undefined) return undefined
@@ -336,6 +339,7 @@ export function ThreadView({
           sections={sections}
           mode="document"
           renderAsk={renderAsk}
+          renderPermission={renderPermission}
           messageActions={messageActions}
           scrollControls={scroll}
           renderMode={mode}
@@ -412,6 +416,7 @@ export function ThreadView({
       <SubagentSheet
         runId={run.id}
         renderAsk={renderAsk}
+        renderPermission={renderPermission}
         agent={openAgent}
         entries={openAgentChildren}
         taskTitles={taskTitles}
