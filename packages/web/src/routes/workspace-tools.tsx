@@ -42,7 +42,7 @@ export function WorkspaceToolsRoute() {
           {projects.data?.projectsDir ? <div className="flex flex-wrap gap-x-3"><dt>Checkout folder</dt><dd className="min-w-0 break-all">{projects.data.projectsDir}</dd></div> : null}
         </dl>
         <div className="flex flex-wrap gap-3">
-          <Button variant="outline" className="h-10 rounded-lg px-[15px] text-xs font-normal leading-[18px]" onClick={() => setProjectAction('new')}>New project</Button>
+          <Button variant="outline" className="h-10 rounded-lg px-[15px] text-xs font-normal leading-[18px]" data-action="new-project" onClick={() => setProjectAction('new')}>New project</Button>
           <Button variant="outline" className="h-10 rounded-lg px-[15px] text-xs font-normal leading-[18px]" onClick={() => setProjectAction('local')}>Open local folder</Button>
           <Button variant="outline" className="h-10 rounded-lg px-[15px] text-xs font-normal leading-[18px]" onClick={() => setProjectAction('clone')}>Clone from GitHub</Button>
         </div>
