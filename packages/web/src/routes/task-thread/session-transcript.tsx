@@ -12,6 +12,7 @@ import {
   NoteLine,
   ProviderAuthRequiredCard,
   ReasoningItem,
+  HookCard,
   ToolCard,
   ToolStreak,
   UserBubble,
@@ -533,8 +534,7 @@ function ThreadEntryRenderer({
     case 'preview-server':
       return <PreviewServerEntry entry={entry} />
     case 'hook':
-      // Placeholder until the HookCard lands (#961, plan task 5): hooks stay hidden, as before.
-      return null
+      return <HookCard item={entry} cacheKey={`${scope}:${entry.id}`} />
     default:
       return assertNever(entry)
   }

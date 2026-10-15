@@ -130,7 +130,7 @@ export function groupThreadItems(allEntries: ThreadEntry[]): ThreadBlock[] {
   const top: ThreadEntry[] = []
   for (const entry of entries) {
     const parentId =
-      (entry.kind === 'message' || entry.kind === 'reasoning' || entry.kind === 'tool') &&
+      (entry.kind === 'message' || entry.kind === 'reasoning' || entry.kind === 'tool' || entry.kind === 'hook') &&
       entry.parentItemId !== undefined &&
       entry.parentItemId !== entry.id &&
       toolIds.has(entry.parentItemId)

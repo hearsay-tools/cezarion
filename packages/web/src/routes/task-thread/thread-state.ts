@@ -395,7 +395,7 @@ function resultText(value: unknown): string {
 }
 
 const isUiItem = (entry: ThreadEntry): entry is UiItem =>
-  entry.kind === 'message' || entry.kind === 'reasoning' || entry.kind === 'tool'
+  entry.kind === 'message' || entry.kind === 'reasoning' || entry.kind === 'tool' || entry.kind === 'hook'
 
 /** Every `PlanStatus`, so an unrecognized status is the only thing that falls back to
  *  `pending` below. `Set<PlanStatus>` accepts a subset without complaint, so this list
@@ -730,7 +730,7 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
         const kind = event.item.kind
         const id = event.item.id
         if (
-          (kind !== 'message' && kind !== 'reasoning' && kind !== 'tool') ||
+          (kind !== 'message' && kind !== 'reasoning' && kind !== 'tool' && kind !== 'hook') ||
           typeof id !== 'string' ||
           id === ''
         ) {

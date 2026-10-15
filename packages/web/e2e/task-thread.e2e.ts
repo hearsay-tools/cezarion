@@ -51,6 +51,16 @@ const TYPO_RUNS = [
   { ...LONG_RUN, id: 'typography-long-model', runner: 'opencode', model: 'opencode/muse-spark-1.3-contributor-free', effort: 'auto' },
   { ...LONG_RUN, id: 'typography-short-model', runner: 'opencode', model: 'grok-4.6', effort: 'auto' },
 ]
+// #961: the same transcript with two hook items after the Bash card — Squeal's context and a
+// failed Stop hook — as the Claude mapper emits them (`__fixtures__/claude/hooks.expected.json`).
+const HOOK_RUN = { ...RUN, id: 'hook-entries', titleSummary: 'Hook entries' }
+const HOOK_LINES = [
+  { type: 'item.completed', ts: '2026-07-14T20:27:40.000Z', stepId: 'task', item: { kind: 'hook', id: 'hook_ctx', event: 'PostToolBatch', status: 'completed',
+    entries: [{ kind: 'context', text: 'SQUEAL · revision 4\n✗ thread-items.test.tsx › ToolCard renders hook rows — new failure' }],
+    stdout: '{"hookSpecificOutput":{"hookEventName":"PostToolBatch","additionalContext":"SQUEAL · revision 4"}}', exitCode: 0 } },
+  { type: 'item.completed', ts: '2026-07-14T20:27:40.000Z', stepId: 'task', item: { kind: 'hook', id: 'hook_fail', event: 'Stop', status: 'failed',
+    entries: [{ kind: 'error', text: 'squeal status timed out after 2000 ms' }], stderr: 'squeal status timed out after 2000 ms\n', exitCode: 1 } },
+]
 const BARE_COMMAND = 'cd /home/agent/projects/very-long-project && npm run test:e2e -- --reporter verbose --runInBand'
 
 let browser: AgentBrowser
@@ -66,7 +76,14 @@ const scoped = (path: string) => `/p/${bootProject}${path}`
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-thread-'))
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
-  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN, LONG_RUN, ...TYPO_RUNS], null, 2), 'utf8')
+  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN, LONG_RUN, ...TYPO_RUNS, HOOK_RUN], null, 2), 'utf8')
+  {
+    const lines = readFileSync(resolve(import.meta.dirname, 'fixtures/thread-run.ndjson'), 'utf8').split('\n').filter(Boolean)
+    const at = lines.findIndex((entry) => entry.includes('"item.completed"') && entry.includes('toolu_mock_1'))
+    const withHooks = [...lines.slice(0, at + 1), ...HOOK_LINES.map((entry) => JSON.stringify(entry)), ...lines.slice(at + 1)]
+      .map((entry, index) => JSON.stringify({ ...JSON.parse(entry), seq: index + 1 }))
+    writeFileSync(join(dataRoot, '.ai/cezar/runs', `${HOOK_RUN.id}.ndjson`), withHooks.join('\n') + '\n')
+  }
   copyFileSync(
     resolve(import.meta.dirname, 'fixtures/thread-run.ndjson'),
     join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`),
@@ -650,6 +667,39 @@ describe('task thread', () => {
     expect(browser.evaluate(`document.querySelector('[data-slot="centered-state"] a[href="${scoped('/')}"]').textContent`)).toBe(
       'Back to tasks',
     )
+  })
+
+  it('renders hook entries as cards that expand readably in every QA variant (#961)', () => {
+    const card = (id: string) => `[...document.querySelectorAll('[data-slot="hook-card"]')].find((el) => el.textContent.includes(${JSON.stringify(id)}))`
+    browser.goto(`${baseUrl}${scoped(`/tasks/${HOOK_RUN.id}`)}`)
+    browser.waitForFunction(`document.querySelectorAll('[data-slot="hook-card"]').length === 2`)
+    // Placed where they ran: after the Bash card, before the Screenshot card.
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="tool-card"], [data-slot="hook-card"]')]
+      .map((el) => el.dataset.slot === 'hook-card' ? 'hook:' + el.dataset.status : el.dataset.kind).slice(0, 4)`))
+      .toEqual(['execute', 'hook:completed', 'hook:failed', 'other'])
+    expect(browser.evaluate(`${card('Stop')}.className.includes('border-danger/25')`)).toBe(true)
+    for (const id of ['PostToolBatch', 'Stop']) {
+      browser.evaluate(`${card(id)}.querySelector(':scope > [data-slot="collapsible-trigger"]').click()`)
+    }
+    browser.waitForFunction(`document.querySelectorAll('[data-slot="hook-entry"]').length === 2`)
+    expect(browser.evaluate(`document.querySelector('[data-slot="hook-entry"][data-kind="context"]').textContent`))
+      .toBe('SQUEAL · revision 4\n✗ thread-items.test.tsx › ToolCard renders hook rows — new failure')
+    try {
+      for (const variant of contrastQaVariants) {
+        applyContrastQaVariant(browser, variant)
+        for (const selector of ['[data-slot="hook-entry"][data-kind="context"]', '[data-slot="hook-entry"][data-kind="error"]']) {
+          const sample = waitForSettledSample<ContrastSample>(browser, contrastSampleExpression(selector, 'color', 'parent'))
+          expect(sample.ratio, `${variant.id} ${selector}: ${sample.foreground} on ${sample.background}`).toBeGreaterThanOrEqual(4.5)
+        }
+        expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= window.innerWidth`), variant.id).toBe(true)
+        // The transcript pins to its end; bring the hooks into the QA screenshot.
+        browser.evaluate(`${card('PostToolBatch')}.scrollIntoView({ block: 'center', behavior: 'instant' })`)
+        browser.screenshot(`${artifactsDir}/issue-961-hooks-${variant.id}.png`, { viewport: true })
+      }
+    } finally {
+      restoreContrastQaDefaults(browser)
+      browser.setViewport(1440, 900)
+    }
   })
 
   it('reflows at iPhone width with no horizontal overflow', () => {
