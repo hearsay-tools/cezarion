@@ -158,17 +158,25 @@ describe('the repo branches API', () => {
     const { id, branch } = await finishedTask(1);
     store.addStep(id, { id: 'task', name: 'Task', kind: 'agent' });
     store.updateStep(id, 'task', { status: 'done', iterations: 1, tokensUsed: 0, sessionId: 'sess-1', backend: 'claude' });
-    const claimed = new Promise<void>((resolve) => {
+    // Under load the store's 300 ms save evicted the run before the delete claimed it, and the
+    // fixture then wrote steps the schema rejects: the reload failed, the claim was refused and
+    // Continue answered 'not found' (hearsay-tools/cezarion#886). Evict it every time, assert the
+    // claim took, and hold it until Continue is tried, so no timer or git spawn decides the order.
+    store.flush();
+    let endHold!: () => void;
+    const held = new Promise<void>((resolve) => { endHold = resolve; });
+    const claimed = new Promise<(() => void) | null>((resolve) => {
       const claim = manager.claimForBranchCleanup.bind(manager);
       vi.spyOn(manager, 'claimForBranchCleanup').mockImplementation((ids) => {
         const release = claim(ids);
-        resolve();
-        return release;
+        resolve(release);
+        return release && (() => void held.then(release));
       });
     });
     const pending = del({ names: [branch], confirm: branch });
-    await claimed;
+    expect(await claimed).toEqual(expect.any(Function));
     expect(manager.continueRun(id, { text: 'go on' })).toEqual({ ok: false, error: expect.stringContaining('being cleaned up') });
+    endHold();
     expect((await pending).status).toBe(200);
   });
 

@@ -9,7 +9,10 @@ import { fixture } from './service.testkit.ts';
 import { createDelegationRoutes } from './routes.ts';
 import { createDelegationApp, startDelegationTransport } from './transport.ts';
 
-describe('bundled worker CLI', () => {
+// Every test spawns real worker worktrees through git. Alone at load 91 they take 0.25-1.2 s
+// (the transport round trips, with `wait`'s ~1 s, are the slowest); the Node 24.15 floor shard
+// runs them about 4x slower, where two of them passed 5 s (hearsay-tools/cezarion#974).
+describe('bundled worker CLI', { timeout: 20_000 }, () => {
   let f: ReturnType<typeof fixture>, transport: Awaited<ReturnType<typeof startDelegationTransport>>;
   let output: ReturnType<typeof vi.spyOn>, env: NodeJS.ProcessEnv;
   beforeEach(async () => {

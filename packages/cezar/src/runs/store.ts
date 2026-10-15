@@ -496,6 +496,10 @@ function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+/** Runs (and conversation roots, one family query each) the open-time facts warm-up enumerates
+ *  per event-loop turn (hearsay-tools/cezarion#949), so each slice stays a few milliseconds. */
+const WARM_IDS_PER_SLICE = 100;
+
 const MAX_RUNS_KEPT = 300;
 
 /** How many archived root runs the run lists carry per project (#864): `GET /run-summaries?archived=recent`
@@ -3588,10 +3592,29 @@ export class RunStore extends EventEmitter {
     this.factsWarming = Promise.resolve().then(async () => {
       if (!this.db) return;
       const ids = new Set(this.recoveryFactIds());
-      for (const rootId of this.listConversationRootIds()) {
-        for (const id of this.listFamilyRunIds(rootId)) ids.add(id);
+      // hearsay-tools/cezarion#949: this microtask ends open()'s synchronous slice, and on a
+      // large history the JSON scan for conversation roots plus one family query per root cost
+      // as much again. Past one slice's worth of runs, yield before the scan and between root
+      // batches; a small store (every unit test) still registers in this one microtask.
+      const large = this.listRunIds().length > WARM_IDS_PER_SLICE;
+      const turn = async (): Promise<boolean> => {
+        await new Promise<void>(resolve => setImmediate(resolve));
+        return this.db !== null;
+      };
+      if (large && !await turn()) return;
+      const roots = this.listConversationRootIds();
+      for (let i = 0; i < roots.length; i++) {
+        if (large && i > 0 && i % WARM_IDS_PER_SLICE === 0 && !await turn()) return;
+        for (const id of this.listFamilyRunIds(roots[i]!)) ids.add(id);
       }
-      for (const id of this.listRunIds()) ids.add(id);
+      if (large && !await turn()) return;
+      // Re-list after the yields: a run deleted meanwhile must not be registered again.
+      const present = this.listRunIds();
+      if (large) {
+        const live = new Set(present);
+        for (const id of ids) if (!live.has(id)) ids.delete(id);
+      }
+      for (const id of present) ids.add(id);
       try {
         await this.facts.warm(ids);
         for (const id of this.deferredAskSummaries) this.refreshDeferredAskSummary(id, this.facts.peek(id));
