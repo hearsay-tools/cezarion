@@ -6,7 +6,7 @@ import { createServer } from 'node:http'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { captureFixtureServer, spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from '../../e2e/fixture-server'
+import { FIXTURE_BOOT_BUDGET_MS, captureFixtureServer, spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from '../../e2e/fixture-server'
 
 const children: ChildProcess[] = []
 const owned = (script: string) => {
@@ -157,6 +157,28 @@ describe('owned fixture server readiness (#795)', () => {
     await expect(waitForFixtureServer(child)).rejects.toThrow('awaiting listener announcement')
     expect(Date.now() - started).toBeLessThan(400)
     expect(child.exitCode !== null || child.signalCode !== null).toBe(true)
+  })
+
+  // hearsay-tools/cezarion#986: a 60-attempt cap ended the announcement wait at 15 s whatever the
+  // caller's budget, because each "not announced yet" attempt costs no time. A 10 ms interval
+  // makes the same cap end the wait at ~0.6 s, so a child that announces at ~1 s proves the
+  // budget is wall-clock only, both for an explicit `timeoutMs` and for the default.
+  const lateAnnouncement = (delayMs: number) => `
+    const server = require('node:http').createServer((req, res) => res.end('ok'));
+    setTimeout(() => server.listen(0, '127.0.0.1', () => console.log('  cockpit → http://127.0.0.1:' + server.address().port)), ${delayMs});
+    process.on('SIGTERM', () => server.close(() => process.exit(0)));
+  `
+  it('honours an explicit timeoutMs instead of capping the announcement wait by attempts', async () => {
+    const child = spawnFixtureServer(['-e', lateAnnouncement(1_000)], { env: process.env }, { timeoutMs: 5_000, intervalMs: 10 })
+    children.push(child)
+    expect(await waitForFixtureServer(child)).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
+  })
+
+  it('bounds the default announcement wait by wall clock, not by attempts', async () => {
+    expect(FIXTURE_BOOT_BUDGET_MS).toBeGreaterThanOrEqual(45_000)
+    const child = spawnFixtureServer(['-e', lateAnnouncement(1_000)], { env: process.env }, { intervalMs: 10 })
+    children.push(child)
+    expect(await waitForFixtureServer(child)).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
   })
 
   it('keeps the health request within the same deadline and aborts late headers', async () => {

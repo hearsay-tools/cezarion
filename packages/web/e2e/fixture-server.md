@@ -10,8 +10,8 @@ were not recorded; the exact cause of that historical 404 remains unproven.
 `spawnFixtureServer` returns the child immediately, drains bounded output, and starts
 the original health deadline at spawn. `waitForFixtureServer` requires that same live
 child's post-listen `cockpit → http://127.0.0.1:<port>` announcement and successful HTTP
-health at that origin. Announcement and HTTP health share one deadline and attempt cap;
-there is no additional retry loop or fresh budget. Invalid announcements, spawn errors,
+health at that origin. Announcement and HTTP health share one wall-clock deadline;
+there is no additional retry loop or fresh budget (see the boot budget section below). Invalid announcements, spawn errors,
 child exits, or expired startup stop the owned child and retain phase/lifecycle/output
 diagnostics. Configuration and environment contents are not serialized.
 
@@ -110,6 +110,23 @@ now covers 53 starts across 45 specs.
 hearsay-tools/cezarion#941 adds `good-css.e2e.ts`: one CLI construction with
 port 0, the shared owned-listener health budget, and awaited shutdown before
 fixture removal. The guard now pins 54 starts across 46 specs.
+
+## Boot budget (hearsay-tools/cezarion#986)
+
+The original per-site budget was `tries: 60` × 250 ms, about 15 s, carried over from the
+health poll of an already-running server. Since spawn-time readiness, that budget also
+covers the whole cockpit boot (detectEnvironment, store open, worktree reconcile,
+recovery), which is CPU-bound. Under load it ran out with the child alive and stdout
+empty: four-lane run `1791923143645-2565641` (load about 30) failed touch-targets,
+task-thread, github-sidebar and quick-list at 14.7 to 14.8 s, and Squeal's slow tier in
+the main checkout failed task-github-items and task-handoff the same way. The attempt
+cap also overrode explicit budgets, because an attempt that finds no announcement costs
+no time: touch-targets asked for 20 s and still failed at 14.8 s.
+
+The budget is now wall-clock only: `FIXTURE_BOOT_BUDGET_MS` (45 s) by default, or the
+caller's `timeoutMs`. The four `timeoutMs: 20_000` overrides above were removed, since the
+default is now larger. 45 s fits inside the default 60 s hook timeout with room for fixture
+setup. A child that exits still fails at once.
 
 ## Other server classes audited
 
