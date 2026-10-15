@@ -100,6 +100,37 @@ describe('worktreeSizeBytes (#483)', () => {
   });
 });
 
+describe('createWorktree under a held config lock (real git)', () => {
+  // Port of open-mercato/cezar#1318 (hearsay-tools/cezarion#1006). Starting a branch from a
+  // remote-tracking ref makes `git worktree add -b` write `branch.<name>.*` tracking keys to
+  // the repository-wide config, so concurrent task starts contend on `.git/config.lock`. A
+  // lock file left in place stands in for the other process holding it.
+  it.each([
+    ['a task', '44444444-4444-4444-8444-444444444444', {}],
+    ['an owned worker', '55555555-5555-4555-8555-555555555555', { freshOnly: true }],
+  ])('creates %s worktree from a remote base without writing tracking config', async (_kind, runId, options) => {
+    const repo = await fixtureRepo('cez-worktree-config-lock-');
+    const head = (await run('git', ['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim();
+    await run('git', ['remote', 'add', 'origin', repo], { cwd: repo });
+    await run('git', ['update-ref', 'refs/remotes/origin/main', head], { cwd: repo });
+    const configLock = join(repo, '.git', 'config.lock');
+    writeFileSync(configLock, 'held by another concurrent task\n');
+
+    try {
+      const created = await createWorktree(repo, runId, 'origin/main', options);
+      expect(created.branch).toBe(branchFor(runId));
+      expect(created.baseBranch).toBe('origin/main');
+      expect((await run('git', ['rev-parse', 'HEAD'], { cwd: created.path })).stdout.trim()).toBe(head);
+    } finally {
+      rmSync(configLock, { force: true });
+    }
+    // `--get-regexp` exits 1 when no key matches: the task branch has no upstream.
+    await expect(
+      run('git', ['config', '--get-regexp', `^branch\\.${branchFor(runId)}\\.`], { cwd: repo }),
+    ).rejects.toMatchObject({ code: 1 });
+  });
+});
+
 describe('createWorktree recovery (real git)', () => {
   it('is idempotent when the task worktree is already registered', async () => {
     const repo = await fixtureRepo('cez-worktree-idempotent-');
