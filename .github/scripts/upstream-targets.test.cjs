@@ -322,11 +322,11 @@ test('renderTargetsReport says why reachability is unknown when the build failed
 test('collectReachability on this repo\'s HEAD snapshot reaches the cockpit, the CLI, its path-loaded entries and the contract', async () => {
   const path = require('node:path');
   const { collectReachability } = require('./upstream-reachability.cjs');
-  const { resolveHead, withHeadSnapshot } = require('./upstream-scan.cjs');
+  const { pinnedGit, resolveHead, withHeadSnapshot } = require('./upstream-scan.cjs');
   // `targets` bundles the files it checks out of HEAD, not the work tree; a file production code
   // imports that the snapshot leaves out would fail the build here.
   const repo = path.resolve(__dirname, '../..');
-  const reach = await withHeadSnapshot(repo, resolveHead(repo), (snapshot) => {
+  const reach = await withHeadSnapshot(pinnedGit(repo, resolveHead(repo)), (snapshot) => {
     assert.equal(snapshot.error, null);
     return collectReachability(snapshot.tree);
   });
@@ -582,16 +582,16 @@ test('collectTargets checks HEAD out with HEAD\'s attributes, not an uncommitted
   assert.deepEqual(tmp.leftovers(), []);
 });
 
-/** Puts a `git` that rejects `--attr-source` first on PATH for one test, as a git older than 2.41
- *  does; every other call reaches the real git. A child spawned afterwards inherits it. */
-function gitWithoutAttrSource(t) {
+/** Puts a `git` shell script first on PATH for one test: the lines `body(bin)` returns run first,
+ *  then the real git with the same arguments. A child spawned afterwards inherits it. */
+function shimGit(t, body) {
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
   const { execFileSync } = require('node:child_process');
   const real = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
-  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'cez-old-git-'));
-  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\ncase "$1" in --attr-source*) echo "unknown option: $1" >&2; exit 129;; esac\nexec '${real}' "$@"\n`, { mode: 0o755 });
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'cez-git-shim-'));
+  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\n${body(bin)}\nexec '${real}' "$@"\n`, { mode: 0o755 });
   const saved = process.env.PATH;
   process.env.PATH = `${bin}${path.delimiter}${saved}`;
   t.after(() => {
@@ -600,19 +600,99 @@ function gitWithoutAttrSource(t) {
   });
 }
 
-test('collectTargets reads reachability and the dry run as unknown on a git that cannot pin attributes to HEAD', async (t) => {
-  const { collectTargets } = require('./upstream-scan.cjs');
+/** A git that rejects `--attr-source`, as one older than 2.41 does; every other call reaches the real git. */
+function gitWithoutAttrSource(t) {
+  shimGit(t, () => 'case "$1" in --attr-source*) echo "unknown option: $1" >&2; exit 129;; esac');
+}
+
+/** Logs every git call from now on. The returned function reads them: one argv array per call, in order. */
+function gitCallLog(t) {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  let log;
+  shimGit(t, (bin) => {
+    log = path.join(bin, 'calls');
+    return `printf '%s\\0' "$@" >> '${log}'\nprintf '\\n' >> '${log}'`;
+  });
+  return () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '').split('\0\n').filter(Boolean).map((call) => call.split('\0'));
+}
+
+/** A call's git subcommand: its first argument that is not a global option. */
+const subcommandOf = (args) => args.find((a) => !a.startsWith('-'));
+
+test('upstream-scan targets refuses, in one line, a git that cannot read attributes from HEAD', (t) => {
   const fx = forkFixture();
   t.after(fx.cleanup);
   const tmp = privateTmp(t);
   gitWithoutAttrSource(t);
-  const report = await collectTargets([fx.upstream.slice(0, 8)], { cwd: fx.dir, fetch: false });
-  assert.match(report.reach.error, /^cannot snapshot HEAD: unknown option: --attr-source/);
-  assert.match(report.dryRunError, /^cannot snapshot HEAD: unknown option: --attr-source/);
-  const live = report.sections[0].files.find((f) => f.path === 'packages/web/src/live.tsx');
-  assert.equal(live.reachability, 'unknown');
-  assert.equal(live.dryRun, 'unknown');
+  const cli = fixtureCli(fx);
+  // Every verdict depends on the pin, so an unpinned report would be untrustworthy, not partial.
+  const result = cli('targets', fx.upstream.slice(0, 8), '--no-fetch');
+  assert.equal(result.status, 1, result.stdout);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /^upstream-scan targets: needs git 2\.41 or newer \(--attr-source\); this git rejects it/);
+  assert.equal(result.stderr.trim().split('\n').length, 1, result.stderr);
   assert.deepEqual(tmp.leftovers(), []);
+});
+
+test('collectTargets finds the baseline and drift with HEAD\'s attributes, not an uncommitted textconv on the ledger', async (t) => {
+  const { collectTargets } = require('./upstream-scan.cjs');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  // The fixture's own config. A dirty attribute naming it would hide every `sha:` line from the pickaxe.
+  fx.git('config', 'diff.review.textconv', 'sed /sha:/d');
+  fx.write('.gitattributes', '.ai/upstream/ledger.yaml diff=review\n');
+  const report = await collectTargets([fx.upstream.slice(0, 8)], { cwd: fx.dir, fetch: false });
+  const [section] = report.sections;
+  assert.equal(section.intro?.subject, 'chore(upstream): scan');
+  assert.equal(section.baseline?.short, fx.git('rev-parse', '--short', fx.base));
+  const live = section.files.find((f) => f.path === 'packages/web/src/live.tsx');
+  assert.deepEqual(live.drift, { commits: 1, added: 1, deleted: 1 });
+  assert.deepEqual(fileFlags({ ...live, forkExists: live.fork.exists }), ['drifted']);
+});
+
+test('collectTargets finds the baseline in the ledger\'s raw text, whatever textconv HEAD commits', async (t) => {
+  const { collectTargets } = require('./upstream-scan.cjs');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  // Committed this time, so the pin alone cannot help: the pickaxe must read raw text.
+  fx.git('config', 'diff.review.textconv', 'sed /sha:/d');
+  fx.write('.gitattributes', '.ai/upstream/ledger.yaml diff=review\n');
+  fx.git('add', '.gitattributes');
+  fx.git('commit', '-q', '-m', 'chore: ledger textconv');
+  const report = await collectTargets([fx.upstream.slice(0, 8)], { cwd: fx.dir, fetch: false });
+  const [section] = report.sections;
+  assert.equal(section.intro?.subject, 'chore(upstream): scan');
+  const live = section.files.find((f) => f.path === 'packages/web/src/live.tsx');
+  assert.deepEqual(live.drift, { commits: 1, added: 1, deleted: 1 });
+});
+
+test('collectTargets counts churn with HEAD\'s attributes, not an uncommitted -diff', async (t) => {
+  const { collectTargets } = require('./upstream-scan.cjs');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  // Unset `diff` makes git call the file binary, and numstat prints `-` for its lines.
+  fx.write('.gitattributes', 'packages/web/src/live.tsx -diff\n');
+  const report = await collectTargets([fx.upstream.slice(0, 8)], { cwd: fx.dir, fetch: false });
+  const live = report.sections[0].files.find((f) => f.path === 'packages/web/src/live.tsx');
+  assert.deepEqual(live.drift, { commits: 1, added: 1, deleted: 1 });
+});
+
+test('every git call of targets reads attributes from the HEAD it resolved', async (t) => {
+  const { collectTargets } = require('./upstream-scan.cjs');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const head = fx.git('rev-parse', 'HEAD');
+  const calls = gitCallLog(t);
+  const report = await collectTargets([fx.upstream.slice(0, 8)], { cwd: fx.dir, fetch: false });
+  assert.equal(report.head.sha, head);
+  const [resolve, ...pinned] = calls();
+  assert.deepEqual(resolve, ['rev-parse', '--verify', 'HEAD^{commit}'], 'resolving HEAD is the one call that cannot name it');
+  for (const args of pinned) assert.equal(args[0], `--attr-source=${head}`, args.join(' '));
+  const seen = new Set(pinned.map(subcommandOf));
+  for (const sub of ['cat-file', 'log', 'diff', 'diff-tree', 'read-tree', 'ls-files', 'checkout-index', 'format-patch', 'apply']) {
+    assert.ok(seen.has(sub), `the guard saw a ${sub} call`);
+  }
 });
 
 test('collectTargets keeps applying attributes HEAD commits', async (t) => {
@@ -655,13 +735,13 @@ test('collectTargets reads every verdict at the HEAD it started from when a comm
 test('withHeadSnapshot checks HEAD out under os.tmpdir() and removes it when the work inside throws', async (t) => {
   const fs = require('node:fs');
   const path = require('node:path');
-  const { resolveHead, withHeadSnapshot } = require('./upstream-scan.cjs');
+  const { pinnedGit, resolveHead, withHeadSnapshot } = require('./upstream-scan.cjs');
   const fx = forkFixture();
   t.after(fx.cleanup);
   const tmp = privateTmp(t);
   fx.write('packages/web/src/main.tsx', 'export const app = []\n');
   let seen = null;
-  await assert.rejects(withHeadSnapshot(fx.dir, resolveHead(fx.dir), (snapshot) => {
+  await assert.rejects(withHeadSnapshot(pinnedGit(fx.dir, resolveHead(fx.dir)), (snapshot) => {
     seen = { ...snapshot, leftovers: tmp.leftovers(), main: fs.readFileSync(path.join(snapshot.tree, 'packages/web/src/main.tsx'), 'utf8') };
     throw new Error('boom');
   }), /boom/);
@@ -856,6 +936,29 @@ test('upstream-scan records rows without a hint, never a clean one, on a git tha
   const warning = result.stderr.trim().split('\n');
   assert.equal(warning.length, 1, result.stderr);
   assert.match(warning[0], /^upstream-scan: .*no conflict hints.*unknown option: --attr-source/);
+  assert.deepEqual(tmp.leftovers(), []);
+});
+
+test('every git call of the scan\'s conflict hints reads attributes from the HEAD it resolved', (t) => {
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const tmp = privateTmp(t);
+  laterUpstreamCommit(fx);
+  const head = fx.git('rev-parse', 'HEAD');
+  const calls = gitCallLog(t);
+  const cli = fixtureCli(fx);
+  const result = cli('--no-fetch', '--date', '2026-10-16');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).added, 1);
+  const logged = calls();
+  // Before the hints resolve HEAD, the scan reads its range from upstream refs: no attributes, and
+  // it must keep working on a git without `--attr-source`.
+  const at = logged.findIndex((args) => args.join(' ') === 'rev-parse --verify HEAD^{commit}');
+  assert.ok(at > 0, logged.map((args) => args.join(' ')).join('\n'));
+  const pinned = logged.slice(at + 1);
+  for (const args of pinned) assert.equal(args[0], `--attr-source=${head}`, args.join(' '));
+  const seen = new Set(pinned.map(subcommandOf));
+  for (const sub of ['read-tree', 'format-patch', 'apply']) assert.ok(seen.has(sub), `the guard saw a ${sub} call`);
   assert.deepEqual(tmp.leftovers(), []);
 });
 

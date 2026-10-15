@@ -79,9 +79,10 @@ against these rules on every `npm run test:unit`, so a `ported` row without a fo
    squash subject), title, date, and a conflict hint from `git apply --check --3way --cached` of
    that commit's patch against a private index holding the committed `HEAD`, built once per scan
    in a temp directory and removed afterwards, so nothing uncommitted in the checkout changes the
-   count; attributes are read from that `HEAD` too (`git --attr-source=<sha>`). When that index
-   cannot be built (temp dir unusable, a git without `--attr-source`), the scan writes one warning
-   to stderr and records the rows without a hint. Append as `pending`. Existing rows are never touched.
+   count; every git call of the hint reads attributes from that `HEAD` too
+   (`git --attr-source=<sha>`). On a git without that option (before 2.41), or when that index
+   cannot be built (temp dir unusable), the scan writes one warning to stderr and records the rows
+   without a hint. Append as `pending`. Existing rows are never touched.
 4. Append a `scans` row and write `scans/<date>.md`. Print a JSON summary on stdout.
 
 No new commits means no file changes and `added: 0`.
@@ -98,7 +99,7 @@ is a ledger sha prefix that must match exactly one row. A commit missing locally
 `refs/cez-upstream/main` with the scan's own fetch, never through a remote. The command prints a
 Markdown report with one section per commit, in the order given, and exits 0 whenever the report
 printed. It exits 1 with one line on stderr for no arguments, an unknown or ambiguous prefix, an
-invalid ledger, or a git failure. A first argument that is not `validate`, `render` or `targets`
+invalid ledger, a git older than 2.41, or a git failure. A first argument that is not `validate`, `render` or `targets`
 exits 2 with a one-line usage message before git or the filesystem is touched; only no argument
 at all runs the scan, which fetches and rewrites the ledger.
 
@@ -107,10 +108,12 @@ starts, and every verdict describes that commit, even if another commit lands mi
 and drift read it directly. The dry run and reachability read a snapshot of it built in a temp
 directory outside the repository: a private `GIT_INDEX_FILE` loaded with `git read-tree <sha>`, which
 `git apply --check --3way --cached` reads, and the files reachability needs, checked out of that
-index with `git checkout-index`. Both read Git attributes from the same commit
-(`git --attr-source=<sha>`), so an uncommitted `.gitattributes` picks neither a merge driver nor a
-smudge filter, while committed attributes and repository config still apply; a git without the
-option reads `unknown`. Uncommitted changes, staged or not, are ignored, the real index
+index with `git checkout-index`. Every git call after resolving `HEAD` reads Git attributes from
+the same commit (`git --attr-source=<sha>`), so an uncommitted `.gitattributes` picks no merge
+driver, smudge filter, textconv or binary flag, while committed attributes and repository config
+still apply; the baseline pickaxe and the drift churn also pass `--no-textconv`, so they read raw
+lines. `targets` needs git 2.41 or newer for that option and exits 1 on an older git, because
+every verdict depends on it. Uncommitted changes, staged or not, are ignored, the real index
 and work tree are never written, and the temp directory is removed whether the run succeeds or
 fails. Only `ledger.yaml` is read from the work tree, so a local, uncommitted row still works.
 

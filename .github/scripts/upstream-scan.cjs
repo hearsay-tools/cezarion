@@ -25,8 +25,9 @@
 // gone, reached by production code or only by tests, changed since the row
 // landed, and a fresh per-file dry run (hearsay-tools/cezarion#1002). Every
 // verdict describes the committed HEAD: uncommitted changes, staged or not, are
-// ignored; only `ledger.yaml` is read from the work tree. Advisory: exit 0
-// whenever the report printed; exit 1 with one line on stderr otherwise.
+// ignored; only `ledger.yaml` is read from the work tree. It needs git 2.41 or
+// newer (`--attr-source`). Advisory: exit 0 whenever the report printed; exit 1
+// with one line on stderr otherwise.
 'use strict';
 
 const { execFileSync, spawnSync } = require('node:child_process');
@@ -53,6 +54,14 @@ function gitSucceeds(args, { cwd = root } = {}) {
   return spawnSync('git', args, { cwd, stdio: 'ignore' }).status === 0;
 }
 
+/** Both output streams, whatever the exit code; for `git apply --check`, which exits 0 AND
+ *  reports its conflicts on stderr. */
+function gitOutput(args, { cwd = root, env, input } = {}) {
+  const result = spawnSync('git', args, { cwd, env, input, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  if (result.error) throw result.error;
+  return `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+}
+
 function loadLedger(cwd = root) {
   const file = path.join(cwd, LEDGER_PATH);
   const ledger = yaml.parse(fs.readFileSync(file, 'utf8'));
@@ -68,8 +77,8 @@ function readLedger() {
   return { file, ledger };
 }
 
-function fetchUpstream(ledger, cwd = root) {
-  git(['fetch', '--no-tags', '--quiet', `https://github.com/${ledger.upstream.repo}`, `${ledger.upstream.branch}:${UPSTREAM_REF}`], { cwd });
+function fetchUpstream(ledger, run = git) {
+  run(['fetch', '--no-tags', '--quiet', `https://github.com/${ledger.upstream.repo}`, `${ledger.upstream.branch}:${UPSTREAM_REF}`]);
 }
 
 /** HEAD as a full commit sha. A run resolves it once and names that sha in every later git
@@ -78,24 +87,43 @@ function resolveHead(cwd = root) {
   return git(['rev-parse', '--verify', 'HEAD^{commit}'], { cwd }).trim();
 }
 
-/** `--attr-source` for every git child that reads the snapshot: attributes come from `head`'s tree,
- *  so an uncommitted `.gitattributes` can pick neither a merge driver for the dry run nor a smudge
- *  filter for `checkout-index`. Committed attributes and the repository's config still apply.
+/** Git for one run against `head`, a resolved commit sha: every call starts with
+ *  `--attr-source=<head>`, so attributes come from `head`'s tree and an uncommitted `.gitattributes`
+ *  can pick no merge driver, smudge filter, textconv or binary flag. Committed attributes and the
+ *  repository's config still apply. Every git child of `targets` and of the scan's hints goes
+ *  through it; only resolving HEAD, which the pin needs first, does not.
  *  The global option, not `GIT_ATTR_SOURCE`: a git without it (before 2.41) rejects the option
- *  instead of silently ignoring an unknown env var. */
-const attrSource = (head) => `--attr-source=${head}`;
+ *  instead of silently ignoring an unknown env var, and `attrSourceRejection` asks once up front. */
+function pinnedGit(cwd, head) {
+  const pin = (args) => [`--attr-source=${head}`, ...args];
+  return {
+    head,
+    git: (args, opts) => git(pin(args), { ...opts, cwd }),
+    gitSucceeds: (args) => gitSucceeds(pin(args), { cwd }),
+    gitOutput: (args, opts) => gitOutput(pin(args), { ...opts, cwd }),
+  };
+}
 
-/** A private index holding `head`'s tree, in a new `cez-targets-*` dir under os.tmpdir(); the
- *  real index is never written. The caller calls `remove()`; a failure here leaves no dir.
- *  `read-tree` reads no attributes, but takes `--attr-source` too, so a git without it fails here,
- *  where callers degrade, rather than in a dry run whose rejected option would read as clean. */
-function headIndex(cwd, head) {
+/** Why this git cannot read attributes from `g.head`, or null when it can: one pinned `rev-parse`
+ *  of the sha just resolved, which only a rejected `--attr-source` can fail. */
+function attrSourceRejection(g) {
+  try {
+    g.git(['rev-parse', '--verify', g.head]);
+    return null;
+  } catch (err) {
+    return oneLine(err);
+  }
+}
+
+/** A private index holding `g.head`'s tree, in a new `cez-targets-*` dir under os.tmpdir(); the
+ *  real index is never written. The caller calls `remove()`; a failure here leaves no dir. */
+function headIndex(g) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cez-targets-'));
   const remove = () => fs.rmSync(dir, { recursive: true, force: true });
   try {
     const real = fs.realpathSync(dir);
     const index = path.join(real, 'index');
-    git([attrSource(head), 'read-tree', head], { cwd, env: { ...process.env, GIT_INDEX_FILE: index } });
+    g.git(['read-tree', g.head], { env: { ...process.env, GIT_INDEX_FILE: index } });
     return { dir: real, index, remove };
   } catch (err) {
     remove();
@@ -103,37 +131,38 @@ function headIndex(cwd, head) {
   }
 }
 
-/** What a 3-way dry run of one upstream commit onto `index` says, a private index holding `head`
+/** What a 3-way dry run of one upstream commit onto `index` says, a private index holding `g.head`
  *  (`headIndex`). `git apply --check --3way` exits 0 AND reports its conflicts on stderr, so both
  *  streams are read whatever the exit code — an exit-code-only check would call everything clean.
- *  The run reads that index alone (`--cached`) and `head`'s attributes (`attrSource`), so nothing
- *  staged or edited in the checkout can change the verdict. The index path reaches the child's
- *  environment only. */
-function applyCheckOutput(sha, cwd, index, head) {
-  const patch = git(['format-patch', '-1', '--stdout', sha], { cwd });
-  const env = { ...process.env, GIT_INDEX_FILE: index };
-  const result = spawnSync('git', [attrSource(head), 'apply', '--check', '--3way', '--cached', '-'], { cwd, env, input: patch, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  if (result.error) throw result.error;
-  return `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+ *  The run reads that index alone (`--cached`) and `g.head`'s attributes, so nothing staged or
+ *  edited in the checkout can change the verdict. The index path reaches the child's environment only. */
+function applyCheckOutput(sha, g, index) {
+  const patch = g.git(['format-patch', '-1', '--stdout', sha]);
+  return g.gitOutput(['apply', '--check', '--3way', '--cached', '-'], { env: { ...process.env, GIT_INDEX_FILE: index }, input: patch });
 }
 
 /** Files a 3-way dry run of each upstream commit cannot apply onto HEAD, by sha. Advisory, dated.
- *  One private index holding HEAD serves every commit and is removed afterwards. When that index
- *  cannot be built (a temp dir that is not a directory or is full, a git without `--attr-source`),
- *  one warning goes to stderr and no commit gets a hint: the scan still records its rows. */
+ *  One private index holding HEAD serves every commit and is removed afterwards. On a git without
+ *  `--attr-source`, or when that index cannot be built (a temp dir that is not a directory or is
+ *  full), one warning goes to stderr and no commit gets a hint: the scan still records its rows. */
 function conflictHints(shas, cwd = root) {
   const hints = {};
   if (shas.length === 0) return hints;
-  const head = resolveHead(cwd);
+  const g = pinnedGit(cwd, resolveHead(cwd));
+  const rejected = attrSourceRejection(g);
+  if (rejected) {
+    process.stderr.write(`upstream-scan: this git cannot read attributes from HEAD (--attr-source needs git 2.41 or newer), so new rows get no conflict hints: ${rejected}\n`);
+    return hints;
+  }
   let built;
   try {
-    built = headIndex(cwd, head);
+    built = headIndex(g);
   } catch (err) {
     process.stderr.write(`upstream-scan: cannot build a private index of HEAD, so new rows get no conflict hints: ${oneLine(err)}\n`);
     return hints;
   }
   try {
-    for (const sha of shas) hints[sha] = parseApplyCheck(applyCheckOutput(sha, cwd, built.index, head));
+    for (const sha of shas) hints[sha] = parseApplyCheck(applyCheckOutput(sha, g, built.index));
   } finally {
     built.remove();
   }
@@ -177,11 +206,11 @@ function entriesFor(ledger, prefixes) {
 }
 
 /** Fetch upstream at most once, and only when a commit is missing. Never a remote (see the header). */
-function ensureUpstreamCommits(ledger, entries, { cwd, fetch }) {
-  const missing = () => entries.filter((e) => !gitSucceeds(['cat-file', '-e', `${e.sha}^{commit}`], { cwd }));
+function ensureUpstreamCommits(ledger, entries, { g, fetch }) {
+  const missing = () => entries.filter((e) => !g.gitSucceeds(['cat-file', '-e', `${e.sha}^{commit}`]));
   let absent = missing();
   if (absent.length && fetch) {
-    fetchUpstream(ledger, cwd);
+    fetchUpstream(ledger, g.git);
     absent = missing();
   }
   if (absent.length) {
@@ -192,25 +221,27 @@ function ensureUpstreamCommits(ledger, entries, { cwd, fetch }) {
   }
 }
 
-/** The commit that added the row's sha to the ledger on `head`'s history, and its first parent:
- *  the fork as the scan saw it. `null` when `head` never committed the row (an unmerged scan). */
-function ledgerBaseline(entry, head, cwd) {
-  const introSha = git(['log', '--reverse', '--format=%H', `-S${entry.sha}`, head, '--', LEDGER_PATH], { cwd }).split('\n')[0];
+/** The commit that added the row's sha to the ledger on `g.head`'s history, and its first parent:
+ *  the fork as the scan saw it. `null` when `g.head` never committed the row (an unmerged scan).
+ *  The pickaxe reads the ledger's raw text (`--no-textconv`), whatever textconv HEAD commits. */
+function ledgerBaseline(entry, g) {
+  const introSha = g.git(['log', '--no-textconv', '--reverse', '--format=%H', `-S${entry.sha}`, g.head, '--', LEDGER_PATH]).split('\n')[0];
   if (!introSha) return { intro: null, baseline: null };
-  const [, short, subject] = git(['log', '-1', `--format=%H${FIELD}%h${FIELD}%s`, introSha], { cwd }).trim().split(FIELD);
+  const [, short, subject] = g.git(['log', '-1', `--format=%H${FIELD}%h${FIELD}%s`, introSha]).trim().split(FIELD);
   const intro = { sha: introSha, short, subject };
-  if (!gitSucceeds(['rev-parse', '--verify', '--quiet', `${introSha}^`], { cwd })) return { intro, baseline: null };
-  const [sha, baseShort, date] = git(['log', '-1', `--format=%H${FIELD}%h${FIELD}%cs`, `${introSha}^`], { cwd }).trim().split(FIELD);
+  if (!g.gitSucceeds(['rev-parse', '--verify', '--quiet', `${introSha}^`])) return { intro, baseline: null };
+  const [sha, baseShort, date] = g.git(['log', '-1', `--format=%H${FIELD}%h${FIELD}%cs`, `${introSha}^`]).trim().split(FIELD);
   return { intro, baseline: { sha, short: baseShort, date } };
 }
 
-/** One upstream file as the fork has it at `head`. A rename is judged by its old path. */
-function targetFile(file, { head, baseline, reach, dryRun, cwd }) {
+/** One upstream file as the fork has it at `g.head`. A rename is judged by its old path.
+ *  Churn counts raw lines (`--no-textconv`). */
+function targetFile(file, { g, baseline, reach, dryRun }) {
   const at = file.from ?? file.path;
-  const exists = gitSucceeds(['cat-file', '-e', `${head}:${at}`], { cwd });
+  const exists = g.gitSucceeds(['cat-file', '-e', `${g.head}:${at}`]);
   let lastTouch = null;
   if (!exists) {
-    const last = git(['--literal-pathspecs', 'log', '-1', `--format=%h${FIELD}%s`, head, '--', at], { cwd }).trim();
+    const last = g.git(['--literal-pathspecs', 'log', '-1', `--format=%h${FIELD}%s`, g.head, '--', at]).trim();
     if (last) {
       const [short, subject] = last.split(FIELD);
       lastTouch = { short, subject };
@@ -218,10 +249,10 @@ function targetFile(file, { head, baseline, reach, dryRun, cwd }) {
   }
   let drift = null;
   if (baseline) {
-    const range = `${baseline.sha}..${head}`;
-    const commits = git(['--literal-pathspecs', 'log', '--no-merges', '--format=%h', range, '--', at], { cwd }).split('\n').filter(Boolean).length;
+    const range = `${baseline.sha}..${g.head}`;
+    const commits = g.git(['--literal-pathspecs', 'log', '--no-merges', '--format=%h', range, '--', at]).split('\n').filter(Boolean).length;
     drift = { commits, added: 0, deleted: 0 };
-    for (const line of git(['--literal-pathspecs', 'diff', '--numstat', baseline.sha, head, '--', at], { cwd }).split('\n').filter(Boolean)) {
+    for (const line of g.git(['--literal-pathspecs', 'diff', '--numstat', '--no-textconv', baseline.sha, g.head, '--', at]).split('\n').filter(Boolean)) {
       const [added, deleted] = line.split('\t');
       drift.added += Number(added) || 0;
       drift.deleted += Number(deleted) || 0;
@@ -242,25 +273,25 @@ function targetFile(file, { head, baseline, reach, dryRun, cwd }) {
  *  manifests and pages, and the repo scripts whose `dist/` imports are roots. */
 const SNAPSHOT_PATH_RE = /^(?:packages\/[^/]+\/(?:src\/|scripts\/|package\.json$|index\.html$)|scripts\/)/;
 
-/** Runs `fn` on a copy of `head` outside the repository: `index`, a private index holding its
+/** Runs `fn` on a copy of `g.head` outside the repository: `index`, a private index holding its
  *  tree (`headIndex`), for the dry run; and `tree`, the files reachability reads, checked out of
- *  that index with `head`'s attributes (`attrSource`). Uncommitted changes, staged or not, reach
- *  neither, and the real index and work tree are never written. A part that could not be built is
- *  null and `error` says why.
+ *  that index with `g.head`'s attributes. Uncommitted changes, staged or not, reach neither, and
+ *  the real index and work tree are never written. A part that could not be built is null and
+ *  `error` says why.
  *  `checkout-index` rather than `git archive`: it reuses the one index, filters paths here (a
  *  pathspec that matches nothing fails the archive), needs no `tar`, and ignores
  *  `export-ignore`. The temp dir is removed whether `fn` resolves or throws. */
-async function withHeadSnapshot(cwd, head, fn) {
+async function withHeadSnapshot(g, fn) {
   const snapshot = { index: null, tree: null, error: null };
   let built = null;
   try {
-    built = headIndex(cwd, head);
+    built = headIndex(g);
     snapshot.index = built.index;
     const env = { ...process.env, GIT_INDEX_FILE: built.index };
     const tree = path.join(built.dir, 'tree');
     fs.mkdirSync(tree);
-    const files = git(['ls-files', '-z'], { cwd, env }).split('\0').filter((f) => SNAPSHOT_PATH_RE.test(f));
-    git([attrSource(head), 'checkout-index', `--prefix=${tree}${path.sep}`, '-z', '--stdin'], { cwd, env, input: files.join('\0') });
+    const files = g.git(['ls-files', '-z'], { env }).split('\0').filter((f) => SNAPSHOT_PATH_RE.test(f));
+    g.git(['checkout-index', `--prefix=${tree}${path.sep}`, '-z', '--stdin'], { env, input: files.join('\0') });
     snapshot.tree = tree;
   } catch (err) {
     snapshot.error = `cannot snapshot HEAD: ${oneLine(err)}`;
@@ -273,27 +304,31 @@ async function withHeadSnapshot(cwd, head, fn) {
 }
 
 /** The data behind `targets`: fork HEAD, the reachability run, one section per ledger row.
- *  HEAD is resolved to one sha first and every git call names it, so a commit landing mid-run
- *  cannot mix two trees in one report. Reachability and the dry run read a snapshot of that
- *  commit; existence and drift read the commit itself. */
+ *  HEAD is resolved to one sha first and every later git call goes through `pinnedGit`, naming it
+ *  and reading its attributes, so neither a commit landing mid-run nor an uncommitted
+ *  `.gitattributes` can change the report. Reachability and the dry run read a snapshot of that
+ *  commit; existence and drift read the commit itself. A git without `--attr-source` is an error:
+ *  every verdict depends on the pin. */
 async function collectTargets(prefixes, { cwd = root, fetch = true } = {}) {
   const { ledger, problems } = loadLedger(cwd);
   if (problems.length) throw new Error(`${LEDGER_PATH} is invalid: ${problems[0]}${problems.length > 1 ? ` (and ${problems.length - 1} more)` : ''}`);
   const entries = entriesFor(ledger, prefixes);
-  const head = resolveHead(cwd);
-  ensureUpstreamCommits(ledger, entries, { cwd, fetch });
-  const [short, date] = git(['log', '-1', `--format=%h${FIELD}%cs`, head], { cwd }).trim().split(FIELD);
-  return withHeadSnapshot(cwd, head, async (snapshot) => {
+  const g = pinnedGit(cwd, resolveHead(cwd));
+  const rejected = attrSourceRejection(g);
+  if (rejected) throw new Error(`needs git 2.41 or newer (--attr-source); this git rejects it: ${rejected}`);
+  ensureUpstreamCommits(ledger, entries, { g, fetch });
+  const [short, date] = g.git(['log', '-1', `--format=%h${FIELD}%cs`, g.head]).trim().split(FIELD);
+  return withHeadSnapshot(g, async (snapshot) => {
     const reach = snapshot.tree
       ? await collectReachability(snapshot.tree)
       : { roots: 0, reachable: 0, inputs: new Set(), error: snapshot.error };
     const sections = entries.map((entry) => {
-      const { intro, baseline } = ledgerBaseline(entry, head, cwd);
-      const files = parseNameStatus(git(['diff-tree', '-r', '-z', '--no-commit-id', '--name-status', '-M', entry.sha], { cwd }));
-      const dryRun = snapshot.index ? parseApplyCheckByFile(applyCheckOutput(entry.sha, cwd, snapshot.index, head)) : new Map();
-      return { entry, intro, baseline, files: files.map((f) => targetFile(f, { head, baseline, reach, dryRun, cwd })) };
+      const { intro, baseline } = ledgerBaseline(entry, g);
+      const files = parseNameStatus(g.git(['diff-tree', '-r', '-z', '--no-commit-id', '--name-status', '-M', entry.sha]));
+      const dryRun = snapshot.index ? parseApplyCheckByFile(applyCheckOutput(entry.sha, g, snapshot.index)) : new Map();
+      return { entry, intro, baseline, files: files.map((f) => targetFile(f, { g, baseline, reach, dryRun })) };
     });
-    return { ledger, head: { sha: head, short, date }, reach, dryRunError: snapshot.index ? null : snapshot.error, sections };
+    return { ledger, head: { sha: g.head, short, date }, reach, dryRunError: snapshot.index ? null : snapshot.error, sections };
   });
 }
 
@@ -354,6 +389,6 @@ function main() {
   scan({ date: values.date, head: values.head, fetch: !values['no-fetch'] });
 }
 
-module.exports = { conflictHints, collectTargets, resolveHead, withHeadSnapshot, UPSTREAM_REF };
+module.exports = { conflictHints, collectTargets, pinnedGit, resolveHead, withHeadSnapshot, UPSTREAM_REF };
 
 if (require.main === module) main();

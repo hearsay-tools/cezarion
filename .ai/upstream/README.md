@@ -91,8 +91,11 @@ whenever it printed, flags or not.
 
 Every verdict describes the committed `HEAD` the report names. Uncommitted changes, staged or
 not, are ignored: the dry run and the reachability bundle read a snapshot of `HEAD` taken outside
-the checkout, and the real index and work tree are never written. Git attributes come from
-`HEAD` too, so an uncommitted `.gitattributes` cannot change a merge or a checkout. `ledger.yaml` is the exception.
+the checkout, and the real index and work tree are never written. Every git call reads its
+attributes from `HEAD` too (`--attr-source`), so an uncommitted `.gitattributes` cannot change a
+merge, a checkout, the baseline or the drift. `targets` therefore needs git 2.41 or newer and exits
+1 on an older git, while the scan still records its rows there, without conflict hints.
+`ledger.yaml` is the exception.
 It is read from the work tree, so a row you have not committed yet still works; its drift then
 reads `unknown`.
 
