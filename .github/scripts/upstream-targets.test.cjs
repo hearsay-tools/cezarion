@@ -601,18 +601,54 @@ test('collectTargets names the prefix that matches no row, several rows, or a co
   await assert.rejects(collectTargets(['fedcba9'], { cwd: fx.dir, fetch: false }), /fedcba9c is not in this clone/);
 });
 
-test('upstream-scan targets exits 1 with a one-line message on a bad prefix', () => {
-  const { spawnSync } = require('node:child_process');
+/** The CLI copied into a fixture. Its repository root is where the script sits, so whatever a run
+ *  does lands in the fixture, never in this checkout. Dependencies still resolve from here. */
+function fixtureCli(fx) {
+  const fs = require('node:fs');
   const path = require('node:path');
-  const script = path.join(__dirname, 'upstream-scan.cjs');
-  // The CLI works on this checkout. Were `targets` ever not dispatched, these arguments make the
-  // fallback scan fail before it fetches or writes the ledger, and its stack trace fails the test.
-  const neverScan = ['--no-fetch', '--head', 'refs/cez-test/never'];
+  const { spawnSync } = require('node:child_process');
+  const scripts = path.join(fx.dir, '.github', 'scripts');
+  fs.mkdirSync(scripts, { recursive: true });
+  for (const name of fs.readdirSync(__dirname).filter((n) => /^upstream-[\w-]+\.cjs$/.test(n) && !n.endsWith('.test.cjs'))) {
+    fs.copyFileSync(path.join(__dirname, name), path.join(scripts, name));
+  }
+  const env = { ...process.env, NODE_PATH: path.resolve(__dirname, '../../node_modules') };
+  return (...args) => spawnSync(process.execPath, [path.join(scripts, 'upstream-scan.cjs'), ...args], { cwd: fx.dir, env, encoding: 'utf8' });
+}
+
+test('upstream-scan targets exits 1 with a one-line message on a bad prefix', (t) => {
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const cli = fixtureCli(fx);
   for (const args of [['targets'], ['targets', '0000000']]) {
-    const result = spawnSync(process.execPath, [script, ...args, ...neverScan], { encoding: 'utf8' });
+    const result = cli(...args);
     assert.equal(result.status, 1, args.join(' '));
     assert.equal(result.stdout, '');
     assert.equal(result.stderr.trim().split('\n').length, 1, result.stderr);
+  }
+});
+
+test('upstream-scan rejects an unknown command before it scans', (t) => {
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  // Upstream has a commit the ledger lacks, so a typo that fell through to the scan would append
+  // a row, write LEDGER.md and a scan report, and exit 0.
+  fx.git('checkout', '-q', 'upstream');
+  fx.write('packages/web/src/dead.tsx', 'export const Dead = 3\n');
+  fx.git('commit', '-q', '-am', 'fix(web): a later upstream change (#13)');
+  fx.git('checkout', '-q', 'main');
+  fx.git('update-ref', 'refs/cez-upstream/main', 'upstream');
+  const cli = fixtureCli(fx);
+  const state = () => ({ refs: fx.git('for-each-ref'), files: fx.git('--no-optional-locks', 'status', '--porcelain', '--untracked-files=all') });
+  const before = state();
+  // `--no-fetch` keeps a run without the fix off the network; the rejection must not depend on it.
+  for (const args of [['target', fx.upstream.slice(0, 8), '--no-fetch'], ['tragets', '--no-fetch']]) {
+    const result = cli(...args);
+    assert.equal(result.status, 2, `${args.join(' ')}: ${result.stdout}${result.stderr}`);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, new RegExp(`^upstream-scan: unknown command "${args[0]}"`));
+    assert.equal(result.stderr.trim().split('\n').length, 1, result.stderr);
+    assert.deepEqual(state(), before, args.join(' '));
   }
 });
 

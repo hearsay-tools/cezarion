@@ -7,6 +7,9 @@
 //   node .github/scripts/upstream-scan.cjs render      # regenerate LEDGER.md after editing the YAML
 //   node .github/scripts/upstream-scan.cjs targets <sha>… [--no-fetch]   # re-check a port's files before planning it
 //
+// Any other first argument is an error (exit 2) raised before git or the filesystem is touched:
+// a mistyped subcommand must never fall through to the scan, which fetches and rewrites the ledger.
+//
 // Upstream main is fetched into `refs/cez-upstream/main`, NEVER a remote: `gh`
 // prefers a remote named `upstream` over `origin`, so adding one repoints
 // cezar's own GitHub tab at the upstream repository (observed 2026-09-16).
@@ -256,6 +259,28 @@ function writeLedgerView(file, ledger) {
   fs.writeFileSync(path.join(path.dirname(file), 'LEDGER.md'), renderLedger(ledger));
 }
 
+/** Subcommands by name. No positional at all is the scan, which is how
+ *  `.github/workflows/upstream-scan.yml` runs it. */
+const COMMANDS = new Map([
+  ['validate', () => {
+    readLedger();
+    process.stdout.write(`${LEDGER_PATH} is valid\n`);
+  }],
+  ['render', () => {
+    const { file, ledger } = readLedger();
+    writeLedgerView(file, ledger);
+    process.stdout.write(`${path.relative(root, path.join(path.dirname(file), 'LEDGER.md'))} written\n`);
+  }],
+  ['targets', (args, values) => {
+    collectTargets(args, { fetch: !values['no-fetch'] })
+      .then((report) => process.stdout.write(renderTargetsReport(report)))
+      .catch((err) => {
+        process.stderr.write(`upstream-scan targets: ${oneLine(err)}\n`);
+        process.exitCode = 1;
+      });
+  }],
+]);
+
 function main() {
   const { values, positionals } = parseArgs({
     options: {
@@ -265,24 +290,15 @@ function main() {
     },
     allowPositionals: true,
   });
-  if (positionals[0] === 'validate') {
-    readLedger();
-    process.stdout.write(`${LEDGER_PATH} is valid\n`);
-    return;
-  }
-  if (positionals[0] === 'targets') {
-    collectTargets(positionals.slice(1), { fetch: !values['no-fetch'] })
-      .then((report) => process.stdout.write(renderTargetsReport(report)))
-      .catch((err) => {
-        process.stderr.write(`upstream-scan targets: ${oneLine(err)}\n`);
-        process.exitCode = 1;
-      });
-    return;
-  }
-  if (positionals[0] === 'render') {
-    const { file, ledger } = readLedger();
-    writeLedgerView(file, ledger);
-    process.stdout.write(`${path.relative(root, path.join(path.dirname(file), 'LEDGER.md'))} written\n`);
+  const [command, ...args] = positionals;
+  if (command !== undefined) {
+    const run = COMMANDS.get(command);
+    if (!run) {
+      process.stderr.write(`upstream-scan: unknown command "${command}"; use validate, render, targets <sha>…, or no command to scan\n`);
+      process.exitCode = 2;
+      return;
+    }
+    run(args, values);
     return;
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(values.date)) throw new Error('--date must be YYYY-MM-DD');
