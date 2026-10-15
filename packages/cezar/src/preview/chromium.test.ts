@@ -572,10 +572,16 @@ setInterval(()=>{},1000);`,
     expect(err.message).toBe(`Chromium did not open its DevTools port within 0.4 s (${bin})`);
     const child = spawned.find(candidate => candidate.spawnfile === bin);
     expect(child?.pid).toBeGreaterThan(1);
-    await vi.waitFor(() => {
-      expect(child!.signalCode).toBe('SIGKILL');
-      expect(() => process.kill(child!.pid!, 0)).toThrow();
-    });
+    // Reaping the killed child is OS work, the same class as the 1 s vi.waitFor default that
+    // timed out in run 38774681222 (hearsay-tools/cezarion#1071). It has not failed in CI; the
+    // explicit budget keeps a loaded runner from tripping it.
+    await vi.waitFor(
+      () => {
+        expect(child!.signalCode).toBe('SIGKILL');
+        expect(() => process.kill(child!.pid!, 0)).toThrow();
+      },
+      { timeout: 10_000, interval: 50 },
+    );
   });
 });
 
@@ -720,6 +726,16 @@ describe('launchChromium leak-detection Chromium regression (#972)', () => {
         });
         await cdp.send('Page.navigate', { url: `${origin}/login` });
         await loaded;
+        // Wait on the load the submit causes, not on a poll of location.pathname. The poll ran
+        // under vi.waitFor's 1 s default and timed out in CI when the POST took longer on a
+        // loaded runner (run 38774681222, hearsay-tools/cezarion#1071). Subscribe before the
+        // submit so the event cannot fire first; the test's 45 s budget bounds the wait.
+        const submitted = new Promise<void>(resolve => {
+          const off = cdp.on('Page.loadEventFired', () => {
+            off();
+            resolve();
+          });
+        });
         await cdp.send('Runtime.evaluate', {
           expression: `(() => {
             const user = document.querySelector('input[name="user"]');
@@ -731,13 +747,12 @@ describe('launchChromium leak-detection Chromium regression (#972)', () => {
             document.querySelector('form').requestSubmit();
           })()`,
         });
-        await vi.waitFor(async () => {
-          const { result } = await cdp.send<{ result: { value?: string } }>('Runtime.evaluate', {
-            expression: 'location.pathname',
-            returnByValue: true,
-          });
-          expect(result.value).toBe('/app');
+        await submitted;
+        const { result: landed } = await cdp.send<{ result: { value?: string } }>('Runtime.evaluate', {
+          expression: 'location.pathname',
+          returnByValue: true,
         });
+        expect(landed.value).toBe('/app');
         const next = new Promise<void>(resolve => {
           const off = cdp.on('Page.loadEventFired', () => {
             off();
