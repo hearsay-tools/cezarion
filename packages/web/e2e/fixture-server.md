@@ -84,14 +84,20 @@ line of its own directly after its import block:
 
 `src/test/fixture-server-start.test.ts` finds the constructions with the same source
 pattern that checks their readiness and compares the count with the declaration. It
-counts source sites, not boots: a constructor reused for a restart counts once. The
-guard names the spec and the line to add, change or remove when:
+counts source sites, not boots: a constructor reused for a restart counts once. Any
+`//` line that reads `fixture-server starts`, at any indentation or spacing, counts as a
+declaration, so a near-miss is reported instead of ignored. The guard names the spec and
+the line to add, change, move or remove when:
 
 - the spec starts a fixture server but has no declaration;
 - the spec has a declaration but starts no fixture server;
 - the declared count differs from the constructions the guard finds;
 - the declaration appears more than once;
-- the declared count is not a positive integer (`0` included).
+- the declaration is malformed: not exactly `// fixture-server starts: N` at column 0
+  with N a positive integer (`0`, `//fixture-server starts: 1` and an indented line
+  included);
+- the declaration is misplaced: the line before it does not end an import statement, or
+  an import follows it. This also rejects a copy inside a string or a block comment.
 
 The count lives in the spec because every shared form of it conflicted. A pinned total
 changed on every PR that added a fixture-server spec, so any two such PRs in flight

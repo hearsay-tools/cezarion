@@ -37,18 +37,25 @@ afterEach(async () => {
 const serveStarts = (source: string) => [...source.matchAll(/\b(spawnFixtureServer|spawn)\(\s*(?:process\.execPath,\s*)?\[([^\]]*'serve'[^\]]*)\]/g)]
 // hearsay-tools/cezarion#1084: each spec declares its own start count, so a PR that adds a
 // fixture-server spec edits only that spec, never a shared total (see e2e/fixture-server.md).
+// Any indentation or spacing is a candidate, so a near-miss is reported instead of ignored; the
+// line before the one declaration must end an import and no import may follow it, which also
+// rules out a copy inside a string or a block comment.
 const startDeclarationProblems = (file: string, source: string): string[] => {
   const starts = serveStarts(source).length
-  const declared = [...source.matchAll(/^\/\/ fixture-server starts: (.*)$/gm)].map(match => match[1])
+  const lines = source.split('\n')
+  const candidates = lines.flatMap((text, index) => /^[ \t]*\/\/[ \t]*fixture-server[ \t]+starts\b/.test(text) ? [{ raw: text, text: text.trimEnd(), index }] : [])
   const line = `\`// fixture-server starts: ${starts}\``
-  const fix = starts ? `change it to ${line}` : 'remove that line'
   const problem = (text: string) => [`${file}: ${text} (see e2e/fixture-server.md)`]
-  if (declared.length > 1) return problem(`declares its fixture-server starts ${declared.length} times; ${starts ? `keep one ${line} line directly after the imports and remove the others` : 'it starts none, so remove every one'}`)
-  const [value] = declared
-  if (value !== undefined && !/^[1-9]\d*$/.test(value)) return problem(`\`// fixture-server starts: ${value}\` is not a positive integer; ${fix}`)
-  if (starts && value === undefined) return problem(`starts ${starts} fixture server(s) but declares none; add ${line} on its own line directly after the imports`)
-  if (!starts && value !== undefined) return problem(`declares \`// fixture-server starts: ${value}\` but starts no fixture server; remove that line`)
-  if (value !== undefined && Number(value) !== starts) return problem(`declares \`// fixture-server starts: ${value}\` but starts ${starts}; ${fix}`)
+  if (candidates.length > 1) return problem(`declares its fixture-server starts ${candidates.length} times; ${starts ? `keep one ${line} line directly after the imports and remove the others` : 'it starts none, so remove every one'}`)
+  const [candidate] = candidates
+  if (!candidate) return starts ? problem(`starts ${starts} fixture server(s) but declares none; add ${line} on its own line directly after the imports`) : []
+  const { raw, text, index } = candidate
+  if (!starts) return problem(`declares \`${text}\` but starts no fixture server; remove that line`)
+  const endsImport = /(?:\bfrom|^import)[ \t]+(['"])[^'"]+\1;?\s*$/.test(lines[index - 1] ?? '')
+  if (!endsImport || lines.slice(index + 1).some(later => /^import\b(?![(.])/.test(later))) return problem(`\`${text}\` is not directly after the imports; put ${line} on its own line directly after the last import and remove this one`)
+  const value = /^\/\/ fixture-server starts: ([1-9]\d*)$/.exec(raw)?.[1]
+  if (value === undefined) return problem(`\`${text}\` is not \`// fixture-server starts: N\` at column 0 with N a positive integer; replace it with ${line}`)
+  if (Number(value) !== starts) return problem(`declares \`${text}\` but starts ${starts}; change it to ${line}`)
   return []
 }
 
@@ -85,7 +92,16 @@ describe('owned fixture server readiness (#795)', () => {
     it('reports a declaration in a spec that no longer starts one', () => reported(`${imports}// fixture-server starts: 1\n`, 'starts no fixture server; remove that line'))
     it('reports a declared count that differs from the starts', () => reported(`${imports}// fixture-server starts: 3\n${start}${start}`, 'starts 2; change it to `// fixture-server starts: 2`'))
     it('reports a declaration that appears more than once', () => reported(`${imports}// fixture-server starts: 1\n// fixture-server starts: 1\n${start}`, 'starts 2 times; keep one `// fixture-server starts: 1` line'))
-    it.each(['0', '-1', '1.5', 'two', ''])('reports a declared count %j that is not a positive integer', value => reported(`${imports}// fixture-server starts: ${value}\n${start}`, 'is not a positive integer; change it to `// fixture-server starts: 1`'))
+    it('reports a canonical declaration plus an indented duplicate', () => reported(`${imports}// fixture-server starts: 1\n${start}  // fixture-server starts: 1\n`, 'starts 2 times; keep one `// fixture-server starts: 1` line'))
+    it('reports an indented declaration in a spec that starts none', () => reported(`${imports}\nfunction later() {\n  // fixture-server starts: 1\n}\n`, 'starts no fixture server; remove that line'))
+    it.each([
+      ['inside a template string', `${imports}const text = \`\n// fixture-server starts: 1\n\`\n${start}`],
+      ['inside a block comment', `${imports}/*\n// fixture-server starts: 1\n*/\n${start}`],
+      ['after a blank line that follows the imports', `${imports}\n// fixture-server starts: 1\n${start}`],
+      ['further down the file', `${imports}${start}// fixture-server starts: 1\n`],
+      ['between two imports', `${imports}// fixture-server starts: 1\nimport { stopFixtureServer } from './fixture-server'\n${start}`],
+    ])('reports a declaration %s as misplaced', (_, source) => reported(source, 'is not directly after the imports; put `// fixture-server starts: 1` on its own line directly after the last import and remove this one'))
+    it.each(['0', '-1', '1.5', 'two', ''].map(value => `// fixture-server starts: ${value}`).concat('//fixture-server starts: 1', '  // fixture-server starts: 1', '// fixture-server  starts: 1', '// fixture-server starts:1', '// fixture-server starts: 1 '))('reports a malformed declaration %j', declaration => reported(`${imports}${declaration}\n${start}`, 'with N a positive integer; replace it with `// fixture-server starts: 1`'))
   })
 
   it('uses the actual child listener when the requested endpoint belongs to a 404 server', async () => {
