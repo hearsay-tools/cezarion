@@ -262,16 +262,16 @@ describe('BookmarkletPanel launch-key readiness (hearsay-tools/cezarion#896)', (
     expect(view.queryByRole('status')).toBeNull()
   })
 
-  it('generates no keyless launcher when the launch key cannot be fetched', async () => {
+  it('falls back to prefill-only launchers when the launch key cannot be fetched', async () => {
     // A 4xx is never retried (query-client.ts), so the query settles into its error state at once.
+    // `/new` prefills without a key, so the launchers stay usable; only auto-start cannot arm.
     serve({ '/api/v1/health': HEALTH })
     const view = renderPanel()
 
-    await waitFor(() => expect(view.getByRole('alert').textContent).toContain('launch key'))
+    await waitFor(() => expect(view.getByRole('alert').textContent).toContain('auto-start'))
     expect(links()).toHaveLength(2)
-    for (const link of links()) {
-      expect(link.getAttribute('href')).toBeNull()
-      expect(link.getAttribute('draggable')).toBe('false')
-    }
+    await waitFor(() => expect(hrefOf('bm-generic')).toContain('key=&ref='))
+    expect(hrefOf('bm-list')).toContain('key=&ref=')
+    for (const link of links()) expect(link.getAttribute('draggable')).toBe('true')
   })
 })

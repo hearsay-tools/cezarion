@@ -48,10 +48,11 @@ export function BookmarkletsSection() {
 /**
  * The bookmarklet generator panel (spec 011, ported from the legacy cockpit): draggable
  * `javascript:` links against the protected `/new?skill=&key=` contract (`lib/bookmarklet`).
- * No launcher is generated until the launch key has loaded (hearsay-tools/cezarion#896): a
- * keyless launcher dragged mid-fetch saved a bookmarklet the target scope rejects forever. While
- * the key is pending, or if it cannot be fetched, the rows render without an `href`, are not
- * draggable, and their Copy button is disabled.
+ * No launcher is generated while the launch key loads (hearsay-tools/cezarion#896): a launcher
+ * dragged mid-fetch saved a keyless bookmarklet that only ever prefills. While the key is
+ * pending the rows render without an `href`, are not draggable, and their Copy button is
+ * disabled. A failed key fetch degrades exactly like legacy: the links still generate, they
+ * prefill the form, and auto-start just will not arm.
  *
  * Project-scoped since the multi-project spec (step 3.6): the pane lives under each project's
  * settings, and the links it makes carry that project's URL prefix AND that project's launch
@@ -69,9 +70,11 @@ export function BookmarkletPanel({ skills }: { skills: readonly Skill[] }) {
   // THIS project's own launch key: `useLaunchKey` goes through the scoped API client, so under
   // `/p/<id>/settings` it reads `/api/p/<id>/launch-key` — that repo's `.ai/cezar/launch-key`,
   // which is the only secret the target cockpit scope will accept (multi-project spec, 3.6).
-  // Null until the key has loaded — never the empty string: a launcher generated with `key=`
-  // looks fine, drags fine, and is silently useless (hearsay-tools/cezarion#896).
-  const key = launchKey.data?.key || null
+  // Null while the key loads: a launcher dragged then would save `key=` and never auto-start,
+  // with nothing to say so (hearsay-tools/cezarion#896). A failed fetch is different and
+  // degrades like legacy: `/new` prefills without a key, so the launchers generate keyless and
+  // the alert below says auto-start cannot arm.
+  const key = launchKey.isError ? '' : launchKey.data?.key || null
   // Bake THIS cockpit's origin into the bookmarklets so a click opens the very instance that
   // generated them — no localhost port-scan (GitHub's CSP blocks that fetch). See bookmarklet.ts.
   const origin = window.location.origin
@@ -122,14 +125,14 @@ export function BookmarkletPanel({ skills }: { skills: readonly Skill[] }) {
         Off by default. Re-drag the launchers after changing this option.
       </p>
 
-      {key === null ? (
+      {key === null || launchKey.isError ? (
         <p
           data-slot="bm-key-state"
           role={launchKey.isError ? 'alert' : 'status'}
           className={`text-xs leading-relaxed ${launchKey.isError ? 'text-destructive' : 'text-soft-foreground'}`}
         >
           {launchKey.isError
-            ? `Could not load this project's launch key, so the launchers are unavailable: ${launchKey.error.message}`
+            ? `Could not load this project's launch key, so these launchers only prefill the form and auto-start cannot arm: ${launchKey.error.message}`
             : "Loading this project's launch key…"}
         </p>
       ) : null}
