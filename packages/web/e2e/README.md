@@ -117,6 +117,31 @@ line; the fix is a wait, never a baseline entry.
    SIGKILL if graceful shutdown takes more than five seconds. The unit check rejects bare
    fixture-server kills in e2e specs.
 
+One more rule is enforced by review, not by the scan: **a wait added or changed to fix a flake
+cites its evidence in the comment at the site.** The comment names the failure bundle path (or
+the single-test reproduction that went red, with its command or delay) and the before/after run
+counts. The evidence in a PR description or a review thread does not count: the next reader
+meets the wait, not the PR, and the automated review sends a bare wait back
+(hearsay-tools/cezarion#1000). The worked example is `liftWithSpace` in
+`project-order.e2e.ts`:
+
+```ts
+ *  Provenance (hearsay-tools/cezarion#438, local, 2026-10-13): with a one-shot
+ *  `waitForFunction(data-dragging)` here instead, the collapsed-mark test failed 2 of 6 full-spec
+ *  runs of `npm run test:e2e -- project-order.e2e.ts`. Failure bundles
+ *  `.ai/qa/failures/project-order/reorders-a-collapsed-mark-…-20` and `-22` both time out on
+ *  `"e2e-order-a moved to position 3 of 4."` with focus on the lifted mark's link: the row was
+ *  lifted, the key reached the activator, and dnd-kit never saw it. The single test alone passed
+ *  4 of 4, because the earlier tests' load is what widens the gap. With this hold: 8 of 8 full-spec
+ *  runs passed.
+```
+
+It names the command, the bundles and what their `probe.json` showed, the before count (2 of 6)
+and the after count (8 of 8). A reproduction stands in for a bundle the same way:
+`task-handoff.e2e.ts`'s `window.__cezLive` wait cites "Reproduced 3/3 by delaying the built
+server's workspace-events attach 4 s behind E2E_DELAY_MS; 0/3 with this wait"
+(hearsay-tools/cezarion#1069).
+
 One site to know about: `selection-states.e2e.ts` asserts `matches(':hover')` after
 `hoverVisiblePoint`. That is a one-shot assertion, not a wait, and it holds because that spec adds
 `--blink-settings=primaryHoverType=2` to `AGENT_BROWSER_ARGS` before it attaches. Rule 1
