@@ -159,41 +159,14 @@ describe('AgentBrowser screenshots never flip the desktop layout under an overla
     }
   })
 
-  // A comment that names the flag (task-handoff.e2e.ts says "never `--full`") is not a use of it,
-  // and comment markers inside a string do not hide one. So scan the source the way the parser
-  // does: skip comments, and test only the string and template literals, quotes included.
-  const PASSES_FULL = /['"`]--full\b/
-  const stringLiterals = (source: string) => {
-    const literals: string[] = []
-    for (let i = 0; i < source.length; i++) {
-      const c = source[i]
-      if (c === '/' && source[i + 1] === '/') i = source.indexOf('\n', i) === -1 ? source.length : source.indexOf('\n', i)
-      else if (c === '/' && source[i + 1] === '*') i = source.indexOf('*/', i + 2) === -1 ? source.length : source.indexOf('*/', i + 2) + 1
-      else if (c === "'" || c === '"' || c === '`') {
-        let j = i + 1
-        while (j < source.length && source[j] !== c) j += source[j] === '\\' ? 2 : 1
-        literals.push(source.slice(i, j + 1))
-        i = j
-      }
-    }
-    return literals.join('\n')
-  }
-  const passesFull = (source: string) => PASSES_FULL.test(stringLiterals(source))
-
-  it('a comment naming --full is not a use of it, and a comment marker in a string hides none', () => {
-    expect(passesFull("    // Viewport capture, never `--full`, here.\n/* or '--full' */\n")).toBe(false)
-    expect(passesFull("  await run(['screenshot', '--full'])\n")).toBe(true)
-    expect(passesFull("  const a = '/*'\n  await run(['screenshot', '--full'])\n  const b = '*/'\n")).toBe(true)
-    expect(passesFull("  const url = 'http://x'\n  await run(['screenshot', '--full'])\n")).toBe(true)
-    expect(passesFull("  await run([`${'--full'}`])\n")).toBe(true)
-    expect(passesFull("  const q = 'it\\'s // fine'\n  await run(['--full'])\n")).toBe(true)
-  })
-
+  // Deliberately a raw-text match: comments count too. A lexer this side of the TypeScript
+  // parser misses real uses (comment markers inside strings or regex literals), while a false
+  // positive costs only rewording, so name the full-page flag in prose without quoting it.
   it('no spec or helper reaches --full except through the guarded seam', () => {
     const e2eDir = join(import.meta.dirname, '../../e2e')
     const offenders = readdirSync(e2eDir)
       .filter((name) => name.endsWith('.ts') && name !== 'agent-browser.ts')
-      .filter((name) => passesFull(readFileSync(join(e2eDir, name), 'utf8')))
+      .filter((name) => /['"`]--full\b/.test(readFileSync(join(e2eDir, name), 'utf8')))
     expect(offenders).toEqual([])
     const seam = readFileSync(join(e2eDir, 'agent-browser.ts'), 'utf8')
     expect(seam.match(/'--full'/g)).toHaveLength(1)
