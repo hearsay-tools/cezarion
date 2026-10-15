@@ -1,16 +1,18 @@
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createWorktree, type AutosaveReason } from '../git-worktree.ts';
 import { readHandoff, seedHandoffFile } from '../handoff.ts';
 import { RunStore } from '../runs/store.ts';
 
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
+// The fixture reads Git directly, so a test's PATH shim reaches only the save.
+const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 
 /** The slice of ActiveRun that saveWorktree reads. */
 interface SaveSeam {
@@ -32,8 +34,9 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
   let runId: string;
   let worktreePath: string;
   let branch: string;
+  let bin: string | undefined;
 
-  const git = (args: string[]) => run('git', args, { cwd: worktreePath });
+  const git = (args: string[]) => run(realGit, args, { cwd: worktreePath });
   const out = async (args: string[]) => (await git(args)).stdout.trim();
   const notes = (id = runId) => store.readEvents(id).flatMap(event => event.type === 'note' ? [String(event.message)] : []);
   const progress = (id = runId) => readHandoff(dataDir, id).split('## Progress log')[1] ?? '';
@@ -58,6 +61,9 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
+    if (bin) rmSync(bin, { recursive: true, force: true });
+    bin = undefined;
     await drainFixtureManagers(repoRoot);
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
@@ -71,6 +77,25 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     const sha = await out(['rev-parse', '--short', 'HEAD']);
     expect(await out(['log', '-1', '--format=%s'])).toBe('cezar autosave (turn end)');
     const message = `turn end: cezar autosave committed ${sha} on ${branch}; to fold it into your own commits while it is HEAD, run \`git reset --soft ${sha}~1\``;
+    expect(progress()).toContain(message);
+    expect(notes()).toContain(message);
+  });
+
+  it.runIf(process.platform !== 'win32')('still reports a commit whose sha cannot be read back', async () => {
+    bin = mkdtempSync(join(tmpdir(), 'cez-autosave-report-bin-'));
+    writeFileSync(join(bin, 'git'), [
+      '#!/bin/sh',
+      'case " $* " in *" rev-parse --short HEAD "*) echo "fatal: shim" >&2; exit 128;; esac',
+      `exec ${JSON.stringify(realGit)} "$@"`,
+      '',
+    ].join('\n'), { mode: 0o755 });
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
+    writeFileSync(join(worktreePath, 'work.txt'), 'progress\n');
+
+    await manager.saveWorktree(runId, { cwd: worktreePath }, 'turn end');
+
+    expect(await out(['log', '-1', '--format=%s'])).toBe('cezar autosave (turn end)');
+    const message = `turn end: cezar autosave committed on ${branch} (sha unavailable); to fold it into your own commits while it is HEAD, run \`git reset --soft HEAD~1\``;
     expect(progress()).toContain(message);
     expect(notes()).toContain(message);
   });

@@ -1,12 +1,14 @@
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { autosaveCommit, type AutosaveOutcome } from './git-worktree.ts';
 
 const run = promisify(execFile);
+// The fixture reads Git directly, so a test's PATH shim reaches only the save.
+const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 const TASK_BRANCH = 'cez/abcd1234';
 
@@ -19,8 +21,9 @@ const TASK_BRANCH = 'cez/abcd1234';
  */
 describe('autosave task-branch rule (#1004)', () => {
   let repo: string;
+  let bin: string | undefined;
 
-  const git = (args: string[]) => run('git', args, { cwd: repo });
+  const git = (args: string[]) => run(realGit, args, { cwd: repo });
   const out = async (args: string[]) => (await git(args)).stdout.trim();
 
   beforeEach(async () => {
@@ -34,7 +37,10 @@ describe('autosave task-branch rule (#1004)', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     rmSync(repo, { recursive: true, force: true });
+    if (bin) rmSync(bin, { recursive: true, force: true });
+    bin = undefined;
   });
 
   it('leaves a dirty tree uncommitted on a branch other than the task branch', async () => {
@@ -75,6 +81,25 @@ describe('autosave task-branch rule (#1004)', () => {
     expect(await out(['log', '-1', '--format=%s', TASK_BRANCH])).toBe('cezar autosave (run finalize)');
     expect(outcomes).toEqual([{ result: 'committed', sha: await out(['rev-parse', '--short', 'HEAD']), branch: TASK_BRANCH }]);
     expect((await git(['status', '--porcelain'])).stdout).toBe('');
+  });
+
+  // The commit landed, so the report must too: a missing sha is no reason to hide it.
+  it.runIf(process.platform !== 'win32')('reports a commit whose sha cannot be read back', async () => {
+    bin = mkdtempSync(join(tmpdir(), 'cez-autosave-branch-bin-'));
+    writeFileSync(join(bin, 'git'), [
+      '#!/bin/sh',
+      'case " $* " in *" rev-parse --short HEAD "*) echo "fatal: shim" >&2; exit 128;; esac',
+      `exec ${JSON.stringify(realGit)} "$@"`,
+      '',
+    ].join('\n'), { mode: 0o755 });
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
+    writeFileSync(join(repo, 'new.txt'), 'work\n');
+    const outcomes: AutosaveOutcome[] = [];
+
+    expect(await autosaveCommit(repo, 'turn end', { taskBranch: TASK_BRANCH, onOutcome: o => outcomes.push(o) })).toBe('committed');
+
+    expect(await out(['log', '-1', '--format=%s', TASK_BRANCH])).toBe('cezar autosave (turn end)');
+    expect(outcomes).toEqual([{ result: 'committed', sha: null, branch: TASK_BRANCH }]);
   });
 
   it('still commits on any branch when no task branch is given (pre-PR)', async () => {

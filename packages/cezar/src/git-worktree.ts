@@ -437,10 +437,11 @@ export type AutosaveResult = 'committed' | 'nothing-to-do' | 'refused' | 'failed
 /**
  * The facts behind a `committed` or `skipped` save, for the caller's report
  * (hearsay-tools/cezarion#1004). `branch` is HEAD's branch name, `null` on a
- * detached HEAD; `sha` is the short hash of the autosave commit.
+ * detached HEAD; `sha` is the short hash of the autosave commit, `null` when
+ * the commit landed but its hash could not be read back.
  */
 export type AutosaveOutcome =
-  | { result: 'committed'; sha: string; branch: string | null }
+  | { result: 'committed'; sha: string | null; branch: string | null }
   | { result: 'skipped'; branch: string | null; changedPaths: number };
 
 export interface AutosaveCommitOptions extends AutosaveOptions {
@@ -573,8 +574,9 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
     ]);
     if (!commit.ok) return 'failed';
     if (onOutcome) {
+      // The commit already landed: a failed read loses the sha, never the report.
       const sha = await git(dir, ['rev-parse', '--short', 'HEAD']);
-      if (sha.ok && sha.stdout.trim()) report({ result: 'committed', sha: sha.stdout.trim(), branch });
+      report({ result: 'committed', sha: (sha.ok && sha.stdout.trim()) || null, branch });
     }
     return 'committed';
   }

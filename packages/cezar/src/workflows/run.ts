@@ -395,8 +395,9 @@ export function periodicAutosaveEnabled(env: NodeJS.ProcessEnv = process.env): b
 function autosaveReportLine(reason: AutosaveReason, outcome: AutosaveOutcome, taskBranch: string | undefined): string {
   const where = outcome.branch ?? 'detached HEAD';
   if (outcome.result === 'committed') {
-    return `${reason}: cezar autosave committed ${outcome.sha} on ${where}; ` +
-      `to fold it into your own commits while it is HEAD, run \`git reset --soft ${outcome.sha}~1\``;
+    const what = outcome.sha ? `${outcome.sha} on ${where}` : `on ${where} (sha unavailable)`;
+    return `${reason}: cezar autosave committed ${what}; ` +
+      `to fold it into your own commits while it is HEAD, run \`git reset --soft ${outcome.sha ?? 'HEAD'}~1\``;
   }
   return `${reason}: ${outcome.changedPaths} changed path(s) left uncommitted on ${where}; ` +
     `cezar does not autosave on a branch other than the task branch ${taskBranch ?? '(unrecorded)'}`;
