@@ -229,7 +229,9 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           expect(cwd).toBeDefined();
           // The turn-end diff stat can still hold this worktree's index.lock while the run reads
           // `waiting`; a `git add` racing it failed with "index.lock: File exists" in PR #871's CI
-          // (M5 opencode, M19 omp and cursor) and in local full runs.
+          // (M5 opencode, M19 omp and cursor) and in local full runs, and on Codex under load
+          // (hearsay-tools/cezarion#887). With the stat's lock held for 0.5s, these rows fail
+          // without this wait and pass with it.
           expect(turnEndsRecorded).toBeGreaterThan(0);
           await until(() => turnEndBookkeeping.size === 0);
           writeFileSync(join(cwd, 'review.txt'), 'review this change');
