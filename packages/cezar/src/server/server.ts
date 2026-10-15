@@ -2927,13 +2927,22 @@ export function createApp(deps: ServerDeps) {
       // GitHub-backed projects register as `checkout` (they have an origin the
       // clone flow would also produce); a local-only repo is `local`.
       const registered = await registerFolder(result.target, result.slug ? 'checkout' : 'local');
-      if (registered.status !== 200) {
-        // As with a clone: the repository is the user's now, so it stays.
+      // A new entry (200), or the existing one for the same root (409 "already registered") — what
+      // creating a registered project whose folder had been deleted produces. The user asked for
+      // that project and it is there, so both are a success. (An if/else chain, not a helper:
+      // only narrowing `registered` keeps the error bodies out of the route's 200 type.)
+      let project: ProjectListEntry;
+      if (registered.status === 200) project = registered.body.project;
+      else if (registered.status === 409 && 'project' in registered.body) project = registered.body.project;
+      else {
+        // As with a clone: the repository is the user's now, so it stays — and a GitHub warning
+        // rides along, since its finishing commands are the only record of what is left to do.
         const { body } = registered;
         const error = 'error' in body && body.error ? body.error : 'could not register the new project';
-        return c.json({ error: `${error} (the project is at ${result.target})` }, registered.status);
+        const warning = result.warning ? `\n${result.warning}` : '';
+        return c.json({ error: `${error} (the project is at ${result.target})${warning}` }, registered.status);
       }
-      const body: CreateProjectResponse = { ...registered.body, ...(result.warning ? { warning: result.warning } : {}) };
+      const body: CreateProjectResponse = { project, ...(result.warning ? { warning: result.warning } : {}) };
       return c.json(body, 200);
     });
 

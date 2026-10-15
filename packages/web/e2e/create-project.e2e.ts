@@ -111,9 +111,14 @@ describe('New project', () => {
       browser.goto(`${baseUrl}/p/${bootId}/`)
       applyContrastQaVariant(browser, desktop(theme))
       // The rail's Add project trigger is the page's FIRST focusable control, so
-      // `focusWithKeyboard` has no predecessor to Tab from (Squeal slow tier, revision 44: "no
-      // visible keyboard predecessor", bundle .ai/qa/failures/create-project/). Focus it directly
-      // and wait for it: the keyboard path under test starts at the Enter that opens the menu.
+      // `focusWithKeyboard` has no predecessor to Tab from. Evidence: both themes failed with "no
+      // visible keyboard predecessor" (bundle
+      // .ai/qa/failures/create-project/creates-a-local-project-from-the-keyboard-light-1/:
+      // probe.json `lastValue: { ready: false, predecessor: null }`, snapshot.txt lists
+      // "Add project" first in the page). Reproduce with
+      // `npm run test:e2e -- create-project.e2e.ts -t 'from the keyboard'` — 2 failed before this
+      // change, 2 passed after. Focus it directly and wait for it: the keyboard path under test
+      // starts at the Enter that opens the menu.
       browser.evaluate(`document.querySelector(${JSON.stringify(RAIL_ADD)}).focus()`)
       browser.waitForFunction(`document.activeElement?.matches(${JSON.stringify(RAIL_ADD)}) === true`)
       browser.press('Enter')

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CheckoutProgressResponse, CreateProjectResponse, GithubOwnersResponse } from '@open-mercato/cezar-contract';
@@ -200,6 +200,35 @@ describe('new-project routes', () => {
     expect(body.warning).toContain('https://github.com/acme/fresh was created, but pushing main failed: fatal: unable to access');
     const progress = (await (await apiRequest(app, '/api/v1/projects/checkout/np-1/progress')).json()) as CheckoutProgressResponse;
     expect(progress.progress).toMatchObject({ checkoutId: 'np-1', phase: 'done', warning: body.warning });
+  });
+
+  it('re-creating a registered project whose folder was deleted answers 200 with that project', async () => {
+    const first = await create({ name: 'fresh' });
+    expect(first.status).toBe(200);
+    rmSync(join(projectsDir, 'fresh'), { recursive: true, force: true });
+    const again = await create({ name: 'fresh' });
+    expect(again.status).toBe(200);
+    expect(again.body.error).toBeUndefined();
+    expect(again.body.project).toMatchObject({ id: first.body.project.id, status: 'ok' });
+  });
+
+  it('a registration failure after a GitHub warning keeps the warning in the error', async () => {
+    // The push fails (a warning with the finishing commands), then the registry cannot be written.
+    const { status, body } = await create(
+      { name: 'fresh', github: { owner: 'acme' } },
+      {
+        projectCommandRunner: recording((argv) => {
+          if (argv[1] !== 'push') return undefined;
+          chmodSync(home, 0o500);
+          return 'fatal: unable to access';
+        }),
+      },
+    );
+    chmodSync(home, 0o700);
+    expect(status).toBe(500);
+    expect(body.error).toContain(`(the project is at ${join(projectsDir, 'fresh')})`);
+    expect(body.error).toContain('https://github.com/acme/fresh was created, but pushing main failed: fatal: unable to access');
+    expect(body.error).toContain('git push -u origin main');
   });
 
   it('a GitHub name collision answers 409 and creates nothing', async () => {
