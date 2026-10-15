@@ -3,7 +3,8 @@ import { execFile } from 'node:child_process';
 import { autosaveGit, type AutosaveOptions } from './autosave-git.ts';
 import { workerWorkspaceSchema } from '@open-mercato/cezar-contract';
 import { existsSync, realpathSync, type Dirent } from 'node:fs';
-import { lstat, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { resolveTaskDiffBase } from './git-diff-base.ts';
 import { isSafeGitRef } from './git-refs.ts';
@@ -35,12 +36,12 @@ interface RegisteredWorktree {
 }
 
 /** Run git, never throw — degradation is the caller's policy. */
-function git(cwd: string, args: string[], timeout?: number): Promise<GitResult> {
+function git(cwd: string, args: string[], timeout?: number, env?: NodeJS.ProcessEnv): Promise<GitResult> {
   return new Promise((resolve) => {
     execFile(
       'git',
       args,
-      { cwd, maxBuffer: 32 * 1024 * 1024, encoding: 'utf8', timeout },
+      { cwd, maxBuffer: 32 * 1024 * 1024, encoding: 'utf8', timeout, ...(env ? { env } : {}) },
       (err, stdout, stderr) => resolve({ ok: !err, stdout: stdout ?? '', stderr: stderr ?? '' }),
     );
   });
@@ -614,6 +615,47 @@ function unquotePath(path: string): string {
   return Buffer.from(bytes).toString('utf8');
 }
 
+type IndexGit = (args: string[]) => Promise<GitResult>;
+
+/**
+ * Run a read-only diff against a PRIVATE copy of the worktree's index
+ * (hearsay-tools/cezarion#1080). `git add -N .` makes untracked files show up,
+ * and `git diff` refreshes the index it reads; on the worktree's real index both
+ * are writes. The turn-end diff stat runs beside the turn-end autosave, so
+ * those writes raced the save's `add -A`/commit for `index.lock`, and kept
+ * landing after a blocked save had settled the run with a retained holder —
+ * the one state in which nothing else may write the worktree. A copy keeps
+ * staged membership (force-added ignored files included), so the output is
+ * the same diff; only the side effect is gone. Same technique as
+ * `collectChanges` on the main tree and `readOwnedDiff` for workers.
+ *
+ * When no private copy can be made (no writable tmpdir) this falls back to
+ * the real index — the pre-#1080 behaviour — rather than reporting no diff,
+ * which would settle reviewable work as `done`.
+ */
+async function withPrivateIndex<T>(worktreePath: string, read: (git: IndexGit) => Promise<T>): Promise<T> {
+  let scratch: string | undefined;
+  try {
+    scratch = await mkdtemp(join(tmpdir(), 'cez-diff-index-'));
+  } catch {
+    return read((args) => git(worktreePath, args));
+  }
+  try {
+    const index = join(scratch, 'index');
+    const env = { ...process.env, GIT_INDEX_FILE: index };
+    const indexed: IndexGit = (args) => git(worktreePath, args, undefined, env);
+    const real = await git(worktreePath, ['rev-parse', '--path-format=absolute', '--git-path', 'index']);
+    let seeded = false;
+    if (real.ok && real.stdout.trim()) {
+      try { await copyFile(real.stdout.trim(), index); seeded = true; } catch { /* No index yet: seed from HEAD. */ }
+    }
+    if (!seeded) await indexed(['read-tree', 'HEAD']);
+    return await read(indexed);
+  } finally {
+    await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 /**
  * "What did this task change": diff of the worktree (committed + uncommitted
  * + untracked, via `add -N`) against the merge-base with its base branch —
@@ -637,13 +679,15 @@ export async function worktreeDiff(
   cap = DIFF_CAP,
 ): Promise<string> {
   if (!isSafeGitRef(baseBranch)) return '(diff failed: refusing option-like base ref)';
-  await git(worktreePath, ['add', '-N', '.']); // intent-to-add: untracked files show up
-  const mergeBase = await git(worktreePath, ['merge-base', baseBranch, 'HEAD']);
-  const base = mergeBase.ok && mergeBase.stdout.trim() ? mergeBase.stdout.trim() : baseBranch;
-  const res = await git(worktreePath, ['diff', base]);
-  if (!res.ok) return `(diff failed: ${res.stderr.trim() || 'unknown git error'})`;
-  if (res.stdout.length > cap) return `${res.stdout.slice(0, cap)}\n… (diff truncated)`;
-  return res.stdout;
+  return withPrivateIndex(worktreePath, async (git) => {
+    await git(['add', '-N', '.']); // intent-to-add (private index, #1080): untracked files show up
+    const mergeBase = await git(['merge-base', baseBranch, 'HEAD']);
+    const base = mergeBase.ok && mergeBase.stdout.trim() ? mergeBase.stdout.trim() : baseBranch;
+    const res = await git(['diff', base]);
+    if (!res.ok) return `(diff failed: ${res.stderr.trim() || 'unknown git error'})`;
+    if (res.stdout.length > cap) return `${res.stdout.slice(0, cap)}\n… (diff truncated)`;
+    return res.stdout;
+  });
 }
 
 /**
@@ -660,11 +704,13 @@ export async function worktreeDiffStat(
   baseBranch: string,
 ): Promise<string> {
   if (!isSafeGitRef(baseBranch)) return '';
-  await git(worktreePath, ['add', '-N', '.']); // intent-to-add: untracked files show up
-  const mergeBase = await git(worktreePath, ['merge-base', baseBranch, 'HEAD']);
-  const base = mergeBase.ok && mergeBase.stdout.trim() ? mergeBase.stdout.trim() : baseBranch;
-  const res = await git(worktreePath, ['diff', '--stat', base]);
-  return res.ok ? res.stdout.trim() : '';
+  return withPrivateIndex(worktreePath, async (git) => {
+    await git(['add', '-N', '.']); // intent-to-add (private index, #1080): untracked files show up
+    const mergeBase = await git(['merge-base', baseBranch, 'HEAD']);
+    const base = mergeBase.ok && mergeBase.stdout.trim() ? mergeBase.stdout.trim() : baseBranch;
+    const res = await git(['diff', '--stat', base]);
+    return res.ok ? res.stdout.trim() : '';
+  });
 }
 
 /** Aggregate diff numbers (#389) — the shape stored on `RunRecord.diffStat`. */
@@ -719,18 +765,19 @@ export async function worktreeShortstat(
   opts: { taskBranch?: string; runStartedAt?: string } = {},
 ): Promise<DiffStat | null> {
   if (!isSafeGitRef(baseBranch)) return null;
-  await git(worktreePath, ['add', '-N', '.']); // intent-to-add: untracked files show up
-  const { base, repointedHead } = await resolveTaskDiffBase(
-    (args) => git(worktreePath, args),
-    baseBranch,
-    opts,
-  );
-  const res = await git(worktreePath, ['diff', '--shortstat', base]);
-  if (!res.ok) return null;
-  // The key stays ABSENT (not `false`) on a normal run: `diffStat` is persisted in
-  // `runs.json` and served on the runs API, so the un-narrowed shape must keep
-  // round-tripping byte-identically.
-  return { ...parseShortstat(res.stdout), ...(repointedHead ? { repointed: true } : {}) };
+  // Private index (#1080): this runs at every turn end, beside the turn-end autosave.
+  return withPrivateIndex(worktreePath, async (git) => {
+    await git(['add', '-N', '.']); // intent-to-add: untracked files show up
+    // `resolveTaskDiffBase` may compare two anchors with `git diff --shortstat`, so it
+    // reads the private index too.
+    const { base, repointedHead } = await resolveTaskDiffBase(git, baseBranch, opts);
+    const res = await git(['diff', '--shortstat', base]);
+    if (!res.ok) return null;
+    // The key stays ABSENT (not `false`) on a normal run: `diffStat` is persisted in
+    // `runs.json` and served on the runs API, so the un-narrowed shape must keep
+    // round-tripping byte-identically.
+    return { ...parseShortstat(res.stdout), ...(repointedHead ? { repointed: true } : {}) };
+  });
 }
 
 /**

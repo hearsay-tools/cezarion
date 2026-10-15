@@ -62,8 +62,19 @@ describe('harness parity — settlement during blocked autosave', () => {
               writeFileSync(join(bin, 'git'), `#!${process.execPath}\n
 const fs = require('node:fs');
 const args = process.argv.slice(2);
-if (args.includes('add') && args.includes('-N') && fs.existsSync(${JSON.stringify(join(bin, 'exit'))})) {
-  fs.writeFileSync(${JSON.stringify(join(bin, 'unexpected-writer'))}, 'index mutation');
+const released = () => fs.existsSync(${JSON.stringify(join(bin, 'exit'))});
+// hearsay-tools/cezarion#1080: the turn-end diff stat starts its \`add -N\` beside the
+// blocked save. At load 34-43 that fake Git booted after the release (cursor R64 in the
+// #902 gate, unit run 3). Hold every intent-to-add up to that point so the race is
+// deterministic, then flag any command that writes the worktree's REAL index after the
+// release: \`add -N\`, and \`diff\`, which refreshes the index it reads. A private
+// GIT_INDEX_FILE is not the worktree's index.
+if (args.includes('add') && args.includes('-N')) {
+  const until = Date.now() + 1000;
+  while (!released() && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+}
+if (((args.includes('add') && args.includes('-N')) || args.includes('diff')) && !process.env.GIT_INDEX_FILE && released()) {
+  fs.writeFileSync(${JSON.stringify(join(bin, 'unexpected-writer'))}, 'index mutation: ' + args.join(' '));
 }
 if (args.includes('status') && args.includes('--porcelain')) {
   // Born after the holder baseline in a session of its own, outside Git's group.
