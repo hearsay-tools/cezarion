@@ -930,3 +930,41 @@ test("post-review refuses to download without the provider job's artifact ID", a
   assert.equal(run('4242'), 0);
   for (const id of ['', '0', 'abc', '42,43', '42 ']) assert.notEqual(run(id), 0, JSON.stringify(id));
 });
+
+// The CI failure sweep files a recurring-failure issue when one error line repeats across
+// unrelated PRs. Open findings are not CI failures, so the review gates must not emit one.
+test('review findings never reach the CI failure sweep as an error cause', async () => {
+  const { parse } = await import('yaml');
+  const { spawnSync } = require('node:child_process');
+  const { causesForStep } = require('./failure-diagnostics.cjs');
+  const run = (script, env) => spawnSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c', script], {
+    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', ...env }, encoding: 'utf8',
+  });
+  // GitHub renders a ::<level>:: workflow command into the job log as ##[<level>].
+  const swept = (result, stepName) => causesForStep({
+    run: { id: 1, run_attempt: 1 }, job: { id: 2 }, step: { number: 3, name: stepName },
+    log: (result.stdout + result.stderr).replace(/^::(\w+)::/gm, '##[$1]'),
+  }).map(cause => cause.kind);
+
+  const review = parse(fs.readFileSync(workflowPath, 'utf8'));
+  const [verdict] = review.jobs['review-complete'].steps;
+  const passing = {
+    VALIDATE_RESULT: 'success', REVIEW_ROUND_RESULT: 'success', CAN_REVIEW: 'true', PROVIDER: 'codex',
+    CLAUDE_RESULT: 'skipped', CODEX_RESULT: 'success', POST_RESULT: 'success', NEW_THREADS: '0', OPEN_THREADS: '0',
+  };
+  for (const findings of [{ NEW_THREADS: '1', OPEN_THREADS: '1' }, { OPEN_THREADS: '2' }]) {
+    const result = run(verdict.run, { ...passing, ...findings });
+    assert.equal(result.status, 1, 'findings still fail the check');
+    assert.deepEqual(swept(result, verdict.name), ['unknown'], JSON.stringify(findings));
+  }
+  // A broken review is a real failure and stays an error the sweep can group.
+  assert.deepEqual(swept(run(verdict.run, { ...passing, NEW_THREADS: '', OPEN_THREADS: '' }), verdict.name), ['error']);
+
+  const ci = parse(fs.readFileSync(ciPath, 'utf8'));
+  const [gate] = ci.jobs['review-result'].steps;
+  for (const env of [{ VERIFY_RESULT: 'success', REVIEW_RESULT: 'failure' }, { VERIFY_RESULT: 'failure', REVIEW_RESULT: 'skipped' }]) {
+    const result = run(gate.run, env);
+    assert.equal(result.status, 1, JSON.stringify(env));
+    assert.deepEqual(swept(result, gate.name), ['unknown'], JSON.stringify(env));
+  }
+});

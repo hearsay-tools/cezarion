@@ -625,12 +625,14 @@ jobs:
             echo '::error::post-review reported no thread counts.' >&2
             exit 1
           fi
-          # Findings are already posted; red here means "address them", not a broken review.
+          # Findings are already posted; red here means "address them", not a broken
+          # review. Notices, not errors, so the CI failure sweep never groups review
+          # findings on unrelated PRs into a recurring-failure issue.
           if [ "$NEW_THREADS" -gt 0 ]; then
-            echo "::error::This review opened $NEW_THREADS new finding thread(s). Address them and push. To have pushback replies judged, run this workflow manually with pr_number, then re-run Review / review-round in this CI run to recount."
+            echo "::notice::This review opened $NEW_THREADS new finding thread(s). Address them and push. To have pushback replies judged, run this workflow manually with pr_number, then re-run Review / review-round in this CI run to recount."
             exit 1
           fi
           if [ "$OPEN_THREADS" -gt 0 ]; then
-            echo "::error::$OPEN_THREADS automated review thread(s) are still unresolved."
+            echo "::notice::$OPEN_THREADS automated review thread(s) are still unresolved."
             exit 1
           fi

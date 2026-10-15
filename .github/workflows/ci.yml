@@ -559,11 +559,14 @@ jobs:
           if [ "$REVIEW_RESULT" = success ]; then
             exit 0
           fi
+          # Notices, not errors: the CI failure sweep groups identical error lines
+          # across PRs, and this line repeats on every PR with open findings. The
+          # failing verify or Review job carries the actual diagnostic.
           if [ "$VERIFY_RESULT" != success ]; then
-            echo "::error::Verification ended '$VERIFY_RESULT', so the review did not run. Fix it, then use Re-run failed jobs: the review runs once verification succeeds." >&2
+            echo "::notice::Verification ended '$VERIFY_RESULT', so the review did not run. Fix it, then use Re-run failed jobs: the review runs once verification succeeds." >&2
             exit 1
           fi
-          echo "::error::The review ended '$REVIEW_RESULT'. Its Review verdict job names the reason." >&2
+          echo "::notice::The review ended '$REVIEW_RESULT'. Its Review verdict job names the reason." >&2
           exit 1
 
   # npm preview publishing (spec .ai/specs/2026-07-18-npm-preview-publish.md, #482).
