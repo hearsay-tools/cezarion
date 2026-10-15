@@ -610,6 +610,7 @@ jobs:
           POST_RESULT: ${{ needs.post-review.result }}
           NEW_THREADS: ${{ needs.post-review.outputs.new_threads }}
           OPEN_THREADS: ${{ needs.post-review.outputs.open_threads }}
+          PR_NUMBER: ${{ needs.review-round.outputs.pr_number }}
         run: |
           [ "$VALIDATE_RESULT" = 'success' ] || exit 1
           [ "$REVIEW_ROUND_RESULT" = 'success' ] || exit 1
@@ -627,12 +628,20 @@ jobs:
           fi
           # Findings are already posted; red here means "address them", not a broken
           # review. Notices, not errors, so the CI failure sweep never groups review
-          # findings on unrelated PRs into a recurring-failure issue.
+          # findings on unrelated PRs into a recurring-failure issue. The step summary
+          # repeats each notice so `gh run view` shows it without the log.
+          verdict() {
+            echo "::notice::$1"
+            echo "$1" >> "$GITHUB_STEP_SUMMARY"
+          }
+          # A re-run never judges a pushback reply: the patch-ID guard skips the model
+          # on an unchanged patch. A manual dispatch skips that guard.
+          rejudge="To have pushback replies judged, run this workflow manually with pr_number, then re-run Review / review-round in the CI run to recount. Dispatch command: gh workflow run automated-code-review.yml -f pr_number=$PR_NUMBER"
           if [ "$NEW_THREADS" -gt 0 ]; then
-            echo "::notice::This review opened $NEW_THREADS new finding thread(s). Address them and push. To have pushback replies judged, run this workflow manually with pr_number, then re-run Review / review-round in this CI run to recount."
+            verdict "This review opened $NEW_THREADS new finding thread(s). Address them and push. $rejudge"
             exit 1
           fi
           if [ "$OPEN_THREADS" -gt 0 ]; then
-            echo "::notice::$OPEN_THREADS automated review thread(s) are still unresolved."
+            verdict "$OPEN_THREADS automated review thread(s) are still unresolved. Re-running the failed jobs alone reuses the old count. If you resolved them by hand, re-run Review / review-round in the CI run to recount. $rejudge"
             exit 1
           fi

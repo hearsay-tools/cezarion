@@ -339,7 +339,7 @@ row's value when the thing it names changes, rather than its label.
 | Issue tracker | GitHub Issues |
 | Stack | TypeScript (Node ≥24.15), pnpm workspaces (npm script metadata retained); Hono + Zod server; React 19 + Vite + Tailwind v4 cockpit |
 | Verification | Local: Squeal when installed and validating, otherwise focused npm checks. Full gate in CI: `npm run typecheck`, `npm test -- --shard=N/3 --maxWorkers=4` (N=1..3), `npm run test:unit`, `npm run build`, `npm run test:package`, `npm run test:e2e` |
-| Automated reviewer | `AUTOMATED_REVIEWER=codex` |
+| Automated reviewer | `AUTOMATED_REVIEWER=codex`. A pushback-only round needs a manual dispatch of `automated-code-review.yml` with `pr_number`, then a re-run of **Review / review-round**. Re-running the failed jobs alone does not re-judge. |
 | Automated review rounds | `AUTOMATED_REVIEW_ROUNDS` (default 3) |
 | Commit convention | Conventional Commits |
 | Specs and plans | unknown |
