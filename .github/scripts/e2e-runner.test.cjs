@@ -45,6 +45,18 @@ test('--server-env opt-ins reach only boot, in order', (t) => {
   assert.ok(!r.tests.some((arg) => arg.startsWith('--server-env')));
 });
 
+// A whitespace-bearing opt-in must not split into two valid bootstrap flags when flattened.
+test('--server-env carrying whitespace is refused before boot', (t) => {
+  for (const arg of ['--server-env=CEZ_X=1 --force-rebuild', '--server-env=CEZ_X=1\n--force']) {
+    const r = run(t, [arg, 'smoke.e2e.ts']);
+    assert.equal(r.status, 2, r.stderr);
+    assert.deepEqual(r.boot, []);
+    assert.deepEqual(r.tests, []);
+    assert.match(r.stderr, /invalid --server-env/);
+    assert.match(r.stderr, /TEST_E2E_STATUS=failed/);
+  }
+});
+
 test('spec paths and a quoted test-name filter reach Vitest intact', (t) => {
   const filters = ['smoke.e2e.ts', 'path with spaces.e2e.ts', '-t', String.raw`opens (drawer|dialog) \[safely\]`];
   const r = run(t, ['--force', ...filters, '--force-rebuild']);
