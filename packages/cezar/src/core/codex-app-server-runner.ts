@@ -1190,6 +1190,7 @@ const PASSIVE_OUTPUT_METHODS = new Set([
   'item/started', 'item/updated', 'item/completed', 'item/agentMessage/delta',
   'item/reasoning/textDelta', 'item/reasoning/summaryDelta', 'item/reasoning/summaryTextDelta',
   'item/commandExecution/outputDelta', 'thread/tokenUsage/updated', 'turn/plan/updated',
+  'hook/started', 'hook/completed',
 ]);
 
 const REASONING_SUMMARIES = new Set(['auto', 'concise', 'detailed', 'none']);

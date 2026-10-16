@@ -125,7 +125,7 @@ export class ClaudeCliRunner implements AgentRunner {
     onEvent?: (event: AgentEvent) => void,
     opts: SessionOptions = {},
   ): AgentSession {
-    const args = buildClaudeArgs(spec, process.env, { replayUserMessages: supportsReplayUserMessages(this.bin) });
+    const args = buildClaudeArgs(spec, process.env, claudeHelpFeatures(this.bin));
 
     let child: ChildProcessWithoutNullStreams;
     try {
@@ -512,26 +512,36 @@ export class ClaudeCliRunner implements AgentRunner {
  * keeps today's path: `CEZ_APPROVAL_GATE=1` opts into `acceptEdits` (#435).
  * `CEZ_CLAUDE_SETTING_SOURCES` optionally adds `--setting-sources`.
  */
-/** `--replay-user-messages` is the read signal (#505), but an older CLI rejects unknown
- * options at startup. Read the installed CLI's own `--help` once per binary; without the
- * flag, result coverage (`user_message_uuids`) still reports reads. */
-const replaySupport = new Map<string, boolean>();
-export function supportsReplayUserMessages(bin: string): boolean {
-  const known = replaySupport.get(bin);
+/** Optional CLI flags cezar feature-detects, because an older CLI rejects unknown options
+ * at startup. `--replay-user-messages` is the read signal (#505); without it, result
+ * coverage (`user_message_uuids`) still reports reads. `--include-hook-events` streams every
+ * hook's lifecycle (#961); without it the CLI still reports SessionStart/Setup hooks. */
+export interface ClaudeHelpFeatures {
+  replayUserMessages: boolean;
+  includeHookEvents: boolean;
+}
+
+/** Read the installed CLI's own `--help` once per binary. */
+const helpFeatures = new Map<string, ClaudeHelpFeatures>();
+export function claudeHelpFeatures(bin: string): ClaudeHelpFeatures {
+  const known = helpFeatures.get(bin);
   if (known !== undefined) return known;
-  let supported = false;
+  let help = '';
   try {
-    supported = execFileSync(bin, ['--help'], { encoding: 'utf8', timeout: 5_000, stdio: ['ignore', 'pipe', 'ignore'] })
-      .includes('--replay-user-messages');
-  } catch { supported = false; }
-  replaySupport.set(bin, supported);
-  return supported;
+    help = execFileSync(bin, ['--help'], { encoding: 'utf8', timeout: 5_000, stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch { help = ''; }
+  const features = {
+    replayUserMessages: help.includes('--replay-user-messages'),
+    includeHookEvents: help.includes('--include-hook-events'),
+  };
+  helpFeatures.set(bin, features);
+  return features;
 }
 
 export function buildClaudeArgs(
   spec: AgentRunSpec,
   env: NodeJS.ProcessEnv = process.env,
-  features: { replayUserMessages: boolean } = { replayUserMessages: true },
+  features: { replayUserMessages: boolean; includeHookEvents?: boolean } = { replayUserMessages: true },
 ): string[] {
   const args: string[] = [
     '--input-format',
@@ -542,6 +552,8 @@ export function buildClaudeArgs(
   ];
   // Echo each stdin line when the model consumes it: the consumption signal (#505).
   if (features.replayUserMessages) args.push('--replay-user-messages');
+  // Every hook's lifecycle, so the transcript can show what hooks told the agent (#961).
+  if (features.includeHookEvents) args.push('--include-hook-events');
   const permissionMode = env.CEZ_CLAUDE_PERMISSION_MODE;
   if (permissionMode === 'bypass') {
     args.push('--dangerously-skip-permissions');

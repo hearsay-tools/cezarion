@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedTranscript } from './seed-transcript'
 
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
@@ -14,6 +15,7 @@ import {
   type ContrastSample,
 } from './contrast'
 import record from './fixtures/thread-run.record.json'
+// fixture-server starts: 1
 
 /**
  * #927 — Agent Response Copy / Copy markdown live in the header row (label + timestamp),
@@ -80,10 +82,9 @@ beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-reply-copy-'))
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
   writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN], null, 2), 'utf8')
-  writeFileSync(
+  seedTranscript(
     join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`),
     events.map((event) => JSON.stringify(event)).join('\n') + '\n',
-    'utf8',
   )
 
   server = spawnFixtureServer(

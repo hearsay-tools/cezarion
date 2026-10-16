@@ -1,5 +1,6 @@
 import type { ToolStatus, UiItem, UiToolItem } from '@open-mercato/cezar-api-client'
 
+import { isSubagentChildKind } from './subagent-child-kind'
 import { splitToolTitle } from './thread-groups'
 import type { ThreadEntry, ThreadTurn } from './thread-state'
 
@@ -63,7 +64,7 @@ const isRootTaskItem = (entry: ThreadEntry): entry is UiToolItem =>
  * raw-JSON card in the sheet.
  */
 const isChildCandidate = (entry: ThreadEntry): entry is UiItem =>
-  (entry.kind === 'message' || entry.kind === 'reasoning' || entry.kind === 'tool') &&
+  isSubagentChildKind(entry.kind) &&
   !(entry.kind === 'tool' && entry.toolKind === 'plan')
 
 /** The first turn holding any of the given roots — where child scanning must begin. */
@@ -93,6 +94,8 @@ function agentTypeOf(item: UiToolItem): string | undefined {
 /** Collapse a child entry to the single line the dock shows as "what this agent is doing now". */
 function activityOf(child: ThreadEntry): string | undefined {
   if (child.kind === 'tool') return truncate(child.title)
+  // A hook (#961) names its event; its status only when it did not simply succeed.
+  if (child.kind === 'hook') return truncate(`${child.event} hook${child.status === 'completed' ? '' : ` ${child.status}`}`)
   if (child.kind === 'message' || child.kind === 'reasoning') {
     // The LAST non-empty line: streamed text grows at the tail, so the newest line is the
     // honest "right now" — the first line froze several deltas ago.

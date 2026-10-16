@@ -62,6 +62,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `ask-reply-late` | native ask whose reply acknowledgement can lag the resumed turn |
  * | `ask-bad` | a malformed ask, and then still end the turn |
  * | `subagent` | child work and terminal signal, then parent monitoring text followed by late child text |
+ * | `hook-after-park` | a mid-turn hook with context, a monitoring park, then a late hook (#961) |
  * | `steer-tool` | one slow tool; agent input sent while it runs is read before the turn ends (#505) |
  * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
  * | `silent-tail` | visible assistant text, a tool, then reasoning that names CEZ:DONE, and no later message |
@@ -125,6 +126,7 @@ export const SCENARIOS = [
   'ask-reply-late',
   'subagent',
   'subagent-after-park',
+  'hook-after-park',
   'steer-tool',
   'steer-late',
 ] as const;
@@ -183,6 +185,8 @@ export const FOLLOWUP_CRITERIA = [
   { id: 'H1', scenario: 'hold-done', name: 'keeps a mid-turn human follow-up across a DONE turn' },
   { id: 'H2', scenario: 'hold-ask', name: 'drops a mid-turn human follow-up when the turn parks on ASK' },
   { id: 'H3', scenario: 'hold-gated', name: 'does not park or nudge between a markerless turn and a mid-turn follow-up' },
+  { id: 'H4', scenario: 'hold-gated', name: 'does not park before a held follow-up whose native turn starts late' },
+  { id: 'H5', scenario: 'hold-gated', name: 'does not park before a late-acknowledged steer that runs after the turn' },
 ] as const;
 
 /** #426: workflow-autonomous-parity.test.ts, real native wires on both turn-end paths. */
@@ -216,6 +220,11 @@ export const FINAL_MESSAGE_CRITERIA = [
   { id: 'F9', scenario: 'silent-tail-late-reply', name: 'resumes when a nudge reply arrives after the bound' },
   { id: 'F10', scenario: 'silent-tail-slow-done', name: 'content that starts before the bound clears it' },
   { id: 'F11', scenario: 'silent-tail-late-turn-start', name: 'resumes on a late native turn-start before content' },
+] as const;
+
+/** hearsay-tools/cezarion#1138: worker-wait-conversations.test.ts, every native parent wire. */
+export const WORKER_PROGRESS_WAIT_CRITERIA = [
+  { id: 'WP1', scenario: 'hold', name: 'delivers progress without retiring the registered worker wait' },
 ] as const;
 
 /** #790: skill system prompt on Continue and restart recovery, every native wire. */
@@ -335,6 +344,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-bad': 'mock:ask-bad',
       subagent: 'mock:subagents',
       'subagent-after-park': 'mock:subagent-after-park',
+      'hook-after-park': 'mock:hook-after-park',
       'steer-tool': 'mock:steer-tool',
       // A line written after the last model call runs as the CLI's next queued turn.
       'steer-late': 'mock:hold',
@@ -384,6 +394,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       // #600's repro: a child thread's own turn/completed must not end the parent.
       subagent: 'mock:child-turn',
       'subagent-after-park': 'mock:subagent-after-park',
+      'hook-after-park': 'mock:hook-after-park',
       'steer-tool': 'mock:steer-tool',
       'steer-late': 'mock:steer-late',
     },
@@ -647,6 +658,15 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'N8', backend: 'cursor', kind: 'scenario-unconstructible',
     reason: 'Every Cursor print process emits a native init frame mapped to turn.started before model-work admission. The native no-progress rows exercise the timeout after that start; no turn-start-free acknowledged input can be constructed.',
   },
+  // #961 wire survey 2026-10-15: no hook lifecycle frame on these wires.
+  ...([
+    ['opencode', 'OpenCode 1.18.35 runs plugin hooks in-process and streams no hook lifecycle event over its SSE wire.'],
+    ['pi', 'Pi 1.0.4 runs extensions in-process; its RPC wire reports only extension_error, never a hook run.'],
+    ['omp', 'OMP 18.8.0 shares Pi\'s RPC wire: extensions run in-process and report only extension_error.'],
+    ['cursor', 'Cursor 2026.10.01-e373342 print stream-json carries no hook lifecycle frame.'],
+  ] as const).map(([backend, reason]) => ({
+    criterion: 'R77', backend, kind: 'scenario-unconstructible' as const, reason,
+  })),
   ...(['claude', 'opencode', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion: 'F11', backend, kind: 'scenario-unconstructible' as const,
     reason: 'This wire has no native turn-start frame that reaches v2 after the nudge is sent; turn.started is synthetic inside sendAgentMessage and fires at nudge send, before the bound.',

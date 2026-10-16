@@ -3,11 +3,13 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedTranscript } from './seed-transcript'
 
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, restoreContrastQaDefaults } from './contrast'
 import record from './fixtures/thread-run.record.json'
+// fixture-server starts: 1
 
 /**
  * #742: a fenced code block in chat must keep one source line per visual line, in the user's
@@ -60,7 +62,7 @@ beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-fence-'))
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
   writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([record], null, 2), 'utf8')
-  writeFileSync(join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`), transcript())
+  seedTranscript(join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`), transcript())
   cpSync(resolve(import.meta.dirname, 'fixtures/thread-run-images'), join(dataRoot, '.ai/cezar/runs', `${RUN_ID}-images`), { recursive: true })
 
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {

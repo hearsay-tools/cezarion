@@ -13,6 +13,7 @@ import type {
   TokenUsage,
   ToolKind,
   ToolStatus,
+  HookStatus,
   UiBackend,
   UiEvent,
   UiEventType,
@@ -145,6 +146,9 @@ describe('UiEvent vocabulary (compile-time contract)', () => {
           assertType<Equal<typeof item.status, ToolStatus>>();
           assertType<Equal<typeof item.exitCode, number | undefined>>();
           return item.title;
+        case 'hook':
+          assertType<Equal<typeof item.status, HookStatus>>();
+          return item.event;
         default: {
           const unreachable: never = item;
           return unreachable;

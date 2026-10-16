@@ -3,11 +3,13 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedTranscript } from './seed-transcript'
 
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import record from './fixtures/subagents-run.record.json'
+// fixture-server starts: 2
 
 /**
  * The grouped sub-agent display (spec `.ai/specs/2026-07-20-grouped-subagent-display.md`,
@@ -80,7 +82,7 @@ beforeAll(async () => {
       }),
     )
     .join('\n')
-  writeFileSync(join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`), `${scaled}\n`, 'utf8')
+  seedTranscript(join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`), `${scaled}\n`)
 
   server = spawnFixtureServer([
       cezarCli,

@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
+const { spawnSync } = require('node:child_process');
 const yaml = require('yaml');
 const {
   parseLog,
@@ -51,6 +53,50 @@ test('parseApplyCheck counts files the 3-way dry run could not apply', () => {
     'Applied patch to \'packages/a.ts\' with conflicts.',
   ].join('\n');
   assert.equal(parseApplyCheck(out), 2);
+});
+
+test('parseApplyCheck counts distinct fork-deleted files alongside patch failures', () => {
+  const output = [
+    'error: packages/deleted file.ts: does not exist in index',
+    'error: packages/deleted file.ts: does not exist in index',
+    'error: packages/other.ts: does not exist in index',
+    'error: patch failed: packages/other.ts:12',
+    'error: packages/other.ts: patch does not apply',
+    "Applied patch to 'packages/clean.ts' cleanly.",
+  ].join('\n');
+  assert.equal(parseApplyCheck(output), 2);
+});
+
+test('applyScan includes a fork-deleted file in hint.conflicts from a real Git dry run', (t) => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'upstream-deleted-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const git = (args, input) => spawnSync('git', args, { cwd, input, encoding: 'utf8' });
+  const ok = (args) => {
+    const result = git(args);
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout;
+  };
+  ok(['init', '-q']);
+  ok(['config', 'user.name', 'Test']);
+  ok(['config', 'user.email', 'test@example.com']);
+  fs.writeFileSync(path.join(cwd, 'deleted file.ts'), 'before\n');
+  ok(['add', '.']);
+  ok(['commit', '-qm', 'base']);
+  const base = ok(['rev-parse', 'HEAD']).trim();
+  fs.writeFileSync(path.join(cwd, 'deleted file.ts'), 'after\n');
+  ok(['commit', '-qam', 'upstream edit']);
+  const patch = ok(['diff', base, 'HEAD']);
+  ok(['checkout', '--detach', base]);
+  ok(['rm', 'deleted file.ts']);
+  ok(['commit', '-qm', 'fork deletes file']);
+  const result = git(['apply', '--check', '--3way'], patch);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /error: deleted file\.ts: does not exist in index/);
+  const { added } = applyScan(ledger(), {
+    commits: [entry()], hints: { [SHA_A]: parseApplyCheck(result.stderr) },
+    upstreamHead: SHA_HEAD, date: '2026-10-16',
+  });
+  assert.equal(added[0].hint.conflicts, 1);
 });
 
 test('validateLedger accepts a decided ledger and names every violated rule', () => {
@@ -150,10 +196,10 @@ test('the committed ledger is valid and every scan report it names exists', () =
   }
 });
 
-test('conflictHint counts a real conflicting commit even though git apply --check exits 0', () => {
+test('conflictHints counts a real conflicting commit even though git apply --check exits 0', () => {
   const { execFileSync } = require('node:child_process');
   const os = require('node:os');
-  const { conflictHint } = require('./upstream-scan.cjs');
+  const { conflictHints } = require('./upstream-scan.cjs');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cez-upstream-hint-'));
   const run = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } }).trim();
   run('init', '-q', '-b', 'main');
@@ -168,7 +214,7 @@ test('conflictHint counts a real conflicting commit even though git apply --chec
   run('checkout', '-q', 'main');
   fs.writeFileSync(path.join(dir, 'a.txt'), 'one\nOURS\nthree\n');
   run('commit', '-q', '-am', 'ours');
-  assert.equal(conflictHint(theirs, dir), 1, 'a.txt conflicts, b.txt applies clean');
+  assert.deepEqual(conflictHints([theirs], dir), { [theirs]: 1 }, 'a.txt conflicts, b.txt applies clean');
   assert.equal(run('status', '--porcelain'), '', 'the dry run leaves the tree untouched');
 });
 
@@ -217,4 +263,14 @@ test('applyScan gives a second scan on the same date its own report file instead
     commits: [{ sha: 'e'.repeat(40), date: '2026-09-18', title: 'and again', }], hints: {}, upstreamHead: 'f'.repeat(40), date: '2026-09-18',
   });
   assert.equal(third.scans[2].report, 'scans/2026-09-18-3.md');
+});
+
+test('scan report names its date and missing hints without calling them clean', () => {
+  const scan = { date: '2026-10-16', since: MERGE_BASE, upstreamHead: SHA_HEAD };
+  const missing = entry();
+  const clean = entry({ sha: SHA_B, hint: { conflicts: 0 } });
+  const report = renderScanReport(ledger(), scan, [missing, clean]);
+  assert.match(report, /Scan 2026-10-16: conflict hints unavailable for 1 of 2 new entries/);
+  assert.match(report, new RegExp(missing.sha.slice(0, 8)));
+  assert.doesNotMatch(renderScanReport(ledger(), scan, [clean]), /hints unavailable/);
 });

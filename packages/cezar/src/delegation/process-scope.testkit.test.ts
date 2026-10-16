@@ -154,9 +154,12 @@ describe('macOS fixture enumeration boundaries', () => {
     const restore = scopeFixtureProcesses('darwin');
     try {
       const result = spawnSync('ps', ['-U', String(process.getuid?.()), '-o', columns], { encoding: 'utf8' }).stdout;
-      expect(result).toContain(String(child));
-      expect(result).not.toContain(String(ambient));
-      expect(result).not.toContain(String(process.ppid));
+      // Compare pid tokens, never substrings: `child` is pid + 100001, so a worker pid of 32739
+      // makes child 132740, which contains a parent pid of 2740.
+      const listed = result.split('\n').filter(Boolean).map(line => Number(line.trim().split(/\s+/)[0]));
+      expect(listed).toContain(child);
+      expect(listed).not.toContain(ambient);
+      expect(listed).not.toContain(process.ppid);
     } finally { restore(); childProcess.spawnSync = original; syncBuiltinESMExports(); }
   });
 

@@ -257,7 +257,24 @@ rl.on('line', (line) => {
   // Every raw command, in arrival order, for tests that pin what the runner wrote.
   if (process.env.CEZ_MOCK_OMP_COMMANDS_FILE) appendFileSync(process.env.CEZ_MOCK_OMP_COMMANDS_FILE, `${line}\n`);
   const command = JSON.parse(line);
-  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && activeTurn) {
+  // hearsay-tools/cezarion#1112: a late-ack steer is admitted after the turn's last model call.
+  // OMP acknowledges it now and, never settling with a queued message, reads it in a further
+  // run before `session_settled` (the endTurn `late` path).
+  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && command.message.includes('mock:deferred-turn-start:late-ack')) {
+    const admit = () => {
+      if (!activeTurn) { setTimeout(admit, 5); return; }
+      record({ userText: command.message, imageCount: (command.images ?? []).length, streamingBehavior: 'steer' });
+      activeTurn.steers.push({ id: command.id, message: command.message });
+      activeTurn.late = true;
+      respond(command);
+    };
+    admit();
+    return;
+  }
+  // hearsay-tools/cezarion#1112: a deferred-start steer is not admitted into the running turn;
+  // OMP acknowledges it as its next prompt once that turn settles, with no turn open.
+  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && activeTurn &&
+    !command.message.includes('mock:deferred-turn-start')) {
     record({ userText: command.message, imageCount: (command.images ?? []).length, streamingBehavior: 'steer' });
     // Steers OMP never hands to the running agent: none of them may end its turn.
     if (command.message.includes('mock:steer-rejected')) {
@@ -394,6 +411,12 @@ async function prompt(command) {
       respond(command);
       beginTurn(command);
     }
+  } else if (message.includes('mock:deferred-turn-start')) {
+    // hearsay-tools/cezarion#1112: the acknowledged prompt opens its native run late. A
+    // separate branch: owned-input-delivery.testkit.ts patches the exact two lines below.
+    respond(command);
+    await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
+    beginTurn(command);
   } else {
   respond(command);
   beginTurn(command);

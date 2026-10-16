@@ -8,6 +8,7 @@ import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { artifactsDir } from './github-fixture'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
+// fixture-server starts: 1
 
 /**
  * Issue 06 §3 (#622, Git slice) and issue 08 §C: the Git view's sidebar (desktop) and Git screen

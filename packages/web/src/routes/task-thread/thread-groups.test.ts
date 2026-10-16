@@ -194,6 +194,33 @@ describe('groupThreadItems — sub-agent nesting (golden subagent-task fixture)'
   })
 })
 
+describe('groupThreadItems — hook items (#961)', () => {
+  const hook = (id: string, extra: Record<string, unknown> = {}): ThreadEntry =>
+    ({ kind: 'hook', id, event: 'PostToolBatch', status: 'completed', entries: [{ kind: 'context', text: 'x' }], ...extra }) as ThreadEntry
+
+  it('a hook does not count as a tool in streaks or context groups', () => {
+    // Ruling: a visible hook reports something that happened between the calls, so it
+    // splits the read group and the fold instead of hiding inside "Explored N files".
+    const blocks = groupThreadItems([
+      tool('a', 'read', 'completed'),
+      tool('b', 'read', 'completed'),
+      hook('h1'),
+      tool('c', 'read', 'completed'),
+      tool('d', 'read', 'completed'),
+    ])
+    expect(shape(blocks)).toEqual(['context-group', 'entry', 'context-group'])
+    const groups = blocks.filter((block) => block.kind === 'context-group')
+    expect(groups.map((group) => group.kind === 'context-group' && group.label)).toEqual(['Explored 2 files', 'Explored 2 files'])
+  })
+
+  it('a hook carrying a parent tool id nests under that tool', () => {
+    const blocks = groupThreadItems([tool('task', 'task', 'running'), hook('h1', { parentItemId: 'task' })])
+    expect(shape(blocks)).toEqual(['tool-card'])
+    const card = blocks[0]!
+    expect(card.kind === 'tool-card' && card.children.map((child) => child.id)).toEqual(['h1'])
+  })
+})
+
 describe('contextGroupLabel', () => {
   it.each([
     [2, 1, 'Explored 2 files · 1 search'],

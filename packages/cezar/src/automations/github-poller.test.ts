@@ -107,6 +107,102 @@ describe('GithubPoller', () => {
     });
   });
 
+  it('resumes both historical sources and intra-item label events without exceeding the record cap', async () => {
+    vi.useFakeTimers({ now: Date.parse('2026-07-27T00:00:00.000Z'), toFake: ['Date'] });
+    const start = '2026-07-25T00:00:00.000Z';
+    const rule = { ...definition, events: ['issue.opened', 'issue.labeled'] as const, filters: { ...definition.filters, includeExisting: true, maxRecords: 1, excludeLabels: ['ignored'] } };
+    const run = vi.fn(async (_exe: string, args: readonly string[]) => {
+      if (args.some((arg) => arg.includes('/timeline'))) return JSON.stringify([
+        { id: 1, event: 'labeled', created_at: '2026-07-26T02:00:00.000Z', label: { name: 'bug' } },
+        { id: 2, event: 'labeled', created_at: '2026-07-26T03:00:00.000Z', label: { name: 'urgent' } },
+      ]);
+      return JSON.stringify({ items: [{ ...item, labels: [{ name: 'bug' }, { name: 'urgent' }] }] });
+    });
+    const poller = new GithubPoller({ run });
+    let historyScan;
+    const events: string[] = [];
+    try {
+    for (let index = 0; index < 4; index++) {
+      const result = await poller.poll('acme', 'demo', { ...rule, events: [...rule.events] }, { since: start, historyScan });
+      expect(result.candidates.length).toBeLessThanOrEqual(1);
+      expect(result.pages).toBeLessThanOrEqual(10);
+      events.push(...result.candidates.map((candidate) => candidate.eventId));
+      historyScan = result.historyScan;
+      if (!historyScan) break;
+      expect(result.cursor).toBeUndefined();
+    }
+    expect(events).toHaveLength(3);
+    expect(new Set(events).size).toBe(3);
+    expect(historyScan).toBeUndefined();
+    expect(run.mock.calls.filter(([, args]) => args.includes('/search/issues')).map(([, args]) => args.find((arg) => arg.startsWith('q=')))).toEqual(expect.arrayContaining([expect.stringContaining('created:<='), expect.stringContaining('updated:>=2026-07-20')]));
+    expect(run.mock.calls.filter(([, args]) => args.includes('/search/issues')).map(([, args]) => args.find((arg) => arg.startsWith('q='))).filter((query) => query?.includes('updated:')).every((query) => !query?.includes('updated:<='))).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('keeps label history independent of a recent opened cursor and post-window issue activity', async () => {
+    const now = Date.now();
+    const since = new Date(now - 3_600_000).toISOString();
+    const transition = new Date(now - 2 * 86_400_000).toISOString();
+    const rule = { ...definition, events: ['issue.opened', 'issue.labeled'] as const, filters: { ...definition.filters, includeExisting: true } };
+    const poller = new GithubPoller({ run: async (_exe, args) => {
+      if (args.some((arg) => arg.includes('/timeline'))) return JSON.stringify([{ id: 1, event: 'labeled', created_at: transition, label: { name: 'bug' } }]);
+      const query = args.find((arg) => arg.startsWith('q='))!;
+      return JSON.stringify({ items: query.includes('updated:') ? [{ ...item, updated_at: new Date(now + 86_400_000).toISOString() }] : [] });
+    } });
+    const result = await poller.poll('acme', 'demo', { ...rule, events: [...rule.events] }, { since });
+    expect(result.candidates.map((candidate) => candidate.timestamp)).toEqual([transition]);
+    // A future comment must not move the opened watermark past unscanned new issues.
+    expect(result.cursor).toBeUndefined();
+    expect(result.truncated).toBe(false);
+  });
+
+  it('makes progress across locally excluded historical rows', async () => {
+    const rule = { ...definition, filters: { ...definition.filters, includeExisting: true, maxRecords: 1, excludeLabels: ['ignored'] } };
+    const poller = new GithubPoller({ run: async () => JSON.stringify({ items: [{ ...item, labels: [{ name: 'ignored' }] }, { ...item, number: 8, node_id: 'I_two' }] }) });
+    const first = await poller.poll('acme', 'demo', rule, { since: '2026-07-25T00:00:00.000Z' });
+    expect(first.candidates).toEqual([]);
+    expect(first.historyScan).toBeDefined();
+    const second = await poller.poll('acme', 'demo', rule, { historyScan: first.historyScan });
+    expect(second.candidates.map((candidate) => candidate.number)).toEqual([8]);
+    expect(second.truncated).toBe(false);
+  });
+
+  it.each([
+    { includeExisting: true, event: 'issue.labeled' as const },
+    { includeExisting: true, event: 'issue.unlabeled' as const },
+    { includeExisting: false, event: 'issue.labeled' as const },
+    { includeExisting: false, event: 'issue.unlabeled' as const },
+  ])('matches past $event labels after removal (includeExisting=$includeExisting)', async ({ includeExisting, event }) => {
+    const now = Date.now();
+    const addedAt = new Date(now - 2 * 3_600_000).toISOString();
+    const removedAt = new Date(now - 3_600_000).toISOString();
+    const issue = { ...item, created_at: new Date(now - 3 * 3_600_000).toISOString(), updated_at: removedAt, labels: [] };
+    const poller = new GithubPoller({ run: async (_exe, args) => {
+      if (args.some((arg) => arg.includes('/timeline'))) return JSON.stringify([
+        { id: 1, event: 'labeled', created_at: addedAt, label: { name: 'bug' } },
+        { id: 2, event: 'unlabeled', created_at: removedAt, label: { name: 'bug' } },
+      ]);
+      // GitHub evaluates label qualifiers against current labels, which are empty.
+      const query = args.find((arg) => arg.startsWith('q='))!;
+      return JSON.stringify({ items: query.includes('label:') ? [] : [issue] });
+    } });
+    const result = await poller.poll('acme', 'demo', {
+      ...definition,
+      events: ['issue.opened', event],
+      filters: { ...definition.filters, includeExisting, allLabels: ['bug'] },
+    }, { since: new Date(now - 4 * 3_600_000).toISOString() });
+    expect(result.candidates).toEqual([expect.objectContaining({
+      event, number: 7, labels: ['bug'], changedLabel: 'bug',
+      timestamp: event === 'issue.labeled' ? addedAt : removedAt,
+    })]);
+  });
+
+  it('reports provider search limits instead of marking an unvisited historical page complete', async () => {
+    const rule = { ...definition, filters: { ...definition.filters, includeExisting: true, maxRecords: 100 } };
+    const poller = new GithubPoller({ run: async () => JSON.stringify({ items: Array.from({ length: 100 }, () => item) }) });
+    await expect(poller.poll('acme', 'demo', rule, { historyScan: { since: '2026-07-25T00:00:00.000Z', until: '2026-07-27T00:00:00.000Z', source: 0, page: 10, item: 0, event: 0 } })).rejects.toThrow('1000-item limit');
+  });
+
   it('repeats all/any/exclude/author/assignee filters locally', () => {
     const candidate = { eventId: 'e', event: 'issue.opened' as const, timestamp: item.created_at, tieBreaker: 'I', repo: 'acme/demo', nodeId: 'I', number: 7, title: 'x', url: item.html_url, author: 'alice', assignees: ['bob'], labels: ['bug', 'urgent'] };
     expect(matchesFilters(candidate, { ...definition, filters: { ...definition.filters, authors: ['alice'], assignees: ['bob'], allLabels: ['bug'], anyLabels: ['urgent'], excludeLabels: ['wontfix'] } })).toBe(true);

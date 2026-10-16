@@ -26,17 +26,21 @@ import { codexStreamError } from './codex-stream-error.ts';
 
 import type {
   FileDiff,
+  HookEntryKind,
+  HookStatus,
   PlanEntry,
   PlanStatus,
   TokenUsage,
   ToolLocation,
   ToolStatus,
   UiEvent,
+  UiHookItem,
   UiItem,
   UiMessageItem,
   UiReasoningItem,
   UiToolItem,
 } from './ui-events.ts';
+import { hookEventName, isVisibleHookItem } from './hook-items.ts';
 import { toolDisplay } from './tool-display.ts';
 import { codexTurnOutcome } from './codex-turn-outcome.ts';
 
@@ -191,6 +195,9 @@ export function mapCodexNotification(frame: unknown, state: CodexUiMapperState):
       return mapDelta(params, state, 'output');
     case 'thread/tokenUsage/updated':
       return mapTokenUsage(params, state);
+    // `hook/started` renders nothing: hooks are completion-only (#961).
+    case 'hook/completed':
+      return { events: mapHookCompleted(params, state), state };
     default:
       // thread/status/changed, thread/closed, … — nothing to render yet.
       return { events: [], state };
@@ -495,6 +502,42 @@ function collabStatus(raw: Record<string, unknown>, receiverIds: string[], event
   if (statuses.length > 0 && statuses.every((status) => status === 'completed' || status === 'shutdown')) return 'completed';
   if (statuses.some((status) => status === 'running' || status === 'pendingInit' || status === 'pending_init')) return 'running';
   return toolStatus(raw, eventType);
+}
+
+const HOOK_STATUS: Readonly<Record<string, HookStatus>> = {
+  completed: 'completed',
+  failed: 'failed',
+  blocked: 'blocked',
+  stopped: 'cancelled',
+};
+const HOOK_ENTRY_KINDS = new Set<HookEntryKind>(['context', 'feedback', 'warning', 'error', 'stop']);
+
+/** `hook/completed` → one hook item (#961). `run.entries` already are what the agent
+ *  received; `statusMessage` joins them unless an entry already says it. */
+function mapHookCompleted(params: Record<string, unknown>, state: CodexUiMapperState): UiEvent[] {
+  const run = isRecord(params.run) ? params.run : undefined;
+  const id = str(run?.id);
+  const eventName = str(run?.eventName);
+  const status = typeof run?.status === 'string' ? HOOK_STATUS[run.status] : undefined;
+  if (!run || id === undefined || eventName === undefined || status === undefined) return [];
+  const entries: UiHookItem['entries'] = [];
+  for (const raw of Array.isArray(run.entries) ? run.entries : []) {
+    if (!isRecord(raw) || typeof raw.text !== 'string' || raw.text.trim() === '') continue;
+    const kind = raw.kind as HookEntryKind;
+    if (HOOK_ENTRY_KINDS.has(kind)) entries.push({ kind, text: raw.text });
+  }
+  const message = str(run.statusMessage)?.trim();
+  if (message && !entries.some((entry) => entry.text.trim() === message)) {
+    entries.push({ kind: status === 'completed' ? 'warning' : 'error', text: message });
+  }
+  const item: UiHookItem = { kind: 'hook', id: `hook_${id}`, event: hookEventName(eventName), status, entries };
+  const source = str(run.sourcePath);
+  if (source !== undefined) item.source = source;
+  const durationMs = num(run.durationMs);
+  if (durationMs !== undefined) item.durationMs = durationMs;
+  const parentItemId = collabParentItemId(params, state);
+  if (parentItemId !== undefined) item.parentItemId = parentItemId;
+  return isVisibleHookItem(item) ? [{ type: 'item.completed', item }] : [];
 }
 
 function collabParentItemId(params: Record<string, unknown>, state: CodexUiMapperState): string | undefined {

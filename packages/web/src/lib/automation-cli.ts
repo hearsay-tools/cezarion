@@ -33,7 +33,7 @@ function bodyFlagExpressible(body: CreateAutomationInput): boolean {
   if (!events?.length || events.some((event) => event.includes(','))) return false
   if (!filters || filters.lookbackDays !== 7 || filters.maxRecords !== 25) return false
   return Object.entries(filters).every(([key, value]) =>
-    key === 'lookbackDays' || key === 'maxRecords' || (FLAG_FILTER_LISTS.has(key) && Array.isArray(value) && value.length > 0))
+    key === 'lookbackDays' || key === 'maxRecords' || (key === 'includeExisting' && value === true) || (FLAG_FILTER_LISTS.has(key) && Array.isArray(value) && value.length > 0))
 }
 
 export function flagExpressible(draft: AutomationDraft): boolean {
@@ -59,6 +59,7 @@ function flagsOf(body: CreateAutomationInput): string {
     parts.push(flag('cron', cronOf(body.schedule!)))
   } else {
     parts.push(flag('on', body.events!.join(',')), `--every ${everyFlag(body.intervalSeconds ?? 300)}`)
+    if (body.filters?.includeExisting) parts.push('--include-existing')
     for (const label of body.filters?.anyLabels ?? []) parts.push(flag('label', label))
     for (const author of body.filters?.authors ?? []) parts.push(flag('author', author))
     for (const label of body.filters?.changedLabels ?? []) parts.push(flag('changed-label', label))

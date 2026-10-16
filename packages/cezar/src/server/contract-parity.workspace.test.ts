@@ -1,4 +1,4 @@
-import type { LiveRunBatchResponse, CheckoutProgressResponse } from '@open-mercato/cezar-contract';
+import type { LiveRunBatchResponse, CheckoutProgressResponse, CreateProjectResponse, GithubOwnersResponse } from '@open-mercato/cezar-contract';
 import type { InferResponseType } from 'hono/client';
 import { hc } from 'hono/client';
 import type { JSONParsed, JSONValue } from 'hono/utils/types';
@@ -85,6 +85,8 @@ describe('src/contract projects/workspace schemas match the routes exactly', () 
   type Projects200 = InferResponseType<typeof client.api.v1.projects.$get, 200>;
   type RegisterProject200 = InferResponseType<typeof client.api.v1.projects.$post, 200>;
   type Checkout200 = InferResponseType<typeof client.api.v1.projects.checkout.$post, 200>;
+  type CreateProject200 = InferResponseType<typeof client.api.v1.projects.create.$post, 200>;
+  type GithubOwners200 = InferResponseType<(typeof client.api.v1.projects)['github-owners']['$get'], 200>;
   type UpdateProject200 = InferResponseType<(typeof client.api.v1.projects)[':projectId']['$patch'], 200>;
   type RemoveProject200 = InferResponseType<(typeof client.api.v1.projects)[':projectId']['$delete'], 200>;
   type FsBrowse200 = InferResponseType<typeof client.api.v1.fs.browse.$get, 200>;
@@ -178,6 +180,8 @@ describe('src/contract projects/workspace schemas match the routes exactly', () 
     Assert<Exact<z.infer<typeof runsSearchResponseSchema>, RunsSearch200>>,
     Assert<Exact<z.infer<typeof registerProjectResponseSchema>, RegisterProject200>>,
     Assert<Exact<z.infer<typeof registerProjectResponseSchema>, Checkout200>>,
+    Assert<Exact<CreateProjectResponse, CreateProject200>>,
+    Assert<Exact<GithubOwnersResponse, GithubOwners200>>,
     Assert<Exact<z.infer<typeof updateProjectResponseSchema>, UpdateProject200>>,
     Assert<Exact<z.infer<typeof removeProjectResponseSchema>, RemoveProject200>>,
     Assert<Exact<z.infer<typeof fsBrowseResponseSchema>, FsBrowse200>>,

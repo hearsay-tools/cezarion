@@ -20,15 +20,15 @@ const section = (text: string, header: string) => {
 
 // hearsay-tools/cezarion#1004, on every HARNESS_ADAPTERS native wire: an agent
 // that checks another branch out in its task worktree must not find
-// `cezar autosave` on it when the session settles. Registered as R77 (initial
-// run, `run finalize`) and R78 (Continue, `turn end`; its first settle also
+// `cezar autosave` on it when the session settles. Registered as R78 (initial
+// run, `run finalize`) and R79 (Continue, `turn end`; its first settle also
 // pins the positive cell, a commit on the task branch, and its periodic case
 // a timer commit that leaves the turn-end flush nothing to save) in the parity
 // guard.
 describe('harness parity — autosave on an agent-checked-out branch (#1004)', () => {
   for (const backend of RUNNER_IDS) {
     for (const continuation of [false, true]) {
-      it(`${backend} ${continuation ? 'R78 continuation turn end' : 'R77 initial run finalize'} leaves work on another branch uncommitted and reports it`, async () => {
+      it(`${backend} ${continuation ? 'R79 continuation turn end' : 'R78 initial run finalize'} leaves work on another branch uncommitted and reports it`, async () => {
         vi.stubEnv('CEZ_DELEGATION', '1');
         try {
           await withOwnedInputRun(backend, 'baseline', async ({ repoRoot, store, manager, runId }) => {
@@ -78,7 +78,7 @@ describe('harness parity — autosave on an agent-checked-out branch (#1004)', (
     // Review on hearsay-tools/cezarion#1111: the timer commits the last work, so the
     // Continue's turn-end flush finds a clean tree and reports nothing; the timer's own
     // coalesced handoff line is what a resumed session reads.
-    it(`${backend} R78 continuation periodic commit followed by a clean turn end is reported`, async () => {
+    it(`${backend} R79 continuation periodic commit followed by a clean turn end is reported`, async () => {
       vi.stubEnv('CEZ_DELEGATION', '1');
       vi.stubEnv('CEZ_AUTOSAVE', '1');
       const intervals = vi.spyOn(globalThis, 'setInterval');

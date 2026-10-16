@@ -66,6 +66,12 @@ describe('cliOf', () => {
     )
   })
 
+  it('copies an existing-items choice as a flag', () => {
+    const draft = pollDraft({ filters: { includeExisting: true, lookbackDays: 7, maxRecords: 25 } })
+    expect(cliOf(draft)).toContain(' --include-existing ')
+    expect(cliOf(draft)).toMatch(/^cez automation add /)
+  })
+
   it('falls back to create --json for what flags cannot say', () => {
     const cases: AutomationDraft[] = [
       pollDraft({ filters: { excludeLabels: ['wontfix'], lookbackDays: 7, maxRecords: 25 } }),
@@ -132,6 +138,8 @@ describe('Copy as CLI round-trips through a real shell into the cez automation r
     ['a weekly schedule', scheduleDraft({ schedule: { type: 'weekly', hour: 23, minute: 59, day: 7, every: 1 } }), 'add'],
     ['an hourly schedule', scheduleDraft({ schedule: { type: 'hours', hour: 0, minute: 0, day: 1, every: 6 } }), 'add'],
     ['a poll with labels and authors', pollDraft({ prompt: HOSTILE, intervalSeconds: 90 }), 'add'],
+    ['a poll including existing matches', pollDraft({ filters: { includeExisting: true, lookbackDays: 7, maxRecords: 25 } }), 'add'],
+    ['a poll explicitly excluding existing matches', pollDraft({ filters: { includeExisting: false, lookbackDays: 7, maxRecords: 25 } }), 'create'],
     ['a poll with a label starting with a dash', pollDraft({ filters: { anyLabels: ['-wip'], lookbackDays: 7, maxRecords: 25 } }), 'add'],
     ['a label event with a changed label', pollDraft({ events: ['issue.labeled'], filters: { changedLabels: ['needs-agent'], lookbackDays: 7, maxRecords: 25 } }), 'add'],
     ['a poll with exclusions', pollDraft({ prompt: HOSTILE, filters: { excludeLabels: ["won't fix"], lookbackDays: 3, maxRecords: 10 } }), 'create'],

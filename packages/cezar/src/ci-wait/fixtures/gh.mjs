@@ -29,6 +29,12 @@ if (args[1] === 'view') {
  if(mode === 'no_checks') { console.error("no checks reported on the 'feature' branch"); process.exit(1); }
  const buckets = { passed:'pass',failed:'fail',cancelled:'cancel',skipped:'skipping',pending:'pending',stubborn:'pending',transient:'pass' };
  const rows = mode === 'no_checks' ? [] : [{name:'build',state:({pending:'PENDING',stubborn:'PENDING',failed:'FAILURE',cancelled:'CANCELLED',skipped:'SKIPPED'})[phase]||'SUCCESS',bucket:buckets[phase]||'pass',link:'https://github.com/org/repo/actions/runs/1'}];
+ if (phase.startsWith('mixed_')) {
+  rows.push({name:'optional publish',state:'SKIPPED',bucket:'skipping',link:''});
+  const result = phase.slice(6);
+  rows[0].bucket = buckets[result];
+  rows[0].state = {passed:'SUCCESS',failed:'FAILURE',cancelled:'CANCELLED',skipped:'SKIPPED'}[result];
+ }
  if (mode === 'many') for(let i=0;i<150;i++) rows.push({name:'x'.repeat(256),state:i===149?'FAILURE':'SUCCESS',bucket:i===149?'fail':'pass',link:''});
  console.log(JSON.stringify(rows));
  process.exit(mode === 'failed' ? 1 : mode === 'pending' ? 8 : 0);

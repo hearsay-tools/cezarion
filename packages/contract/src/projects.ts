@@ -198,6 +198,62 @@ export const checkoutProjectInputSchema = z.object({
 });
 export type CheckoutProjectInput = z.infer<typeof checkoutProjectInputSchema>;
 
+/**
+ * A new project's name: GitHub's repository-name characters (letters, digits, `.`, `-`, `_`, at
+ * most 100), starting with a letter or digit as every checkout folder must. It is the folder name
+ * and, with `github`, the repository name, so a name GitHub would rewrite is refused — and the
+ * schema, the server and the dialog share this ONE rule, so the middleware never passes a name the
+ * handler then rejects.
+ */
+export const PROJECT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+
+/**
+ * `POST /api/v1/projects/create` (spec 2026-10-15-create-new-project, a port of
+ * open-mercato/cezar#1402) — a fresh git repo at `<projectsDir>/<name>`. `github` present ⇒ also
+ * a new GitHub repository under `owner`, which is ALWAYS private: there is deliberately no
+ * visibility field, and one must never be added. `template` (`owner/repo` or a GitHub URL)
+ * generates the repository from a template instead of starting empty. Progress arrives as
+ * `checkout-progress`, keyed by `checkoutId`, like the clone flow.
+ */
+export const createProjectInputSchema = z.object({
+  name: z.string().trim().regex(PROJECT_NAME_PATTERN),
+  github: z
+    .object({
+      owner: z.string().trim().min(1).max(64),
+      template: z.string().trim().max(512).optional(),
+    })
+    .optional(),
+  checkoutId: z.string().trim().max(128).optional(),
+});
+export type CreateProjectInput = z.infer<typeof createProjectInputSchema>;
+
+/** The registered project, plus `warning` when the GitHub repository was created but a later step
+ *  (remote, credentials, push) did not finish. The local project is kept and registered; the
+ *  warning names the repository and the command that finishes the job. */
+export const createProjectResponseSchema = registerProjectResponseSchema.extend({
+  warning: z.string().optional(),
+});
+export type CreateProjectResponse = z.infer<typeof createProjectResponseSchema>;
+
+/** One account a new repository may belong to: the signed-in user first (`personal: true`), then
+ *  their organisations. `avatarUrl`/`description` are absent when GitHub gives none. */
+export const githubOwnerSchema = z.object({
+  login: z.string(),
+  personal: z.boolean(),
+  avatarUrl: z.string().optional(),
+  description: z.string().optional(),
+});
+export type GithubOwner = z.infer<typeof githubOwnerSchema>;
+
+/** `GET /api/v1/projects/github-owners` — the accounts a new repository may belong to. Never an
+ *  error: no `gh`, an unauthenticated one, or a hosted cockpit answers `available: false` with the
+ *  reason. */
+export const githubOwnersResponseSchema = z.discriminatedUnion('available', [
+  z.object({ available: z.literal(true), owners: z.array(githubOwnerSchema) }),
+  z.object({ available: z.literal(false), reason: z.string() }),
+]);
+export type GithubOwnersResponse = z.infer<typeof githubOwnersResponseSchema>;
+
 /** One directory in a `GET /api/v1/fs/browse` listing (multi-project spec, step 4.1). `path` is
  *  absolute — same-origin route, like `ProjectListEntry.root`. */
 export const fsBrowseDirSchema = z.object({

@@ -17,6 +17,8 @@ import {
   getGithubChecks,
   getGithubSearch,
   getGithubRefStatus,
+  getGithubOwners,
+  createProject,
   getGroup,
   getHealth,
   applyApplicationUpdate,
@@ -706,6 +708,28 @@ describe('history responses are validated at the boundary (#827)', () => {
   })
 })
 
+
+describe('new-project calls (spec 2026-10-15-create-new-project)', () => {
+  it('passes a well-formed owners answer through', async () => {
+    reply({ available: true, owners: [{ login: 'octo', personal: true }] })
+    expect(await getGithubOwners()).toEqual({ available: true, owners: [{ login: 'octo', personal: true }] })
+  })
+
+  it('rejects an owners answer that is not its shape, never handing the dialog owner-less data', async () => {
+    reply({ login: 'octo', orgs: [] })
+    const error = (await getGithubOwners().catch((e: unknown) => e)) as ApiError
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error.message).toBe('the cezar server answered /projects/github-owners with an unexpected body')
+  })
+
+  it('posts the create body as given and surfaces the server error verbatim', async () => {
+    reply({ error: 'folder already exists: /p/fresh' }, { status: 409 })
+    const error = (await createProject({ name: 'fresh', checkoutId: 'np-1' }).catch((e: unknown) => e)) as ApiError
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error.status).toBe(409)
+    expect(error.message).toBe('folder already exists: /p/fresh')
+  })
+})
 
 describe('explicit project actions', () => {
   afterEach(() => setApiScope(null))

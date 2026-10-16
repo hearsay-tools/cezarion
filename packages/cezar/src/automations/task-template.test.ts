@@ -30,6 +30,44 @@ const scheduled: ScheduleAutomationDefinition = {
 const occurrence = { at: '2026-10-02T04:00:00.000Z', trigger: 'schedule' as const };
 const DAY = 86_400_000;
 
+it('reopens only the bounded history window after an idle restart and retains durable receipts', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'cezar-history-restart-'));
+  try {
+    const now = Date.parse('2026-10-16T08:00:00.000Z');
+    const automations = AutomationStore.open(root);
+    const rule = automations.create({ ...definition, filters: { ...definition.filters, includeExisting: true } });
+    automations.setState(rule.id, () => ({ baselineAt: '2026-09-01T00:00:00.000Z', lastSuccessAt: '2026-09-01T00:00:00.000Z' }));
+    automations.reserveReceipt({ automationId: rule.id, revision: rule.revision, eventId: 'already-launched' });
+    expect(rebaselineIdleAutomations(automations, undefined, now)).toBe(1);
+    expect(automations.state(rule.id)).toMatchObject({ baselineAt: '2026-10-09T08:00:00.000Z', cursor: { timestamp: '2026-10-09T08:00:00.000Z' } });
+    const reopened = AutomationStore.open(root);
+    expect(reopened.latestReceipts().size).toBe(1);
+    expect(reopened.get(rule.id)?.filters?.includeExisting).toBe(true);
+    // Starting again before the first poll must preserve this same scan window.
+    expect(rebaselineIdleAutomations(reopened, undefined, now + 1000)).toBe(0);
+    expect(reopened.state(rule.id)?.baselineAt).toBe('2026-10-09T08:00:00.000Z');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it('does not overwrite a concurrent history-policy edit during idle rebaseline', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'cezar-history-restart-race-'));
+  try {
+    const now = Date.parse('2026-10-16T08:00:00.000Z');
+    const automations = AutomationStore.open(root);
+    const rule = automations.create(definition);
+    automations.setState(rule.id, () => ({ revision: rule.revision, lastSuccessAt: '2026-09-01T00:00:00.000Z' }));
+    const setState = automations.setState.bind(automations);
+    vi.spyOn(automations, 'setState').mockImplementationOnce((id, update) => {
+      const other = AutomationStore.open(root);
+      other.update(rule.id, rule.revision, { ...rule, filters: { ...rule.filters!, includeExisting: true } }, () => ({ armedAt: new Date(now).toISOString(), baselineAt: '2026-10-09T08:00:00.000Z' }));
+      return setState(id, update);
+    });
+    expect(rebaselineIdleAutomations(automations, undefined, now)).toBe(0);
+    expect(AutomationStore.open(root).state(rule.id)).toMatchObject({ revision: 2, baselineAt: '2026-10-09T08:00:00.000Z' });
+    expect(automations.logs({ automationId: rule.id })).toEqual([]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 function fakeManager(store: RunStore): RunManager {
   return {
     startRun: (workflow: { name: string; steps: Array<{ id: string; name?: string; command?: string }> }, input: { task: string }) =>

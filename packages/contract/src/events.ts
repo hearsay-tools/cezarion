@@ -138,7 +138,8 @@ export type RunHistoryContext = z.infer<typeof runHistoryContextSchema>;
  *
  * `cloning` carries a single line of `git clone` output; `done` and `error` are terminal. The
  * clone dialog renders `error` VERBATIM — a clone fails for reasons (auth, network, a mistyped
- * repo) that only the server can name.
+ * repo) that only the server can name. The new-project flow reuses this frame; its `done` may
+ * carry a `warning`.
  */
 export const checkoutProgressEventSchema = z.object({
   checkoutId: z.string().optional(),
@@ -146,5 +147,8 @@ export const checkoutProgressEventSchema = z.object({
   phase: z.enum(['cloning', 'done', 'error']),
   line: z.string().optional(),
   error: z.string().optional(),
+  /** On `done` only: the project was created and registered, but a later step did not finish
+   *  (new-project flow, spec 2026-10-15-create-new-project). Names what exists and how to finish. */
+  warning: z.string().optional(),
 });
 export type CheckoutProgressEvent = z.infer<typeof checkoutProgressEventSchema>;

@@ -10,6 +10,7 @@ vi.mock('@/api/queries', () => ({
 }))
 vi.mock('@/components/add-project-dialog', () => ({ AddProjectDialog: () => <div role="dialog" aria-label="Choose local folder" /> }))
 vi.mock('@/components/clone-project-dialog', () => ({ CloneProjectDialog: () => <div role="dialog" aria-label="Clone repository" /> }))
+vi.mock('@/components/create-project-dialog', () => ({ CreateProjectDialog: () => <div role="dialog" aria-label="New project" /> }))
 afterEach(() => { cleanup(); vi.clearAllMocks(); mocks.singleProject = false; mocks.allAvailable = false; vi.unstubAllGlobals() })
 
 describe('Workspace tools', () => {
@@ -19,6 +20,12 @@ describe('Workspace tools', () => {
     expect(screen.getByRole('dialog', { name: 'Choose local folder' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Clone from GitHub' }))
     expect(screen.getByRole('dialog', { name: 'Clone repository' })).toBeTruthy()
+  })
+
+  it('opens the New project flow from the shared workspace page', () => {
+    render(<MemoryRouter><WorkspaceToolsRoute /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: 'New project' }))
+    expect(screen.getByRole('dialog', { name: 'New project' })).toBeTruthy()
   })
 
   it('rechecks the real tool inventory and copies only the reported diagnostics', async () => {

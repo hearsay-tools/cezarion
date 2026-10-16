@@ -9,6 +9,31 @@
 
 Add a project-scoped **Automations** page directly below GitHub in the sidebar. Users define bounded, polling-based GitHub triggers and pair them with the same prompt, workflow, skill, model, runner, worktree, and autonomy controls used by New task; matching issues or pull requests enqueue ordinary cezar tasks, while a durable execution log makes every decision debuggable.
 
+## Optional existing matches (hearsay-tools/cezarion#1150)
+
+The default remains future-only at enablement. A per-poll **Include existing items** switch,
+`filters.includeExisting` (optional boolean, absent means false), explicitly includes matching
+events within `lookbackDays`. Activation and a policy change on an enabled definition arm that
+window; other edits preserve scan progress. Pausing retains receipts, and enabling or idle restart
+reopens only the selected bounded window. Durable event receipts prevent duplicate launches.
+For label triggers, eligibility follows the transition timestamp, rather than the issue's creation.
+
+Test filter uses the selected eligibility window without the execution cursor. It writes no
+receipts and launches nothing. History remains bounded by the rolling lookback and existing
+per-check caps. The CLI exposes `--include-existing` for GitHub `add`, plus the JSON filter key.
+
+Historical scans save an optional `historyScan` position (fixed since/until, source, page, item,
+and label-event offset), retaining the successful cursor until the window drains. Each check
+keeps the configured record cap, 100-item budget and ten-request budget. The default future-only
+polling path retains its two-minute overlap. Provider search (1,000 items) and label timeline
+(100 events per item) limits report actionable errors instead of certifying unvisited history.
+Rearming clears continuation; ordinary query edits clear its offsets while preserving the
+successful cursor. Lookback-only edits do not reopen completed discovery; re-enable to reopen
+a wider window. Historical label searches revisit the rolling lookback independently of the live
+cursor and bound eligibility by transition time, so a later comment cannot permanently evict an
+unvisited transition from a frozen updated-time query. Definition and runtime revisions are checked before launch and under state
+writes. An orphan state-first arm is recovered under the definitions lock before the next poll.
+
 ## Resolved assumptions (autonomous defaults)
 
 | # | Question | Applied default | Why | Confirm? |

@@ -9,6 +9,7 @@ import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-
 import { focusWithKeyboard } from './contrast'
 import { artifactsDir } from './github-fixture'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
+// fixture-server starts: 1
 
 /**
  * #622 (GitHub slice): the GitHub view's own sidebar (desktop) and filter index (phone), in a real

@@ -41,6 +41,37 @@ const fill = () => {
   fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Summarise the week' } })
 }
 
+it('saves the explicit existing-items choice for a GitHub automation', async () => {
+  const calls = stubFetch(() => json(saved, 201))
+  const onSaved = mount()
+  fill()
+  fireEvent.click(screen.getByRole('button', { name: 'When GitHub changes' }))
+  const history = screen.getByRole('switch', { name: 'Include existing items' })
+  expect(history.getAttribute('aria-checked')).toBe('false')
+  fireEvent.click(history)
+  expect(screen.getAllByText(/Existing matches within the lookback/).length).toBeGreaterThan(0)
+  fireEvent.click(screen.getByRole('button', { name: 'Save paused' }))
+  await waitFor(() => expect(onSaved).toHaveBeenCalled())
+  expect(calls.find((call) => call.method === 'POST')?.body).toMatchObject({ filters: { includeExisting: true, lookbackDays: 7, maxRecords: 25 } })
+})
+
+it('restores a saved history choice and allows turning it off while editing', async () => {
+  const calls = stubFetch(() => json(saved))
+  const automation: AutomationDefinition = {
+    id: 'history', name: 'Review', revision: 3, kind: 'github', enabled: true,
+    events: ['issue.opened'], intervalSeconds: 300,
+    filters: { includeExisting: true, lookbackDays: 7, maxRecords: 25 },
+    task: { prompt: 'Review {{github.url}}' }, createdAt: '', updatedAt: '',
+  }
+  const onSaved = mount({ automation })
+  const history = screen.getByRole('switch', { name: 'Include existing items' })
+  expect(history.getAttribute('aria-checked')).toBe('true')
+  fireEvent.click(history)
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await waitFor(() => expect(onSaved).toHaveBeenCalled())
+  expect(calls.find((call) => call.method === 'PUT')?.body).toMatchObject({ enabled: true, expectedRevision: 3, filters: { includeExisting: false } })
+})
+
 it('saves a weekly schedule paused and shows five previewed runs', async () => {
   const calls = stubFetch(() => json(saved, 201))
   const onSaved = mount()

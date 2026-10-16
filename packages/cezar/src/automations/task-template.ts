@@ -6,6 +6,8 @@ import type { RunManager, StartRunInput } from '../workflows/run.ts';
 import type { GithubCandidate } from './github-poller.ts';
 import type { ScheduleOccurrence } from './schedule-runner.ts';
 import type { AutomationStore } from './store.ts';
+import { githubBaselineState } from './github-baseline.ts';
+import { isGithubAutomation } from './types.ts';
 import type { AutomationDefinition, GithubAutomationDefinition, ScheduleAutomationDefinition } from './types.ts';
 
 export const GITHUB_PLACEHOLDERS: ReadonlySet<string> = new Set([
@@ -211,37 +213,40 @@ export function rebaselineIdleAutomations(
   now = Date.now(),
 ): number {
   let rebaselined = 0;
+  automationStore.reload();
   for (const definition of automationStore.list()) {
-    if (!definition.enabled || definition.kind !== 'github') continue;
+    if (!definition.enabled || !isGithubAutomation(definition)) continue;
     const state = automationStore.state(definition.id) ?? {};
     const lookbackMs = (definition.filters?.lookbackDays ?? 7) * 86_400_000;
     // Idle since the LATER of the last success and the enable baseline. `enable` writes a fresh
     // `baselineAt` but no `lastSuccessAt` (and keeps a stale one on a re-enable), so measuring
     // from `lastSuccessAt` alone would re-baseline a poll on every restart inside its first
     // interval, dropping the events since the enable (a deviation from upstream).
-    const instants = [state.lastSuccessAt, state.baselineAt].map((iso) => iso ? Date.parse(iso) : Number.NaN).filter(Number.isFinite);
+    const instants = [state.lastSuccessAt, state.armedAt, state.baselineAt].map((iso) => iso ? Date.parse(iso) : Number.NaN).filter(Number.isFinite);
     const reference = instants.length ? Math.max(...instants) : Number.NaN;
     if (Number.isFinite(reference) && now - reference <= lookbackMs) continue;
     const lastSuccess = state.lastSuccessAt ? Date.parse(state.lastSuccessAt) : Number.NaN;
     const idleDays = Number.isFinite(lastSuccess) ? Math.round((now - lastSuccess) / 86_400_000) : undefined;
-    const baselineAt = new Date(now).toISOString();
-    automationStore.setState(definition.id, (current) => ({
-      ...current,
-      revision: definition.revision,
-      baselineAt,
-      cursor: { timestamp: baselineAt },
-      frozenHighWatermark: undefined,
-      backlogAfter: undefined,
-      backoffUntil: undefined,
-      consecutiveFailures: 0,
-      nextCheckAt: new Date(now + (definition.intervalSeconds ?? 300) * 1_000).toISOString(),
-    }));
+    let armed = false;
+    automationStore.setState(definition.id, (current) => {
+      // An editor or successful poll can land after the idle snapshot. Check again under
+      // the state lock; a stale recovery must never roll that revision or progress back.
+      if (current.revision !== undefined && current.revision !== definition.revision) return current;
+      const freshInstants = [current.lastSuccessAt, current.armedAt, current.baselineAt]
+        .map((iso) => iso ? Date.parse(iso) : Number.NaN).filter(Number.isFinite);
+      if (freshInstants.length && now - Math.max(...freshInstants) <= lookbackMs) return current;
+      armed = true;
+      return { ...current, ...githubBaselineState(definition, now) };
+    });
+    if (!armed) continue;
     // The log write is best effort: a busy log lock must not undo a brake that already held.
     void automationStore.appendLog({
       automationId: definition.id,
       revision: definition.revision,
       result: 'baseline',
-      reason: idleDays === undefined
+      reason: definition.filters.includeExisting
+        ? 'Reopened the configured lookback window at start; existing receipts prevent duplicate launches.'
+        : idleDays === undefined
         ? 'Re-baselined at start: this automation had never polled successfully; the backlog is not launched.'
         : `Re-baselined at start after ${idleDays} day${idleDays === 1 ? '' : 's'} idle; the backlog is not launched.`,
     }).catch(() => undefined);

@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
+// fixture-server starts: 1
 
 // A sidebar row's meta line truncates with an ellipsis, and Chromium keeps hit-testing a reference
 // chip the ellipsis hid. A click on the blank space right of the `…` opened that hidden reference

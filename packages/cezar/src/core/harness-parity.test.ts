@@ -66,6 +66,7 @@ import {
   NO_PROGRESS_CRITERIA,
   AUTONOMOUS_CRITERIA,
   FINAL_MESSAGE_CRITERIA,
+  WORKER_PROGRESS_WAIT_CRITERIA,
   WORKFLOW_ASK_CRITERIA,
   FOLLOWUP_CRITERIA,
   ANSWER_DELIVERY_CRITERIA,
@@ -574,6 +575,8 @@ const CONTROL_CRITERIA = [
   { id: 'R10', scenario: 'done' },
   { id: 'R11', scenario: 'baseline' },
   { id: 'R15', scenario: 'subagent-after-park' },
+  // #961: hook items never move run state, mid-turn or after the park.
+  { id: 'R77', scenario: 'hook-after-park' },
   { id: 'R16', scenario: 'ask-snapshot' },
   { id: 'R20', scenario: 'baseline' },
   { id: 'R21', scenario: 'baseline' },
@@ -594,9 +597,9 @@ const CONTROL_CRITERIA = [
   { id: 'R68', scenario: 'baseline' },
   // hearsay-tools/cezarion#1004: harness-autosave-branch.test.ts, run-finalize and turn-end
   // saves leave work on an agent-checked-out branch uncommitted and report it in the handoff;
-  // R78 also reports a periodic commit that leaves the closing turn-end flush clean.
-  { id: 'R77', scenario: 'baseline' },
+  // R79 also reports a periodic commit that leaves the closing turn-end flush clean.
   { id: 'R78', scenario: 'baseline' },
+  { id: 'R79', scenario: 'baseline' },
   // hearsay-tools/cezarion#994: workflows/ci-wait-failure-parity.test.ts,
   // failed fresh/continued CI attempts retain history through scheduler recovery.
   { id: 'R72', scenario: 'provider-error' },
@@ -1256,6 +1259,53 @@ describe('harness parity — late child attention', () => {
   }
 });
 
+// #961: native hook frames reach the event log and nothing else. A hook that
+// completes after the run parked (Squeal's async `waiter`) must neither wake the
+// run, move its wake time, nor open a turn; the mid-turn hook must not end one.
+describe('harness parity — hooks never move run state', () => {
+  for (const backend of RUNNER_IDS) {
+    const exempt = exemptionFor('R77', backend);
+    if (exempt) {
+      it(`${backend} is exempt from R77 — ${exempt.reason}`, () => {
+        expect(exempt.kind).toBe('scenario-unconstructible');
+        expect(HARNESS_ADAPTERS[backend].scenarios['hook-after-park']).toBeUndefined();
+      });
+      continue;
+    }
+    it(`${backend} R77 keeps a parked run parked through mid-turn and late hook items`, async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'cez-hook-park-'));
+      const release = join(dir, 'release');
+      try {
+        await driveRun(backend, { prompt: `${promptFor(backend, 'hook-after-park')} parity-release=${release}` },
+          record => record?.activity === 'monitoring' || record?.status === 'waiting', 30_000,
+          async ({ store, runId }) => {
+            expect(store.getRun(runId)).toMatchObject({ status: 'running', activity: 'monitoring' });
+            const wake = store.getRun(runId)?.monitoringWakeAt;
+            expect(wake).toBeDefined();
+            const before = store.readEvents(runId).length;
+            const changes: Array<{ status: string; activity?: string; monitoringWakeAt?: string }> = [];
+            const recordChange = (record: NonNullable<RunObservation['record']>) => {
+              if (record.id === runId) changes.push({ status: record.status, activity: record.activity, monitoringWakeAt: record.monitoringWakeAt });
+            };
+            store.on('run', recordChange);
+            try {
+              writeFileSync(release, 'go');
+              await waitFor(() => store.readEvents(runId).slice(before).some(event => JSON.stringify(event).includes('Late hook processed.')));
+              expect(store.getRun(runId)).toMatchObject({ status: 'running', activity: 'monitoring', monitoringWakeAt: wake });
+              for (const change of changes) expect(change).toEqual({ status: 'running', activity: 'monitoring', monitoringWakeAt: wake });
+              expect(store.readEvents(runId).slice(before).some(event => event.type === 'turn.started')).toBe(false);
+              const hooks = store.readEvents(runId)
+                .filter(event => event.type === 'item.completed' && (event.item as { kind?: string } | undefined)?.kind === 'hook')
+                .map(event => (event.item as { id: string }).id);
+              expect(hooks).toHaveLength(2);
+              expect(new Set(hooks).size).toBe(2);
+            } finally { store.off('run', recordChange); }
+          });
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }, 60_000);
+  }
+});
+
 // #134/#401: use native completed-message frames, not an injected UiEvent or
 // fake runner. Current wires couple that snapshot to v1; the named exemptions
 // are pinned in the inverse direction, in addition to the actual park/card.
@@ -1759,6 +1809,7 @@ describe('harness parity — the matrix itself', () => {
     ...WORKTREE_SETUP_CRITERIA.map(c => c.id),
     ...AUTONOMOUS_CRITERIA.map(c => c.id),
     ...FINAL_MESSAGE_CRITERIA.map(c => c.id),
+    ...WORKER_PROGRESS_WAIT_CRITERIA.map(c => c.id),
     ...NO_PROGRESS_CRITERIA.map(c => c.id),
     ...WORKFLOW_TIMEOUT_CRITERIA.map((c) => c.id),
     ...SEAM_CRITERIA.map((c) => c.id),
@@ -1785,6 +1836,8 @@ describe('harness parity — the matrix itself', () => {
     if (worktreeSetup) return worktreeSetup.scenario;
     const autonomous = AUTONOMOUS_CRITERIA.find(c => c.id === id);
     if (autonomous) return autonomous.scenario;
+    const workerProgress = WORKER_PROGRESS_WAIT_CRITERIA.find(c => c.id === id);
+    if (workerProgress) return workerProgress.scenario;
     const finalMessage = FINAL_MESSAGE_CRITERIA.find(c => c.id === id);
     if (finalMessage) return finalMessage.scenario;
     const inactivity = NO_PROGRESS_CRITERIA.find(c => c.id === id);

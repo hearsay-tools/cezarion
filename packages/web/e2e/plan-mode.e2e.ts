@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { settleVisual, waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
+// fixture-server starts: 1
 
 /**
  * Plan mode end-to-end (R4 Step 1.2, #383 + spec 008) against a LIVE dry-run server. Under

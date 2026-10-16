@@ -1,7 +1,7 @@
 import { permissionDecisionSchema, runIdParamSchema as permissionRunIdParamSchema } from '@open-mercato/cezar-contract';
 import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
 import { CheckoutProgressCache } from './checkout-progress.ts';
-import { checkoutProgressParamsSchema } from '@open-mercato/cezar-contract';
+import { checkoutProgressParamsSchema, createProjectInputSchema, type CreateProjectResponse, type GithubOwnersResponse } from '@open-mercato/cezar-contract';
 import { createLiveRoutes } from './live-routes.ts';
 import { subscribeRunFeed } from './run-event-feed.ts';
 import { sidebarLimitsSchema } from '@open-mercato/cezar-contract';
@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { AutomationStore } from '../automations/store.ts';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { GithubPoller } from '../automations/github-poller.ts';
+import { githubBaselineState } from '../automations/github-baseline.ts';
 import { ProjectAutomationScheduler, WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
 import { AutomationProjectUnavailableError, SCHEDULE_LEASE_HELD_REASON, ScheduleRunner, type ScheduleRunnerHandle } from '../automations/schedule-runner.ts';
 import {
@@ -208,6 +209,7 @@ import {
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { mergeWriteWorkspaceUiState, readWorkspaceUiState } from '../workspace/ui-state.ts';
 import { checkoutRepo, type CloneRunner } from './checkout.ts';
+import { createProject, listGithubOwners, type CommandRunner } from './create-project.ts';
 import { armPreview, ProjectContextError, ProjectContexts, projectWarmupEnabled, sweepRegisteredPreviewLeftovers, type ProjectContext } from './project-context.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
 import { readUiState, uiStatePath } from '../ui-state.ts';
@@ -301,6 +303,10 @@ export interface ServerDeps {
    *  route's guards, cleanup and error surfacing are exercised for real
    *  against real temp dirs, without a network or a `gh` binary. */
   cloneRunner?: CloneRunner;
+  /** How `POST /api/v1/projects/create` and `GET /api/v1/projects/github-owners`
+   *  run `git`/`gh` (spec 2026-10-15-create-new-project). Defaults to real
+   *  commands (or the `CEZ_DRY_RUN=1` fake); injected by tests. */
+  projectCommandRunner?: CommandRunner;
   /** What the Git view's branch classifier asks GitHub (issue 08). Defaults to the ref-status
    *  cache plus one cached `gh pr list`; tests inject a fake forge. */
   branchForge?: BranchForge;
@@ -400,6 +406,9 @@ const selectAgentProfileSchema = z.object({
 }).strict();
 
 /** The hosted-mode refusal, worded like the agent-config one it mirrors. */
+const HOSTED_GITHUB_CREATE_REFUSAL = 'Creating GitHub repositories is available from a local cockpit only';
+const HOSTED_GITHUB_OWNERS_REASON = 'GitHub repositories can be created from a local cockpit only';
+
 const hostedProfileRefusal = {
   error: 'agent accounts are managed from the machine that owns the checkout (this cockpit runs in hosted mode)',
 };
@@ -516,7 +525,10 @@ function sameSchedule(a: AutomationDefinition['schedule'], b: AutomationDefiniti
  * cleared when paused. Passed to the store's `create`/`update` as `arm`, which writes it BEFORE
  * the definition, so another cockpit's timer never pairs the new definition with the old instant.
  */
-function armScheduleFromNow(definition: AutomationDefinition): { nextRunAt: string | undefined } | undefined {
+function armAutomationFromNow(definition: AutomationDefinition) {
+  if (isGithubAutomation(definition)) {
+    return definition.enabled ? githubBaselineState(definition) : { nextCheckAt: undefined };
+  }
   if (!isScheduleAutomation(definition)) return undefined;
   const next = definition.enabled ? nextOccurrence(definition.schedule, Date.now(), localTimeZone()) : null;
   return { nextRunAt: next === null ? undefined : new Date(next).toISOString() };
@@ -2865,7 +2877,93 @@ export function createApp(deps: ServerDeps) {
         return c.json({ error: `${error} (the clone is at ${result.target})` }, registered.status);
       }
       return c.json(registered.body, 200);
+    })
+
+    // ---- new project (spec 2026-10-15-create-new-project) ------------------
+    // "Add project → New project": a fresh git repo at `<projectsDir>/<name>`,
+    // optionally backed by a new PRIVATE GitHub repository (never public — the
+    // body has no visibility field to set), optionally from a template. Same
+    // progress stream and cache, same `registerFolder` commit, same
+    // `{ error, reason }` degradation as the clone route above.
+    //
+    // A hosted cockpit creates LOCAL projects only: GitHub creation would act
+    // with the host's `gh` account on a remote viewer's behalf, and the owner
+    // list would show that viewer the host's login and organisations.
+    .get('/projects/github-owners', async (c) => {
+      if (!capabilities().localHandoff) {
+        const body: GithubOwnersResponse = { available: false, reason: HOSTED_GITHUB_OWNERS_REASON };
+        return c.json(body);
+      }
+      return c.json(await listGithubOwners(deps.projectCommandRunner));
+    })
+
+    .post('/projects/create', jsonZodValidator(() => createProjectInputSchema, { message: 'project name must be a valid GitHub repository name — letters, digits, ".", "-" and "_" only, no spaces' }), async (c) => {
+      if (capabilities().singleProject) {
+        return c.json(singleProjectRefusal('adding projects'), 409);
+      }
+      const { name, github, checkoutId } = c.req.valid('json');
+      if (github && !capabilities().localHandoff) {
+        return c.json({ error: HOSTED_GITHUB_CREATE_REFUSAL }, 409);
+      }
+      const projectsDir = expandTilde(await workspaceProjectsDir());
+      // `registerFolder` re-checks hosted containment, but only AFTER the
+      // repository exists; asked here first, an out-of-root checkout root
+      // refuses before anything is created.
+      if (!capabilities().localHandoff && !(await isInsideHostedBrowseRoot(join(projectsDir, name)))) {
+        return c.json({ error: 'folder is outside the browsable root' }, 400);
+      }
+      const result = await createProject({
+        name,
+        github,
+        checkoutId,
+        projectsDir,
+        onProgress: (event) => { checkoutProgress.record(event); workspaceEvents.emit('checkout-progress', event); },
+        // Cancels only the steps before `gh repo create` (create-project.ts).
+        signal: c.req.raw.signal,
+        ...(deps.projectCommandRunner ? { run: deps.projectCommandRunner } : {}),
+      });
+      if (!result.ok) {
+        return c.json(
+          'reason' in result ? { error: result.error, reason: result.reason } : { error: result.error },
+          result.status,
+        );
+      }
+      // GitHub-backed projects register as `checkout` (they have an origin the
+      // clone flow would also produce); a local-only repo is `local`.
+      const registered = await registerFolder(result.target, result.slug ? 'checkout' : 'local');
+      // A new entry (200), or the existing one for the same root (409 "already registered") — what
+      // creating a registered project whose folder had been deleted produces. The user asked for
+      // that project and it is there, so both are a success. (An if/else chain, not a helper:
+      // only narrowing `registered` keeps the error bodies out of the route's 200 type.)
+      let project: ProjectListEntry;
+      if (registered.status === 200) project = registered.body.project;
+      else if (registered.status === 409 && 'project' in registered.body) project = registered.body.project;
+      else {
+        // As with a clone: the repository is the user's now, so it stays — and a GitHub warning
+        // rides along, since its finishing commands are the only record of what is left to do.
+        const { body } = registered;
+        const error = 'error' in body && body.error ? body.error : 'could not register the new project';
+        const warning = result.warning ? `\n${result.warning}` : '';
+        return c.json({ error: `${error} (the project is at ${result.target})${warning}` }, registered.status);
+      }
+      const body: CreateProjectResponse = { project, ...(result.warning ? { warning: result.warning } : {}) };
+      return c.json(body, 200);
     });
+
+  /** Hosted containment for a path that may not exist yet: lexical for the
+   *  path itself, realpath for its nearest existing ancestor (a symlink inside
+   *  the browse root may point out of it). Same rule as `registerFolder`. */
+  const isInsideHostedBrowseRoot = async (candidate: string): Promise<boolean> => {
+    const browseRoot = resolveBrowseRoot(await workspaceBrowseRoot());
+    if (!(await isLexicallyInsideBrowseRoot(browseRoot, candidate))) return false;
+    let existing = candidate;
+    while (!(await stat(existing).then(() => true, () => false))) {
+      const parent = dirname(existing);
+      if (parent === existing) return false;
+      existing = parent;
+    }
+    return isInsideBrowseRoot(browseRoot, existing);
+  };
 
   // Register an existing folder (multi-project spec, "Add project" — the
   // folder-browser dialog's commit step, step 4.2). Workspace-level like its
@@ -3642,17 +3740,7 @@ export function createApp(deps: ServerDeps) {
       }
       const { enable, ...input } = parsed.data;
       try {
-        const automation = automationStore.create({ ...input, kind: resolved.kind, enabled: enable === true }, undefined, enable ? armScheduleFromNow : undefined);
-        if (enable && isGithubAutomation(automation)) {
-          const baselineAt = new Date().toISOString();
-          automationStore.setState(automation.id, (current) => ({
-            ...current,
-            revision: automation.revision,
-            baselineAt,
-            cursor: { timestamp: baselineAt },
-            nextCheckAt: new Date(Date.now() + automation.intervalSeconds * 1_000).toISOString(),
-          }));
-        }
+        const automation = automationStore.create({ ...input, kind: resolved.kind, enabled: enable === true }, undefined, enable ? armAutomationFromNow : undefined);
         emitAutomationChange(c.get('project'), automation.id, automation.revision);
         automationsChanged();
         return c.json({ automation }, 201);
@@ -3691,8 +3779,15 @@ export function createApp(deps: ServerDeps) {
         // another cockpit never reads the still-enabled definition beside a due instant. Armed in
         // the request, as `enable` does, rather than left to the timer: the list refetched on the
         // change event must already see it. Compared with the definition on disk, not the one read above.
-        const automation = automationStore.update(c.req.param('id'), expectedRevision, { ...input, kind: resolved.kind, enabled: input.enabled ?? false }, (next, previous) =>
-          previous && (!sameSchedule(previous.schedule, next.schedule) || previous.enabled !== next.enabled) ? armScheduleFromNow(next) : undefined);
+        const automation = automationStore.update(c.req.param('id'), expectedRevision, { ...input, kind: resolved.kind, enabled: input.enabled ?? false }, (next, previous) => {
+          if (previous && (!sameSchedule(previous.schedule, next.schedule) || previous.enabled !== next.enabled
+            || (next.enabled && Boolean(previous.filters?.includeExisting) !== Boolean(next.filters?.includeExisting)))) return armAutomationFromNow(next);
+          // A continuation belongs to its query. Ordinary edits retain the successful cursor,
+          // but a changed query must start a fresh bounded scan rather than reuse page offsets.
+          if (isGithubAutomation(next) && previous && (JSON.stringify(previous.filters) !== JSON.stringify(next.filters)
+            || JSON.stringify(previous.events) !== JSON.stringify(next.events))) return { historyScan: undefined };
+          return undefined;
+        });
         emitAutomationChange(c.get('project'), automation.id, automation.revision);
         automationsChanged();
         return c.json({ automation });
@@ -3721,22 +3816,14 @@ export function createApp(deps: ServerDeps) {
       try {
       if (isScheduleAutomation(current)) {
         // A schedule has no backlog to baseline against: it arms its next occurrence from now.
-        const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: true }, armScheduleFromNow);
+        const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: true }, armAutomationFromNow);
         emitAutomationChange(c.get('project'), automation.id, automation.revision);
         automationsChanged();
         return c.json({ automation });
       }
       if (!isGithubAutomation(current)) return c.json({ error: 'automation definition is incomplete' }, 409);
-      const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: true });
-      const baselineAt = new Date().toISOString();
-      store.setState(automation.id, (state) => ({
-        ...state,
-        revision: automation.revision,
-        baselineAt,
-        cursor: { timestamp: baselineAt },
-        nextCheckAt: new Date(Date.now() + current.intervalSeconds * 1_000).toISOString(),
-      }));
-      await store.appendLog({ automationId: automation.id, revision: automation.revision, result: 'baseline', reason: 'Enabled from a current-time baseline; existing records were not launched.' });
+      const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: true }, armAutomationFromNow);
+      await store.appendLog({ automationId: automation.id, revision: automation.revision, result: 'baseline', reason: current.filters.includeExisting ? 'Enabled with existing matches within the lookback; prior receipts prevent duplicate launches.' : 'Enabled from a current-time baseline; existing records were not launched.' });
       emitAutomationChange(c.get('project'), automation.id, automation.revision);
       automationsChanged();
       return c.json({ automation });
@@ -3752,7 +3839,7 @@ export function createApp(deps: ServerDeps) {
       const current = store.get(c.req.param('id'));
       if (!current) return c.json({ error: 'not found' }, 404);
       try {
-        const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: false }, armScheduleFromNow);
+        const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: false }, armAutomationFromNow);
         emitAutomationChange(c.get('project'), automation.id, automation.revision);
         automationsChanged();
         return c.json({ automation });

@@ -8,6 +8,7 @@ import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
 import { applyContrastQaVariant, contrastSampleExpression, restoreContrastQaDefaults, type ContrastSample } from './contrast'
+// fixture-server starts: 1
 
 // "Hand off" (#589) against the real server: the project webhook is set through the same PATCH
 // the settings page sends, the thread's button opens the dialog (a bottom sheet at 360px), and

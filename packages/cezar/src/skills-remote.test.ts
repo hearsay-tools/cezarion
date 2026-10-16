@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   __holdFetchForTests,
@@ -10,15 +10,18 @@ import {
   getTeamSkillsCached,
   isPinnedSha,
   lastFetchStampPath,
+  listRemoteSkills,
+  materializeSkillToCache,
   readLastFetchAt,
   refreshTeamSkills,
   shouldPassiveFetch,
   shouldRecordFetchFailure,
+  skillFilesCacheDirFor,
   waitForCachedTeamSkills,
   waitForTeamSkills,
   writeLastFetchAt,
 } from './skills-remote.ts';
-import { seedTeamSkillsClone, writeSkillsReposConfig } from './skills-remote.testkit.ts';
+import { seedTeamDirSkillClone, seedTeamSkillsClone, writeSkillsReposConfig } from './skills-remote.testkit.ts';
 
 const TTL = 6 * 60 * 60 * 1_000;
 
@@ -218,5 +221,114 @@ describe('cached team-skill list before the passive fetch (#859)', () => {
 
     expect(await waitForCachedTeamSkills(repoRoot)).toEqual([]);
     expect(await settledWithin(waitForTeamSkills(repoRoot), 200)).toBe(false);
+  });
+});
+
+describe('materializeSkillToCache — the per-commit copy for runs without a task worktree (#1024)', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function scratch(prefix: string): string {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    dirs.push(dir);
+    return dir;
+  }
+
+  /** The skill as a fresh listing reads it now — its body and `team.commit` at the current `main`. */
+  async function listGreeter(repo: string) {
+    const greeter = (await listRemoteSkills({ repo, ref: 'main' })).find((skill) => skill.name === 'greeter');
+    if (!greeter) throw new Error('expected the directory skill to be listed');
+    return greeter;
+  }
+
+  /** A temp `$HOME` and a bare-cloned source whose `greeter` directory skill can move upstream. */
+  async function greeterSource() {
+    const home = scratch('cez-team-home-');
+    vi.stubEnv('HOME', home);
+    const repo = `org-${randomUUID().slice(0, 8)}/skills`;
+    const source = await seedTeamDirSkillClone(repo, 'greeter', {
+      'SKILL.md': 'say hi v1\n',
+      'references/notes.md': 'notes v1\n',
+    });
+    dirs.push(source.sourceDir);
+    const greeter = await listGreeter(repo);
+    // Keyed exactly like the bare clone, under a sibling cache root.
+    const cacheRoot = join(home, '.cache', 'cez', 'skill-files', basename(bareDirFor(repo)));
+    return { home, repo, source, greeter, cacheRoot };
+  }
+
+  it('copies the whole directory into <cache>/<commit>/<name> and reuses it for the same commit', async () => {
+    const { repo, source, greeter, cacheRoot } = await greeterSource();
+    expect(skillFilesCacheDirFor(repo)).toBe(cacheRoot);
+
+    const first = await materializeSkillToCache(greeter);
+    expect(first).toBe(join(cacheRoot, source.commit, 'greeter'));
+    expect(readFileSync(join(first!, 'SKILL.md'), 'utf8')).toBe('say hi v1\n');
+    expect(readFileSync(join(first!, 'references', 'notes.md'), 'utf8')).toBe('notes v1\n');
+
+    // Same commit: the complete copy is reused as-is, not rebuilt.
+    writeFileSync(join(first!, 'sentinel'), 'kept\n');
+    expect(await materializeSkillToCache(greeter)).toBe(first);
+    expect(readFileSync(join(first!, 'sentinel'), 'utf8')).toBe('kept\n');
+
+    // A newer commit gets its own directory; the old one is still fresh, so it stays.
+    const v2 = await source.update({ 'SKILL.md': 'say hi v2\n' });
+    const second = await materializeSkillToCache(await listGreeter(repo));
+    expect(second).toBe(join(cacheRoot, v2, 'greeter'));
+    expect(readFileSync(join(second!, 'SKILL.md'), 'utf8')).toBe('say hi v2\n');
+    expect(existsSync(join(second!, 'references'))).toBe(false);
+    expect(existsSync(first!)).toBe(true);
+  });
+
+  it('copies the commit the skill was listed at, not where the ref moved since', async () => {
+    const { source, greeter, cacheRoot } = await greeterSource();
+    // Another project fetches main to v2 between listing and materializing.
+    await source.update({ 'SKILL.md': 'say hi v2\n' });
+
+    const dir = await materializeSkillToCache(greeter);
+    expect(dir).toBe(join(cacheRoot, source.commit, 'greeter'));
+    expect(readFileSync(join(dir!, 'SKILL.md'), 'utf8')).toBe('say hi v1\n');
+    expect(readFileSync(join(dir!, 'references', 'notes.md'), 'utf8')).toBe('notes v1\n');
+  });
+
+  it('falls back to the ref when the listed commit is absent or not in the clone', async () => {
+    const { source, greeter, cacheRoot } = await greeterSource();
+    const v2 = await source.update({ 'SKILL.md': 'say hi v2\n' });
+    const team = greeter.team!;
+    for (const commit of [undefined, 'f'.repeat(40)]) {
+      const dir = await materializeSkillToCache({ ...greeter, team: { ...team, commit } });
+      expect(dir, String(commit)).toBe(join(cacheRoot, v2, 'greeter'));
+      expect(readFileSync(join(dir!, 'SKILL.md'), 'utf8')).toBe('say hi v2\n');
+    }
+  });
+
+  it('prunes commit dirs untouched for a week', async () => {
+    const { repo, source, greeter, cacheRoot } = await greeterSource();
+    expect(await materializeSkillToCache(greeter)).toBe(join(cacheRoot, source.commit, 'greeter'));
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1_000);
+    utimesSync(join(cacheRoot, source.commit), eightDaysAgo, eightDaysAgo);
+
+    const v2 = await source.update({ 'SKILL.md': 'say hi v2\n' });
+    expect(await materializeSkillToCache(await listGreeter(repo))).toBe(join(cacheRoot, v2, 'greeter'));
+    expect(existsSync(join(cacheRoot, source.commit))).toBe(false);
+  });
+
+  it('touches a reused commit dir so pruning measures last use, not creation', async () => {
+    const { source, greeter, cacheRoot } = await greeterSource();
+    expect(await materializeSkillToCache(greeter)).toBe(join(cacheRoot, source.commit, 'greeter'));
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1_000);
+    utimesSync(join(cacheRoot, source.commit), eightDaysAgo, eightDaysAgo);
+
+    expect(await materializeSkillToCache(greeter)).toBe(join(cacheRoot, source.commit, 'greeter'));
+    expect(statSync(join(cacheRoot, source.commit)).mtimeMs).toBeGreaterThan(Date.now() - 60_000);
+  });
+
+  it('degrades to null, never a throw, when the cache cannot be written', async () => {
+    const { home, greeter } = await greeterSource();
+    writeFileSync(join(home, '.cache', 'cez', 'skill-files'), 'not a directory\n');
+    await expect(materializeSkillToCache(greeter)).resolves.toBeNull();
   });
 });

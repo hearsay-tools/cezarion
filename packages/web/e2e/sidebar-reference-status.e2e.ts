@@ -7,6 +7,7 @@ import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { contrastSampleExpression, hoverVisiblePoint, type ContrastSample } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
+// fixture-server starts: 1
 
 // #677: real rows and real CSS. Only the external forge answer is deterministic.
 const statuses = ['draft', 'review-required', 'changes-requested', 'checks-pending', 'checks-failing', 'ready', 'merged', 'closed', 'open', 'completed', 'not-planned'] as const

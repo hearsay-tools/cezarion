@@ -25,7 +25,7 @@ interface SaveSeam {
  * behind says so in its `## Autosave (cezar)` section, never the Progress log,
  * and the same text reaches the cockpit as a note. Periodic commits share one
  * coalesced handoff line and no note.
- * The runner-wire matrix for the same rule is R77/R78
+ * The runner-wire matrix for the same rule is R78/R79
  * (core/harness-autosave-branch.test.ts).
  */
 describe('autosave report in the handoff and cockpit (#1004)', () => {

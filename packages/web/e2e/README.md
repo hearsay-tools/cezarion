@@ -10,6 +10,23 @@ This page is about one thing: how a spec waits. Most red shards on `main`
 and on unrelated pull requests have been sampling races, not product bugs (#369, #393, #394,
 #405, #409), and every one of them looked like a flake until the page state was in hand.
 
+## QA screenshots of one element
+
+Use `browser.screenshotElement(selector, path)` for viewport evidence of a specific
+CSS-selected element. It centres the element in its scroll containers, waits for fonts,
+finite animations and stable geometry, and checks that the whole box is in the viewport
+with uncovered edges before taking the screenshot. This keeps a middle transcript card
+away from the sticky task header (hearsay-tools/cezarion#1135).
+
+```ts
+browser.screenshotElement('[data-slot="hook-card"][data-status="completed"]', evidencePath)
+```
+
+The element must fit in the available viewport. Missing, oversized or covered targets
+fail with the usual diagnostic bundle instead of producing misleading evidence. This
+captures the viewport around the element, not a cropped element or a full-page image.
+Use `browser.screenshot(path)` when the current viewport itself is the evidence.
+
 ## Wait, then read — as one step
 
 agent-browser gives no implicit waits. `click`, `hover` and `fill` act at once, `eval`
@@ -115,7 +132,9 @@ line; the fix is a wait, never a baseline entry.
    `await stopFixtureServer(server)` before `rmSync(dataRoot, ...)`. The server flushes state after
    SIGTERM, so `kill()` alone does not settle cleanup. The helper waits for `exit` and sends
    SIGKILL if graceful shutdown takes more than five seconds. The unit check rejects bare
-   fixture-server kills in e2e specs.
+   fixture-server kills in e2e specs. A spec that starts its own fixture server declares the
+   count on one line after its imports, `// fixture-server starts: N`, and a unit guard checks
+   it (see `fixture-server.md`).
 
 One more rule is enforced by review, not by the scan: **a wait added or changed to fix a flake
 cites its evidence in the comment at the site.** The comment names the failure bundle path (or
@@ -133,6 +152,23 @@ for a CI failure, the run and its `cockpit-failures-shard-<n>` artifact (see
 records what the bundle's `probe.json` showed. `setViewport` in `agent-browser.ts` is the durable
 form: "`cockpit-failures-shard-2` artifacts 11255134650, 11255508374 and 11259950580 (draft
 PR #791)".
+
+Copy this provenance comment and fill every part:
+
+```ts
+// <what changed and why>. Evidence: <spec> failed with "<headline>" (bundle
+// .ai/qa/failures/<spec>/<test>-<n>/: probe.json <key fact>, snapshot.txt <key fact>;
+// <durable citation>). Reproduce with `npm run test:e2e -- <spec>.e2e.ts -t '<name>'` —
+// <failed> of <runs> failed before, <passed> of <runs> passed after.
+```
+
+Three parts are required, and review checks each one (hearsay-tools/cezarion#1093):
+
+| Part | Write |
+| --- | --- |
+| Bundle leaf path | The full `<spec>/<test>-<n>/` directory, named by the rule above, never the `<spec>/` parent. Add the durable citation next to it: the CI run id and its `cockpit-failures-shard-<n>` artifact, or the PR comment for a local bundle. A red run of the reproduction writes a bundle too (`failure-setup.ts` for any failed test with a browser attached, the seam when a wait gives up), so name that bundle. |
+| Reproduction command | The single-test recipe from [Reproducing one test](#reproducing-one-test-locally), or the env-gated delay that made it red. |
+| Before/after counts | Both totals: how many of how many runs failed without the change, and how many of how many passed with it ("2 of 6", "8 of 8" below). A bare count cannot tell 2 of 6 from 2 of 200, nor show whether an after-run still failed. |
 
 The worked example for the counts is `liftWithSpace` in `project-order.e2e.ts`, quoted as it
 stands:
@@ -252,6 +288,8 @@ Evidence and artifacts stay in this checkout's `.ai/qa`.
 A cold boot deletes the previous descriptor before it starts anything. If the boot then fails,
 specs report that no env exists and point at `.ai/qa/test-env-app.log`. Before this change they
 attached to the old env's dead `baseUrl` and repeated its browser notes.
+
+Seeded NDJSON transcripts must go through `seedTranscript` from `seed-transcript.ts`; every nonblank line needs `seq` and `ts` (and `type`), and validation reports the line number and event type before writing.
 
 ## Full local suite in four lanes
 

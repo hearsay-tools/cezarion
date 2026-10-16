@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedTranscript } from './seed-transcript'
 
 import { waitForSettledSample } from './visual-ready'
 import { messageClockExpression } from './transcript-measurements'
@@ -10,6 +11,7 @@ import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './f
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
 import record from './fixtures/thread-run.record.json'
+// fixture-server starts: 1
 
 // Real store/history/reducer/rendering, not live provider execution. Deliberately
 // interleave work between non-blocking sends and replies, unlike the old QA fixture.
@@ -55,7 +57,7 @@ beforeAll(async () => {
   for (const [id, padding] of [[parent, 0], [large, 70]] as const) {
     const lines = events(padding).map((event, n) => ({ seq: n + 1, ts: '2026-09-20T12:05:00Z', ...event }))
     // The long transcript has its own sender identity, keeping direction truthful.
-    writeFileSync(join(root, '.ai/cezar/runs', `${id}.ndjson`), lines.map(line => JSON.stringify(line).replaceAll(parent, id)).join('\n') + '\n')
+    seedTranscript(join(root, '.ai/cezar/runs', `${id}.ndjson`), lines.map(line => JSON.stringify(line).replaceAll(parent, id)).join('\n') + '\n')
   }
   const diagnosticEvents = [
     { ...projection(reqA), deliveredAt: '2026-09-20T12:04:00Z' },
@@ -63,7 +65,7 @@ beforeAll(async () => {
     { type: 'conversation-message', delivery: 'not-delivered', message: { ...follow, kind: 'progress', requestId: undefined,
       text: 'Correct the returned result', state: 'continuation-required', instruction: `Not delivered: worker is done. To resume it with a new instruction, run worker send ${alpha} "<instruction>" --kind request --resume --id <new-message-UUID>; use a new message ID.` } },
   ]
-  writeFileSync(join(root, '.ai/cezar/runs', `${diagnostics}.ndjson`), diagnosticEvents.map((event, n) =>
+  seedTranscript(join(root, '.ai/cezar/runs', `${diagnostics}.ndjson`), diagnosticEvents.map((event, n) =>
     JSON.stringify({ seq: n + 1, ts: '2026-09-20T12:05:00Z', ...event }).replaceAll(parent, diagnostics)).join('\n') + '\n')
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env: fixtureServeEnv(root), stdio: 'ignore' })
   base = await waitForFixtureServer(server)

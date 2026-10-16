@@ -289,6 +289,23 @@ describe('collectSubagents — children', () => {
     expect(subagentChildren(turns, 'a').map((c) => c.id)).toEqual(['c1'])
   })
 
+  it('includes a sub-agent’s hooks in its drill-down without counting them as tools (#961)', () => {
+    const hook: ThreadEntry = {
+      kind: 'hook', id: 'h1', event: 'PostToolUse', status: 'completed', entries: [{ kind: 'context', text: 'ctx' }], parentItemId: 'a',
+    }
+    const turns = [turn('turn-1', [task('a', 'running'), childTool('c1', 'a', 'Ran npm test'), hook])]
+    expect(subagentChildren(turns, 'a').map((c) => c.id)).toEqual(['c1', 'h1'])
+    expect(collectSubagents(turns)[0]!.toolCalls).toBe(1)
+  })
+
+  it('reads a hook-only latest child as the activity line (#961)', () => {
+    const hook = (status: 'completed' | 'failed'): ThreadEntry => ({
+      kind: 'hook', id: 'h1', event: 'Stop', status, entries: [{ kind: 'error', text: 'x' }], parentItemId: 'a',
+    })
+    expect(collectSubagents([turn('turn-1', [task('a', 'running'), hook('completed')])])[0]!.activity).toBe('Stop hook')
+    expect(collectSubagents([turn('turn-1', [task('a', 'running'), hook('failed')])])[0]!.activity).toBe('Stop hook failed')
+  })
+
   it('leaves activity undefined when the agent has no children yet', () => {
     const agents = collectSubagents([turn('turn-1', [task('a', 'running')])])
     expect(agents[0]!.activity).toBeUndefined()

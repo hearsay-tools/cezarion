@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedTranscript } from './seed-transcript'
 
 import { captureFixtureServer, spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
@@ -11,6 +12,7 @@ import record from './fixtures/thread-run.record.json'
 import { waitForStatus } from './poll'
 import { settleVisual, waitForSettledSample } from './visual-ready'
 import { HISTORY_BOUNDARY_SLACK_PX, isNearHistoryStart } from '../src/routes/task-thread/thread-scroll'
+// fixture-server starts: 1
 
 const repoRoot = resolve(import.meta.dirname, '../../..')
 const artifactsDir = resolve(repoRoot, '.ai/qa/artifacts_e2e')
@@ -261,10 +263,9 @@ beforeAll(async () => {
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
   writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN, RUN_B], null, 2), 'utf8')
   for (const runId of [RUN_ID, RUN_B_ID]) {
-    writeFileSync(
+    seedTranscript(
       join(dataRoot, '.ai/cezar/runs', `${runId}.ndjson`),
       events.map((event) => JSON.stringify(event)).join('\n') + '\n',
-      'utf8',
     )
   }
 

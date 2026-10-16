@@ -26,6 +26,27 @@ export async function removeAfterOwnedWork(root: string, ownedWork: Promise<void
   rmSync(root, { recursive: true, force: true });
 }
 
+/**
+ * Every automatic (scheduled) full destroy attempt the service starts from here on, as the promise
+ * of its settlement (hearsay-tools/cezarion#1109). Ticks that skip an unchanged destroy start none.
+ * A test that waits for a background retry to finish awaits the attempt itself: what one full
+ * attempt costs is real Git, `/proc` scans and the mutation-lock keeper, and a wall-clock window
+ * sized for an idle host is shorter than that attempt at load ~90.
+ */
+export function scheduledDestroyAttempts(service: DelegationService): Array<Promise<unknown>> {
+  const started: Array<Promise<unknown>> = [];
+  type Attempt = (project: unknown, workerId: string, check: unknown, mode: 'manual' | 'scheduled') => Promise<unknown>;
+  const target = service as unknown as { destroyAttempt: Attempt };
+  const original = target.destroyAttempt.bind(service);
+  target.destroyAttempt = (...args) => {
+    const attempt = original(...args);
+    // Settled either way: a thrown attempt is still the one the test waited for.
+    if (args[3] === 'scheduled') started.push(attempt.then(result => result, (error: unknown) => error));
+    return attempt;
+  };
+  return started;
+}
+
 export function fixture(): { root: string; sha: string; store: RunStore; manager: RunManager; parent: RunRecord; credentials: CredentialRegistry; caller: Caller; token: string; service: DelegationService; close(): Promise<void> } {
   const root = mkdtempSync(join(tmpdir(), 'cez-delegation-service-'));
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });

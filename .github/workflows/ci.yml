@@ -524,11 +524,14 @@ jobs:
   # Automated code review (spec .ai/specs/2026-10-15-review-inside-ci.md). It
   # starts only after verify succeeds, so no job waits on CI. Model keys go to
   # this call alone, never `secrets: inherit`. The called jobs narrow these
-  # permissions per job; only the trusted poster gets the write scopes.
+  # permissions per job; only the trusted poster gets the write scopes. The status
+  # function keeps GitHub from adding its implicit success(), which reads false
+  # when a shard before verify was skipped, as every docs-only, infra-only and
+  # bump PR skips them (hearsay-tools/cezarion#1100).
   review:
     name: Review
     needs: verify
-    if: github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main' }}
     permissions:
       actions: read
       contents: write

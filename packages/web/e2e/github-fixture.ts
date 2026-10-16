@@ -4,7 +4,7 @@ import {
   formatGitHubNavFailure,
   GITHUB_TAB_MARKUP_JS,
   githubSurfaceReadyJs,
-} from '../src/lib/github-nav-contract'
+} from './github-nav-contract'
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')

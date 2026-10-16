@@ -795,18 +795,28 @@ test('both model jobs run on provider and round alone, and recheck verification 
   }
 });
 
-test('the Automated Code Review check fails on new or still-open finding threads', async () => {
+test('the Automated Code Review check fails on new or still-open finding threads', async (t) => {
   const { parse } = await import('yaml');
   const { spawnSync } = require('node:child_process');
+  const { tmpdir } = require('node:os');
   const workflow = parse(fs.readFileSync(workflowPath, 'utf8'));
   const [step] = workflow.jobs['review-complete'].steps;
   const passing = {
     VALIDATE_RESULT: 'success', REVIEW_ROUND_RESULT: 'success', CAN_REVIEW: 'true', PROVIDER: 'codex',
     CLAUDE_RESULT: 'skipped', CODEX_RESULT: 'success', POST_RESULT: 'success', NEW_THREADS: '0', OPEN_THREADS: '0',
+    PR_NUMBER: '42',
   };
-  const run = (overrides) => spawnSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c', step.run], {
-    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', ...passing, ...overrides }, encoding: 'utf8',
-  });
+  const cwd = fs.mkdtempSync(path.join(tmpdir(), 'review-verdict-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  let runs = 0;
+  // GitHub always sets GITHUB_STEP_SUMMARY; each run gets its own file.
+  const run = (overrides) => {
+    const summaryPath = path.join(cwd, `summary-${runs++}.md`);
+    const result = spawnSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c', step.run], {
+      env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', GITHUB_STEP_SUMMARY: summaryPath, ...passing, ...overrides }, encoding: 'utf8',
+    });
+    return { ...result, summary: fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf8') : '' };
+  };
   const cases = [
     ['a clean review', {}, 0],
     ['a skip with nothing open', { CAN_REVIEW: 'false', PROVIDER: '', CODEX_RESULT: 'skipped' }, 0],
@@ -825,10 +835,25 @@ test('the Automated Code Review check fails on new or still-open finding threads
     const result = run(overrides);
     assert.equal(result.status, status, `${label}: ${result.stdout}${result.stderr}`);
   }
-  assert.match(run({ NEW_THREADS: '2', OPEN_THREADS: '2' }).stdout, /opened 2 new finding thread/);
-  // Re-running the round alone never judges a pushback reply: the patch-ID guard skips the model.
-  assert.match(run({ NEW_THREADS: '2', OPEN_THREADS: '2' }).stdout, /run this workflow manually with pr_number, then re-run Review \/ review-round/);
-  assert.match(run({ OPEN_THREADS: '3' }).stdout, /3 automated review thread\(s\) are still unresolved/);
+  const opened = run({ NEW_THREADS: '2', OPEN_THREADS: '2' });
+  const stillOpen = run({ OPEN_THREADS: '3' });
+  assert.match(opened.stdout, /opened 2 new finding thread/);
+  assert.match(stillOpen.stdout, /3 automated review thread\(s\) are still unresolved/);
+  // Re-running a CI round never judges a pushback reply: the patch-ID guard skips the model on an unchanged patch.
+  for (const result of [opened, stillOpen]) {
+    assert.match(result.stdout, /run this workflow manually with pr_number, then re-run Review \/ review-round/);
+    assert.match(result.stdout, /gh workflow run automated-code-review\.yml -f pr_number=42\b/);
+  }
+  // Re-run failed jobs reruns only the verdict, which reads post-review's old open_threads output.
+  assert.match(stillOpen.stdout, /Re-running the failed jobs alone reuses the old count\./);
+  assert.match(stillOpen.stdout, /resolved them by hand, re-run Review \/ review-round/);
+  // `gh run view` shows the step summary without the log, so it carries the notice text verbatim.
+  for (const result of [opened, stillOpen]) {
+    const notice = result.stdout.match(/^::notice::(.*)$/m)?.[1];
+    assert.ok(notice, result.stdout);
+    assert.equal(result.summary, `${notice}\n`);
+  }
+  assert.equal(run({}).summary, '', 'a green verdict writes no summary');
 });
 
 test('App-authored upstream-scan PRs skip review through the trusted classifier', () => {
@@ -875,7 +900,41 @@ test('ci.yml starts the review after verify and owns the required Automated Code
     ANTHROPIC_API_KEY: '${{ secrets.ANTHROPIC_API_KEY }}',
     OPENAI_API_KEY: '${{ secrets.OPENAI_API_KEY }}',
   }, 'pass the model keys alone, never `secrets: inherit`');
-  for (const [context, expected] of routing) assert.equal(evaluate(caller.if, { github: context }), expected, JSON.stringify(context));
+  // GitHub wraps a job `if:` holding no status function in `success()`, and that `success()`
+  // is false once any job upstream, however far, did not succeed: a skipped shard included.
+  const upstream = name => {
+    const seen = new Set();
+    const walk = job => [ci.jobs[job].needs ?? []].flat().forEach(dep => seen.has(dep) || (seen.add(dep), walk(dep)));
+    walk(name);
+    return [...seen];
+  };
+  const runs = (name, { github: context, results, cancelled = false }) => {
+    const job = ci.jobs[name];
+    const condition = job.if.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+    const before = upstream(name).map(dep => results[dep]);
+    return evaluate(/\b(success|failure|cancelled|always)\(/.test(condition) ? condition : `success() && (${condition})`, {
+      github: context,
+      needs: Object.fromEntries([job.needs].flat().map(dep => [dep, { result: results[dep] }])),
+      cancelled: () => cancelled,
+      success: () => !cancelled && before.every(result => result === 'success'),
+      failure: () => before.includes('failure'),
+    });
+  };
+  const shards = ['vitest', 'node-floor', 'cockpit-browser'];
+  const outcome = (shardResult, verifyResult) => Object.fromEntries(Object.keys(ci.jobs).map(job => [job,
+    job === 'verify' ? verifyResult : shards.includes(job) ? shardResult : 'success']));
+  for (const [context, expected] of routing) {
+    assert.equal(runs('review', { github: context, results: outcome('success', 'success') }), expected, JSON.stringify(context));
+  }
+  const pr = routing[0][0];
+  // Docs-only, infra-only and verified bump PRs skip every shard by design, and verify succeeds.
+  assert.equal(runs('review', { github: pr, results: outcome('skipped', 'success') }), true,
+    'a verify that succeeds after skipped shards must still start the review');
+  for (const [shardResult, verifyResult] of [['failure', 'failure'], ['cancelled', 'cancelled'], ['skipped', 'failure'], ['success', 'skipped']]) {
+    assert.equal(runs('review', { github: pr, results: outcome(shardResult, verifyResult) }), false, `verify ${verifyResult}`);
+  }
+  assert.equal(runs('review', { github: pr, results: outcome('skipped', 'success'), cancelled: true }), false,
+    'a cancelled run starts no review');
 
   // A called job asking for more than the caller grants fails the whole run; granting more
   // than any called job uses widens every called job's ceiling for nothing.

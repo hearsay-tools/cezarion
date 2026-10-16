@@ -10,7 +10,7 @@ import { paletteHex } from '@/test/palette'
 
 import { setApiScope } from '@open-mercato/cezar-api-client'
 import type { RunEvent } from '@open-mercato/cezar-api-client'
-import type { UiToolItem } from '@open-mercato/cezar-api-client'
+import type { UiHookItem, UiToolItem } from '@open-mercato/cezar-api-client'
 
 import bashAndScreenshot from '../../../../cezar/src/core/__fixtures__/claude/bash-and-screenshot.expected.json'
 import failedAndDenied from '../../../../cezar/src/core/__fixtures__/claude/failed-and-denied.expected.json'
@@ -21,6 +21,8 @@ import { TaskFileContext } from './file-links'
 import { groupThreadItems } from './thread-groups'
 import {
   ContextGroup,
+  HookCard,
+  hookDetail,
   isNearBottom,
   OUTPUT_CLAMP_LINES,
   AssistantMessage,
@@ -85,6 +87,96 @@ const asRunEvents = (events: object[]): RunEvent[] =>
 
 const card = () => document.querySelector('[data-slot="tool-card"]')!
 const trigger = (name: RegExp) => screen.getByRole('button', { name })
+
+describe('HookCard (#961)', () => {
+  const hook = (extra: Partial<UiHookItem> = {}): UiHookItem => ({
+    kind: 'hook',
+    id: 'hook_h1',
+    event: 'SessionStart',
+    name: 'SessionStart:startup',
+    status: 'completed',
+    entries: [{ kind: 'context', text: 'SQUEAL · registered at revision 0\nKnown failures: 0' }],
+    stdout: '{"hookSpecificOutput":{}}',
+    exitCode: 0,
+    ...extra,
+  })
+  const hookCard = () => document.querySelector('[data-slot="hook-card"]')!
+
+  it('hookDetail splits the native name at the matcher', () => {
+    expect(hookDetail(hook())).toBe('SessionStart · startup')
+    expect(hookDetail(hook({ event: 'PreToolUse', name: 'PreToolUse:Bash' }))).toBe('PreToolUse · Bash')
+    expect(hookDetail(hook({ event: 'Stop', name: undefined }))).toBe('Stop')
+  })
+
+  it('renders verb, detail and a context label, collapsed by default', () => {
+    render(<HookCard item={hook()} />)
+    const button = screen.getByRole('button', { name: /Hook.*SessionStart · startup/ })
+    expect(button.textContent).toContain('context')
+    expect(hookCard().getAttribute('data-state')).toBe('closed')
+    expect(screen.queryByText(/Known failures/)).toBeNull()
+  })
+
+  it('expands to multiline entries with whitespace preserved', () => {
+    render(<HookCard item={hook()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Hook/ }))
+    const entry = document.querySelector('[data-slot="hook-entry"]')!
+    expect(entry.textContent).toBe('SQUEAL · registered at revision 0\nKnown failures: 0')
+    expect(entry.className).toContain('whitespace-pre-wrap')
+  })
+
+  it('source path and raw-output toggle use the AA muted token on card-2', () => {
+    render(<HookCard item={hook({ source: '/plugins/squeal/hooks/stop.sh', stdout: '{}', exitCode: 0 })} />)
+    fireEvent.click(screen.getByRole('button', { name: /Hook/ }))
+    // `text-soft-foreground` on bg-card-2 is 4.37:1 in light, below AA for 11–12 px text.
+    for (const slot of ['hook-source', 'hook-raw-toggle']) {
+      const element = document.querySelector(`[data-slot="${slot}"]`)!
+      expect(element.className, slot).toContain('text-muted-foreground')
+      expect(element.className, slot).not.toContain('text-soft-foreground')
+    }
+  })
+
+  it('shows failed + exit pill and danger border for failed/blocked', () => {
+    for (const status of ['failed', 'blocked'] as const) {
+      render(<HookCard item={hook({ status, exitCode: 2, entries: [{ kind: 'error', text: 'boom' }] })} />)
+      expect(hookCard().getAttribute('data-status')).toBe(status)
+      expect(hookCard().className).toContain('border-danger/25')
+      const button = screen.getByRole('button', { name: /Hook/ })
+      expect(button.textContent).toContain(status)
+      expect(button.querySelector('[data-slot="hook-exit"]')?.textContent).toBe('2')
+      fireEvent.click(button)
+      // The AA-tuned red word token: plain `text-danger` on bg-card-2 is 4.05:1 in dark.
+      expect(document.querySelector('[data-slot="hook-entry"]')!.className).toContain('text-signal-word-red')
+      cleanup()
+    }
+  })
+
+  it('raw output toggle reveals stdout and stderr', () => {
+    render(<HookCard item={hook({ stderr: 'warn: slow' })} />)
+    fireEvent.click(screen.getByRole('button', { name: /Hook/ }))
+    expect(screen.queryByText('warn: slow')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Raw output · exit 0/ }))
+    expect(screen.getByText('{"hookSpecificOutput":{}}')).toBeTruthy()
+    expect(screen.getByText('warn: slow')).toBeTruthy()
+  })
+
+  it('shows source path when present', () => {
+    render(<HookCard item={hook({ source: '/home/u/.codex/plugins/squeal/hooks.json' })} />)
+    fireEvent.click(screen.getByRole('button', { name: /Hook/ }))
+    expect(screen.getByText('/home/u/.codex/plugins/squeal/hooks.json')).toBeTruthy()
+  })
+
+  it('trigger is keyboard-operable', () => {
+    // A native, enabled <button>: Enter and Space activate it in every browser, and it
+    // takes Tab focus — jsdom does not synthesize the click, so assert the contract.
+    render(<HookCard item={hook()} />)
+    const button = screen.getByRole('button', { name: /Hook/ })
+    expect(button.tagName).toBe('BUTTON')
+    expect(button.hasAttribute('disabled')).toBe(false)
+    expect(button.getAttribute('tabindex')).not.toBe('-1')
+    button.focus()
+    expect(document.activeElement).toBe(button)
+  })
+})
 
 describe('ToolCard — states', () => {
   it('keeps the complete command in the tooltip and expanded row', () => {

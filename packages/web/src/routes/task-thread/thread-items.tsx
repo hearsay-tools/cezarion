@@ -1,11 +1,11 @@
-import { BrainIcon, FileTextIcon, FolderInputIcon, GlobeIcon, LoaderCircleIcon, MessageSquareIcon, SendIcon, SquarePenIcon, SquareTerminalIcon } from 'lucide-react'
+import { AnchorIcon, BrainIcon, FileTextIcon, FolderInputIcon, GlobeIcon, LoaderCircleIcon, MessageSquareIcon, SendIcon, SquarePenIcon, SquareTerminalIcon } from 'lucide-react'
 import { BotIcon, ChevronRightIcon, CopyIcon, ListTodoIcon, PaperclipIcon, SearchIcon, Trash2Icon, WrenchIcon } from '@/components/design-icons'
 import { useContext, useEffect, useId, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { ZoomableImage } from '@/components/zoomable-image'
 import { Link } from '@/lib/project-router'
-import { resolveApiUrl, isImageAttachmentName, type FileDiff, type ToolKind, type UiToolItem } from '@open-mercato/cezar-api-client'
+import { resolveApiUrl, isImageAttachmentName, type FileDiff, type ToolKind, type UiHookItem, type UiToolItem } from '@open-mercato/cezar-api-client'
 import { cn } from '@/lib/utils'
 
 import { fullExecCommand } from './exec-command'
@@ -1058,6 +1058,96 @@ export function ToolCard({
             <div data-slot="tool-nested" className="flex flex-col gap-2 border-l-2 border-border py-2.5 pr-3 pl-3 ml-4 my-2">
               {renderNested?.(nested, cacheKey ?? item.id)}
             </div>
+          ) : null}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+/** "SessionStart · startup" from the native label `SessionStart:startup`; the bare event
+ *  when the backend sent no richer name. */
+export function hookDetail(item: UiHookItem): string {
+  const name = item.name ?? item.event
+  const colon = name.indexOf(':')
+  return colon > 0 ? `${name.slice(0, colon)} · ${name.slice(colon + 1)}` : name
+}
+
+/**
+ * One native hook run (#961): what a hook told the agent, or how it failed. Same card geometry
+ * as `ToolCard` so it lines up with the tool calls around it; collapsed by default. The body
+ * shows the extracted entries (what the agent received); the raw stdout/stderr sit behind a
+ * second, smaller toggle.
+ */
+export function HookCard({ item, cacheKey }: { item: UiHookItem; cacheKey?: string }) {
+  const cache = useThreadCardCache()
+  const [userOpen, setUserOpenState] = useState<boolean>(
+    () => (cacheKey !== undefined ? (cache?.get(cacheKey) ?? false) : false),
+  )
+  const setUserOpen = (open: boolean) => {
+    if (cacheKey !== undefined) cache?.set(cacheKey, open)
+    setUserOpenState(open)
+  }
+  const failed = item.status !== 'completed'
+  const hasContext = item.entries.some((entry) => entry.kind === 'context')
+  const hasRaw = (item.stdout ?? '') !== '' || (item.stderr ?? '') !== ''
+  const detail = hookDetail(item)
+  return (
+    <Collapsible
+      data-slot="hook-card"
+      data-status={item.status}
+      open={userOpen}
+      onOpenChange={setUserOpen}
+      className={cn('min-w-0 overflow-hidden rounded-md border bg-card', failed ? 'border-danger/25' : 'border-border')}
+    >
+      <CollapsibleTrigger className="group flex min-h-[28px] w-full items-center gap-1.5 px-2.5 py-0.5 text-left text-[13px] hover:bg-muted">
+        <ChevronRightIcon aria-hidden className="size-3 shrink-0 text-soft-foreground transition-transform group-data-[state=open]:rotate-90" />
+        <AnchorIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="shrink-0 font-semibold">Hook</span>
+        <code title={detail} className="block min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{detail}</code>
+        <span className="ml-auto flex shrink-0 items-center gap-2 pl-2">
+          {failed ? <span className="text-xs text-muted-foreground">{item.status}</span> : hasContext ? <span className="text-xs text-soft-foreground">context</span> : null}
+          {failed && typeof item.exitCode === 'number' && item.exitCode !== 0 ? (
+            <span data-slot="hook-exit" className="rounded-full bg-danger/10 px-2 py-px font-mono text-[11px] font-semibold text-danger">
+              {item.exitCode}
+            </span>
+          ) : null}
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="border-t border-border bg-card-2">
+          {item.entries.map((entry, index) => (
+            <pre
+              key={index}
+              data-slot="hook-entry"
+              data-kind={entry.kind}
+              className={cn(
+                'px-3 py-2 font-mono text-xs leading-[1.7] whitespace-pre-wrap [overflow-wrap:anywhere]',
+                // Red words at text size use the AA-tuned token; `text-danger` is 4.05:1 on card-2 in dark.
+                (entry.kind === 'error' || entry.kind === 'stop') && 'text-signal-word-red',
+              )}
+            >
+              {entry.text}
+            </pre>
+          ))}
+          {item.source !== undefined ? (
+            <p data-slot="hook-source" className="px-3 pb-2 font-mono text-[11px] text-muted-foreground [overflow-wrap:anywhere]">{item.source}</p>
+          ) : null}
+          {hasRaw ? (
+            <Collapsible className="border-t border-border">
+              <CollapsibleTrigger data-slot="hook-raw-toggle" className="group flex w-full items-center gap-1 px-3 py-1 text-left text-xs text-muted-foreground hover:text-foreground">
+                <ChevronRightIcon aria-hidden className="size-3 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+                {`Raw output${typeof item.exitCode === 'number' ? ` · exit ${item.exitCode}` : ''}`}
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                {item.stdout ? (
+                  <pre data-slot="hook-stdout" className="px-3 py-2 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere]">{item.stdout}</pre>
+                ) : null}
+                {item.stderr ? (
+                  <pre data-slot="hook-stderr" className="px-3 py-2 font-mono text-xs whitespace-pre-wrap text-signal-word-red [overflow-wrap:anywhere]">{item.stderr}</pre>
+                ) : null}
+              </CollapsibleContent>
+            </Collapsible>
           ) : null}
         </div>
       </CollapsibleContent>

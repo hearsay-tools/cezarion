@@ -1,0 +1,173 @@
+[
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "hook",
+      "id": "hook_a1000000-0000-4000-8000-000000000001",
+      "event": "SessionStart",
+      "name": "SessionStart:startup",
+      "status": "completed",
+      "entries": [
+        {
+          "kind": "context",
+          "text": "SQUEAL · registered at revision 0\nKnown failures: 0"
+        }
+      ],
+      "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"SQUEAL · registered at revision 0\\nKnown failures: 0\"}}",
+      "exitCode": 0
+    }
+  },
+  {
+    "type": "session.started",
+    "sessionId": "5d1e7a90-3c4b-4f6a-9e21-0a1b2c3d4e5f",
+    "backend": "claude",
+    "model": "claude-fable-5",
+    "cwd": "/repo",
+    "tools": [
+      "Bash",
+      "Edit",
+      "Write"
+    ]
+  },
+  {
+    "type": "turn.started",
+    "turnId": "turn_1"
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_hook_1",
+      "name": "Bash",
+      "toolKind": "execute",
+      "title": "Ran npm test",
+      "status": "running",
+      "input": {
+        "command": "npm test"
+      }
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_hook_1",
+      "name": "Bash",
+      "toolKind": "execute",
+      "title": "Ran npm test",
+      "status": "completed",
+      "input": {
+        "command": "npm test"
+      },
+      "output": "ok"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "hook",
+      "id": "hook_a1000000-0000-4000-8000-000000000003",
+      "event": "PostToolBatch",
+      "status": "completed",
+      "entries": [
+        {
+          "kind": "context",
+          "text": "line one\nline two"
+        }
+      ],
+      "stdout": "line one\nline two\n",
+      "exitCode": 0
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "hook",
+      "id": "hook_a1000000-0000-4000-8000-000000000004",
+      "event": "PreToolUse",
+      "name": "PreToolUse:Edit",
+      "status": "blocked",
+      "entries": [
+        {
+          "kind": "error",
+          "text": "blocked by policy"
+        }
+      ],
+      "stderr": "blocked by policy",
+      "exitCode": 2
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "hook",
+      "id": "hook_a1000000-0000-4000-8000-000000000005",
+      "event": "PreToolUse",
+      "name": "PreToolUse:Write",
+      "status": "blocked",
+      "entries": [
+        {
+          "kind": "stop",
+          "text": "no writes"
+        }
+      ],
+      "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"no writes\"}}",
+      "exitCode": 0
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "item_1",
+      "role": "assistant",
+      "text": "Done."
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "item_1",
+      "role": "assistant",
+      "text": "Done."
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "hook",
+      "id": "hook_a1000000-0000-4000-8000-000000000006",
+      "event": "Stop",
+      "status": "failed",
+      "entries": [
+        {
+          "kind": "error",
+          "text": "boom"
+        }
+      ],
+      "stderr": "boom\n",
+      "exitCode": 1
+    }
+  },
+  {
+    "type": "turn.completed",
+    "turnId": "turn_1",
+    "stopReason": "end_turn",
+    "usage": {
+      "input": 130,
+      "output": 23,
+      "total": 153
+    },
+    "costUsd": 0.001
+  },
+  {
+    "type": "usage.updated",
+    "usage": {
+      "input": 130,
+      "output": 23,
+      "total": 153
+    },
+    "costUsd": 0.001
+  }
+]

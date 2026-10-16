@@ -396,6 +396,12 @@ composer names the project it will run in.
 **Adding a project** — the **+** button on the desktop rail (or in the mobile
 navigation drawer):
 
+- ✨ **New project…** creates a git repository with one empty commit in the checkout
+  root and registers it. Optionally — only when you switch it on — it also creates a
+  **private** GitHub repository under your account or one of your organizations, empty or
+  from a GitHub template. If GitHub setup fails after the repository exists, the local
+  project is kept and the dialog shows the command that finishes it. A hosted cockpit
+  creates local projects only.
 - 📂 **Open local folder…** browses from the configured browse root
   (**Settings → Projects**, default `~/`) in a folder picker and
   registers the folder you pick.
@@ -818,6 +824,20 @@ it is given, except `task`, which merges key by key (`null` removes one); it res
 and echoes the revision it read, so a concurrent edit in the cockpit is refused (exit 2), never
 overwritten. Mutating commands print the automation's cockpit page as `url`.
 
+GitHub automations exclude events before enablement by default. Turn on **Include existing items**
+in the editor, pass `--include-existing` to `add`, or set `"filters": {"includeExisting": true,
+"lookbackDays": 7, "maxRecords": 25}` in a JSON definition to include older matches within the
+lookback (1–90 days). Turning this on for an enabled automation reopens that window on its next
+check. Changing only the lookback preserves the completed cursor; pause and re-enable to
+reopen the wider history window. Previously processed matches stay deduplicated across edits, pauses and restarts, and
+per-check limits still apply. Historical scans resume across checks and restarts when capped.
+GitHub search is limited to 1,000 items per window and label timelines to 100 events per item;
+reaching either limit reports an error with guidance to narrow the filters or lookback. **Test filter** previews the selected window independently of the
+execution cursor; it never launches tasks. For label triggers, the window applies to the label
+event's time, so a newly added label can match an old issue even with history off. Historical
+label discovery revisits the rolling window because later comments can move issues between pages;
+receipts prevent those repeated observations from launching duplicate tasks.
+
 The address comes from `CEZ_COCKPIT_URL` and `CEZ_PROJECT_ID`, which the cockpit puts in a task's
 environment. Without them, only an explicit `--url`, `--repo` or `CEZ_URL` looks for a cockpit;
 otherwise the command exits 2 and never starts a server. With automations off, the cockpit's `409`
@@ -919,7 +939,7 @@ Useful environment variables:
 | `CEZ_CURSOR_BIN=/path/to/agent` | Override the Cursor CLI (`agent`) executable. |
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME` | The agents' **own** variables, honoured where the vendor documents one. Setting one moves that agent's **default account** — the config folder cezar discovers. A *second* login of the same CLI is deliberately not an environment setting, since one process-wide value cannot differ per project: add it under **Settings → Agent accounts** and pick it per project. |
 | `CEZ_BROWSE_ROOT=~/` | Default root for **Add project → Open local folder…**. The picker cannot navigate above it; a saved workspace value overrides the environment default and must name an existing folder. |
-| `CEZ_PROJECTS_DIR=~/cezar/projects` | Default destination for **Clone from GitHub**. Saved workspace settings override it, and missing directories are created recursively. |
+| `CEZ_PROJECTS_DIR=~/cezar/projects` | Default destination for **Clone from GitHub** and **New project**. Saved workspace settings override it, and missing directories are created recursively. |
 | `CEZ_SKILLS_AUTO_UPDATE=0` | Disable automatic checks and updates for upstream-CLI-tracked Open Mercato skill installations. On by default; a saved global Skills setting overrides this environment default. Checks are delayed, bounded, cached, and non-blocking. |
 | `CEZ_PROJECT_WARMUP=0` | Prepare each registered project only when it is first opened. By default the cockpit prepares every other registered project in the background once it listens, one at a time, most recently opened first: the run store opens and interrupted runs resume, so the first click on a project does not wait. A project another live cockpit serves is skipped. |
 | `CEZ_AUTONOMOUS_DEFAULT=0` | Seed the New Task Autonomous default (`0` or `1`). Without a seed, skills default on and workflows off; a saved global Resources setting overrides it. |

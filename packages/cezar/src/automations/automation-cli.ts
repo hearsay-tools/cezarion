@@ -49,7 +49,7 @@ One JSON object per invocation; exit 0 ok, 1 check failed, 2 refused or no cockp
                                            paused unless --enable
   add --name <name> (--cron "<M H * * *>" | --on <event>[,<event>] [--every <5m|1h>])
       [--prompt <text> | --prompt-file <path>] [--workflow <w>] [--runner <id>] [--model <m>]
-      [--autonomous | --no-autonomous] [--label <l>]... [--author <a>]... [--changed-label <l>]... [--enable]
+      [--autonomous | --no-autonomous] [--label <l>]... [--author <a>]... [--changed-label <l>]... [--include-existing] [--enable]
                                            the same from flags. --cron takes "M H * * *" (daily), "M H * * 1-5"
                                            (weekdays), "M H * * D" (0 or 7 = Sunday) or "0 */N * * *"
                                            (N in 1,2,3,4,6,8,12); anything else needs the JSON form
@@ -82,6 +82,7 @@ const ADD_FLAGS = {
   autonomous: { type: 'boolean' }, 'no-autonomous': { type: 'boolean' },
   label: { type: 'string', multiple: true }, author: { type: 'string', multiple: true },
   'changed-label': { type: 'string', multiple: true },
+  'include-existing': { type: 'boolean' },
   enable: { type: 'boolean' },
 } as const;
 
@@ -120,7 +121,7 @@ export function parseEvery(value: string): number {
 export interface AddFlags {
   name?: string; cron?: string; on?: string; every?: string;
   workflow?: string; runner?: string; model?: string; autonomous?: boolean; 'no-autonomous'?: boolean;
-  label?: string[]; author?: string[]; 'changed-label'?: string[]; enable?: boolean;
+  label?: string[]; author?: string[]; 'changed-label'?: string[]; 'include-existing'?: boolean; enable?: boolean;
 }
 
 /** The `add` flags as the `create` body they stand for. Anything they cannot say is exit 64. */
@@ -128,6 +129,7 @@ export function bodyFromAddFlags(values: AddFlags, prompt: string): CreateAutoma
   if (!values.name?.trim()) usageError('--name is required');
   if (!prompt.trim()) usageError('--prompt (or --prompt-file) is required');
   if (values.cron && values.on) usageError('give --cron (a schedule) OR --on (a GitHub poll), not both');
+  if (values.cron && values['include-existing']) usageError('--include-existing applies only to a GitHub poll');
   if (!values.cron && !values.on) usageError('give --cron "<M H * * *>" for a schedule or --on <event> for a GitHub poll');
   if (values.autonomous && values['no-autonomous']) usageError('give --autonomous OR --no-autonomous, not both');
   const task: CreateAutomationInput['task'] = { prompt, worktree: true, autonomous: !values['no-autonomous'] };
@@ -143,6 +145,7 @@ export function bodyFromAddFlags(values: AddFlags, prompt: string): CreateAutoma
     body = { name: values.name.trim(), kind: 'schedule', schedule, task };
   } else {
     const filters: NonNullable<CreateAutomationInput['filters']> = { lookbackDays: 7, maxRecords: 25 };
+    if (values['include-existing']) filters.includeExisting = true;
     if (values.label?.length) filters.anyLabels = values.label;
     if (values.author?.length) filters.authors = values.author;
     if (values['changed-label']?.length) filters.changedLabels = values['changed-label'];

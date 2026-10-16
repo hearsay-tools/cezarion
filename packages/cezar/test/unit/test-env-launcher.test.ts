@@ -105,6 +105,7 @@ case "$*" in
   'exec -w @wjarka/cezarion -- tsc '*) server "\${out:-packages/cezar/dist}" ;;
   'run build -w @open-mercato/cezar-web'*)
     printf '%s\\n' "\${VITE_CEZ_E2E:-production}" >> .ai/build-invocations
+    printf '%s\\n' "\${NODE_ENV-unset}" >> .ai/build-node-env
     web "\${out:-packages/cezar/web/dist}"
     ;;
   'run build')
@@ -140,7 +141,7 @@ done
   symlinkSync('npm', join(root, 'bin/pnpm'));
   // The served project is a clone of this checkout, so the fixture is a repository whose
   // generated state is ignored the way the real one's is.
-  writeFileSync(join(root, '.gitignore'), '/.ai/qa/\n/bin/\nnode_modules/\n/packages/cezar/dist/\n/packages/cezar/web/\n/.ai/build-invocations\n/.ai/inline-contract-dist\n/.ai/app-argv\n/.ai/app-cez-env\n/app.pid\n');
+  writeFileSync(join(root, '.gitignore'), '/.ai/qa/\n/bin/\nnode_modules/\n/packages/cezar/dist/\n/packages/cezar/web/\n/.ai/build-invocations\n/.ai/build-node-env\n/.ai/inline-contract-dist\n/.ai/app-argv\n/.ai/app-cez-env\n/app.pid\n');
   const git = (...args: string[]) => execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@cezar.invalid', ...args], {
     env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, stdio: 'ignore',
   });
@@ -205,6 +206,22 @@ test('the bootstrap builds into the ignored mirror and never writes the producti
   assert.equal(statSync(join(fixture.root, 'packages/cezar/dist/index.js')).mtimeMs, productionMtime);
   spawnSync('/bin/sh', [down], { encoding: 'utf8', env, timeout: 20_000 });
   launchedPids.delete(descriptor(fixture.root).app.pid);
+});
+
+// hearsay-tools/cezarion#1087: Squeal drives the e2e Vitest project directly, so its globalSetup
+// runs test-env-up.sh -> build-e2e.sh with Vitest's NODE_ENV=test inherited. Vite then built a
+// development bundle (import.meta.env.DEV true): the cockpit pointed its SharedWorker at the
+// dev-server-only `/assets/live-worker-*.ts`, the worker failed, every document fell back to
+// finite HTTP polling and `window.__cezLive` never became true.
+test('the e2e cockpit is a production bundle whatever NODE_ENV the caller inherited', () => {
+  const fixture = makeFixture(false);
+  for (const inherited of ['test', 'development', undefined]) {
+    const env: NodeJS.ProcessEnv = { ...process.env, PATH: fixture.path };
+    if (inherited === undefined) delete env.NODE_ENV;
+    else env.NODE_ENV = inherited;
+    prebuildE2e(fixture, env);
+  }
+  assert.deepEqual(readFileSync(join(fixture.root, '.ai/build-node-env'), 'utf8').trim().split('\n'), ['production', 'production', 'production']);
 });
 
 test('a mirror without the e2e marker refuses live reuse and the build cache', () => {
@@ -450,19 +467,69 @@ require('node:http').createServer((req, res) => {
 
 test('health timeout bounds elapsed time even when a real HTTP probe stalls', async () => {
   const fixture = unhealthyFixture('stalled');
+  // Trace the launcher's own health clock and every probe budget it hands curl, in call order.
+  // `date +%s` is read only by the health wait, so the first traced reading is its start.
+  const trace = join(fixture.root, '.ai/health-trace');
+  rmSync(join(fixture.root, 'bin/date'));
+  writeFileSync(join(fixture.root, 'bin/date'), `#!/bin/sh
+if [ "\${1-}" = +%s ]; then
+  now=$("${commandPath('date')}" +%s)
+  printf 'date %s\\n' "$now" >> '${trace}'
+  printf '%s\\n' "$now"
+else
+  exec "${commandPath('date')}" "$@"
+fi
+`, { mode: 0o755 });
+  rmSync(join(fixture.root, 'bin/curl'));
+  writeFileSync(join(fixture.root, 'bin/curl'), `#!/bin/sh
+prev=
+for arg do
+  [ "$prev" != --max-time ] || budget=$arg
+  prev=$arg
+done
+printf 'curl %s %s\\n' "\${budget-none}" "$arg" >> '${trace}'
+exec "${commandPath('curl')}" "$@"
+`, { mode: 0o755 });
+
   const started = performance.now();
   const result = spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-up.sh')], {
-    encoding: 'utf8', env: { ...fixture.env, TEST_ENV_HEALTH_TIMEOUT_SECONDS: '5' }, timeout: 9_000, killSignal: 'SIGKILL',
+    // The kill is a hang guard, not the proof (#1105): a launcher that ignored the 5s override
+    // would wait out its 180s default, so stop it well before that and let the status
+    // assertion fail. 60s is several times the slowest loaded run seen (8.6s at load ~90), so
+    // scheduling delay cannot reach it while the deadline is enforced.
+    encoding: 'utf8', env: { ...fixture.env, TEST_ENV_HEALTH_TIMEOUT_SECONDS: '5' }, timeout: 60_000, killSignal: 'SIGKILL',
   });
   const elapsed = (performance.now() - started) / 1_000;
   const pid = requirePid(join(fixture.root, 'app.pid'));
   launchedPids.add(pid);
-  assert.equal(result.status, 1, `launcher did not enforce its health deadline (${elapsed}s): ${result.stderr}`);
-  assert.ok(elapsed >= 4 && elapsed < 8, `five-second health wait took ${elapsed}s`);
-  // The launcher reports whole elapsed seconds, so a slow runner can print 6s for a 5s
-  // deadline (#856). Bound it like `elapsed`: at least the deadline, never the 180s default.
+  const traced = existsSync(trace) ? readFileSync(trace, 'utf8') : '';
+  assert.equal(result.status, 1, `launcher did not enforce its health deadline (${elapsed}s): ${result.stderr}\n${traced}`);
+  // Lower bounds only: load can stretch the wait but never shorten it, so these prove the
+  // probe really stalled until the deadline without breaking on a busy host.
+  assert.ok(elapsed >= 4, `five-second health wait took ${elapsed}s`);
+  // The launcher reports whole elapsed seconds on its own clock, so a slow runner can print
+  // 6s or more for a 5s deadline (#856). It must still have waited out the deadline.
   const reported = Number(result.stderr.match(/health wait timed out after (\d+)s/)?.[1]);
-  assert.ok(reported >= 5 && reported < 8, `five-second health wait reported ${reported}s: ${result.stderr}`);
+  assert.ok(reported >= 5, `five-second health wait reported ${reported}s: ${result.stderr}`);
+  // The bound itself, in the launcher's own clock rather than the host's wall clock (#1105):
+  // every stalled probe must be budgeted to end by health start + 5s. A launcher that fell
+  // back to its 180s default keeps issuing 5s probes after that point, and one that ignored
+  // the remaining budget lets the last probe overrun it. Scheduling delay moves both the
+  // clock reading and the probe together, so it cannot break this.
+  const lines = traced.trim().split('\n');
+  const healthStart = Number(lines.find((line) => line.startsWith('date '))?.slice('date '.length));
+  assert.ok(Number.isInteger(healthStart), `no health clock reading traced:\n${traced}`);
+  let clock = Number.NaN;
+  let probes = 0;
+  for (const line of lines) {
+    const [kind, value, url] = line.split(' ');
+    if (kind === 'date') clock = Number(value);
+    if (kind !== 'curl' || !url?.endsWith('/api/v1/health') || Number.isNaN(clock)) continue;
+    probes++;
+    assert.ok(clock + Number(value) <= healthStart + 5,
+      `probe at ${clock - healthStart}s was budgeted ${value}s past the 5s deadline:\n${traced}`);
+  }
+  assert.ok(probes >= 1, `no health probe traced:\n${traced}`);
   assert.deepEqual(result.stderr.match(/^boot-line-\d+$/gm),
     Array.from({ length: 20 }, (_, i) => `boot-line-${i + 6}`));
   assert.equal(result.stdout, '', 'a failed boot must not emit running markers');

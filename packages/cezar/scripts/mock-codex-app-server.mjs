@@ -248,6 +248,8 @@ rl.on('line', async (line) => {
       if (silent.isLateTurnStartNudge(turnText)) await waitForMockRelease(silent.LATE_REPLY_MS);
       else if (silent.isLateNudge(turnText)) await silent.sleep(silent.LATE_REPLY_MS);
     }
+    // hearsay-tools/cezarion#1112: the acknowledged turn/start reports turn/started late.
+    if (turnText.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
     if (!turnText.includes('mock:no-progress-ack-only')) {
     emit({ method: 'turn/started', params: { turn: { id: 'turn_mock_1', status: 'inProgress', items: [] } } });
     }
@@ -301,6 +303,19 @@ rl.on('line', async (line) => {
         emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
         return;
       }
+    }
+    // #961: `hook/completed` (0.160.1 schema) — one mid-turn, one after the run parked.
+    if (turnText.includes('mock:hook-after-park')) {
+      const hook = (id, eventName, text) => ({ method: 'hook/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', run: {
+        id, eventName, handlerType: 'command', executionMode: 'sync', scope: 'turn', sourcePath: '/mock/hooks.json',
+        displayOrder: 0, startedAt: 1, status: 'completed', entries: [{ kind: 'context', text }],
+      } } });
+      emit(hook('hook-mid', 'postToolUse', 'Mid-turn hook context.'));
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', item: { type: 'agentMessage', id: 'hook-parent', text: 'Watching.\nCEZ:MONITORING' } } });
+      emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
+      await afterParityPark(turnText);
+      emit(hook('hook-late', 'stop', 'Late hook processed.'));
+      return;
     }
     // Native thread attribution from collab-agent-tool-call.ndjson (#121/#401).
     if (turnText.includes('mock:subagent-after-park')) {

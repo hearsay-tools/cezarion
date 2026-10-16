@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedTranscript } from './seed-transcript'
 
 import { waitForSettledSample } from './visual-ready'
 import { assistantWidthExpression } from './transcript-measurements'
@@ -11,6 +12,7 @@ import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './f
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { expectedRowCount, largeThreadEvents } from './fixtures/make-large-thread'
 import record from './fixtures/thread-run.record.json'
+// fixture-server starts: 1
 
 /**
  * R3 Step 2.4 in a real browser: virtualization on a LARGE transcript (the synthetic
@@ -180,15 +182,14 @@ beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-thread-scroll-'))
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
   writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN, { ...RUN, id: REPLAY_ID, title: 'Held progressive cache replay' }], null, 2), 'utf8')
-  writeFileSync(
+  seedTranscript(
     join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`),
     largeThreadEvents(TURNS)
       .map((line) => JSON.stringify(line))
       .join('\n') + '\n',
-    'utf8',
   )
 
-  writeFileSync(join(dataRoot, '.ai/cezar/runs', `${REPLAY_ID}.ndjson`), replayEvents.map(line => JSON.stringify(line)).join('\n') + '\n')
+  seedTranscript(join(dataRoot, '.ai/cezar/runs', `${REPLAY_ID}.ndjson`), replayEvents.map(line => JSON.stringify(line)).join('\n') + '\n')
 
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },

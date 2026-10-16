@@ -242,7 +242,13 @@ are distinct outcomes, alongside failed, cancelled, destroyed, timed-out, and
 sender-closed. Late replies remain recorded without replacing a first settlement.
 Both roles can wait on their own requests using the existing bounded scheduler wake
 queue. An incoming message can interrupt that wait with reason `message`, retaining
-unresolved obligations; there is no automatic re-wait.
+unresolved obligations; there is no automatic re-wait for request waits. A worker
+progress message wakes a parent waiting for worker completion without retiring
+that wait. After progress delivery the same wait parks again with its original
+ID, selected workers and deadline; terminal outcomes still produce one wake.
+Harness row **WP1** in `workflows/worker-wait-conversations.test.ts` exercises
+repeated progress and one terminal wake through every `RUNNER_IDS` native mock
+wire using `HARNESS_ADAPTERS` (hearsay-tools/cezarion#1138).
 
 Messages are bounded to 100,000 characters, 32 undelivered inputs per recipient,
 1,024 messages per family, and 32 pending obligations. Requests and waits expire
@@ -437,10 +443,10 @@ two, so drift fails `npm run typecheck` (the gate) rather than the UI at runtime
    entries, diff shape, stop reasons) — ecosystem alignment.
 3. **Per-capability degradation, never per-backend** — see §6.
 
-### The item model (one id-keyed stream for text, reasoning and tools)
+### The item model (one id-keyed stream for text, reasoning, tools and hooks)
 
 ```ts
-type UiItem = UiMessageItem | UiReasoningItem | UiToolItem;
+type UiItem = UiMessageItem | UiReasoningItem | UiToolItem | UiHookItem;
 ```
 
 - `UiMessageItem` — `kind:'message'`, `role`, `text`, `phase?:'commentary'|'final'`.
@@ -448,6 +454,17 @@ type UiItem = UiMessageItem | UiReasoningItem | UiToolItem;
 - `UiToolItem` — `kind:'tool'`, `name` (backend tool name), `toolKind`, `title`
   (human line computed once — see §5), `status`, `input?`, `output?`, `error?`,
   `diffs?: FileDiff[]`, `locations?`, `exitCode?`, `parentItemId?`.
+- `UiHookItem` — `kind:'hook'` (hearsay-tools/cezarion#961), one native hook run:
+  `event` (PascalCase: `SessionStart`, `PreToolUse`, `Stop`), `name?` (native label
+  when richer, `PreToolUse:Bash`), `source?` (hook definition path), `status`
+  (`completed|failed|blocked|cancelled`), `entries: {kind, text}[]` (what the agent
+  received: `context|feedback|warning|error|stop`), raw `stdout?`/`stderr?`,
+  `exitCode?`, `durationMs?`, `parentItemId?`. Emitted **once**, as `item.completed`,
+  and only when visible: `status !== 'completed'` or `entries` is non-empty
+  (`hook-items.ts` `isVisibleHookItem`). A silent successful hook, or one printing
+  only control JSON (`{"continue":true}`), is never emitted. Hook items are v2-only
+  and never touch run state: no turn, park, wake, Needs You, ASK or completion path
+  reads them.
 
 `parentItemId` nests subagent work under the tool item that spawned it (claude
 `parent_tool_use_id`, opencode `subtask` parts, Codex collaboration receiver
@@ -539,6 +556,7 @@ transport into `UiEvent`s. The authoritative table is
 | `item.delta` `output` (live terminal) | *(none — card fills on completion; per-capability degradation)* | `item/commandExecution/outputDelta` | running-state metadata |
 | `plan.updated` | `TodoWrite` input | `todoList` / `plan` items | `todowrite` tool |
 | `ask.requested` | portable `CEZ:ASK` marker | portable marker + native `item/tool/requestUserInput` | portable marker + native `question` tool (`GET /question`, `POST /question/:id/reply`) |
+| hook item | `system/hook_response` (`--include-hook-events` when `--help` lists it; without it only SessionStart/Setup). Entries parsed from JSON stdout: `additionalContext`→context, `systemMessage`→warning, block `reason`/`stopReason`/deny `permissionDecisionReason`→stop, ask reason→feedback; plain stdout→context. Stdout yields entries on exit 0 only (Claude ignores it otherwise; it stays raw output). Exit 2, `decision:block`, `continue:false`, deny→`blocked` | `hook/completed` (`run.entries` verbatim, `sourcePath`→`source`, `stopped`→`cancelled`) | *(none — plugin hooks run in-process)* |
 | subagent nesting (`parentItemId`) | `parent_tool_use_id` | collaboration receiver thread id (review mode remains childless) | child-session parts under a `subtask` |
 | `usage.updated` | `result.usage` + `total_cost_usd` | `thread/tokenUsage/updated` (no USD) | `message.updated` tokens/cost + `step-finish` |
 
@@ -744,6 +762,10 @@ or a new fixture set forgets one — a named row fails. The matrix:
 - `turn.completed` with a `stopReason`
 - sub-agent **nesting** via `parentItemId` where the upstream wire attributes
   child work to a parent
+- hook items (`hook_response` / `hook/completed`, hearsay-tools/cezarion#961) — Claude
+  and Codex only. OpenCode 1.18.35, Pi 1.0.4, OMP 18.8.0 and Cursor
+  2026.10.01-e373342 run hooks in-process or report none, and carry the named
+  `NO_HOOK_TELEMETRY` exemption with an inverse assertion
 
 A new backend must produce every row its wire supports. A genuine upstream gap
 requires a named, versioned exemption with an inverse assertion; Cursor token
@@ -1184,7 +1206,7 @@ this HTTP-only ordering and test root idle expiry/Continue on their native wires
 Owned-worker terminal settlement and explicit question/worker/CI waits retain
 their existing policies.
 
-**H1–H3** (hearsay-tools/cezarion#486) live in `core/workflow-followup-parity.test.ts`
+**H1–H5** (hearsay-tools/cezarion#486, H4–H5 hearsay-tools/cezarion#1112) live in `core/workflow-followup-parity.test.ts`
 and the same parity guard. A human follow-up sent via `manager.sendMessage` while a
 turn is running must reach the agent without a resend when that turn ends with
 `CEZ:DONE` (H1), must be dropped when the same turn parks on a portable `CEZ:ASK`
@@ -1206,7 +1228,23 @@ human `turn/steer` whose completed-then-response ordering left no active turn; i
 restarts an accepted-but-unread steer with `turn/start` under the same
 `clientUserMessageId`, and skips that restart when the turn already echoed the id.
 A Codex human `turn/start` keeps `holdsHumanInput()` true until `turn/started`
-(or until that turn will never start: start error, close, interrupt).
+(or until that turn will never start: start error, close, interrupt). The same holds
+for every drain that opens a new native turn (H4, hearsay-tools/cezarion#1112): a Cursor
+print follow-up stays held from the queue shift until its process's init frame. A Pi or OMP
+human prompt stays held from its write, past its ack, until a normalized turn has it — the
+rule Codex keeps: its user `message_start` inside an open normalized turn, its ack while the
+turn it opened is still open, the first `turn.started` after its ack, or (OMP) its
+`prompt_result`. A rejected or local ack and `discardQueuedMessages` also release it. The ack
+alone never does: Pi reads a steer acknowledged after the turn's last model call as its next
+prompt, after `agent_settled` (the `mock:steer-late` ordering, H5). Nor does a raw
+`agent_start`, which neither mapper reports: Pi's mock in H5 holds 800 ms between that run's
+`agent_start` and its first activity, the window in which a release there let the run park.
+Without that, the 250 ms recheck found the hold drained and parked the run `waiting`
+while the follow-up's turn was still starting, and that turn then ran under Needs you.
+H4 sends the follow-up with `mock:deferred-turn-start`, which every mock honors by
+starting that turn 800 ms late (`scripts/mock-deferred-turn-start.mjs`), and asserts no
+turn starts after the first park. H5 adds `:late-ack`: Pi and OMP acknowledge the steer inside
+the running turn, Pi then runs it as its next prompt and OMP reads it before settling.
 OMP named wire limit: a human prompt rejected after `session_settled` is only a note
 and is not restarted — real OMP settles only at `queuedMessageCount === 0`, so a
 steer accepted before settle is read in-turn (I2), and a post-settle rejection has
@@ -1328,6 +1366,13 @@ supply a nonempty ask-kind inventory and native prompts, or a named executable
 wire exemption. The prose guard rejects counted runner rosters in this contract,
 the hearsay-tools/cezarion#68 spec and harness-parity comments so adding an id cannot stale their counts.
 
+R77 (hearsay-tools/cezarion#961) is R15's shape for hooks: a native hook frame mid-turn, a
+monitoring park, then a late hook frame released after the park (Squeal's async `waiter`
+completes this late). Status, activity and the wake deadline survive, no turn opens, and
+both hooks persist as distinct `item.completed` hook items. Only Claude and Codex have a
+hook wire; the other runners carry `scenario-unconstructible` exemptions naming the version
+surveyed.
+
 R15 (hearsay-tools/cezarion#121/#401) releases native child updates only after the run has parked,
 then checks that status, activity and the monitoring wake deadline survive.
 Claude and Codex retain nested items; Cursor retains attributed late task
@@ -1419,15 +1464,15 @@ while an unrelated process keeps starting new processes in the worktree, as
 Squeal's Vitest workers do. The final autosave must commit, leave no cleanup
 evidence or hold, and leave the unrelated process running and unsignalled.
 
-R77–R78 (hearsay-tools/cezarion#1004, `core/harness-autosave-branch.test.ts`) check
+R78–R79 (hearsay-tools/cezarion#1004, `core/harness-autosave-branch.test.ts`) check
 another branch out in an owned worker's worktree on every `HARNESS_ADAPTERS` native
-wire, leave a file, and settle the session: R77 on the initial run (`run finalize`),
-R78 on a Continue (`turn end`). The save commits nothing, the foreign branch tip does
+wire, leave a file, and settle the session: R78 on the initial run (`run finalize`),
+R79 on a Continue (`turn end`). The save commits nothing, the foreign branch tip does
 not move, and the handoff's `## Autosave (cezar)` section and a cockpit note both
 name the branch and the uncommitted path count, while the Progress log stays free
-of the report. R78's first settle, still on the task branch, pins the other half:
+of the report. R79's first settle, still on the task branch, pins the other half:
 the commit is reported with its short sha, the branch and the
-`git reset --soft <sha>~1` fold-back command. R78's periodic case fires the
+`git reset --soft <sha>~1` fold-back command. R79's periodic case fires the
 Continue's `CEZ_AUTOSAVE=1` timer by hand, so the closing `turn end` flush finds
 a clean tree and reports nothing: the timer's own coalesced `periodic:` line
 names the commit, the branch and the fold-back command, and no cockpit note is

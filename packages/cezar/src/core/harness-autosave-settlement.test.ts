@@ -24,8 +24,13 @@ describe('harness parity — settlement during blocked autosave', () => {
         it(`${backend} R${row} ${continuation ? 'Continue' : 'fresh'} ${outcome} settles with a detached Git holder`, async () => {
           vi.stubEnv('CEZ_DELEGATION', '1');
           const save = worktrees.autosaveCommit;
+          // Only the intercepted save gets the stubbed budget. A Continue cell's first
+          // Finish/idle close saves through real Git; at 500 ms that save can time out
+          // on a loaded host and retain an unproven-termination blocker, which refuses
+          // the Continue below (hearsay-tools/cezarion#1095, same as R25).
+          let budget: { timeoutMs: number; killGraceMs: number; confirmMs: number } | undefined;
           vi.spyOn(worktrees, 'autosaveCommit').mockImplementation((dir, reason, options) =>
-            save(dir, reason, { ...options, timeoutMs: 500, killGraceMs: 100, confirmMs: 100 }));
+            save(dir, reason, { ...options, ...budget }));
           vi.spyOn(console, 'warn').mockImplementation(() => undefined);
           try {
             const hasTail = continuation && outcome === 'cancelled';
@@ -93,6 +98,7 @@ if (args.includes('status') && args.includes('--porcelain')) {
 }
 `, { mode: 0o755 });
               process.env.PATH = `${bin}:${path}`;
+              budget = { timeoutMs: 500, killGraceMs: 100, confirmMs: 100 };
               try {
                 const prompt = HARNESS_ADAPTERS[backend].scenarios['provider-error']!;
                 if (continuation) {
@@ -125,7 +131,13 @@ setInterval(() => require('node:child_process').spawn(process.execPath, ['-e', '
                 // 30+); the refusal below quotes the latest report, so wait for the one naming the holder.
                 await waitFor(() => store.readEvents(runId).some(event => event.type === 'note' && String(event.message).includes('termination not confirmed') &&
                   String(event.message).includes(`holder PIDs: ${holder}`)), 5000);
-                await waitFor(() => !manager.isActive(runId), 3000);
+                // No custom bound here (hearsay-tools/cezarion#1095). Settlement still waits for the
+                // turn-end diff stat (`execution.turns`), and that stat runs four or five Git
+                // processes through this fake's Node shim after the release above. At load ~50 those
+                // boots outran the old 3 s bound. Independence from the holder is proven by the
+                // holder still being alive at the assertions below, since it lives until `finally`,
+                // not by how fast settlement is.
+                await waitFor(() => !manager.isActive(runId));
                 expect(outcome === 'success' ? ['done', 'review'] : [outcome]).toContain(store.getRun(runId)?.status);
                 expect(store.getRun(runId)?.stopping).toBeUndefined();
                 expect(store.readWorkerExecution(runId)?.phase).toBe('complete');
