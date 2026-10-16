@@ -1427,7 +1427,11 @@ not move, and the handoff's `## Autosave (cezar)` section and a cockpit note bot
 name the branch and the uncommitted path count, while the Progress log stays free
 of the report. R78's first settle, still on the task branch, pins the other half:
 the commit is reported with its short sha, the branch and the
-`git reset --soft <sha>~1` fold-back command.
+`git reset --soft <sha>~1` fold-back command. R78's periodic case fires the
+Continue's `CEZ_AUTOSAVE=1` timer by hand, so the closing `turn end` flush finds
+a clean tree and reports nothing: the timer's own coalesced `periodic:` line
+names the commit, the branch and the fold-back command, and no cockpit note is
+emitted for it.
 
 Autosaves serialize per canonical worktree; Git auto-maintenance is disabled
 only for these commands. Holder discovery shares orphan recovery's cwd boundary,
