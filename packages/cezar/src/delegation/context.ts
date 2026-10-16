@@ -236,7 +236,7 @@ export async function placeWorkerAttachments(options: { dataDir: string; workspa
   const notIgnored = (path: string) => refuse(`--attach path is not ignored by the worker baseline: ${path}; commit it and spawn from that commit instead of attaching it`);
   const detail = (error: unknown) => error instanceof Error ? error.message : String(error);
   const attached: string[] = [];
-  const created: Array<{ dir: string; path: string; dev: number; ino: number }> = [];
+  const created: Array<{ source: string; dir: string; path: string; dev: number; ino: number }> = [];
   try {
     for (const [index, input] of (context?.inputs ?? []).entries()) {
       const { source } = input;
@@ -285,7 +285,7 @@ export async function placeWorkerAttachments(options: { dataDir: string; workspa
           if (await realpath(dir).catch(() => undefined) !== dir || entry?.dev !== opened.dev || entry.ino !== opened.ino) {
             throw refuse(`--attach path leaves the worker worktree: ${source.path}`);
           }
-          created.push({ dir, path: destination, dev: opened.dev, ino: opened.ino });
+          created.push({ source: source.path, dir, path: destination, dev: opened.dev, ino: opened.ino });
           await file.writeFile(bytes);
         } finally { await file.close(); }
       } catch (error) {
@@ -307,14 +307,19 @@ export async function placeWorkerAttachments(options: { dataDir: string; workspa
       if (offending !== undefined) throw notIgnored(offending);
     }
   } catch (error) {
-    // Only files this call created, still the same inode in the same canonical directory.
+    // Only files this call created, still the same inode in the same canonical directory. Each
+    // removal is attempted on its own; one that fails is reported, never allowed to hide the cause.
+    const leftovers: string[] = [];
     for (const copy of created.reverse()) {
-      const entry = await lstat(copy.path).catch(() => undefined);
-      if (entry?.dev === copy.dev && entry.ino === copy.ino && await realpath(copy.dir).catch(() => undefined) === copy.dir) {
-        await rm(copy.path, { force: true });
-      }
+      try {
+        const entry = await lstat(copy.path).catch(() => undefined);
+        if (entry?.dev === copy.dev && entry.ino === copy.ino && await realpath(copy.dir).catch(() => undefined) === copy.dir) {
+          await rm(copy.path, { force: true });
+        }
+      } catch (failure) { leftovers.push(`${copy.source} (${detail(failure)})`); }
     }
-    throw error;
+    if (!leftovers.length) throw error;
+    throw refuse(`${detail(error)}; could not remove the attached copies made before the failure: ${leftovers.join(', ')}`);
   }
 }
 

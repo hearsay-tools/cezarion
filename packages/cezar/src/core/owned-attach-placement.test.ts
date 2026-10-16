@@ -17,6 +17,7 @@ import { autosaveCommit } from '../git-worktree.ts';
 // A one-shot hook around `open`: it may change the filesystem just before a matching path is opened,
 // and its returned step receives the opened handle, so a test can land a race or a failing write.
 const openHook = vi.hoisted(() => ({ current: undefined as undefined | ((path: string) => ((handle?: FileHandle) => void) | undefined) }));
+const rmHook = vi.hoisted(() => ({ current: undefined as undefined | ((path: string) => void) }));
 vi.mock('node:fs/promises', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   const open = (async (path: Parameters<typeof actual.open>[0], ...rest: unknown[]) => {
@@ -24,7 +25,12 @@ vi.mock('node:fs/promises', async importOriginal => {
     let handle: FileHandle | undefined;
     try { handle = await (actual.open as (...args: unknown[]) => Promise<FileHandle>)(path, ...rest); return handle; } finally { after?.(handle); }
   }) as typeof actual.open;
-  return { ...actual, open, default: { ...actual, open } };
+  // `rmHook` may throw instead of removing, to fail a rollback.
+  const rm = (async (path: Parameters<typeof actual.rm>[0], ...rest: unknown[]) => {
+    rmHook.current?.(String(path));
+    return (actual.rm as (...args: unknown[]) => Promise<void>)(path, ...rest);
+  }) as typeof actual.rm;
+  return { ...actual, open, rm, default: { ...actual, open, rm } };
 });
 
 const until = (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 });
@@ -79,7 +85,7 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
     return { worker, workspace, options: { dataDir: join(f.root, '.ai/cezar'), workspace: delegation.workspace, context: delegation.context! } };
   };
   afterEach(async () => {
-    openHook.current = undefined;
+    openHook.current = undefined; rmHook.current = undefined;
     for (const s of seen) s.finish();
     seen.length = 0;
     await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs();
@@ -222,6 +228,28 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
       .rejects.toMatchObject({ code: 'invalid_input', message: expect.stringMatching(/qa\/evidence\.log.*ENOSPC/) });
     expect(existsSync(join(workspace.path, 'qa/1149/brief.md'))).toBe(false);
     expect(existsSync(join(workspace.path, 'qa/evidence.log'))).toBe(false);
+  });
+
+  it('placement keeps the named failure and cleans up every other copy when one rollback removal fails', async () => {
+    commit('.gitignore', 'qa/\n');
+    for (const [path, content] of Object.entries(ATTACHED)) write(path, content);
+    const { workspace, options } = await accepted(Object.keys(ATTACHED));
+    const evidence = join(workspace.path, 'qa/evidence.log');
+    openHook.current = path => {
+      if (path !== evidence) return undefined;
+      openHook.current = undefined;
+      return handle => {
+        if (handle) handle.writeFile = async () => { throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' }); };
+      };
+    };
+    rmHook.current = path => {
+      if (path === evidence) throw Object.assign(new Error(`EACCES: permission denied, unlink '${path}'`), { code: 'EACCES' });
+    };
+    const failure = await placeWorkerAttachments(options).then(() => undefined, (error: unknown) => error);
+    expect(failure).toMatchObject({ code: 'invalid_input', message: expect.stringMatching(/qa\/evidence\.log.*ENOSPC/) });
+    // The cleanup failure is reported with its path, after the original failure.
+    expect((failure as Error).message).toMatch(/ENOSPC.*could not remove.*qa\/evidence\.log.*EACCES/);
+    expect(existsSync(join(workspace.path, 'qa/1149/brief.md'))).toBe(false);
   });
 
   it('placement does not overwrite an existing destination', async () => {
