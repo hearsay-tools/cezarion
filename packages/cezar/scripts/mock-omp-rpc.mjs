@@ -397,10 +397,14 @@ async function prompt(command) {
       respond(command);
       beginTurn(command);
     }
+  } else if (message.includes('mock:deferred-turn-start')) {
+    // hearsay-tools/cezarion#1112: the acknowledged prompt opens its native run late. A
+    // separate branch: owned-input-delivery.testkit.ts patches the exact two lines below.
+    respond(command);
+    await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
+    beginTurn(command);
   } else {
   respond(command);
-  // hearsay-tools/cezarion#1112: the acknowledged prompt opens its native run late.
-  if (message.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
   beginTurn(command);
   }
   if (message.includes('mock:multi-pr-refs')) {
