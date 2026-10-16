@@ -24,8 +24,8 @@ function outcome(checks: GithubCheck[]): CiWaitResult['outcome'] | undefined {
   if (!checks.length || checks.some(c => c.bucket === 'pending')) return undefined;
   if (checks.some(c => c.bucket === 'fail')) return 'failed';
   if (checks.some(c => c.bucket === 'cancel')) return 'cancelled';
-  if (checks.some(c => c.bucket === 'skipping')) return 'skipped';
-  return 'passed';
+  if (checks.some(c => c.bucket === 'pass')) return 'passed';
+  return 'skipped';
 }
 function observation(wait: CiWait, result: CiWaitResult['outcome'], rows: GithubCheck[], extra: Partial<Pick<CiWaitResult, 'observedHeadSha' | 'diagnostic'>> = {}): CiWaitResult {
   const checks = rows.slice(0, 100).map(row => ({name:clean(row.name,256),state:clean(row.state,256),link:safeLink(row.link)}));
