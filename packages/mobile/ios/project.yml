@@ -1,0 +1,61 @@
+name: Cezarion
+options:
+  bundleIdPrefix: tools.hearsay.cezarion
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    TARGETED_DEVICE_FAMILY: "1,2"
+targets:
+  Cezarion:
+    type: application
+    platform: iOS
+    sources: [Cezarion]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: tools.hearsay.cezarion.mobile
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: Cezarion/Info.plist
+      properties:
+        CFBundleDisplayName: Cezarion
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UIRequiresFullScreen: false
+        ITSAppUsesNonExemptEncryption: false
+  CezarionTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: Cezarion
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+  CezarionUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: Cezarion
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Cezarion:
+    build:
+      targets:
+        Cezarion: all
+    test:
+      targets: [CezarionTests, CezarionUITests]
+      environmentVariables:
+        MOBILE_TEST_ENDPOINT: "$(MOBILE_TEST_ENDPOINT)"
+        MOBILE_TEST_AUTH_ORIGIN: "$(MOBILE_TEST_AUTH_ORIGIN)"
