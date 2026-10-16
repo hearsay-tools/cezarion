@@ -92,7 +92,7 @@ import {
 } from '../worktree-setup.ts';
 import { getHeadCommit, getRepoInfo } from '../server/git.ts';
 import { ensureOwnedWorkspace, verifyOwnedWorkspace } from '../delegation/workspace.ts';
-import { verifyWorkerContext } from '../delegation/context.ts';
+import { placeWorkerAttachments, verifyWorkerContext } from '../delegation/context.ts';
 import { enqueueAgentInput, agentInputBatch, hasLiveInboxClaim } from '../delegation/input.ts';
 import { parseDelegationEffort } from '../delegation/effort.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
@@ -6612,6 +6612,9 @@ export class RunManager {
         const ownedWorkspace = owned && ownedRun ? await ensureOwnedWorkspace(this.repoRoot, ownedRun) : undefined;
         if (ownedRun?.delegation?.role === 'worker') await verifyWorkerContext({ dataDir: this.dataDir, parentId: ownedRun.delegation.parentRunId, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context,
           parentCwd: this.store.getRun(ownedRun.delegation.parentRunId)?.worktreePath ?? this.repoRoot });
+        // First launch only (hearsay-tools/cezarion#1149): a worker re-queued past its first step and
+        // runContinuation never re-place attachments the worker may have edited or deleted.
+        if (ownedRun?.delegation?.role === 'worker' && startAt === 0) await placeWorkerAttachments({ dataDir: this.dataDir, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context });
         const wt = ownedWorkspace
           ? { path: ownedWorkspace.path, branch: ownedWorkspace.branch, baseBranch: ownedWorkspace.baselineSha }
           : await createWorktree(this.repoRoot, runId, base);

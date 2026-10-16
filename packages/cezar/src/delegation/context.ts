@@ -219,6 +219,60 @@ export async function verifyWorkerContext(options: {
   } catch { throw invalid(); }
 }
 
+/**
+ * Copy each verified `parent-file` snapshot into the worker worktree before its first turn
+ * (hearsay-tools/cezarion#1149). First launch only: an existing copy is the worker's, never
+ * overwritten, and Continue never calls this, so a deleted copy stays deleted. Directories are
+ * walked one component at a time from the worktree root, so no symlink in the checkout can carry
+ * the write outside it.
+ */
+export async function placeWorkerAttachments(options: { dataDir: string; workspace: WorkerWorkspace; context?: WorkerInputRecipe }): Promise<void> {
+  const { dataDir, workspace, context } = options;
+  const root = await realpath(workspace.path);
+  for (const [index, input] of (context?.inputs ?? []).entries()) {
+    const { source } = input;
+    if (source.kind !== 'parent-file') continue;
+    const components = source.path.split('/');
+    const name = components.pop()!;
+    // Existing components first: `check-ignore` dies outright on a path beyond a symlink.
+    const walk = async (create: boolean) => {
+      let dir = root;
+      for (const component of components) {
+        dir = join(dir, component);
+        const entry = await lstat(dir).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== 'ENOENT') throw error;
+          return undefined;
+        });
+        if (!entry && !create) return;
+        if (!entry) await mkdir(dir).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error; });
+        const current = entry ?? await lstat(dir);
+        if (current.isSymbolicLink() || !current.isDirectory()) {
+          throw refuse(`--attach path has a component that is not a directory in the worker worktree: ${source.path}`);
+        }
+      }
+      if (create && await realpath(dir) !== dir) throw refuse(`--attach path leaves the worker worktree: ${source.path}`);
+      return dir;
+    };
+    await walk(false);
+    if (!await ignoredByGit(root, source.path)) {
+      throw refuse(`--attach path is not ignored by the worker baseline: ${source.path}; commit it and spawn from that commit instead of attaching it`);
+    }
+    const dir = (await walk(true))!;
+    const bytes = await readBoundedContextFile(await parentFileSnapshotPath(dataDir, workspace, index), input.bytes);
+    if (bytes.length !== input.bytes || hash(bytes) !== input.sha256) throw invalid();
+    const destination = join(dir, name);
+    let file;
+    try {
+      file = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue;
+      throw error;
+    }
+    // A truncated copy would read as the worker's own on the next launch: remove the one this call created.
+    try { await file.writeFile(bytes); } catch (error) { await rm(destination, { force: true }); throw error; } finally { await file.close(); }
+  }
+}
+
 export function workerContextTask(task: string, recipe: WorkerInputRecipe): string {
   return task + (recipe.text === undefined ? '' : `\n\nSelected context:\n${recipe.text}`) +
     (recipe.inputs.length ? `\n\nSelected input files (worker-local paths):\n${recipe.inputs.map(input => JSON.stringify(input.path)).join('\n')}` : '');
