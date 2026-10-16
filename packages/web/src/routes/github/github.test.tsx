@@ -1260,10 +1260,10 @@ describe('the comment thread', () => {
       }),
     })
     renderAt('/github/issues/142')
-    await screen.findByText(ISSUE_142.body)
+    await screen.findByText(ISSUE_142.body!)
     fireEvent.click(document.querySelector<HTMLElement>('[data-slot="gh-refresh"]')!)
     await screen.findByText('Edited upstream requirements')
-    expect(screen.queryByText(ISSUE_142.body)).toBeNull()
+    expect(screen.queryByText(ISSUE_142.body!)).toBeNull()
     expect(sent.some(({ path }) => path === '/api/v1/github?limit=1000&refresh=1')).toBe(true)
   })
 
