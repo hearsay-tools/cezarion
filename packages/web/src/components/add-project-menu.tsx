@@ -2,6 +2,7 @@ import * as React from 'react'
 
 import { AddProjectDialog } from '@/components/add-project-dialog'
 import { CloneProjectDialog } from '@/components/clone-project-dialog'
+import { CreateProjectDialog } from '@/components/create-project-dialog'
 import { FolderIcon, FolderPlusIcon } from '@/components/design-icons'
 import { GithubIcon } from '@/components/icons'
 import { Button } from '@/components/ui/button'
@@ -17,8 +18,9 @@ import { cn } from '@/lib/utils'
 /**
  * The "Add project" dropdown beside the New task CTA (multi-project spec, "Sidebar → Header").
  *
- * "Open local folder…" opens the folder-browser dialog (step 4.2); "Clone from GitHub…" opens
- * the checkout dialog (step 4.3).
+ * "New project…" opens the create dialog (spec 2026-10-15-create-new-project); "Open local
+ * folder…" opens the folder-browser dialog (step 4.2); "Clone from GitHub…" opens the checkout
+ * dialog (step 4.3).
  *
  * Neither item is gh-gated here, deliberately. The spec's "disabled with a reason when `gh` is
  * unavailable" would mean reading `GET /api/health` from this component — and the dialogs are
@@ -59,6 +61,7 @@ export function AddProjectMenu({
 } = {}) {
   const [browsing, setBrowsing] = React.useState(false)
   const [cloning, setCloning] = React.useState(false)
+  const [creating, setCreating] = React.useState(false)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -82,6 +85,10 @@ export function AddProjectMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side={side} className="w-56">
         <DropdownMenuLabel className="text-xs text-soft-foreground">Add project</DropdownMenuLabel>
+        <DropdownMenuItem data-slot="add-project-new" onSelect={() => setCreating(true)}>
+          <FolderPlusIcon aria-hidden="true" />
+          New project…
+        </DropdownMenuItem>
         <DropdownMenuItem data-slot="add-project-local" onSelect={() => setBrowsing(true)}>
           <FolderIcon aria-hidden="true" />
           Open local folder…
@@ -93,6 +100,7 @@ export function AddProjectMenu({
       </DropdownMenuContent>
       {browsing ? <AddProjectDialog open onOpenChange={setBrowsing} /> : null}
       {cloning ? <CloneProjectDialog open onOpenChange={setCloning} /> : null}
+      {creating ? <CreateProjectDialog open onOpenChange={setCreating} /> : null}
     </DropdownMenu>
   )
 }

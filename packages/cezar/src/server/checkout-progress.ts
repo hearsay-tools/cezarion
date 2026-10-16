@@ -1,6 +1,6 @@
 import type { CheckoutProgressEvent } from '@open-mercato/cezar-contract';
 
-/** Recovery cache for the clone dialog, never an authority for the mutation's result. */
+/** Recovery cache for the clone and new-project dialogs, never an authority for the mutation's result. */
 export class CheckoutProgressCache {
   private readonly values = new Map<string, { at: number; progress: CheckoutProgressEvent }>();
   constructor(private readonly now = Date.now) {}
@@ -11,7 +11,7 @@ export class CheckoutProgressCache {
     if (!progress.checkoutId) return;
     this.prune();
     this.values.delete(progress.checkoutId);
-    this.values.set(progress.checkoutId, { at: this.now(), progress: { ...progress, ...(progress.line ? { line: progress.line.slice(-4096) } : {}), ...(progress.error ? { error: progress.error.slice(-4096) } : {}) } });
+    this.values.set(progress.checkoutId, { at: this.now(), progress: { ...progress, ...(progress.line ? { line: progress.line.slice(-4096) } : {}), ...(progress.error ? { error: progress.error.slice(-4096) } : {}), ...(progress.warning ? { warning: progress.warning.slice(0, 4096) } : {}) } });
     while (this.values.size > 128) this.values.delete(this.values.keys().next().value!);
   }
   get(id: string): CheckoutProgressEvent | null {
