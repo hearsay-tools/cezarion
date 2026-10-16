@@ -299,16 +299,18 @@ and untracked files. Use
 It selects Vitest tests through the import graph for ordinary source changes;
 shared/configuration/unknown inputs, deletions, or unavailable Git/base information
 fall back to full Vitest. Clean changes, and changes confined to CI's docs-only
-list (`isDocsPath` in `.github/scripts/change-surface.cjs`), explicitly skip
-iteration tests. That list holds root Markdown, `docs/`, `.ai/specs/`,
-`.ai/analysis/`, and Markdown under `packages/` outside `fixtures`,
-`__fixtures__` and `__snapshots__` directories, minus `testReadDocuments`: the
-Markdown a Vitest test or cockpit browser spec reads, which runs full Vitest.
-`.github/scripts/change-surface-readers.test.cjs` fails when package code names
-a docs-only Markdown file. No matching tests is an error: select the relevant test files explicitly
-and report any coverage gap rather than treating it as a pass. Import graphs do
-not cover every runtime dependency, so this command is only iteration feedback,
-never a replacement for CI's final gate.
+list, explicitly skip iteration tests. `isDocsPath` in
+`.github/scripts/change-surface.cjs` is the exact definition. The list includes
+root Markdown and `LICENSE*`, `docs/`, `.ai/specs/`, `.ai/analysis/`, the
+generated upstream scan data, and Markdown under `packages/` outside
+`fixtures`, `__fixtures__` and `__snapshots__` directories. It excludes
+`testReadDocuments`, the Markdown a Vitest test or cockpit browser spec reads,
+which runs full Vitest. `.github/scripts/change-surface-readers.test.cjs` fails
+when package code names a docs-only Markdown file by path. No matching tests is
+an error: select the relevant test files explicitly and report any coverage gap
+rather than treating it as a pass. Import graphs do not cover every runtime
+dependency, so this command is only iteration feedback, never a replacement for
+CI's final gate.
 
 Cockpit browser E2E is a separate command from packaged CLI E2E — it boots the real app and
 drives it in a real Chrome through the `agent-browser` provider (`.ai/browsers/agent-browser.md`):
