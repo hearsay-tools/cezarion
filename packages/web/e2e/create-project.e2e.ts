@@ -113,6 +113,13 @@ describe('New project', () => {
       // With no project registered (a server booted inside a task worktree) the rail's Add project
       // trigger is the page's first focusable control; in CI the boot project's mark comes first.
       // `focusWithKeyboard` reaches it through a real Tab either way (hearsay-tools/cezarion#1091).
+      // Not a flake fix: the failure was deterministic. Before hearsay-tools/cezarion#1117 both
+      // themes failed here with "no visible keyboard predecessor" (bundle
+      // .ai/qa/failures/create-project/creates-a-local-project-from-the-keyboard-light-1/:
+      // probe.json `lastValue: { ready: false, predecessor: null }`), which is why
+      // hearsay-tools/cezarion#1081 focused the trigger with `.focus()`. After it, in a task
+      // worktree on 2026-10-16, `npm run test:e2e -- create-project.e2e.ts -t 'from the keyboard'`
+      // passed 2 of 2 through this helper.
       focusWithKeyboard(browser, RAIL_ADD)
       browser.press('Enter')
       // Radix focuses the first item of a menu opened from the keyboard: New project comes first.
