@@ -138,10 +138,11 @@ admits never comes back a 400 from the handler, and `AppType` never promises an 
 turns away. Export a shared rule ONCE from `packages/contract` and use that constant in the schema,
 the handler and the cockpit; the handler never refuses, on shape alone, a value the schema let
 through. What a schema cannot know — a name already taken, a run another process holds — stays the
-handler's to refuse. hearsay-tools/cezarion#1081 is the worked example:
-`createProjectInputSchema.name` used `GITHUB_REPO_NAME_PATTERN`, which admitted a leading `-`, `.`
-or `_`, and the handler then refused those names through `isValidCheckoutName`. Its fix exports one
-`PROJECT_NAME_PATTERN` from `packages/contract/src/projects.ts` for all three.
+handler's to refuse. hearsay-tools/cezarion#1081 is the worked example: its create-project body
+first matched the name against GitHub's repository-name characters, which admit a leading `-`, `.`
+or `_`, and the handler then refused those names through `isValidCheckoutName`. The fix there
+exports one project-name pattern from the contract, and the schema, the handler and the New project
+dialog all test against it.
 
 ## Repository layout
 
