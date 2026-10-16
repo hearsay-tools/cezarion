@@ -251,11 +251,12 @@ export class ProjectContexts {
       try { imported = reader?.getMeta(RUNS_IMPORT_COMPLETE_KEY) !== undefined; }
       finally { reader?.close(); }
       if (!imported && !existsSync(join(dataDir, 'runs.json'))) return undefined;
-      const temporaryOwnership = this.deps.ownership ? undefined : new CockpitOwnership();
-      const ownership = this.deps.ownership ?? temporaryOwnership!;
+      const temporaryOwnership = new CockpitOwnership();
       let store: RunStore | undefined;
       try {
-        await ownership.acquire(dataDir);
+        // Existing process claims protect managers even after disposal. Borrow those;
+        // otherwise maintenance owns only this lease, never the server's lifetime.
+        if (!this.deps.ownership?.owns(dataDir)) await temporaryOwnership.acquire(dataDir);
         if (!current()) return undefined;
         ensureDataGitignore(project.root);
         store = RunStore.open(dataDir, { keepLive: true, maintenance: true });
@@ -263,7 +264,7 @@ export class ProjectContexts {
       } finally {
         active = false;
         if (store) { await store.historyIdle(); store.close(); }
-        temporaryOwnership?.releaseAll();
+        temporaryOwnership.releaseAll();
       }
     })();
     this.maintenance.set(projectId, lease);
