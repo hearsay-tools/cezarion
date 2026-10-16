@@ -1,0 +1,46 @@
+# Small text on card-2
+
+Use at least **4.5:1** contrast for text under 14 px on `bg-card-2`.
+The normal-text AA rule also applies to larger text until it meets WCAG's
+large-text threshold (24 px regular or about 18.67 px bold).
+
+These ratios use the opaque default palette in `src/styles/index.css`,
+with `--card-2` resolving to `--surface-muted`. Both themes must pass.
+Opacity, overlays, hover surfaces and custom colors require a separate measurement.
+
+| Foreground utility | Dark | Light | Safe in both themes? |
+| --- | ---: | ---: | --- |
+| `text-foreground` | 14.57:1 | 15.66:1 | Yes — primary text |
+| `text-muted-foreground`, `text-supporting-foreground` | 7.43:1 | 6.60:1 | Yes — secondary text |
+| `text-link-foreground` | 10.31:1 | 4.80:1 | Yes — links |
+| `text-signal-word-red` | 5.51:1 | 5.67:1 | Yes — red words |
+| `text-soft-foreground` | 4.88:1 | 4.37:1 | No — use muted-foreground |
+| `text-danger` | 4.05:1 | 4.24:1 | No — use signal-word-red |
+
+Icons and non-text graphics have a separate 3:1 requirement; these text rules
+do not prohibit their use of danger.
+
+## Reproduction and guard
+
+Reproduced for hearsay-tools/cezarion#1133 at `3040cbf78`:
+open `src/routes/task-thread/thread-items.tsx`, find `data-slot="tool-error"`,
+and follow its parent `bg-card-2`. The body uses `text-xs text-danger`.
+Resolve the foreground and background tokens from `src/styles/index.css`, convert
+OKLCH to linear sRGB, and calculate `(lighter luminance + .05) / (darker luminance + .05)`.
+This yields 4.05:1 dark and 4.24:1 light. Substituting soft-foreground yields
+4.88:1 dark and 4.37:1 light. For rendered measurements, use
+`e2e/contrast.ts`'s `contrastSampleExpression` on the expanded tool-error element.
+The baseline also records the small step number in `routes/plan-review.tsx` on card-2.
+The existing tool-error fix belongs to hearsay-tools/cezarion#1114.
+
+`src/test/card-2-contrast.test.ts` scans JSX class strings, including literal
+branches of class helpers and templates. It follows card-2 ancestors, inherited
+ink and font sizes, and known tool/hook body slots. A different explicit
+background ends inheritance. Unknown font sizes are treated conservatively as
+small. Icons without text and explicitly large text are excluded.
+
+This is a static guard, not a computed-style audit: runtime-generated classes,
+component boundaries and CSS rules still need rendered contrast checks.
+The baseline identifies existing instances by file and opening JSX, including
+counts through duplicate entries. Remove an entry when fixing its instance;
+never add allowances. The test rejects new instances and stale baseline entries.
