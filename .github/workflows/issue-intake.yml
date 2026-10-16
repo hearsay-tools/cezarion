@@ -175,6 +175,15 @@ jobs:
       issues: read
 
     steps:
+      - name: Reject untrusted bot actors
+        env:
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [[ "$ACTOR" == *'[bot]' && "$ACTOR" != 'claude[bot]' ]]; then
+            echo "Unsupported bot actor: $ACTOR. Only claude[bot] may trigger Jev intake." >&2
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

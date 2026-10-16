@@ -109,6 +109,10 @@ test('issue intake workflow keeps its provider, permission, and fail-closed cont
   assert.match(jev, /name: intake-output\n\s+path: intake-output\/intake\.json\n\s+if-no-files-found: error/);
   assert.doesNotMatch(jev, /ANTHROPIC_API_KEY|OPENAI_API_KEY|vars\.ISSUE_INTAKE_(?:CLAUDE|CODEX)_/);
   assert.ok(jev.indexOf('name: Fetch issue context') < jev.indexOf('name: Run Jev issue triage'));
+  // A billable provider call: untrusted bots must not trigger it.
+  assert.match(jev, /name: Reject untrusted bot actors/);
+  assert.match(jev, /\[\[ "\$ACTOR" == \*'\[bot\]' && "\$ACTOR" != 'claude\[bot\]' \]\]/);
+  assert.ok(jev.indexOf('name: Reject untrusted bot actors') < jev.indexOf('name: Run Jev issue triage'), 'bot guard must run before Jev');
 
   const apply = job(workflow, 'apply-intake');
   assert.match(apply, /needs: \[validate-provider, codex-intake, jev-intake\]/);
