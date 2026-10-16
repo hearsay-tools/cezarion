@@ -83,7 +83,14 @@ export function GithubItemDetail({
 }) {
   const changes = subNav?.changes ?? false
   const kindWord = item.kind === 'pr' ? 'pull request' : 'issue'
-  const hasDiffStat = item.kind === 'pr' && Boolean(item.additions || item.deletions)
+  // The detail tier (hearsay-tools/cezarion#1183): the thread request also carries the item's own
+  // body and diffstat, so the pane no longer depends on the list row having shipped them. The same
+  // query `GithubThread` reads; on the Changes tab it serves only what is already cached.
+  const detail = useGithubComments(item.kind, item.number, !changes).data?.detail
+  const body = detail?.body ?? item.body
+  const additions = detail?.additions ?? item.additions
+  const deletions = detail?.deletions ?? item.deletions
+  const hasDiffStat = item.kind === 'pr' && Boolean(additions || deletions)
   return (
     <article data-slot="gh-detail-inner" className="min-w-0 px-4 py-4 md:px-7 md:py-5">
       {backLink ? (
@@ -111,8 +118,8 @@ export function GithubItemDetail({
           <>
             ·
             <span data-slot="gh-diffstat">
-              <span className="text-success">+{item.additions ?? 0}</span>{' '}
-              <span className="text-danger">−{item.deletions ?? 0}</span>
+              <span className="text-success">+{additions ?? 0}</span>{' '}
+              <span className="text-danger">−{deletions ?? 0}</span>
             </span>
           </>
         ) : null}
@@ -166,8 +173,8 @@ export function GithubItemDetail({
 
       {changes && item.kind === 'pr' ? <GithubPrChanges item={item} /> : <>
       <div data-slot="gh-body" className="mt-5 text-sm">
-        {item.body ? (
-          <Markdown>{item.body}</Markdown>
+        {body ? (
+          <Markdown>{body}</Markdown>
         ) : (
           <p className="text-soft-foreground">(no description)</p>
         )}

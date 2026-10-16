@@ -870,6 +870,31 @@ describe('the GitHub detail pane', () => {
     expect(checks?.getAttribute('rel')).toBe('noopener noreferrer')
   })
 
+  it('hydrates the selected PR body and diffstat from the thread detail (hearsay-tools/cezarion#1183)', async () => {
+    stubFetch({
+      'GET /api/v1/github/comments/pr/137': () => jsonResponse({
+        ...THREAD,
+        detail: { body: 'Hydrated PR description', additions: 240, deletions: 12 },
+      }),
+    })
+    renderAt('/github/prs/137')
+
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-body"]')?.textContent).toContain('Hydrated PR description'))
+    expect(document.querySelector('[data-slot="gh-diffstat"]')?.textContent).toBe('+240 −12')
+  })
+
+  it('an issue whose list row has no body shows the detail body', async () => {
+    const { body: _body, ...bodiless } = ISSUE_142
+    stubFetch({
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issues: [bodiless, ISSUE_139] }),
+      'GET /api/v1/github/comments/issue/142': () => jsonResponse({ ...THREAD, detail: { body: 'Body from the detail tier' } }),
+    })
+    renderAt('/github/issues/142')
+
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-body"]')?.textContent).toContain('Body from the detail tier'))
+    expect(document.querySelector('[data-slot="gh-body"]')?.textContent).not.toContain('(no description)')
+  })
+
   it('renders the issue body through the markdown pipeline', async () => {
     stubFetch()
     renderAt('/github/issues/142')
