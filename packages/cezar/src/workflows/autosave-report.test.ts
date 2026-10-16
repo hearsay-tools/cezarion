@@ -79,6 +79,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
 
   afterEach(async () => {
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
     if (bin) rmSync(bin, { recursive: true, force: true });
     bin = undefined;
     await drainFixtureManagers(repoRoot);
@@ -102,7 +103,8 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     bin = mkdtempSync(join(tmpdir(), 'cez-autosave-report-bin-'));
     writeFileSync(join(bin, 'git'), [
       '#!/bin/sh',
-      'case " $* " in *" rev-parse --short HEAD "*) echo "fatal: shim" >&2; exit 128;; esac',
+      // Any abbreviation: the save shortens the commit it wrote, never a re-read HEAD.
+      'case " $* " in *" rev-parse --short "*) echo "fatal: shim" >&2; exit 128;; esac',
       `exec ${JSON.stringify(realGit)} "$@"`,
       '',
     ].join('\n'), { mode: 0o755 });
@@ -156,6 +158,23 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
 
     expect(readHandoff(dataDir, runId)).toBe(before);
     expect(notes().filter(message => message.includes('autosave'))).toEqual([]);
+  });
+
+  // The refusal now has two causes; the note must not claim conflicts that are not there.
+  it('says an unfinished merge, not only conflicts, can refuse the save', async () => {
+    await git(['checkout', '-q', '-b', 'side']);
+    writeFileSync(join(worktreePath, 'b.txt'), 'side\n');
+    await git(['add', '-A']);
+    await git([...GIT_ID, 'commit', '-q', '-m', 'side']);
+    await git(['checkout', '-q', branch]);
+    await git([...GIT_ID, 'merge', '-q', '--no-commit', '--no-ff', 'side']);
+    const tip = await out(['rev-parse', branch]);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await manager.saveWorktree(runId, { cwd: worktreePath }, 'turn end');
+
+    expect(await out(['rev-parse', branch])).toBe(tip);
+    expect(notes()).toContain(`turn end autosave refused: unresolved conflicts or an unfinished merge, cherry-pick or revert; working files remain in ${worktreePath}`);
   });
 
   it('writes nothing when there is nothing to save', async () => {

@@ -8135,7 +8135,7 @@ export class RunManager {
     void task.then(result => {
       cleanupConfirmed = true;
       if (result === 'failed') note(`${reason} autosave failed; working files remain in ${state.cwd}`);
-      else if (result === 'refused') note(`${reason} autosave refused because of unresolved conflicts; working files remain in ${state.cwd}`);
+      else if (result === 'refused') note(`${reason} autosave refused: unresolved conflicts or an unfinished merge, cherry-pick or revert; working files remain in ${state.cwd}`);
       else if (outcome) {
         const message = autosaveReportLine(reason, outcome, taskBranch);
         note(message);

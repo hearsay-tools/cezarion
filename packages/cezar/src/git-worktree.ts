@@ -431,7 +431,9 @@ export type AutosaveReason = 'periodic' | 'turn end' | 'run finalize' | 'pre-PR'
  * means the branch leaves the box without the run's final state and the user
  * has to be told (see createDraftPr). A bare boolean could not carry that.
  * `skipped` happens only when the caller names a task branch and HEAD is not
- * on it (hearsay-tools/cezarion#1004); the pre-PR flush never names one.
+ * on it (hearsay-tools/cezarion#1004); the pre-PR flush never names one. A save
+ * that names one is also `refused` while a merge, cherry-pick or revert waits
+ * for the agent to conclude it.
  */
 export type AutosaveResult = 'committed' | 'nothing-to-do' | 'refused' | 'failed' | 'skipped';
 
@@ -447,8 +449,9 @@ export type AutosaveOutcome =
 
 export interface AutosaveCommitOptions extends AutosaveOptions {
   /** The task's own branch (`cez/<id8>`). Given, the save commits only while HEAD is
-   *  `refs/heads/<taskBranch>`; on any other branch or a detached HEAD it leaves the
-   *  index and working tree alone and returns `skipped`. */
+   *  `refs/heads/<taskBranch>`, and writes that ref by compare-and-swap; on any other
+   *  branch or a detached HEAD it leaves the index and working tree alone and returns
+   *  `skipped`. */
   taskBranch?: string;
   /** Receives the facts behind a `committed` or `skipped` result. Never called otherwise. */
   onOutcome?: (outcome: AutosaveOutcome) => void;
@@ -553,6 +556,19 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
       console.warn(`[cezar] skipping ${reason} autosave in ${dir}: ${unresolved}`);
       return 'refused';
     }
+    if (taskBranch !== undefined) {
+      // A resolved merge, cherry-pick or revert the agent has not concluded: `git commit`
+      // would conclude it under `cezar autosave`. The agent concludes it with its own
+      // message; the next flush picks the work up (hearsay-tools/cezarion#1004).
+      for (const pending of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
+        const found = await git(dir, ['rev-parse', '--verify', '-q', pending]);
+        if (found.ok) {
+          console.warn(`[cezar] skipping ${reason} autosave in ${dir}: ${pending} is set, the operation is not concluded`);
+          return 'refused';
+        }
+        if (found.code !== 1) return 'failed';
+      }
+    }
     if (!(await git(dir, ['add', '-A'])).ok) return 'failed';
     // Commit as the CURRENT git user, so the branch's commits (and any PR opened from it) are
     // attributed to the real author and pass CLA / attribution checks. The old hardcoded
@@ -566,18 +582,65 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
     const identityArgs = (name.ok && name.stdout.trim() && email.ok && email.stdout.trim())
       ? []
       : ['-c', 'user.name=cezar', '-c', 'user.email=cezar@local'];
-    const commit = await git(dir, [
+    const message = `cezar autosave (${reason})`;
+    if (taskBranch === undefined) {
+      const commit = await git(dir, [
+        ...identityArgs,
+        'commit',
+        '--no-verify',
+        '-m',
+        message,
+      ]);
+      if (!commit.ok) return 'failed';
+      if (onOutcome) {
+        // The commit already landed: a failed read loses the sha, never the report.
+        const sha = await git(dir, ['rev-parse', '--short', 'HEAD']);
+        report({ result: 'committed', sha: (sha.ok && sha.stdout.trim()) || null, branch });
+      }
+      return 'committed';
+    }
+    // The task branch is written by compare-and-swap, never through HEAD: the agent can
+    // check another branch out after the `symbolic-ref` check above, and `git commit`
+    // resolves HEAD again at its own start, so the save landed on the agent's branch
+    // (review on hearsay-tools/cezarion#1111). `update-ref <ref> <new> <old>` moves the
+    // branch only while it still points at the tip read here (an unborn one: while it
+    // still does not exist); a moved branch fails the save and the next flush retries.
+    // Unlike the porcelain this runs no prepare-commit-msg or post-commit hook
+    // (`--no-verify` already skipped pre-commit and commit-msg), and the reflog entry
+    // reads `cezar autosave (<reason>)` without the `commit: ` prefix. commit-tree
+    // stopped reading commit.gpgSign in Git 2.9 (its release notes tell scripts to read
+    // it and pass -S), so it is read here: a user who signs every commit still does.
+    const ref = `refs/heads/${taskBranch}`;
+    const tip = await git(dir, ['rev-parse', '--verify', '-q', ref]);
+    if (!tip.ok && tip.code !== 1) return 'failed';
+    const parent = tip.ok ? tip.stdout.trim() : '';
+    const written = await git(dir, ['write-tree']);
+    const tree = written.stdout.trim();
+    if (!written.ok || !tree) return 'failed';
+    if (parent) {
+      // Dirty when status looked, identical once staged: nothing to save.
+      const parentTree = await git(dir, ['rev-parse', '--verify', '-q', `${parent}^{tree}`]);
+      if (!parentTree.ok) return 'failed';
+      if (parentTree.stdout.trim() === tree) return 'nothing-to-do';
+    }
+    const sign = await git(dir, ['config', '--type=bool', 'commit.gpgsign']);
+    if (!sign.ok && sign.code !== 1) return 'failed';
+    const created = await git(dir, [
       ...identityArgs,
-      'commit',
-      '--no-verify',
+      'commit-tree',
+      ...(sign.ok && sign.stdout.trim() === 'true' ? ['-S'] : []),
+      tree,
+      ...(parent ? ['-p', parent] : []),
       '-m',
-      `cezar autosave (${reason})`,
+      message,
     ]);
-    if (!commit.ok) return 'failed';
+    const sha = created.stdout.trim();
+    if (!created.ok || !sha) return 'failed';
+    if (!(await git(dir, ['update-ref', '-m', message, ref, sha, parent])).ok) return 'failed';
     if (onOutcome) {
       // The commit already landed: a failed read loses the sha, never the report.
-      const sha = await git(dir, ['rev-parse', '--short', 'HEAD']);
-      report({ result: 'committed', sha: (sha.ok && sha.stdout.trim()) || null, branch });
+      const short = await git(dir, ['rev-parse', '--short', sha]);
+      report({ result: 'committed', sha: (short.ok && short.stdout.trim()) || null, branch: taskBranch });
     }
     return 'committed';
   }
