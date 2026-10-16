@@ -110,17 +110,10 @@ describe('New project', () => {
     it(`creates a local project from the keyboard, ${theme}`, async () => {
       browser.goto(`${baseUrl}/p/${bootId}/`)
       applyContrastQaVariant(browser, desktop(theme))
-      // The rail's Add project trigger is the page's FIRST focusable control, so
-      // `focusWithKeyboard` has no predecessor to Tab from. Evidence: both themes failed with "no
-      // visible keyboard predecessor" (bundle
-      // .ai/qa/failures/create-project/creates-a-local-project-from-the-keyboard-light-1/:
-      // probe.json `lastValue: { ready: false, predecessor: null }`, snapshot.txt lists
-      // "Add project" first in the page). Reproduce with
-      // `npm run test:e2e -- create-project.e2e.ts -t 'from the keyboard'` — 2 failed before this
-      // change, 2 passed after. Focus it directly and wait for it: the keyboard path under test
-      // starts at the Enter that opens the menu.
-      browser.evaluate(`document.querySelector(${JSON.stringify(RAIL_ADD)}).focus()`)
-      browser.waitForFunction(`document.activeElement?.matches(${JSON.stringify(RAIL_ADD)}) === true`)
+      // With no project registered (a server booted inside a task worktree) the rail's Add project
+      // trigger is the page's first focusable control; in CI the boot project's mark comes first.
+      // `focusWithKeyboard` reaches it through a real Tab either way (hearsay-tools/cezarion#1091).
+      focusWithKeyboard(browser, RAIL_ADD)
       browser.press('Enter')
       // Radix focuses the first item of a menu opened from the keyboard: New project comes first.
       browser.waitForFunction(`document.activeElement?.getAttribute('data-slot') === 'add-project-new'`)
