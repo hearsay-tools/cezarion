@@ -1,12 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixture } from './service.testkit.ts';
 import { parentFileSnapshotPath, verifyWorkerContext } from './context.ts';
 import { ensureOwnedWorkspace } from './workspace.ts';
 import type { WorkerSpawnRequest } from '@open-mercato/cezar-contract';
+
+// A one-shot hook around `open`: it may change the filesystem just before a matching path is
+// opened and return a step that runs right after, so a race lands between the canonical checks.
+const openHook = vi.hoisted(() => ({ current: undefined as undefined | ((path: string) => (() => void) | undefined) }));
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  const open = (async (path: Parameters<typeof actual.open>[0], ...rest: unknown[]) => {
+    const after = openHook.current?.(String(path));
+    try { return await (actual.open as (...args: unknown[]) => ReturnType<typeof actual.open>)(path, ...rest); } finally { after?.(); }
+  }) as typeof actual.open;
+  return { ...actual, open, default: { ...actual, open } };
+});
 
 describe('explicit owned worker context', () => {
   let f: ReturnType<typeof fixture>;
@@ -105,8 +117,17 @@ describe('parent-file references', () => {
     if (worker.delegation?.role !== 'worker') throw Error('worker');
     return { worker, delegation: worker.delegation };
   };
+  /** While `qa/<file>` is opened, `qa` is a symlink to `elsewhere`; it is a real directory again before and after. */
+  const swapAncestorDuringOpen = (file: string) => {
+    openHook.current = path => {
+      if (!path.endsWith(`/qa/${file}`)) return undefined;
+      openHook.current = undefined;
+      renameSync(join(f.root, 'qa'), join(f.root, 'qa.real')); symlinkSync(join(f.root, 'elsewhere'), join(f.root, 'qa'));
+      return () => { unlinkSync(join(f.root, 'qa')); renameSync(join(f.root, 'qa.real'), join(f.root, 'qa')); };
+    };
+  };
   beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
-  afterEach(async () => { await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+  afterEach(async () => { openHook.current = undefined; await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
   it('snapshots ignored parent files with worker-worktree recipe paths', async () => {
     commit('.gitignore', 'qa/\n');
@@ -143,11 +164,46 @@ describe('parent-file references', () => {
     symlinkSync('../elsewhere', join(f.root, 'qa/link'));
     const before = runsDir();
     await expect(f.service.spawn(f.caller, input(files('qa/ok.md', 'qa/absent.md')))).rejects.toThrow('--attach path not found: qa/absent.md');
+    write('qa/plain-file', 'a file, not a directory');
+    await expect(f.service.spawn(f.caller, input(files('qa/ok.md', 'qa/plain-file/brief.md')))).rejects.toThrow('--attach path not found: qa/plain-file/brief.md');
     for (const path of ['qa/link/secret.md', 'qa/link', 'qa/dir']) {
       await expect(f.service.spawn(f.caller, input(files('qa/ok.md', path)))).rejects.toThrow(`--attach path is not a regular file inside the parent worktree: ${path}`);
     }
     expect(runsDir()).toEqual(before);
     expect(f.store.listRuns()).toHaveLength(1);
+  });
+
+  it('binds the read bytes to the canonical source, refusing an ancestor swapped for a symlink during the read', async () => {
+    commit('.gitignore', 'qa/\n');
+    write('qa/brief.md', 'inside bytes'); write('elsewhere/brief.md', 'OUTSIDE bytes');
+    const before = runsDir();
+    swapAncestorDuringOpen('brief.md');
+    await expect(f.service.spawn(f.caller, input(files('qa/brief.md')))).rejects.toThrow('--attach path changed while it was read: qa/brief.md');
+    expect(openHook.current).toBeUndefined();
+    expect(readFileSync(join(f.root, 'qa/brief.md'), 'utf8')).toBe('inside bytes');
+    expect(runsDir()).toEqual(before);
+    expect(f.store.listRuns()).toHaveLength(1);
+    // A source removed while it is opened is named too, not folded into the generic refusal.
+    openHook.current = path => { if (path.endsWith('/qa/brief.md')) { openHook.current = undefined; rmSync(path); } return undefined; };
+    await expect(f.service.spawn(f.caller, input(files('qa/brief.md')))).rejects.toThrow('--attach path not found: qa/brief.md');
+    expect(runsDir()).toEqual(before);
+  });
+
+  it('refuses to rebuild a missing snapshot through an ancestor swapped for a symlink during the read', async () => {
+    commit('.gitignore', 'qa/\n');
+    // Identical bytes outside: the hash check alone cannot tell where they came from.
+    write('qa/brief.md', 'same bytes'); write('elsewhere/brief.md', 'same bytes');
+    const { workerId } = await f.service.spawn(f.caller, input(files('qa/brief.md')));
+    const { context, workspace, parentRunId } = workerOf(workerId).delegation;
+    const dataDir = join(f.root, '.ai/cezar');
+    const snapshot = await parentFileSnapshotPath(dataDir, workspace, 0);
+    rmSync(snapshot);
+    swapAncestorDuringOpen('brief.md');
+    await expect(verifyWorkerContext({ dataDir, parentId: parentRunId, workspace, context, parentCwd: f.root })).rejects.toMatchObject({ code: 'invalid_input' });
+    expect(openHook.current).toBeUndefined();
+    expect(() => lstatSync(snapshot)).toThrow();
+    await expect(verifyWorkerContext({ dataDir, parentId: parentRunId, workspace, context, parentCwd: f.root })).resolves.toBeUndefined();
+    expect(readFileSync(snapshot, 'utf8')).toBe('same bytes');
   });
 
   it('shares the 8 MiB budget and refuses credentials', async () => {

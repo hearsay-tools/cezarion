@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { constants } from 'node:fs';
+import { constants, type Stats } from 'node:fs';
 import { lstat, mkdir, open, realpath, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -15,6 +15,11 @@ const invalid = () => new DelegationPolicyError('invalid_input', 'Worker context
 
 /** Fixed-size read, regular files only; neither a FIFO nor a growing file can evade the bound. */
 export async function readBoundedContextFile(path: string, limit: number): Promise<Buffer> {
+  return (await readBoundedFile(path, limit)).bytes;
+}
+/** The same read, with the opened file's own stat: O_NOFOLLOW guards only the last component,
+ * so a caller binds the bytes to a path by comparing this identity with the path's. */
+async function readBoundedFile(path: string, limit: number): Promise<{ bytes: Buffer; stat: Stats }> {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = await file.stat();
@@ -28,7 +33,7 @@ export async function readBoundedContextFile(path: string, limit: number): Promi
     }
     const after = await file.stat();
     if (count > limit || count !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs) throw invalid();
-    return bytes.subarray(0, count);
+    return { bytes: bytes.subarray(0, count), stat: after };
   } finally { await file.close(); }
 }
 
@@ -69,20 +74,32 @@ async function attachmentBytes(dataDir: string, parentId: string, id: string, li
 }
 
 const refuse = (message: string) => new DelegationPolicyError('invalid_input', message);
-/** A regular file inside the parent's worktree, reached without any symlink component (hearsay-tools/cezarion#1149). */
+/**
+ * A regular file inside the parent's worktree, reached without any symlink component (hearsay-tools/cezarion#1149).
+ * Node has no openat, so a directory above the file can be swapped for a symlink while it is
+ * opened: the bytes count only when the opened file IS the one at the canonical path afterwards.
+ * Every source failure names the path; only the budget keeps the generic refusal.
+ */
 async function parentFile(parentCwd: string, path: string): Promise<{ read(limit: number): Promise<Buffer> }> {
   const source = join(await realpath(parentCwd), path);
+  const notFound = (error: NodeJS.ErrnoException) => error.code === 'ENOENT' || error.code === 'ENOTDIR';
   const canonical = async () => {
     const [real, entry] = await Promise.all([realpath(source), lstat(source)]).catch((error: NodeJS.ErrnoException) => {
-      throw error.code === 'ENOENT' ? refuse(`--attach path not found: ${path}`) : error;
+      throw notFound(error) ? refuse(`--attach path not found: ${path}`) : refuse(`--attach path is not a regular file inside the parent worktree: ${path}`);
     });
     if (real !== source || !entry.isFile()) throw refuse(`--attach path is not a regular file inside the parent worktree: ${path}`);
+    return entry;
   };
-  await canonical();
+  const checked = await canonical();
   return { async read(limit) {
-    const bytes = await readBoundedContextFile(source, limit);
-    await canonical();
-    return bytes;
+    if (checked.size > limit) throw invalid();
+    // It was a regular file at the canonical path a moment ago: any read failure is a change.
+    const read = await readBoundedFile(source, limit).catch((error: NodeJS.ErrnoException) => {
+      throw notFound(error) ? refuse(`--attach path not found: ${path}`) : refuse(`--attach path changed while it was read: ${path}`);
+    });
+    const entry = await canonical();
+    if (entry.dev !== read.stat.dev || entry.ino !== read.stat.ino) throw refuse(`--attach path changed while it was read: ${path}`);
+    return read.bytes;
   } };
 }
 async function ignoredByGit(cwd: string, path: string): Promise<boolean> {
