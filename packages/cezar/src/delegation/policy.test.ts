@@ -138,6 +138,28 @@ describe('parent-only delegation policy', () => {
     }
   });
 
+  it.each(['review', 'done', 'failed'] as const)('names the resume command when steering a %s worker', status => {
+    expect(() => authorizeWorker(caller(), { ...worker(), status }, 'steer', root(), projectId))
+      .toThrowError(expect.objectContaining({
+        code: 'incompatible_state',
+        message: expect.stringContaining(`worker send ${workerId} "<instruction>" --kind request --resume --id <new-message-UUID>`),
+      }));
+  });
+
+  it('does not suggest resuming cancelled, stopping or destroyed workers', () => {
+    const destroyed = worker();
+    if (destroyed.delegation?.role !== 'worker') throw new Error('fixture');
+    destroyed.delegation.destroy = { requestedAt: now, phase: 'complete', remaining: [] };
+    for (const target of [
+      { ...worker(), status: 'cancelled' as const },
+      { ...worker(), status: 'done' as const, stopping: true },
+      { ...destroyed, status: 'done' as const },
+    ]) {
+      expect(() => authorizeWorker(caller(), target, 'steer', root(), projectId))
+        .toThrowError(expect.objectContaining({ code: 'incompatible_state', message: 'Worker no longer accepts steering.' }));
+    }
+  });
+
   it('rejects terminal steering but permits queued/running/waiting input', () => {
     for (const status of ['review', 'done', 'failed', 'cancelled'] as const) {
       denied(() => authorizeWorker(caller(), { ...worker(), status }, 'steer', root(), projectId), 'incompatible_state');
