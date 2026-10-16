@@ -23,8 +23,10 @@ const bot = { login: 'github-actions[bot]' };
 // Each verdict reply on an earlier thread arrives as its own empty-body bot
 // review. Rounds posted before the round marker carry a patch-id marker, a
 // malformed one (11), or only a summary (12, 13: dispatch or a failed patch-id).
-// automated-code-review.workflow.test.cjs runs the workflow's review_count jq
-// filter over a copy of this history.
+// Any non-empty body counts and neither side trims, so whitespace-only bodies
+// (14-16) count and jq and JS agree byte for byte, whatever each engine calls
+// whitespace. automated-code-review.workflow.test.cjs runs the workflow's
+// review_count jq filter over a copy of this history.
 const roundHistory = [
   { id: 1, user: bot, submitted_at: '2026-10-01T10:00:00Z', body: `<!-- cez-review-patch-id: ${'1'.repeat(40)} -->` },
   { id: 2, user: bot, submitted_at: '2026-10-01T10:01:00Z', body: '' },
@@ -40,6 +42,8 @@ const roundHistory = [
   { id: 12, user: bot, submitted_at: '2026-10-01T10:10:00Z', body: 'No issues found' },
   { id: 13, user: bot, submitted_at: '2026-10-01T10:11:00Z', body: 'Guard the null input before parsing.' },
   { id: 14, user: bot, submitted_at: '2026-10-01T10:12:00Z', body: ' \n\t' },
+  { id: 15, user: bot, submitted_at: '2026-10-01T10:13:00Z', body: ' ' },
+  { id: 16, user: bot, submitted_at: '2026-10-01T10:14:00Z', body: '﻿' },
 ];
 
 test('counts no automated reviews when review history is empty', () => {
@@ -55,8 +59,8 @@ test('counts three automated reviews from review history', () => {
 });
 
 test('counts only review rounds, never the empty-body reviews that wrap verdict replies', () => {
-  assert.deepEqual(roundHistory.filter((review) => isAutomatedReviewRound(review)).map((review) => review.id), [1, 3, 5, 6, 11, 12, 13]);
-  assert.equal(countAutomatedReviews(roundHistory), 7);
+  assert.deepEqual(roundHistory.filter((review) => isAutomatedReviewRound(review)).map((review) => review.id), [1, 3, 5, 6, 11, 12, 13, 14, 15, 16]);
+  assert.equal(countAutomatedReviews(roundHistory), 10);
 });
 
 test('does not count pending automated reviews', () => {

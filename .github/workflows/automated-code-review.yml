@@ -193,7 +193,7 @@ jobs:
               can_review=false
             else
               # Rounds only, as isAutomatedReviewRound counts them: a non-empty body; verdict replies are empty-body reviews.
-              review_count="$(gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.user.login == "github-actions[bot]") | select(.submitted_at != null) | select((.body // "") | test("\\S")) | .id' | wc -l)"
+              review_count="$(gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.user.login == "github-actions[bot]") | select(.submitted_at != null) | select((.body // "") != "") | .id' | wc -l)"
               if [ "$review_count" -lt "$AUTOMATED_REVIEW_ROUNDS" ]; then
                 can_review=true
               else

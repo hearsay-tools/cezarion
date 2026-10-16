@@ -548,9 +548,10 @@ test('review schema requires every object property and models optional values as
 
 
 const bot = { login: 'github-actions[bot]' };
-// Same history as roundHistory in automated-review.test.cjs: seven rounds, three
-// of them unmarked or malformed legacy rounds, among empty-body verdict-reply
-// reviews, a whitespace-only, a pending and a human review.
+// Same history as roundHistory in automated-review.test.cjs: ten rounds, among
+// them unmarked or malformed legacy rounds and whitespace-only bodies (ASCII,
+// U+00A0, U+FEFF), among empty-body verdict-reply reviews, a pending and a human
+// review. Neither side trims, so jq and JS agree byte for byte.
 const roundHistory = [
   { id: 1, user: bot, submitted_at: '2026-10-01T10:00:00Z', body: `<!-- cez-review-patch-id: ${'1'.repeat(40)} -->` },
   { id: 2, user: bot, submitted_at: '2026-10-01T10:01:00Z', body: '' },
@@ -566,6 +567,8 @@ const roundHistory = [
   { id: 12, user: bot, submitted_at: '2026-10-01T10:10:00Z', body: 'No issues found' },
   { id: 13, user: bot, submitted_at: '2026-10-01T10:11:00Z', body: 'Guard the null input before parsing.' },
   { id: 14, user: bot, submitted_at: '2026-10-01T10:12:00Z', body: ' \n\t' },
+  { id: 15, user: bot, submitted_at: '2026-10-01T10:13:00Z', body: ' ' },
+  { id: 16, user: bot, submitted_at: '2026-10-01T10:14:00Z', body: '﻿' },
 ];
 
 test('review-round counts rounds by the same rule as countAutomatedReviews', async () => {
@@ -578,7 +581,7 @@ test('review-round counts rounds by the same rule as countAutomatedReviews', asy
   assert.ok(filter, 'review-round must count reviews through a --jq filter');
   const counted = execFileSync('jq', ['-r', filter], { input: JSON.stringify(roundHistory), encoding: 'utf8' }).split('\n').filter(Boolean).length;
   assert.equal(counted, countAutomatedReviews(roundHistory));
-  assert.equal(counted, 7);
+  assert.equal(counted, 10);
 });
 
 test('review-round skips when the three-dot patch-id matches the last posted marker', async (t) => {
