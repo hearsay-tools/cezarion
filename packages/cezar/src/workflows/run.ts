@@ -43,6 +43,7 @@ import {
   appendHandoffHeartbeat,
   followupsEnabled,
   handoffPath,
+  recordHandoffPeriodicAutosave,
   seedHandoffFile,
 } from '../handoff.ts';
 import { attachmentDirectory, resolveAttachmentPath } from './attachment-path.ts';
@@ -386,7 +387,8 @@ export { CHECK_KILL_GRACE_MS, CHECK_TERMINATION_CONFIRM_MS } from './grouped-com
  *  a draft PR) are NOT gated: the task branch must still end holding the finished state.
  *  The turn-end and run-finalize flushes and the timer commit only while HEAD is that
  *  branch, though (hearsay-tools/cezarion#1004): on a branch the agent checked out they
- *  commit nothing. */
+ *  commit nothing. The timer's commits are reported as one coalesced handoff line per run
+ *  of periodic commits (`recordHandoffPeriodicAutosave`), never as a cockpit note. */
 export function periodicAutosaveEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CEZ_AUTOSAVE === '1';
 }
@@ -8088,7 +8090,9 @@ export class RunManager {
   /** Keep a separate maintenance hold until autosave proves all its processes exited.
    *  Commits only while HEAD is the run's recorded branch (hearsay-tools/cezarion#1004), and
    *  reports a commit or a skip in the handoff's `## Autosave (cezar)` section and as a note;
-   *  a run with no recorded branch keeps committing on whatever HEAD is. */
+   *  a periodic save reports only a commit, in the handoff alone, coalesced with the
+   *  periodic commits right before it. A run with no recorded branch keeps committing on
+   *  whatever HEAD is. */
   private async saveWorktree(runId: string, state: ActiveRun, reason: AutosaveReason): Promise<void> {
     if (state.cwd === this.repoRoot) return;
     for (;;) {
@@ -8110,14 +8114,10 @@ export class RunManager {
     let cleanupConfirmed = false;
     let taskBranch: string | undefined;
     try { taskBranch = this.store.getRun(runId)?.branch; } catch { /* A closed store keeps the old rule. */ }
-    // The periodic timer keeps the branch rule but reports nothing: one line per 90 s tick
-    // would bury the Autosave section, and the turn-end or run-finalize flush that always
-    // follows the timer reports the final state, which is what a resumed session reads.
-    const reports = reason !== 'periodic';
     let outcome: AutosaveOutcome | undefined;
     const task = autosaveCommit(state.cwd, reason, {
       ...(taskBranch ? { taskBranch } : {}),
-      ...(reports ? { onOutcome: (reported: AutosaveOutcome) => { outcome = reported; } } : {}),
+      onOutcome: reported => { outcome = reported; },
       onWarning: note,
       onBlocked: (message, proof) => {
         retainAutosaveCleanup(this.dataDir, runId, state.cwd, message, proof);
@@ -8136,7 +8136,15 @@ export class RunManager {
       cleanupConfirmed = true;
       if (result === 'failed') note(`${reason} autosave failed; working files remain in ${state.cwd}`);
       else if (result === 'refused') note(`${reason} autosave refused: unresolved conflicts or an unfinished merge, cherry-pick or revert; working files remain in ${state.cwd}`);
-      else if (outcome) {
+      else if (outcome && reason === 'periodic') {
+        // The timer reports its commits too, since a clean closing flush reports nothing
+        // (review on hearsay-tools/cezarion#1111): one coalesced handoff line per run of
+        // periodic commits and no note, as a note every 90 s would flood the timeline. A
+        // periodic skip stays silent; the closing flush reports one with the final count.
+        if (outcome.result === 'committed') {
+          try { recordHandoffPeriodicAutosave(this.dataDir, runId, outcome); } catch { /* The handoff is a journal, never a reason to fail. */ }
+        }
+      } else if (outcome) {
         const message = autosaveReportLine(reason, outcome, taskBranch);
         note(message);
         try { appendHandoffAutosaveReport(this.dataDir, runId, message); } catch { /* The handoff is a journal, never a reason to fail. */ }

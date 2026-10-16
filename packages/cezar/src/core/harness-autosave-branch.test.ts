@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { readHandoff } from '../handoff.ts';
+import { AUTOSAVE_INTERVAL_MS } from '../workflows/run.ts';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { withOwnedInputRun, waitFor } from './harness-parity.testkit.ts';
 
@@ -21,7 +22,9 @@ const section = (text: string, header: string) => {
 // that checks another branch out in its task worktree must not find
 // `cezar autosave` on it when the session settles. Registered as R77 (initial
 // run, `run finalize`) and R78 (Continue, `turn end`; its first settle also
-// pins the positive cell, a commit on the task branch) in the parity guard.
+// pins the positive cell, a commit on the task branch, and its periodic case
+// a timer commit that leaves the turn-end flush nothing to save) in the parity
+// guard.
 describe('harness parity — autosave on an agent-checked-out branch (#1004)', () => {
   for (const backend of RUNNER_IDS) {
     for (const continuation of [false, true]) {
@@ -71,5 +74,50 @@ describe('harness parity — autosave on an agent-checked-out branch (#1004)', (
         } finally { vi.restoreAllMocks(); vi.unstubAllEnvs(); }
       }, 60_000);
     }
+
+    // Review on hearsay-tools/cezarion#1111: the timer commits the last work, so the
+    // Continue's turn-end flush finds a clean tree and reports nothing; the timer's own
+    // coalesced handoff line is what a resumed session reads.
+    it(`${backend} R78 continuation periodic commit followed by a clean turn end is reported`, async () => {
+      vi.stubEnv('CEZ_DELEGATION', '1');
+      vi.stubEnv('CEZ_AUTOSAVE', '1');
+      const intervals = vi.spyOn(globalThis, 'setInterval');
+      try {
+        await withOwnedInputRun(backend, 'baseline', async ({ repoRoot, store, manager, runId }) => {
+          const dataDir = join(repoRoot, '.ai/cezar');
+          const notes = () => store.readEvents(runId).flatMap(event => event.type === 'note' ? [String(event.message)] : []);
+          const autosave = () => section(readHandoff(dataDir, runId), '## Autosave (cezar)');
+          const progress = () => section(readHandoff(dataDir, runId), '## Progress log');
+          manager.enqueueOwnedRun(runId);
+          await waitFor(() => store.getRun(runId)?.status === 'waiting');
+          const { worktreePath: dir, branch: taskBranch } = store.getRun(runId)!;
+          const git = (args: string[]) => execFileSync('git', args, { cwd: dir!, encoding: 'utf8' }).trim();
+          expect(manager.finish(runId)).toBe(true);
+          await waitFor(() => !manager.isActive(runId));
+          intervals.mockClear();
+          expect(manager.continueRun(runId, { text: 'mock:baseline' }).ok).toBe(true);
+          await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
+          // The Continue's own timer, fired by hand instead of after 90 s.
+          const tick = intervals.mock.calls.filter(call => call[1] === AUTOSAVE_INTERVAL_MS).at(-1)?.[0];
+          expect(tick).toBeTypeOf('function');
+          writeFileSync(join(dir!, 'periodic.txt'), 'commit me\n');
+          (tick as () => void)();
+          await waitFor(() => autosave().includes('periodic: '));
+          expect(git(['log', '-1', '--format=%s', taskBranch!])).toBe('cezar autosave (periodic)');
+          const sha = git(['rev-parse', '--short', taskBranch!]);
+
+          expect(manager.finish(runId)).toBe(true);
+          await waitFor(() => !manager.isActive(runId));
+
+          // The turn-end flush had nothing to save, so the periodic line is still the newest.
+          expect(git(['rev-parse', '--short', taskBranch!])).toBe(sha);
+          const periodic = `periodic: 1 cezar autosave commit(s) on ${taskBranch}, first ${sha}, latest ${sha}; ` +
+            `to fold the latest into your own commits while it is HEAD, run \`git reset --soft ${sha}~1\``;
+          expect(autosave().split('\n').filter(Boolean)[0]).toMatch(new RegExp(`^- \\S+ — ${escape(periodic)}$`));
+          expect(progress()).not.toContain('periodic');
+          expect(notes().filter(message => message.includes('periodic'))).toEqual([]);
+        });
+      } finally { vi.restoreAllMocks(); vi.unstubAllEnvs(); }
+    }, 60_000);
   }
 });

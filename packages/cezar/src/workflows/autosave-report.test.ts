@@ -23,7 +23,8 @@ interface SaveSeam {
  * hearsay-tools/cezarion#1004: a resumed session reads the handoff, not
  * `git log`. Each turn-end / run-finalize save that commits or leaves work
  * behind says so in its `## Autosave (cezar)` section, never the Progress log,
- * and the same text reaches the cockpit as a note.
+ * and the same text reaches the cockpit as a note. Periodic commits share one
+ * coalesced handoff line and no note.
  * The runner-wire matrix for the same rule is R77/R78
  * (core/harness-autosave-branch.test.ts).
  */
@@ -144,20 +145,83 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     expect(notes()).toContain(message);
   });
 
-  it('writes no handoff line or note for a periodic save, committed or skipped', async () => {
-    const before = readHandoff(dataDir, runId);
+  /** The coalesced line a run of periodic commits on the task branch leaves (#1004 review). */
+  const periodicLine = (count: number, first: string, latest: string) =>
+    `periodic: ${count} cezar autosave commit(s) on ${branch}, first ${first}, latest ${latest}; ` +
+    `to fold the latest into your own commits while it is HEAD, run \`git reset --soft ${latest}~1\``;
+  const autosaveLines = (id = runId) => autosave(id).split('\n').filter(Boolean);
+  const autosaveNotes = () => notes().filter(message => message.includes('autosave'));
+
+  // The automated review on hearsay-tools/cezarion#1111: the timer committed the last
+  // work, the closing flush found a clean tree, and nothing told a resumed session.
+  it('reports a periodic commit that leaves the closing turn-end flush nothing to save', async () => {
     writeFileSync(join(worktreePath, 'work.txt'), 'progress\n');
     await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
     expect(await out(['log', '-1', '--format=%s'])).toBe('cezar autosave (periodic)');
+    const sha = await out(['rev-parse', '--short', 'HEAD']);
+
+    await manager.saveWorktree(runId, { cwd: worktreePath }, 'turn end');
+
+    expect(await out(['rev-parse', '--short', 'HEAD'])).toBe(sha);
+    expectReported(periodicLine(1, sha, sha));
+    expect(autosave()).toContain(`on ${branch}`);
+    expect(autosave()).toContain(`\`git reset --soft ${sha}~1\``);
+    // A note every 90 s would flood the timeline; the handoff line is the report.
+    expect(autosaveNotes()).toEqual([]);
+  });
+
+  it('coalesces consecutive periodic commits into one line', async () => {
+    writeFileSync(join(worktreePath, 'one.txt'), 'progress\n');
+    await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
+    const first = await out(['rev-parse', '--short', 'HEAD']);
+    writeFileSync(join(worktreePath, 'two.txt'), 'progress\n');
+    await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
+    const latest = await out(['rev-parse', '--short', 'HEAD']);
+    expect(latest).not.toBe(first);
+
+    expect(autosaveLines()).toHaveLength(1);
+    expectReported(periodicLine(2, first, latest));
+    expect(autosaveNotes()).toEqual([]);
+  });
+
+  it('starts a new periodic line after a turn-end report', async () => {
+    writeFileSync(join(worktreePath, 'one.txt'), 'progress\n');
+    await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
+    const one = await out(['rev-parse', '--short', 'HEAD']);
+    writeFileSync(join(worktreePath, 'two.txt'), 'progress\n');
+    await manager.saveWorktree(runId, { cwd: worktreePath }, 'turn end');
+    const two = await out(['rev-parse', '--short', 'HEAD']);
+    writeFileSync(join(worktreePath, 'three.txt'), 'progress\n');
+    await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
+    const three = await out(['rev-parse', '--short', 'HEAD']);
+
+    const lines = autosaveLines();
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toMatch(/ — periodic: /);
+    expect(lines[0]).toContain(periodicLine(1, three, three));
+    expect(lines[1]).toContain(`turn end: cezar autosave committed ${two} on ${branch};`);
+    expect(lines[2]).toContain(periodicLine(1, one, one));
+    // Only the turn-end flush reaches the cockpit.
+    expect(autosaveNotes()).toEqual([expect.stringContaining(`turn end: cezar autosave committed ${two}`)]);
+  });
+
+  it('reports a periodic commit only in the handoff, and a periodic skip nowhere', async () => {
+    writeFileSync(join(worktreePath, 'work.txt'), 'progress\n');
+    await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
+    expect(await out(['log', '-1', '--format=%s'])).toBe('cezar autosave (periodic)');
+    const sha = await out(['rev-parse', '--short', 'HEAD']);
+    expect(autosaveLines()).toEqual([expect.stringContaining(periodicLine(1, sha, sha))]);
+    const committed = readHandoff(dataDir, runId);
 
     await git(['checkout', '-q', '-b', 'fix/1004-x']);
     writeFileSync(join(worktreePath, 'more.txt'), 'progress\n');
     await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
-    // Same rule as the closing flushes: nothing lands on the agent's branch.
+    // Same rule as the closing flushes: nothing lands on the agent's branch. The skip
+    // stays silent: the closing flush reports it with the final path count.
     expect((await git(['status', '--porcelain'])).stdout).toBe('?? more.txt\n');
 
-    expect(readHandoff(dataDir, runId)).toBe(before);
-    expect(notes().filter(message => message.includes('autosave'))).toEqual([]);
+    expect(readHandoff(dataDir, runId)).toBe(committed);
+    expect(autosaveNotes()).toEqual([]);
   });
 
   // The refusal now has two causes; the note must not claim conflicts that are not there.

@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   HANDOFF_INSTRUCTIONS,
@@ -10,6 +10,7 @@ import {
   appendHandoffHeartbeat,
   handoffPath,
   handoffProgressExcerpt,
+  recordHandoffPeriodicAutosave,
   seedHandoffFile,
 } from './handoff.ts';
 import { todoSchema } from './todos.ts';
@@ -134,5 +135,147 @@ describe('appendHandoffAutosaveReport', () => {
 
     expect(HANDOFF_ONLY_INSTRUCTIONS).toContain(`"${header}"`);
     expect(HANDOFF_ONLY_INSTRUCTIONS).toMatch(/"## Autosave \(cezar\)" section[^\n]*leave it in place/);
+  });
+});
+
+/**
+ * hearsay-tools/cezarion#1004 review: the periodic timer's commits are reported too,
+ * since a clean closing flush reports nothing. One line covers a run of consecutive
+ * periodic commits on one branch, so a 90 s timer cannot bury the section.
+ */
+describe('recordHandoffPeriodicAutosave', () => {
+  const RUN = 'run-1';
+  const BRANCH = 'cez/run-1';
+  let dataDir: string;
+  const file = () => handoffPath(dataDir, RUN);
+  const read = () => readFileSync(file(), 'utf8');
+  const section = (header: string) => {
+    const text = read();
+    const start = text.indexOf(`${header}\n`);
+    if (start < 0) return '';
+    const rest = text.slice(start + header.length + 1);
+    const next = rest.indexOf('\n## ');
+    return next >= 0 ? rest.slice(0, next) : rest;
+  };
+  const lines = () => section('## Autosave (cezar)').split('\n').filter(Boolean);
+  const periodic = (count: number, first: string, latest: string, branch = BRANCH, fold = `${latest}~1`) =>
+    `periodic: ${count} cezar autosave commit(s) on ${branch}, first ${first}, latest ${latest}; ` +
+    `to fold the latest into your own commits while it is HEAD, run \`git reset --soft ${fold}\``;
+  const seed = () => seedHandoffFile(dataDir, { id: RUN, title: 't', workflow: 'quick-task', task: 'do it', branch: BRANCH });
+  const at = (iso: string) => vi.setSystemTime(new Date(iso));
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'cez-handoff-'));
+    mkdirSync(join(dataDir, 'runs'));
+    vi.useFakeTimers({ toFake: ['Date'] });
+    at('2026-10-16T10:00:00.000Z');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('creates the section right before the Progress log on the first periodic commit', () => {
+    seed();
+    appendHandoffHeartbeat(dataDir, RUN, 'implemented the change');
+
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'abc1234', branch: BRANCH });
+
+    const text = read();
+    expect(text.indexOf('## Progress log\n')).toBeGreaterThan(text.indexOf('## Autosave (cezar)\n'));
+    expect(section('## Autosave (cezar)')).toBe(`\n- 2026-10-16T10:00:00.000Z — ${periodic(1, 'abc1234', 'abc1234')}\n`);
+    expect(section('## Progress log')).not.toContain('periodic');
+    expect(handoffProgressExcerpt(text)).toMatch(/^- \S+ — implemented the change$/);
+    expect(text.endsWith('## Resume notes\n')).toBe(true);
+  });
+
+  it('coalesces consecutive commits on the same branch into one line: count, first, latest, time', () => {
+    seed();
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'aaa1111', branch: BRANCH });
+    at('2026-10-16T10:01:30.000Z');
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'bbb2222', branch: BRANCH });
+    at('2026-10-16T10:03:00.000Z');
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'ccc3333', branch: BRANCH });
+
+    expect(lines()).toEqual([`- 2026-10-16T10:03:00.000Z — ${periodic(3, 'aaa1111', 'ccc3333')}`]);
+    expect(read().match(/^## Autosave \(cezar\)$/gm)).toHaveLength(1);
+    expect(handoffProgressExcerpt(read())).toBe('');
+  });
+
+  it('starts a new line on a different branch', () => {
+    seed();
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'aaa1111', branch: BRANCH });
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'bbb2222', branch: 'fix/1004-x' });
+
+    expect(lines()).toEqual([
+      `- 2026-10-16T10:00:00.000Z — ${periodic(1, 'bbb2222', 'bbb2222', 'fix/1004-x')}`,
+      `- 2026-10-16T10:00:00.000Z — ${periodic(1, 'aaa1111', 'aaa1111')}`,
+    ]);
+  });
+
+  it('starts a new line after a turn-end or run-finalize report, which ends the run of commits', () => {
+    seed();
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'aaa1111', branch: BRANCH });
+    appendHandoffAutosaveReport(dataDir, RUN, 'turn end: cezar autosave committed bbb2222 on cez/run-1');
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'ccc3333', branch: BRANCH });
+
+    expect(lines()).toEqual([
+      `- 2026-10-16T10:00:00.000Z — ${periodic(1, 'ccc3333', 'ccc3333')}`,
+      '- 2026-10-16T10:00:00.000Z — turn end: cezar autosave committed bbb2222 on cez/run-1',
+      `- 2026-10-16T10:00:00.000Z — ${periodic(1, 'aaa1111', 'aaa1111')}`,
+    ]);
+  });
+
+  it.each([
+    ['a truncated line', `- 2026-10-16T09:00:00.000Z — periodic: 2 cezar autosave commit(s) on ${BRANCH}, first aaa1111, latest bbb2222`],
+    ['a fold-back command that no longer names the latest', `- 2026-10-16T09:00:00.000Z — ${periodic(2, 'aaa1111', 'bbb2222', BRANCH, 'aaa1111~1')}`],
+    ['trailing text', `- 2026-10-16T09:00:00.000Z — ${periodic(2, 'aaa1111', 'bbb2222')} (squashed)`],
+    ['a count of zero', `- 2026-10-16T09:00:00.000Z — ${periodic(0, 'aaa1111', 'bbb2222')}`],
+    ['no timestamp', `- ${periodic(2, 'aaa1111', 'bbb2222')}`],
+  ])('starts a new line instead of guessing at an edited periodic line: %s', (_name, edited) => {
+    writeFileSync(file(), `# Handoff\n\n## Autosave (cezar)\n\n${edited}\n\n## Progress log\n\n## Resume notes\n`);
+
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'ccc3333', branch: BRANCH });
+
+    expect(lines()).toEqual([`- 2026-10-16T10:00:00.000Z — ${periodic(1, 'ccc3333', 'ccc3333')}`, edited]);
+  });
+
+  it('counts a commit whose sha could not be read, folding back from HEAD', () => {
+    seed();
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: null, branch: BRANCH });
+    expect(lines()).toEqual([`- 2026-10-16T10:00:00.000Z — ${periodic(1, '(sha unavailable)', '(sha unavailable)', BRANCH, 'HEAD~1')}`]);
+
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'bbb2222', branch: BRANCH });
+    expect(lines()).toEqual([`- 2026-10-16T10:00:00.000Z — ${periodic(2, '(sha unavailable)', 'bbb2222')}`]);
+
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: null, branch: BRANCH });
+    expect(lines()).toEqual([`- 2026-10-16T10:00:00.000Z — ${periodic(3, '(sha unavailable)', '(sha unavailable)', BRANCH, 'HEAD~1')}`]);
+  });
+
+  it('names a detached HEAD and keeps it apart from a branch', () => {
+    seed();
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'aaa1111', branch: null });
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'bbb2222', branch: null });
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'ccc3333', branch: BRANCH });
+
+    expect(lines()).toEqual([
+      `- 2026-10-16T10:00:00.000Z — ${periodic(1, 'ccc3333', 'ccc3333')}`,
+      `- 2026-10-16T10:00:00.000Z — ${periodic(2, 'aaa1111', 'bbb2222', 'detached HEAD')}`,
+    ]);
+  });
+
+  it('appends the section at the end of a file without a Progress log', () => {
+    writeFileSync(file(), '# Handoff\n\nfree-form notes');
+
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'aaa1111', branch: BRANCH });
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'bbb2222', branch: BRANCH });
+
+    expect(read()).toBe(`# Handoff\n\nfree-form notes\n\n## Autosave (cezar)\n\n- 2026-10-16T10:00:00.000Z — ${periodic(2, 'aaa1111', 'bbb2222')}\n`);
+  });
+
+  it('is a no-op on a missing file', () => {
+    expect(() => recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'aaa1111', branch: BRANCH })).not.toThrow();
+    expect(() => readFileSync(file())).toThrow();
   });
 });

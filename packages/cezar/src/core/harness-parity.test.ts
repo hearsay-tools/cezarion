@@ -593,7 +593,8 @@ const CONTROL_CRITERIA = [
   { id: 'R67', scenario: 'baseline' },
   { id: 'R68', scenario: 'baseline' },
   // hearsay-tools/cezarion#1004: harness-autosave-branch.test.ts, run-finalize and turn-end
-  // saves leave work on an agent-checked-out branch uncommitted and report it in the handoff.
+  // saves leave work on an agent-checked-out branch uncommitted and report it in the handoff;
+  // R78 also reports a periodic commit that leaves the closing turn-end flush clean.
   { id: 'R77', scenario: 'baseline' },
   { id: 'R78', scenario: 'baseline' },
   // hearsay-tools/cezarion#994: workflows/ci-wait-failure-parity.test.ts,
