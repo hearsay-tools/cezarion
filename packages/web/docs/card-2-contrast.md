@@ -15,7 +15,7 @@ Opacity, overlays, hover surfaces and custom colors require a separate measureme
 | `text-link-foreground` | 10.31:1 | 4.80:1 | Yes — links |
 | `text-signal-word-red` | 5.51:1 | 5.67:1 | Yes — red words |
 | `text-soft-foreground` | 4.88:1 | 4.37:1 | No — use muted-foreground |
-| `text-danger` | 4.05:1 | 4.24:1 | No — use signal-word-red |
+| `text-danger`, `text-destructive` (alias) | 4.05:1 | 4.24:1 | No — use signal-word-red |
 
 Icons and non-text graphics have a separate 3:1 requirement; these text rules
 do not prohibit their use of danger.
@@ -44,7 +44,7 @@ conservatively, including empty/absent class branches. Expansion is capped at 12
 combinations with a conservative fallback. JSX-only expressions are visited as elements rather than wrapper text. Unknown font sizes are treated conservatively as
 small. Known pixel/Tailwind sizes qualify as large at 24 px regular or 18.67 px
 with bold, extrabold or black weight; unknown weights grant no bold exemption.
-Variant-prefixed ink, size, weight and card-2 utilities are checked as possible
+Important modifiers are normalized. Variant-prefixed ink, size, weight and card-2 utilities are checked as possible
 states alongside the default state; variant backgrounds cannot grant an opaque-surface exemption. Icons without text and explicitly large text are excluded.
 
 This is a static guard, not a computed-style audit: runtime-generated classes,

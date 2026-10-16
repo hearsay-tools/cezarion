@@ -90,9 +90,9 @@ function utilityStates(branch: string): string[][] {
       else if (token[i] === ']' || token[i] === ')') depth--
       else if (token[i] === ':' && depth === 0) lastColon = i
     }
-    if (lastColon === -1) base.push(token)
+    const utility = token.slice(lastColon + 1).replace(/^!|!$/g, '')
+    if (lastColon === -1) base.push(utility)
     else {
-      const utility = token.slice(lastColon + 1)
       if (utility.startsWith('text-') || utility.startsWith('font-') || utility === 'bg-card-2') variants.push(utility)
     }
   }
@@ -126,7 +126,7 @@ function scan(source: string): string[] {
         const backgrounds = classes.filter(c => surfaceClasses.has(c) || c === 'bg-transparent' || surfaceClasses.has(c.split('/')[0] ?? ''))
         const inheritsSurface = backgrounds.length === 0 || backgrounds.some(c => c === 'bg-transparent' || c.includes('/'))
         const onCard = backgrounds.includes('bg-card-2') || inheritsSurface && (card || bodySlot)
-        const ownColors = classes.filter(c => /^text-(?:danger|soft-foreground|muted-foreground|supporting-foreground|link-foreground|foreground|signal-word-red)$/.test(c))
+        const ownColors = classes.filter(c => /^text-(?:danger|destructive|soft-foreground|muted-foreground|supporting-foreground|link-foreground|foreground|signal-word-red)$/.test(c))
         const colors = ownColors.length ? ownColors : [color]
         const sizes = classes.filter(c => /^text-(?:xs|sm|base|lg|xl|\d+xl)(?:\/.*)?$|^text-(?:\[|\(length:)/.test(c))
         const size = sizes.length ? Math.min(...sizes.map(fontSize)) : inheritedSize
@@ -134,7 +134,7 @@ function scan(source: string): string[] {
         const bold = weights.length ? weights.every(w => /^font-(?:bold|extrabold|black)$/.test(w)) : inheritedBold
         return { onCard, colors, size, bold, large: size >= 24 || bold && size >= 56 / 3 }
       })
-      const unsafe = (ink: string) => ink === 'text-danger' || ink === 'text-soft-foreground'
+      const unsafe = (ink: string) => ink === 'text-danger' || ink === 'text-destructive' || ink === 'text-soft-foreground'
       const children = node.children
       if (children.some(rendersText) && states.some(s => s.onCard && !s.large && s.colors.some(unsafe))) {
         sites.push(source.slice(opening.start ?? 0, opening.end ?? 0).replace(/\s+/g, ' '))
@@ -193,6 +193,17 @@ it('applies the bold large-text threshold and follows inherited size and weight'
   expect(scan(`<div className="bg-card-2 text-danger text-xl font-bold"><span className="font-normal">small</span></div>`)).toHaveLength(1)
   expect(scan(`<div className="bg-card-2 text-danger text-xl font-bold md:font-normal">small at md</div>`)).toHaveLength(1)
   expect(scan(`<div className="bg-card-2 text-danger text-xl font-semibold">small</div>`)).toHaveLength(1)
+})
+it('treats destructive as the unsafe danger palette alias', () => {
+  expect(scan(`<p className="bg-card-2 text-xs text-destructive">bad</p>`)).toHaveLength(1)
+  expect(scan(`<div className="bg-card-2 text-destructive text-xs"><span>bad</span></div>`)).toHaveLength(1)
+  expect(scan(`<p className="bg-card-2 text-xs text-foreground hover:text-destructive">bad on hover</p>`)).toHaveLength(1)
+  expect(scan(`<p className="bg-card-2 text-destructive text-[24px]">large</p>`)).toEqual([])
+})
+it('recognizes important utility modifiers', () => {
+  expect(scan(`<p className="bg-card-2! text-xs! text-danger!">bad</p>`)).toHaveLength(1)
+  expect(scan(`<p className="!bg-card-2 !text-xs !text-destructive">bad</p>`)).toHaveLength(1)
+  expect(scan(`<p className="bg-card-2 text-xs md:text-destructive!">bad</p>`)).toHaveLength(1)
 })
 it('lets documented safe foregrounds override inherited unsafe ink', () => {
   expect(scan(`<div className="bg-card-2 text-danger"><span className="text-supporting-foreground">safe</span><span className="text-link-foreground">safe</span></div>`)).toEqual([])
