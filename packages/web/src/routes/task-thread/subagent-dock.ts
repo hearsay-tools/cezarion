@@ -1,5 +1,6 @@
 import type { ToolStatus, UiItem, UiToolItem } from '@open-mercato/cezar-api-client'
 
+import { isSubagentChildKind } from './subagent-child-kind'
 import { splitToolTitle } from './thread-groups'
 import type { ThreadEntry, ThreadTurn } from './thread-state'
 
@@ -63,7 +64,7 @@ const isRootTaskItem = (entry: ThreadEntry): entry is UiToolItem =>
  * raw-JSON card in the sheet.
  */
 const isChildCandidate = (entry: ThreadEntry): entry is UiItem =>
-  (entry.kind === 'message' || entry.kind === 'reasoning' || entry.kind === 'tool' || entry.kind === 'hook') &&
+  isSubagentChildKind(entry.kind) &&
   !(entry.kind === 'tool' && entry.toolKind === 'plan')
 
 /** The first turn holding any of the given roots — where child scanning must begin. */
