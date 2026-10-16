@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import { AutomationStore } from '../automations/store.ts';
 import { reconcileAutomationReceipts } from '../automations/task-template.ts';
@@ -10,11 +11,12 @@ import { armRepoHandle } from '../runs/arm-repo-handle.ts';
 import { ensureDataGitignore } from '../data-gitignore.ts';
 import { reclaimWorktrees } from '../runs/retention.ts';
 import { RunStore } from '../runs/store.ts';
+import { RunDatabase, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY } from '../runs/run-database.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager } from '../workflows/run.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { getRepoInfo } from './git.ts';
-import { ownedByAnotherCockpit, type CockpitOwnership } from './cockpit-ownership.ts';
+import { ownedByAnotherCockpit, CockpitOwnership } from './cockpit-ownership.ts';
 
 /**
  * Per-project server context (spec 2026-07-20-multi-project-workspace,
@@ -175,6 +177,7 @@ export class ProjectContexts {
   private readonly contexts = new Map<string, ProjectContext>();
   private readonly managerCleanups = new WeakMap<RunManager, () => void>();
   private readonly building = new Map<string, Promise<ProjectContext>>();
+  private readonly maintenance = new Map<string, Promise<unknown>>();
   private readonly repoHandleControllers = new WeakMap<RunStore, AbortController>();
   /** Live store-created subscribers; invoked before RunManager recovery. */
   private readonly storeListeners = new Set<(store: RunStore) => void>();
@@ -205,7 +208,12 @@ export class ProjectContexts {
     if (inFlight) return inFlight;
     const generation = this.generation;
     const epoch = this.epochs.get(projectId) ?? 0;
-    const build = this.build(projectId, () => generation !== this.generation || epoch !== (this.epochs.get(projectId) ?? 0));
+    const stale = () => generation !== this.generation || epoch !== (this.epochs.get(projectId) ?? 0);
+    const build = (async () => {
+      await this.maintenance.get(projectId)?.catch(() => undefined);
+      if (stale()) throw new ProjectContextsClosedError();
+      return this.build(projectId, stale);
+    })();
     this.building.set(projectId, build);
     try {
       const ctx = await build;
@@ -220,6 +228,48 @@ export class ProjectContexts {
     } finally {
       this.building.delete(projectId);
     }
+  }
+
+  /** A short-lived writer lease for background maintenance; never creates/recover a manager.
+   * Context construction waits for the lease, while disposal invalidates it synchronously. */
+  async withMaintenanceStore<T>(projectId: string, work: (store: RunStore, current: () => boolean) => Promise<T>): Promise<T | undefined> {
+    const generation = this.generation, epoch = this.epochs.get(projectId) ?? 0;
+    let active = true;
+    const current = () => active && generation === this.generation && epoch === (this.epochs.get(projectId) ?? 0);
+    const built = this.peek(projectId);
+    if (built) return work(built.store, current).finally(() => { active = false; });
+    if (this.building.has(projectId) || this.maintenance.has(projectId)) return undefined;
+    const lease = (async () => {
+      const project = (await this.deps.listProjects()).find(project => project.id === projectId);
+      if (!project || project.status === 'missing' || !current()) return undefined;
+      const dataDir = join(project.root, '.ai/cezar');
+      if (ownedByAnotherCockpit(dataDir)) return undefined;
+      // Skip empty projects, but let the established fenced importer discover legacy-only
+      // history. Maintenance mode never normalizes live rows or recovers a manager.
+      const reader = RunDatabase.openReadOnly(join(dataDir, RUNS_DB_FILE));
+      let imported = false;
+      try { imported = reader?.getMeta(RUNS_IMPORT_COMPLETE_KEY) !== undefined; }
+      finally { reader?.close(); }
+      if (!imported && !existsSync(join(dataDir, 'runs.json'))) return undefined;
+      const temporaryOwnership = new CockpitOwnership();
+      let store: RunStore | undefined;
+      try {
+        // Existing process claims protect managers even after disposal. Borrow those;
+        // otherwise maintenance owns only this lease, never the server's lifetime.
+        if (!this.deps.ownership?.owns(dataDir)) await temporaryOwnership.acquire(dataDir);
+        if (!current()) return undefined;
+        ensureDataGitignore(project.root);
+        store = RunStore.open(dataDir, { keepLive: true, maintenance: true });
+        return await work(store, current);
+      } finally {
+        active = false;
+        if (store) { await store.historyIdle(); store.close(); }
+        temporaryOwnership.releaseAll();
+      }
+    })();
+    this.maintenance.set(projectId, lease);
+    try { return await lease; }
+    finally { if (this.maintenance.get(projectId) === lease) this.maintenance.delete(projectId); }
   }
 
   /**
@@ -313,6 +363,7 @@ export class ProjectContexts {
    */
   async settle(projectId: string): Promise<void> {
     await this.building.get(projectId)?.catch(() => undefined);
+    await this.maintenance.get(projectId)?.catch(() => undefined);
   }
 
   /** Already-built context, without triggering a build. */

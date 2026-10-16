@@ -144,6 +144,9 @@ const REPO: RepoResponse = {
 const REPO_NO_GIT: RepoResponse = { info: null, status: [], log: [], branches: [], baseBranch: null, tracking: null }
 
 const CONFIG: ConfigResponse = {
+  archiveOnMerge: null,
+  effectiveArchiveOnMerge: false,
+  archiveOnMergeSource: 'default',
   baseBranch: null,
   defaultRunner: 'claude',
   systemPrompt: null,
@@ -164,6 +167,9 @@ const WORKSPACE_CONFIG: WorkspaceConfigResponse = {
   projectsDir: '~/cezar/projects',
   skillsAutoUpdate: null,
   effectiveSkillsAutoUpdate: true,
+  archiveOnMerge: null,
+  effectiveArchiveOnMerge: false,
+  archiveOnMergeSource: 'default',
   composerDefaults: {
     autonomous: null,
     worktree: null,

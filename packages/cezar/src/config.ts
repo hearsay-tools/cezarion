@@ -79,6 +79,7 @@ const configSchema = z.object({
   /** Live title updates: refresh the display title through the namer on each
    *  turn end. Absent = the `CEZ_TITLE_UPDATES` env decides (default ON — owner
    *  decision on PR #479). */
+  archiveOnMerge: z.boolean().optional().catch(undefined),
   liveTitleUpdates: z.boolean().optional(),
   /** Optional diff-first review gate (#489): when a successful run with changes
    *  should park at `review` for a human. Absent = the `CEZ_REVIEW_GATE` env

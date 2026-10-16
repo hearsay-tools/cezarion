@@ -9,7 +9,7 @@ import { emitUsageForTest } from '../core/process-usage.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContextSource } from './project-context.ts';
-import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { seedRuns, readPersistedRuns } from '../runs/run-store.testkit.ts';
 
 /**
  * Lazy per-project context map (spec 2026-07-20-multi-project-workspace,
@@ -35,6 +35,59 @@ describe('ProjectContexts', () => {
   function makeContexts(projects: ProjectContextSource[]): ProjectContexts {
     return new ProjectContexts({ listProjects: async () => projects });
   }
+
+  it('leases a cold store without recovery, and context build waits for its release', async () => {
+    const dataDir = join(rootA, '.ai/cezar');
+    seedRuns(dataDir, [{ id: 'interrupted', title: 'task', task: 'task', workflow: 'quick-task', steps: [], status: 'running', tokensUsed: 0, archived: false, createdAt: '2026-01-01T00:00:00.000Z' }]);
+    const prepared = vi.fn();
+    const contexts = new ProjectContexts({ listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], prepareManager: prepared });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const lease = contexts.withMaintenanceStore('a', async (store, current) => {
+      expect(current()).toBe(true);
+      expect(store.getRun('interrupted')?.status).toBe('running');
+      entered(); await gate;
+      expect(contexts.peek('a')).toBeUndefined();
+    });
+    await started;
+    expect(prepared).not.toHaveBeenCalled();
+    expect(contexts.ids()).toEqual([]);
+    expect(readPersistedRuns(dataDir)[0].status).toBe('running');
+    const build = contexts.context('a');
+    release(); await lease; await build;
+    expect(prepared).toHaveBeenCalledTimes(1);
+    contexts.disposeAll();
+  });
+
+  it('invalidates a maintenance lease on removal', async () => {
+    seedRuns(join(rootA, '.ai/cezar'), []);
+    const contexts = makeContexts([{ id: 'a', root: rootA, status: 'not-git' }]);
+    await contexts.withMaintenanceStore('a', async (_store, current) => {
+      expect(current()).toBe(true); contexts.dispose('a'); expect(current()).toBe(false);
+    });
+    expect(contexts.ids()).toEqual([]);
+  });
+
+  it('imports a legacy-only cold store without normalizing live work or building a manager', async () => {
+    const dataDir = join(rootA, '.ai/cezar');
+    mkdirSync(dataDir, { recursive: true });
+    const legacy = [{ id: 'interrupted', title: 'task', task: 'task', workflow: 'quick-task', steps: [], status: 'running', tokensUsed: 0, archived: false, createdAt: '2026-01-01T00:00:00.000Z' }];
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify(legacy));
+    const prepared = vi.fn();
+    const contexts = new ProjectContexts({ listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], prepareManager: prepared });
+    const visited = vi.fn();
+    await contexts.withMaintenanceStore('a', async store => {
+      visited();
+      expect(store.getRun('interrupted')?.status).toBe('running');
+    });
+    expect(visited).toHaveBeenCalledOnce();
+    expect(readPersistedRuns(dataDir)).toEqual(legacy);
+    expect(prepared).not.toHaveBeenCalled();
+    expect(contexts.ids()).toEqual([]);
+    contexts.disposeAll();
+  });
 
   it('builds lazily: nothing on construction, first access builds, second returns the same instance', async () => {
     const contexts = makeContexts([
