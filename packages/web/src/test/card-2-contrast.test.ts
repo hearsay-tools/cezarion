@@ -19,6 +19,18 @@ function eachChild(node: Node, visit: (node: Node) => void): void {
   }
 }
 
+/** Only a falsy number (0/NaN) survives React's && short circuit as visible text. */
+function mayRenderFalsyNumber(node: Node): boolean {
+  switch (node.type) {
+    case 'BooleanLiteral': case 'NullLiteral': case 'StringLiteral':
+    case 'JSXElement': case 'JSXFragment': return false
+    case 'NumericLiteral': return node.value === 0
+    case 'UnaryExpression': return node.operator !== '!' && node.operator !== 'void' && node.operator !== 'typeof' && node.operator !== 'delete'
+    case 'BinaryExpression': return !['===', '!==', '==', '!=', '<', '>', '<=', '>=', 'in', 'instanceof'].includes(node.operator)
+    default: return true // a runtime identifier/call may evaluate to 0 or NaN
+  }
+}
+
 /** JSX branches are visited separately; only expressions that can render text belong to the wrapper. */
 function rendersText(node: Node): boolean {
   switch (node.type) {
@@ -27,7 +39,7 @@ function rendersText(node: Node): boolean {
     case 'NullLiteral': case 'BooleanLiteral': return false
     case 'JSXExpressionContainer': return rendersText(node.expression)
     case 'ConditionalExpression': return rendersText(node.consequent) || rendersText(node.alternate)
-    case 'LogicalExpression': return (node.operator !== '&&' && rendersText(node.left)) || rendersText(node.right)
+    case 'LogicalExpression': return (node.operator === '&&' ? mayRenderFalsyNumber(node.left) : rendersText(node.left)) || rendersText(node.right)
     default: return true // identifiers and calls can contain runtime text
   }
 }
@@ -74,7 +86,7 @@ it('catches unsafe small text on the element, descendants, conditional classes a
   expect(scan(`<><p className="bg-card-2 text-danger text-xs">bad</p><div className="bg-card-2"><span className={cn('text-xs', bad ? 'text-danger' : 'text-muted-foreground')}>bad</span></div><div data-slot="tool-error" className="text-soft-foreground">bad</div></>`)).toHaveLength(3)
 })
 it('follows inherited ink and size through expressions and fragments', () => {
-  expect(scan(`<div className="bg-card-2 text-danger text-[11px]">{ok && <><span>bad</span></>}</div>`)).toHaveLength(1)
+  expect(scan(`<div className="bg-card-2 text-danger text-[11px]">{ok === true && <><span>bad</span></>}</div>`)).toHaveLength(1)
   expect(scan(`<div className="bg-card-2 text-danger text-[24px]"><span className="text-xs">bad</span></div>`)).toHaveLength(1)
 })
 it('accepts safe ink, separate surfaces, large text, icons and unrelated text', () => {
@@ -91,8 +103,13 @@ it('lets documented safe foregrounds override inherited unsafe ink', () => {
   expect(scan(`<div className="bg-card-2 text-danger"><span className="text-supporting-foreground">safe</span><span className="text-link-foreground">safe</span></div>`)).toEqual([])
 })
 it('does not count safely styled JSX branches as text in their wrapper', () => {
-  expect(scan(`<div className="bg-card-2 text-danger">{ok && <span className="text-muted-foreground">safe</span>}{ok ? <span className="text-foreground">safe</span> : null}</div>`)).toEqual([])
+  expect(scan(`<div className="bg-card-2 text-danger">{ok === true && <span className="text-muted-foreground">safe</span>}{ok ? <span className="text-foreground">safe</span> : null}</div>`)).toEqual([])
   expect(scan(`<div className="bg-card-2 text-danger">{ok ? <span className="text-foreground">safe</span> : 'bad'}</div>`)).toHaveLength(1)
+})
+it('checks numeric falsy text rendered by logical guards', () => {
+  expect(scan(`<div className="bg-card-2 text-danger text-xs">{0 && <span className="text-muted-foreground">safe</span>}</div>`)).toHaveLength(1)
+  expect(scan(`<div className="bg-card-2 text-danger text-xs">{count && <span className="text-muted-foreground">safe</span>}</div>`)).toHaveLength(1)
+  expect(scan(`<div className="bg-card-2 text-danger text-xs">{count > 0 && <span className="text-muted-foreground">safe</span>}{!!count && <span className="text-foreground">safe</span>}</div>`)).toEqual([])
 })
 it('does not allow the card-2 small-text baseline to grow or retain fixed instances', () => {
   function walk(dir: string): string[] {
