@@ -11,8 +11,8 @@ import { workerContextHash, workerWorkflowHash, workerStepIdentity, captureWorke
 import { buildChildEnv } from '../core/agent-env.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import {
   parseAskMarkerResult,
   stripAskMarker,
@@ -72,7 +72,7 @@ import { discoverSkills, type Skill } from '../skills.ts';
 import { resolveCapabilities } from '../server/capabilities.ts';
 import { automationCliCommand, automationsPrompt } from '../automations/prompts.ts';
 import { createAutomationSkill } from '../automations/builtin-skill.ts';
-import { materializeSkillDir, waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
+import { materializeSkillDir, materializeSkillToCache, TEAM_SKILL_AGENT_DIRS, waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
@@ -1690,6 +1690,48 @@ export class RunManager {
   /** Every skill lookup in this manager goes through here, so the built-ins reach all of them. */
   private discoverSkills(): Promise<Skill[]> {
     return discoverSkills(this.repoRoot, { builtin: this.builtinSkills() });
+  }
+  /**
+   * Put a directory team skill's files (SKILL.md + references/) on disk for this
+   * run, for the step start and Continue alike (#286, #413, #1024). The run's OWN
+   * task worktree gets `.claude/skills/<name>/`, `.agents/skills/<name>/` and
+   * `.cursor/skills/<name>/`, so every backend finds them, kept out of git by the
+   * shared info/exclude. Any other cwd — worktree off, a non-git project, a
+   * Continue whose worktree is gone — is the main checkout or unknown, where those
+   * directories are LOCAL skills to `discoverSkills` that would shadow the team
+   * source for every later run; it gets a per-commit cache copy instead, which
+   * the skill prompt names. So does a worktree where no copy landed, such as one
+   * whose three agent dirs all link out of it. A worktree that took only some
+   * copies — one agent dir links out of it — has the prompt name the first that
+   * landed, since the runner's own dir may be the one skipped. Returns the
+   * step-start note and, for a cache or partial copy, the directory the prompt
+   * names; undefined when nothing landed on disk.
+   */
+  private async materializeTeamSkill(runId: string, cwd: string, skill: Skill): Promise<{ note: string; filesDir?: string } | undefined> {
+    if (skill.source !== 'team' || !skill.team?.dir) return undefined;
+    const written = this.isOwnTaskWorktree(runId, cwd) ? await materializeSkillDir(cwd, skill).catch(() => []) : [];
+    if (written.length === TEAM_SKILL_AGENT_DIRS.length) {
+      return {
+        note: `team skill "${skill.name}" materialized to .claude/skills/${skill.name}/ ` +
+          `.agents/skills/${skill.name}/, and .cursor/skills/${skill.name}/`,
+      };
+    }
+    if (written.length > 0) {
+      return {
+        note: `team skill "${skill.name}" materialized to ${written.map((dir) => `${relative(cwd, dir)}/`).join(' and ')}`,
+        filesDir: written[0],
+      };
+    }
+    const filesDir = await materializeSkillToCache(skill).catch(() => null);
+    return filesDir ? { note: `team skill "${skill.name}" materialized to ${filesDir}`, filesDir } : undefined;
+  }
+  /** `cwd` is the run's recorded task worktree, and not the project root. Unresolvable means no. */
+  private isOwnTaskWorktree(runId: string, cwd: string): boolean {
+    const worktreePath = this.store.getRun(runId)?.worktreePath;
+    if (!worktreePath) return false;
+    const real = (path: string): string | undefined => { try { return realpathSync(path); } catch { return undefined; } };
+    const dir = real(cwd);
+    return dir !== undefined && dir === real(worktreePath) && dir !== real(this.repoRoot);
   }
 
   private delegationProvisioner?: DelegationProvisioner;
@@ -6199,13 +6241,13 @@ export class RunManager {
         }
       }
       if (skill) {
-        const playbook = skillSystemPrompt(skill);
+        // Rematerialize a directory team skill — into a #483 rematerialized
+        // worktree, or the cache copy when the worktree is gone — before the
+        // playbook, which names a cache copy's directory (#1024). No note on Continue.
+        const materialized = await this.materializeTeamSkill(runId, state.cwd, skill);
+        const playbook = skillSystemPrompt(skill, materialized?.filesDir);
         if (skipSkillOnResume) fallbackSkillPrompt = playbook;
         else continuationSkillPrompt = playbook;
-        if (skill.source === 'team' && skill.team?.dir) {
-          // Rematerialize into a #483 rematerialized worktree; do not note it on Continue.
-          await materializeSkillDir(state.cwd, skill).catch(() => false);
-        }
       } else if (!skipSkillOnResume) {
         this.store.appendEvent(runId, {
           type: 'lifecycle',
@@ -6849,26 +6891,12 @@ export class RunManager {
         // name and catalog description in the normalized runner payload so a
         // numeric task such as "432" still gives the model enough context to
         // describe the work — and therefore derive a useful title (#432).
-        systemPrompt = skillSystemPrompt(skill);
-        // Directory team skills (SKILL.md + references/) get materialized
-        // into <cwd>/.claude/skills/<name>/ (claude),
-        // <cwd>/.agents/skills/<name>/ (codex/pi), and
-        // <cwd>/.cursor/skills/<name>/ (Cursor) — the run's worktree when
-        // there is one — so every backend sees the companion files on disk;
-        // the shared info/exclude keeps them out of git (and out of autosave
-        // commits). (#286, #413)
-        if (skill.source === 'team' && skill.team?.dir) {
-          const seeded = await materializeSkillDir(state.cwd, skill).catch(() => false);
-          if (seeded) {
-            emit({
-              type: 'note',
-              stepId: step.id,
-              message:
-                `team skill "${skill.name}" materialized to .claude/skills/${skill.name}/ ` +
-                `.agents/skills/${skill.name}/, and .cursor/skills/${skill.name}/`,
-            });
-          }
-        }
+        // Directory team skills (SKILL.md + references/) get their files on
+        // disk first: into the run's own task worktree, or — never the main
+        // checkout — a per-commit cache copy the prompt names (#286, #413, #1024).
+        const materialized = await this.materializeTeamSkill(runId, state.cwd, skill);
+        systemPrompt = skillSystemPrompt(skill, materialized?.filesDir);
+        if (materialized) emit({ type: 'note', stepId: step.id, message: materialized.note });
       } else {
         emit({
           type: 'note',
@@ -8370,11 +8398,16 @@ export function makeRunTitle(task: string, workflow: WorkflowDef): string {
  * worse, reads a stale copy materialized from the team-repo cache. The path
  * resolves against the MAIN project root (`discoverSkills(repoRoot)`), i.e. the
  * current `npx skills`-installed copy, so a worktree agent and the main
- * checkout read the exact same, up-to-date files. Team skills are omitted here:
- * they are materialized into the worktree separately (see the call site).
+ * checkout read the exact same, up-to-date files. A team skill's `path` is not
+ * on disk: its files are materialized per run (`RunManager.materializeTeamSkill`).
+ * Inside the run's task worktree they need no pointer; a run without one, or
+ * whose worktree took no copy, gets a per-commit cache copy, passed here as
+ * `teamFilesDir` (#1024). A worktree that took only some of its copies passes
+ * the first one it did take.
  */
 export function skillSystemPrompt(
   skill: Pick<Skill, 'name' | 'description' | 'body'> & Partial<Pick<Skill, 'path' | 'source'>>,
+  teamFilesDir?: string,
 ): string {
   const lines = [
     `Selected skill: /${skill.name}`,
@@ -8387,6 +8420,13 @@ export function skillSystemPrompt(
       `Skill files are installed on disk at: ${dir}`,
       `Read any file this skill references (for example references/*.md) from that absolute directory. ` +
         `It is the current installed copy — use it even though your working directory is a separate worktree that does not contain the skill.`,
+    );
+  } else if (skill.source === 'team' && teamFilesDir) {
+    lines.push(
+      '',
+      `Skill files are installed on disk at: ${teamFilesDir}`,
+      `Read any file this skill references (for example references/*.md) from that absolute directory. ` +
+        `It is a copy of the skill at the commit this run uses.`,
     );
   }
   lines.push('', 'Skill instructions:', skill.body.trim());

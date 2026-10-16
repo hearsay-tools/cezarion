@@ -1,7 +1,8 @@
 /**
  * #790 review follow-ups: Continue must revalidate after skill materialize,
  * wait briefly for the team-skill cache, keep extra-only worker inheritance,
- * and rematerialize a team directory skill without a Continue note.
+ * and rematerialize a team directory skill without a Continue note — into the
+ * run's worktree, or a cache copy when it has none (#1024).
  */
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
@@ -37,6 +38,11 @@ const TEAM_SKILL = 'team-playbook';
 const TEAM_SKILL_BODY = 'TEAM-PLAYBOOK-BODY-790';
 const MISSING_SKILL_LIFECYCLE = `skill /${TEAM_SKILL} is not in the skill registry — its instructions were not re-sent to the continued session`;
 const MATERIALIZED_NOTE = `team skill "${TEAM_SKILL}" materialized to`;
+
+/** All three in-worktree copies, which `materializeSkillDir` reports written. */
+function writtenSkillDirs(worktree: string): string[] {
+  return ['.claude', '.agents', '.cursor'].map((agentDir) => join(worktree, agentDir, 'skills', TEAM_SKILL));
+}
 
 function teamDirSkill(): Skill {
   return {
@@ -121,6 +127,15 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     for (const dir of cleanup) rmSync(dir, { recursive: true, force: true });
   });
 
+  /** Give a run its own task worktree, so Continue rematerializes into it (#1024). */
+  async function attachWorktree(runId: string): Promise<string> {
+    const path = join(repoRoot, '.ai/cezar/worktrees', runId);
+    const branch = `cez/${runId.slice(0, 8)}`;
+    await execFileAsync('git', ['worktree', 'add', '-q', '-b', branch, path], { cwd: repoRoot });
+    store.updateRun(runId, { worktreePath: path, branch });
+    return path;
+  }
+
   function terminalSkillRun(skillName: string, extra = EXTRA_PROMPT): string {
     const def = plannedWorkflow(skillTaskSteps(skillName));
     const record = store.createRun({
@@ -147,18 +162,40 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
   it('Stop during materializeSkillDir never launches the continued session', async () => {
     const skill = teamDirSkill();
     vi.spyOn(skills, 'discoverSkills').mockResolvedValue([skill]);
-    let release!: (seeded: boolean) => void;
-    const held = new Promise<boolean>((resolve) => { release = resolve; });
+    let release!: (written: string[]) => void;
+    const held = new Promise<string[]>((resolve) => { release = resolve; });
     const materialize = vi.spyOn(skillsRemote, 'materializeSkillDir').mockReturnValue(held);
+    const id = terminalSkillRun(TEAM_SKILL);
+    const worktree = await attachWorktree(id);
+
+    expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
+    await vi.waitFor(() => expect(materialize).toHaveBeenCalledTimes(1), { timeout: LAUNCH_WAIT_MS });
+    expect(launches).toEqual([]);
+    expect(manager.cancel(id)).toBe(true);
+    release(writtenSkillDirs(worktree));
+    await vi.waitFor(() => expect(!manager.isActive(id) || launches.length > 0).toBe(true), { timeout: LAUNCH_WAIT_MS });
+    expect(launches).toEqual([]);
+    expect(store.getRun(id)?.status).toBe('cancelled');
+    expect(manager.isActive(id)).toBe(false);
+  });
+
+  it('Stop during materializeSkillToCache never launches a continued session without a worktree (#1024)', async () => {
+    const skill = teamDirSkill();
+    vi.spyOn(skills, 'discoverSkills').mockResolvedValue([skill]);
+    let release!: (dir: string | null) => void;
+    const held = new Promise<string | null>((resolve) => { release = resolve; });
+    const materialize = vi.spyOn(skillsRemote, 'materializeSkillToCache').mockReturnValue(held);
+    const intoCheckout = vi.spyOn(skillsRemote, 'materializeSkillDir');
     const id = terminalSkillRun(TEAM_SKILL);
 
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
     await vi.waitFor(() => expect(materialize).toHaveBeenCalledTimes(1), { timeout: LAUNCH_WAIT_MS });
     expect(launches).toEqual([]);
     expect(manager.cancel(id)).toBe(true);
-    release(true);
+    release('/cache/skill-files/org__skills/abc/team-playbook');
     await vi.waitFor(() => expect(!manager.isActive(id) || launches.length > 0).toBe(true), { timeout: LAUNCH_WAIT_MS });
     expect(launches).toEqual([]);
+    expect(intoCheckout).not.toHaveBeenCalled();
     expect(store.getRun(id)?.status).toBe('cancelled');
     expect(manager.isActive(id)).toBe(false);
   });
@@ -185,7 +222,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     discover.mockResolvedValueOnce([]);
     discover.mockResolvedValue([skill]);
     vi.spyOn(skillsRemote, 'waitForTeamSkills').mockResolvedValue([skill]);
-    vi.spyOn(skillsRemote, 'materializeSkillDir').mockResolvedValue(true);
+    vi.spyOn(skillsRemote, 'materializeSkillToCache').mockResolvedValue(null);
     const id = terminalSkillRun(TEAM_SKILL);
 
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
@@ -253,13 +290,32 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
   it('Continue of a team directory skill rematerializes without a note', async () => {
     const skill = teamDirSkill();
     vi.spyOn(skills, 'discoverSkills').mockResolvedValue([skill]);
-    const materialize = vi.spyOn(skillsRemote, 'materializeSkillDir').mockResolvedValue(true);
+    const materialize = vi.spyOn(skillsRemote, 'materializeSkillDir').mockImplementation(async (root) => writtenSkillDirs(root));
     const id = terminalSkillRun(TEAM_SKILL);
+    const worktree = await attachWorktree(id);
 
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
     await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: LAUNCH_WAIT_MS });
     expect(materialize).toHaveBeenCalledTimes(1);
+    expect(materialize).toHaveBeenCalledWith(worktree, skill);
     expect(launches[0]!.spec.systemPrompt).toContain(skillSystemPrompt(skill));
+    expect(store.readEvents(id).some((event) => event.type === 'note' && String(event.message).includes(MATERIALIZED_NOTE))).toBe(false);
+    sessions[0]!.finish();
+  });
+
+  it('Continue without a worktree names the cache copy of a team directory skill, without a note (#1024)', async () => {
+    const skill = teamDirSkill();
+    const filesDir = '/cache/skill-files/org__skills/abc/team-playbook';
+    vi.spyOn(skills, 'discoverSkills').mockResolvedValue([skill]);
+    const intoCheckout = vi.spyOn(skillsRemote, 'materializeSkillDir');
+    const toCache = vi.spyOn(skillsRemote, 'materializeSkillToCache').mockResolvedValue(filesDir);
+    const id = terminalSkillRun(TEAM_SKILL);
+
+    expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
+    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: LAUNCH_WAIT_MS });
+    expect(toCache).toHaveBeenCalledTimes(1);
+    expect(intoCheckout).not.toHaveBeenCalled();
+    expect(launches[0]!.spec.systemPrompt).toContain(skillSystemPrompt(skill, filesDir));
     expect(store.readEvents(id).some((event) => event.type === 'note' && String(event.message).includes(MATERIALIZED_NOTE))).toBe(false);
     sessions[0]!.finish();
   });

@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { bareDirFor } from './skills-remote.ts';
 
@@ -40,6 +40,55 @@ export async function seedTeamSkillsClone(repo: string, skills: Record<string, s
     addSkill: async (name, body) => {
       await commit({ [name]: body }, name);
       await execFileAsync('git', ['fetch', '-q', 'origin', '+refs/heads/*:refs/heads/*'], { cwd: bareDir });
+    },
+  };
+}
+
+/** A team-skills source holding one directory skill (`skills/<name>/SKILL.md` + companions), already cloned bare. */
+export interface SeededTeamDirSkill {
+  sourceDir: string;
+  bareDir: string;
+  /** The commit the bare clone's `main` points at. */
+  commit: string;
+  /** Replace the skill directory upstream with exactly `files`, commit, and pull it into the bare clone. */
+  update(files: Record<string, string>): Promise<string>;
+}
+
+/**
+ * Seed `bareDirFor(repo)` (stub `$HOME` first) with a bare clone of a local repo whose
+ * `skills/<name>/` holds `files`, keyed by path relative to that directory
+ * (`SKILL.md`, `references/notes.md`, …). No stamp is written.
+ */
+export async function seedTeamDirSkillClone(
+  repo: string,
+  name: string,
+  files: Record<string, string>,
+): Promise<SeededTeamDirSkill> {
+  const sourceDir = mkdtempSync(join(tmpdir(), 'cez-team-dir-skill-src-'));
+  const skillDir = join(sourceDir, 'skills', name);
+  await execFileAsync('git', ['init', '-q', '-b', 'main'], { cwd: sourceDir });
+  const commit = async (next: Record<string, string>): Promise<string> => {
+    rmSync(skillDir, { recursive: true, force: true });
+    for (const [rel, body] of Object.entries(next)) {
+      mkdirSync(dirname(join(skillDir, rel)), { recursive: true });
+      writeFileSync(join(skillDir, rel), body);
+    }
+    await execFileAsync('git', ['add', '-A'], { cwd: sourceDir });
+    await execFileAsync('git', [...GIT_ID, 'commit', '-q', '-m', name], { cwd: sourceDir });
+    return (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: sourceDir })).stdout.trim();
+  };
+  const first = await commit(files);
+  const bareDir = bareDirFor(repo);
+  mkdirSync(join(bareDir, '..'), { recursive: true });
+  await execFileAsync('git', ['clone', '-q', '--bare', '--', sourceDir, bareDir]);
+  return {
+    sourceDir,
+    bareDir,
+    commit: first,
+    update: async (next) => {
+      const sha = await commit(next);
+      await execFileAsync('git', ['fetch', '-q', 'origin', '+refs/heads/*:refs/heads/*'], { cwd: bareDir });
+      return sha;
     },
   };
 }
