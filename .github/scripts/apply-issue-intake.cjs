@@ -36,12 +36,27 @@ function loadIntake(input) {
   return intake;
 }
 
-function planIntakeMutations({ intake, issueNumber, knownLabels }) {
+function labelMutations(intake, issueNumber, knownLabels) {
+  const labels = intake.labels.filter((label) => knownLabels.has(label));
+  if (labels.length === 0) return [];
+  return [['issue', 'edit', String(issueNumber), '--add-label', labels.join(',')]];
+}
+
+// candidateNumbers, when given, is the duplicate candidate set rebuilt by
+// issue-intake-candidates.cjs. A duplicate pick outside it (the issue itself,
+// a split-out parent, a closed issue) labels the issue and leaves it open.
+function planIntakeMutations({ intake, issueNumber, knownLabels, candidateNumbers, warn = () => {} }) {
   validateIntake(intake);
   if (!Number.isInteger(issueNumber) || issueNumber <= 0) throw new Error('issueNumber must be a positive integer.');
   if (!(knownLabels instanceof Set)) throw new Error('knownLabels must be a Set.');
+  if (candidateNumbers !== undefined && !(candidateNumbers instanceof Set)) throw new Error('candidateNumbers must be a Set.');
 
   if (intake.action === 'skip') return [];
+
+  if (intake.action === 'duplicate' && candidateNumbers && !candidateNumbers.has(intake.duplicate_of)) {
+    warn(`#${intake.duplicate_of} is not a duplicate candidate for #${issueNumber}; labeling instead of closing.`);
+    return labelMutations(intake, issueNumber, knownLabels);
+  }
 
   if (intake.action === 'duplicate') {
     if (intake.duplicate_of === null) throw new Error('duplicate_of is required for a duplicate action.');
@@ -56,9 +71,7 @@ function planIntakeMutations({ intake, issueNumber, knownLabels }) {
     return mutations;
   }
 
-  const labels = intake.labels.filter((label) => knownLabels.has(label));
-  if (labels.length === 0) return [];
-  return [['issue', 'edit', String(issueNumber), '--add-label', labels.join(',')]];
+  return labelMutations(intake, issueNumber, knownLabels);
 }
 
 module.exports = { loadIntake, planIntakeMutations, validateIntake };
