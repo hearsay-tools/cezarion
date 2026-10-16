@@ -82,7 +82,8 @@ test('the recheck re-reads the shortlisted candidates in full and can reject the
 });
 
 test('the shortlist is the top three candidates once the best reaches its threshold', () => {
-  const ranked = { answers: { duplicate: { type: 'choice', choice: 'none', probabilities: { none: 0.5, '#14': 0.3, '#15': 0.1, '#16': 0.06, '#17': 0.04 } } } };
+  // The second and third need not reach the threshold themselves.
+  const ranked = { answers: { duplicate: { type: 'choice', choice: '#14', probabilities: { none: 0.05, '#14': THRESHOLDS.shortlist, '#15': 0.02, '#16': 0.01, '#17': 0.005 } } } };
   assert.deepEqual(shortlist({ response: ranked }), [14, 15, 16]);
   const low = { answers: { duplicate: { type: 'choice', choice: 'none', probabilities: { none: 0.9, '#14': THRESHOLDS.shortlist - 0.01 } } } };
   assert.deepEqual(shortlist({ response: low }), []);

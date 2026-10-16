@@ -260,8 +260,8 @@ function report({ dir, out, count }) {
   const closesAt = (row, t) => row.recheckPick && row.topCandidate >= t.shortlist
     && row.recheckPick.p >= t.duplicate && row.recheckPick.sameWork >= t.sameWork;
   const duplicateSweep = [];
-  for (const value of [0.5, 0.7, 0.8, 0.9, 0.95]) {
-    const t = { ...THRESHOLDS, duplicate: value, sameWork: value };
+  for (const value of [0.5, 0.6, 0.7, 0.8, 0.9]) {
+    const t = { ...THRESHOLDS, duplicate: value };
     const closes = rows.filter((row) => closesAt(row, t));
     const wrong = closes.filter((row) => row.target.state_reason !== 'duplicate');
     duplicateSweep.push(`| ${value} | ${closes.length - wrong.length} | ${wrong.length}${wrong.length ? ` (${wrong.map((row) => `#${row.target.number}`).join(', ')})` : ''} |`);
@@ -303,13 +303,16 @@ Corpus fetched ${corpus.fetchedAt} from ${corpus.repo}: the ${targets.length} ne
 
 ## Tuning
 
-The first run asked the issue's full question set at duplicate 0.9, main area 0.5, type 0.5, secondary areas 0.8 and accessibility 0.7. Three changes followed:
+The first run asked one call with the issue's full question set at duplicate 0.9, main area 0.5, type 0.5, secondary areas 0.8 and accessibility 0.7. What followed:
 
 - The per-area yes/no questions added 26 wrong area labels for 7 right ones, most of them \`area-docs\`. They are gone: an issue gets one area at most.
 - Jev picked #902, the flaky-test epic, as the duplicate of its child #919 at 0.94. Epics are no longer candidates.
-- Jev picked #958 for #963 at 0.93; #963 is follow-up work that names #958 as the change before it. The duplicate threshold is 0.95, above every pick that was not a duplicate.
+- Jev picked #958 for #963 at 0.93, above the real duplicate #1080 → #1035, so no single-call threshold separated them. #963 is follow-up work that names #958 as the change before it.
+- Duplicates now take two calls. The first ranks every candidate from its title and a 300-character excerpt with template headings removed. When its best candidate reaches \`shortlist\`, a second call re-reads the top three with full bodies: one pick-one question over the three plus \`none\`, and one same-work yes/no per candidate. On full bodies Jev answers \`none\` for #963. Only the second call can close a duplicate.
+- A second live run moved single probabilities by up to 0.12. In both runs #1080 → #1035 scored 0.87 on the recheck pick and 0.51 on same work, while no other candidate passed 0.69 and 0.44. Shortlist thresholds of 0.2, 0.3 and 0.5 gave the same closes; 0.5 runs the second call on about 20 of 150 issues.
+- The type options carry code-owned descriptions with a real \`none\`. A type threshold of 0.8 cut recall on issues that carry a type label, so type stays at 0.5.
 
-A type threshold of 0.8 raised overall F1 by 0.4 points but cut recall on issues that carry a type label from 94.8% to 86.5%, so type stays at 0.5.
+One real duplicate sets the close thresholds. Rerun this replay once more duplicates exist.
 
 ## Label agreement
 
@@ -334,9 +337,9 @@ ${sweepLines.join('\n')}
 Jev closes an issue only when the recheck's pick reaches ${THRESHOLDS.duplicate} and its same-work answer reaches ${THRESHOLDS.sameWork}. Wrong closes at that threshold: **${wrongCloses.length}**${wrongCloses.length ? ` (${wrongCloses.map((row) => `#${row.target.number}`).join(', ')})` : ''}.
 Codex picked the issue itself on ${selfPicks} of ${paired.length} runs; each of those runs failed in \`apply-intake\` and left the issue unlabeled.
 
-Recheck sweep, with \`duplicate\` and \`sameWork\` set to the same value and \`shortlist\` at ${THRESHOLDS.shortlist}:
+Recheck sweep over the pick threshold, with \`sameWork\` at ${THRESHOLDS.sameWork} and \`shortlist\` at ${THRESHOLDS.shortlist}:
 
-| Both thresholds at least | Closes of issues closed as duplicates | Other closes |
+| Recheck pick at least | Closes of issues closed as duplicates | Other closes |
 | --- | --- | --- |
 ${duplicateSweep.join('\n')}
 

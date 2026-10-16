@@ -36,11 +36,14 @@ const TYPE_CRITERIA = Object.freeze({
 // The replay dropped the per-area yes/no questions the issue proposed: they
 // added 26 wrong area labels for 7 right ones.
 const THRESHOLDS = Object.freeze({
-  // The first call's top candidate must reach this for the recheck to run.
-  shortlist: 0.2,
+  // The first call's top candidate must reach this for the recheck to run;
+  // the recheck then reads the top three, whatever their own probability.
+  shortlist: 0.5,
   // The recheck's pick, and its own same-work answer, must both reach these.
-  duplicate: 0.9,
-  sameWork: 0.9,
+  // The pick carries the separation: 0.87 for the one real duplicate in the
+  // replay against at most 0.69 for anything else, over two runs.
+  duplicate: 0.8,
+  sameWork: 0.45,
   mainArea: 0.5,
   type: 0.5,
   accessibility: 0.7,

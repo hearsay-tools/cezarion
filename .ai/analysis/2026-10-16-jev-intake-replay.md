@@ -8,18 +8,21 @@ Corpus fetched 2026-10-16T21:12:26.731Z from hearsay-tools/cezarion: the 150 new
 - Each issue's duplicate candidates are the issues open when it was opened (created earlier, not closed by then), through the same filter the workflow uses: never the issue itself, never an issue it was split out of, never an epic. Titles and bodies are today's.
 - The truth is each issue's current labels, limited to the labels intake asks about: `area-cezar`, `area-web`, `area-api-client`, `area-contract`, `area-ci`, `area-docs`, `bug`, `enhancement`, `documentation`, `accessibility`.
 - The Codex baseline is the `intake.json` each issue's intake run uploaded (149 issues). The truth leans towards Codex: its labels stayed on the issue unless a person removed one, so it scores near 100% precision by construction, and an issue Codex left unlabeled usually has no type label either, so any type Jev gives it counts as wrong. The slices below take out the parts of that lean that can be taken out.
-- Thresholds: `duplicate` 0.95, `mainArea` 0.5, `type` 0.5, `accessibility` 0.7.
-- Latency: median 286 ms, p95 368 ms. Input tokens: mean 9741, max 13063.
+- Thresholds: `shortlist` 0.5, `duplicate` 0.8, `sameWork` 0.45, `mainArea` 0.5, `type` 0.5, `accessibility` 0.7.
+- Latency for both calls together: median 554 ms, p95 639 ms. Input tokens per issue, both calls: mean 13793, max 17816.
 
 ## Tuning
 
-The first run asked the issue's full question set at duplicate 0.9, main area 0.5, type 0.5, secondary areas 0.8 and accessibility 0.7. Three changes followed:
+The first run asked one call with the issue's full question set at duplicate 0.9, main area 0.5, type 0.5, secondary areas 0.8 and accessibility 0.7. What followed:
 
 - The per-area yes/no questions added 26 wrong area labels for 7 right ones, most of them `area-docs`. They are gone: an issue gets one area at most.
 - Jev picked #902, the flaky-test epic, as the duplicate of its child #919 at 0.94. Epics are no longer candidates.
-- Jev picked #958 for #963 at 0.93; #963 is follow-up work that names #958 as the change before it. The duplicate threshold is 0.95, above every pick that was not a duplicate.
+- Jev picked #958 for #963 at 0.93, above the real duplicate #1080 → #1035, so no single-call threshold separated them. #963 is follow-up work that names #958 as the change before it.
+- Duplicates now take two calls. The first ranks every candidate from its title and a 300-character excerpt with template headings removed. When its best candidate reaches `shortlist`, a second call re-reads the top three with full bodies: one pick-one question over the three plus `none`, and one same-work yes/no per candidate. On full bodies Jev answers `none` for #963. Only the second call can close a duplicate.
+- A second live run moved single probabilities by up to 0.12. In both runs #1080 → #1035 scored 0.87 on the recheck pick and 0.51 on same work, while no other candidate passed 0.69 and 0.44. Shortlist thresholds of 0.2, 0.3 and 0.5 gave the same closes; 0.5 runs the second call on about 20 of 150 issues.
+- The type options carry code-owned descriptions with a real `none`. A type threshold of 0.8 cut recall on issues that carry a type label, so type stays at 0.5.
 
-A type threshold of 0.8 raised overall F1 by 0.4 points but cut recall on issues that carry a type label from 94.8% to 86.5%, so type stays at 0.5.
+One real duplicate sets the close thresholds. Rerun this replay once more duplicates exist.
 
 ## Label agreement
 
@@ -42,111 +45,110 @@ Micro precision 100.0%, recall 83.1%, F1 90.8%; exact label set on 116/149 issue
 
 ### Jev, the same 149 issues
 
-Micro precision 79.9%, recall 85.6%, F1 82.6%; exact label set on 74/149 issues.
+Micro precision 80.2%, recall 84.5%, F1 82.3%; exact label set on 77/149 issues.
 
 | Label | TP | FP | FN | Precision | Recall |
 | --- | --- | --- | --- | --- | --- |
-| `area-cezar` | 74 | 2 | 11 | 97.4% | 87.1% |
+| `area-cezar` | 74 | 3 | 11 | 96.1% | 87.1% |
 | `area-web` | 45 | 0 | 8 | 100.0% | 84.9% |
 | `area-api-client` | 0 | 0 | 1 | – | 0.0% |
 | `area-contract` | 0 | 0 | 9 | – | 0.0% |
 | `area-ci` | 10 | 0 | 4 | 100.0% | 71.4% |
 | `area-docs` | 14 | 1 | 1 | 93.3% | 93.3% |
-| `bug` | 72 | 34 | 3 | 67.9% | 96.0% |
+| `bug` | 70 | 32 | 5 | 68.6% | 93.3% |
 | `enhancement` | 17 | 10 | 2 | 63.0% | 89.5% |
-| `documentation` | 2 | 13 | 0 | 13.3% | 100.0% |
+| `documentation` | 1 | 12 | 1 | 7.7% | 50.0% |
 | `accessibility` | 4 | 0 | 1 | 100.0% | 80.0% |
 
 ### Jev, all 150 issues
 
-Micro precision 80.0%, recall 85.7%, F1 82.8%; exact label set on 75/150 issues.
+Micro precision 80.3%, recall 84.6%, F1 82.4%; exact label set on 78/150 issues.
 
 | Label | TP | FP | FN | Precision | Recall |
 | --- | --- | --- | --- | --- | --- |
-| `area-cezar` | 74 | 2 | 11 | 97.4% | 87.1% |
+| `area-cezar` | 74 | 3 | 11 | 96.1% | 87.1% |
 | `area-web` | 45 | 0 | 8 | 100.0% | 84.9% |
 | `area-api-client` | 0 | 0 | 1 | – | 0.0% |
 | `area-contract` | 0 | 0 | 9 | – | 0.0% |
 | `area-ci` | 11 | 0 | 4 | 100.0% | 73.3% |
 | `area-docs` | 14 | 1 | 1 | 93.3% | 93.3% |
-| `bug` | 73 | 34 | 3 | 68.2% | 96.1% |
+| `bug` | 71 | 32 | 5 | 68.9% | 93.4% |
 | `enhancement` | 17 | 10 | 2 | 63.0% | 89.5% |
-| `documentation` | 2 | 13 | 0 | 13.3% | 100.0% |
+| `documentation` | 1 | 12 | 1 | 7.7% | 50.0% |
 | `accessibility` | 4 | 0 | 1 | 100.0% | 80.0% |
 
 ### Slices (precision / recall / F1)
 
 | Slice | Issues | Codex | Jev |
 | --- | --- | --- | --- |
-| Areas only | 149 | 100.0% / 80.8% / 89.4% | 97.9% / 80.8% / 88.5% |
-| Type, issues that carry a type label | 95 | 100.0% / 86.5% / 92.7% | 95.8% / 94.8% / 95.3% |
-| Every asked label, issues Codex left unlabeled | 28 | 100.0% / 0.0% / 0.0% | 68.5% / 90.2% / 77.9% |
+| Areas only | 149 | 100.0% / 80.8% / 89.4% | 97.3% / 80.8% / 88.3% |
+| Type, issues that carry a type label | 95 | 100.0% / 86.5% / 92.7% | 93.6% / 91.7% / 92.6% |
+| Every asked label, issues Codex left unlabeled | 28 | 100.0% / 0.0% / 0.0% | 68.6% / 85.4% / 76.1% |
 
 ### Threshold sweep (Jev, all issues; micro F1 and false positives, one threshold varied at a time)
 
 | Threshold | 0.3 | 0.4 | 0.5 | 0.6 | 0.7 | 0.8 | 0.9 | 0.95 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `mainArea` | 82.7% (62 FP) | 82.7% (62 FP) | 82.8% (60 FP) | 82.4% (60 FP) | 81.1% (59 FP) | 79.5% (58 FP) | 77.5% (58 FP) | 75.5% (58 FP) |
-| `type` | 82.8% (60 FP) | 82.8% (60 FP) | 82.8% (60 FP) | 83.0% (53 FP) | 83.1% (48 FP) | 83.2% (46 FP) | 82.4% (41 FP) | 82.3% (36 FP) |
-| `accessibility` | 81.4% (71 FP) | 82.1% (66 FP) | 82.5% (63 FP) | 82.7% (62 FP) | 82.8% (60 FP) | 82.8% (60 FP) | 82.8% (60 FP) | 82.6% (60 FP) |
+| `mainArea` | 82.3% (59 FP) | 82.3% (59 FP) | 82.4% (58 FP) | 81.3% (57 FP) | 80.5% (57 FP) | 79.1% (55 FP) | 77.1% (55 FP) | 75.2% (55 FP) |
+| `type` | 82.1% (60 FP) | 82.1% (60 FP) | 82.4% (58 FP) | 82.7% (53 FP) | 83.0% (51 FP) | 82.9% (48 FP) | 83.2% (43 FP) | 82.6% (40 FP) |
+| `accessibility` | 81.1% (69 FP) | 81.6% (65 FP) | 82.2% (61 FP) | 82.4% (60 FP) | 82.4% (58 FP) | 82.4% (58 FP) | 82.4% (58 FP) | 82.2% (58 FP) |
 
 ## Duplicates
 
-Jev closes an issue only when its duplicate pick reaches 0.95. Wrong closes at that threshold: **0**.
+Jev closes an issue only when the recheck's pick reaches 0.8 and its same-work answer reaches 0.45. Wrong closes at that threshold: **0**.
 Codex picked the issue itself on 26 of 149 runs; each of those runs failed in `apply-intake` and left the issue unlabeled.
 
-| Pick probability at least | Picks on issues closed as duplicates | Picks on other issues |
+Recheck sweep over the pick threshold, with `sameWork` at 0.45 and `shortlist` at 0.5:
+
+| Recheck pick at least | Closes of issues closed as duplicates | Other closes |
 | --- | --- | --- |
-| 0.6 | 1 | 17 |
-| 0.7 | 1 | 9 |
-| 0.8 | 1 | 4 |
-| 0.9 | 0 | 1 |
-| 0.93 | 0 | 1 |
-| 0.95 | 0 | 0 |
-| 0.97 | 0 | 0 |
+| 0.5 | 1 | 0 |
+| 0.6 | 1 | 0 |
+| 0.7 | 1 | 0 |
+| 0.8 | 1 | 0 |
+| 0.9 | 0 | 0 |
 
-Rows: every issue closed as a duplicate, every Codex duplicate pick, and every Jev pick at 0.5 or above.
+Rows: every issue closed as a duplicate, every Codex duplicate pick, and every Jev pick at 0.5 or above in either call.
 
-| Issue | Closed as | Codex pick | Jev pick (probability) | Jev closes |
-| --- | --- | --- | --- | --- |
-| #1180 | open | #1180 (itself) | none | no |
-| #1165 | open | #1165 (itself) | #1004 (0.51) | no |
-| #1164 | open | #1164 (itself) | #1147 (0.80) | no |
-| #1163 | open | – | #1154 (0.75) | no |
-| #1154 | open | #1154 (itself) | none | no |
-| #1152 | open | #1152 (itself) | #1112 (0.59) | no |
-| #1148 | completed | #1148 (itself) | none | no |
-| #1140 | completed | #1140 (itself) | #1002 (0.53) | no |
-| #1134 | open | #1134 (itself) | none | no |
-| #1133 | open | – | #1114 (0.67) | no |
-| #1125 | completed | #1107 | none | no |
-| #1121 | open | #1121 (itself) | #1024 (0.71) | no |
-| #1119 | open | #1119 (itself) | #1024 (0.61) | no |
-| #1118 | open | – | #1024 (0.57) | no |
-| #1110 | open | – | #1004 (0.65) | no |
-| #1108 | completed | – | #1107 (0.62) | no |
-| #1104 | open | #1104 (itself) | #1090 (0.64) | no |
-| #1092 | completed | #1092 (itself) | none | no |
-| #1090 | completed | #1090 (itself) | none | no |
-| #1086 | open | – | #1014 (0.50) | no |
-| #1080 | duplicate | #1035 | #1035 (0.89) | no |
-| #1056 | completed | – | #1043 (0.69) | no |
-| #1055 | completed | #1055 (itself) | none | no |
-| #1049 | completed | #1049 (itself) | none | no |
-| #1046 | completed | #1046 (itself) | #979 (0.83) | no |
-| #1042 | completed | – | #986 (0.70) | no |
-| #1039 | completed | – | #980 (0.63) | no |
-| #1029 | completed | #1029 (itself) | none | no |
-| #1012 | completed | #1012 (itself) | none | no |
-| #1003 | completed | #1003 (itself) | none | no |
-| #1000 | completed | #1000 (itself) | none | no |
-| #997 | completed | #997 (itself) | none | no |
-| #991 | open | – | #915 (0.79) | no |
-| #985 | completed | #985 (itself) | none | no |
-| #984 | completed | #984 (itself) | none | no |
-| #980 | completed | #980 (itself) | none | no |
-| #967 | open | – | #667 (0.68) | no |
-| #965 | completed | – | #960 (0.81) | no |
-| #963 | open | – | #958 (0.93) | no |
-| #961 | completed | #961 (itself) | none | no |
-| #948 | completed | #948 (itself) | #919 (0.75) | no |
+| Issue | Closed as | Codex pick | First call pick | Recheck pick | Jev closes |
+| --- | --- | --- | --- | --- | --- |
+| #1180 | open | #1180 (itself) | none | none | no |
+| #1165 | open | #1165 (itself) | none | none | no |
+| #1164 | open | #1164 (itself) | #1147 (0.73) | none | no |
+| #1163 | open | – | #1154 (0.66) | none | no |
+| #1154 | open | #1154 (itself) | none | none | no |
+| #1152 | open | #1152 (itself) | #1112 (0.57) | none | no |
+| #1148 | completed | #1148 (itself) | none | none | no |
+| #1140 | completed | #1140 (itself) | #1002 (0.52) | none | no |
+| #1134 | open | #1134 (itself) | none | none | no |
+| #1133 | open | – | #1114 (0.60) | none | no |
+| #1125 | completed | #1107 | none | none | no |
+| #1121 | open | #1121 (itself) | #1024 (0.70) | none | no |
+| #1119 | open | #1119 (itself) | #1024 (0.61) | none | no |
+| #1118 | open | – | #1024 (0.57) | none | no |
+| #1110 | open | – | #1004 (0.54) | none | no |
+| #1108 | completed | – | #1107 (0.59) | none | no |
+| #1104 | open | #1104 (itself) | #1090 (0.56) | none | no |
+| #1092 | completed | #1092 (itself) | none | none | no |
+| #1090 | completed | #1090 (itself) | none | none | no |
+| #1080 | duplicate | #1035 | #1035 (0.88) | #1035 (0.87, same work 0.51) | yes |
+| #1056 | completed | – | #1043 (0.64) | none | no |
+| #1055 | completed | #1055 (itself) | none | none | no |
+| #1049 | completed | #1049 (itself) | none | none | no |
+| #1046 | completed | #1046 (itself) | #979 (0.81) | none | no |
+| #1042 | completed | – | #986 (0.70) | none | no |
+| #1039 | completed | – | #980 (0.57) | none | no |
+| #1035 | open | – | none | #887 (0.69, same work 0.35) | no |
+| #1029 | completed | #1029 (itself) | none | none | no |
+| #1012 | completed | #1012 (itself) | none | none | no |
+| #1003 | completed | #1003 (itself) | none | none | no |
+| #1000 | completed | #1000 (itself) | none | none | no |
+| #997 | completed | #997 (itself) | none | none | no |
+| #991 | open | – | #915 (0.77) | none | no |
+| #985 | completed | #985 (itself) | none | none | no |
+| #984 | completed | #984 (itself) | none | none | no |
+| #980 | completed | #980 (itself) | none | none | no |
+| #965 | completed | – | #960 (0.86) | #960 (0.63, same work 0.23) | no |
+| #963 | open | – | #958 (0.92) | none | no |
+| #961 | completed | #961 (itself) | none | none | no |
+| #948 | completed | #948 (itself) | #919 (0.76) | #919 (0.68, same work 0.23) | no |
