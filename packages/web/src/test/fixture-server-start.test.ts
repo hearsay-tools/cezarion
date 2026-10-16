@@ -236,6 +236,10 @@ describe('owned fixture server readiness (#795)', () => {
 
   it('keeps the health request within the same deadline and aborts late headers', async () => {
     const child = owned(serverScript({ headerDelay: 2_000 }))
+    // hearsay-tools/cezarion#1102: start the deadline once the child has announced its listener,
+    // so it bounds only the health request; from spawn it also covered Node's startup, which
+    // under load outlasted 900 ms and failed in `awaiting listener announcement` instead.
+    await once(child.stdout!, 'data')
     const started = Date.now()
     await expect(waitForFixtureServer(child, { deadline: Date.now() + 900 })).rejects.toThrow('health')
     expect(Date.now() - started).toBeLessThan(1_500)
