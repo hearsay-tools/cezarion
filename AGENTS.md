@@ -217,6 +217,27 @@ browser specs for affected UI flows, e.g.
 `npm run test:e2e -- smoke.e2e.ts -t 'test name'` (see `packages/web/e2e/README.md`).
 Do not run the entire Vitest or browser suite after each edit or each review round.
 
+No tool maps a cockpit source change to the browser specs it affects, with or
+without Squeal: `npm run test:changed` runs `npm test`, whose four unit projects
+hold no browser spec, and Squeal's browser-spec inputs include all of
+`packages/web/src/**`, so an edit marks every spec stale and names none. Grep
+`packages/web/e2e/*.e2e.ts` for the `data-slot`, `data-streamdown` and
+`data-testid` values and distinctive class names that the changed file and the
+local components it imports render. Walk down to what the file renders, never up
+to what renders it: going up reaches most of the suite. When Squeal is
+unavailable, run the matches with `npm run test:e2e -- <spec>.e2e.ts` (one call
+takes several specs); otherwise those specs' results come from Squeal. Shared
+renderers such as `packages/web/src/routes/task-thread/markdown.tsx` and
+`packages/web/src/components/diff/*` matter most, because one edit reaches specs
+written for other features. `markdown.tsx` renders no `data-slot`, yet an edit to
+it broke `artifact-project-links.e2e.ts` (hearsay-tools/cezarion#1076) through
+its siblings `task-link.tsx` and `link-safety-dialog.tsx`; this grep, run from
+the repo root, lists that spec:
+
+```bash
+grep -lE 'link-safety|data-streamdown|thread-markdown' packages/web/e2e/*.e2e.ts
+```
+
 **The final gate and full-suite runs belong in CI.** Do not run the entire local
 gate, `squeal run --all`, or the full Vitest or browser suite just to finish a
 task, commit, open a PR, or complete a review. Run a full local suite only when
