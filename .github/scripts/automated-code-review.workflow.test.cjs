@@ -466,7 +466,7 @@ test('automated review rounds read AUTOMATED_REVIEW_ROUNDS and ignore the cap on
   // The configured value changes in GitHub, not here: pin how to read it, never the number.
   assert.match(roundsBinding[0], /`AUTOMATED_REVIEW_ROUNDS` repository variable/);
   assert.match(roundsBinding[0], /`gh variable get AUTOMATED_REVIEW_ROUNDS`/);
-  assert.match(roundsBinding[0], /falls back to 3 only when the variable is unset/);
+  assert.match(roundsBinding[0], /falls back to 3 only when the variable is unset or empty/);
 
   assert.match(round, /PR_NUMBER: \$\{\{ github\.event\.pull_request\.number \|\| inputs\.pr_number \}\}/);
   assert.match(claude, /PR_NUMBER: \$\{\{ needs\.review-round\.outputs\.pr_number \}\}/);
