@@ -130,6 +130,7 @@ test('classifies infra harness and unnamed github paths as full-matrix', () => {
     '.github/workflows/ci-benchmark.yml',
     '.github/scripts/change-surface.cjs',
     '.github/scripts/change-surface.test.cjs',
+    '.github/scripts/change-surface-readers.test.cjs',
     '.github/scripts/fixtures/docs-path-cases.cjs',
     '.github/scripts/require-e2e-passed.cjs',
     '.github/scripts/ci-test-sequencer.mjs',

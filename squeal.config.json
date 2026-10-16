@@ -100,6 +100,10 @@
       ".github/scripts/fixtures/docs-path-cases.cjs",
       "package.json"
     ],
+    ".github/scripts/change-surface-readers.test.cjs": [
+      "packages/**",
+      "squeal.config.json"
+    ],
     "packages/cezar/src/pid-file.testkit.test.ts": [
       "packages/cezar/src/**/*.test.ts",
       "packages/cezar/src/**/*.testkit.ts",
