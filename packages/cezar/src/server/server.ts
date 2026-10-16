@@ -1,5 +1,5 @@
 import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
-import { lookupMergedPullRequests } from './forge/github.ts';
+import { discoverRepoHandle, lookupMergedPullRequests } from './forge/github.ts';
 import { resolveArchiveOnMerge, resolveGlobalArchiveOnMerge } from '../archive-on-merge-setting.ts';
 import type { WorkspaceConfigResponse } from '@open-mercato/cezar-contract';
 export type { WorkspaceConfigResponse } from '@open-mercato/cezar-contract';
@@ -6563,8 +6563,8 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     },
     enabled: async project => resolveArchiveOnMerge(await loadConfig(project.root), await loadWorkspaceConfig()).enabled,
     repository: async project => {
-      const remote = parseRemote((await getRepoInfo(project.root))?.remote ?? '');
-      return remote?.host === 'github.com' ? `https://github.com/${remote.owner}/${remote.repo}` : undefined;
+      const repository = await discoverRepoHandle(project.root);
+      return repository.status === 'resolved' ? `https://github.com/${repository.handle.owner}/${repository.handle.name}` : undefined;
     },
     withStore: async (project, work) => {
       if (project.root === deps.repoRoot) return work(deps.store, id => deps.manager.isActive?.(id) ?? false, () => server.listening);

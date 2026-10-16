@@ -70,6 +70,25 @@ describe('ProjectContexts', () => {
     expect(contexts.ids()).toEqual([]);
   });
 
+  it('imports a legacy-only cold store without normalizing live work or building a manager', async () => {
+    const dataDir = join(rootA, '.ai/cezar');
+    mkdirSync(dataDir, { recursive: true });
+    const legacy = [{ id: 'interrupted', title: 'task', task: 'task', workflow: 'quick-task', steps: [], status: 'running', tokensUsed: 0, archived: false, createdAt: '2026-01-01T00:00:00.000Z' }];
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify(legacy));
+    const prepared = vi.fn();
+    const contexts = new ProjectContexts({ listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], prepareManager: prepared });
+    const visited = vi.fn();
+    await contexts.withMaintenanceStore('a', async store => {
+      visited();
+      expect(store.getRun('interrupted')?.status).toBe('running');
+    });
+    expect(visited).toHaveBeenCalledOnce();
+    expect(readPersistedRuns(dataDir)).toEqual(legacy);
+    expect(prepared).not.toHaveBeenCalled();
+    expect(contexts.ids()).toEqual([]);
+    contexts.disposeAll();
+  });
+
   it('builds lazily: nothing on construction, first access builds, second returns the same instance', async () => {
     const contexts = makeContexts([
       { id: 'a', root: rootA, status: 'not-git' },

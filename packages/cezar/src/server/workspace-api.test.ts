@@ -91,6 +91,9 @@ describe('the workspace settings API (step 2.7)', () => {
     expect(body).toEqual({
       browseRoot: '~/',
       projectsDir: '~/cezar/projects',
+      archiveOnMerge: null,
+      effectiveArchiveOnMerge: false,
+      archiveOnMergeSource: 'default',
       skillsAutoUpdate: null,
       effectiveSkillsAutoUpdate: true,
       composerDefaults: {
@@ -140,6 +143,9 @@ describe('the workspace settings API (step 2.7)', () => {
     expect((await res.json()) as WorkspaceConfigResponse).toEqual({
       browseRoot: '~/',
       projectsDir: '~/cezar/projects',
+      archiveOnMerge: null,
+      effectiveArchiveOnMerge: false,
+      archiveOnMergeSource: 'default',
       skillsAutoUpdate: null,
       effectiveSkillsAutoUpdate: true,
       composerDefaults: {

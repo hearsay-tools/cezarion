@@ -1,6 +1,6 @@
 import { readHistoryText, historyPaths } from './history-file.ts';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +8,18 @@ import { RunStore, type RunRecord } from './store.ts';
 import { seedRuns, blockRunWrites, readPersistedRuns } from './run-store.testkit.ts';
 import { archivePullRequests } from './pull-requests.ts';
 import { registerRunProcess, unregisterRunProcess } from '../core/process-usage.ts';
+
+const processProbes = vi.hoisted(() => ({ scan: vi.fn(() => new Map<number, string>()), unshared: vi.fn() }));
+vi.mock('../delegation/process-liveness.ts', async original => {
+  const actual = await original<typeof import('../delegation/process-liveness.ts')>();
+  return { ...actual,
+    sharedCwdScan: () => actual.sharedCwdScan(processProbes.scan),
+    inspectGeneration: (input: Parameters<typeof actual.inspectGeneration>[0]) => {
+      if (!input.cwds) processProbes.unshared();
+      return actual.inspectGeneration(input);
+    },
+  };
+});
 
 const repo = 'https://github.com/o/r';
 const pr = { number: 42, source: 'declared' as const };
@@ -125,11 +137,18 @@ describe('guarded automatic archive', () => {
     const proof = store.readWorkerExecution(worker.id)!;
     expect(store.commitWorkerExecutionComplete(worker.id, proof.generation)).toBe(true);
     store.flush();
+    mkdirSync(join(dir, 'absent-worktree'));
+    mkdirSync(join(dir, 'root-worktree'));
+    store.updateRun(id, { worktreePath: join(dir, 'root-worktree') }); store.flush();
+    processProbes.scan.mockClear(); processProbes.unshared.mockClear();
     const snapshot = store.archiveOnMergeSnapshot(id, repo)!;
     expect(snapshot?.pullRequests).toEqual([{ owner: 'o', repo: 'r', number: 42 }]);
+    expect(processProbes.scan).toHaveBeenCalledTimes(1);
     const seen: boolean[][] = [];
     store.on('run', () => seen.push([store.getRun(id)!.archived, store.getRun(worker.id)!.archived]));
     expect(store.archiveAfterMerge(snapshot, observations(snapshot), repo)).toBe(true);
+    expect(processProbes.scan).toHaveBeenCalledTimes(2);
+    expect(processProbes.unshared).not.toHaveBeenCalled();
     expect(seen.every(pair => pair.every(Boolean))).toBe(true);
     expect(readPersistedRuns(dir).every(run => run.archived)).toBe(true);
   });

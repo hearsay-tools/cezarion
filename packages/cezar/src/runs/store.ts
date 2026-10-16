@@ -24,7 +24,7 @@ import { hasPlainHistory, historyStat, historyPaths, readHistoryText, readHistor
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
-import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, sharedCwdScan, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { archivePullRequests, pullRequestKey, mergePullRequests } from './pull-requests.ts';
@@ -3025,6 +3025,7 @@ export class RunStore extends EventEmitter {
     const ids = [id, ...new Set([...(this.db?.listIdsByParent(id) ?? []), ...this.listWorkersOf(id).map(run => run.id)])];
     if (ids.length > 1025) return undefined;
     const family: RunRecord[] = [];
+    const cwds = sharedCwdScan();
     for (const memberId of ids) {
       const row = this.db?.get(memberId);
       const raw: unknown = row ? JSON.parse(row.data) : this.held.get(memberId);
@@ -3043,8 +3044,8 @@ export class RunStore extends EventEmitter {
       if (!facts || facts.pendingAsk !== undefined) return undefined;
       if (run.delegation?.role === 'worker') {
         const proof = this.readWorkerExecution(memberId);
-        if (!proof || !this.workerResourcesSafe(memberId, proof.generation, run.delegation.workspace.resourceId)) return undefined;
-      } else if (run.worktreePath && inspectGeneration({ paths: [run.worktreePath] }).liveness !== 'gone') return undefined;
+        if (!proof || this.workerResourceHolders(memberId, proof.generation, run.delegation.workspace.resourceId, { cwds }) !== 'safe') return undefined;
+      } else if (run.worktreePath && inspectGeneration({ paths: [run.worktreePath], cwds }).liveness !== 'gone') return undefined;
       if (this.writeRefusal(memberId)) return undefined;
       family.push(run);
     }
@@ -3065,25 +3066,29 @@ export class RunStore extends EventEmitter {
   archiveOnMergeSnapshot(id: string, repoBase?: string, isActive: (id: string) => boolean = () => false): ArchiveOnMergeSnapshot | undefined {
     const family = this.archiveFamily(id, isActive);
     if (!family) return undefined;
+    return this.archiveSnapshot(family, repoBase);
+  }
+
+  private archiveSnapshot(family: RunRecord[], repoBase?: string): ArchiveOnMergeSnapshot | undefined {
     const pullRequests = archivePullRequests(family, repoBase);
     if (!pullRequests) return undefined;
     const fingerprint = archiveDigest(pullRequests);
     if (family[0]!.autoArchive?.fingerprint === fingerprint) return undefined;
-    return { rootId: id, fingerprint, pullRequests, token: archiveDigest(family) };
+    return { rootId: family[0]!.id, fingerprint, pullRequests, token: archiveDigest(family) };
   }
 
   /** No await between final revalidation and the fenced, all-or-nothing cascade. */
   archiveAfterMerge(snapshot: ArchiveOnMergeSnapshot, observations: readonly MergedPullRequest[], repoBase?: string,
     isActive: (id: string) => boolean = () => false): boolean {
-    const current = this.archiveOnMergeSnapshot(snapshot.rootId, repoBase, isActive);
+    const family = this.archiveFamily(snapshot.rootId, isActive);
+    if (!family) return false;
+    const current = this.archiveSnapshot(family, repoBase);
     if (!current || current.token !== snapshot.token || current.fingerprint !== snapshot.fingerprint) return false;
     const parsed = observations.map(observation => mergedPullRequestSchema.safeParse(observation));
     if (parsed.some(result => !result.success)) return false;
     const merged = parsed.flatMap(result => result.success ? [result.data] : []);
     const byKey = new Map(merged.map(pr => [pullRequestKey(pr), pr]));
     if (byKey.size !== current.pullRequests.length || current.pullRequests.some(pr => !byKey.has(pullRequestKey(pr)))) return false;
-    const family = this.archiveFamily(snapshot.rootId, isActive);
-    if (!family) return false;
     const restoredAt = Math.max(0, ...family.map(run => run.manualUnarchivedAt ? Date.parse(run.manualUnarchivedAt) : 0));
     if (restoredAt && merged.every(pr => Date.parse(pr.mergedAt) <= restoredAt)) return false;
     const now = new Date().toISOString();

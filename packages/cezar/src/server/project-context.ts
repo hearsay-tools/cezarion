@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import { AutomationStore } from '../automations/store.ts';
 import { reconcileAutomationReceipts } from '../automations/task-template.ts';
@@ -243,18 +244,20 @@ export class ProjectContexts {
       if (!project || project.status === 'missing' || !current()) return undefined;
       const dataDir = join(project.root, '.ai/cezar');
       if (ownedByAnotherCockpit(dataDir)) return undefined;
-      // Discover without creating/importing state or touching live rows. Old SQLite schemas
-      // are readable; only the lease's subsequent writer appends an index migration.
+      // Skip empty projects, but let the established fenced importer discover legacy-only
+      // history. Maintenance mode never normalizes live rows or recovers a manager.
       const reader = RunDatabase.openReadOnly(join(dataDir, RUNS_DB_FILE));
-      if (!reader) return undefined;
-      try { if (reader.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) return undefined; }
-      finally { reader.close(); }
+      let imported = false;
+      try { imported = reader?.getMeta(RUNS_IMPORT_COMPLETE_KEY) !== undefined; }
+      finally { reader?.close(); }
+      if (!imported && !existsSync(join(dataDir, 'runs.json'))) return undefined;
       const temporaryOwnership = this.deps.ownership ? undefined : new CockpitOwnership();
       const ownership = this.deps.ownership ?? temporaryOwnership!;
       let store: RunStore | undefined;
       try {
         await ownership.acquire(dataDir);
         if (!current()) return undefined;
+        ensureDataGitignore(project.root);
         store = RunStore.open(dataDir, { keepLive: true, maintenance: true });
         return await work(store, current);
       } finally {

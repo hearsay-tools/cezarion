@@ -12,14 +12,16 @@ import { RunManager } from '../workflows/run.ts';
 import { registerProject, listProjects, clearProjectProbeCache } from '../workspace/projects.ts';
 import { ProjectContexts } from './project-context.ts';
 import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
-import { lookupMergedPullRequests } from './forge/github.ts';
+import { discoverRepoHandle, lookupMergedPullRequests } from './forge/github.ts';
 import { startServer } from './server.ts';
 
-vi.mock('./forge/github.ts', async original => ({ ...await original<object>(), lookupMergedPullRequests: vi.fn(async (_root: string, prs: ArchivePullRequestIdentity[]) => prs.map(pr => ({ ...pr, mergedAt: '2026-01-02T00:00:00Z' }))) }));
+vi.mock('./forge/github.ts', async original => ({ ...await original<object>(), discoverRepoHandle: vi.fn(), lookupMergedPullRequests: vi.fn(async (_root: string, prs: ArchivePullRequestIdentity[]) => prs.filter(pr => pr.repo === 'r').map(pr => ({ ...pr, mergedAt: '2026-01-02T00:00:00Z' }))) }));
 const dirs: string[] = [];
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); dirs.splice(0).forEach(d => rmSync(d, { force: true, recursive: true })); clearProjectProbeCache(); });
 function dir() { const path = mkdtempSync(join(tmpdir(), 'cez-merge-boot-')); dirs.push(path); return path; }
-it.each([false, true])('archives an unopened opted-in project without recovery; single-project=%s', async single => {
+it.each([{ single: false, repository: 'r' }, { single: true, repository: 'r' }, { single: false, repository: 'upstream' }])('uses the verified gh default repository without recovery: %j', async ({ single, repository }) => {
+  vi.mocked(discoverRepoHandle).mockResolvedValue({ status: 'resolved', handle: { owner: 'o', name: repository } });
+  vi.mocked(lookupMergedPullRequests).mockClear();
   vi.stubEnv('CEZ_HOME', dir()); vi.stubEnv('CEZ_PROJECT_WARMUP', '0'); vi.stubEnv('CEZ_DRY_RUN', '1');
   vi.stubEnv('CEZ_ARCHIVE_ON_MERGE', '1'); vi.stubEnv('CEZ_SINGLE_PROJECT', single ? '1' : '0');
   vi.spyOn(SkillsUpdateCoordinator.prototype, 'start').mockImplementation(() => {});
@@ -46,10 +48,15 @@ it.each([false, true])('archives an unopened opted-in project without recovery; 
     await vi.waitFor(() => expect(coordinator).toBeDefined());
     await vi.waitFor(async () => {
       await coordinator!.tick();
-      expect(readPersistedRuns(dataDir)[0].archived).toBe(!single);
+      expect(readPersistedRuns(dataDir)[0].archived).toBe(!single && repository === 'r');
     });
     expect(contexts.peek(other.id)).toBeUndefined(); expect(recover).not.toHaveBeenCalled();
-    if (!single) expect(lookupMergedPullRequests).toHaveBeenCalled();
+    if (!single) {
+      await vi.waitFor(async () => {
+        await coordinator!.tick();
+        expect(lookupMergedPullRequests).toHaveBeenCalledWith(cold, [{ owner: 'o', repo: repository, number: 42 }], expect.any(AbortSignal));
+      });
+    }
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve())); contexts.disposeAll(); store.close();
   }
