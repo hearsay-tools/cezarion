@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { AutomationStore } from '../automations/store.ts';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { GithubPoller } from '../automations/github-poller.ts';
+import { githubBaselineState } from '../automations/github-baseline.ts';
 import { ProjectAutomationScheduler, WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
 import { AutomationProjectUnavailableError, SCHEDULE_LEASE_HELD_REASON, ScheduleRunner, type ScheduleRunnerHandle } from '../automations/schedule-runner.ts';
 import {
@@ -516,7 +517,10 @@ function sameSchedule(a: AutomationDefinition['schedule'], b: AutomationDefiniti
  * cleared when paused. Passed to the store's `create`/`update` as `arm`, which writes it BEFORE
  * the definition, so another cockpit's timer never pairs the new definition with the old instant.
  */
-function armScheduleFromNow(definition: AutomationDefinition): { nextRunAt: string | undefined } | undefined {
+function armAutomationFromNow(definition: AutomationDefinition) {
+  if (isGithubAutomation(definition)) {
+    return definition.enabled ? githubBaselineState(definition) : { nextCheckAt: undefined };
+  }
   if (!isScheduleAutomation(definition)) return undefined;
   const next = definition.enabled ? nextOccurrence(definition.schedule, Date.now(), localTimeZone()) : null;
   return { nextRunAt: next === null ? undefined : new Date(next).toISOString() };
@@ -3642,17 +3646,7 @@ export function createApp(deps: ServerDeps) {
       }
       const { enable, ...input } = parsed.data;
       try {
-        const automation = automationStore.create({ ...input, kind: resolved.kind, enabled: enable === true }, undefined, enable ? armScheduleFromNow : undefined);
-        if (enable && isGithubAutomation(automation)) {
-          const baselineAt = new Date().toISOString();
-          automationStore.setState(automation.id, (current) => ({
-            ...current,
-            revision: automation.revision,
-            baselineAt,
-            cursor: { timestamp: baselineAt },
-            nextCheckAt: new Date(Date.now() + automation.intervalSeconds * 1_000).toISOString(),
-          }));
-        }
+        const automation = automationStore.create({ ...input, kind: resolved.kind, enabled: enable === true }, undefined, enable ? armAutomationFromNow : undefined);
         emitAutomationChange(c.get('project'), automation.id, automation.revision);
         automationsChanged();
         return c.json({ automation }, 201);
@@ -3691,8 +3685,15 @@ export function createApp(deps: ServerDeps) {
         // another cockpit never reads the still-enabled definition beside a due instant. Armed in
         // the request, as `enable` does, rather than left to the timer: the list refetched on the
         // change event must already see it. Compared with the definition on disk, not the one read above.
-        const automation = automationStore.update(c.req.param('id'), expectedRevision, { ...input, kind: resolved.kind, enabled: input.enabled ?? false }, (next, previous) =>
-          previous && (!sameSchedule(previous.schedule, next.schedule) || previous.enabled !== next.enabled) ? armScheduleFromNow(next) : undefined);
+        const automation = automationStore.update(c.req.param('id'), expectedRevision, { ...input, kind: resolved.kind, enabled: input.enabled ?? false }, (next, previous) => {
+          if (previous && (!sameSchedule(previous.schedule, next.schedule) || previous.enabled !== next.enabled
+            || (next.enabled && Boolean(previous.filters?.includeExisting) !== Boolean(next.filters?.includeExisting)))) return armAutomationFromNow(next);
+          // A continuation belongs to its query. Ordinary edits retain the successful cursor,
+          // but a changed query must start a fresh bounded scan rather than reuse page offsets.
+          if (isGithubAutomation(next) && previous && (JSON.stringify(previous.filters) !== JSON.stringify(next.filters)
+            || JSON.stringify(previous.events) !== JSON.stringify(next.events))) return { historyScan: undefined };
+          return undefined;
+        });
         emitAutomationChange(c.get('project'), automation.id, automation.revision);
         automationsChanged();
         return c.json({ automation });
@@ -3721,22 +3722,14 @@ export function createApp(deps: ServerDeps) {
       try {
       if (isScheduleAutomation(current)) {
         // A schedule has no backlog to baseline against: it arms its next occurrence from now.
-        const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: true }, armScheduleFromNow);
+        const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: true }, armAutomationFromNow);
         emitAutomationChange(c.get('project'), automation.id, automation.revision);
         automationsChanged();
         return c.json({ automation });
       }
       if (!isGithubAutomation(current)) return c.json({ error: 'automation definition is incomplete' }, 409);
-      const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: true });
-      const baselineAt = new Date().toISOString();
-      store.setState(automation.id, (state) => ({
-        ...state,
-        revision: automation.revision,
-        baselineAt,
-        cursor: { timestamp: baselineAt },
-        nextCheckAt: new Date(Date.now() + current.intervalSeconds * 1_000).toISOString(),
-      }));
-      await store.appendLog({ automationId: automation.id, revision: automation.revision, result: 'baseline', reason: 'Enabled from a current-time baseline; existing records were not launched.' });
+      const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: true }, armAutomationFromNow);
+      await store.appendLog({ automationId: automation.id, revision: automation.revision, result: 'baseline', reason: current.filters.includeExisting ? 'Enabled with existing matches within the lookback; prior receipts prevent duplicate launches.' : 'Enabled from a current-time baseline; existing records were not launched.' });
       emitAutomationChange(c.get('project'), automation.id, automation.revision);
       automationsChanged();
       return c.json({ automation });
@@ -3752,7 +3745,7 @@ export function createApp(deps: ServerDeps) {
       const current = store.get(c.req.param('id'));
       if (!current) return c.json({ error: 'not found' }, 404);
       try {
-        const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: false }, armScheduleFromNow);
+        const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: false }, armAutomationFromNow);
         emitAutomationChange(c.get('project'), automation.id, automation.revision);
         automationsChanged();
         return c.json({ automation });

@@ -275,6 +275,20 @@ export class AutomationStore {
     }).join('|');
   }
 
+  /** A crashed writer can leave runtime and committed definition revisions inconsistent.
+   * The definitions lock waits out live editors; only then is a mismatched revision an orphan.
+   * Re-arm the committed policy, retaining receipts and unrelated runtime fields. */
+  recoverArming(id: string, arm: AutomationArm): boolean {
+    return this.withWriteLock(DEFINITIONS_LOCK, DEFINITIONS_RECLAIM, () => {
+      this.reload();
+      const definition = this.get(id);
+      const state = this.state(id);
+      if (!definition || !state?.revision || state.revision === definition.revision) return false;
+      this.setState(id, (current) => ({ ...current, ...arm(definition, definition), revision: definition.revision }));
+      return true;
+    });
+  }
+
   state(id: string): AutomationRuntimeState | undefined {
     return this.stateFile.states[id];
   }

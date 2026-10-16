@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import type { AutomationEvent, GithubAutomationDefinition } from './types.ts';
+import type { AutomationEvent, AutomationRuntimeState, GithubAutomationDefinition } from './types.ts';
 
 const execFileAsync = promisify(execFile);
 const HARD_CANDIDATE_CAP = 100;
@@ -52,6 +52,7 @@ export interface GithubPollResult {
   truncated: boolean;
   pages: number;
   cursor?: { timestamp: string; tieBreaker: string };
+  historyScan?: AutomationRuntimeState['historyScan'];
 }
 
 export interface GithubPollerOptions {
@@ -60,6 +61,7 @@ export interface GithubPollerOptions {
 
 export interface GithubPollOptions {
   since?: string;
+  historyScan?: AutomationRuntimeState['historyScan'];
 }
 
 export class GithubPoller {
@@ -104,6 +106,9 @@ export class GithubPoller {
       sources.push({ family: 'issues', activity: 'updated', opened: false, labels: true });
     }
 
+    if (definition.filters.includeExisting) {
+      return this.pollHistory(owner, repo, definition, sources, options);
+    }
     const perPage = Math.min(definition.filters.maxRecords, HARD_CANDIDATE_CAP);
     const expectedRepoUrl = `https://api.github.com/repos/${owner}/${repo}`.toLowerCase();
     const observations: Array<{
@@ -195,6 +200,94 @@ export class GithubPoller {
       pages: sources.length,
       cursor: cursor ? { timestamp: cursor.timestamp, tieBreaker: cursor.tieBreaker } : undefined,
     };
+  }
+
+  /** Resume a fixed search window instead of letting overlap duplicates fill every page.
+   * Each check evaluates at most maxRecords observations and 100 items, with at most ten
+   * provider requests. The successful live cursor moves only after every source is drained. */
+  private async pollHistory(
+    owner: string,
+    repo: string,
+    definition: GithubAutomationDefinition,
+    sources: Array<{ family: 'issues' | 'prs' | 'mixed'; activity: 'created' | 'updated'; opened: boolean; labels: boolean }>,
+    options: GithubPollOptions,
+  ): Promise<GithubPollResult> {
+    const since = options.since ?? new Date(Date.now() - definition.filters.lookbackDays * 86_400_000).toISOString();
+    const scan = options.historyScan ? structuredClone(options.historyScan) : {
+      since, until: new Date().toISOString(), source: 0, page: 1, item: 0, event: 0,
+      cursor: undefined as AutomationRuntimeState['cursor'],
+    };
+    const candidates: GithubCandidate[] = [];
+    let requests = 0;
+    let evaluated = 0;
+    let itemsRead = 0;
+    const cap = Math.min(definition.filters.maxRecords, HARD_CANDIDATE_CAP);
+    while (scan.source < sources.length && requests < 10 && evaluated < cap && itemsRead < HARD_CANDIDATE_CAP) {
+      const source = sources[scan.source]!;
+      // Issue activity is mutable: comments must not evict unseen label transitions from
+      // a frozen updated-time query. Revisit the full label lookback on each completed scan.
+      const sourceSince = source.labels
+        ? new Date(Date.parse(scan.until) - definition.filters.lookbackDays * 86_400_000).toISOString()
+        : scan.since;
+      const query = buildSearchQuery(owner, repo, definition, source.family, source.activity, sourceSince)
+        + (source.labels ? '' : ` ${source.activity}:<=${scan.until}`);
+      const raw = await this.run('gh', [
+        'api', '--method', 'GET', '/search/issues', '-f', `q=${query}`,
+        '-f', 'per_page=100', '-f', `page=${scan.page}`,
+        '-f', `sort=${source.activity}`, '-f', 'order=asc',
+      ]);
+      requests++;
+      const response = searchResponseSchema.parse(JSON.parse(raw));
+      for (; scan.item < response.items.length && evaluated < cap && itemsRead < HARD_CANDIDATE_CAP; scan.item++) {
+        const item = response.items[scan.item]!;
+        itemsRead++;
+        if (item.repository_url.toLowerCase() !== `https://api.github.com/repos/${owner}/${repo}`.toLowerCase()) continue;
+        let rows: GithubCandidate[];
+        if (source.labels) {
+          if (item.pull_request) continue;
+          if (requests >= 10) break;
+          const timeline = await this.timeline(owner, repo, item.number);
+          requests++;
+          // The existing timeline reader is one bounded page. Do not silently certify an
+          // incomplete history; the log explains how to narrow or process this item separately.
+          if (timeline.length >= 100) throw new Error('GitHub label history reached its 100-event page limit; narrow the automation filters or process this item separately.');
+          rows = reconstructLabelEvents(owner, repo, item, timeline)
+            .filter((row) => Date.parse(row.timestamp) >= Date.parse(sourceSince) && Date.parse(row.timestamp) <= Date.parse(scan.until));
+        } else {
+          const event = item.pull_request ? 'pull_request.opened' : 'issue.opened';
+          rows = [normalizeOpened(owner, repo, item, event)]
+            .filter((row) => Date.parse(row.timestamp) >= Date.parse(sourceSince) && Date.parse(row.timestamp) <= Date.parse(scan.until));
+        }
+        for (; scan.event < rows.length && evaluated < cap; scan.event++) {
+          const row = rows[scan.event]!;
+          evaluated++;
+          if (!source.labels && (!scan.cursor || compareObservation(row, { ...scan.cursor, tieBreaker: scan.cursor.tieBreaker ?? '' }) > 0)) {
+            scan.cursor = { timestamp: row.timestamp, tieBreaker: row.tieBreaker };
+          }
+          if (definition.events.includes(row.event) && matchesFilters(row, definition)) candidates.push(row);
+        }
+        if (scan.event < rows.length) break;
+        // Empty/nonmatching items count towards the work budget too.
+        if (!rows.length) evaluated++;
+        scan.event = 0;
+      }
+      if (scan.item < response.items.length) break;
+      if (response.items.length >= 100) {
+        if (scan.page >= 10) throw new Error('GitHub search reached its 1000-item limit; narrow the automation lookback or filters.');
+        scan.page++;
+      } else {
+        scan.source++;
+        scan.page = 1;
+      }
+      scan.item = 0;
+      scan.event = 0;
+    }
+    const truncated = scan.source < sources.length;
+    candidates.sort(compareObservation);
+    const cursor = !truncated && scan.cursor?.tieBreaker !== undefined
+      ? { timestamp: scan.cursor.timestamp, tieBreaker: scan.cursor.tieBreaker }
+      : undefined;
+    return { candidates, truncated, pages: requests, cursor, ...(truncated ? { historyScan: scan } : {}) };
   }
 
   private async timeline(owner: string, repo: string, number: number) {

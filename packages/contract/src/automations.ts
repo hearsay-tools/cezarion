@@ -43,6 +43,8 @@ export type AutomationEvent = z.infer<typeof automationEventSchema>;
  * caller that omits them in a request body still gets them back materialized.
  */
 export const automationFiltersSchema = z.object({
+  /** Opt in to matching events before enablement, bounded by lookbackDays. Absent means false. */
+  includeExisting: z.boolean().optional(),
   authors: z.array(z.string()).optional(),
   assignees: z.array(z.string()).optional(),
   allLabels: z.array(z.string()).optional(),
@@ -124,11 +126,25 @@ export type AutomationCursor = z.infer<typeof automationCursorSchema>;
  * The scheduler's own bookkeeping for one automation. Every key is optional — a definition that
  * has never run has no state at all, and the keys appear as the poller reaches each stage.
  */
+/** Durable position inside a bounded historical search, independent of the live overlap. */
+export const automationHistoryScanSchema = z.object({
+  since: z.string().datetime(),
+  until: z.string().datetime(),
+  source: z.number().int().min(0).max(2),
+  page: z.number().int().min(1).max(10),
+  item: z.number().int().min(0).max(100),
+  event: z.number().int().min(0).max(100),
+  cursor: automationCursorSchema.optional(),
+});
+
 export const automationRuntimeStateSchema = z.object({
-  /** The definition revision this state belongs to; a bumped revision re-baselines. */
+  /** The definition revision this state belongs to; activation or history-policy changes re-arm. */
   revision: z.number().optional(),
-  /** Enabling establishes a CURRENT-TIME baseline: records older than this never launch. */
+  /** Earliest eligible event: enablement time, or the lookback start when includeExisting is on. */
   baselineAt: z.string().optional(),
+  /** When discovery was armed, independent of the historical baseline. */
+  armedAt: z.string().optional(),
+  historyScan: automationHistoryScanSchema.optional(),
   cursor: automationCursorSchema.optional(),
   frozenHighWatermark: automationCursorSchema.extend({ tieBreaker: z.string() }).optional(),
   backlogAfter: automationCursorSchema.extend({ tieBreaker: z.string() }).optional(),

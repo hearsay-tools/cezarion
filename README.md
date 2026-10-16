@@ -818,6 +818,20 @@ it is given, except `task`, which merges key by key (`null` removes one); it res
 and echoes the revision it read, so a concurrent edit in the cockpit is refused (exit 2), never
 overwritten. Mutating commands print the automation's cockpit page as `url`.
 
+GitHub automations exclude events before enablement by default. Turn on **Include existing items**
+in the editor, pass `--include-existing` to `add`, or set `"filters": {"includeExisting": true,
+"lookbackDays": 7, "maxRecords": 25}` in a JSON definition to include older matches within the
+lookback (1–90 days). Turning this on for an enabled automation reopens that window on its next
+check. Changing only the lookback preserves the completed cursor; pause and re-enable to
+reopen the wider history window. Previously processed matches stay deduplicated across edits, pauses and restarts, and
+per-check limits still apply. Historical scans resume across checks and restarts when capped.
+GitHub search is limited to 1,000 items per window and label timelines to 100 events per item;
+reaching either limit reports an error with guidance to narrow the filters or lookback. **Test filter** previews the selected window independently of the
+execution cursor; it never launches tasks. For label triggers, the window applies to the label
+event's time, so a newly added label can match an old issue even with history off. Historical
+label discovery revisits the rolling window because later comments can move issues between pages;
+receipts prevent those repeated observations from launching duplicate tasks.
+
 The address comes from `CEZ_COCKPIT_URL` and `CEZ_PROJECT_ID`, which the cockpit puts in a task's
 environment. Without them, only an explicit `--url`, `--repo` or `CEZ_URL` looks for a cockpit;
 otherwise the command exits 2 and never starts a server. With automations off, the cockpit's `409`

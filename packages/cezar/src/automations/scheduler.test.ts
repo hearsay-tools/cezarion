@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { automationLogRecordSchema as contractLogRecordSchema } from '@open-mercato/cezar-contract';
 import { AutomationCoordinator } from './coordinator.ts';
 import { AutomationStore } from './store.ts';
+import { GithubPoller } from './github-poller.ts';
 import type { GithubAutomationDefinition, ScheduleAutomationDefinition } from './types.ts';
 import * as scheduleRunner from './schedule-runner.ts';
 import { LeaseHeldError, ProjectAutomationScheduler, WORKSPACE_TIMER_CAP_MS, WorkspaceAutomationScheduler } from './scheduler.ts';
@@ -20,6 +21,155 @@ async function setup() {
 const candidate = { eventId: 'event', event: 'issue.opened' as const, timestamp: '2026-07-26T02:00:00.000Z', tieBreaker: 'I', repo: 'acme/demo', nodeId: 'I', number: 7, title: 'Issue', url: 'https://github.com/acme/demo/issues/7', author: 'alice', assignees: [], labels: [] };
 
 describe('ProjectAutomationScheduler', () => {
+  it.each([false, true])('previews the selected window independently of the execution cursor (includeExisting=%s)', async (includeExisting) => {
+    const { store, definition } = await setup();
+    const rule = { ...definition, filters: { ...definition.filters, includeExisting } };
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-07-26T05:00:00.000Z'));
+    store.setState(rule.id, () => ({ baselineAt: '2026-07-26T01:00:00.000Z', cursor: { timestamp: '2026-07-26T04:00:00.000Z' } }));
+    const before = store.state(rule.id);
+    const poll = vi.fn(async () => ({ candidates: [candidate], truncated: false, pages: 1 }));
+    const launch = vi.fn(async () => ({ runId: 'unexpected' }));
+    try {
+      const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll } as never }, launch });
+      expect((await scheduler.check(rule, 'preview')).candidates.map((row) => row.number)).toEqual([7]);
+      expect(poll).toHaveBeenCalledWith('acme', 'demo', rule, {
+        since: includeExisting ? '2026-07-19T05:00:00.000Z' : '2026-07-26T00:58:00.000Z',
+      });
+      expect(store.state(rule.id)).toEqual(before);
+      expect(store.receipts()).toEqual([]);
+      expect(launch).not.toHaveBeenCalled();
+    } finally { clock.mockRestore(); }
+  });
+
+  it('previews existing matches before activation only when history is included', async () => {
+    const { store, definition } = await setup();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-07-26T05:00:00.000Z'));
+    store.setState(definition.id, () => ({ baselineAt: '2026-07-26T03:00:00.000Z' }));
+    const poller = { poll: async () => ({ candidates: [candidate], truncated: false, pages: 1 }) } as never;
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller } });
+    try {
+      expect((await scheduler.check(definition, 'preview')).candidates).toEqual([]);
+      expect((await scheduler.check({ ...definition, filters: { ...definition.filters, includeExisting: true } }, 'preview')).candidates.map((row) => row.number)).toEqual([7]);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('never launches history outside the current lookback even when a stored cursor is older', async () => {
+    const { store, definition } = await setup();
+    const rule = { ...definition, filters: { ...definition.filters, includeExisting: true, lookbackDays: 1 } };
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-07-28T02:00:00.000Z'));
+    store.setState(rule.id, () => ({ baselineAt: '2026-07-20T00:00:00.000Z', cursor: { timestamp: '2026-07-20T00:00:00.000Z' } }));
+    const launch = vi.fn(async () => ({ runId: 'unexpected' }));
+    const poll = vi.fn(async () => ({ candidates: [candidate], truncated: false, pages: 1 }));
+    try {
+      const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll } as never }, launch });
+      expect((await scheduler.check(rule)).candidates).toEqual([]);
+      expect(launch).not.toHaveBeenCalled();
+      expect(store.receipts()).toEqual([]);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('does not launch an obsolete window or overwrite a history-policy change during polling', async () => {
+    const { store, definition } = await setup();
+    const launch = vi.fn(async () => ({ runId: 'unexpected' }));
+    const newerState = { baselineAt: '2026-07-27T00:00:00.000Z', cursor: { timestamp: '2026-07-27T00:00:00.000Z' } };
+    const poll = async () => {
+      // Another cockpit edits the policy while the provider request is in flight.
+      const other = AutomationStore.open(store.dataDir);
+      other.update(definition.id, definition.revision, { ...definition, filters: { ...definition.filters, includeExisting: true } }, () => newerState);
+      return { candidates: [candidate], truncated: false, pages: 1 };
+    };
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll } as never }, launch });
+    await scheduler.check(definition);
+    expect(launch).not.toHaveBeenCalled();
+    expect(AutomationStore.open(store.dataDir).state(definition.id)).toMatchObject({ revision: 2, ...newerState });
+    expect(store.receipts()).toEqual([]);
+  });
+
+  it('does not launch while a state-first policy edit has armed a newer revision', async () => {
+    const { store, definition } = await setup();
+    const launch = vi.fn(async () => ({ runId: 'unexpected' }));
+    const poll = async () => {
+      // update writes runtime before its definition: simulate that observable interval.
+      const other = AutomationStore.open(store.dataDir);
+      other.setState(definition.id, () => ({ revision: 2, baselineAt: '2026-07-27T00:00:00.000Z' }));
+      return { candidates: [candidate], truncated: false, pages: 1 };
+    };
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll } as never }, launch });
+    await scheduler.check(definition);
+    expect(launch).not.toHaveBeenCalled();
+    expect(AutomationStore.open(store.dataDir).state(definition.id)?.revision).toBe(2);
+  });
+
+  it('preserves a policy edit that lands between validation and the state write', async () => {
+    const { store, definition } = await setup();
+    const setState = store.setState.bind(store);
+    const newerState = { baselineAt: '2026-07-27T00:00:00.000Z', cursor: { timestamp: '2026-07-27T00:00:00.000Z' } };
+    vi.spyOn(store, 'setState').mockImplementationOnce((id, update) => {
+      const other = AutomationStore.open(store.dataDir);
+      other.update(definition.id, definition.revision, { ...definition, filters: { ...definition.filters, includeExisting: true } }, () => newerState);
+      return setState(id, update);
+    });
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll: async () => ({ candidates: [], truncated: false, pages: 1 }) } as never }, launch: async () => ({ runId: 'unused' }) });
+    await scheduler.check(definition);
+    expect(AutomationStore.open(store.dataDir).state(definition.id)).toMatchObject({ revision: 2, ...newerState });
+  });
+
+  it('recovers an interrupted state-first edit before starting the next poll', async () => {
+    const { store, definition } = await setup();
+    store.setState(definition.id, () => ({ revision: 2, baselineAt: '2026-07-20T00:00:00.000Z' }));
+    const launch = vi.fn(async () => ({ runId: 'unexpected' }));
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll: async () => ({ candidates: [candidate], truncated: false, pages: 1 }) } as never }, launch });
+    await scheduler.check(definition);
+    expect(launch).not.toHaveBeenCalled();
+    expect(store.state(definition.id)?.revision).toBe(definition.revision);
+    expect(Date.parse(store.state(definition.id)!.baselineAt!)).toBeGreaterThan(Date.parse(candidate.timestamp));
+  });
+
+  it.each([[1, 30], [25, 30], [25, 130]])('drains dense historical pages across checks and restart with maxRecords=%s (items=%s)', async (maxRecords, count) => {
+    const { store, definition } = await setup();
+    const rule = store.update(definition.id, definition.revision, { ...definition, filters: { ...definition.filters, includeExisting: true, maxRecords } }) as GithubAutomationDefinition;
+    const now = Date.now();
+    const timestamp = new Date(now - 60_000).toISOString();
+    const items = Array.from({ length: count }, (_, index) => ({ node_id: `I_${index}`, number: index + 1, title: 'Issue', html_url: `https://github.com/acme/demo/issues/${index + 1}`, created_at: timestamp, user: { login: 'alice' }, labels: [], assignees: [], repository_url: 'https://api.github.com/repos/acme/demo' }));
+    const poller = new GithubPoller({ run: async (_executable, args) => {
+      const perPage = Number(args.find((arg) => arg.startsWith('per_page='))?.split('=')[1]);
+      const page = Number(args.find((arg) => arg.startsWith('page='))?.split('=')[1] ?? 1);
+      return JSON.stringify({ items: items.slice((page - 1) * perPage, page * perPage) });
+    } });
+    const launched: number[] = [];
+    for (let index = 0; index < Math.ceil(items.length / maxRecords) + 2; index++) {
+      const reopened = AutomationStore.open(store.dataDir);
+      const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store: reopened, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller }, launch: async (_rule, row) => { launched.push(row.number); return { runId: `run-${row.number}` }; } });
+      await scheduler.check(rule);
+    }
+    expect(launched).toHaveLength(count);
+    expect(new Set(launched).size).toBe(count);
+  });
+
+  it('eventually discovers an old label transition when a newer comment moves its issue during history drain', async () => {
+    const { store, definition } = await setup();
+    const rule = store.update(definition.id, definition.revision, { ...definition, events: ['issue.labeled'], filters: { ...definition.filters, includeExisting: true, maxRecords: 1, changedLabels: ['bug'] } }) as GithubAutomationDefinition;
+    const now = Date.now();
+    const iso = (days: number) => new Date(now - days * 86_400_000).toISOString();
+    const items = [1, 2].map((number) => ({ node_id: `I_${number}`, number, title: 'Issue', html_url: `https://github.com/acme/demo/issues/${number}`, created_at: iso(5), updated_at: iso(number === 1 ? 2 : 1), user: { login: 'alice' }, labels: [{ name: 'bug' }], assignees: [], repository_url: 'https://api.github.com/repos/acme/demo' }));
+    const poller = new GithubPoller({ run: async (_executable, args) => {
+      if (args.some((arg) => arg.includes('/timeline'))) {
+        const number = args.some((arg) => arg.includes('/issues/1/')) ? 1 : 2;
+        return JSON.stringify([{ id: number, event: 'labeled', label: { name: 'bug' }, created_at: iso(number === 1 ? 2 : 3) }]);
+      }
+      const query = args.find((arg) => arg.startsWith('q='))!;
+      const since = query.match(/updated:>=([^ ]+)/)?.[1];
+      const until = query.match(/updated:<=([^ ]+)/)?.[1];
+      return JSON.stringify({ items: items.filter((item) => (!since || item.updated_at >= since) && (!until || item.updated_at <= until)).sort((a, b) => a.updated_at.localeCompare(b.updated_at)) });
+    } });
+    const launched: number[] = [];
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller }, launch: async (_rule, row) => { launched.push(row.number); return { runId: `run-${row.number}` }; } });
+    await scheduler.check(rule);
+    items[1]!.updated_at = new Date(now + 60_000).toISOString();
+    for (let index = 0; index < 5; index++) await scheduler.check(rule);
+    expect(launched).toEqual([1, 2]);
+  });
+
   it('previews without cursor, receipt, or launch mutation', async () => {
     const { store, definition } = await setup();
     const launch = vi.fn(async () => ({ runId: 'run' }));

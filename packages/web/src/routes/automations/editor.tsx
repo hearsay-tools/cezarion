@@ -16,7 +16,7 @@ import { usableRunners } from '@/lib/provider-status'
 import { RUNNERS, modelsForRunner } from '../new-task-form'
 import { CopyAsCliCard } from './copy-as-cli-card'
 import { fromDefinition, toCreateBody, toUpdateBody, type AutomationDraft } from './editor-draft'
-import { GithubFields, pollSentence } from './editor-github-fields'
+import { GithubFields, historySentence, pollSentence } from './editor-github-fields'
 import { ScheduleFields } from './editor-schedule-fields'
 import { NextRunsPreview } from './next-runs-preview'
 import { PageFrame } from './page-frame'
@@ -180,7 +180,7 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
               <span>{automation ? 'Enabled' : 'Enable after saving'}</span>
             </label>
             <p className="text-xs break-words text-muted-foreground">
-              {isSchedule ? 'The first run is the next occurrence shown beside the schedule.' : 'Enabling starts from a current-time baseline. Existing matches will not launch tasks.'}
+              {isSchedule ? 'The first run is the next occurrence shown beside the schedule.' : historySentence(draft.filters.includeExisting)}
             </p>
           </Section>
 

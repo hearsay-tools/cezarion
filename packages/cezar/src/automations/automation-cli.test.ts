@@ -96,6 +96,12 @@ describe('cez automation', () => {
       expect(last()).toMatchObject({ enabled: true });
     });
 
+    it('opts a GitHub poll into existing matches without enabling it', () => {
+      expect(bodyFromAddFlags({ name: 'History', on: 'issue.opened', 'include-existing': true }, 'Review')).toMatchObject({ filters: { includeExisting: true } });
+      expect(bodyFromAddFlags({ name: 'History', on: 'issue.opened', 'include-existing': true }, 'Review')).not.toHaveProperty('enable');
+      expect(() => bodyFromAddFlags({ name: 'Schedule', cron: '0 4 * * *', 'include-existing': true }, 'Go')).toThrow(/GitHub/);
+    });
+
     it('--on/--every/--label define a GitHub poll', () => {
       expect(bodyFromAddFlags({ name: 'G', on: 'pull_request.opened', every: '5m', label: ['bug'] }, 'P')).toEqual({
         name: 'G', kind: 'github', events: ['pull_request.opened'], intervalSeconds: 300,
