@@ -1801,14 +1801,26 @@ export function useProjectGithub(scope: string, params: { limit?: number } = {},
 
 type GithubPages = InfiniteData<GithubData, GithubPageParam>
 
+/** A later page GitHub could not serve. The server degrades in the payload (`available: false`,
+ *  HTTP 200), which as a page would end the list with no way on: thrown instead, it surfaces as
+ *  the failed page whose Retry asks for the same cursor again. */
+class GithubPageUnavailableError extends Error {}
+
 /** The options both readers of one paged list share, so either can start the query. */
 function githubPagesOptions(key: readonly unknown[], pageSize: number, projectId?: string) {
   return {
     queryKey: key,
     initialPageParam: {} as GithubPageParam,
-    queryFn: ({ pageParam, signal }: { pageParam: GithubPageParam; signal: AbortSignal }) =>
-      getGithub({ limit: pageSize, ...pageParam, ...(projectId ? { projectId } : {}) }, { signal }),
+    queryFn: async ({ pageParam, signal }: { pageParam: GithubPageParam; signal: AbortSignal }) => {
+      const page = await getGithub({ limit: pageSize, ...pageParam, ...(projectId ? { projectId } : {}) }, { signal })
+      // Page 1 keeps its payload: the tab's own unavailable state explains it.
+      if (!page.available && Object.keys(pageParam).length > 0) throw new GithubPageUnavailableError(page.reason ?? 'GitHub is unavailable.')
+      return page
+    },
     getNextPageParam: (last: GithubData) => nextGithubPageParam(last),
+    // GitHub's own answer is not retried behind the user's back: Retry is theirs to press.
+    retry: (failureCount: number, error: Error) => !(error instanceof GithubPageUnavailableError)
+      && !(error instanceof ApiError && error.status >= 400 && error.status < 500) && failureCount < 1,
     staleTime: 60_000,
     refetchOnWindowFocus: true,
   }

@@ -761,6 +761,56 @@ describe('scroll-driven paging (hearsay-tools/cezarion#1183, port of open-mercat
     await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142', '139', '120']))
   })
 
+  it('a page GitHub could not serve (HTTP 200, available: false) keeps Retry instead of ending the list', async () => {
+    const sent = stubPaged()
+    const paged = vi.mocked(fetch).getMockImplementation()!
+    let failNext = true
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input).includes('issuesCursor=') && failNext) {
+        failNext = false
+        sent.push({ path: String(input), method: 'GET', body: undefined })
+        // The server's degrade contract: a timeout or lost auth answers 200 with a reason.
+        return jsonResponse({ available: false, reason: 'GitHub did not answer in time. Refresh to try again.', issues: [], prs: [] })
+      }
+      return paged(input, init)
+    })
+    renderAt('/github?filter=all')
+    await waitFor(() => expect(live()).toHaveLength(1))
+    act(() => live()[0]!.fire(true))
+    const retry = await screen.findByRole('button', { name: 'Retry' })
+    expect(sentinel()?.textContent).toContain('Could not load more.')
+    expect(rows()).toHaveLength(2)
+    expect(sent.filter((r) => r.path.includes('issuesCursor='))).toHaveLength(1)
+
+    fireEvent.click(retry)
+    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142', '139', '120']))
+  })
+
+  it('a preset with no match on the loaded pages still pages on to find one', async () => {
+    const sent = stubPaged()
+    const paged = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input)
+      // Page 1's issues are both assigned to someone else; the viewer's issue is on page 2.
+      if ((init?.method ?? 'GET') === 'GET' && listPage(path)) {
+        sent.push({ path, method: 'GET', body: undefined })
+        return path.includes('issuesCursor=')
+          ? jsonResponse({ ...GITHUB, viewerLogin: 'octocat', issues: [{ ...ISSUE_120, assignees: ['octocat'] }], prs: [], issuesNextCursor: null, prsNextCursor: null })
+          : jsonResponse({
+            ...GITHUB, viewerLogin: 'octocat', issuesNextCursor: 'c1', prsNextCursor: null,
+            issues: GITHUB.issues.map((issue) => ({ ...issue, assignees: ['someone-else'] })),
+          })
+      }
+      return paged(input, init)
+    })
+    renderAt('/github?filter=assigned')
+    await waitFor(() => expect(live()).toHaveLength(1))
+    expect(rows()).toHaveLength(0)
+    act(() => live()[0]!.fire(true))
+    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['120']))
+    expect(sent.filter((r) => listPage(r.path) && r.path.includes('issuesCursor=c1'))).toHaveLength(1)
+  })
+
   it('a text search pauses paging; the No task yet preset keeps paging', async () => {
     stubPaged()
     renderAt('/github?filter=all')

@@ -618,7 +618,10 @@ export function GithubRoute({
   const startMargin = useStartMargin(rowsEl, scrollOwner)
   const narrowing = query.trim() !== '' || labelFilter.length > 0
     || (view === 'issues' && ((!isAssignedFilter && assigneeFilter.length > 0) || activeProject !== ''))
-  const pagingShown = list.hasNextPage && !narrowing && backedQuery === null && items.length > 0
+  // Gated on the loaded SIDE, not on the preset's matches: a preset with nothing on the loaded
+  // pages must still page on to the match a later page holds.
+  const loadedSide = view === 'issues' ? gh?.issues.length ?? 0 : gh?.prs.length ?? 0
+  const pagingShown = list.hasNextPage && !narrowing && backedQuery === null && loadedSide > 0
   const loadMoreRef = useLoadMoreSentinel(
     pagingShown && !list.isFetchingNextPage && !list.isFetchNextPageError,
     scrollOwner,
