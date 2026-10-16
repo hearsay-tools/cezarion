@@ -272,6 +272,8 @@ A cold boot deletes the previous descriptor before it starts anything. If the bo
 specs report that no env exists and point at `.ai/qa/test-env-app.log`. Before this change they
 attached to the old env's dead `baseUrl` and repeated its browser notes.
 
+Seeded NDJSON transcripts must go through `seedTranscript` from `seed-transcript.ts`; every nonblank line needs `seq` and `ts` (and `type`), and validation reports the line number and event type before writing.
+
 ## Full local suite in four lanes
 
 Run `npm run test:e2e:local` for the complete suite on a machine with roughly **8 GiB
