@@ -603,10 +603,16 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30,
 export function ghFailureReason(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   if (/ENOENT/.test(message)) return 'gh CLI not found — install it and run `gh auth login`';
-  const stderr = (err as { stderr?: unknown } | null)?.stderr;
-  const lines = (typeof stderr === 'string' && stderr.trim() ? stderr : message)
-    .split('\n').map((line) => line.trim()).filter(Boolean);
-  return lines.find((line) => !/^Command failed:/i.test(line)) ?? lines[0] ?? 'gh failed';
+  const failure = (err ?? {}) as { stderr?: unknown; killed?: unknown; signal?: unknown };
+  const stderr = typeof failure.stderr === 'string' ? failure.stderr : '';
+  if (stderr.trim()) {
+    const lines = stderr.split('\n').map((line) => line.trim()).filter(Boolean);
+    return lines.find((line) => !/^Command failed:/i.test(line)) ?? lines[0]!;
+  }
+  if (failure.killed === true || typeof failure.signal === 'string') return 'GitHub did not answer in time. Refresh to try again.';
+  // Without stderr, everything after "Command failed:" is the argv, which is query text.
+  if (/^Command failed:/i.test(message)) return 'GitHub request failed. Refresh to try again.';
+  return message.split('\n').map((line) => line.trim()).find(Boolean) ?? 'gh failed';
 }
 
 /** Bounded lookup already started by the list. Never launch work for an expired generation. */

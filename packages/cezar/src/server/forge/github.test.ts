@@ -21,6 +21,7 @@ import {
   createGithubDriver,
   fetchGithubComments,
   fetchGithubCommentCounts,
+  ghFailureReason,
   fetchTimelinePages,
   fetchListConnection,
   ghGraphqlArgs,
@@ -1947,6 +1948,16 @@ describe('paged GitHub list (#1183)', () => {
     const data = await fetchGithub('/repo/paged-stderr', true);
     expect(data.available).toBe(false);
     expect(data.reason).toBe("gh: Field 'name' doesn't exist on type 'LabelConnection'");
+  });
+
+  it('never reports a line of the query argv when gh wrote no stderr (a timeout)', () => {
+    const argvMessage = 'Command failed: gh api graphql -f query=\nquery ($owner: String!, $name: String!, $first: Int!) {\n  repository(owner: $owner) {';
+    const timedOut = Object.assign(new Error(argvMessage), { killed: true, signal: 'SIGTERM', stderr: '' });
+    expect(ghFailureReason(timedOut)).toBe('GitHub did not answer in time. Refresh to try again.');
+    const silent = Object.assign(new Error(argvMessage), { stderr: '' });
+    expect(ghFailureReason(silent)).toBe('GitHub request failed. Refresh to try again.');
+    expect(ghFailureReason(new Error('spawn gh ENOENT'))).toMatch(/gh CLI not found/);
+    expect(ghFailureReason(new Error('socket hang up'))).toBe('socket hang up');
   });
 });
 
