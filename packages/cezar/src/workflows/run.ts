@@ -3984,6 +3984,9 @@ export class RunManager {
   acknowledgeInbox(runId: string, generation: string, receiptId: string): 'acknowledged' | 'already-acknowledged' {
     if (this.disposed || this.store.getRun(runId)?.agentInputs?.some(input => input.inboxClaim?.receiptId === receiptId &&
       !input.deliveredAt && this.providerOwnsInboxInput(runId, input.id))) throw new Error('inbox receipt displaced');
+    const inputIds = (this.store.getRun(runId)?.agentInputs ?? []).filter(input => !input.deliveredAt &&
+      input.inboxClaim?.receiptId === receiptId && input.inboxClaim.generation === generation).map(input => input.id);
+    this.prepareWorkerWaitBatch(runId, inputIds);
     const result = this.store.ackInboxInputs(runId, receiptId, generation, new Date().toISOString());
     this.armInboxClaimExpiry(runId);
     this.reconcileWorkerWaits();
@@ -4433,7 +4436,14 @@ export class RunManager {
           const inboxParked = delivered.inboxClaim?.acknowledgedAt &&
             (this.workerWaiting.has(parent.id) || this.workerWakeAdmitted.has(parent.id)) &&
             state?.session?.open && state.atTurnBoundary === state.session;
-          this.withdrawWorkerWait(parent.id);
+          const retained = this.retireDeliveredWorkerWake(parent.id);
+          if (retained) {
+            // Revisit the restored intent even during recovery/inbox ACK. Its
+            // original deadline and outcomes still need an independent wake.
+            this.pendingReconciliations.add(familyRootId);
+            if (inboxParked && state) this.parkWorkerWait(parent.id, state);
+            continue;
+          }
           // Inbox ACK starts no provider turn. Retain the completed turn's slot
           // exemption if its registered wait parked while that ACK was in transit.
           if (inboxParked && state) {
@@ -4604,6 +4614,38 @@ export class RunManager {
     return true;
   }
 
+  /** Progress owns a delivery turn, not the parent's completion-wait intent. */
+  private retainsWorkerWaitOnProgress(runId: string): boolean {
+    const wait = this.workerWait(runId);
+    return !!wait?.workerIds.length && wait.reason === 'message' &&
+      this.store.getRun(runId)?.agentInputs?.find(input => input.id === wait.wakeId)?.conversation?.kind === 'progress';
+  }
+
+  /** Persist an interrupting member before acknowledging a mixed batch. The
+   * selected wake then survives a crash between delivery and wait retirement. */
+  private prepareWorkerWaitBatch(runId: string, inputIds: readonly string[]): void {
+    const run = this.store.getRun(runId);
+    const wait = this.workerWait(runId);
+    if (!run?.delegation || run.delegation.role === 'invalid' || !wait?.wakeId ||
+      !inputIds.includes(wait.wakeId) || !this.retainsWorkerWaitOnProgress(runId)) return;
+    const interrupt = run.agentInputs?.find(input => inputIds.includes(input.id) &&
+      input.conversation && input.conversation.kind !== 'progress');
+    if (interrupt) this.store.commitDelegation([{ id: runId, delegation: { ...run.delegation, wait: { ...wait, wakeId: interrupt.id } } }]);
+  }
+
+  private retireDeliveredWorkerWake(runId: string): boolean {
+    const run = this.store.getRun(runId);
+    const wait = this.workerWait(runId);
+    if (!run?.delegation || run.delegation.role === 'invalid' || !wait || !this.retainsWorkerWaitOnProgress(runId)) {
+      this.withdrawWorkerWait(runId);
+      return false;
+    }
+    const { reason: _reason, wakeId: _wakeId, ...intent } = wait;
+    this.store.commitDelegation([{ id: runId, delegation: { ...run.delegation, wait: { ...intent, phase: 'registered' } } }]);
+    this.clearWorkerWaitAdmission(runId);
+    return true;
+  }
+
   private withdrawWorkerWait(runId: string, acceptedHumanMessage?: QueuedMessage): void {
     const run = this.store.getRun(runId);
     const wait = this.workerWait(runId);
@@ -4611,6 +4653,10 @@ export class RunManager {
     // Publish intent retirement, exact wake removal and accepted human input
     // together. A disk failure must leave both durable and admission state intact.
     this.store.commitWorkerWaitWithdrawal(runId, wait.id, acceptedHumanMessage);
+    this.clearWorkerWaitAdmission(runId);
+  }
+
+  private clearWorkerWaitAdmission(runId: string): void {
     const timer = this.workerWaitTimers.get(runId); if (timer) clearTimeout(timer);
     this.workerWaitTimers.delete(runId);
     if (this.workerWakeQueuedAt.delete(runId) && this.active.has(runId)) {
@@ -4950,8 +4996,12 @@ export class RunManager {
         catch { console.error(`[cez] ${state.agentInputError}`); }
       }
     };
+    let retainedWorkerWaitId: string | undefined;
     let acknowledgement: false | Promise<void>;
-    try { acknowledgement = session.sendAgentMessage(content, inputIds); }
+    try {
+      this.prepareWorkerWaitBatch(runId, inputIds);
+      acknowledgement = session.sendAgentMessage(content, inputIds);
+    }
     catch (error) { fail(error, false); state.agentInputFlight = undefined; return false; }
     if (!acknowledgement) { state.agentInputFlight = undefined; return false; }
     // Attach rejection handling before any persistence/capacity work can throw.
@@ -4992,7 +5042,8 @@ export class RunManager {
               if (early.length) this.store.commitAgentInputsConsumed(runId, early, deliveredAt);
             }
           }
-          if (inputIds.includes(this.workerWait(runId)?.wakeId ?? '')) this.withdrawWorkerWait(runId);
+          const wait = this.workerWait(runId);
+          if (inputIds.includes(wait?.wakeId ?? '') && this.retireDeliveredWorkerWake(runId)) retainedWorkerWaitId = wait!.id;
           this.reconcileWorkerWaits();
         }
       } catch (error) { fail(error, true); }
@@ -5005,6 +5056,11 @@ export class RunManager {
       // after its turn already ended: no later turn-end would arm one (#505 review).
       if (inputIds.some(id => state.unreadRetried?.has(id)) || state.atTurnBoundary === session) this.armUnreadInputTimer(runId, state);
       if (this.flushAgentInputs(runId)) return;
+      // Only this progress ACK restored an intent. Generic input-readiness
+      // callbacks must not park a freshly registered wait ahead of ASK parsing.
+      if (retainedWorkerWaitId && this.workerWait(runId)?.id === retainedWorkerWaitId &&
+        state.atTurnBoundary === session && !state.pendingHumanAsk && !state.parkAfterAck?.humanGate &&
+        !this.hasUnansweredHumanAsk(runId) && this.parkWorkerWait(runId, state)) return;
       this.settleIdleBoundary(runId, state, session);
     }).catch(error => {
       // Bookkeeping failures cannot become unhandled promise rejections.
@@ -5045,10 +5101,13 @@ export class RunManager {
 
   private formatAgentInput(runId: string, input: AgentInput): string {
     const attribution = input.conversation;
-    const text = attribution
-      ? `Agent conversation ${JSON.stringify({ id: input.id, ...attribution })}${this.workerWait(runId)?.reason === 'message' ? `; interrupted wait ${this.workerWait(runId)!.id} to receive this message; outstanding requests remain pending` : ''}\n${input.text}`
-      : input.text;
     const wait = this.workerWait(runId);
+    const waitContext = wait?.reason !== 'message' ? '' : this.retainsWorkerWaitOnProgress(runId) && attribution?.kind === 'progress'
+      ? `; worker wait ${wait.id} remains active; end your turn to keep waiting`
+      : `; interrupted wait ${wait.id} to receive this message; outstanding requests remain pending`;
+    const text = attribution
+      ? `Agent conversation ${JSON.stringify({ id: input.id, ...attribution })}${waitContext}\n${input.text}`
+      : input.text;
     const receipt = wait?.wakeId === input.id && wait.wakeId !== wait.id && wait.reason !== 'message'
       ? `\nWait ${wait.id} (${wait.reason}); request outcomes: ${JSON.stringify(wait.requestOutcomes ?? [])}; worker outcomes: ${JSON.stringify(wait.outcomes.map(outcome => ({ ...outcome, ...(outcome.summary ? { summary: outcome.summary.slice(0, 256) } : {}) })))}. This is not review approval.` : '';
     return text + receipt + this.agentInputOutcomeText(input);

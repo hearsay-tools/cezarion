@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentSession } from '../core/agent-runner.ts';
+import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
+import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import {
@@ -12,9 +13,9 @@ import {
 
 describe('parent and worker conversation waits through RunManager', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
-  async function conversationPair() {
+  async function conversationPair(runner: RunnerId = 'claude') {
     process.env.CEZ_DELEGATION = '1';
-    const p = await parent();
+    const p = await parent('mock:hold', runner);
     const metadata = store.getRun(p.id)!.delegation!;
     if (metadata.role !== 'root') throw Error('missing root');
     store.commitDelegation([{ id: p.id, delegation: { ...metadata, permissions: [...metadata.permissions, 'steer'] } }]);
@@ -38,6 +39,78 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
         !!run.agentInputs?.find(input => input.id === inputId)?.deliveredAt;
     });
   }
+
+  for (const runner of RUNNER_IDS) {
+    it(`${runner} WP1 progress wakes the parent and preserves its worker wait until one terminal wake`, async () => {
+      process.env.CEZ_DRY_RUN = '0';
+      process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
+      process.env[HARNESS_ADAPTERS[runner].binEnv] = HARNESS_ADAPTERS[runner].mockBin;
+      const f = await conversationPair(runner);
+      try {
+        const wait = manager.registerWorkerWait(f.p.id, { workerIds: [f.w.id], timeoutSeconds: 600 });
+        await until(() => waitOf(store.getRun(f.p.id))?.phase === 'parked');
+        for (let n = 0; n < 2; n++) {
+          const id = randomUUID();
+          await f.service.send(f.workerCaller, { id, recipientRunId: f.p.id, kind: 'progress', text: 'Still working mock:hold', timeoutSeconds: 600 });
+          await until(() => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt);
+          expect(waitOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, deadline: wait.deadline, workerIds: [f.w.id] });
+          await until(() => waitOf(store.getRun(f.p.id))?.phase === 'parked');
+          expect(semaphore.busy()).toBe(0);
+        }
+        expect(manager.finish(f.w.id)).toBe(true);
+        await until(() => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === wait.id)?.deliveredAt);
+        manager.reconcileWorkerWaits(); manager.reconcileWorkerWaits();
+        expect(waitOf(store.getRun(f.p.id))).toBeUndefined();
+        expect(store.getRun(f.p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
+        expect(store.getRun(f.p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'outcome' } });
+      } finally { f.close(); }
+    });
+  }
+
+  it('inbox ACK of progress preserves a parked worker wait and its terminal wake', async () => {
+    const f = await conversationPair();
+    const engine = manager as unknown as { pump(): Promise<void>; queue: string[] };
+    const pump = vi.spyOn(engine, 'pump').mockResolvedValue();
+    try {
+      const wait = manager.registerWorkerWait(f.p.id, { workerIds: [f.w.id], timeoutSeconds: 600 });
+      const id = randomUUID();
+      await f.service.send(f.workerCaller, { id, recipientRunId: f.p.id, kind: 'progress', text: 'Still working mock:hold', timeoutSeconds: 600 });
+      const generation = randomUUID();
+      const claim = manager.reserveInboxInputs(f.p.id, generation, [id])!;
+      expect(manager.acknowledgeInbox(f.p.id, generation, claim.receiptId)).toBe('acknowledged');
+      expect(waitOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: 'parked', deadline: wait.deadline });
+      expect(engine.queue).not.toContain(f.p.id);
+      expect(semaphore.busy()).toBe(0);
+      pump.mockRestore();
+      expect(manager.finish(f.w.id)).toBe(true);
+      await until(() => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === wait.id)?.deliveredAt);
+      expect(waitOf(store.getRun(f.p.id))).toBeUndefined();
+      expect(store.getRun(f.p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
+    } finally { pump.mockRestore(); f.close(); }
+  });
+
+  it.each(['provider', 'inbox'] as const)('a mixed progress/request %s batch still interrupts the worker wait', async mode => {
+    const f = await conversationPair();
+    const engine = manager as unknown as { pump(): Promise<void> };
+    const pump = vi.spyOn(engine, 'pump').mockResolvedValue();
+    try {
+      const wait = manager.registerWorkerWait(f.p.id, { workerIds: [f.w.id], timeoutSeconds: 600 });
+      const progressId = randomUUID(); const requestId = randomUUID();
+      await f.service.send(f.workerCaller, { id: progressId, recipientRunId: f.p.id, kind: 'progress', text: 'Working mock:hold', timeoutSeconds: 600 });
+      await f.service.send(f.workerCaller, { id: requestId, recipientRunId: f.p.id, kind: 'request', text: 'Need a decision mock:hold', timeoutSeconds: 600 });
+      if (mode === 'inbox') {
+        const generation = randomUUID();
+        const claim = manager.reserveInboxInputs(f.p.id, generation, [progressId, requestId])!;
+        expect(manager.acknowledgeInbox(f.p.id, generation, claim.receiptId)).toBe('acknowledged');
+      } else {
+        pump.mockRestore(); await engine.pump();
+        await until(() => [progressId, requestId].every(id => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt));
+      }
+      expect(waitOf(store.getRun(f.p.id))).toBeUndefined();
+      expect(store.getRun(f.p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'message' } });
+      expect(store.getRun(f.p.id)?.delegation).toMatchObject({ conversation: { outcomes: [] } });
+    } finally { pump.mockRestore(); f.close(); }
+  });
 
   it('conversation: worker request wait releases capacity and explicit parent reply wakes exactly once', async () => {
     const f = await conversationPair();
