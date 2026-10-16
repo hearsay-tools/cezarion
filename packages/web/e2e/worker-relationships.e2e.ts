@@ -8,6 +8,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest'
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+// fixture-server starts: 1
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const parentId = randomUUID(), orphanId = randomUUID(), absentId = randomUUID()

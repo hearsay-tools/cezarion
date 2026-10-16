@@ -8,6 +8,7 @@ import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import record from './fixtures/thread-run.record.json'
+// fixture-server starts: 1
 
 /**
  * #730 — an assistant reply's single newlines render as visible line breaks in the loaded

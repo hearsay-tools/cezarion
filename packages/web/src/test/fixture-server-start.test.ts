@@ -34,21 +34,74 @@ afterEach(async () => {
   for (const child of children.splice(0)) await stopFixtureServer(child)
 })
 
+const serveStarts = (source: string) => [...source.matchAll(/\b(spawnFixtureServer|spawn)\(\s*(?:process\.execPath,\s*)?\[([^\]]*'serve'[^\]]*)\]/g)]
+// hearsay-tools/cezarion#1084: each spec declares its own start count, so a PR that adds a
+// fixture-server spec edits only that spec, never a shared total (see e2e/fixture-server.md).
+// Any indentation or spacing is a candidate, so a near-miss is reported instead of ignored; the
+// line before the one declaration must end an import and no import may follow it, which also
+// rules out a copy inside a string or a block comment.
+const startDeclarationProblems = (file: string, source: string): string[] => {
+  const starts = serveStarts(source).length
+  const lines = source.split('\n')
+  const candidates = lines.flatMap((text, index) => /^[ \t]*\/\/[ \t]*fixture-server[ \t]+starts\b/.test(text) ? [{ raw: text, text: text.trimEnd(), index }] : [])
+  const line = `\`// fixture-server starts: ${starts}\``
+  const problem = (text: string) => [`${file}: ${text} (see e2e/fixture-server.md)`]
+  if (candidates.length > 1) return problem(`declares its fixture-server starts ${candidates.length} times; ${starts ? `keep one ${line} line directly after the imports and remove the others` : 'it starts none, so remove every one'}`)
+  const [candidate] = candidates
+  if (!candidate) return starts ? problem(`starts ${starts} fixture server(s) but declares none; add ${line} on its own line directly after the imports`) : []
+  const { raw, text, index } = candidate
+  if (!starts) return problem(`declares \`${text}\` but starts no fixture server; remove that line`)
+  const endsImport = /(?:\bfrom|^import)[ \t]+(['"])[^'"]+\1;?\s*$/.test(lines[index - 1] ?? '')
+  if (!endsImport || lines.slice(index + 1).some(later => /^import\b(?![(.])/.test(later))) return problem(`\`${text}\` is not directly after the imports; put ${line} on its own line directly after the last import and remove this one`)
+  const value = /^\/\/ fixture-server starts: ([1-9]\d*)$/.exec(raw)?.[1]
+  if (value === undefined) return problem(`\`${text}\` is not \`// fixture-server starts: N\` at column 0 with N a positive integer; replace it with ${line}`)
+  if (Number(value) !== starts) return problem(`declares \`${text}\` but starts ${starts}; change it to ${line}`)
+  return []
+}
+
 describe('owned fixture server readiness (#795)', () => {
   it('routes all spec-owned CLI serve constructions through child-owned readiness', () => {
     const directory = resolve(import.meta.dirname, '../../e2e')
-    let constructions = 0
+    const problems: string[] = []
     for (const file of readdirSync(directory).filter(file => file.endsWith('.e2e.ts'))) {
       const source = readFileSync(resolve(directory, file), 'utf8')
-      const starts = [...source.matchAll(/\b(spawnFixtureServer|spawn)\(\s*(?:process\.execPath,\s*)?\[([^\]]*'serve'[^\]]*)\]/g)]
-      for (const start of starts) {
-        constructions++
-        expect(start[1], `${file}: CLI serve must own its readiness endpoint`).toBe('spawnFixtureServer')
-      }
+      const starts = serveStarts(source)
+      for (const start of starts) expect(start[1], `${file}: CLI serve must own its readiness endpoint`).toBe('spawnFixtureServer')
       if (starts.length) expect(source, `${file}: await owned health before seeding or browser setup`).toContain('await waitForFixtureServer(')
+      problems.push(...startDeclarationProblems(file, source))
     }
-    // The complete construction audit is documented in e2e/fixture-server.md.
-    expect(constructions).toBe(56)
+    expect(problems).toEqual([])
+  })
+
+  describe('per-spec start declarations (hearsay-tools/cezarion#1084)', () => {
+    const start = "const server = spawnFixtureServer([cli, 'serve', '--port', '0'], { cwd })\n"
+    const imports = "import { spawnFixtureServer } from './fixture-server'\n"
+    const reported = (source: string, fix: string) => {
+      const problems = startDeclarationProblems('synthetic.e2e.ts', source)
+      expect(problems).toHaveLength(1)
+      expect(problems[0]).toMatch(/^synthetic\.e2e\.ts: /)
+      expect(problems[0]).toContain(fix)
+      expect(problems[0]).toContain('e2e/fixture-server.md')
+    }
+
+    it('accepts a declaration that matches the starts, and a spec with neither', () => {
+      expect(startDeclarationProblems('synthetic.e2e.ts', `${imports}// fixture-server starts: 2\n\n${start}${start}`)).toEqual([])
+      expect(startDeclarationProblems('synthetic.e2e.ts', `${imports}\nconst url = 'http://127.0.0.1:1'\n`)).toEqual([])
+    })
+    it('reports a spec that starts an undeclared fixture server', () => reported(`${imports}\n${start}`, 'add `// fixture-server starts: 1` on its own line'))
+    it('reports a declaration in a spec that no longer starts one', () => reported(`${imports}// fixture-server starts: 1\n`, 'starts no fixture server; remove that line'))
+    it('reports a declared count that differs from the starts', () => reported(`${imports}// fixture-server starts: 3\n${start}${start}`, 'starts 2; change it to `// fixture-server starts: 2`'))
+    it('reports a declaration that appears more than once', () => reported(`${imports}// fixture-server starts: 1\n// fixture-server starts: 1\n${start}`, 'starts 2 times; keep one `// fixture-server starts: 1` line'))
+    it('reports a canonical declaration plus an indented duplicate', () => reported(`${imports}// fixture-server starts: 1\n${start}  // fixture-server starts: 1\n`, 'starts 2 times; keep one `// fixture-server starts: 1` line'))
+    it('reports an indented declaration in a spec that starts none', () => reported(`${imports}\nfunction later() {\n  // fixture-server starts: 1\n}\n`, 'starts no fixture server; remove that line'))
+    it.each([
+      ['inside a template string', `${imports}const text = \`\n// fixture-server starts: 1\n\`\n${start}`],
+      ['inside a block comment', `${imports}/*\n// fixture-server starts: 1\n*/\n${start}`],
+      ['after a blank line that follows the imports', `${imports}\n// fixture-server starts: 1\n${start}`],
+      ['further down the file', `${imports}${start}// fixture-server starts: 1\n`],
+      ['between two imports', `${imports}// fixture-server starts: 1\nimport { stopFixtureServer } from './fixture-server'\n${start}`],
+    ])('reports a declaration %s as misplaced', (_, source) => reported(source, 'is not directly after the imports; put `// fixture-server starts: 1` on its own line directly after the last import and remove this one'))
+    it.each(['0', '-1', '1.5', 'two', ''].map(value => `// fixture-server starts: ${value}`).concat('//fixture-server starts: 1', '  // fixture-server starts: 1', '// fixture-server  starts: 1', '// fixture-server starts:1', '// fixture-server starts: 1 '))('reports a malformed declaration %j', declaration => reported(`${imports}${declaration}\n${start}`, 'with N a positive integer; replace it with `// fixture-server starts: 1`'))
   })
 
   it('uses the actual child listener when the requested endpoint belongs to a 404 server', async () => {

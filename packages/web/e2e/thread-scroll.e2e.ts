@@ -11,6 +11,7 @@ import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './f
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { expectedRowCount, largeThreadEvents } from './fixtures/make-large-thread'
 import record from './fixtures/thread-run.record.json'
+// fixture-server starts: 1
 
 /**
  * R3 Step 2.4 in a real browser: virtualization on a LARGE transcript (the synthetic

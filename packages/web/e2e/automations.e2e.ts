@@ -8,6 +8,7 @@ import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, readTestEnv } f
 import { applyContrastQaVariant, contrastQaVariants, restoreContrastQaDefaults } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { pollFor, pollJson } from './poll'
+// fixture-server starts: 1
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const shotsDir = resolve(import.meta.dirname, '../../../.ai/qa/screenshots/automations')

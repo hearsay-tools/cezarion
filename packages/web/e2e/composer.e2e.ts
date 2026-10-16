@@ -8,6 +8,7 @@ import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForStatus } from './poll'
+// fixture-server starts: 1
 
 /**
  * The composer (R3 Step 2.1) end-to-end, against a LIVE dry-run session — not a replayed

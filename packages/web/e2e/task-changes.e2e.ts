@@ -8,6 +8,7 @@ import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForStatus } from './poll'
+// fixture-server starts: 1
 
 /**
  * The Changes tab (R5 Step 1.5) end-to-end against a LIVE dry run, same doctrine as

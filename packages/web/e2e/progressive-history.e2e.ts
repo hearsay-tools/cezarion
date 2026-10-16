@@ -11,6 +11,7 @@ import record from './fixtures/thread-run.record.json'
 import { waitForStatus } from './poll'
 import { settleVisual, waitForSettledSample } from './visual-ready'
 import { HISTORY_BOUNDARY_SLACK_PX, isNearHistoryStart } from '../src/routes/task-thread/thread-scroll'
+// fixture-server starts: 1
 
 const repoRoot = resolve(import.meta.dirname, '../../..')
 const artifactsDir = resolve(repoRoot, '.ai/qa/artifacts_e2e')

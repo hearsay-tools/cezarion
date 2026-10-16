@@ -27,6 +27,10 @@ Baseline `ac1d7fee48b201bc0d5c775986b98361648aca6c`: 44 constructions in 37 spec
 source guard inventories every spec-owned CLI `serve` construction, including those
 with a separately resolved built CLI path.
 
+The table is the historical audit from hearsay-tools/cezarion#795 and the PRs that
+followed it; it is no longer extended. Each spec now declares its own starts (see the
+next section).
+
 | Spec | Baseline construction lines | Endpoint/budget exceptions |
 | --- | --- | --- |
 | agents-dock.e2e.ts | 102 | OS-bound initial port; original 15 s |
@@ -69,56 +73,37 @@ with a separately resolved built CLI path.
 | worker-relationships.e2e.ts | 63 | Original 20 s retained |
 | worktree-setup.e2e.ts | 47 | Initial port 0; original 15 s |
 
-The merge of main adds two fixtures to this class: `automations.e2e.ts` (the
-opted-in schedule server) and `live-preview.e2e.ts` (the opted-in cockpit server).
-Both now request port 0 and adopt their owned listener within the original 15 s
-health budget. The preview application itself keeps its separate explicit port
-and native lifecycle; its browser wait override is unchanged. The complete
-construction guard pins those 46 starts across 39 spec files.
+## Declaring a spec's starts (hearsay-tools/cezarion#1084)
 
-Main commit `12875135` adds `artifact-project-links.e2e.ts`, whose single CLI
-construction also requests port 0 and adopts its owned listener within the original
-15 s health budget. Its publication, cross-project browser assertions and 120 s setup
-timeout are unchanged. The complete guard now pins 47 starts across 40 spec files.
+A spec that starts its own CLI `serve` declares how many constructions it has, on one
+line of its own directly after its import block:
 
-Issue #810 adds `sidebar-limits.e2e.ts`: one CLI construction with port 0,
-owned listener readiness within the original 15 s health budget, and awaited
-shutdown before fixture removal. The guard now pins 48 starts across 41 specs.
+```ts
+// fixture-server starts: 2
+```
 
-The OMP sub-agent case in `agents-dock.e2e.ts` (#595) adds a second CLI construction to an
-existing spec: port 0, owned listener readiness, awaited shutdown before fixture removal.
-The guard now pins 49 starts across 41 specs.
+`src/test/fixture-server-start.test.ts` finds the constructions with the same source
+pattern that checks their readiness and compares the count with the declaration. It
+counts source sites, not boots: a constructor reused for a restart counts once. Any
+`//` line that reads `fixture-server starts`, at any indentation or spacing, counts as a
+declaration, so a near-miss is reported instead of ignored. The guard names the spec and
+the line to add, change, move or remove when:
 
-hearsay-tools/cezarion#845 adds `sidebar-ellipsis-click.e2e.ts`: one CLI
-construction with port 0, owned listener readiness within the original 15 s
-health budget, and awaited shutdown before fixture removal. The guard now pins
-50 starts across 42 specs.
+- the spec starts a fixture server but has no declaration;
+- the spec has a declaration but starts no fixture server;
+- the declared count differs from the constructions the guard finds;
+- the declaration appears more than once;
+- the declaration is malformed: not exactly `// fixture-server starts: N` at column 0
+  with N a positive integer (`0`, `//fixture-server starts: 1` and an indented line
+  included);
+- the declaration is misplaced: the line before it does not end an import statement, or
+  an import follows it. This also rejects a copy inside a string or a block comment.
 
-hearsay-tools/cezarion#917 adds `worktree-setup.e2e.ts`: one CLI construction with
-port 0 over its own fixture repo, owned listener readiness within the original 15 s
-health budget, and awaited shutdown before fixture removal. The guard now pins 51
-starts across 43 specs.
-
-hearsay-tools/cezarion#927 adds `assistant-reply-copy.e2e.ts`: one CLI construction
-with port 0 over its own fixture repo, owned listener readiness within the original
-15 s health budget, and awaited shutdown before fixture removal. The guard now pins
-52 starts across 44 specs.
-
-hearsay-tools/cezarion#922 adds `task-pr-collection.e2e.ts`: one CLI construction
-with port 0 and child-owned readiness within the original 15 s deadline. The audit
-now covers 53 starts across 45 specs.
-
-hearsay-tools/cezarion#941 adds `good-css.e2e.ts`: one CLI construction with
-port 0, the shared owned-listener health budget, and awaited shutdown before
-fixture removal. The guard now pins 54 starts across 46 specs.
-
-hearsay-tools/cezarion#1023 adds `search-focus.e2e.ts`: one CLI construction
-with port 0, child-owned listener readiness and awaited shutdown before fixture
-removal. The guard now pins 55 starts across 47 specs.
-
-hearsay-tools/cezarion#1012 adds `markdown-preview.e2e.ts`: one CLI construction
-with port 0, child-owned readiness within the original 15 s deadline, and awaited
-shutdown before fixture removal. The guard now pins 56 starts across 48 specs.
+The count lives in the spec because every shared form of it conflicted. A pinned total
+changed on every PR that added a fixture-server spec, so any two such PRs in flight
+conflicted (hearsay-tools/cezarion#1076 resolved one by hand). A shared sorted list of
+specs still conflicts when two new names sort into the same gap. A spec that adds or
+drops a fixture server edits only itself, and nothing in this document changes.
 
 ## Boot budget (hearsay-tools/cezarion#986)
 
@@ -144,12 +129,15 @@ setup. A child that exits still fails at once.
   gate remain unchanged. Its upstream CLI fixture uses the new ownership helper.
 - `run-header-ci-wait` starts Vite with `--strictPort`; a bind conflict fails instead
   of selecting another port. Its construction and readiness remain unchanged.
+- `live-preview` starts its cockpit through the ownership helper, but the preview
+  application it drives keeps its separate explicit port and native lifecycle, and its
+  browser wait override is unchanged.
 - Service node tests use other ownership mechanisms: `cockpit-ownership` already
   requests port 0 and adopts its own stdout listener; `task-cli` deliberately tests
   zero-config repo-identity discovery rather than a requested health endpoint.
   Application-update tests use their own IPC actual-listener acknowledgement with
   exact-restart identity checks, or packaged mock servers with fixed explicit binds.
-  They are distinct from the 56 cockpit-spec CLI preference/health constructions.
+  They are distinct from the cockpit-spec CLI preference/health constructions.
 - In-process Hono/server tests use their returned listener or app and do not spawn
   an adaptive CLI port. Browser mock API fixtures do not spawn this CLI.
 

@@ -18,6 +18,7 @@ import {
   restoreContrastQaDefaults,
   type ContrastSample,
 } from './contrast'
+// fixture-server starts: 7
 
 /**
  * The task quick-list, in a real browser, against a real cezar serving real runs.

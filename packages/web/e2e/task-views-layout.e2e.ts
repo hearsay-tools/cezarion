@@ -9,6 +9,7 @@ import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './f
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForHealth, pollFor, pollJson } from './poll'
 import record from './fixtures/thread-run.record.json'
+// fixture-server starts: 1
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e/task-views')
 let root: string, base: string, project: string, automationId: string

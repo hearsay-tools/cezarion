@@ -9,6 +9,7 @@ import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './f
 import { expectGroupRowHeightMatchesTaskRow } from './row-height'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, type ContrastQaVariant, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
+// fixture-server starts: 1
 
 const originalBrowserArgs = process.env.AGENT_BROWSER_ARGS
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')

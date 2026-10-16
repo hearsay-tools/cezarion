@@ -9,6 +9,7 @@ import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
+// fixture-server starts: 1
 
 // Real layout regression: jsdom cannot resolve density, clipping, or hit testing.
 let browser: AgentBrowser

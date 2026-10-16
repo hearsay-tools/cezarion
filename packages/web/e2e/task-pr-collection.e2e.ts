@@ -7,6 +7,7 @@ import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, cezarCli, fixtureServe
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { dismissWithEscape, hoverVisiblePoint } from './contrast'
 import { waitForSettledSample } from './visual-ready'
+// fixture-server starts: 1
 
 // hearsay-tools/cezarion#922: real persistence, summaries, routing and browser layout.
 // Native-wire ingestion is covered separately by the exhaustive PR1/PR2 regressions.

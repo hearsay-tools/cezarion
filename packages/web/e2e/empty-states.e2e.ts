@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+// fixture-server starts: 1
 
 /**
  * The CenteredState surfaces (Step 4.1), in a real browser: the no-tasks hero on the overview

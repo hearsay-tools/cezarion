@@ -8,6 +8,7 @@ import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
 import { dismissWithEscape, focusWithKeyboard } from './contrast'
+// fixture-server starts: 1
 
 let browser: AgentBrowser
 let server: ChildProcess

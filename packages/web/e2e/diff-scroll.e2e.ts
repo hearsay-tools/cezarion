@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
+// fixture-server starts: 1
 
 /**
  * Diff virtualization in a real browser (`components/diff/diff-scroll.ts` §"THE PERFORMANCE

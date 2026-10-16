@@ -7,6 +7,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest'
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
+// fixture-server starts: 2
 
 let browser: AgentBrowser
 let server: ChildProcess

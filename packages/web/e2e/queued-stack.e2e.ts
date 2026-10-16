@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForStatus, pollFor, pollJson } from './poll'
+// fixture-server starts: 1
 
 /**
  * Stacking, editing and removing a queued run's prompt (#472), end-to-end against a LIVE
