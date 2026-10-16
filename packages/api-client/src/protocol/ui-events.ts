@@ -122,7 +122,32 @@ export interface UiToolItem {
   parentItemId?: string
 }
 
-export type UiItem = UiMessageItem | UiReasoningItem | UiToolItem
+/** How a native hook run ended — see the server's `ui-events.ts` (#961). */
+export type HookStatus = 'completed' | 'failed' | 'blocked' | 'cancelled'
+
+/** The role of one piece of hook output — codex `HookOutputEntryKind` verbatim. */
+export type HookEntryKind = 'context' | 'feedback' | 'warning' | 'error' | 'stop'
+
+/** One native hook run that told the agent something, failed, was cancelled or blocked. */
+export interface UiHookItem {
+  kind: 'hook'
+  id: string
+  /** Native event, PascalCase: `SessionStart`, `PreToolUse`, `Stop`. */
+  event: string
+  /** Native label when richer than `event`: `SessionStart:startup`, `PreToolUse:Bash`. */
+  name?: string
+  /** Where the hook is defined, when the wire says (codex `sourcePath`). */
+  source?: string
+  status: HookStatus
+  entries: Array<{ kind: HookEntryKind; text: string }>
+  stdout?: string
+  stderr?: string
+  exitCode?: number
+  durationMs?: number
+  parentItemId?: string
+}
+
+export type UiItem = UiMessageItem | UiReasoningItem | UiToolItem | UiHookItem
 
 /* ------------------------------------------------------------------ */
 /* Events — discriminated on `type`                                    */

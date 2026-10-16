@@ -90,6 +90,7 @@ const CAPABILITIES: ReadonlyArray<[name: string, produced: (events: UiEvent[]) =
       ),
   ],
   ['turn.completed with a stopReason', (events) => events.some((e) => e.type === 'turn.completed' && e.stopReason !== undefined)],
+  ['hook items (hook_response / hook/completed)', (events) => items(events).some((item) => item.kind === 'hook')],
 ] as const;
 
 /** Cursor 2026.09.15-d2fe57e: ACP presenter in 1699.index.js emits no usage,
@@ -103,6 +104,15 @@ const CURSOR_NO_USAGE_TELEMETRY = new Set([
   'turn.completed with per-turn directional usage',
 ]);
 
+/** #961, wire survey 2026-10-15: OpenCode 1.18.35 plugin hooks, Pi 1.0.4 and OMP 18.8.0
+ * extensions run in-process and stream no hook lifecycle (Pi/OMP surface only
+ * `extension_error`, already mapped as a session error); Cursor 2026.10.01-e373342's stream
+ * carries no hook frame. Claude (`--include-hook-events`) and Codex (`hook/completed`) do.
+ * The inverse assertion keeps a fabricated hook item from erasing the gap.
+ */
+const NO_HOOK_TELEMETRY = new Set(['opencode', 'pi', 'cursor', 'omp']);
+const HOOK_ROW = 'hook items (hook_response / hook/completed)';
+
 describe('protocol v2 backend parity (every mapper emits every matrix capability)', () => {
   it('Cursor print independently emits a plan from its native todo wire', () => {
     const printEvents = JSON.parse(readFileSync(join(HERE, '__fixtures__', 'cursor',
@@ -112,6 +122,12 @@ describe('protocol v2 backend parity (every mapper emits every matrix capability
   for (const backend of BACKENDS) {
     const events = fixtureEvents(backend);
     for (const [name, produced] of CAPABILITIES) {
+      if (name === HOOK_ROW && NO_HOOK_TELEMETRY.has(backend)) {
+        it(`${backend} explicitly lacks ${name} (its wire reports no hook lifecycle)`, () => {
+          expect(produced(events)).toBe(false);
+        });
+        continue;
+      }
       if (backend === 'cursor' && CURSOR_NO_USAGE_TELEMETRY.has(name)) {
         it(`cursor explicitly lacks ${name} (2026.09.15-d2fe57e ACP has no telemetry)`, () => {
           expect(produced(events)).toBe(false);

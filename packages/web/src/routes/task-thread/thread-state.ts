@@ -395,7 +395,7 @@ function resultText(value: unknown): string {
 }
 
 const isUiItem = (entry: ThreadEntry): entry is UiItem =>
-  entry.kind === 'message' || entry.kind === 'reasoning' || entry.kind === 'tool'
+  entry.kind === 'message' || entry.kind === 'reasoning' || entry.kind === 'tool' || entry.kind === 'hook'
 
 /** Every `PlanStatus`, so an unrecognized status is the only thing that falls back to
  *  `pending` below. `Set<PlanStatus>` accepts a subset without complaint, so this list
@@ -462,7 +462,9 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
     // Clone: deltas append in place, and the event object off the wire must stay untouched.
     // Assistant (and rare in-stream user) messages carry the completing event's clock (#435).
     const item = raw.kind === 'message' && ts !== undefined ? { ...raw, ts } : { ...raw }
-    if (!turn.v2Items) {
+    // A hook (#961) is no evidence of v2 tool coverage, and a Claude SessionStart hook lands
+    // before `turn.started`, which must still attach to the prompt's turn.
+    if (!turn.v2Items && item.kind !== 'hook') {
       // The dedup latch flips: this turn is v2-covered, so every v1-synthesized TOOL in it is
       // a duplicate of something v2 already describes (or is about to). Tools can be dropped
       // sight-unseen because v2 tool coverage is total across backends and ids are shared —
@@ -730,7 +732,7 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
         const kind = event.item.kind
         const id = event.item.id
         if (
-          (kind !== 'message' && kind !== 'reasoning' && kind !== 'tool') ||
+          (kind !== 'message' && kind !== 'reasoning' && kind !== 'tool' && kind !== 'hook') ||
           typeof id !== 'string' ||
           id === ''
         ) {
@@ -755,7 +757,7 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
         const item = located.entry.entry
         if (event.field === 'output' && item.kind === 'tool') {
           item.output = (item.output ?? '') + delta
-        } else if (event.field !== 'output' && item.kind !== 'tool') {
+        } else if (event.field !== 'output' && (item.kind === 'message' || item.kind === 'reasoning')) {
           item.text += delta
         }
         break

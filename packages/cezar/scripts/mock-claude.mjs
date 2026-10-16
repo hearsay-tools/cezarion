@@ -64,7 +64,7 @@ const emit = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
 
 // `--help` lists the options cezar feature-detects (#505).
 if (process.argv.includes('--help')) {
-  process.stdout.write('Usage: claude [options]\n  --input-format <format>\n  --replay-user-messages  Re-emit user messages from stdin back on stdout\n');
+  process.stdout.write('Usage: claude [options]\n  --input-format <format>\n  --replay-user-messages  Re-emit user messages from stdin back on stdout\n  --include-hook-events  Include all hook lifecycle events in the output stream\n');
   process.exit(0);
 }
 
@@ -203,6 +203,20 @@ async function respond(userText, imageCount, uuid) {
     const text = ['steer tool done', ...steered.map(s => `saw: ${s.userText}`)].join('\n');
     emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
     emit({ type: 'result', subtype: 'success', result: text, user_message_uuids: [uuid, ...steered.map(s => s.uuid)].filter(Boolean), usage: { input_tokens: 20, output_tokens: 10 } });
+    return;
+  }
+  // #961: hook_response frames as `--include-hook-events` emits them (CLI 2.1.301) — one
+  // mid-turn, one after the run parked (Squeal's async `waiter` completes this late).
+  if (!userText.includes('[cez-namer]') && userText.includes('mock:hook-after-park')) {
+    const hook = (id, event, text) => ({
+      type: 'system', subtype: 'hook_response', hook_id: `hook-${id}-${turn}`, hook_name: event, hook_event: event,
+      stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: text } }), stderr: '', exit_code: 0, outcome: 'success',
+    });
+    emit(hook('mid', 'PostToolBatch', 'Mid-turn hook context.'));
+    emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Watching.\nCEZ:MONITORING' }] } });
+    emit({ type: 'result', subtype: 'success', result: 'Watching.\nCEZ:MONITORING', usage: { input_tokens: 10, output_tokens: 5 } });
+    await afterParityPark(userText);
+    emit(hook('late', 'Stop', 'Late hook processed.'));
     return;
   }
   // Native child attribution from __fixtures__/claude/subagent-task.ndjson.

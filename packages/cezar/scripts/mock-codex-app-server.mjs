@@ -302,6 +302,19 @@ rl.on('line', async (line) => {
         return;
       }
     }
+    // #961: `hook/completed` (0.160.1 schema) — one mid-turn, one after the run parked.
+    if (turnText.includes('mock:hook-after-park')) {
+      const hook = (id, eventName, text) => ({ method: 'hook/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', run: {
+        id, eventName, handlerType: 'command', executionMode: 'sync', scope: 'turn', sourcePath: '/mock/hooks.json',
+        displayOrder: 0, startedAt: 1, status: 'completed', entries: [{ kind: 'context', text }],
+      } } });
+      emit(hook('hook-mid', 'postToolUse', 'Mid-turn hook context.'));
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', item: { type: 'agentMessage', id: 'hook-parent', text: 'Watching.\nCEZ:MONITORING' } } });
+      emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
+      await afterParityPark(turnText);
+      emit(hook('hook-late', 'stop', 'Late hook processed.'));
+      return;
+    }
     // Native thread attribution from collab-agent-tool-call.ndjson (#121/#401).
     if (turnText.includes('mock:subagent-after-park')) {
       emit({ method: 'item/started', params: { threadId: 'th_mock_1', item: { type: 'collabAgentToolCall', id: 'park-spawn', tool: 'spawnAgent', status: 'inProgress', receiverThreadIds: ['th_park_child'] } } });

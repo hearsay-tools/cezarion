@@ -12,6 +12,7 @@ import {
   NoteLine,
   ProviderAuthRequiredCard,
   ReasoningItem,
+  HookCard,
   ToolCard,
   ToolStreak,
   UserBubble,
@@ -532,6 +533,8 @@ function ThreadEntryRenderer({
       return <ProviderAuthRequiredCard incident={entry} />
     case 'preview-server':
       return <PreviewServerEntry entry={entry} />
+    case 'hook':
+      return <HookCard item={entry} cacheKey={`${scope}:${entry.id}`} />
     default:
       return assertNever(entry)
   }

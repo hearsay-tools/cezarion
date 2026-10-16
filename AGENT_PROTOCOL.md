@@ -437,10 +437,10 @@ two, so drift fails `npm run typecheck` (the gate) rather than the UI at runtime
    entries, diff shape, stop reasons) — ecosystem alignment.
 3. **Per-capability degradation, never per-backend** — see §6.
 
-### The item model (one id-keyed stream for text, reasoning and tools)
+### The item model (one id-keyed stream for text, reasoning, tools and hooks)
 
 ```ts
-type UiItem = UiMessageItem | UiReasoningItem | UiToolItem;
+type UiItem = UiMessageItem | UiReasoningItem | UiToolItem | UiHookItem;
 ```
 
 - `UiMessageItem` — `kind:'message'`, `role`, `text`, `phase?:'commentary'|'final'`.
@@ -448,6 +448,17 @@ type UiItem = UiMessageItem | UiReasoningItem | UiToolItem;
 - `UiToolItem` — `kind:'tool'`, `name` (backend tool name), `toolKind`, `title`
   (human line computed once — see §5), `status`, `input?`, `output?`, `error?`,
   `diffs?: FileDiff[]`, `locations?`, `exitCode?`, `parentItemId?`.
+- `UiHookItem` — `kind:'hook'` (hearsay-tools/cezarion#961), one native hook run:
+  `event` (PascalCase: `SessionStart`, `PreToolUse`, `Stop`), `name?` (native label
+  when richer, `PreToolUse:Bash`), `source?` (hook definition path), `status`
+  (`completed|failed|blocked|cancelled`), `entries: {kind, text}[]` (what the agent
+  received: `context|feedback|warning|error|stop`), raw `stdout?`/`stderr?`,
+  `exitCode?`, `durationMs?`, `parentItemId?`. Emitted **once**, as `item.completed`,
+  and only when visible: `status !== 'completed'` or `entries` is non-empty
+  (`hook-items.ts` `isVisibleHookItem`). A silent successful hook, or one printing
+  only control JSON (`{"continue":true}`), is never emitted. Hook items are v2-only
+  and never touch run state: no turn, park, wake, Needs You, ASK or completion path
+  reads them.
 
 `parentItemId` nests subagent work under the tool item that spawned it (claude
 `parent_tool_use_id`, opencode `subtask` parts, Codex collaboration receiver
@@ -539,6 +550,7 @@ transport into `UiEvent`s. The authoritative table is
 | `item.delta` `output` (live terminal) | *(none — card fills on completion; per-capability degradation)* | `item/commandExecution/outputDelta` | running-state metadata |
 | `plan.updated` | `TodoWrite` input | `todoList` / `plan` items | `todowrite` tool |
 | `ask.requested` | portable `CEZ:ASK` marker | portable marker + native `item/tool/requestUserInput` | portable marker + native `question` tool (`GET /question`, `POST /question/:id/reply`) |
+| hook item | `system/hook_response` (`--include-hook-events` when `--help` lists it; without it only SessionStart/Setup). Entries parsed from JSON stdout: `additionalContext`→context, `systemMessage`→warning, block `reason`/`stopReason`/deny `permissionDecisionReason`→stop, ask reason→feedback; plain stdout→context. Stdout yields entries on exit 0 only (Claude ignores it otherwise; it stays raw output). Exit 2, `decision:block`, `continue:false`, deny→`blocked` | `hook/completed` (`run.entries` verbatim, `sourcePath`→`source`, `stopped`→`cancelled`) | *(none — plugin hooks run in-process)* |
 | subagent nesting (`parentItemId`) | `parent_tool_use_id` | collaboration receiver thread id (review mode remains childless) | child-session parts under a `subtask` |
 | `usage.updated` | `result.usage` + `total_cost_usd` | `thread/tokenUsage/updated` (no USD) | `message.updated` tokens/cost + `step-finish` |
 
@@ -744,6 +756,10 @@ or a new fixture set forgets one — a named row fails. The matrix:
 - `turn.completed` with a `stopReason`
 - sub-agent **nesting** via `parentItemId` where the upstream wire attributes
   child work to a parent
+- hook items (`hook_response` / `hook/completed`, hearsay-tools/cezarion#961) — Claude
+  and Codex only. OpenCode 1.18.35, Pi 1.0.4, OMP 18.8.0 and Cursor
+  2026.10.01-e373342 run hooks in-process or report none, and carry the named
+  `NO_HOOK_TELEMETRY` exemption with an inverse assertion
 
 A new backend must produce every row its wire supports. A genuine upstream gap
 requires a named, versioned exemption with an inverse assertion; Cursor token
@@ -1327,6 +1343,13 @@ waiting to test owned-input draining. Neither replaces R26. New runners must
 supply a nonempty ask-kind inventory and native prompts, or a named executable
 wire exemption. The prose guard rejects counted runner rosters in this contract,
 the hearsay-tools/cezarion#68 spec and harness-parity comments so adding an id cannot stale their counts.
+
+R77 (hearsay-tools/cezarion#961) is R15's shape for hooks: a native hook frame mid-turn, a
+monitoring park, then a late hook frame released after the park (Squeal's async `waiter`
+completes this late). Status, activity and the wake deadline survive, no turn opens, and
+both hooks persist as distinct `item.completed` hook items. Only Claude and Codex have a
+hook wire; the other runners carry `scenario-unconstructible` exemptions naming the version
+surveyed.
 
 R15 (hearsay-tools/cezarion#121/#401) releases native child updates only after the run has parked,
 then checks that status, activity and the monitoring wake deadline survive.

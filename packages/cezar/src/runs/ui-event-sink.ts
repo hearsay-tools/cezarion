@@ -222,6 +222,8 @@ function itemShape(item: UiItem): string {
     const { output: _output, ...rest } = item;
     return JSON.stringify(rest);
   }
+  // Hooks arrive once, complete, and never stream a field.
+  if (item.kind === 'hook') return JSON.stringify(item);
   const { text: _text, ...rest } = item;
   return JSON.stringify(rest);
 }

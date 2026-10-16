@@ -7,6 +7,7 @@ import type { UiMessageItem, UiToolItem } from '@open-mercato/cezar-api-client'
 
 import bashAndScreenshot from '../../../../cezar/src/core/__fixtures__/claude/bash-and-screenshot.expected.json'
 import failedAndDenied from '../../../../cezar/src/core/__fixtures__/claude/failed-and-denied.expected.json'
+import claudeHooks from '../../../../cezar/src/core/__fixtures__/claude/hooks.expected.json'
 import textTurn from '../../../../cezar/src/core/__fixtures__/claude/text-turn.expected.json'
 import thinkingEditWriteTodo from '../../../../cezar/src/core/__fixtures__/claude/thinking-edit-write-todo.expected.json'
 import {
@@ -83,6 +84,65 @@ describe('reduceThread — golden v2 fixtures', () => {
     const tools = turns[0]!.items.filter((i): i is UiToolItem => i.kind === 'tool')
     expect(tools.map((t) => t.status)).toEqual(['failed', 'declined'])
     expect(tools[0]!.error).toBeTruthy()
+  })
+})
+
+describe('reduceThread — hook items (#961)', () => {
+  const hookIds = (items: ThreadEntry[]) => items.filter((item) => item.kind === 'hook').map((item) => item.id)
+
+  it('admits a hook item into the current turn in arrival order between tools', () => {
+    const { turns } = reduceThread(asRunEvents(claudeHooks))
+    const items = turns.flatMap((turn) => turn.items)
+    expect(kinds(items)).toEqual(['hook', 'tool', 'hook', 'hook', 'hook', 'message', 'hook'])
+    expect(hookIds(items)).toEqual([
+      'hook_a1000000-0000-4000-8000-000000000001',
+      'hook_a1000000-0000-4000-8000-000000000003',
+      'hook_a1000000-0000-4000-8000-000000000004',
+      'hook_a1000000-0000-4000-8000-000000000005',
+      'hook_a1000000-0000-4000-8000-000000000006',
+    ])
+  })
+
+  it('one hook card when the same item.completed is replayed', () => {
+    const hook = { kind: 'hook', id: 'hook_h1', event: 'Stop', status: 'completed', entries: [{ kind: 'context', text: 'x' }] }
+    const { turns } = reduceThread([
+      line(1, 'turn.started', { turnId: 'turn_1' }),
+      line(2, 'item.completed', { item: hook }),
+      line(3, 'item.completed', { item: hook }),
+    ])
+    expect(hookIds(turns.flatMap((turn) => turn.items))).toEqual(['hook_h1'])
+  })
+
+  it('a hook before the first turn.started lands in a turn', () => {
+    const { turns } = reduceThread([
+      line(1, 'item.completed', { item: { kind: 'hook', id: 'hook_s', event: 'SessionStart', status: 'completed', entries: [{ kind: 'context', text: 'ctx' }] } }),
+      line(2, 'turn.started', { turnId: 'turn_1' }),
+      line(3, 'item.completed', { item: { kind: 'message', id: 'm1', role: 'assistant', text: 'hi' } }),
+    ])
+    expect(hookIds(turns.flatMap((turn) => turn.items))).toEqual(['hook_s'])
+  })
+
+  it('a SessionStart hook between the user message and turn.started stays in that one turn', () => {
+    // Claude's wire order: the prompt, then SessionStart hook_response, then the turn.
+    const { turns } = reduceThread([
+      line(1, 'user-message', { text: 'go', imageCount: 0 }),
+      line(2, 'item.completed', { item: { kind: 'hook', id: 'hook_s', event: 'SessionStart', status: 'completed', entries: [{ kind: 'context', text: 'ctx' }] } }),
+      line(3, 'turn.started', { turnId: 'turn_1' }),
+      line(4, 'item.completed', { item: { kind: 'message', id: 'm1', role: 'assistant', text: 'hi' } }),
+      line(5, 'turn.completed', { turnId: 'turn_1', stopReason: 'end_turn' }),
+    ])
+    expect(turns).toHaveLength(1)
+    expect(turns[0]!.userMessage?.text).toBe('go')
+    expect(kinds(turns[0]!.items)).toEqual(['hook', 'message'])
+    expect(turns[0]!.completed?.stopReason).toBe('end_turn')
+  })
+
+  it('a hook does not drop the v1 tools of its turn', () => {
+    const { turns } = reduceThread([
+      line(1, 'tool-call', { id: 't1', name: 'Bash', input: { command: 'ls' } }),
+      line(2, 'item.completed', { item: { kind: 'hook', id: 'hook_p', event: 'PostToolUse', status: 'completed', entries: [{ kind: 'context', text: 'ctx' }] } }),
+    ])
+    expect(kinds(turns.flatMap((turn) => turn.items))).toEqual(['tool', 'hook'])
   })
 })
 

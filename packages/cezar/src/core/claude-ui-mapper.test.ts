@@ -67,6 +67,9 @@ const GOLDEN_FIXTURES = [
   // capture (CLI 2.1.211) — the task tools' result text is the mapper's only
   // source for task ids, so it is pinned here verbatim.
   'task-tools-plan',
+  // Hook frames as `--include-hook-events` emits them (CLI 2.1.301), trimmed from a
+  // live capture (#961): silent hooks map to nothing, the rest to one hook item each.
+  'hooks',
 ] as const;
 
 describe('claude → v2 golden fixtures', () => {
@@ -78,6 +81,124 @@ describe('claude → v2 golden fixtures', () => {
       expect(actual).toStrictEqual(expectedEvents(fixture));
     });
   }
+});
+
+describe('claude hook_response (#961)', () => {
+  const response = (fields: Record<string, unknown>): Record<string, unknown> => ({
+    type: 'system',
+    subtype: 'hook_response',
+    hook_id: 'h1',
+    hook_name: 'SessionStart:startup',
+    hook_event: 'SessionStart',
+    stdout: '',
+    stderr: '',
+    exit_code: 0,
+    outcome: 'success',
+    ...fields,
+  });
+  const hookItems = (msg: unknown): unknown[] =>
+    mapClaudeMessage(msg, createClaudeUiState()).events.map((event) => (event as { item?: unknown }).item);
+  const only = (msg: unknown) => {
+    const { events } = mapClaudeMessage(msg, createClaudeUiState());
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe('item.completed');
+    return (events[0] as Extract<UiEvent, { type: 'item.completed' }>).item as unknown as Record<string, unknown>;
+  };
+
+  it('maps hook_response with additionalContext to a context entry', () => {
+    const stdout = JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'SQUEAL · revision 0' } });
+    expect(only(response({ stdout }))).toEqual({
+      kind: 'hook',
+      id: 'hook_h1',
+      event: 'SessionStart',
+      name: 'SessionStart:startup',
+      status: 'completed',
+      entries: [{ kind: 'context', text: 'SQUEAL · revision 0' }],
+      stdout,
+      exitCode: 0,
+    });
+  });
+
+  it('reads no entries from stdout on a nonzero exit, which Claude ignores', () => {
+    const stdout = JSON.stringify({ hookSpecificOutput: { additionalContext: 'never delivered' } });
+    for (const exit_code of [1, 2]) {
+      const item = only(response({ stdout, stderr: 'blocked: tests red', exit_code, outcome: 'error' }));
+      expect(item.entries).toEqual([{ kind: 'error', text: 'blocked: tests red' }]);
+      expect(item.stdout).toBe(stdout);
+    }
+  });
+
+  it('emits nothing for a silent successful hook', () => {
+    expect(hookItems(response({}))).toEqual([]);
+  });
+
+  it('emits nothing for control-only JSON', () => {
+    for (const stdout of [
+      '{"continue":true}',
+      '{"suppressOutput":true}',
+      '{"hookSpecificOutput":{"permissionDecision":"allow"}}',
+    ]) {
+      expect(hookItems(response({ stdout }))).toEqual([]);
+    }
+  });
+
+  it('treats non-object JSON stdout as plain text', () => {
+    for (const stdout of ['"quoted"', '[1,2]', 'null']) {
+      expect(only(response({ stdout })).entries).toEqual([{ kind: 'context', text: stdout }]);
+    }
+  });
+
+  it('maps exit 2 to blocked and stderr to an error entry', () => {
+    const item = only(response({ stderr: 'blocked by policy\n', exit_code: 2, outcome: 'error' }));
+    expect(item.status).toBe('blocked');
+    expect(item.entries).toEqual([{ kind: 'error', text: 'blocked by policy' }]);
+    expect(item.exitCode).toBe(2);
+  });
+
+  it('maps decision block / continue:false / permissionDecision deny to blocked', () => {
+    expect(only(response({ stdout: '{"decision":"block","reason":"tests are red"}' }))).toMatchObject({
+      status: 'blocked',
+      entries: [{ kind: 'stop', text: 'tests are red' }],
+    });
+    expect(only(response({ stdout: '{"continue":false,"stopReason":"halt"}' }))).toMatchObject({
+      status: 'blocked',
+      entries: [{ kind: 'stop', text: 'halt' }],
+    });
+    expect(only(response({ stdout: '{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"no writes"}}' }))).toMatchObject({
+      status: 'blocked',
+      entries: [{ kind: 'stop', text: 'no writes' }],
+    });
+    expect(only(response({ stdout: '{"hookSpecificOutput":{"permissionDecision":"ask","permissionDecisionReason":"confirm push"}}' }))).toMatchObject({
+      status: 'completed',
+      entries: [{ kind: 'feedback', text: 'confirm push' }],
+    });
+  });
+
+  it('maps outcome cancelled to cancelled', () => {
+    const item = only(response({ outcome: 'cancelled', exit_code: undefined, stdout: 'Hook cancelled' }));
+    expect(item.status).toBe('cancelled');
+    expect(item).not.toHaveProperty('exitCode');
+  });
+
+  it('maps a failing hook with no output to failed', () => {
+    expect(only(response({ exit_code: 1, outcome: 'error' }))).toMatchObject({ status: 'failed', entries: [] });
+  });
+
+  it('maps systemMessage to a warning entry', () => {
+    expect(only(response({ stdout: '{"systemMessage":"slow tier pending"}' })).entries).toEqual([
+      { kind: 'warning', text: 'slow tier pending' },
+    ]);
+  });
+
+  it('omits name when hook_name equals hook_event', () => {
+    expect(only(response({ hook_name: 'Stop', hook_event: 'Stop', stdout: 'hi' }))).not.toHaveProperty('name');
+  });
+
+  it('hook_started and hook_progress emit nothing', () => {
+    for (const subtype of ['hook_started', 'hook_progress']) {
+      expect(hookItems({ type: 'system', subtype, hook_id: 'h1', hook_name: 'Stop', hook_event: 'Stop', stdout: 'partial' })).toEqual([]);
+    }
+  });
 });
 
 describe('mapClaudeMessage edge cases', () => {
