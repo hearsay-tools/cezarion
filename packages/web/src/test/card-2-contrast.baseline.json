@@ -1,4 +1,7 @@
 [
+  "routes/plan-review.tsx: <Button type=\"button\" variant=\"ghost\" size=\"icon-sm\" data-slot=\"plan-step-remove\" aria-label={`Remove step ${index + 1}`} className=\"size-7 text-muted-foreground hover:text-danger\" onClick={() => onStepsChange(removeStep(plan.steps, index))} >",
   "routes/plan-review.tsx: <span className=\"w-5 shrink-0 font-mono text-[11px] text-soft-foreground tabular-nums\">",
-  "routes/task-thread/thread-items.tsx: <div data-slot=\"tool-error\" className=\"px-4 py-3 font-mono text-xs leading-[1.7] whitespace-pre-wrap text-danger\">"
+  "routes/settings/settings-shell.tsx: <span className=\"block text-xs text-soft-foreground\">",
+  "routes/task-thread/thread-items.tsx: <div data-slot=\"tool-error\" className=\"px-4 py-3 font-mono text-xs leading-[1.7] whitespace-pre-wrap text-danger\">",
+  "routes/unknown-project.tsx: <span className=\"font-mono text-[11px] font-normal text-soft-foreground\">"
 ]

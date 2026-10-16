@@ -76,6 +76,29 @@ function rendersText(node: Node): boolean {
   }
 }
 
+/** Keep the default state and a union of possible variant ink/size changes.
+ * Variant surfaces cannot guarantee opacity in every state, so only card-2 is
+ * added to the union. This deliberately favors findings over unsafe exemptions. */
+function utilityStates(branch: string): string[][] {
+  const base: string[] = []
+  const variants: string[] = []
+  for (const token of branch.split(/\s+/)) {
+    let depth = 0
+    let lastColon = -1
+    for (let i = 0; i < token.length; i++) {
+      if (token[i] === '[' || token[i] === '(') depth++
+      else if (token[i] === ']' || token[i] === ')') depth--
+      else if (token[i] === ':' && depth === 0) lastColon = i
+    }
+    if (lastColon === -1) base.push(token)
+    else {
+      const utility = token.slice(lastColon + 1)
+      if (utility.startsWith('text-') || utility === 'bg-card-2') variants.push(utility)
+    }
+  }
+  return variants.length ? [base, [...base, ...variants]] : [base]
+}
+
 function scan(source: string): string[] {
   const file = parse(source, { sourceType: 'module', plugins: ['typescript', 'jsx'] })
   const sites: string[] = []
@@ -92,8 +115,7 @@ function scan(source: string): string[] {
       }
       const slot = strings(attr('data-slot')?.value)[0]
       const bodySlot = ['tool-error', 'tool-command', 'hook-entry', 'hook-source', 'hook-raw-toggle', 'hook-stdout', 'hook-stderr'].includes(slot ?? '')
-      const states = classBranches(attr('className')?.value).map(branch => {
-        const classes = branch.split(/\s+/)
+      const states = classBranches(attr('className')?.value).flatMap(utilityStates).map(classes => {
         const backgrounds = classes.filter(c => surfaceClasses.has(c) || c === 'bg-transparent' || surfaceClasses.has(c.split('/')[0] ?? ''))
         const inheritsSurface = backgrounds.length === 0 || backgrounds.some(c => c === 'bg-transparent' || c.includes('/'))
         const onCard = backgrounds.includes('bg-card-2') || inheritsSurface && (card || bodySlot)
@@ -146,6 +168,13 @@ it('treats explicit unknown font sizes as small instead of inheriting large text
     expect(scan(`<div className="bg-card-2 text-danger text-[24px]"><span className="${size}">bad</span></div>`), size).toHaveLength(1)
   }
   expect(scan(`<div className="bg-card-2 text-danger text-[24px]"><span className="text-center text-muted-foreground">safe</span></div>`)).toEqual([])
+})
+it('checks variant colors, sizes and surfaces without losing inherited defaults', () => {
+  expect(scan(`<div className="bg-card-2 text-foreground text-[24px]"><span className="md:text-danger md:text-xs">bad</span></div>`)).toHaveLength(1)
+  expect(scan(`<div className="bg-card-2 text-danger text-xs"><span className="md:text-foreground md:text-2xl md:bg-background">bad by default</span></div>`)).toHaveLength(1)
+  expect(scan(`<p className="bg-background text-danger text-xs md:bg-card-2">bad</p>`)).toHaveLength(1)
+  expect(scan(`<p className="bg-card-2 text-foreground text-[24px] [&:hover]:text-danger [&:hover]:text-[length:var(--small)]">bad</p>`)).toHaveLength(1)
+  expect(scan(`<p className="bg-card-2 text-muted-foreground md:text-foreground text-xs md:text-2xl">safe</p>`)).toEqual([])
 })
 it('lets documented safe foregrounds override inherited unsafe ink', () => {
   expect(scan(`<div className="bg-card-2 text-danger"><span className="text-supporting-foreground">safe</span><span className="text-link-foreground">safe</span></div>`)).toEqual([])

@@ -30,7 +30,10 @@ OKLCH to linear sRGB, and calculate `(lighter luminance + .05) / (darker luminan
 This yields 4.05:1 dark and 4.24:1 light. Substituting soft-foreground yields
 4.88:1 dark and 4.37:1 light. For rendered measurements, use
 `e2e/contrast.ts`'s `contrastSampleExpression` on the expanded tool-error element.
-The baseline also records the small step number in `routes/plan-review.tsx` on card-2.
+The initial baseline also records the small step number and Remove hover text in
+`routes/plan-review.tsx`, settings section descriptions in `routes/settings/settings-shell.tsx`,
+and project-link details in `routes/unknown-project.tsx`. The latter two inherit card-2
+on hover. All five instances predate this guard; the ratchet applies after this initial baseline.
 The existing tool-error fix belongs to hearsay-tools/cezarion#1114.
 
 `src/test/card-2-contrast.test.ts` scans JSX class strings, including literal
@@ -39,7 +42,8 @@ ink and font sizes, and known tool/hook body slots. A named opaque palette backg
 backgrounds, images, and background layout utilities retain it conservatively. Literal size/background branches are checked
 conservatively, including empty/absent class branches. Expansion is capped at 128
 combinations with a conservative fallback. JSX-only expressions are visited as elements rather than wrapper text. Unknown font sizes are treated conservatively as
-small. Icons without text and explicitly large text are excluded.
+small. Variant-prefixed ink, size and card-2 utilities are checked as possible
+states alongside the default state; variant backgrounds cannot grant an opaque-surface exemption. Icons without text and explicitly large text are excluded.
 
 This is a static guard, not a computed-style audit: runtime-generated classes,
 component boundaries and CSS rules still need rendered contrast checks.
