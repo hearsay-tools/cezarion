@@ -197,6 +197,71 @@ describe('GithubPoller', () => {
     })]);
   });
 
+  describe('mixed GitHub timelines (hearsay-tools/cezarion#1182)', () => {
+    // Shapes from the issue timeline API: only labeled/unlabeled carry a label.
+    const unrelated = (createdAt: string) => [
+      { id: 101, node_id: 'IC_1', event: 'commented', created_at: createdAt, body: 'hi', user: { login: 'alice' } },
+      { id: 102, node_id: 'AE_1', event: 'assigned', created_at: createdAt, assignee: { login: 'bob' } },
+      { id: 103, node_id: 'CE_1', event: 'closed', created_at: createdAt, commit_id: null },
+      { sha: 'abc', node_id: 'C_1', event: 'committed', message: 'fix' },
+    ];
+    const labelPoller = (timeline: unknown[], now: number) => {
+      const issue = { ...item, created_at: new Date(now - 3 * 3_600_000).toISOString(), updated_at: new Date(now - 3_600_000).toISOString(), labels: [] };
+      return new GithubPoller({ run: async (_exe, args) => args.some((arg) => arg.includes('/timeline'))
+        ? JSON.stringify(timeline)
+        : JSON.stringify({ items: [issue] }) });
+    };
+    const labelRule = (includeExisting: boolean): GithubAutomationDefinition => ({
+      ...definition,
+      events: ['issue.labeled', 'issue.unlabeled'],
+      filters: { ...definition.filters, includeExisting },
+    });
+
+    it.each([false, true])('keeps label changes among comments, assignments and closures (includeExisting=%s)', async (includeExisting) => {
+      const now = Date.now();
+      const addedAt = new Date(now - 2 * 3_600_000).toISOString();
+      const removedAt = new Date(now - 3_600_000).toISOString();
+      const other = new Date(now - 90 * 60_000).toISOString();
+      const [comment, assigned, closed, committed] = unrelated(other);
+      const result = await labelPoller([
+        { id: 1, node_id: 'LE_1', event: 'labeled', created_at: addedAt, label: { name: 'bug' } },
+        comment, assigned,
+        { id: 2, node_id: 'UE_1', event: 'unlabeled', created_at: removedAt, label: { name: 'bug' } },
+        closed, committed,
+      ], now).poll('acme', 'demo', labelRule(includeExisting), { since: new Date(now - 4 * 3_600_000).toISOString() });
+      expect(result.candidates).toEqual([
+        expect.objectContaining({ event: 'issue.labeled', changedLabel: 'bug', labels: ['bug'], timestamp: addedAt, eventId: 'acme/demo:I_one:issue.labeled:LE_1' }),
+        expect.objectContaining({ event: 'issue.unlabeled', changedLabel: 'bug', labels: ['bug'], timestamp: removedAt, eventId: 'acme/demo:I_one:issue.unlabeled:UE_1' }),
+      ]);
+    });
+
+    it.each([false, true])('reads a timeline with no label changes as no candidates (includeExisting=%s)', async (includeExisting) => {
+      const now = Date.now();
+      const result = await labelPoller(unrelated(new Date(now - 3_600_000).toISOString()), now)
+        .poll('acme', 'demo', labelRule(includeExisting), { since: new Date(now - 4 * 3_600_000).toISOString() });
+      expect(result.candidates).toEqual([]);
+    });
+
+    it.each([false, true])('names the issue and entry of a malformed label change (includeExisting=%s)', async (includeExisting) => {
+      const now = Date.now();
+      const at = new Date(now - 3_600_000).toISOString();
+      const poll = labelPoller([unrelated(at)[0], { id: 3, event: 'labeled', created_at: at }], now)
+        .poll('acme', 'demo', labelRule(includeExisting), { since: new Date(now - 4 * 3_600_000).toISOString() });
+      await expect(poll).rejects.toThrow(/acme\/demo#7 timeline entry 1 \(labeled\).*label/);
+    });
+
+    it('refuses a full raw timeline page even when most entries are not label changes', async () => {
+      const now = Date.now();
+      const at = new Date(now - 3_600_000).toISOString();
+      const timeline = [
+        { id: 1, event: 'labeled', created_at: at, label: { name: 'bug' } },
+        ...Array.from({ length: 99 }, (_, index) => ({ id: 200 + index, event: 'commented', created_at: at, body: 'x' })),
+      ];
+      await expect(labelPoller(timeline, now).poll('acme', 'demo', labelRule(true), { since: new Date(now - 4 * 3_600_000).toISOString() }))
+        .rejects.toThrow('100-event page limit');
+    });
+  });
+
   it('reports provider search limits instead of marking an unvisited historical page complete', async () => {
     const rule = { ...definition, filters: { ...definition.filters, includeExisting: true, maxRecords: 100 } };
     const poller = new GithubPoller({ run: async () => JSON.stringify({ items: Array.from({ length: 100 }, () => item) }) });

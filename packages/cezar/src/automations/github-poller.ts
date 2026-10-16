@@ -159,7 +159,7 @@ export class GithubPoller {
           }
         }
         if (source.labels && !item.pull_request) {
-          const timeline = await this.timeline(owner, repo, item.number);
+          const { events: timeline } = await this.timeline(owner, repo, item.number);
           const events = reconstructLabelEvents(owner, repo, item, timeline);
           for (const event of events) {
             if (!atOrAfter(event.timestamp, options.since)) continue;
@@ -250,8 +250,9 @@ export class GithubPoller {
           requests++;
           // The existing timeline reader is one bounded page. Do not silently certify an
           // incomplete history; the log explains how to narrow or process this item separately.
-          if (timeline.length >= 100) throw new Error('GitHub label history reached its 100-event page limit; narrow the automation filters or process this item separately.');
-          rows = reconstructLabelEvents(owner, repo, item, timeline)
+          // Count the raw page: dropping unrelated entries does not make it complete.
+          if (timeline.rawLength >= 100) throw new Error('GitHub label history reached its 100-event page limit; narrow the automation filters or process this item separately.');
+          rows = reconstructLabelEvents(owner, repo, item, timeline.events)
             .filter((row) => Date.parse(row.timestamp) >= Date.parse(sourceSince) && Date.parse(row.timestamp) <= Date.parse(scan.until));
         } else {
           const event = item.pull_request ? 'pull_request.opened' : 'issue.opened';
@@ -290,12 +291,27 @@ export class GithubPoller {
     return { candidates, truncated, pages: requests, cursor, ...(truncated ? { historyScan: scan } : {}) };
   }
 
+  /** The timeline mixes comments, assignments, closures and more with label changes.
+   * Only label changes are validated and returned; `rawLength` is the unfiltered page
+   * size, which the history page-limit check needs (hearsay-tools/cezarion#1182). */
   private async timeline(owner: string, repo: string, number: number) {
     const raw = await this.run('gh', [
       'api', '--method', 'GET', `repos/${owner}/${repo}/issues/${number}/timeline`,
       '-H', 'Accept: application/vnd.github+json', '-f', 'per_page=100',
     ]);
-    return z.array(timelineEventSchema).parse(JSON.parse(raw));
+    const entries = z.array(z.unknown()).parse(JSON.parse(raw));
+    const events: z.infer<typeof timelineEventSchema>[] = [];
+    entries.forEach((entry, index) => {
+      const kind = typeof entry === 'object' && entry !== null ? (entry as { event?: unknown }).event : undefined;
+      if (kind !== 'labeled' && kind !== 'unlabeled') return;
+      const parsed = timelineEventSchema.safeParse(entry);
+      if (!parsed.success) {
+        const issues = parsed.error.issues.map((issue) => `${issue.path.join('.') || '(entry)'}: ${issue.message}`).join('; ');
+        throw new Error(`GitHub returned a malformed label change at ${owner}/${repo}#${number} timeline entry ${index} (${kind}): ${issues}`);
+      }
+      events.push(parsed.data);
+    });
+    return { events, rawLength: entries.length };
   }
 }
 
