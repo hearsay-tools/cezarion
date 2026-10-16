@@ -110,6 +110,9 @@ export interface ForgeCommentsData {
    *  the legacy comments-only call. Capped independently of `comments`, which keeps its exact
    *  pre-#525 shape, contents and cap (BACKWARD_COMPATIBILITY.md §2). */
   events?: ForgeTimelineEvent[];
+  /** The item's own body (and a PR's diffstat), fetched with the thread
+   *  (hearsay-tools/cezarion#1183). Absent when that lookup failed. */
+  detail?: { body: string; additions?: number; deletions?: number };
 }
 
 export interface ForgeListOptions {

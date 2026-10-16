@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import { GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, type GithubItemResponse, type GithubProjectsData } from '@open-mercato/cezar-contract';
+import { GITHUB_COMMENT_COUNTS_MAX, GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, type GithubCommentCountsData, type GithubItemResponse, type GithubProject, type GithubProjectsData } from '@open-mercato/cezar-contract';
 import { fetchIssueProjects, fetchRepositoryProjects, fetchViewerLogin } from './github-filters.ts';
 import { fetchGithubMergeRequirements, type GithubMergeRequirements } from './github-merge-requirements.ts';
 import { autosaveCommit } from '../../git-worktree.ts';
@@ -1660,6 +1660,101 @@ export async function fetchPrChecks(
   return out;
 }
 
+const itemDetailSchema = z.object({
+  body: z.string().nullish(),
+  additions: z.number().int().nonnegative().optional(),
+  deletions: z.number().int().nonnegative().optional(),
+});
+
+/** One item's body (and a PR's diffstat), or `undefined` on any failure. */
+async function fetchItemDetail(repoRoot: string, kind: 'issue' | 'pr', number: number): Promise<ForgeCommentsData['detail']> {
+  try {
+    const out = await gh(repoRoot, [kind, 'view', String(number), '--json', kind === 'pr' ? 'body,additions,deletions' : 'body']);
+    const parsed = itemDetailSchema.parse(JSON.parse(out));
+    return {
+      body: (parsed.body ?? '').slice(0, COMMENT_BODY_CAP),
+      ...(kind === 'pr' && parsed.additions !== undefined ? { additions: parsed.additions } : {}),
+      ...(kind === 'pr' && parsed.deletions !== undefined ? { deletions: parsed.deletions } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+// Per-item comment counts (hearsay-tools/cezarion#1183): the list defers them, and the cockpit
+// asks for its loaded rows after paint. Keyed `context␀kind␀number`, same TTL and bound as checks.
+const commentCountsCache = new Map<string, { at: number; count: number }>();
+const commentCountsSchema = z.object({
+  data: z.object({
+    repository: z.record(z.string(), z.object({ comments: z.object({ totalCount: z.number().int().nonnegative() }) }).nullable()),
+  }),
+});
+
+/**
+ * Comment counts for the given issue or PR numbers, in one aliased GraphQL query. A number GitHub
+ * does not know is absent (unknown), never 0. Degrades to `{ available: false, reason }` — never a
+ * throw. Numbers are de-duplicated, validated and capped at `GITHUB_COMMENT_COUNTS_MAX`.
+ */
+export async function fetchGithubCommentCounts(
+  repoRoot: string, kind: 'issue' | 'pr', numbers: number[], refresh = false,
+): Promise<GithubCommentCountsData> {
+  if (process.env.CEZ_DRY_RUN === '1') return mockGithubCommentCounts(kind, numbers);
+  const context = githubContext(repoRoot);
+  const wanted = [...new Set(numbers)].filter((n) => Number.isSafeInteger(n) && n > 0).slice(0, GITHUB_COMMENT_COUNTS_MAX);
+  const counts: Record<number, number> = {};
+  const misses: number[] = [];
+  const now = Date.now();
+  const keyOf = (n: number) => `${context.key}\0${kind}\0${n}`;
+  for (const n of wanted) {
+    const hit = commentCountsCache.get(keyOf(n));
+    if (!refresh && hit && now - hit.at < CACHE_MS) counts[n] = hit.count;
+    else misses.push(n);
+  }
+  if (misses.length === 0) return { available: true, counts };
+  try {
+    const handle = await resolveRepoHandleStrict(repoRoot, context);
+    if (!handle) return { available: false, reason: 'Could not resolve this repository on GitHub.' };
+    // Integers only in the aliases; owner and name travel as variables.
+    const fields = misses.map((n) => `n${n}: issueOrPullRequest(number: ${n}) {
+      ... on Issue { comments { totalCount } }
+      ... on PullRequest { comments { totalCount } }
+    }`).join('\n');
+    // A number GitHub does not know comes back NOT_FOUND and makes `gh` exit 1 with the rest of
+    // the batch on stdout; `refStatusGraphql` keeps that partial answer.
+    const raw = await refStatusGraphql(repoRoot, context)(
+      `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`,
+      { owner: handle.owner, name: handle.name },
+    );
+    const rows = commentCountsSchema.parse(JSON.parse(raw)).data.repository;
+    for (const n of misses) {
+      const count = rows[`n${n}`]?.comments.totalCount;
+      if (count === undefined) continue; // unknown number: absent, and asked again next time
+      counts[n] = count;
+      commentCountsCache.delete(keyOf(n));
+      commentCountsCache.set(keyOf(n), { at: now, count });
+    }
+    while (commentCountsCache.size > CHECKS_CACHE_MAX) {
+      const oldest = commentCountsCache.keys().next().value;
+      if (oldest === undefined) break;
+      commentCountsCache.delete(oldest);
+    }
+    return { available: true, counts };
+  } catch (err) {
+    return { available: false, reason: ghFailureReason(err) };
+  }
+}
+
+/** CEZ_DRY_RUN=1 — the catalog's own counts, so the offline list shows its badges. */
+function mockGithubCommentCounts(kind: 'issue' | 'pr', numbers: number[]): GithubCommentCountsData {
+  const rows = kind === 'pr' ? mockGithub().prs : mockGithub().issues;
+  const counts: Record<number, number> = {};
+  for (const n of numbers) {
+    const row = rows.find((item) => item.number === n);
+    if (row) counts[n] = row.comments;
+  }
+  return { available: true, counts };
+}
+
 // Per-PR checks cache: keyed `repoRoot␀number`, same 60 s TTL as the list cache but BOUNDED. Lets
 // a repeated visible-window hydration within a minute serve cached glyphs instead of re-querying.
 const checksCache = new Map<string, { at: number; glyph: ChecksGlyph }>();
@@ -2600,7 +2695,7 @@ export async function fetchGithubComments(
   number: number,
   refresh = false,
 ): Promise<ForgeCommentsData> {
-  if (process.env.CEZ_DRY_RUN === '1') return mockGithubComments(kind);
+  if (process.env.CEZ_DRY_RUN === '1') return mockGithubComments(kind, number);
   // NUL separator: cannot appear in a filesystem path, so roots can never alias.
   const key = `${repoRoot}\0${kind}#${number}`;
   const hit = commentsCache.get(key);
@@ -2608,6 +2703,10 @@ export async function fetchGithubComments(
   // PR conversation comments live on the issues endpoint too — always use it for the body thread.
   const legacyComments = () =>
     gh(repoRoot, ['api', `repos/{owner}/{repo}/issues/${number}/comments`, '--paginate']);
+  // The detail tier (hearsay-tools/cezarion#1183): the list no longer has to carry a body, so
+  // the pane asks for it here, in parallel with the thread. It is attached only to a thread
+  // that loaded, and a failed view never costs the thread.
+  const detail = fetchItemDetail(repoRoot, kind, number);
   try {
     let commentRows: unknown[] = [];
     let events: ForgeTimelineEvent[] | undefined;
@@ -2708,6 +2807,8 @@ export async function fetchGithubComments(
       truncated: truncated || eventsTruncated || stoppedShort || undefined,
     };
     if (events) data.events = events;
+    const itemDetail = await detail;
+    if (itemDetail) data.detail = itemDetail;
     cacheComments(key, data);
     return data;
   } catch (err) {
@@ -2723,7 +2824,7 @@ export async function fetchGithubComments(
 
 /** CEZ_DRY_RUN=1 — a small fixed thread (one image-bearing comment, plus a review for PRs) so
  *  the whole feature is demoable and e2e-testable offline. */
-function mockGithubComments(kind: 'issue' | 'pr'): ForgeCommentsData {
+function mockGithubComments(kind: 'issue' | 'pr', number?: number): ForgeCommentsData {
   const base = Date.now() - 3_600_000;
   const at = (offset: number) => new Date(base + offset).toISOString();
   const comments: ForgeComment[] = [
@@ -2832,7 +2933,14 @@ function mockGithubComments(kind: 'issue' | 'pr'): ForgeCommentsData {
     });
   }
 
-  return { available: true, comments, events };
+  // The detail tier (hearsay-tools/cezarion#1183): the catalog row's own body and diffstat.
+  const row = number === undefined ? undefined
+    : (kind === 'pr' ? mockGithub().prs : mockGithub().issues).find((item) => item.number === number);
+  const detail = row ? {
+    body: row.body ?? '',
+    ...(kind === 'pr' ? { additions: row.additions ?? 0, deletions: row.deletions ?? 0 } : {}),
+  } : undefined;
+  return { available: true, comments, events, ...(detail ? { detail } : {}) };
 }
 
 // ---- draft-PR creation (review gate, spec 009) ------------------------------
@@ -3247,6 +3355,9 @@ export function evictGithubProjectCaches(repoRoot: string): void {
     if (entry.contextKey === contextKey) dropListEntry(key);
   });
   repositoryProjectsCache.delete(contextKey);
+  commentCountsCache.forEach((_value, key) => {
+    if (key.startsWith(`${contextKey}\0`)) commentCountsCache.delete(key);
+  });
   mergeStateCache.forEach((_value, key) => {
     if (key.startsWith(`${repoRoot}:`)) mergeStateCache.delete(key);
   });

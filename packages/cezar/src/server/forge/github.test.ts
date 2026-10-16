@@ -20,6 +20,7 @@ import {
   detectGithubCached,
   createGithubDriver,
   fetchGithubComments,
+  fetchGithubCommentCounts,
   fetchTimelinePages,
   fetchListConnection,
   ghGraphqlArgs,
@@ -1356,7 +1357,9 @@ describe('fetchGithubComments timeline integration (#525)', () => {
 
     expect(data.available).toBe(false);
     expect(data.reason).toMatch(/gh CLI not found/);
-    expect(execFileMock).toHaveBeenCalledTimes(1); // no second spawn
+    // No second THREAD spawn. The detail tier's own `view` (hearsay-tools/cezarion#1183) runs in
+    // parallel from the start, so it is not a retry and is not counted.
+    expect(execFileMock.mock.calls.filter((call) => (call[1] as string[])[1] !== 'view')).toHaveLength(1);
   });
 
   it('tops up comments[] when the fetch stopped short on a comment-poor prefix', async () => {
@@ -3827,5 +3830,87 @@ describe('fetchGithubItem (#692)', () => {
     });
     expect(await fetchGithubItem('/repo/item-dry', 'pr', 99999)).toEqual({ available: true, item: null });
     expect(execFileMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('comment counts and the detail tier (hearsay-tools/cezarion#1183)', () => {
+  beforeEach(() => {
+    vi.stubEnv('CEZ_DRY_RUN', '');
+    execFileMock.mockReset();
+    __clearCommentsCacheForTests();
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  /** Answers `gh repo view` with a handle and every other call through `reply`; records argv. */
+  const fakeGh = (reply: (argv: string[]) => string | Error) => {
+    const calls: string[][] = [];
+    execFileMock.mockImplementation((...args: unknown[]) => {
+      const argv = args[1] as string[];
+      const cb = args.at(-1) as (err: unknown, result: unknown) => void;
+      calls.push(argv);
+      if (argv[0] === 'repo') return cb(null, { stdout: 'o/r', stderr: '' });
+      const out = reply(argv);
+      return out instanceof Error ? cb(out, null) : cb(null, { stdout: out, stderr: '' });
+    });
+    return calls;
+  };
+  /** Each alias `nN` in the query answers N + 1 comments, except the numbers in `unknown`. */
+  const countsReply = (unknown: number[] = []) => (argv: string[]) => {
+    const query = argv.find((a) => a.startsWith('query=')) ?? '';
+    const numbers = [...query.matchAll(/n(\d+): issueOrPullRequest/g)].map((m) => Number(m[1]));
+    return JSON.stringify({ data: { repository: Object.fromEntries(numbers.map((n) =>
+      [`n${n}`, unknown.includes(n) ? null : { comments: { totalCount: n + 1 } }])) } });
+  };
+  const graphqlCalls = (calls: string[][]) => calls.filter((argv) => argv[1] === 'graphql');
+
+  it('comment counts alias each number and cache per context', async () => {
+    vi.stubEnv('GH_CONFIG_DIR', 'account-a');
+    const calls = fakeGh(countsReply([7]));
+    expect(await fetchGithubCommentCounts('/counts', 'issue', [142, 139, 142, 7])).toEqual({
+      available: true, counts: { 142: 143, 139: 140 },
+    });
+    const sent = graphqlCalls(calls);
+    expect(sent).toHaveLength(1);
+    const query = sent[0]!.find((a) => a.startsWith('query='))!;
+    expect(query).toContain('n142: issueOrPullRequest(number: 142)');
+    expect(query).toContain('... on Issue { comments { totalCount } }');
+    expect(query).toContain('... on PullRequest { comments { totalCount } }');
+    // Served from the cache: same context, kind and numbers.
+    expect(await fetchGithubCommentCounts('/counts', 'issue', [139, 142])).toEqual({ available: true, counts: { 142: 143, 139: 140 } });
+    expect(graphqlCalls(calls)).toHaveLength(1);
+    // refresh, another kind and another account each ask again.
+    await fetchGithubCommentCounts('/counts', 'issue', [142], true);
+    await fetchGithubCommentCounts('/counts', 'pr', [142]);
+    vi.stubEnv('GH_CONFIG_DIR', 'account-b');
+    await fetchGithubCommentCounts('/counts', 'issue', [142]);
+    expect(graphqlCalls(calls)).toHaveLength(4);
+  });
+
+  it('a failed counts query degrades to available:false with the stderr reason', async () => {
+    fakeGh(() => Object.assign(new Error('Command failed: gh api graphql -f query=query($owner:String!'), {
+      stderr: 'HTTP 401: Bad credentials (https://api.github.com/graphql)\n',
+    }));
+    expect(await fetchGithubCommentCounts('/counts-fail', 'pr', [1])).toEqual({
+      available: false, reason: 'HTTP 401: Bad credentials (https://api.github.com/graphql)',
+    });
+  });
+
+  it('detail body arrives with the thread and a failed view leaves the thread intact', async () => {
+    let failView = false;
+    const calls = fakeGh((argv) => {
+      if (argv[1] === 'view') {
+        return failView ? new Error('view failed') : JSON.stringify({ body: 'x'.repeat(9_000), additions: 5, deletions: 2 });
+      }
+      return '[]'; // timeline, comments and reviews: an empty thread
+    });
+    const pr = await fetchGithubComments('/detail', 'pr', 7);
+    expect(pr.available).toBe(true);
+    expect(pr.detail).toEqual({ body: 'x'.repeat(8_000), additions: 5, deletions: 2 });
+    expect(calls).toContainEqual(['pr', 'view', '7', '--json', 'body,additions,deletions']);
+    failView = true;
+    const issue = await fetchGithubComments('/detail', 'issue', 8);
+    expect(issue).toMatchObject({ available: true, comments: [] });
+    expect(issue.detail).toBeUndefined();
+    expect(calls).toContainEqual(['issue', 'view', '8', '--json', 'body']);
   });
 });

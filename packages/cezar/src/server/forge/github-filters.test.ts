@@ -69,7 +69,7 @@ it('dry run includes usable assignment and board fixtures without a subprocess',
 
 import { fetchIssueProjects } from './github-filters.ts';
 it('discovers later pages and filters memberships by ID, not duplicate board titles', async () => {
-  const graphql = vi.fn(async (query: string, variables: Record<string, string>) => {
+  const graphql = vi.fn(async (query: string, variables: Record<string, string | number>) => {
     if (query.includes('projectsV2')) return JSON.stringify({ data: { repository: { projectsV2: {
       nodes: [variables.cursor ? { ...board, id: 'P2' } : board],
       pageInfo: variables.cursor ? pageInfo : { hasNextPage: true, endCursor: 'next' },
