@@ -8,6 +8,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest'
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { seedTranscript } from './seed-transcript'
 // fixture-server starts: 1
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -48,7 +49,7 @@ beforeAll(async () => {
     { seq: 1, ts: now, runId: askId, stepId: 'task', type: 'ask.requested', requestId: 'real-human-question', questions: [{ header: 'Choice', question: 'Which implementation should I use?', options: [{ label: 'Minimal', description: 'Small change' }, { label: 'Expanded', description: 'Wider change' }] }] },
     { seq: 2, ts: now, runId: askId, stepId: 'task', type: 'agent-input', input: { id: randomUUID(), source: 'agent', parentRunId: parentId, text: 'Preserve the human question', createdAt: now } },
   ]
-  writeFileSync(join(root, '.ai/cezar/runs', `${askId}.ndjson`), events.map(event => JSON.stringify(event)).join('\n') + '\n')
+  seedTranscript(join(root, '.ai/cezar/runs', `${askId}.ndjson`), events.map(event => JSON.stringify(event)).join('\n') + '\n')
   // A second real registered project exercises the slim workspace index in Tasks/palette.
   const other = join(root, 'other-project')
   execFileSync('git', ['init', '-q', '-b', 'main', other])
