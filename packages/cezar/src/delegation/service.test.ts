@@ -17,7 +17,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import type { Caller } from './credentials.ts';
 
-import { fixture } from './service.testkit.ts';
+import { fixture, scheduledDestroyAttempts } from './service.testkit.ts';
 import { ensureOwnedWorkspace, gitCommonDir, WORKTREE_LOCK_BUSY_ERROR } from './workspace.ts';
 import { DelegationService } from './service.ts';
 import { withWorktreeMutation } from '../git-worktree-lock.ts';
@@ -730,8 +730,15 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 5_000 });
     const reached = destroyOf(workerId)!.retry!.attempts;
     const writes = vi.spyOn(f.store, 'commitDestroyRetry');
+    const full = scheduledDestroyAttempts(f.service);
     await holder!.close();
-    await vi.waitFor(() => expect(destroyOf(workerId)).toEqual({ requestedAt: expect.any(String), phase: 'complete', remaining: [] }), { timeout: 5_000 });
+    // "Within the fast window" is counted in ticks below, not in wall clock: the window promises the
+    // exit is noticed at the next fast tick, which the 5 s bound covers (one 200 ms tick, a readlink and
+    // a stat-only check). The full attempt that tick starts is real Git and `/proc` work, awaited rather
+    // than timed: at load ~90 it outlasted 5 s and was caught mid-`cleaning` (hearsay-tools/cezarion#1109).
+    await vi.waitFor(() => expect(full.length).toBeGreaterThan(0), { timeout: 5_000 });
+    await full[0];
+    expect(destroyOf(workerId)).toEqual({ requestedAt: expect.any(String), phase: 'complete', remaining: [] });
     // A completed destroy drops the run's retry state too.
     expect(f.store.getRun(workerId)?.destroyRetry).toBeUndefined();
     const attempts = writes.mock.calls.map(([, retry]) => retry?.attempts ?? 0);

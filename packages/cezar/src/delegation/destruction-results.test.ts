@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { onTestFinished, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fixture } from './service.testkit.ts';
+import { fixture, scheduledDestroyAttempts } from './service.testkit.ts';
 import { ensureOwnedWorkspace, planOwnedWorkspace } from './workspace.ts';
 import { RunStore } from '../runs/store.ts';
 
@@ -54,14 +54,26 @@ describe('verified destruction retains results through explicit history deletion
     expect(readFileSync(join(workspace.path, 'result.txt'), 'utf8')).toBe('retained patch');
     expect(execFileSync('git', ['rev-parse', `refs/heads/${workspace.branch}`], { cwd: f.root, encoding: 'utf8' }).trim()).toBe(f.sha);
   });
-  it('retries a locked owned worktree after the Git lock is removed', async () => {
+  // Two full destroy attempts (the explicit one that meets the lock, then the awaited retry) on top of
+  // the worker setup: about twice the Git work of this suite's other cases, so twice its 15 s budget.
+  // With every owned-workspace Git call slowed by 100 ms it needs ~10 s (hearsay-tools/cezarion#1109).
+  it('retries a locked owned worktree after the Git lock is removed', { timeout: 30_000 }, async () => {
     Object.assign(f.service, { destroyBackoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
     const { workerId, workspace } = await completed();
     execFileSync('git', ['worktree', 'lock', workspace.path], { cwd: f.root });
     expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
     expect(existsSync(workspace.path)).toBe(true);
+    // Armed before the unlock, and no timer can fire between the destroy's return and here, so the
+    // first scheduled attempt is the one that sees the lock gone.
+    const attempts = scheduledDestroyAttempts(f.service);
     execFileSync('git', ['worktree', 'unlock', workspace.path], { cwd: f.root });
-    await vi.waitFor(() => expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'complete', remaining: [] } }), { timeout: 3_000 });
+    // The 3 s bound covers only what starts that attempt: one 50 ms tick and a stat-only change check.
+    // The attempt itself (evidence capture, removal, the lock keeper: tens of Git and node spawns) is
+    // awaited, not timed: at load ~90 it outlasted 3 s and was caught mid-`cleaning` (hearsay-tools/cezarion#1109).
+    await vi.waitFor(() => expect(attempts.length).toBeGreaterThan(0), { timeout: 3_000 });
+    await attempts[0];
+    // That first retry after the unlock completes the destroy; it is not left to a later one.
+    expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'complete', remaining: [] } });
     expect(existsSync(workspace.path)).toBe(false);
   });
   it('preserves a settled summary and diff after destruction, child deletion and restart', async () => {
