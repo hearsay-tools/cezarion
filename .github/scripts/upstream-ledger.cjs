@@ -156,6 +156,10 @@ function renderScanReport(ledger, scan, added) {
     '',
     'Conflict hint = files a 3-way dry run of that commit could not apply onto this fork at scan time; 0 means the patch applies clean.',
     '',
+    ...(added.some((e) => !Number.isInteger(e.hint?.conflicts)) ? [
+      `Scan ${scan.date}: conflict hints unavailable for ${added.filter((e) => !Number.isInteger(e.hint?.conflicts)).length} of ${added.length} new entries; blank cells mean unknown, not clean.`,
+      '',
+    ] : []),
     'Decisions live in `ledger.yaml` (rendered in `LEDGER.md`); this report is the record of what arrived.',
     '',
     '| Sha | Upstream | Date | Title | Conflicts |',

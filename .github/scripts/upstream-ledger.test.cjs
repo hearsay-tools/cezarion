@@ -218,3 +218,13 @@ test('applyScan gives a second scan on the same date its own report file instead
   });
   assert.equal(third.scans[2].report, 'scans/2026-09-18-3.md');
 });
+
+test('scan report names its date and missing hints without calling them clean', () => {
+  const scan = { date: '2026-10-16', since: MERGE_BASE, upstreamHead: SHA_HEAD };
+  const missing = entry();
+  const clean = entry({ sha: SHA_B, hint: { conflicts: 0 } });
+  const report = renderScanReport(ledger(), scan, [missing, clean]);
+  assert.match(report, /Scan 2026-10-16: conflict hints unavailable for 1 of 2 new entries/);
+  assert.match(report, new RegExp(missing.sha.slice(0, 8)));
+  assert.doesNotMatch(renderScanReport(ledger(), scan, [clean]), /hints unavailable/);
+});
