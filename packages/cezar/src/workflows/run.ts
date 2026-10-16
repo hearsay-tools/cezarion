@@ -4621,13 +4621,14 @@ export class RunManager {
       this.store.getRun(runId)?.agentInputs?.find(input => input.id === wait.wakeId)?.conversation?.kind === 'progress';
   }
 
-  /** Persist an interrupting member before acknowledging a mixed batch. The
-   * selected wake then survives a crash between delivery and wait retirement. */
+  /** Persist an interrupting member before acknowledging it, even when progress
+   * is in a separate provider flight. The selected wake then survives a crash
+   * between delivery and wait retirement. */
   private prepareWorkerWaitBatch(runId: string, inputIds: readonly string[]): void {
     const run = this.store.getRun(runId);
     const wait = this.workerWait(runId);
     if (!run?.delegation || run.delegation.role === 'invalid' || !wait?.wakeId ||
-      !inputIds.includes(wait.wakeId) || !this.retainsWorkerWaitOnProgress(runId)) return;
+      !this.retainsWorkerWaitOnProgress(runId)) return;
     const interrupt = run.agentInputs?.find(input => inputIds.includes(input.id) &&
       input.conversation && input.conversation.kind !== 'progress');
     if (interrupt) this.store.commitDelegation([{ id: runId, delegation: { ...run.delegation, wait: { ...wait, wakeId: interrupt.id } } }]);

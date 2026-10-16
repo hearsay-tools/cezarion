@@ -117,6 +117,31 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
     } finally { pump.mockRestore(); f.close(); }
   });
 
+  it('request-only inbox ACK interrupts a progress wake still awaiting provider ACK', async () => {
+    const f = await conversationPair();
+    const engine = manager as unknown as { pump(): Promise<void>; active: Map<string, { session: AgentSession }> };
+    const pump = vi.spyOn(engine, 'pump').mockResolvedValue();
+    let acknowledge!: () => void;
+    const pending = new Promise<void>(resolve => { acknowledge = resolve; });
+    const send = vi.spyOn(engine.active.get(f.p.id)!.session, 'sendAgentMessage').mockReturnValue(pending);
+    try {
+      manager.registerWorkerWait(f.p.id, { workerIds: [f.w.id], timeoutSeconds: 600 });
+      const progressId = randomUUID(); const requestId = randomUUID();
+      await f.service.send(f.workerCaller, { id: progressId, recipientRunId: f.p.id, kind: 'progress', text: 'Working mock:hold', timeoutSeconds: 600 });
+      pump.mockRestore(); await engine.pump();
+      await until(() => send.mock.calls.some(call => call[1]?.includes(progressId)));
+      expect(manager.canClaimInboxInput(f.p.id, progressId)).toBe(false);
+      await f.service.send(f.workerCaller, { id: requestId, recipientRunId: f.p.id, kind: 'request', text: 'Need a decision mock:hold', timeoutSeconds: 600 });
+      const generation = randomUUID();
+      const claim = manager.reserveInboxInputs(f.p.id, generation, [requestId])!;
+      expect(manager.acknowledgeInbox(f.p.id, generation, claim.receiptId)).toBe('acknowledged');
+      expect(waitOf(store.getRun(f.p.id))).toBeUndefined();
+      acknowledge();
+      await until(() => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === progressId)?.deliveredAt);
+      expect(waitOf(store.getRun(f.p.id))).toBeUndefined();
+    } finally { acknowledge(); send.mockRestore(); pump.mockRestore(); f.close(); }
+  });
+
   it('conversation: worker request wait releases capacity and explicit parent reply wakes exactly once', async () => {
     const f = await conversationPair();
     try {
