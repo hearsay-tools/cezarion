@@ -621,11 +621,13 @@ export class DelegationService {
       for (const requestId of wait.requestIds) this.ownRequest(caller, requestId);
     } else authorizeCancelWait(caller, sender, project.id);
     // Read in the same tick as the cancel: the outcome depends on what the wait was before it.
-    const before = project.store.getRun(caller.runId)?.delegation;
+    const run = project.store.getRun(caller.runId); const before = run?.delegation;
     const current = before && before.role !== 'invalid' && before.wait?.id === waitId ? before.wait.phase : undefined;
+    // A finished run queues no wake, so ending its turn would deliver nothing.
+    const live = !!run && ['queued', 'running', 'waiting'].includes(run.status);
     const wait = project.manager.cancelWorkerWait(caller.runId, waitId);
     const instruction = current === undefined ? `Wait ${waitId} already settled and is no longer current; cancelling changes nothing.`
-      : current === 'wake-pending' ? `Wait ${waitId} already settled (${wait.reason}); cancelling changes nothing. End your turn to receive its result, then register another wait.`
+      : current === 'wake-pending' ? `Wait ${waitId} already settled (${wait.reason}); cancelling changes nothing.${live ? ' End your turn to receive its result, then register another wait.' : ''}`
         : `Wait ${waitId} cancelled. End your turn to receive the cancellation, then register another wait.`;
     return { wait, instruction };
   }
