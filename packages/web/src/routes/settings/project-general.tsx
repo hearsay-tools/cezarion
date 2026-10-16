@@ -1,4 +1,3 @@
-import { ArchiveOnMergeField } from './archive-on-merge-field'
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 
@@ -109,7 +108,6 @@ export function ProjectGeneral({ capabilities }: { capabilities?: Pick<Capabilit
         </>
       ) : null}
       </section>
-      <section className="rounded-lg border border-border bg-card p-5"><ArchiveOnMergeField /></section>
       {managesRegistry ? <section className="rounded-lg border border-border bg-card p-5"><RemoveProject project={project} bootProject={registry.bootProject} /></section> : null}
     </div>
   )

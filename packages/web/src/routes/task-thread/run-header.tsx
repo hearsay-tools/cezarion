@@ -315,7 +315,7 @@ export function RunHeader({
         tab === 'session' && 'md:sticky md:top-0',
       )}
     >
-      {run.archived && run.autoArchive?.reason === 'pull-requests-merged' ? <p data-slot="auto-archive-reason" className="text-[13px] text-muted-foreground">Archived automatically after all associated PRs merged.</p> : null}
+      {run.archived && run.autoArchive?.reason === 'pull-requests-merged' && run.autoArchive.archivedAt === run.archivedAt ? <p data-slot="auto-archive-reason" className="text-[13px] text-muted-foreground">Archived automatically after all associated PRs merged.</p> : null}
       <div className="w-full">
         {/* On the pushed phone screen the row would hold only controls (details chevron, Archive,
             Handoff) between the top bar and the facet tabs. The chevron moves into the top bar and

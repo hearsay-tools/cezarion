@@ -38,6 +38,7 @@ function serve() {
       const json = (payload: unknown) =>
         new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })
       if (url.endsWith('/open-targets')) return json({ targets: [] })
+      if (url.endsWith('/config')) return json({ archiveOnMerge: null, effectiveArchiveOnMerge: false, archiveOnMergeSource: 'default' })
       if (url.startsWith('/api/v1/projects/') && method === 'DELETE') {
         return json({ removed: true, id: url.split('/').pop() })
       }
@@ -153,6 +154,13 @@ afterEach(() => {
 })
 
 describe('the General page', () => {
+  it('keeps task archiving available for an unregistered boot project in single-project mode', async () => {
+    renderAt('/settings', { singleProject: true, registry: [] })
+    await waitFor(() => expect(document.querySelector('[data-route="settings"]')).not.toBeNull())
+    expect(await screen.findByLabelText('Archive tasks after PRs merge')).not.toBeNull()
+    expect(document.querySelector('[data-action="project-general-remove"]')).toBeNull()
+  })
+
   it('reads out the registry entry for the project you are inside', async () => {
     renderAt('/p/demo/settings')
     const facts = await waitFor(() => {

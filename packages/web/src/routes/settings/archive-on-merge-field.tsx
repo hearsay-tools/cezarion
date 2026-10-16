@@ -24,9 +24,9 @@ function ArchivePreference({ config, scope }: { config: Preference; scope: 'proj
   const id = useId()
   const client = useQueryClient()
   const save = useMutation({
-    mutationFn: async (archiveOnMerge: boolean | null): Promise<ConfigResponse | WorkspaceConfigResponse> => scope === 'project' ? putConfig({ archiveOnMerge }) : putWorkspaceConfig({ archiveOnMerge }),
-    onSuccess: result => {
-      if (scope === 'project') client.setQueryData(queryKeys.config, result)
+    mutationFn: async ({ archiveOnMerge, projectKey }: { archiveOnMerge: boolean | null; projectKey: typeof queryKeys.config }): Promise<ConfigResponse | WorkspaceConfigResponse> => scope === 'project' ? putConfig({ archiveOnMerge }, projectKey[0]) : putWorkspaceConfig({ archiveOnMerge }),
+    onSuccess: (result, { projectKey }) => {
+      if (scope === 'project') client.setQueryData(projectKey, result)
       else {
         client.setQueryData(workspaceQueryKeys.config, result)
         void client.invalidateQueries({ predicate: query => query.queryKey.at(-1) === 'config' && query.queryKey !== workspaceQueryKeys.config })
@@ -44,7 +44,7 @@ function ArchivePreference({ config, scope }: { config: Preference; scope: 'proj
       className="min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-ring active:bg-muted disabled:opacity-50"
       value={config.archiveOnMerge === null ? 'inherit' : config.archiveOnMerge ? 'enabled' : 'disabled'}
       disabled={save.isPending}
-      onChange={event => save.mutate(event.target.value === 'inherit' ? null : event.target.value === 'enabled')}
+      onChange={event => save.mutate({ archiveOnMerge: event.target.value === 'inherit' ? null : event.target.value === 'enabled', projectKey: queryKeys.config })}
     >
       <option value="inherit">{scope === 'project' ? 'Inherit global setting' : 'Use default'}</option>
       <option value="enabled">Enabled</option>
