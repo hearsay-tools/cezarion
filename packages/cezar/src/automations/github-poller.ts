@@ -316,7 +316,11 @@ export function buildSearchQuery(
   ];
   for (const author of definition.filters.authors ?? []) terms.push(`author:${safeQualifier(author)}`);
   for (const assignee of definition.filters.assignees ?? []) terms.push(`assignee:${safeQualifier(assignee)}`);
-  for (const label of definition.filters.allLabels ?? []) terms.push(`label:${JSON.stringify(label)}`);
+  // Label transitions are filtered against reconstructed event labels. Current
+  // issue labels cannot exclude a transition whose matching label was removed.
+  if (activity === 'created') {
+    for (const label of definition.filters.allLabels ?? []) terms.push(`label:${JSON.stringify(label)}`);
+  }
   return terms.filter(Boolean).join(' ');
 }
 

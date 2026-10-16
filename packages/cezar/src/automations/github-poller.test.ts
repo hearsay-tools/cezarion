@@ -167,6 +167,36 @@ describe('GithubPoller', () => {
     expect(second.truncated).toBe(false);
   });
 
+  it.each([
+    { includeExisting: true, event: 'issue.labeled' as const },
+    { includeExisting: true, event: 'issue.unlabeled' as const },
+    { includeExisting: false, event: 'issue.labeled' as const },
+    { includeExisting: false, event: 'issue.unlabeled' as const },
+  ])('matches past $event labels after removal (includeExisting=$includeExisting)', async ({ includeExisting, event }) => {
+    const now = Date.now();
+    const addedAt = new Date(now - 2 * 3_600_000).toISOString();
+    const removedAt = new Date(now - 3_600_000).toISOString();
+    const issue = { ...item, created_at: new Date(now - 3 * 3_600_000).toISOString(), updated_at: removedAt, labels: [] };
+    const poller = new GithubPoller({ run: async (_exe, args) => {
+      if (args.some((arg) => arg.includes('/timeline'))) return JSON.stringify([
+        { id: 1, event: 'labeled', created_at: addedAt, label: { name: 'bug' } },
+        { id: 2, event: 'unlabeled', created_at: removedAt, label: { name: 'bug' } },
+      ]);
+      // GitHub evaluates label qualifiers against current labels, which are empty.
+      const query = args.find((arg) => arg.startsWith('q='))!;
+      return JSON.stringify({ items: query.includes('label:') ? [] : [issue] });
+    } });
+    const result = await poller.poll('acme', 'demo', {
+      ...definition,
+      events: ['issue.opened', event],
+      filters: { ...definition.filters, includeExisting, allLabels: ['bug'] },
+    }, { since: new Date(now - 4 * 3_600_000).toISOString() });
+    expect(result.candidates).toEqual([expect.objectContaining({
+      event, number: 7, labels: ['bug'], changedLabel: 'bug',
+      timestamp: event === 'issue.labeled' ? addedAt : removedAt,
+    })]);
+  });
+
   it('reports provider search limits instead of marking an unvisited historical page complete', async () => {
     const rule = { ...definition, filters: { ...definition.filters, includeExisting: true, maxRecords: 100 } };
     const poller = new GithubPoller({ run: async () => JSON.stringify({ items: Array.from({ length: 100 }, () => item) }) });
