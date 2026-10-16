@@ -4,6 +4,7 @@ import {
   blank,
   compareToBaseline,
   readBaseline,
+  scanFile,
   scannedFiles,
   scanSource,
   scanSuite,
@@ -23,6 +24,7 @@ import {
 const rules = (sites: Site[]) => sites.map((s) => s.rule);
 const lines = (sites: Site[]) => sites.map((s) => s.line);
 const scan = (...src: string[]) => scanSource('x.test.ts', src.join('\n'));
+const errors = (...src: string[]) => scanFile('x.test.ts', src.join('\n')).errors.map(({ line, construct }) => ({ line, construct }));
 
 describe('blanking strings and comments', () => {
   it('keeps line and column positions', () => {
@@ -65,6 +67,37 @@ describe('blanking strings and comments', () => {
     );
     expect(lines(sites)).toEqual([2, 4]);
   });
+
+  it('reads a / after an if, while, for or with head as a regex, not a division', () => {
+    const src = [
+      'if (ok) /[`]/.test(x);',
+      'await sleep(50);',
+      "while (more()) /['\"]/.test(y);",
+      'await delay(5);',
+      'for (const k of ks) /`/.test(k);',
+      'await pause(5);',
+      'for await (const c of cs) /`/.test(c);',
+      'await wait(5);',
+    ];
+    expect(lines(scan(...src))).toEqual([2, 4, 6, 8]);
+    expect(errors(...src)).toEqual([]);
+  });
+
+  it('still reads a / after a call or a grouped expression as a division', () => {
+    const src = ['const r = f(a) / 2 + "/";', 'await sleep(50);', 'const q = (a + b) / 2 + "/";', 'await sleep(50);'];
+    expect(lines(scan(...src))).toEqual([2, 4]);
+    expect(errors(...src)).toEqual([]);
+  });
+
+  it('reports an unterminated string, template, substitution or block comment rather than swallowing what follows', () => {
+    expect(errors('const s = `abc', 'await sleep(50);')).toEqual([{ line: 1, construct: 'template' }]);
+    expect(errors('const s = `a ${f(', 'await sleep(50);')).toEqual([{ line: 1, construct: 'substitution' }]);
+    expect(errors("const s = 'abc", 'await sleep(50);')).toEqual([{ line: 1, construct: 'string' }]);
+    expect(errors('/* never closed', 'await sleep(50);')).toEqual([{ line: 1, construct: 'comment' }]);
+    // A string stops at its line end, so the code after it is still read.
+    expect(lines(scan("const s = 'abc", 'await sleep(50);'))).toEqual([2]);
+    expect(errors("const s = 'a\\", "b';", '`x${`y`}z`;')).toEqual([]);
+  });
 });
 
 describe('rule sleep', () => {
@@ -88,12 +121,22 @@ describe('rule sleep', () => {
     expect(sites[6]?.site).toBe('await new Promise(r => setTimeout(r, 50));');
   });
 
+  it('flags the block-arrow form that returns the timer', () => {
+    const sites = scan(
+      'await new Promise(r => { return setTimeout(r, 50); });',
+      'await new Promise((resolve) => { return globalThis.setTimeout(resolve, 50); });',
+    );
+    expect(lines(sites)).toEqual([1, 2]);
+  });
+
   it('leaves a literal 0 alone: that is one event-loop turn, not a wait', () => {
     expect(scan(
       'await sleep(0);',
       'await setTimeout(0);',
       'await new Promise(r => setTimeout(r, 0));',
       'await new Promise(r => setTimeout(r));',
+      'await sleep(0.0);',
+      'await sleep(0x0);',
     )).toEqual([]);
   });
 
@@ -189,6 +232,45 @@ describe('rule short-bound', () => {
       'await expect.poll(() => count(), { timeout: 15_000 }).toBe(1);',
     );
     expect(lines(sites)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("reads only the options object's own timeout, whatever its other properties hold", () => {
+    const sites = scan(
+      'await vi.waitFor(cb, { interval: fn({ timeout: 20_000 }) });',
+      'await vi.waitFor(cb, { nested: { timeout: 20_000 }, timeout: 100 });',
+      'await vi.waitFor(cb, { "timeout": 20_000 });',
+      "await vi.waitFor(cb, { 'timeout': 100 });",
+      'await vi.waitFor(cb, { timeout: /* ms */ 20_000, interval: 10 });',
+    );
+    expect(lines(sites)).toEqual([1, 2, 4]);
+  });
+
+  it('lets an explicit timeout after the last spread decide the bound', () => {
+    const sites = scan(
+      'await vi.waitFor(cb, { ...options, timeout: 100 });',
+      'await vi.waitFor(cb, { timeout: 100, ...options });',
+      'await vi.waitFor(cb, { ...options });',
+      'await vi.waitFor(cb, { ...a, timeout: 20_000, ...b });',
+      'await vi.waitFor(cb, { ...a, timeout: 20_000, interval: 5 });',
+      'await vi.waitFor(cb, { [key]: 20_000 });',
+    );
+    expect(lines(sites)).toEqual([1]);
+  });
+
+  it('reads every numeric literal form the same way in calls, options and defaults', () => {
+    const sites = scan(
+      'await vi.waitFor(cb, { timeout: 5e3 });',
+      'await vi.waitFor(cb, 9.999e3);',
+      'await vi.waitFor(cb, 0x10);',
+      'await waitFor(() => ready(), 1.5e3);',
+      'async function until(check: () => boolean, timeout = 1.5) {}',
+      'async function waitFor(check: () => boolean, timeout = 5e3) {}',
+      'await vi.waitFor(cb, { timeout: 1e4 });',
+      'await vi.waitFor(cb, 0x2710);',
+      'await waitFor(() => ready(), 1E+4);',
+      'async function eventually(check: () => boolean, timeout = 1e4) {}',
+    );
+    expect(lines(sites)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
   it('leaves a bound it cannot read alone', () => {
@@ -295,6 +377,20 @@ describe('a bound with a reason', () => {
     );
     expect(lines(sites)).toEqual([1, 3, 6, 8]);
   });
+
+  it('is accepted only from a real line comment, not from text in a string or a template', () => {
+    const sites = scan(
+      'await sleep(50); const x = "// bound: not a comment";',
+      'const script = `',
+      '// bound: template text, not a comment',
+      '${await sleep(50)}',
+      '`;',
+      'const t = `x',
+      '// bound: inside a template`; await sleep(50);',
+      "await sleep(50); const u = 'http://x'; // bound: a real trailing comment",
+    );
+    expect(lines(sites)).toEqual([1, 4, 7]);
+  });
 });
 
 describe('the baseline', () => {
@@ -330,6 +426,10 @@ describe('the baseline', () => {
 });
 
 describe('the server unit suite', () => {
+  // One read of each file for every whole-suite assertion below.
+  let scanned: ReturnType<typeof scanSuite> | undefined;
+  const suite = () => (scanned ??= scanSuite());
+
   it('scans every test and testkit under packages/cezar/src, and not its own files', () => {
     const files = scannedFiles();
     expect(files.length).toBeGreaterThan(300);
@@ -338,8 +438,16 @@ describe('the server unit suite', () => {
     expect(files.some((f) => f.includes('__fixtures__/') || f.includes('node_modules/'))).toBe(false);
   });
 
+  it('reads every scanned file to its end: no string, template or comment is left open', () => {
+    const where = suite().errors.map((e) => `  ${e.file}:${e.line} unterminated ${e.construct}: ${e.text}`).join('\n');
+    expect(
+      suite().errors,
+      `The scan read these as unterminated, so everything after them went unread. Fix the scan's blanking in test-wait-discipline.testkit.ts:\n${where}`,
+    ).toEqual([]);
+  });
+
   it('has no bare sleep or short bound outside the baseline, and the baseline names no site that is gone', () => {
-    const sites = scanSuite();
+    const { sites } = suite();
     const actual = tally(sites);
     // Update mode shrinks the baseline to what the suite has now; it never adds to it.
     if (process.env.TEST_WAIT_DISCIPLINE_UPDATE === '1') shrinkBaseline(actual);
