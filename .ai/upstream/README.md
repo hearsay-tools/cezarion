@@ -18,7 +18,11 @@ Design: `.ai/specs/2026-09-18-upstream-ledger.md`.
 node .github/scripts/upstream-scan.cjs            # fetch upstream main, append new commits as pending
 node .github/scripts/upstream-scan.cjs validate   # check the ledger against the rules below
 node .github/scripts/upstream-scan.cjs render     # regenerate LEDGER.md after editing ledger.yaml
+node .github/scripts/upstream-scan.cjs targets <sha>…  # re-check a port's files against the fork now
 ```
+
+Any other first argument is an error: the command prints a one-line usage message and exits 2
+before it touches git or a file, so a mistyped `target` never runs the scan.
 
 The scan fetches upstream into `refs/cez-upstream/main`. Never add a git remote named
 `upstream` in this repository: `gh` prefers it over `origin`, and cezar's own GitHub tab
@@ -57,8 +61,56 @@ Set `status`, add `decided: YYYY-MM-DD`, and fill the fields that status require
 | `n/a` | nothing to port: release bumps, upstream-only docs | `reason` |
 
 `hint.conflicts` is the number of files a 3-way dry run of the upstream commit could not apply
-onto this fork when the scan ran. It is advisory and goes stale as the fork moves. A free-form
-`note` is allowed on any row.
+onto the fork's committed `HEAD` when the scan ran; uncommitted changes never count. A merge
+commit is applied as its diff from its first parent. A scan that cannot build its private copy of
+`HEAD` warns on stderr and records its rows without a `hint`. It is advisory and goes stale as the
+fork moves. `targets` re-runs the dry run against the current fork and reports it per file. A
+free-form `note` is allowed on any row.
+
+## Starting a port
+
+A row's `note` and `hint` describe the fork on the day of the scan. The fork keeps moving. Port
+issue hearsay-tools/cezarion#438 was planned from a note that named `project-groups.tsx`, but by
+the time the port started only tests still imported that component. A literal port would have
+landed in dead code.
+
+So when work on a port starts, before the planner's design gate, run this from a checkout of
+current `main` (a fresh task worktree is one):
+
+```bash
+node .github/scripts/upstream-scan.cjs targets <sha>…
+```
+
+Pass the row's sha, or a prefix of 7 or more characters. A port that spans several upstream
+commits takes several shas. A port issue's Agent context names this command with its row sha(s).
+The command fetches upstream into `refs/cez-upstream/main` when a commit is missing locally;
+`--no-fetch` turns that into an error.
+
+It prints a Markdown report, one section per upstream commit, with a row for every file the commit
+touches. A merge commit is compared with its first parent, the upstream `main` it landed on, and
+its section says so. Put the flagged rows in front of the planner. The report is advisory: it
+exits 0 whenever it printed, flags or not.
+
+Every verdict describes the committed `HEAD` the report names. Uncommitted changes, staged or
+not, are ignored: the dry run and the reachability bundle read a snapshot of `HEAD` taken outside
+the checkout, and the real index and work tree are never written. Every git call reads its
+attributes from `HEAD` too (`--attr-source`), so an uncommitted `.gitattributes` cannot change a
+merge, a checkout, the baseline or the drift. `targets` therefore needs git 2.41 or newer and exits
+1 on an older git, while the scan still records its rows there, without conflict hints.
+`ledger.yaml` is the exception.
+It is read from the work tree, so a row you have not committed yet still works; its drift then
+reads `unknown`.
+
+| Flag | Means | Do this |
+| --- | --- | --- |
+| `test-only` | No production entry point reaches the file; only tests import it. | Find the live code that replaced the component before porting into it. hearsay-tools/cezarion#438 is the worked example: the drag went into the project rail (hearsay-tools/cezarion#999), and hearsay-tools/cezarion#997 removed the dead component. |
+| `missing` | Upstream modifies, deletes or renames a path the fork no longer has. | The fork removed or moved it. The report names the last fork commit that touched the path; that commit says where the code went. |
+| `drifted` | Fork commits touched the file since the ledger row landed. | Read those commits before trusting the row's `note` or `hint`. The commit count and line churn show how much changed. Churn beside `0 commits` (unflagged) means a merge commit changed the file. |
+
+Drift counts from the parent of the commit that added the row to `ledger.yaml`. A row that
+`main` never committed has no such commit, so its drift reads `unknown`. Reachability and the
+dry run read `unknown` when the bundle or the `HEAD` snapshot behind them fails; the report's
+first lines say why.
 
 ## Citation provenance
 
