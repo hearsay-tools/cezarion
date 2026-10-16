@@ -307,6 +307,42 @@ it('caches each page under its own key and never across contexts', async () => {
   expect(lists()).toBe(3);
 });
 
+it('refreshing page 1 drops the context\'s later cached pages, so scrolling after Refresh asks again', async () => {
+  const root = '/paged-refresh-evicts';
+  const calls = mockPagedGh();
+  const laterPages = () => calls.filter(c => c === 'issues:c1').length;
+  await fetchGithub(root, false, 50);
+  await fetchGithub(root, false, 50, page2);
+  await fetchGithub(root, false, 50, page2);
+  expect(laterPages()).toBe(1);
+  await fetchGithub(root, true, 50);
+  await fetchGithub(root, false, 50, page2);
+  expect(laterPages()).toBe(2);
+});
+
+it('a later page that started before a page-1 refresh is answered but not cached', async () => {
+  const root = '/paged-refresh-race';
+  const calls = mockPagedGh();
+  const immediate = run.getMockImplementation()!;
+  let finishList!: () => void;
+  run.mockImplementation((...args: unknown[]) => {
+    const argv = (args[1] as string[]).join(' ');
+    if (argv.includes('issues(first') && argv.includes('after=c1') && !finishList) {
+      finishList = () => immediate(...args);
+      return;
+    }
+    return immediate(...args);
+  });
+  const stale = fetchGithub(root, false, 50, page2);
+  await vi.waitFor(() => expect(finishList).toBeTypeOf('function'));
+  await fetchGithub(root, true, 50);
+  finishList();
+  expect((await stale).issues.map(i => i.number)).toEqual([2]);
+  const before = calls.filter(c => c === 'issues:c1').length;
+  await fetchGithub(root, false, 50, page2);
+  expect(calls.filter(c => c === 'issues:c1').length).toBe(before + 1);
+});
+
 it('an older concurrent request for the same page never replaces the newer entry', async () => {
   const root = '/paged-order';
   mockPagedGh();

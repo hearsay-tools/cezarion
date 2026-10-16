@@ -412,6 +412,10 @@ export async function fetchListConnection(
    issues/PRs must never be served under another project's scope, and page 2 is never page 1.
    Bounded like `commentsCache` so an unbounded workspace can't grow it without limit. */
 let listRequestOrder = 0;
+/** Per context, the order of the newest page-1 refresh. A refresh drops the context's later
+ *  pages (their cursors were cut from the old first page), and a later page that started before
+ *  it may answer its caller but never re-enters the cache. Bounded with `listCache`. */
+const listRefreshOrder = new Map<string, number>();
 const listCache = new Map<string, {
   contextKey: string; order: number; at: number; limit: number; data: GithubData; projects: Promise<GithubProjectsData>;
 }>();
@@ -466,6 +470,18 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30,
     return hit.data;
   }
   const order = ++listRequestOrder;
+  if (refresh && !page.issuesCursor && !page.prsCursor && !page.issuesDone && !page.prsDone) {
+    listRefreshOrder.delete(context.key);
+    listRefreshOrder.set(context.key, order);
+    while (listRefreshOrder.size > LIST_CACHE_MAX) {
+      const oldest = listRefreshOrder.keys().next().value;
+      if (oldest === undefined) break;
+      listRefreshOrder.delete(oldest);
+    }
+    for (const [cached, entry] of [...listCache]) {
+      if (entry.contextKey === context.key && cached !== key) dropListEntry(cached);
+    }
+  }
   try {
     // No `statusCheckRollup` (#664): it is hydrated lazily per on-screen PR row via
     // `fetchGithubChecks`. A big aggregate list still gets a little more wall clock.
@@ -584,7 +600,7 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30,
     });
     // Concurrent refreshes may finish in reverse order. An older list must not evict
     // the newer generation (and invalidate the newer client's metadata follow-up).
-    if ((listCache.get(key)?.order ?? -1) < order) {
+    if ((listCache.get(key)?.order ?? -1) < order && order >= (listRefreshOrder.get(context.key) ?? 0)) {
       dropListEntry(key); // re-insert so this key becomes the newest
       listCache.set(key, { contextKey: context.key, order, at: Date.now(), limit: capped, data, projects });
       projectGenerations.set(generation, key);
