@@ -192,8 +192,8 @@ jobs:
             if [ -f "$classifier" ] && node --input-type=commonjs -e "const c = require(require('node:path').resolve(process.cwd(), process.env.CLASSIFIER)); process.exit(c.classifyFromEnv() || c.classifyUpstreamScanFromEnv?.() ? 0 : 1)"; then
               can_review=false
             else
-              # Rounds only, as isAutomatedReviewRound counts them: verdict replies are empty-body reviews.
-              review_count="$(gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.user.login == "github-actions[bot]") | select(.submitted_at != null) | select((.body // "") | test("<!-- cez-review-(round|patch-id: [0-9a-f]{40}) -->")) | .id' | wc -l)"
+              # Rounds only, as isAutomatedReviewRound counts them: a non-empty body; verdict replies are empty-body reviews.
+              review_count="$(gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.user.login == "github-actions[bot]") | select(.submitted_at != null) | select((.body // "") | test("\\S")) | .id' | wc -l)"
               if [ "$review_count" -lt "$AUTOMATED_REVIEW_ROUNDS" ]; then
                 can_review=true
               else

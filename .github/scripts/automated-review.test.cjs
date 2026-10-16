@@ -21,8 +21,10 @@ const sha = 'a'.repeat(40);
 const roundMarker = '<!-- cez-review-round -->';
 const bot = { login: 'github-actions[bot]' };
 // Each verdict reply on an earlier thread arrives as its own empty-body bot
-// review. automated-code-review.workflow.test.cjs runs the workflow's
-// review_count jq filter over a copy of this history.
+// review. Rounds posted before the round marker carry a patch-id marker, a
+// malformed one (11), or only a summary (12, 13: dispatch or a failed patch-id).
+// automated-code-review.workflow.test.cjs runs the workflow's review_count jq
+// filter over a copy of this history.
 const roundHistory = [
   { id: 1, user: bot, submitted_at: '2026-10-01T10:00:00Z', body: `<!-- cez-review-patch-id: ${'1'.repeat(40)} -->` },
   { id: 2, user: bot, submitted_at: '2026-10-01T10:01:00Z', body: '' },
@@ -35,6 +37,9 @@ const roundHistory = [
   { id: 9, user: bot, submitted_at: null, body: '<!-- cez-review-round -->' },
   { id: 10, user: { login: 'octocat' }, submitted_at: '2026-10-01T10:08:00Z', body: '<!-- cez-review-round -->' },
   { id: 11, user: bot, submitted_at: '2026-10-01T10:09:00Z', body: `<!-- cez-review-patch-id: ${'4'.repeat(39)} -->` },
+  { id: 12, user: bot, submitted_at: '2026-10-01T10:10:00Z', body: 'No issues found' },
+  { id: 13, user: bot, submitted_at: '2026-10-01T10:11:00Z', body: 'Guard the null input before parsing.' },
+  { id: 14, user: bot, submitted_at: '2026-10-01T10:12:00Z', body: ' \n\t' },
 ];
 
 test('counts no automated reviews when review history is empty', () => {
@@ -50,8 +55,8 @@ test('counts three automated reviews from review history', () => {
 });
 
 test('counts only review rounds, never the empty-body reviews that wrap verdict replies', () => {
-  assert.deepEqual(roundHistory.filter((review) => isAutomatedReviewRound(review)).map((review) => review.id), [1, 3, 5, 6]);
-  assert.equal(countAutomatedReviews(roundHistory), 4);
+  assert.deepEqual(roundHistory.filter((review) => isAutomatedReviewRound(review)).map((review) => review.id), [1, 3, 5, 6, 11, 12, 13]);
+  assert.equal(countAutomatedReviews(roundHistory), 7);
 });
 
 test('does not count pending automated reviews', () => {
@@ -356,7 +361,8 @@ test('posts a later round when maxRounds is raised above the review count', asyn
 });
 
 test('the round cap counts review rounds, not the reviews that wrap verdict replies', async () => {
-  const rounds = [roundMarker, formatReviewPatchIdMarker(sha), `summary\n\n${roundMarker}`]
+  // The third is an unmarked round from before the round marker.
+  const rounds = [roundMarker, formatReviewPatchIdMarker(sha), 'No issues found']
     .map((body, i) => ({ user: bot, submitted_at: `2026-10-01T10:0${i}:00Z`, body }));
   const replies = Array.from({ length: 6 }, (_, i) => ({ user: bot, submitted_at: `2026-10-01T11:0${i}:00Z`, body: '' }));
   const post = async (history) => {

@@ -548,8 +548,9 @@ test('review schema requires every object property and models optional values as
 
 
 const bot = { login: 'github-actions[bot]' };
-// Same history as roundHistory in automated-review.test.cjs: four rounds among
-// verdict-reply reviews, a pending and a human review, and a 39-hex marker.
+// Same history as roundHistory in automated-review.test.cjs: seven rounds, three
+// of them unmarked or malformed legacy rounds, among empty-body verdict-reply
+// reviews, a whitespace-only, a pending and a human review.
 const roundHistory = [
   { id: 1, user: bot, submitted_at: '2026-10-01T10:00:00Z', body: `<!-- cez-review-patch-id: ${'1'.repeat(40)} -->` },
   { id: 2, user: bot, submitted_at: '2026-10-01T10:01:00Z', body: '' },
@@ -562,6 +563,9 @@ const roundHistory = [
   { id: 9, user: bot, submitted_at: null, body: '<!-- cez-review-round -->' },
   { id: 10, user: { login: 'octocat' }, submitted_at: '2026-10-01T10:08:00Z', body: '<!-- cez-review-round -->' },
   { id: 11, user: bot, submitted_at: '2026-10-01T10:09:00Z', body: `<!-- cez-review-patch-id: ${'4'.repeat(39)} -->` },
+  { id: 12, user: bot, submitted_at: '2026-10-01T10:10:00Z', body: 'No issues found' },
+  { id: 13, user: bot, submitted_at: '2026-10-01T10:11:00Z', body: 'Guard the null input before parsing.' },
+  { id: 14, user: bot, submitted_at: '2026-10-01T10:12:00Z', body: ' \n\t' },
 ];
 
 test('review-round counts rounds by the same rule as countAutomatedReviews', async () => {
@@ -574,7 +578,7 @@ test('review-round counts rounds by the same rule as countAutomatedReviews', asy
   assert.ok(filter, 'review-round must count reviews through a --jq filter');
   const counted = execFileSync('jq', ['-r', filter], { input: JSON.stringify(roundHistory), encoding: 'utf8' }).split('\n').filter(Boolean).length;
   assert.equal(counted, countAutomatedReviews(roundHistory));
-  assert.equal(counted, 4);
+  assert.equal(counted, 7);
 });
 
 test('review-round skips when the three-dot patch-id matches the last posted marker', async (t) => {
@@ -712,9 +716,10 @@ exit 128
     assert.equal(outputs.can_review, 'true');
   });
 
+  // Round 2 is an unmarked legacy round (dispatch or a failed patch-id).
   const history = (rounds) => [
     { id: 1, user: bot, submitted_at: '2026-10-01T10:00:00Z', body: `<!-- cez-review-patch-id: ${'d'.repeat(40)} -->` },
-    { id: 2, user: bot, submitted_at: '2026-10-01T10:10:00Z', body: 'summary\n\n<!-- cez-review-round -->' },
+    { id: 2, user: bot, submitted_at: '2026-10-01T10:10:00Z', body: 'No issues found' },
     { id: 3, user: bot, submitted_at: '2026-10-01T10:20:00Z', body: `<!-- cez-review-round -->\n\n<!-- cez-review-patch-id: ${'e'.repeat(40)} -->` },
   ].slice(0, rounds).concat(Array.from({ length: 5 }, (_, i) => ({ id: 10 + i, user: bot, submitted_at: `2026-10-01T11:0${i}:00Z`, body: '' })));
 
