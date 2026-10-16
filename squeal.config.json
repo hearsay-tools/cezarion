@@ -95,6 +95,8 @@
     ],
     "scripts/test-changed.test.mjs": [
       "scripts/test-changed.mjs",
+      ".github/scripts/change-surface.cjs",
+      ".github/scripts/fixtures/docs-path-cases.cjs",
       "package.json"
     ],
     "packages/cezar/src/pid-file.testkit.test.ts": [
