@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   formatGitHubNavFailure,
   githubSurfaceReadyJs,
-} from './github-nav-contract'
+} from '../../e2e/github-nav-contract'
 
 const ISSUES = '/p/cezar/github'
 const PRS = '/p/cezar/github/prs'

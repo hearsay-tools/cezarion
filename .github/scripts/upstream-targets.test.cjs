@@ -1037,9 +1037,9 @@ test('upstream-scan records a merge\'s conflict hint from its first-parent diff'
   const result = cli('--no-fetch', '--date', '2026-10-16');
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).added, 3, 'the merge and the new commits on both its sides');
-  // live.tsx conflicts and gone.ts is missing, which the hint does not count. A merge read as one
+  // live.tsx conflicts and gone.ts is missing, so both count. A merge read as one
   // commit has an empty patch, which would record a false 0.
-  assert.deepEqual(scannedRow(fx, merge).hint, { conflicts: 1 });
+  assert.deepEqual(scannedRow(fx, merge).hint, { conflicts: 2 });
   const logged = calls();
   const at = logged.findIndex((args) => args.join(' ') === 'rev-parse --verify --end-of-options HEAD^{commit}');
   assert.ok(at > 0, logged.map((args) => args.join(' ')).join('\n'));
