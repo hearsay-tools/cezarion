@@ -79,3 +79,12 @@ test('malformed input is rejected', () => {
   assert.throws(() => buildCandidates({ issue: issue(1), openIssues: {}, repo }), /openIssues/);
   assert.throws(() => buildCandidates({ issue: issue(1), openIssues: [], repo: 'nope' }), /repo/);
 });
+
+test('an epic is never a duplicate candidate: a new issue under it is a child, not the same work', () => {
+  const candidates = buildCandidates({
+    issue: issue(211),
+    openIssues: [issue(902, { labels: [{ name: 'epic' }] }), issue(14, { labels: ['bug'] })],
+    repo,
+  });
+  assert.deepEqual(candidates.map((c) => c.number), [14]);
+});

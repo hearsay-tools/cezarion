@@ -205,7 +205,7 @@ function report({ dir, out, count }) {
   const codexPaired = scoreLabels(paired.map((row) => labelsOf(row.codex)), paired.map(truth), labels);
 
   const sweepLines = ['| Threshold | ' + SWEEP.join(' | ') + ' |', '| --- |' + SWEEP.map(() => ' --- |').join('')];
-  for (const key of ['mainArea', 'type', 'secondaryArea', 'accessibility']) {
+  for (const key of ['mainArea', 'type', 'accessibility']) {
     const cells = SWEEP.map((value) => {
       const swept = evaluate({ corpus, baseline, answers, targets, thresholds: { ...THRESHOLDS, [key]: value } });
       const score = scoreLabels(swept.map((row) => labelsOf(row.jev)), swept.map(truth), labels);
@@ -222,7 +222,31 @@ function report({ dir, out, count }) {
       const closes = row.jev.action === 'duplicate' ? 'yes' : 'no';
       return `| #${row.target.number} | ${row.target.state_reason ?? 'open'} | ${codexPick} | ${jevPick} | ${closes} |`;
     });
+  const selfPicks = paired.filter((row) => row.codex.action === 'duplicate' && row.codex.duplicate_of === row.target.number).length;
   const wrongCloses = rows.filter((row) => row.jev.action === 'duplicate' && row.target.state_reason !== 'duplicate');
+  const duplicateSweep = [0.6, 0.7, 0.8, 0.9, 0.93, 0.95, 0.97].map((value) => {
+    const picks = rows.filter((row) => row.duplicatePick && row.duplicatePick.p >= value);
+    const right = picks.filter((row) => row.target.state_reason === 'duplicate').length;
+    return `| ${value} | ${right} | ${picks.length - right} |`;
+  });
+
+  // Slices that do not lean on Codex's own output: areas only, type only where
+  // the issue carries a type, and the issues Codex left unlabeled.
+  const areas = labels.filter((label) => label.startsWith('area-'));
+  const typeLabels = labels.filter((label) => ['bug', 'enhancement', 'documentation'].includes(label));
+  const typed = paired.filter((row) => row.target.labels.some((label) => typeLabels.includes(label)));
+  const slice = (subset, only, pick) => scoreLabels(subset.map((row) => labelsOf(pick(row))), subset.map(truth), only);
+  const unlabeled = paired.filter((row) => labelsOf(row.codex).length === 0);
+  const sliceLine = (name, subset, only) => {
+    const jev = slice(subset, only, (row) => row.jev);
+    const codex = slice(subset, only, (row) => row.codex);
+    return `| ${name} | ${subset.length} | ${pct(codex.precision)} / ${pct(codex.recall)} / ${pct(codex.f1)} | ${pct(jev.precision)} / ${pct(jev.recall)} / ${pct(jev.f1)} |`;
+  };
+  const slices = [
+    sliceLine('Areas only', paired, areas),
+    sliceLine('Type, issues that carry a type label', typed, typeLabels),
+    sliceLine('Every asked label, issues Codex left unlabeled', unlabeled, labels),
+  ];
   const models = [...new Set(rows.map((row) => answers[row.target.number].model))];
   const ms = rows.map((row) => answers[row.target.number].ms).sort((a, b) => a - b);
   const tokens = rows.map((row) => answers[row.target.number].usage?.input_tokens ?? 0);
@@ -234,11 +258,21 @@ Corpus fetched ${corpus.fetchedAt} from ${corpus.repo}: the ${targets.length} ne
 
 ## Method
 
-- Each issue's duplicate candidates are the issues open when it was opened (created earlier, not closed by then), through the same filter the workflow uses: never the issue itself, never an issue it was split out of. Titles and bodies are today's.
+- Each issue's duplicate candidates are the issues open when it was opened (created earlier, not closed by then), through the same filter the workflow uses: never the issue itself, never an issue it was split out of, never an epic. Titles and bodies are today's.
 - The truth is each issue's current labels, limited to the labels intake asks about: ${labels.map((label) => `\`${label}\``).join(', ')}.
-- The Codex baseline is the \`intake.json\` each issue's intake run uploaded (${paired.length} issues). Its labels favour Codex: a person kept or removed what Codex added, and labels an author set at creation count against neither model's recall less than they should.
+- The Codex baseline is the \`intake.json\` each issue's intake run uploaded (${paired.length} issues). The truth leans towards Codex: its labels stayed on the issue unless a person removed one, so it scores near 100% precision by construction, and an issue Codex left unlabeled usually has no type label either, so any type Jev gives it counts as wrong. The slices below take out the parts of that lean that can be taken out.
 - Thresholds: ${Object.entries(THRESHOLDS).map(([key, value]) => `\`${key}\` ${value}`).join(', ')}.
 - Latency: median ${ms[Math.floor(ms.length / 2)]} ms, p95 ${ms[Math.floor(ms.length * 0.95)]} ms. Input tokens: mean ${Math.round(tokens.reduce((a, b) => a + b, 0) / Math.max(tokens.length, 1))}, max ${Math.max(...tokens)}.
+
+## Tuning
+
+The first run asked the issue's full question set at duplicate 0.9, main area 0.5, type 0.5, secondary areas 0.8 and accessibility 0.7. Three changes followed:
+
+- The per-area yes/no questions added 26 wrong area labels for 7 right ones, most of them \`area-docs\`. They are gone: an issue gets one area at most.
+- Jev picked #902, the flaky-test epic, as the duplicate of its child #919 at 0.94. Epics are no longer candidates.
+- Jev picked #958 for #963 at 0.93; #963 is follow-up work that names #958 as the change before it. The duplicate threshold is 0.95, above every pick that was not a duplicate.
+
+A type threshold of 0.8 raised overall F1 by 0.4 points but cut recall on issues that carry a type label from 94.8% to 86.5%, so type stays at 0.5.
 
 ## Label agreement
 
@@ -248,6 +282,12 @@ ${scoreTable(`Jev, the same ${paired.length} issues`, jevPaired, labels)}
 
 ${scoreTable(`Jev, all ${rows.length} issues`, jevAll, labels)}
 
+### Slices (precision / recall / F1)
+
+| Slice | Issues | Codex | Jev |
+| --- | --- | --- | --- |
+${slices.join('\n')}
+
 ### Threshold sweep (Jev, all issues; micro F1 and false positives, one threshold varied at a time)
 
 ${sweepLines.join('\n')}
@@ -255,6 +295,11 @@ ${sweepLines.join('\n')}
 ## Duplicates
 
 Jev closes an issue only when its duplicate pick reaches ${THRESHOLDS.duplicate}. Wrong closes at that threshold: **${wrongCloses.length}**${wrongCloses.length ? ` (${wrongCloses.map((row) => `#${row.target.number}`).join(', ')})` : ''}.
+Codex picked the issue itself on ${selfPicks} of ${paired.length} runs; each of those runs failed in \`apply-intake\` and left the issue unlabeled.
+
+| Pick probability at least | Picks on issues closed as duplicates | Picks on other issues |
+| --- | --- | --- |
+${duplicateSweep.join('\n')}
 
 Rows: every issue closed as a duplicate, every Codex duplicate pick, and every Jev pick at 0.5 or above.
 

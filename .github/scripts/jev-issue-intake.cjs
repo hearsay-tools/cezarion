@@ -23,11 +23,12 @@ const NONE = 'none';
 
 // Probability each answer must reach before it acts. Set from the replay in
 // .ai/analysis/2026-10-16-jev-intake-replay.md; rerun it before changing them.
+// The replay dropped the per-area yes/no questions the issue proposed: they
+// added 26 wrong area labels for 7 right ones.
 const THRESHOLDS = Object.freeze({
-  duplicate: 0.9,
+  duplicate: 0.95,
   mainArea: 0.5,
   type: 0.5,
-  secondaryArea: 0.8,
   accessibility: 0.7,
 });
 
@@ -92,12 +93,6 @@ function buildRequest({ issue, candidates, labels, model = DEFAULT_MODEL }) {
       instructions: 'Which part of the repository does the issue described by `title` and `body` mainly change?',
       criteria: Object.fromEntries([...areas.map((area) => [area.name, area.description]), [NONE, 'None of these parts']]),
     };
-    for (const area of areas) {
-      questions[`area:${area.name}`] = {
-        type: 'noul',
-        instructions: `Does the work in the issue described by \`title\` and \`body\` change this part of the repository: ${area.description}?`,
-      };
-    }
   }
   if (types.length > 0) {
     questions.type = {
@@ -150,16 +145,9 @@ function mapAnswers({ request, response, thresholds = THRESHOLDS }) {
   }
 
   const labels = [];
-  let mainArea = null;
   if (questions.main_area) {
     const main = readChoice(answers, 'main_area', questions.main_area);
-    if (main.choice !== NONE && main.probability >= thresholds.mainArea) {
-      mainArea = main.choice;
-      labels.push(mainArea);
-    }
-    for (const area of Object.keys(questions.main_area.criteria).filter((name) => name !== NONE)) {
-      if (area !== mainArea && readNoul(answers, `area:${area}`) >= thresholds.secondaryArea) labels.push(area);
-    }
+    if (main.choice !== NONE && main.probability >= thresholds.mainArea) labels.push(main.choice);
   }
   if (questions.type) {
     const type = readChoice(answers, 'type', questions.type);

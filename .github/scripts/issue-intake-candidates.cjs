@@ -1,7 +1,8 @@
 'use strict';
 
 // Duplicate candidates for issue intake, built in code so no provider can pick
-// the new issue itself or the issue it was split out of (#1163, #1154). Every
+// the new issue itself, the issue it was split out of (#1163, #1154), or an
+// epic, which tracks child issues and is never their duplicate. Every
 // intake path reads the list this writes; the applicator rebuilds it uncapped
 // as a backstop.
 
@@ -9,6 +10,7 @@ const fs = require('node:fs');
 
 // A Jev Choice takes at most 255 options, and one of them is "none".
 const MAX_CANDIDATES = 254;
+const EPIC = 'epic';
 
 const REF = String.raw`\[?(?:#(\d+)|([\w.-]+\/[\w.-]+)#(\d+)|https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/(\d+))`;
 const SPLIT_OUT = new RegExp(String.raw`\b(?:split|carved)(?:\s+out)?\s+(?:of|from)\s+${REF}`, 'gi');
@@ -48,7 +50,8 @@ function buildCandidates({ issue, openIssues, repo, max = MAX_CANDIDATES }) {
       body: String(other.body ?? ''),
       labels: (other.labels ?? []).map(labelName).filter((name) => typeof name === 'string' && name.length > 0),
       updated_at: other.updated_at ?? null,
-    }));
+    }))
+    .filter((candidate) => !candidate.labels.includes(EPIC));
   if (candidates.length <= max) return candidates;
 
   const keep = new Set(

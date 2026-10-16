@@ -28,9 +28,6 @@ function response(overrides = {}) {
       duplicate: choice('none', 0.97),
       main_area: choice('area-web', 0.8),
       type: choice('bug', 0.9),
-      'area:area-cezar': noul(0.1),
-      'area:area-web': noul(0.95),
-      'area:area-ci': noul(0.1),
       accessibility: noul(0.1),
       ...overrides,
     },
@@ -48,9 +45,7 @@ test('asks one duplicate choice over the candidates plus none, never the new iss
 
 test('asks about areas, type and accessibility only, never the labels other processes set', () => {
   const keys = Object.keys(request.questions).sort();
-  assert.deepEqual(keys, [
-    'accessibility', 'area:area-cezar', 'area:area-ci', 'area:area-web', 'duplicate', 'main_area', 'type',
-  ]);
+  assert.deepEqual(keys, ['accessibility', 'duplicate', 'main_area', 'type']);
   assert.deepEqual(Object.keys(request.questions.main_area.criteria), ['area-cezar', 'area-web', 'area-ci', 'none']);
   assert.deepEqual(Object.keys(request.questions.type.criteria), ['bug', 'enhancement', 'documentation', 'none']);
   const asked = JSON.stringify(request.questions);
@@ -76,28 +71,24 @@ test('a duplicate closes only at or above its threshold, with a templated commen
   assert.equal(below.duplicate_of, null);
 });
 
-test('one main area, one type, and secondary areas only above their own threshold', () => {
-  assert.deepEqual(mapAnswers({ request, response: response() }).labels, ['area-web', 'bug']);
-
-  const secondary = mapAnswers({ request, response: response({
-    'area:area-ci': noul(THRESHOLDS.secondaryArea),
-    'area:area-cezar': noul(THRESHOLDS.secondaryArea - 0.01),
-  }) });
-  assert.deepEqual(secondary.labels, ['area-web', 'area-ci', 'bug']);
-  assert.equal(secondary.labels.filter((label) => ['bug', 'enhancement', 'documentation'].includes(label)).length, 1);
+test('an issue gets at most one area and one type', () => {
+  const result = mapAnswers({ request, response: response() });
+  assert.deepEqual(result.labels, ['area-web', 'bug']);
+  assert.equal(result.labels.filter((label) => label.startsWith('area-')).length, 1);
+  assert.equal(result.labels.filter((label) => ['bug', 'enhancement', 'documentation'].includes(label)).length, 1);
 });
 
 test('main area and type apply at their threshold and not below it', () => {
-  const at = mapAnswers({ request, response: response({ main_area: choice('area-cezar', THRESHOLDS.mainArea), type: choice('enhancement', THRESHOLDS.type), 'area:area-web': noul(0) }) });
+  const at = mapAnswers({ request, response: response({ main_area: choice('area-cezar', THRESHOLDS.mainArea), type: choice('enhancement', THRESHOLDS.type) }) });
   assert.deepEqual(at.labels, ['area-cezar', 'enhancement']);
 
-  const below = mapAnswers({ request, response: response({ main_area: choice('area-cezar', THRESHOLDS.mainArea - 0.01), type: choice('enhancement', THRESHOLDS.type - 0.01), 'area:area-web': noul(0) }) });
+  const below = mapAnswers({ request, response: response({ main_area: choice('area-cezar', THRESHOLDS.mainArea - 0.01), type: choice('enhancement', THRESHOLDS.type - 0.01) }) });
   assert.deepEqual(below, { action: 'skip', duplicate_of: null, comment: null, labels: [] });
 });
 
 test('none answers and accessibility map as asked', () => {
   const result = mapAnswers({ request, response: response({ main_area: choice('none', 0.99), type: choice('none', 0.99), accessibility: noul(THRESHOLDS.accessibility) }) });
-  assert.deepEqual(result.labels, ['area-web', 'accessibility']);
+  assert.deepEqual(result.labels, ['accessibility']);
   const quiet = mapAnswers({ request, response: response({ accessibility: noul(THRESHOLDS.accessibility - 0.01) }) });
   assert.ok(!quiet.labels.includes('accessibility'));
 });
@@ -107,7 +98,7 @@ test('a malformed answer fails instead of guessing', () => {
   assert.throws(() => mapAnswers({ request, response: response({ duplicate: choice('#211', 0.99) }) }), /not offered/);
   assert.throws(() => mapAnswers({ request, response: response({ type: noul(0.5) }) }), /not a choice/);
   assert.throws(() => mapAnswers({ request, response: response({ accessibility: noul(1.5) }) }), /not a probability/);
-  assert.throws(() => mapAnswers({ request, response: response({ 'area:area-ci': undefined }) }), /missing/);
+  assert.throws(() => mapAnswers({ request, response: response({ main_area: undefined }) }), /missing/);
 });
 
 function reply(status, body = {}, headers = {}) {
