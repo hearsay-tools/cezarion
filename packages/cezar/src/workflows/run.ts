@@ -5800,7 +5800,8 @@ export class RunManager {
       try {
         if (record.delegation.destroy) throw new Error('Worker destruction has begun');
         cwd = (await verifyOwnedWorkspace(this.repoRoot, record)).path;
-        await verifyWorkerContext({ dataDir: this.dataDir, parentId: record.delegation.parentRunId, workspace: record.delegation.workspace, context: record.delegation.context });
+        await verifyWorkerContext({ dataDir: this.dataDir, parentId: record.delegation.parentRunId, workspace: record.delegation.workspace, context: record.delegation.context,
+          parentCwd: this.store.getRun(record.delegation.parentRunId)?.worktreePath ?? this.repoRoot });
       } catch (error) {
         const message = `owned workspace unavailable: ${error instanceof Error ? error.message : String(error)}`;
         const finishedAt = new Date().toISOString();
@@ -6609,7 +6610,8 @@ export class RunManager {
       try {
         if (this.workerExecutionStopped(runId)) { this.dropActive(runId); return; }
         const ownedWorkspace = owned && ownedRun ? await ensureOwnedWorkspace(this.repoRoot, ownedRun) : undefined;
-        if (ownedRun?.delegation?.role === 'worker') await verifyWorkerContext({ dataDir: this.dataDir, parentId: ownedRun.delegation.parentRunId, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context });
+        if (ownedRun?.delegation?.role === 'worker') await verifyWorkerContext({ dataDir: this.dataDir, parentId: ownedRun.delegation.parentRunId, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context,
+          parentCwd: this.store.getRun(ownedRun.delegation.parentRunId)?.worktreePath ?? this.repoRoot });
         const wt = ownedWorkspace
           ? { path: ownedWorkspace.path, branch: ownedWorkspace.branch, baseBranch: ownedWorkspace.baselineSha }
           : await createWorktree(this.repoRoot, runId, base);

@@ -505,7 +505,7 @@ export class DelegationService {
       const workspace = await planOwnedWorkspace(project.root, randomUUID(), baselineSha);
       const prepared = request.context === undefined ? undefined : await prepareWorkerContext({
         repoRoot: project.root, dataDir: join(project.root, '.ai/cezar'), parentId: parent.id, workspace,
-        context: request.context, containsSecret: text => project.store.containsSessionSecret(text),
+        parentCwd: settings.cwd, context: request.context, containsSecret: text => project.store.containsSessionSecret(text),
       });
       const context = prepared?.recipe;
       let accepted = false;
