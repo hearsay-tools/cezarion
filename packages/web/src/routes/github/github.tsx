@@ -901,16 +901,22 @@ export function GithubRoute({
         ) : (
           <div ref={setRowsEl} data-slot="gh-rows" data-virtualized={scrollOwner ? 'true' : undefined} role="list">
             {(() => {
-              // `pb-1` on each row keeps the old list's `gap-1`; a virtualizer lays rows out itself.
+              // The item wrapper carries what the old `ul > li` selectors did: a virtualizer puts
+              // its own element around each child, so a sibling selector cannot reach the next row.
               const rendered = items.map((item, index) => (
-                <div key={item.url} role="listitem" className="pb-1">
+                <div
+                  key={item.url}
+                  role="listitem"
+                  data-slot="gh-row-item"
+                  data-divided={index > 0 || undefined}
+                  data-compact-hidden={(compactPreview && index >= 2 && selected?.url !== item.url) || undefined}
+                >
                   <GithubRow
                     item={item}
                     view={view}
                     filter={linkFilter}
                     colors={labelColors}
                     active={selected?.url === item.url}
-                    compactHidden={compactPreview && index >= 2 && selected?.url !== item.url}
                     queued={queued.has(item.url)}
                     checks={item.kind === 'pr' ? checksMap?.[item.number] ?? item.checks : item.checks}
                     comments={commentsOf(item)}
@@ -988,17 +994,18 @@ export function GithubRoute({
             </p>
             <ul className="flex flex-col gap-0.5 px-2 pb-2">
               {searchHits.map((item) => (
-                <GithubRow
-                  key={item.url}
-                  item={item}
-                  view={view}
-                  filter={linkFilter}
-                  colors={labelColors}
-                  active={selected?.url === item.url}
-                  queued={queued.has(item.url)}
-                  checks={item.kind === 'pr' ? checksMap?.[item.number] ?? item.checks : item.checks}
-                  comments={commentsOf(item)}
-                />
+                <li key={item.url}>
+                  <GithubRow
+                    item={item}
+                    view={view}
+                    filter={linkFilter}
+                    colors={labelColors}
+                    active={selected?.url === item.url}
+                    queued={queued.has(item.url)}
+                    checks={item.kind === 'pr' ? checksMap?.[item.number] ?? item.checks : item.checks}
+                    comments={commentsOf(item)}
+                  />
+                </li>
               ))}
             </ul>
           </div>
@@ -1107,7 +1114,6 @@ function GithubRow({
   filter,
   colors,
   active,
-  compactHidden,
   queued,
   checks,
   comments,
@@ -1118,7 +1124,6 @@ function GithubRow({
   filter: GithubFilter | null
   colors: Record<string, string>
   active: boolean
-  compactHidden?: boolean
   queued: boolean
   /** Resolved checks glyph — the lazily-hydrated value overrides the list's `null` (#664). */
   checks?: GithubItem['checks']
@@ -1150,53 +1155,51 @@ function GithubRow({
   }
 
   return (
-    <li data-compact-hidden={compactHidden || undefined}>
-      <Link
-        to={githubFilterPath(view, filter, item.number)}
-        draggable
-        onDragStart={onDragStart}
-        onMouseEnter={prefetchThread}
-        onFocus={prefetchThread}
-        data-slot="gh-row"
-        data-number={item.number}
-        data-kind={item.kind}
-        aria-current={active ? 'page' : undefined}
-        title="Drag into the composer to prefill a task"
-        className={cn(
-          'flex flex-col gap-2 rounded-md px-3 py-4 transition-colors hover:bg-muted',
-          active && 'bg-accent-strong/10 text-accent-text',
-        )}
-      >
-        <span className="flex min-w-0 items-start gap-2 md:items-center">
-          <Icon
-            aria-hidden="true"
-            className={cn('mt-0.5 size-3.5 shrink-0 md:mt-0', item.kind === 'issue' ? 'text-success' : 'text-accent-icon')}
-          />
-          <span className={cn('line-clamp-2 min-w-0 text-[13px] font-medium md:block md:truncate', active && 'font-semibold')}>
-            {item.title}
-          </span>
+    <Link
+      to={githubFilterPath(view, filter, item.number)}
+      draggable
+      onDragStart={onDragStart}
+      onMouseEnter={prefetchThread}
+      onFocus={prefetchThread}
+      data-slot="gh-row"
+      data-number={item.number}
+      data-kind={item.kind}
+      aria-current={active ? 'page' : undefined}
+      title="Drag into the composer to prefill a task"
+      className={cn(
+        'flex flex-col gap-2 rounded-md px-3 py-4 transition-colors hover:bg-muted',
+        active && 'bg-accent-strong/10 text-accent-text',
+      )}
+    >
+      <span className="flex min-w-0 items-start gap-2 md:items-center">
+        <Icon
+          aria-hidden="true"
+          className={cn('mt-0.5 size-3.5 shrink-0 md:mt-0', item.kind === 'issue' ? 'text-success' : 'text-accent-icon')}
+        />
+        <span className={cn('line-clamp-2 min-w-0 text-[13px] font-medium md:block md:truncate', active && 'font-semibold')}>
+          {item.title}
         </span>
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-[22px] font-mono text-[11px] text-muted-foreground md:flex-nowrap md:gap-y-0">
-          <span>#{item.number}</span>
-          <span className="max-w-full shrink-0 truncate md:min-w-0 md:shrink">{item.author}</span>
-          <span>{shortAge(item.createdAt)}</span>
-          <CommentCount count={comments} />
-          {checks ? <ChecksGlyph checks={checks} /> : null}
-          {queued ? (
-            <span data-slot="gh-queued-flag" className="font-sans font-medium text-accent-text">
-              ↗ run queued
-            </span>
-          ) : null}
-        </span>
-        {item.labels.length > 0 ? (
-          <span data-slot="gh-row-labels" className="flex flex-wrap gap-1 pl-[22px]">
-            {item.labels.map((label) => (
-              <LabelChip key={label} label={label} color={colors[label]} plain />
-            ))}
+      </span>
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-[22px] font-mono text-[11px] text-muted-foreground md:flex-nowrap md:gap-y-0">
+        <span>#{item.number}</span>
+        <span className="max-w-full shrink-0 truncate md:min-w-0 md:shrink">{item.author}</span>
+        <span>{shortAge(item.createdAt)}</span>
+        <CommentCount count={comments} />
+        {checks ? <ChecksGlyph checks={checks} /> : null}
+        {queued ? (
+          <span data-slot="gh-queued-flag" className="font-sans font-medium text-accent-text">
+            ↗ run queued
           </span>
         ) : null}
-      </Link>
-    </li>
+      </span>
+      {item.labels.length > 0 ? (
+        <span data-slot="gh-row-labels" className="flex flex-wrap gap-1 pl-[22px]">
+          {item.labels.map((label) => (
+            <LabelChip key={label} label={label} color={colors[label]} plain />
+          ))}
+        </span>
+      ) : null}
+    </Link>
   )
 }
 

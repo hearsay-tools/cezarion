@@ -1611,6 +1611,12 @@ describe('GitHub handoff field chrome (#243)', () => {
   if (!cssPath) throw new Error(`github-layout.css not found from ${process.cwd()}`)
   const css = readFileSync(cssPath, 'utf8')
 
+  it('styles row dividers and the phone preview on the row item, which survives virtualization (#1183)', () => {
+    expect(css).toMatch(/\[data-slot='gh-row-item'\]\[data-divided\]\s*\{\s*border-block-start:/)
+    expect(css).toMatch(/\[data-mobile-preview\] \[data-slot='gh-row-item'\]\[data-compact-hidden\]\s*\{\s*display:\s*none/)
+    expect(css).not.toMatch(/\[data-slot='gh-rows'\] > li/)
+  })
+
   it('keeps phone filters wrapping instead of stacking a column that hides the first row (#325)', () => {
     expect(css).not.toMatch(/\[data-slot='gh-issue-filters'\]\s*\{[^}]*flex-direction:\s*column/)
     expect(css).not.toMatch(/\[data-slot='gh-filter-toolbar'\]\s*\{[^}]*flex-direction:\s*column/)
@@ -3757,7 +3763,7 @@ it('keeps passing checks with unknown requirements blocked', async () => {
 
 
 const compactHiddenFlags = () =>
-  rows().map((row) => row.closest('li')?.hasAttribute('data-compact-hidden') ?? false)
+  rows().map((row) => row.closest('[data-slot="gh-row-item"]')?.hasAttribute('data-compact-hidden') ?? false)
 
 it('hides phone-list rows past the second unless that row is the open detail (#344)', async () => {
   const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
@@ -3774,6 +3780,19 @@ it('keeps the selected phone-list row when it sits past the second (#344)', asyn
   await screen.findByRole('button', { name: 'View all 3 issues' })
   expect(compactHiddenFlags()).toEqual([false, false, false])
   expect(rows()[2]?.getAttribute('aria-current')).toBe('page')
+})
+
+it('wraps each list row in one item that carries the divider and the phone-preview flag (#1183)', async () => {
+  const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
+  stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
+  renderAt('/github/issues/142')
+  await screen.findByRole('button', { name: 'View all 3 issues' })
+  const items = rows().map((row) => row.closest('[data-slot="gh-row-item"]'))
+  // The virtualizer wraps every child in its own element, so `ul > li` and `li + li` no longer
+  // reach the rows: the item itself says whether it draws a divider or hides on a phone.
+  expect(items.map((item) => item?.getAttribute('role'))).toEqual(['listitem', 'listitem', 'listitem'])
+  expect(items.map((item) => item?.hasAttribute('data-divided'))).toEqual([false, true, true])
+  expect(document.querySelectorAll('[data-slot="gh-rows"] li')).toHaveLength(0)
 })
 
 it('lets a mobile detail preview reveal every issue without losing its selected item', async () => {
