@@ -37,7 +37,8 @@ The existing tool-error fix belongs to hearsay-tools/cezarion#1114.
 branches of class helpers and templates. It follows card-2 ancestors, inherited
 ink and font sizes, and known tool/hook body slots. An opaque separate background ends inheritance; transparent and translucent
 backgrounds retain it conservatively. Literal size/background branches are checked
-conservatively, and JSX-only expressions are visited as elements rather than wrapper text. Unknown font sizes are treated conservatively as
+conservatively, including empty/absent class branches. Expansion is capped at 128
+combinations with a conservative fallback. JSX-only expressions are visited as elements rather than wrapper text. Unknown font sizes are treated conservatively as
 small. Icons without text and explicitly large text are excluded.
 
 This is a static guard, not a computed-style audit: runtime-generated classes,

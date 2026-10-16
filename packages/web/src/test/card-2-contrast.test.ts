@@ -19,6 +19,32 @@ function eachChild(node: Node, visit: (node: Node) => void): void {
   }
 }
 
+/** Preserve empty alternatives: a missing size/background keeps the inherited default.
+ * Bound expansion; overflow collapses to a conservative union with a small size. */
+function classBranches(node: Node | null | undefined): string[] {
+  if (!node) return ['']
+  const combine = (groups: string[][], separator = ' '): string[] => groups.reduce((left, right) => {
+    if (left.length * right.length > 128) return [[...left, ...right, 'text-xs'].join(' ')]
+    return [...new Set(left.flatMap(a => right.map(b => a + separator + b)))]
+  }, [''])
+  switch (node.type) {
+    case 'StringLiteral': return [node.value]
+    case 'JSXExpressionContainer': case 'TSAsExpression': case 'TSSatisfiesExpression':
+    case 'TSNonNullExpression': return classBranches(node.expression)
+    case 'SpreadElement': return classBranches(node.argument)
+    case 'ConditionalExpression': return [...classBranches(node.consequent), ...classBranches(node.alternate)]
+    case 'LogicalExpression': return ['', ...classBranches(node.left), ...classBranches(node.right)]
+    case 'CallExpression': return combine(node.arguments.map(classBranches))
+    case 'ArrayExpression': return combine(node.elements.map(classBranches))
+    case 'TemplateLiteral': return combine(node.quasis.flatMap((q, i) => i < node.expressions.length
+      ? [[q.value.raw], classBranches(node.expressions[i])] : [[q.value.raw]]), '')
+    case 'ObjectExpression': return combine(node.properties.map(p => p.type === 'ObjectProperty' && !p.computed
+      ? ['', p.key.type === 'StringLiteral' ? p.key.value : p.key.type === 'Identifier' ? p.key.name : '']
+      : ['']))
+    default: return [''] // arbitrary runtime values still require rendered checks
+  }
+}
+
 /** Only a falsy number (0/NaN) survives React's && short circuit as visible text. */
 function mayRenderFalsyNumber(node: Node): boolean {
   switch (node.type) {
@@ -58,22 +84,27 @@ function scan(source: string): string[] {
         eachChild(n, c => { result.push(...strings(c)) })
         return result
       }
-      const classes = strings(attr('className')?.value).join(' ').split(/\s+/)
       const slot = strings(attr('data-slot')?.value)[0]
-      const backgrounds = classes.filter(c => /^bg-(?!gradient)/.test(c))
       const bodySlot = ['tool-error', 'tool-command', 'hook-entry', 'hook-source', 'hook-raw-toggle', 'hook-stdout', 'hook-stderr'].includes(slot ?? '')
-      const inheritsSurface = backgrounds.length === 0 || backgrounds.some(c => c === 'bg-transparent' || c.includes('/'))
-      const onCard = backgrounds.includes('bg-card-2') || inheritsSurface && (card || bodySlot)
-      const ownColors = classes.filter(c => /^text-(?:danger|soft-foreground|muted-foreground|supporting-foreground|link-foreground|foreground|signal-word-red)$/.test(c))
-      const colors = ownColors.length ? ownColors : [color]
-      const sizes = classes.filter(c => /^text-(?:xs|sm|base|lg|xl|\d?xl|\[\d+(?:\.\d+)?px\])$/.test(c))
-      const large = sizes.length ? sizes.every(s => /^(?:text-[2-9]xl|text-\[(?:2[4-9]|[3-9]\d)px\])$/.test(s)) : inheritedLarge
+      const states = classBranches(attr('className')?.value).map(branch => {
+        const classes = branch.split(/\s+/)
+        const backgrounds = classes.filter(c => /^bg-(?!gradient)/.test(c))
+        const inheritsSurface = backgrounds.length === 0 || backgrounds.some(c => c === 'bg-transparent' || c.includes('/'))
+        const onCard = backgrounds.includes('bg-card-2') || inheritsSurface && (card || bodySlot)
+        const ownColors = classes.filter(c => /^text-(?:danger|soft-foreground|muted-foreground|supporting-foreground|link-foreground|foreground|signal-word-red)$/.test(c))
+        const colors = ownColors.length ? ownColors : [color]
+        const sizes = classes.filter(c => /^text-(?:xs|sm|base|lg|xl|\d?xl|\[\d+(?:\.\d+)?px\])$/.test(c))
+        const large = sizes.length ? sizes.every(s => /^(?:text-[2-9]xl|text-\[(?:2[4-9]|[3-9]\d)px\])$/.test(s)) : inheritedLarge
+        return { onCard, colors, large }
+      })
+      const unsafe = (ink: string) => ink === 'text-danger' || ink === 'text-soft-foreground'
       const children = node.children
-      const hasText = children.some(rendersText)
-      if (onCard && !large && hasText && colors.some(c => c === 'text-danger' || c === 'text-soft-foreground')) {
+      if (children.some(rendersText) && states.some(s => s.onCard && !s.large && s.colors.some(unsafe))) {
         sites.push(source.slice(opening.start ?? 0, opening.end ?? 0).replace(/\s+/g, ' '))
       }
-      for (const child of children) visit(child, onCard, colors.find(c => c === 'text-danger' || c === 'text-soft-foreground') ?? colors[0] ?? '', large)
+      // Descendants conservatively inherit any unsafe alternative across a class branch.
+      const inks = states.flatMap(s => s.colors)
+      for (const child of children) visit(child, states.some(s => s.onCard), inks.find(unsafe) ?? inks[0] ?? '', states.every(s => s.large))
       return
     }
     eachChild(node, child => visit(child, card, color, inheritedLarge))
@@ -110,6 +141,16 @@ it('checks numeric falsy text rendered by logical guards', () => {
   expect(scan(`<div className="bg-card-2 text-danger text-xs">{0 && <span className="text-muted-foreground">safe</span>}</div>`)).toHaveLength(1)
   expect(scan(`<div className="bg-card-2 text-danger text-xs">{count && <span className="text-muted-foreground">safe</span>}</div>`)).toHaveLength(1)
   expect(scan(`<div className="bg-card-2 text-danger text-xs">{count > 0 && <span className="text-muted-foreground">safe</span>}{!!count && <span className="text-foreground">safe</span>}</div>`)).toEqual([])
+})
+it('retains inherited defaults in absent class branches', () => {
+  expect(scan(`<p className={cn('bg-card-2 text-danger', big ? 'text-2xl' : '')}>bad</p>`)).toHaveLength(1)
+  expect(scan(`<div className="bg-card-2"><p className={cn('text-danger text-xs', other ? 'bg-background' : '')}>bad</p></div>`)).toHaveLength(1)
+  expect(scan(`<p className={cn('bg-card-2 text-danger', big && 'text-2xl')}>bad</p>`)).toHaveLength(1)
+})
+it('reads literal helper arrays, object keys, templates and type wrappers', () => {
+  expect(scan(`<p className={cn(...(['bg-card-2', 'text-danger', 'text-xs'] as const))}>bad</p>`)).toHaveLength(1)
+  expect(scan(`<p className={cn('bg-card-2 text-xs', {'text-danger': bad})}>bad</p>`)).toHaveLength(1)
+  expect(scan('<p className={`bg-card-2 text-danger text-${big ? "2xl" : "xs"}`}>bad</p>')).toHaveLength(1)
 })
 it('does not allow the card-2 small-text baseline to grow or retain fixed instances', () => {
   function walk(dir: string): string[] {
