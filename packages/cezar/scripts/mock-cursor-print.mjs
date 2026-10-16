@@ -88,6 +88,11 @@ if (process.env.CEZ_MOCK_STDIN_FILE && stdinPrompt) {
     `${JSON.stringify({ method: 'cursor-print/stdin', prompt: stdinPrompt })}\n`);
 }
 if (mode === 'delay-init') await new Promise(resolve => setTimeout(resolve, 10_000));
+// Reproduce a loaded host's per-process startup cost on every turn: Cursor print
+// spawns one process per turn, so a cap row pays it MAX_AUTO_CONTINUES + 1 times
+// (hearsay-tools/cezarion#1125).
+const spawnDelayMs = Number.parseInt(process.env.CEZ_MOCK_CURSOR_SPAWN_DELAY_MS ?? '0', 10) || 0;
+if (spawnDelayMs > 0) await new Promise(resolve => setTimeout(resolve, spawnDelayMs));
 const attempt = log ? readFileSync(log, 'utf8').trim().split('\n').length : 1;
 const rejectModel = () => process.stderr.write(`Cannot use this model: ${flag('--model')}. Available models: ${'other-model, '.repeat(1000)}\n`);
 if (mode === 'model-rejection-always' || (mode === 'model-rejection-once' && attempt === 1) ||
