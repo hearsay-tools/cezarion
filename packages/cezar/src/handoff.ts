@@ -4,8 +4,9 @@ import { dirname, join } from 'node:path';
 /**
  * Per-task handoff journal (spec 007): `.ai/cezar/runs/<runId>.handoff.md`,
  * next to the run's NDJSON events and outside the task worktree — it survives
- * worktree removal. Cez seeds the skeleton and appends heartbeats; the agent
- * (told via CEZ_HANDOFF_FILE + the system-prompt fragment below) keeps the
+ * worktree removal. Cez seeds the skeleton, appends heartbeats and owns the
+ * `## Autosave (cezar)` section (hearsay-tools/cezarion#1004); the agent (told
+ * via CEZ_HANDOFF_FILE + the system-prompt fragment below) keeps the
  * "Progress log" and "Resume notes" sections up to date. Everything here is
  * best-effort: the handoff is a journal, never a reason to fail a run.
  */
@@ -74,6 +75,118 @@ export function appendHandoffHeartbeat(dataDir: string, runId: string, note: str
   }
 }
 
+const AUTOSAVE_HEADER = '## Autosave (cezar)\n';
+
+/** Index of `marker` at the start of a line, or -1. */
+function lineStart(text: string, marker: string): number {
+  if (text.startsWith(marker)) return 0;
+  const idx = text.indexOf(`\n${marker}`);
+  return idx < 0 ? -1 : idx + 1;
+}
+
+/**
+ * Put `- <ISO ts> — <note>` on top of the `## Autosave (cezar)` section, the one
+ * placement every autosave report shares. `entry` sees the newest line under the
+ * header (`undefined` when there is none) and names the note, and whether it
+ * replaces that line instead of going above it.
+ */
+function writeAutosaveSection(
+  dataDir: string,
+  runId: string,
+  entry: (newest: string | undefined) => { note: string; replace: boolean },
+): void {
+  const file = handoffPath(dataDir, runId);
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch {
+    return; // not seeded — nothing to report into
+  }
+  const lineFor = (note: string) => `- ${new Date().toISOString()} — ${note}\n`;
+  const header = lineStart(text, AUTOSAVE_HEADER);
+  const progress = lineStart(text, '## Progress log\n');
+  let next: string;
+  if (header >= 0) {
+    const end = header + AUTOSAVE_HEADER.length;
+    const rest = text.slice(end).replace(/^\n+/, '');
+    const eol = rest.indexOf('\n');
+    const first = eol < 0 ? rest : rest.slice(0, eol);
+    const newest = first.startsWith('- ') ? first : undefined;
+    const { note, replace } = entry(newest);
+    const kept = replace && newest !== undefined ? rest.slice(first.length + 1) : rest;
+    next = `${text.slice(0, end)}\n${lineFor(note)}${kept}`;
+  } else {
+    const line = lineFor(entry(undefined).note);
+    next = progress >= 0
+      ? `${text.slice(0, progress)}${AUTOSAVE_HEADER}\n${line}\n${text.slice(progress)}`
+      : `${text === '' ? '' : text.replace(/\n*$/, '\n\n')}${AUTOSAVE_HEADER}\n${line}`;
+  }
+  try {
+    writeFileSync(file, next, 'utf8');
+  } catch {
+    // best effort
+  }
+}
+
+/**
+ * Cez's autosave report (hearsay-tools/cezarion#1004): insert `- <ISO ts> — <note>`
+ * right under the `## Autosave (cezar)` header (newest at the top), never in the
+ * Progress log, whose top lines are the agent's own summary (variant compare
+ * column, draft-PR body). The first report creates the section right before
+ * `## Progress log`, so an agent rewriting the end of the file (Resume notes)
+ * leaves it alone; no Progress log → end of the file; missing file → no-op.
+ */
+export function appendHandoffAutosaveReport(dataDir: string, runId: string, note: string): void {
+  writeAutosaveSection(dataDir, runId, () => ({ note, replace: false }));
+}
+
+const SHA_UNAVAILABLE = '(sha unavailable)';
+const PERIODIC_SHA = String.raw`[0-9a-f]+|\(sha unavailable\)`;
+/** A whole periodic line as `periodicAutosaveNote` writes it; anything else is not one.
+ *  The branch slot takes anything but a line break: Git accepts Unicode whitespace in a ref
+ *  name, which `\S` and `.` refuse, and the exact re-render check rejects any line that is
+ *  not cezar's own. */
+const PERIODIC_LINE = new RegExp(
+  String.raw`^- \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z — (periodic: ([1-9]\d*) cezar autosave commit\(s\) on ([^\r\n]+?), ` +
+    String.raw`first (${PERIODIC_SHA}), latest (${PERIODIC_SHA}); .*)$`,
+);
+
+function periodicAutosaveNote(count: number, branch: string, first: string | null, latest: string | null): string {
+  return `periodic: ${count} cezar autosave commit(s) on ${branch}, first ${first ?? SHA_UNAVAILABLE}, latest ${latest ?? SHA_UNAVAILABLE}; ` +
+    `to fold the latest into your own commits while it is HEAD, run \`git reset --soft ${latest ?? 'HEAD'}~1\``;
+}
+
+/**
+ * The periodic timer's commit (hearsay-tools/cezarion#1004): a clean closing flush
+ * reports nothing, so the timer reports its own commits, as ONE line per run of
+ * consecutive periodic commits on one branch — a line every 90 s would bury the
+ * section. When the newest line is such a line for `branch`, it is rewritten with
+ * the count + 1, its first sha, this `sha` as the latest and a new timestamp. Any
+ * other newest line (a turn-end or run-finalize report, another branch, a line
+ * someone edited) gets a new line above it, placed as `appendHandoffAutosaveReport`
+ * places one. `sha: null` is a commit whose hash could not be read back; `branch:
+ * null` is a detached HEAD. Missing file → no-op.
+ */
+export function recordHandoffPeriodicAutosave(
+  dataDir: string,
+  runId: string,
+  commit: { sha: string | null; branch: string | null },
+): void {
+  const branch = commit.branch ?? 'detached HEAD';
+  writeAutosaveSection(dataDir, runId, (newest) => {
+    const match = newest === undefined ? null : PERIODIC_LINE.exec(newest);
+    if (match) {
+      const [, note, count, lineBranch, first, latest] = match;
+      const sha = (value: string) => (value === SHA_UNAVAILABLE ? null : value);
+      // Only a line exactly as cezar wrote it is continued: an edit starts a new one.
+      if (lineBranch === branch && note === periodicAutosaveNote(Number(count), branch, sha(first!), sha(latest!))) {
+        return { note: periodicAutosaveNote(Number(count) + 1, branch, sha(first!), commit.sha), replace: true };
+      }
+    }
+    return { note: periodicAutosaveNote(1, branch, commit.sha, commit.sha), replace: false };
+  });
+}
+
 /** Full handoff markdown, or '' when the file doesn't exist (yet). */
 export function readHandoff(dataDir: string, runId: string): string {
   try {
@@ -139,7 +252,7 @@ export function followupsEnabled(env: NodeJS.ProcessEnv = process.env): boolean 
 export const HANDOFF_ONLY_INSTRUCTIONS = `## Handoff (cezar)
 
 CEZ_HANDOFF_FILE (env) is the absolute path to this task's rolling handoff file. Treat it like a HANDOFF.md:
-1. At the start of work, read it — "Resume notes" left by a previous session is your starting context.
+1. At the start of work, read it — "Resume notes" left by a previous session is your starting context. A "## Autosave (cezar)" section, when present, is cezar's record of an autosave commit on your branch (with the command that folds it back) or of work it left uncommitted; leave it in place.
 2. After every meaningful milestone (passing tests, a commit, a PR, a scope decision), append one terse timestamped line under "## Progress log", newest at the top.
 3. Before finishing or pausing, update "## Resume notes" with what's done, what's next and any blockers. Leave it empty only when the task is truly complete.
 
