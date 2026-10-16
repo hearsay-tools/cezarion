@@ -1227,8 +1227,9 @@ not close, park, or nudge. Every runner releases a held human input by one rule
 - (a) the normalized `turn.started` of the turn that carries it has been emitted;
 - (b) it is read inside an open normalized turn; or
 - (c) a rejection or a close means it can never start, or a `discardQueuedMessages`
-  drops a queued input. On a wire that already wrote or spawned the input, discard
-  drops only the hold and the input can still run (see the H2 exemptions).
+  drops it. A discard cannot retract an input the wire already wrote or spawned: the
+  runner then either drops only the hold, and the input can still run, or keeps the
+  hold because its discard is a no-op (see the H2 exemptions).
 
 Close releases because run.ts reads the hold only while the session is `open`
 (`harnessHoldsHumanInput` and the recheck timer both check `session.open` first), so
@@ -1245,10 +1246,11 @@ maps these exits to its own wire:
   model call runs as the CLI's next turn; while that turn is pending, cezar emits its
   `turn.started` on the first assistant, user or result frame, before it processes the
   replay echo. A `result` that settles lines through `queued_turn_count` alone is not
-  a release.
+  a release. `discardQueuedMessages` is a no-op on this wire, so it is not an exit.
 - **Codex**: (a) `turn/started` after the human `turn/start`, or the `turn/start`
   response when `turn/started` came first. (b) the `item/started` `userMessage` echo
-  of a steer's `clientUserMessageId`. (c) a `turn/start` or `turn/steer` error. A
+  of a steer's `clientUserMessageId`. (c) a `turn/start` or `turn/steer` error;
+  `discardQueuedMessages` is a no-op on this wire, so it is not an exit. A
   `turn/steer` response is admission, not a release.
 - **OpenCode**: (a) the `turn.started` cezar emits at the follow-up's `prompt_async`
   POST, once the running turn ends. (c) `discardQueuedMessages`. A follow-up sent
