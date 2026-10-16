@@ -14,6 +14,17 @@ const owned = (script: string) => {
   children.push(child)
   return child
 }
+// The child's first output, or its exit: a child that dies before printing must fail here with
+// its exit status, not hang until the test's timeout.
+const firstOutput = (child: ChildProcess) => new Promise<void>((resolve, reject) => {
+  const onData = () => { child.off('exit', onExit); resolve() }
+  const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+    child.stdout!.off('data', onData)
+    reject(new Error(`fixture child exited before its first output (code=${code} signal=${signal})`))
+  }
+  child.stdout!.once('data', onData)
+  child.once('exit', onExit)
+})
 const serverScript = ({ announcement = '', status = 200, chunked = false, bodyDelay = 0, headerDelay = 0, stderr = '' } = {}) => `
   const http = require('node:http');
   const server = http.createServer((req, res) => {
@@ -205,7 +216,7 @@ describe('owned fixture server readiness (#795)', () => {
   it('charges earlier setup time to the original spawn-to-health deadline', async () => {
     const child = spawnFixtureServer(['-e', "setTimeout(() => console.log('setup checkpoint'), 350); setInterval(() => {}, 1000)"], { env: process.env }, { timeoutMs: 600 })
     children.push(child)
-    await once(child.stdout!, 'data')
+    await firstOutput(child)
     const started = Date.now()
     await expect(waitForFixtureServer(child)).rejects.toThrow('awaiting listener announcement')
     expect(Date.now() - started).toBeLessThan(400)
@@ -236,6 +247,10 @@ describe('owned fixture server readiness (#795)', () => {
 
   it('keeps the health request within the same deadline and aborts late headers', async () => {
     const child = owned(serverScript({ headerDelay: 2_000 }))
+    // hearsay-tools/cezarion#1102: start the deadline once the child has announced its listener,
+    // so it bounds only the health request; from spawn it also covered Node's startup, which
+    // under load outlasted 900 ms and failed in `awaiting listener announcement` instead.
+    await firstOutput(child)
     const started = Date.now()
     await expect(waitForFixtureServer(child, { deadline: Date.now() + 900 })).rejects.toThrow('health')
     expect(Date.now() - started).toBeLessThan(1_500)
@@ -273,7 +288,7 @@ describe('owned fixture server readiness (#795)', () => {
 
   it('reports an unhealthy owned listener, retries within its existing budget, and stops only its child', async () => {
     const child = owned(serverScript({ status: 503 }))
-    await once(child.stdout!, 'data')
+    await firstOutput(child)
     await expect(waitForFixtureServer(child, { deadline: Date.now() + 900 })).rejects.toThrow('answered 503')
     expect(child.exitCode !== null || child.signalCode !== null).toBe(true)
   })
@@ -281,7 +296,7 @@ describe('owned fixture server readiness (#795)', () => {
   it.each([500, 503])('retains the received HTTP %s when a later health probe times out', async status => {
     const child = owned(serverScript({ status }))
     // Arrange the owned listener, not an unrelated endpoint or a guessed port.
-    await once(child.stdout!, 'data')
+    await firstOutput(child)
     let now = Date.now()
     const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
     const nativeFetch = globalThis.fetch
