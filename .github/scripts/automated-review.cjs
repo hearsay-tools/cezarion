@@ -96,12 +96,12 @@ function changedLinesFromFiles(files) {
   return changed;
 }
 const REVIEW_ROUND_MARKER = '<!-- cez-review-round -->';
-// A round is a submitted bot review with a non-empty body: each verdict reply
-// arrives wrapped in its own review whose body is exactly '' and never counts.
-// postReview stamps REVIEW_ROUND_MARKER on every round, so a findings-only round
-// without a patch id is never empty. Older unmarked rounds (dispatch, failed
-// patch-id) count through their summary. The review-round step's review_count
-// jq filter applies the same rule; neither trims, so the engines cannot disagree.
+// A round is a submitted bot review with a non-empty string body: each verdict
+// reply arrives wrapped in its own review whose body is exactly '' and never
+// counts. postReview stamps REVIEW_ROUND_MARKER on every round, so a findings-only
+// round without a patch id is never empty. Older unmarked rounds (dispatch, failed
+// patch-id) count through their summary. The review-round step's review_count jq
+// filter applies the same rule: both check the type and neither trims.
 function isAutomatedReviewRound(review, author = 'github-actions[bot]') {
   return review?.user?.login === author && review?.submitted_at != null && typeof review.body === 'string' && review.body !== '';
 }
