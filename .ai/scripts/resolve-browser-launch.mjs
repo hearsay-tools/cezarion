@@ -38,19 +38,29 @@ export function isContainerHost(host = {}) {
   return false;
 }
 
+// Whether Chrome's SingletonSocket under this env's temp dir would overflow
+// sun_path. Each process that launches Chrome asks it about its OWN env: the
+// answer test-env-up.sh saved belongs to whoever booted the shared env
+// (hearsay-tools/cezarion#1090).
+export function tmpdirExceedsSocketBudget(env = process.env, platform = process.platform, unixSocketMax) {
+  if (platform === 'win32') return false;
+  const tmp = env.TMPDIR || env.TMP || env.TEMP || '';
+  if (!tmp) return false;
+  const max = unixSocketMax ?? (platform === 'darwin' ? DARWIN_UNIX_SOCKET_MAX : UNIX_SOCKET_MAX);
+  return Buffer.byteLength(tmp) + CHROME_SINGLETON_OVERHEAD > max;
+}
+
 export function resolveBrowserLaunch(input = {}) {
   const env = input.env ?? process.env;
   const platform = input.platform ?? process.platform;
   const host = input.host ?? readHostSignals();
-  const unixSocketMax = input.unixSocketMax ?? (platform === 'darwin' ? DARWIN_UNIX_SOCKET_MAX : UNIX_SOCKET_MAX);
   const fallbackTmp = input.fallbackTmp ?? (
     platform === 'win32' ? (env.TEMP || env.TMP || env.TMPDIR || 'C:\\Windows\\Temp') : '/tmp'
   );
   const inContainer = isContainerHost(host);
   const launchArgs = inContainer ? ['--no-sandbox'] : [];
-  const currentTmp = env.TMPDIR || env.TMP || env.TEMP || '';
   const runtimeEnv = {};
-  if (platform !== 'win32' && currentTmp && Buffer.byteLength(currentTmp) + CHROME_SINGLETON_OVERHEAD > unixSocketMax) {
+  if (tmpdirExceedsSocketBudget(env, platform, input.unixSocketMax)) {
     runtimeEnv.TMPDIR = fallbackTmp;
     runtimeEnv.TMP = fallbackTmp;
     runtimeEnv.TEMP = fallbackTmp;
