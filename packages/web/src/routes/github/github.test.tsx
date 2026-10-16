@@ -1490,8 +1490,22 @@ describe('the comment thread', () => {
     await waitFor(() => expect(answer).toBeTypeOf('function'))
     expect(document.querySelector('[data-slot="gh-comment-count"]')).toBeNull()
     await act(async () => { answer(jsonResponse({ available: true, counts: { 142: 3, 139: 0 } })) })
-    await waitFor(() => expect(document.querySelector('[data-slot="gh-comment-count"]')?.getAttribute('data-count')).toBe('3'))
-    expect(document.querySelectorAll('[data-slot="gh-comment-count"]')).toHaveLength(1)
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-row"] [data-slot="gh-comment-count"]')?.getAttribute('data-count')).toBe('3'))
+    // Rows only: the previewed detail shows the same hydrated count in its own meta line.
+    expect(document.querySelectorAll('[data-slot="gh-row"] [data-slot="gh-comment-count"]')).toHaveLength(1)
+  })
+
+  it('the open detail shows the hydrated comment count, not the deferred placeholder', async () => {
+    stubFetch({
+      'GET /api/v1/github?limit=50': () => jsonResponse({
+        ...GITHUB, issues: [{ ...ISSUE_142, comments: 0 }, { ...ISSUE_139, comments: 0 }], commentsDeferred: true,
+      }),
+      'GET /api/v1/github/comment-counts?kind=issue&numbers=142%2C139': () => jsonResponse({ available: true, counts: { 142: 4, 139: 0 } }),
+    })
+    renderAt('/github/issues/142')
+    await waitFor(() => expect(
+      document.querySelector('[data-slot="gh-meta"] [data-slot="gh-comment-count"]')?.getAttribute('data-count'),
+    ).toBe('4'))
   })
 
   it('Refresh collapses to a fresh first page', async () => {

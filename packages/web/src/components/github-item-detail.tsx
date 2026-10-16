@@ -59,6 +59,7 @@ export function GithubItemDetail({
   item,
   colors,
   checks,
+  comments,
   backLink,
   subNav,
   onRunAgent,
@@ -69,6 +70,9 @@ export function GithubItemDetail({
   colors: Record<string, string>
   /** Resolved checks glyph — the lazily-hydrated value overrides the list's `null` (#664). */
   checks?: GithubItem['checks']
+  /** Resolved comment count — the hydrated value overrides a deferred list row's placeholder
+   *  `0` (hearsay-tools/cezarion#1183). */
+  comments?: number
   /** The phone-only "Back to the list" target; `null` renders no back link. */
   backLink: { to: string } | null
   /** The PR Conversation/Changes tabs, keeping the list's `?filter=`; `null` renders a
@@ -91,6 +95,7 @@ export function GithubItemDetail({
   const additions = detail?.additions ?? item.additions
   const deletions = detail?.deletions ?? item.deletions
   const hasDiffStat = item.kind === 'pr' && Boolean(additions || deletions)
+  const commentCount = comments ?? item.comments
   return (
     <article data-slot="gh-detail-inner" className="min-w-0 px-4 py-4 md:px-7 md:py-5">
       {backLink ? (
@@ -109,9 +114,9 @@ export function GithubItemDetail({
       <p data-slot="gh-meta" className="flex flex-wrap items-center gap-x-1.5 font-mono text-[11px] text-soft-foreground">
         <span>#{item.number}</span>·<span>{kindWord}</span>·<span>opened by {item.author}</span>·
         <span>{shortAge(item.createdAt)} ago</span>
-        {item.comments ? (
+        {commentCount ? (
           <>
-            ·<CommentCount count={item.comments} />
+            ·<CommentCount count={commentCount} />
           </>
         ) : null}
         {hasDiffStat ? (

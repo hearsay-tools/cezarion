@@ -1027,6 +1027,7 @@ export function GithubRoute({
         {selected ? (
           <GithubItemDetail
             item={selected}
+            comments={commentsOf(selected)}
             afterHeading={selected.kind === 'issue' ? (
               // The list can retain this same issue as its preview; reopening still resets it.
               <IssueLinkedTasks key={n ?? 'list'} number={selected.number} repo={gh.repo} />
