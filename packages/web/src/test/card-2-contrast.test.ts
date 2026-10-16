@@ -91,6 +91,7 @@ function utilityStates(branch: string): string[][] {
       else if (token[i] === ':' && depth === 0) lastColon = i
     }
     const utility = token.slice(lastColon + 1).replace(/^!|!$/g, '')
+      .replace(/^(bg-[^/]+)\/(?:100(?:\.0+)?|\[1(?:\.0+)?\]|\[100(?:\.0+)?%\])$/, '$1')
     if (lastColon === -1) base.push(utility)
     else {
       if (utility.startsWith('text-') || utility.startsWith('font-') || utility === 'bg-card-2') variants.push(utility)
@@ -210,6 +211,12 @@ it('retains unsafe ink through opacity modifiers', () => {
     expect(scan(`<p className="bg-card-2 text-xs ${color}">bad</p>`), color).toHaveLength(1)
   }
   expect(scan(`<div className="bg-card-2 text-danger/80 text-xs"><span>bad</span></div>`)).toHaveLength(1)
+})
+it('recognizes fully opaque card-2 background modifiers', () => {
+  for (const background of ['bg-card-2/100', 'bg-card-2/[1]', 'bg-card-2/[100%]', 'md:bg-card-2/100!']) {
+    expect(scan(`<p className="${background} text-danger text-xs">bad</p>`), background).toHaveLength(1)
+  }
+  expect(scan(`<div className="bg-card-2"><p className="bg-background/100 text-danger text-xs">separate</p></div>`)).toEqual([])
 })
 it('lets documented safe foregrounds override inherited unsafe ink', () => {
   expect(scan(`<div className="bg-card-2 text-danger"><span className="text-supporting-foreground">safe</span><span className="text-link-foreground">safe</span></div>`)).toEqual([])

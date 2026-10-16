@@ -44,7 +44,8 @@ conservatively, including empty/absent class branches. Expansion is capped at 12
 combinations with a conservative fallback. JSX-only expressions are visited as elements rather than wrapper text. Unknown font sizes are treated conservatively as
 small. Known pixel/Tailwind sizes qualify as large at 24 px regular or 18.67 px
 with bold, extrabold or black weight; unknown weights grant no bold exemption.
-Important modifiers and opacity suffixes on unsafe ink are normalized; reducing
+Important modifiers, fully opaque background suffixes (`/100`, `/[1]`, `/[100%]`),
+and opacity suffixes on unsafe ink are normalized; reducing
 these colors’ opacity cannot grant a contrast exemption. Variant-prefixed ink, size, weight and card-2 utilities are checked as possible
 states alongside the default state; variant backgrounds cannot grant an opaque-surface exemption. Icons without text and explicitly large text are excluded.
 
