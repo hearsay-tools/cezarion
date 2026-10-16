@@ -8,6 +8,12 @@ import { expect, it } from 'vitest'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const baselinePath = join(root, 'test/card-2-contrast.baseline.json')
+// Only named palette colors establish an opaque surface. Unknown arbitrary images,
+// gradients and layout utilities retain the ancestor surface conservatively.
+const surfaceClasses = new Set([
+  ...Array.from(readFileSync(join(root, 'styles/index.css'), 'utf8').matchAll(/--color-([\w-]+):/g), m => `bg-${m[1]}`),
+  'bg-black', 'bg-white',
+])
 
 /** Static guard, not a computed-style audit. Unknown sizes are conservatively small.
  * Literal branches in cn()/templates are inspected; arbitrary runtime class values are not. */
@@ -88,12 +94,12 @@ function scan(source: string): string[] {
       const bodySlot = ['tool-error', 'tool-command', 'hook-entry', 'hook-source', 'hook-raw-toggle', 'hook-stdout', 'hook-stderr'].includes(slot ?? '')
       const states = classBranches(attr('className')?.value).map(branch => {
         const classes = branch.split(/\s+/)
-        const backgrounds = classes.filter(c => /^bg-(?!gradient)/.test(c))
+        const backgrounds = classes.filter(c => surfaceClasses.has(c) || c === 'bg-transparent' || surfaceClasses.has(c.split('/')[0] ?? ''))
         const inheritsSurface = backgrounds.length === 0 || backgrounds.some(c => c === 'bg-transparent' || c.includes('/'))
         const onCard = backgrounds.includes('bg-card-2') || inheritsSurface && (card || bodySlot)
         const ownColors = classes.filter(c => /^text-(?:danger|soft-foreground|muted-foreground|supporting-foreground|link-foreground|foreground|signal-word-red)$/.test(c))
         const colors = ownColors.length ? ownColors : [color]
-        const sizes = classes.filter(c => /^text-(?:xs|sm|base|lg|xl|\d?xl|\[\d+(?:\.\d+)?px\])$/.test(c))
+        const sizes = classes.filter(c => /^text-(?:xs|sm|base|lg|xl|\d+xl)(?:\/.*)?$|^text-(?:\[|\(length:)/.test(c))
         const large = sizes.length ? sizes.every(s => /^(?:text-[2-9]xl|text-\[(?:2[4-9]|[3-9]\d)px\])$/.test(s)) : inheritedLarge
         return { onCard, colors, large }
       })
@@ -129,6 +135,17 @@ it('checks every possible size and background branch conservatively', () => {
 })
 it('retains card-2 underneath transparent backgrounds', () => {
   expect(scan(`<div className="bg-card-2"><p className="bg-transparent text-xs text-danger">bad</p></div>`)).toHaveLength(1)
+})
+it('keeps card-2 through background layout and image utilities', () => {
+  for (const utility of ['bg-cover', 'bg-center', 'bg-no-repeat', 'bg-fixed', 'bg-clip-text', 'bg-[url(/image.png)]']) {
+    expect(scan(`<div className="bg-card-2"><p className="${utility} text-xs text-danger">bad</p></div>`), utility).toHaveLength(1)
+  }
+})
+it('treats explicit unknown font sizes as small instead of inheriting large text', () => {
+  for (const size of ['text-[length:var(--small)]', 'text-(length:--small)', 'text-[0.75rem]', 'text-[12px]/4']) {
+    expect(scan(`<div className="bg-card-2 text-danger text-[24px]"><span className="${size}">bad</span></div>`), size).toHaveLength(1)
+  }
+  expect(scan(`<div className="bg-card-2 text-danger text-[24px]"><span className="text-center text-muted-foreground">safe</span></div>`)).toEqual([])
 })
 it('lets documented safe foregrounds override inherited unsafe ink', () => {
   expect(scan(`<div className="bg-card-2 text-danger"><span className="text-supporting-foreground">safe</span><span className="text-link-foreground">safe</span></div>`)).toEqual([])
