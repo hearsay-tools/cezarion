@@ -10,6 +10,23 @@ This page is about one thing: how a spec waits. Most red shards on `main`
 and on unrelated pull requests have been sampling races, not product bugs (#369, #393, #394,
 #405, #409), and every one of them looked like a flake until the page state was in hand.
 
+## QA screenshots of one element
+
+Use `browser.screenshotElement(selector, path)` for viewport evidence of a specific
+CSS-selected element. It centres the element in its scroll containers, waits for fonts,
+finite animations and stable geometry, and checks that the whole box is in the viewport
+with uncovered edges before taking the screenshot. This keeps a middle transcript card
+away from the sticky task header (hearsay-tools/cezarion#1135).
+
+```ts
+browser.screenshotElement('[data-slot="hook-card"][data-status="completed"]', evidencePath)
+```
+
+The element must fit in the available viewport. Missing, oversized or covered targets
+fail with the usual diagnostic bundle instead of producing misleading evidence. This
+captures the viewport around the element, not a cropped element or a full-page image.
+Use `browser.screenshot(path)` when the current viewport itself is the evidence.
+
 ## Wait, then read — as one step
 
 agent-browser gives no implicit waits. `click`, `hover` and `fill` act at once, `eval`
@@ -271,6 +288,8 @@ Evidence and artifacts stay in this checkout's `.ai/qa`.
 A cold boot deletes the previous descriptor before it starts anything. If the boot then fails,
 specs report that no env exists and point at `.ai/qa/test-env-app.log`. Before this change they
 attached to the old env's dead `baseUrl` and repeated its browser notes.
+
+Seeded NDJSON transcripts must go through `seedTranscript` from `seed-transcript.ts`; every nonblank line needs `seq` and `ts` (and `type`), and validation reports the line number and event type before writing.
 
 ## Full local suite in four lanes
 

@@ -1,8 +1,9 @@
 import type { ChildProcess } from 'node:child_process'
-import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedTranscript } from './seed-transcript'
 
 import { disclosureVisibilityExpression, settleVisual, visibilitySampleExpression, waitForSettledSample } from './visual-ready'
 import { expectEditorFitsViewport } from './session-layout'
@@ -84,17 +85,17 @@ beforeAll(async () => {
     const at = lines.findIndex((entry) => entry.includes('"item.completed"') && entry.includes('toolu_mock_1'))
     const withHooks = [...lines.slice(0, at + 1), ...HOOK_LINES.map((entry) => JSON.stringify(entry)), ...lines.slice(at + 1)]
       .map((entry, index) => JSON.stringify({ ...JSON.parse(entry), seq: index + 1 }))
-    writeFileSync(join(dataRoot, '.ai/cezar/runs', `${HOOK_RUN.id}.ndjson`), withHooks.join('\n') + '\n')
+    seedTranscript(join(dataRoot, '.ai/cezar/runs', `${HOOK_RUN.id}.ndjson`), withHooks.join('\n') + '\n')
   }
-  copyFileSync(
-    resolve(import.meta.dirname, 'fixtures/thread-run.ndjson'),
+  seedTranscript(
     join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`),
+    readFileSync(resolve(import.meta.dirname, 'fixtures/thread-run.ndjson'), 'utf8'),
   )
-  writeFileSync(join(dataRoot, '.ai/cezar/runs', `${LONG_RUN.id}.ndjson`),
+  seedTranscript(join(dataRoot, '.ai/cezar/runs', `${LONG_RUN.id}.ndjson`),
     readFileSync(resolve(import.meta.dirname, 'fixtures/thread-run.ndjson'), 'utf8')
       .split('\n').filter((line) => !/plan\.updated|TodoWrite|toolu_mock_todo|\"type\":\"plan\"/.test(line)).join('\n'))
   for (const run of TYPO_RUNS) {
-    writeFileSync(join(dataRoot, '.ai/cezar/runs', `${run.id}.ndjson`),
+    seedTranscript(join(dataRoot, '.ai/cezar/runs', `${run.id}.ndjson`),
       readFileSync(resolve(import.meta.dirname, 'fixtures/thread-run.ndjson'), 'utf8')
         .replaceAll('Ran git status --short', BARE_COMMAND)
         .replaceAll('"command":"git status --short"', `"command":${JSON.stringify(BARE_COMMAND)}`))
@@ -700,8 +701,7 @@ describe('task thread', () => {
         }
         expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= window.innerWidth`), variant.id).toBe(true)
         // The transcript pins to its end; bring the hooks into the QA screenshot.
-        browser.evaluate(`${card('PostToolBatch')}.scrollIntoView({ block: 'center', behavior: 'instant' })`)
-        browser.screenshot(`${artifactsDir}/issue-961-hooks-${variant.id}.png`, { viewport: true })
+        browser.screenshotElement('[data-slot="hook-card"][data-status="completed"]', `${artifactsDir}/issue-961-hooks-${variant.id}.png`)
       }
     } finally {
       restoreContrastQaDefaults(browser)

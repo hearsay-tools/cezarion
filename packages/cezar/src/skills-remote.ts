@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, realpath, rename, rm, rmdir, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { loadConfig, type SkillsRepoSource } from './config.ts';
 import { parseFrontmatter, type Skill } from './skills.ts';
 
@@ -11,7 +11,9 @@ import { parseFrontmatter, type Skill } from './skills.ts';
  * Team skills from remote git repos (spec 005), janitor-style: a bare clone
  * without a checkout, listed with `git ls-tree` and read with `git show`.
  * The cache lives in `~/.cache/cez/skills/<owner>__<name>/` — global, so one
- * fetch serves every project. Everything degrades: no network / no access to
+ * fetch serves every project. A directory skill's files reach a run through its
+ * task worktree, or `~/.cache/cez/skill-files/` without one (#1024) — never the
+ * main checkout. Everything degrades: no network / no access to
  * the skills repo means the team skills quietly disappear from the list while
  * local skills keep working. Nothing here ever blocks startup.
  */
@@ -144,16 +146,28 @@ export function isPinnedSha(ref: string): boolean {
   return /^[0-9a-f]{40}$/i.test(ref) || /^[0-9a-f]{64}$/i.test(ref);
 }
 
-/** Stable cache directory name: the last two path segments, `owner__name`. */
-export function bareDirFor(repo: string): string {
+/** Stable cache key for a source: the last two path segments, `owner__name`. */
+function cacheKeyFor(repo: string): string {
   const trimmed = repo
     .replace(/\/+$/, '')
     .replace(/\.git$/, '')
     .replace(/^[a-z+]+:\/\//i, '')
     .replace(/^~\//, '');
   const segments = trimmed.split(/[/:]/).filter(Boolean).map(sanitizeSegment);
-  const key = segments.slice(-2).join('__') || 'skills';
-  return join(homedir(), '.cache', 'cez', 'skills', key);
+  return segments.slice(-2).join('__') || 'skills';
+}
+
+/** The source's bare clone: `~/.cache/cez/skills/<owner>__<name>`. */
+export function bareDirFor(repo: string): string {
+  return join(homedir(), '.cache', 'cez', 'skills', cacheKeyFor(repo));
+}
+
+/**
+ * Per-commit copies of the source's directory skills for runs without a task
+ * worktree (#1024): `~/.cache/cez/skill-files/<owner>__<name>/<commit>/<skill>/`.
+ */
+export function skillFilesCacheDirFor(repo: string): string {
+  return join(homedir(), '.cache', 'cez', 'skill-files', cacheKeyFor(repo));
 }
 
 function sanitizeSegment(s: string): string {
@@ -335,49 +349,246 @@ export async function listRemoteSkills(src: SkillsRepoSource): Promise<Skill[]> 
 // ---- materialization (directory skills) ---------------------------------------
 
 /**
- * Copy a directory skill (SKILL.md + references/…) out of the bare clone into
- * `<repoRoot>/.claude/skills/<name>/` (claude),
- * `<repoRoot>/.agents/skills/<name>/` (codex/pi — the canonical dir SKILL_DIRS
- * scans first), and `<repoRoot>/.cursor/skills/<name>/` (Cursor), and keep all
- * destinations out of the user's git via `.git/info/exclude`.
- * Returns false when there is nothing to materialize (not a directory skill,
- * no clone…). (#286 — writing only the claude dir left codex/pi without the
- * companion files on disk.)
+ * Dropped into every copy `materializeSkillDir` creates, recording where it came
+ * from. Its presence is what makes a directory cezar's to replace: a skill dir
+ * without it may be the user's own, and is only ever overlaid.
  */
-export async function materializeSkillDir(repoRoot: string, skill: Skill): Promise<boolean> {
-  if (!skill.team?.dir || !skill.team.path.endsWith('SKILL.md')) return false;
-  const bareDir = bareDirFor(skill.team.repo);
-  if (!existsSync(join(bareDir, 'HEAD'))) return false;
-  const ref = await resolveRef(bareDir, skill.team.ref);
-  if (ref === null) return false;
-  const srcDir = skill.team.path.slice(0, -'/SKILL.md'.length);
-  const ls = await git(['ls-tree', '-r', '--name-only', ref, '--', srcDir], LIST_TIMEOUT_MS, bareDir);
-  if (!ls.ok) return false;
+const TEAM_SKILL_MARKER = '.cezar-team-skill.json';
 
-  const destDirs = [
-    join(repoRoot, '.claude', 'skills', skill.name),
-    join(repoRoot, '.agents', 'skills', skill.name),
-    join(repoRoot, '.cursor', 'skills', skill.name),
-  ];
-  let wrote = 0;
+interface SkillDirSource {
+  bareDir: string;
+  /** The immutable commit the files are read at. */
+  commit: string;
+  /** The skill's directory inside the skills repo. */
+  srcDir: string;
+}
+
+/**
+ * Where a directory team skill's files live in its bare clone, or null. They are
+ * read at `skill.team.commit`, the commit its body was listed at (#428), so the
+ * files match the prompt even when another project has since fetched the ref
+ * further. Only a skill without that commit, or one the clone no longer holds,
+ * resolves `skill.team.ref` instead.
+ */
+async function resolveSkillDirSource(skill: Skill): Promise<SkillDirSource | null> {
+  if (!skill.team?.dir || !skill.team.path.endsWith('SKILL.md')) return null;
+  const bareDir = bareDirFor(skill.team.repo);
+  if (!existsSync(join(bareDir, 'HEAD'))) return null;
+  const listed = skill.team.commit && isPinnedSha(skill.team.commit) ? await resolveRef(bareDir, skill.team.commit) : null;
+  const commit = listed ?? (await resolveRef(bareDir, skill.team.ref));
+  if (commit === null) return null;
+  return { bareDir, commit, srcDir: skill.team.path.slice(0, -'/SKILL.md'.length) };
+}
+
+/** Every file of the skill's directory at the commit, keyed by its `/`-joined relative path. */
+async function readSkillDirFiles({ bareDir, commit, srcDir }: SkillDirSource): Promise<Map<string, string>> {
+  const files = new Map<string, string>();
+  const ls = await git(['ls-tree', '-r', '--name-only', commit, '--', srcDir], LIST_TIMEOUT_MS, bareDir);
+  if (!ls.ok) return files;
   for (const file of ls.stdout.split('\n').filter(Boolean)) {
     const rel = file.slice(srcDir.length + 1);
     // git paths are repo-relative and normalized, but never trust them blindly.
-    if (!rel || rel.split('/').includes('..')) continue;
-    const show = await git(['show', `${ref}:${file}`], LIST_TIMEOUT_MS, bareDir);
-    if (!show.ok) continue;
-    for (const destDir of destDirs) {
-      const target = join(destDir, rel);
-      await mkdir(dirname(target), { recursive: true });
-      await writeFile(target, show.stdout, 'utf8');
-    }
-    wrote++;
+    if (!rel || rel.split('/').includes('..') || rel === TEAM_SKILL_MARKER) continue;
+    const show = await git(['show', `${commit}:${file}`], LIST_TIMEOUT_MS, bareDir);
+    if (show.ok) files.set(rel, show.stdout);
   }
-  if (wrote === 0) return false;
-  await excludeFromGit(repoRoot, `.claude/skills/${skill.name}/`);
-  await excludeFromGit(repoRoot, `.agents/skills/${skill.name}/`);
-  await excludeFromGit(repoRoot, `.cursor/skills/${skill.name}/`);
-  return true;
+  return files;
+}
+
+/**
+ * Where `path` really lands: the realpath of its nearest existing ancestor (the
+ * path itself when it exists), through every symlink, plus the segments below
+ * it. Null when that ancestor cannot be resolved, a dangling link among them.
+ */
+async function landingPath(path: string): Promise<string | null> {
+  const below: string[] = [];
+  for (let at = resolve(path); ; at = dirname(at)) {
+    if (await lstat(at).then(() => true, () => false)) {
+      const real = await realpath(at).catch(() => null);
+      return real === null ? null : join(real, ...below.reverse());
+    }
+    if (dirname(at) === at) return null;
+    below.push(basename(at));
+  }
+}
+
+/** `path` lands inside `root`, itself a realpath. */
+async function landsInside(root: string, path: string): Promise<boolean> {
+  const landing = await landingPath(path);
+  return landing !== null && (landing === root || landing.startsWith(root.endsWith(sep) ? root : root + sep));
+}
+
+/** Write every file under `destDir`; given a `root`, skip a file that would land outside it. */
+async function writeSkillFiles(destDir: string, files: Map<string, string>, root?: string): Promise<void> {
+  for (const [rel, content] of files) {
+    const target = join(destDir, rel);
+    if (root !== undefined && !(await landsInside(root, target))) continue;
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, content, 'utf8');
+  }
+}
+
+/**
+ * Clear the paths in `dir` whose type the new files contradict: a directory or a
+ * symlink where a file goes, and a non-directory (a symlink included) where a
+ * file's parent directory goes. Without this an upstream `references/guide` that
+ * became `references/guide/x.md` (or back) fails the write with EEXIST/EISDIR,
+ * and a write follows a link wherever it points. Only for a marked copy. Every
+ * check is an lstat, so a link is unlinked, never followed.
+ */
+async function clearTypeConflicts(dir: string, files: Map<string, string>): Promise<void> {
+  const entry = (path: string) => lstat(path).catch(() => null);
+  for (const rel of files.keys()) {
+    const parts = rel.split('/');
+    for (let depth = 1; depth < parts.length; depth++) {
+      const ancestor = join(dir, ...parts.slice(0, depth));
+      if ((await entry(ancestor))?.isDirectory() === false) await unlink(ancestor);
+    }
+    const target = join(dir, rel);
+    const found = await entry(target);
+    if (found?.isDirectory()) await rm(target, { recursive: true, force: true });
+    else if (found?.isSymbolicLink()) await unlink(target);
+  }
+}
+
+/** Remove every entry under `dir` whose `/`-joined relative path is not kept, then empty directories. */
+async function removeUnlisted(dir: string, keep: Set<string>, prefix = ''): Promise<void> {
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await removeUnlisted(path, keep, rel);
+      await rmdir(path).catch(() => undefined); // still holds kept files
+    } else if (!keep.has(rel)) {
+      await unlink(path);
+    }
+  }
+}
+
+/** Where `materializeSkillDir` puts a worktree copy: `<dir>/skills/<name>/`, in this order. */
+export const TEAM_SKILL_AGENT_DIRS = ['.claude', '.agents', '.cursor'] as const;
+
+/**
+ * Copy a directory skill (SKILL.md + references/…) out of the bare clone into
+ * `<worktree>/.claude/skills/<name>/` (claude),
+ * `<worktree>/.agents/skills/<name>/` (codex/pi — the canonical dir SKILL_DIRS
+ * scans first), and `<worktree>/.cursor/skills/<name>/` (Cursor), and keep all
+ * destinations out of the user's git via `.git/info/exclude`.
+ * Returns the absolute directories it wrote, in `TEAM_SKILL_AGENT_DIRS` order;
+ * empty when none was (not a directory skill, no clone, every destination
+ * outside the worktree…). A destination skipped while others were written is
+ * missing from the list, so the caller can name a copy that did land. (#286 —
+ * writing only the claude dir left codex/pi without the companion files on disk.)
+ *
+ * Only ever for a run's OWN task worktree (#1024): those three directories in
+ * the main checkout are local skills to `discoverSkills`, so a copy left there
+ * outranks the team source for every later run and never refreshes. A run
+ * without a task worktree uses `materializeSkillToCache` instead.
+ *
+ * Nothing is written or pruned outside `realpath(repoRoot)`. Before touching a
+ * destination its real location is resolved (the realpath of its nearest
+ * existing ancestor, or of itself, plus the rest); one a symlink leads out of
+ * the worktree — a `.claude` linked to the main checkout's, a symlinked `<name>`
+ * dir — is skipped whole: no directory, marker, file, exclude line or prune. A
+ * link that stays inside, such as a tracked `.claude -> .agents`, is followed.
+ * Inside a marked copy a symlink is unlinked, never followed; inside an
+ * unmarked one a file whose path leads out is skipped.
+ *
+ * A destination this function created carries `TEAM_SKILL_MARKER` and is
+ * replaced on the next call, so files a newer commit dropped do not linger. The
+ * marker is written first, then paths whose file/directory type changed
+ * upstream are cleared, the files written, and stale files removed after them,
+ * so a crash leaves a marked, complete-or-mixed copy the next run replaces —
+ * never a half-empty one. An existing directory without the marker may be the
+ * user's own: it is overlaid as before, never pruned, and never marked.
+ */
+export async function materializeSkillDir(repoRoot: string, skill: Skill): Promise<string[]> {
+  const source = await resolveSkillDirSource(skill);
+  if (!source || !skill.team) return [];
+  const files = await readSkillDirFiles(source);
+  if (files.size === 0) return [];
+  const { repo, ref, path } = skill.team;
+  const marker = `${JSON.stringify({ repo, ref, path, commit: source.commit }, null, 2)}\n`;
+
+  const root = await realpath(repoRoot).catch(() => null);
+  if (root === null) return [];
+  const written: string[] = [];
+  for (const agentDir of TEAM_SKILL_AGENT_DIRS) {
+    const destDir = join(repoRoot, agentDir, 'skills', skill.name);
+    if (!(await landsInside(root, destDir))) continue;
+    // lstat: a marker that is a link elsewhere does not make the dir ours.
+    const marked = (await lstat(join(destDir, TEAM_SKILL_MARKER)).catch(() => null))?.isFile() === true;
+    const ours = !existsSync(destDir) || marked;
+    if (ours) {
+      await mkdir(destDir, { recursive: true });
+      await writeFile(join(destDir, TEAM_SKILL_MARKER), marker, 'utf8');
+      await clearTypeConflicts(destDir, files);
+    }
+    await writeSkillFiles(destDir, files, root);
+    if (ours) await removeUnlisted(destDir, new Set([...files.keys(), TEAM_SKILL_MARKER]));
+    written.push(agentDir);
+  }
+  for (const agentDir of written) await excludeFromGit(repoRoot, `${agentDir}/skills/${skill.name}/`);
+  return written.map((agentDir) => resolve(repoRoot, agentDir, 'skills', skill.name));
+}
+
+/** A per-commit copy nobody has used for this long is pruned. */
+const SKILL_FILES_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
+
+/**
+ * Materialize a directory skill for a run WITHOUT its own task worktree (#1024):
+ * worktree off, a non-git project, a Continue whose worktree is gone. Writes
+ * `<skillFilesCacheDirFor(repo)>/<commit>/<name>/` and returns that absolute
+ * directory for the skill prompt to name; nothing is written to the project
+ * and nothing to `info/exclude`.
+ *
+ * Content-addressed by commit: the copy is staged in a sibling and renamed into
+ * place, so an existing one is complete and is reused as-is, its commit dir
+ * touched. That source's other commit dirs untouched for `SKILL_FILES_TTL_MS`
+ * are pruned. Never throws — any cache error degrades to null (no files on disk,
+ * only the body in the prompt).
+ */
+export async function materializeSkillToCache(skill: Skill): Promise<string | null> {
+  try {
+    const source = await resolveSkillDirSource(skill);
+    if (!source || !skill.team) return null;
+    const root = skillFilesCacheDirFor(skill.team.repo);
+    const commitDir = join(root, source.commit);
+    const dest = join(commitDir, skill.name);
+    if (!existsSync(dest)) {
+      const files = await readSkillDirFiles(source);
+      if (files.size === 0) return null;
+      const staging = join(commitDir, `.${skill.name}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`);
+      try {
+        await mkdir(staging, { recursive: true });
+        await writeSkillFiles(staging, files);
+        await rename(staging, dest);
+      } catch (error) {
+        await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+        // A concurrent writer renamed the same commit's copy into place first.
+        if (!existsSync(dest)) throw error;
+      }
+    }
+    const now = new Date();
+    await utimes(commitDir, now, now);
+    await pruneSkillFiles(root, source.commit, now.getTime());
+    return dest;
+  } catch {
+    return null;
+  }
+}
+
+/** Best-effort: drop the source's commit dirs other than `keep` untouched for a week. */
+async function pruneSkillFiles(root: string, keep: string, now: number): Promise<void> {
+  for (const entry of await readdir(root).catch(() => [] as string[])) {
+    if (entry === keep) continue;
+    const path = join(root, entry);
+    try {
+      if (now - (await stat(path)).mtimeMs > SKILL_FILES_TTL_MS) await rm(path, { recursive: true, force: true });
+    } catch {
+      // raced with another pruner, or unreadable — the next run tries again
+    }
+  }
 }
 
 /** Append a pattern to git's `info/exclude` (idempotent, non-fatal). */

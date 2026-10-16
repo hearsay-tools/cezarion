@@ -413,8 +413,11 @@ async function removeWorktreeLocked(
 
 /**
  * Why an autosave commit happened. Only `periodic` is gated (behind
- * `CEZ_AUTOSAVE=1`, #471) — the three flushes always run so the branch ends
- * holding the finished state. Before this was recorded, all four wrote the bare
+ * `CEZ_AUTOSAVE=1`, #471) — the three flushes always run so the task branch
+ * ends holding the finished state. The turn-end and run-finalize flushes (and
+ * the periodic timer) name the task branch, so they commit only while HEAD is
+ * that branch (hearsay-tools/cezarion#1004); `pre-PR` commits on whatever HEAD
+ * is. Before this was recorded, all four wrote the bare
  * message `cezar autosave`, so a user who had opted out of the periodic timer
  * still saw `cezar autosave` in `git log` and reasonably concluded the opt-out
  * was broken. Only commit *spacing* (~90 s ⇒ timer) told them apart.
@@ -427,8 +430,32 @@ export type AutosaveReason = 'periodic' | 'turn end' | 'run finalize' | 'pre-PR'
  * the *last* one, so anything other than `committed`/`nothing-to-do` there
  * means the branch leaves the box without the run's final state and the user
  * has to be told (see createDraftPr). A bare boolean could not carry that.
+ * `skipped` happens only when the caller names a task branch and HEAD is not
+ * on it (hearsay-tools/cezarion#1004); the pre-PR flush never names one. A save
+ * that names one is also `refused` while a merge, cherry-pick or revert waits
+ * for the agent to conclude it.
  */
-export type AutosaveResult = 'committed' | 'nothing-to-do' | 'refused' | 'failed';
+export type AutosaveResult = 'committed' | 'nothing-to-do' | 'refused' | 'failed' | 'skipped';
+
+/**
+ * The facts behind a `committed` or `skipped` save, for the caller's report
+ * (hearsay-tools/cezarion#1004). `branch` is HEAD's branch name, `null` on a
+ * detached HEAD; `sha` is the short hash of the autosave commit, `null` when
+ * the commit landed but its hash could not be read back.
+ */
+export type AutosaveOutcome =
+  | { result: 'committed'; sha: string | null; branch: string | null }
+  | { result: 'skipped'; branch: string | null; changedPaths: number };
+
+export interface AutosaveCommitOptions extends AutosaveOptions {
+  /** The task's own branch (`cez/<id8>`). Given, the save commits only while HEAD is
+   *  `refs/heads/<taskBranch>`, and writes that ref by compare-and-swap; on any other
+   *  branch or a detached HEAD it returns `skipped` and leaves the working tree alone,
+   *  and the index too unless HEAD moves while it saves. */
+  taskBranch?: string;
+  /** Receives the facts behind a `committed` or `skipped` result. Never called otherwise. */
+  onOutcome?: (outcome: AutosaveOutcome) => void;
+}
 
 /**
  * Leftover merge-conflict markers, anchored at line start as git writes them.
@@ -473,8 +500,11 @@ const autosaves = new Map<string, Promise<AutosaveResult>>();
 
 /**
  * Stage and commit everything in the worktree as a "cezar autosave" commit
- * (janitor pattern) — the agent's progress is always recoverable from the
- * `cez/<id8>` branch history. Quietly a no-op when nothing changed.
+ * (janitor pattern) — the agent's progress is recoverable from the `cez/<id8>`
+ * branch history. Quietly a no-op when nothing changed. With `taskBranch`, a
+ * worktree whose HEAD the agent moved to another branch (or detached) is left
+ * uncommitted instead: an autosave commit there lands in the agent's own PR
+ * history (hearsay-tools/cezarion#1004).
  *
  * The message carries `reason` so the opt-in periodic timer and the always-on
  * flushes are distinguishable in `git log`; the `cezar autosave` prefix is kept
@@ -484,7 +514,7 @@ const autosaves = new Map<string, Promise<AutosaveResult>>();
  * markers: the incident behind #471 was an autosave capturing a half-resolved
  * merge, and a blind `git add -A` would do it again.
  */
-export async function autosaveCommit(dir: string, reason: AutosaveReason, options: AutosaveOptions = {}): Promise<AutosaveResult> {
+export async function autosaveCommit(dir: string, reason: AutosaveReason, options: AutosaveCommitOptions = {}): Promise<AutosaveResult> {
   let key = resolve(dir);
   try { key = realpathSync(dir); } catch { /* Missing/unreadable dir fails through Git. */ }
   const previous = autosaves.get(key);
@@ -501,6 +531,31 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
     const status = await git(dir, ['status', '--porcelain']);
     if (!status.ok) return 'failed';
     if (!status.stdout.trim()) return 'nothing-to-do';
+    const { taskBranch, onOutcome } = options;
+    const report = (outcome: AutosaveOutcome) => {
+      try { onOutcome?.(outcome); } catch { /* Reporting must not change what the save did. */ }
+    };
+    // HEAD's symbolic ref, `null` on a detached HEAD, `undefined` when the read failed.
+    const readHead = async (): Promise<string | null | undefined> => {
+      // Exit 1 under -q is a detached HEAD; anything else is a failed read.
+      const ref = await git(dir, ['symbolic-ref', '-q', 'HEAD']);
+      if (!ref.ok && ref.code !== 1) return undefined;
+      return ref.ok ? ref.stdout.trim() : null;
+    };
+    const branchName = (head: string | null) => head?.startsWith('refs/heads/') ? head.slice('refs/heads/'.length) : head;
+    // HEAD is not the task branch: the work stays uncommitted, reported with the paths status saw.
+    const skip = (head: string | null): 'skipped' => {
+      report({ result: 'skipped', branch: branchName(head), changedPaths: status.stdout.split('\n').filter(Boolean).length });
+      return 'skipped';
+    };
+    let head: string | null = null;
+    if (taskBranch !== undefined || onOutcome) {
+      const read = await readHead();
+      if (read === undefined) return 'failed';
+      head = read;
+    }
+    const branch = branchName(head);
+    if (taskBranch !== undefined && head !== `refs/heads/${taskBranch}`) return skip(head);
     const unresolved = await unresolvedConflicts(dir, status.stdout);
     if (unresolved) {
       // Losing one recovery point beats poisoning the branch with a commit that
@@ -509,6 +564,28 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
       // which is why callers get `refused` rather than a bare `false`.
       console.warn(`[cezar] skipping ${reason} autosave in ${dir}: ${unresolved}`);
       return 'refused';
+    }
+    // A resolved merge, cherry-pick or revert the agent has not concluded: `git commit`
+    // would conclude it under `cezar autosave`. The agent concludes it with its own
+    // message; the next flush picks the work up (hearsay-tools/cezarion#1004). Asked of
+    // Git, not looked up as files: only MERGE_HEAD is always a file. CHERRY_PICK_HEAD and
+    // REVERT_HEAD are root refs in the ref backend, which a reftable repository keeps in
+    // its reftable stack, so a file check would miss them there.
+    const pendingOperation = async (): Promise<'refused' | 'failed' | null> => {
+      for (const pending of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
+        const found = await git(dir, ['rev-parse', '--verify', '-q', pending]);
+        if (found.ok) {
+          console.warn(`[cezar] skipping ${reason} autosave in ${dir}: ${pending} is set, the operation is not concluded`);
+          return 'refused';
+        }
+        if (found.code !== 1) return 'failed';
+      }
+      return null;
+    };
+    if (taskBranch !== undefined) {
+      // Checked before staging too, so a pending operation's index stays as the agent left it.
+      const pending = await pendingOperation();
+      if (pending) return pending;
     }
     if (!(await git(dir, ['add', '-A'])).ok) return 'failed';
     // Commit as the CURRENT git user, so the branch's commits (and any PR opened from it) are
@@ -523,14 +600,92 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
     const identityArgs = (name.ok && name.stdout.trim() && email.ok && email.stdout.trim())
       ? []
       : ['-c', 'user.name=cezar', '-c', 'user.email=cezar@local'];
-    const commit = await git(dir, [
+    const message = `cezar autosave (${reason})`;
+    if (taskBranch === undefined) {
+      const commit = await git(dir, [
+        ...identityArgs,
+        'commit',
+        '--no-verify',
+        '-m',
+        message,
+      ]);
+      if (!commit.ok) return 'failed';
+      if (onOutcome) {
+        // The commit already landed: a failed read loses the sha, never the report.
+        const sha = await git(dir, ['rev-parse', '--short', 'HEAD']);
+        report({ result: 'committed', sha: (sha.ok && sha.stdout.trim()) || null, branch });
+      }
+      return 'committed';
+    }
+    // The task branch is written by compare-and-swap, never through HEAD: the agent can
+    // check another branch out after the `symbolic-ref` check above, and `git commit`
+    // resolves HEAD again at its own start, so the save landed on the agent's branch
+    // (review on hearsay-tools/cezarion#1111). `update-ref <ref> <new> <old>` moves the
+    // branch only while it still points at the tip read here (an unborn one: while it
+    // still does not exist); a moved branch fails the save and the next flush retries.
+    // Unlike the porcelain this runs no prepare-commit-msg or post-commit hook
+    // (`--no-verify` already skipped pre-commit and commit-msg), and the reflog entry
+    // reads `cezar autosave (<reason>)` without the `commit: ` prefix. commit-tree
+    // stopped reading commit.gpgSign in Git 2.9 (its release notes tell scripts to read
+    // it and pass -S), so it is read here: a user who signs every commit still does.
+    const ref = `refs/heads/${taskBranch}`;
+    const tip = await git(dir, ['rev-parse', '--verify', '-q', ref]);
+    if (!tip.ok && tip.code !== 1) return 'failed';
+    const parent = tip.ok ? tip.stdout.trim() : '';
+    const written = await git(dir, ['write-tree']);
+    const tree = written.stdout.trim();
+    if (!written.ok || !tree) return 'failed';
+    if (parent) {
+      // Dirty when status looked, identical once staged: nothing to save.
+      const parentTree = await git(dir, ['rev-parse', '--verify', '-q', `${parent}^{tree}`]);
+      if (!parentTree.ok) return 'failed';
+      if (parentTree.stdout.trim() === tree) return 'nothing-to-do';
+    }
+    const sign = await git(dir, ['config', '--type=bool', 'commit.gpgsign']);
+    if (!sign.ok && sign.code !== 1) return 'failed';
+    const created = await git(dir, [
       ...identityArgs,
-      'commit',
-      '--no-verify',
+      'commit-tree',
+      ...(sign.ok && sign.stdout.trim() === 'true' ? ['-S'] : []),
+      tree,
+      ...(parent ? ['-p', parent] : []),
       '-m',
-      `cezar autosave (${reason})`,
+      message,
     ]);
-    return commit.ok ? 'committed' : 'failed';
+    const sha = created.stdout.trim();
+    if (!created.ok || !sha) return 'failed';
+    // The save is not atomic against the agent's own Git commands. It guarantees that no
+    // ref other than refs/heads/<taskBranch> moves, and that no merge, cherry-pick or
+    // revert Git has recorded as pending (its MERGE_HEAD, CHERRY_PICK_HEAD or REVERT_HEAD
+    // written) by this recheck is committed: the check before `add -A` cannot see one that
+    // starts after it, and the save would record that operation's content without its
+    // ancestry (review round 4 on hearsay-tools/cezarion#1004). An operation that starts
+    // after `write-tree` cannot be in this tree; one recorded before it is still pending
+    // here, unless the agent also concluded it, which moved the branch and fails the
+    // compare-and-swap, or aborted it within those few commands, whose content the save
+    // then still records. A Git command still running during the save is not excluded:
+    // `git merge` publishes the merged index before it writes MERGE_HEAD, so a save in
+    // between records that content single-parent, as `git add -A && git commit` always
+    // did (review round 5 reproduced the same result on main). The save also commits only
+    // when HEAD names the task branch at both of its reads, before `add -A` and here after
+    // `write-tree`, so a checkout between them skips it (review round 2 on
+    // hearsay-tools/cezarion#1111). A checkout away and back again between the reads is not
+    // excluded, nor is one still running, which writes the new index and working tree
+    // before it moves HEAD, so a save in between commits the other branch's files onto the
+    // task branch, as `git add -A && git commit` on main does. A refusal or a skip here
+    // leaves what `add -A` staged in the index, as every failure after it does.
+    const moved = await readHead();
+    if (moved === undefined) return 'failed';
+    if (moved !== ref) return skip(moved);
+    const late = await pendingOperation();
+    if (late) return late;
+    if (!(await git(dir, ['update-ref', '-m', message, ref, sha, parent])).ok) return 'failed';
+    if (onOutcome) {
+      // The commit already landed: a failed read loses the sha, never the report.
+      const short = await git(dir, ['rev-parse', '--short', sha]);
+      report({ result: 'committed', sha: (short.ok && short.stdout.trim()) || null, branch: taskBranch });
+    }
+    return 'committed';
   }
 }
 

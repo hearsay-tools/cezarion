@@ -608,7 +608,7 @@ export class DelegationService {
     for (const workerId of request.workerIds) this.target(caller, { workerId }, 'wait');
     const project = this.context(caller);
     const wait = project.manager.registerWorkerWait(caller.runId, request);
-    return { wait, instruction: `Wait registered until ${wait.deadline}. End your turn now to release capacity. Cezar will resume you when ${wait.mode === 'all' ? 'all selected workers settle' : 'a selected worker settles'}, or on the deadline/cancellation; no automatic re-wait.` };
+    return { wait, instruction: `Wait registered until ${wait.deadline}. End your turn now to release capacity. Cezar will resume you when ${wait.mode === 'all' ? 'all selected workers settle' : 'a selected worker settles'}, or on the deadline/cancellation. Worker progress also wakes you but keeps this wait active; end your turn to keep waiting.` };
   }
   async cancelWait(caller: Caller, value: WorkerCancelWaitRequest) {
     const { waitId } = workerCancelWaitRequestSchema.parse(value);

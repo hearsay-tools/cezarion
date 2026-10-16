@@ -41,10 +41,29 @@ lokalnych z `.ai/skills/`.
    wygrywa — zasada "repo użytkownika jest źródłem prawdy".
 5. **Seed do kontekstu agenta**: body skilla nadal idzie w
    `--append-system-prompt` (jak dziś). Dla skilli katalogowych (`SKILL.md` +
-   references) — materializacja katalogu do `<cwd>/.claude/skills/<name>/`
-   ORAZ `<cwd>/.agents/skills/<name>/` (claude vs codex/pi, hearsay-tools/cezarion#286), z wpisem
-   każdego z obu do `.git/info/exclude` (wzorzec janitora), żeby każdy backend
-   widział references na dysku.
+   references) — materializacja katalogu do `<worktree>/.claude/skills/<name>/`,
+   `<worktree>/.agents/skills/<name>/` ORAZ `<worktree>/.cursor/skills/<name>/`
+   (claude vs codex/pi vs Cursor, hearsay-tools/cezarion#286, hearsay-tools/cezarion#413), z wpisem
+   każdego do `.git/info/exclude` (wzorzec janitora), żeby każdy backend
+   widział references na dysku. Tylko we własnym worktree zadania
+   (hearsay-tools/cezarion#1024): w głównym checkoucie te katalogi to lokalne skille, które
+   przesłaniałyby źródło zespołowe w każdym kolejnym runie i nigdy by się nie
+   odświeżały. Każda kopia ma znacznik `.cezar-team-skill.json`; kopia ze
+   znacznikiem jest przy następnej materializacji zastępowana, katalog bez
+   znacznika (może należeć do użytkownika) tylko nadpisywany plikami, nigdy
+   czyszczony. Nic nie jest zapisywane ani usuwane poza `realpath(<worktree>)`:
+   katalog docelowy, który symlink wyprowadza poza worktree (np. `.claude`
+   podlinkowany do głównego checkoutu), jest pomijany w całości, a symlink
+   wewnątrz kopii ze znacznikiem jest usuwany, nigdy nie podążamy za nim.
+   Run bez własnego worktree (worktree wyłączony, projekt bez gita,
+   Continue po zniknięciu worktree) albo taki, którego worktree nie przyjął
+   żadnej kopii, dostaje kopię per commit w
+   `~/.cache/cez/skill-files/<owner>__<name>/<commit>/<skill>/` (atomowy
+   rename, kopie nieużywane od 7 dni są usuwane), a prompt skilla podaje jej
+   absolutną ścieżkę. Obie ścieżki czytają pliki z commita, z którego wczytano
+   body skilla (`team.commit`, hearsay-tools/cezarion#428), a nie z miejsca, do którego ref
+   przesunął się od tego czasu; `ref` rozwiązywany jest tylko wtedy, gdy tego
+   commita brak lub nie ma go w klonie.
 6. **API/GUI**: `GET /api/skills` zwraca też `source: 'team'`;
    `POST /api/skills/refresh` robi fetch; etykiety i przycisk w zakładce.
 

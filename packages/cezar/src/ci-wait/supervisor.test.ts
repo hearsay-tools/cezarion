@@ -22,6 +22,9 @@ describe('bounded GitHub supervisor',()=>{
  it.each(['passed','failed','cancelled','skipped'] as const)('attributes structured %s checks despite command exit codes',async(outcome)=>{
   expect(await supervisor(outcome).watch(wait(),new AbortController().signal)).toMatchObject({outcome,headSha:'a'.repeat(40),totalChecks:1});
  });
+ it.each(['passed','failed','cancelled','skipped'] as const)('reports %s when terminal checks also include a skipped check',async outcome=>{
+  expect(await supervisor(`mixed_${outcome}`).watch(wait(),new AbortController().signal)).toMatchObject({outcome,totalChecks:2});
+ });
  it('detects changed head and preserves the captured head',async()=>{
   expect(await supervisor('head_changed').watch(wait(),new AbortController().signal)).toMatchObject({outcome:'head_changed',headSha:'a'.repeat(40),observedHeadSha:'b'.repeat(40)});
  });
@@ -71,9 +74,9 @@ it('turns corrupt persisted identity into a visible error instead of rejecting t
  expect((await supervisor('passed').watch(broken,new AbortController().signal)).outcome).toBe('error');
 });
 
-it.each(['passed','failed','head_changed'] as const)('attributes a final %s snapshot after real gh watch completes',async outcome=>{
+it.each(['passed','failed','head_changed','mixed_passed'] as const)('attributes a final %s snapshot after real gh watch completes',async outcome=>{
  const dir=await mkdtemp(join(tmpdir(),'ci-watch-final-'));dirs.push(dir);const s=supervisor(`watch_${outcome}`,{CI_FIXTURE_COUNTER:join(dir,'watched')});
- expect(await s.watch(wait(),new AbortController().signal)).toMatchObject({outcome,headSha:'a'.repeat(40),...(outcome==='head_changed'?{observedHeadSha:'b'.repeat(40)}:{totalChecks:1})});
+ expect(await s.watch(wait(),new AbortController().signal)).toMatchObject({outcome:outcome==='mixed_passed'?'passed':outcome,headSha:'a'.repeat(40),...(outcome==='head_changed'?{observedHeadSha:'b'.repeat(40)}:{totalChecks:outcome==='mixed_passed'?2:1})});
 });
 
 it('rejects metadata for a different PR number', async () => {

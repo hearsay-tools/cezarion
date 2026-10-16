@@ -1,5 +1,6 @@
 import type { UiToolItem } from '@open-mercato/cezar-api-client'
 
+import { isSubagentChildKind } from './subagent-child-kind'
 import type { ThreadConversationMessage, ThreadEntry } from './thread-state'
 
 /**
@@ -130,7 +131,8 @@ export function groupThreadItems(allEntries: ThreadEntry[]): ThreadBlock[] {
   const top: ThreadEntry[] = []
   for (const entry of entries) {
     const parentId =
-      (entry.kind === 'message' || entry.kind === 'reasoning' || entry.kind === 'tool' || entry.kind === 'hook') &&
+      isSubagentChildKind(entry.kind) &&
+      'parentItemId' in entry &&
       entry.parentItemId !== undefined &&
       entry.parentItemId !== entry.id &&
       toolIds.has(entry.parentItemId)

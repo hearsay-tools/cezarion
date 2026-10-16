@@ -66,6 +66,7 @@ import {
   NO_PROGRESS_CRITERIA,
   AUTONOMOUS_CRITERIA,
   FINAL_MESSAGE_CRITERIA,
+  WORKER_PROGRESS_WAIT_CRITERIA,
   WORKFLOW_ASK_CRITERIA,
   FOLLOWUP_CRITERIA,
   ANSWER_DELIVERY_CRITERIA,
@@ -594,6 +595,11 @@ const CONTROL_CRITERIA = [
   // hearsay-tools/cezarion#958: final autosave beside unrelated worktree process churn.
   { id: 'R67', scenario: 'baseline' },
   { id: 'R68', scenario: 'baseline' },
+  // hearsay-tools/cezarion#1004: harness-autosave-branch.test.ts, run-finalize and turn-end
+  // saves leave work on an agent-checked-out branch uncommitted and report it in the handoff;
+  // R79 also reports a periodic commit that leaves the closing turn-end flush clean.
+  { id: 'R78', scenario: 'baseline' },
+  { id: 'R79', scenario: 'baseline' },
   // hearsay-tools/cezarion#994: workflows/ci-wait-failure-parity.test.ts,
   // failed fresh/continued CI attempts retain history through scheduler recovery.
   { id: 'R72', scenario: 'provider-error' },
@@ -1803,6 +1809,7 @@ describe('harness parity — the matrix itself', () => {
     ...WORKTREE_SETUP_CRITERIA.map(c => c.id),
     ...AUTONOMOUS_CRITERIA.map(c => c.id),
     ...FINAL_MESSAGE_CRITERIA.map(c => c.id),
+    ...WORKER_PROGRESS_WAIT_CRITERIA.map(c => c.id),
     ...NO_PROGRESS_CRITERIA.map(c => c.id),
     ...WORKFLOW_TIMEOUT_CRITERIA.map((c) => c.id),
     ...SEAM_CRITERIA.map((c) => c.id),
@@ -1829,6 +1836,8 @@ describe('harness parity — the matrix itself', () => {
     if (worktreeSetup) return worktreeSetup.scenario;
     const autonomous = AUTONOMOUS_CRITERIA.find(c => c.id === id);
     if (autonomous) return autonomous.scenario;
+    const workerProgress = WORKER_PROGRESS_WAIT_CRITERIA.find(c => c.id === id);
+    if (workerProgress) return workerProgress.scenario;
     const finalMessage = FINAL_MESSAGE_CRITERIA.find(c => c.id === id);
     if (finalMessage) return finalMessage.scenario;
     const inactivity = NO_PROGRESS_CRITERIA.find(c => c.id === id);
