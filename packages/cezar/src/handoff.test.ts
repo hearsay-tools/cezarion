@@ -265,6 +265,23 @@ describe('recordHandoffPeriodicAutosave', () => {
     ]);
   });
 
+  // Git refuses only ASCII space and control characters in a ref name, so a branch can
+  // carry Unicode whitespace (`git check-ref-format --branch` accepts all three), and JS
+  // `\s` matches the first two while `.` misses the line separator (round 7 on
+  // hearsay-tools/cezarion#1111).
+  it.each([
+    ['U+00A0 no-break space', 'fix/a\u00a0b'],
+    ['U+2003 em space', 'fix/a\u2003b'],
+    ['U+2028 line separator', 'fix/a\u2028b'],
+  ])('coalesces on a branch whose name holds Unicode whitespace: %s', (_name, branch) => {
+    seed();
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'aaa1111', branch });
+    at('2026-10-16T10:01:30.000Z');
+    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'bbb2222', branch });
+
+    expect(lines()).toEqual([`- 2026-10-16T10:01:30.000Z — ${periodic(2, 'aaa1111', 'bbb2222', branch)}`]);
+  });
+
   it('appends the section at the end of a file without a Progress log', () => {
     writeFileSync(file(), '# Handoff\n\nfree-form notes');
 

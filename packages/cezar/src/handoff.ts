@@ -142,9 +142,12 @@ export function appendHandoffAutosaveReport(dataDir: string, runId: string, note
 
 const SHA_UNAVAILABLE = '(sha unavailable)';
 const PERIODIC_SHA = String.raw`[0-9a-f]+|\(sha unavailable\)`;
-/** A whole periodic line as `periodicAutosaveNote` writes it; anything else is not one. */
+/** A whole periodic line as `periodicAutosaveNote` writes it; anything else is not one.
+ *  The branch slot takes anything but a line break: Git accepts Unicode whitespace in a ref
+ *  name, which `\S` and `.` refuse, and the exact re-render check rejects any line that is
+ *  not cezar's own. */
 const PERIODIC_LINE = new RegExp(
-  String.raw`^- \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z — (periodic: ([1-9]\d*) cezar autosave commit\(s\) on (detached HEAD|\S+), ` +
+  String.raw`^- \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z — (periodic: ([1-9]\d*) cezar autosave commit\(s\) on ([^\r\n]+?), ` +
     String.raw`first (${PERIODIC_SHA}), latest (${PERIODIC_SHA}); .*)$`,
 );
 
