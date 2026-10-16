@@ -1,3 +1,6 @@
+import { execFileSync } from 'node:child_process';
+import { lstat, realpath } from 'node:fs/promises';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { readBoundedContextFile } from './context.ts';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
@@ -30,8 +33,10 @@ const CLI_FLAG: Record<string, string> = {
   requestIds: '--request', workerIds: 'worker-id', workerId: 'worker-id', waitId: 'wait-id', recipientRunId: 'recipient-run-id',
   task: 'task', text: 'text',
 };
+/** Generic zod message for a refine that sets none; any other message is the schema's own words. */
+const ZOD_DEFAULT_MESSAGE = 'Invalid input';
 const WORKER_USAGE = { operations: [
-  { name: 'spawn', positionals: 1, required: ['--baseline', '--request-id'], optional: ['--workflow', '--skill', '--runner', '--backend', '--model', '--effort', '--context', '--context-file'] },
+  { name: 'spawn', positionals: 1, required: ['--baseline', '--request-id'], optional: ['--workflow', '--skill', '--runner', '--backend', '--model', '--effort', '--context', '--context-file', '--attach'] },
   { name: 'inspect', positionals: 1 },
   { name: 'steer', positionals: 2 },
   { name: 'stop', positionals: 1 },
@@ -80,6 +85,7 @@ const WORKER_FLAG_HELP: Record<string, string> = {
   '--skill': '<name>                   Run one discovered skill as the worker task; not with --workflow.',
   '--context': '<text>                 Selected context; mutually exclusive with --context-file.',
   '--context-file': '<path>            UTF-8 context file; mutually exclusive with --context.',
+  '--attach': '<path>                  Copy a git-ignored file from your worktree into the worker worktree at the same path; repeatable.',
   '--mode': '<one|any|all>             Wait mode (default any); one requires one target.',
   '--timeout-seconds': '<1-1800>       Wait or request deadline (default 600 seconds).',
   '--request': '<UUID>                 Request to wait for; repeat for multiple requests.',
@@ -106,6 +112,32 @@ function workerHelp(operation?: string): string {
   ].join('\n');
 }
 class WorkerCliError extends Error {}
+/**
+ * Resolve each `--attach` value against the caller's directory into a path relative to its worktree
+ * root, which is what the server resolves against. Existence, file type and symlinks are checked here
+ * so a typo fails before any request; whether git ignores the path is the server's call (#1149).
+ */
+async function attachPaths(values: string[]): Promise<string[]> {
+  if (values.length === 0) return [];
+  const cwd = process.cwd();
+  let top: string;
+  try { top = await realpath(execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', timeout: 5_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim()); }
+  catch { throw new WorkerCliError('spawn --attach needs a git worktree; run it from your worktree'); }
+  const root = await realpath(cwd);
+  const paths: string[] = [];
+  for (const value of values) {
+    const abs = resolve(root, value);
+    const info = await lstat(abs).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') throw new WorkerCliError(`spawn --attach path not found: ${value}`);
+      throw new WorkerCliError(`spawn --attach path cannot be read: ${value}`);
+    });
+    if (!info.isFile()) throw new WorkerCliError(`spawn --attach path is not a regular file: ${value}`);
+    const rel = relative(top, abs);
+    if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new WorkerCliError(`spawn --attach path is outside your worktree: ${value}`);
+    paths.push(rel.split(sep).join('/'));
+  }
+  return paths;
+}
 class InboxHttpError extends Error { constructor(readonly status: number) { super('Inbox operation failed'); } }
 function cliName(path: PropertyKey[], argv: string[]): string {
   // `backend` takes `--runner` or its alias `--backend`; name the spelling the caller typed (#632).
@@ -127,6 +159,10 @@ function formatWorkerCliError(error: unknown, argv: string[]): string {
     const missing = error.issues.filter(issue => issue.code === 'invalid_type' && issue.message.includes('undefined'));
     if (missing.length) return `${operation} is missing ${missing.map(issue => cliName(issue.path, argv)).join(' and ')}`;
     const first = error.issues[0];
+    // `--attach` rides in `context.artifacts`; only its custom messages (duplicate, .gitignore) already name the path.
+    if (first?.path[0] === 'context' && first.path[1] === 'artifacts') {
+      return first.code === 'custom' && first.message !== ZOD_DEFAULT_MESSAGE ? first.message : `${operation} has invalid --attach`;
+    }
     return first ? `${operation} has invalid ${cliName(first.path, argv)}` : 'Invalid worker command arguments';
   }
   if (error instanceof Error && 'code' in error && error.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') {
@@ -197,7 +233,7 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
     const operation = argv[0] === 'collect' ? 'collect' : argv[0] === 'cancel-wait' ? 'cancel-wait' : z.union([workerOperationSchema, conversationOperationSchema]).parse(argv[0]);
     const { values, positionals } = parseArgs({ args: argv.slice(1), allowPositionals: true, strict: true, options: {
       help: { type: 'boolean', short: 'h' },
-      ...(operation === 'spawn' ? { baseline: { type: 'string' as const }, 'request-id': { type: 'string' as const }, workflow: { type: 'string' as const }, skill: { type: 'string' as const }, runner: { type: 'string' as const }, backend: { type: 'string' as const }, model: { type: 'string' as const }, effort: { type: 'string' as const }, context: { type: 'string' as const }, 'context-file': { type: 'string' as const } } : {}),
+      ...(operation === 'spawn' ? { baseline: { type: 'string' as const }, 'request-id': { type: 'string' as const }, workflow: { type: 'string' as const }, skill: { type: 'string' as const }, runner: { type: 'string' as const }, backend: { type: 'string' as const }, model: { type: 'string' as const }, effort: { type: 'string' as const }, context: { type: 'string' as const }, 'context-file': { type: 'string' as const }, attach: { type: 'string' as const, multiple: true } } : {}),
       ...(['send', 'progress', 'reply', 'follow-up'].includes(operation) ? { id: { type: 'string' as const }, kind: { type: 'string' as const }, 'request-id': { type: 'string' as const }, 'timeout-seconds': { type: 'string' as const } } : {}),
       ...(operation === 'send' || operation === 'progress' ? { resume: { type: 'boolean' as const } } : {}),
       ...(operation === 'wait' || operation === 'wait-requests' ? { request: { type: 'string' as const, multiple: true }, 'timeout-seconds': { type: 'string' as const }, mode: { type: 'string' as const } } : {}),
@@ -237,12 +273,14 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
       if (values.context !== undefined && values['context-file'] !== undefined) throw new WorkerCliError('spawn has extra argument --context-file');
       const contextText = values['context-file'] === undefined ? values.context
         : new TextDecoder('utf-8', { fatal: true }).decode(await readBoundedContextFile(String(values['context-file']), 400_000));
+      const attached = await attachPaths((values.attach as string[] | undefined) ?? []);
+      const context = { ...(contextText === undefined ? {} : { text: contextText }), ...(attached.length === 0 ? {} : { artifacts: attached.map(path => ({ kind: 'parent-file' as const, path })) }) };
       body = workerSpawnRequestSchema.parse({ task: positionals[0], baseline: values.baseline, requestId: values['request-id'],
         ...(runner === undefined ? {} : { backend: runner }), ...(values.model === undefined ? {} : { model: values.model }),
         ...(values.effort === undefined ? {} : { effort: values.effort }),
         ...(values.workflow === undefined ? {} : { workflow: values.workflow }),
         ...(values.skill === undefined ? {} : { skill: values.skill }),
-        ...(contextText === undefined ? {} : { context: { text: contextText } }),
+        ...(Object.keys(context).length === 0 ? {} : { context }),
       });
     } else if (operation === 'wait' || operation === 'wait-requests') {
       const timeout = values['timeout-seconds'];
