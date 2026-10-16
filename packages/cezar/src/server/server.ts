@@ -1,3 +1,8 @@
+import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
+import { lookupMergedPullRequests } from './forge/github.ts';
+import { resolveArchiveOnMerge, resolveGlobalArchiveOnMerge } from '../archive-on-merge-setting.ts';
+import type { WorkspaceConfigResponse } from '@open-mercato/cezar-contract';
+export type { WorkspaceConfigResponse } from '@open-mercato/cezar-contract';
 import { permissionDecisionSchema, runIdParamSchema as permissionRunIdParamSchema } from '@open-mercato/cezar-contract';
 import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
 import { CheckoutProgressCache } from './checkout-progress.ts';
@@ -351,6 +356,7 @@ export interface ServerDeps {
   projectLookup?: { resolve?: (projectId: string | undefined) => Promise<ProjectContext | undefined> };
   /** Re-arm the workspace automation timer after definition mutations. */
   automationsChanged?: () => void;
+  archiveOnMergeChanged?: () => void;
 }
 
 // ---- project-scoped routing (multi-project spec, step 2.2) -----------------
@@ -627,39 +633,6 @@ export interface RemoveProjectResponse {
  *  back to "inherit the workspace cap". */
 export interface UpdateProjectResponse {
   project: ProjectListEntry;
-}
-
-/** `GET/PUT /api/workspace/config` (multi-project spec, step 2.7) — the
- *  settings slice of `~/.cezar/config.json`: global knobs ONLY, never the
- *  project registry (that is `GET /api/projects`' job). */
-export interface WorkspaceConfigResponse {
-  /** Root exposed by the Add project directory browser (`~` kept). */
-  browseRoot: string;
-  /** Checkout root for GUI-cloned projects — stored as written (`~` kept). */
-  projectsDir: string;
-  /** Stored override; null means inherit CEZ_SKILLS_AUTO_UPDATE, then true. */
-  skillsAutoUpdate: boolean | null;
-  effectiveSkillsAutoUpdate: boolean;
-  composerDefaults: {
-    autonomous: boolean | null;
-    worktree: boolean | null;
-    inheritedAutonomous: boolean | 'source-dependent';
-    inheritedWorktree: boolean;
-  };
-  resources: {
-    maxParallel: number;
-    maxMonitoringSessions: number;
-    monitoringWakeIntervalMinutes: number | null;
-    autoResumeOnUsageLimit: boolean;
-    memoryLimitMb: number | null;
-    worktreeRetentionDefault: number;
-  };
-  /** What a repo that has set none of its own runs (spec 2026-07-29-agent-profiles). Both keys
-   *  optional: absent means "no opinion", which must stay distinguishable from a chosen value. */
-  agentDefaults: {
-    runner?: ProviderId;
-    models?: { claude?: string; codex?: string; opencode?: string };
-  };
 }
 
 // ---- workspace SSE (multi-project spec, step 2.8) --------------------------
@@ -3226,6 +3199,9 @@ export function createApp(deps: ServerDeps) {
     projectsDir: config.projectsDir,
     skillsAutoUpdate: config.skillsAutoUpdate ?? null,
     effectiveSkillsAutoUpdate: effectiveSkillsAutoUpdate(config),
+    archiveOnMerge: config.archiveOnMerge ?? null,
+    effectiveArchiveOnMerge: resolveGlobalArchiveOnMerge(config).enabled,
+    archiveOnMergeSource: resolveGlobalArchiveOnMerge(config).source,
     composerDefaults: {
       autonomous: config.composerDefaults.autonomous ?? null,
       worktree: config.composerDefaults.worktree ?? null,
@@ -3263,7 +3239,7 @@ export function createApp(deps: ServerDeps) {
 
     .put('/workspace/config', jsonZodValidator(() => workspaceConfigUpdateSchema), async (c) => {
       const parsed = { data: c.req.valid('json') };
-      const { browseRoot, projectsDir, skillsAutoUpdate, composerDefaults, resources, agentDefaults } = parsed.data;
+      const { browseRoot, projectsDir, skillsAutoUpdate, archiveOnMerge, composerDefaults, resources, agentDefaults } = parsed.data;
       for (const [configuredRoot, create] of [
         [browseRoot, false],
         [projectsDir, true],
@@ -3297,6 +3273,8 @@ export function createApp(deps: ServerDeps) {
           // Roots are stored as written (`~` kept); only the probe expands them.
           if (browseRoot !== undefined) config.browseRoot = browseRoot;
           if (projectsDir !== undefined) config.projectsDir = projectsDir;
+          if (archiveOnMerge === null) delete config.archiveOnMerge;
+          else if (archiveOnMerge !== undefined) config.archiveOnMerge = archiveOnMerge;
           if (skillsAutoUpdate === null) delete config.skillsAutoUpdate;
           else if (skillsAutoUpdate !== undefined) config.skillsAutoUpdate = skillsAutoUpdate;
           if (composerDefaults?.autonomous === null) delete config.composerDefaults.autonomous;
@@ -3340,6 +3318,7 @@ export function createApp(deps: ServerDeps) {
         // e.g. a read-only home — nothing was persisted (atomic tmp+rename).
         return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
       }
+      if (archiveOnMerge !== undefined) deps.archiveOnMergeChanged?.();
       // A resource change takes effect WITHOUT a restart: refresh the shared
       // semaphore's in-memory snapshot and pump every manager (step 2.5's hook).
       if (resources !== undefined) await deps.semaphore?.refresh();
@@ -3380,6 +3359,7 @@ export function createApp(deps: ServerDeps) {
     browseRoot: z.string().trim().min(1).max(4096).optional(),
     projectsDir: z.string().trim().min(1).max(4096).optional(),
     skillsAutoUpdate: z.boolean().nullable().optional(),
+    archiveOnMerge: z.boolean().nullable().optional(),
     composerDefaults: z
       .object({
         autonomous: z.boolean().nullable().optional(),
@@ -6032,10 +6012,14 @@ export function createApp(deps: ServerDeps) {
   // The Settings → Agents knobs in one read (R6 Step 1.5) — an ADDITIVE
   // sibling of PUT /api/config below; /api/health keeps its protected shape.
   const configAnswer = async (repoRoot: string, config: CezConfig) => {
+    const archive = resolveArchiveOnMerge(config, await loadWorkspaceConfig());
     const nativeModels = await readAgentModelDefaults(repoRoot);
     const setup = resolveWorktreeSetup(config.worktreeSetup);
     const modelsLocked = agentModelsLocked(repoRoot);
     return {
+      archiveOnMerge: config.archiveOnMerge ?? null,
+      effectiveArchiveOnMerge: archive.enabled,
+      archiveOnMergeSource: archive.source,
       baseBranch: config.baseBranch ?? null,
       defaultRunner: config.defaultRunner,
       systemPrompt: config.systemPrompt ?? null,
@@ -6111,6 +6095,10 @@ export function createApp(deps: ServerDeps) {
         if (parsed.data.liveTitleUpdates === null) delete raw.liveTitleUpdates;
         else raw.liveTitleUpdates = parsed.data.liveTitleUpdates;
       }
+      if (parsed.data.archiveOnMerge !== undefined) {
+        if (parsed.data.archiveOnMerge === null) delete raw.archiveOnMerge;
+        else raw.archiveOnMerge = parsed.data.archiveOnMerge;
+      }
       if (parsed.data.reviewGate !== undefined) {
         if (parsed.data.reviewGate === null) delete raw.reviewGate;
         else raw.reviewGate = parsed.data.reviewGate;
@@ -6152,6 +6140,7 @@ export function createApp(deps: ServerDeps) {
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
       }
+      if (parsed.data.archiveOnMerge !== undefined) deps.archiveOnMergeChanged?.();
       // Pre-R6 answer shape ({baseBranch, defaultRunner}) + additive R6 fields.
       return c.json(await configAnswer(repoRoot, await loadConfig(repoRoot)));
     });
@@ -6190,6 +6179,7 @@ export function createApp(deps: ServerDeps) {
     // Optional review gate toggle (Settings → Agents, #489): null clears the key
     // back to the env-default behavior (OFF).
     reviewGate: z.boolean().nullable().optional(),
+    archiveOnMerge: z.boolean().nullable().optional(),
     // Worktree setup (Settings → Worktrees, #917): null or [] deletes the key.
     worktreeSetup: worktreeSetupConfigSchema.nullable().optional(),
   });
@@ -6565,6 +6555,24 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     },
     afterRecover: (project) => deps.delegation?.service.armDestroyRetries(project.id),
   });
+  const archiveOnMerge = new ArchiveOnMergeCoordinator({
+    projects: async () => {
+      const boot = { id: bootProjectId, root: deps.repoRoot, status: 'ok' as const };
+      if (resolveCapabilities(process.env, deps.bindHost).singleProject) return [boot];
+      return [boot, ...(await listProjects()).filter(project => project.id !== bootProjectId && project.root !== deps.repoRoot)];
+    },
+    enabled: async project => resolveArchiveOnMerge(await loadConfig(project.root), await loadWorkspaceConfig()).enabled,
+    repository: async project => {
+      const remote = parseRemote((await getRepoInfo(project.root))?.remote ?? '');
+      return remote?.host === 'github.com' ? `https://github.com/${remote.owner}/${remote.repo}` : undefined;
+    },
+    withStore: async (project, work) => {
+      if (project.root === deps.repoRoot) return work(deps.store, id => deps.manager.isActive?.(id) ?? false, () => server.listening);
+      return sharedContexts.withMaintenanceStore(project.id, (store, valid) =>
+        work(store, id => sharedContexts.peek(project.id)?.manager.isActive(id) ?? false, valid));
+    },
+    lookup: lookupMergedPullRequests,
+  });
   // Injected contexts (tests) skip `prepareManager`.
   sharedContexts.onContextBuilt(addressManager);
   // #801: GitHub automations are opt-in. Off, the flag must remove the BEHAVIOR and not merely
@@ -6583,6 +6591,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     socketHub,
     cezarPort,
     projectLookup,
+    archiveOnMergeChanged: () => archiveOnMerge.invalidate(),
     automationsChanged: () => rescheduleAutomations(),
   });
   // SECURITY: default to loopback. This server executes agents locally and its endpoints are
@@ -6732,6 +6741,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     }
   });
   const startBackgroundServices = () => {
+    archiveOnMerge.start();
     void listProjects().then((projects) => {
       const all = projects.some((project) => project.root === deps.repoRoot)
         ? projects : [{ id: deps.bootProjectId ?? 'default', root: deps.repoRoot, status: 'ok' as const }, ...projects];
@@ -6776,7 +6786,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     resolveProject: async (projectId) => projectLookup.resolve?.(projectId),
   });
   server.once('close', () => {
-    unsubscribe(); coordinator.stop(); automationScheduler.stop(); sharedContexts.disposeAll(); void deps.delegation?.close();
+    unsubscribe(); archiveOnMerge.stop(); coordinator.stop(); automationScheduler.stop(); sharedContexts.disposeAll(); void deps.delegation?.close();
     socketHub.close();
     previewSocket.close();
     void deps.previewHost?.close().catch(() => undefined);
@@ -6784,6 +6794,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   // The one `upgrade` listener: the subscription bus and the preview pane's socket (#781).
   attachUpgradeRouter(server, [socketHubRoute(socketHub, (req) => verifyWsUpgrade(req, deps.bindHost)), previewSocket.route]);
   const shutdownForRestart = async (): Promise<void> => {
+    archiveOnMerge.stop();
     sharedContexts.disposeAll(); // close every built secondary project before old process exits
     deps.store.flush();
     socketHub.close();

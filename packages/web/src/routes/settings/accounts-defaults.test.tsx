@@ -80,6 +80,9 @@ function serve({
     projectsDir: '~/cezar/projects',
     skillsAutoUpdate: null,
     effectiveSkillsAutoUpdate: true,
+    archiveOnMerge: null,
+    effectiveArchiveOnMerge: false,
+    archiveOnMergeSource: 'default',
     composerDefaults: {
       autonomous: null,
       worktree: null,

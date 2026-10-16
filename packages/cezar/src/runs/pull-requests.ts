@@ -1,3 +1,4 @@
+import { runPullRequestSchema, type ArchivePullRequestIdentity } from '@open-mercato/cezar-contract';
 import type { RunPullRequest, RunSummary } from '@open-mercato/cezar-contract';
 
 /** Compare repository identities rather than URL formatting or reference numbers alone. */
@@ -51,4 +52,44 @@ export function ownPullRequestNumbers(
     if (!entry.url) return true;
     try { return own !== undefined && repository(entry.url) === own; } catch { return false; }
   }).map(entry => entry.number))];
+}
+
+/** Fail closed over the COMPLETE collection, including unresolved or malformed members. */
+export function archivePullRequests(
+  family: readonly { pullRequests?: unknown; pullRequestUrl?: string; referencedPullRequestUrl?: string; prNumber?: number }[],
+  repoBase?: string,
+): ArchivePullRequestIdentity[] | undefined {
+  const own = repoBase ? githubIdentity(`${repoBase.replace(/\/$/, '')}/pull/1`) : undefined;
+  const result = new Map<string, ArchivePullRequestIdentity>();
+  for (const run of family) {
+    if (run.pullRequests !== undefined) {
+      if (!Array.isArray(run.pullRequests)) return undefined;
+      for (const raw of run.pullRequests) {
+        const parsed = runPullRequestSchema.safeParse(raw);
+        if (!parsed.success) return undefined;
+        const entry = parsed.data;
+        const identity = entry.url ? githubIdentity(entry.url) : own ? { ...own, number: entry.number } : undefined;
+        if (!identity || identity.number !== entry.number) return undefined;
+        result.set(pullRequestKey(identity), identity);
+      }
+    } else if (run.pullRequestUrl !== undefined) {
+      const identity = githubIdentity(run.pullRequestUrl);
+      if (!identity || !own || identity.owner !== own.owner || identity.repo !== own.repo) return undefined;
+      result.set(pullRequestKey(identity), identity);
+    }
+  }
+  return result.size ? [...result].sort(([a], [b]) => a.localeCompare(b)).map(([, identity]) => identity) : undefined;
+}
+
+export function pullRequestKey(identity: ArchivePullRequestIdentity): string {
+  return `${identity.owner.toLowerCase()}/${identity.repo.toLowerCase()}#${identity.number}`;
+}
+
+function githubIdentity(value: string): ArchivePullRequestIdentity | undefined {
+  try {
+    const url = new URL(value);
+    const match = /^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/([1-9][0-9]*)\/?$/.exec(url.pathname);
+    if (!match || url.hostname.toLowerCase() !== 'github.com' || url.port || url.username || url.password || !['http:', 'https:'].includes(url.protocol)) return undefined;
+    return { owner: match[1]!.toLowerCase(), repo: match[2]!.toLowerCase(), number: Number(match[3]) };
+  } catch { return undefined; }
 }

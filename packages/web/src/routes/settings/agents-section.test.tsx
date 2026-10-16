@@ -121,6 +121,9 @@ function serve({
     ...(agentProfiles?.selections as Record<string, Record<string, string>>),
   }
   const state: ConfigResponse = {
+  archiveOnMerge: null,
+  effectiveArchiveOnMerge: false,
+  archiveOnMergeSource: 'default',
     baseBranch: null,
     defaultRunner: 'claude',
     systemPrompt: null,

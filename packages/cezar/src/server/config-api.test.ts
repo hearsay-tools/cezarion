@@ -32,12 +32,12 @@ describe('the config API', () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-configapi-'));
     homeRoot = mkdtempSync(join(tmpdir(), 'cez-configapi-home-'));
     process.env.HOME = homeRoot;
-    process.env.CEZ_HOME = join(homeRoot, '.cezar');
+    process.env.CEZ_HOME = join(homeRoot, 'cezar-sandbox');
     process.env.CODEX_HOME = join(homeRoot, '.codex');
     process.env.XDG_CONFIG_HOME = join(homeRoot, '.config');
     delete process.env.CEZ_AGENT_MODELS_LOCKED;
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
-    mkdirSync(join(homeRoot, '.cezar'), { recursive: true });
+    mkdirSync(join(homeRoot, 'cezar-sandbox'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     // The config routes never touch the manager — an empty stub is honest.
     app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
@@ -75,6 +75,9 @@ describe('the config API', () => {
     const res = await get();
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
+      archiveOnMerge: null,
+      effectiveArchiveOnMerge: false,
+      archiveOnMergeSource: 'default',
       baseBranch: null,
       defaultRunner: 'claude',
       systemPrompt: null,
@@ -88,6 +91,20 @@ describe('the config API', () => {
       worktreeSetup: null,
       worktreeSetupIssue: null,
     });
+  });
+
+  it('persists archive-on-merge overrides, inherits the workspace and clears back to defaults', async () => {
+    expect(await getBody()).toMatchObject({ archiveOnMerge: null, effectiveArchiveOnMerge: false, archiveOnMergeSource: 'default' });
+    const global = await apiRequest(app, '/api/v1/workspace/config', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ archiveOnMerge: true }) });
+    expect(global.status).toBe(200);
+    expect(await getBody()).toMatchObject({ archiveOnMerge: null, effectiveArchiveOnMerge: true, archiveOnMergeSource: 'global' });
+    expect((await put({ archiveOnMerge: false })).status).toBe(200);
+    expect(await getBody()).toMatchObject({ archiveOnMerge: false, effectiveArchiveOnMerge: false, archiveOnMergeSource: 'project' });
+    expect(rawFile().archiveOnMerge).toBe(false);
+    await put({ archiveOnMerge: null });
+    expect(rawFile()).not.toHaveProperty('archiveOnMerge');
+    expect(await getBody()).toMatchObject({ effectiveArchiveOnMerge: true, archiveOnMergeSource: 'global' });
+    expect((await put({ archiveOnMerge: 'yes' })).status).toBe(400);
   });
 
   it("uses the coding agents' native model settings as the initial defaults", async () => {
@@ -139,7 +156,7 @@ describe('the config API', () => {
 
   it('supports a global workspace config lock across repositories', async () => {
     writeFileSync(
-      join(homeRoot, '.cezar', 'config.json'),
+      join(homeRoot, 'cezar-sandbox', 'config.json'),
       JSON.stringify({ modelsLocked: true }),
       'utf8',
     );
@@ -194,6 +211,9 @@ describe('the config API', () => {
     expect(raw.defaultRunner).toBeUndefined();
     expect(raw.plannerModel).toBeUndefined();
     expect(await (await get()).json()).toEqual({
+      archiveOnMerge: null,
+      effectiveArchiveOnMerge: false,
+      archiveOnMergeSource: 'default',
       baseBranch: 'develop',
       defaultRunner: 'claude',
       systemPrompt: 'Be brief.',

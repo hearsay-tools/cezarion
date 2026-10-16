@@ -25,6 +25,9 @@ let requests: Array<{ method: string; url: string; body?: unknown }> = []
 function serve(config: Partial<ConfigResponse> = {}) {
   requests = []
   const state: ConfigResponse = {
+    archiveOnMerge: null,
+    effectiveArchiveOnMerge: false,
+    archiveOnMergeSource: 'default',
     baseBranch: null,
     defaultRunner: 'claude',
     systemPrompt: null,

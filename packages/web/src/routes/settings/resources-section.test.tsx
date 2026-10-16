@@ -30,6 +30,9 @@ function serve(resources: Partial<WorkspaceConfigResponse['resources']> = {}) {
     projectsDir: '~/cezar/projects',
     skillsAutoUpdate: null,
     effectiveSkillsAutoUpdate: true,
+    archiveOnMerge: null,
+    effectiveArchiveOnMerge: false,
+    archiveOnMergeSource: 'default',
     composerDefaults: {
       autonomous: null,
       worktree: null,

@@ -27,6 +27,18 @@ import { workflowDefSchema, workflowStepDefSchema } from './workflows.ts';
  *    `{}` — a payload the route cannot produce.
  */
 
+/** Canonical GitHub authority retained with an automatic archive receipt. */
+export const archivePullRequestIdentitySchema = z.object({
+  owner: z.string().min(1), repo: z.string().min(1), number: z.number().int().positive(),
+});
+export type ArchivePullRequestIdentity = z.infer<typeof archivePullRequestIdentitySchema>;
+export const mergedPullRequestSchema = archivePullRequestIdentitySchema.extend({ mergedAt: z.string().datetime() });
+export type MergedPullRequest = z.infer<typeof mergedPullRequestSchema>;
+export const autoArchiveReceiptSchema = z.object({
+  reason: z.literal('pull-requests-merged'), archivedAt: z.string().datetime(),
+  fingerprint: z.string(), pullRequests: z.array(mergedPullRequestSchema),
+});
+
 // ---- the record --------------------------------------------------------------------------
 
 export const runStatusSchema = z.enum([
@@ -349,6 +361,8 @@ export const runRecordSchema = z.object({
   peakProcCount: z.number().optional(),
   archived: z.boolean(),
   archivedAt: z.string().optional(),
+  autoArchive: autoArchiveReceiptSchema.optional(),
+  manualUnarchivedAt: z.string().datetime().optional(),
   /** Pinned to the top of this project's task list (#935) — the `Pinned` group above
    *  `Needs you`. Optional, unlike `archived`: absent IS "not pinned", which is what every
    *  record written before this carries, and the store never writes `false`. Archiving

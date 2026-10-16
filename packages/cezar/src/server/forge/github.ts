@@ -1,3 +1,5 @@
+import { mergedPullRequestSchema, type ArchivePullRequestIdentity, type MergedPullRequest } from '@open-mercato/cezar-contract';
+import { archivePullRequests, pullRequestKey } from '../../runs/pull-requests.ts';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -3282,4 +3284,40 @@ export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | nu
       }
     },
   };
+}
+
+/** Strict archive authority: no partial GraphQL success, redirects, guessed identity or date. */
+export async function fetchMergedPullRequests(runGraphql: GraphqlRunner, identities: readonly ArchivePullRequestIdentity[]): Promise<MergedPullRequest[]> {
+  const repositories = new Map<string, ArchivePullRequestIdentity[]>();
+  for (const identity of new Map(identities.map(pr => [pullRequestKey(pr), pr])).values()) {
+    const key = `${identity.owner}/${identity.repo}`;
+    repositories.set(key, [...(repositories.get(key) ?? []), identity]);
+  }
+  const merged: MergedPullRequest[] = [];
+  for (const [repository, prs] of repositories) {
+    for (let offset = 0; offset < prs.length; offset += 25) {
+      const chunk = prs.slice(offset, offset + 25);
+      const query = `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { nameWithOwner ${chunk.map(pr => `pr${pr.number}: pullRequest(number: ${pr.number}) { number url state mergedAt }`).join(' ')} } }`;
+      const response: unknown = JSON.parse(await runGraphql(query, { owner: chunk[0]!.owner, name: chunk[0]!.repo }));
+      const parsed = z.object({ errors: z.array(z.unknown()).optional(), data: z.object({ repository: z.object({ nameWithOwner: z.string() }).passthrough().nullable() }) }).safeParse(response);
+      if (!parsed.success || parsed.data.errors?.length || parsed.data.data.repository?.nameWithOwner.toLowerCase() !== repository.toLowerCase()) continue;
+      for (const pr of chunk) {
+        const node = z.object({ number: z.number(), url: z.string(), state: z.literal('MERGED'), mergedAt: z.string().datetime() }).safeParse(parsed.data.data.repository[`pr${pr.number}`]);
+        if (!node.success || node.data.number !== pr.number) continue;
+        const actual = archivePullRequests([{ pullRequests: [{ number: node.data.number, url: node.data.url, source: 'created' }] }]);
+        if (actual?.length !== 1 || pullRequestKey(actual[0]!) !== pullRequestKey(pr)) continue;
+        merged.push(mergedPullRequestSchema.parse({ ...pr, mergedAt: node.data.mergedAt }));
+      }
+    }
+  }
+  return merged;
+}
+
+export function lookupMergedPullRequests(repoRoot: string, identities: ArchivePullRequestIdentity[], signal: AbortSignal): Promise<MergedPullRequest[]> {
+  const context = githubContext(repoRoot);
+  return fetchMergedPullRequests(async (query, variables) => {
+    const args = ['api', 'graphql', '--hostname', 'github.com', '-f', `query=${query}`];
+    for (const [key, value] of Object.entries(variables)) args.push('-f', `${key}=${value}`);
+    return gh(repoRoot, args, 15_000, signal, context);
+  }, identities);
 }
