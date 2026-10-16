@@ -295,13 +295,14 @@ export interface AgentSession {
   discardQueuedMessages(): void;
   /** True while this session still holds a human follow-up from `sendMessage`
    *  that the model has not consumed and that the runner will still deliver (#486).
-   *  Queueing runners drop on `discardQueuedMessages` and return false immediately.
-   *  Write-through/steer wires report true until the harness settles that line
-   *  (their discard is a no-op). A drain with no new turn must call
-   *  `onAgentInputReady` so run.ts can re-settle the idle boundary. A drain that
-   *  opens a new native turn keeps reporting true until that turn's `turn.started`
-   *  has been emitted: a spawn, an ack or a queue shift is not a turn start, and
-   *  run.ts parks a boundary whose hold reads false (hearsay-tools/cezarion#1112). */
+   *  A held input releases only when (a) the normalized `turn.started` of the turn
+   *  that carries it has been emitted, (b) it is read inside an open normalized turn,
+   *  or (c) it can never start: a rejection, a close, or a `discardQueuedMessages`
+   *  that drops it (the hold then reads false at once). A native ack, a
+   *  native run-start frame, a spawn or a queue shift is not a release: run.ts parks
+   *  a boundary whose hold reads false (hearsay-tools/cezarion#1112). A release that
+   *  opens no new turn must call `onAgentInputReady` so run.ts can re-settle the idle
+   *  boundary. AGENT_PROTOCOL.md §7 lists each runner's exit frames. */
   holdsHumanInput(): boolean;
   /** Count of human follow-ups still held behind `holdsHumanInput`. Every built-in
    *  runner reports it from the same state `holdsHumanInput` reads
