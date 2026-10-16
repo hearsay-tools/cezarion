@@ -462,9 +462,15 @@ list, detail pane and Hand to agent action stay in the main area. On mobile, the
 GitHub tab opens the filter screen; selecting a row opens its list.
 
 Has a task and No task yet use issue references from this project's non-archived
-tasks, excluding references to other repositories. Counts show a `+` when the
-underlying list or search reaches its result limit; an unavailable count is not
-shown as zero. Views without their own navigation still show tasks in the sidebar.
+tasks, excluding references to other repositories. The list loads 50 rows at a time
+and loads the next page as you scroll toward its end. The tabs and All open show
+GitHub's exact open totals. A preset count shows a `+` while more pages remain
+unloaded, and a search count shows one when the search reaches its result limit;
+an unavailable count is not shown as zero. Filtering by search, label, assignee or
+board narrows the loaded rows and does not load more pages.
+
+The `body` field on `GET /api/v1/github` list rows is deprecated. It is still sent,
+and a later minor removes it; read an item's body from the comments route's `detail`. Views without their own navigation still show tasks in the sidebar.
 
 Open an issue to see **Linked tasks (N)** beneath its heading. Each row opens a task
 in the current project and shows its title, status and date, newest first. Archived

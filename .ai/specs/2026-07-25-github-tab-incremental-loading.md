@@ -230,6 +230,14 @@ with `detail?: { body }`; `comments[]`/`events?` keep their exact shape and caps
 
 Phases 2 and 3 are tracked as follow-up issues, not part of this PR.
 
+> Fork note (hearsay-tools/cezarion, 2026-10-17): hearsay-tools/cezarion#1183 delivers Phase 2
+> and most of Phase 3 by porting open-mercato/cezar#1362, #1366 and #1374: one GraphQL query per
+> side and page with exact totals and independent cursors, 50-row pages loaded by scrolling, the
+> `virtua` list bound to the element that really scrolls, comment counts after paint through
+> `GET /api/v1/github/comment-counts`, and the comments route's additive `detail`. The list's
+> `body` is deprecated but still sent; its removal waits for a later minor. Design:
+> `docs/superpowers/specs/2026-10-16-github-paged-lists-design.md` on that branch.
+
 ## Implementation Plan
 
 **Phase 1 — the deliverable for #664**
