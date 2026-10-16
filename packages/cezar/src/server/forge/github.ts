@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import { GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, type GithubItemResponse, type GithubProjectsData } from '@open-mercato/cezar-contract';
-import { fetchIssueProjects, fetchViewerLogin } from './github-filters.ts';
+import { fetchIssueProjects, fetchRepositoryProjects, fetchViewerLogin } from './github-filters.ts';
 import { fetchGithubMergeRequirements, type GithubMergeRequirements } from './github-merge-requirements.ts';
 import { autosaveCommit } from '../../git-worktree.ts';
 import { refNumberFromUrl } from '../../runs/run-search.ts';
@@ -409,9 +409,41 @@ export async function fetchListConnection(
    issues/PRs must never be served under another project's scope, and page 2 is never page 1.
    Bounded like `commentsCache` so an unbounded workspace can't grow it without limit. */
 let listRequestOrder = 0;
-const listCache = new Map<string, { order: number; at: number; limit: number; data: GithubData; projects: Promise<GithubProjectsData> }>();
+const listCache = new Map<string, {
+  contextKey: string; order: number; at: number; limit: number; data: GithubData; projects: Promise<GithubProjectsData>;
+}>();
 const LIST_CACHE_MAX = 50;
 const CACHE_MS = 60_000;
+/** Which page key holds a projects generation, so `fetchGithubProjects` never scans the cache.
+ *  Installed and evicted in step with `listCache`, so it shares its bound. */
+const projectGenerations = new Map<string, string>();
+/** Board discovery (the `projectsV2` walk) per context: page 2 pays for membership only. A
+ *  failed discovery is dropped, so the next page or refresh asks again. */
+const repositoryProjectsCache = new Map<string, { at: number; projects: Promise<GithubProject[]> }>();
+
+function dropListEntry(key: string): void {
+  const generation = listCache.get(key)?.data.projectsGeneration;
+  if (generation && projectGenerations.get(generation) === key) projectGenerations.delete(generation);
+  listCache.delete(key);
+}
+
+function discoverRepositoryProjects(contextKey: string, refresh: boolean, start: () => Promise<GithubProject[]>): Promise<GithubProject[]> {
+  const hit = repositoryProjectsCache.get(contextKey);
+  if (!refresh && hit && Date.now() - hit.at < CACHE_MS) return hit.projects;
+  const projects = start();
+  const entry = { at: Date.now(), projects };
+  repositoryProjectsCache.delete(contextKey);
+  repositoryProjectsCache.set(contextKey, entry);
+  projects.catch(() => {
+    if (repositoryProjectsCache.get(contextKey) === entry) repositoryProjectsCache.delete(contextKey);
+  });
+  while (repositoryProjectsCache.size > LIST_CACHE_MAX) {
+    const oldest = repositoryProjectsCache.keys().next().value;
+    if (oldest === undefined) break;
+    repositoryProjectsCache.delete(oldest);
+  }
+  return projects;
+}
 export const GH_MAX_LIMIT = 1000;
 
 /** Where one list page starts on each side. A done side answered `nextCursor: null` already. */
@@ -450,7 +482,9 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30,
     const firstPage = !page.issuesCursor && !page.prsCursor && !page.issuesDone && !page.prsDone;
     const issueSide = fetchListConnection(runGraphql, ownerName.owner, ownerName.name, 'issues', capped, page.issuesCursor, page.issuesDone);
     const projectLookup = fetchIssueProjects(projectGraphql, ownerName.owner, ownerName.name,
-      async () => (await issueSide).nodes.map((node) => node.number));
+      async () => (await issueSide).nodes.map((node) => node.number),
+      () => discoverRepositoryProjects(context.key, refresh,
+        () => fetchRepositoryProjects(projectGraphql, ownerName.owner, ownerName.name)));
     const [issuesPage, prsPage, viewerLogin] = await Promise.all([
       issueSide,
       fetchListConnection(runGraphql, ownerName.owner, ownerName.name, 'pullRequests', capped, page.prsCursor, page.prsDone),
@@ -548,13 +582,14 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30,
     // Concurrent refreshes may finish in reverse order. An older list must not evict
     // the newer generation (and invalidate the newer client's metadata follow-up).
     if ((listCache.get(key)?.order ?? -1) < order) {
-      listCache.delete(key); // re-insert so this key becomes the newest
-      listCache.set(key, { order, at: Date.now(), limit: capped, data, projects });
+      dropListEntry(key); // re-insert so this key becomes the newest
+      listCache.set(key, { contextKey: context.key, order, at: Date.now(), limit: capped, data, projects });
+      projectGenerations.set(generation, key);
     }
     while (listCache.size > LIST_CACHE_MAX) {
       const oldest = listCache.keys().next().value;
       if (oldest === undefined) break;
-      listCache.delete(oldest);
+      dropListEntry(oldest);
     }
     return data;
   } catch (err) {
@@ -576,10 +611,11 @@ export function ghFailureReason(err: unknown): string {
 
 /** Bounded lookup already started by the list. Never launch work for an expired generation. */
 export async function fetchGithubProjects(repoRoot: string, generation: string): Promise<GithubProjectsData> {
-  const contextKey = githubContext(repoRoot).key;
-  const entry = [...listCache.entries()].find(([key, value]) =>
-    value.data.projectsGeneration === generation && JSON.parse(key)[0] === contextKey)?.[1];
-  if (!entry) {
+  const key = projectGenerations.get(generation);
+  const entry = key === undefined ? undefined : listCache.get(key);
+  // A generation from another repository, host or account never resolves here, even when
+  // its UUID is known: the context is part of what the generation was issued for.
+  if (!entry || entry.contextKey !== githubContext(repoRoot).key || entry.data.projectsGeneration !== generation) {
     return { generation, state: 'unavailable', reason: 'Project metadata expired. Refresh to try again.' };
   }
   return entry.projects;
@@ -3206,7 +3242,11 @@ async function fetchPrMergeState(
 }
 
 export function evictGithubProjectCaches(repoRoot: string): void {
-  listCache.delete(githubContext(repoRoot).key);
+  const contextKey = githubContext(repoRoot).key;
+  listCache.forEach((entry, key) => {
+    if (entry.contextKey === contextKey) dropListEntry(key);
+  });
+  repositoryProjectsCache.delete(contextKey);
   mergeStateCache.forEach((_value, key) => {
     if (key.startsWith(`${repoRoot}:`)) mergeStateCache.delete(key);
   });
