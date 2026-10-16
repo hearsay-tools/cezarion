@@ -90,6 +90,7 @@ function fetchCorpus({ dir, count }) {
     '.[] | select(.pull_request == null) | {number,title,body,labels: [.labels[].name],created_at,closed_at,updated_at,state_reason}',
   ).map((issue) => ({ ...issue, body: issue.body ?? '' }));
   const labels = JSON.parse(gh(['label', 'list', '--limit', '100', '--json', 'name,description']));
+  fs.mkdirSync(dir, { recursive: true });
   const corpus = { repo, fetchedAt: new Date().toISOString(), issues, labels };
   const targets = targetsOf(corpus, count);
 
@@ -117,7 +118,6 @@ function fetchCorpus({ dir, count }) {
     baseline[target.number] = { run: run.id, conclusion: run.conclusion, intake };
   }
 
-  fs.mkdirSync(dir, { recursive: true });
   writeJson(path.join(dir, 'corpus.json'), corpus);
   writeJson(path.join(dir, 'baseline.json'), baseline);
   console.log(`${issues.length} issues, ${targets.length} targets, ${Object.keys(baseline).length} with a Codex run`);
