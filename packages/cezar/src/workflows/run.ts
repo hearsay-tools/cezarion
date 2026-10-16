@@ -5095,14 +5095,20 @@ export class RunManager {
       const input = run.agentInputs?.find(entry => entry.id === run.ciWait?.wakeId && !entry.deliveredAt);
       return !!input && this.submitAgentInput(runId, state, [{ type: 'text', text: this.formatAgentInput(runId, input) }], [input.id]);
     }
-    const batch = agentInputBatch(queue, input => this.formatAgentInput(runId, input));
-    return !!batch && this.submitAgentInput(runId, state, [{ type: 'text', text: batch.text }], batch.inputs.map(input => input.id));
+    // Select within the byte budget using the longer interruption context, then
+    // format the selected snapshot consistently. Do not change durable wait intent
+    // merely to format inputs that the provider may refuse.
+    const batch = agentInputBatch(queue, input => this.formatAgentInput(runId, input, false));
+    if (!batch) return false;
+    const progressOnly = batch.inputs.every(input => input.conversation?.kind === 'progress');
+    const text = batch.inputs.map(input => this.formatAgentInput(runId, input, progressOnly)).join('\n\n');
+    return this.submitAgentInput(runId, state, [{ type: 'text', text }], batch.inputs.map(input => input.id));
   }
 
-  private formatAgentInput(runId: string, input: AgentInput): string {
+  private formatAgentInput(runId: string, input: AgentInput, progressOnly = true): string {
     const attribution = input.conversation;
     const wait = this.workerWait(runId);
-    const waitContext = wait?.reason !== 'message' ? '' : this.retainsWorkerWaitOnProgress(runId) && attribution?.kind === 'progress'
+    const waitContext = wait?.reason !== 'message' ? '' : progressOnly && this.retainsWorkerWaitOnProgress(runId) && attribution?.kind === 'progress'
       ? `; worker wait ${wait.id} remains active; end your turn to keep waiting`
       : `; interrupted wait ${wait.id} to receive this message; outstanding requests remain pending`;
     const text = attribution

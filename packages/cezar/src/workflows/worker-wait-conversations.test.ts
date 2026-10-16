@@ -103,8 +103,13 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
         const claim = manager.reserveInboxInputs(f.p.id, generation, [progressId, requestId])!;
         expect(manager.acknowledgeInbox(f.p.id, generation, claim.receiptId)).toBe('acknowledged');
       } else {
+        const active = manager as unknown as { active: Map<string, { session: AgentSession }> };
+        const send = vi.spyOn(active.active.get(f.p.id)!.session, 'sendAgentMessage');
         pump.mockRestore(); await engine.pump();
         await until(() => [progressId, requestId].every(id => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt));
+        const submitted = JSON.stringify(send.mock.calls);
+        expect(submitted).toContain(`interrupted wait ${wait.id}`);
+        expect(submitted).not.toContain('remains active');
       }
       expect(waitOf(store.getRun(f.p.id))).toBeUndefined();
       expect(store.getRun(f.p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'message' } });
