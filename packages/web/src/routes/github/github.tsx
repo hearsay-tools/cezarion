@@ -276,10 +276,12 @@ export function GithubRoute({
       void refetchExact(exact)
       return getGithub({ refresh: true, limit: GITHUB_PAGE_SIZE })
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       // A refresh starts the list over at one fresh first page: later pages were cut against the
-      // old cursors, and the next scroll loads them again from this page's (#1183). Then
-      // re-hydrate the visible checks window so glyphs track the fresh rows.
+      // old cursors, and the next scroll loads them again from this page's (#1183). A page load
+      // still in flight is cancelled first, or it would land its old pages over the fresh one.
+      // Then re-hydrate the visible checks window so glyphs track the fresh rows.
+      await queryClient.cancelQueries({ queryKey: queryKeys.githubPages(GITHUB_PAGE_SIZE), exact: true })
       queryClient.setQueryData<InfiniteData<GithubData, GithubPageParam>>(
         queryKeys.githubPages(GITHUB_PAGE_SIZE), { pages: [data], pageParams: [{}] })
       void queryClient.invalidateQueries({ queryKey: queryKeys.githubChecks(checkPrNumbers) })

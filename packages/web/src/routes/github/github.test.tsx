@@ -811,6 +811,31 @@ describe('scroll-driven paging (hearsay-tools/cezarion#1183, port of open-mercat
     expect(sent.filter((r) => listPage(r.path) && r.path.includes('issuesCursor=c1'))).toHaveLength(1)
   })
 
+  it('Refresh during a pending page load keeps the fresh first page', async () => {
+    let finishPage!: (response: Response) => void
+    stubPaged()
+    const paged = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input)
+      if (path.includes('issuesCursor=')) return new Promise<Response>((resolve) => { finishPage = resolve })
+      if (path.includes('refresh=1') && listPage(path)) {
+        return jsonResponse({ ...GITHUB, issues: [{ ...ISSUE_142, title: 'Fresh title' }], prs: [], issuesNextCursor: null, prsNextCursor: null })
+      }
+      return paged(input, init)
+    })
+    renderAt('/github?filter=all')
+    await waitFor(() => expect(live()).toHaveLength(1))
+    act(() => live()[0]!.fire(true))
+    await waitFor(() => expect(finishPage).toBeTypeOf('function'))
+    fireEvent.click(document.querySelector<HTMLElement>('[data-slot="gh-refresh"]')!)
+    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142']))
+    // The old page lands after the refresh: it must not restore the pre-refresh pages.
+    await act(async () => { finishPage(jsonResponse({ ...GITHUB, issues: [ISSUE_120], prs: [], issuesNextCursor: null, prsNextCursor: null })) })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(rows().map((row) => row.dataset.number)).toEqual(['142'])
+    expect(rows()[0]?.textContent).toContain('Fresh title')
+  })
+
   it('a text search pauses paging; the No task yet preset keeps paging', async () => {
     stubPaged()
     renderAt('/github?filter=all')
