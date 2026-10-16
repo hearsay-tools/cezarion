@@ -163,8 +163,23 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
     try {
       await until(() => store.getRun(w.id)?.status === 'waiting');
       await until(() => store.getRun(blocker.id)?.status === 'running');
+      // The wait settles on the worker's durable exit proof, not its status write:
+      // finishWorkerExecution awaits the worker's sessions, turns and deliveries, then
+      // commitWorkerExecutionComplete emits the run that reconcileWorkerWaits reads.
+      // Hold that proof the way a loaded host delays it (hearsay-tools/cezarion#1113: the
+      // gate read `parked` right after the worker reached `done`).
+      let releaseExit!: () => void;
+      (manager as unknown as { executions: Map<string, { deliveries: Set<Promise<void>> }> }).executions.get(w.id)!
+        .deliveries.add(new Promise<void>(resolve => { releaseExit = resolve; }));
       manager.finish(w.id);
-      await until(() => terminal.includes(store.getRun(w.id)?.status ?? ''));
+      try {
+        await until(() => terminal.includes(store.getRun(w.id)?.status ?? ''));
+        // Until the proof lands the parent stays parked on its worker, and that reads as
+        // waiting on the worker, never Needs you.
+        expect(waitOf(store.getRun(p.id))?.phase).toBe('parked');
+        expect(deriveAttention(store.getRun(p.id)!)).toMatchObject({ bucket: 'none', tone: 'running', shape: 'workers', label: 'waiting on 1 worker' });
+      } finally { releaseExit(); }
+      await until(() => waitOf(store.getRun(p.id))?.phase !== 'parked');
       expect(store.getRun(p.id)?.status).toBe('waiting');
       capacity(p.id);
     } finally {
