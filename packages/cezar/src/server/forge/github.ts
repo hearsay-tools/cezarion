@@ -319,7 +319,8 @@ export const GH_GRAPHQL_PAGE_MAX = 100;
 
 export type ListSide = 'issues' | 'pullRequests';
 
-const LIST_NODE_FIELDS = 'number title author { login } createdAt url body labels(first: 20) { nodes { name color } }';
+// Labels up to 100, which is what `gh issue list --json labels` read before the GraphQL page.
+const LIST_NODE_FIELDS = 'number title author { login } createdAt url body labels(first: 100) { nodes { name color } }';
 const listQuery = (side: ListSide): string => `
 query ($owner: String!, $name: String!, $first: Int!, $after: String) {
   repository(owner: $owner, name: $name) {

@@ -1898,7 +1898,8 @@ describe('paged GitHub list (#1183)', () => {
     for (const argv of spawns.filter((a) => listSide(a))) {
       expect(argv[argv.findIndex((a) => a.startsWith('first=')) - 1]).toBe('-F');
       expect(graphqlVar(argv, 'query')).not.toContain('comments');
-      expect(graphqlVar(argv, 'query')).toContain('labels(first: 20) { nodes');
+      // `gh issue list --json labels` read up to 100 labels; the GraphQL page keeps that.
+      expect(graphqlVar(argv, 'query')).toContain('labels(first: 100) { nodes');
     }
   });
 
