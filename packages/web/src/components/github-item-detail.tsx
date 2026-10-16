@@ -906,7 +906,7 @@ const CHECKS_TONE: Record<Checks, string> = {
 /** The comment-count badge (#499): a muted speech-bubble glyph + count, shown on issue/PR rows
  *  and in the detail meta line. Renders nothing for a zero (or absent) count, so quiet items look
  *  exactly as they did before real counts arrived. Shared so the row and detail can't drift. */
-export function CommentCount({ count }: { count: number }) {
+export function CommentCount({ count }: { count: number | undefined }) {
   if (!count) return null
   return (
     <span

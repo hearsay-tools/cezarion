@@ -7,6 +7,7 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
+import { queryKeys } from '@/api/queries'
 import type {
   GithubComment,
   GithubCommentsData,
@@ -210,6 +211,10 @@ function stubFetch(
           { path: 'logo.png', status: 'modified', additions: 0, deletions: 0, patchUnavailableReason: 'binary' },
         ],
       })
+      // Deferred comment counts (hearsay-tools/cezarion#1183) default to "nothing known".
+      if (method === 'GET' && path.startsWith('/api/v1/github/comment-counts')) {
+        return jsonResponse({ available: true, counts: {} })
+      }
       // Lazy PR checks (#664) default to an empty map — a test overrides to hydrate specific glyphs.
       if (method === 'GET' && path.startsWith('/api/v1/github/checks')) {
         return jsonResponse({ available: true, checks: {} })
@@ -542,7 +547,7 @@ describe('the GitHub tab lists', () => {
     const p203: GithubItem = { ...PR_137, number: 203, url: 'u203', checks: null }
     const pr137: GithubItem = { ...PR_137, checks: null }
     stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, prs: [pr137, p201, p202, p203] }),
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: [pr137, p201, p202, p203] }),
       'GET /api/v1/github/checks?prs=137%2C201%2C202%2C203': () =>
         jsonResponse({ available: true, checks: { 137: 'failing', 201: 'passing', 202: 'pending', 203: null } }),
     })
@@ -614,7 +619,7 @@ describe('the GitHub tab lists', () => {
       issues: Array.from({ length: 45 }, (_, i) => ({ ...ISSUE_142, number: i + 1, url: `u${i}` })),
     }
     stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse(many),
+      'GET /api/v1/github?limit=50': () => jsonResponse(many),
     })
     renderAt('/github')
 
@@ -1255,7 +1260,7 @@ describe('the comment thread', () => {
 
   it('manual Refresh bypasses the list cache and updates the selected issue body', async () => {
     const sent = stubFetch({
-      'GET /api/v1/github?limit=1000&refresh=1': () => jsonResponse({
+      'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse({
         ...GITHUB, issues: [{ ...ISSUE_142, body: 'Edited upstream requirements' }, ISSUE_139],
       }),
     })
@@ -1264,7 +1269,61 @@ describe('the comment thread', () => {
     fireEvent.click(document.querySelector<HTMLElement>('[data-slot="gh-refresh"]')!)
     await screen.findByText('Edited upstream requirements')
     expect(screen.queryByText(ISSUE_142.body!)).toBeNull()
-    expect(sent.some(({ path }) => path === '/api/v1/github?limit=1000&refresh=1')).toBe(true)
+    expect(sent.some(({ path }) => path === '/api/v1/github?limit=50&refresh=1')).toBe(true)
+  })
+
+  it('tabs show the server totals, not the loaded length (hearsay-tools/cezarion#1183)', async () => {
+    const many = Array.from({ length: 45 }, (_, i) => ({ ...ISSUE_139, number: 1000 + i, url: `https://github.com/acme/demo/issues/${1000 + i}` }))
+    stubFetch({
+      'GET /api/v1/github?limit=50': () => jsonResponse({
+        ...GITHUB, issues: many, issuesTotal: 88, prsTotal: 12, issuesNextCursor: 'c45', prsNextCursor: 'p1',
+      }),
+    })
+    renderAt('/github?filter=all')
+    expect(await screen.findByText('Issues · 88')).toBeTruthy()
+    expect(screen.getByText('Pull requests · 12')).toBeTruthy()
+  })
+
+  it('a deferred row shows no badge until its count lands, then shows it', async () => {
+    let answer!: (response: Response) => void
+    stubFetch({
+      'GET /api/v1/github?limit=50': () => jsonResponse({
+        ...GITHUB, issues: [{ ...ISSUE_142, comments: 0 }, { ...ISSUE_139, comments: 0 }], commentsDeferred: true,
+      }),
+      'GET /api/v1/github/comment-counts?kind=issue&numbers=142%2C139': () => new Promise<Response>((resolve) => { answer = resolve }),
+    })
+    renderAt('/github?filter=all')
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    await waitFor(() => expect(answer).toBeTypeOf('function'))
+    expect(document.querySelector('[data-slot="gh-comment-count"]')).toBeNull()
+    await act(async () => { answer(jsonResponse({ available: true, counts: { 142: 3, 139: 0 } })) })
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-comment-count"]')?.getAttribute('data-count')).toBe('3'))
+    expect(document.querySelectorAll('[data-slot="gh-comment-count"]')).toHaveLength(1)
+  })
+
+  it('Refresh collapses to a fresh first page', async () => {
+    const sent = stubFetch({
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issuesNextCursor: 'c2', prsNextCursor: null }),
+      'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse({
+        ...GITHUB, issues: [{ ...ISSUE_142, title: 'Fresh title' }], issuesNextCursor: 'c1', prsNextCursor: null,
+      }),
+    })
+    const client = renderAt('/github?filter=all')
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    // A second page is loaded (the scroll sentinel lands in a later change).
+    const key = queryKeys.githubPages(50)
+    await act(async () => {
+      client.setQueryData(key, (current: { pages: GithubData[]; pageParams: unknown[] } | undefined) => ({
+        pages: [...current!.pages, { ...GITHUB, issues: [{ ...ISSUE_139, number: 7, url: 'https://github.com/acme/demo/issues/7' }], prs: [] }],
+        pageParams: [...current!.pageParams, { issuesCursor: 'c2', prsDone: true }],
+      }))
+    })
+    await waitFor(() => expect(rows()).toHaveLength(3))
+    fireEvent.click(document.querySelector<HTMLElement>('[data-slot="gh-refresh"]')!)
+    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142']))
+    expect(rows()[0]!.textContent).toContain('Fresh title')
+    expect(client.getQueryData<{ pages: unknown[]; pageParams: unknown[] }>(key)).toMatchObject({ pages: [expect.anything()], pageParams: [{}] })
+    expect(sent.some(({ path }) => path === '/api/v1/github?limit=50&refresh=1')).toBe(true)
   })
 
   it('sends refresh=1 for the OPEN THREAD when the tab is manually refreshed', async () => {
@@ -1313,8 +1372,8 @@ describe('the unavailable forge state', () => {
   it('renders the server reason and the gh hint, and Try again refetches with refresh=1', async () => {
     const unavailable: GithubData = { available: false, reason: 'gh not installed', issues: [], prs: [] }
     const sent = stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse(unavailable),
-      'GET /api/v1/github?limit=1000&refresh=1': () => jsonResponse(unavailable),
+      'GET /api/v1/github?limit=50': () => jsonResponse(unavailable),
+      'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse(unavailable),
     })
     renderAt('/github')
 
@@ -1322,12 +1381,12 @@ describe('the unavailable forge state', () => {
       expect(screen.getByRole('heading', { level: 1, name: 'GitHub is unavailable here' })).toBeTruthy(),
     )
     expect(screen.getByText('gh not installed')).toBeTruthy()
-    // One fast fetch now (#664): the single limit=1000 load is what proved the forge unreachable.
-    expect(sent.some((request) => request.path === '/api/v1/github?limit=1000')).toBe(true)
+    // One fast fetch now (#664): the single limit=50 load is what proved the forge unreachable.
+    expect(sent.some((request) => request.path === '/api/v1/github?limit=50')).toBe(true)
 
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     await waitFor(() =>
-      expect(sent.some((request) => request.path === '/api/v1/github?limit=1000&refresh=1')).toBe(true),
+      expect(sent.some((request) => request.path === '/api/v1/github?limit=50&refresh=1')).toBe(true),
     )
   })
 })
@@ -2812,7 +2871,7 @@ describe('issue assignee and board controls', () => {
     { ...ISSUE_139, assignees: ['bob'], projectIds: [] },
   ] }
   it('composes Assigned to me with the board and search, then clears every filter', async () => {
-    stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse(filteredData) })
+    stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse(filteredData) })
     renderAt('/github')
     fireEvent.click(await screen.findByRole('button', { name: 'Assigned to me' }))
     expect(rows().map(r => r.textContent).join()).toContain(ISSUE_142.title)
@@ -2825,7 +2884,7 @@ describe('issue assignee and board controls', () => {
     expect(rows()).toHaveLength(2)
   })
   it('marks Assigned to me active only when the viewer is the sole assignee, including manual selection', async () => {
-    stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse(filteredData) })
+    stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse(filteredData) })
     renderAt('/github')
     const me = await screen.findByRole('button', { name: 'Assigned to me' })
     expect(me.getAttribute('aria-pressed')).toBe('false')
@@ -2840,7 +2899,7 @@ describe('issue assignee and board controls', () => {
     expect(me.getAttribute('aria-pressed')).toBe('false')
   })
   it('keeps issue filters off the PR list when changing tabs', async () => {
-    stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse(filteredData) })
+    stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse(filteredData) })
     renderAt('/github')
     fireEvent.click(await screen.findByRole('button', { name: 'Assigned to me' }))
     fireEvent.click(screen.getByRole('link', { name: /Pull requests ·/ }))
@@ -2856,8 +2915,8 @@ it('selects multiple assignees and retains filter chrome during refresh', async 
     { ...ISSUE_142, assignees: ['alice'] }, { ...ISSUE_139, assignees: ['bob'] },
   ] }
   stubFetch({
-    'GET /api/v1/github?limit=1000': () => jsonResponse(data),
-    'GET /api/v1/github?limit=1000&refresh=1': () => new Promise(resolve => { finish = resolve }),
+    'GET /api/v1/github?limit=50': () => jsonResponse(data),
+    'GET /api/v1/github?limit=50&refresh=1': () => new Promise(resolve => { finish = resolve }),
   })
   renderAt('/github')
   fireEvent.click(await screen.findByRole('button', { name: 'Assignee' }))
@@ -2884,7 +2943,7 @@ it('keeps legacy metadata usable with disabled personal filtering and no board p
 })
 
 it('renders a disabled No boards picker on the filter row when projects is empty', async () => {
-  stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, viewerLogin: 'alice', projects: [] }) })
+  stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, viewerLogin: 'alice', projects: [] }) })
   renderAt('/github')
   const picker = await screen.findByRole('combobox', { name: 'Project board' }) as HTMLSelectElement
   expect(picker.disabled).toBe(true)
@@ -2901,8 +2960,8 @@ it.each([[], undefined])('does not restore a stale board selection after refresh
   ] }
   let refreshes = 0
   stubFetch({
-    'GET /api/v1/github?limit=1000': () => jsonResponse(boardData),
-    'GET /api/v1/github?limit=1000&refresh=1': () => jsonResponse(++refreshes === 1 ? { ...boardData, projects } : boardData),
+    'GET /api/v1/github?limit=50': () => jsonResponse(boardData),
+    'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse(++refreshes === 1 ? { ...boardData, projects } : boardData),
   })
   renderAt('/github')
   fireEvent.change(await screen.findByRole('combobox', { name: 'Project board' }), { target: { value: 'P1' } })
@@ -2946,7 +3005,7 @@ describe('cross-state search fallback (#730)', () => {
 
   it.each(['4507', '#4507'])('searches exact numeric %s despite an open substring match', async (query) => {
     const sent = stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, prs: [{ ...PR_137, number: 14507 }] }),
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: [{ ...PR_137, number: 14507 }] }),
       [`GET /api/v1/github/search?kind=pr&q=${encodeURIComponent(query)}`]: () => jsonResponse({ available: true, items: [MERGED_PR] }),
     })
     renderAt('/github/prs')
@@ -2960,7 +3019,7 @@ describe('cross-state search fallback (#730)', () => {
   it.each(['unavailable', 'empty'])('reports exact lookup %s alongside local substring rows', async (outcome) => {
     let finish!: (response: Response) => void
     const sent = stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, prs: [{ ...PR_137, number: 14507 }] }),
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: [{ ...PR_137, number: 14507 }] }),
       'GET /api/v1/github/search?kind=pr&q=4507': () => new Promise(resolve => { finish = resolve }),
     })
     renderAt('/github/prs')
@@ -2978,8 +3037,8 @@ describe('cross-state search fallback (#730)', () => {
     let outcome: 'success' | 'failure' | 'recovered' = 'success'
     const listData = { ...GITHUB, prs: withLocal ? [{ ...PR_137, number: 14507 }] : [PR_137] }
     const sent = stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse(listData),
-      'GET /api/v1/github?limit=1000&refresh=1': () => jsonResponse(listData),
+      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
+      'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse(listData),
       'GET /api/v1/github/search?kind=pr&q=4507': () => outcome === 'failure'
         ? jsonResponse({ error: 'Search refresh unavailable' }, 400)
         : jsonResponse({ available: true, items: [{ ...MERGED_PR, title: outcome === 'recovered' ? 'Updated remote title' : MERGED_PR.title }] }),
@@ -3042,7 +3101,7 @@ describe('cross-state search fallback (#730)', () => {
     const expectedNumbers = [...(selected === null ? [] : [selected]), MERGED_PR.number, ...openPrs.slice(0, selected === null ? 99 : 98).map(pr => pr.number)]
     const checksPath = `/api/v1/github/checks?prs=${encodeURIComponent(expectedNumbers.join(','))}`
     const sent = stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, prs: openPrs }),
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: openPrs }),
       'GET /api/v1/github/search?kind=pr&q=4507': () => jsonResponse({ available: true, items: [MERGED_PR] }),
       [`GET ${checksPath}`]: () => jsonResponse({ available: true, checks: { 4507: 'passing' } }),
     })
@@ -3259,7 +3318,7 @@ describe('cross-state search fallback (#730)', () => {
     const MERGED_STREAM: GithubItem = { ...MERGED_PR, title: 'Stream reconcile' }
 
     const sent = stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, prs: [PR_137, PR_200] }),
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: [PR_137, PR_200] }),
       // A real `gh search prs Stream` answers with the OPEN #137 alongside the merged one — which
       // is what made the stale payload render #137 a second time.
       'GET /api/v1/github/search?kind=pr&q=Stream': () =>
@@ -3360,7 +3419,7 @@ describe('cross-state search fallback (#730)', () => {
       checks: null,
     }
     const sent = stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, prs: [PR_137, PR_200] }),
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: [PR_137, PR_200] }),
     })
     renderAt('/github/prs')
     await waitFor(() => expect(rows()).toHaveLength(2))
@@ -3426,7 +3485,7 @@ describe('cross-state search preserves fork filters', () => {
   const hitTitles = () => Array.from(hits()?.querySelectorAll('li') ?? []).map(row => row.textContent).join('|')
   it('uses the full local narrow to trigger search, then ANDs labels and board with OR assignees', async () => {
     stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse(listData),
+      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
       'GET /api/v1/github/search?kind=issue&q=payment': () => jsonResponse({ available: true, items: remote }),
     })
     renderAt('/github')
@@ -3448,7 +3507,7 @@ describe('cross-state search preserves fork filters', () => {
 
   it('keeps the selected remote detail when filters hide its row', async () => {
     stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse(listData),
+      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
       'GET /api/v1/github/search?kind=issue&q=remote': () => jsonResponse({ available: true, items: [remote[0]] }),
     })
     renderAt('/github')
@@ -3464,8 +3523,8 @@ describe('cross-state search preserves fork filters', () => {
   it('refresh retries an incomplete search without losing the active filter', async () => {
     let attempts = 0
     stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse(listData),
-      'GET /api/v1/github?limit=1000&refresh=1': () => jsonResponse(listData),
+      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
+      'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse(listData),
       'GET /api/v1/github/search?kind=issue&q=remote': () => jsonResponse(++attempts === 1
         ? { available: true, items: [{ ...remote[0], projectIds: undefined }], projectsReason: 'Project board lookup timed out.' }
         : { available: true, items: [remote[2]] }),
@@ -3481,7 +3540,7 @@ describe('cross-state search preserves fork filters', () => {
 
   it('does not claim exhaustive absence when filters discard a truncated search window', async () => {
     stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse(listData),
+      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
       'GET /api/v1/github/search?kind=issue&q=remote': () => jsonResponse({ available: true, items: [remote[0]], truncated: true }),
     })
     renderAt('/github')
@@ -3493,7 +3552,7 @@ describe('cross-state search preserves fork filters', () => {
 
   it('reports incomplete search board metadata without clearing query or selected board', async () => {
     stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse(listData),
+      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
       'GET /api/v1/github/search?kind=issue&q=remote': () => jsonResponse({ available: true,
         items: [{ ...remote[0], projectIds: undefined }], projectsReason: 'Project board lookup timed out.' }),
     })
@@ -3557,7 +3616,7 @@ const compactHiddenFlags = () =>
 
 it('hides phone-list rows past the second unless that row is the open detail (#344)', async () => {
   const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
-  stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
+  stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
   renderAt('/github/issues/142')
   await screen.findByRole('button', { name: 'View all 3 issues' })
   expect(compactHiddenFlags()).toEqual([false, false, true])
@@ -3565,7 +3624,7 @@ it('hides phone-list rows past the second unless that row is the open detail (#3
 
 it('keeps the selected phone-list row when it sits past the second (#344)', async () => {
   const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
-  stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
+  stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
   renderAt('/github/issues/138')
   await screen.findByRole('button', { name: 'View all 3 issues' })
   expect(compactHiddenFlags()).toEqual([false, false, false])
@@ -3574,7 +3633,7 @@ it('keeps the selected phone-list row when it sits past the second (#344)', asyn
 
 it('lets a mobile detail preview reveal every issue without losing its selected item', async () => {
   const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
-  stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
+  stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
   renderAt('/github/issues/142')
   const expand = await screen.findByRole('button', { name: 'View all 3 issues' })
   expect(expand.getAttribute('aria-expanded')).toBe('false')
@@ -3593,8 +3652,8 @@ it.each(['ready', 'unavailable', 'network'] as const)('keeps the board filter an
   ] }
   let finish!: (value: Response) => void
   stubFetch({
-    'GET /api/v1/github?limit=1000': () => jsonResponse(boardData),
-    'GET /api/v1/github?limit=1000&refresh=1': () => jsonResponse({ ...boardData, projectsState: 'refreshing', projectsGeneration: generation,
+    'GET /api/v1/github?limit=50': () => jsonResponse(boardData),
+    'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse({ ...boardData, projectsState: 'refreshing', projectsGeneration: generation,
       issues: [boardData.issues[0], { ...ISSUE_139 }] }),
     [`GET /api/v1/github/projects?generation=${generation}`]: () => new Promise<Response>(resolve => { finish = resolve }),
   })
