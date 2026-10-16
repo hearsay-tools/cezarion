@@ -140,7 +140,8 @@ describe('mid-turn human follow-up parity — #486', () => {
         }, 30_000);
         continue;
       }
-      const modes = row.id === 'H3' || row.id === 'H4' ? ['fresh', 'continuation'] as const : ['fresh'] as const;
+      const lateStart = row.id === 'H4' || row.id === 'H5';
+      const modes = row.id === 'H3' || lateStart ? ['fresh', 'continuation'] as const : ['fresh'] as const;
       for (const mode of modes) it(`${backend} ${row.id} ${row.name}${modes.length > 1 ? ` (${mode})` : ''}`, async () => {
         await withMockLogs(async ({ argsFile, stdinFile, releaseFile, files, release }) => {
           const env = { CEZ_MOCK_ARGS_FILE: argsFile, CEZ_MOCK_STDIN_FILE: stdinFile, CEZ_MOCK_RELEASE_FILE: releaseFile };
@@ -164,16 +165,19 @@ describe('mid-turn human follow-up parity — #486', () => {
               });
             return;
           }
-          if (row.id === 'H3' || row.id === 'H4') {
+          if (row.id === 'H3' || lateStart) {
             // H4 holds the follow-up's native turn start past the 250 ms held-input recheck.
-            const followUp = row.id === 'H4' ? `${KEEP} ${DEFERRED_TURN_START_TOKEN}` : KEEP;
+            // H5 also has the wire acknowledge it inside the running turn first, the
+            // `mock:steer-late` ordering: pi reads it as its next prompt, OMP before settling.
+            const followUp = row.id === 'H5' ? `${KEEP} ${DEFERRED_TURN_START_TOKEN}:late-ack`
+              : row.id === 'H4' ? `${KEEP} ${DEFERRED_TURN_START_TOKEN}` : KEEP;
             const noNudge = async (store: RunStore, runId: string, startSeq = 0) => {
               const events = store.readEvents(runId).slice(startSeq);
               // A park while the follow-up's native turn is still open is the
               // hearsay-tools/cezarion#1112 shape: the cockpit shows Needs you mid-turn.
               const turnEdges = events.filter(e => e.type === 'turn.started' || e.type === 'turn.completed');
               if (store.getRun(runId)?.status === 'waiting') expect(turnEdges.at(-1)?.type).toBe('turn.completed');
-              if (row.id === 'H4') {
+              if (lateStart) {
                 // Settled is the first `waiting`; a spurious park precedes the late native turn
                 // start, so wait out that start before asserting no turn followed the park.
                 // Provenance: hearsay-tools/cezarion#1112 (cursor parked 250 ms after turn-end,

@@ -180,9 +180,13 @@ export class PiRunner implements AgentRunner {
     let agentInputReady = false;
     let promptSerial = 0;
     let humanPromptAcks = 0;
-    // A human prompt pi acknowledged with no turn open runs as pi's next agent run. It stays
-    // held until that agent_start, so the ack is not a turn boundary (hearsay-tools/cezarion#1112).
-    let humanAwaitingStart = 0;
+    // Each human prompt stays held from its write until pi shows a turn has it, because an
+    // ack is not a turn boundary (hearsay-tools/cezarion#1112). Exits: its user message_start
+    // (read in the running turn, or opening the run that reads it), the next agent_start
+    // after its ack (that run reads it, even with no user message), a rejected ack, or
+    // discardQueuedMessages. A steer acked after the turn's last model call is read as pi's
+    // next prompt, after agent_settled, so the ack alone never releases it.
+    const humanHeld: Array<{ text: string; acked: boolean }> = [];
     let agentAck: { id: string; resolve: () => void; reject: (error: Error) => void } | undefined;
     const rejectAgentAck = (error = new Error('pi closed before prompt acknowledgement')) => {
       const pending = agentAck; agentAck = undefined;
@@ -260,7 +264,7 @@ export class PiRunner implements AgentRunner {
       ) {
         return false;
       }
-      if (!requestId) humanPromptAcks += 1;
+      if (!requestId) { humanPromptAcks += 1; humanHeld.push({ text: message, acked: false }); }
       else {
         submissions.accept(requestId, inputIds, message);
       }
@@ -384,9 +388,12 @@ export class PiRunner implements AgentRunner {
                 pending.reject(new Error(message));
               }
             } else if (value.id === undefined) {
-              const held = humanPromptAcks > 0;
+              // Human prompts carry no id, so acks answer them in write order. A second ack for
+              // a prompt pi already answered (a late steer re-run) finds no ack outstanding.
+              const held = humanPromptAcks > 0 ? humanHeld.find(entry => !entry.acked) : undefined;
               humanPromptAcks = Math.max(0, humanPromptAcks - 1);
-              if (held && value.success === true && !piUi.turnId) humanAwaitingStart += 1;
+              if (held && value.success === true) held.acked = true;
+              else if (held) humanHeld.splice(humanHeld.indexOf(held), 1);
               if (value.success === false) onEvent?.({ type: 'error', message: rpcError(value) });
             }
             readyAfterAck();
@@ -417,16 +424,22 @@ export class PiRunner implements AgentRunner {
               latchedProviderError = undefined;
             }
           } else if (value.type === 'agent_start') {
-            // emitUi above already reported this run's turn.started.
-            humanAwaitingStart = 0;
+            // emitUi above already reported this run's turn.started: it reads every human
+            // prompt pi acknowledged before it.
+            for (let at = humanHeld.length - 1; at >= 0; at--) if (humanHeld[at]!.acked) humanHeld.splice(at, 1);
             // Pi handles commands in stream order: only a prompt it acknowledged before this
             // agent_start can be in the turn it starts (#505 CI race).
             carried = new Set(submissions.pendingIds().filter(id => acked.has(id)));
             turnFailed = false;
           } else if (value.type === 'message_start' && isRecord(value.message) && value.message.role === 'user') {
             // The model received this prompt now (#505).
-            const ids = submissions.consumeOldestByText(piMessageText(value.message));
+            const text = piMessageText(value.message);
+            const ids = submissions.consumeOldestByText(text);
             if (ids.length) opts.onAgentInputConsumed?.(ids);
+            else {
+              const human = humanHeld.findIndex(entry => entry.text === text);
+              if (human >= 0) humanHeld.splice(human, 1);
+            }
           } else if (value.type === 'tool_execution_start') {
             flushText();
             const id = string(value.toolCallId);
@@ -568,9 +581,9 @@ export class PiRunner implements AgentRunner {
         return acknowledged;
       },
       // A written prompt cannot be unwritten; only stop reporting an acknowledged one as held.
-      discardQueuedMessages: () => { humanAwaitingStart = 0; },
-      holdsHumanInput: () => humanPromptAcks > 0 || humanAwaitingStart > 0,
-      heldHumanInputCount: () => humanPromptAcks + humanAwaitingStart,
+      discardQueuedMessages: () => { humanHeld.length = 0; },
+      holdsHumanInput: () => humanHeld.length > 0,
+      heldHumanInputCount: () => humanHeld.length,
       end,
       interrupt,
       pid: child.pid,

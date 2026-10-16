@@ -126,6 +126,20 @@ const rl = readline.createInterface({ input: process.stdin });
 let queue = Promise.resolve();
 rl.on('line', (line) => {
   const command = JSON.parse(line);
+  // hearsay-tools/cezarion#1112: a late-ack steer is admitted into the running turn after its
+  // last model call: pi acknowledges it now, with the turn open, and reads it as its next
+  // prompt once that turn settles (the `mock:steer-late` ordering), starting that run late.
+  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && command.message.includes('mock:deferred-turn-start:late-ack')) {
+    const admit = () => {
+      if (!activeTurn) { setTimeout(admit, 5); return; }
+      if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: command.message, imageCount: 0, streamingBehavior: 'steer' })}\n`);
+      activeTurn.steers.push(command.message);
+      activeTurn.late = true;
+      write({ id: command.id, type: 'response', command: 'prompt', success: true });
+    };
+    admit();
+    return;
+  }
   // hearsay-tools/cezarion#1112: a deferred-start steer is not admitted into the running turn;
   // pi acknowledges it as its next prompt once that turn settles, with no turn open.
   if (command.type === 'prompt' && command.streamingBehavior === 'steer' && activeTurn &&
