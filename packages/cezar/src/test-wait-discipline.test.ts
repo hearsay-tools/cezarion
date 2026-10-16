@@ -1,0 +1,363 @@
+import { describe, expect, it } from 'vitest';
+import {
+  baselinePath,
+  blank,
+  compareToBaseline,
+  readBaseline,
+  scannedFiles,
+  scanSource,
+  scanSuite,
+  shrinkBaseline,
+  SHORT_BOUND_MS,
+  tally,
+  type Site,
+} from './test-wait-discipline.testkit.ts';
+
+/**
+ * The server unit tests' wait discipline, as a source scan (hearsay-tools/cezarion#1155). A bare
+ * sleep stands in for a condition nobody named; a wait bounded under 10 s puts a wall clock on a
+ * fixture a loaded host can take longer than that to start. Each rule is pinned on a snippet here,
+ * and the suite's real sites are pinned in a baseline that can only shrink, the same shape
+ * `packages/web/src/test/e2e-wait-discipline.test.ts` uses for the cockpit specs.
+ */
+const rules = (sites: Site[]) => sites.map((s) => s.rule);
+const lines = (sites: Site[]) => sites.map((s) => s.line);
+const scan = (...src: string[]) => scanSource('x.test.ts', src.join('\n'));
+
+describe('blanking strings and comments', () => {
+  it('keeps line and column positions', () => {
+    const src = "const a = 'x(y'; // z\n/* p\nq */ const b = `t${c}u`;";
+    const out = blank(src);
+    expect(out).toHaveLength(src.length);
+    expect(out.split('\n').map((l) => l.length)).toEqual(src.split('\n').map((l) => l.length));
+    expect(out).toBe("const a = '   ';     \n    \n     const b = ` ${c} `;");
+  });
+
+  it('does not see a sleep inside a string, a template or a comment', () => {
+    expect(scan(
+      "const a = 'await sleep(100)';",
+      'const b = "await new Promise(r => setTimeout(r, 100))";',
+      'const script = `',
+      '  await new Promise(resolve => setTimeout(resolve, 100));',
+      '  await vi.waitFor(() => ready());',
+      '`;',
+      '// await sleep(100)',
+      '/* await sleep(100)',
+      '   await vi.waitFor(() => ready()) */',
+    )).toEqual([]);
+  });
+
+  it('sees a sleep inside a ${} substitution, which is code, nested templates included', () => {
+    const sites = scan(
+      'const script = `before ${await sleep(100)} after`;',
+      'const nested = `a ${`b ${await delay(5)} c`} d`;',
+    );
+    expect(rules(sites)).toEqual(['sleep', 'sleep']);
+    expect(lines(sites)).toEqual([1, 2]);
+  });
+
+  it('crosses a regex literal holding a quote or a backtick', () => {
+    const sites = scan(
+      "const re = /['`]/;",
+      'await sleep(100);',
+      "const ok = x.replace(/[\"']/g, '');",
+      'await delay(5);',
+    );
+    expect(lines(sites)).toEqual([2, 4]);
+  });
+});
+
+describe('rule sleep', () => {
+  it('flags each awaited sleep form, whatever its argument', () => {
+    const sites = scan(
+      'await delay(50);',
+      'await sleep(DELAY_MS);',
+      'await wait(options.gate);',
+      'await pause(1_000);',
+      'await setTimeout(50);',
+      'await timers.setTimeout(50);',
+      'await new Promise(r => setTimeout(r, 50));',
+      'await new Promise((resolve) => setTimeout(resolve, 50));',
+      'await new Promise<void>((done) => { setTimeout(done, 50); });',
+      'await new Promise(r => globalThis.setTimeout(r, 50));',
+      'await new Promise(r => global.setTimeout(r, 50));',
+      'await new Promise(resolve => realSetTimeout(resolve, ms));',
+    );
+    expect(lines(sites)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(new Set(rules(sites))).toEqual(new Set(['sleep']));
+    expect(sites[6]?.site).toBe('await new Promise(r => setTimeout(r, 50));');
+  });
+
+  it('leaves a literal 0 alone: that is one event-loop turn, not a wait', () => {
+    expect(scan(
+      'await sleep(0);',
+      'await setTimeout(0);',
+      'await new Promise(r => setTimeout(r, 0));',
+      'await new Promise(r => setTimeout(r));',
+    )).toEqual([]);
+  });
+
+  it('leaves a timer that is not a sleep alone', () => {
+    expect(scan(
+      'const timer = setTimeout(() => controller.abort(), 5_000);',
+      "await new Promise((_, reject) => setTimeout(() => reject(new Error('deadline')), 5_000));",
+      'await obj.sleep(100);',
+    )).toEqual([]);
+  });
+
+  it('leaves a sleep in a loop body alone: it is a poll interval', () => {
+    expect(scan(
+      'while (!ready()) {',
+      '  if (Date.now() > deadline) throw new Error("late");',
+      '  await sleep(10);',
+      '}',
+      'for (let i = 0; i < 10; i += 1) {',
+      '  if (ready()) break;',
+      '  await new Promise(r => setTimeout(r, 10));',
+      '}',
+      'do {',
+      '  await delay(10);',
+      '} while (!ready());',
+      'for await (const chunk of stream) {',
+      '  await pause(5);',
+      '}',
+      'while (!ready()) await sleep(10);',
+      'for (const x of xs) if (x) await sleep(10);',
+      'while (!ready()) { try { await check(); } catch { await sleep(10); } }',
+      'const churn = (async () => { while (on) { await delay(15); } })();',
+    )).toEqual([]);
+  });
+
+  it('flags a sleep after its loop closes, and one in a test a loop defines', () => {
+    const sites = scan(
+      'while (!ready()) {',
+      '  await sleep(10);',
+      '}',
+      'await sleep(300);',
+      'for (const row of ROWS) {',
+      "  it(row.id, async () => {",
+      '    await sleep(300);',
+      '  });',
+      '}',
+      'for (const row of ROWS) it(row.id, async () => { await sleep(300); });',
+    );
+    expect(lines(sites)).toEqual([4, 7, 10]);
+  });
+
+  it('reads a multi-line loop header and a function with a return type', () => {
+    expect(rules(scan(
+      'for (',
+      '  let i = 0;',
+      '  i < 3;',
+      '  i += 1',
+      ') {',
+      '  await sleep(10);',
+      '}',
+      'while (x) {',
+      '  async function f(): Promise<void> {',
+      '    await sleep(10);',
+      '  }',
+      '}',
+    ))).toEqual(['sleep']);
+  });
+});
+
+describe('rule short-bound', () => {
+  it('pins the threshold at 10 s', () => {
+    expect(SHORT_BOUND_MS).toBe(10_000);
+  });
+
+  it('flags Vitest waits left at their 1 s default', () => {
+    const sites = scan(
+      'await vi.waitFor(() => expect(x).toBe(1));',
+      'await vi.waitUntil(() => ready());',
+      'await expect.poll(() => count()).toBe(2);',
+      'await vi.waitFor(() => expect(x).toBe(1), { interval: 10 });',
+    );
+    expect(rules(sites)).toEqual(['short-bound', 'short-bound', 'short-bound', 'short-bound']);
+    expect(lines(sites)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('flags a literal bound under 10 s in the number form and in an options object', () => {
+    const sites = scan(
+      'await vi.waitFor(() => ready(), 2_000);',
+      'await vi.waitFor(() => ready(), { timeout: 5_000, interval: 20 });',
+      'await vi.waitUntil(() => ready(), { timeout: 9_999 });',
+      'await expect.poll(() => count(), { timeout: 3000 }).toBe(1);',
+      'await vi.waitFor(() => ready(), { timeout: 10_000 });',
+      'await vi.waitFor(() => ready(), 30_000);',
+      'await expect.poll(() => count(), { timeout: 15_000 }).toBe(1);',
+    );
+    expect(lines(sites)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('leaves a bound it cannot read alone', () => {
+    expect(scan(
+      'await vi.waitFor(() => ready(), { timeout: LAUNCH_WAIT_MS });',
+      'await vi.waitFor(() => ready(), waitOptions);',
+      'await vi.waitFor(() => ready(), SETTLE);',
+      'await vi.waitFor(() => ready(), { timeout });',
+      'await vi.waitFor(() => ready(), { ...waitOptions, interval: 10 });',
+      'await vi.waitFor(() => ready(), { timeout: 5_000 * 4 });',
+    )).toEqual([]);
+  });
+
+  it('reads a call across lines and keys it on its first line', () => {
+    const sites = scan(
+      'const a = 1;',
+      'await vi.waitFor(() => {',
+      '  expect(store.getRun(id)?.status).toBe("done");',
+      '}, {',
+      '  interval: 20,',
+      '  timeout: 2_000,',
+      '});',
+      'await expect',
+      '  .poll(() => count(), { timeout: 5_000 })',
+      '  .toBe(1);',
+      'await vi.waitFor(() => {',
+      '  expect(x).toBe(1);',
+      '}, {',
+      '  timeout: 20_000,',
+      '});',
+    );
+    expect(lines(sites)).toEqual([2, 8]);
+    expect(sites[0]?.site).toBe('await vi.waitFor(() => {');
+  });
+
+  it('flags a local wait helper called with a short literal after its condition', () => {
+    const sites = scan(
+      'await waitFor(() => ready(), 5000);',
+      'await until(() => ready(), "the run to settle", 3_000);',
+      'await waitUntil(id, () => {',
+      '  return ready();',
+      '}, 2_000);',
+      'await eventually(() => ready(), 400);',
+      'await waitForCondition(() => ready(), 1_000);',
+      'await waitFor(() => ready(), 30_000);',
+      'await waitFor(() => ready());',
+      'await until(() => ready(), "label");',
+    );
+    expect(lines(sites)).toEqual([1, 2, 3, 6, 7]);
+  });
+
+  it('counts vi.waitFor once and leaves a method of something else alone', () => {
+    expect(scan('await vi.waitFor(() => ready(), 2_000);')).toHaveLength(1);
+    expect(scan('await harness.waitFor(() => ready(), 2_000);', 'await this.until(() => ready(), 100);')).toEqual([]);
+  });
+
+  it('flags a local wait helper whose bound defaults to a short literal, on its definition line', () => {
+    const sites = scan(
+      'async function until(check: () => boolean, timeoutMs = 5_000): Promise<void> {',
+      '  await vi.waitFor(() => expect(check()).toBe(true), { timeout: timeoutMs });',
+      '}',
+      'const waitFor = async (predicate: () => boolean, timeoutMs: number = 4000) => {',
+      '  await vi.waitFor(() => expect(predicate()).toBe(true), { timeout: timeoutMs });',
+      '};',
+      'export async function eventually(cond: () => boolean, ms = 10_000): Promise<void> {}',
+      'async function waitUntil(cond: () => boolean, timeoutMs = 30_000, intervalMs = 25): Promise<void> {}',
+      'const until = Date.now() + 1_000;',
+    );
+    expect(rules(sites)).toEqual(['short-bound', 'short-bound']);
+    expect(lines(sites)).toEqual([1, 4]);
+  });
+});
+
+describe('a bound with a reason', () => {
+  it('is accepted on the same line', () => {
+    expect(scan(
+      'await sleep(400); // bound: observe past the 250 ms runner auto-end timer',
+      'await vi.waitFor(() => ready(), { timeout: 2_000 }); // bound: the fake exits in under 10 ms',
+    )).toEqual([]);
+  });
+
+  it('is accepted anywhere in the comment block directly above', () => {
+    expect(scan(
+      '// bound: the fixture is in memory',
+      'await vi.waitFor(() => ready());',
+      '',
+      '// The product holds the slot for 250 ms.',
+      '// bound: observe past that window once',
+      '// (hearsay-tools/cezarion#1155).',
+      'await sleep(400);',
+    )).toEqual([]);
+  });
+
+  it('is refused with an empty reason, or with a blank line between', () => {
+    const sites = scan(
+      'await sleep(400); // bound:',
+      '// bound:   ',
+      'await sleep(400);',
+      '// bound: a reason, but too far away',
+      '',
+      'await sleep(400);',
+      '// Bound: the wrong case',
+      'await sleep(400);',
+    );
+    expect(lines(sites)).toEqual([1, 3, 6, 8]);
+  });
+});
+
+describe('the baseline', () => {
+  it('tallies sites by file, rule and site text, sorted', () => {
+    const sites: Site[] = [
+      { file: 'b.test.ts', rule: 'sleep', site: 's', line: 9 },
+      { file: 'a.test.ts', rule: 'short-bound', site: 'await vi.waitFor(() => ready());', line: 5 },
+      { file: 'a.test.ts', rule: 'short-bound', site: 'await vi.waitFor(() => ready());', line: 12 },
+    ];
+    expect(tally(sites)).toEqual([
+      { file: 'a.test.ts', rule: 'short-bound', site: 'await vi.waitFor(() => ready());', count: 2 },
+      { file: 'b.test.ts', rule: 'sleep', site: 's', count: 1 },
+    ]);
+  });
+
+  it('reports a new site as added and a fixed site as stale', () => {
+    const baseline = [
+      { file: 'a.test.ts', rule: 'sleep' as const, site: 'old', count: 2 },
+      { file: 'a.test.ts', rule: 'sleep' as const, site: 'gone', count: 1 },
+    ];
+    const actual = [
+      { file: 'a.test.ts', rule: 'sleep' as const, site: 'old', count: 1 },
+      { file: 'a.test.ts', rule: 'sleep' as const, site: 'new', count: 1 },
+    ];
+    const { added, stale } = compareToBaseline(actual, baseline);
+    expect(added).toEqual([{ file: 'a.test.ts', rule: 'sleep', site: 'new', count: 1 }]);
+    // Both a lowered count and a vanished site are stale: the baseline must shrink to match.
+    expect(stale).toEqual([
+      { file: 'a.test.ts', rule: 'sleep', site: 'old', count: 2 },
+      { file: 'a.test.ts', rule: 'sleep', site: 'gone', count: 1 },
+    ]);
+  });
+});
+
+describe('the server unit suite', () => {
+  it('scans every test and testkit under packages/cezar/src, and not its own files', () => {
+    const files = scannedFiles();
+    expect(files.length).toBeGreaterThan(300);
+    expect(files).toContain('core/harness-parity.testkit.ts');
+    expect(files.some((f) => f.startsWith('test-wait-discipline.'))).toBe(false);
+    expect(files.some((f) => f.includes('__fixtures__/') || f.includes('node_modules/'))).toBe(false);
+  });
+
+  it('has no bare sleep or short bound outside the baseline, and the baseline names no site that is gone', () => {
+    const sites = scanSuite();
+    const actual = tally(sites);
+    // Update mode shrinks the baseline to what the suite has now; it never adds to it.
+    if (process.env.TEST_WAIT_DISCIPLINE_UPDATE === '1') shrinkBaseline(actual);
+    const { added, stale } = compareToBaseline(actual, readBaseline());
+    const where = (entries: typeof added) =>
+      entries
+        .flatMap((e) => sites.filter((s) => s.file === e.file && s.rule === e.rule && s.site === e.site).map((s) => `  ${s.file}:${s.line} [${s.rule}] ${s.site}`))
+        .join('\n');
+    const listed = (entries: typeof stale) => entries.map((e) => `  ${e.file} [${e.rule}] ×${e.count}: ${e.site}`).join('\n');
+    expect(
+      added,
+      'New bare sleeps or short wait bounds. Wait on the product\'s own signal, or state the bound\'s reason at the site ' +
+        `as a \`// bound: <reason>\` comment (AGENTS.md § Validation). Never add a site to ${baselinePath}:\n${where(added)}`,
+    ).toEqual([]);
+    expect(
+      stale,
+      `Baseline entries no longer found; shrink ${baselinePath} ` +
+        `(TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts does it):\n${listed(stale)}`,
+    ).toEqual([]);
+  });
+});
