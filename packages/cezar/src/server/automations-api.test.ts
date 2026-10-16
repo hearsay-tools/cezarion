@@ -76,6 +76,64 @@ describe('GitHub automation API', () => {
     body: JSON.stringify(body),
   });
 
+  it.each(['create', 'enable', 'update'] as const)('arms the bounded history window through %s and preserves receipts', async (entry) => {
+    withGithubRemote(root);
+    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const server = app({ automationStore });
+    const filters = { ...input.filters, includeExisting: true };
+    const started = Date.now();
+    const createdResponse = await apiRequest(server, '/api/v1/automations', json({ ...input, filters: entry === 'update' ? input.filters : filters, enable: entry !== 'enable' }));
+    expect(createdResponse.status).toBe(201);
+    let { automation } = await createdResponse.json() as any;
+    automationStore.reserveReceipt({ automationId: automation.id, revision: automation.revision, eventId: 'already-seen' });
+    if (entry === 'enable') {
+      const response = await apiRequest(server, `/api/v1/automations/${automation.id}/enable`, { method: 'POST' });
+      expect(response.status).toBe(200);
+      ({ automation } = await response.json() as any);
+    } else if (entry === 'update') {
+      const response = await apiRequest(server, `/api/v1/automations/${automation.id}`, json({ ...input, filters, enabled: true, expectedRevision: automation.revision }, 'PUT'));
+      expect(response.status).toBe(200);
+      ({ automation } = await response.json() as any);
+    }
+    expect(automation.filters.includeExisting).toBe(true);
+    const state = automationStore.state(automation.id)!;
+    expect(Date.parse(state.baselineAt!)).toBeGreaterThanOrEqual(started - 7 * 86_400_000);
+    expect(Date.parse(state.baselineAt!)).toBeLessThanOrEqual(Date.now() - 7 * 86_400_000);
+    expect(state.cursor).toEqual({ timestamp: state.baselineAt });
+    expect(automationStore.latestReceipts().size).toBe(1);
+    expect(AutomationStore.open(join(root, '.ai/cezar')).get(automation.id)?.filters?.includeExisting).toBe(true);
+  });
+
+  it('preserves progress on ordinary edits and re-establishes the cutoff when history is disabled', async () => {
+    withGithubRemote(root);
+    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const server = app({ automationStore });
+    const filters = { ...input.filters, includeExisting: true };
+    const created = await apiRequest(server, '/api/v1/automations', json({ ...input, filters, enable: true }));
+    let { automation } = await created.json() as any;
+    automationStore.setState(automation.id, (state) => ({ ...state, cursor: { timestamp: '2026-10-15T12:00:00.000Z', tieBreaker: 'seen' } }));
+    const before = automationStore.state(automation.id)!;
+    const edited = await apiRequest(server, `/api/v1/automations/${automation.id}`, json({ ...input, name: 'Renamed', filters, enabled: true, expectedRevision: automation.revision }, 'PUT'));
+    expect(edited.status).toBe(200);
+    ({ automation } = await edited.json() as any);
+    expect(automationStore.state(automation.id)).toMatchObject({ baselineAt: before.baselineAt, cursor: before.cursor });
+    const started = Date.now();
+    const disabled = await apiRequest(server, `/api/v1/automations/${automation.id}`, json({ ...input, filters: { ...filters, includeExisting: false }, enabled: true, expectedRevision: automation.revision }, 'PUT'));
+    expect(disabled.status).toBe(200);
+    expect(Date.parse(automationStore.state(automation.id)!.baselineAt!)).toBeGreaterThanOrEqual(started);
+  });
+
+  it.each([undefined, false])('preserves future-only activation with includeExisting=%s', async (includeExisting) => {
+    withGithubRemote(root);
+    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const started = Date.now();
+    const response = await apiRequest(app({ automationStore }), '/api/v1/automations', json({ ...input, filters: { ...input.filters, ...(includeExisting === undefined ? {} : { includeExisting }) }, enable: true }));
+    expect(response.status).toBe(201);
+    const { automation } = await response.json() as any;
+    expect(Date.parse(automationStore.state(automation.id)!.baselineAt!)).toBeGreaterThanOrEqual(started);
+  });
+
+
   it('answers GitHub availability from a settled probe on a cold cache', async () => {
     withGithubRemote(root);
     // A stub `gh` that succeeds: the first read must wait for the probe instead of answering

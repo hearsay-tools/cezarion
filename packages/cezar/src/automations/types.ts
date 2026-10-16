@@ -15,6 +15,7 @@ const stringList = z.array(boundedString).max(100).optional();
 
 export const automationFiltersSchema = z
   .object({
+    includeExisting: z.boolean().optional(),
     authors: stringList,
     assignees: stringList,
     allLabels: stringList,
@@ -127,10 +128,24 @@ export const automationCursorSchema = z
   })
   .passthrough();
 
+/** Durable position inside a bounded historical search, independent of the live overlap. */
+export const automationHistoryScanSchema = z.object({
+  since: z.string().datetime(),
+  until: z.string().datetime(),
+  source: z.number().int().min(0).max(2),
+  page: z.number().int().min(1).max(10),
+  item: z.number().int().min(0).max(100),
+  event: z.number().int().min(0).max(100),
+  cursor: automationCursorSchema.optional(),
+});
+
 export const automationRuntimeStateSchema = z
   .object({
     revision: z.number().int().positive().optional(),
     baselineAt: z.string().datetime().optional(),
+    /** Arming time, independent of a history window's older lower bound. */
+    armedAt: z.string().datetime().optional(),
+    historyScan: automationHistoryScanSchema.optional(),
     cursor: automationCursorSchema.optional(),
     frozenHighWatermark: automationCursorSchema
       .extend({ tieBreaker: z.string() })

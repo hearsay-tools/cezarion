@@ -5,6 +5,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { ChipButton } from './chip-button'
 import type { AutomationDraft } from './editor-draft'
 
@@ -31,9 +32,15 @@ const csv = (values: readonly string[] | undefined) => (values ?? []).join(', ')
 const parseCsv = (text: string) => text.split(',').map((item) => item.trim()).filter(Boolean)
 
 /** One-sentence explanation of how a GitHub automation polls — also the preview column's text. */
-export function pollSentence(draft: Pick<AutomationDraft, 'events' | 'intervalSeconds'>): string {
+export function historySentence(includeExisting: boolean | undefined): string {
+  return includeExisting
+    ? 'Existing matches within the lookback are eligible on the next check. Previously processed matches will not run again.'
+    : 'Enabling starts from a current-time baseline. Existing matches will not launch tasks.'
+}
+
+export function pollSentence(draft: Pick<AutomationDraft, 'events' | 'intervalSeconds' | 'filters'>): string {
   const minutes = Math.max(1, Math.round(draft.intervalSeconds / 60))
-  return `Polls GitHub every ${minutes} minute${minutes === 1 ? '' : 's'} for ${draft.events.join(', ') || 'no events'}. Enabling starts from a current-time baseline, so existing matches never launch tasks.`
+  return `Polls GitHub every ${minutes} minute${minutes === 1 ? '' : 's'} for ${draft.events.join(', ') || 'no events'}. ${historySentence(draft.filters.includeExisting)}`
 }
 
 export function GithubFields({ draft, onChange, disabledReason }: { draft: AutomationDraft; onChange: (patch: Partial<AutomationDraft>) => void; disabledReason?: string }) {
@@ -68,6 +75,13 @@ export function GithubFields({ draft, onChange, disabledReason }: { draft: Autom
             {intervals.map((item) => <SelectItem key={item.seconds} value={String(item.seconds)}>{item.label}</SelectItem>)}
           </SelectContent>
         </Select>
+      </div>
+      <div className="grid gap-2">
+        <label className="flex min-h-11 items-center gap-3 text-sm">
+          <Switch aria-label="Include existing items" aria-describedby="automation-history-hint" checked={draft.filters.includeExisting ?? false} onCheckedChange={(includeExisting) => setFilter({ includeExisting })} />
+          <span>Include existing items</span>
+        </label>
+        <p id="automation-history-hint" className="text-xs text-muted-foreground">{historySentence(draft.filters.includeExisting)}</p>
       </div>
       <Collapsible>
         <CollapsibleTrigger className="group flex min-h-11 items-center gap-2 text-sm font-medium">

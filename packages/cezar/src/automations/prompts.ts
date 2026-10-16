@@ -72,6 +72,7 @@ Top-level keys:
 - "task": the ordinary task each match or occurrence launches.
 
 "filters" keys:
+- "includeExisting": boolean (default false). When true, include matching events before enablement within lookbackDays. Turning this on for an enabled poll reopens the window on its next check; durable receipts prevent duplicate launches.
 - "authors": GitHub logins that opened it. "assignees": current assignees.
 - "allLabels": must carry every one of these labels. "anyLabels": must carry at least one. "excludeLabels": must carry none.
 - "changedLabels": REQUIRED for issue.labeled and issue.unlabeled: the label whose change fires it.
@@ -90,7 +91,7 @@ For a GitHub poll, name, events and task are required; for a schedule, name, kin
 
 Prompt placeholders, substituted per launch. GitHub poll: {{github.kind}} (issue | pull request), {{github.number}}, {{github.title}}, {{github.url}}, {{github.author}}, {{github.assignees}}, {{github.labels}} and {{github.event}}. Schedule: {{date}}, {{time}}, {{project}} and {{automation}}. Any other placeholder is rejected. The matched item's details (or the scheduled instant) are also appended to every launched task as untrusted context, so the prompt need not repeat them.
 
-A new automation is PAUSED unless created with --enable. Enabling a GitHub poll establishes a current-time baseline: only pull requests and issues that appear AFTER it are ever launched, never the backlog. Enabling a schedule arms its next occurrence.`;
+A new automation is PAUSED unless created with --enable. Enabling a GitHub poll establishes a current-time baseline by default; filters.includeExisting opts in to older matches within the configured lookback. Test filter previews the selected window without advancing the execution cursor or launching tasks. Enabling a schedule arms its next occurrence.`;
 
 /** The part composed into every task's system prompt while automations are on and reachable. */
 export function automationsPrompt(command: string): string {
@@ -101,7 +102,7 @@ The CLI is ${command}. Every command prints one JSON object:
 
   ${command} schema                                   the definition shape, every key, every bound, the prompt placeholders
   ${command} create --file <def.json> [--enable]      create one from JSON (paused unless --enable); --json '<json>' or stdin work too
-  ${command} add --name <n> (--cron "0 4 * * *" | --on <event> --every 5m) --prompt <p> [--workflow w] [--runner r] [--model m] [--no-autonomous] [--label l] [--author a] [--changed-label l] [--enable]
+  ${command} add --name <n> (--cron "0 4 * * *" | --on <event> --every 5m) --prompt <p> [--workflow w] [--runner r] [--model m] [--no-autonomous] [--label l] [--author a] [--changed-label l] [--include-existing] [--enable]
   ${command} check <id> [--execute]                   GitHub poll: preview what the filter matches right now (launches nothing without --execute)
   ${command} run <id>                                 schedule: launch it once, now
   ${command} list | show <id> | update <id> --file <def.json> | enable <id> | pause <id> | delete <id>
@@ -141,7 +142,7 @@ For a GitHub poll:
 
     ${command} check <id>
 
-This runs the filter against GitHub now and counts the matches without launching anything. Zero matches on a filter that should match something means a wrong label, author or event: fix the definition (\`${command} update <id> --file <def.json>\`) and preview again. Enabling establishes a current-time baseline, so a preview is the only way to see what the filter does to existing items.
+This runs the filter against GitHub now and counts the matches without launching anything. Check the labels, author, event and selected history window when an expected match is absent. By default, an enabled poll excludes events before its activation. Set \`filters.includeExisting: true\` only when the user asks to include older matches within the configured lookback; receipts still prevent duplicate launches. Preview ignores the execution cursor and never advances it.
 
 For a schedule there is nothing to preview: report the schedule and its next occurrence. \`${command} run <id>\` launches it once now if the user wants to see the task before the first scheduled one.
 
