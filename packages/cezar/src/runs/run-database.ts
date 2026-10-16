@@ -30,7 +30,7 @@ export const RUNS_IMPORT_COMPLETE_KEY = 'import-complete';
 /** `PRAGMA user_version` of a database this build created. A higher number means a newer cezar
  *  wrote it; that is refused rather than read, because a newer schema may store what this one
  *  would silently drop on its next write. */
-export const RUN_DATABASE_SCHEMA_VERSION = 2;
+export const RUN_DATABASE_SCHEMA_VERSION = 3;
 
 /**
  * The oldest `user_version` the READ-ONLY reader can read as it stands (`openReadOnly`). It never
@@ -159,6 +159,11 @@ const MIGRATIONS: readonly string[] = [
   -- Indexes only: nothing a v1 reader reads changes, which is why RUN_DATABASE_READABLE_FROM stays 1.
   CREATE INDEX runs_unarchived ON runs (created_at DESC, seq) WHERE archived = 0;
   CREATE INDEX runs_archived_roots ON runs (archived, created_at DESC, seq) WHERE parent_run_id IS NULL;
+  `,
+  `
+  CREATE INDEX runs_archive_on_merge ON runs (seq)
+    WHERE archived = 0 AND live = 0 AND parent_run_id IS NULL
+      AND status IN ('review', 'done', 'failed', 'cancelled');
   `,
 ];
 
@@ -808,6 +813,22 @@ export class RunDatabase {
     const sql = `SELECT seq, id, created_at FROM runs WHERE ${where} ${NEWEST_FIRST}`;
     return this.run(() => this.db.prepare(sql).all(...params))
       .map((row) => ({ id: row.id as string, createdAt: row.created_at as string, seq: row.seq as number }));
+  }
+
+  /** Bounded keyset walk. Include worker-only PR roots without decoding history. */
+  listArchiveOnMergeCandidates(afterSeq: number, limit: number): Array<{ id: string; seq: number }> {
+    return this.run(() => this.db.prepare(`SELECT id, seq FROM runs
+      WHERE archived = 0 AND live = 0 AND parent_run_id IS NULL
+        AND status IN ('review', 'done', 'failed', 'cancelled') AND seq > ?
+      ORDER BY seq LIMIT ?`).all(afterSeq, Math.max(1, Math.min(64, limit))))
+      .map(row => ({ id: row.id as string, seq: row.seq as number }));
+  }
+
+  /** Indexed point/family lookup, after the bounded root page has been selected. */
+  archiveFamilyHasPullRequests(id: string): boolean {
+    return this.run(() => this.db.prepare(`SELECT 1 FROM runs WHERE (id = ? OR parent_run_id = ?)
+      AND (json_array_length(json_extract(data, '$.pullRequests')) > 0
+        OR json_extract(data, '$.pullRequestUrl') IS NOT NULL) LIMIT 1`).get(id, id)) !== undefined;
   }
 
   /** Every id with its revision, ordered by id. */

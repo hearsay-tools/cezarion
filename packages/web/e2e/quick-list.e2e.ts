@@ -1838,6 +1838,17 @@ describe('archive from the sidebar (#780)', () => {
       for (const variant of contrastQaVariants.filter(v => v.density === 'comfortable')) {
         applyContrastQaVariant(browser, variant)
         const mobile = variant.viewport.width === 360
+        // The drawer this opens must survive `/p/default/` resolving to `/p/<boot>/`, which can
+        // land after the click: AppShell closed it on that in-place rewrite until
+        // hearsay-tools/cezarion#1129 (a product fix; no wait changed here). Evidence: this test
+        // failed with "value never stayed stable" from the settleVisual below (bundle
+        // .ai/qa/failures/quick-list/folds-sections-with-the-keyboard-persists-across-canonical-routes-and-shares-mob-1/:
+        // probe.json lastValue null and activeElement "Open projects" with data-state="closed",
+        // snapshot.txt `button "Open projects" [expanded=false]`; Squeal run
+        // 9f51ddd7-68da-4e5a-a7bf-1d3e243d85ce, recorded on hearsay-tools/cezarion#1129). Reproduce
+        // with `E2E_DELAY_MS=300 npm run test:e2e -- quick-list.e2e.ts -t 'folds sections with the keyboard'`
+        // and the README's delay patched into the built `GET /projects` handler — 9 of 9 failed
+        // before with the same probe, 8 of 8 passed after.
         if (mobile) browser.click('[data-slot="mobile-top-bar"] button[aria-label^="Open projects"]')
         const surface = mobile ? '[data-slot="drawer-tasks"]' : desktop
         const toggle = `${surface} [data-bucket="Finished"] [data-slot="section-toggle"]`

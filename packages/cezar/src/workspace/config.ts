@@ -208,6 +208,7 @@ const workspaceConfigSchema = z
     /** Optional auto-update override. Absence inherits the environment/default
      *  and must stay absent on unrelated merge-writes. */
     skillsAutoUpdate: z.boolean().optional().catch(undefined),
+    archiveOnMerge: z.boolean().optional().catch(undefined),
     /** Global opt-in model policy. The native coding-agent model becomes
      * authoritative while runner choice remains available. */
     modelsLocked: z.boolean().optional().catch(undefined),

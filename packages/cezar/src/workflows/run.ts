@@ -11,8 +11,8 @@ import { workerContextHash, workerWorkflowHash, workerStepIdentity, captureWorke
 import { buildChildEnv } from '../core/agent-env.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import {
   parseAskMarkerResult,
   stripAskMarker,
@@ -39,9 +39,11 @@ import {
 import {
   HANDOFF_ONLY_INSTRUCTIONS,
   HANDOFF_INSTRUCTIONS,
+  appendHandoffAutosaveReport,
   appendHandoffHeartbeat,
   followupsEnabled,
   handoffPath,
+  recordHandoffPeriodicAutosave,
   seedHandoffFile,
 } from '../handoff.ts';
 import { attachmentDirectory, resolveAttachmentPath } from './attachment-path.ts';
@@ -72,11 +74,11 @@ import { discoverSkills, type Skill } from '../skills.ts';
 import { resolveCapabilities } from '../server/capabilities.ts';
 import { automationCliCommand, automationsPrompt } from '../automations/prompts.ts';
 import { createAutomationSkill } from '../automations/builtin-skill.ts';
-import { materializeSkillDir, waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
+import { materializeSkillDir, materializeSkillToCache, TEAM_SKILL_AGENT_DIRS, waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
-import { autosaveCommit, type AutosaveReason, createWorktree, resolveBaseRef, worktreeDiff, worktreeShortstat } from '../git-worktree.ts';
+import { autosaveCommit, type AutosaveOutcome, type AutosaveReason, createWorktree, resolveBaseRef, worktreeDiff, worktreeShortstat } from '../git-worktree.ts';
 import { runGroupedCommand } from './grouped-command.ts';
 import {
   resolveWorktreeSetup,
@@ -382,9 +384,27 @@ export { CHECK_KILL_GRACE_MS, CHECK_TERMINATION_CONFIRM_MS } from './grouped-com
 /** The periodic autosave timer is opt-in (#471): off, a task branch carries only the
  *  agent's own commits plus the turn-end/pre-PR flushes — no mid-run "cezar autosave"
  *  noise interleaving PR history. The flushes (`autosaveCommit` at turn end and before
- *  a draft PR) are NOT gated: the branch must still end holding the finished state. */
+ *  a draft PR) are NOT gated: the task branch must still end holding the finished state.
+ *  The turn-end and run-finalize flushes and the timer commit only while HEAD is that
+ *  branch, though (hearsay-tools/cezarion#1004): on a branch the agent checked out they
+ *  commit nothing. The timer's commits are reported as one coalesced handoff line per run
+ *  of periodic commits (`recordHandoffPeriodicAutosave`), never as a cockpit note. */
 export function periodicAutosaveEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CEZ_AUTOSAVE === '1';
+}
+
+/** The handoff `## Autosave (cezar)` line and cockpit note for a save that committed or
+ *  left work behind (hearsay-tools/cezarion#1004): a resumed session reads this, not
+ *  `git log`. Never a Progress-log line: the top of that log is the agent's own summary. */
+function autosaveReportLine(reason: AutosaveReason, outcome: AutosaveOutcome, taskBranch: string | undefined): string {
+  const where = outcome.branch ?? 'detached HEAD';
+  if (outcome.result === 'committed') {
+    const what = outcome.sha ? `${outcome.sha} on ${where}` : `on ${where} (sha unavailable)`;
+    return `${reason}: cezar autosave committed ${what}; ` +
+      `to fold it into your own commits while it is HEAD, run \`git reset --soft ${outcome.sha ?? 'HEAD'}~1\``;
+  }
+  return `${reason}: ${outcome.changedPaths} changed path(s) left uncommitted on ${where}; ` +
+    `cezar does not autosave on a branch other than the task branch ${taskBranch ?? '(unrecorded)'}`;
 }
 
 /**
@@ -1690,6 +1710,48 @@ export class RunManager {
   /** Every skill lookup in this manager goes through here, so the built-ins reach all of them. */
   private discoverSkills(): Promise<Skill[]> {
     return discoverSkills(this.repoRoot, { builtin: this.builtinSkills() });
+  }
+  /**
+   * Put a directory team skill's files (SKILL.md + references/) on disk for this
+   * run, for the step start and Continue alike (#286, #413, #1024). The run's OWN
+   * task worktree gets `.claude/skills/<name>/`, `.agents/skills/<name>/` and
+   * `.cursor/skills/<name>/`, so every backend finds them, kept out of git by the
+   * shared info/exclude. Any other cwd — worktree off, a non-git project, a
+   * Continue whose worktree is gone — is the main checkout or unknown, where those
+   * directories are LOCAL skills to `discoverSkills` that would shadow the team
+   * source for every later run; it gets a per-commit cache copy instead, which
+   * the skill prompt names. So does a worktree where no copy landed, such as one
+   * whose three agent dirs all link out of it. A worktree that took only some
+   * copies — one agent dir links out of it — has the prompt name the first that
+   * landed, since the runner's own dir may be the one skipped. Returns the
+   * step-start note and, for a cache or partial copy, the directory the prompt
+   * names; undefined when nothing landed on disk.
+   */
+  private async materializeTeamSkill(runId: string, cwd: string, skill: Skill): Promise<{ note: string; filesDir?: string } | undefined> {
+    if (skill.source !== 'team' || !skill.team?.dir) return undefined;
+    const written = this.isOwnTaskWorktree(runId, cwd) ? await materializeSkillDir(cwd, skill).catch(() => []) : [];
+    if (written.length === TEAM_SKILL_AGENT_DIRS.length) {
+      return {
+        note: `team skill "${skill.name}" materialized to .claude/skills/${skill.name}/ ` +
+          `.agents/skills/${skill.name}/, and .cursor/skills/${skill.name}/`,
+      };
+    }
+    if (written.length > 0) {
+      return {
+        note: `team skill "${skill.name}" materialized to ${written.map((dir) => `${relative(cwd, dir)}/`).join(' and ')}`,
+        filesDir: written[0],
+      };
+    }
+    const filesDir = await materializeSkillToCache(skill).catch(() => null);
+    return filesDir ? { note: `team skill "${skill.name}" materialized to ${filesDir}`, filesDir } : undefined;
+  }
+  /** `cwd` is the run's recorded task worktree, and not the project root. Unresolvable means no. */
+  private isOwnTaskWorktree(runId: string, cwd: string): boolean {
+    const worktreePath = this.store.getRun(runId)?.worktreePath;
+    if (!worktreePath) return false;
+    const real = (path: string): string | undefined => { try { return realpathSync(path); } catch { return undefined; } };
+    const dir = real(cwd);
+    return dir !== undefined && dir === real(worktreePath) && dir !== real(this.repoRoot);
   }
 
   private delegationProvisioner?: DelegationProvisioner;
@@ -3984,6 +4046,9 @@ export class RunManager {
   acknowledgeInbox(runId: string, generation: string, receiptId: string): 'acknowledged' | 'already-acknowledged' {
     if (this.disposed || this.store.getRun(runId)?.agentInputs?.some(input => input.inboxClaim?.receiptId === receiptId &&
       !input.deliveredAt && this.providerOwnsInboxInput(runId, input.id))) throw new Error('inbox receipt displaced');
+    const inputIds = (this.store.getRun(runId)?.agentInputs ?? []).filter(input => !input.deliveredAt &&
+      input.inboxClaim?.receiptId === receiptId && input.inboxClaim.generation === generation).map(input => input.id);
+    this.prepareWorkerWaitBatch(runId, inputIds);
     const result = this.store.ackInboxInputs(runId, receiptId, generation, new Date().toISOString());
     this.armInboxClaimExpiry(runId);
     this.reconcileWorkerWaits();
@@ -4433,7 +4498,14 @@ export class RunManager {
           const inboxParked = delivered.inboxClaim?.acknowledgedAt &&
             (this.workerWaiting.has(parent.id) || this.workerWakeAdmitted.has(parent.id)) &&
             state?.session?.open && state.atTurnBoundary === state.session;
-          this.withdrawWorkerWait(parent.id);
+          const retained = this.retireDeliveredWorkerWake(parent.id);
+          if (retained) {
+            // Revisit the restored intent even during recovery/inbox ACK. Its
+            // original deadline and outcomes still need an independent wake.
+            this.pendingReconciliations.add(familyRootId);
+            if (inboxParked && state) this.parkWorkerWait(parent.id, state);
+            continue;
+          }
           // Inbox ACK starts no provider turn. Retain the completed turn's slot
           // exemption if its registered wait parked while that ACK was in transit.
           if (inboxParked && state) {
@@ -4604,6 +4676,39 @@ export class RunManager {
     return true;
   }
 
+  /** Progress owns a delivery turn, not the parent's completion-wait intent. */
+  private retainsWorkerWaitOnProgress(runId: string): boolean {
+    const wait = this.workerWait(runId);
+    return !!wait?.workerIds.length && wait.reason === 'message' &&
+      this.store.getRun(runId)?.agentInputs?.find(input => input.id === wait.wakeId)?.conversation?.kind === 'progress';
+  }
+
+  /** Persist an interrupting member before acknowledging it, even when progress
+   * is in a separate provider flight. The selected wake then survives a crash
+   * between delivery and wait retirement. */
+  private prepareWorkerWaitBatch(runId: string, inputIds: readonly string[]): void {
+    const run = this.store.getRun(runId);
+    const wait = this.workerWait(runId);
+    if (!run?.delegation || run.delegation.role === 'invalid' || !wait?.wakeId ||
+      !this.retainsWorkerWaitOnProgress(runId)) return;
+    const interrupt = run.agentInputs?.find(input => inputIds.includes(input.id) &&
+      input.conversation && input.conversation.kind !== 'progress');
+    if (interrupt) this.store.commitDelegation([{ id: runId, delegation: { ...run.delegation, wait: { ...wait, wakeId: interrupt.id } } }]);
+  }
+
+  private retireDeliveredWorkerWake(runId: string): boolean {
+    const run = this.store.getRun(runId);
+    const wait = this.workerWait(runId);
+    if (!run?.delegation || run.delegation.role === 'invalid' || !wait || !this.retainsWorkerWaitOnProgress(runId)) {
+      this.withdrawWorkerWait(runId);
+      return false;
+    }
+    const { reason: _reason, wakeId: _wakeId, ...intent } = wait;
+    this.store.commitDelegation([{ id: runId, delegation: { ...run.delegation, wait: { ...intent, phase: 'registered' } } }]);
+    this.clearWorkerWaitAdmission(runId);
+    return true;
+  }
+
   private withdrawWorkerWait(runId: string, acceptedHumanMessage?: QueuedMessage): void {
     const run = this.store.getRun(runId);
     const wait = this.workerWait(runId);
@@ -4611,6 +4716,10 @@ export class RunManager {
     // Publish intent retirement, exact wake removal and accepted human input
     // together. A disk failure must leave both durable and admission state intact.
     this.store.commitWorkerWaitWithdrawal(runId, wait.id, acceptedHumanMessage);
+    this.clearWorkerWaitAdmission(runId);
+  }
+
+  private clearWorkerWaitAdmission(runId: string): void {
     const timer = this.workerWaitTimers.get(runId); if (timer) clearTimeout(timer);
     this.workerWaitTimers.delete(runId);
     if (this.workerWakeQueuedAt.delete(runId) && this.active.has(runId)) {
@@ -4950,8 +5059,12 @@ export class RunManager {
         catch { console.error(`[cez] ${state.agentInputError}`); }
       }
     };
+    let retainedWorkerWaitId: string | undefined;
     let acknowledgement: false | Promise<void>;
-    try { acknowledgement = session.sendAgentMessage(content, inputIds); }
+    try {
+      this.prepareWorkerWaitBatch(runId, inputIds);
+      acknowledgement = session.sendAgentMessage(content, inputIds);
+    }
     catch (error) { fail(error, false); state.agentInputFlight = undefined; return false; }
     if (!acknowledgement) { state.agentInputFlight = undefined; return false; }
     // Attach rejection handling before any persistence/capacity work can throw.
@@ -4992,7 +5105,8 @@ export class RunManager {
               if (early.length) this.store.commitAgentInputsConsumed(runId, early, deliveredAt);
             }
           }
-          if (inputIds.includes(this.workerWait(runId)?.wakeId ?? '')) this.withdrawWorkerWait(runId);
+          const wait = this.workerWait(runId);
+          if (inputIds.includes(wait?.wakeId ?? '') && this.retireDeliveredWorkerWake(runId)) retainedWorkerWaitId = wait!.id;
           this.reconcileWorkerWaits();
         }
       } catch (error) { fail(error, true); }
@@ -5005,6 +5119,11 @@ export class RunManager {
       // after its turn already ended: no later turn-end would arm one (#505 review).
       if (inputIds.some(id => state.unreadRetried?.has(id)) || state.atTurnBoundary === session) this.armUnreadInputTimer(runId, state);
       if (this.flushAgentInputs(runId)) return;
+      // Only this progress ACK restored an intent. Generic input-readiness
+      // callbacks must not park a freshly registered wait ahead of ASK parsing.
+      if (retainedWorkerWaitId && this.workerWait(runId)?.id === retainedWorkerWaitId &&
+        state.atTurnBoundary === session && !state.pendingHumanAsk && !state.parkAfterAck?.humanGate &&
+        !this.hasUnansweredHumanAsk(runId) && this.parkWorkerWait(runId, state)) return;
       this.settleIdleBoundary(runId, state, session);
     }).catch(error => {
       // Bookkeeping failures cannot become unhandled promise rejections.
@@ -5039,16 +5158,25 @@ export class RunManager {
       const input = run.agentInputs?.find(entry => entry.id === run.ciWait?.wakeId && !entry.deliveredAt);
       return !!input && this.submitAgentInput(runId, state, [{ type: 'text', text: this.formatAgentInput(runId, input) }], [input.id]);
     }
-    const batch = agentInputBatch(queue, input => this.formatAgentInput(runId, input));
-    return !!batch && this.submitAgentInput(runId, state, [{ type: 'text', text: batch.text }], batch.inputs.map(input => input.id));
+    // Select within the byte budget using the longer interruption context, then
+    // format the selected snapshot consistently. Do not change durable wait intent
+    // merely to format inputs that the provider may refuse.
+    const batch = agentInputBatch(queue, input => this.formatAgentInput(runId, input, false));
+    if (!batch) return false;
+    const progressOnly = batch.inputs.every(input => input.conversation?.kind === 'progress');
+    const text = batch.inputs.map(input => this.formatAgentInput(runId, input, progressOnly)).join('\n\n');
+    return this.submitAgentInput(runId, state, [{ type: 'text', text }], batch.inputs.map(input => input.id));
   }
 
-  private formatAgentInput(runId: string, input: AgentInput): string {
+  private formatAgentInput(runId: string, input: AgentInput, progressOnly = true): string {
     const attribution = input.conversation;
-    const text = attribution
-      ? `Agent conversation ${JSON.stringify({ id: input.id, ...attribution })}${this.workerWait(runId)?.reason === 'message' ? `; interrupted wait ${this.workerWait(runId)!.id} to receive this message; outstanding requests remain pending` : ''}\n${input.text}`
-      : input.text;
     const wait = this.workerWait(runId);
+    const waitContext = wait?.reason !== 'message' ? '' : progressOnly && this.retainsWorkerWaitOnProgress(runId) && attribution?.kind === 'progress'
+      ? `; worker wait ${wait.id} remains active; end your turn to keep waiting`
+      : `; interrupted wait ${wait.id} to receive this message; outstanding requests remain pending`;
+    const text = attribution
+      ? `Agent conversation ${JSON.stringify({ id: input.id, ...attribution })}${waitContext}\n${input.text}`
+      : input.text;
     const receipt = wait?.wakeId === input.id && wait.wakeId !== wait.id && wait.reason !== 'message'
       ? `\nWait ${wait.id} (${wait.reason}); request outcomes: ${JSON.stringify(wait.requestOutcomes ?? [])}; worker outcomes: ${JSON.stringify(wait.outcomes.map(outcome => ({ ...outcome, ...(outcome.summary ? { summary: outcome.summary.slice(0, 256) } : {}) })))}. This is not review approval.` : '';
     return text + receipt + this.agentInputOutcomeText(input);
@@ -6133,13 +6261,13 @@ export class RunManager {
         }
       }
       if (skill) {
-        const playbook = skillSystemPrompt(skill);
+        // Rematerialize a directory team skill — into a #483 rematerialized
+        // worktree, or the cache copy when the worktree is gone — before the
+        // playbook, which names a cache copy's directory (#1024). No note on Continue.
+        const materialized = await this.materializeTeamSkill(runId, state.cwd, skill);
+        const playbook = skillSystemPrompt(skill, materialized?.filesDir);
         if (skipSkillOnResume) fallbackSkillPrompt = playbook;
         else continuationSkillPrompt = playbook;
-        if (skill.source === 'team' && skill.team?.dir) {
-          // Rematerialize into a #483 rematerialized worktree; do not note it on Continue.
-          await materializeSkillDir(state.cwd, skill).catch(() => false);
-        }
       } else if (!skipSkillOnResume) {
         this.store.appendEvent(runId, {
           type: 'lifecycle',
@@ -6719,7 +6847,9 @@ export class RunManager {
       break;
     }
 
-    // Final autosave: the branch always ends holding the finished state.
+    // Final autosave: the task branch ends holding the finished state; on a branch the
+    // agent checked out, the work stays uncommitted and the handoff's Autosave section
+    // says so (#1004).
     this.clearAutosaveTimer(state);
     await this.saveWorktree(runId, state, 'run finalize');
 
@@ -6783,26 +6913,12 @@ export class RunManager {
         // name and catalog description in the normalized runner payload so a
         // numeric task such as "432" still gives the model enough context to
         // describe the work — and therefore derive a useful title (#432).
-        systemPrompt = skillSystemPrompt(skill);
-        // Directory team skills (SKILL.md + references/) get materialized
-        // into <cwd>/.claude/skills/<name>/ (claude),
-        // <cwd>/.agents/skills/<name>/ (codex/pi), and
-        // <cwd>/.cursor/skills/<name>/ (Cursor) — the run's worktree when
-        // there is one — so every backend sees the companion files on disk;
-        // the shared info/exclude keeps them out of git (and out of autosave
-        // commits). (#286, #413)
-        if (skill.source === 'team' && skill.team?.dir) {
-          const seeded = await materializeSkillDir(state.cwd, skill).catch(() => false);
-          if (seeded) {
-            emit({
-              type: 'note',
-              stepId: step.id,
-              message:
-                `team skill "${skill.name}" materialized to .claude/skills/${skill.name}/ ` +
-                `.agents/skills/${skill.name}/, and .cursor/skills/${skill.name}/`,
-            });
-          }
-        }
+        // Directory team skills (SKILL.md + references/) get their files on
+        // disk first: into the run's own task worktree, or — never the main
+        // checkout — a per-commit cache copy the prompt names (#286, #413, #1024).
+        const materialized = await this.materializeTeamSkill(runId, state.cwd, skill);
+        systemPrompt = skillSystemPrompt(skill, materialized?.filesDir);
+        if (materialized) emit({ type: 'note', stepId: step.id, message: materialized.note });
       } else {
         emit({
           type: 'note',
@@ -8065,7 +8181,12 @@ export class RunManager {
     return this.autosaveTasks.get(runId)?.blocker ?? autosaveCleanupBlocker(this.dataDir, runId);
   }
 
-  /** Keep a separate maintenance hold until autosave proves all its processes exited. */
+  /** Keep a separate maintenance hold until autosave proves all its processes exited.
+   *  Commits only while HEAD is the run's recorded branch (hearsay-tools/cezarion#1004), and
+   *  reports a commit or a skip in the handoff's `## Autosave (cezar)` section and as a note;
+   *  a periodic save reports only a commit, in the handoff alone, coalesced with the
+   *  periodic commits right before it. A run with no recorded branch keeps committing on
+   *  whatever HEAD is. */
   private async saveWorktree(runId: string, state: ActiveRun, reason: AutosaveReason): Promise<void> {
     if (state.cwd === this.repoRoot) return;
     for (;;) {
@@ -8085,7 +8206,12 @@ export class RunManager {
     let release: (() => void) | undefined;
     let retained = false;
     let cleanupConfirmed = false;
+    let taskBranch: string | undefined;
+    try { taskBranch = this.store.getRun(runId)?.branch; } catch { /* A closed store keeps the old rule. */ }
+    let outcome: AutosaveOutcome | undefined;
     const task = autosaveCommit(state.cwd, reason, {
+      ...(taskBranch ? { taskBranch } : {}),
+      onOutcome: reported => { outcome = reported; },
       onWarning: note,
       onBlocked: (message, proof) => {
         retainAutosaveCleanup(this.dataDir, runId, state.cwd, message, proof);
@@ -8103,7 +8229,20 @@ export class RunManager {
     void task.then(result => {
       cleanupConfirmed = true;
       if (result === 'failed') note(`${reason} autosave failed; working files remain in ${state.cwd}`);
-      else if (result === 'refused') note(`${reason} autosave refused because of unresolved conflicts; working files remain in ${state.cwd}`);
+      else if (result === 'refused') note(`${reason} autosave refused: unresolved conflicts or an unfinished merge, cherry-pick or revert; working files remain in ${state.cwd}`);
+      else if (outcome && reason === 'periodic') {
+        // The timer reports its commits too, since a clean closing flush reports nothing
+        // (review on hearsay-tools/cezarion#1111): one coalesced handoff line per run of
+        // periodic commits and no note, as a note every 90 s would flood the timeline. A
+        // periodic skip stays silent; the closing flush reports one with the final count.
+        if (outcome.result === 'committed') {
+          try { recordHandoffPeriodicAutosave(this.dataDir, runId, outcome); } catch { /* The handoff is a journal, never a reason to fail. */ }
+        }
+      } else if (outcome) {
+        const message = autosaveReportLine(reason, outcome, taskBranch);
+        note(message);
+        try { appendHandoffAutosaveReport(this.dataDir, runId, message); } catch { /* The handoff is a journal, never a reason to fail. */ }
+      }
     }, error => note(`${reason} autosave failed: ${String(error)}; working files remain in ${state.cwd}`)).finally(() => {
       if (this.autosaveTasks.get(runId) === entry) this.autosaveTasks.delete(runId);
       if (retained && cleanupConfirmed) {
@@ -8304,11 +8443,16 @@ export function makeRunTitle(task: string, workflow: WorkflowDef): string {
  * worse, reads a stale copy materialized from the team-repo cache. The path
  * resolves against the MAIN project root (`discoverSkills(repoRoot)`), i.e. the
  * current `npx skills`-installed copy, so a worktree agent and the main
- * checkout read the exact same, up-to-date files. Team skills are omitted here:
- * they are materialized into the worktree separately (see the call site).
+ * checkout read the exact same, up-to-date files. A team skill's `path` is not
+ * on disk: its files are materialized per run (`RunManager.materializeTeamSkill`).
+ * Inside the run's task worktree they need no pointer; a run without one, or
+ * whose worktree took no copy, gets a per-commit cache copy, passed here as
+ * `teamFilesDir` (#1024). A worktree that took only some of its copies passes
+ * the first one it did take.
  */
 export function skillSystemPrompt(
   skill: Pick<Skill, 'name' | 'description' | 'body'> & Partial<Pick<Skill, 'path' | 'source'>>,
+  teamFilesDir?: string,
 ): string {
   const lines = [
     `Selected skill: /${skill.name}`,
@@ -8321,6 +8465,13 @@ export function skillSystemPrompt(
       `Skill files are installed on disk at: ${dir}`,
       `Read any file this skill references (for example references/*.md) from that absolute directory. ` +
         `It is the current installed copy — use it even though your working directory is a separate worktree that does not contain the skill.`,
+    );
+  } else if (skill.source === 'team' && teamFilesDir) {
+    lines.push(
+      '',
+      `Skill files are installed on disk at: ${teamFilesDir}`,
+      `Read any file this skill references (for example references/*.md) from that absolute directory. ` +
+        `It is a copy of the skill at the commit this run uses.`,
     );
   }
   lines.push('', 'Skill instructions:', skill.body.trim());

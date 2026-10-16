@@ -1,6 +1,6 @@
-import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { Link as RouterLink, MemoryRouter, useLocation } from 'react-router'
+import { Link as RouterLink, MemoryRouter, useLocation, useNavigate, type NavigateFunction } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AppShell, routeOwnsScrollArrival, type AppShellProps } from './app-shell'
@@ -1015,6 +1015,41 @@ describe('AppShell', () => {
       fireEvent.click(within(drawer() as HTMLElement).getByRole('link', { name: 'Tools' }))
       await waitFor(() => expect(drawer()).toBeNull())
       expect(screen.getByTestId('location').textContent).toBe('/tools')
+    })
+
+    describe('the boot alias resolving under an open drawer (hearsay-tools/cezarion#1129)', () => {
+      /** Navigates from outside the drawer, the way `ProjectScopeRoute`'s `<Navigate>` and the ⌘K
+       *  palette do: a click on anything behind the modal would dismiss it first. */
+      let navigate: NavigateFunction | null = null
+      function NavigateHandle() {
+        navigate = useNavigate()
+        return null
+      }
+      const go = (to: string, replace: boolean) => act(() => { void navigate?.(to, { replace }) })
+
+      it('stays open when /p/default/… is rewritten in place to the boot project\'s id', async () => {
+        renderShell('/p/default/', {}, <NavigateHandle />)
+        openMenu()
+        await settle()
+        go('/p/boot-repo/', true)
+        expect(screen.getByTestId('location').textContent).toBe('/p/boot-repo/')
+        await settle()
+        expect(drawer()).not.toBeNull()
+      })
+
+      it('still closes on a pushed switch to another project\'s same view', async () => {
+        renderShell('/p/default/', {}, <NavigateHandle />)
+        openMenu()
+        go('/p/other-repo/', false)
+        await waitFor(() => expect(drawer()).toBeNull())
+      })
+
+      it('still closes when a replace lands on a different view', async () => {
+        renderShell('/p/default/', {}, <NavigateHandle />)
+        openMenu()
+        go('/p/boot-repo/tasks', true)
+        await waitFor(() => expect(drawer()).toBeNull())
+      })
     })
 
     it('shows no update row until a newer release exists, then one row with the action', () => {

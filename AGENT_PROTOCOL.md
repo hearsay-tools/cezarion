@@ -242,7 +242,13 @@ are distinct outcomes, alongside failed, cancelled, destroyed, timed-out, and
 sender-closed. Late replies remain recorded without replacing a first settlement.
 Both roles can wait on their own requests using the existing bounded scheduler wake
 queue. An incoming message can interrupt that wait with reason `message`, retaining
-unresolved obligations; there is no automatic re-wait.
+unresolved obligations; there is no automatic re-wait for request waits. A worker
+progress message wakes a parent waiting for worker completion without retiring
+that wait. After progress delivery the same wait parks again with its original
+ID, selected workers and deadline; terminal outcomes still produce one wake.
+Harness row **WP1** in `workflows/worker-wait-conversations.test.ts` exercises
+repeated progress and one terminal wake through every `RUNNER_IDS` native mock
+wire using `HARNESS_ADAPTERS` (hearsay-tools/cezarion#1138).
 
 Messages are bounded to 100,000 characters, 32 undelivered inputs per recipient,
 1,024 messages per family, and 32 pending obligations. Requests and waits expire
@@ -1457,6 +1463,20 @@ R67–R68 (hearsay-tools/cezarion#958, same file) Finish a fresh run and a Conti
 while an unrelated process keeps starting new processes in the worktree, as
 Squeal's Vitest workers do. The final autosave must commit, leave no cleanup
 evidence or hold, and leave the unrelated process running and unsignalled.
+
+R78–R79 (hearsay-tools/cezarion#1004, `core/harness-autosave-branch.test.ts`) check
+another branch out in an owned worker's worktree on every `HARNESS_ADAPTERS` native
+wire, leave a file, and settle the session: R78 on the initial run (`run finalize`),
+R79 on a Continue (`turn end`). The save commits nothing, the foreign branch tip does
+not move, and the handoff's `## Autosave (cezar)` section and a cockpit note both
+name the branch and the uncommitted path count, while the Progress log stays free
+of the report. R79's first settle, still on the task branch, pins the other half:
+the commit is reported with its short sha, the branch and the
+`git reset --soft <sha>~1` fold-back command. R79's periodic case fires the
+Continue's `CEZ_AUTOSAVE=1` timer by hand, so the closing `turn end` flush finds
+a clean tree and reports nothing: the timer's own coalesced `periodic:` line
+names the commit, the branch and the fold-back command, and no cockpit note is
+emitted for it.
 
 Autosaves serialize per canonical worktree; Git auto-maintenance is disabled
 only for these commands. Holder discovery shares orphan recovery's cwd boundary,

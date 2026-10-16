@@ -263,7 +263,7 @@ test('renderTargetsReport puts flagged rows first, in diff order, and escapes ce
   assert.match(md, /\| File \| Upstream \| Fork \| Flags \| Reachability \| Drift \| Dry run \|/);
 });
 
-test('renderTargetsReport heads the report with the fork HEAD, counts and the reachability run', () => {
+test('renderTargetsReport heads the report with the fork revision, counts and the reachability run', () => {
   const md = renderTargetsReport(report());
   assert.match(md, /`aaaa1111` \(2026-10-16\)/);
   assert.match(md, /1 upstream commit checked/);
@@ -757,7 +757,7 @@ test('every git call of targets reads attributes from the HEAD it resolved', asy
   const report = await collectTargets([fx.upstream.slice(0, 8)], { cwd: fx.dir, fetch: false });
   assert.equal(report.head.sha, head);
   const [resolve, ...pinned] = calls();
-  assert.deepEqual(resolve, ['rev-parse', '--verify', 'HEAD^{commit}'], 'resolving HEAD is the one call that cannot name it');
+  assert.deepEqual(resolve, ['rev-parse', '--verify', '--end-of-options', 'HEAD^{commit}'], 'resolving HEAD is the one call that cannot name it');
   for (const args of pinned) assert.equal(args[0], `--attr-source=${head}`, args.join(' '));
   const seen = new Set(pinned.map(subcommandOf));
   for (const sub of ['cat-file', 'log', 'diff', 'diff-tree', 'rev-list', 'read-tree', 'ls-files', 'checkout-index', 'format-patch', 'apply']) {
@@ -808,7 +808,7 @@ test('the fetch of targets, and the existence checks after it, read attributes f
   const logged = calls();
   assert.equal(report.head.sha, head);
   const [resolve, ...pinned] = logged;
-  assert.deepEqual(resolve, ['rev-parse', '--verify', 'HEAD^{commit}']);
+  assert.deepEqual(resolve, ['rev-parse', '--verify', '--end-of-options', 'HEAD^{commit}']);
   for (const args of pinned) assert.equal(args[0], `--attr-source=${head}`, args.join(' '));
   const fetches = pinned.flatMap((args, i) => (subcommandOf(args) === 'fetch' ? [i] : []));
   assert.equal(fetches.length, 1, 'the guard saw exactly one fetch call');
@@ -1037,11 +1037,11 @@ test('upstream-scan records a merge\'s conflict hint from its first-parent diff'
   const result = cli('--no-fetch', '--date', '2026-10-16');
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).added, 3, 'the merge and the new commits on both its sides');
-  // live.tsx conflicts and gone.ts is missing, which the hint does not count. A merge read as one
+  // live.tsx conflicts and gone.ts is missing, so both count. A merge read as one
   // commit has an empty patch, which would record a false 0.
-  assert.deepEqual(scannedRow(fx, merge).hint, { conflicts: 1 });
+  assert.deepEqual(scannedRow(fx, merge).hint, { conflicts: 2 });
   const logged = calls();
-  const at = logged.findIndex((args) => args.join(' ') === 'rev-parse --verify HEAD^{commit}');
+  const at = logged.findIndex((args) => args.join(' ') === 'rev-parse --verify --end-of-options HEAD^{commit}');
   assert.ok(at > 0, logged.map((args) => args.join(' ')).join('\n'));
   const pinned = logged.slice(at + 1);
   assert.ok(pinned.some((args) => subcommandOf(args) === 'diff-tree' && args.includes('-p')), 'the guard saw the merge\'s patch');
@@ -1067,6 +1067,7 @@ test('upstream-scan records rows without a hint, and warns, when it cannot build
   const summary = JSON.parse(lines[0]);
   assert.equal(summary.added, 1);
   assert.ok(fs.existsSync(path.join(fx.dir, summary.report)), 'the scan report is written');
+  assert.match(fs.readFileSync(path.join(fx.dir, summary.report), 'utf8'), /Scan 2026-10-16: conflict hints unavailable for 1/);
   const row = scannedRow(fx, later);
   assert.equal(row.status, 'pending');
   assert.equal('hint' in row, false);
@@ -1106,7 +1107,7 @@ test('every git call of the scan\'s conflict hints reads attributes from the HEA
   const logged = calls();
   // Before the hints resolve HEAD, the scan reads its range from upstream refs: no attributes, and
   // it must keep working on a git without `--attr-source`.
-  const at = logged.findIndex((args) => args.join(' ') === 'rev-parse --verify HEAD^{commit}');
+  const at = logged.findIndex((args) => args.join(' ') === 'rev-parse --verify --end-of-options HEAD^{commit}');
   assert.ok(at > 0, logged.map((args) => args.join(' ')).join('\n'));
   const pinned = logged.slice(at + 1);
   for (const args of pinned) assert.equal(args[0], `--attr-source=${head}`, args.join(' '));
@@ -1119,4 +1120,61 @@ test('renderTargetsReport keeps a multi-line ledger note on its bullet line', ()
   const r = report();
   r.sections[0].entry.note = 'drag moved to the rail;\nfallback is registry order\n';
   assert.match(renderTargetsReport(r), /^- Ledger row: .* · note: drag moved to the rail; fallback is registry order$/m);
+});
+
+
+test('upstream-scan help documents the UTC date default', (t) => {
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const result = fixtureCli(fx)('--help');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /--date YYYY-MM-DD.*UTC/);
+});
+
+test('upstream-scan defaults the scan date to UTC even in another timezone', (t) => {
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  laterUpstreamCommit(fx);
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { spawnSync } = require('node:child_process');
+  fixtureCli(fx);
+  const clock = path.join(fx.dir, 'clock.cjs');
+  fs.writeFileSync(clock, `const RealDate = Date; global.Date = class extends RealDate { constructor(...args) { super(...(args.length ? args : ['2026-10-16T00:30:00Z'])); } };`);
+  const result = spawnSync(process.execPath, ['--require', clock, path.join(fx.dir, '.github/scripts/upstream-scan.cjs'), '--no-fetch'], {
+    cwd: fx.dir, encoding: 'utf8', env: { ...process.env, TZ: 'America/Los_Angeles', NODE_PATH: path.resolve(__dirname, '../../node_modules') },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).date, '2026-10-16');
+});
+
+test('upstream-scan rejects extra validate and render positionals without writing', (t) => {
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const cli = fixtureCli(fx);
+  const before = fx.git('status', '--porcelain', '--untracked-files=all');
+  for (const command of ['validate', 'render']) {
+    const result = cli(command, 'unexpected');
+    assert.equal(result.status, 2, result.stdout + result.stderr);
+    assert.match(result.stderr, /unexpected positional argument/);
+    assert.equal(result.stdout, '');
+    assert.equal(fx.git('status', '--porcelain', '--untracked-files=all'), before);
+  }
+});
+
+test('upstream-scan targets honours the requested fork head and report date', (t) => {
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const cli = fixtureCli(fx);
+  const current = cli('targets', fx.upstream.slice(0, 8), '--no-fetch');
+  assert.equal(current.status, 0, current.stderr);
+  const earlier = cli('targets', fx.upstream.slice(0, 8), '--no-fetch', '--head', 'HEAD^', '--date', '2001-02-03');
+  assert.equal(earlier.status, 0, earlier.stderr);
+  assert.match(earlier.stdout, /Report date: 2001-02-03/);
+  assert.match(earlier.stdout, /^- Fork revision:/m);
+  assert.match(earlier.stdout, /\| `packages\/web\/src\/gone.ts` \| M \| present \|/);
+  assert.match(current.stdout, /\| `packages\/web\/src\/gone.ts` \| M \| absent,/);
+  assert.ok(earlier.stdout.includes(fx.git('rev-parse', '--short', 'HEAD^')));
+  assert.ok(!earlier.stdout.includes(fx.dropGone));
+  assert.notEqual(current.stdout, earlier.stdout);
 });

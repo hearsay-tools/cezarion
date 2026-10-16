@@ -7,6 +7,7 @@ import { afterEach, expect, it } from 'vitest';
 import { CockpitOwnership } from './cockpit-ownership.ts';
 import { ProjectContexts } from './project-context.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
+import { seedRuns } from '../runs/run-store.testkit.ts';
 
 const roots: string[] = [];
 const owners: CockpitOwnership[] = [];
@@ -84,6 +85,52 @@ it('secondary ownership lasts until process exit, even after context disposal', 
   const record = JSON.parse(readFileSync(join(dataDir, 'cockpit.lock'), 'utf8'));
   expect(record.url).toBe('http://127.0.0.1:4321');
   await expect(fixture().owner.acquire(dataDir)).rejects.toThrow('http://127.0.0.1:4321');
+});
+
+it.each([false, true])('releases a cold maintenance claim without releasing the boot project (work fails: %s)', async (fails) => {
+  const { root, owner, dataDir } = fixture();
+  const boot = fixture();
+  await owner.acquire(boot.dataDir);
+  owner.publishUrl('http://127.0.0.1:4321');
+  const bootClaim = readFileSync(join(boot.dataDir, 'cockpit.lock'), 'utf8');
+  seedRuns(dataDir, []);
+  const contexts = new ProjectContexts({
+    ownership: owner,
+    listProjects: async () => [{ id: 'cold', root, status: 'not-git' }],
+  });
+  try {
+    const maintenance = contexts.withMaintenanceStore('cold', async () => {
+      expect(existsSync(join(dataDir, 'cockpit.lock'))).toBe(true);
+      if (fails) throw new Error('maintenance failed');
+    });
+    if (fails) await expect(maintenance).rejects.toThrow('maintenance failed');
+    else await maintenance;
+    expect(contexts.ids()).toEqual([]);
+    expect(existsSync(join(dataDir, 'cockpit.lock'))).toBe(false);
+    expect(readFileSync(join(boot.dataDir, 'cockpit.lock'), 'utf8')).toBe(bootClaim);
+    await fixture().owner.acquire(dataDir);
+  } finally {
+    contexts.disposeAll();
+  }
+});
+
+it('borrows a pre-existing process claim for maintenance without releasing it', async () => {
+  const { root, owner, dataDir } = fixture();
+  seedRuns(dataDir, []);
+  await owner.acquire(dataDir);
+  owner.publishUrl('http://127.0.0.1:4321');
+  const claim = readFileSync(join(dataDir, 'cockpit.lock'), 'utf8');
+  const contexts = new ProjectContexts({
+    ownership: owner,
+    listProjects: async () => [{ id: 'cold', root, status: 'not-git' }],
+  });
+  try {
+    await contexts.withMaintenanceStore('cold', async () => undefined);
+    expect(readFileSync(join(dataDir, 'cockpit.lock'), 'utf8')).toBe(claim);
+    await expect(fixture().owner.acquire(dataDir)).rejects.toThrow('http://127.0.0.1:4321');
+  } finally {
+    contexts.disposeAll();
+  }
 });
 
 it.runIf(process.platform === 'linux' || process.platform === 'darwin')('reclaims a stale process incarnation even when its PID is live again', async () => {

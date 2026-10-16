@@ -697,7 +697,7 @@ describe('RunDatabase', () => {
       writer.transaction({ upserts: [row('a')], deletes: [] });
       writer.close();
       const raw = new DatabaseSync(path);
-      raw.exec('DROP INDEX runs_unarchived; DROP INDEX runs_archived_roots; PRAGMA user_version = 1');
+      raw.exec('DROP INDEX runs_unarchived; DROP INDEX runs_archived_roots; DROP INDEX runs_archive_on_merge; PRAGMA user_version = 1');
       raw.close();
       const reader = RunDatabase.openReadOnly(path)!;
       open.push(reader);
@@ -716,7 +716,7 @@ describe('RunDatabase', () => {
       writer.transaction({ upserts: [row('a'), row('b')], deletes: [] });
       writer.close();
       const raw = new DatabaseSync(path);
-      raw.exec('DROP INDEX runs_unarchived; DROP INDEX runs_archived_roots; PRAGMA user_version = 1');
+      raw.exec('DROP INDEX runs_unarchived; DROP INDEX runs_archived_roots; DROP INDEX runs_archive_on_merge; PRAGMA user_version = 1');
       raw.close();
       const db = openDb();
       expect(db.listRevisions().map((r) => r.id)).toEqual(['a', 'b']);

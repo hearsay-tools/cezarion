@@ -6,6 +6,7 @@ import type { Capabilities } from '@open-mercato/cezar-api-client'
 import { useActiveProjectIdentity } from '@/components/sidebar-project-header'
 import { Link as ScopedLink, NavLink as ScopedNavLink } from '@/lib/project-router'
 import { ProjectGeneral } from './project-general'
+import { ArchiveOnMergeField } from './archive-on-merge-field'
 import { visibleSettingsSections, type SettingsScope, type SettingsSection } from './registry'
 
 /**
@@ -153,12 +154,13 @@ export function SettingsIndexRoute({ capabilities }: {
         <SectionPills scope="project" activeId={null} capabilities={capabilities} />
         {/* No second h1 for small screens: the app shell's mobile top bar already titles the
             page "Settings" from the nav registry. */}
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col gap-5">
           {/* The index is a PAGE, not a menu: the folder, the registry facts, the concurrency
               ceiling and Remove. `capabilities` travels because the registry half of that page
               is exactly what single-project mode disables, the same gate
               `visibleSettingsSections` applies. */}
           <ProjectGeneral capabilities={capabilities} />
+          <section className="rounded-lg border border-border bg-card p-5"><ArchiveOnMergeField /></section>
           <h2 className="settings-other-title mt-6 rounded-t-lg border border-b-0 border-border bg-card px-5 pt-5 text-base font-semibold md:hidden">Other project settings</h2>
           <ul
             data-slot="settings-index"

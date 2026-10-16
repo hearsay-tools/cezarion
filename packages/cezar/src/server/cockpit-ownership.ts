@@ -116,6 +116,12 @@ export class CockpitOwnership {
   private readonly owned = new Map<string, Owner>();
   private url: string | undefined;
 
+  /** A long-lived process claim may be borrowed without changing its lifetime. */
+  owns(dataDir: string): boolean {
+    try { return this.owned.has(join(realpathSync(dataDir), 'cockpit.lock')); }
+    catch { return false; }
+  }
+
   async acquire(dataDir: string): Promise<void> {
     mkdirSync(dataDir, { recursive: true });
     const canonical = realpathSync(dataDir);

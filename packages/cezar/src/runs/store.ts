@@ -3,7 +3,8 @@ import { EventEmitter } from 'node:events';
 import { workerEvidenceRunIds, workerExecutionSchema, type WorkerExecution } from './worker-execution.ts';
 import { agentTmpDirLocations, agentTmpDirMayExist, agentTmpDirOwnershipProven, removeAgentTmpDir } from './agent-tmpdir.ts';
 import { removeArtifacts } from '../artifacts/lifecycle.ts';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import { hasRegisteredRunProcess } from '../core/process-usage.ts';
 import { isDeepStrictEqual } from 'node:util';
 import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -11,7 +12,7 @@ import { z } from 'zod';
 import {
   ciWaitSchema, agentInputSchema, inboxClaimSchema, delegationStateSchema, workerCreationReceiptSchema, workerCollectedResultSchema, workerResultFileSchema,
   continuationMessageSchema, previewServerSchema, toRunSummary, workerDestroyRetrySchema,
-  runRecordSchema as contractRunRecordSchema, runPullRequestSchema,
+  runRecordSchema as contractRunRecordSchema, runPullRequestSchema, mergedPullRequestSchema,
 } from '@open-mercato/cezar-contract';
 import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult, WorkerDestroyRetry } from '@open-mercato/cezar-contract';
 import { matchesRunQuery, sqlPrefilterTokens } from './run-search.ts';
@@ -23,11 +24,11 @@ import { hasPlainHistory, historyStat, historyPaths, readHistoryText, readHistor
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
-import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, sharedCwdScan, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
-import { mergePullRequests } from './pull-requests.ts';
-import type { RunPullRequest } from '@open-mercato/cezar-contract';
+import { archivePullRequests, pullRequestKey, mergePullRequests } from './pull-requests.ts';
+import type { ArchivePullRequestIdentity, MergedPullRequest, RunPullRequest } from '@open-mercato/cezar-contract';
 import { MAX_REF } from './task-refs.ts';
 // Type-only module (zod + nothing else), so this cannot cycle back into the store.
 import { workflowDefSchema } from '../workflows/types.ts';
@@ -357,6 +358,8 @@ export const runRecordSchema = z.object({
   peakProcCount: z.number().optional(),
   archived: z.boolean().default(false),
   archivedAt: z.string().optional(),
+  autoArchive: contractRunRecordSchema.shape.autoArchive,
+  manualUnarchivedAt: contractRunRecordSchema.shape.manualUnarchivedAt,
   /** Pinned to the top of this project's task list (#935): plain per-task state, the
    *  same class as `archived` and `seenAt`. Optional with NO default, unlike `archived`:
    *  absent is what every runs.json written before this carries and it already means
@@ -1411,13 +1414,13 @@ export class RunStore extends EventEmitter {
    * only a boot passes it, while nothing else runs yet. Without it a busy database fails after
    * one busy timeout.
    */
-  static open(dataDir: string, opts?: { keepLive?: boolean; retryBusy?: boolean }): RunStore {
+  static open(dataDir: string, opts?: { keepLive?: boolean; retryBusy?: boolean; maintenance?: boolean }): RunStore {
     const path = join(dataDir, RUNS_DB_FILE);
     const delays = opts?.retryBusy ? OPEN_RETRY_DELAYS_MS : [];
     const started = Date.now();
     for (let attempt = 0; ; attempt++) {
       try {
-        return RunStore.openOnce(dataDir, path, opts?.keepLive === true);
+        return RunStore.openOnce(dataDir, path, opts?.keepLive === true, opts?.maintenance === true);
       } catch (error) {
         const transient = error instanceof RunDatabaseBusyError || (error instanceof LegacyWriterError && error.reason === 'cockpit');
         if (!transient || attempt >= delays.length) {
@@ -1428,7 +1431,7 @@ export class RunStore extends EventEmitter {
     }
   }
 
-  private static openOnce(dataDir: string, path: string, keepLive: boolean): RunStore {
+  private static openOnce(dataDir: string, path: string, keepLive: boolean, maintenance: boolean): RunStore {
     mkdirSync(join(dataDir, 'runs'), { recursive: true });
     const store = new RunStore(dataDir);
     store.keepLive = keepLive;
@@ -1437,8 +1440,10 @@ export class RunStore extends EventEmitter {
       if (db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) importLegacyIndex(db, dataDir);
       store.db = db;
       store.owner = openClaimSession();
-      store.loadHeldRows();
-      store.warmTranscriptFacts();
+      if (!maintenance) {
+        store.loadHeldRows();
+        store.warmTranscriptFacts();
+      }
     } catch (error) {
       if (store.owner) {
         try { db.releaseClaims(store.owner.session); } catch { /* the session closes below: its claims are provably dead */ }
@@ -3011,6 +3016,95 @@ export class RunStore extends EventEmitter {
     this.touch(run);
   }
 
+  listArchiveOnMergeCandidates(afterSeq = 0, limit = 32): Array<{ id: string; seq: number }> {
+    return this.db?.listArchiveOnMergeCandidates(afterSeq, limit) ?? [];
+  }
+
+  /** Use unnormalized persisted evidence: cold reads must not turn interrupted work into safety. */
+  private archiveFamily(id: string, isActive: (id: string) => boolean): RunRecord[] | undefined {
+    const ids = [id, ...new Set([...(this.db?.listIdsByParent(id) ?? []), ...this.listWorkersOf(id).map(run => run.id)])];
+    if (ids.length > 1025) return undefined;
+    const family: RunRecord[] = [];
+    const cwds = sharedCwdScan();
+    for (const memberId of ids) {
+      const row = this.db?.get(memberId);
+      const raw: unknown = row ? JSON.parse(row.data) : this.held.get(memberId);
+      const decoded = decodeRunRow(JSON.stringify(raw));
+      if (!decoded) return undefined;
+      // Do not let the runtime schema's per-entry salvage hide malformed PR authority.
+      if (raw && typeof raw === 'object' && 'pullRequests' in raw &&
+        (!Array.isArray(raw.pullRequests) || raw.pullRequests.some(entry => !runPullRequestSchema.safeParse(entry).success))) return undefined;
+      const run = this.held.get(memberId) ?? decoded.run;
+      if (row && !this.held.has(memberId)) this.decodeCold(row); // records the synchronous write fence
+      if (this.deleted.has(memberId) || this.quarantined.has(memberId) || this.pins.has(memberId) || isActive(memberId) ||
+        hasRegisteredRunProcess(memberId) || isLiveRecord(run) || row?.live ||
+        run.hasPendingHumanAsk || run.hasPendingPermission || run.delegation?.role === 'invalid' ||
+        !['review', 'done', 'failed', 'cancelled'].includes(run.status) || autosaveCleanupBlocker(this.dataDir, memberId)) return undefined;
+      const facts = this.facts.peek(memberId);
+      if (!facts || facts.pendingAsk !== undefined) return undefined;
+      if (run.delegation?.role === 'worker') {
+        const proof = this.readWorkerExecution(memberId);
+        if (!proof || this.workerResourceHolders(memberId, proof.generation, run.delegation.workspace.resourceId, { cwds }) !== 'safe') return undefined;
+      } else if (run.worktreePath && inspectGeneration({ paths: [run.worktreePath], cwds }).liveness !== 'gone') return undefined;
+      if (this.writeRefusal(memberId)) return undefined;
+      family.push(run);
+    }
+    if (family[0]?.delegation?.role === 'worker' || family[0]?.archived) return undefined;
+    return family;
+  }
+
+  hasArchiveOnMergeAssociations(id: string): boolean {
+    return this.db?.archiveFamilyHasPullRequests(id) ?? false;
+  }
+
+  async prepareArchiveOnMerge(id: string): Promise<void> {
+    const ids = [id, ...(this.db?.listIdsByParent(id) ?? [])];
+    if (ids.length > 1025) return;
+    for (const memberId of ids) await this.facts.ready(memberId);
+  }
+
+  archiveOnMergeSnapshot(id: string, repoBase?: string, isActive: (id: string) => boolean = () => false): ArchiveOnMergeSnapshot | undefined {
+    const family = this.archiveFamily(id, isActive);
+    if (!family) return undefined;
+    return this.archiveSnapshot(family, repoBase);
+  }
+
+  private archiveSnapshot(family: RunRecord[], repoBase?: string): ArchiveOnMergeSnapshot | undefined {
+    const pullRequests = archivePullRequests(family, repoBase);
+    if (!pullRequests) return undefined;
+    const fingerprint = archiveDigest(pullRequests);
+    if (family[0]!.autoArchive?.fingerprint === fingerprint) return undefined;
+    return { rootId: family[0]!.id, fingerprint, pullRequests, token: archiveDigest(family) };
+  }
+
+  /** No await between final revalidation and the fenced, all-or-nothing cascade. */
+  archiveAfterMerge(snapshot: ArchiveOnMergeSnapshot, observations: readonly MergedPullRequest[], repoBase?: string,
+    isActive: (id: string) => boolean = () => false): boolean {
+    const family = this.archiveFamily(snapshot.rootId, isActive);
+    if (!family) return false;
+    const current = this.archiveSnapshot(family, repoBase);
+    if (!current || current.token !== snapshot.token || current.fingerprint !== snapshot.fingerprint) return false;
+    const parsed = observations.map(observation => mergedPullRequestSchema.safeParse(observation));
+    if (parsed.some(result => !result.success)) return false;
+    const merged = parsed.flatMap(result => result.success ? [result.data] : []);
+    const byKey = new Map(merged.map(pr => [pullRequestKey(pr), pr]));
+    if (byKey.size !== current.pullRequests.length || current.pullRequests.some(pr => !byKey.has(pullRequestKey(pr)))) return false;
+    const restoredAt = Math.max(0, ...family.map(run => run.manualUnarchivedAt ? Date.parse(run.manualUnarchivedAt) : 0));
+    if (restoredAt && merged.every(pr => Date.parse(pr.mergedAt) <= restoredAt)) return false;
+    const now = new Date().toISOString();
+    if (merged.some(pr => Date.parse(pr.mergedAt) > Date.parse(now))) return false;
+    const staged = new Map(family.map(run => {
+      const next = structuredClone(run);
+      archiveFields(next, true, now);
+      next.pinned = undefined; next.pinnedAt = undefined;
+      return [next.id, next] as const;
+    }));
+    staged.get(snapshot.rootId)!.autoArchive = { reason: 'pull-requests-merged', archivedAt: now, fingerprint: current.fingerprint, pullRequests: merged };
+    this.commitIndex(staged);
+    for (const id of staged.keys()) this.compressor.enqueue(id);
+    return true;
+  }
+
   setArchived(id: string, archived: boolean): RunRecord | undefined {
     const run = this.record(id);
     if (!run) return undefined;
@@ -3037,12 +3131,7 @@ export class RunStore extends EventEmitter {
     const changed = run.archived !== archived;
     // Transcript first: a restore throw aborts with the record unchanged (#818 S3).
     this.syncTranscriptForm(run.id, archived);
-    run.archived = archived;
-    run.archivedAt = archived ? new Date().toISOString() : undefined;
-    if (archived) {
-      clearPendingAutoResume(run);
-      clearPin(run);
-    }
+    archiveFields(run, archived, new Date().toISOString());
     this.touch(run);
     return changed;
   }
@@ -4364,4 +4453,20 @@ export class RunStore extends EventEmitter {
     this.db?.close();
     this.db = null;
   }
+}
+
+export interface ArchiveOnMergeSnapshot {
+  rootId: string;
+  fingerprint: string;
+  pullRequests: ArchivePullRequestIdentity[];
+  token: string;
+}
+function archiveDigest(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+function archiveFields(run: RunRecord, archived: boolean, now: string): void {
+  run.archived = archived;
+  run.archivedAt = archived ? now : undefined;
+  if (archived) { clearPendingAutoResume(run); clearPin(run); }
+  else run.manualUnarchivedAt = now;
 }

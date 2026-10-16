@@ -34,6 +34,9 @@ export const workspaceConfigResponseSchema = z.object({
   /** Stored override; `null` means inherit `CEZ_SKILLS_AUTO_UPDATE`, then true. */
   skillsAutoUpdate: z.boolean().nullable(),
   effectiveSkillsAutoUpdate: z.boolean(),
+  archiveOnMerge: z.boolean().nullable(),
+  effectiveArchiveOnMerge: z.boolean(),
+  archiveOnMergeSource: z.enum(['global', 'environment', 'default']),
   composerDefaults: z.object({
     autonomous: z.boolean().nullable(),
     worktree: z.boolean().nullable(),
@@ -83,6 +86,7 @@ export const setWorkspaceConfigInputSchema = z.object({
   browseRoot: z.string().trim().min(1).max(4096).optional(),
   projectsDir: z.string().trim().min(1).max(4096).optional(),
   skillsAutoUpdate: z.boolean().nullable().optional(),
+  archiveOnMerge: z.boolean().nullable().optional(),
   composerDefaults: z
     .object({
       autonomous: z.boolean().nullable().optional(),
@@ -391,6 +395,9 @@ export type WorktreeSetupConfig = z.infer<typeof worktreeSetupConfigSchema>;
 
 /** `GET /api/v1/config` — every Settings → Agents knob in one read. */
 export const configResponseSchema = z.object({
+  archiveOnMerge: z.boolean().nullable(),
+  effectiveArchiveOnMerge: z.boolean(),
+  archiveOnMergeSource: z.enum(['project', 'global', 'environment', 'default']),
   baseBranch: z.string().nullable(),
   defaultRunner: runnerSchema,
   systemPrompt: z.string().nullable(),
@@ -429,6 +436,7 @@ export type SetConfigResponse = z.infer<typeof setConfigResponseSchema>;
  * another runner's preset.
  */
 export const setConfigInputSchema = z.object({
+  archiveOnMerge: z.boolean().nullable().optional(),
   baseBranch: z.string().trim().min(1).max(200).nullable().optional(),
   defaultRunner: runnerSchema.optional(),
   systemPrompt: z.string().trim().max(20_000).nullable().optional(),

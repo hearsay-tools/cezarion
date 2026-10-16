@@ -13,19 +13,21 @@
 // Upstream main is fetched into `refs/cez-upstream/main`, NEVER a remote: `gh`
 // prefers a remote named `upstream` over `origin`, so adding one repoints
 // cezar's own GitHub tab at the upstream repository (observed 2026-09-16).
+// `--date` defaults to the current UTC date for scans and target reports.
 // `--head` scans up to a given upstream commit instead of the fetched tip,
-// which is how a backfill records an older scan honestly.
+// which is how a backfill records an older scan honestly. For targets, --head selects
+// the fork commit to inspect (default HEAD); --date labels the report, not the tree.
 //
 // Prints one JSON line on stdout: { added, date, upstreamHead, since, report }.
 // Exit 0 with `added: 0` when upstream has nothing new; exit 1 on an invalid
 // ledger, so a workflow never commits a ledger the unit gate would reject.
 //
 // `targets` takes ledger sha prefixes and prints a Markdown report on the files
-// those upstream commits touch, as the fork's HEAD has them now: present or
+// those upstream commits touch, as the fork's selected commit has them: present or
 // gone, reached by production code or only by tests, changed since the row
 // landed, and a fresh per-file dry run (hearsay-tools/cezarion#1002). A merge is
 // compared with its first parent, here and in the scan's conflict hints. Every
-// verdict describes the committed HEAD: uncommitted changes, staged or not, are
+// verdict describes the selected committed fork revision: uncommitted changes, staged or not, are
 // ignored; only `ledger.yaml` is read from the work tree. It needs git 2.41 or
 // newer (`--attr-source`). Advisory: exit 0 whenever the report printed; exit 1
 // with one line on stderr otherwise.
@@ -82,10 +84,10 @@ function fetchUpstream(ledger, run = git) {
   run(['fetch', '--no-tags', '--quiet', `https://github.com/${ledger.upstream.repo}`, `${ledger.upstream.branch}:${UPSTREAM_REF}`]);
 }
 
-/** HEAD as a full commit sha. A run resolves it once and names that sha in every later git
+/** A fork ref (HEAD by default) as a full commit sha. A run resolves it once and names that sha in every later git
  *  call, so a commit landing in the checkout mid-run cannot mix two trees in one result. */
-function resolveHead(cwd = root) {
-  return git(['rev-parse', '--verify', 'HEAD^{commit}'], { cwd }).trim();
+function resolveHead(cwd = root, ref = 'HEAD') {
+  return git(['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`], { cwd }).trim();
 }
 
 /** Git for one run against `head`, a resolved commit sha: every call starts with
@@ -336,15 +338,15 @@ async function withHeadSnapshot(g, fn) {
  *  `.gitattributes` can change the report. Reachability and the dry run read a snapshot of that
  *  commit; existence and drift read the commit itself. A git without `--attr-source` is an error:
  *  every verdict depends on the pin. */
-async function collectTargets(prefixes, { cwd = root, fetch = true } = {}) {
+async function collectTargets(prefixes, { cwd = root, fetch = true, head = 'HEAD', date = new Date().toISOString().slice(0, 10) } = {}) {
   const { ledger, problems } = loadLedger(cwd);
   if (problems.length) throw new Error(`${LEDGER_PATH} is invalid: ${problems[0]}${problems.length > 1 ? ` (and ${problems.length - 1} more)` : ''}`);
   const entries = entriesFor(ledger, prefixes);
-  const g = pinnedGit(cwd, resolveHead(cwd));
+  const g = pinnedGit(cwd, resolveHead(cwd, head));
   const rejected = attrSourceRejection(g);
   if (rejected) throw new Error(`needs git 2.41 or newer (--attr-source); this git rejects it: ${rejected}`);
   ensureUpstreamCommits(ledger, entries, { g, fetch });
-  const [short, date] = g.git(['log', '-1', `--format=%h${FIELD}%cs`, g.head]).trim().split(FIELD);
+  const [short, commitDate] = g.git(['log', '-1', `--format=%h${FIELD}%cs`, g.head]).trim().split(FIELD);
   return withHeadSnapshot(g, async (snapshot) => {
     const reach = snapshot.tree
       ? await collectReachability(snapshot.tree)
@@ -356,7 +358,7 @@ async function collectTargets(prefixes, { cwd = root, fetch = true } = {}) {
       const files = changedFiles(commit, g).map((f) => targetFile(f, { g, baseline, reach, dryRun }));
       return { entry, intro, baseline, merge: commit.merge, files };
     });
-    return { ledger, head: { sha: g.head, short, date }, reach, dryRunError: snapshot.index ? null : snapshot.error, sections };
+    return { ledger, date, head: { sha: g.head, short, date: commitDate }, reach, dryRunError: snapshot.index ? null : snapshot.error, sections };
   });
 }
 
@@ -384,7 +386,7 @@ const COMMANDS = new Map([
     process.stdout.write(`${path.relative(root, path.join(path.dirname(file), 'LEDGER.md'))} written\n`);
   }],
   ['targets', (args, values) => {
-    collectTargets(args, { fetch: !values['no-fetch'] })
+    collectTargets(args, { fetch: !values['no-fetch'], head: values.head, date: values.date })
       .then((report) => process.stdout.write(renderTargetsReport(report)))
       .catch((err) => {
         process.stderr.write(`upstream-scan targets: ${oneLine(err)}\n`);
@@ -398,11 +400,27 @@ function main() {
     options: {
       date: { type: 'string', default: new Date().toISOString().slice(0, 10) },
       head: { type: 'string' },
+      help: { type: 'boolean', short: 'h' },
       'no-fetch': { type: 'boolean', default: false },
     },
     allowPositionals: true,
   });
+  if (values.help) {
+    process.stdout.write(`Usage: upstream-scan.cjs [validate | render | targets <sha>…] [options]
+  --date YYYY-MM-DD  Scan/report date (default: current UTC date)
+  --head <ref>       Scan: upstream tip (default: fetched tip); targets: fork commit (default: HEAD)
+  --no-fetch         Do not fetch upstream
+  -h, --help         Show this help
+`);
+    return;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(values.date)) throw new Error('--date must be YYYY-MM-DD');
   const [command, ...args] = positionals;
+  if ((command === 'validate' || command === 'render') && args.length) {
+    process.stderr.write(`upstream-scan: ${command}: unexpected positional argument "${args[0]}"\n`);
+    process.exitCode = 2;
+    return;
+  }
   if (command !== undefined) {
     const run = COMMANDS.get(command);
     if (!run) {
@@ -413,7 +431,6 @@ function main() {
     run(args, values);
     return;
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(values.date)) throw new Error('--date must be YYYY-MM-DD');
   scan({ date: values.date, head: values.head, fetch: !values['no-fetch'] });
 }
 

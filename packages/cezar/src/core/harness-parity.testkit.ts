@@ -222,6 +222,11 @@ export const FINAL_MESSAGE_CRITERIA = [
   { id: 'F11', scenario: 'silent-tail-late-turn-start', name: 'resumes on a late native turn-start before content' },
 ] as const;
 
+/** hearsay-tools/cezarion#1138: worker-wait-conversations.test.ts, every native parent wire. */
+export const WORKER_PROGRESS_WAIT_CRITERIA = [
+  { id: 'WP1', scenario: 'hold', name: 'delivers progress without retiring the registered worker wait' },
+] as const;
+
 /** #790: skill system prompt on Continue and restart recovery, every native wire. */
 export const SKILL_RESUME_CRITERIA = [
   { id: 'R53', scenario: 'baseline', name: 'keeps the skill system prompt on Continue' },

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { processStartToken } from '../delegation/process-liveness.ts';
-import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, RunDatabaseDiskFullError } from './run-database.ts';
+import { RUN_DATABASE_SCHEMA_VERSION, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, RunDatabaseDiskFullError } from './run-database.ts';
 import { blockRunWrites, readPersistedRuns, runIds } from './run-store.testkit.ts';
 import { LEGACY_INDEX_BACKUP_FILE, RunStore, __setLegacyImportHookForTests } from './store.ts';
 import { RunStoreOpenError } from './store-open-error.ts';
@@ -558,7 +558,7 @@ describe('a store that cannot be opened is never an empty one', () => {
     const before = snapshot([RUNS_DB_FILE]);
     const failure = openFailure();
     expect(failure.kind).toBe('unsupported-schema');
-    expect(failure.message).toMatch(/runs\.db was written by a newer cezar \(schema 99; this cezar reads schema 2\)\. Upgrade cezar to open this project's runs\.$/);
+    expect(failure.message).toBe(`${join(dataDir, RUNS_DB_FILE)} was written by a newer cezar (schema 99; this cezar reads schema ${RUN_DATABASE_SCHEMA_VERSION}). Upgrade cezar to open this project's runs.`);
     expect(snapshot([RUNS_DB_FILE])).toEqual(before);
   });
 });

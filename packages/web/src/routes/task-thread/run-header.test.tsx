@@ -113,6 +113,17 @@ const actionBar = () => {
   return within(document.querySelector('[data-slot="run-actions-menu"]') as HTMLElement)
 }
 
+it.each([true, false])('shows the automatic reason only for its matching archive event: %s', automatic => {
+  stubFetch()
+  const receiptAt = '2026-01-02T00:00:00.000Z'
+  renderHeader(run('done', {
+    archived: true,
+    archivedAt: automatic ? receiptAt : '2026-01-03T00:00:00.000Z',
+    autoArchive: { reason: 'pull-requests-merged', archivedAt: receiptAt, fingerprint: 'a'.repeat(64), pullRequests: [{ owner: 'o', repo: 'r', number: 42, mergedAt: receiptAt }] },
+  }))
+  expect(document.querySelector('[data-slot="auto-archive-reason"]') !== null).toBe(automatic)
+})
+
 describe('Session-only activity controls (#751)', () => {
   const tabs: RunTab[] = ['changes', 'commits', 'files', { kind: 'issue', number: 751 }, { kind: 'pr', number: 752 }]
 

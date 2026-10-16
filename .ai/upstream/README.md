@@ -84,17 +84,19 @@ node .github/scripts/upstream-scan.cjs targets <sha>…
 Pass the row's sha, or a prefix of 7 or more characters. A port that spans several upstream
 commits takes several shas. A port issue's Agent context names this command with its row sha(s).
 The command fetches upstream into `refs/cez-upstream/main` when a commit is missing locally;
-`--no-fetch` turns that into an error.
+`--no-fetch` turns that into an error. `--head <ref>` selects a different committed fork revision
+(default `HEAD`); `--date YYYY-MM-DD` labels the report (default: current UTC date). The
+date does not select a historical tree. Run `--help` for scan and targets option meanings.
 
 It prints a Markdown report, one section per upstream commit, with a row for every file the commit
 touches. A merge commit is compared with its first parent, the upstream `main` it landed on, and
 its section says so. Put the flagged rows in front of the planner. The report is advisory: it
 exits 0 whenever it printed, flags or not.
 
-Every verdict describes the committed `HEAD` the report names. Uncommitted changes, staged or
-not, are ignored: the dry run and the reachability bundle read a snapshot of `HEAD` taken outside
+Every verdict describes the committed fork revision the report names (`HEAD` by default). Uncommitted changes, staged or
+not, are ignored: the dry run and the reachability bundle read a snapshot of that commit taken outside
 the checkout, and the real index and work tree are never written. Every git call reads its
-attributes from `HEAD` too (`--attr-source`), so an uncommitted `.gitattributes` cannot change a
+attributes from that commit too (`--attr-source`), so an uncommitted `.gitattributes` cannot change a
 merge, a checkout, the baseline or the drift. `targets` therefore needs git 2.41 or newer and exits
 1 on an older git, while the scan still records its rows there, without conflict hints.
 `ledger.yaml` is the exception.

@@ -1,3 +1,4 @@
+import { TasksSection } from './archive-on-merge-field'
 import { BellIcon, BotIcon, FoldersIcon, GaugeIcon, KeyRoundIcon, PaletteIcon, SparklesIcon } from '@/components/design-icons'
 import { BookmarkIcon, FileCogIcon, FileTextIcon, FolderGit2Icon, KeyboardIcon } from 'lucide-react'
 import type { ComponentType, SVGProps } from 'react'
@@ -47,6 +48,7 @@ export type SettingsSectionId =
   | 'prompt-templates'
   | 'keyboard'
   | 'skills'
+  | 'tasks'
 
 /** Which settings area a section belongs to — and therefore which store it writes. */
 export type SettingsScope = 'project' | 'global'
@@ -154,6 +156,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     component: ResourcesSection,
     scope: 'global',
   },
+  { id: 'tasks', title: 'Tasks', description: 'Automatic task archiving after pull requests merge.', icon: FolderGit2Icon, component: TasksSection, scope: 'global' },
   {
     id: 'skills',
     title: 'Skills',

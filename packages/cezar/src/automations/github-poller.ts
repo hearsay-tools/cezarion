@@ -6,6 +6,11 @@ import type { AutomationEvent, AutomationRuntimeState, GithubAutomationDefinitio
 const execFileAsync = promisify(execFile);
 const HARD_CANDIDATE_CAP = 100;
 const GITHUB_COMMAND_TIMEOUT_MS = 30_000;
+/** Provider requests one history check may spend, its search included. */
+const HISTORY_REQUEST_CAP = 10;
+const TIMELINE_PAGE_SIZE = 100;
+/** The timeline is oldest first, so a live poll reads every page up to this cap. */
+const TIMELINE_PAGE_CAP = 10;
 
 const githubItemSchema = z.object({
   id: z.number().int().positive().optional(),
@@ -159,8 +164,9 @@ export class GithubPoller {
           }
         }
         if (source.labels && !item.pull_request) {
-          const timeline = await this.timeline(owner, repo, item.number);
-          const events = reconstructLabelEvents(owner, repo, item, timeline);
+          const timeline = await this.timeline(owner, repo, item.number, TIMELINE_PAGE_CAP);
+          if (!timeline.complete) throw incompleteHistory(owner, repo, item.number, TIMELINE_PAGE_CAP);
+          const events = reconstructLabelEvents(owner, repo, item, timeline.events);
           for (const event of events) {
             if (!atOrAfter(event.timestamp, options.since)) continue;
             sourceObservations.push({
@@ -222,7 +228,7 @@ export class GithubPoller {
     let evaluated = 0;
     let itemsRead = 0;
     const cap = Math.min(definition.filters.maxRecords, HARD_CANDIDATE_CAP);
-    while (scan.source < sources.length && requests < 10 && evaluated < cap && itemsRead < HARD_CANDIDATE_CAP) {
+    while (scan.source < sources.length && requests < HISTORY_REQUEST_CAP && evaluated < cap && itemsRead < HARD_CANDIDATE_CAP) {
       const source = sources[scan.source]!;
       // Issue activity is mutable: comments must not evict unseen label transitions from
       // a frozen updated-time query. Revisit the full label lookback on each completed scan.
@@ -245,13 +251,18 @@ export class GithubPoller {
         let rows: GithubCandidate[];
         if (source.labels) {
           if (item.pull_request) continue;
-          if (requests >= 10) break;
-          const timeline = await this.timeline(owner, repo, item.number);
-          requests++;
-          // The existing timeline reader is one bounded page. Do not silently certify an
-          // incomplete history; the log explains how to narrow or process this item separately.
-          if (timeline.length >= 100) throw new Error('GitHub label history reached its 100-event page limit; narrow the automation filters or process this item separately.');
-          rows = reconstructLabelEvents(owner, repo, item, timeline)
+          if (requests >= HISTORY_REQUEST_CAP) break;
+          const budget = HISTORY_REQUEST_CAP - requests;
+          const timeline = await this.timeline(owner, repo, item.number, budget);
+          requests += timeline.pages;
+          if (!timeline.complete) {
+            // Resume this item next check, which starts with more budget. A check spends one
+            // request on its search, so a timeline that fills the rest of a fresh check can never
+            // be read whole: do not silently certify an incomplete history.
+            if (budget < HISTORY_REQUEST_CAP - 1) break;
+            throw incompleteHistory(owner, repo, item.number, budget);
+          }
+          rows = reconstructLabelEvents(owner, repo, item, timeline.events)
             .filter((row) => Date.parse(row.timestamp) >= Date.parse(sourceSince) && Date.parse(row.timestamp) <= Date.parse(scan.until));
         } else {
           const event = item.pull_request ? 'pull_request.opened' : 'issue.opened';
@@ -290,12 +301,33 @@ export class GithubPoller {
     return { candidates, truncated, pages: requests, cursor, ...(truncated ? { historyScan: scan } : {}) };
   }
 
-  private async timeline(owner: string, repo: string, number: number) {
-    const raw = await this.run('gh', [
-      'api', '--method', 'GET', `repos/${owner}/${repo}/issues/${number}/timeline`,
-      '-H', 'Accept: application/vnd.github+json', '-f', 'per_page=100',
-    ]);
-    return z.array(timelineEventSchema).parse(JSON.parse(raw));
+  /** The timeline mixes comments, assignments, closures and more with label changes, oldest
+   * first. Reads up to `maxPages` pages and validates and returns only label changes.
+   * `complete` is false when the last page read was full: dropping unrelated entries does not
+   * make a history complete (hearsay-tools/cezarion#1182). */
+  private async timeline(owner: string, repo: string, number: number, maxPages: number) {
+    const events: z.infer<typeof timelineEventSchema>[] = [];
+    for (let page = 1; page <= maxPages; page++) {
+      const raw = await this.run('gh', [
+        'api', '--method', 'GET', `repos/${owner}/${repo}/issues/${number}/timeline`,
+        '-H', 'Accept: application/vnd.github+json',
+        '-f', `per_page=${TIMELINE_PAGE_SIZE}`, '-f', `page=${page}`,
+      ]);
+      const entries = z.array(z.unknown()).parse(JSON.parse(raw));
+      entries.forEach((entry, offset) => {
+        const kind = typeof entry === 'object' && entry !== null ? (entry as { event?: unknown }).event : undefined;
+        if (kind !== 'labeled' && kind !== 'unlabeled') return;
+        const parsed = timelineEventSchema.safeParse(entry);
+        if (!parsed.success) {
+          const issues = parsed.error.issues.map((issue) => `${issue.path.join('.') || '(entry)'}: ${issue.message}`).join('; ');
+          const index = (page - 1) * TIMELINE_PAGE_SIZE + offset;
+          throw new Error(`GitHub returned a malformed label change at ${owner}/${repo}#${number} timeline entry ${index} (${kind}): ${issues}`);
+        }
+        events.push(parsed.data);
+      });
+      if (entries.length < TIMELINE_PAGE_SIZE) return { events, pages: page, complete: true };
+    }
+    return { events, pages: maxPages, complete: false };
   }
 }
 
@@ -322,6 +354,10 @@ export function buildSearchQuery(
     for (const label of definition.filters.allLabels ?? []) terms.push(`label:${JSON.stringify(label)}`);
   }
   return terms.filter(Boolean).join(' ');
+}
+
+function incompleteHistory(owner: string, repo: string, number: number, pages: number): Error {
+  return new Error(`GitHub issue ${owner}/${repo}#${number} has more label history than one check reads (${pages * TIMELINE_PAGE_SIZE} timeline entries); narrow the automation filters or process this item separately.`);
 }
 
 function safeQualifier(value: string): string {
