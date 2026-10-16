@@ -1209,11 +1209,14 @@ A Codex human `turn/start` keeps `holdsHumanInput()` true until `turn/started`
 (or until that turn will never start: start error, close, interrupt). The same holds
 for every drain that opens a new native turn (H4, hearsay-tools/cezarion#1112): a Cursor
 print follow-up stays held from the queue shift until its process's init frame. A Pi or OMP
-human prompt stays held from its write, past its ack, until a turn has it: its user
-`message_start`, the next `agent_start` after its ack, or (OMP) its `prompt_result`. A
-rejected or local ack and `discardQueuedMessages` also release it. The ack alone never does:
-Pi reads a steer acknowledged after the turn's last model call as its next prompt, after
-`agent_settled` (the `mock:steer-late` ordering, H5).
+human prompt stays held from its write, past its ack, until a normalized turn has it — the
+rule Codex keeps: its user `message_start` inside an open normalized turn, its ack while the
+turn it opened is still open, the first `turn.started` after its ack, or (OMP) its
+`prompt_result`. A rejected or local ack and `discardQueuedMessages` also release it. The ack
+alone never does: Pi reads a steer acknowledged after the turn's last model call as its next
+prompt, after `agent_settled` (the `mock:steer-late` ordering, H5). Nor does a raw
+`agent_start`, which neither mapper reports: Pi's mock in H5 holds 800 ms between that run's
+`agent_start` and its first activity, the window in which a release there let the run park.
 Without that, the 250 ms recheck found the hold drained and parked the run `waiting`
 while the follow-up's turn was still starting, and that turn then ran under Needs you.
 H4 sends the follow-up with `mock:deferred-turn-start`, which every mock honors by

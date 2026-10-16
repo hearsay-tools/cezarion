@@ -404,9 +404,13 @@ async function handle(command) {
     const monitoringMarker = command.message.includes('mock:monitoring') ? '\n\nCEZ:MONITORING' : '';
     const responseText = `Investigating: ${command.message}${monitoringMarker}`;
     send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    // hearsay-tools/cezarion#1112: the acknowledged prompt opens its native run late.
+    // hearsay-tools/cezarion#1112: the acknowledged prompt opens its native run late. A late-ack
+    // steer's run reports agent_start first: pi's mapper reports no turn for it, so the hold
+    // must outlast it until the run's first activity.
+    const lateAck = command.message.includes('mock:deferred-turn-start:late-ack');
+    if (lateAck) send({ type: 'agent_start' });
     if (command.message.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
-    send({ type: 'agent_start' });
+    if (!lateAck) send({ type: 'agent_start' });
     send({ type: 'turn_start' });
     send({
       type: 'message_update',

@@ -353,7 +353,10 @@ export class OmpRunner implements AgentRunner {
     const emitUi = (value: unknown): void => {
       const mapped = mapOmpRpcMessage(value, ompUi);
       ompUi = mapped.state;
-      for (const event of mapped.events) emitUiEvent(event);
+      for (const event of mapped.events) {
+        emitUiEvent(event);
+        if (event.type === 'turn.started') releaseHeldIntoTurn();
+      }
     };
     /** Releases the mapper's provider-error latch when the stream ends without a settle. */
     const emitLatchedUiProviderError = (): void => {
@@ -405,12 +408,18 @@ export class OmpRunner implements AgentRunner {
     // Every prompt carries an id: a local completion or failure ends the turn only when it
     // answers the prompt that opened it, never a steer (the mapper gates on this id).
     const humanAcks = new Set<string>();
-    // Each human prompt stays held from its write until OMP shows a turn has it, because an
+    // Each human prompt stays held from its write until a normalized turn has it, because an
     // ack is not a turn boundary (hearsay-tools/cezarion#1112). Exits: its user message_start,
-    // the next agent_start after its ack, its prompt_result (OMP reports every admitted prompt
-    // at the terminal agent_end, before session_settled), a rejected or local
-    // (`agentInvoked: false`) ack, or discardQueuedMessages.
-    const humanHeld = new Map<string, { text: string; acked: boolean }>();
+    // its ack while the turn it opened is still open, the first turn.started after its ack,
+    // its prompt_result (OMP reports every admitted prompt at the terminal agent_end, before
+    // session_settled), a rejected or local (`agentInvoked: false`) ack, or
+    // discardQueuedMessages. A raw agent_start is not an exit: OMP's mapper reports nothing
+    // for it (same rule as pi-runner.ts).
+    const humanHeld = new Map<string, { text: string; acked: boolean; turnId?: string }>();
+    /** A turn.started was just emitted: it reads every human prompt OMP acknowledged before it. */
+    function releaseHeldIntoTurn(): void {
+      for (const [id, held] of humanHeld) if (held.acked) humanHeld.delete(id);
+    }
     let agentAck: { id: string; resolve: () => void; reject: (error: Error) => void } | undefined;
     const rejectAgentAck = (error = new Error('omp closed before prompt acknowledgement')) => {
       const pending = agentAck; agentAck = undefined;
@@ -475,12 +484,16 @@ export class OmpRunner implements AgentRunner {
       ) {
         return false;
       }
-      if (!requestId) { humanAcks.add(id); humanHeld.set(id, { text: message, acked: false }); }
-      else submissions.accept(requestId, inputIds, message);
+      if (requestId) submissions.accept(requestId, inputIds, message);
       if (!ompUi.turnId) {
         const mapped = ompTurnStarted(ompUi, id);
         ompUi = mapped.state;
         for (const event of mapped.events) emitUiEvent(event);
+      }
+      // An idle prompt names the turn it opened: its ack releases it while that turn is open.
+      if (!requestId) {
+        humanAcks.add(id);
+        humanHeld.set(id, { text: message, acked: false, ...(opensTurn ? { turnId: ompUi.turnId ?? undefined } : {}) });
       }
       return true;
     };
@@ -652,7 +665,7 @@ export class OmpRunner implements AgentRunner {
               const runsAgent = !(isRecord(value.data) && value.data.agentInvoked === false);
               const held = humanHeld.get(id);
               if (humanAcks.delete(id) && held) {
-                if (value.success === true && runsAgent) held.acked = true;
+                if (value.success === true && runsAgent && (!held.turnId || held.turnId !== ompUi.turnId)) held.acked = true;
                 else humanHeld.delete(id);
               }
             }
@@ -692,9 +705,6 @@ export class OmpRunner implements AgentRunner {
               latchedProviderError = undefined;
             }
           } else if (value.type === 'agent_start') {
-            // emitUi above already reported this run's turn.started: it reads every human
-            // prompt OMP acknowledged before it.
-            for (const [id, held] of humanHeld) if (held.acked) humanHeld.delete(id);
             // Only a prompt OMP acknowledged before this agent_start can be in its turn (#505).
             carried = new Set(submissions.pendingIds().filter(id => acked.has(id)));
             turnFailed = false;
@@ -703,7 +713,13 @@ export class OmpRunner implements AgentRunner {
             const text = ompMessageText(value.message);
             const ids = submissions.consumeOldestByText(text);
             if (ids.length) opts.onAgentInputConsumed?.(ids);
-            else for (const [id, held] of humanHeld) if (held.text === text) { humanHeld.delete(id); break; }
+            else for (const [id, held] of humanHeld) {
+              if (held.text !== text) continue;
+              // Read with no normalized turn open: held until that turn.started (as pi-runner.ts).
+              if (ompUi.turnId) humanHeld.delete(id);
+              else held.acked = true;
+              break;
+            }
           } else if (value.type === 'tool_execution_start') {
             flushText();
             const id = string(value.toolCallId);
