@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { visualSampleExpression } from './visual-ready'
 import { tmpdirExceedsSocketBudget } from '../../../.ai/scripts/resolve-browser-launch.mjs'
 
 /**
@@ -1063,6 +1064,31 @@ export class AgentBrowser {
   hover(selector: string): void {
     this.awaitTarget('hover', selector)
     this.run(['hover', selector])
+  }
+
+  /** Viewport evidence of one CSS-selected element. Centre inner scrollers before sampling;
+   * require stable rendered geometry and uncovered edges so a sticky header cannot hide it.
+   * Reproduction: screenshot-element.e2e.ts (hearsay-tools/cezarion#1135), 1440x900 and
+   * 390x844: end-pinned target is off-screen; start alignment hides its top under the header.
+   * The target must fit in the available viewport; impossible framing fails with a bundle. */
+  screenshotElement(selector: string, path: string): string {
+    this.waitForStable(`(() => {
+      const target = document.querySelector(${JSON.stringify(selector)});
+      if (!target) return null;
+      target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+      const layout = ${visualSampleExpression(selector)};
+      if (!layout) return null;
+      const r = target.getBoundingClientRect();
+      if (r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth) return null;
+      const x = (r.left + r.right) / 2, y = (r.top + r.bottom) / 2;
+      const points = [[x, r.top + 1], [x, r.bottom - 1], [r.left + 1, y], [r.right - 1, y], [x, y]];
+      if (points.some(([x, y]) => {
+        const hit = document.elementFromPoint(x, y);
+        return !hit || (hit !== target && !target.contains(hit));
+      })) return null;
+      return layout;
+    })()`, { holdMs: 200, failure: `screenshot target did not settle fully in view: ${selector}` })
+    return this.screenshot(path)
   }
 
   /** operation: screenshot. The descriptor requires an absolute path — a relative
