@@ -242,7 +242,13 @@ are distinct outcomes, alongside failed, cancelled, destroyed, timed-out, and
 sender-closed. Late replies remain recorded without replacing a first settlement.
 Both roles can wait on their own requests using the existing bounded scheduler wake
 queue. An incoming message can interrupt that wait with reason `message`, retaining
-unresolved obligations; there is no automatic re-wait.
+unresolved obligations; there is no automatic re-wait for request waits. A worker
+progress message wakes a parent waiting for worker completion without retiring
+that wait. After progress delivery the same wait parks again with its original
+ID, selected workers and deadline; terminal outcomes still produce one wake.
+Harness row **WP1** in `workflows/worker-wait-conversations.test.ts` exercises
+repeated progress and one terminal wake through every `RUNNER_IDS` native mock
+wire using `HARNESS_ADAPTERS` (hearsay-tools/cezarion#1138).
 
 Messages are bounded to 100,000 characters, 32 undelivered inputs per recipient,
 1,024 messages per family, and 32 pending obligations. Requests and waits expire

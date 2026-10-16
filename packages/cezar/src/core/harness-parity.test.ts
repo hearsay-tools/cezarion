@@ -66,6 +66,7 @@ import {
   NO_PROGRESS_CRITERIA,
   AUTONOMOUS_CRITERIA,
   FINAL_MESSAGE_CRITERIA,
+  WORKER_PROGRESS_WAIT_CRITERIA,
   WORKFLOW_ASK_CRITERIA,
   FOLLOWUP_CRITERIA,
   ANSWER_DELIVERY_CRITERIA,
@@ -1803,6 +1804,7 @@ describe('harness parity — the matrix itself', () => {
     ...WORKTREE_SETUP_CRITERIA.map(c => c.id),
     ...AUTONOMOUS_CRITERIA.map(c => c.id),
     ...FINAL_MESSAGE_CRITERIA.map(c => c.id),
+    ...WORKER_PROGRESS_WAIT_CRITERIA.map(c => c.id),
     ...NO_PROGRESS_CRITERIA.map(c => c.id),
     ...WORKFLOW_TIMEOUT_CRITERIA.map((c) => c.id),
     ...SEAM_CRITERIA.map((c) => c.id),
@@ -1829,6 +1831,8 @@ describe('harness parity — the matrix itself', () => {
     if (worktreeSetup) return worktreeSetup.scenario;
     const autonomous = AUTONOMOUS_CRITERIA.find(c => c.id === id);
     if (autonomous) return autonomous.scenario;
+    const workerProgress = WORKER_PROGRESS_WAIT_CRITERIA.find(c => c.id === id);
+    if (workerProgress) return workerProgress.scenario;
     const finalMessage = FINAL_MESSAGE_CRITERIA.find(c => c.id === id);
     if (finalMessage) return finalMessage.scenario;
     const inactivity = NO_PROGRESS_CRITERIA.find(c => c.id === id);
