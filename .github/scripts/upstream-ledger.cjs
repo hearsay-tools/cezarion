@@ -31,7 +31,7 @@ function parseApplyCheck(output) {
     if (m) { files.add(m[1]); continue; }
     m = /^error: patch failed: (.+):\d+$/.exec(line);
     if (m) { files.add(m[1]); continue; }
-    m = /^error: (.+): patch does not apply$/.exec(line);
+    m = /^error: (.+): (?:patch does not apply|does not exist in index)$/.exec(line);
     if (m) files.add(m[1]);
   }
   return files.size;
