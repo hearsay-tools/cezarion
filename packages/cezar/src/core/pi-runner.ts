@@ -158,7 +158,10 @@ export class PiRunner implements AgentRunner {
     const emitUi = (value: unknown): void => {
       const mapped = mapPiRpcMessage(value, piUi);
       piUi = mapped.state;
-      for (const event of mapped.events) opts.onUiEvent?.(event);
+      for (const event of mapped.events) {
+        opts.onUiEvent?.(event);
+        if (event.type === 'turn.started') releaseHeldIntoTurn();
+      }
     };
     /** The mapper latches a provider failure until the turn settles; when the RPC
      *  stream ends without `agent_settled` this releases it the way v1 does. */
@@ -180,6 +183,19 @@ export class PiRunner implements AgentRunner {
     let agentInputReady = false;
     let promptSerial = 0;
     let humanPromptAcks = 0;
+    // Each human prompt stays held from its write until a normalized turn has it, because an
+    // ack is not a turn boundary (hearsay-tools/cezarion#1112). Exits: its user message_start
+    // (the running turn read it), its ack while the turn it opened is still open, the first
+    // turn.started after its ack, a rejected ack, or discardQueuedMessages. A raw agent_start
+    // is not an exit: pi's mapper reports nothing for it, so a run released there could park
+    // before the turn that reads the prompt is reported. A steer acked after the turn's last
+    // model call is read as pi's next prompt, after agent_settled, so the ack alone never
+    // releases it.
+    const humanHeld: Array<{ text: string; acked: boolean; turnId?: string }> = [];
+    /** A turn.started was just emitted: it reads every human prompt pi acknowledged before it. */
+    function releaseHeldIntoTurn(): void {
+      for (let at = humanHeld.length - 1; at >= 0; at--) if (humanHeld[at]!.acked) humanHeld.splice(at, 1);
+    }
     let agentAck: { id: string; resolve: () => void; reject: (error: Error) => void } | undefined;
     const rejectAgentAck = (error = new Error('pi closed before prompt acknowledgement')) => {
       const pending = agentAck; agentAck = undefined;
@@ -257,14 +273,16 @@ export class PiRunner implements AgentRunner {
       ) {
         return false;
       }
-      if (!requestId) humanPromptAcks += 1;
-      else {
-        submissions.accept(requestId, inputIds, message);
-      }
+      if (requestId) submissions.accept(requestId, inputIds, message);
       if (!piUi.turnId) {
         const mapped = piTurnStarted(piUi);
         piUi = mapped.state;
         for (const event of mapped.events) opts.onUiEvent?.(event);
+      }
+      // An idle prompt names the turn it opened: its ack releases it while that turn is open.
+      if (!requestId) {
+        humanPromptAcks += 1;
+        humanHeld.push({ text: message, acked: false, ...(opensTurn ? { turnId: piUi.turnId ?? undefined } : {}) });
       }
       return true;
     };
@@ -381,7 +399,12 @@ export class PiRunner implements AgentRunner {
                 pending.reject(new Error(message));
               }
             } else if (value.id === undefined) {
+              // Human prompts carry no id, so acks answer them in write order. A second ack for
+              // a prompt pi already answered (a late steer re-run) finds no ack outstanding.
+              const held = humanPromptAcks > 0 ? humanHeld.find(entry => !entry.acked) : undefined;
               humanPromptAcks = Math.max(0, humanPromptAcks - 1);
+              if (held && value.success === true && (!held.turnId || held.turnId !== piUi.turnId)) held.acked = true;
+              else if (held) humanHeld.splice(humanHeld.indexOf(held), 1);
               if (value.success === false) onEvent?.({ type: 'error', message: rpcError(value) });
             }
             readyAfterAck();
@@ -418,8 +441,16 @@ export class PiRunner implements AgentRunner {
             turnFailed = false;
           } else if (value.type === 'message_start' && isRecord(value.message) && value.message.role === 'user') {
             // The model received this prompt now (#505).
-            const ids = submissions.consumeOldestByText(piMessageText(value.message));
+            const text = piMessageText(value.message);
+            const ids = submissions.consumeOldestByText(text);
             if (ids.length) opts.onAgentInputConsumed?.(ids);
+            else {
+              // Read with no normalized turn open (a late steer's own run): the run is not
+              // reported yet, so it stays held until that turn.started.
+              const human = humanHeld.findIndex(entry => entry.text === text);
+              if (human >= 0 && piUi.turnId) humanHeld.splice(human, 1);
+              else if (human >= 0) humanHeld[human]!.acked = true;
+            }
           } else if (value.type === 'tool_execution_start') {
             flushText();
             const id = string(value.toolCallId);
@@ -560,9 +591,10 @@ export class PiRunner implements AgentRunner {
         }
         return acknowledged;
       },
-      discardQueuedMessages: () => undefined,
-      holdsHumanInput: () => humanPromptAcks > 0,
-      heldHumanInputCount: () => humanPromptAcks,
+      // A written prompt cannot be unwritten; only stop reporting an acknowledged one as held.
+      discardQueuedMessages: () => { humanHeld.length = 0; },
+      holdsHumanInput: () => humanHeld.length > 0,
+      heldHumanInputCount: () => humanHeld.length,
       end,
       interrupt,
       pid: child.pid,

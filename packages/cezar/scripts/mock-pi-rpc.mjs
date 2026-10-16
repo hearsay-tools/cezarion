@@ -126,7 +126,24 @@ const rl = readline.createInterface({ input: process.stdin });
 let queue = Promise.resolve();
 rl.on('line', (line) => {
   const command = JSON.parse(line);
-  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && activeTurn) {
+  // hearsay-tools/cezarion#1112: a late-ack steer is admitted into the running turn after its
+  // last model call: pi acknowledges it now, with the turn open, and reads it as its next
+  // prompt once that turn settles (the `mock:steer-late` ordering), starting that run late.
+  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && command.message.includes('mock:deferred-turn-start:late-ack')) {
+    const admit = () => {
+      if (!activeTurn) { setTimeout(admit, 5); return; }
+      if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: command.message, imageCount: 0, streamingBehavior: 'steer' })}\n`);
+      activeTurn.steers.push(command.message);
+      activeTurn.late = true;
+      write({ id: command.id, type: 'response', command: 'prompt', success: true });
+    };
+    admit();
+    return;
+  }
+  // hearsay-tools/cezarion#1112: a deferred-start steer is not admitted into the running turn;
+  // pi acknowledges it as its next prompt once that turn settles, with no turn open.
+  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && activeTurn &&
+    !command.message.includes('mock:deferred-turn-start')) {
     if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: command.message, imageCount: 0, streamingBehavior: 'steer' })}\n`);
     activeTurn.steers.push(command.message);
     write({ id: command.id, type: 'response', command: 'prompt', success: true });
@@ -387,7 +404,13 @@ async function handle(command) {
     const monitoringMarker = command.message.includes('mock:monitoring') ? '\n\nCEZ:MONITORING' : '';
     const responseText = `Investigating: ${command.message}${monitoringMarker}`;
     send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' });
+    // hearsay-tools/cezarion#1112: the acknowledged prompt opens its native run late. A late-ack
+    // steer's run reports agent_start first: pi's mapper reports no turn for it, so the hold
+    // must outlast it until the run's first activity.
+    const lateAck = command.message.includes('mock:deferred-turn-start:late-ack');
+    if (lateAck) send({ type: 'agent_start' });
+    if (command.message.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
+    if (!lateAck) send({ type: 'agent_start' });
     send({ type: 'turn_start' });
     send({
       type: 'message_update',

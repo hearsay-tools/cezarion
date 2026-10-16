@@ -3,7 +3,8 @@
  *
  * A follow-up sent while a turn is running must survive that turn's CEZ:DONE
  * (H1), must be dropped when the same turn parks on CEZ:ASK (H2), and must not
- * park or nudge between a markerless hold-style turn and the follow-up (H3).
+ * park or nudge between a markerless hold-style turn and the follow-up (H3), including
+ * when the follow-up's native turn starts late (H4, hearsay-tools/cezarion#1112).
  * Each RUNNER_IDS backend is driven through its own HARNESS_ADAPTERS native mock.
  */
 import { randomUUID } from 'node:crypto';
@@ -14,8 +15,12 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { driveRun, exemptionFor, FOLLOWUP_CRITERIA, promptFor, waitFor } from './harness-parity.testkit.ts';
+import type { RunStore } from '../runs/store.ts';
 
 const KEEP = 'followup-486-keep';
+// hearsay-tools/cezarion#1112: scripts/mock-deferred-turn-start.mjs (kept in step with it).
+const DEFERRED_TURN_START_TOKEN = 'mock:deferred-turn-start';
+const DEFERRED_TURN_START_MS = 800;
 const DROP = 'followup-486-drop';
 const COALESCE_BIN = join(dirname(fileURLToPath(import.meta.url)), '../../scripts/mock-codex-coalesce-steer.mjs');
 const REVERSE_BIN = join(dirname(fileURLToPath(import.meta.url)), '../../scripts/mock-codex-reverse-steer.mjs');
@@ -135,7 +140,8 @@ describe('mid-turn human follow-up parity — #486', () => {
         }, 30_000);
         continue;
       }
-      const modes = row.id === 'H3' ? ['fresh', 'continuation'] as const : ['fresh'] as const;
+      const lateStart = row.id === 'H4' || row.id === 'H5';
+      const modes = row.id === 'H3' || lateStart ? ['fresh', 'continuation'] as const : ['fresh'] as const;
       for (const mode of modes) it(`${backend} ${row.id} ${row.name}${modes.length > 1 ? ` (${mode})` : ''}`, async () => {
         await withMockLogs(async ({ argsFile, stdinFile, releaseFile, files, release }) => {
           const env = { CEZ_MOCK_ARGS_FILE: argsFile, CEZ_MOCK_STDIN_FILE: stdinFile, CEZ_MOCK_RELEASE_FILE: releaseFile };
@@ -159,8 +165,27 @@ describe('mid-turn human follow-up parity — #486', () => {
               });
             return;
           }
-          if (row.id === 'H3') {
-            const noNudge = (events: readonly { type: string; message?: unknown }[]) => {
+          if (row.id === 'H3' || lateStart) {
+            // H4 holds the follow-up's native turn start past the 250 ms held-input recheck.
+            // H5 also has the wire acknowledge it inside the running turn first, the
+            // `mock:steer-late` ordering: pi reads it as its next prompt, OMP before settling.
+            const followUp = row.id === 'H5' ? `${KEEP} ${DEFERRED_TURN_START_TOKEN}:late-ack`
+              : row.id === 'H4' ? `${KEEP} ${DEFERRED_TURN_START_TOKEN}` : KEEP;
+            const noNudge = async (store: RunStore, runId: string, startSeq = 0) => {
+              const events = store.readEvents(runId).slice(startSeq);
+              // A park while the follow-up's native turn is still open is the
+              // hearsay-tools/cezarion#1112 shape: the cockpit shows Needs you mid-turn.
+              const turnEdges = events.filter(e => e.type === 'turn.started' || e.type === 'turn.completed');
+              if (store.getRun(runId)?.status === 'waiting') expect(turnEdges.at(-1)?.type).toBe('turn.completed');
+              if (lateStart) {
+                // Settled is the first `waiting`; a spurious park precedes the late native turn
+                // start, so wait out that start before asserting no turn followed the park.
+                // Provenance: hearsay-tools/cezarion#1112 (cursor parked 250 ms after turn-end,
+                // then ran the follow-up as `waiting`; reproduced with this token, red without the fix).
+                const parkedAt = store.readEvents(runId).length;
+                await new Promise(resolve => setTimeout(resolve, DEFERRED_TURN_START_MS + 700));
+                expect(store.readEvents(runId).slice(parkedAt).filter(e => e.type === 'turn.started')).toEqual([]);
+              }
               expect(mockLog(files)).toContain(KEEP);
               expect(events.some(e => e.type === 'note' && String(e.message).includes('continuing without pausing'))).toBe(false);
             };
@@ -183,7 +208,7 @@ describe('mid-turn human follow-up parity — #486', () => {
                   const continued = manager.continueRun(runId, { text: promptFor(backend, 'hold-gated') });
                   expect(continued.ok).toBe(true);
                   await waitFor(() => store.readEvents(runId).slice(startSeq).some(e => e.type === 'turn.started'));
-                  expect(manager.sendMessage(runId, [{ type: 'text', text: KEEP }])).toBe(true);
+                  expect(manager.sendMessage(runId, [{ type: 'text', text: followUp }])).toBe(true);
                   release();
                   await waitFor(() => {
                     const status = store.getRun(runId)?.status;
@@ -192,7 +217,7 @@ describe('mid-turn human follow-up parity — #486', () => {
                   });
                   const status = store.getRun(runId)?.status;
                   if (status && statuses.at(-1) !== status) statuses.push(status);
-                  noNudge(store.readEvents(runId).slice(startSeq));
+                  await noNudge(store, runId, startSeq);
                   noParkBetween(statuses);
                 }, {
                   env,
@@ -202,11 +227,11 @@ describe('mid-turn human follow-up parity — #486', () => {
             }
             const observed = await driveRun(backend, 'hold-gated', run =>
               run?.status === 'waiting' || ['done', 'review', 'failed'].includes(run?.status ?? ''), 30_000,
-              async ({ store, runId }) => { noNudge(store.readEvents(runId)); }, {
+              async ({ store, runId }) => { await noNudge(store, runId); }, {
                 env,
                 during: async ({ manager, runId, store }) => {
                   await waitFor(() => store.readEvents(runId).some(e => e.type === 'turn.started'));
-                  expect(manager.sendMessage(runId, [{ type: 'text', text: KEEP }])).toBe(true);
+                  expect(manager.sendMessage(runId, [{ type: 'text', text: followUp }])).toBe(true);
                   release();
                 },
               });

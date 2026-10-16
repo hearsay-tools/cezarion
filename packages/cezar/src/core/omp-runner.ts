@@ -353,7 +353,10 @@ export class OmpRunner implements AgentRunner {
     const emitUi = (value: unknown): void => {
       const mapped = mapOmpRpcMessage(value, ompUi);
       ompUi = mapped.state;
-      for (const event of mapped.events) emitUiEvent(event);
+      for (const event of mapped.events) {
+        emitUiEvent(event);
+        if (event.type === 'turn.started') releaseHeldIntoTurn();
+      }
     };
     /** Releases the mapper's provider-error latch when the stream ends without a settle. */
     const emitLatchedUiProviderError = (): void => {
@@ -405,6 +408,18 @@ export class OmpRunner implements AgentRunner {
     // Every prompt carries an id: a local completion or failure ends the turn only when it
     // answers the prompt that opened it, never a steer (the mapper gates on this id).
     const humanAcks = new Set<string>();
+    // Each human prompt stays held from its write until a normalized turn has it, because an
+    // ack is not a turn boundary (hearsay-tools/cezarion#1112). Exits: its user message_start,
+    // its ack while the turn it opened is still open, the first turn.started after its ack,
+    // its prompt_result (OMP reports every admitted prompt at the terminal agent_end, before
+    // session_settled), a rejected or local (`agentInvoked: false`) ack, or
+    // discardQueuedMessages. A raw agent_start is not an exit: OMP's mapper reports nothing
+    // for it (same rule as pi-runner.ts).
+    const humanHeld = new Map<string, { text: string; acked: boolean; turnId?: string }>();
+    /** A turn.started was just emitted: it reads every human prompt OMP acknowledged before it. */
+    function releaseHeldIntoTurn(): void {
+      for (const [id, held] of humanHeld) if (held.acked) humanHeld.delete(id);
+    }
     let agentAck: { id: string; resolve: () => void; reject: (error: Error) => void } | undefined;
     const rejectAgentAck = (error = new Error('omp closed before prompt acknowledgement')) => {
       const pending = agentAck; agentAck = undefined;
@@ -469,12 +484,16 @@ export class OmpRunner implements AgentRunner {
       ) {
         return false;
       }
-      if (!requestId) humanAcks.add(id);
-      else submissions.accept(requestId, inputIds, message);
+      if (requestId) submissions.accept(requestId, inputIds, message);
       if (!ompUi.turnId) {
         const mapped = ompTurnStarted(ompUi, id);
         ompUi = mapped.state;
         for (const event of mapped.events) emitUiEvent(event);
+      }
+      // An idle prompt names the turn it opened: its ack releases it while that turn is open.
+      if (!requestId) {
+        humanAcks.add(id);
+        humanHeld.set(id, { text: message, acked: false, ...(opensTurn ? { turnId: ompUi.turnId ?? undefined } : {}) });
       }
       return true;
     };
@@ -597,6 +616,7 @@ export class OmpRunner implements AgentRunner {
           // The mapper closed its turn on this frame: v1 ends the turn with it.
           const endsTurn = turnOpen && ompUi.turnId === null;
           if (!isRecord(value)) continue;
+          if (value.type === 'prompt_result') humanHeld.delete(string(value.id) ?? '');
 
           if (value.type === 'response' && value.command === 'get_state' && value.success === true && isRecord(value.data)) {
             const discovered = string(value.data.sessionId);
@@ -641,7 +661,13 @@ export class OmpRunner implements AgentRunner {
               if (value.success === true) { acked.add(pending.id); pending.resolve(); }
               else pending.reject(new Error(rpcError(value)));
             } else if (id) {
-              humanAcks.delete(id);
+              // `agentInvoked: false` is a prompt OMP finished itself: no agent run follows.
+              const runsAgent = !(isRecord(value.data) && value.data.agentInvoked === false);
+              const held = humanHeld.get(id);
+              if (humanAcks.delete(id) && held) {
+                if (value.success === true && runsAgent && (!held.turnId || held.turnId !== ompUi.turnId)) held.acked = true;
+                else humanHeld.delete(id);
+              }
             }
             readyAfterAck();
           } else if (value.type === 'response' && value.success === false) {
@@ -684,8 +710,16 @@ export class OmpRunner implements AgentRunner {
             turnFailed = false;
           } else if (value.type === 'message_start' && isRecord(value.message) && value.message.role === 'user') {
             // The model received this prompt now (#505).
-            const ids = submissions.consumeOldestByText(ompMessageText(value.message));
+            const text = ompMessageText(value.message);
+            const ids = submissions.consumeOldestByText(text);
             if (ids.length) opts.onAgentInputConsumed?.(ids);
+            else for (const [id, held] of humanHeld) {
+              if (held.text !== text) continue;
+              // Read with no normalized turn open: held until that turn.started (as pi-runner.ts).
+              if (ompUi.turnId) humanHeld.delete(id);
+              else held.acked = true;
+              break;
+            }
           } else if (value.type === 'tool_execution_start') {
             flushText();
             const id = string(value.toolCallId);
@@ -847,9 +881,10 @@ export class OmpRunner implements AgentRunner {
         if (!sendMessage(content, id, inputIds)) { agentAck = undefined; return false; }
         return acknowledged;
       },
-      discardQueuedMessages: () => undefined,
-      holdsHumanInput: () => humanAcks.size > 0,
-      heldHumanInputCount: () => humanAcks.size,
+      // A written prompt cannot be unwritten; only stop reporting an acknowledged one as held.
+      discardQueuedMessages: () => { humanHeld.clear(); },
+      holdsHumanInput: () => humanHeld.size > 0,
+      heldHumanInputCount: () => humanHeld.size,
       end,
       interrupt,
       // The live child: a Ruling 13 respawn replaces it (`onPidChange` tells the caller who read it).

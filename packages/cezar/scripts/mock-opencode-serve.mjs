@@ -376,6 +376,8 @@ const server = createServer((req, res) => {
         }
         if (silent.isLateNudge(prompt)) await silent.sleep(silent.LATE_REPLY_MS);
       }
+      // hearsay-tools/cezarion#1112: the acknowledged prompt streams its turn late.
+      if (body.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
       if (url.endsWith('/prompt_async')) {
         currentUserId = `msg_user_${++steerSerial}`;
         const text = JSON.parse(body).parts.map(part => part.text ?? '').join('\n');

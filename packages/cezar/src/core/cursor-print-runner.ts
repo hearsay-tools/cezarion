@@ -84,6 +84,9 @@ interface ActiveTurn {
   turnText: string;
   stderr: string;
   receipt?: { resolve(): void; reject(error: Error): void; settled: boolean };
+  /** A queued human follow-up this process carries, still held until its init frame
+   *  opens the native turn (hearsay-tools/cezarion#1112). */
+  heldHuman: boolean;
 }
 
 const NATIVE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -200,7 +203,7 @@ class CursorPrintSession implements AgentSession {
     return path;
   }
 
-  private beginTurn(content: ContentBlock[], receipt?: ActiveTurn['receipt']): void {
+  private beginTurn(content: ContentBlock[], receipt?: ActiveTurn['receipt'], heldHuman = false): void {
     if (this.closing || !this.isOpen) { receipt?.reject(new Error('Cursor print session closed')); return; }
     let text: string;
     let imagePaths: string[];
@@ -225,12 +228,12 @@ class CursorPrintSession implements AgentSession {
     if (this.pluginDir) args.push('--plugin-dir', this.pluginDir);
     for (const path of imagePaths) args.push('--image', path);
     const prompt = prependSystemPrompt(this.spec.systemPrompt, text);
-    this.launchTurn(args, prompt, receipt, false);
+    this.launchTurn(args, prompt, receipt, false, undefined, heldHuman);
   }
 
   /** Reuse prepared input verbatim; retrying must not rebuild images or change resume identity. */
   private launchTurn(args: readonly string[], prompt: string, receipt: ActiveTurn['receipt'], modelRetry: boolean,
-    env = buildChildEnv({ backend: 'cursor', extraEnv: this.spec.env })): void {
+    env = buildChildEnv({ backend: 'cursor', extraEnv: this.spec.env }), heldHuman = false): void {
     let proc: CursorPrintProcess;
     try {
       proc = startCursorPrintProcess({
@@ -258,7 +261,7 @@ class CursorPrintSession implements AgentSession {
       return;
     }
     const active: ActiveTurn = { process: proc, args, prompt, env, modelRetry, buffer: '', initSeen: false,
-      resultSeen: false, modelWorkSeen: false, turnText: '', stderr: '', receipt };
+      resultSeen: false, modelWorkSeen: false, turnText: '', stderr: '', receipt, heldHuman };
     this.active = active;
     this.turnCount += 1;
     if (this.turnCount > 1 && proc.pid) this.opts.onPidChange?.(proc.pid);
@@ -340,6 +343,8 @@ class CursorPrintSession implements AgentSession {
     const mapped = mapCursorPrintMessage(frame, this.uiState);
     this.uiState = mapped.state;
     for (const event of mapped.events) this.opts.onUiEvent?.(event);
+    // The consumer has seen this process's turn.started: the follow-up is in a turn now.
+    if (active.initSeen) active.heldHuman = false;
     for (const event of mapCursorPrintStreamEvent(frame)) {
       if (event.type === 'session' || event.type === 'turn-end') continue;
       if (event.type === 'error') this.errorReported = true;
@@ -371,7 +376,7 @@ class CursorPrintSession implements AgentSession {
       this.emit({ type: 'note', message: 'Retrying Cursor model admission once with the same selection before inference.' });
       // A consumer can stop the session while handling the note.
       if (!this.closing && this.isOpen) {
-        this.launchTurn(active.args, active.prompt, active.receipt, true, active.env);
+        this.launchTurn(active.args, active.prompt, active.receipt, true, active.env, active.heldHuman);
         return;
       }
     }
@@ -407,7 +412,9 @@ class CursorPrintSession implements AgentSession {
   private afterTurn(): void {
     if (!this.isOpen || this.busy || this.closing || this.markerAsk) return;
     const next = this.queue.shift();
-    if (next) this.beginTurn(next);
+    // Shifting the queue must not read as delivered: until the new process's init
+    // frame, the manager still sees the old turn's boundary (hearsay-tools/cezarion#1112).
+    if (next) this.beginTurn(next, undefined, true);
     else this.scheduleAutoEnd();
   }
   private clearAutoEnd(): void { if (this.autoEnd) clearTimeout(this.autoEnd); this.autoEnd = undefined; }
@@ -435,10 +442,15 @@ class CursorPrintSession implements AgentSession {
   }
   discardQueuedMessages(): void {
     this.queue = [];
+    // A spawned follow-up cannot be unwritten; only stop reporting it as held.
+    if (this.active) this.active.heldHuman = false;
     if (!this.busy) this.opts.onAgentInputReady?.();
   }
-  holdsHumanInput(): boolean { return this.queue.length > 0; }
-  heldHumanInputCount(): number { return this.queue.length; }
+  /** A follow-up stays held from sendMessage until the print process carrying it opens
+   *  its turn; the spawn-to-init gap is not a turn boundary (hearsay-tools/cezarion#1112). */
+  private launchingHuman(): boolean { return !!this.active?.heldHuman && !this.active.initSeen; }
+  holdsHumanInput(): boolean { return this.queue.length > 0 || this.launchingHuman(); }
+  heldHumanInputCount(): number { return this.queue.length + (this.launchingHuman() ? 1 : 0); }
   end(): void {
     if (this.closing || this.finished) return;
     this.closing = true;
