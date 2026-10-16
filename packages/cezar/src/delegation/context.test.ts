@@ -4,8 +4,8 @@ import { lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSy
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixture } from './service.testkit.ts';
-import { parentFileSnapshotPath, verifyWorkerContext } from './context.ts';
-import { ensureOwnedWorkspace } from './workspace.ts';
+import { parentFileSnapshotPath, prepareWorkerContext, verifyWorkerContext } from './context.ts';
+import { ensureOwnedWorkspace, planOwnedWorkspace } from './workspace.ts';
 import type { WorkerSpawnRequest } from '@open-mercato/cezar-contract';
 
 // A one-shot hook around `open`: it may change the filesystem just before a matching path is
@@ -156,6 +156,18 @@ describe('parent-file references', () => {
     write('qa/keep.md', 're-included'); write('qa/other.txt', 'ignored');
     await expect(f.service.spawn(f.caller, input(files('qa/other.txt', 'qa/keep.md')))).rejects.toThrow(/not ignored by git: qa\/keep\.md.*commit/);
     expect(f.store.listRuns()).toHaveLength(1);
+  });
+
+  it('refuses an attached .gitignore even when the request schema was bypassed', async () => {
+    // A later attachment that is a `.gitignore` could re-include an earlier one in the worker worktree.
+    commit('.gitignore', 'qa/\n');
+    write('qa/.GitIgnore', '!x\n');
+    const before = runsDir();
+    const workspace = await planOwnedWorkspace(f.root, randomUUID(), f.sha);
+    await expect(prepareWorkerContext({ repoRoot: f.root, dataDir: join(f.root, '.ai/cezar'), parentId: f.parent.id, workspace, parentCwd: f.root,
+      context: files('qa/.GitIgnore'), containsSecret: () => false }))
+      .rejects.toMatchObject({ code: 'invalid_input', message: '--attach cannot attach a .gitignore: qa/.GitIgnore; ignore rules must come from the baseline' });
+    expect(runsDir()).toEqual(before);
   });
 
   it('refuses missing, symlinked and directory parent files, naming the path', async () => {

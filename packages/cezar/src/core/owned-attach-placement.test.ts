@@ -1,6 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
@@ -9,9 +10,22 @@ import type { AgentRunResult, AgentRunSpec, AgentSession } from './agent-runner.
 import * as runners from './runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from './claude-cli-runner.ts';
 import { fixture } from '../delegation/service.testkit.ts';
-import { placeWorkerAttachments } from '../delegation/context.ts';
+import { parentFileSnapshotPath, placeWorkerAttachments } from '../delegation/context.ts';
 import { ensureOwnedWorkspace, readOwnedDiff } from '../delegation/workspace.ts';
 import { autosaveCommit } from '../git-worktree.ts';
+
+// A one-shot hook around `open`: it may change the filesystem just before a matching path is opened,
+// and its returned step receives the opened handle, so a test can land a race or a failing write.
+const openHook = vi.hoisted(() => ({ current: undefined as undefined | ((path: string) => ((handle?: FileHandle) => void) | undefined) }));
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  const open = (async (path: Parameters<typeof actual.open>[0], ...rest: unknown[]) => {
+    const after = openHook.current?.(String(path));
+    let handle: FileHandle | undefined;
+    try { handle = await (actual.open as (...args: unknown[]) => Promise<FileHandle>)(path, ...rest); return handle; } finally { after?.(handle); }
+  }) as typeof actual.open;
+  return { ...actual, open, default: { ...actual, open } };
+});
 
 const until = (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 });
 const ATTACHED = { 'qa/1149/brief.md': 'the brief\n', 'qa/evidence.log': 'evidence bytes\n' } as const;
@@ -57,7 +71,15 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
         seen.push({ spec, files, finish }); return session;
       } }));
   });
+  /** Accept `paths` through the service, materialize the worker worktree, and return placement's options. */
+  const accepted = async (paths: readonly string[]) => {
+    const { workerId } = await spawn(paths);
+    const { worker, delegation } = workerOf(workerId);
+    const workspace = await ensureOwnedWorkspace(f.root, worker);
+    return { worker, workspace, options: { dataDir: join(f.root, '.ai/cezar'), workspace: delegation.workspace, context: delegation.context! } };
+  };
   afterEach(async () => {
+    openHook.current = undefined;
     for (const s of seen) s.finish();
     seen.length = 0;
     await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs();
@@ -130,6 +152,76 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
     const committed = execFileSync('git', ['show', '--name-only', '--format=', 'HEAD'], { cwd: workspace.path, encoding: 'utf8' }).trim().split('\n');
     expect(committed).toEqual(['work.txt']);
     expect(execFileSync('git', ['status', '--porcelain'], { cwd: workspace.path, encoding: 'utf8' })).toBe('');
+  });
+
+  it('placement refuses and removes attachments a later attached .gitignore would re-include', async () => {
+    // The reviewer's reproduction. The request schema refuses an attached .gitignore; this recipe is
+    // built by hand to prove placement's own after-the-batch check still holds without it.
+    commit('.gitignore', 'qa/*\n');
+    write('qa/.gitignore', '!data/\n!data/*\n'); write('qa/data/.gitignore', 'x\n'); write('qa/data/x', 'attached x\n');
+    const { workspace, options } = await accepted(['qa/data/x']);
+    const rules = Buffer.from('!data/\n!data/*\n');
+    writeFileSync(await parentFileSnapshotPath(options.dataDir, options.workspace, 1), rules);
+    const context = { ...options.context, inputs: [...options.context.inputs, { source: { kind: 'parent-file' as const, path: 'qa/.gitignore' },
+      path: join(workspace.path, 'qa/.gitignore'), bytes: rules.length, sha256: createHash('sha256').update(rules).digest('hex') }] };
+    await expect(placeWorkerAttachments({ ...options, context }))
+      .rejects.toMatchObject({ code: 'invalid_input', message: expect.stringMatching(/not ignored by the worker baseline: qa\/data\/x;.*commit/) });
+    expect(existsSync(join(workspace.path, 'qa/data/x'))).toBe(false);
+    expect(existsSync(join(workspace.path, 'qa/.gitignore'))).toBe(false);
+    execFileSync('git', ['add', '-A'], { cwd: workspace.path });
+    expect(execFileSync('git', ['diff', '--cached', '--name-only'], { cwd: workspace.path, encoding: 'utf8' })).toBe('');
+  });
+
+  it('placement refuses a parent directory swapped for a symlink before the destination opens', async () => {
+    commit('.gitignore', 'qa/\n');
+    for (const [path, content] of Object.entries(ATTACHED)) write(path, content);
+    const { workspace, options } = await accepted(Object.keys(ATTACHED));
+    const outside = join(tmpdir(), `cez-attach-outside-${randomUUID()}`);
+    mkdirSync(outside);
+    try {
+      // After the directory walk created and checked `qa/1149`, right before the destination opens.
+      openHook.current = path => {
+        if (path !== join(workspace.path, 'qa/1149/brief.md')) return undefined;
+        openHook.current = undefined;
+        rmdirSync(join(workspace.path, 'qa/1149')); symlinkSync(outside, join(workspace.path, 'qa/1149'));
+        return undefined;
+      };
+      await expect(placeWorkerAttachments(options))
+        .rejects.toMatchObject({ code: 'invalid_input', message: expect.stringContaining('qa/1149/brief.md') });
+      expect(openHook.current).toBeUndefined();
+      const escaped = join(outside, 'brief.md');
+      expect(existsSync(escaped) ? readFileSync(escaped, 'utf8') : '').toBe('');
+      expect(existsSync(join(workspace.path, 'qa/evidence.log'))).toBe(false);
+    } finally { rmSync(outside, { recursive: true, force: true }); }
+  });
+
+  it('placement names the attachment whose snapshot no longer matches', async () => {
+    commit('.gitignore', 'qa/\n');
+    for (const [path, content] of Object.entries(ATTACHED)) write(path, content);
+    const { workspace, options } = await accepted(Object.keys(ATTACHED));
+    // Same length, different bytes: only the digest tells them apart.
+    writeFileSync(await parentFileSnapshotPath(options.dataDir, options.workspace, 1), 'EVIDENCE bytes\n');
+    await expect(placeWorkerAttachments(options))
+      .rejects.toMatchObject({ code: 'invalid_input', message: expect.stringContaining('qa/evidence.log') });
+    expect(existsSync(join(workspace.path, 'qa/1149/brief.md'))).toBe(false);
+    expect(existsSync(join(workspace.path, 'qa/evidence.log'))).toBe(false);
+  });
+
+  it('placement names the attachment and removes the copies it made when a write fails', async () => {
+    commit('.gitignore', 'qa/\n');
+    for (const [path, content] of Object.entries(ATTACHED)) write(path, content);
+    const { workspace, options } = await accepted(Object.keys(ATTACHED));
+    openHook.current = path => {
+      if (path !== join(workspace.path, 'qa/evidence.log')) return undefined;
+      openHook.current = undefined;
+      return handle => {
+        if (handle) handle.writeFile = async () => { throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' }); };
+      };
+    };
+    await expect(placeWorkerAttachments(options))
+      .rejects.toMatchObject({ code: 'invalid_input', message: expect.stringMatching(/qa\/evidence\.log.*ENOSPC/) });
+    expect(existsSync(join(workspace.path, 'qa/1149/brief.md'))).toBe(false);
+    expect(existsSync(join(workspace.path, 'qa/evidence.log'))).toBe(false);
   });
 
   it('placement does not overwrite an existing destination', async () => {

@@ -4,7 +4,7 @@ import { constants, type Stats } from 'node:fs';
 import { lstat, mkdir, open, realpath, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
-import type { WorkerInput, WorkerInputRecipe, WorkerSpawnRequest, WorkerWorkspace } from '@open-mercato/cezar-contract';
+import { parentFileRefusal, type WorkerInput, type WorkerInputRecipe, type WorkerSpawnRequest, type WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { resolveAttachmentPath } from '../workflows/attachment-path.ts';
 import { DelegationPolicyError } from './policy.ts';
 
@@ -152,6 +152,8 @@ export async function prepareWorkerContext(options: {
         // Only an ignored file may enter the worker worktree: anything else would come back
         // through its diff and autosave commits. Confinement is checked before `check-ignore`,
         // which dies outright on a path beyond a symlink.
+        const refusal = parentFileRefusal(source.path);
+        if (refusal) throw refuse(refusal);
         const { stdout } = await git('git', ['ls-tree', '-z', workspace.baselineSha, '--', source.path], { cwd: repoRoot, maxBuffer: 16_384, timeout: 30_000 });
         if (stdout) throw refuse(`--attach path is tracked by git: ${source.path}; commit your changes and spawn from that commit instead of attaching it`);
         const file = await parentFile(options.parentCwd, source.path);
@@ -223,53 +225,96 @@ export async function verifyWorkerContext(options: {
  * Copy each verified `parent-file` snapshot into the worker worktree before its first turn
  * (hearsay-tools/cezarion#1149). First launch only: an existing copy is the worker's, never
  * overwritten, and Continue never calls this, so a deleted copy stays deleted. Directories are
- * walked one component at a time from the worktree root, so no symlink in the checkout can carry
- * the write outside it.
+ * walked one component at a time from the worktree root. Node has no openat, so the destination
+ * counts only when, after its exclusive no-follow create, it is still the entry in the checked
+ * directory. Once every file is in place the whole batch is re-checked against the worker's ignore
+ * rules; on any failure the copies this call made are removed and the refusal names the path.
  */
 export async function placeWorkerAttachments(options: { dataDir: string; workspace: WorkerWorkspace; context?: WorkerInputRecipe }): Promise<void> {
   const { dataDir, workspace, context } = options;
   const root = await realpath(workspace.path);
-  for (const [index, input] of (context?.inputs ?? []).entries()) {
-    const { source } = input;
-    if (source.kind !== 'parent-file') continue;
-    const components = source.path.split('/');
-    const name = components.pop()!;
-    // Existing components first: `check-ignore` dies outright on a path beyond a symlink.
-    const walk = async (create: boolean) => {
-      let dir = root;
-      for (const component of components) {
-        dir = join(dir, component);
-        const entry = await lstat(dir).catch((error: NodeJS.ErrnoException) => {
-          if (error.code !== 'ENOENT') throw error;
-          return undefined;
-        });
-        if (!entry && !create) return;
-        if (!entry) await mkdir(dir).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error; });
-        const current = entry ?? await lstat(dir);
-        if (current.isSymbolicLink() || !current.isDirectory()) {
-          throw refuse(`--attach path has a component that is not a directory in the worker worktree: ${source.path}`);
+  const notIgnored = (path: string) => refuse(`--attach path is not ignored by the worker baseline: ${path}; commit it and spawn from that commit instead of attaching it`);
+  const detail = (error: unknown) => error instanceof Error ? error.message : String(error);
+  const attached: string[] = [];
+  const created: Array<{ dir: string; path: string; dev: number; ino: number }> = [];
+  try {
+    for (const [index, input] of (context?.inputs ?? []).entries()) {
+      const { source } = input;
+      if (source.kind !== 'parent-file') continue;
+      attached.push(source.path);
+      try {
+        const components = source.path.split('/');
+        const name = components.pop()!;
+        // Existing components first: `check-ignore` dies outright on a path beyond a symlink.
+        const walk = async (create: boolean) => {
+          let dir = root;
+          for (const component of components) {
+            dir = join(dir, component);
+            const entry = await lstat(dir).catch((error: NodeJS.ErrnoException) => {
+              if (error.code !== 'ENOENT') throw error;
+              return undefined;
+            });
+            if (!entry && !create) return;
+            if (!entry) await mkdir(dir).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error; });
+            const current = entry ?? await lstat(dir);
+            if (current.isSymbolicLink() || !current.isDirectory()) {
+              throw refuse(`--attach path has a component that is not a directory in the worker worktree: ${source.path}`);
+            }
+          }
+          return dir;
+        };
+        await walk(false);
+        if (!await ignoredByGit(root, source.path)) throw notIgnored(source.path);
+        const bytes = await (async () => readBoundedContextFile(await parentFileSnapshotPath(dataDir, workspace, index), input.bytes))()
+          .catch((error: unknown) => { throw refuse(`--attach snapshot is missing or changed: ${source.path} (${detail(error)})`); });
+        if (bytes.length !== input.bytes || hash(bytes) !== input.sha256) throw refuse(`--attach snapshot is missing or changed: ${source.path}`);
+        const dir = (await walk(true))!;
+        const destination = join(dir, name);
+        let file;
+        try {
+          file = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue;
+          throw error;
         }
+        try {
+          const opened = await file.stat();
+          const entry = await lstat(destination).catch(() => undefined);
+          // A directory swapped for a symlink since the walk: the file is elsewhere, and unlinking
+          // through the redirected path could remove someone else's. Leave it, write nothing.
+          if (await realpath(dir).catch(() => undefined) !== dir || entry?.dev !== opened.dev || entry.ino !== opened.ino) {
+            throw refuse(`--attach path leaves the worker worktree: ${source.path}`);
+          }
+          created.push({ dir, path: destination, dev: opened.dev, ino: opened.ino });
+          await file.writeFile(bytes);
+        } finally { await file.close(); }
+      } catch (error) {
+        throw error instanceof DelegationPolicyError ? error : refuse(`--attach path could not be placed in the worker worktree: ${source.path} (${detail(error)})`);
       }
-      if (create && await realpath(dir) !== dir) throw refuse(`--attach path leaves the worker worktree: ${source.path}`);
-      return dir;
-    };
-    await walk(false);
-    if (!await ignoredByGit(root, source.path)) {
-      throw refuse(`--attach path is not ignored by the worker baseline: ${source.path}; commit it and spawn from that commit instead of attaching it`);
     }
-    const dir = (await walk(true))!;
-    const bytes = await readBoundedContextFile(await parentFileSnapshotPath(dataDir, workspace, index), input.bytes);
-    if (bytes.length !== input.bytes || hash(bytes) !== input.sha256) throw invalid();
-    const destination = join(dir, name);
-    let file;
-    try {
-      file = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue;
-      throw error;
+    // A placed file can change the rules for another (a nested `.gitignore` re-including it).
+    if (attached.length) {
+      const check = git('git', ['check-ignore', '-z', '--stdin'], { cwd: root, maxBuffer: 1024 * 1024, timeout: 30_000 });
+      // A git that exits early fails the promise below; its EPIPE on stdin must not crash the process.
+      check.child.stdin?.on('error', () => {}).end(attached.map(path => `${path}\0`).join(''));
+      const result = await check
+        .then(({ stdout }) => stdout, (error: { code?: unknown; message?: string }) => {
+          if (error.code === 1) return '';
+          throw refuse(`--attach paths could not be checked against the worker baseline: ${attached[0]} (${detail(error)})`);
+        });
+      const ignored = new Set(result.split('\0'));
+      const offending = attached.find(path => !ignored.has(path));
+      if (offending !== undefined) throw notIgnored(offending);
     }
-    // A truncated copy would read as the worker's own on the next launch: remove the one this call created.
-    try { await file.writeFile(bytes); } catch (error) { await rm(destination, { force: true }); throw error; } finally { await file.close(); }
+  } catch (error) {
+    // Only files this call created, still the same inode in the same canonical directory.
+    for (const copy of created.reverse()) {
+      const entry = await lstat(copy.path).catch(() => undefined);
+      if (entry?.dev === copy.dev && entry.ino === copy.ino && await realpath(copy.dir).catch(() => undefined) === copy.dir) {
+        await rm(copy.path, { force: true });
+      }
+    }
+    throw error;
   }
 }
 

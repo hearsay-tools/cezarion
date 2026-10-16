@@ -18,6 +18,16 @@ describe('parent-file context reference', () => {
     expect(parsed.error?.issues.map(issue => issue.message)).toContainEqual(expect.stringContaining('duplicate --attach path: a.md'));
   });
 
+  it.each(['.gitignore', 'qa/.gitignore', 'qa/data/.GitIgnore'])('refuses an attached .gitignore %j, naming it', path => {
+    const parsed = workerContextSchema.safeParse(context(path));
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues.map(issue => issue.message)).toContainEqual(`--attach cannot attach a .gitignore: ${path}; ignore rules must come from the baseline`);
+  });
+
+  it.each(['qa/.gitignore.bak', 'qa/gitignore', '.gitignore-notes/x.md'])('accepts a near-miss name %j', path => {
+    expect(workerContextSchema.safeParse(context(path)).success).toBe(true);
+  });
+
   it('leaves baseline-file references as they were', () => {
     expect(workerContextSchema.safeParse({ artifacts: [{ kind: 'baseline-file', path: 'src/x.ts' }] }).success).toBe(true);
   });
