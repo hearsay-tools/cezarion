@@ -1070,12 +1070,38 @@ export class AgentBrowser {
    * require stable rendered geometry and uncovered edges so a sticky header cannot hide it.
    * Reproduction: screenshot-element.e2e.ts (hearsay-tools/cezarion#1135), 1440x900 and
    * 390x844: end-pinned target is off-screen; start alignment hides its top under the header.
+   * Tall-target probe: at 390x844 a 700px card centres at y=72 behind a 96px header;
+   * the old helper timed out, though it fits below the header (hearsay-tools/cezarion#1135).
    * The target must fit in the available viewport; impossible framing fails with a bundle. */
   screenshotElement(selector: string, path: string): string {
     this.waitForStable(`(() => {
       const target = document.querySelector(${JSON.stringify(selector)});
       if (!target) return null;
       target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+      // Centre can still put a tall, otherwise fitting card behind a sticky header.
+      // Probe each vertical edge and move the nearest scrollable ancestor away from
+      // a fixed/sticky occluder. Two passes handle a header and a footer; an overlay
+      // or an impossible fit still fails the visibility check below.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const box = target.getBoundingClientRect(), x = (box.left + box.right) / 2;
+        let delta = 0;
+        for (const [y, edge] of [[box.top + 1, 'top'], [box.bottom - 1, 'bottom']]) {
+          let hit = document.elementFromPoint(x, y);
+          if (!hit || hit === target || target.contains(hit)) continue;
+          while (hit && !['fixed', 'sticky'].includes(getComputedStyle(hit).position)) hit = hit.parentElement;
+          if (!hit) continue;
+          const obstacle = hit.getBoundingClientRect();
+          delta = edge === 'top' ? box.top - obstacle.bottom - 1 : box.bottom - obstacle.top + 1;
+          break;
+        }
+        if (!delta) break;
+        for (let parent = target.parentElement; parent; parent = parent.parentElement) {
+          if (parent !== document.scrollingElement && !/(auto|scroll|hidden)/.test(getComputedStyle(parent).overflowY)) continue;
+          const before = parent.scrollTop;
+          parent.scrollBy({ top: delta, behavior: 'instant' });
+          if (parent.scrollTop !== before) break;
+        }
+      }
       const layout = ${visualSampleExpression(selector)};
       if (!layout) return null;
       const r = target.getBoundingClientRect();

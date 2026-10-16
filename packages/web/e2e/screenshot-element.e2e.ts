@@ -21,16 +21,16 @@ const rect = `(() => {
 })()`
 
 describe('element QA evidence (hearsay-tools/cezarion#1135)', () => {
-  it.each([[1440, 900], [390, 844]])('frames the whole target below the sticky header at %ix%i', (width, height) => {
+  it.each([[1440, 900, 160], [390, 844, 160], [390, 844, 700]])('frames a %ix%i viewport target of height %i below the sticky header', (width, height, targetHeight) => {
     browser.setViewport(width, height)
-    browser.goto(`data:text/html,${encodeURIComponent(fixture)}`)
+    browser.goto(`data:text/html,${encodeURIComponent(fixture.replace('block-size:160px', `block-size:${targetHeight}px`))}`)
     browser.evaluate(`document.querySelector('main').scrollTop = 9999`)
     const offscreen = browser.waitForValue<{ bottom: number }>(rect)
     expect(offscreen.bottom).toBeLessThan(0)
     browser.evaluate(`document.querySelector('#target').scrollIntoView({ block: 'start', behavior: 'instant' })`)
     const covered = browser.waitForValue<{ uncovered: boolean }>(rect)
     expect(covered.uncovered).toBe(false)
-    browser.screenshotElement('#target', resolve(import.meta.dirname, `../../../.ai/qa/artifacts/issue-1135-${width}.png`))
+    browser.screenshotElement('#target', resolve(import.meta.dirname, `../../../.ai/qa/artifacts/issue-1135-${width}-${targetHeight}.png`))
     const captured = browser.waitForValue<{ top: number; bottom: number; height: number; uncovered: boolean }>(rect)
     expect(captured.top).toBeGreaterThanOrEqual(96)
     expect(captured.bottom).toBeLessThanOrEqual(captured.height)
