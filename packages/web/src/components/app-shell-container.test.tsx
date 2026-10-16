@@ -1058,7 +1058,8 @@ it.each(['/p/shop/settings/agents', '/settings/global/appearance'])('shows scope
   expect([...group.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['General', 'Sidebar', 'Agents', 'Agent config', 'Worktrees', 'Bookmarklets', 'Prompt templates'])
   const global = screen.getByRole('navigation', { name: 'Global · every project' })
   expect(within(global).getByRole('link', { name: 'Appearance' }).getAttribute('href')).toBe('/settings/global/appearance')
-  expect([...global.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['Appearance', 'Notifications', 'Resources', 'Skills', 'Agent accounts', 'Projects'])
+  expect([...global.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['Appearance', 'Notifications', 'Resources', 'Tasks', 'Skills', 'Agent accounts', 'Projects'])
+  expect(within(global).getByRole('link', { name: 'Tasks' }).getAttribute('href')).toBe('/settings/global/tasks')
   expect(within(global).queryByRole('link', { name: 'Keyboard' })).toBeNull()
   // The global area has no index page, so its group has no General row.
   expect(within(global).queryByRole('link', { name: 'General' })).toBeNull()
