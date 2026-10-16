@@ -134,6 +134,23 @@ records what the bundle's `probe.json` showed. `setViewport` in `agent-browser.t
 form: "`cockpit-failures-shard-2` artifacts 11255134650, 11255508374 and 11259950580 (draft
 PR #791)".
 
+Copy this provenance comment and fill every part:
+
+```ts
+// <what changed and why>. Evidence: <spec> failed with "<headline>" (bundle
+// .ai/qa/failures/<spec>/<test>-<n>/: probe.json <key fact>, snapshot.txt <key fact>;
+// <durable citation>). Reproduce with `npm run test:e2e -- <spec>.e2e.ts -t '<name>'` —
+// <failed> of <runs> failed before, <passed> of <runs> passed after.
+```
+
+Three parts are required, and review checks each one (hearsay-tools/cezarion#1093):
+
+| Part | Write |
+| --- | --- |
+| Bundle leaf path | The full `<spec>/<test>-<n>/` directory, named by the rule above, never the `<spec>/` parent. Add the durable citation next to it: the CI run id and its `cockpit-failures-shard-<n>` artifact, or the PR comment for a local bundle. A red run of the reproduction writes a bundle too (`failure-setup.ts` for any failed test with a browser attached, the seam when a wait gives up), so name that bundle. |
+| Reproduction command | The single-test recipe from [Reproducing one test](#reproducing-one-test-locally), or the env-gated delay that made it red. |
+| Before/after counts | Both totals: how many of how many runs failed without the change, and how many of how many passed with it ("2 of 6", "8 of 8" below). A bare count cannot tell 2 of 6 from 2 of 200, nor show whether an after-run still failed. |
+
 The worked example for the counts is `liftWithSpace` in `project-order.e2e.ts`, quoted as it
 stands:
 
