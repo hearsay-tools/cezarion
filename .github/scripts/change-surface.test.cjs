@@ -27,6 +27,9 @@ const infraScripts = [
   '.github/scripts/ci-sweep-patterns.cjs',
   '.github/scripts/ci-sweep-report.cjs',
   '.github/scripts/apply-issue-intake.cjs',
+  '.github/scripts/issue-intake-candidates.cjs',
+  '.github/scripts/jev-issue-intake.cjs',
+  '.github/scripts/jev-intake-replay.cjs',
 ];
 
 test('classifies every allowlisted path group as docs-only', () => {

@@ -28,7 +28,7 @@ const docsAllowlisted = [
 // the unconditional build-and-package job.
 const infraAllowlisted = [
   /^\.github\/workflows\/(?:report-workflow-failure|sweep-ci-failures|upstream-scan|npm-preview-cleanup|publish-pr-snapshot|issue-intake)\.yml$/,
-  /^\.github\/scripts\/(?:ci-sweep-api|ci-sweep-collect|ci-sweep-patterns|ci-sweep-report|apply-issue-intake)(?:\.test)?\.cjs$/,
+  /^\.github\/scripts\/(?:ci-sweep-api|ci-sweep-collect|ci-sweep-patterns|ci-sweep-report|apply-issue-intake|issue-intake-candidates|jev-issue-intake|jev-intake-replay)(?:\.test)?\.cjs$/,
 ];
 
 function isSafePath(path) {
