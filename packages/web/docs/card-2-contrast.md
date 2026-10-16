@@ -35,8 +35,9 @@ The existing tool-error fix belongs to hearsay-tools/cezarion#1114.
 
 `src/test/card-2-contrast.test.ts` scans JSX class strings, including literal
 branches of class helpers and templates. It follows card-2 ancestors, inherited
-ink and font sizes, and known tool/hook body slots. A different explicit
-background ends inheritance. Unknown font sizes are treated conservatively as
+ink and font sizes, and known tool/hook body slots. An opaque separate background ends inheritance; transparent and translucent
+backgrounds retain it conservatively. Literal size/background branches are checked
+conservatively, and JSX-only expressions are visited as elements rather than wrapper text. Unknown font sizes are treated conservatively as
 small. Icons without text and explicitly large text are excluded.
 
 This is a static guard, not a computed-style audit: runtime-generated classes,

@@ -19,10 +19,23 @@ function eachChild(node: Node, visit: (node: Node) => void): void {
   }
 }
 
+/** JSX branches are visited separately; only expressions that can render text belong to the wrapper. */
+function rendersText(node: Node): boolean {
+  switch (node.type) {
+    case 'JSXText': return node.value.trim() !== ''
+    case 'JSXElement': case 'JSXFragment': case 'JSXEmptyExpression':
+    case 'NullLiteral': case 'BooleanLiteral': return false
+    case 'JSXExpressionContainer': return rendersText(node.expression)
+    case 'ConditionalExpression': return rendersText(node.consequent) || rendersText(node.alternate)
+    case 'LogicalExpression': return (node.operator !== '&&' && rendersText(node.left)) || rendersText(node.right)
+    default: return true // identifiers and calls can contain runtime text
+  }
+}
+
 function scan(source: string): string[] {
   const file = parse(source, { sourceType: 'module', plugins: ['typescript', 'jsx'] })
   const sites: string[] = []
-  function visit(node: Node, card = false, color = '', size = ''): void {
+  function visit(node: Node, card = false, color = '', inheritedLarge = false): void {
     if (node.type === 'JSXElement') {
       const opening = node.openingElement
       const attr = (name: string) => opening.attributes.find(p => p.type === 'JSXAttribute' && p.name.type === 'JSXIdentifier' && p.name.name === name) as JSXAttribute | undefined
@@ -35,21 +48,23 @@ function scan(source: string): string[] {
       }
       const classes = strings(attr('className')?.value).join(' ').split(/\s+/)
       const slot = strings(attr('data-slot')?.value)[0]
-      const background = classes.find(c => /^bg-(?!gradient)/.test(c))
-      const onCard = background ? background === 'bg-card-2' : card || ['tool-error', 'tool-command', 'hook-entry', 'hook-source', 'hook-raw-toggle', 'hook-stdout', 'hook-stderr'].includes(slot ?? '')
-      const ownColors = classes.filter(c => /^text-(?:danger|soft-foreground|muted-foreground|foreground|signal-word-red)$/.test(c))
+      const backgrounds = classes.filter(c => /^bg-(?!gradient)/.test(c))
+      const bodySlot = ['tool-error', 'tool-command', 'hook-entry', 'hook-source', 'hook-raw-toggle', 'hook-stdout', 'hook-stderr'].includes(slot ?? '')
+      const inheritsSurface = backgrounds.length === 0 || backgrounds.some(c => c === 'bg-transparent' || c.includes('/'))
+      const onCard = backgrounds.includes('bg-card-2') || inheritsSurface && (card || bodySlot)
+      const ownColors = classes.filter(c => /^text-(?:danger|soft-foreground|muted-foreground|supporting-foreground|link-foreground|foreground|signal-word-red)$/.test(c))
       const colors = ownColors.length ? ownColors : [color]
-      const ownSize = classes.find(c => /^text-(?:xs|sm|base|lg|xl|\d?xl|\[\d+(?:\.\d+)?px\])$/.test(c)) ?? size
-      const large = /^(?:text-(?:[2-9]xl)|text-\[(?:2[4-9]|[3-9]\d)px\])$/.test(ownSize)
+      const sizes = classes.filter(c => /^text-(?:xs|sm|base|lg|xl|\d?xl|\[\d+(?:\.\d+)?px\])$/.test(c))
+      const large = sizes.length ? sizes.every(s => /^(?:text-[2-9]xl|text-\[(?:2[4-9]|[3-9]\d)px\])$/.test(s)) : inheritedLarge
       const children = node.children
-      const hasText = children.some(c => c.type === 'JSXText' ? c.value.trim() !== '' : c.type === 'JSXExpressionContainer' && c.expression.type !== 'JSXEmptyExpression')
+      const hasText = children.some(rendersText)
       if (onCard && !large && hasText && colors.some(c => c === 'text-danger' || c === 'text-soft-foreground')) {
         sites.push(source.slice(opening.start ?? 0, opening.end ?? 0).replace(/\s+/g, ' '))
       }
-      for (const child of children) visit(child, onCard, colors.find(c => c === 'text-danger' || c === 'text-soft-foreground') ?? colors[0] ?? '', ownSize)
+      for (const child of children) visit(child, onCard, colors.find(c => c === 'text-danger' || c === 'text-soft-foreground') ?? colors[0] ?? '', large)
       return
     }
-    eachChild(node, child => visit(child, card, color, size))
+    eachChild(node, child => visit(child, card, color, inheritedLarge))
   }
   visit(file)
   return sites
@@ -59,11 +74,25 @@ it('catches unsafe small text on the element, descendants, conditional classes a
   expect(scan(`<><p className="bg-card-2 text-danger text-xs">bad</p><div className="bg-card-2"><span className={cn('text-xs', bad ? 'text-danger' : 'text-muted-foreground')}>bad</span></div><div data-slot="tool-error" className="text-soft-foreground">bad</div></>`)).toHaveLength(3)
 })
 it('follows inherited ink and size through expressions and fragments', () => {
-  expect(scan(`<div className="bg-card-2 text-danger text-[11px]">{ok && <><span>bad</span></>}</div>`)).toHaveLength(2)
+  expect(scan(`<div className="bg-card-2 text-danger text-[11px]">{ok && <><span>bad</span></>}</div>`)).toHaveLength(1)
   expect(scan(`<div className="bg-card-2 text-danger text-[24px]"><span className="text-xs">bad</span></div>`)).toHaveLength(1)
 })
 it('accepts safe ink, separate surfaces, large text, icons and unrelated text', () => {
   expect(scan(`<><div className="bg-card-2"><p className="text-muted-foreground text-xs">ok</p><svg className="text-danger"/><p className="text-danger text-[24px]">large</p><p className="bg-background text-danger">other</p></div><p className="text-danger">elsewhere</p></>`)).toEqual([])
+})
+it('checks every possible size and background branch conservatively', () => {
+  expect(scan(`<p className={cn('bg-card-2 text-danger', ok ? 'text-2xl' : 'text-xs')}>bad</p>`)).toHaveLength(1)
+  expect(scan(`<p className={cn('text-xs text-danger', ok ? 'bg-background' : 'bg-card-2')}>bad</p>`)).toHaveLength(1)
+})
+it('retains card-2 underneath transparent backgrounds', () => {
+  expect(scan(`<div className="bg-card-2"><p className="bg-transparent text-xs text-danger">bad</p></div>`)).toHaveLength(1)
+})
+it('lets documented safe foregrounds override inherited unsafe ink', () => {
+  expect(scan(`<div className="bg-card-2 text-danger"><span className="text-supporting-foreground">safe</span><span className="text-link-foreground">safe</span></div>`)).toEqual([])
+})
+it('does not count safely styled JSX branches as text in their wrapper', () => {
+  expect(scan(`<div className="bg-card-2 text-danger">{ok && <span className="text-muted-foreground">safe</span>}{ok ? <span className="text-foreground">safe</span> : null}</div>`)).toEqual([])
+  expect(scan(`<div className="bg-card-2 text-danger">{ok ? <span className="text-foreground">safe</span> : 'bad'}</div>`)).toHaveLength(1)
 })
 it('does not allow the card-2 small-text baseline to grow or retain fixed instances', () => {
   function walk(dir: string): string[] {
