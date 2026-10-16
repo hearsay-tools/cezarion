@@ -15,7 +15,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { buildCandidates } = require('./issue-intake-candidates.cjs');
-const { buildRequest, callJev, mapAnswers, askableLabels, THRESHOLDS, DEFAULT_MODEL } = require('./jev-issue-intake.cjs');
+const {
+  buildRequest, buildRecheckRequest, shortlist, callJev, mapAnswers, askableLabels, THRESHOLDS, DEFAULT_MODEL,
+} = require('./jev-issue-intake.cjs');
 
 // Issues open when `target` was opened, as far as creation and close times
 // tell. Titles and bodies are today's, which is the closest record we have.
@@ -121,9 +123,18 @@ function fetchCorpus({ dir, count }) {
   console.log(`${issues.length} issues, ${targets.length} targets, ${Object.keys(baseline).length} with a Codex run`);
 }
 
+function candidatesFor(corpus, target) {
+  return buildCandidates({ issue: target, openIssues: openAt(corpus.issues, target), repo: corpus.repo });
+}
+
 function requestFor(corpus, target, model) {
-  const candidates = buildCandidates({ issue: target, openIssues: openAt(corpus.issues, target), repo: corpus.repo });
-  return buildRequest({ issue: target, candidates, labels: corpus.labels, model });
+  return buildRequest({ issue: target, candidates: candidatesFor(corpus, target), labels: corpus.labels, model });
+}
+
+// The replay rechecks the top three of every issue, whatever their rank, so
+// the report can sweep the shortlist threshold without another call.
+function recheckRequestFor(corpus, target, numbers, model) {
+  return buildRecheckRequest({ issue: target, candidates: candidatesFor(corpus, target), numbers, model });
 }
 
 async function ask({ dir, count, model = DEFAULT_MODEL, concurrency = 4 }) {
@@ -139,7 +150,13 @@ async function ask({ dir, count, model = DEFAULT_MODEL, concurrency = 4 }) {
       const request = requestFor(corpus, target, model);
       const started = Date.now();
       const response = await callJev({ request, apiKey: process.env.TYPESAFE_API_KEY });
-      answers[target.number] = { model: response.model, ms: Date.now() - started, usage: response.usage, answers: response.answers };
+      const numbers = shortlist({ response, thresholds: { ...THRESHOLDS, shortlist: 0 } });
+      let recheck = null;
+      if (numbers.length > 0) {
+        const recheckResponse = await callJev({ request: recheckRequestFor(corpus, target, numbers, model), apiKey: process.env.TYPESAFE_API_KEY });
+        recheck = { numbers, usage: recheckResponse.usage, answers: recheckResponse.answers };
+      }
+      answers[target.number] = { model: response.model, ms: Date.now() - started, usage: response.usage, answers: response.answers, recheck };
       writeJson(answersPath, answers);
       console.log(`#${target.number} ${response.model} ${Date.now() - started}ms`);
     }
@@ -153,15 +170,27 @@ function evaluate({ corpus, baseline, answers, targets, thresholds }) {
     const cached = answers[target.number];
     if (!cached) continue;
     const request = requestFor(corpus, target, cached.model);
-    const jev = mapAnswers({ request, response: cached, thresholds });
+    const shortlisted = cached.recheck && shortlist({ response: cached, thresholds }).length > 0;
+    const recheck = shortlisted
+      ? { request: recheckRequestFor(corpus, target, cached.recheck.numbers, cached.model), response: cached.recheck }
+      : null;
+    const jev = mapAnswers({ request, response: cached, recheck, thresholds });
     const codex = baseline[target.number]?.intake ?? null;
     const top = cached.answers.duplicate;
+    const second = cached.recheck?.answers.duplicate;
+    const secondNumber = second && second.choice !== 'none' ? Number(second.choice.slice(1)) : null;
     rows.push({
       target,
       jev,
       codex,
       candidateCount: Object.keys(request.questions.duplicate.criteria).length - 1,
       duplicatePick: top.choice === 'none' ? null : { number: Number(top.choice.slice(1)), p: top.probabilities[top.choice] },
+      topCandidate: Math.max(0, ...Object.entries(top.probabilities).filter(([key]) => key !== 'none').map(([, value]) => value)),
+      recheckPick: secondNumber === null ? null : {
+        number: secondNumber,
+        p: second.probabilities[second.choice],
+        sameWork: cached.recheck.answers[`same_work:#${secondNumber}`].noul,
+      },
     });
   }
   return rows;
@@ -215,20 +244,28 @@ function report({ dir, out, count }) {
   }
 
   const duplicateRows = rows
-    .filter((row) => (row.duplicatePick && row.duplicatePick.p >= 0.5) || row.target.state_reason === 'duplicate' || row.codex?.action === 'duplicate')
+    .filter((row) => (row.duplicatePick && row.duplicatePick.p >= 0.5) || row.recheckPick?.p >= 0.5 || row.target.state_reason === 'duplicate' || row.codex?.action === 'duplicate')
     .map((row) => {
       const jevPick = row.duplicatePick ? `#${row.duplicatePick.number} (${row.duplicatePick.p.toFixed(2)})` : 'none';
+      const recheckPick = row.recheckPick ? `#${row.recheckPick.number} (${row.recheckPick.p.toFixed(2)}, same work ${row.recheckPick.sameWork.toFixed(2)})` : 'none';
       const codexPick = row.codex?.action === 'duplicate' ? `#${row.codex.duplicate_of}${row.codex.duplicate_of === row.target.number ? ' (itself)' : ''}` : '–';
       const closes = row.jev.action === 'duplicate' ? 'yes' : 'no';
-      return `| #${row.target.number} | ${row.target.state_reason ?? 'open'} | ${codexPick} | ${jevPick} | ${closes} |`;
+      return `| #${row.target.number} | ${row.target.state_reason ?? 'open'} | ${codexPick} | ${jevPick} | ${recheckPick} | ${closes} |`;
     });
   const selfPicks = paired.filter((row) => row.codex.action === 'duplicate' && row.codex.duplicate_of === row.target.number).length;
   const wrongCloses = rows.filter((row) => row.jev.action === 'duplicate' && row.target.state_reason !== 'duplicate');
-  const duplicateSweep = [0.6, 0.7, 0.8, 0.9, 0.93, 0.95, 0.97].map((value) => {
-    const picks = rows.filter((row) => row.duplicatePick && row.duplicatePick.p >= value);
-    const right = picks.filter((row) => row.target.state_reason === 'duplicate').length;
-    return `| ${value} | ${right} | ${picks.length - right} |`;
-  });
+  // A recheck pick closes when it reaches `duplicate` and its same-work answer
+  // reaches `sameWork`; the first call's top candidate must reach `shortlist`
+  // for the recheck to run at all.
+  const closesAt = (row, t) => row.recheckPick && row.topCandidate >= t.shortlist
+    && row.recheckPick.p >= t.duplicate && row.recheckPick.sameWork >= t.sameWork;
+  const duplicateSweep = [];
+  for (const value of [0.5, 0.7, 0.8, 0.9, 0.95]) {
+    const t = { ...THRESHOLDS, duplicate: value, sameWork: value };
+    const closes = rows.filter((row) => closesAt(row, t));
+    const wrong = closes.filter((row) => row.target.state_reason !== 'duplicate');
+    duplicateSweep.push(`| ${value} | ${closes.length - wrong.length} | ${wrong.length}${wrong.length ? ` (${wrong.map((row) => `#${row.target.number}`).join(', ')})` : ''} |`);
+  }
 
   // Slices that do not lean on Codex's own output: areas only, type only where
   // the issue carries a type, and the issues Codex left unlabeled.
@@ -249,7 +286,7 @@ function report({ dir, out, count }) {
   ];
   const models = [...new Set(rows.map((row) => answers[row.target.number].model))];
   const ms = rows.map((row) => answers[row.target.number].ms).sort((a, b) => a - b);
-  const tokens = rows.map((row) => answers[row.target.number].usage?.input_tokens ?? 0);
+  const tokens = rows.map((row) => (answers[row.target.number].usage?.input_tokens ?? 0) + (answers[row.target.number].recheck?.usage?.input_tokens ?? 0));
 
   const text = `# Jev issue-intake replay
 
@@ -262,7 +299,7 @@ Corpus fetched ${corpus.fetchedAt} from ${corpus.repo}: the ${targets.length} ne
 - The truth is each issue's current labels, limited to the labels intake asks about: ${labels.map((label) => `\`${label}\``).join(', ')}.
 - The Codex baseline is the \`intake.json\` each issue's intake run uploaded (${paired.length} issues). The truth leans towards Codex: its labels stayed on the issue unless a person removed one, so it scores near 100% precision by construction, and an issue Codex left unlabeled usually has no type label either, so any type Jev gives it counts as wrong. The slices below take out the parts of that lean that can be taken out.
 - Thresholds: ${Object.entries(THRESHOLDS).map(([key, value]) => `\`${key}\` ${value}`).join(', ')}.
-- Latency: median ${ms[Math.floor(ms.length / 2)]} ms, p95 ${ms[Math.floor(ms.length * 0.95)]} ms. Input tokens: mean ${Math.round(tokens.reduce((a, b) => a + b, 0) / Math.max(tokens.length, 1))}, max ${Math.max(...tokens)}.
+- Latency for both calls together: median ${ms[Math.floor(ms.length / 2)]} ms, p95 ${ms[Math.floor(ms.length * 0.95)]} ms. Input tokens per issue, both calls: mean ${Math.round(tokens.reduce((a, b) => a + b, 0) / Math.max(tokens.length, 1))}, max ${Math.max(...tokens)}.
 
 ## Tuning
 
@@ -294,18 +331,20 @@ ${sweepLines.join('\n')}
 
 ## Duplicates
 
-Jev closes an issue only when its duplicate pick reaches ${THRESHOLDS.duplicate}. Wrong closes at that threshold: **${wrongCloses.length}**${wrongCloses.length ? ` (${wrongCloses.map((row) => `#${row.target.number}`).join(', ')})` : ''}.
+Jev closes an issue only when the recheck's pick reaches ${THRESHOLDS.duplicate} and its same-work answer reaches ${THRESHOLDS.sameWork}. Wrong closes at that threshold: **${wrongCloses.length}**${wrongCloses.length ? ` (${wrongCloses.map((row) => `#${row.target.number}`).join(', ')})` : ''}.
 Codex picked the issue itself on ${selfPicks} of ${paired.length} runs; each of those runs failed in \`apply-intake\` and left the issue unlabeled.
 
-| Pick probability at least | Picks on issues closed as duplicates | Picks on other issues |
+Recheck sweep, with \`duplicate\` and \`sameWork\` set to the same value and \`shortlist\` at ${THRESHOLDS.shortlist}:
+
+| Both thresholds at least | Closes of issues closed as duplicates | Other closes |
 | --- | --- | --- |
 ${duplicateSweep.join('\n')}
 
-Rows: every issue closed as a duplicate, every Codex duplicate pick, and every Jev pick at 0.5 or above.
+Rows: every issue closed as a duplicate, every Codex duplicate pick, and every Jev pick at 0.5 or above in either call.
 
-| Issue | Closed as | Codex pick | Jev pick (probability) | Jev closes |
-| --- | --- | --- | --- | --- |
-${duplicateRows.join('\n') || '| – | – | – | – | – |'}
+| Issue | Closed as | Codex pick | First call pick | Recheck pick | Jev closes |
+| --- | --- | --- | --- | --- | --- |
+${duplicateRows.join('\n') || '| – | – | – | – | – | – |'}
 `;
   fs.writeFileSync(out, text);
   console.log(`wrote ${out}: Jev F1 ${pct(jevPaired.f1)} vs Codex ${pct(codexPaired.f1)} on ${paired.length} paired issues; ${wrongCloses.length} wrong closes`);

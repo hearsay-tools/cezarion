@@ -1,10 +1,13 @@
 'use strict';
 
-// Issue intake through Jev, TypeSafe's typed-decision model (#1163). One call
-// asks every question; this script maps the answers to the intake.json schema
-// that apply-issue-intake.cjs applies, so the applicator stays the only code
-// that mutates an issue. Jev has no tools and can only answer with options we
-// offered, so the duplicate pick is always one of the filtered candidates.
+// Issue intake through Jev, TypeSafe's typed-decision model (#1163). The first
+// call ranks every duplicate candidate from a short excerpt and asks the label
+// questions; when a candidate ranks high enough, a second call re-reads the top
+// three with their full bodies and may reject all of them. This script maps the
+// answers to the intake.json schema that apply-issue-intake.cjs applies, so the
+// applicator stays the only code that mutates an issue. Jev has no tools and can
+// only answer with options we offered, so a duplicate pick is always one of the
+// filtered candidates.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -17,23 +20,36 @@ const DEFAULT_MODEL = 'jev-1.13.0';
 
 // Labels other processes set. Intake never asks about them.
 const NEVER_ASKED = new Set(['friction', 'upstream-port', 'epic', 'in-progress', 'needs-qa', 'repo-setup']);
-const TYPE_LABELS = ['bug', 'enhancement', 'documentation'];
 const ACCESSIBILITY = 'accessibility';
 const NONE = 'none';
+// Code-owned option text: GitHub's one-line label descriptions left Jev no
+// boundary for issues that are none of the three.
+const TYPE_CRITERIA = Object.freeze({
+  bug: 'Behaviour that is broken or wrong today, and the issue asks to fix it: an error, a crash, a hang, a regression, wrong output, or a failing or flaky test.',
+  enhancement: 'A new feature or capability, or a change to behaviour that works as designed today.',
+  documentation: 'A change to documentation only: README, AGENTS.md, specs, guides or process files, with no code change.',
+  [NONE]: 'Maintenance that fixes nothing broken and adds no capability: refactoring, removing dead code, cleanup, or tooling chores.',
+});
 
 // Probability each answer must reach before it acts. Set from the replay in
 // .ai/analysis/2026-10-16-jev-intake-replay.md; rerun it before changing them.
 // The replay dropped the per-area yes/no questions the issue proposed: they
 // added 26 wrong area labels for 7 right ones.
 const THRESHOLDS = Object.freeze({
-  duplicate: 0.95,
+  // The first call's top candidate must reach this for the recheck to run.
+  shortlist: 0.2,
+  // The recheck's pick, and its own same-work answer, must both reach these.
+  duplicate: 0.9,
+  sameWork: 0.9,
   mainArea: 0.5,
   type: 0.5,
   accessibility: 0.7,
 });
 
+const SHORTLIST_SIZE = 3;
 const BODY_LIMIT = 12_000;
 const EXCERPT_LIMIT = 300;
+const RECHECK_BODY_LIMIT = 8_000;
 // Jev allows 32k tokens for the state plus the longest question, which is the
 // duplicate Choice. Estimate tokens as chars / 3 to stay well under it.
 const DUPLICATE_BUDGET_CHARS = 28_000 * 3;
@@ -45,12 +61,25 @@ function truncate(text, limit) {
   return value.length <= limit ? value : `${value.slice(0, limit)}…`;
 }
 
+// Issue template headings (`## Context / Why`) and HTML comments open almost
+// every body; dropping them leaves the excerpt for what tells issues apart.
+function excerptOf(body, limit) {
+  const text = String(body ?? '')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .split('\n')
+    .filter((line) => !/^\s*#{1,6}\s/.test(line))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return truncate(text, limit);
+}
+
 function askableLabels(labels) {
   const byName = new Map(labels.map((label) => [label.name, label.description || label.name]));
   const pick = (name) => ({ name, description: byName.get(name) });
   return {
     areas: [...byName.keys()].filter((name) => name.startsWith('area-') && !NEVER_ASKED.has(name)).map(pick),
-    types: TYPE_LABELS.filter((name) => byName.has(name)).map(pick),
+    types: Object.keys(TYPE_CRITERIA).filter((name) => name !== NONE && byName.has(name)).map(pick),
     accessibility: byName.has(ACCESSIBILITY) ? pick(ACCESSIBILITY) : null,
   };
 }
@@ -62,8 +91,9 @@ function candidateKey(number) {
 function duplicateCriteria(candidates, excerptLimit) {
   const criteria = {};
   for (const candidate of candidates) {
-    const excerpt = truncate(candidate.body.replace(/\s+/g, ' ').trim(), excerptLimit);
-    criteria[candidateKey(candidate.number)] = excerptLimit > 0 ? { title: candidate.title, excerpt } : { title: candidate.title };
+    criteria[candidateKey(candidate.number)] = excerptLimit > 0
+      ? { title: candidate.title, excerpt: excerptOf(candidate.body, excerptLimit) }
+      : { title: candidate.title };
   }
   criteria[NONE] = 'No listed issue is the same work as the new issue.';
   return criteria;
@@ -77,13 +107,19 @@ function fitDuplicateCriteria(candidates, stateChars) {
   throw new Error('unreachable');
 }
 
+const SAME_WORK = 'the same root cause or the same goal, so that finishing one finishes the other, not only the same topic';
+
+function issueState(issue) {
+  return { title: String(issue.title ?? ''), body: truncate(issue.body, BODY_LIMIT) };
+}
+
 function buildRequest({ issue, candidates, labels, model = DEFAULT_MODEL }) {
-  const state = { title: String(issue.title ?? ''), body: truncate(issue.body, BODY_LIMIT) };
+  const state = issueState(issue);
   const { areas, types, accessibility } = askableLabels(labels);
   const questions = {
     duplicate: {
       type: 'choice',
-      instructions: 'The `title` and `body` describe a newly opened issue. Is it the same underlying work as one of the listed open issues: the same root cause or the same goal, not only the same topic? Pick none unless one listed issue is clearly the same work.',
+      instructions: `The \`title\` and \`body\` describe a newly opened issue. Is it the same underlying work as one of the listed open issues: ${SAME_WORK}? Pick none unless one listed issue is clearly the same work.`,
       criteria: fitDuplicateCriteria(candidates, JSON.stringify(state).length),
     },
   };
@@ -97,8 +133,8 @@ function buildRequest({ issue, candidates, labels, model = DEFAULT_MODEL }) {
   if (types.length > 0) {
     questions.type = {
       type: 'choice',
-      instructions: 'What kind of issue do `title` and `body` describe?',
-      criteria: Object.fromEntries([...types.map((type) => [type.name, type.description]), [NONE, 'None of these kinds']]),
+      instructions: 'What kind of work does the issue described by `title` and `body` ask for?',
+      criteria: Object.fromEntries([...types.map((type) => [type.name, TYPE_CRITERIA[type.name]]), [NONE, TYPE_CRITERIA[NONE]]]),
     };
   }
   if (accessibility) {
@@ -110,9 +146,60 @@ function buildRequest({ issue, candidates, labels, model = DEFAULT_MODEL }) {
   return { model, state, questions };
 }
 
+// The candidates the recheck re-reads: the first call's top picks, when its
+// best one reaches the shortlist threshold.
+function shortlist({ response, thresholds = THRESHOLDS, size = SHORTLIST_SIZE }) {
+  const probabilities = response?.answers?.duplicate?.probabilities ?? {};
+  const ranked = Object.entries(probabilities)
+    .filter(([key, value]) => key !== NONE && typeof value === 'number')
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, size);
+  if (ranked.length === 0 || ranked[0][1] < thresholds.shortlist) return [];
+  return ranked.map(([key]) => Number(key.slice(1)));
+}
+
+function sameWorkKey(number) {
+  return `same_work:${candidateKey(number)}`;
+}
+
+function buildRecheckRequest({ issue, candidates, numbers, model = DEFAULT_MODEL }) {
+  const byNumber = new Map(candidates.map((candidate) => [candidate.number, candidate]));
+  const picked = numbers.map((number) => {
+    const candidate = byNumber.get(number);
+    if (!candidate) throw new Error(`#${number} is not a duplicate candidate.`);
+    return { number, title: candidate.title, body: truncate(candidate.body, RECHECK_BODY_LIMIT) };
+  });
+  const questions = {
+    duplicate: {
+      type: 'choice',
+      instructions: `The \`title\` and \`body\` describe a newly opened issue. Read each listed open issue in full. Is the new issue the same underlying work as one of them: ${SAME_WORK}? Work that follows up on, builds on, or was split out of a listed issue is not the same work. Pick none unless one is clearly the same work.`,
+      criteria: Object.fromEntries([
+        ...picked.map((candidate) => [candidateKey(candidate.number), { title: candidate.title, body: candidate.body }]),
+        [NONE, 'None of these is the same work as the new issue.'],
+      ]),
+    },
+  };
+  for (const candidate of picked) {
+    questions[sameWorkKey(candidate.number)] = {
+      type: 'noul',
+      instructions: {
+        open_issue: { title: candidate.title, body: candidate.body },
+        question: `Is the new issue described by \`title\` and \`body\` the same underlying work as \`open_issue\`: ${SAME_WORK}? A follow-up to \`open_issue\`, or work split out of it, is not the same work.`,
+      },
+    };
+  }
+  return { model, state: issueState(issue), questions };
+}
+
 function probability(value, label) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) throw new Error(`${label} is not a probability.`);
   return value;
+}
+
+function answersOf(response) {
+  const answers = response?.answers;
+  if (!answers || typeof answers !== 'object') throw new Error('Jev response has no answers.');
+  return answers;
 }
 
 function readChoice(answers, key, question) {
@@ -128,20 +215,28 @@ function readNoul(answers, key) {
   return probability(answer.noul, `Jev answer ${key}`);
 }
 
-function mapAnswers({ request, response, thresholds = THRESHOLDS }) {
-  const answers = response?.answers;
-  if (!answers || typeof answers !== 'object') throw new Error('Jev response has no answers.');
+// recheck is { request, response } from the second call, or null when the
+// first call ranked no candidate high enough to recheck.
+function mapAnswers({ request, response, recheck = null, thresholds = THRESHOLDS }) {
+  const answers = answersOf(response);
   const { questions } = request;
+  readChoice(answers, 'duplicate', questions.duplicate);
 
-  const duplicate = readChoice(answers, 'duplicate', questions.duplicate);
-  if (duplicate.choice !== NONE && duplicate.probability >= thresholds.duplicate) {
-    const number = Number(duplicate.choice.slice(1));
-    return {
-      action: 'duplicate',
-      duplicate_of: number,
-      comment: `Duplicate of #${number} (Jev probability ${duplicate.probability.toFixed(2)}).`,
-      labels: [],
-    };
+  if (recheck) {
+    const recheckAnswers = answersOf(recheck.response);
+    const pick = readChoice(recheckAnswers, 'duplicate', recheck.request.questions.duplicate);
+    if (pick.choice !== NONE && pick.probability >= thresholds.duplicate) {
+      const number = Number(pick.choice.slice(1));
+      const sameWork = readNoul(recheckAnswers, sameWorkKey(number));
+      if (sameWork >= thresholds.sameWork) {
+        return {
+          action: 'duplicate',
+          duplicate_of: number,
+          comment: `Duplicate of #${number} (Jev probability ${pick.probability.toFixed(2)}, same work ${sameWork.toFixed(2)}).`,
+          labels: [],
+        };
+      }
+    }
   }
 
   const labels = [];
@@ -198,15 +293,32 @@ async function callJev({
   }
 }
 
-function summarize(request, response, intake) {
-  const lines = [`model: ${response.model}`, `action: ${intake.action}`];
-  for (const [key, answer] of Object.entries(response.answers)) {
-    if (!request.questions[key]) continue;
-    lines.push(answer.type === 'choice'
-      ? `${key}: ${answer.choice} (${Number(answer.probabilities?.[answer.choice]).toFixed(2)})`
-      : `${key}: ${Number(answer.noul).toFixed(2)}`);
+function summarizeAnswers(prefix, request, response) {
+  return Object.entries(response.answers)
+    .filter(([key]) => request.questions[key])
+    .map(([key, answer]) => (answer.type === 'choice'
+      ? `${prefix}${key}: ${answer.choice} (${Number(answer.probabilities?.[answer.choice]).toFixed(2)})`
+      : `${prefix}${key}: ${Number(answer.noul).toFixed(2)}`));
+}
+
+// Both calls and the mapping. fetchImpl and sleep pass through to callJev.
+async function triage({ issue, candidates, labels, model = DEFAULT_MODEL, apiKey, thresholds = THRESHOLDS, ...transport }) {
+  const request = buildRequest({ issue, candidates, labels, model });
+  const response = await callJev({ request, apiKey, ...transport });
+  const numbers = shortlist({ response, thresholds });
+  let recheck = null;
+  if (numbers.length > 0) {
+    const recheckRequest = buildRecheckRequest({ issue, candidates, numbers, model });
+    recheck = { request: recheckRequest, response: await callJev({ request: recheckRequest, apiKey, ...transport }) };
   }
-  return lines.join('\n');
+  const intake = mapAnswers({ request, response, recheck, thresholds });
+  const log = [
+    `model: ${response.model}`,
+    `action: ${intake.action}`,
+    ...summarizeAnswers('', request, response),
+    ...(recheck ? summarizeAnswers('recheck ', recheck.request, recheck.response) : ['recheck: skipped']),
+  ];
+  return { intake, log: log.join('\n') };
 }
 
 // node jev-issue-intake.cjs <context dir> <intake.json path>
@@ -214,18 +326,17 @@ function summarize(request, response, intake) {
 // labels.json from the context directory.
 async function main([contextDir, outputPath], env = process.env) {
   const read = (name) => JSON.parse(fs.readFileSync(path.join(contextDir, name), 'utf8'));
-  const request = buildRequest({
+  const { intake, log } = await triage({
     issue: read('issue.json'),
     candidates: read('open-issues.json'),
     labels: read('labels.json'),
     model: env.ISSUE_INTAKE_JEV_MODEL || DEFAULT_MODEL,
+    apiKey: env.TYPESAFE_API_KEY,
   });
-  const response = await callJev({ request, apiKey: env.TYPESAFE_API_KEY });
-  const intake = mapAnswers({ request, response });
   validateIntake(intake);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, `${JSON.stringify(intake, null, 2)}\n`);
-  console.log(summarize(request, response, intake));
+  console.log(log);
 }
 
 if (require.main === module) {
@@ -237,9 +348,14 @@ if (require.main === module) {
 
 module.exports = {
   buildRequest,
+  buildRecheckRequest,
+  shortlist,
+  triage,
   callJev,
   mapAnswers,
   askableLabels,
+  excerptOf,
+  TYPE_CRITERIA,
   THRESHOLDS,
   DEFAULT_MODEL,
   NEVER_ASKED,

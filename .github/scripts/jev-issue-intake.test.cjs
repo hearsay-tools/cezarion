@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildRequest, callJev, mapAnswers, THRESHOLDS, NEVER_ASKED, ENDPOINT } = require('./jev-issue-intake.cjs');
+const {
+  buildRequest, buildRecheckRequest, shortlist, triage, callJev, mapAnswers, excerptOf,
+  THRESHOLDS, TYPE_CRITERIA, NEVER_ASKED, ENDPOINT,
+} = require('./jev-issue-intake.cjs');
 const { validateIntake } = require('./apply-issue-intake.cjs');
 
 const labels = [
@@ -61,14 +64,72 @@ test('a long candidate list drops excerpts to stay inside the context budget', (
   assert.ok(JSON.stringify(big.state).length + JSON.stringify(big.questions.duplicate.criteria).length <= 28_000 * 3);
 });
 
-test('a duplicate closes only at or above its threshold, with a templated comment', () => {
-  const at = mapAnswers({ request, response: response({ duplicate: choice('#14', THRESHOLDS.duplicate) }) });
-  assert.deepEqual(at, { action: 'duplicate', duplicate_of: 14, comment: `Duplicate of #14 (Jev probability ${THRESHOLDS.duplicate.toFixed(2)}).`, labels: [] });
+function recheckFor(numbers, overrides = {}) {
+  const recheckRequest = buildRecheckRequest({ issue, candidates, numbers });
+  const answers = { duplicate: choice('none', 0.9) };
+  for (const number of numbers) answers[`same_work:#${number}`] = noul(0.1);
+  return { request: recheckRequest, response: { model: 'jev-1.13.0', answers: { ...answers, ...overrides } } };
+}
+
+test('the recheck re-reads the shortlisted candidates in full and can reject them all', () => {
+  const recheck = buildRecheckRequest({ issue, candidates, numbers: [14, 15] });
+  assert.deepEqual(Object.keys(recheck.questions).sort(), ['duplicate', 'same_work:#14', 'same_work:#15']);
+  assert.deepEqual(Object.keys(recheck.questions.duplicate.criteria), ['#14', '#15', 'none']);
+  assert.equal(recheck.questions.duplicate.criteria['#14'].body, candidates[0].body, 'full body, not an excerpt');
+  assert.match(recheck.questions.duplicate.instructions, /follows up on, builds on, or was split out of/);
+  assert.deepEqual(recheck.questions['same_work:#14'].instructions.open_issue, { title: candidates[0].title, body: candidates[0].body });
+  assert.throws(() => buildRecheckRequest({ issue, candidates, numbers: [211] }), /not a duplicate candidate/);
+});
+
+test('the shortlist is the top three candidates once the best reaches its threshold', () => {
+  const ranked = { answers: { duplicate: { type: 'choice', choice: 'none', probabilities: { none: 0.5, '#14': 0.3, '#15': 0.1, '#16': 0.06, '#17': 0.04 } } } };
+  assert.deepEqual(shortlist({ response: ranked }), [14, 15, 16]);
+  const low = { answers: { duplicate: { type: 'choice', choice: 'none', probabilities: { none: 0.9, '#14': THRESHOLDS.shortlist - 0.01 } } } };
+  assert.deepEqual(shortlist({ response: low }), []);
+  const at = { answers: { duplicate: { type: 'choice', choice: '#14', probabilities: { none: 0.1, '#14': THRESHOLDS.shortlist } } } };
+  assert.deepEqual(shortlist({ response: at }), [14]);
+});
+
+test('a duplicate closes only when the recheck pick and its same-work answer both reach their thresholds', () => {
+  const close = recheckFor([14, 15], { duplicate: choice('#14', THRESHOLDS.duplicate), 'same_work:#14': noul(THRESHOLDS.sameWork) });
+  const at = mapAnswers({ request, response: response(), recheck: close });
+  assert.deepEqual(at, {
+    action: 'duplicate',
+    duplicate_of: 14,
+    comment: `Duplicate of #14 (Jev probability ${THRESHOLDS.duplicate.toFixed(2)}, same work ${THRESHOLDS.sameWork.toFixed(2)}).`,
+    labels: [],
+  });
   validateIntake(at);
 
-  const below = mapAnswers({ request, response: response({ duplicate: choice('#14', THRESHOLDS.duplicate - 0.01) }) });
-  assert.equal(below.action, 'label');
-  assert.equal(below.duplicate_of, null);
+  const weakPick = recheckFor([14], { duplicate: choice('#14', THRESHOLDS.duplicate - 0.01), 'same_work:#14': noul(0.99) });
+  assert.equal(mapAnswers({ request, response: response(), recheck: weakPick }).action, 'label');
+  const notSameWork = recheckFor([14], { duplicate: choice('#14', 0.99), 'same_work:#14': noul(THRESHOLDS.sameWork - 0.01) });
+  assert.equal(mapAnswers({ request, response: response(), recheck: notSameWork }).action, 'label');
+  const rejected = recheckFor([14], { duplicate: choice('none', 0.99), 'same_work:#14': noul(0.99) });
+  assert.equal(mapAnswers({ request, response: response(), recheck: rejected }).action, 'label');
+});
+
+test('the first call alone never closes a duplicate, however sure it is', () => {
+  const result = mapAnswers({ request, response: response({ duplicate: choice('#14', 1) }) });
+  assert.equal(result.action, 'label');
+  assert.equal(result.duplicate_of, null);
+});
+
+test('excerpts drop template headings and HTML comments', () => {
+  assert.equal(excerptOf('## Context / Why\n\nUnder load, git collides.\n<!-- note -->\n### What\nFix it.', 300), 'Under load, git collides. Fix it.');
+  assert.equal(excerptOf('a'.repeat(400), 300).length, 301);
+  assert.equal(request.questions.duplicate.criteria['#14'].excerpt.startsWith('xxx'), true);
+});
+
+test('type options carry code-owned descriptions, none included', () => {
+  assert.deepEqual(request.questions.type.criteria, {
+    bug: TYPE_CRITERIA.bug,
+    enhancement: TYPE_CRITERIA.enhancement,
+    documentation: TYPE_CRITERIA.documentation,
+    none: TYPE_CRITERIA.none,
+  });
+  assert.match(TYPE_CRITERIA.bug, /flaky test/);
+  assert.match(TYPE_CRITERIA.none, /refactoring/);
 });
 
 test('an issue gets at most one area and one type', () => {
@@ -96,6 +157,8 @@ test('none answers and accessibility map as asked', () => {
 test('a malformed answer fails instead of guessing', () => {
   assert.throws(() => mapAnswers({ request, response: {} }), /no answers/);
   assert.throws(() => mapAnswers({ request, response: response({ duplicate: choice('#211', 0.99) }) }), /not offered/);
+  assert.throws(() => mapAnswers({ request, response: response(), recheck: recheckFor([14], { duplicate: choice('#15', 0.99) }) }), /not offered/);
+  assert.throws(() => mapAnswers({ request, response: response(), recheck: recheckFor([14], { duplicate: choice('#14', 0.99), 'same_work:#14': undefined }) }), /missing/);
   assert.throws(() => mapAnswers({ request, response: response({ type: noul(0.5) }) }), /not a choice/);
   assert.throws(() => mapAnswers({ request, response: response({ accessibility: noul(1.5) }) }), /not a probability/);
   assert.throws(() => mapAnswers({ request, response: response({ main_area: undefined }) }), /missing/);
@@ -135,4 +198,27 @@ test('callJev fails closed on a client error, on exhausted retries and without a
   await assert.rejects(callJev({ request, apiKey: 'k', fetchImpl: async () => reply(529), sleep: async () => {}, maxAttempts: 2 }), /HTTP 529/);
   await assert.rejects(callJev({ request, apiKey: 'k', fetchImpl: async () => { throw new Error('socket hang up'); }, sleep: async () => {}, maxAttempts: 2 }), /after 2 attempts: socket hang up/);
   await assert.rejects(callJev({ request, apiKey: '', fetchImpl: async () => reply(200) }), /TYPESAFE_API_KEY/);
+});
+
+test('triage makes one call when no candidate ranks high, and a recheck call when one does', async () => {
+  const replies = (bodies) => {
+    const calls = [];
+    const fetchImpl = async (url, init) => { calls.push(JSON.parse(init.body)); return reply(200, bodies.shift()); };
+    return { calls, fetchImpl };
+  };
+  const quiet = replies([response()]);
+  const one = await triage({ issue, candidates, labels, apiKey: 'k', fetchImpl: quiet.fetchImpl, sleep: async () => {} });
+  assert.equal(quiet.calls.length, 1);
+  assert.deepEqual(one.intake.labels, ['area-web', 'bug']);
+  assert.match(one.log, /recheck: skipped/);
+
+  const ranked = response({ duplicate: { type: 'choice', choice: '#14', probabilities: { '#14': 0.7, '#15': 0.2, none: 0.1 }, confidence: 0.6 } });
+  const sure = { model: 'jev-1.13.0', answers: { duplicate: choice('#14', 0.97), 'same_work:#14': noul(0.95), 'same_work:#15': noul(0.1) } };
+  const loud = replies([ranked, sure]);
+  const two = await triage({ issue, candidates, labels, apiKey: 'k', fetchImpl: loud.fetchImpl, sleep: async () => {} });
+  assert.equal(loud.calls.length, 2);
+  assert.deepEqual(Object.keys(loud.calls[1].questions.duplicate.criteria), ['#14', '#15', 'none']);
+  assert.equal(two.intake.action, 'duplicate');
+  assert.equal(two.intake.duplicate_of, 14);
+  assert.match(two.log, /recheck same_work:#14: 0\.95/);
 });
