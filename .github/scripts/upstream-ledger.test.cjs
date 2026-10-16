@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
+const { spawnSync } = require('node:child_process');
 const yaml = require('yaml');
 const {
   parseLog,
@@ -51,6 +53,50 @@ test('parseApplyCheck counts files the 3-way dry run could not apply', () => {
     'Applied patch to \'packages/a.ts\' with conflicts.',
   ].join('\n');
   assert.equal(parseApplyCheck(out), 2);
+});
+
+test('parseApplyCheck counts distinct fork-deleted files alongside patch failures', () => {
+  const output = [
+    'error: packages/deleted file.ts: does not exist in index',
+    'error: packages/deleted file.ts: does not exist in index',
+    'error: packages/other.ts: does not exist in index',
+    'error: patch failed: packages/other.ts:12',
+    'error: packages/other.ts: patch does not apply',
+    "Applied patch to 'packages/clean.ts' cleanly.",
+  ].join('\n');
+  assert.equal(parseApplyCheck(output), 2);
+});
+
+test('applyScan includes a fork-deleted file in hint.conflicts from a real Git dry run', (t) => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'upstream-deleted-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const git = (args, input) => spawnSync('git', args, { cwd, input, encoding: 'utf8' });
+  const ok = (args) => {
+    const result = git(args);
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout;
+  };
+  ok(['init', '-q']);
+  ok(['config', 'user.name', 'Test']);
+  ok(['config', 'user.email', 'test@example.com']);
+  fs.writeFileSync(path.join(cwd, 'deleted file.ts'), 'before\n');
+  ok(['add', '.']);
+  ok(['commit', '-qm', 'base']);
+  const base = ok(['rev-parse', 'HEAD']).trim();
+  fs.writeFileSync(path.join(cwd, 'deleted file.ts'), 'after\n');
+  ok(['commit', '-qam', 'upstream edit']);
+  const patch = ok(['diff', base, 'HEAD']);
+  ok(['checkout', '--detach', base]);
+  ok(['rm', 'deleted file.ts']);
+  ok(['commit', '-qm', 'fork deletes file']);
+  const result = git(['apply', '--check', '--3way'], patch);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /error: deleted file\.ts: does not exist in index/);
+  const { added } = applyScan(ledger(), {
+    commits: [entry()], hints: { [SHA_A]: parseApplyCheck(result.stderr) },
+    upstreamHead: SHA_HEAD, date: '2026-10-16',
+  });
+  assert.equal(added[0].hint.conflicts, 1);
 });
 
 test('validateLedger accepts a decided ledger and names every violated rule', () => {
