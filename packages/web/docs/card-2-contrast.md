@@ -38,11 +38,13 @@ The existing tool-error fix belongs to hearsay-tools/cezarion#1114.
 
 `src/test/card-2-contrast.test.ts` scans JSX class strings, including literal
 branches of class helpers and templates. It follows card-2 ancestors, inherited
-ink and font sizes, and known tool/hook body slots. A named opaque palette background ends inheritance; transparent/translucent
+ink, font sizes and named font weights, and known tool/hook body slots. A named opaque palette background ends inheritance; transparent/translucent
 backgrounds, images, and background layout utilities retain it conservatively. Literal size/background branches are checked
 conservatively, including empty/absent class branches. Expansion is capped at 128
 combinations with a conservative fallback. JSX-only expressions are visited as elements rather than wrapper text. Unknown font sizes are treated conservatively as
-small. Variant-prefixed ink, size and card-2 utilities are checked as possible
+small. Known pixel/Tailwind sizes qualify as large at 24 px regular or 18.67 px
+with bold, extrabold or black weight; unknown weights grant no bold exemption.
+Variant-prefixed ink, size, weight and card-2 utilities are checked as possible
 states alongside the default state; variant backgrounds cannot grant an opaque-surface exemption. Icons without text and explicitly large text are excluded.
 
 This is a static guard, not a computed-style audit: runtime-generated classes,

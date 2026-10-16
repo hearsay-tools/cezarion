@@ -93,16 +93,23 @@ function utilityStates(branch: string): string[][] {
     if (lastColon === -1) base.push(token)
     else {
       const utility = token.slice(lastColon + 1)
-      if (utility.startsWith('text-') || utility === 'bg-card-2') variants.push(utility)
+      if (utility.startsWith('text-') || utility.startsWith('font-') || utility === 'bg-card-2') variants.push(utility)
     }
   }
   return variants.length ? [base, [...base, ...variants]] : [base]
 }
 
+const namedSizes: Record<string, number> = { xs: 12, sm: 14, base: 16, lg: 18, xl: 20, '2xl': 24, '3xl': 30, '4xl': 36, '5xl': 48, '6xl': 60, '7xl': 72, '8xl': 96, '9xl': 128 }
+function fontSize(utility: string): number {
+  const value = utility.slice(5).split('/')[0] ?? ''
+  const pixels = /^\[(\d+(?:\.\d+)?)px\]$/.exec(value)
+  return pixels ? Number(pixels[1]) : namedSizes[value] ?? 0 // unknown explicit size is conservatively small
+}
+
 function scan(source: string): string[] {
   const file = parse(source, { sourceType: 'module', plugins: ['typescript', 'jsx'] })
   const sites: string[] = []
-  function visit(node: Node, card = false, color = '', inheritedLarge = false): void {
+  function visit(node: Node, card = false, color = '', inheritedSize = 0, inheritedBold = false): void {
     if (node.type === 'JSXElement') {
       const opening = node.openingElement
       const attr = (name: string) => opening.attributes.find(p => p.type === 'JSXAttribute' && p.name.type === 'JSXIdentifier' && p.name.name === name) as JSXAttribute | undefined
@@ -122,8 +129,10 @@ function scan(source: string): string[] {
         const ownColors = classes.filter(c => /^text-(?:danger|soft-foreground|muted-foreground|supporting-foreground|link-foreground|foreground|signal-word-red)$/.test(c))
         const colors = ownColors.length ? ownColors : [color]
         const sizes = classes.filter(c => /^text-(?:xs|sm|base|lg|xl|\d+xl)(?:\/.*)?$|^text-(?:\[|\(length:)/.test(c))
-        const large = sizes.length ? sizes.every(s => /^(?:text-[2-9]xl|text-\[(?:2[4-9]|[3-9]\d)px\])$/.test(s)) : inheritedLarge
-        return { onCard, colors, large }
+        const size = sizes.length ? Math.min(...sizes.map(fontSize)) : inheritedSize
+        const weights = classes.filter(c => /^font-(?:thin|extralight|light|normal|medium|semibold|bold|extrabold|black)$|^font-(?:\[|\(weight:)/.test(c))
+        const bold = weights.length ? weights.every(w => /^font-(?:bold|extrabold|black)$/.test(w)) : inheritedBold
+        return { onCard, colors, size, bold, large: size >= 24 || bold && size >= 56 / 3 }
       })
       const unsafe = (ink: string) => ink === 'text-danger' || ink === 'text-soft-foreground'
       const children = node.children
@@ -132,10 +141,10 @@ function scan(source: string): string[] {
       }
       // Descendants conservatively inherit any unsafe alternative across a class branch.
       const inks = states.flatMap(s => s.colors)
-      for (const child of children) visit(child, states.some(s => s.onCard), inks.find(unsafe) ?? inks[0] ?? '', states.every(s => s.large))
+      for (const child of children) visit(child, states.some(s => s.onCard), inks.find(unsafe) ?? inks[0] ?? '', Math.min(...states.map(s => s.size)), states.every(s => s.bold))
       return
     }
-    eachChild(node, child => visit(child, card, color, inheritedLarge))
+    eachChild(node, child => visit(child, card, color, inheritedSize, inheritedBold))
   }
   visit(file)
   return sites
@@ -175,6 +184,15 @@ it('checks variant colors, sizes and surfaces without losing inherited defaults'
   expect(scan(`<p className="bg-background text-danger text-xs md:bg-card-2">bad</p>`)).toHaveLength(1)
   expect(scan(`<p className="bg-card-2 text-foreground text-[24px] [&:hover]:text-danger [&:hover]:text-[length:var(--small)]">bad</p>`)).toHaveLength(1)
   expect(scan(`<p className="bg-card-2 text-muted-foreground md:text-foreground text-xs md:text-2xl">safe</p>`)).toEqual([])
+})
+it('applies the bold large-text threshold and follows inherited size and weight', () => {
+  expect(scan(`<div className="bg-card-2 text-danger text-xl font-bold">safe</div>`)).toEqual([])
+  expect(scan(`<div className="bg-card-2 text-danger text-[20px]"><span className="font-bold">safe</span></div>`)).toEqual([])
+  expect(scan(`<div className="bg-card-2 text-danger text-[19px] font-bold"><span>safe</span></div>`)).toEqual([])
+  expect(scan(`<div className="bg-card-2 text-danger text-[18px] font-bold">small</div>`)).toHaveLength(1)
+  expect(scan(`<div className="bg-card-2 text-danger text-xl font-bold"><span className="font-normal">small</span></div>`)).toHaveLength(1)
+  expect(scan(`<div className="bg-card-2 text-danger text-xl font-bold md:font-normal">small at md</div>`)).toHaveLength(1)
+  expect(scan(`<div className="bg-card-2 text-danger text-xl font-semibold">small</div>`)).toHaveLength(1)
 })
 it('lets documented safe foregrounds override inherited unsafe ink', () => {
   expect(scan(`<div className="bg-card-2 text-danger"><span className="text-supporting-foreground">safe</span><span className="text-link-foreground">safe</span></div>`)).toEqual([])
