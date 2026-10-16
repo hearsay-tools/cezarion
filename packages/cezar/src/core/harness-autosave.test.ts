@@ -18,8 +18,17 @@ describe('harness parity — autosave cleanup (#495)', () => {
         vi.stubEnv('CEZ_DELEGATION', '1');
         const save = worktrees.autosaveCommit;
         const saves: Promise<unknown>[] = [];
+        // The stubbed 700 ms budget is for the intercepted Git below, not for the real
+        // saves before it. On a loaded host, R25's first Finish runs a real final save
+        // that can outlive 500 ms. The kill that follows has 200 ms to prove termination,
+        // and an unproven one keeps the cleanup blocker by design
+        // (hearsay-tools/cezarion#934). The run settles and `isActive` turns false, but
+        // Continue is refused with "termination not confirmed" until Git is gone
+        // (hearsay-tools/cezarion#1095). So the earlier saves run with the product
+        // budget, and only the intercepted phase gets the shorter one.
+        let budget: { timeoutMs: number; killGraceMs: number; confirmMs: number } | undefined;
         vi.spyOn(worktrees, 'autosaveCommit').mockImplementation((dir, reason, options) => {
-          const task = save(dir, reason, { ...options, timeoutMs: 500, killGraceMs: 100, confirmMs: 100 });
+          const task = save(dir, reason, { ...options, ...budget });
           saves.push(task);
           return task;
         });
@@ -66,6 +75,7 @@ if (args.includes('status') && args.includes('--porcelain')) {
 }
 `, { mode: 0o755 });
             process.env.PATH = `${bin}:${path}`;
+            budget = { timeoutMs: 500, killGraceMs: 100, confirmMs: 100 };
             try {
               expect(manager.finish(runId)).toBe(true);
               // Under load the stubbed 700ms Git budget is not the wait: reaching
