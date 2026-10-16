@@ -35,6 +35,18 @@ const CLI_FLAG: Record<string, string> = {
 };
 /** Generic zod message for a refine that sets none; any other message is the schema's own words. */
 const ZOD_DEFAULT_MESSAGE = 'Invalid input';
+/**
+ * `--attach` rides in `context.artifacts`, so a schema issue under it is an `--attach` failure. The
+ * schema's own custom messages (duplicate, .gitignore) already name the path; any other issue names
+ * the value as typed, found by the artifact index (the CLI sends one `parent-file` per `--attach`).
+ */
+function attachIssue(error: z.ZodError, operation: string, typed: string[]): string | undefined {
+  const first = error.issues[0];
+  if (first?.path[0] !== 'context' || first.path[1] !== 'artifacts') return undefined;
+  if (first.code === 'custom' && first.message !== ZOD_DEFAULT_MESSAGE) return first.message;
+  const value = typeof first.path[2] === 'number' ? typed[first.path[2]] : undefined;
+  return value === undefined ? `${operation} has invalid --attach` : `${operation} has invalid --attach: ${value}`;
+}
 const WORKER_USAGE = { operations: [
   { name: 'spawn', positionals: 1, required: ['--baseline', '--request-id'], optional: ['--workflow', '--skill', '--runner', '--backend', '--model', '--effort', '--context', '--context-file', '--attach'] },
   { name: 'inspect', positionals: 1 },
@@ -115,7 +127,7 @@ class WorkerCliError extends Error {}
 /**
  * Resolve each `--attach` value against the caller's directory into a path relative to its worktree
  * root, which is what the server resolves against. Existence, file type and symlinks are checked here
- * so a typo fails before any request; whether git ignores the path is the server's call (#1149).
+ * so a typo fails before any request; whether git ignores the path is the server's call (hearsay-tools/cezarion#1149).
  */
 async function attachPaths(values: string[]): Promise<string[]> {
   if (values.length === 0) return [];
@@ -159,10 +171,6 @@ function formatWorkerCliError(error: unknown, argv: string[]): string {
     const missing = error.issues.filter(issue => issue.code === 'invalid_type' && issue.message.includes('undefined'));
     if (missing.length) return `${operation} is missing ${missing.map(issue => cliName(issue.path, argv)).join(' and ')}`;
     const first = error.issues[0];
-    // `--attach` rides in `context.artifacts`; only its custom messages (duplicate, .gitignore) already name the path.
-    if (first?.path[0] === 'context' && first.path[1] === 'artifacts') {
-      return first.code === 'custom' && first.message !== ZOD_DEFAULT_MESSAGE ? first.message : `${operation} has invalid --attach`;
-    }
     return first ? `${operation} has invalid ${cliName(first.path, argv)}` : 'Invalid worker command arguments';
   }
   if (error instanceof Error && 'code' in error && error.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') {
@@ -275,13 +283,16 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
         : new TextDecoder('utf-8', { fatal: true }).decode(await readBoundedContextFile(String(values['context-file']), 400_000));
       const attached = await attachPaths((values.attach as string[] | undefined) ?? []);
       const context = { ...(contextText === undefined ? {} : { text: contextText }), ...(attached.length === 0 ? {} : { artifacts: attached.map(path => ({ kind: 'parent-file' as const, path })) }) };
-      body = workerSpawnRequestSchema.parse({ task: positionals[0], baseline: values.baseline, requestId: values['request-id'],
+      const spawnRequest = { task: positionals[0], baseline: values.baseline, requestId: values['request-id'],
         ...(runner === undefined ? {} : { backend: runner }), ...(values.model === undefined ? {} : { model: values.model }),
         ...(values.effort === undefined ? {} : { effort: values.effort }),
         ...(values.workflow === undefined ? {} : { workflow: values.workflow }),
         ...(values.skill === undefined ? {} : { skill: values.skill }),
         ...(Object.keys(context).length === 0 ? {} : { context }),
-      });
+      };
+      const parsed = workerSpawnRequestSchema.safeParse(spawnRequest);
+      if (!parsed.success) throw new WorkerCliError(attachIssue(parsed.error, operation, (values.attach as string[] | undefined) ?? []) ?? formatWorkerCliError(parsed.error, argv));
+      body = parsed.data;
     } else if (operation === 'wait' || operation === 'wait-requests') {
       const timeout = values['timeout-seconds'];
       if (timeout !== undefined && (typeof timeout !== 'string' || !/^\d+$/.test(timeout))) throw new WorkerCliError(`${operation} has invalid --timeout-seconds`);

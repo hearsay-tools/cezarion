@@ -338,10 +338,13 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
       expect(json()).toEqual({ code: 'invalid_input', error: '--attach cannot attach a .gitignore: qa/.gitignore; ignore rules must come from the baseline' });
       expect(fetchMock).not.toHaveBeenCalled();
     });
-    it('names --attach for a path the schema refuses without a custom message', async () => {
+    it('names the rejected --attach value for a path the schema refuses without a custom message', async () => {
       mkdirSync(join(repo, '.git/x'), { recursive: true }); writeFileSync(join(repo, '.git/x/f'), 'x');
       expect(await runWorkerCommand(spawnArgs('--attach', '.git/x/f'), env)).toBe(1);
-      expect(json()).toEqual({ code: 'invalid_input', error: 'spawn has invalid --attach' });
+      expect(json()).toEqual({ code: 'invalid_input', error: 'spawn has invalid --attach: .git/x/f' });
+      // With several attachments, the index in the schema issue picks the bad one, as the parent typed it.
+      expect(await runWorkerCommand(spawnArgs('--attach', 'qa/a.md', '--attach=./.git/x/f', '--attach', 'qa/b.md'), env)).toBe(1);
+      expect(json()).toEqual({ code: 'invalid_input', error: 'spawn has invalid --attach: ./.git/x/f' });
       expect(fetchMock).not.toHaveBeenCalled();
     });
   });
