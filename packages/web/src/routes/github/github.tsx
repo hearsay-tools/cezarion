@@ -1,6 +1,7 @@
 import './github-layout.css'
 import { hashKey, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { LoaderCircleIcon } from 'lucide-react'
+import { Virtualizer } from 'virtua'
 import { ArrowLeftIcon, CheckIcon, CircleDotIcon, ChevronDownIcon, GitPullRequestIcon, RefreshCwIcon, SearchIcon, TriangleAlertIcon } from '@/components/design-icons'
 import {
   useEffect,
@@ -51,6 +52,7 @@ import { IssueFilters } from './issue-filters'
 import { allLabels, filterGithubItems, labelChipStyle, shouldSearchForge } from './github-filter'
 import { GithubFilterScreen } from './github-filter-screen'
 import { GithubLoading } from './github-loading'
+import { useListScrollOwner, useLoadMoreSentinel, useStartMargin } from './github-paging'
 import {
   FAILING_QUERY, REVIEW_QUERY, githubFilterPath, isSearchBackedFilter, issueNumbersWithTask, parseGithubFilter,
   rowsFromSearch, searchQueryFor, GITHUB_PAGE_SIZE, ISSUE_ROWS, PR_ROWS, ACTIVE_FILTER_LABEL, type GithubFilter,
@@ -600,6 +602,29 @@ export function GithubRoute({
   const commentsOf = (item: GithubItem): number | undefined =>
     commentCounts[item.number] ?? (deferredNumbers.has(item.number) ? undefined : item.comments)
 
+  // Scroll-driven paging (#1183, port of open-mercato/cezar#1374). The rows virtualize against
+  // the element that really scrolls them (the list pane from `md` up, the shell's `main` below
+  // it), and the next page loads when the sentinel nears that element's bottom. No paging under
+  // a text, label, assignee or board narrow: a narrowed list would keep the sentinel in view and
+  // crawl every page, and anything past the open list is the forge search's job (#730). The
+  // list-backed presets keep paging, so their counts read `N+` until a side is done; the
+  // search-backed ones never page. A failed page stops the observer too, or the still-visible
+  // sentinel would retry it in a tight loop.
+  const [listEl, setListEl] = useState<HTMLElement | null>(null)
+  const [rowsEl, setRowsEl] = useState<HTMLDivElement | null>(null)
+  const scrollOwner = useListScrollOwner(listEl)
+  const scrollOwnerRef = useRef<HTMLElement | null>(null)
+  scrollOwnerRef.current = scrollOwner
+  const startMargin = useStartMargin(rowsEl, scrollOwner)
+  const narrowing = query.trim() !== '' || labelFilter.length > 0
+    || (view === 'issues' && ((!isAssignedFilter && assigneeFilter.length > 0) || activeProject !== ''))
+  const pagingShown = list.hasNextPage && !narrowing && backedQuery === null && items.length > 0
+  const loadMoreRef = useLoadMoreSentinel(
+    pagingShown && !list.isFetchingNextPage && !list.isFetchNextPageError,
+    scrollOwner,
+    () => void list.fetchNextPage(),
+  )
+
   // The bare `/github` restores the remembered sub-tab (#417). It lives HERE rather than in a
   // wrapper component so `/github` and `/github/issues/:n` render the same element type: React
   // reconciles by type, so a wrapper made the hop between them a full remount, resetting `query`
@@ -855,6 +880,7 @@ export function GithubRoute({
       >
       {/* Stack whenever columns would leave less than 360px for the detail. */}
       <section
+        ref={setListEl}
         data-slot="gh-list"
         data-mobile-preview={compactPreview || undefined}
         style={{ '--github-list-width': `${githubListWidth}px` } as CSSProperties}
@@ -873,23 +899,61 @@ export function GithubRoute({
             </div>
           )
         ) : (
-          <ul data-slot="gh-rows" className="flex flex-col gap-1">
-            {items.map((item, index) => (
-              <GithubRow
-                key={item.url}
-                item={item}
-                view={view}
-                filter={linkFilter}
-                colors={labelColors}
-                active={selected?.url === item.url}
-                compactHidden={compactPreview && index >= 2 && selected?.url !== item.url}
-                queued={queued.has(item.url)}
-                checks={item.kind === 'pr' ? checksMap?.[item.number] ?? item.checks : item.checks}
-                comments={commentsOf(item)}
-              />
-            ))}
-          </ul>
+          <div ref={setRowsEl} data-slot="gh-rows" data-virtualized={scrollOwner ? 'true' : undefined} role="list">
+            {(() => {
+              // `pb-1` on each row keeps the old list's `gap-1`; a virtualizer lays rows out itself.
+              const rendered = items.map((item, index) => (
+                <div key={item.url} role="listitem" className="pb-1">
+                  <GithubRow
+                    item={item}
+                    view={view}
+                    filter={linkFilter}
+                    colors={labelColors}
+                    active={selected?.url === item.url}
+                    compactHidden={compactPreview && index >= 2 && selected?.url !== item.url}
+                    queued={queued.has(item.url)}
+                    checks={item.kind === 'pr' ? checksMap?.[item.number] ?? item.checks : item.checks}
+                    comments={commentsOf(item)}
+                  />
+                </div>
+              ))
+              // Keyed by the owner, so a breakpoint that moves the scroll owner remounts the
+              // virtualizer against the new one instead of keeping the stale scroll offset.
+              return scrollOwner ? (
+                <Virtualizer key={scrollOwner === listEl ? 'list' : 'main'} scrollRef={scrollOwnerRef} startMargin={startMargin}>
+                  {rendered}
+                </Virtualizer>
+              ) : rendered
+            })()}
+          </div>
         )}
+
+        {pagingShown ? (
+          <div
+            ref={loadMoreRef}
+            data-slot="gh-load-more"
+            className="flex min-h-6 items-center justify-center gap-1.5 px-4 pb-3 text-xs text-soft-foreground"
+          >
+            {list.isFetchingNextPage ? (
+              <>
+                <LoaderCircleIcon aria-hidden="true" className="size-3.5 motion-safe:animate-spin" />
+                Loading more…
+              </>
+            ) : list.isFetchNextPageError ? (
+              <>
+                Could not load more.
+                <button
+                  type="button"
+                  data-slot="gh-load-more-retry"
+                  onClick={() => void list.fetchNextPage()}
+                  className="font-medium text-accent-text hover:underline"
+                >
+                  Retry
+                </button>
+              </>
+            ) : null}
+          </div>
+        ) : null}
 
         {backedQuery !== null && filterSearch.data?.available && filterSearch.data.truncated ? (
           <div data-slot="gh-filter-note" role="status" className="px-4 py-3 text-xs text-soft-foreground">
