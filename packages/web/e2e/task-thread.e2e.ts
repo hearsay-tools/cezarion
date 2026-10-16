@@ -700,8 +700,7 @@ describe('task thread', () => {
         }
         expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= window.innerWidth`), variant.id).toBe(true)
         // The transcript pins to its end; bring the hooks into the QA screenshot.
-        browser.evaluate(`${card('PostToolBatch')}.scrollIntoView({ block: 'center', behavior: 'instant' })`)
-        browser.screenshot(`${artifactsDir}/issue-961-hooks-${variant.id}.png`, { viewport: true })
+        browser.screenshotElement('[data-slot="hook-card"][data-status="completed"]', `${artifactsDir}/issue-961-hooks-${variant.id}.png`)
       }
     } finally {
       restoreContrastQaDefaults(browser)
