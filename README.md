@@ -467,7 +467,8 @@ and loads the next page as you scroll toward its end. The tabs and All open show
 GitHub's exact open totals. A preset count shows a `+` while more pages remain
 unloaded, and a search count shows one when the search reaches its result limit;
 an unavailable count is not shown as zero. Filtering by search, label, assignee or
-board narrows the loaded rows and does not load more pages.
+board narrows the loaded rows; while it is on, the next page loads only when you press
+Load more.
 
 The `body` field on `GET /api/v1/github` list rows is deprecated. It is still sent,
 and a later minor removes it; read an item's body from the comments route's `detail`. Views without their own navigation still show tasks in the sidebar.

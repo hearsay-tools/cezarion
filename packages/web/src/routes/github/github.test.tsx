@@ -811,6 +811,30 @@ describe('scroll-driven paging (hearsay-tools/cezarion#1183, port of open-mercat
     expect(sent.filter((r) => listPage(r.path) && r.path.includes('issuesCursor=c1'))).toHaveLength(1)
   })
 
+  it('under a text narrow, Load more reaches matches on later pages without auto-paging', async () => {
+    const sent = stubPaged()
+    renderAt('/github?filter=all')
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    // 'session' matches #142 on page 1; page 2's #120 is titled to match too.
+    const paged = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input).includes('issuesCursor=')) {
+        sent.push({ path: String(input), method: 'GET', body: undefined })
+        return jsonResponse({ ...GITHUB, issues: [{ ...ISSUE_120, title: 'Older session bug' }], prs: [], issuesNextCursor: null, prsNextCursor: null })
+      }
+      return paged(input, init)
+    })
+    fireEvent.change(document.querySelector('[data-slot="gh-search"]')!, { target: { value: 'session' } })
+    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142']))
+    // No observer: a narrowed list would keep the sentinel in view and crawl every page.
+    expect(live()).toHaveLength(0)
+    expect(sent.filter((r) => r.path.includes('issuesCursor='))).toHaveLength(0)
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more' }))
+    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142', '120']))
+    expect(sent.filter((r) => r.path.includes('issuesCursor='))).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull()
+  })
+
   it('Refresh during a pending page load keeps the fresh first page', async () => {
     let finishPage!: (response: Response) => void
     stubPaged()
@@ -842,8 +866,9 @@ describe('scroll-driven paging (hearsay-tools/cezarion#1183, port of open-mercat
     await waitFor(() => expect(sentinel()).not.toBeNull())
     fireEvent.change(document.querySelector('[data-slot="gh-search"]')!, { target: { value: '142' } })
     await waitFor(() => expect(rows()).toHaveLength(1))
-    expect(sentinel()).toBeNull()
+    // Paused, not gone: the next page waits for Load more.
     expect(live()).toHaveLength(0)
+    expect(screen.getByRole('button', { name: 'Load more' })).toBeTruthy()
     cleanup()
     observers = []
     stubPaged()

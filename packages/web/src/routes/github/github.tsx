@@ -606,9 +606,9 @@ export function GithubRoute({
 
   // Scroll-driven paging (#1183, port of open-mercato/cezar#1374). The rows virtualize against
   // the element that really scrolls them (the list pane from `md` up, the shell's `main` below
-  // it), and the next page loads when the sentinel nears that element's bottom. No paging under
-  // a text, label, assignee or board narrow: a narrowed list would keep the sentinel in view and
-  // crawl every page, and anything past the open list is the forge search's job (#730). The
+  // it), and the next page loads when the sentinel nears that element's bottom. No automatic
+  // paging under a text, label, assignee or board narrow: a narrowed list would keep the sentinel
+  // in view and crawl every page, so the next page waits for the user's Load more. The
   // list-backed presets keep paging, so their counts read `N+` until a side is done; the
   // search-backed ones never page. A failed page stops the observer too, or the still-visible
   // sentinel would retry it in a tight loop.
@@ -623,7 +623,11 @@ export function GithubRoute({
   // Gated on the loaded SIDE, not on the preset's matches: a preset with nothing on the loaded
   // pages must still page on to the match a later page holds.
   const loadedSide = view === 'issues' ? gh?.issues.length ?? 0 : gh?.prs.length ?? 0
-  const pagingShown = list.hasNextPage && !narrowing && backedQuery === null && loadedSide > 0
+  const pagingAvailable = list.hasNextPage && backedQuery === null && loadedSide > 0
+  const pagingShown = pagingAvailable && !narrowing
+  // Under a narrow the next page waits for the user's Load more: the filter only sees loaded
+  // rows, and a match on a later page must stay reachable without crawling every page.
+  const manualPaging = pagingAvailable && narrowing
   const loadMoreRef = useLoadMoreSentinel(
     pagingShown && !list.isFetchingNextPage && !list.isFetchNextPageError,
     scrollOwner,
@@ -939,7 +943,7 @@ export function GithubRoute({
           </div>
         )}
 
-        {pagingShown ? (
+        {pagingAvailable ? (
           <div
             ref={loadMoreRef}
             data-slot="gh-load-more"
@@ -960,6 +964,18 @@ export function GithubRoute({
                   className="font-medium text-accent-text hover:underline"
                 >
                   Retry
+                </button>
+              </>
+            ) : manualPaging ? (
+              <>
+                Filters cover the loaded {view === 'issues' ? 'issues' : 'pull requests'}.
+                <button
+                  type="button"
+                  data-slot="gh-load-more-manual"
+                  onClick={() => void list.fetchNextPage()}
+                  className="font-medium text-accent-text hover:underline"
+                >
+                  Load more
                 </button>
               </>
             ) : null}
