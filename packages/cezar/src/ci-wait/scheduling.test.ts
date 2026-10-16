@@ -72,8 +72,8 @@ it('keeps at most four watchers and starts the fifth only after an owned watcher
 it('does not create two watchers for one wait identity',async()=>{
  const github=new ScriptedGithub();github.rows=[{name:'build',state:'PENDING',bucket:'pending',link:''}];const s=new CiWatcherSupervisor({github});services.push(s);const c=new AbortController();const w=wait();const a=s.watch(w,c.signal),b=s.watch(w,c.signal);expect(a).toBe(b);await vi.waitFor(()=>expect(github.active).toBe(1));c.abort();await a;
 });
-it('reports mixed outcomes with failure before cancellation before skips',async()=>{
- for(const [buckets,want] of [[['pass','skipping'],'skipped'],[['skipping','cancel'],'cancelled'],[['cancel','fail'],'failed']] as const){const github=new ScriptedGithub();github.rows=buckets.map(bucket=>({name:'build',state:bucket,link:'',bucket}));expect((await start(github).result).outcome).toBe(want);}
+it('reports mixed outcomes with failure before cancellation before passing checks',async()=>{
+ for(const [buckets,want] of [[['pass','skipping'],'passed'],[['skipping','cancel'],'cancelled'],[['cancel','fail'],'failed']] as const){const github=new ScriptedGithub();github.rows=buckets.map(bucket=>({name:'build',state:bucket,link:'',bucket}));expect((await start(github).result).outcome).toBe(want);}
 });
 
 it('expires a queued wait on its original deadline without starting a fifth watcher',async()=>{
