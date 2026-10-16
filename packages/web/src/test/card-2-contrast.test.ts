@@ -67,9 +67,13 @@ function mayRenderFalsyNumber(node: Node): boolean {
 function rendersText(node: Node): boolean {
   switch (node.type) {
     case 'JSXText': return node.value.trim() !== ''
-    case 'JSXElement': case 'JSXFragment': case 'JSXEmptyExpression':
+    case 'JSXFragment': return node.children.some(rendersText)
+    case 'JSXElement': case 'JSXEmptyExpression':
     case 'NullLiteral': case 'BooleanLiteral': return false
-    case 'JSXExpressionContainer': return rendersText(node.expression)
+    case 'JSXExpressionContainer': case 'TSAsExpression': case 'TSSatisfiesExpression':
+    case 'TSNonNullExpression': return rendersText(node.expression)
+    case 'BinaryExpression': return !['===', '!==', '==', '!=', '<', '>', '<=', '>=', 'in', 'instanceof'].includes(node.operator)
+    case 'UnaryExpression': return !['!', 'delete', 'void'].includes(node.operator)
     case 'ConditionalExpression': return rendersText(node.consequent) || rendersText(node.alternate)
     case 'LogicalExpression': return (node.operator === '&&' ? mayRenderFalsyNumber(node.left) : rendersText(node.left)) || rendersText(node.right)
     default: return true // identifiers and calls can contain runtime text
@@ -224,6 +228,17 @@ it('lets documented safe foregrounds override inherited unsafe ink', () => {
 it('does not count safely styled JSX branches as text in their wrapper', () => {
   expect(scan(`<div className="bg-card-2 text-danger">{ok === true && <span className="text-muted-foreground">safe</span>}{ok ? <span className="text-foreground">safe</span> : null}</div>`)).toEqual([])
   expect(scan(`<div className="bg-card-2 text-danger">{ok ? <span className="text-foreground">safe</span> : 'bad'}</div>`)).toHaveLength(1)
+})
+it('checks raw text in fragments without counting safely styled elements twice', () => {
+  expect(scan(`<div className="bg-card-2 text-danger text-xs"><>visible text</></div>`)).toHaveLength(1)
+  expect(scan(`<div className="bg-card-2 text-danger text-xs">{ok && <>visible text</>}</div>`)).toHaveLength(1)
+  expect(scan(`<div className="bg-card-2 text-danger text-xs"><><><span className="text-muted-foreground">safe</span></></></div>`)).toEqual([])
+})
+it('does not count boolean-result expressions as wrapper text', () => {
+  expect(scan(`<div className="bg-card-2 text-danger text-xs">{count > 0 || <span className="text-muted-foreground">safe</span>}</div>`)).toEqual([])
+  expect(scan(`<div className="bg-card-2 text-danger text-xs">{count > 0 ?? <span className="text-muted-foreground">safe</span>}</div>`)).toEqual([])
+  expect(scan(`<div className="bg-card-2 text-danger text-xs">{!!count}{typeof count === 'number'}{delete obj.key}</div>`)).toEqual([])
+  expect(scan(`<div className="bg-card-2 text-danger text-xs">{count + 1 || <span className="text-muted-foreground">safe</span>}</div>`)).toHaveLength(1)
 })
 it('checks numeric falsy text rendered by logical guards', () => {
   expect(scan(`<div className="bg-card-2 text-danger text-xs">{0 && <span className="text-muted-foreground">safe</span>}</div>`)).toHaveLength(1)
