@@ -1423,9 +1423,10 @@ R77–R78 (hearsay-tools/cezarion#1004, `core/harness-autosave-branch.test.ts`) 
 another branch out in an owned worker's worktree on every `HARNESS_ADAPTERS` native
 wire, leave a file, and settle the session: R77 on the initial run (`run finalize`),
 R78 on a Continue (`turn end`). The save commits nothing, the foreign branch tip does
-not move, and the handoff Progress log and a cockpit note both name the branch and
-the uncommitted path count. R78's first settle, still on the task branch, pins the
-other half: the commit is reported with its short sha, the branch and the
+not move, and the handoff's `## Autosave (cezar)` section and a cockpit note both
+name the branch and the uncommitted path count, while the Progress log stays free
+of the report. R78's first settle, still on the task branch, pins the other half:
+the commit is reported with its short sha, the branch and the
 `git reset --soft <sha>~1` fold-back command.
 
 Autosaves serialize per canonical worktree; Git auto-maintenance is disabled
