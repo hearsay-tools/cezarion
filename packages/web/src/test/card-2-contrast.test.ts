@@ -126,7 +126,7 @@ function scan(source: string): string[] {
         const backgrounds = classes.filter(c => surfaceClasses.has(c) || c === 'bg-transparent' || surfaceClasses.has(c.split('/')[0] ?? ''))
         const inheritsSurface = backgrounds.length === 0 || backgrounds.some(c => c === 'bg-transparent' || c.includes('/'))
         const onCard = backgrounds.includes('bg-card-2') || inheritsSurface && (card || bodySlot)
-        const ownColors = classes.filter(c => /^text-(?:danger|destructive|soft-foreground|muted-foreground|supporting-foreground|link-foreground|foreground|signal-word-red)$/.test(c))
+        const ownColors = classes.map(c => c.replace(/^(text-(?:danger|destructive|soft-foreground))\/.+$/, '$1')).filter(c => /^text-(?:danger|destructive|soft-foreground|muted-foreground|supporting-foreground|link-foreground|foreground|signal-word-red)$/.test(c))
         const colors = ownColors.length ? ownColors : [color]
         const sizes = classes.filter(c => /^text-(?:xs|sm|base|lg|xl|\d+xl)(?:\/.*)?$|^text-(?:\[|\(length:)/.test(c))
         const size = sizes.length ? Math.min(...sizes.map(fontSize)) : inheritedSize
@@ -204,6 +204,12 @@ it('recognizes important utility modifiers', () => {
   expect(scan(`<p className="bg-card-2! text-xs! text-danger!">bad</p>`)).toHaveLength(1)
   expect(scan(`<p className="!bg-card-2 !text-xs !text-destructive">bad</p>`)).toHaveLength(1)
   expect(scan(`<p className="bg-card-2 text-xs md:text-destructive!">bad</p>`)).toHaveLength(1)
+})
+it('retains unsafe ink through opacity modifiers', () => {
+  for (const color of ['text-danger/80', 'text-soft-foreground/70', 'text-destructive/[0.8]', 'md:text-danger/80!']) {
+    expect(scan(`<p className="bg-card-2 text-xs ${color}">bad</p>`), color).toHaveLength(1)
+  }
+  expect(scan(`<div className="bg-card-2 text-danger/80 text-xs"><span>bad</span></div>`)).toHaveLength(1)
 })
 it('lets documented safe foregrounds override inherited unsafe ink', () => {
   expect(scan(`<div className="bg-card-2 text-danger"><span className="text-supporting-foreground">safe</span><span className="text-link-foreground">safe</span></div>`)).toEqual([])
