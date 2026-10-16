@@ -4,8 +4,9 @@ import { dirname, join } from 'node:path';
 /**
  * Per-task handoff journal (spec 007): `.ai/cezar/runs/<runId>.handoff.md`,
  * next to the run's NDJSON events and outside the task worktree — it survives
- * worktree removal. Cez seeds the skeleton and appends heartbeats; the agent
- * (told via CEZ_HANDOFF_FILE + the system-prompt fragment below) keeps the
+ * worktree removal. Cez seeds the skeleton, appends heartbeats and owns the
+ * `## Autosave (cezar)` section (hearsay-tools/cezarion#1004); the agent (told
+ * via CEZ_HANDOFF_FILE + the system-prompt fragment below) keeps the
  * "Progress log" and "Resume notes" sections up to date. Everything here is
  * best-effort: the handoff is a journal, never a reason to fail a run.
  */
@@ -67,6 +68,48 @@ export function appendHandoffHeartbeat(dataDir: string, runId: string, note: str
     idx >= 0
       ? `${text.slice(0, idx + marker.length)}\n${line}${text.slice(idx + marker.length).replace(/^\n+/, '')}`
       : `${text}${text.endsWith('\n') || text === '' ? '' : '\n'}${line}`;
+  try {
+    writeFileSync(file, next, 'utf8');
+  } catch {
+    // best effort
+  }
+}
+
+const AUTOSAVE_HEADER = '## Autosave (cezar)\n';
+
+/** Index of `marker` at the start of a line, or -1. */
+function lineStart(text: string, marker: string): number {
+  if (text.startsWith(marker)) return 0;
+  const idx = text.indexOf(`\n${marker}`);
+  return idx < 0 ? -1 : idx + 1;
+}
+
+/**
+ * Cez's autosave report (hearsay-tools/cezarion#1004): insert `- <ISO ts> — <note>`
+ * right under the `## Autosave (cezar)` header (newest at the top), never in the
+ * Progress log, whose top lines are the agent's own summary (variant compare
+ * column, draft-PR body). The first report creates the section right before
+ * `## Progress log`, so an agent rewriting the end of the file (Resume notes)
+ * leaves it alone; no Progress log → end of the file; missing file → no-op.
+ */
+export function appendHandoffAutosaveReport(dataDir: string, runId: string, note: string): void {
+  const file = handoffPath(dataDir, runId);
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch {
+    return; // not seeded — nothing to report into
+  }
+  const line = `- ${new Date().toISOString()} — ${note}\n`;
+  const header = lineStart(text, AUTOSAVE_HEADER);
+  const progress = lineStart(text, '## Progress log\n');
+  const end = header + AUTOSAVE_HEADER.length;
+  const next =
+    header >= 0
+      ? `${text.slice(0, end)}\n${line}${text.slice(end).replace(/^\n+/, '')}`
+      : progress >= 0
+        ? `${text.slice(0, progress)}${AUTOSAVE_HEADER}\n${line}\n${text.slice(progress)}`
+        : `${text === '' ? '' : text.replace(/\n*$/, '\n\n')}${AUTOSAVE_HEADER}\n${line}`;
   try {
     writeFileSync(file, next, 'utf8');
   } catch {
@@ -139,7 +182,7 @@ export function followupsEnabled(env: NodeJS.ProcessEnv = process.env): boolean 
 export const HANDOFF_ONLY_INSTRUCTIONS = `## Handoff (cezar)
 
 CEZ_HANDOFF_FILE (env) is the absolute path to this task's rolling handoff file. Treat it like a HANDOFF.md:
-1. At the start of work, read it — "Resume notes" left by a previous session is your starting context.
+1. At the start of work, read it — "Resume notes" left by a previous session is your starting context. A "## Autosave (cezar)" section, when present, is cezar's record of an autosave commit on your branch (with the command that folds it back) or of work it left uncommitted; leave it in place.
 2. After every meaningful milestone (passing tests, a commit, a PR, a scope decision), append one terse timestamped line under "## Progress log", newest at the top.
 3. Before finishing or pausing, update "## Resume notes" with what's done, what's next and any blockers. Leave it empty only when the task is truly complete.
 

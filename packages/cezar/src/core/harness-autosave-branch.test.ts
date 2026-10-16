@@ -8,6 +8,14 @@ import { withOwnedInputRun, waitFor } from './harness-parity.testkit.ts';
 
 const FOREIGN = 'fix/1004-x';
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Text of one `## Header` section of the handoff, up to the next `## ` header. */
+const section = (text: string, header: string) => {
+  const start = text.indexOf(`${header}\n`);
+  if (start < 0) return '';
+  const rest = text.slice(start + header.length + 1);
+  const next = rest.indexOf('\n## ');
+  return next >= 0 ? rest.slice(0, next) : rest;
+};
 
 // hearsay-tools/cezarion#1004, on every HARNESS_ADAPTERS native wire: an agent
 // that checks another branch out in its task worktree must not find
@@ -23,6 +31,9 @@ describe('harness parity — autosave on an agent-checked-out branch (#1004)', (
           await withOwnedInputRun(backend, 'baseline', async ({ repoRoot, store, manager, runId }) => {
             const dataDir = join(repoRoot, '.ai/cezar');
             const notes = () => store.readEvents(runId).flatMap(event => event.type === 'note' ? [String(event.message)] : []);
+            // The report has its own section; the Progress log stays the agent's summary.
+            const autosave = () => section(readHandoff(dataDir, runId), '## Autosave (cezar)');
+            const progress = () => section(readHandoff(dataDir, runId), '## Progress log');
             manager.enqueueOwnedRun(runId);
             await waitFor(() => store.getRun(runId)?.status === 'waiting');
             const { worktreePath: dir, branch: taskBranch } = store.getRun(runId)!;
@@ -35,7 +46,8 @@ describe('harness parity — autosave on an agent-checked-out branch (#1004)', (
               expect(git(['log', '-1', '--format=%s', taskBranch!])).toBe('cezar autosave (run finalize)');
               const sha = git(['rev-parse', '--short', taskBranch!]);
               const committed = `run finalize: cezar autosave committed ${sha} on ${taskBranch}; to fold it into your own commits while it is HEAD, run \`git reset --soft ${sha}~1\``;
-              expect(readHandoff(dataDir, runId)).toContain(committed);
+              expect(autosave()).toContain(committed);
+              expect(progress()).not.toContain(committed);
               expect(notes()).toContain(committed);
               expect(manager.continueRun(runId, { text: 'mock:baseline' }).ok).toBe(true);
               await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
@@ -52,7 +64,8 @@ describe('harness parity — autosave on an agent-checked-out branch (#1004)', (
             const reason = continuation ? 'turn end' : 'run finalize';
             const skipped = new RegExp(`${escape(reason)}: \\d+ changed path\\(s\\) left uncommitted on ${escape(FOREIGN)}; ` +
               `cezar does not autosave on a branch other than the task branch ${escape(taskBranch!)}`);
-            expect(readHandoff(dataDir, runId)).toMatch(skipped);
+            expect(autosave()).toMatch(skipped);
+            expect(progress()).not.toMatch(skipped);
             expect(notes().some(message => skipped.test(message))).toBe(true);
           });
         } finally { vi.restoreAllMocks(); vi.unstubAllEnvs(); }

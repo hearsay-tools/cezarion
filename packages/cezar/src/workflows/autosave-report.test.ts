@@ -22,7 +22,8 @@ interface SaveSeam {
 /**
  * hearsay-tools/cezarion#1004: a resumed session reads the handoff, not
  * `git log`. Each turn-end / run-finalize save that commits or leaves work
- * behind says so there, and the same text reaches the cockpit as a note.
+ * behind says so in its `## Autosave (cezar)` section, never the Progress log,
+ * and the same text reaches the cockpit as a note.
  * The runner-wire matrix for the same rule is R77/R78
  * (core/harness-autosave-branch.test.ts).
  */
@@ -39,7 +40,23 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
   const git = (args: string[]) => run(realGit, args, { cwd: worktreePath });
   const out = async (args: string[]) => (await git(args)).stdout.trim();
   const notes = (id = runId) => store.readEvents(id).flatMap(event => event.type === 'note' ? [String(event.message)] : []);
-  const progress = (id = runId) => readHandoff(dataDir, id).split('## Progress log')[1] ?? '';
+  /** Text of one `## Header` section, up to the next `## ` header. */
+  const section = (header: string, id: string) => {
+    const text = readHandoff(dataDir, id);
+    const start = text.indexOf(`${header}\n`);
+    if (start < 0) return '';
+    const rest = text.slice(start + header.length + 1);
+    const next = rest.indexOf('\n## ');
+    return next >= 0 ? rest.slice(0, next) : rest;
+  };
+  const autosave = (id = runId) => section('## Autosave (cezar)', id);
+  // The top of the Progress log is the agent's own summary: the variant compare
+  // column and the draft-PR body both read it, so the report must stay out of it.
+  const progress = (id = runId) => section('## Progress log', id);
+  const expectReported = (message: string, id = runId) => {
+    expect(autosave(id)).toContain(message);
+    expect(progress(id)).not.toContain(message);
+  };
 
   beforeEach(async () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-autosave-report-'));
@@ -77,7 +94,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     const sha = await out(['rev-parse', '--short', 'HEAD']);
     expect(await out(['log', '-1', '--format=%s'])).toBe('cezar autosave (turn end)');
     const message = `turn end: cezar autosave committed ${sha} on ${branch}; to fold it into your own commits while it is HEAD, run \`git reset --soft ${sha}~1\``;
-    expect(progress()).toContain(message);
+    expectReported(message);
     expect(notes()).toContain(message);
   });
 
@@ -96,7 +113,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
 
     expect(await out(['log', '-1', '--format=%s'])).toBe('cezar autosave (turn end)');
     const message = `turn end: cezar autosave committed on ${branch} (sha unavailable); to fold it into your own commits while it is HEAD, run \`git reset --soft HEAD~1\``;
-    expect(progress()).toContain(message);
+    expectReported(message);
     expect(notes()).toContain(message);
   });
 
@@ -110,7 +127,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     expect(await out(['rev-parse', 'HEAD'])).toBe(tip);
     expect((await git(['status', '--porcelain'])).stdout).toBe('?? work.txt\n');
     const message = `run finalize: 1 changed path(s) left uncommitted on fix/1004-x; cezar does not autosave on a branch other than the task branch ${branch}`;
-    expect(progress()).toContain(message);
+    expectReported(message);
     expect(notes()).toContain(message);
   });
 
@@ -121,12 +138,12 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     await manager.saveWorktree(runId, { cwd: worktreePath }, 'turn end');
 
     const message = `turn end: 1 changed path(s) left uncommitted on detached HEAD; cezar does not autosave on a branch other than the task branch ${branch}`;
-    expect(progress()).toContain(message);
+    expectReported(message);
     expect(notes()).toContain(message);
   });
 
   it('writes no handoff line or note for a periodic save, committed or skipped', async () => {
-    const before = progress();
+    const before = readHandoff(dataDir, runId);
     writeFileSync(join(worktreePath, 'work.txt'), 'progress\n');
     await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
     expect(await out(['log', '-1', '--format=%s'])).toBe('cezar autosave (periodic)');
@@ -137,16 +154,16 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     // Same rule as the closing flushes: nothing lands on the agent's branch.
     expect((await git(['status', '--porcelain'])).stdout).toBe('?? more.txt\n');
 
-    expect(progress()).toBe(before);
+    expect(readHandoff(dataDir, runId)).toBe(before);
     expect(notes().filter(message => message.includes('autosave'))).toEqual([]);
   });
 
   it('writes nothing when there is nothing to save', async () => {
-    const before = progress();
+    const before = readHandoff(dataDir, runId);
 
     await manager.saveWorktree(runId, { cwd: worktreePath }, 'turn end');
 
-    expect(progress()).toBe(before);
+    expect(readHandoff(dataDir, runId)).toBe(before);
     expect(notes()).toEqual([]);
   });
 
@@ -161,6 +178,6 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
 
     expect(await out(['log', '-1', '--format=%s', 'fix/1004-x'])).toBe('cezar autosave (run finalize)');
     const sha = await out(['rev-parse', '--short', 'HEAD']);
-    expect(progress(legacy)).toContain(`run finalize: cezar autosave committed ${sha} on fix/1004-x;`);
+    expectReported(`run finalize: cezar autosave committed ${sha} on fix/1004-x;`, legacy);
   });
 });
