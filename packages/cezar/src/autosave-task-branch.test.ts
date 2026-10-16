@@ -294,6 +294,48 @@ describe('autosave task-branch rule (#1004)', () => {
     });
   });
 
+  /** Commit `file` on a new branch `side` off the task branch, check the task branch out again. */
+  const sideBranch = async (file: string, content: string) => {
+    await git(['checkout', '-q', '-b', 'side']);
+    writeFileSync(join(repo, file), content);
+    await git(['add', '-A']);
+    await git([...GIT_ID, 'commit', '-q', '-m', 'side']);
+    await git(['checkout', '-q', TASK_BRANCH]);
+    return out(['rev-parse', 'side']);
+  };
+
+  // Review round 4 on hearsay-tools/cezarion#1004: the agent's operation starts after
+  // the pending check, just before the save's real `add -A`, so the save stages its
+  // content. Committed as a plain autosave, a merge lost its second parent and its
+  // MERGE_HEAD stayed behind a clean status; a conflicted pick committed its markers.
+  it.runIf(process.platform !== 'win32')('refuses a merge that starts mid-save, and leaves it pending', async () => {
+    const side = await sideBranch('b.txt', 'side\n');
+    const tip = await out(['rev-parse', TASK_BRANCH]);
+    shim([`case " $* " in *" add -A "*) "$REAL" ${GIT_ID.join(' ')} merge -q --no-ff --no-commit side || exit $?;; esac`]);
+    writeFileSync(join(repo, 'new.txt'), 'work\n');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    expect(await autosaveCommit(repo, 'turn end', { taskBranch: TASK_BRANCH })).toBe('refused');
+
+    expect(await out(['rev-parse', TASK_BRANCH])).toBe(tip);
+    expect(await out(['rev-parse', 'MERGE_HEAD'])).toBe(side);
+  });
+
+  it.runIf(process.platform !== 'win32')('refuses a cherry-pick that stops on a conflict mid-save, and leaves it pending', async () => {
+    const side = await sideBranch('a.txt', 'side\n');
+    writeFileSync(join(repo, 'a.txt'), 'task\n');
+    await git([...GIT_ID, 'commit', '-q', '-am', 'task']);
+    const tip = await out(['rev-parse', TASK_BRANCH]);
+    shim([`case " $* " in *" add -A "*) "$REAL" ${GIT_ID.join(' ')} cherry-pick side >/dev/null 2>&1;; esac`]);
+    writeFileSync(join(repo, 'new.txt'), 'work\n');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    expect(await autosaveCommit(repo, 'turn end', { taskBranch: TASK_BRANCH })).toBe('refused');
+
+    expect(await out(['rev-parse', TASK_BRANCH])).toBe(tip);
+    expect(await out(['rev-parse', 'CHERRY_PICK_HEAD'])).toBe(side);
+  });
+
   // The pre-PR flush names no branch: it keeps the porcelain commit, command for command.
   it.runIf(process.platform !== 'win32')('runs the same Git commands as before when no task branch is given', async () => {
     await git(['config', 'user.name', 'test']);

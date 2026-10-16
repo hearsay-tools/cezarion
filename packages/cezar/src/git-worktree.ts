@@ -556,10 +556,13 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
       console.warn(`[cezar] skipping ${reason} autosave in ${dir}: ${unresolved}`);
       return 'refused';
     }
-    if (taskBranch !== undefined) {
-      // A resolved merge, cherry-pick or revert the agent has not concluded: `git commit`
-      // would conclude it under `cezar autosave`. The agent concludes it with its own
-      // message; the next flush picks the work up (hearsay-tools/cezarion#1004).
+    // A resolved merge, cherry-pick or revert the agent has not concluded: `git commit`
+    // would conclude it under `cezar autosave`. The agent concludes it with its own
+    // message; the next flush picks the work up (hearsay-tools/cezarion#1004). Asked of
+    // Git, not looked up as files: only MERGE_HEAD is always a file. CHERRY_PICK_HEAD and
+    // REVERT_HEAD are root refs in the ref backend, which a reftable repository keeps in
+    // its reftable stack, so a file check would miss them there.
+    const pendingOperation = async (): Promise<'refused' | 'failed' | null> => {
       for (const pending of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
         const found = await git(dir, ['rev-parse', '--verify', '-q', pending]);
         if (found.ok) {
@@ -568,6 +571,12 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
         }
         if (found.code !== 1) return 'failed';
       }
+      return null;
+    };
+    if (taskBranch !== undefined) {
+      // Checked before staging too, so a pending operation's index stays as the agent left it.
+      const pending = await pendingOperation();
+      if (pending) return pending;
     }
     if (!(await git(dir, ['add', '-A'])).ok) return 'failed';
     // Commit as the CURRENT git user, so the branch's commits (and any PR opened from it) are
@@ -636,6 +645,17 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
     ]);
     const sha = created.stdout.trim();
     if (!created.ok || !sha) return 'failed';
+    // The save is not atomic against the agent's own Git commands. It guarantees that no
+    // ref other than refs/heads/<taskBranch> moves, and that no pending merge, cherry-pick
+    // or revert is committed: the check before `add -A` cannot see one that starts after
+    // it, and the save would record that operation's content without its ancestry (review
+    // round 4 on hearsay-tools/cezarion#1004). An operation that starts after `write-tree`
+    // cannot be in this tree; one that started before it is still pending here, unless
+    // the agent also concluded it, which moved the branch and fails the compare-and-swap,
+    // or aborted it within those few commands, whose content the save then still records.
+    // A refusal leaves what `add -A` staged in the index, as every failure after it does.
+    const late = await pendingOperation();
+    if (late) return late;
     if (!(await git(dir, ['update-ref', '-m', message, ref, sha, parent])).ok) return 'failed';
     if (onOutcome) {
       // The commit already landed: a failed read loses the sha, never the report.
