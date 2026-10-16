@@ -18,7 +18,7 @@ const docsAllowlisted = [
   // unconditional build-and-package job validates the ledger via test:unit.
   /^\.ai\/upstream\/(?:ledger\.yaml|LEDGER\.md)$/,
   /^\.ai\/upstream\/scans\/\d{4}-\d{2}-\d{2}(?:-(?:[2-9]|[1-9]\d+))?\.md$/,
-  /^(?:AGENT_PROTOCOL|AGENTS|BACKWARD_COMPATIBILITY|CODE_REVIEW|SDLC)\.md$/,
+  /^(?:AGENTS|CODE_REVIEW|SDLC)\.md$/,
   /^LICENSE[^/]*$/,
 ];
 
