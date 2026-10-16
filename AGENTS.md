@@ -198,6 +198,7 @@ Do not duplicate those background runs with `npm test`,
 `npm run test:unit`, `npm run test:package`, `npm run test:e2e`, or `npm run test:changed`.
 Use `squeal why <check>` for failure details and, when a result is needed,
 `squeal status --wait 60000`.
+If test-first work intentionally makes a previously passing check fail, Squeal denies the next edit once; resend the same edit unchanged (a newly added test’s first observed failure does not trigger this denial).
 Under Codex, use the absolute Squeal command printed in its messages when
 `squeal` is not on PATH. Fix regressions and report known failures, pending,
 stale, or unknown results accurately; zero known failures is not a full pass.
