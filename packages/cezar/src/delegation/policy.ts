@@ -45,7 +45,10 @@ export function authorizeWorker(caller: Caller, target: RunRecord | undefined, o
     throw new DelegationPolicyError('incompatible_state', 'Parent finish is pending');
   }
   if (operation === 'steer' && (parsed.data.destroy || !['queued', 'running', 'waiting'].includes(target.status))) {
-    throw new DelegationPolicyError('incompatible_state', 'Worker no longer accepts steering');
+    const instruction = !parsed.data.destroy && !target.stopping && ['review', 'done', 'failed'].includes(target.status)
+      ? ` To resume it with a new instruction, run worker send ${target.id} "<instruction>" --kind request --resume --id <new-message-UUID>; use a new message ID.`
+      : '';
+    throw new DelegationPolicyError('incompatible_state', `Worker no longer accepts steering.${instruction}`);
   }
   // Reads, wait and idempotent stop/destroy remain scoped but are allowed through destruction.
   // This grants no permission to relaunch or delete resources without the manager/Git barriers.
