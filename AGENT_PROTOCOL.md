@@ -1226,39 +1226,48 @@ not close, park, or nudge. Every runner releases a held human input by one rule
 
 - (a) the normalized `turn.started` of the turn that carries it has been emitted;
 - (b) it is read inside an open normalized turn; or
-- (c) it can never start: a rejection, a close, or a `discardQueuedMessages` that
-  drops it.
+- (c) a rejection or a close means it can never start, or a `discardQueuedMessages`
+  drops a queued input. On a wire that already wrote or spawned the input, discard
+  drops only the hold and the input can still run (see the H2 exemptions).
 
-A native ack, a native run-start frame, a spawn or a queue shift is not a release.
-A release there lets the 250 ms recheck find the hold drained and park the run
-`waiting` while the follow-up's turn is still starting; that turn then runs under
-Needs you. Each runner maps these exits to its own wire:
+Close releases because run.ts reads the hold only while the session is `open`
+(`harnessHoldsHumanInput` and the recheck timer both check `session.open` first), so
+a runner need not clear its hold on close. A native ack, a native run-start frame, a
+spawn or a queue shift is not a release on its own: it releases only when one of
+those exits already holds, as a Pi or OMP ack does when cezar emitted that turn's
+`turn.started` at the write and the turn is still open. A release on the frame alone
+lets the 250 ms recheck find the hold drained and park the run `waiting` while the
+follow-up's turn is still starting; that turn then runs under Needs you. Each runner
+maps these exits to its own wire:
 
 - **Claude**: (b) the `--replay-user-messages` echo of the line's `uuid`, or a
   `result` whose `user_message_uuids` names it. A line written after the turn's last
-  model call runs as the CLI's next turn; cezar emits that turn's `turn.started` on
-  its first frame, before the echo. A `result` that settles lines through
-  `queued_turn_count` alone is not a release.
+  model call runs as the CLI's next turn; while that turn is pending, cezar emits its
+  `turn.started` on the first assistant, user or result frame, before it processes the
+  replay echo. A `result` that settles lines through `queued_turn_count` alone is not
+  a release.
 - **Codex**: (a) `turn/started` after the human `turn/start`, or the `turn/start`
   response when `turn/started` came first. (b) the `item/started` `userMessage` echo
-  of a steer's `clientUserMessageId`. (c) a `turn/start` or `turn/steer` error, and
-  session close. A `turn/steer` response is admission, not a release.
+  of a steer's `clientUserMessageId`. (c) a `turn/start` or `turn/steer` error. A
+  `turn/steer` response is admission, not a release.
 - **OpenCode**: (a) the `turn.started` cezar emits at the follow-up's `prompt_async`
-  POST, once the running turn ends. (c) `discardQueuedMessages`, or a closed server.
-  A follow-up sent while a question reply is in flight stays held until that reply
-  succeeds, then posts like any other.
+  POST, once the running turn ends. (c) `discardQueuedMessages`. A follow-up sent
+  while a question reply is in flight stays held until that reply succeeds, then posts
+  like any other.
 - **Cursor ACP**: (a) the `turn.started` cezar emits when it shifts the follow-up off
   its queue into `session/prompt`, after the running prompt's response. (c)
   `discardQueuedMessages`, which a `CEZ:ASK` turn end also runs.
 - **Cursor print**: (a) the `system`/`init` frame of the print process that carries
   the follow-up, which the mapper turns into `turn.started`. (c)
-  `discardQueuedMessages`, which also stops reporting a spawned follow-up. The queue
-  shift and the spawn are not a release. Before the wrapper picks ACP or print, it
-  holds the follow-up itself and hands it to the runner it picks.
+  `discardQueuedMessages`, which drops the queue; for a spawned follow-up it drops
+  only the hold, and that process can still run it. The queue shift and the spawn are
+  not a release. Before the wrapper picks ACP or print, it holds the follow-up itself
+  and hands it to the runner it picks.
 - **Pi**: (a) its ack, when its write opened a normalized turn that is still open
   (cezar emits that `turn.started` at the write); for a steer, the first
   `turn.started` after its ack. (b) its user `message_start` inside an open
-  normalized turn. (c) a rejected ack, and `discardQueuedMessages`. A steer's ack is
+  normalized turn. (c) a rejected ack, and `discardQueuedMessages`, which drops only
+  the hold: the prompt is already written and can still run. A steer's ack alone is
   not a release: Pi reads a steer acknowledged after the turn's last model call as
   its next prompt, after `agent_settled` (the `mock:steer-late` ordering, H5). A raw
   `agent_start` is not one either: the mapper reports nothing for it, and Pi's mock in
@@ -1270,8 +1279,9 @@ Needs you. Each runner maps these exits to its own wire:
 
 `discardQueuedMessagesOnAsk` still runs first, so an ASK park drops the waiter on
 queueing wires. Write-through/steer wires may consume the follow-up inside the running
-turn or open a later one; H1 still holds either way. A held follow-up that drains
-without opening a turn must re-settle the idle boundary (close, park, or nudge).
+turn or open a later one; H1 still holds either way. A held follow-up that drains at
+an idle boundary (the turn already ended) without opening a new turn must call
+`onAgentInputReady` so run.ts re-settles that boundary (close, park, or nudge).
 `handleAgentInputReady` is the fast path and a 250 ms recheck timer is the backstop;
 after `UNREAD_INPUT_GRACE_MS` of a hold that never drained with no runner activity,
 the follow-up is treated as delivered-unconfirmed (a `#505`-style note) and the
