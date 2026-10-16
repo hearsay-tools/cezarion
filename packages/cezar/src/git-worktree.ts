@@ -450,8 +450,8 @@ export type AutosaveOutcome =
 export interface AutosaveCommitOptions extends AutosaveOptions {
   /** The task's own branch (`cez/<id8>`). Given, the save commits only while HEAD is
    *  `refs/heads/<taskBranch>`, and writes that ref by compare-and-swap; on any other
-   *  branch or a detached HEAD it leaves the index and working tree alone and returns
-   *  `skipped`. */
+   *  branch or a detached HEAD it returns `skipped` and leaves the working tree alone,
+   *  and the index too unless HEAD moves while it saves. */
   taskBranch?: string;
   /** Receives the facts behind a `committed` or `skipped` result. Never called otherwise. */
   onOutcome?: (outcome: AutosaveOutcome) => void;
@@ -535,18 +535,27 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
     const report = (outcome: AutosaveOutcome) => {
       try { onOutcome?.(outcome); } catch { /* Reporting must not change what the save did. */ }
     };
-    let head: string | null = null;
-    if (taskBranch !== undefined || onOutcome) {
+    // HEAD's symbolic ref, `null` on a detached HEAD, `undefined` when the read failed.
+    const readHead = async (): Promise<string | null | undefined> => {
       // Exit 1 under -q is a detached HEAD; anything else is a failed read.
       const ref = await git(dir, ['symbolic-ref', '-q', 'HEAD']);
-      if (!ref.ok && ref.code !== 1) return 'failed';
-      head = ref.ok ? ref.stdout.trim() : null;
-    }
-    const branch = head?.startsWith('refs/heads/') ? head.slice('refs/heads/'.length) : head;
-    if (taskBranch !== undefined && head !== `refs/heads/${taskBranch}`) {
-      report({ result: 'skipped', branch, changedPaths: status.stdout.split('\n').filter(Boolean).length });
+      if (!ref.ok && ref.code !== 1) return undefined;
+      return ref.ok ? ref.stdout.trim() : null;
+    };
+    const branchName = (head: string | null) => head?.startsWith('refs/heads/') ? head.slice('refs/heads/'.length) : head;
+    // HEAD is not the task branch: the work stays uncommitted, reported with the paths status saw.
+    const skip = (head: string | null): 'skipped' => {
+      report({ result: 'skipped', branch: branchName(head), changedPaths: status.stdout.split('\n').filter(Boolean).length });
       return 'skipped';
+    };
+    let head: string | null = null;
+    if (taskBranch !== undefined || onOutcome) {
+      const read = await readHead();
+      if (read === undefined) return 'failed';
+      head = read;
     }
+    const branch = branchName(head);
+    if (taskBranch !== undefined && head !== `refs/heads/${taskBranch}`) return skip(head);
     const unresolved = await unresolvedConflicts(dir, status.stdout);
     if (unresolved) {
       // Losing one recovery point beats poisoning the branch with a commit that
@@ -657,8 +666,17 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
     // then still records. A Git command still running during the save is not excluded:
     // `git merge` publishes the merged index before it writes MERGE_HEAD, so a save in
     // between records that content single-parent, as `git add -A && git commit` always
-    // did (review round 5 reproduced the same result on main). A refusal leaves what
-    // `add -A` staged in the index, as every failure after it does.
+    // did (review round 5 reproduced the same result on main). The save also commits only
+    // when HEAD names the task branch at both of its reads, before `add -A` and here after
+    // `write-tree`, so a checkout between them skips it (review round 2 on
+    // hearsay-tools/cezarion#1111). A checkout away and back again between the reads is not
+    // excluded, nor is one still running, which writes the new index and working tree
+    // before it moves HEAD, so a save in between commits the other branch's files onto the
+    // task branch, as `git add -A && git commit` on main does. A refusal or a skip here
+    // leaves what `add -A` staged in the index, as every failure after it does.
+    const moved = await readHead();
+    if (moved === undefined) return 'failed';
+    if (moved !== ref) return skip(moved);
     const late = await pendingOperation();
     if (late) return late;
     if (!(await git(dir, ['update-ref', '-m', message, ref, sha, parent])).ok) return 'failed';

@@ -16,8 +16,8 @@ const TASK_BRANCH = 'cez/abcd1234';
  * hearsay-tools/cezarion#1004: an agent checked its own feature branch out in
  * its task worktree, and the `run finalize` flush committed
  * `cezar autosave (run finalize)` onto that branch. Given the task branch, the
- * save commits only while HEAD is that branch; anywhere else it leaves the
- * index and working tree alone and reports what it left.
+ * save commits only while HEAD is that branch; anywhere else it leaves the work
+ * uncommitted and reports what it left.
  */
 describe('autosave task-branch rule (#1004)', () => {
   let repo: string;
@@ -125,12 +125,14 @@ describe('autosave task-branch rule (#1004)', () => {
 
   // The review finding on hearsay-tools/cezarion#1111: HEAD was checked before
   // `git add`, and `git commit` resolved it again at its own start, so an agent
-  // switching branches in between got the autosave on its own branch.
+  // switching branches in between got the autosave on its own branch. A checkout
+  // before the save's last HEAD read skips it (the tests after the mid-save
+  // refusals); this one lands after that read, just before the ref update.
   it.runIf(process.platform !== 'win32')('commits on the task branch even when the agent checks another branch out mid-save', async () => {
     const base = await out(['rev-parse', TASK_BRANCH]);
     await git(['branch', 'fix/1004-x']);
-    // The real `add -A`, then the agent's checkout: same tip, so the staged work carries over.
-    shim(['case " $* " in *" add -A "*) "$REAL" "$@" || exit $?; exec "$REAL" checkout -q fix/1004-x;; esac']);
+    // The agent's checkout, then the real `update-ref`: same tip, so the staged work carries over.
+    shim(['case " $* " in *" update-ref "*) "$REAL" checkout -q fix/1004-x || exit $?;; esac']);
     writeFileSync(join(repo, 'new.txt'), 'work\n');
     const outcomes: AutosaveOutcome[] = [];
 
@@ -334,6 +336,39 @@ describe('autosave task-branch rule (#1004)', () => {
 
     expect(await out(['rev-parse', TASK_BRANCH])).toBe(tip);
     expect(await out(['rev-parse', 'CHERRY_PICK_HEAD'])).toBe(side);
+  });
+
+  // Review round 2 on hearsay-tools/cezarion#1111: HEAD was read once, before `add -A`.
+  // A checkout in that gap staged the other branch's files, and the compare-and-swap
+  // still wrote that snapshot onto the task branch, which had not moved.
+  it.runIf(process.platform !== 'win32')('skips the save when the agent checks another branch out before staging', async () => {
+    const side = await sideBranch('other.txt', 'other\n');
+    const tip = await out(['rev-parse', TASK_BRANCH]);
+    // The agent's checkout, then the real `add -A`: the dirty work carries over onto side's tree.
+    shim(['case " $* " in *" add -A "*) "$REAL" checkout -q side || exit $?;; esac']);
+    writeFileSync(join(repo, 'a.txt'), 'edited\n');
+    writeFileSync(join(repo, 'new.txt'), 'work\n');
+    const outcomes: AutosaveOutcome[] = [];
+
+    expect(await autosaveCommit(repo, 'turn end', { taskBranch: TASK_BRANCH, onOutcome: o => outcomes.push(o) })).toBe('skipped');
+
+    expect(outcomes).toEqual([{ result: 'skipped', branch: 'side', changedPaths: 2 }]);
+    expect((await git(['for-each-ref', '--format=%(refname) %(objectname)'])).stdout)
+      .toBe(`refs/heads/${TASK_BRANCH} ${tip}\nrefs/heads/side ${side}\n`);
+    expect(await out(['symbolic-ref', 'HEAD'])).toBe('refs/heads/side');
+  });
+
+  it.runIf(process.platform !== 'win32')('skips the save when the agent detaches HEAD before staging', async () => {
+    const tip = await out(['rev-parse', TASK_BRANCH]);
+    shim(['case " $* " in *" add -A "*) "$REAL" checkout -q --detach || exit $?;; esac']);
+    writeFileSync(join(repo, 'new.txt'), 'work\n');
+    const outcomes: AutosaveOutcome[] = [];
+
+    expect(await autosaveCommit(repo, 'turn end', { taskBranch: TASK_BRANCH, onOutcome: o => outcomes.push(o) })).toBe('skipped');
+
+    expect(outcomes).toEqual([{ result: 'skipped', branch: null, changedPaths: 1 }]);
+    expect((await git(['for-each-ref', '--format=%(refname) %(objectname)'])).stdout).toBe(`refs/heads/${TASK_BRANCH} ${tip}\n`);
+    expect(await out(['rev-parse', 'HEAD'])).toBe(tip);
   });
 
   // The pre-PR flush names no branch: it keeps the porcelain commit, command for command.
