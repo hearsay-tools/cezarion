@@ -646,14 +646,19 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
     const sha = created.stdout.trim();
     if (!created.ok || !sha) return 'failed';
     // The save is not atomic against the agent's own Git commands. It guarantees that no
-    // ref other than refs/heads/<taskBranch> moves, and that no pending merge, cherry-pick
-    // or revert is committed: the check before `add -A` cannot see one that starts after
-    // it, and the save would record that operation's content without its ancestry (review
-    // round 4 on hearsay-tools/cezarion#1004). An operation that starts after `write-tree`
-    // cannot be in this tree; one that started before it is still pending here, unless
-    // the agent also concluded it, which moved the branch and fails the compare-and-swap,
-    // or aborted it within those few commands, whose content the save then still records.
-    // A refusal leaves what `add -A` staged in the index, as every failure after it does.
+    // ref other than refs/heads/<taskBranch> moves, and that no merge, cherry-pick or
+    // revert Git has recorded as pending (its MERGE_HEAD, CHERRY_PICK_HEAD or REVERT_HEAD
+    // written) by this recheck is committed: the check before `add -A` cannot see one that
+    // starts after it, and the save would record that operation's content without its
+    // ancestry (review round 4 on hearsay-tools/cezarion#1004). An operation that starts
+    // after `write-tree` cannot be in this tree; one recorded before it is still pending
+    // here, unless the agent also concluded it, which moved the branch and fails the
+    // compare-and-swap, or aborted it within those few commands, whose content the save
+    // then still records. A Git command still running during the save is not excluded:
+    // `git merge` publishes the merged index before it writes MERGE_HEAD, so a save in
+    // between records that content single-parent, as `git add -A && git commit` always
+    // did (review round 5 reproduced the same result on main). A refusal leaves what
+    // `add -A` staged in the index, as every failure after it does.
     const late = await pendingOperation();
     if (late) return late;
     if (!(await git(dir, ['update-ref', '-m', message, ref, sha, parent])).ok) return 'failed';
