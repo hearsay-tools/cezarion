@@ -5,6 +5,9 @@ import type { GithubData, GithubItem } from '@open-mercato/cezar-api-client'
  * infinite query holds. Each side pages on its own cursor; a side that answered `null` is done
  * and is asked for its total only, so it never restarts at page 1.
  */
+/** Rows per side per page. The owner's decision (2026-10-16): 50 rows, comment counts after paint. */
+export const GITHUB_PAGE_SIZE = 50
+
 export type GithubPageParam = { issuesCursor?: string; prsCursor?: string; issuesDone?: true; prsDone?: true }
 
 /** The request after `last`, or `undefined` when both sides are done or the server does not

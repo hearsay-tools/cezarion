@@ -242,6 +242,8 @@ describe('merging from the detail (#692)', () => {
       releaseMerge!()
       await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['p1', 'github', 'item', 'pr', 42] }))
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ['p1', 'github', 'merge-state', 42] })
+      // The paged list (hearsay-tools/cezarion#1183) drops the merged PR on its next read.
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['p1', 'github', 'pages', 50] })
       const touched = invalidate.mock.calls.map(([filters]) => JSON.stringify(filters?.queryKey))
       expect(touched.filter((key) => key.includes('"p2"'))).toEqual([])
     } finally {

@@ -32,7 +32,8 @@ import { cn, isHttpUrl } from '@/lib/utils'
 
 import { Markdown } from '@/routes/task-thread/markdown'
 import { labelChipStyle } from '@/routes/github/github-filter'
-import { GITHUB_LIST_LIMIT, githubFilterPath, type GithubFilter } from '@/routes/github/github-sidebar-model'
+import { githubFilterPath, type GithubFilter } from '@/routes/github/github-sidebar-model'
+import { GITHUB_PAGE_SIZE } from '@/api/github-pages'
 
 /** A single label pill, tinted with its GitHub color (or neutral when unknown). */
 export function LabelChip({ label, color, plain = false }: { label: string; color: string | undefined; plain?: boolean }) {
@@ -226,7 +227,7 @@ function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: (
   // in, not the one now on screen (review g3 #1).
   const mergeKeys = () => ({
     mergeState: queryKeys.githubMergeState(number),
-    list: queryKeys.github({ limit: GITHUB_LIST_LIMIT }),
+    list: queryKeys.githubPages(GITHUB_PAGE_SIZE),
     comments: queryKeys.githubComments('pr', number),
     item: queryKeys.githubItem('pr', number),
     refStatus: referenceProjectId === undefined ? undefined : queryKeys.githubRefStatusOf(referenceProjectId),
@@ -244,7 +245,8 @@ function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: (
       setConfirming(false)
       toast(`Pull request #${number} merged`)
       void queryClient.invalidateQueries({ queryKey: keys.mergeState })
-      // The single list query (#664) — a merged PR drops out of the open set on the next fetch.
+      // The paged list (hearsay-tools/cezarion#1183) — a merged PR drops out of the open set on
+      // the next read of its pages.
       void queryClient.invalidateQueries({ queryKey: keys.list })
       void queryClient.invalidateQueries({ queryKey: keys.comments })
       // The task tab's item (#692), and every chip and tab glyph of this project: the server
