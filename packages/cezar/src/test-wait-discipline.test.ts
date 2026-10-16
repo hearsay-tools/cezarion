@@ -83,6 +83,19 @@ describe('blanking strings and comments', () => {
     expect(errors(...src)).toEqual([]);
   });
 
+  it('reads a head with a comment before its parenthesis, and a call with one after its dot', () => {
+    const src = [
+      'if /*hi*/ (ok) /[`]/.test(x);',
+      'await sleep(50);',
+      'for await /*hi*/ (const c of cs) /`/.test(c);',
+      'await delay(5);',
+      'const r = Symbol./*c*/for(x) / 2 + "/";',
+      'await pause(5);',
+    ];
+    expect(lines(scan(...src))).toEqual([2, 4, 6]);
+    expect(errors(...src)).toEqual([]);
+  });
+
   it('still reads a / after a call or a grouped expression as a division', () => {
     const src = ['const r = f(a) / 2 + "/";', 'await sleep(50);', 'const q = (a + b) / 2 + "/";', 'await sleep(50);'];
     expect(lines(scan(...src))).toEqual([2, 4]);
@@ -253,6 +266,9 @@ describe('rule short-bound', () => {
       'await vi.waitFor(cb, { ...a, timeout: 20_000, ...b });',
       'await vi.waitFor(cb, { ...a, timeout: 20_000, interval: 5 });',
       'await vi.waitFor(cb, { [key]: 20_000 });',
+      // An escaped key is not decoded: like a computed key it is unreadable, whatever it names.
+      'await vi.waitFor(cb, { "\\u0074imeout": 20_000 });',
+      'await vi.waitFor(cb, { "\\u0074imeout": 100 });',
     );
     expect(lines(sites)).toEqual([1]);
   });
@@ -338,9 +354,13 @@ describe('rule short-bound', () => {
       'export async function eventually(cond: () => boolean, ms = 10_000): Promise<void> {}',
       'async function waitUntil(cond: () => boolean, timeoutMs = 30_000, intervalMs = 25): Promise<void> {}',
       'const until = Date.now() + 1_000;',
+      'async function until(cb: () => boolean, timeout =',
+      '  5000) {}',
+      'const until = (cb: () => boolean, timeout =',
+      '  5000) => {};',
     );
-    expect(rules(sites)).toEqual(['short-bound', 'short-bound']);
-    expect(lines(sites)).toEqual([1, 4]);
+    expect(rules(sites)).toEqual(['short-bound', 'short-bound', 'short-bound', 'short-bound']);
+    expect(lines(sites)).toEqual([1, 4, 10, 12]);
   });
 });
 
@@ -376,6 +396,21 @@ describe('a bound with a reason', () => {
       'await sleep(400);',
     );
     expect(lines(sites)).toEqual([1, 3, 6, 8]);
+  });
+
+  it('ends the comment block above at a line with anything before its //', () => {
+    const sites = scan(
+      '// bound: reason',
+      '/* extra */ // other',
+      'await sleep(50);',
+      '// bound: reason',
+      'const x = 1; // other',
+      'await sleep(50);',
+      '// bound: reason',
+      '  // indented is still a comment line',
+      'await sleep(50);',
+    );
+    expect(lines(sites)).toEqual([3, 6]);
   });
 
   it('is accepted only from a real line comment, not from text in a string or a template', () => {

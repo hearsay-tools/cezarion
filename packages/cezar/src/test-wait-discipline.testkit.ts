@@ -92,6 +92,8 @@ export function blankSource(source: string): BlankedSource {
     copied = to;
   };
   const lineComments: number[] = [];
+  // Every comment so far as [start, end), so the head test can step back over one.
+  const comments: Array<[number, number]> = [];
   const unterminated: BlankedSource['unterminated'] = [];
   // What encloses the cursor: a template's literal part, or a `${…}` slot counting its own braces.
   const stack: Array<{ kind: 'template'; offset: number } | { kind: 'slot'; offset: number; depth: number }> = [];
@@ -126,6 +128,7 @@ export function blankSource(source: string): BlankedSource {
     if (ch === '/' && next === '/') {
       lineComments.push(i);
       const end = source.indexOf('\n', i);
+      comments.push([i, end === -1 ? n : end]);
       wipe(i, end === -1 ? n : end);
       i = end === -1 ? n : end;
       continue;
@@ -134,6 +137,7 @@ export function blankSource(source: string): BlankedSource {
       const close = source.indexOf('*/', i + 2);
       if (close === -1) unterminated.push({ construct: 'comment', offset: i });
       const end = close === -1 ? n : close + 2;
+      comments.push([i, end]);
       wipe(i, end);
       i = end;
       continue;
@@ -169,7 +173,7 @@ export function blankSource(source: string): BlankedSource {
         continue;
       }
     }
-    if (ch === '(') parens.push(headsStatement(source, i));
+    if (ch === '(') parens.push(headsStatement(source, i, comments));
     else if (ch === ')') closedHead = parens.pop() ?? false;
     if (top?.kind === 'slot') {
       if (ch === '{') top.depth += 1;
@@ -204,18 +208,29 @@ function regexMayStart(source: string, last: number, closedHead: boolean): boole
   return !/[\]}'"`]/.test(ch);
 }
 
-/** Whether the `(` at `open` heads an `if`, `while`, `for` (or `for await`) or `with` statement. */
-function headsStatement(source: string, open: number): boolean {
-  const end = skipSpaceBack(source, open - 1);
+/** Whether the `(` at `open` heads an `if`, `while`, `for` (or `for await`) or `with` statement.
+ *  Steps back over whitespace and the comments seen so far, so a comment before the `(` or
+ *  after a `.` does not hide the keyword. */
+function headsStatement(source: string, open: number, comments: Array<[number, number]>): boolean {
+  let c = comments.length - 1;
+  const back = (from: number): number => {
+    let k = skipSpaceBack(source, from);
+    for (; c >= 0 && (comments[c]?.[0] ?? 0) <= k; c -= 1) {
+      if (k >= (comments[c]?.[1] ?? 0)) break;
+      k = skipSpaceBack(source, (comments[c]?.[0] ?? 0) - 1);
+    }
+    return k;
+  };
+  const end = back(open - 1);
   let word = wordEndingAt(source, end);
   let start = end - word.length;
   if (word === 'await') {
-    const before = skipSpaceBack(source, start);
+    const before = back(start);
     word = wordEndingAt(source, before);
     start = before - word.length;
   }
   // `Symbol.for(…)` is a call.
-  return statementHeads.has(word) && source[skipSpaceBack(source, start)] !== '.';
+  return statementHeads.has(word) && source[back(start)] !== '.';
 }
 
 /** The closing `/` of a regex literal opened at `open`, or -1 when the line ends first. */
@@ -410,7 +425,6 @@ export function scanSource(file: string, source: string): Site[] {
 export function scanFile(file: string, source: string): { sites: Site[]; errors: ScanError[] } {
   const { code, lineComments, unterminated } = blankSource(source);
   const lines = source.split('\n');
-  const codeLines = code.split('\n');
   const lineStarts = [0];
   for (let i = 0; i < source.length; i += 1) if (source[i] === '\n') lineStarts.push(i + 1);
   const lineOf = (offset: number): number => {
@@ -471,11 +485,15 @@ export function scanFile(file: string, source: string): { sites: Site[]; errors:
   // Acceptance reads only the `//` comments blanking found, so `// bound:` written inside a string
   // or a template accepts nothing.
   const commentOn = new Map<number, string>();
+  const commentOnly = new Set<number>();
   for (const start of lineComments) {
     const end = source.indexOf('\n', start);
-    commentOn.set(lineOf(start), source.slice(start, end === -1 ? undefined : end));
+    const line = lineOf(start);
+    commentOn.set(line, source.slice(start, end === -1 ? undefined : end));
+    // Only whitespace before the `//` in the original: `/* x */ // y` is not a comment line.
+    if (source.slice(lineStarts[line], start).trim() === '') commentOnly.add(line);
   }
-  const commentLine = (index: number): boolean => commentOn.has(index) && (codeLines[index] ?? '').trim() === '';
+  const commentLine = (index: number): boolean => commentOnly.has(index);
   const accepted = (index: number): boolean => {
     if (boundComment.test(commentOn.get(index) ?? '')) return true;
     for (let j = index - 1; j >= 0 && commentLine(j); j -= 1) if (boundComment.test(commentOn.get(j) ?? '')) return true;
@@ -515,14 +533,20 @@ function optionsBound(code: string, source: string, arg: Item): number | undefin
 
 /**
  * A property's key and value text. A quoted key is blanked in the code, so its name is read from
- * the original source at the same offsets: `{ "timeout": 100 }` names `timeout`. A spread or a
- * computed key is `undefined`; a method or a numeric key gets an empty name.
+ * the original source at the same offsets: `{ "timeout": 100 }` names `timeout`. A spread, a
+ * computed key or a quoted key with an escape is `undefined`; a method or a numeric key gets an
+ * empty name.
  */
 function propertyKey(source: string, property: Item): { name: string; value?: string } | undefined {
   const { text, start } = property;
   if (text.startsWith('...') || text.startsWith('[')) return undefined;
   const quoted = /^(['"])( *)\1\s*:/.exec(text);
-  if (quoted) return { name: source.slice(start + 1, start + 1 + (quoted[2] ?? '').length), value: text.slice(quoted[0].length).trim() };
+  if (quoted) {
+    const name = source.slice(start + 1, start + 1 + (quoted[2] ?? '').length);
+    // An escape is not decoded: `"\u0074imeout"` may name anything, so it reads like a computed key.
+    if (name.includes('\\')) return undefined;
+    return { name, value: text.slice(quoted[0].length).trim() };
+  }
   const named = /^([A-Za-z_$][\w$]*)\s*(:|$)/.exec(text);
   if (!named) return { name: '' };
   return { name: named[1] ?? '', ...(named[2] === ':' ? { value: text.slice(named[0].length).trim() } : {}) };
@@ -530,7 +554,7 @@ function propertyKey(source: string, property: Item): { name: string; value?: st
 
 /** A parameter like `timeoutMs = 5_000`. A poll interval is not a bound, so `intervalMs = 25` is not one. */
 function shortDefault(param: Item): boolean {
-  const parsed = /^(?:\.\.\.)?([\w$]+)\s*\??\s*(?::[^=]*)?=(.*)$/.exec(param.text);
+  const parsed = /^(?:\.\.\.)?([\w$]+)\s*\??\s*(?::[^=]*)?=([\s\S]*)$/.exec(param.text);
   return parsed !== null && !/interval/i.test(parsed[1] ?? '') && isShort(literalMs(parsed[2]?.trim()));
 }
 
