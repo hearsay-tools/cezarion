@@ -1,7 +1,14 @@
 // Tripwire for the docs rule (hearsay-tools/cezarion#1099). change-surface.cjs
 // lets Markdown under packages/ skip Vitest and cockpit browser E2E because no
-// test reads it. This file fails when package code starts naming such a file,
-// so a new reader cannot hide behind the docs-only skip.
+// test reads it. This file fails when package code starts naming such a file
+// by path, so a new reader cannot hide behind the docs-only skip.
+//
+// It is a text scan, not a parser. It catches a path token that names the
+// file, resolved from the naming file's directory or one of its ancestors
+// (`e2e/fixture-server.md` from packages/web/src/test/). It misses a path
+// assembled from separate segments, such as
+// join(root, 'packages', 'contract', 'README.md'), a path built at runtime,
+// and a token on a line the comment filter skips (`//`, `/*`, `*`).
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
@@ -98,7 +105,13 @@ function docsMarkdownNamedByPackageCode() {
   return [...hits].sort();
 }
 
+// A repository-local approximation of Squeal's glob compiler, covering `**`,
+// `*` and `{a,b}` only. Other syntax throws rather than being escaped, so a
+// config glob that uses it fails here instead of matching the wrong files.
 function globToRegExp(glob) {
+  if (/[?[\]]/.test(glob) || glob.startsWith('!')) {
+    throw new Error(`globToRegExp does not implement the syntax in ${JSON.stringify(glob)}; extend globToRegExp before relying on it`);
+  }
   const convert = (pattern) => {
     let source = '';
     for (let i = 0; i < pattern.length; i++) {
@@ -139,7 +152,7 @@ test('every test-read document is a tracked file', () => {
   }
 });
 
-test('glob helper matches the Squeal glob forms it is given', () => {
+test('local globToRegExp helper matches the Squeal glob forms it supports', () => {
   const pattern = globToRegExp('packages/web/e2e/**/*.{ts,mjs}');
   assert.ok(pattern.test('packages/web/e2e/smoke.e2e.ts'));
   assert.ok(pattern.test('packages/web/e2e/fixtures/preview-app.mjs'));
@@ -147,6 +160,9 @@ test('glob helper matches the Squeal glob forms it is given', () => {
   assert.ok(!pattern.test('packages/web/e2e/smoke.e2e.tsx'));
   assert.ok(globToRegExp('packages/web/e2e/fixtures/**').test('packages/web/e2e/fixtures/a/b.png'));
   assert.ok(!globToRegExp('packages/web/*.json').test('packages/web/e2e/x.json'));
+  for (const unsupported of ['packages/web/e2e/?.ts', 'packages/web/e2e/[ab].ts', 'packages/web/e2e/a].ts', '!packages/web/e2e/**']) {
+    assert.throws(() => globToRegExp(unsupported), /extend globToRegExp/, unsupported);
+  }
 });
 
 test('Squeal browser-spec inputs cover exactly the non-docs files under packages/web/e2e/', () => {
