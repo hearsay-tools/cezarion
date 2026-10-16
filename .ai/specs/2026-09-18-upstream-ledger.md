@@ -75,14 +75,15 @@ against these rules on every `npm run test:unit`, so a `ported` row without a fo
    open-mercato/cezar (observed 2026-09-16).
 2. Range is `<last scan's upstreamHead>..refs/cez-upstream/main`, or `<origin.mergeBase>..` on the
    first scan.
-3. For every commit in the range not already in the ledger: record sha, PR number (from the
-   squash subject), title, date, and a conflict hint from `git apply --check --3way --cached` of
-   that commit's patch against a private index holding the committed `HEAD`, built once per scan
-   in a temp directory and removed afterwards, so nothing uncommitted in the checkout changes the
-   count; every git call of the hint reads attributes from that `HEAD` too
-   (`git --attr-source=<sha>`). On a git without that option (before 2.41), or when that index
-   cannot be built (temp dir unusable), the scan writes one warning to stderr and records the rows
-   without a hint. Append as `pending`. Existing rows are never touched.
+3. For every commit in the range not already in the ledger: record sha, PR number (from the squash
+   subject), title, date, and a conflict hint from `git apply --check --3way --cached` of that
+   commit's patch (a merge's is its diff from its first parent) against a private index holding
+   the committed `HEAD`, built once per scan in a temp directory and removed afterwards, so
+   nothing uncommitted in the checkout changes the count; every git call of the hint reads
+   attributes from that `HEAD` too (`git --attr-source=<sha>`). On a git without that option
+   (before 2.41), or when that index cannot be built (temp dir unusable), the scan writes one
+   warning to stderr and records the rows without a hint. Append as `pending`. Existing rows are
+   never touched.
 4. Append a `scans` row and write `scans/<date>.md`. Print a JSON summary on stdout.
 
 No new commits means no file changes and `added: 0`.
@@ -121,9 +122,11 @@ The baseline is the first parent of the commit that added the row's full sha to 
 (`git log --reverse -S<sha> HEAD -- .ai/upstream/ledger.yaml`). The ledger schema does not change. A row `HEAD` never committed has no baseline, and its drift
 reads `unknown`, never "no change".
 
-The file list comes from the upstream commit's own diff. A rename is judged by its old path,
-because that is where the fork's code would be. Each file gets four columns: whether the path
-exists at `HEAD` (and, when it does not, the last fork commit that touched it), reachability,
+The file list comes from the upstream commit's own diff. A merge commit is compared with its first
+parent, for the file list and the dry run alike, and its section says so: read as one commit, a
+merge lists no file and its `format-patch` is mail headers alone. A rename is judged by its old
+path, because that is where the fork's code would be. Each file gets four columns: whether the
+path exists at `HEAD` (and, when it does not, the last fork commit that touched it), reachability,
 drift since the baseline (non-merge commits and line churn), and a per-file 3-way dry run against
 `HEAD`. Churn comes from the whole `baseline..HEAD` diff, so it shows even beside `0 commits`: a
 merge commit can change a file no non-merge commit touched. Three flags summarise them:

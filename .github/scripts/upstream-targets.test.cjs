@@ -311,6 +311,13 @@ test('renderTargetsReport says why the dry run is unknown when HEAD could not be
   assert.match(md, /^- Dry run now: 0 conflict · 0 missing · 0 clean · 4 unknown/m);
 });
 
+test('renderTargetsReport says a merge was compared with its first parent', () => {
+  assert.doesNotMatch(renderTargetsReport(report()), /^- Merge commit:/m);
+  const r = report();
+  r.sections[0].merge = { firstParent: 'cccc3333dddd4444eeee5555ffff6666aaaa7777' };
+  assert.match(renderTargetsReport(r), /^- Merge commit: compared with its first parent `cccc3333`$/m);
+});
+
 test('renderTargetsReport says why reachability is unknown when the build failed', () => {
   const r = report({ reach: { roots: 3, reachable: 0, error: 'Could not resolve "./gone"' } });
   r.sections[0].files[3].reachability = 'unknown';
@@ -462,6 +469,7 @@ test('collectTargets re-checks an upstream commit against the fork HEAD', async 
   const rows = md.split('\n').filter((l) => l.startsWith('| `'));
   assert.match(rows[rows.length - 1], /^\| `README\.md` \|/, 'the unflagged row comes last');
   assert.match(md, /`packages\/web\/src\/gone\.ts` \| M \| absent, last touched by `[0-9a-f]+` refactor\(web\): drop gone \| missing, drifted \|/);
+  assert.doesNotMatch(md, /^- Merge commit:/m, 'a single-parent commit needs no merge line');
 });
 
 test('collectTargets reads drift as unknown for a ledger row HEAD never committed', async (t) => {
@@ -480,6 +488,68 @@ test('collectTargets reads drift as unknown for a ledger row HEAD never committe
   assert.equal(report.sections[0].files[0].drift, null);
   assert.match(renderTargetsReport(report), /^## .*baseline unknown/m);
   assert.notEqual(report.sections[1].baseline, null);
+});
+
+/** A `--no-ff` merge on upstream, with `refs/cez-upstream/main` at it. Its second parent takes
+ *  live.tsx from 2 to 4 (HEAD has 3: a conflict) and gone.ts, which the fork deleted, from 2 to 3;
+ *  its first parent is a later upstream commit that adds CHANGELOG.md. So the merge compared with
+ *  its first parent changes live.tsx and gone.ts, compared with its second only CHANGELOG.md, and
+ *  read as one commit (`diff-tree <merge>`, `format-patch -1 <merge>`) nothing at all. */
+function upstreamMerge(fx) {
+  fx.git('checkout', '-q', '-b', 'topic', 'upstream');
+  fx.write('packages/web/src/live.tsx', 'export const Live = 4\n// two\n// three\n');
+  fx.write('packages/web/src/gone.ts', 'export const gone = 3\n');
+  fx.git('commit', '-q', '-am', 'fix(web): topic change');
+  fx.git('checkout', '-q', 'upstream');
+  fx.write('CHANGELOG.md', 'upstream changelog\n');
+  fx.git('add', 'CHANGELOG.md');
+  fx.git('commit', '-q', '-m', 'docs: changelog (#15)');
+  const firstParent = fx.git('rev-parse', 'HEAD');
+  fx.git('merge', '-q', '--no-ff', '--no-edit', '-m', 'Merge pull request #14 from topic', 'topic');
+  const merge = fx.git('rev-parse', 'HEAD');
+  fx.git('checkout', '-q', 'main');
+  fx.git('update-ref', 'refs/cez-upstream/main', 'upstream');
+  return { merge, firstParent };
+}
+
+test('collectTargets compares an upstream merge with its first parent', async (t) => {
+  const { collectTargets } = require('./upstream-scan.cjs');
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const { merge, firstParent } = upstreamMerge(fx);
+  fx.write('.ai/upstream/ledger.yaml', fx.ledger([...fx.entries, { sha: merge, pr: 14, title: 'Merge pull request #14 from topic', date: '2026-09-12', status: 'pending' }], fx.base));
+  fx.git('commit', '-q', '-am', 'chore(upstream): scan the merge');
+  fx.write('packages/web/src/live.tsx', 'export const Live = 5\n// two\n// three\n');
+  fx.git('commit', '-q', '-am', 'feat(web): fork edits live again');
+  const head = fx.git('rev-parse', 'HEAD');
+  const calls = gitCallLog(t);
+  const report = await collectTargets([merge.slice(0, 8)], { cwd: fx.dir, fetch: false });
+  const [section] = report.sections;
+  const byPath = Object.fromEntries(section.files.map((f) => [f.path, f]));
+  assert.deepEqual(Object.keys(byPath), ['packages/web/src/gone.ts', 'packages/web/src/live.tsx'], 'the first parent\'s side, never CHANGELOG.md');
+  assert.equal(section.merge?.firstParent, firstParent);
+
+  const live = byPath['packages/web/src/live.tsx'];
+  assert.equal(live.reachability, 'production');
+  assert.deepEqual(live.drift, { commits: 1, added: 1, deleted: 1 });
+  assert.equal(live.dryRun, 'conflict');
+  assert.deepEqual(fileFlags({ ...live, forkExists: live.fork.exists }), ['drifted']);
+
+  const gone = byPath['packages/web/src/gone.ts'];
+  assert.equal(gone.fork.exists, false);
+  assert.equal(gone.dryRun, 'missing');
+  assert.deepEqual(fileFlags({ ...gone, forkExists: gone.fork.exists }), ['missing']);
+
+  const md = renderTargetsReport(report);
+  assert.match(md, new RegExp(`^- Merge commit: compared with its first parent \`${firstParent.slice(0, 8)}\`$`, 'm'));
+  assert.match(md, /^- Dry run now: 1 conflict · 1 missing · 0 clean \(/m);
+  assert.match(md, /2 files flagged/);
+
+  // The merge's own path reads attributes from HEAD like every other call.
+  const [, ...pinned] = calls();
+  for (const args of pinned) assert.equal(args[0], `--attr-source=${head}`, args.join(' '));
+  assert.ok(pinned.some((args) => subcommandOf(args) === 'rev-list'), 'the guard saw the parent count');
+  assert.ok(pinned.some((args) => subcommandOf(args) === 'diff-tree' && args.includes('-p')), 'the guard saw the merge\'s patch');
 });
 
 /** What `collectTargets` must leave alone: the fixture's status and its real index, byte for byte.
@@ -690,7 +760,7 @@ test('every git call of targets reads attributes from the HEAD it resolved', asy
   assert.deepEqual(resolve, ['rev-parse', '--verify', 'HEAD^{commit}'], 'resolving HEAD is the one call that cannot name it');
   for (const args of pinned) assert.equal(args[0], `--attr-source=${head}`, args.join(' '));
   const seen = new Set(pinned.map(subcommandOf));
-  for (const sub of ['cat-file', 'log', 'diff', 'diff-tree', 'read-tree', 'ls-files', 'checkout-index', 'format-patch', 'apply']) {
+  for (const sub of ['cat-file', 'log', 'diff', 'diff-tree', 'rev-list', 'read-tree', 'ls-files', 'checkout-index', 'format-patch', 'apply']) {
     assert.ok(seen.has(sub), `the guard saw a ${sub} call`);
   }
 });
@@ -956,6 +1026,29 @@ test('upstream-scan records each new commit\'s conflict hint with HEAD\'s attrib
   assert.deepEqual(tmp.leftovers(), []);
 });
 
+test('upstream-scan records a merge\'s conflict hint from its first-parent diff', (t) => {
+  const fx = forkFixture();
+  t.after(fx.cleanup);
+  const tmp = privateTmp(t);
+  const { merge } = upstreamMerge(fx);
+  const head = fx.git('rev-parse', 'HEAD');
+  const calls = gitCallLog(t);
+  const cli = fixtureCli(fx);
+  const result = cli('--no-fetch', '--date', '2026-10-16');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).added, 3, 'the merge and the new commits on both its sides');
+  // live.tsx conflicts and gone.ts is missing, which the hint does not count. A merge read as one
+  // commit has an empty patch, which would record a false 0.
+  assert.deepEqual(scannedRow(fx, merge).hint, { conflicts: 1 });
+  const logged = calls();
+  const at = logged.findIndex((args) => args.join(' ') === 'rev-parse --verify HEAD^{commit}');
+  assert.ok(at > 0, logged.map((args) => args.join(' ')).join('\n'));
+  const pinned = logged.slice(at + 1);
+  assert.ok(pinned.some((args) => subcommandOf(args) === 'diff-tree' && args.includes('-p')), 'the guard saw the merge\'s patch');
+  for (const args of pinned) assert.equal(args[0], `--attr-source=${head}`, args.join(' '));
+  assert.deepEqual(tmp.leftovers(), []);
+});
+
 test('upstream-scan records rows without a hint, and warns, when it cannot build its private index', (t) => {
   const fs = require('node:fs');
   const path = require('node:path');
@@ -1018,7 +1111,7 @@ test('every git call of the scan\'s conflict hints reads attributes from the HEA
   const pinned = logged.slice(at + 1);
   for (const args of pinned) assert.equal(args[0], `--attr-source=${head}`, args.join(' '));
   const seen = new Set(pinned.map(subcommandOf));
-  for (const sub of ['read-tree', 'format-patch', 'apply']) assert.ok(seen.has(sub), `the guard saw a ${sub} call`);
+  for (const sub of ['read-tree', 'rev-list', 'format-patch', 'apply']) assert.ok(seen.has(sub), `the guard saw a ${sub} call`);
   assert.deepEqual(tmp.leftovers(), []);
 });
 

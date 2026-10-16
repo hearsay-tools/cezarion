@@ -61,10 +61,11 @@ Set `status`, add `decided: YYYY-MM-DD`, and fill the fields that status require
 | `n/a` | nothing to port: release bumps, upstream-only docs | `reason` |
 
 `hint.conflicts` is the number of files a 3-way dry run of the upstream commit could not apply
-onto the fork's committed `HEAD` when the scan ran; uncommitted changes never count. A scan that
-cannot build its private copy of `HEAD` warns on stderr and records its rows without a `hint`. It is
-advisory and goes stale as the fork moves. `targets` re-runs the dry run against the current fork
-and reports it per file. A free-form `note` is allowed on any row.
+onto the fork's committed `HEAD` when the scan ran; uncommitted changes never count. A merge
+commit is applied as its diff from its first parent. A scan that cannot build its private copy of
+`HEAD` warns on stderr and records its rows without a `hint`. It is advisory and goes stale as the
+fork moves. `targets` re-runs the dry run against the current fork and reports it per file. A
+free-form `note` is allowed on any row.
 
 ## Starting a port
 
@@ -85,9 +86,10 @@ commits takes several shas. A port issue's Agent context names this command with
 The command fetches upstream into `refs/cez-upstream/main` when a commit is missing locally;
 `--no-fetch` turns that into an error.
 
-It prints a Markdown report, one section per upstream commit, with a row for every file the
-commit touches. Put the flagged rows in front of the planner. The report is advisory: it exits 0
-whenever it printed, flags or not.
+It prints a Markdown report, one section per upstream commit, with a row for every file the commit
+touches. A merge commit is compared with its first parent, the upstream `main` it landed on, and
+its section says so. Put the flagged rows in front of the planner. The report is advisory: it
+exits 0 whenever it printed, flags or not.
 
 Every verdict describes the committed `HEAD` the report names. Uncommitted changes, staged or
 not, are ignored: the dry run and the reachability bundle read a snapshot of `HEAD` taken outside

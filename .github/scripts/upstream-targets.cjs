@@ -224,6 +224,7 @@ function renderSection(ledger, section) {
   row.push(Number.isInteger(entry.hint?.conflicts) ? `scan hint: ${plural(entry.hint.conflicts, 'conflict')}` : 'scan hint: none recorded');
   if (entry.note) row.push(`note: ${String(entry.note).trim().replace(/\s*\n\s*/g, ' ')}`);
   lines.push(`- Ledger row: ${row.join(' · ')}`);
+  if (section.merge) lines.push(`- Merge commit: compared with its first parent \`${section.merge.firstParent.slice(0, 8)}\``);
   lines.push(baseline
     ? `- Baseline: \`${baseline.short}\` (${baseline.date}), the parent of \`${intro.short}\` ${intro.subject}, which added this row`
     : '- Baseline: unknown. This row is not in the history of `ledger.yaml` at `HEAD` (an unmerged scan?), so drift reads unknown.');

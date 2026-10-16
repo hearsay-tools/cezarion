@@ -23,7 +23,8 @@
 // `targets` takes ledger sha prefixes and prints a Markdown report on the files
 // those upstream commits touch, as the fork's HEAD has them now: present or
 // gone, reached by production code or only by tests, changed since the row
-// landed, and a fresh per-file dry run (hearsay-tools/cezarion#1002). Every
+// landed, and a fresh per-file dry run (hearsay-tools/cezarion#1002). A merge is
+// compared with its first parent, here and in the scan's conflict hints. Every
 // verdict describes the committed HEAD: uncommitted changes, staged or not, are
 // ignored; only `ledger.yaml` is read from the work tree. It needs git 2.41 or
 // newer (`--attr-source`). Advisory: exit 0 whenever the report printed; exit 1
@@ -131,14 +132,40 @@ function headIndex(g) {
   }
 }
 
-/** What a 3-way dry run of one upstream commit onto `index` says, a private index holding `g.head`
- *  (`headIndex`). `git apply --check --3way` exits 0 AND reports its conflicts on stderr, so both
- *  streams are read whatever the exit code — an exit-code-only check would call everything clean.
- *  The run reads that index alone (`--cached`) and `g.head`'s attributes, so nothing staged or
- *  edited in the checkout can change the verdict. The index path reaches the child's environment only. */
-function applyCheckOutput(sha, g, index) {
-  const patch = g.git(['format-patch', '-1', '--stdout', sha]);
-  return g.gitOutput(['apply', '--check', '--3way', '--cached', '-'], { env: { ...process.env, GIT_INDEX_FILE: index }, input: patch });
+/** One upstream commit as `targets` and the scan's hints compare it: with its parent, or, for a
+ *  merge, with its first parent, the upstream main it landed on. Read as one commit a merge shows
+ *  nothing (a bare `diff-tree <merge>` lists no file and `format-patch -1 <merge>` is mail headers
+ *  alone), which would report no files and a clean dry run. `merge` is `{ firstParent }` or null;
+ *  the parents come from one `rev-list` per commit. */
+function upstreamCommit(sha, g) {
+  const [, ...parents] = g.git(['rev-list', '--parents', '-n', '1', sha]).trim().split(' ');
+  return { sha, merge: parents.length > 1 ? { firstParent: parents[0] } : null };
+}
+
+/** The files `commit` changes against its first parent: two tree-ish, so a merge lists its files
+ *  and a single-parent commit lists what its own diff does. */
+function changedFiles(commit, g) {
+  return parseNameStatus(g.git(['diff-tree', '-r', '-z', '--name-status', '-M', `${commit.sha}^1`, commit.sha]));
+}
+
+/** The patch a dry run applies: `format-patch` for a single-parent commit; for a merge, the diff
+ *  from its first parent. That diff is plumbing (`diff-tree -p`), not `git diff`: the porcelain
+ *  follows the user's `diff.noprefix`, `color.diff`, external diff and textconv, and any of them
+ *  makes a patch `git apply` misreads. `--full-index` names the blobs the 3-way merge needs. */
+function upstreamPatch(commit, g) {
+  return commit.merge
+    ? g.git(['diff-tree', '-p', '--binary', '--full-index', '-M', `${commit.sha}^1`, commit.sha])
+    : g.git(['format-patch', '-1', '--stdout', commit.sha]);
+}
+
+/** What a 3-way dry run of one upstream commit (`upstreamCommit`) onto `index` says, a private
+ *  index holding `g.head` (`headIndex`). `git apply --check --3way` exits 0 AND reports its
+ *  conflicts on stderr, so both streams are read whatever the exit code — an exit-code-only check
+ *  would call everything clean. The run reads that index alone (`--cached`) and `g.head`'s
+ *  attributes, so nothing staged or edited in the checkout can change the verdict. The index path
+ *  reaches the child's environment only. */
+function applyCheckOutput(commit, g, index) {
+  return g.gitOutput(['apply', '--check', '--3way', '--cached', '-'], { env: { ...process.env, GIT_INDEX_FILE: index }, input: upstreamPatch(commit, g) });
 }
 
 /** Files a 3-way dry run of each upstream commit cannot apply onto HEAD, by sha. Advisory, dated.
@@ -162,7 +189,7 @@ function conflictHints(shas, cwd = root) {
     return hints;
   }
   try {
-    for (const sha of shas) hints[sha] = parseApplyCheck(applyCheckOutput(sha, g, built.index));
+    for (const sha of shas) hints[sha] = parseApplyCheck(applyCheckOutput(upstreamCommit(sha, g), g, built.index));
   } finally {
     built.remove();
   }
@@ -324,9 +351,10 @@ async function collectTargets(prefixes, { cwd = root, fetch = true } = {}) {
       : { roots: 0, reachable: 0, inputs: new Set(), error: snapshot.error };
     const sections = entries.map((entry) => {
       const { intro, baseline } = ledgerBaseline(entry, g);
-      const files = parseNameStatus(g.git(['diff-tree', '-r', '-z', '--no-commit-id', '--name-status', '-M', entry.sha]));
-      const dryRun = snapshot.index ? parseApplyCheckByFile(applyCheckOutput(entry.sha, g, snapshot.index)) : new Map();
-      return { entry, intro, baseline, files: files.map((f) => targetFile(f, { g, baseline, reach, dryRun })) };
+      const commit = upstreamCommit(entry.sha, g);
+      const dryRun = snapshot.index ? parseApplyCheckByFile(applyCheckOutput(commit, g, snapshot.index)) : new Map();
+      const files = changedFiles(commit, g).map((f) => targetFile(f, { g, baseline, reach, dryRun }));
+      return { entry, intro, baseline, merge: commit.merge, files };
     });
     return { ledger, head: { sha: g.head, short, date }, reach, dryRunError: snapshot.index ? null : snapshot.error, sections };
   });
