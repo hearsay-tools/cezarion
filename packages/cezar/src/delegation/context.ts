@@ -89,6 +89,8 @@ export async function prepareWorkerContext(options: {
         if (!match || match[3] !== source.path) throw invalid();
         const size = await git('git', ['cat-file', '-s', match[2]!], { cwd: repoRoot, maxBuffer: 1024, timeout: 30_000 });
         inputs.push({ source, path: join(workspace.path, source.path), bytes: Number(size.stdout.trim()), sha256: hash(match[2]!) });
+      } else if (source.kind === 'parent-file') {
+        throw invalid();
       } else {
         const bytes = await attachmentBytes(dataDir, parentId, source.id, WORKER_CONTEXT_BYTES - copied);
         if (options.containsSecret(bytes.toString('utf8'))) throw invalid();
@@ -124,6 +126,7 @@ export async function verifyWorkerContext(options: {
         await canonicalFile(input.path);
         continue;
       }
+      if (input.source.kind === 'parent-file') throw invalid();
       const path = join(await inputDirectory(dataDir, workspace.ownerRunId), copyName(index));
       if (input.path !== path) throw invalid();
       copied += input.bytes;

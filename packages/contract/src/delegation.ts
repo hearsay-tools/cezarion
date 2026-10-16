@@ -89,16 +89,25 @@ export const workerCreationReceiptSchema = z.object({
 export const workerBackendSchema = z.enum(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp']);
 const relativeInputPath = z.string().min(1).max(4096).refine(path =>
   !/[\\\u0000-\u001f\u007f:]/.test(path) && !path.startsWith('/') &&
-  path.split('/').every(part => part !== '' && part !== '.' && part !== '..'));
+  path.split('/').every(part => part !== '' && part !== '.' && part !== '..' && part.toLowerCase() !== '.git'));
 export const workerContextReferenceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('baseline-file'), path: relativeInputPath }).strict(),
   z.object({ kind: z.literal('parent-attachment'), id: z.string().min(1).max(255).regex(/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/).refine(id => !id.includes('..')) }).strict(),
+  /** A git-ignored file in the parent's own worktree, relative to its root (`cez worker spawn --attach`, hearsay-tools/cezarion#1149). */
+  z.object({ kind: z.literal('parent-file'), path: relativeInputPath }).strict(),
 ]);
 export type WorkerContextReference = z.infer<typeof workerContextReferenceSchema>;
 export const workerContextSchema = z.object({
   text: z.string().max(100_000).optional(),
   artifacts: z.array(workerContextReferenceSchema).max(32).optional(),
-}).strict();
+}).strict().superRefine(({ artifacts = [] }, ctx) => {
+  const seen = new Set<string>();
+  for (const [index, artifact] of artifacts.entries()) {
+    if (artifact.kind !== 'parent-file') continue;
+    if (seen.has(artifact.path)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['artifacts', index, 'path'], message: `duplicate --attach path: ${artifact.path}` });
+    seen.add(artifact.path);
+  }
+});
 export const workerInputSchema = z.object({
   source: workerContextReferenceSchema,
   path: z.string().min(1).max(8192),
