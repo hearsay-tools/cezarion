@@ -3,7 +3,7 @@ import { ChevronDownIcon, FolderIcon, MenuIcon, PlusIcon, SearchIcon, ShieldChec
 import { ChevronLeftIcon } from 'lucide-react'
 import * as React from 'react'
 import type { ReactNode } from 'react'
-import { Link as RouterLink, matchPath, useLocation } from 'react-router'
+import { Link as RouterLink, matchPath, useLocation, useNavigationType } from 'react-router'
 
 import { openCommandPalette } from '@/components/command-palette'
 import { DrawerGlobal, DrawerIdentity, DrawerProjects, DrawerUpdate, MenuButtonPills, elsewhereSignal, menuButtonLabel, type DrawerTools, type MobileProjectNav } from '@/components/mobile-projects'
@@ -245,9 +245,21 @@ export function AppShell({
   // Close on route change. Without this the drawer survives the navigation it triggered and sits
   // on top of the view the user just asked for — and back/forward and the ⌘K palette (Step 4.3)
   // navigate without going through the drawer's own links at all.
+  //
+  // One pathname change is not a navigation: `/p/default/…` is rewritten in place (a REPLACE) to
+  // `/p/<boot>/…` once the registry names the boot project (`ProjectScopeRoute`). The shell and
+  // its drawer already render the boot project from health before that, so a drawer opened in the
+  // gap shows the same view after it and must stay open. hearsay-tools/cezarion#1129: on a slow
+  // registry answer the rewrite closed a drawer the user had just opened.
+  const navigationType = useNavigationType()
+  const menuPathname = React.useRef(pathname)
   React.useEffect(() => {
+    const previous = menuPathname.current
+    menuPathname.current = pathname
+    if (previous === pathname) return
+    if (navigationType === 'REPLACE' && isBootAliasResolution(previous, pathname)) return
     setMenuOpen(false)
-  }, [pathname])
+  }, [pathname, navigationType])
 
   // The drawer must not outlive its breakpoint: widening past `md` reveals the real sidebar, and
   // an open drawer would leave a focus-trapping modal over an already-visible nav.
@@ -575,6 +587,13 @@ function MobileNavDrawer({
       <DrawerGlobal onNavigate={onNavigate} tools={toolsStatus} />
     </SheetContent>
   )
+}
+
+/** `/p/default/<rest>` resolving to `/p/<boot>/<rest>`: the same view under its canonical id. */
+function isBootAliasResolution(previous: string, next: string): boolean {
+  return pathnameProjectId(previous) === 'default' &&
+    pathnameProjectId(next) !== null && pathnameProjectId(next) !== 'default' &&
+    stripProjectPrefix(previous) === stripProjectPrefix(next)
 }
 
 /** Displayed-project navigation is shared by the desktop sidebar and the mobile task list. */
