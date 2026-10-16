@@ -95,9 +95,17 @@ function changedLinesFromFiles(files) {
   }
   return changed;
 }
+const REVIEW_ROUND_MARKER = '<!-- cez-review-round -->';
+// A round carries the round marker, or a patch-id marker from before it existed.
+// Each verdict reply arrives wrapped in its own empty-body review and never counts.
+// The review-round step's review_count jq filter applies the same rule.
+function isAutomatedReviewRound(review, author = 'github-actions[bot]') {
+  if (review?.user?.login !== author || review?.submitted_at == null) return false;
+  return (typeof review.body === 'string' && review.body.includes(REVIEW_ROUND_MARKER)) || extractReviewPatchId(review.body) !== null;
+}
 function countAutomatedReviews(reviews, author = 'github-actions[bot]') {
   if (!Array.isArray(reviews)) return 0;
-  return reviews.filter((review) => review?.user?.login === author && review?.submitted_at != null).length;
+  return reviews.filter((review) => isAutomatedReviewRound(review, author)).length;
 }
 function formatReviewPatchIdMarker(patchId) {
   if (typeof patchId !== 'string' || !SHA.test(patchId)) return null;
@@ -134,8 +142,7 @@ async function postReview({ github, owner, repo, pullNumber, eventHeadSha, revie
   const reviews = await github.paginate(github.rest.pulls.listReviews, { owner, repo, pull_number: pullNumber, per_page: 100 });
   if (!ignoreCap && countAutomatedReviews(reviews) >= maxRounds) return 0;
   if (reviews.some((review) => review?.user?.login === 'github-actions[bot]' && review.commit_id === reviewedHeadSha)) return 0;
-  const marker = formatReviewPatchIdMarker(patchId);
-  const postedBody = marker ? (body ? `${body}\n\n${marker}` : marker) : (body || '');
+  const postedBody = [body, REVIEW_ROUND_MARKER, formatReviewPatchIdMarker(patchId)].filter(Boolean).join('\n\n');
   await github.rest.pulls.createReview({ owner, repo, pull_number: pullNumber, commit_id: reviewedHeadSha, event: 'COMMENT', body: postedBody, comments: comments.map(({ path, line, body: commentBody }) => ({ path, line, side: 'RIGHT', body: commentBody })) });
   return comments.length;
 }
@@ -212,6 +219,7 @@ module.exports = {
   loadReview,
   changedLinesFromFiles,
   countAutomatedReviews,
+  isAutomatedReviewRound,
   postReview,
   assertLiveHead,
   listReviewThreads,

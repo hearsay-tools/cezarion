@@ -547,6 +547,36 @@ test('review schema requires every object property and models optional values as
 });
 
 
+const bot = { login: 'github-actions[bot]' };
+// Same history as roundHistory in automated-review.test.cjs: four rounds among
+// verdict-reply reviews, a pending and a human review, and a 39-hex marker.
+const roundHistory = [
+  { id: 1, user: bot, submitted_at: '2026-10-01T10:00:00Z', body: `<!-- cez-review-patch-id: ${'1'.repeat(40)} -->` },
+  { id: 2, user: bot, submitted_at: '2026-10-01T10:01:00Z', body: '' },
+  { id: 3, user: bot, submitted_at: '2026-10-01T10:02:00Z', body: `summary\n\n<!-- cez-review-patch-id: ${'2'.repeat(40)} -->` },
+  { id: 4, user: bot, submitted_at: '2026-10-01T10:03:00Z', body: '' },
+  { id: 5, user: bot, submitted_at: '2026-10-01T10:04:00Z', body: 'summary\n\n<!-- cez-review-round -->' },
+  { id: 6, user: bot, submitted_at: '2026-10-01T10:05:00Z', body: `<!-- cez-review-round -->\n\n<!-- cez-review-patch-id: ${'3'.repeat(40)} -->` },
+  { id: 7, user: bot, submitted_at: '2026-10-01T10:06:00Z', body: '' },
+  { id: 8, user: bot, submitted_at: '2026-10-01T10:07:00Z', body: null },
+  { id: 9, user: bot, submitted_at: null, body: '<!-- cez-review-round -->' },
+  { id: 10, user: { login: 'octocat' }, submitted_at: '2026-10-01T10:08:00Z', body: '<!-- cez-review-round -->' },
+  { id: 11, user: bot, submitted_at: '2026-10-01T10:09:00Z', body: `<!-- cez-review-patch-id: ${'4'.repeat(39)} -->` },
+];
+
+test('review-round counts rounds by the same rule as countAutomatedReviews', async () => {
+  const { parse } = await import('yaml');
+  const { execFileSync } = require('node:child_process');
+  const { countAutomatedReviews } = require('./automated-review.cjs');
+  const workflow = parse(fs.readFileSync(workflowPath, 'utf8'));
+  const round = workflow.jobs['review-round'].steps.find((step) => step.id === 'review-round');
+  const filter = round.run.match(/review_count="\$\(gh api [^\n]*?--jq '([^']+)'/)?.[1];
+  assert.ok(filter, 'review-round must count reviews through a --jq filter');
+  const counted = execFileSync('jq', ['-r', filter], { input: JSON.stringify(roundHistory), encoding: 'utf8' }).split('\n').filter(Boolean).length;
+  assert.equal(counted, countAutomatedReviews(roundHistory));
+  assert.equal(counted, 4);
+});
+
 test('review-round skips when the three-dot patch-id matches the last posted marker', async (t) => {
   const { parse } = await import('yaml');
   const { execFileSync } = require('node:child_process');
@@ -572,7 +602,9 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
   const patchId = 'c'.repeat(40);
   const marker = `<!-- cez-review-patch-id: ${patchId} -->`;
 
-  async function runRound({ event, gitOk, reviewsOut, headRef = '', prAuthor = '', filesOut = 'packages/cezar/src/index.ts', liveHead = head, filesOk = true }) {
+  // `reviews` serves /reviews as real JSON through real `jq -r` and the --jq
+  // filter the script passed; `reviewsOut` is the canned filter output.
+  async function runRound({ event, gitOk, reviewsOut, reviews, headRef = '', prAuthor = '', filesOut = 'packages/cezar/src/index.ts', liveHead = head, filesOk = true }) {
     const cwd = fs.mkdtempSync(path.join(tmpdir(), 'review-patch-id-'));
     const output = path.join(cwd, 'outputs');
     const scriptsDir = path.join(cwd, '.cez-trusted', '.github', 'scripts');
@@ -627,12 +659,16 @@ exit 128
       GH_TOKEN: 'test-token',
       TEST_STAMPS_OK: '1',
     };
+    if (reviews) {
+      env.TEST_REVIEWS_JSON = path.join(cwd, 'reviews.json');
+      fs.writeFileSync(env.TEST_REVIEWS_JSON, JSON.stringify(reviews));
+    }
     const filesLiteral = filesOut.replace(/'/g, `'\\''`);
     const filesBranch = filesOk
       ? `printf '%s\\n' '${filesLiteral}'`
       : `echo 'page failed' >&2; return 1`;
     const script = [
-      `gh() { case "$*" in *'.head.sha'*) echo '${liveHead}';; *'.base.sha'*) echo '${base}';; *'/files'*) ${filesBranch};; *'/reviews'*) printf '%s\\n' '${reviewsOut}';; *) echo "unexpected gh: $*" >&2; return 1;; esac; }`,
+      `gh() { case "$*" in *'.head.sha'*) echo '${liveHead}';; *'.base.sha'*) echo '${base}';; *'/files'*) ${filesBranch};; *'/reviews'*) if [ -n "\${TEST_REVIEWS_JSON:-}" ]; then while [ "$1" != --jq ]; do shift; done; jq -r "$2" "$TEST_REVIEWS_JSON"; else printf '%s\\n' '${reviewsOut}'; fi;; *) echo "unexpected gh: $*" >&2; return 1;; esac; }`,
       round.run,
     ].join('\n');
     try {
@@ -674,6 +710,24 @@ exit 128
   await t.test('workflow_dispatch still reviews past the patch-id skip', async () => {
     const outputs = await runRound({ event: 'workflow_dispatch', gitOk: true, reviewsOut: marker });
     assert.equal(outputs.can_review, 'true');
+  });
+
+  const history = (rounds) => [
+    { id: 1, user: bot, submitted_at: '2026-10-01T10:00:00Z', body: `<!-- cez-review-patch-id: ${'d'.repeat(40)} -->` },
+    { id: 2, user: bot, submitted_at: '2026-10-01T10:10:00Z', body: 'summary\n\n<!-- cez-review-round -->' },
+    { id: 3, user: bot, submitted_at: '2026-10-01T10:20:00Z', body: `<!-- cez-review-round -->\n\n<!-- cez-review-patch-id: ${'e'.repeat(40)} -->` },
+  ].slice(0, rounds).concat(Array.from({ length: 5 }, (_, i) => ({ id: 10 + i, user: bot, submitted_at: `2026-10-01T11:0${i}:00Z`, body: '' })));
+
+  await t.test('verdict-reply reviews do not spend the round cap', async () => {
+    const outputs = await runRound({ event: 'pull_request_target', gitOk: true, reviews: history(2) });
+    assert.equal(outputs.can_review, 'true');
+    assert.equal(outputs.patch_id, patchId);
+  });
+
+  await t.test('the cap stops the round after AUTOMATED_REVIEW_ROUNDS rounds', async () => {
+    const outputs = await runRound({ event: 'pull_request_target', gitOk: true, reviews: history(3) });
+    assert.equal(outputs.can_review, 'false');
+    assert.equal(outputs.patch_id, '', 'the cap, not the patch-id skip, stopped the round');
   });
 
   await t.test('bot-authored release/v* head skips review when files are manifest-only', async () => {
