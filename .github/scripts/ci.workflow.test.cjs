@@ -230,6 +230,30 @@ test('classification is not a path filter and build-and-package stays unconditio
   assert.equal(ci.jobs['build-and-package'].needs, undefined);
 });
 
+test('build-and-package lints workflows with pinned, hash-verified actionlint and shellcheck (hearsay-tools/cezarion#1130)', () => {
+  const steps = workflow().jobs['build-and-package'].steps;
+  const index = steps.findIndex((step) => step.name === 'Lint workflows');
+  assert.ok(index > 0, 'expected a Lint workflows step');
+  assert.equal(steps[index - 1].name, 'Check out repository', 'lint before Node setup so it fails in seconds');
+  const { env, run } = steps[index];
+  const [major, minor, patch] = String(env.ACTIONLINT_VERSION).split('.').map(Number);
+  assert.ok(major * 1e6 + minor * 1e3 + patch >= 1_007_010,
+    `actionlint ${env.ACTIONLINT_VERSION}: 1.7.10 is the first release that reads YAML anchors`);
+  assert.match(String(env.SHELLCHECK_VERSION), /^\d+\.\d+\.\d+$/);
+  assert.match(env.ACTIONLINT_SHA256, /^[0-9a-f]{64}$/);
+  assert.match(env.SHELLCHECK_SHA256, /^[0-9a-f]{64}$/);
+  assert.equal(env.SHELLCHECK_OPTS, '--severity=warning');
+  assert.doesNotMatch(run, /\$\{\{/, 'versions and hashes reach the script through env, not interpolation');
+  const verify = run.indexOf('sha256sum -c');
+  assert.ok(verify > run.lastIndexOf('curl -fsSL --retry 3 '), 'verify after both downloads');
+  assert.ok(verify < run.indexOf('tar '), 'verify before extracting');
+  assert.match(run, /\$ACTIONLINT_SHA256/);
+  assert.match(run, /\$SHELLCHECK_SHA256/);
+  const lint = run.split('\n').find((line) => line.includes('-shellcheck='));
+  assert.match(lint ?? '', /-shellcheck="[^"]*shellcheck-v\$\{SHELLCHECK_VERSION\}\/shellcheck"/, 'shellcheck comes from the pinned download, not the runner image');
+  assert.match(lint, /-pyflakes=(\s|$)/, 'pyflakes is off');
+});
+
 test('test jobs require full-matrix classification without losing the bot bump skip', () => {
   const ci = workflow();
   for (const name of ['vitest', 'node-floor', 'cockpit-browser']) {

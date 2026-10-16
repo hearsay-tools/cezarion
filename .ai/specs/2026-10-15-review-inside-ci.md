@@ -49,6 +49,6 @@ Open findings fail the CI run, not just a separate workflow. Consumers:
 
 ## Validation
 
-Unit tests (`automated-code-review.workflow.test.cjs`) pin the triggers, the `needs: verify` gate, the routing and naming of the required check, the permission union, the explicit secrets, and the artifact-ID guard. `pr-snapshot.test.cjs` pins publishing despite a review failure. `actionlint` checks the caller against the called workflow.
+Unit tests (`automated-code-review.workflow.test.cjs`) pin the triggers, the `needs: verify` gate, the routing and naming of the required check, the permission union, the explicit secrets, and the artifact-ID guard. `pr-snapshot.test.cjs` pins publishing despite a review failure. `build-and-package` in `ci.yml` runs `actionlint` over `.github/workflows/`. `actionlint` checks each `uses: ./.github/workflows/…` caller's inputs and secrets against the called workflow. It also checks the syntax of every expression. `actionlint` does not compare permissions, so the unit test pins the permission union instead.
 
 `pull_request_target` loads `ci.yml` from `main`, so the introducing PR is still reviewed by the previous standalone workflow. After merge, a disposable same-repository draft PR confirms one green run with one posted review. It then deliberately fails one verification job and confirms that **Re-run failed jobs** runs the review once verification passes.

@@ -1,0 +1,16 @@
+# actionlint configuration for the `Lint workflows` step in ci.yml
+# (hearsay-tools/cezarion#1130).
+self-hosted-runner:
+  # Blacksmith runners: ci-benchmark.yml uses the 4-vCPU label, release.yml
+  # the 8-vCPU one.
+  labels:
+    - blacksmith-*-ubuntu-2404
+
+paths:
+  .github/workflows/**/*.{yml,yaml}:
+    ignore:
+      # GitHub documents `concurrency.queue` (report-workflow-failure.yml and
+      # sweep-ci-failures.yml use it), but actionlint 1.7.12 predates it and the
+      # fix is still pending in rhysd/actionlint#654. Remove this ignore once a
+      # pinned release understands `queue`.
+      - '^unexpected key "queue" for "concurrency" section\.'
