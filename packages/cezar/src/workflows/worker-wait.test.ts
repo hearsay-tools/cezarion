@@ -471,6 +471,41 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(manager.cancelWorkerWait(p.id, wait.id).reason).toBe('cancelled');
   });
 
+  it('refuses another wait over a parked one by naming cancel-wait', async () => {
+    const p = await parent(); const w = await worker(p.id); const wait = register(p.id, [w.id]);
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+    expect(() => register(p.id, [w.id])).toThrow(`Wait ${wait.id} is already active; keep it or run worker cancel-wait ${wait.id} before registering another`);
+  });
+
+  // hearsay-tools/cezarion#1200: cancelling a wake-pending receipt changes nothing, so naming
+  // cancel-wait sent parents round a loop that only a turn-end breaks.
+  it('tells a parent to end its turn instead of cancelling a wake-pending wait', async () => {
+    const release = join(root, 'release-wake-pending-turn'); const wire = controlledWire({ firstResultGate: release });
+    const p = await parent(); await until(wire.initialReceived); const w = await worker(p.id);
+    const wait = register(p.id, [w.id]);
+    expect(() => register(p.id, [w.id])).toThrow(`Wait ${wait.id} is already active; keep it or run worker cancel-wait ${wait.id} before registering another`);
+    expect(manager.cancelWorkerWait(p.id, wait.id).phase).toBe('wake-pending');
+    let refusal: unknown; try { register(p.id, [w.id]); } catch (error) { refusal = error; }
+    expect(refusal).toMatchObject({ code: 'incompatible_state', message: `Wait ${wait.id} has settled and its result is waiting for delivery. End your turn to receive it, then register another wait.` });
+    expect((refusal as Error).message).not.toContain('cancel-wait');
+    writeFileSync(release, 'release');
+    await until(() => !waitOf(store.getRun(p.id)));
+  });
+
+  it('a wait on an already settled worker is wake-pending from registration and the next one is told to end the turn', async () => {
+    const release = join(root, 'release-settled-worker-turn'); const wire = controlledWire({ firstResultGate: release });
+    const p = await parent(); await until(wire.initialReceived); const w = await worker(p.id);
+    fixtureUpdateRun(w.id, { status: 'done' });
+    const wait = register(p.id, [w.id]);
+    expect(wait).toMatchObject({ phase: 'wake-pending', reason: 'outcome' });
+    const next = await worker(p.id);
+    let refusal: unknown; try { register(p.id, [next.id]); } catch (error) { refusal = error; }
+    expect(refusal).toMatchObject({ code: 'incompatible_state', message: `Wait ${wait.id} has settled and its result is waiting for delivery. End your turn to receive it, then register another wait.` });
+    expect((refusal as Error).message).not.toContain('cancel-wait');
+    writeFileSync(release, 'release');
+    await until(() => !waitOf(store.getRun(p.id)));
+  });
+
   it('parent cancellation retires its wait with a receipt while cancelling workers', async () => {
     const p = await parent(); const w = await worker(p.id); const wait = register(p.id, [w.id]);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');

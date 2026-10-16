@@ -620,7 +620,14 @@ export class DelegationService {
       if (!wait?.requestIds?.length) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
       for (const requestId of wait.requestIds) this.ownRequest(caller, requestId);
     } else authorizeCancelWait(caller, sender, project.id);
-    return { wait: project.manager.cancelWorkerWait(caller.runId, waitId) };
+    // Read in the same tick as the cancel: the outcome depends on what the wait was before it.
+    const before = project.store.getRun(caller.runId)?.delegation;
+    const current = before && before.role !== 'invalid' && before.wait?.id === waitId ? before.wait.phase : undefined;
+    const wait = project.manager.cancelWorkerWait(caller.runId, waitId);
+    const instruction = current === undefined ? `Wait ${waitId} already settled and is no longer current; cancelling changes nothing.`
+      : current === 'wake-pending' ? `Wait ${waitId} already settled (${wait.reason}); cancelling changes nothing. End your turn to receive its result, then register another wait.`
+        : `Wait ${waitId} cancelled. End your turn to receive the cancellation, then register another wait.`;
+    return { wait, instruction };
   }
   async destroy(caller: Caller, params: WorkerParams) {
     const { project, worker } = this.target(caller, params, 'destroy');

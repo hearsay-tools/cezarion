@@ -190,7 +190,8 @@ describe('authenticated delegation HTTP family', () => {
     try {
       for (let i = 0; i < 2; i++) {
         const response = await request('/cancel-wait', { waitId });
-        expect(response.status).toBe(200); expect(await response.json()).toEqual({ wait });
+        expect(response.status).toBe(200); expect(await response.json()).toEqual({ wait,
+          instruction: `Wait ${waitId} already settled (timeout); cancelling changes nothing. End your turn to receive its result, then register another wait.` });
       }
       expect(reopened.getRun(workerId)?.status).toBe('queued');
       expect(reopened.getRun(f.parent.id)?.status).toBe(status);

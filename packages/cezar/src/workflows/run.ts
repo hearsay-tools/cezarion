@@ -3972,6 +3972,7 @@ export class RunManager {
     if (state?.pendingHumanAsk || this.hasUnansweredHumanAsk(runId)) refuse('A human question is pending; answer it before registering a wait');
     if (run?.ciWait) refuse('A CI wait is already active; finish or withdraw it before registering a worker wait');
     const wait = this.workerWait(runId);
+    if (wait?.phase === 'wake-pending') refuse(`Wait ${wait.id} has settled and its result is waiting for delivery. End your turn to receive it, then register another wait.`);
     if (wait) refuse(`Wait ${wait.id} is already active; keep it or run worker cancel-wait ${wait.id} before registering another`);
     if (!['running', 'waiting'].includes(run!.status) || !state?.session?.open || state.cancelled) {
       refuse(`Run is ${run!.status} with no available active session; register a wait from an executing parent or worker`);
