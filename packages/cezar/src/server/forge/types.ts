@@ -117,6 +117,12 @@ export interface ForgeListOptions {
   refresh?: boolean;
   /** Max items to fetch (driver-capped). */
   limit?: number;
+  /** Opaque cursors from a previous page's `issuesNextCursor`/`prsNextCursor`. */
+  issuesCursor?: string;
+  prsCursor?: string;
+  /** That side answered `nextCursor: null`: fetch none of its rows, only its total. */
+  issuesDone?: boolean;
+  prsDone?: boolean;
 }
 
 /** The `GET /api/github/search` payload (#730). The list tier (`listIssues`/`listPRs`) only ever

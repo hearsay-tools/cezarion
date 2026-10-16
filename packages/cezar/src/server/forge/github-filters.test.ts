@@ -14,13 +14,16 @@ function mockGh(projectsFail = false, viewerFail = false) {
     const cb = args.at(-1) as (err: unknown, result: unknown) => void;
     const ok = (v: unknown) => cb(null, { stdout: typeof v === 'string' ? v : JSON.stringify(v), stderr: '' });
     if (argv[0] === 'repo') return ok('o/r');
-    if (argv[0] === 'issue') return ok([{ number: 1, title: 'Task', author: { login: 'o' }, createdAt: '', labels: [], body: '', url: 'https://github.com/o/r/issues/1', assignees: [{ login: 'alice' }] }]);
-    if (argv[0] === 'pr') return ok([]);
     const query = argv.find(a => a.startsWith('query=')) ?? '';
+    // The paged list (hearsay-tools/cezarion#1183): one GraphQL connection per side.
+    if (query.includes('issues(first')) return ok({ data: { repository: { issues: { totalCount: 1, pageInfo, nodes: [
+      { number: 1, title: 'Task', author: { login: 'o' }, createdAt: '', labels: { nodes: [] }, body: '', url: 'https://github.com/o/r/issues/1', assignees: { nodes: [{ login: 'alice' }] } },
+    ] } } } });
+    if (query.includes('pullRequests(first')) return ok({ data: { repository: { pullRequests: { totalCount: 0, pageInfo, nodes: [] } } } });
     if (query.includes('viewer')) return viewerFail ? cb(new Error('offline'), null) : ok({ data: { viewer: { login: 'alice' } } });
     if (query.includes('projectsV2')) return projectsFail ? cb(new Error('scope missing'), null) : ok({ data: { repository: { projectsV2: { nodes: [board], pageInfo } } } });
     if (query.includes('projectItems')) return ok({ data: { repository: { i1: { projectItems: { nodes: [{ project: { id: 'P1' } }], pageInfo } } } } });
-    return cb(new Error('counts unavailable'), null);
+    return cb(new Error('unexpected gh call'), null);
   });
 }
 beforeEach(() => { vi.stubEnv('CEZ_DRY_RUN', ''); run.mockReset(); });
@@ -199,7 +202,7 @@ it('does not install an older list after a newer list has already completed', as
   const immediate = run.getMockImplementation()!;
   let finishList!: () => void;
   run.mockImplementation((...args: unknown[]) => {
-    if ((args[1] as string[])[0] === 'issue') {
+    if ((args[1] as string[]).join(' ').includes('issues(first')) {
       finishList = () => immediate(...args);
       return;
     }
