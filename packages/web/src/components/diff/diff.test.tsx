@@ -342,6 +342,13 @@ describe('Diff facade — Markdown preview (hearsay-tools/cezarion#1012)', () =>
     const loadFileText = vi.fn(() => new Promise<string>((resolve) => (resolveNext = resolve)))
     const { rerender } = await renderDiff(<Diff files={[GUIDE]} preview loadFileText={loadFileText} />, 'docs/guide.md')
     expect(findCard('docs/guide.md').textContent).toContain('Loading preview…')
+    // The card's path renders in the commit that mounts the preview, but the preview's fetch runs
+    // in a passive effect React may flush in a later task. Resolving before that call exists hits
+    // the initial no-op, and the preview then waits on a promise nobody resolves
+    // (hearsay-tools/cezarion#1161: a probe here read 0 calls on the local miss; with the effect delayed
+    // 50 ms, red 5/5 without this wait, green 10/10 with it). Exactly one call also pins that the
+    // mounted preview fetches once.
+    await waitFor(() => expect(loadFileText).toHaveBeenCalledTimes(1))
     resolveNext('# First version')
     await waitFor(() => expect(findCard('docs/guide.md').querySelector('h1')?.textContent).toBe('First version'))
 
