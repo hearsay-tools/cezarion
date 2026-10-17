@@ -1114,7 +1114,7 @@ function importLegacyIndex(db: RunDatabase, dataDir: string): void {
  */
 const LEGACY_REFERENCE_HEAL_SQL =
   "(json_extract(summary, '$.markerRefs.pr') IS NOT NULL AND json_extract(summary, '$.referencedPullRequestUrl') IS NULL)" +
-  " OR json_extract(summary, '$.markerRefs.issue') IS NOT NULL";
+  " OR (NOT EXISTS (SELECT 1 FROM meta WHERE key = 'issue-attribution:' || runs.id AND value = CAST(runs.revision AS TEXT)) AND json_extract(summary, '$.markerRefs.issue') IS NOT NULL)";
 
 /** Mark-all-read's rule (see `RunStore.markAllRead`) over the columns and the stored summary. */
 const MARK_ALL_READ_SQL = "archived = 0 AND status IN ('done', 'failed') AND finished_at IS NOT NULL" +
@@ -1561,7 +1561,13 @@ export class RunStore extends EventEmitter {
       if (!healable.has(rowFamily(row))) continue;
       const decoded = decode(row);
       // Held only when the repair changed it: the next save writes it, then it leaves.
-      if (decoded) this.adoptLoadedRun(decoded, { keepLive: this.keepLive, onlyIfChanged: true }, row);
+      if (decoded) {
+        // Persist verification once even when legacy issue attribution was already correct.
+        const needsIssueCheck = decoded.run.markerRefs?.issue !== undefined &&
+          this.db!.getMeta(`issue-attribution:${row.id}`) !== String(row.revision);
+        this.adoptLoadedRun(decoded, { keepLive: this.keepLive, onlyIfChanged: !needsIssueCheck }, row);
+        if (needsIssueCheck) this.dirty.add(row.id);
+      }
     }
     for (const rootId of this.anchoredFamilies()) this.holdFamily(rootId, decode);
     this.releaseUnheldClaims();
@@ -4291,7 +4297,10 @@ export class RunStore extends EventEmitter {
     const encode = (run: RunRecord) => {
       const encoded = encodeRawRecord(run, (this.base.get(run.id) ?? this.coldBase.get(run.id))?.extras);
       extras.set(run.id, encoded.extras);
-      upserts.push(encodeRunRow(run, encoded.data));
+      const projected = { ...run };
+      restoreOriginatingIssue(projected);
+      upserts.push({ ...encodeRunRow(run, encoded.data),
+        issueAttributionCurrent: isDeepStrictEqual(projected, run) });
     };
     for (const [id, next] of staged) {
       if (next) encode(next);

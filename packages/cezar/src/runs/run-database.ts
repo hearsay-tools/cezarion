@@ -181,6 +181,8 @@ export interface RunRowInput {
   worktreePath?: string | null;
   branch?: string | null;
   baseBranch?: string | null;
+  /** Whether originating-issue attribution was verified for this write. */
+  issueAttributionCurrent?: boolean;
   /** The complete record, serialized. */
   data: string;
   /** The record's summary projection, serialized. */
@@ -870,7 +872,10 @@ export class RunDatabase {
           return;
         }
         if (changes.fence) claims = this.checkFence(changes.fence);
-        for (const id of changes.deletes) this.statements.delete.run(id);
+        for (const id of changes.deletes) {
+          this.statements.delete.run(id);
+          this.statements.deleteMeta.run(`issue-attribution:${id}`);
+        }
         const revision = changes.upserts.length > 0 ? this.nextSequence(COMMIT_SEQ_KEY) : 0;
         for (const row of changes.upserts) {
           const inserted = this.statements.upsert.get({
@@ -890,6 +895,9 @@ export class RunDatabase {
             data: row.data,
             summary: row.summary,
           });
+          // Revision binding makes an older writer invalidate this optional repair cache.
+          if (row.issueAttributionCurrent) this.statements.setMeta.run(`issue-attribution:${row.id}`, String(revision));
+          else this.statements.deleteMeta.run(`issue-attribution:${row.id}`);
           revisions.set(row.id, revision);
           seqs.set(row.id, inserted!.seq as number);
         }

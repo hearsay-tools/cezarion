@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runRecordSchema as contractRunRecordSchema } from '@open-mercato/cezar-contract';
 import { historyPaths } from './history-file.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
+import { RunDatabase } from './run-database.ts';
 import { RunStore, runRecordSchema } from './store.ts';
 import { blockRunWrites, readPersistedRuns, readPersistedText, seedRuns } from './run-store.testkit.ts';
 
@@ -1431,6 +1432,34 @@ describe('RunStore — referenced-issue discovery (spec 2026-07-21-report-ref-di
     const reopened = RunStore.open(dataDir);
     expect(reopened.getRun(run.id)?.referencedIssueUrl).toBe(origin);
     reopened.close();
+  });
+
+  it('does not decode normalized issue history on repeated store opens', () => {
+    const { store, run } = freshRun('Fix issue #1200');
+    store.updateRun(run.id, { status: 'done', issueNumber: 1200 });
+    store.applyMarkerRefs(run.id, { issue: 1216 });
+    store.close();
+    const scan = vi.spyOn(RunDatabase.prototype, 'listWhere');
+    try {
+      const reopened = RunStore.open(dataDir);
+      expect(scan.mock.results.flatMap(result => result.value ?? []).map(row => row.id)).not.toContain(run.id);
+      reopened.close();
+    } finally { scan.mockRestore(); }
+  });
+
+  it('checks correct legacy issue history once, then skips it', () => {
+    seedRuns(dataDir, [{ ...LEGACY_RUN, task: 'Fix issue #1200',
+      issueNumber: 1200, markerRefs: { issue: 1200 } }]);
+    const scan = vi.spyOn(RunDatabase.prototype, 'listWhere');
+    try {
+      const first = RunStore.open(dataDir);
+      expect(scan.mock.results.flatMap(result => result.value ?? []).map(row => row.id)).toContain(LEGACY_RUN.id);
+      first.close();
+      scan.mockClear();
+      const second = RunStore.open(dataDir);
+      expect(scan.mock.results.flatMap(result => result.value ?? []).map(row => row.id)).not.toContain(LEGACY_RUN.id);
+      second.close();
+    } finally { scan.mockRestore(); }
   });
 
   it('repairs an already overwritten originating issue when loading', () => {
