@@ -218,7 +218,10 @@ export async function verifyWorkerContext(options: {
       }
       if (bytes.length !== input.bytes || hash(bytes) !== input.sha256) throw invalid();
     }
-  } catch { throw invalid(); }
+  } catch (error) {
+    // As at spawn: a named `--attach` refusal tells the parent which path to repair.
+    throw error instanceof DelegationPolicyError ? error : invalid();
+  }
 }
 
 /**

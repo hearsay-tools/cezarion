@@ -218,6 +218,18 @@ describe('parent-file references', () => {
     expect(readFileSync(snapshot, 'utf8')).toBe('same bytes');
   });
 
+  it('names the attachment whose missing snapshot cannot be rebuilt because its parent source is gone', async () => {
+    commit('.gitignore', 'qa/\n');
+    write('qa/brief.md', 'brief'); write('qa/notes.md', 'notes');
+    const { workerId } = await f.service.spawn(f.caller, input(files('qa/brief.md', 'qa/notes.md')));
+    const { context, workspace, parentRunId } = workerOf(workerId).delegation;
+    const dataDir = join(f.root, '.ai/cezar');
+    rmSync(await parentFileSnapshotPath(dataDir, workspace, 1));
+    rmSync(join(f.root, 'qa/notes.md'));
+    await expect(verifyWorkerContext({ dataDir, parentId: parentRunId, workspace, context, parentCwd: f.root }))
+      .rejects.toMatchObject({ code: 'invalid_input', message: '--attach path not found: qa/notes.md' });
+  });
+
   it('shares the 8 MiB budget and refuses credentials', async () => {
     commit('.gitignore', 'qa/\n');
     const images = join(f.root, '.ai/cezar/runs', `${f.parent.id}-images`); mkdirSync(images, { recursive: true });
