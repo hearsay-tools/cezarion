@@ -183,6 +183,8 @@ function needsRecord(summary: RunSummary, handle?: RepoHandle | null): boolean {
   if (summary.autoResumeAt !== undefined && summary.status !== 'failed') return true;
   // A referenced PR that an older cezar's created-PR declaration erased is restored.
   if (summary.referencedPullRequestUrl === undefined && summary.markerRefs?.pr !== undefined) return true;
+  // Issue markers may have overwritten the originating issue in older records.
+  if (summary.markerRefs?.issue !== undefined) return true;
   // A foreign reference the prompt does not corroborate is dropped; the prompt is in the record.
   if (handle && (summary.referencedPullRequestUrl !== undefined || summary.referencedIssueUrl !== undefined)) return true;
   // A root waiting on workers has its pending human question re-read from the transcript.

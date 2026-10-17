@@ -521,6 +521,11 @@ describe('taskIssueUrl', () => {
     expect(taskIssueUrl(r)).toBeUndefined()
   })
 
+  it('links the primary issue when a later marker names a follow-up', () => {
+    const r = run({ issueNumber: 1200, markerRefs: { issue: 1216 } })
+    expect(taskIssueUrl(r, 'https://github.com/o/r')).toBe('https://github.com/o/r/issues/1200')
+  })
+
   it('prefers a real discovered issue URL over the synthesized one (#526)', () => {
     const r = run({
       markerRefs: { issue: 524 },

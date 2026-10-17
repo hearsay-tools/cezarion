@@ -1378,6 +1378,42 @@ describe('RunStore — referenced-issue discovery (spec 2026-07-21-report-ref-di
     return { store, run };
   };
 
+  it.each(['Fix #1200 using /dev-flow.', 'Fix issue #1200',
+    'Fix https://github.com/open-mercato/cezar/issues/1200'])(
+    'keeps the originating issue after filing a follow-up: %s', (task) => {
+      const { store, run } = freshRun(task);
+      store.updateRun(run.id, { issueNumber: 1200 });
+      store.applyMarkerRefs(run.id, { issue: 1200 });
+      store.applyMarkerRefs(run.id, { pr: 1210 });
+      store.appendEvent(run.id, { type: 'result', result:
+        'Created https://github.com/open-mercato/cezar/issues/1216' });
+      store.applyMarkerRefs(run.id, { issue: 1216 });
+      expect(run.issueNumber).toBe(1200);
+      expect(run.referencedIssueUrl).not.toBe('https://github.com/open-mercato/cezar/issues/1216');
+      expect(run.referencedIssueCandidates).toContain('https://github.com/open-mercato/cezar/issues/1216');
+      store.appendEvent(run.id, { type: 'result', result:
+        'Working https://github.com/open-mercato/cezar/issues/1200' });
+      expect(run.referencedIssueUrl).toBe('https://github.com/open-mercato/cezar/issues/1200');
+      store.flush();
+      expect(RunStore.open(dataDir).getRun(run.id)?.issueNumber).toBe(1200);
+    });
+
+  it('repairs an already overwritten originating issue when loading', () => {
+    const { store, run } = freshRun('Fix #1200 using /dev-flow.');
+    store.updateRun(run.id, { issueNumber: 1216, markerRefs: { issue: 1216 },
+      referencedIssueUrl: 'https://github.com/open-mercato/cezar/issues/1216',
+      referencedIssueCandidates: ['https://github.com/open-mercato/cezar/issues/1200',
+        'https://github.com/open-mercato/cezar/issues/1216'] });
+    store.flush();
+    store.close();
+    expect(readRunIndexFromDisk(dataDir).runs.find(row => row.id === run.id)?.issueNumber).toBe(1200);
+    const reopened = RunStore.open(dataDir);
+    expect(reopened.listRunSummaries().runs.find(row => row.id === run.id)?.issueNumber).toBe(1200);
+    const loaded = reopened.getRun(run.id);
+    expect(loaded?.issueNumber).toBe(1200);
+    expect(loaded?.referencedIssueUrl).toBe('https://github.com/open-mercato/cezar/issues/1200');
+  });
+
   it('adopts a single issue link and seeds issueNumber', () => {
     const { store, run } = freshRun();
     store.appendEvent(run.id, {
