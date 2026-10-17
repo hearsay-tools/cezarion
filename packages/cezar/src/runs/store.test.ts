@@ -1398,6 +1398,25 @@ describe('RunStore — referenced-issue discovery (spec 2026-07-21-report-ref-di
       expect(RunStore.open(dataDir).getRun(run.id)?.issueNumber).toBe(1200);
     });
 
+  it('keeps equal-number prompt issues across repositories ambiguous', () => {
+    const urls = ['https://github.com/one/repo/issues/1200', 'https://github.com/two/repo/issues/1200'];
+    const { store, run } = freshRun(`Compare ${urls.join(' and ')}`);
+    store.applyMarkerRefs(run.id, { issue: 1200 });
+    expect(run.referencedIssueUrl).toBeUndefined();
+  });
+
+  it('restores an upstream prompt URL when legacy candidate evidence is absent', () => {
+    const origin = 'https://github.com/upstream/repo/issues/1200';
+    const { store, run } = freshRun(`Fix ${origin}`);
+    store.updateRun(run.id, { issueNumber: 1216, markerRefs: { issue: 1216 },
+      referencedIssueUrl: 'https://github.com/local/repo/issues/1216',
+      referencedIssueCandidates: undefined });
+    store.close();
+    const reopened = RunStore.open(dataDir);
+    expect(reopened.getRun(run.id)?.referencedIssueUrl).toBe(origin);
+    reopened.close();
+  });
+
   it('repairs an already overwritten originating issue when loading', () => {
     const { store, run } = freshRun('Fix #1200 using /dev-flow.');
     store.updateRun(run.id, { issueNumber: 1216, markerRefs: { issue: 1216 },

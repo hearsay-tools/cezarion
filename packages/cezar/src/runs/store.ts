@@ -790,8 +790,16 @@ function referencedIssueDeclaration(run: RunRecord): number | undefined {
 function resolveIssueReference(run: RunRecord, handle?: RepoHandle | null): string | undefined {
   const declared = referencedIssueDeclaration(run);
   const candidates = run.referencedIssueCandidates ?? [];
-  const promptUrls = candidates.filter(url => run.task.includes(url) && refUrlNumber(url) === declared);
-  return resolveReferencedRef(promptUrls.length === 1 ? promptUrls : candidates, run.task, declared, handle);
+  // Prompt URLs remain evidence even in legacy records without a candidate working set.
+  const promptUrls = [...new Set([...run.task.matchAll(new RegExp(ISSUE_URL_RE.source, 'g'))]
+    .map(match => match[0]).filter(url => refUrlNumber(url) === declared))];
+  if (promptUrls.length > 1) return undefined;
+  if (promptUrls.length === 1) return resolveReferencedRef(promptUrls, run.task, declared, handle);
+  // A number cannot choose between two repositories' issues with that same number.
+  if (declared !== undefined && new Set(candidates.filter(url => refUrlNumber(url) === declared)).size > 1) {
+    return undefined;
+  }
+  return resolveReferencedRef(candidates, run.task, declared, handle);
 }
 
 function restoreOriginatingIssue(run: RunRecord): void {
