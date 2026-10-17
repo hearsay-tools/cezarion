@@ -626,7 +626,11 @@ export class DelegationService {
     // A finished run queues no wake, so ending its turn would deliver nothing.
     const live = !!run && ['queued', 'running', 'waiting'].includes(run.status);
     const wait = project.manager.cancelWorkerWait(caller.runId, waitId);
+    // A settled wait the call retired (hearsay-tools/cezarion#1228) queues no wake, so there is nothing to end the turn for.
+    const after = project.store.getRun(caller.runId)?.delegation;
+    const retired = current === 'wake-pending' && !(after && after.role !== 'invalid' && after.wait?.id === waitId);
     const instruction = current === undefined ? `Wait ${waitId} already settled and is no longer current; cancelling changes nothing.`
+      : retired ? `Wait ${waitId} had already settled; cancelling retired it and kept its outcomes in this receipt. Register another wait now.`
       : current === 'wake-pending' ? `Wait ${waitId} already settled (${wait.reason}); cancelling changes nothing.${live ? ' End your turn to receive its result, then register another wait.' : ''}`
         : `Wait ${waitId} cancelled. End your turn to receive the cancellation, then register another wait.`;
     return { wait, instruction };

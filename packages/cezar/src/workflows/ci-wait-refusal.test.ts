@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { workerWaitRequestSchema } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
+import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { CiToolController } from '../ci-wait/controller.ts';
 import { callCiWait } from '../ci-wait/client.ts';
@@ -96,14 +98,20 @@ describe('R27 CI registration refusal after worker settlement — #713', { timeo
         fixtureUpdateRun(child.id, { status: 'done' });
         manager.reconcileWorkerWaits();
         expect(waitOf(store.getRun(run.id))?.phase).toBe('wake-pending');
-        if (action === 'cancel') manager.cancelWorkerWait(run.id, wait.id);
-        else {
-          const service = new DelegationService();
-          const unregister = service.registerProject({ id: 'project', root, store, manager });
-          try {
-            expect(await service.destroyForHuman('project', child.id)).toMatchObject({ state: 'complete', remaining: [] });
-          } finally { unregister(); }
-        }
+        const service = new DelegationService();
+        const unregister = service.registerProject({ id: 'project', root, store, manager });
+        try {
+          if (action === 'cancel') {
+            // Through the service, so its instruction is pinned in the turn that retires the wait (hearsay-tools/cezarion#1200).
+            vi.stubEnv('CEZ_DELEGATION', '1');
+            const credentials = new CredentialRegistry();
+            try {
+              const caller = credentials.authenticate(credentials.issue('project', run.id, randomUUID()))!;
+              expect(await service.cancelWait(caller, { waitId: wait.id })).toMatchObject({ wait: { id: wait.id, reason: 'cancelled' },
+                instruction: `Wait ${wait.id} had already settled; cancelling retired it and kept its outcomes in this receipt. Register another wait now.` });
+            } finally { credentials.close(); vi.unstubAllEnvs(); }
+          } else expect(await service.destroyForHuman('project', child.id)).toMatchObject({ state: 'complete', remaining: [] });
+        } finally { unregister(); }
         expect(waitOf(store.getRun(run.id))).toBeUndefined();
         expect(store.getRun(run.id)?.delegation).toMatchObject({ lastWait: { id: wait.id,
           reason: action === 'cancel' ? 'cancelled' : 'outcome', outcomes: [{ workerId: child.id, status: 'done' }] } });
