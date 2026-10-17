@@ -183,6 +183,39 @@ describe('the cold window agrees with the store', () => {
   });
 });
 
+describe('cold issue attribution repair in search', () => {
+  it('recovers a malformed summary during an issue-reference search', () => {
+    const run = record({ task: 'Fix issue #1200', issueNumber: 1200,
+      markerRefs: { issue: 1200 }, referencedIssueUrl: undefined,
+      referencedIssueCandidates: [] }) as unknown as RunRecord;
+    const db = RunDatabase.open(join(dir, RUNS_DB_FILE));
+    db.transaction({ upserts: [{ ...encodeRunRow(run), summary: 'malformed JSON' }],
+      deletes: [], meta: { [RUNS_IMPORT_COMPLETE_KEY]: '{}' } });
+    db.close();
+    expect(searchRunIndexFromDisk(dir, '#1200', { limit: 1 }).runs.map(run => run.id)).toEqual(['cold']);
+  });
+
+  it('does not decode issue-marked records for an unrelated word search', () => {
+    seedRuns(dir, [record({ task: 'Fix issue #1200', title: 'Investigating attribution',
+      issueNumber: 1216, markerRefs: { issue: 1216 } })]);
+    const fetched = vi.spyOn(RunDatabase.prototype, 'getMany');
+    expect(searchRunIndexFromDisk(dir, 'unrelatedword', { limit: 1 }).runs).toEqual([]);
+    expect(fetched.mock.calls.flatMap(([ids]) => ids)).toEqual([]);
+  });
+
+  it('finds an originating issue absent from the stored summary', () => {
+    seedRuns(dir, [record({ task: 'Fix issue #1200', title: 'Investigating attribution',
+      issueNumber: 1216, markerRefs: { issue: 1216 },
+      referencedIssueUrl: 'https://github.com/local/repo/issues/1216',
+      referencedIssueCandidates: ['https://github.com/local/repo/issues/1200',
+        'https://github.com/local/repo/issues/1216'],
+      referencedPullRequestUrl: undefined, referencedPrCandidates: [] })]);
+    for (const query of ['#1200', 'issues/1200', 'https://github.com/local/repo/issues/1200']) {
+      expect(searchRunIndexFromDisk(dir, query, { limit: 1 }).runs.map(run => run.id)).toEqual(['cold']);
+    }
+  });
+});
+
 describe('cold search counts matches after projection', () => {
   it('keeps scanning past candidates that scoping the repository drops', () => {
     // Three newer runs match `43` only through a foreign issue the handle scopes away; the

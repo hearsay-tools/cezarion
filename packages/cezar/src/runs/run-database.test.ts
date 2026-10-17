@@ -761,3 +761,14 @@ describe('RunDatabase', () => {
     });
   });
 });
+
+it('binds issue repair verification to the written revision and removes it on replacement or deletion', () => {
+  const db = openDb();
+  db.transaction({ upserts: [row('issue', { issueAttributionCurrent: true })], deletes: [] });
+  expect(db.getMeta('issue-attribution:issue')).toBe(String(db.get('issue')!.revision));
+  db.transaction({ upserts: [row('issue')], deletes: [] });
+  expect(db.getMeta('issue-attribution:issue')).toBeUndefined();
+  db.transaction({ upserts: [row('issue', { issueAttributionCurrent: true })], deletes: [] });
+  db.transaction({ upserts: [], deletes: ['issue'] });
+  expect(db.getMeta('issue-attribution:issue')).toBeUndefined();
+});

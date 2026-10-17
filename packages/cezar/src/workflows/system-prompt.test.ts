@@ -315,6 +315,21 @@ describe('systemPrompt end-to-end (dry run)', () => {
     expect(after?.prNumber).toBe(500);
   }, 30_000);
 
+  it('keeps explicit PR precedence when the prompt also names an issue', async () => {
+    const record = manager.startRun(skillWorkflow, { task: 'Review PR #900 for issue #1200' });
+    await manager.recordTurnEnd(record.id, 'CEZ:TITLE=reviewing the change');
+    expect(store.getRun(record.id)?.titleSummary).toBe('900: reviewing the change');
+  }, 30_000);
+
+  it('keeps the originating issue in a follow-up title marker', async () => {
+    const record = manager.startRun(skillWorkflow, { task: 'Fix issue #1200' });
+    await manager.recordTurnEnd(record.id, 'CEZ:ISSUE=1200\nCEZ:PR=1210');
+    await manager.recordTurnEnd(record.id, 'CEZ:ISSUE=1216\nCEZ:TITLE=fixing issue attribution');
+    const after = store.getRun(record.id);
+    expect(after?.issueNumber).toBe(1200);
+    expect(after?.titleSummary).toBe('1200: fixing issue attribution');
+  }, 30_000);
+
   it('mock:refs end to end: markers set the record, silence the wrong chip, and stay out of the transcript', async () => {
     const id = await runToEnd({ task: 'do the thing mock:refs mock:done' });
     // Settle window for the fire-and-forget turn-end bookkeeping.
