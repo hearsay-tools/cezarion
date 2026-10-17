@@ -90,7 +90,7 @@ jobs:
           APP_SLUG: ${{ steps.scan_app.outputs.app-slug }}
           EXPECTED_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
         run: |
-          if [ "$APP_SLUG[bot]" != "$EXPECTED_LOGIN" ]; then
+          if [ "${APP_SLUG}[bot]" != "$EXPECTED_LOGIN" ]; then
             echo '::error::RELEASE_APP_BOT_LOGIN does not match the installed App slug.'
             exit 1
           fi
