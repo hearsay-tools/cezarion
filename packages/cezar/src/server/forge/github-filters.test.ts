@@ -201,15 +201,18 @@ it('does not install an older list after a newer list has already completed', as
   mockGh();
   const immediate = run.getMockImplementation()!;
   let finishList!: () => void;
+  let held!: () => void;
+  const listHeld = new Promise<void>(resolve => { held = resolve; });
   run.mockImplementation((...args: unknown[]) => {
     if ((args[1] as string[]).join(' ').includes('issues(first')) {
       finishList = () => immediate(...args);
+      held();
       return;
     }
     return immediate(...args);
   });
   const older = fetchGithub('/filters-list-order', true);
-  await vi.waitFor(() => expect(finishList).toBeTypeOf('function'));
+  await listHeld;
   mockGh(true);
   const newer = await fetchGithub('/filters-list-order', true);
   await fetchGithubProjects('/filters-list-order', newer.projectsGeneration!);
@@ -325,16 +328,19 @@ it('a later page that started before a page-1 refresh is answered but not cached
   const calls = mockPagedGh();
   const immediate = run.getMockImplementation()!;
   let finishList!: () => void;
+  let held!: () => void;
+  const listHeld = new Promise<void>(resolve => { held = resolve; });
   run.mockImplementation((...args: unknown[]) => {
     const argv = (args[1] as string[]).join(' ');
     if (argv.includes('issues(first') && argv.includes('after=c1') && !finishList) {
       finishList = () => immediate(...args);
+      held();
       return;
     }
     return immediate(...args);
   });
   const stale = fetchGithub(root, false, 50, page2);
-  await vi.waitFor(() => expect(finishList).toBeTypeOf('function'));
+  await listHeld;
   await fetchGithub(root, true, 50);
   finishList();
   expect((await stale).issues.map(i => i.number)).toEqual([2]);
@@ -348,16 +354,19 @@ it('an older concurrent request for the same page never replaces the newer entry
   mockPagedGh();
   const immediate = run.getMockImplementation()!;
   let finishList!: () => void;
+  let held!: () => void;
+  const listHeld = new Promise<void>(resolve => { held = resolve; });
   run.mockImplementation((...args: unknown[]) => {
     const argv = (args[1] as string[]).join(' ');
     if (argv.includes('issues(first') && argv.includes('after=c1') && !finishList) {
       finishList = () => immediate(...args);
+      held();
       return;
     }
     return immediate(...args);
   });
   const older = fetchGithub(root, true, 50, page2);
-  await vi.waitFor(() => expect(finishList).toBeTypeOf('function'));
+  await listHeld;
   const newer = await fetchGithub(root, true, 50, page2);
   finishList();
   await older;
