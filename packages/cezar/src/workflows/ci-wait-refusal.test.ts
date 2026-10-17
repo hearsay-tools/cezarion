@@ -144,6 +144,37 @@ describe('R27 CI registration refusal after worker settlement — #713', { timeo
       expect(waitOf(store.getRun(run.id))).toBeUndefined();
     } finally { unregister(); wire.release(); }
   });
+  it.each(RUNNER_IDS)('%s R80 cancel-wait over destroyed workers frees the slot during the same native turn', async runner => {
+    const wire = holdNativeTurn(runner);
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.hold!, runner });
+    store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+    const service = new DelegationService();
+    const unregister = service.registerProject({ id: 'project', root, store, manager });
+    try {
+      await until(wire.received);
+      const child = await worker(run.id);
+      const wait = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
+      // Destruction completes before the worker yields an outcome, so the wait stays registered until the cancel settles it.
+      const delegation = store.getRun(child.id)!.delegation;
+      if (delegation?.role !== 'worker') throw Error('worker fixture');
+      store.commitDelegation([{ id: child.id, delegation: { ...delegation,
+        destroy: { requestedAt: new Date().toISOString(), phase: 'complete', remaining: [] } } }]);
+      manager.reconcileWorkerWaits();
+      expect(waitOf(store.getRun(run.id))).toMatchObject({ id: wait.id, phase: 'registered' });
+      expect(await cancelAsAgent(service, run.id, wait.id)).toMatchObject({ wait: { id: wait.id, reason: 'cancelled' },
+        instruction: `Wait ${wait.id} cancelled and retired; the wait slot is free and its outcomes stay in this receipt. Register another wait in this turn.` });
+      expect(waitOf(store.getRun(run.id))).toBeUndefined();
+      expect(store.getRun(run.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'cancelled' } });
+      const next = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
+      expect(next).toMatchObject({ phase: 'registered' });
+      expect(store.readEvents(run.id).filter(event => event.type === 'turn-end')).toHaveLength(0);
+      // A destroyed worker cannot record an execution, so end it directly: it is never dequeued once the parent
+      // frees its slot. Cancelling the new wait then retires it through the same destroyed-worker path.
+      store.updateRun(child.id, { status: 'cancelled' });
+      manager.cancelWorkerWait(run.id, next.id);
+      expect(waitOf(store.getRun(run.id))).toBeUndefined();
+    } finally { unregister(); wire.release(); }
+  });
 
 });
 

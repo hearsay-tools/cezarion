@@ -630,11 +630,13 @@ export class DelegationService {
     // has just settled in an executing turn is retired by a second cancel.
     const after = project.store.getRun(caller.runId)?.delegation;
     const kept = !!after && after.role !== 'invalid' && after.wait?.id === waitId;
+    // A wait the call retired leaves the slot free whatever its phase was, so no turn-end advice follows it.
     const instruction = current === undefined ? `Wait ${waitId} already settled and is no longer current; cancelling changes nothing.`
-      : current === 'wake-pending' && !kept ? `Wait ${waitId} had already settled; cancelling freed the wait slot and its outcomes stay in this receipt. Register another wait in this turn.`
+      : !kept ? (current === 'wake-pending' ? `Wait ${waitId} had already settled; cancelling freed the wait slot and its outcomes stay in this receipt. Register another wait in this turn.`
+        : `Wait ${waitId} cancelled and retired; the wait slot is free and its outcomes stay in this receipt. Register another wait in this turn.`)
       : current === 'wake-pending' ? (live ? `Wait ${waitId} already settled (${wait.reason}) and is waiting for delivery; this cancel could not clear it. End your turn to receive its result, then register another wait.`
         : `Wait ${waitId} already settled (${wait.reason}); cancelling changes nothing.`)
-      : kept && project.manager.canFreeSettledWorkerWait(caller.runId) ? `Wait ${waitId} cancelled; it holds the wait slot until its cancellation is delivered. Run worker cancel-wait ${waitId} again to free the slot and register another wait in this turn.`
+      : project.manager.canFreeSettledWorkerWait(caller.runId) ? `Wait ${waitId} cancelled; it holds the wait slot until its cancellation is delivered. Run worker cancel-wait ${waitId} again to free the slot and register another wait in this turn.`
         : `Wait ${waitId} cancelled. End your turn to receive the cancellation, then register another wait.`;
     return { wait, instruction };
   }
