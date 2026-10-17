@@ -1090,7 +1090,7 @@ describe('GitHub view sidebar list (#622)', () => {
       '/api/v1/health': { ...HEALTH, forge: { available: true } },
       '/api/v1/todos': [],
       '/api/v1/projects': { bootProject: 'cezar', projects: [{ ...PROJECT, forge: 'github' }, shop] },
-      '/api/v1/p/shop/github?limit=1000': GH,
+      '/api/v1/p/shop/github?limit=50': GH,
       '/api/v1/p/shop/run-summaries': [],
     })
     renderShell('/p/shop/github/prs?filter=review')
@@ -1099,7 +1099,7 @@ describe('GitHub view sidebar list (#622)', () => {
     expect(document.querySelector('[data-slot="task-quick-list"]')).toBeNull()
     expect(sidebar.querySelector('[data-gh-filter="review"]')?.getAttribute('aria-current')).toBe('page')
     expect(sidebar.querySelector('[data-gh-filter="mine"]')?.getAttribute('href')).toBe('/p/shop/github/prs?filter=mine')
-    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/v1/p/shop/github?limit=1000')).toBe(true))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/v1/p/shop/github?limit=50')).toBe(true))
     // The shell never asked another project's GitHub while the URL names Shop.
     expect(fetchMock.mock.calls.some(([url]) => /^\/api\/v1\/github\?/.test(String(url)))).toBe(false)
   })

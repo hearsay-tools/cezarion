@@ -67,6 +67,8 @@ import {
   type TestProjectWebhookResponse,
   githubSearchQuerySchema,
   githubProjectsQuerySchema,
+  githubListQuerySchema,
+  githubCommentCountsQuerySchema,
   setWorkspaceUiStateInputSchema,
   type GroupResponse,
   type GroupVariant,
@@ -228,7 +230,7 @@ import { createPreviewSocket } from './preview-socket.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
 import { parseRemote, resolveForge, type ForgeAvailability } from './forge/index.ts';
-import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubComments, fetchGithubItem, forgetGithubItem, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
+import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubCommentCounts, fetchGithubComments, fetchGithubItem, forgetGithubItem, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { CockpitAlreadyRunningError, type CockpitOwnership } from './cockpit-ownership.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
@@ -5651,13 +5653,20 @@ export function createApp(deps: ServerDeps) {
     .get(
       '/github',
       // `limit` stays a bare string: the handler's `Number.parseInt`/`Number.isFinite` fallback to
-      // 30 already accepts `?limit=banana`, and a numeric schema would 400 it instead.
-      queryZodValidator(z.object({ limit: queryValue, refresh: queryValue })),
+      // 30 already accepts `?limit=banana`, and a numeric schema would 400 it instead. The
+      // cursors and done flags page each side on its own (hearsay-tools/cezarion#1183); the
+      // schema refuses a done side that also carries its cursor, and both sides done.
+      queryZodValidator(githubListQuerySchema),
       async (c) => {
         const { root: repoRoot } = c.get('project');
         const query = c.req.valid('query');
         const limit = Number.parseInt(query.limit ?? '', 10);
-        return c.json(await fetchGithub(repoRoot, query.refresh === '1', Number.isFinite(limit) ? limit : 30));
+        return c.json(await fetchGithub(repoRoot, query.refresh === '1', Number.isFinite(limit) ? limit : 30, {
+          issuesCursor: query.issuesCursor,
+          prsCursor: query.prsCursor,
+          issuesDone: query.issuesDone === '1',
+          prsDone: query.prsDone === '1',
+        }));
       },
     )
 
@@ -5710,6 +5719,15 @@ export function createApp(deps: ServerDeps) {
         numbers.push(n);
       }
       return c.json(await fetchGithubChecks(repoRoot, numbers));
+    })
+
+    // Comment counts for loaded list rows (hearsay-tools/cezarion#1183). The list defers them
+    // (`commentsDeferred`) because they were ~0.4 s of every page; the cockpit asks here after
+    // paint. Same shape and in-payload degrade as /github/checks: at most 100 positive numbers,
+    // 400 on anything malformed, never a 5xx.
+    .get('/github/comment-counts', queryZodValidator(githubCommentCountsQuerySchema, { message: 'invalid comment-counts query' }), async (c) => {
+      const { kind, numbers, refresh } = c.req.valid('query');
+      return c.json(await fetchGithubCommentCounts(c.get('project').root, kind, numbers.split(',').map(Number), refresh === '1'));
     })
 
     // Search across ALL states (#730). Additive sibling of `/github`, which lists the OPEN set

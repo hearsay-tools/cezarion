@@ -8,6 +8,7 @@ import type { GithubData, GithubItem, GithubSearchData, HealthResponse, RunRecor
 
 import { GithubRoute } from './github'
 import { GithubSidebar } from './github-sidebar'
+import { ListViewportResizeObserver } from './github-geometry.testkit'
 
 /**
  * The GitHub view's sidebar filters (#622) through the real route: URL state, the task join,
@@ -15,7 +16,7 @@ import { GithubSidebar } from './github-sidebar'
  */
 
 beforeEach(() => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  vi.stubGlobal('ResizeObserver', ListViewportResizeObserver)
   Element.prototype.scrollIntoView = vi.fn()
   localStorage.clear()
   // The workspace-geometry effect runs inside a `main` (the test wraps one); desktop by default.
@@ -370,17 +371,21 @@ describe('the phone filter screen and entry rules', () => {
   })
 
   it('binds the workspace geometry observer once the list replaces the filter screen', async () => {
-    const observed: Element[] = []
-    vi.stubGlobal('ResizeObserver', class {
-      observe(el: Element) { observed.push(el) }
-      unobserve() {}
-      disconnect() {}
+    const observed: { observer: object; el: Element }[] = []
+    vi.stubGlobal('ResizeObserver', class extends ListViewportResizeObserver {
+      override observe(el: Element) {
+        observed.push({ observer: this, el })
+        super.observe(el)
+      }
     })
     setDesktop(false)
     stub()
     renderAt('/github')
     await waitFor(() => expect(document.querySelector('[data-slot="github-filter-screen"]')).not.toBeNull())
-    const mains = () => observed.filter((el) => el.getAttribute('data-slot') === 'main')
+    // The geometry effect's own observer watches `main` AND the workspace; the virtualized rows
+    // (#1183) observe `main` too, but never the workspace, so the pair singles the effect out.
+    const mains = () => observed.filter(({ observer, el }) => el.getAttribute('data-slot') === 'main'
+      && observed.some((other) => other.observer === observer && other.el.getAttribute('data-slot') === 'gh-workspace'))
     // No workspace exists on the filter screen, so `main` is not observed yet.
     expect(mains()).toEqual([])
     fireEvent.click(document.querySelector('[data-gh-filter="assigned"]')!)

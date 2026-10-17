@@ -8,6 +8,7 @@ export {
   fetchGithub,
   fetchGithubProjects,
   fetchGithubChecks,
+  fetchGithubCommentCounts,
   fetchGithubComments,
   fetchGithubPrDiff,
   fetchGithubRefStatus,

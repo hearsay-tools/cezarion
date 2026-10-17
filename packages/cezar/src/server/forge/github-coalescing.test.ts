@@ -17,6 +17,14 @@ function statuses(call: Call) {
   const repository = Object.fromEntries([...query.matchAll(/(r\d+): issueOrPullRequest\(number: (\d+)\)/g)].map(m => [m[1], { __typename: 'Issue', state: 'OPEN' }]));
   answer(call, JSON.stringify({ data: { repository } }));
 }
+/** An empty page of whichever list connection `call` asks for (hearsay-tools/cezarion#1183). */
+function listReply(call: Call): string {
+  const query = call.args.find(a => a.startsWith('query=')) ?? '';
+  const side = query.includes('pullRequests(first') ? 'pullRequests' : query.includes('issues(first') ? 'issues' : null;
+  return side
+    ? JSON.stringify({ data: { repository: { [side]: { totalCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } } })
+    : '{"data":{}}';
+}
 const tick = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
 beforeEach(() => {
   vi.stubEnv('CEZ_DRY_RUN', '');
@@ -34,16 +42,16 @@ describe('shared GitHub discovery and status misses', () => {
     answer(discoveries()[0]!); await tick();
     for (const c of calls.filter(c => c.args[0] !== 'repo')) {
       if (queries().includes(c)) statuses(c);
-      else answer(c, c.args[1] === 'list' ? '[]' : '{"data":{}}');
+      else answer(c, listReply(c));
     }
     expect((await list).available).toBe(true);
     expect(await status).toMatchObject({ available: true, issues: { 1: 'open' } });
     const count = calls.length;
     const refresh = fetchGithub('/shared', true); await tick();
-    for (const c of calls.slice(count)) answer(c, c.args[1] === 'list' ? '[]' : '{"data":{}}');
+    for (const c of calls.slice(count)) answer(c, listReply(c));
     expect((await refresh).available).toBe(true);
     expect(discoveries()).toHaveLength(1);
-    expect(calls.filter(c => c.args[0] === 'issue')).toHaveLength(2);
+    expect(calls.filter(c => c.args.join(' ').includes('issues(first'))).toHaveLength(2);
   });
 
   it('coalesces identical and overlapping references while returning only requested numbers', async () => {
