@@ -5,7 +5,7 @@ import { runSummarySchema, toRunSummary, type RunSummary } from '@open-mercato/c
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunSummaryRow } from './run-database.ts';
 import { decodeRunRecord, LEGACY_INDEX_FILE, reconcileLoadedRun, rescopeRun, parseRunRecords, type RepoHandle, type RunRecord } from './store.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
-import { matchesRunQuery, sqlPrefilterTokens } from './run-search.ts';
+import { matchesRunQuery, searchTokens, sqlPrefilterTokens } from './run-search.ts';
 
 /** A cold project's runs as list rows, and whether older archived roots were left out. */
 export interface ColdRunIndex {
@@ -118,13 +118,16 @@ function searchDatabase(db: RunDatabase, dataDir: string, query: string, { handl
   // reference it matched on. The scan stops at one match past the limit counted AFTER that, so
   // dropped candidates can never use up the cap and hide an older real match (#864 review).
   const matched: RunSummary[] = [];
+  // Repair can introduce an issue number or URL, but cannot introduce an unrelated prose word.
+  const repairIssueAttribution = searchTokens(query).some(token =>
+    /^#?\d+$/.test(token) || /(?:^|\/)issues\/\d+/i.test(token));
   db.visitRootSummaries(sqlPrefilterTokens(query), (row) => {
     const summary = parseSummary(row.summary);
-    if (summary !== undefined && summary.markerRefs?.issue === undefined && !matchesRunQuery(summary, query)) return true;
+    if (summary !== undefined && (!repairIssueAttribution || summary.markerRefs?.issue === undefined) && !matchesRunQuery(summary, query)) return true;
     const [projected] = projectRows(db, [row], dataDir, handle);
     if (projected && matchesRunQuery(projected, query)) matched.push(projected);
     return matched.length <= limit;
-  }, { includeIssueMarked: true });
+  }, { includeIssueMarked: repairIssueAttribution });
   return matched.length > limit ? { runs: matched.slice(0, limit), truncated: true } : { runs: matched, truncated: false };
 }
 

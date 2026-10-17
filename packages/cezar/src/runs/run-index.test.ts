@@ -184,6 +184,14 @@ describe('the cold window agrees with the store', () => {
 });
 
 describe('cold issue attribution repair in search', () => {
+  it('does not decode issue-marked records for an unrelated word search', () => {
+    seedRuns(dir, [record({ task: 'Fix issue #1200', title: 'Investigating attribution',
+      issueNumber: 1216, markerRefs: { issue: 1216 } })]);
+    const fetched = vi.spyOn(RunDatabase.prototype, 'getMany');
+    expect(searchRunIndexFromDisk(dir, 'unrelatedword', { limit: 1 }).runs).toEqual([]);
+    expect(fetched.mock.calls.flatMap(([ids]) => ids)).toEqual([]);
+  });
+
   it('finds an originating issue absent from the stored summary', () => {
     seedRuns(dir, [record({ task: 'Fix issue #1200', title: 'Investigating attribution',
       issueNumber: 1216, markerRefs: { issue: 1216 },
@@ -191,7 +199,9 @@ describe('cold issue attribution repair in search', () => {
       referencedIssueCandidates: ['https://github.com/local/repo/issues/1200',
         'https://github.com/local/repo/issues/1216'],
       referencedPullRequestUrl: undefined, referencedPrCandidates: [] })]);
-    expect(searchRunIndexFromDisk(dir, '#1200', { limit: 1 }).runs.map(run => run.id)).toEqual(['cold']);
+    for (const query of ['#1200', 'issues/1200', 'https://github.com/local/repo/issues/1200']) {
+      expect(searchRunIndexFromDisk(dir, query, { limit: 1 }).runs.map(run => run.id)).toEqual(['cold']);
+    }
   });
 });
 
