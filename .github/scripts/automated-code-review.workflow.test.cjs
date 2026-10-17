@@ -461,7 +461,13 @@ test('automated review rounds read AUTOMATED_REVIEW_ROUNDS and ignore the cap on
   assert.match(round, /EVENT_NAME" = workflow_dispatch/);
   assert.match(round, /review_count" -lt "\$AUTOMATED_REVIEW_ROUNDS"/);
   assert.doesNotMatch(round, /review_count" -lt 3/);
-  assert.match(fs.readFileSync(agentsPath, 'utf8'), /Automated review rounds \| `AUTOMATED_REVIEW_ROUNDS` \(default 3\)/);
+  const roundsBinding = fs.readFileSync(agentsPath, 'utf8').match(/^\| Automated review rounds \|.*$/m);
+  assert.ok(roundsBinding, 'AGENTS.md must keep the Automated review rounds binding row');
+  // The configured value changes in GitHub, not here: the row names how to read the cap and never states its value.
+  assert.match(roundsBinding[0], /`AUTOMATED_REVIEW_ROUNDS` repository variable/);
+  assert.match(roundsBinding[0], /`gh variable get AUTOMATED_REVIEW_ROUNDS`/);
+  assert.match(roundsBinding[0], /falls back to 3 only when the variable is unset or empty/);
+  assert.doesNotMatch(roundsBinding[0].replace('falls back to 3', ''), /\d/);
 
   assert.match(round, /PR_NUMBER: \$\{\{ github\.event\.pull_request\.number \|\| inputs\.pr_number \}\}/);
   assert.match(claude, /PR_NUMBER: \$\{\{ needs\.review-round\.outputs\.pr_number \}\}/);
