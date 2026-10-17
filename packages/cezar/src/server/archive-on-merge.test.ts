@@ -7,6 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { seedRuns } from '../runs/run-store.testkit.ts';
 import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
+import { fetchMergedPullRequests } from './forge/github.ts';
 
 const dirs: string[] = [], stores: RunStore[] = [];
 afterEach(() => { stores.splice(0).forEach(s => s.close()); dirs.splice(0).forEach(d => rmSync(d, { recursive: true, force: true })); });
@@ -49,6 +50,21 @@ it('defers missing or wrong-repository observations and retries after an outage'
   await f.coordinator.tick(); expect(f.store.getRun(f.id)?.archived).toBe(false);
   f.lookup.mockRejectedValueOnce(new Error('offline'));
   await f.coordinator.tick(); expect(f.store.getRun(f.id)?.archived).toBe(false);
+});
+
+it('archives a merged family when a different family declares a nonexistent PR', async () => {
+  const f = fixture(2);
+  f.store.updateRun(f.ids[1]!, { pullRequests: [{ number: 43, source: 'declared' }] }); f.store.flush();
+  f.lookup.mockImplementation(async (_root, identities) => fetchMergedPullRequests(async query => {
+    const repository = { nameWithOwner: 'o/r', pr42: { number: 42, url: 'https://github.com/o/r/pull/42', state: 'MERGED', mergedAt: '2026-01-02T00:00:00Z' }, pr43: null };
+    if (query.includes('pr43:')) throw Object.assign(new Error('gh: Could not resolve PR 43'), {
+      code: 1, stdout: JSON.stringify({ data: { repository }, errors: [{ type: 'NOT_FOUND', path: ['repository', 'pr43'] }] }),
+    });
+    return JSON.stringify({ data: { repository } });
+  }, identities));
+  await f.coordinator.tick();
+  expect(f.store.getRun(f.id)?.archived).toBe(true);
+  expect(f.store.getRun(f.ids[1]!)?.archived).toBe(false);
 });
 
 it.each([0, 32])('eventually checks complete large PR sets across more than 32 families with %i open sets', async openSets => {
