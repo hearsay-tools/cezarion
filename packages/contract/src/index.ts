@@ -25,6 +25,7 @@ export * from './preview.ts';
 
 export * from './conversations.ts';
 export * from './ci-wait.ts';
+export * from './waits.ts';
 export * from './artifacts.ts';
 export * from './discovery.ts';
 

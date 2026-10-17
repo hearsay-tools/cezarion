@@ -1,4 +1,5 @@
-import type { RunIndexEntry, RunRecord } from './runs.ts';
+import type { RunIndexEntry, RunRecord, RunSummary } from './runs.ts';
+import { resolveWaitingOn } from './waits.ts';
 
 /**
  * The one canonical attention function (cockpit spec, "Design system" → status grammar).
@@ -89,7 +90,10 @@ function isUnseen(_run: AttentionInput): boolean {
  *  the same canonical function instead of inventing a second status-to-tone mapping. `activity`
  *  is optional (#490), so status-only callers keep working unchanged. Delegation uses the slim
  *  contract projection: full run records, `ApiRun`s and workspace index rows all carry it. */
-export type AttentionInput = Pick<RunRecord, 'status' | 'activity' | 'autoResumeAt' | 'hasPendingHumanAsk' | 'hasPendingPermission'> & Pick<RunIndexEntry, 'delegation'>;
+export type AttentionInput = Pick<RunRecord, 'status' | 'activity' | 'autoResumeAt' | 'hasPendingHumanAsk' | 'hasPendingPermission'> & Pick<RunIndexEntry, 'delegation'>
+  // A summary carries `waitingOn`; a full or stream-patched record carries `waits` and no
+  // `waitingOn`, and `resolveWaitingOn` computes it from them (spec 2026-10-17-unified-waits).
+  & Partial<Pick<RunSummary, 'waitingOn'>> & Partial<Pick<RunRecord, 'waits'>>;
 
 /** Dependency wording shared by attention and relationship details (#375). A worker can only
  * wait on requests to its parent; only roots can wait for worker completion. */
@@ -140,6 +144,17 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
   if (run.status === 'failed') {
     return { bucket: 'error', tone: 'danger', shape: 'filled', pulse: false, label: 'failed' };
   }
+  // A CI or timer park is `waiting` on its own downstream work, not on you: it keeps the
+  // running bucket and ring the `activity: 'monitoring'` rung below gave it before the wait list.
+  // An open human signal makes `waitingOn` human (or the transcript argument says so), which
+  // falls through to Needs you.
+  const waitingOn = run.status === 'waiting' && !hasPendingHumanAsk ? resolveWaitingOn(run) : undefined;
+  if (waitingOn?.kind === 'ci') {
+    return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for CI' };
+  }
+  if (waitingOn?.kind === 'timer') {
+    return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' };
+  }
   const dependencyLabel = delegationWaitLabel(run.delegation);
   if (!hasPendingHumanAsk && !run.hasPendingHumanAsk && run.status === 'waiting' && run.delegation?.role !== 'invalid' && run.delegation?.wait?.phase === 'parked' && dependencyLabel) {
     // Its own workers → the robot; a worker waiting on its parent is waiting on something
@@ -168,6 +183,7 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
     // Still working, but on its OWN downstream work (a sub-agent / a monitored
     // command), not on you (#490). A sub-state of `running`, so it stays in the
     // `running` bucket — no notification, no "Needs you" — with its own label.
+    // No longer written (CI and timer parks are `waiting` + an open wait); kept for older rows.
     return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' };
   }
   if (run.status === 'running') {

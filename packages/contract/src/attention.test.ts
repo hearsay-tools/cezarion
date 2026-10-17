@@ -178,3 +178,52 @@ it('keeps a native permission prompt above worker-wait attention (hearsay-tools/
     delegation: { role: 'root' as const, wait: { phase: 'parked' as const, workerIds: ['child'] } } };
   expect(deriveAttention(waiting as AttentionInput)).toMatchObject({ bucket: 'permission', label: 'needs permission' });
 });
+
+/** CI and timer parks are `waiting` with an open wait (spec 2026-10-17-unified-waits, phase 1).
+ *  The cockpit derives attention from full records and stream-patched records too, which carry
+ *  `waits` but no `waitingOn` key, so the rows below pass RECORDS. */
+describe('open waits', () => {
+  const openCi = () => ({
+    kind: 'ci' as const, id: '11111111-1111-4111-8111-111111111111', source: 'agent' as const, via: 'cezar_wait' as const,
+    registeredAt: '2026-10-17T15:10:00.000Z', deadline: '2026-10-17T15:40:00.000Z', phase: 'open' as const, turnId: 'turn-1',
+    prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40),
+    generation: 'gen-1', timeoutSeconds: 1800,
+  });
+  const openTimer = () => ({
+    kind: 'timer' as const, id: '22222222-2222-4222-8222-222222222222', source: 'agent' as const, via: 'cezar_wait' as const,
+    registeredAt: '2026-10-17T15:00:00.000Z', deadline: '2026-10-17T15:05:00.000Z', phase: 'open' as const, turnId: 'turn-1',
+    seconds: 300,
+  });
+
+  it('reads a waiting record with an open CI or timer wait as running, not Needs you', () => {
+    expect(deriveAttention({ status: 'waiting', waits: [openCi()] })).toMatchObject({ bucket: 'running', shape: 'ring', label: 'waiting for CI' });
+    expect(deriveAttention({ status: 'waiting', waits: [openTimer()] })).toMatchObject({ bucket: 'running', shape: 'ring', label: 'monitoring' });
+    expect(deriveAttention({ status: 'waiting', waits: [openCi()] })).toEqual({
+      bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for CI',
+    });
+  });
+
+  it('keeps an open human signal above the wait', () => {
+    expect(deriveAttention({ status: 'waiting', waits: [openCi()], hasPendingHumanAsk: true }).label).toBe('needs you');
+    // The transcript-context argument the cockpit passes says the same.
+    expect(deriveAttention({ status: 'waiting', waits: [openCi()] }, true).label).toBe('needs you');
+    expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'human' }, waits: [openCi()] }).label).toBe('needs you');
+  });
+
+  it('follows a summary\'s waitingOn when the row carries no waits', () => {
+    expect(deriveAttention({
+      status: 'waiting',
+      waitingOn: { kind: 'ci', waitId: '11111111-1111-4111-8111-111111111111', prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' },
+    }).label).toBe('waiting for CI');
+    expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'timer', waitId: '22222222-2222-4222-8222-222222222222', at: '2026-10-17T15:05:00.000Z' } }).label).toBe('monitoring');
+  });
+
+  it('leaves every other status alone', () => {
+    expect(deriveAttention({ status: 'running', waits: [openCi()] }).label).toBe('running');
+    expect(deriveAttention({ status: 'review', waits: [openCi()] }).label).toBe('needs review');
+    expect(deriveAttention({ status: 'failed', waits: [openCi()] }).label).toBe('failed');
+    expect(deriveAttention({ status: 'waiting', waits: [{ ...openCi(), phase: 'resolved' as const }] }).label).toBe('needs you');
+    expect(deriveAttention({ status: 'waiting' }).label).toBe('needs you'); // no wait: unchanged fallback
+    expect(deriveAttention({ status: 'running', activity: 'monitoring' }).label).toBe('monitoring'); // legacy summary rows
+  });
+});
