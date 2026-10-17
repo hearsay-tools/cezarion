@@ -873,7 +873,15 @@ aborted registration from a changed turn. Only missing or revoked transport
 capabilities are `unauthorized`; an unknown registration failure is `unavailable`.
 Safe messages never forward request contents or raw provider errors.
 
-A settled worker wait still blocks CI registration until its wake is delivered.
+A settled worker wait blocks CI registration until its wake is delivered, explicitly
+cancelled by the executing parent, or every selected worker is verifiably destroyed.
+Cancellation and completed destruction retire the obsolete lifecycle input and retain
+`lastWait` outcomes, freeing the slot in the same turn (hearsay-tools/cezarion#1225).
+A parked parent's queued wake remains load-bearing for resumption; cleanup must not
+strand it. R80 in `workflows/ci-wait-refusal.test.ts` holds each `RUNNER_IDS` native
+mock turn open, settles its worker, cancels or records completed destruction, then
+registers a new worker wait and CI wait before releasing the turn. Both paths failed
+before the fix on every runner; there are no wire exemptions.
 `worker_wait_pending` instructs the agent to end its turn and retry after delivery;
 settlement alone must not discard the result or start competing waits. Harness row
 R27 reproduces this sequence through every runner's native mock wire and the real

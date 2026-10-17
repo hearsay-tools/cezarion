@@ -50,7 +50,11 @@ references to unrelated runs. Repository references resolve in the worker's own
 worktree; parent attachments are copied into worker-owned storage before agent
 execution. Bound copied inputs to 8 MiB total. Store source identity and resolved
 worker locations; copies remain inputs even if the parent later deletes its
-original. No URL fetches or arbitrary filesystem-copy interface.
+original. No URL fetches or arbitrary filesystem-copy interface, with one exception
+(hearsay-tools/cezarion#1149): a `parent-file` reference (`cez worker spawn --attach <path>`)
+copies a regular, git-ignored file from the parent's own worktree into the worker's worktree
+at the same relative path before its first turn. It counts toward the same 32 references and
+8 MiB budget; tracked, unignored, symlinked, `.git` and `.gitignore` paths are refused.
 
 Resolve omitted backend to the active parent's effective backend. With the same
 backend, omitted model/account/effort inherit the parent's accepted settings.

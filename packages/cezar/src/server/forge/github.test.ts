@@ -1849,6 +1849,10 @@ describe('paged GitHub list (#1183)', () => {
   } = {}) => {
     const spawns: string[][] = [];
     const pending: Array<() => void> = [];
+    // Resolves once the issue, PR and viewer queries have all been spawned.
+    const seen = new Set<string>();
+    let allSpawned!: () => void;
+    const spawned = new Promise<void>((resolve) => { allSpawned = resolve; });
     execFileMock.mockImplementation((...args: unknown[]) => {
       const argv = args[1] as string[];
       const cb = args[args.length - 1] as (e: unknown, r: unknown) => void;
@@ -1856,21 +1860,25 @@ describe('paged GitHub list (#1183)', () => {
       let stdout = '{}';
       if (argv[0] === 'repo') return cb(null, { stdout: 'owner/n\n', stderr: '' });
       const side = listSide(argv);
+      const viewer = (graphqlVar(argv, 'query') ?? '').includes('viewer');
       // One page per side: a request that already carries a cursor reaches the end.
       const resumed = graphqlVar(argv, 'after') !== undefined;
       if (side === 'issues') stdout = listReply('issues', opts.issues ?? [], { total: opts.issuesTotal, next: resumed ? null : opts.issuesNext });
       else if (side === 'pullRequests') stdout = listReply('pullRequests', opts.prs ?? [], { total: opts.prsTotal, next: resumed ? null : opts.prsNext });
-      else if ((graphqlVar(argv, 'query') ?? '').includes('viewer')) stdout = JSON.stringify({ data: { viewer: { login: 'me' } } });
+      else if (viewer) stdout = JSON.stringify({ data: { viewer: { login: 'me' } } });
       const answer = () => cb(null, { stdout, stderr: '' });
       if (opts.hold) pending.push(answer);
       else answer();
+      if (side) seen.add(side);
+      else if (viewer) seen.add('viewer');
+      if (seen.size === 3) allSpawned();
     });
-    return { spawns, release: () => pending.splice(0).forEach((answer) => answer()) };
+    return { spawns, spawned, release: () => pending.splice(0).forEach((answer) => answer()) };
   };
   const firstVar = (argv: string[]) => Number(graphqlVar(argv, 'first'));
 
   it('fetchGithub runs the issue, PR and viewer queries in parallel and returns totals and cursors', async () => {
-    const { spawns, release } = serveList({
+    const { spawns, spawned, release } = serveList({
       issues: [listNode(9, {
         labels: { nodes: [{ name: 'bug', color: 'd73a4a' }] },
         assignees: { nodes: [{ login: 'ada' }] },
@@ -1880,11 +1888,10 @@ describe('paged GitHub list (#1183)', () => {
       issuesTotal: 88, prsTotal: 12, issuesNext: 'i-next', prsNext: null, hold: true,
     });
     const pending = fetchGithub('/repo/paged-parallel', true, 50);
-    await vi.waitFor(() => {
-      const kinds = spawns.map((argv) => listSide(argv)
-        ?? ((graphqlVar(argv, 'query') ?? '').includes('viewer') ? 'viewer' : null)).filter(Boolean);
-      expect(kinds.sort()).toEqual(['issues', 'pullRequests', 'viewer']);
-    });
+    await spawned;
+    const kinds = spawns.map((argv) => listSide(argv)
+      ?? ((graphqlVar(argv, 'query') ?? '').includes('viewer') ? 'viewer' : null)).filter(Boolean);
+    expect(kinds.sort()).toEqual(['issues', 'pullRequests', 'viewer']);
     release();
     const data = await pending;
     expect(data).toMatchObject({

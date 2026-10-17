@@ -89,20 +89,41 @@ export const workerCreationReceiptSchema = z.object({
 export const workerBackendSchema = z.enum(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp']);
 const relativeInputPath = z.string().min(1).max(4096).refine(path =>
   !/[\\\u0000-\u001f\u007f:]/.test(path) && !path.startsWith('/') &&
-  path.split('/').every(part => part !== '' && part !== '.' && part !== '..'));
+  path.split('/').every(part => part !== '' && part !== '.' && part !== '..' && part.toLowerCase() !== '.git'));
+/**
+ * Why a `parent-file` path may never be attached, or undefined. An attached `.gitignore` would
+ * rewrite the worker worktree's ignore rules and could re-include another attachment, which its
+ * diff and autosave would then carry (hearsay-tools/cezarion#1149). The schema and the server share it.
+ */
+export function parentFileRefusal(path: string): string | undefined {
+  return path.split('/').at(-1)?.toLowerCase() === '.gitignore'
+    ? `--attach cannot attach a .gitignore: ${path}; ignore rules must come from the baseline` : undefined;
+}
 export const workerContextReferenceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('baseline-file'), path: relativeInputPath }).strict(),
   z.object({ kind: z.literal('parent-attachment'), id: z.string().min(1).max(255).regex(/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/).refine(id => !id.includes('..')) }).strict(),
+  /** A git-ignored file in the parent's own worktree, relative to its root (`cez worker spawn --attach`, hearsay-tools/cezarion#1149). */
+  z.object({ kind: z.literal('parent-file'), path: relativeInputPath }).strict().superRefine(({ path }, ctx) => {
+    const message = parentFileRefusal(path);
+    if (message) ctx.addIssue({ code: 'custom', path: ['path'], message });
+  }),
 ]);
 export type WorkerContextReference = z.infer<typeof workerContextReferenceSchema>;
 export const workerContextSchema = z.object({
   text: z.string().max(100_000).optional(),
   artifacts: z.array(workerContextReferenceSchema).max(32).optional(),
-}).strict();
+}).strict().superRefine(({ artifacts = [] }, ctx) => {
+  const seen = new Set<string>();
+  for (const [index, artifact] of artifacts.entries()) {
+    if (artifact.kind !== 'parent-file') continue;
+    if (seen.has(artifact.path)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['artifacts', index, 'path'], message: `duplicate --attach path: ${artifact.path}` });
+    seen.add(artifact.path);
+  }
+});
 export const workerInputSchema = z.object({
   source: workerContextReferenceSchema,
   path: z.string().min(1).max(8192),
-  /** Parent attachment: SHA-256 of copied bytes. Baseline file: SHA-256 of the pinned Git blob ID
+  /** Parent attachment and parent file: SHA-256 of copied bytes. Baseline file: SHA-256 of the pinned Git blob ID
    * (the lowercase hexadecimal ID as UTF-8 text), not of file contents. Interpret by source.kind. */
   sha256: requestHashSchema,
   bytes: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),

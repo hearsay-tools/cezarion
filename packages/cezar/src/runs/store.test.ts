@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runRecordSchema as contractRunRecordSchema } from '@open-mercato/cezar-contract';
 import { historyPaths } from './history-file.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
+import { RunDatabase } from './run-database.ts';
 import { RunStore, runRecordSchema } from './store.ts';
 import { blockRunWrites, readPersistedRuns, readPersistedText, seedRuns } from './run-store.testkit.ts';
 
@@ -1377,6 +1378,107 @@ describe('RunStore — referenced-issue discovery (spec 2026-07-21-report-ref-di
     const run = store.createRun({ title: 't', workflow: 'w', task, steps: [] });
     return { store, run };
   };
+
+  it.each(['Fix #1200 using /dev-flow.', 'Fix issue #1200',
+    'Fix https://github.com/open-mercato/cezar/issues/1200',
+    'Fix the upstream issue #1200', 'Review the issue #1200',
+    'Address upstream issue #1200', 'Investigate the GitHub issue #1200',
+    'Could you fix issue #1200?', 'Can you please fix issue #1200?',
+    'Please could you review issue #1200?', 'I would like you to fix issue #1200'])(
+    'keeps the originating issue after filing a follow-up: %s', (task) => {
+      const { store, run } = freshRun(task);
+      store.updateRun(run.id, { issueNumber: 1200 });
+      store.applyMarkerRefs(run.id, { issue: 1200 });
+      store.applyMarkerRefs(run.id, { pr: 1210 });
+      store.appendEvent(run.id, { type: 'result', result:
+        'Created https://github.com/open-mercato/cezar/issues/1216' });
+      store.applyMarkerRefs(run.id, { issue: 1216 });
+      expect(run.issueNumber).toBe(1200);
+      expect(run.referencedIssueUrl).not.toBe('https://github.com/open-mercato/cezar/issues/1216');
+      expect(run.referencedIssueCandidates).toContain('https://github.com/open-mercato/cezar/issues/1216');
+      store.appendEvent(run.id, { type: 'result', result:
+        'Working https://github.com/open-mercato/cezar/issues/1200' });
+      expect(run.referencedIssueUrl).toBe('https://github.com/open-mercato/cezar/issues/1200');
+      store.flush();
+      expect(RunStore.open(dataDir).getRun(run.id)?.issueNumber).toBe(1200);
+    });
+
+  it('lets the marker replace incidental issue mentions in a comparison prompt', () => {
+    const { store, run } = freshRun('Compare against issue #1200 while fixing issue #1216');
+    store.updateRun(run.id, { issueNumber: 1200 });
+    store.appendEvent(run.id, { type: 'result', result:
+      'https://github.com/open-mercato/cezar/issues/1200 https://github.com/open-mercato/cezar/issues/1216' });
+    store.applyMarkerRefs(run.id, { issue: 1216 });
+    expect(run.issueNumber).toBe(1216);
+    expect(run.referencedIssueUrl).toBe('https://github.com/open-mercato/cezar/issues/1216');
+    store.close();
+    const reopened = RunStore.open(dataDir);
+    expect(reopened.getRun(run.id)?.issueNumber).toBe(1216);
+    reopened.close();
+  });
+
+  it('keeps equal-number prompt issues across repositories ambiguous', () => {
+    const urls = ['https://github.com/one/repo/issues/1200', 'https://github.com/two/repo/issues/1200'];
+    const { store, run } = freshRun(`Compare ${urls.join(' and ')}`);
+    store.applyMarkerRefs(run.id, { issue: 1200 });
+    expect(run.referencedIssueUrl).toBeUndefined();
+  });
+
+  it('restores an upstream prompt URL when legacy candidate evidence is absent', () => {
+    const origin = 'https://github.com/upstream/repo/issues/1200';
+    const { store, run } = freshRun(`Fix ${origin}`);
+    store.updateRun(run.id, { issueNumber: 1216, markerRefs: { issue: 1216 },
+      referencedIssueUrl: 'https://github.com/local/repo/issues/1216',
+      referencedIssueCandidates: undefined });
+    store.close();
+    const reopened = RunStore.open(dataDir);
+    expect(reopened.getRun(run.id)?.referencedIssueUrl).toBe(origin);
+    reopened.close();
+  });
+
+  it('does not decode normalized issue history on repeated store opens', () => {
+    const { store, run } = freshRun('Fix issue #1200');
+    store.updateRun(run.id, { status: 'done', issueNumber: 1200 });
+    store.applyMarkerRefs(run.id, { issue: 1216 });
+    store.close();
+    const scan = vi.spyOn(RunDatabase.prototype, 'listWhere');
+    try {
+      const reopened = RunStore.open(dataDir);
+      expect(scan.mock.results.flatMap(result => result.value ?? []).map(row => row.id)).not.toContain(run.id);
+      reopened.close();
+    } finally { scan.mockRestore(); }
+  });
+
+  it('checks correct legacy issue history once, then skips it', () => {
+    seedRuns(dataDir, [{ ...LEGACY_RUN, task: 'Fix issue #1200',
+      issueNumber: 1200, markerRefs: { issue: 1200 } }]);
+    const scan = vi.spyOn(RunDatabase.prototype, 'listWhere');
+    try {
+      const first = RunStore.open(dataDir);
+      expect(scan.mock.results.flatMap(result => result.value ?? []).map(row => row.id)).toContain(LEGACY_RUN.id);
+      first.close();
+      scan.mockClear();
+      const second = RunStore.open(dataDir);
+      expect(scan.mock.results.flatMap(result => result.value ?? []).map(row => row.id)).not.toContain(LEGACY_RUN.id);
+      second.close();
+    } finally { scan.mockRestore(); }
+  });
+
+  it('repairs an already overwritten originating issue when loading', () => {
+    const { store, run } = freshRun('Fix #1200 using /dev-flow.');
+    store.updateRun(run.id, { issueNumber: 1216, markerRefs: { issue: 1216 },
+      referencedIssueUrl: 'https://github.com/open-mercato/cezar/issues/1216',
+      referencedIssueCandidates: ['https://github.com/open-mercato/cezar/issues/1200',
+        'https://github.com/open-mercato/cezar/issues/1216'] });
+    store.flush();
+    store.close();
+    expect(readRunIndexFromDisk(dataDir).runs.find(row => row.id === run.id)?.issueNumber).toBe(1200);
+    const reopened = RunStore.open(dataDir);
+    expect(reopened.listRunSummaries().runs.find(row => row.id === run.id)?.issueNumber).toBe(1200);
+    const loaded = reopened.getRun(run.id);
+    expect(loaded?.issueNumber).toBe(1200);
+    expect(loaded?.referencedIssueUrl).toBe('https://github.com/open-mercato/cezar/issues/1200');
+  });
 
   it('adopts a single issue link and seeds issueNumber', () => {
     const { store, run } = freshRun();

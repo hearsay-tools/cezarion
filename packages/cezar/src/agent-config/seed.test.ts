@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { seedAgentConfigLocalLayer } from './seed.ts';
+import { isPreserved, seedAgentConfigLocalLayer } from './seed.ts';
 
 let repo: string;
 const env = process.env;
@@ -47,6 +47,29 @@ describe('seedAgentConfigLocalLayer', () => {
     } finally {
       git(repo, 'worktree', 'remove', '--force', wt);
     }
+  });
+
+  it('leaves a path in the preserve set alone and still seeds the others', async () => {
+    mkdirSync(join(repo, '.claude'), { recursive: true });
+    writeFileSync(join(repo, '.claude', 'settings.local.json'), '{"main":true}');
+    writeFileSync(join(repo, 'CLAUDE.local.md'), 'main checkout bytes');
+    const wt = makeWorktree();
+    try {
+      writeFileSync(join(wt, 'CLAUDE.local.md'), 'explicit parent attachment');
+      const seeded = await seedAgentConfigLocalLayer(repo, wt, env, new Set(['CLAUDE.local.md']));
+      expect(seeded).toEqual(['.claude/settings.local.json']);
+      expect(readFileSync(join(wt, 'CLAUDE.local.md'), 'utf8')).toBe('explicit parent attachment');
+      expect(readFileSync(join(wt, '.claude', 'settings.local.json'), 'utf8')).toBe('{"main":true}');
+    } finally {
+      git(repo, 'worktree', 'remove', '--force', wt);
+    }
+  });
+
+  it('matches a nested preserve path under Windows separators', () => {
+    const rel = win32.relative('C:\\repo', 'C:\\repo\\.claude\\settings.local.json');
+    expect(rel).toBe('.claude\\settings.local.json');
+    expect(isPreserved(new Set(['.claude/settings.local.json']), rel, win32.sep)).toBe(true);
+    expect(isPreserved(new Set(['CLAUDE.local.md']), rel, win32.sep)).toBe(false);
   });
 
   it('no-ops when the source file is absent', async () => {

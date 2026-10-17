@@ -611,6 +611,8 @@ const CONTROL_CRITERIA = [
   { id: 'R26', scenario: 'ask-resume' },
   // workflows/ci-wait-refusal.test.ts: settled worker wake, private CI IPC, then delivery.
   { id: 'R27', scenario: 'hold' },
+  // hearsay-tools/cezarion#1225: cancel/destroy releases the same-turn wait slot.
+  { id: 'R80', scenario: 'hold' },
   { id: 'R28', scenario: 'baseline' },
   { id: 'R29', scenario: 'baseline' },
   { id: 'R30', scenario: 'baseline' },
