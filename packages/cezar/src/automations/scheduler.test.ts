@@ -180,7 +180,7 @@ describe('ProjectAutomationScheduler', () => {
     expect(launch).not.toHaveBeenCalled();
     expect(store.logs({ automationId: definition.id })[0]).toMatchObject({
       result: 'preview',
-      reason: 'Bounded preview found 1 match; no tasks were launched.',
+      reason: 'Bounded preview found 1 filter match; no tasks were launched. Counts can include closed items and previously processed events.',
     });
   });
 

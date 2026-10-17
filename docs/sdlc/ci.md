@@ -43,7 +43,10 @@ requested full local browser run or CI failure investigation, use
 `npm run test:changed -- --base=<ref>`. `--plan` prints the selection and command
 without executing it. Ordinary TS/JS source changes use Vitest's import graph.
 Contract/configuration/unknown input, removed paths, missing base or failed Git
-inspection run full Vitest. Clean and Markdown-only changes explicitly skip.
+inspection run full Vitest. Clean changes, and changes confined to CI's docs-only
+list (`isDocsPath` in `.github/scripts/change-surface.cjs`, which includes Markdown
+under `packages/` outside fixture directories but not the Markdown a test reads),
+explicitly skip.
 Inspect `--plan` before running it; if it selects the full suite, choose focused
 checks and leave full verification to CI. No matching tests fails rather than
 reporting a pass; select test files explicitly and report any coverage gap.
