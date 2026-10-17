@@ -255,6 +255,20 @@ affected checks. A targeted run, skipped browser suite, or old pass for changed
 inputs never counts as a full pass. CI independently enforces the complete gate
 in `.github/workflows/ci.yml`; check its required aggregate before merge.
 
+A PR that edits `ci.yml`, or a workflow it calls, does not run its own definition.
+CI triggers on `pull_request_target`, which loads the workflow from the base branch,
+so every check on the PR can pass while a new step never ran. To prove a `ci.yml`
+change before merge, push the branch and run `gh workflow run ci.yml --ref <branch>`
+without `-f pr_number`, which only bot release PRs take. The dispatched run uses the
+branch's `ci.yml` on the pushed head, with the full matrix. It skips both publishing
+jobs, so it publishes nothing: `publish-snapshot` runs only on a push to `main`, and
+`prepare-pr-snapshot` only on `pull_request_target`. It also skips `review` and
+`review-result`, so it never exercises `automated-code-review.yml`, the one workflow
+`ci.yml` calls. The dispatched run does not satisfy the PR's required checks (see
+`docs/sdlc/ci.md` § Diagnostic dispatch), so cite its run ID in the PR's
+Verification section. Run `38979957113` proved the new `Lint workflows` step of
+hearsay-tools/cezarion#1199.
+
 A full local Vitest run (or one shard) that fails only under host load can still
 back a PR. Record the load average (`uptime`) and the failed files, rerun those
 files (`npm test -- <files>`) until they pass, state both in the PR's
