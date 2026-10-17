@@ -12,6 +12,11 @@
     "onStart": "lookup-only"
   },
   "inputs": {
+    "packages/web/src/test/card-2-contrast.test.ts": [
+      "packages/web/src/**/*.tsx",
+      "packages/web/src/test/card-2-contrast.baseline.json",
+      "packages/web/src/styles/index.css"
+    ],
     "packages/cezar/test/e2e/*.test.ts": [
       "packages/cezar/dist/**",
       "packages/cezar/web/dist/**",
