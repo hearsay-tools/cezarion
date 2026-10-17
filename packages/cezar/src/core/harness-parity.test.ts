@@ -622,6 +622,9 @@ const CONTROL_CRITERIA = [
   { id: 'R34', scenario: 'baseline' },
   // R35 covers both preview serve (#781) and stop/restart (#803) discovery on every native wire.
   { id: 'R35', scenario: 'baseline' },
+  // core/ci-tools.test.ts (hearsay-tools/cezarion#1233): `cezar_wait` and `cezar_cancel_wait`
+  // reach the session's handlers through each native wire, fresh and resumed.
+  { id: 'U0', scenario: 'baseline' },
   // #399: shared monitoring instructions on each native prompt channel.
   { id: 'R36', scenario: 'baseline' },
   { id: 'R37', scenario: 'baseline' },
@@ -2253,17 +2256,18 @@ describe('harness parity — cezarTools list behind CEZ_PREVIEW', () => {
       const controller = await CiToolController.start();
       const dir = mkdtempSync(join(tmpdir(), 'cez-tools-list-'));
       try {
-        const session = controller.provision(async () => wait);
+        const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'ci', source: 'agent', via: 'cezar_wait_for_ci', phase: 'open' } }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }) });
         const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, allowedTools: ['Read'], env: { ...session.env, CEZ_MOCK_ARGS_FILE: join(dir, 'wire'), CEZ_MOCK_CI_PR: wait.prUrl, CEZ_MOCK_CI_RESULT: join(dir, 'result'), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
         expect(obs.v1.filter((event) => event.type === 'error')).toEqual([]);
-        const expected = enabled ? ['cezar_wait_for_ci', 'cezar_preview_serve', 'cezar_preview_stop'] : ['cezar_wait_for_ci'];
+        const waits = ['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait'];
+        const expected = enabled ? [...waits, 'cezar_preview_serve', 'cezar_preview_stop'] : waits;
         expect(JSON.parse(readFileSync(join(dir, 'result'), 'utf8')).names).toEqual(expected);
         const argv: string[] = JSON.parse(readFileSync(join(dir, 'wire'), 'utf8').trim().split('\n')[0]!);
         if (backend === 'claude') {
           const allowed = argv[argv.indexOf('--allowedTools') + 1]!.split(',');
           expect(allowed.filter((name) => name.startsWith(`mcp__${session.descriptor.name}__`))).toEqual(expected.map((name) => `mcp__${session.descriptor.name}__${name}`));
         }
-        if (backend === 'pi') expect(argv[argv.indexOf('--tools') + 1]!.split(',').filter((name) => name.startsWith('cezar_'))).toEqual(expected);
+        if (backend === 'pi' || backend === 'omp') expect(argv[argv.indexOf('--tools') + 1]!.split(',').filter((name) => name.startsWith('cezar_'))).toEqual(expected);
       } finally {
         vi.unstubAllEnvs();
         await controller.close();

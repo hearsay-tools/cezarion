@@ -1,4 +1,4 @@
-import type { CiWaitErrorCode, PreviewResultCode, PreviewServeResult } from '@open-mercato/cezar-contract';
+import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, type CiWaitErrorCode, type PreviewResultCode, type PreviewServeResult } from '@open-mercato/cezar-contract';
 import type { z } from 'zod';
 
 /** Safe diagnostics shared by the manager and private transport. Never forward raw errors. */
@@ -79,4 +79,24 @@ export function previewInvalidInput(error: z.ZodError, input: unknown): PreviewS
     message: `\`${field}\` ${FIELD_RULES[field]} (got ${got}).`,
     hint: `"${field}" ${FIELD_RULES[field]}. A valid call: ${EXAMPLE_CALL}. Fix the field and call again.`,
   };
+}
+
+// hearsay-tools/cezarion#1233: `cezar_wait` and `cezar_cancel_wait` refusals name the first
+// failing field and its rule, never the value the agent sent.
+const WAIT_FIELD_RULES: Record<string, string> = {
+  kind: 'must be "ci" or "timer"',
+  pr: 'must be an HTTPS GitHub pull request URL (kind "ci")',
+  timeout_seconds: 'must be an integer between 1 and 7200 (kind "ci")',
+  seconds: `must be an integer between ${TIMER_MIN_SECONDS} and ${TIMER_MAX_SECONDS} (kind "timer")`,
+  note: 'must be a string of at most 512 characters (kind "timer")',
+  wait_id: 'must be a wait_id that cezar_wait answered',
+};
+const WAIT_FIELDS = 'kind "ci" takes pr and timeout_seconds; kind "timer" takes seconds and note';
+
+export function waitInvalidInput(error?: z.ZodError): string {
+  const issue = error?.issues[0];
+  if (issue?.code === 'unrecognized_keys') return `Unknown field ${issue.keys.map(key => JSON.stringify(key.slice(0, 64))).join(', ')}: ${WAIT_FIELDS}.`;
+  const field = error?.issues.map(entry => entry.path[0]).find((key): key is string => typeof key === 'string' && key in WAIT_FIELD_RULES);
+  if (field) return `\`${field}\` ${WAIT_FIELD_RULES[field]}.`;
+  return `The arguments must be a JSON object: ${WAIT_FIELDS}.`;
 }

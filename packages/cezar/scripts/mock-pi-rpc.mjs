@@ -236,6 +236,12 @@ async function handle(command) {
         pendingMessageCount: 0,
       },
     });
+  } else if (command.type === 'prompt' && command.message.includes('mock:cezar-tool')) {
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    send({ type: 'agent_start' }); send({ type: 'turn_start' });
+    const { toolPrompt } = await import('./mock-ci-tool.mjs');
+    sendText([await toolPrompt('pi', process.argv.slice(2), command.message)]);
+    sendTurnEnd();
   } else if (command.type === 'prompt' && command.message.includes('mock:ci-wait')) {
     send({ id: command.id, type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' }); send({ type: 'turn_start' });

@@ -9,18 +9,33 @@ import { getRequestListener } from '@hono/node-server';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { previewStopResult } from '../preview/registration.ts';
-import { ciErrorMessage, previewInvalidInput, previewOversized, previewRefusal } from './errors.ts';
+import { ciErrorMessage, previewInvalidInput, previewOversized, previewRefusal, waitInvalidInput } from './errors.ts';
 import { previewToolEnabled } from './tools.ts';
-import { ciWaitRequestSchema, ciWaitReceiptSchema, ciWaitErrorCodeSchema, previewStopRequestSchema, previewStopResultSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, previewServeResultSchema, type CiWait, type CiWaitRequest, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract';
+import { cezarCancelWaitAnswerSchema, cezarCancelWaitRequestSchema, cezarWaitAnswerSchema, cezarWaitRequestSchema, ciWaitRequestSchema, ciWaitReceiptSchema, ciWaitErrorCodeSchema, previewStopRequestSchema, previewStopResultSchema, type CezarCancelWaitAnswer, type CezarCancelWaitRequest, type CezarWaitAnswer, type CezarWaitRequest, type CiWait, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, previewServeResultSchema, type PreviewServeRequest, type PreviewServeResult, type Wait, type WaitVia } from '@open-mercato/cezar-contract';
 import { jsonZodValidator } from '../server/validators.ts';
 import type { AgentRunSpec } from '../core/agent-runner.ts';
 
-type Registration = (request: CiWaitRequest, signal: AbortSignal) => Promise<CiWait>;
-/** #781: absent where no cockpit owns the run, which the route answers as `headless`. */
+/**
+ * hearsay-tools/cezarion#1233: what `registerWait` settles to. The agent sees `answer`; an accepted
+ * registration also carries the entry it opened, which the deprecated `cezar_wait_for_ci` route
+ * needs for its unchanged receipt (head SHA, registration time).
+ */
+export type WaitRegistration =
+  | { answer: Extract<CezarWaitAnswer, { ok: true }>; wait: Wait }
+  | { answer: Extract<CezarWaitAnswer, { ok: false }> };
 /** `signal` aborts when the session's capability is revoked (cancel, stop, session end). */
 type PreviewRegistration = (request: PreviewServeRequest, signal: AbortSignal) => Promise<PreviewServeResult>;
 type PreviewStop = (request: PreviewStopRequest, signal: AbortSignal) => Promise<PreviewStopResult>;
-type Capability = { register: Registration; registerPreview?: PreviewRegistration; stopPreview?: PreviewStop; lifetime: AbortController };
+/** The session's trusted callbacks: run identity comes from here, never from the model's arguments. */
+export type CezarToolHandlers = {
+  /** `via` names the tool that opened the wait: `cezar_wait`, or the `cezar_wait_for_ci` alias. */
+  registerWait: (request: CezarWaitRequest, via: WaitVia, signal: AbortSignal) => Promise<WaitRegistration>;
+  cancelWait: (request: CezarCancelWaitRequest, signal: AbortSignal) => Promise<CezarCancelWaitAnswer>;
+  /** #781: absent where no cockpit owns the run, which the route answers as `headless`. */
+  registerPreview?: PreviewRegistration;
+  stopPreview?: PreviewStop;
+};
+type Capability = CezarToolHandlers & { lifetime: AbortController };
 export type CiToolSession = { descriptor: NonNullable<AgentRunSpec['cezarTools']>; env: Record<string, string>; revoke(): void };
 const unavailable = { code: 'unavailable' as const, message: ciErrorMessage('unavailable') };
 
@@ -61,10 +76,10 @@ export class CiToolController {
     }
   }
 
-  provision(register: Registration, registerPreview?: PreviewRegistration, stopPreview?: PreviewStop): CiToolSession {
+  provision(handlers: CezarToolHandlers): CiToolSession {
     if (this.closed) throw new Error(unavailable.message);
     const token = randomBytes(32).toString('hex');
-    const capability: Capability = { register, registerPreview, stopPreview, lifetime: new AbortController() };
+    const capability: Capability = { ...handlers, lifetime: new AbortController() };
     this.capabilities.set(token, capability);
     const entry = fileURLToPath(new URL('./mcp.js', import.meta.url));
     // Source execution uses tsx already installed by the developer; installed artifacts use plain Node.
@@ -90,9 +105,20 @@ export class CiToolController {
   }
 }
 
+/** A refusal's code when it is a fixed CI code, so its message is ours and never the thrower's. */
+function ciRefusalCode(code: unknown) {
+  const parsed = ciWaitErrorCodeSchema.safeParse(code);
+  return parsed.success ? parsed.data : undefined;
+}
+const thrownCode = (error: unknown) => error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+/** The alias receipt keeps the phase names it answered before the wait list. */
+const receiptPhase = { open: 'registered', resolved: 'wake-pending', delivered: 'delivered', cancelled: 'withdrawn' } as const satisfies Record<Wait['phase'], CiWait['phase']>;
+
 /**
- * Typed private route inventory: GET holds adapter lifetime; POST ci-wait registers CI; POST
- * preview-serve registers a dev server (#781); preview-stop controls its approved process (#803).
+ * Typed private route inventory: GET holds adapter lifetime; POST wait opens a CI or timer wait and
+ * POST cancel-wait closes one (hearsay-tools/cezarion#1233); POST ci-wait is their deprecated CI
+ * alias; POST preview-serve registers a dev server (#781); preview-stop controls its approved
+ * process (#803).
  */
 export function ciToolRoutes(capabilities: Map<string, Capability>) {
   const authorized = (authorization: string | undefined) => {
@@ -124,15 +150,57 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
     .post('/api/v1/tools/ci-wait', bodyLimit({ maxSize: 16_384, onError: c => c.json({ code: 'invalid_request' as const, message: 'CI request exceeds 16 KiB' }, 413) }), jsonZodValidator(ciWaitRequestSchema, { code: 'invalid_input', message: 'Invalid CI wait arguments' }), async c => {
       const capability = c.get('capability');
       try {
-        const wait = await capability.register(c.req.valid('json'), capability.lifetime.signal);
+        const registration = await capability.registerWait({ kind: 'ci', ...c.req.valid('json') }, 'cezar_wait_for_ci', capability.lifetime.signal);
         capability.lifetime.signal.throwIfAborted();
-        const receipt = ciWaitReceiptSchema.parse({ waitId: wait.id, prUrl: wait.prUrl, repository: wait.repository, prNumber: wait.prNumber, headSha: wait.headSha, registeredAt: wait.registeredAt, deadline: wait.deadline, phase: wait.phase });
+        if (!registration.answer.ok) {
+          const code = ciRefusalCode(registration.answer.code);
+          return c.json(code ? { code, message: ciErrorMessage(code) } : unavailable, 503);
+        }
+        const wait = 'wait' in registration ? registration.wait : undefined;
+        if (wait?.kind !== 'ci') return c.json(unavailable, 503);
+        const receipt = ciWaitReceiptSchema.parse({ waitId: wait.id, prUrl: wait.prUrl, repository: wait.repository, prNumber: wait.prNumber, headSha: wait.headSha, registeredAt: wait.registeredAt, deadline: wait.deadline, phase: receiptPhase[wait.phase] });
         return c.json(receipt);
       } catch (error) {
         if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
-        const code = ciWaitErrorCodeSchema.safeParse(error && typeof error === 'object' && 'code' in error ? error.code : undefined);
-        if (code.success) return c.json({ code: code.data, message: ciErrorMessage(code.data) }, 503);
+        const code = ciRefusalCode(thrownCode(error));
+        if (code) return c.json({ code, message: ciErrorMessage(code) }, 503);
         return c.json(unavailable, 503);
+      }
+    })
+    .use('/api/v1/tools/wait', async (c, next) => {
+      const capability = authorized(c.req.header('authorization'));
+      if (!capability) return c.json(unauthorized, 401);
+      c.set('capability', capability);
+      await next();
+    })
+    // The agent fixes a bad call from the message, so refusals answer 200 with a typed result.
+    .post('/api/v1/tools/wait', bodyLimit({ maxSize: 16_384, onError: c => c.json({ ok: false as const, code: 'invalid_request' as const, message: 'The arguments exceed 16 KiB.' }) }), jsonZodValidator(cezarWaitRequestSchema, { invalid: (c, error) => c.json({ ok: false as const, code: 'invalid_request' as const, message: waitInvalidInput(error) }) }), async c => {
+      const capability = c.get('capability');
+      try {
+        const { answer } = await capability.registerWait(c.req.valid('json'), 'cezar_wait', capability.lifetime.signal);
+        capability.lifetime.signal.throwIfAborted();
+        return c.json(cezarWaitAnswerSchema.parse(answer));
+      } catch (error) {
+        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
+        const code = ciRefusalCode(thrownCode(error)) ?? 'unavailable';
+        return c.json({ ok: false as const, code, message: ciErrorMessage(code) });
+      }
+    })
+    .use('/api/v1/tools/cancel-wait', async (c, next) => {
+      const capability = authorized(c.req.header('authorization'));
+      if (!capability) return c.json(unauthorized, 401);
+      c.set('capability', capability);
+      await next();
+    })
+    .post('/api/v1/tools/cancel-wait', bodyLimit({ maxSize: 16_384, onError: c => c.json({ cancelled: false as const, code: 'invalid_request' as const, message: 'The arguments exceed 16 KiB.' }) }), jsonZodValidator(cezarCancelWaitRequestSchema, { invalid: (c, error) => c.json({ cancelled: false as const, code: 'invalid_request' as const, message: waitInvalidInput(error) }) }), async c => {
+      const capability = c.get('capability');
+      try {
+        const answer = cezarCancelWaitAnswerSchema.parse(await capability.cancelWait(c.req.valid('json'), capability.lifetime.signal));
+        capability.lifetime.signal.throwIfAborted();
+        return c.json(answer);
+      } catch {
+        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
+        return c.json({ cancelled: false as const, code: 'unavailable' as const, message: ciErrorMessage('unavailable') });
       }
     })
     .use('/api/v1/tools/preview-stop', async (c, next) => {

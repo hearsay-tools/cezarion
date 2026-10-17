@@ -67,6 +67,15 @@ export async function ciPrompt(backend, wire, text) {
   return JSON.stringify(result.response);
 }
 
+// `mock:cezar-tool <name> <base64-json-args>` calls any cezar tool with those arguments
+// (hearsay-tools/cezarion#1233). Base64, standard or URL-safe, survives every wire's escaping.
+export async function toolPrompt(backend, wire, text) {
+  const match = /mock:cezar-tool\s+([a-z_]+)\s+([A-Za-z0-9+/=_-]+)/.exec(text);
+  if (!match) throw new Error('mock:cezar-tool needs a tool name and base64 JSON arguments');
+  const result = await probeCezarTool(backend, wire, match[1], JSON.parse(Buffer.from(match[2], 'base64').toString('utf8')));
+  return JSON.stringify(result.response);
+}
+
 // `mock:preview-serve <port>` registers the e2e fixture app (`node preview-app.mjs <port>`) as a live preview.
 export async function previewPrompt(backend, wire, text) {
   const port = Number(/mock:preview-serve\s+(\d+)/.exec(text)?.[1]);

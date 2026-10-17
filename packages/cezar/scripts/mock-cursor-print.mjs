@@ -159,6 +159,10 @@ if (prompt.includes('mock:silent-tail') || prompt.includes('mock:tool-tail') ||
   readTool(origin === 'silent-tail-again' ? silent.SILENT_TAIL_REASONING : 'A project'); result(''); process.exit(0);
 }
 if (origin === 'resume-done' && resumeId) { finish('Resumed work finished.\nCEZ:DONE'); process.exit(0); }
+if (prompt.includes('mock:cezar-tool')) {
+  const { toolPrompt } = await import('./mock-ci-tool.mjs');
+  finish(await toolPrompt('cursor', args, prompt)); process.exit(0);
+}
 if (prompt.includes('mock:ci-wait') || process.env.CEZ_MOCK_CI_PR) {
   const { ciPrompt, probeCiTool } = await import('./mock-ci-tool.mjs');
   const response = prompt.includes('mock:ci-wait') ? await ciPrompt('cursor', args, prompt)

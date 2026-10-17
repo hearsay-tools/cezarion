@@ -58,7 +58,7 @@ describe('R27 CI registration refusal after worker settlement — #713', { timeo
     try {
       await until(wire.received);
       const state = (manager as unknown as { active: Map<string, { ciGeneration: string; session: AgentSession }> }).active.get(run.id)!;
-      const tools = controller.provision((request, signal) => manager.registerCiWait(run.id, request, state.ciGeneration, signal));
+      const tools = controller.provision(manager.cezarToolHandlers(run.id, state.ciGeneration));
       const child = await worker(run.id);
       const wait = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
       // Pending and settled-but-undelivered waits must both identify their blocker.
@@ -90,7 +90,7 @@ describe('R27 CI registration refusal after worker settlement — #713', { timeo
       try {
         await until(wire.received);
         const state = (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(run.id)!;
-        const tools = controller.provision((request, signal) => manager.registerCiWait(run.id, request, state.ciGeneration, signal));
+        const tools = controller.provision(manager.cezarToolHandlers(run.id, state.ciGeneration));
         const child = await worker(run.id);
         const wait = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
         fixtureUpdateRun(child.id, { status: 'done' });

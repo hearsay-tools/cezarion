@@ -7,6 +7,7 @@ import { previewStopResult, previewResult, validateRegistration, type PreviewHos
 import { acquireCiResources } from '../ci-wait/resources.ts';
 import { artifactInstructions, provisionArtifactDirectory } from '../artifacts/lifecycle.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
+import type { CezarToolHandlers } from '../ci-wait/controller.ts';
 import { workerContextHash, workerWorkflowHash, workerStepIdentity, captureWorkerAccount, boundWorkerAccountEnv, WorkerIdentityError, type WorkerAccountBinding, type WorkerExecutionIdentity, type WorkerStepIdentity } from '../delegation/execution-identity.ts';
 import { buildChildEnv } from '../core/agent-env.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
@@ -1779,13 +1780,35 @@ export class RunManager {
     const generation = state.ciGeneration;
     const controller = await this.ciResources.controller();
     if (!controller || this.disposed || state.cancelled || this.active.get(runId) !== state) return;
-    const provisioned = controller.provision(
-      (request, signal) => this.registerCiWait(runId, request, generation, signal),
-      (request, signal) => this.registerPreviewServer(runId, request, signal),
-      (request, signal) => this.stopPreviewServer(runId, request, signal),
-    );
+    const provisioned = controller.provision(this.cezarToolHandlers(runId, generation));
     state.revokeCiTools = provisioned.revoke;
     return provisioned;
+  }
+
+  /**
+   * The trusted callbacks behind one session's cezar tools. hearsay-tools/cezarion#1233: until the
+   * wait list lands here, `cezar_wait` with kind "ci" (and its `cezar_wait_for_ci` alias) still
+   * registers through `registerCiWait`, whose coded refusals the tool server turns into fixed
+   * messages; timers and `cezar_cancel_wait` answer `unavailable`.
+   */
+  cezarToolHandlers(runId: string, generation: string): CezarToolHandlers {
+    const notYet = 'This wait tool is not available in this Cezar session yet.';
+    return {
+      registerWait: async (request, via, signal) => {
+        if (request.kind !== 'ci') return { answer: { ok: false, code: 'unavailable', message: notYet } };
+        const wait = await this.registerCiWait(runId, { pr: request.pr, timeout_seconds: request.timeout_seconds }, generation, signal);
+        const phase = ({ registered: 'open', parked: 'open', 'wake-pending': 'resolved', delivered: 'delivered', withdrawn: 'cancelled' } as const)[wait.phase];
+        const { wakeId: _wakeId, deliveredAt, ...entry } = wait;
+        const open = phase === 'open' ? [{ wait_id: wait.id, kind: 'ci' as const, deadline: wait.deadline, summary: `CI for ${wait.repository}#${wait.prNumber}` }] : [];
+        return {
+          answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: open },
+          wait: { ...entry, kind: 'ci', source: 'agent', via, phase, ...(deliveredAt ? { deliveredAt } : {}) },
+        };
+      },
+      cancelWait: async () => ({ cancelled: false, code: 'unavailable', message: notYet }),
+      registerPreview: (request, signal) => this.registerPreviewServer(runId, request, signal),
+      stopPreview: (request, signal) => this.stopPreviewServer(runId, request, signal),
+    };
   }
 
   async stopPreviewServer(runId: string, request: PreviewStopRequest, signal?: AbortSignal): Promise<PreviewStopResult> {

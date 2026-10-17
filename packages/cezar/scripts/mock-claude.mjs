@@ -260,6 +260,13 @@ async function respond(userText, imageCount, uuid) {
     emit({ type: 'result', subtype: 'success', result: 'Use `CEZ:ASK {"questions":[]}` in your reply.\n> CEZ:ASK {not valid json', usage: { input_tokens: 10, output_tokens: 5 } });
     return;
   }
+  if (!userText.includes('[cez-namer]') && userText.includes('mock:cezar-tool')) {
+    const { toolPrompt } = await import('./mock-ci-tool.mjs');
+    const text = await toolPrompt('claude', process.argv.slice(2), userText);
+    emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
+    emit({ type: 'result', subtype: 'success', result: text, usage: { input_tokens: 20, output_tokens: 10 } });
+    return;
+  }
   if (userText.includes('mock:ci-wait')) {
     const { ciPrompt } = await import('./mock-ci-tool.mjs');
     const text = await ciPrompt('claude', process.argv.slice(2), userText);
