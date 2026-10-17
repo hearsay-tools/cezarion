@@ -721,7 +721,7 @@ export class RunDatabase {
     opts: { includeIssueMarked?: boolean } = {}): void {
     const tokens = prefilter.map(() => 'instr(lower(summary), ?) > 0').join(' AND ');
     const matches = opts.includeIssueMarked && tokens
-      ? `(${tokens}) OR json_extract(summary, '$.markerRefs.issue') IS NOT NULL` : tokens;
+      ? `(${tokens}) OR CASE WHEN json_valid(summary) THEN json_extract(summary, '$.markerRefs.issue') IS NOT NULL ELSE 1 END` : tokens;
     const where = ['parent_run_id IS NULL', ...(matches ? [`(${matches})`] : [])].join(' AND ');
     this.run(() => {
       for (const row of this.db.prepare(`${SUMMARY_SELECT} WHERE ${where} ${NEWEST_FIRST}`).iterate(...prefilter)) {
