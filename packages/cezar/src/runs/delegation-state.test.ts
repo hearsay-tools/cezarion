@@ -309,6 +309,22 @@ describe('RunStore durable delegation', () => {
     expect(store.getRun(run.id)?.agentInputs?.[0]).toEqual({ ...first, deliveredAt: now });
   });
 
+  it('cancelling a settled wait retains its outcome and removes its wake across restart', () => {
+    const run = store.createRun(input);
+    const waitId = randomUUID();
+    const outcome = { workerId, revision: 0, status: 'review' as const, observedAt: now };
+    store.commitDelegation([{ id: run.id, delegation: { ...root, wait: {
+      id: waitId, workerIds: [workerId], outcomes: [outcome], deadline: now,
+      phase: 'wake-pending', reason: 'outcome', wakeId: waitId,
+    } } }]);
+    store.commitAgentInputs(run.id, [{ id: waitId, source: 'lifecycle', parentRunId: run.id, text: 'worker ready', createdAt: now }]);
+    store.commitWorkerWaitWithdrawal(run.id, waitId, undefined, 'cancelled');
+    const reopened = RunStore.open(dataDir, { keepLive: true });
+    expect(reopened.getRun(run.id)?.delegation).not.toHaveProperty('wait');
+    expect(reopened.getRun(run.id)?.delegation).toMatchObject({ lastWait: { id: waitId, reason: 'cancelled', outcomes: [outcome] } });
+    expect(reopened.getRun(run.id)?.agentInputs).toEqual([]);
+  });
+
   it('withdrawing a message wake preserves accepted conversation input across restart', () => {
     const run = store.createRun(input);
     const messageId = randomUUID(); const waitId = randomUUID();

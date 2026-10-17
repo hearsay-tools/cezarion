@@ -770,6 +770,7 @@ export class DelegationService {
         head: removed ? { state: 'deleted', reason: 'missing', ...('sha' in evidence.result.head ? { sha: evidence.result.head.sha } : {}) } : evidence.result.head,
         diff: evidence.result.diff.state === 'available' ? { ...evidence.result.diff, snapshotId: randomUUID() } : evidence.result.diff,
       }, evidence.diffSnapshot);
+      project.manager.reconcileWorkerWaits(evidence.result.parentRunId);
       return observed(result, holders, explained);
     } catch (error) {
       // hearsay-tools/cezarion#879: an attempt that throws says why, instead of leaving an
