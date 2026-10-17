@@ -367,6 +367,7 @@ async function respond(userText, imageCount, uuid) {
   }
 
   // Same assistant/result envelopes as the baseline stream-json fixture.
+  // owned-input-delivery.testkit.ts patches the line below to hold the pipe response; keep it verbatim.
   if (userText.includes('mock:agent-echo')) {
     emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: userText }] } });
     emit({ type: 'result', subtype: 'success', result: userText, usage: { input_tokens: 20, output_tokens: 10 } });

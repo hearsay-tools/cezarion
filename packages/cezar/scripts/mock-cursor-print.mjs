@@ -215,6 +215,7 @@ if (prompt.includes('mock:hold')) await new Promise(resolve => setTimeout(resolv
 if (prompt === 'inspect the working tree' || prompt.includes('mock:baseline')) {
   readTool(); const text = 'Cursor inspected the workspace.'; assistant(text); result(text); process.exit(0);
 }
+// owned-input-delivery.testkit.ts patches the exact line below to hold the print response; keep it verbatim.
 if (prompt.includes('mock:agent-echo')) { finish(prompt); process.exit(0); }
 const text = `turn ${turn}: ${prompt}`;
 if (mode === 'delay-work' && resumeId) await new Promise(resolve => setTimeout(resolve, 200));

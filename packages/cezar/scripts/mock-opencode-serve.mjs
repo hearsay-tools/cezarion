@@ -331,6 +331,7 @@ const server = createServer((req, res) => {
         crashWithStderr(body);
         return;
       }
+      // owned-input-delivery.testkit.ts patches the line below to reject one prompt; keep it verbatim.
       if (body.includes('mock:reject-agent-post')) {
         res.writeHead(503, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ error: 'agent prompt rejected' }));
@@ -361,6 +362,7 @@ const server = createServer((req, res) => {
         // F7: SSE turn-end before HTTP ACK so parkAfterAck applies the silent-tail nudge.
         setTimeout(() => res.end(JSON.stringify({ info: info({}), parts: [] })), 250);
       } else {
+      // owned-input-delivery.testkit.ts patches the exact line below to hold the ACK; keep it verbatim.
       res.end(JSON.stringify({ info: info({}), parts: [] }));
       }
       if (body.includes('mock:autonomous-readiness-idle')) autonomousReadinessIdle = true;
@@ -433,6 +435,7 @@ const server = createServer((req, res) => {
         send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
         return;
       }
+      // owned-input-delivery.testkit.ts widens the condition below to its delay marker; keep it verbatim.
       if (body.includes('mock:agent-echo')) {
         send({ type: 'message.updated', properties: { info: info({}) } });
         send({ type: 'message.part.updated', properties: { part: {
