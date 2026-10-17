@@ -189,8 +189,9 @@ describe('authenticated delegation HTTP family', () => {
     f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager });
     try {
       // A finished parent queues no wake, so ending its turn would deliver nothing.
-      const instruction = `Wait ${waitId} already settled (timeout); cancelling changes nothing.` +
-        (status === 'queued' ? ' End your turn to receive its result, then register another wait.' : '');
+      const instruction = status === 'queued'
+        ? `Wait ${waitId} already settled (timeout) and is waiting for delivery; this cancel could not clear it. End your turn to receive its result, then register another wait.`
+        : `Wait ${waitId} already settled (timeout); cancelling changes nothing.`;
       for (let i = 0; i < 2; i++) {
         const response = await request('/cancel-wait', { waitId });
         expect(response.status).toBe(200); expect(await response.json()).toEqual({ wait, instruction });

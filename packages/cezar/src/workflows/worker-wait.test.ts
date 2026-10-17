@@ -476,22 +476,28 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(() => register(p.id, [w.id])).toThrow(`Wait ${wait.id} is already active; keep it or run worker cancel-wait ${wait.id} before registering another`);
   });
 
-  // hearsay-tools/cezarion#1200: cancelling a wake-pending receipt changes nothing, so naming
-  // cancel-wait sent parents round a loop that only a turn-end breaks.
-  it('tells a parent to end its turn instead of cancelling a wake-pending wait', async () => {
+  // hearsay-tools/cezarion#1200 after hearsay-tools/cezarion#1228: a turn that is still executing frees
+  // a settled wait with cancel-wait, so the refusal names it rather than a turn-end.
+  it('names cancel-wait to free a cancelled wait within the same turn', async () => {
     const release = join(root, 'release-wake-pending-turn'); const wire = controlledWire({ firstResultGate: release });
     const p = await parent(); await until(wire.initialReceived); const w = await worker(p.id);
     const wait = register(p.id, [w.id]);
     expect(() => register(p.id, [w.id])).toThrow(`Wait ${wait.id} is already active; keep it or run worker cancel-wait ${wait.id} before registering another`);
     expect(manager.cancelWorkerWait(p.id, wait.id).phase).toBe('wake-pending');
     let refusal: unknown; try { register(p.id, [w.id]); } catch (error) { refusal = error; }
-    expect(refusal).toMatchObject({ code: 'incompatible_state', message: `Wait ${wait.id} has settled and its result is waiting for delivery. End your turn to receive it, then register another wait.` });
-    expect((refusal as Error).message).not.toContain('cancel-wait');
+    expect(refusal).toMatchObject({ code: 'incompatible_state', message: `Wait ${wait.id} has settled and its outcomes are kept. Run worker cancel-wait ${wait.id} to free the slot now, then register another wait.` });
+    expect((refusal as Error).message).not.toContain('End your turn');
+    expect(manager.cancelWorkerWait(p.id, wait.id)).toMatchObject({ id: wait.id, reason: 'cancelled' });
+    expect(waitOf(store.getRun(p.id))).toBeUndefined();
+    const next = register(p.id, [w.id]);
+    expect(next).toMatchObject({ phase: 'registered' });
+    expect(store.readEvents(p.id).filter(event => event.type === 'turn-end')).toHaveLength(0);
+    manager.cancelWorkerWait(p.id, next.id);
     writeFileSync(release, 'release');
     await until(() => !waitOf(store.getRun(p.id)));
   });
 
-  it('a wait on an already settled worker is wake-pending from registration and the next one is told to end the turn', async () => {
+  it('a wait on an already settled worker is wake-pending from registration and cancel-wait frees it for the next one', async () => {
     const release = join(root, 'release-settled-worker-turn'); const wire = controlledWire({ firstResultGate: release });
     const p = await parent(); await until(wire.initialReceived); const w = await worker(p.id);
     fixtureUpdateRun(w.id, { status: 'done' });
@@ -499,8 +505,29 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(wait).toMatchObject({ phase: 'wake-pending', reason: 'outcome' });
     const next = await worker(p.id);
     let refusal: unknown; try { register(p.id, [next.id]); } catch (error) { refusal = error; }
+    expect(refusal).toMatchObject({ code: 'incompatible_state', message: `Wait ${wait.id} has settled and its outcomes are kept. Run worker cancel-wait ${wait.id} to free the slot now, then register another wait.` });
+    expect((refusal as Error).message).not.toContain('End your turn');
+    manager.cancelWorkerWait(p.id, wait.id);
+    expect(store.getRun(p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, outcomes: [{ workerId: w.id, status: 'done' }] } });
+    const another = register(p.id, [next.id]);
+    expect(another).toMatchObject({ phase: 'registered' });
+    expect(store.readEvents(p.id).filter(event => event.type === 'turn-end')).toHaveLength(0);
+    manager.cancelWorkerWait(p.id, another.id);
+    writeFileSync(release, 'release');
+    await until(() => !waitOf(store.getRun(p.id)));
+  });
+
+  it('tells a parent to end its turn when its settled wait cannot be freed in this turn', async () => {
+    const release = join(root, 'release-unfreeable-turn'); const wire = controlledWire({ firstResultGate: release });
+    const p = await parent(); await until(wire.initialReceived); const w = await worker(p.id);
+    fixtureUpdateRun(w.id, { status: 'done' });
+    const wait = register(p.id, [w.id]); const next = await worker(p.id);
+    // A registering turn that cannot free its wait (wake already admitted, or recovering) has no fixture.
+    const canFree = vi.spyOn(manager, 'canFreeSettledWorkerWait').mockReturnValue(false);
+    let refusal: unknown; try { register(p.id, [next.id]); } catch (error) { refusal = error; }
     expect(refusal).toMatchObject({ code: 'incompatible_state', message: `Wait ${wait.id} has settled and its result is waiting for delivery. End your turn to receive it, then register another wait.` });
     expect((refusal as Error).message).not.toContain('cancel-wait');
+    canFree.mockRestore();
     writeFileSync(release, 'release');
     await until(() => !waitOf(store.getRun(p.id)));
   });

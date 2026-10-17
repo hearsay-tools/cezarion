@@ -102,14 +102,8 @@ describe('R27 CI registration refusal after worker settlement — #713', { timeo
         const unregister = service.registerProject({ id: 'project', root, store, manager });
         try {
           if (action === 'cancel') {
-            // Through the service, so its instruction is pinned in the turn that retires the wait (hearsay-tools/cezarion#1200).
-            vi.stubEnv('CEZ_DELEGATION', '1');
-            const credentials = new CredentialRegistry();
-            try {
-              const caller = credentials.authenticate(credentials.issue('project', run.id, randomUUID()))!;
-              expect(await service.cancelWait(caller, { waitId: wait.id })).toMatchObject({ wait: { id: wait.id, reason: 'cancelled' },
-                instruction: `Wait ${wait.id} had already settled; cancelling retired it and kept its outcomes in this receipt. Register another wait now.` });
-            } finally { credentials.close(); vi.unstubAllEnvs(); }
+            expect(await cancelAsAgent(service, run.id, wait.id)).toMatchObject({ wait: { id: wait.id, reason: 'cancelled' },
+              instruction: `Wait ${wait.id} had already settled; cancelling freed the wait slot and its outcomes stay in this receipt. Register another wait in this turn.` });
           } else expect(await service.destroyForHuman('project', child.id)).toMatchObject({ state: 'complete', remaining: [] });
         } finally { unregister(); }
         expect(waitOf(store.getRun(run.id))).toBeUndefined();
@@ -125,5 +119,38 @@ describe('R27 CI registration refusal after worker settlement — #713', { timeo
       } finally { wire.release(); await controller.close(); }
     });
   }
+  it.each(RUNNER_IDS)('%s R80 cancel-wait twice frees a live wait during the same native turn', async runner => {
+    const wire = holdNativeTurn(runner);
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.hold!, runner });
+    store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+    const service = new DelegationService();
+    const unregister = service.registerProject({ id: 'project', root, store, manager });
+    try {
+      await until(wire.received);
+      const child = await worker(run.id);
+      const wait = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
+      expect(await cancelAsAgent(service, run.id, wait.id)).toMatchObject({ wait: { id: wait.id, phase: 'wake-pending', reason: 'cancelled' },
+        instruction: `Wait ${wait.id} cancelled; it holds the wait slot until its cancellation is delivered. Run worker cancel-wait ${wait.id} again to free the slot and register another wait in this turn.` });
+      expect(await cancelAsAgent(service, run.id, wait.id)).toMatchObject({ wait: { id: wait.id, reason: 'cancelled' },
+        instruction: `Wait ${wait.id} had already settled; cancelling freed the wait slot and its outcomes stay in this receipt. Register another wait in this turn.` });
+      expect(waitOf(store.getRun(run.id))).toBeUndefined();
+      const next = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
+      expect(next).toMatchObject({ phase: 'registered' });
+      expect(store.readEvents(run.id).filter(event => event.type === 'turn-end')).toHaveLength(0);
+      // Settle the worker so it never starts once the parent frees its slot, then retire the new wait as R80 does.
+      fixtureUpdateRun(child.id, { status: 'done' });
+      manager.reconcileWorkerWaits();
+      manager.cancelWorkerWait(run.id, next.id);
+      expect(waitOf(store.getRun(run.id))).toBeUndefined();
+    } finally { unregister(); wire.release(); }
+  });
 
 });
+
+/** Cancel with the parent's own credential, as `cez worker cancel-wait` does, so the instruction is pinned (hearsay-tools/cezarion#1200). */
+async function cancelAsAgent(service: DelegationService, runId: string, waitId: string) {
+  vi.stubEnv('CEZ_DELEGATION', '1');
+  const credentials = new CredentialRegistry();
+  try { return await service.cancelWait(credentials.authenticate(credentials.issue('project', runId, randomUUID()))!, { waitId }); }
+  finally { credentials.close(); vi.unstubAllEnvs(); }
+}

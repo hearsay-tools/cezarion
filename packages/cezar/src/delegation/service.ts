@@ -626,12 +626,15 @@ export class DelegationService {
     // A finished run queues no wake, so ending its turn would deliver nothing.
     const live = !!run && ['queued', 'running', 'waiting'].includes(run.status);
     const wait = project.manager.cancelWorkerWait(caller.runId, waitId);
-    // A settled wait the call retired (hearsay-tools/cezarion#1228) queues no wake, so there is nothing to end the turn for.
+    // And again after it: a settled wait it retired (hearsay-tools/cezarion#1228) queues no wake, and one it
+    // has just settled in an executing turn is retired by a second cancel.
     const after = project.store.getRun(caller.runId)?.delegation;
-    const retired = current === 'wake-pending' && !(after && after.role !== 'invalid' && after.wait?.id === waitId);
+    const kept = !!after && after.role !== 'invalid' && after.wait?.id === waitId;
     const instruction = current === undefined ? `Wait ${waitId} already settled and is no longer current; cancelling changes nothing.`
-      : retired ? `Wait ${waitId} had already settled; cancelling retired it and kept its outcomes in this receipt. Register another wait now.`
-      : current === 'wake-pending' ? `Wait ${waitId} already settled (${wait.reason}); cancelling changes nothing.${live ? ' End your turn to receive its result, then register another wait.' : ''}`
+      : current === 'wake-pending' && !kept ? `Wait ${waitId} had already settled; cancelling freed the wait slot and its outcomes stay in this receipt. Register another wait in this turn.`
+      : current === 'wake-pending' ? (live ? `Wait ${waitId} already settled (${wait.reason}) and is waiting for delivery; this cancel could not clear it. End your turn to receive its result, then register another wait.`
+        : `Wait ${waitId} already settled (${wait.reason}); cancelling changes nothing.`)
+      : kept && project.manager.canFreeSettledWorkerWait(caller.runId) ? `Wait ${waitId} cancelled; it holds the wait slot until its cancellation is delivered. Run worker cancel-wait ${waitId} again to free the slot and register another wait in this turn.`
         : `Wait ${waitId} cancelled. End your turn to receive the cancellation, then register another wait.`;
     return { wait, instruction };
   }

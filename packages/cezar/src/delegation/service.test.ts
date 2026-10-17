@@ -598,13 +598,13 @@ describe('delegation service durable authority', () => {
     expect((await f.service.cancelWait(f.caller, { waitId })).wait).toEqual(settled.wait);
     expect(f.store.getRun(f.parent.id)).toEqual(before);
   });
-  // hearsay-tools/cezarion#1200: every outcome is wake-pending, so only a turn-end lets the caller wait again.
+  // hearsay-tools/cezarion#1200: with no executing turn nothing frees the wait, so only a turn-end lets the caller wait again.
   it('tells the caller what each cancellation outcome means for its turn', async () => {
     const { waitId } = await cancellableWait();
     expect(await f.service.cancelWait(f.caller, { waitId })).toMatchObject({ wait: { id: waitId, phase: 'wake-pending', reason: 'cancelled' },
       instruction: `Wait ${waitId} cancelled. End your turn to receive the cancellation, then register another wait.` });
     expect(await f.service.cancelWait(f.caller, { waitId })).toMatchObject({ wait: { id: waitId, phase: 'wake-pending' },
-      instruction: `Wait ${waitId} already settled (cancelled); cancelling changes nothing. End your turn to receive its result, then register another wait.` });
+      instruction: `Wait ${waitId} already settled (cancelled) and is waiting for delivery; this cancel could not clear it. End your turn to receive its result, then register another wait.` });
     f.store.commitWorkerWaitWithdrawal(f.parent.id, waitId);
     expect(await f.service.cancelWait(f.caller, { waitId })).toMatchObject({ wait: { id: waitId },
       instruction: `Wait ${waitId} already settled and is no longer current; cancelling changes nothing.` });
