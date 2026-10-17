@@ -2201,6 +2201,22 @@ export class RunStore extends EventEmitter {
     return [...ids];
   }
 
+  /** All retained tasks this automation started, including variants, finished and archived runs.
+   * Logs and receipts may compact independently. Read only matching keys in SQLite and overlay
+   * held records so a debounced provenance update or deletion is reflected immediately. */
+  countAutomationRuns(automationId: string): number {
+    const where = "json_extract(data, '$.automation.automationId') = ? OR " +
+      "json_extract(data, '$.automationTrigger.automationId') = ?";
+    const ids = new Set((this.db?.listKeysWhere(where, [automationId, automationId]) ?? [])
+      .map((key) => key.id));
+    for (const id of this.deleted) ids.delete(id);
+    for (const [id, run] of this.held) {
+      if (run.automation?.automationId === automationId || run.automationTrigger?.automationId === automationId) ids.add(id);
+      else ids.delete(id);
+    }
+    return ids.size;
+  }
+
   /** First non-archived task referencing a project issue, including secondary references. */
   findNonArchivedRunByIssue(repo: string, number: number): string | undefined {
     const url = `https://github.com/${repo}/issues/${number}`.toLowerCase();
