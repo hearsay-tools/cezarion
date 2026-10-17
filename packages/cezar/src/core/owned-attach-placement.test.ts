@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -40,7 +40,7 @@ const ATTACHED = { 'qa/1149/brief.md': 'the brief\n', 'qa/evidence.log': 'eviden
 // the worker's worktree holds at the moment its session starts (hearsay-tools/cezarion#1149).
 describe('attached parent files in the worker worktree', { timeout: 30_000 }, () => {
   let f: ReturnType<typeof fixture>;
-  const seen: Array<{ spec: AgentRunSpec; files: Record<string, string | undefined>; finish(): void }> = [];
+  const seen: Array<{ spec: AgentRunSpec; files: Record<string, string | undefined>; claudeLocal?: string; finish(): void }> = [];
   const spawn = (paths: readonly string[]) => f.service.spawn(f.caller, { task: 'inspect', baseline: 'parent-head', requestId: randomUUID(),
     context: { artifacts: paths.map(path => ({ kind: 'parent-file' as const, path })) } satisfies WorkerSpawnRequest['context'] });
   const commit = (path: string, content: string) => {
@@ -65,16 +65,15 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
     f = fixture();
     vi.spyOn(runners, 'createRunner').mockImplementation(backend => ({ backend: backend ?? 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
       interrupt: async () => {}, run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), startSession: spec => {
-        const files = Object.fromEntries(Object.keys(ATTACHED).map(path => {
-          const target = join(spec.cwd, path);
-          return [path, existsSync(target) ? readFileSync(target, 'utf8') : undefined];
-        }));
+        const read = (path: string) => existsSync(join(spec.cwd, path)) ? readFileSync(join(spec.cwd, path), 'utf8') : undefined;
+        const files = Object.fromEntries(Object.keys(ATTACHED).map(path => [path, read(path)]));
+        const claudeLocal = read('CLAUDE.local.md');
         let resolve!: (value: AgentRunResult) => void; let open = true;
         const result = new Promise<AgentRunResult>(done => { resolve = done; });
         const finish = () => { if (open) { open = false; resolve({ text: '', toolCalls: [], tokensUsed: 0 }); } };
         const session: AgentSession = { result, get open() { return open; }, sendMessage: () => open, sendAgentMessage: () => open ? Promise.resolve() : false,
           discardQueuedMessages: () => {}, holdsHumanInput: () => false, interrupt: finish, end: finish };
-        seen.push({ spec, files, finish }); return session;
+        seen.push({ spec, files, claudeLocal, finish }); return session;
       } }));
   });
   /** Accept `paths` through the service, materialize the worker worktree, and return placement's options. */
@@ -100,6 +99,25 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
     const { delegation } = workerOf(workerId);
     expect(seen[0]!.spec.cwd).toBe(delegation.workspace.path);
     expect(seen[0]!.files).toEqual(ATTACHED);
+  });
+
+  it('an attached personal config file is not overwritten by the main checkout\'s copy before the first turn', async () => {
+    // The parent works in its own worktree; automatic config seeding copies from the main checkout.
+    commit('.gitignore', 'CLAUDE.local.md\n');
+    const parentCwd = mkdtempSync(join(tmpdir(), 'cez-attach-parent-'));
+    rmdirSync(parentCwd);
+    execFileSync('git', ['worktree', 'add', '-q', '--detach', parentCwd, 'HEAD'], { cwd: f.root });
+    try {
+      f.store.updateRun(f.parent.id, { worktreePath: parentCwd });
+      const settings = f.manager.delegationExecutionSettings(f.parent.id);
+      vi.mocked(f.manager.delegationExecutionSettings).mockReturnValue({ ...settings, cwd: parentCwd });
+      write('CLAUDE.local.md', 'main checkout bytes');
+      writeFileSync(join(parentCwd, 'CLAUDE.local.md'), 'explicit parent attachment');
+      await spawn(['CLAUDE.local.md']);
+      await launch();
+      await until(() => seen.length === 1);
+      expect(seen[0]!.claudeLocal).toBe('explicit parent attachment');
+    } finally { rmSync(parentCwd, { recursive: true, force: true }); }
   });
 
   it('Continue does not restore an attached file the worker deleted', async () => {

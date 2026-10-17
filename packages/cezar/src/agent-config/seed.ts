@@ -53,13 +53,17 @@ async function ensureExcluded(commonGitDir: string, line: string): Promise<void>
 /**
  * Copy the seeded personal-layer files from `repoRoot` into `worktreeCwd`.
  * Guards every file with `git check-ignore` so a file the user genuinely tracked
- * (against the vendor's advice) is neither copied nor excluded. Returns the
- * repo-relative paths actually seeded, for the caller's note. Never throws.
+ * (against the vendor's advice) is neither copied nor excluded. `preserve` names
+ * repo-relative paths the caller already placed on purpose (a worker's explicit
+ * `--attach` files, hearsay-tools/cezarion#1149): those are left alone and not
+ * reported. Returns the repo-relative paths actually seeded, for the caller's
+ * note. Never throws.
  */
 export async function seedAgentConfigLocalLayer(
   repoRoot: string,
   worktreeCwd: string,
   env: NodeJS.ProcessEnv = process.env,
+  preserve: ReadonlySet<string> = new Set(),
 ): Promise<string[]> {
   if (worktreeCwd === repoRoot) return [];
   const home = agentHomePaths(env);
@@ -76,6 +80,7 @@ export async function seedAgentConfigLocalLayer(
     const rel = relative(repoRoot, src);
     // Never seed something outside the repo, or that isn't there.
     if (rel.startsWith('..') || !(await fileExists(src))) continue;
+    if (preserve.has(rel)) continue;
     // Only seed a genuinely-ignored file — never force-exclude a tracked one.
     const ignored = await git(repoRoot, ['check-ignore', '-q', '--', rel]);
     if (!ignored.ok) continue;

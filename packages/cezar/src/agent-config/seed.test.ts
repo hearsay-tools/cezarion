@@ -49,6 +49,22 @@ describe('seedAgentConfigLocalLayer', () => {
     }
   });
 
+  it('leaves a path in the preserve set alone and still seeds the others', async () => {
+    mkdirSync(join(repo, '.claude'), { recursive: true });
+    writeFileSync(join(repo, '.claude', 'settings.local.json'), '{"main":true}');
+    writeFileSync(join(repo, 'CLAUDE.local.md'), 'main checkout bytes');
+    const wt = makeWorktree();
+    try {
+      writeFileSync(join(wt, 'CLAUDE.local.md'), 'explicit parent attachment');
+      const seeded = await seedAgentConfigLocalLayer(repo, wt, env, new Set(['CLAUDE.local.md']));
+      expect(seeded).toEqual(['.claude/settings.local.json']);
+      expect(readFileSync(join(wt, 'CLAUDE.local.md'), 'utf8')).toBe('explicit parent attachment');
+      expect(readFileSync(join(wt, '.claude', 'settings.local.json'), 'utf8')).toBe('{"main":true}');
+    } finally {
+      git(repo, 'worktree', 'remove', '--force', wt);
+    }
+  });
+
   it('no-ops when the source file is absent', async () => {
     const wt = makeWorktree();
     try {
