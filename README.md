@@ -838,6 +838,12 @@ event's time, so a newly added label can match an old issue even with history of
 label discovery revisits the rolling window because later comments can move issues between pages;
 receipts prevent those repeated observations from launching duplicate tasks.
 
+Automation list counters use two windows. **Launched** counts every stored task with that
+automation's provenance, across definition revisions, including each variant, completed and
+archived tasks. Restarting or compacting automation logs and receipts does not change it;
+deleting a task removes it from the count. **Matches**, **Duplicates** and **Errors** describe
+only that automation's latest 100 activity-log rows. Recent activity remains a separate log view.
+
 The address comes from `CEZ_COCKPIT_URL` and `CEZ_PROJECT_ID`, which the cockpit puts in a task's
 environment. Without them, only an explicit `--url`, `--repo` or `CEZ_URL` looks for a cockpit;
 otherwise the command exits 2 and never starts a server. With automations off, the cockpit's `409`

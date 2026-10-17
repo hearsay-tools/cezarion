@@ -76,6 +76,71 @@ describe('GitHub automation API', () => {
     body: JSON.stringify(body),
   });
 
+  it('counts persisted tasks and variants beyond recent logs, compaction and restart', async () => {
+    const dataDir = join(root, '.ai/cezar');
+    const automationStore = AutomationStore.open(dataDir);
+    const definition = automationStore.create({ ...input, enabled: false }, 'counter-test');
+    const scheduled = automationStore.create({ ...scheduleInput, enabled: false }, 'scheduled-counter');
+    const createTask = (automationId: string, schedule = false) => {
+      const run = store.createRun({ title: 'variant', workflow: 'quick-task', task: 'Go', steps: [] });
+      store.updateRun(run.id, schedule ? {
+        automationTrigger: { automationId, automationRevision: 1, receiptId: 'schedule-receipt', trigger: 'manual', occurrenceAt: '2026-01-01T00:00:00.000Z' },
+      } : {
+        automation: { automationId, automationRevision: 1, receiptId: 'shared-variant-receipt', event: 'issue.opened', githubUrl: 'https://github.com/acme/demo/issues/1' },
+      });
+      store.updateRun(run.id, { status: 'done' });
+      return run;
+    };
+    const first = createTask(definition.id);
+    const second = createTask(definition.id);
+    createTask(definition.id);
+    createTask(scheduled.id, true);
+    createTask(scheduled.id, true);
+    createTask('another-automation');
+    store.createRun({ title: 'manual task', workflow: 'quick-task', task: 'Go', steps: [] });
+    store.updateRun(first.id, { status: 'done', archived: true });
+    await automationStore.appendLog({ automationId: definition.id, revision: 1, result: 'launched', runId: first.id });
+    for (let i = 0; i < 101; i++) {
+      await automationStore.appendLog({ automationId: definition.id, revision: 1, result: i === 100 ? 'no-match' : 'duplicate' });
+    }
+    const assertCounts = async (server: ReturnType<typeof app>) => {
+      const response = await apiRequest(server, '/api/v1/automations');
+      expect(response.status).toBe(200);
+      const body = await response.json() as any;
+      const entry = body.automations.find((row: any) => row.id === definition.id);
+      expect(entry.counts).toEqual({ launched: 3, matches: 99, duplicates: 99, errors: 0 });
+      expect(entry.latestLog.result).toBe('no-match');
+      expect(body.automations.find((row: any) => row.id === scheduled.id).counts.launched).toBe(2);
+    };
+    await assertCounts(app({ automationStore }));
+    // Rotate the original launch out of the journal, without an expensive append loop.
+    const logPath = join(dataDir, 'automation-log.ndjson');
+    const original = readFileSync(logPath, 'utf8').trim().split('\n');
+    const latest = JSON.parse(original.at(-1)!);
+    writeFileSync(logPath, original.concat(Array.from({ length: 10_000 }, (_, i) =>
+      JSON.stringify({ ...latest, seq: latest.seq + i + 1 }))).join('\n') + '\n');
+    await automationStore.compact();
+    expect(readFileSync(logPath, 'utf8')).not.toContain('"result":"launched"');
+    store.flush();
+    const reopened = RunStore.open(dataDir);
+    try {
+      const server = app({ store: reopened, automationStore: AutomationStore.open(dataDir) });
+      const response = await apiRequest(server, '/api/v1/automations');
+      const body = await response.json() as any;
+      expect(body.automations.find((row: any) => row.id === definition.id).counts.launched).toBe(3);
+      expect(body.automations.find((row: any) => row.id === scheduled.id).counts.launched).toBe(2);
+      // Unsaved changes override cold rows without waiting for the save debounce.
+      reopened.updateRun(first.id, { automation: undefined });
+      expect(reopened.countAutomationRuns(definition.id)).toBe(2);
+      reopened.deleteRun(second.id);
+      expect(reopened.countAutomationRuns(definition.id)).toBe(1);
+      reopened.flush();
+      expect(reopened.countAutomationRuns(definition.id)).toBe(1);
+    } finally {
+      reopened.close();
+    }
+  });
+
   it.each(['create', 'enable', 'update'] as const)('arms the bounded history window through %s and preserves receipts', async (entry) => {
     withGithubRemote(root);
     const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
@@ -818,6 +883,13 @@ describe('GitHub automation API', () => {
   it('the list tallies count schedule launches as launched and failed launches as errors', async () => {
     const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
     const created = ((await (await apiRequest(app({ automationStore }), '/api/v1/automations', json(scheduleInput))).json()) as any).automation;
+    for (const trigger of ['schedule', 'manual', 'catch-up'] as const) {
+      const run = store.createRun({ title: trigger, workflow: 'quick-task', task: 'Go', steps: [] });
+      store.updateRun(run.id, { automationTrigger: {
+        automationId: created.id, automationRevision: 1, receiptId: trigger,
+        trigger, occurrenceAt: '2026-01-01T00:00:00.000Z',
+      } });
+    }
     for (const result of ['launched', 'manual', 'catch-up', 'failed', 'error', 'rate-limited', 'duplicate', 'no-match'] as const) {
       await automationStore.appendLog({ automationId: created.id, revision: 1, result });
     }

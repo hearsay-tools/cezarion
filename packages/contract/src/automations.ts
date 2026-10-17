@@ -205,11 +205,12 @@ export type AutomationLogRecord = z.infer<typeof automationLogRecordSchema>;
 
 // ---- responses -----------------------------------------------------------------------------
 
-/** The list view's per-automation tallies, counted over that automation's last 100 log rows. */
+/** Launches count all retained tasks; activity tallies use the automation's latest 100 log rows. */
 export const automationCountsSchema = z.object({
   /** GitHub candidates that matched a filter: `launched` + `duplicate` rows. */
   matches: z.number(),
-  /** Tasks launched: `launched`, plus a schedule's `manual` (Run now) and `catch-up` rows. */
+  /** Stored tasks with this automation's provenance, including each variant, finished and archived
+   * tasks, across all revisions. Independent of log/receipt retention; deleting a task removes it. */
   launched: z.number(),
   /** `duplicate` rows: a match whose receipt already existed, so nothing launched. */
   duplicates: z.number(),

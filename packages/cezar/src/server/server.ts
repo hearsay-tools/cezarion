@@ -3659,7 +3659,7 @@ export function createApp(deps: ServerDeps) {
     .use('/automation-log', requireAutomations)
     .use('/automation-log/*', requireAutomations)
     .get('/automations', async (c) => {
-      const { root, automationStore } = c.get('project');
+      const { root, automationStore, store } = c.get('project');
       const forge = resolveForge(await getRepoInfo(root));
       // Awaits the driver's settled probe (per-repo cache + in-flight dedupe, 5 s timeout, never
       // throws): a "still being checked" answer would leave the cockpit's GitHub option disabled
@@ -3687,7 +3687,7 @@ export function createApp(deps: ServerDeps) {
           ...(nextRunAt ? { nextRunAt } : {}),
           counts: {
             matches: logs.filter((row) => row.result === 'launched' || row.result === 'duplicate').length,
-            launched: logs.filter((row) => row.result === 'launched' || row.result === 'manual' || row.result === 'catch-up').length,
+            launched: store.countAutomationRuns(automation.id),
             duplicates: logs.filter((row) => row.result === 'duplicate').length,
             errors: logs.filter((row) => row.result === 'error' || row.result === 'rate-limited' || row.result === 'failed').length,
           },
