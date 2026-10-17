@@ -200,6 +200,24 @@ describe('rule sleep', () => {
     expect(lines(sites)).toEqual([4, 7, 10]);
   });
 
+  it('flags a sleep in a concise arrow a loop defines: its body is a function body, not the loop body', () => {
+    const sites = scan(
+      'for (const r of rows) { it(r, async () => await sleep(300)); }',
+      'for (const r of rows) it(r, async () => await sleep(300))',
+      'while (x) { await Promise.all(xs.map(async x => await sleep(5))) }',
+    );
+    expect(lines(sites)).toEqual([1, 2, 3]);
+  });
+
+  it('still leaves a loop sleep alone after a concise arrow ends, and beside a conditional', () => {
+    expect(scan(
+      'while (!ready()) { await sleep(10) }',
+      'for (;;) { const v = await retry(() => check(), 3); await sleep(10) }',
+      'while (!ok) { ok = items.some(i => i.done); await sleep(25) }',
+      'for (const x of xs) { await sleep(x ? 10 : 20) }',
+    )).toEqual([]);
+  });
+
   it('reads a multi-line loop header and a function with a return type', () => {
     expect(rules(scan(
       'for (',

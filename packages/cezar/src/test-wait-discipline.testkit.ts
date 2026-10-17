@@ -259,6 +259,12 @@ function skipSpaceBack(code: string, from: number): number {
   return k;
 }
 
+function skipSpaceForward(code: string, from: number): number {
+  let k = from;
+  while (k < code.length && /\s/.test(code[k] ?? '')) k += 1;
+  return k;
+}
+
 /** The bracket matching the `(`, `[` or `{` at `open`, in blanked code; the end of the source when unbalanced. */
 function closeOf(code: string, open: number): number {
   const opener = code[open];
@@ -356,17 +362,26 @@ function frameOf(code: string, open: number): Frame {
  * The offsets in `offsets` that sit in a loop body: inside a `for`/`while`/`do` block with no
  * function body between, or the brace-less body of a loop header (`while (!ready()) await …`).
  * A loop's own deadline is out of this scan's reach, so a sleep in one is read as a poll interval.
+ *
+ * A concise arrow's body is a function body too (`it(r, async () => await sleep(300))`). It opens
+ * at a `=>` not followed by `{` and ends at the `,` or `;` that ends its expression, or at the
+ * bracket that closes the one it sits in; `(` and `[` are tracked for that alone. Without its `;`,
+ * a concise arrow statement runs to the enclosing `}`: that only flags more, never exempts more.
  */
 function inLoopBody(code: string, offsets: number[]): Set<number> {
   const found = new Set<number>();
   for (const offset of offsets) if (bracelessLoopBody(code, offset)) found.add(offset);
   const queue = [...offsets].sort((a, b) => a - b);
-  const stack: Frame[] = [];
+  // A `{` frame, a `(`/`[` group, or a concise arrow's body.
+  const stack: Array<Frame | 'group' | 'arrow'> = [];
+  const endArrows = (): void => {
+    while (stack.at(-1) === 'arrow') stack.pop();
+  };
   let q = 0;
   for (let i = 0; i < code.length && q < queue.length; i += 1) {
     while (queue[q] === i) {
       for (let f = stack.length - 1; f >= 0; f -= 1) {
-        if (stack[f] === 'function') break;
+        if (stack[f] === 'function' || stack[f] === 'arrow') break;
         if (stack[f] === 'loop') {
           found.add(i);
           break;
@@ -374,8 +389,14 @@ function inLoopBody(code: string, offsets: number[]): Set<number> {
       }
       q += 1;
     }
-    if (code[i] === '{') stack.push(frameOf(code, i));
-    else if (code[i] === '}') stack.pop();
+    const ch = code[i];
+    if (ch === '{') stack.push(frameOf(code, i));
+    else if (ch === '(' || ch === '[') stack.push('group');
+    else if (ch === '}' || ch === ')' || ch === ']') {
+      endArrows();
+      stack.pop();
+    } else if (ch === ',' || ch === ';') endArrows();
+    else if (ch === '=' && code[i + 1] === '>' && code[skipSpaceForward(code, i + 2)] !== '{') stack.push('arrow');
   }
   return found;
 }
