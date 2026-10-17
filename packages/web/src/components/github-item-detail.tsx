@@ -32,7 +32,8 @@ import { cn, isHttpUrl } from '@/lib/utils'
 
 import { Markdown } from '@/routes/task-thread/markdown'
 import { labelChipStyle } from '@/routes/github/github-filter'
-import { GITHUB_LIST_LIMIT, githubFilterPath, type GithubFilter } from '@/routes/github/github-sidebar-model'
+import { githubFilterPath, type GithubFilter } from '@/routes/github/github-sidebar-model'
+import { GITHUB_PAGE_SIZE } from '@/api/github-pages'
 
 /** A single label pill, tinted with its GitHub color (or neutral when unknown). */
 export function LabelChip({ label, color, plain = false }: { label: string; color: string | undefined; plain?: boolean }) {
@@ -58,6 +59,7 @@ export function GithubItemDetail({
   item,
   colors,
   checks,
+  comments,
   backLink,
   subNav,
   onRunAgent,
@@ -68,6 +70,9 @@ export function GithubItemDetail({
   colors: Record<string, string>
   /** Resolved checks glyph — the lazily-hydrated value overrides the list's `null` (#664). */
   checks?: GithubItem['checks']
+  /** Resolved comment count — the hydrated value overrides a deferred list row's placeholder
+   *  `0` (hearsay-tools/cezarion#1183). */
+  comments?: number
   /** The phone-only "Back to the list" target; `null` renders no back link. */
   backLink: { to: string } | null
   /** The PR Conversation/Changes tabs, keeping the list's `?filter=`; `null` renders a
@@ -82,7 +87,15 @@ export function GithubItemDetail({
 }) {
   const changes = subNav?.changes ?? false
   const kindWord = item.kind === 'pr' ? 'pull request' : 'issue'
-  const hasDiffStat = item.kind === 'pr' && Boolean(item.additions || item.deletions)
+  // The detail tier (hearsay-tools/cezarion#1183): the thread request also carries the item's own
+  // body and diffstat, so the pane no longer depends on the list row having shipped them. The same
+  // query `GithubThread` reads; on the Changes tab it serves only what is already cached.
+  const detail = useGithubComments(item.kind, item.number, !changes).data?.detail
+  const body = detail?.body ?? item.body
+  const additions = detail?.additions ?? item.additions
+  const deletions = detail?.deletions ?? item.deletions
+  const hasDiffStat = item.kind === 'pr' && Boolean(additions || deletions)
+  const commentCount = comments ?? item.comments
   return (
     <article data-slot="gh-detail-inner" className="min-w-0 px-4 py-4 md:px-7 md:py-5">
       {backLink ? (
@@ -101,17 +114,17 @@ export function GithubItemDetail({
       <p data-slot="gh-meta" className="flex flex-wrap items-center gap-x-1.5 font-mono text-[11px] text-soft-foreground">
         <span>#{item.number}</span>·<span>{kindWord}</span>·<span>opened by {item.author}</span>·
         <span>{shortAge(item.createdAt)} ago</span>
-        {item.comments ? (
+        {commentCount ? (
           <>
-            ·<CommentCount count={item.comments} />
+            ·<CommentCount count={commentCount} />
           </>
         ) : null}
         {hasDiffStat ? (
           <>
             ·
             <span data-slot="gh-diffstat">
-              <span className="text-success">+{item.additions ?? 0}</span>{' '}
-              <span className="text-danger">−{item.deletions ?? 0}</span>
+              <span className="text-success">+{additions ?? 0}</span>{' '}
+              <span className="text-danger">−{deletions ?? 0}</span>
             </span>
           </>
         ) : null}
@@ -165,8 +178,8 @@ export function GithubItemDetail({
 
       {changes && item.kind === 'pr' ? <GithubPrChanges item={item} /> : <>
       <div data-slot="gh-body" className="mt-5 text-sm">
-        {item.body ? (
-          <Markdown>{item.body}</Markdown>
+        {body ? (
+          <Markdown>{body}</Markdown>
         ) : (
           <p className="text-soft-foreground">(no description)</p>
         )}
@@ -226,7 +239,7 @@ function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: (
   // in, not the one now on screen (review g3 #1).
   const mergeKeys = () => ({
     mergeState: queryKeys.githubMergeState(number),
-    list: queryKeys.github({ limit: GITHUB_LIST_LIMIT }),
+    list: queryKeys.githubPages(GITHUB_PAGE_SIZE),
     comments: queryKeys.githubComments('pr', number),
     item: queryKeys.githubItem('pr', number),
     refStatus: referenceProjectId === undefined ? undefined : queryKeys.githubRefStatusOf(referenceProjectId),
@@ -244,7 +257,8 @@ function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: (
       setConfirming(false)
       toast(`Pull request #${number} merged`)
       void queryClient.invalidateQueries({ queryKey: keys.mergeState })
-      // The single list query (#664) — a merged PR drops out of the open set on the next fetch.
+      // The paged list (hearsay-tools/cezarion#1183) — a merged PR drops out of the open set on
+      // the next read of its pages.
       void queryClient.invalidateQueries({ queryKey: keys.list })
       void queryClient.invalidateQueries({ queryKey: keys.comments })
       // The task tab's item (#692), and every chip and tab glyph of this project: the server
@@ -904,7 +918,7 @@ const CHECKS_TONE: Record<Checks, string> = {
 /** The comment-count badge (#499): a muted speech-bubble glyph + count, shown on issue/PR rows
  *  and in the detail meta line. Renders nothing for a zero (or absent) count, so quiet items look
  *  exactly as they did before real counts arrived. Shared so the row and detail can't drift. */
-export function CommentCount({ count }: { count: number }) {
+export function CommentCount({ count }: { count: number | undefined }) {
   if (!count) return null
   return (
     <span
