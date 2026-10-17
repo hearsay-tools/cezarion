@@ -866,12 +866,6 @@
       "count": 2
     },
     {
-      "file": "server/forge/github-filters.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(finishList).toBeTypeOf('function'));",
-      "count": 1
-    },
-    {
       "file": "server/forge/github.test.ts",
       "rule": "short-bound",
       "site": "await vi.waitFor(() => expect(delivered).toBe(true), { timeout: 100 });",
