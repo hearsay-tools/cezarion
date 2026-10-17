@@ -1382,7 +1382,9 @@ describe('RunStore — referenced-issue discovery (spec 2026-07-21-report-ref-di
   it.each(['Fix #1200 using /dev-flow.', 'Fix issue #1200',
     'Fix https://github.com/open-mercato/cezar/issues/1200',
     'Fix the upstream issue #1200', 'Review the issue #1200',
-    'Address upstream issue #1200', 'Investigate the GitHub issue #1200'])(
+    'Address upstream issue #1200', 'Investigate the GitHub issue #1200',
+    'Could you fix issue #1200?', 'Can you please fix issue #1200?',
+    'Please could you review issue #1200?', 'I would like you to fix issue #1200'])(
     'keeps the originating issue after filing a follow-up: %s', (task) => {
       const { store, run } = freshRun(task);
       store.updateRun(run.id, { issueNumber: 1200 });

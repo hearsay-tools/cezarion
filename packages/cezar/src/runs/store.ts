@@ -778,8 +778,9 @@ function referencedPrDeclaration(run: RunRecord): number | undefined {
 function originatingIssue(run: RunRecord): number | undefined {
   // Only an issue-led subject is stable attribution. Mentions inside comparisons or
   // background instructions remain evidence, but an agent declaration may supersede them.
-  const prompt = run.task.trimStart().replace(
-    /^(?:please\s+)?(?:fix|resolve|address|implement|investigate|review|work(?:\s+on)?)\s+/i, '');
+  const prompt = run.task.trimStart()
+    .replace(/^(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+|i\s+(?:want|would\s+like)\s+you\s+to\s+)/i, '')
+    .replace(/^(?:please\s+)?(?:fix|resolve|address|implement|investigate|review|work(?:\s+on)?)\s+/i, '');
   const subject = /^(?:(?:the\s+)?(?:(?:github|fork|upstream)\s+)?issue\s*|(?:fork|upstream)\s+)?(?:https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+|(?:[\w.-]+\/[\w.-]+)?#?\d+)\b/i.exec(prompt);
   if (!subject) return undefined;
   const refs = extractTaskRefs(subject[0]);
