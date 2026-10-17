@@ -194,6 +194,27 @@ describe('ProjectAutomationScheduler', () => {
     expect(store.latestReceipts().get('one:event')).toMatchObject({ status: 'launched', runId: 'run' });
   });
 
+  it.each([false, true])('launches once for paired issue events across checks and restart (split=%s)', async (split) => {
+    const { store, definition } = await setup();
+    const rule = store.update(definition.id, definition.revision, {
+      ...definition, events: ['issue.opened', 'issue.labeled'],
+      filters: { ...definition.filters, includeExisting: true, changedLabels: ['bug'] },
+    }) as GithubAutomationDefinition;
+    const timestamp = new Date(Date.now() - 60_000).toISOString();
+    const opened = { ...candidate, timestamp };
+    const labeled = { ...opened, event: 'issue.labeled' as const, eventId: 'label-event', changedLabel: 'bug' };
+    const launch = vi.fn(async () => ({ runId: 'only-run' }));
+    const check = async (rows: Array<typeof opened | typeof labeled>) => {
+      const reopened = AutomationStore.open(store.dataDir);
+      await new ProjectAutomationScheduler({ projectId: 'p', store: reopened, timeZone: 'UTC',
+        github: { owner: 'acme', repo: 'demo', poller: { poll: async () => ({ candidates: rows, truncated: false, pages: 1 }) } as never }, launch,
+      }).check(rule);
+    };
+    await check(split ? [opened] : [opened, labeled]);
+    await check([labeled]);
+    expect(launch).toHaveBeenCalledTimes(1);
+  });
+
   it('does not advance the cursor on failure and applies bounded backoff', async () => {
     const { store, definition } = await setup();
     store.setState(definition.id, (current) => ({ ...current, cursor: { timestamp: '2026-07-26T01:00:00.000Z' } }));

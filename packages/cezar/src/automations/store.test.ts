@@ -239,6 +239,24 @@ describe('AutomationStore', () => {
     expect(store.logs().map((row) => row.result)).toEqual(['skipped']);
   });
 
+  it('retains an issue reservation past receipt retention without retaining old event history', async () => {
+    const dir = await directory();
+    const store = AutomationStore.open(dir, { now: () => new Date('2026-10-17T00:00:00Z') });
+    const candidate = { eventId: 'opened', event: 'issue.opened' as const, timestamp: '2026-01-01T00:00:00Z',
+      tieBreaker: 'I', repo: 'acme/demo', nodeId: 'I', number: 7, title: 'Issue',
+      url: 'https://github.com/acme/demo/issues/7', author: 'alice', assignees: [], labels: [] };
+    for (const eventId of ['opened', 'labeled']) {
+      const receipt = store.reserveReceipt({ automationId: 'one', revision: 1, eventId, candidate })!;
+      store.appendReceipt({ ...receipt, status: 'launched', runId: 'run', updatedAt: '2026-01-01T00:00:00Z' });
+    }
+    const other = store.reserveReceipt({ automationId: 'one', revision: 1, eventId: 'old-pr' })!;
+    store.appendReceipt({ ...other, status: 'launched', runId: 'pr-run', updatedAt: '2026-01-01T00:00:00Z' });
+    await store.compact();
+    const receipts = [...AutomationStore.open(dir).latestReceipts().values()];
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]).toMatchObject({ automationId: 'one', candidate: { number: 7 }, runId: 'run' });
+  });
+
   it('keeps every row when compaction overlaps an append from another store', async () => {
     const dir = await directory();
     const owner = AutomationStore.open(dir);

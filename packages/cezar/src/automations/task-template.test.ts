@@ -7,6 +7,8 @@ import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { launchAutomationRun, launchScheduledRun, rebaselineIdleAutomations, reconcileAutomationReceipts, renderAutomationTask, renderScheduleTask, validateAutomationPrompt } from './task-template.ts';
 import { AutomationStore } from './store.ts';
+import { ProjectAutomationScheduler } from './scheduler.ts';
+import { GithubPoller } from './github-poller.ts';
 import type { GithubAutomationDefinition, ScheduleAutomationDefinition } from './types.ts';
 
 const definition: GithubAutomationDefinition = {
@@ -100,6 +102,82 @@ describe('automation task templates', () => {
       const launched = await launchAutomationRun({ root, manager, store, definition: { ...definition, task: { ...definition.task, workflow: 'quick-task' } }, candidate, receiptId: 'receipt' });
       expect(store.getRun(launched.runId)?.automation).toEqual({ automationId: 'one', automationRevision: 1, receiptId: 'receipt', event: 'issue.opened', githubUrl: candidate.url });
     } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it.each(['primary', 'marker', 'url', 'secondary', 'automation', 'prompt'] as const)('skips backfill when a non-archived task references the issue via %s', async (source) => {
+    const root = await mkdtemp(join(tmpdir(), 'cezar-existing-issue-'));
+    let store = RunStore.open(join(root, '.ai/cezar'));
+    try {
+      const existing = store.createRun({ title: 'Manual task', workflow: 'quick-task', task: source === 'prompt' ? `Fix ${candidate.url}` : 'Work', steps: [] });
+      const references = {
+        prompt: { issueNumber: 1216, markerRefs: { issue: 1216 } },
+        primary: { issueNumber: 7 },
+        marker: { markerRefs: { issue: 7 } },
+        url: { referencedIssueUrl: candidate.url },
+        secondary: { issueNumber: 1216, markerRefs: { issue: 1216 }, referencedIssueCandidates: [candidate.url, 'https://github.com/acme/demo/issues/1216'] },
+        automation: { automation: { automationId: 'other', automationRevision: 1, receiptId: 'old', event: 'issue.opened' as const, githubUrl: candidate.url } },
+      };
+      store.updateRun(existing.id, references[source]);
+      store.close();
+      store = RunStore.open(join(root, '.ai/cezar'));
+      const startRun = vi.fn(() => store.createRun({ title: 'Duplicate', workflow: 'quick-task', task: 'Duplicate', steps: [] }));
+      const result = await launchAutomationRun({ root, store, manager: { startRun } as unknown as RunManager,
+        definition: { ...definition, filters: { ...definition.filters, includeExisting: true } }, candidate, receiptId: 'new',
+      });
+      expect(startRun).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ runId: existing.id, existing: true });
+      expect(store.getRun(existing.id)?.automation?.receiptId).not.toBe('new');
+    } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+  });
+
+  it('backfill skips a manual task with a secondary reference and logs its id for both events', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'cezar-backfill-'));
+    const store = RunStore.open(join(root, '.ai/cezar'));
+    try {
+      const existing = store.createRun({ title: 'Manual task', workflow: 'quick-task', task: 'Work', steps: [] });
+      store.updateRun(existing.id, { issueNumber: 1216, referencedIssueCandidates: [candidate.url] });
+      const automations = AutomationStore.open(join(root, '.ai/cezar'));
+      const rule = automations.create({ ...definition, events: ['issue.opened', 'issue.labeled'],
+        filters: { ...definition.filters, includeExisting: true, changedLabels: ['bug'] },
+      }) as GithubAutomationDefinition;
+      const timestamp = new Date(Date.now() - 60_000).toISOString();
+      const poller = new GithubPoller({ run: async (_exe, args) => args.some((arg) => arg.includes('/timeline'))
+        ? JSON.stringify([{ id: 1, event: 'labeled', created_at: timestamp, label: { name: 'bug' } }])
+        : JSON.stringify({ items: [{ node_id: candidate.nodeId, number: 7, title: 'Issue', html_url: candidate.url,
+          created_at: timestamp, updated_at: timestamp, user: { login: 'alice' }, labels: [{ name: 'bug' }],
+          repository_url: 'https://api.github.com/repos/acme/demo' }] }),
+      });
+      const startRun = vi.fn(() => store.createRun({ title: 'Duplicate', workflow: 'quick-task', task: 'Duplicate', steps: [] }));
+      const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store: automations, timeZone: 'UTC',
+        github: { owner: 'acme', repo: 'demo', poller },
+        launch: (definition, candidate, receiptId) => launchAutomationRun({ root, store, manager: { startRun } as unknown as RunManager, definition, candidate, receiptId }),
+      });
+      await scheduler.check(rule);
+      await scheduler.check(rule);
+      expect(startRun).not.toHaveBeenCalled();
+      const skips = automations.logs({ automationId: rule.id }).filter((log) => log.githubNumber === 7);
+      expect(skips).toHaveLength(4);
+      for (const log of skips) {
+        expect(log.runId).toBe(existing.id);
+        expect(log.reason).toContain(existing.id);
+      }
+      expect(skips.some((log) => log.result === 'skipped')).toBe(true);
+    } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+  });
+
+  it.each(['archived', 'foreign', 'pull-request', 'foreign-number'] as const)('allows an issue launch when the other task reference is %s', async (kind) => {
+    const root = await mkdtemp(join(tmpdir(), 'cezar-issue-guard-'));
+    const store = RunStore.open(join(root, '.ai/cezar'));
+    try {
+      const other = store.createRun({ title: 'Other task', workflow: 'quick-task', task: 'Work', steps: [] });
+      store.updateRun(other.id, kind === 'archived' ? { archived: true, issueNumber: 7 }
+        : kind === 'foreign-number' ? { issueNumber: 7, markerRefs: { issue: 7 }, referencedIssueUrl: 'https://github.com/other/repo/issues/7' }
+        : kind === 'foreign' ? { referencedIssueCandidates: ['https://github.com/other/repo/issues/7'] }
+        : { prNumber: 7, referencedPrCandidates: ['https://github.com/acme/demo/pull/7'] });
+      const startRun = vi.fn(() => store.createRun({ title: 'New task', workflow: 'quick-task', task: 'New task', steps: [] }));
+      await launchAutomationRun({ root, store, manager: { startRun } as unknown as RunManager, definition, candidate, receiptId: 'new' });
+      expect(startRun).toHaveBeenCalledTimes(1);
+    } finally { store.close(); await rm(root, { recursive: true, force: true }); }
   });
 
   it('reconciles a reserved receipt from persisted run provenance', async () => {

@@ -397,9 +397,17 @@ export class AutomationStore {
 
   async compact(): Promise<void> {
     const cutoff = this.now().getTime() - RETENTION_MS;
-    const latest = [...this.latestReceipts().values()].filter(
-      (row) => Date.parse(row.updatedAt) >= cutoff,
-    );
+    const issues = new Set<string>();
+    const latest = [...this.latestReceipts().values()].filter((row) => {
+      // Event history expires; the first reservation of an issue must not. Keep one
+      // durable issue reservation so a new label months later cannot launch it again.
+      const issue = row.candidate?.event.startsWith('issue.')
+        ? `${row.automationId}:${row.candidate.repo.toLowerCase()}:${row.candidate.number}`
+        : undefined;
+      const firstIssue = issue !== undefined && !issues.has(issue);
+      if (issue !== undefined) issues.add(issue);
+      return firstIssue || Date.parse(row.updatedAt) >= cutoff;
+    });
     this.rewriteNdjson(RECEIPTS, latest);
     await this.withLogLease(() => {
       const logs = this.readNdjson(LOG, automationLogRecordSchema);
