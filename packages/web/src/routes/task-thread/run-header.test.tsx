@@ -142,80 +142,78 @@ describe('Session-only activity controls (#751)', () => {
   })
 })
 
-describe('monitoring schedule', () => {
-  it('shows the exact persisted deadline in a time element', () => {
-    stubFetch()
-    renderHeader(run('running', { activity: 'monitoring', monitoringWakeAt: '2026-07-25T10:15:00.000Z' }))
-    expect(screen.getByText('monitoring')).not.toBeNull()
-    const time = screen.getByText(/2026/).closest('time')
-    expect(time?.getAttribute('datetime')).toBe('2026-07-25T10:15:00.000Z')
-    expect(screen.getByText(/Next automatic check/)).not.toBeNull()
-  })
-
-  it('shows parked copy for absent or malformed deadlines', () => {
-    stubFetch()
-    renderHeader(run('running', { activity: 'monitoring', monitoringWakeAt: 'not-a-date' }))
-    expect(screen.getByText('Parked — no automatic check scheduled')).not.toBeNull()
-    expect(screen.queryByText(/Invalid Date/)).toBeNull()
-  })
-
-  it('distinguishes a capped monitoring epoch from an ordinary parked session', () => {
-    stubFetch()
-    renderHeader(run('running', { activity: 'monitoring', monitoringWakeCapReached: true }))
-    expect(screen.getByText('Automatic checks paused — 40/40 reached')).not.toBeNull()
-    expect(screen.queryByText('Parked — no automatic check scheduled')).toBeNull()
-  })
-})
-
-describe('CI wait status', () => {
-  const ciWait = (extra: Partial<NonNullable<ApiRun['ciWait']>> = {}): NonNullable<ApiRun['ciWait']> => ({
-    id: 'ci-1', generation: 'session-1', turnId: 'turn-1', timeoutSeconds: 1800,
+describe('open waits', () => {
+  type CiEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'ci' }>
+  type TimerEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'timer' }>
+  const ciEntry = (extra: Partial<CiEntry> = {}): CiEntry => ({
+    id: '00000000-0000-4000-8000-000000000474', kind: 'ci', source: 'agent', via: 'cezar_wait',
+    generation: 'session-1', turnId: 'turn-1', timeoutSeconds: 1800,
     prUrl: 'https://github.com/owner/repo/pull/474', repository: 'owner/repo', prNumber: 474,
     headSha: '123456789abcdef', registeredAt: '2026-09-22T12:00:00.000Z',
-    deadline: '2026-09-22T12:30:00.000Z', phase: 'registered', ...extra,
+    deadline: '2026-09-22T12:30:00.000Z', phase: 'open', ...extra,
   })
+  const timerEntry = (extra: Partial<TimerEntry> = {}): TimerEntry => ({
+    id: '00000000-0000-4000-8000-000000000005', kind: 'timer', source: 'agent', via: 'cezar_wait',
+    turnId: 'turn-1', seconds: 300, registeredAt: '2026-09-22T12:00:00.000Z',
+    deadline: '2026-09-22T12:05:00.000Z', phase: 'open', ...extra,
+  })
+  const observed = (outcome: NonNullable<CiEntry['result']>['outcome']): CiEntry['result'] => ({
+    outcome, headSha: '123456789abcdef', observedHeadSha: 'fedcba987654321',
+    observedAt: '2026-09-22T12:02:00.000Z', checks: [], totalChecks: 0, truncated: false,
+  })
+  const ciItems = () => [...document.querySelectorAll<HTMLElement>('[data-slot="ci-wait-status"]')]
+  const timerItems = () => [...document.querySelectorAll<HTMLElement>('[data-slot="monitoring-schedule"]')]
 
-  it('keeps active registration working, with a focusable PR link and absolute deadline', () => {
+  it('lists every open wait: CI with its PR link and deadline, timer with its time and note', () => {
     stubFetch()
-    renderHeader(run('running', { ciWait: ciWait() }))
-    expect(screen.getByText('running')).not.toBeNull()
-    expect(screen.getByText(/Waiting for CI/)).not.toBeNull()
+    renderHeader(run('waiting', { waits: [
+      ciEntry(),
+      ciEntry({ id: '00000000-0000-4000-8000-000000000475', prUrl: 'https://github.com/owner/other/pull/12',
+        repository: 'owner/other', prNumber: 12, deadline: '2026-09-22T13:00:00.000Z' }),
+      timerEntry({ note: 'Re-check the staging deploy' }),
+    ] }))
+    expect(screen.getByText('waiting for CI')).not.toBeNull()
+    expect(ciItems()).toHaveLength(2)
+    expect(ciItems().map(item => item.getAttribute('role'))).toEqual(['status', 'status'])
+    expect(ciItems().map(item => item.querySelector('time')?.getAttribute('datetime')))
+      .toEqual(['2026-09-22T12:30:00.000Z', '2026-09-22T13:00:00.000Z'])
+    expect(screen.getAllByText('Waiting for CI')).toHaveLength(2)
     const link = screen.getByRole('link', { name: 'owner/repo#474' })
     expect(link.getAttribute('href')).toBe('https://github.com/owner/repo/pull/474')
     link.focus()
     expect(document.activeElement).toBe(link)
-    expect(document.querySelector('[data-slot="ci-wait-status"] time')?.getAttribute('datetime')).toBe('2026-09-22T12:30:00.000Z')
+    expect(screen.getByRole('link', { name: 'owner/other#12' }).getAttribute('href')).toBe('https://github.com/owner/other/pull/12')
+    expect(timerItems()).toHaveLength(1)
+    expect(timerItems()[0]?.textContent).toContain('Next automatic check')
+    expect(timerItems()[0]?.querySelector('time')?.getAttribute('datetime')).toBe('2026-09-22T12:05:00.000Z')
+    expect(screen.getByText('Re-check the staging deploy')).not.toBeNull()
     expect(screen.queryByText(/waiting for capacity/)).toBeNull()
   })
 
-  it('replaces the ordinary monitoring timer while parked, even with stale wake metadata', () => {
+  it('reads a run with only a timer open as monitoring, without a note line when there is none', () => {
     stubFetch()
-    renderHeader(run('running', {
-      activity: 'monitoring', monitoringWakeAt: '2026-09-22T12:05:00.000Z',
-      monitoringWakeCapReached: true, ciWait: ciWait({ phase: 'parked' }),
-    }))
+    renderHeader(run('waiting', { waits: [timerEntry()] }))
     expect(screen.getByText('monitoring')).not.toBeNull()
-    expect(screen.getByText(/Waiting for CI/)).not.toBeNull()
-    expect(document.querySelector('[data-slot="monitoring-schedule"]')).toBeNull()
-    expect(document.querySelector('[data-slot="ci-wait-status"]')?.getAttribute('role')).toBe('status')
+    expect(ciItems()).toHaveLength(0)
+    expect(timerItems()).toHaveLength(1)
+    expect(timerItems()[0]?.querySelectorAll('p')).toHaveLength(1)
   })
 
   it.each([
-    ['monitoring', 'CI result ready — waiting for capacity'],
-    [undefined, 'CI result ready — current turn still working'],
-  ] as const)('describes admission honestly for activity %s', (activity, label) => {
+    ['running', 'CI result ready — current turn still working', 'Automatic check due — current turn still working'],
+    ['waiting', 'CI result ready — waiting for capacity', 'Automatic check due — waiting for capacity'],
+    ['queued', 'CI result ready — waiting for capacity', 'Automatic check due — waiting for capacity'],
+  ] as const)('describes a resolved wait honestly while %s', (status, ciLabel, timerLabel) => {
     stubFetch()
-    renderHeader(run('running', { activity, ciWait: ciWait({ phase: 'wake-pending' }) }))
-    expect(screen.getByText(label)).not.toBeNull()
+    renderHeader(run(status, { waits: [
+      ciEntry({ phase: 'resolved', result: observed('passed') }),
+      timerEntry({ phase: 'resolved', note: 'Look at the deploy' }),
+    ] }))
+    expect(screen.getByText(ciLabel)).not.toBeNull()
     expect(screen.getByRole('link', { name: 'owner/repo#474' })).not.toBeNull()
+    expect(screen.getByText(timerLabel)).not.toBeNull()
+    expect(screen.getByText('Look at the deploy')).not.toBeNull()
     expect(screen.queryByText(/Next automatic check/)).toBeNull()
-  })
-
-  it.each(['queued', 'waiting'] as const)('retains the pending CI result and PR during %s admission', (status) => {
-    stubFetch()
-    renderHeader(run(status, { ciWait: ciWait({ phase: 'wake-pending' }) }))
-    expect(screen.getByText('CI result ready — waiting for capacity')).not.toBeNull()
-    expect(screen.getByRole('link', { name: 'owner/repo#474' })).not.toBeNull()
   })
 
   it.each([
@@ -227,61 +225,94 @@ describe('CI wait status', () => {
     ['deadline', 'CI wait timed out — inspect the PR checks'],
     ['error', 'CI wait unavailable — inspect access and the PR checks'],
     ['head_changed', 'CI head changed — 1234567 → fedcba9'],
-  ] as const)('shows the retained %s observation without changing task status', (outcome, label) => {
+  ] as const)('shows the last settled CI observation when nothing is open (%s)', (outcome, label) => {
     stubFetch()
-    renderHeader(run('running', { lastCiWait: ciWait({ phase: 'delivered', result: {
-      outcome, headSha: '123456789abcdef', observedHeadSha: 'fedcba987654321',
-      observedAt: '2026-09-22T12:02:00.000Z', checks: [], totalChecks: 0, truncated: false,
-    } }) }))
+    renderHeader(run('done', { lastWaits: [ciEntry({ phase: 'delivered', result: observed(outcome) })] }))
     expect(screen.getByText(label)).not.toBeNull()
-    expect(screen.getByText('running')).not.toBeNull()
+    expect(screen.getByText('done')).not.toBeNull()
     expect(screen.getByRole('link', { name: 'owner/repo#474' })).not.toBeNull()
+    expect(ciItems()).toHaveLength(1)
+    expect(ciItems()[0]?.textContent).toContain('Observed')
+    expect(ciItems()[0]?.querySelector('time')?.getAttribute('datetime')).toBe('2026-09-22T12:02:00.000Z')
   })
 
-  it('shows unreadable retained CI history without inventing a PR link or changing task status', () => {
+  it('shows the newest settled CI wait, past a newer settled timer, beside an open timer', () => {
     stubFetch()
-    renderHeader(run('done', { lastCiWaitError: 'CI wait unavailable — saved observation is unreadable; register a new wait.' }))
+    renderHeader(run('waiting', {
+      waits: [timerEntry({ id: '00000000-0000-4000-8000-000000000007', deadline: '2026-09-22T12:20:00.000Z' })],
+      lastWaits: [
+        ciEntry({ id: '00000000-0000-4000-8000-000000000001', phase: 'delivered', result: observed('passed') }),
+        ciEntry({ id: '00000000-0000-4000-8000-000000000002', phase: 'delivered', result: observed('failed') }),
+        timerEntry({ id: '00000000-0000-4000-8000-000000000006', phase: 'delivered', deliveredAt: '2026-09-22T12:10:00.000Z' }),
+      ],
+    }))
+    expect(screen.getByText('CI checks failed — inspect the PR checks')).not.toBeNull()
+    expect(screen.queryByText(/CI checks passed/)).toBeNull()
+    expect(ciItems()).toHaveLength(1)
+    expect(timerItems()).toHaveLength(1)
+    expect(timerItems()[0]?.querySelector('time')?.getAttribute('datetime')).toBe('2026-09-22T12:20:00.000Z')
+  })
+
+  it('shows a new wait instead of a stale previous success', () => {
+    stubFetch()
+    renderHeader(run('waiting', { waits: [ciEntry()], lastWaits: [ciEntry({
+      id: '00000000-0000-4000-8000-000000000001', phase: 'delivered', result: observed('passed'),
+    })] }))
+    expect(screen.getByText('Waiting for CI')).not.toBeNull()
+    expect(screen.queryByText(/CI checks passed/)).toBeNull()
+  })
+
+  it('shows a cancelled wait as cancelled even when it carried a result, with when it was cancelled', () => {
+    stubFetch()
+    renderHeader(run('waiting', { lastWaits: [ciEntry({
+      phase: 'cancelled', cancelledAt: '2026-09-22T12:03:00.000Z', result: observed('passed'),
+    })] }))
+    expect(screen.getByText('CI wait cancelled')).not.toBeNull()
+    expect(screen.queryByText(/CI checks passed/)).toBeNull()
+    expect(ciItems()[0]?.textContent).toContain('Cancelled')
+    expect(ciItems()[0]?.querySelector('time')?.getAttribute('datetime')).toBe('2026-09-22T12:03:00.000Z')
+    // Human input no longer withdraws a CI wait, so the old withdrawal advice has no case left.
+    expect(screen.queryByText(/General monitoring does not restart/)).toBeNull()
+    expect(screen.queryByText(/A new CI wait is needed/)).toBeNull()
+  })
+
+  it('shows lastWaitsError when a saved wait was unreadable', () => {
+    stubFetch()
+    renderHeader(run('done', { lastWaitsError: 'CI wait unavailable — saved observation is unreadable; register a new wait.' }))
     expect(screen.getByText(/saved observation is unreadable/)).not.toBeNull()
-    expect(document.querySelector('[data-slot="ci-wait-status"]')?.getAttribute('role')).toBe('status')
+    expect(ciItems()[0]?.getAttribute('role')).toBe('status')
     expect(screen.queryByRole('link', { name: 'owner/repo#474' })).toBeNull()
+    expect(screen.getByText('done')).not.toBeNull()
   })
 
   it('keeps the last snapshot visible offline and falls back for an invalid deadline', () => {
     stubFetch()
     vi.stubGlobal('navigator', { ...navigator, onLine: false })
-    renderHeader(run('running', { ciWait: ciWait({ deadline: 'invalid' }) }))
-    expect(screen.getByText(/Waiting for CI/)).not.toBeNull()
+    renderHeader(run('waiting', { waits: [ciEntry({ deadline: 'invalid' }), timerEntry({ deadline: 'invalid' })] }))
+    expect(screen.getByText('Waiting for CI')).not.toBeNull()
     expect(screen.getByText('CI deadline unavailable')).not.toBeNull()
+    expect(screen.getByText('Automatic check time unavailable')).not.toBeNull()
     expect(screen.queryByText(/Invalid Date/)).toBeNull()
   })
 
-  it('shows a new wait instead of a stale previous success', () => {
+  it('shows no open wait on a finished run, and skips kinds this cockpit does not render', () => {
     stubFetch()
-    renderHeader(run('running', { ciWait: ciWait(), lastCiWait: ciWait({ phase: 'delivered', result: {
-      outcome: 'passed', headSha: '123456789abcdef', observedAt: '2026-09-22T12:02:00.000Z',
-      checks: [], totalChecks: 0, truncated: false,
-    } }) }))
-    expect(screen.getByText(/Waiting for CI/)).not.toBeNull()
-    expect(screen.queryByText(/CI checks passed/)).toBeNull()
+    const { unmount } = renderHeader(run('done', { waits: [ciEntry(), timerEntry()] }))
+    expect(screen.queryByText('Waiting for CI')).toBeNull()
+    expect(timerItems()).toHaveLength(0)
+    unmount()
+
+    // A later phase adds human and worker waits; an older header leaves them to the pill.
+    const later = { id: '00000000-0000-4000-8000-000000000009', kind: 'human', phase: 'open' } as unknown as CiEntry
+    renderHeader(run('waiting', { waits: [later, timerEntry()] }))
+    expect(ciItems()).toHaveLength(0)
+    expect(timerItems()).toHaveLength(1)
   })
 
-  it('retains cancellation alongside ordinary monitoring after human withdrawal', () => {
+  it('renders nothing for a run with no waits at all', () => {
     stubFetch()
-    renderHeader(run('running', { activity: 'monitoring', lastCiWait: ciWait({ phase: 'withdrawn' }) }))
-    expect(screen.getByText('CI wait cancelled')).not.toBeNull()
-    expect(screen.getByText('Parked — no automatic check scheduled')).not.toBeNull()
-    expect(screen.getByText('General monitoring does not restart this CI wait.')).not.toBeNull()
-  })
-
-  it('shows a withdrawn wait as cancelled even when its undelivered result passed', () => {
-    stubFetch()
-    renderHeader(run('running', { lastCiWait: ciWait({ phase: 'withdrawn', result: {
-      outcome: 'passed', headSha: '123456789abcdef', observedAt: '2026-09-22T12:02:00.000Z',
-      checks: [], totalChecks: 0, truncated: false,
-    } }) }))
-    expect(screen.getByText('CI wait cancelled')).not.toBeNull()
-    expect(screen.queryByText(/CI checks passed/)).toBeNull()
-    expect(screen.getByText('A new CI wait is needed to resume CI monitoring.')).not.toBeNull()
+    renderHeader(run('running'))
+    expect(document.querySelector('[data-slot="open-waits"]')).toBeNull()
   })
 })
 
@@ -916,10 +947,13 @@ describe('dense run details (#765)', () => {
   it('keeps the monitoring schedule out of the disclosure — a self-resuming run is status', () => {
     stubFetch()
     renderHeader(
-      run('running', {
+      run('waiting', {
         id: freshRunId(),
-        activity: 'monitoring',
-        monitoringWakeAt: '2026-07-25T10:15:00.000Z',
+        waits: [{
+          id: '00000000-0000-4000-8000-000000000005', kind: 'timer', source: 'agent', via: 'monitoring-line',
+          turnId: 'turn-1', seconds: 300, registeredAt: '2026-07-25T10:10:00.000Z',
+          deadline: '2026-07-25T10:15:00.000Z', phase: 'open',
+        }],
       }),
     )
 

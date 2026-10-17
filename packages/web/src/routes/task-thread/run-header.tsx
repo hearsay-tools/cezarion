@@ -21,7 +21,7 @@ import {
   useRunHandoff,
   useRuns,
 } from '@/api/queries'
-import { DEFAULT_AGENT_ACCOUNT_ID, type ApiRun, type OpenTarget } from '@open-mercato/cezar-api-client'
+import { DEFAULT_AGENT_ACCOUNT_ID, type ApiRun, type OpenTarget, type Wait } from '@open-mercato/cezar-api-client'
 import { hasAccountChoice, useAgentAccounts } from '@/api/agent-accounts'
 import { DiffStatLabel } from '@/components/diff-stat'
 import { TitleEditInput, useTitleEditor } from '@/components/editable-title'
@@ -380,8 +380,7 @@ export function RunHeader({
         </div>
         {/* Outside the disclosure on purpose: "this run wakes itself up at 14:20" is status, not
             metadata — it belongs with the pill above, not behind a tap with the diff stats. */}
-        <CiWaitStatus run={run} />
-        <MonitoringSchedule run={run} />
+        <OpenWaits run={run} />
 
         {/* Below md (#621): 13.5px labels and quiet counts, tabs spread across the row. The 44px
             floor stays — the touch-target sweep measures these links — so the design's 40px is the
@@ -917,24 +916,64 @@ function MetaRow({
   )
 }
 
-/** Snapshot-only status: CI registration never starts a browser watcher or changes the run pill. */
-function activeCiWait(run: ApiRun) {
-  const wait = run.ciWait
-  return ['running', 'queued', 'waiting'].includes(run.status) && wait && wait.phase !== 'delivered' && wait.phase !== 'withdrawn'
-    ? wait
+type CiWait = Extract<Wait, { kind: 'ci' }>
+type TimerWait = Extract<Wait, { kind: 'timer' }>
+
+/** Only these statuses can have a wait in flight; a finished run's leftovers are history. */
+const IN_FLIGHT_STATUSES: readonly ApiRun['status'][] = ['running', 'queued', 'waiting']
+
+/** The kinds this header renders. Streamed records were only checked for `id`, and a later phase
+ *  of the wait list adds human and worker waits, which the pill already reports. */
+function renderableWaits(value: unknown): Wait[] {
+  return Array.isArray(value) ? value.filter((wait): wait is Wait => wait?.kind === 'ci' || wait?.kind === 'timer') : []
+}
+
+function formatInstant(value: string | undefined) {
+  const date = value ? new Date(value) : undefined
+  return date && Number.isFinite(date.getTime())
+    ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'long' }).format(date)
     : undefined
 }
 
-function CiWaitStatus({ run }: { run: ApiRun }) {
-  const active = activeCiWait(run)
-  const wait = active ?? run.lastCiWait
-  if (!active && run.lastCiWaitError) return (
-    <div data-slot="ci-wait-status" role="status" aria-live="polite" aria-atomic="true"
-      className="mt-1 min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
-      {run.lastCiWaitError}
+/** A resolved wait's result is owed to the agent: mid-turn it waits for the turn end, otherwise
+ *  for the wake turn to be admitted. */
+function owedLabel(prefix: string, run: ApiRun) {
+  return `${prefix} — ${run.status === 'running' ? 'current turn still working' : 'waiting for capacity'}`
+}
+
+/**
+ * Every open wait on the run (spec 2026-10-17-unified-waits), then the last settled CI
+ * observation. Snapshot-only status: none of it starts a browser watcher, and the pill reads
+ * `waitingOn` through `deriveAttention`, not this list. The settled observation (or the retained
+ * recovery error) stays beside an open timer, and gives way only to a CI wait of its own.
+ */
+function OpenWaits({ run }: { run: ApiRun }) {
+  const listed = renderableWaits(run.waits)
+  const open = IN_FLIGHT_STATUSES.includes(run.status)
+    ? listed.filter(wait => wait.phase === 'open' || wait.phase === 'resolved')
+    : []
+  const ciOpen = open.some(wait => wait.kind === 'ci')
+  // `lastWaits` is newest last; a settled entry still in `waits` is newer than all of them.
+  const settled = [...renderableWaits(run.lastWaits), ...listed.filter(wait => !open.includes(wait) && wait.phase !== 'open')]
+  const lastCi = ciOpen ? undefined : settled.filter((wait): wait is CiWait => wait.kind === 'ci').at(-1)
+  const error = ciOpen ? undefined : run.lastWaitsError
+  if (!open.length && !lastCi && !error) return null
+  return (
+    <div data-slot="open-waits" className="mt-1 flex min-w-0 flex-col gap-1">
+      {open.map(wait => wait.kind === 'ci'
+        ? <CiWaitStatus key={wait.id} run={run} wait={wait} />
+        : <TimerWaitStatus key={wait.id} run={run} wait={wait} />)}
+      {error ? (
+        <div data-slot="ci-wait-status" role="status" aria-live="polite" aria-atomic="true"
+          className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+          {error}
+        </div>
+      ) : lastCi ? <CiWaitStatus run={run} wait={lastCi} settled /> : null}
     </div>
   )
-  if (!wait) return null
+}
+
+function CiWaitStatus({ run, wait, settled = false }: { run: ApiRun; wait: CiWait; settled?: boolean }) {
   const result = wait.result
   const outcomes = {
     passed: 'CI checks passed — observed checks only; not merge approval',
@@ -946,22 +985,16 @@ function CiWaitStatus({ run }: { run: ApiRun }) {
     error: 'CI wait unavailable — inspect access and the PR checks',
     head_changed: `CI head changed — ${result?.headSha.slice(0, 7)} → ${result?.observedHeadSha?.slice(0, 7) ?? 'unknown'}`,
   }
-  const label = active
-    ? wait.phase === 'wake-pending'
-      ? run.status !== 'running' || run.activity === 'monitoring'
-        ? 'CI result ready — waiting for capacity'
-        : 'CI result ready — current turn still working'
-      : 'Waiting for CI'
-    : wait.phase === 'withdrawn' ? 'CI wait cancelled' : result ? outcomes[result.outcome] : 'CI wait unavailable'
-  const timestamp = active ? wait.deadline : result?.observedAt
-  const date = timestamp ? new Date(timestamp) : undefined
-  const dateLabel = date && Number.isFinite(date.getTime())
-    ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'long' }).format(date)
-    : undefined
+  const cancelled = settled && wait.phase === 'cancelled'
+  const label = !settled
+    ? wait.phase === 'resolved' ? owedLabel('CI result ready', run) : 'Waiting for CI'
+    : cancelled ? 'CI wait cancelled' : result ? outcomes[result.outcome] : 'CI wait unavailable'
+  const timestamp = !settled ? wait.deadline : cancelled ? wait.cancelledAt : result?.observedAt
+  const dateLabel = formatInstant(timestamp)
   const prLabel = `${wait.repository}#${wait.prNumber}`
   return (
     <div data-slot="ci-wait-status" role="status" aria-live="polite" aria-atomic="true"
-      className="mt-1 min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+      className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
       <div className="flex min-w-0 flex-wrap items-center gap-x-1">
         <span>{label}</span>
         <span aria-hidden="true">—</span>
@@ -972,47 +1005,28 @@ function CiWaitStatus({ run }: { run: ApiRun }) {
           </a>
         ) : <span>{prLabel}</span>}
       </div>
-      {!active && wait.phase === 'withdrawn' ? (
-        <p>{run.activity === 'monitoring'
-          ? 'General monitoring does not restart this CI wait.'
-          : 'A new CI wait is needed to resume CI monitoring.'}</p>
-      ) : null}
       {dateLabel ? (
-        <p>{active ? 'Deadline' : 'Observed'}{' '}<time dateTime={timestamp}>{dateLabel}</time></p>
-      ) : active ? <p>CI deadline unavailable</p> : null}
+        <p>{!settled ? 'Deadline' : cancelled ? 'Cancelled' : 'Observed'}{' '}<time dateTime={timestamp}>{dateLabel}</time></p>
+      ) : !settled ? <p>CI deadline unavailable</p> : null}
     </div>
   )
 }
 
-function MonitoringSchedule({ run }: { run: ApiRun }) {
-  if (activeCiWait(run) || run.status !== 'running' || run.activity !== 'monitoring') return null
-  if (run.monitoringWakeCapReached) {
-    return (
-      <p data-slot="monitoring-schedule" role="status" className="mt-1 text-xs text-muted-foreground">
-        Automatic checks paused — 40/40 reached
-      </p>
-    )
-  }
-  const wakeAt = run.monitoringWakeAt ? new Date(run.monitoringWakeAt) : null
-  const validWakeAt = wakeAt && Number.isFinite(wakeAt.getTime()) ? wakeAt : null
-  if (!validWakeAt) {
-    return (
-      <p data-slot="monitoring-schedule" role="status" className="mt-1 text-xs text-muted-foreground">
-        Parked — no automatic check scheduled
-      </p>
-    )
-  }
-  const label = new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'long',
-  }).format(validWakeAt)
+function TimerWaitStatus({ run, wait }: { run: ApiRun; wait: TimerWait }) {
+  const dateLabel = formatInstant(wait.deadline)
   return (
-    <p data-slot="monitoring-schedule" role="status" className="mt-1 text-xs text-muted-foreground">
-      Next automatic check{' '}
-      <time dateTime={run.monitoringWakeAt} className="font-medium text-foreground">
-        {label}
-      </time>
-    </p>
+    <div data-slot="monitoring-schedule" role="status" aria-live="polite" aria-atomic="true"
+      className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+      {wait.phase === 'resolved' ? <p>{owedLabel('Automatic check due', run)}</p> : dateLabel ? (
+        <p>
+          Next automatic check{' '}
+          <time dateTime={wait.deadline} className="font-medium text-foreground">
+            {dateLabel}
+          </time>
+        </p>
+      ) : <p>Automatic check time unavailable</p>}
+      {wait.note ? <p>{wait.note}</p> : null}
+    </div>
   )
 }
 

@@ -21,16 +21,25 @@ const viteCli = resolve(dirname(createRequire(import.meta.url).resolve('vite/pac
 const fixtureDir = resolve(webRoot, '.e2e-fixtures', `ci-header-${process.pid}`)
 const artifacts = resolve(webRoot, '../../.ai/qa/artifacts_e2e/run-header-ci-wait')
 const repository = `${'long-owner-'.repeat(3)}/${'long-repository-'.repeat(5)}`
-const wait: NonNullable<ApiRun['ciWait']> = {
-  id: 'ci-browser', generation: 'generation', turnId: 'turn', timeoutSeconds: 1800,
+type CiWait = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'ci' }>
+type TimerWait = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'timer' }>
+const wait: CiWait = {
+  id: '00000000-0000-4000-8000-000000000474', kind: 'ci', source: 'agent', via: 'cezar_wait',
+  generation: 'generation', turnId: 'turn', timeoutSeconds: 1800,
   repository, prNumber: 474, prUrl: 'https://github.com/owner/repo/pull/474',
   headSha: '123456789abcdef', registeredAt: '2026-09-22T12:00:00.000Z',
-  deadline: '2026-09-22T12:30:00.000Z', phase: 'parked',
+  deadline: '2026-09-22T12:30:00.000Z', phase: 'open',
+}
+const timer: TimerWait = {
+  id: '00000000-0000-4000-8000-000000000005', kind: 'timer', source: 'agent', via: 'cezar_wait',
+  turnId: 'turn', seconds: 300, registeredAt: '2026-09-22T12:00:00.000Z',
+  deadline: '2026-09-22T12:05:00.000Z', phase: 'open',
+  note: `Re-check ${'the-staging-deployment-'.repeat(4)}after the migration finishes`,
 }
 const run: ApiRun = {
   id: 'ci-browser', task: 'Wait for checks', title: 'Wait for checks', workflow: 'quick-task',
-  status: 'running', activity: 'monitoring', createdAt: wait.registeredAt,
-  archived: false, tokensUsed: 0, steps: [], ciWait: wait,
+  status: 'waiting', createdAt: wait.registeredAt,
+  archived: false, tokensUsed: 0, steps: [], waits: [wait],
 }
 let browser: AgentBrowser
 let server: ChildProcess
@@ -114,47 +123,49 @@ describe('CI header browser accessibility', () => {
     }
   }
 
-  it('updates from active registration to queued admission without losing the PR link', () => {
-    browser.evaluate(`window.setCiRun(${JSON.stringify({ ...run, activity: undefined, ciWait: { ...wait, phase: 'registered' } })})`)
+  it('updates from an open wait to a resolved one without losing the PR link', () => {
+    browser.evaluate(`window.setCiRun(${JSON.stringify({ ...run, status: 'running', waits: [wait] })})`)
     browser.waitForFunction(`document.querySelector('${status}').textContent.includes('Waiting for CI')`)
     expect(browser.text(status)).not.toContain('waiting for capacity')
-    browser.evaluate(`window.setCiRun(${JSON.stringify({ ...run, ciWait: { ...wait, phase: 'wake-pending' } })})`)
+    browser.evaluate(`window.setCiRun(${JSON.stringify({ ...run, waits: [{ ...wait, phase: 'resolved' }] })})`)
     browser.waitForFunction(`document.querySelector('${status}').textContent.includes('CI result ready — waiting for capacity')`)
     expect(browser.count(link)).toBe(1)
     expect(browser.count('[data-slot="monitoring-schedule"]')).toBe(0)
   })
   it('keeps a settled result linked while continuation admission is queued or waiting', () => {
     for (const runStatus of ['queued', 'waiting']) {
-      browser.evaluate(`window.setCiRun(${JSON.stringify({ ...run, status: runStatus, activity: undefined,
-        ciWait: { ...wait, phase: 'wake-pending' } })})`)
+      browser.evaluate(`window.setCiRun(${JSON.stringify({ ...run, status: runStatus,
+        waits: [{ ...wait, phase: 'resolved' }] })})`)
       browser.waitForFunction(`document.querySelector('${status}').textContent.includes('CI result ready — waiting for capacity')`)
       expect(browser.count(link)).toBe(1)
     }
   })
 
-  it('distinguishes withdrawn CI from a scheduled monitoring wake and clears the notice on registration', () => {
-    const withdrawn = { ...run, ciWait: undefined, lastCiWait: { ...wait, phase: 'withdrawn' },
-      monitoringWakeAt: '2026-09-22T12:05:00.000Z' }
+  it('keeps a cancelled CI wait beside an open timer and its note, and clears it on a new registration', () => {
+    const cancelled = { ...run, waits: [timer],
+      lastWaits: [{ ...wait, phase: 'cancelled', cancelledAt: '2026-09-22T12:03:00.000Z' }] }
     for (const theme of ['light', 'dark']) {
       browser.setViewport(360, 640)
-      browser.evaluate(`document.documentElement.style.zoom = '1'; document.documentElement.classList.toggle('light', ${theme === 'light'}); window.setCiRun(${JSON.stringify(withdrawn)})`)
+      browser.evaluate(`document.documentElement.style.zoom = '1'; document.documentElement.classList.toggle('light', ${theme === 'light'}); window.setCiRun(${JSON.stringify(cancelled)})`)
       const text = browser.waitForValue(`document.querySelector('${status}')?.textContent`,
-        value => typeof value === 'string' && value.includes('General monitoring does not restart this CI wait.'))
-      expect(text).toContain('CI wait cancelled')
-      expect(browser.text('[data-slot="monitoring-schedule"]')).toContain('Next automatic check')
+        value => typeof value === 'string' && value.includes('CI wait cancelled'))
+      expect(text).toContain('Cancelled')
+      const schedule = browser.text('[data-slot="monitoring-schedule"]')
+      expect(schedule).toContain('Next automatic check')
+      expect(schedule).toContain('after the migration finishes')
       expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= document.documentElement.clientWidth`)).toBe(true)
-      browser.screenshot(resolve(artifacts, `withdrawn-${theme}-360.png`), { viewport: true })
+      browser.screenshot(resolve(artifacts, `cancelled-${theme}-360.png`), { viewport: true })
     }
     browser.evaluate(`window.setCiRun(${JSON.stringify(run)})`)
     const registered = browser.waitForValue(`document.querySelector('${status}')?.textContent`,
       value => typeof value === 'string' && value.includes('Waiting for CI'))
-    expect(registered).not.toContain('does not restart')
+    expect(registered).not.toContain('cancelled')
     expect(browser.count('[data-slot="monitoring-schedule"]')).toBe(0)
   })
 
   it('retains a readable recovery error without fabricating a PR link', () => {
-    const recovered = { ...run, status: 'done', activity: undefined, ciWait: undefined,
-      lastCiWaitError: 'CI wait unavailable — saved observation is unreadable; register a new wait.' }
+    const recovered = { ...run, status: 'done', waits: undefined,
+      lastWaitsError: 'CI wait unavailable — saved observation is unreadable; register a new wait.' }
     browser.setViewport(360, 640)
     browser.evaluate(`document.documentElement.style.zoom = '1'; window.setCiRun(${JSON.stringify(recovered)})`)
     browser.waitForFunction(`document.querySelector('${status}').textContent.includes('saved observation is unreadable')`)
