@@ -150,11 +150,13 @@ describe('fields this cezar does not know (the raw-record codec)', () => {
   it('do not include a field the salvage dropped as unreadable: that drop is the runtime\'s, as before', () => {
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a', { lastCiWait: { unreadable: true }, fromNewerCezar: 1 })]));
     const store = open();
-    expect(store.getRun('a')?.lastCiWaitError).toContain('unreadable');
+    // Store schema 4 reads the legacy field into the wait list's salvage (unified waits).
+    expect(store.getRun('a')?.lastWaitsError).toContain('unreadable');
     store.updateRun('a', { title: 'touched' });
     store.flush();
     expect(persisted('a')).not.toHaveProperty('lastCiWait');
-    expect(persisted('a')).toMatchObject({ fromNewerCezar: 1, lastCiWaitError: expect.stringContaining('unreadable') });
+    expect(persisted('a')).not.toHaveProperty('lastWaits');
+    expect(persisted('a')).toMatchObject({ fromNewerCezar: 1, lastWaitsError: expect.stringContaining('unreadable') });
   });
 
   it('are stored as runs.json held them until the run is first written', () => {

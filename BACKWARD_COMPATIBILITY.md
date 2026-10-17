@@ -177,7 +177,8 @@ the running host, not persisted across cockpit restarts.
 Written by one version, read by the next, and hand-editable by design:
 
 - **`runs.db`** (hearsay-tools/cezarion#779) — the run store: a SQLite database (`node:sqlite`, WAL), one per project, authoritative for run state from the first start that imports `runs.json`. One row per run: `data` is the complete `RunRecord` JSON (zod schema in `packages/cezar/src/runs/store.ts`), `summary` is its `RunSummary` JSON, and a few more columns are copies of record fields kept for queries. Every `RunRecord` rule below still holds; it now describes the JSON in `data`, and the entries named `runs.json → …` are fields of that record. New fields MUST be optional or defaulted (`archived` uses `.default(false)`); a required new field makes every pre-existing run fail the schema on read (the store skips such a row with one warning and leaves it in the database: a finished one is still listed from its stored summary until something reads it, then drops out of the list, and `GET /runs/:id` answers 404 saying it could not be read; before hearsay-tools/cezarion#779 the loader `safeParse`d the whole `runs.json` array and one failure dropped every run). The `runner` and `backend` enums keep the legacy id `claude-cli` **parseable and self-normalizing** — `storedRunnerSchema` accepts it and folds it to `claude`, so an old or hand-edited record loads instead of dropping every run in the file, and no consumer, wire type or contract schema ever sees a fourth runner (open-mercato/cezar#547). Follow that precedent for any id this project renames: widen the READ, fold to the current spelling, and leave the authored surfaces (request bodies, settings, workflow step defs) narrow. The runner id `omp` (Oh My Pi, hearsay-tools/cezarion#595, design `.ai/specs/2026-10-02-omp-runner.md`) is **additive**: it joins `RUNNER_IDS` and every enum derived from it, `pi` keeps its id and behavior, and old run records (rows in `runs.db` or a legacy `runs.json`), configs and workflow files parse unchanged. Per-runner `GET /health` checks gain an `omp` entry, `GET /models?runner=omp` and the Settings → Agent config catalog gain OMP entries (including a `yaml` config format), and `CEZ_OMP_BIN` is a new optional override; a host without `omp` boots as before and shows it unavailable.
-  - The schema version is `PRAGMA user_version` (2; hearsay-tools/cezarion#864 added the run lists' two window indexes, `runs_unarchived` and `runs_archived_roots`, and nothing else). A database with a higher version is refused, never read or written, because a newer layout may hold what this one would drop on its next write. Opening a project migrates a lower version forward. The read-only cold reader never migrates, and reads any version from `RUN_DATABASE_READABLE_FROM` (1) up as it stands, so a project this build has not opened yet still answers the runs index and the workspace search.
+  - The schema version is `PRAGMA user_version` (4). Version 2 (hearsay-tools/cezarion#864) added the run lists' two window indexes, `runs_unarchived` and `runs_archived_roots`, and version 3 the archive-on-merge index, `runs_archive_on_merge`. Version 4 (hearsay-tools/cezarion#1233) changes no table: it changes the record JSON in `data` (the wait list, at the end of this section). A database with a higher version is refused, never read or written, because a newer layout may hold what this one would drop on its next write. Opening a project migrates a lower version forward. The read-only cold reader never migrates, and reads any version from `RUN_DATABASE_READABLE_FROM` (1) up as it stands, so a project this build has not opened yet still answers the runs index and the workspace search.
+  - **Downgrade below schema 4 is refused, loudly.** A cezar from before hearsay-tools/cezarion#1233 opens a version-4 `runs.db` as `unsupported-schema` (table below) and reads nothing. Without the bump it would read records that no longer carry `ciWait`, recover a parked run as a plain waiting one, and settle an owned worker as successful. The recovery is to run this version, or a newer one, again. Exporting for an older cezar (step 4) still works, but that cezar strips `waits` and `lastWaits`, so a run parked on CI or a timer reads there as a plain waiting run.
   - Fields this cezar does not know survive a write: a row keeps the unknown keys it was stored with (a newer cezar's additions), apart from fields the runtime removes.
   - The `meta`, `run_claims` and `run_conflicts` tables are private to cezar and may change in any release. Nothing else may read or write them.
   - Unlike `runs.json`, `runs.db` is not hand-editable. Use the export in "Recovering run history" to read it or to give runs to an older cezar.
@@ -265,17 +266,33 @@ A boot project that failed to open skips worktree pruning, scratch cleanup and r
 
 Breaking: any change that makes an existing file unparseable, silently discarded, or rewritten into a new shape without reading the old one. Required path: read old + new shapes for at least one minor release (a lazy upgrade-on-read is fine since writes go through the schema), or ship an explicit migration; never require the user to delete `.ai/cezar/`.
 
-CI waiting adds optional `ciWait` and bounded `lastCiWait` run fields using the
-shared `CiWait` schema, outside delegation. Old records without them retain
-ordinary monitoring behavior. Invalid CI state must degrade to a visible
-unavailable observation, never success. CI phases (`registered`, `parked`,
-`wake-pending`, `delivered`, `withdrawn`) do not add or rename run statuses:
-parking uses `running` / `activity: monitoring` with the existing capped resource
-exemption. Early results wait for turn-end and scheduler admission. Retain the
-absolute deadline, deterministic lifecycle input ID and delivery checkpoint across
-restarts; replay after ambiguous provider acceptance remains possible, so no
-exactly-once guarantee is made. Human asks, completion/review authority and ordinary
-monitoring timers remain independent. No new marker or browser polling API is added.
+Waits (store schema 4, hearsay-tools/cezarion#1233, spec
+`.ai/specs/2026-10-17-unified-waits.md`) live in one list on the run record:
+optional `waits` (open and resolved waits; at most 16 open) and `lastWaits`
+(settled waits, newest last, capped at 16), both arrays of the contract's `Wait`
+(`ci` or `timer` in phase 1), plus `lastWaitsError` when a saved wait could not be
+read. They replace the CI fields `ciWait`, `lastCiWait` and `lastCiWaitError`
+(#474) and the monitoring fields `monitoringWakeAt`, `monitoringWakeCapReached` and
+`activity: 'monitoring'`, which are never written again. Older rows are upgraded
+on read (`upgradeLegacyWaits` in `runs/store.ts`), and open rewrites every row it
+loads that way:
+
+- `ciWait` in `registered` or `parked` becomes an open `ci` wait, `wake-pending` a
+  resolved one; `lastCiWait` goes to `lastWaits`, `delivered` as delivered and
+  anything else as cancelled. A wait keeps its id, which is also the id of its
+  wake input, so an undelivered CI result is still delivered after the upgrade.
+- `activity: 'monitoring'` on a live run becomes `status: 'waiting'` (its running
+  step too), with an open `timer` due at `monitoringWakeAt` when it had one. On a
+  finished run the monitoring fields are dropped.
+- An unreadable wait entry, legacy or new, is dropped by itself: the run and its
+  readable waits load, `lastWaitsError` says what happened, and the status is left
+  alone. Invalid wait state never reads as success.
+
+A wait ends only when its own event fires, its deadline passes or it is cancelled,
+so a terminal status write no longer clears wait state as a side effect. Deadlines,
+the wait id and the delivery checkpoint survive restarts; replay after ambiguous
+provider acceptance remains possible, so no exactly-once guarantee is made. No new
+marker or browser polling API is added.
 
 ## 4. Workflow YAML format (`packages/cezar/src/workflows/types.ts`)
 

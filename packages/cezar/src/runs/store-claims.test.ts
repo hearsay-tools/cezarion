@@ -74,7 +74,10 @@ describe('open leaves another live store\'s runs alone', () => {
     const parked = serve.createRun({ title: 'parked', workflow: 'w', task: 't', steps: [] });
     serve.updateRun(parked.id, { status: 'waiting' });
     const monitoring = serve.createRun({ title: 'monitoring', workflow: 'w', task: 't', steps: [] });
-    serve.updateRun(monitoring.id, { status: 'running', activity: 'monitoring', monitoringWakeAt: '2026-10-05T12:00:00.000Z' });
+    // A monitoring park as store schema 4 writes it: waiting, with an open timer.
+    serve.updateRun(monitoring.id, { status: 'waiting' });
+    serve.commitWait(monitoring.id, { id: '33333333-3333-4333-8333-333333333333', kind: 'timer', source: 'agent', via: 'monitoring-line',
+      registeredAt: '2026-10-05T11:55:00.000Z', deadline: '2026-10-05T12:00:00.000Z', phase: 'open', turnId: 'turn', seconds: 300 });
     serve.flush();
 
     const headless = open();
@@ -84,12 +87,12 @@ describe('open leaves another live store\'s runs alone', () => {
     headless.close();
 
     expect(persisted(parked.id)).toMatchObject({ status: 'waiting' });
-    expect(persisted(monitoring.id)).toMatchObject({ status: 'running', activity: 'monitoring' });
+    expect(persisted(monitoring.id)).toMatchObject({ status: 'waiting', waits: [{ kind: 'timer', phase: 'open' }] });
     expect(heldThere).toEqual([]);
     serve.close();
     const restarted = open({ keepLive: true });
     expect(restarted.getRun(parked.id)?.status).toBe('waiting');
-    expect(restarted.getRun(monitoring.id)?.status).toBe('running');
+    expect(restarted.getRun(monitoring.id)).toMatchObject({ status: 'waiting', waits: [{ kind: 'timer', phase: 'open' }] });
   });
 
   it('still settles a live run nobody alive owns, as a headless open always has', () => {
