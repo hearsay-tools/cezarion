@@ -1213,13 +1213,77 @@ turn is running must reach the agent without a resend when that turn ends with
 (H2), and a markerless hold-style turn must not park or nudge between the follow-up
 and the next turn (H3). H3 is a guard that the run does not park or nudge in that
 gap, not a proof the follow-up ran as its own turn — except OpenCode continuation,
-which does pin the follow-up across Continue. `AgentSession.holdsHumanInput()` reports
-a follow-up the runner still holds and will still deliver; both turn-end handlers fold
-it into “input delivered” so the run does not close, park, or nudge.
+which does pin the follow-up across Continue. H4 sends the follow-up with
+`mock:deferred-turn-start`, which every mock honors by starting that turn 800 ms late
+(`scripts/mock-deferred-turn-start.mjs`), and asserts no turn starts after the first
+park. H5 adds `:late-ack`: Pi and OMP acknowledge the steer inside the running turn,
+Pi then runs it as its next prompt and OMP reads it before settling.
+
+`AgentSession.holdsHumanInput()` reports a follow-up the runner still holds and will
+still deliver; both turn-end handlers fold it into “input delivered” so the run does
+not close, park, or nudge. Every runner releases a held human input by one rule
+(hearsay-tools/cezarion#1152). It releases only when:
+
+- (a) the normalized `turn.started` of the turn that carries it has been emitted;
+- (b) it is read inside an open normalized turn; or
+- (c) a rejection or a close means it can never start, or a `discardQueuedMessages`
+  drops it. A discard cannot retract an input the wire already wrote or spawned: the
+  runner then either drops only the hold, and the input can still run, or keeps the
+  hold because its discard is a no-op (see the H2 exemptions).
+
+Close releases because run.ts reads the hold only while the session is `open`
+(`harnessHoldsHumanInput` and the recheck timer both check `session.open` first), so
+a runner need not clear its hold on close. A native ack, a native run-start frame, a
+spawn or a queue shift is not a release on its own: it releases only when one of
+those exits already holds, as a Pi or OMP ack does when cezar emitted that turn's
+`turn.started` at the write and the turn is still open. A release on the frame alone
+lets the 250 ms recheck find the hold drained and park the run `waiting` while the
+follow-up's turn is still starting; that turn then runs under Needs you. Each runner
+maps these exits to its own wire:
+
+- **Claude**: (b) the `--replay-user-messages` echo of the line's `uuid`, or a
+  `result` whose `user_message_uuids` names it. A line written after the turn's last
+  model call runs as the CLI's next turn; while that turn is pending, cezar emits its
+  `turn.started` on the first assistant, user or result frame, before it processes the
+  replay echo. A `result` that settles lines through `queued_turn_count` alone is not
+  a release. `discardQueuedMessages` is a no-op on this wire, so it is not an exit.
+- **Codex**: (a) `turn/started` after the human `turn/start`, or the `turn/start`
+  response when `turn/started` came first. (b) the `item/started` `userMessage` echo
+  of a steer's `clientUserMessageId`. (c) a `turn/start` or `turn/steer` error;
+  `discardQueuedMessages` is a no-op on this wire, so it is not an exit. A
+  `turn/steer` response is admission, not a release.
+- **OpenCode**: (a) the `turn.started` cezar emits at the follow-up's `prompt_async`
+  POST, once the running turn ends. (c) `discardQueuedMessages`. A follow-up sent
+  while a question reply is in flight stays held until that reply succeeds, then posts
+  like any other.
+- **Cursor ACP**: (a) the `turn.started` cezar emits when it shifts the follow-up off
+  its queue into `session/prompt`, after the running prompt's response. (c)
+  `discardQueuedMessages`, which a `CEZ:ASK` turn end also runs.
+- **Cursor print**: (a) the `system`/`init` frame of the print process that carries
+  the follow-up, which the mapper turns into `turn.started`. (c)
+  `discardQueuedMessages`, which drops the queue; for a spawned follow-up it drops
+  only the hold, and that process can still run it. The queue shift and the spawn are
+  not a release. Before the wrapper picks ACP or print, it holds the follow-up itself
+  and hands it to the runner it picks.
+- **Pi**: (a) its ack, when its write opened a normalized turn that is still open
+  (cezar emits that `turn.started` at the write); for a steer, the first
+  `turn.started` after its ack. (b) its user `message_start` inside an open
+  normalized turn. (c) a rejected ack, and `discardQueuedMessages`, which drops only
+  the hold: the prompt is already written and can still run. A steer's ack alone is
+  not a release: Pi reads a steer acknowledged after the turn's last model call as
+  its next prompt, after `agent_settled` (the `mock:steer-late` ordering, H5). A raw
+  `agent_start` is not one either: the mapper reports nothing for it, and Pi's mock in
+  H5 holds 800 ms between that run's `agent_start` and its first activity.
+- **OMP**: the Pi exits, plus (b) its `prompt_result`, which OMP sends at the
+  terminal `agent_end` before `session_settled`. (c) also covers a local
+  (`agentInvoked: false`) ack or `prompt_result`. A raw `agent_start` is not a
+  release.
+
 `discardQueuedMessagesOnAsk` still runs first, so an ASK park drops the waiter on
 queueing wires. Write-through/steer wires may consume the follow-up inside the running
-turn or open a later one; H1 still holds either way. A held follow-up that drains
-without opening a turn must re-settle the idle boundary (close, park, or nudge).
+turn or open a later one; H1 still holds either way. A held follow-up that drains at
+an idle boundary (the turn already ended) without opening a new turn must call
+`onAgentInputReady` so run.ts re-settles that boundary (close, park, or nudge).
 `handleAgentInputReady` is the fast path and a 250 ms recheck timer is the backstop;
 after `UNREAD_INPUT_GRACE_MS` of a hold that never drained with no runner activity,
 the follow-up is treated as delivered-unconfirmed (a `#505`-style note) and the
@@ -1227,24 +1291,6 @@ boundary settles so the run cannot keep a slot forever. Codex does not release a
 human `turn/steer` whose completed-then-response ordering left no active turn; it
 restarts an accepted-but-unread steer with `turn/start` under the same
 `clientUserMessageId`, and skips that restart when the turn already echoed the id.
-A Codex human `turn/start` keeps `holdsHumanInput()` true until `turn/started`
-(or until that turn will never start: start error, close, interrupt). The same holds
-for every drain that opens a new native turn (H4, hearsay-tools/cezarion#1112): a Cursor
-print follow-up stays held from the queue shift until its process's init frame. A Pi or OMP
-human prompt stays held from its write, past its ack, until a normalized turn has it — the
-rule Codex keeps: its user `message_start` inside an open normalized turn, its ack while the
-turn it opened is still open, the first `turn.started` after its ack, or (OMP) its
-`prompt_result`. A rejected or local ack and `discardQueuedMessages` also release it. The ack
-alone never does: Pi reads a steer acknowledged after the turn's last model call as its next
-prompt, after `agent_settled` (the `mock:steer-late` ordering, H5). Nor does a raw
-`agent_start`, which neither mapper reports: Pi's mock in H5 holds 800 ms between that run's
-`agent_start` and its first activity, the window in which a release there let the run park.
-Without that, the 250 ms recheck found the hold drained and parked the run `waiting`
-while the follow-up's turn was still starting, and that turn then ran under Needs you.
-H4 sends the follow-up with `mock:deferred-turn-start`, which every mock honors by
-starting that turn 800 ms late (`scripts/mock-deferred-turn-start.mjs`), and asserts no
-turn starts after the first park. H5 adds `:late-ack`: Pi and OMP acknowledge the steer inside
-the running turn, Pi then runs it as its next prompt and OMP reads it before settling.
 OMP named wire limit: a human prompt rejected after `session_settled` is only a note
 and is not restarted — real OMP settles only at `queuedMessageCount === 0`, so a
 steer accepted before settle is read in-turn (I2), and a post-settle rejection has
