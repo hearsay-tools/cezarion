@@ -92,7 +92,7 @@ import {
 } from '../worktree-setup.ts';
 import { getHeadCommit, getRepoInfo } from '../server/git.ts';
 import { ensureOwnedWorkspace, verifyOwnedWorkspace } from '../delegation/workspace.ts';
-import { verifyWorkerContext } from '../delegation/context.ts';
+import { placeWorkerAttachments, verifyWorkerContext } from '../delegation/context.ts';
 import { enqueueAgentInput, agentInputBatch, hasLiveInboxClaim } from '../delegation/input.ts';
 import { parseDelegationEffort } from '../delegation/effort.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
@@ -5830,7 +5830,8 @@ export class RunManager {
       try {
         if (record.delegation.destroy) throw new Error('Worker destruction has begun');
         cwd = (await verifyOwnedWorkspace(this.repoRoot, record)).path;
-        await verifyWorkerContext({ dataDir: this.dataDir, parentId: record.delegation.parentRunId, workspace: record.delegation.workspace, context: record.delegation.context });
+        await verifyWorkerContext({ dataDir: this.dataDir, parentId: record.delegation.parentRunId, workspace: record.delegation.workspace, context: record.delegation.context,
+          parentCwd: this.store.getRun(record.delegation.parentRunId)?.worktreePath ?? this.repoRoot });
       } catch (error) {
         const message = `owned workspace unavailable: ${error instanceof Error ? error.message : String(error)}`;
         const finishedAt = new Date().toISOString();
@@ -6639,7 +6640,11 @@ export class RunManager {
       try {
         if (this.workerExecutionStopped(runId)) { this.dropActive(runId); return; }
         const ownedWorkspace = owned && ownedRun ? await ensureOwnedWorkspace(this.repoRoot, ownedRun) : undefined;
-        if (ownedRun?.delegation?.role === 'worker') await verifyWorkerContext({ dataDir: this.dataDir, parentId: ownedRun.delegation.parentRunId, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context });
+        if (ownedRun?.delegation?.role === 'worker') await verifyWorkerContext({ dataDir: this.dataDir, parentId: ownedRun.delegation.parentRunId, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context,
+          parentCwd: this.store.getRun(ownedRun.delegation.parentRunId)?.worktreePath ?? this.repoRoot });
+        // First launch only (hearsay-tools/cezarion#1149): a worker re-queued past its first step and
+        // runContinuation never re-place attachments the worker may have edited or deleted.
+        if (ownedRun?.delegation?.role === 'worker' && startAt === 0) await placeWorkerAttachments({ dataDir: this.dataDir, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context });
         const wt = ownedWorkspace
           ? { path: ownedWorkspace.path, branch: ownedWorkspace.branch, baseBranch: ownedWorkspace.baselineSha }
           : await createWorktree(this.repoRoot, runId, base);
@@ -6653,7 +6658,11 @@ export class RunManager {
         emit({ type: 'note', message: `worktree ready — branch ${wt.branch} (base ${wt.baseBranch})` });
         // Seed from this manager's project root: each multi-project context has
         // its own manager/repoRoot and must never copy another project's layer.
-        const seededConfig = await seedAgentConfigLocalLayer(this.repoRoot, state.cwd).catch(() => []);
+        // A worker's explicit `--attach` files win over the main checkout's copy (hearsay-tools/cezarion#1149).
+        const attached = new Set(ownedRun?.delegation?.role === 'worker'
+          ? (ownedRun.delegation.context?.inputs ?? []).flatMap(input => input.source.kind === 'parent-file' ? [input.source.path] : [])
+          : []);
+        const seededConfig = await seedAgentConfigLocalLayer(this.repoRoot, state.cwd, process.env, attached).catch(() => []);
         if (seededConfig.length > 0) {
           emit({ type: 'note', message: `seeded personal agent config: ${seededConfig.join(', ')}` });
         }

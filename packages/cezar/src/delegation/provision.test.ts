@@ -47,6 +47,12 @@ describe('session provisioning', () => {
     expect(instructions).toContain('--request-id <UUID> --runner codex');
     expect(instructions).not.toMatch(/backend/i);
   });
+  // hearsay-tools/cezarion#1149: a parent that never reads --help still learns --attach and its ignored-only rule.
+  it('teaches --attach and the parent-file reference in the parent instructions', () => {
+    const { instructions } = provision()!;
+    expect(instructions).toMatch(/--attach <path> \(repeatable; copies a git-ignored file from your worktree[^)]*commit those instead\)/);
+    expect(instructions).toContain('baseline-file, parent-attachment or parent-file references');
+  });
   it('provisions no ordinary-run metadata while off and never promotes invalid/worker records to roots', async () => {
     const ordinary = f.store.createRun({ title: 'ordinary', task: 'ordinary', workflow: 'quick-task', steps: [] });
     vi.stubEnv('CEZ_DELEGATION', '0'); expect(provision(ordinary.id)).toBeUndefined(); expect(f.store.getRun(ordinary.id)?.delegation).toBeUndefined();
