@@ -136,7 +136,7 @@ export class ProjectAutomationScheduler {
       }
       this.handle.onChange?.(definition.id, definition.revision);
       completion = mode === 'preview'
-        ? { result: 'preview', reason: `Bounded preview found ${eligible.length} match${eligible.length === 1 ? '' : 'es'}; no tasks were launched.` }
+        ? { result: 'preview', reason: `Bounded preview found ${eligible.length} filter match${eligible.length === 1 ? '' : 'es'}; no tasks were launched. Counts can include closed items and previously processed events.` }
         : { result: 'no-match', reason: 'Scheduled check completed.' };
       return { ...result, candidates: eligible };
     } catch (error) {
