@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { workerWaitRequestSchema } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
+import { DelegationService } from '../delegation/service.ts';
 import { CiToolController } from '../ci-wait/controller.ts';
 import { callCiWait } from '../ci-wait/client.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
@@ -78,4 +79,43 @@ describe('R27 CI registration refusal after worker settlement — #713', { timeo
       expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
     } finally { wire.release(); await controller.close(); }
   });
+  for (const action of ['cancel', 'destroy'] as const) {
+    it.each(RUNNER_IDS)(`%s R80 ${action} frees a settled wait during the same native turn`, async runner => {
+      const wire = holdNativeTurn(runner);
+      vi.spyOn(CiWatcherSupervisor.prototype, 'resolve').mockResolvedValue(identity);
+      vi.spyOn(CiWatcherSupervisor.prototype, 'watch').mockReturnValue(new Promise(() => {}));
+      const controller = await CiToolController.start();
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.hold!, runner });
+      store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+      try {
+        await until(wire.received);
+        const state = (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(run.id)!;
+        const tools = controller.provision((request, signal) => manager.registerCiWait(run.id, request, state.ciGeneration, signal));
+        const child = await worker(run.id);
+        const wait = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
+        fixtureUpdateRun(child.id, { status: 'done' });
+        manager.reconcileWorkerWaits();
+        expect(waitOf(store.getRun(run.id))?.phase).toBe('wake-pending');
+        if (action === 'cancel') manager.cancelWorkerWait(run.id, wait.id);
+        else {
+          const service = new DelegationService();
+          const unregister = service.registerProject({ id: 'project', root, store, manager });
+          try {
+            expect(await service.destroyForHuman('project', child.id)).toMatchObject({ state: 'complete', remaining: [] });
+          } finally { unregister(); }
+        }
+        expect(waitOf(store.getRun(run.id))).toBeUndefined();
+        expect(store.getRun(run.id)?.delegation).toMatchObject({ lastWait: { id: wait.id,
+          reason: action === 'cancel' ? 'cancelled' : 'outcome', outcomes: [{ workerId: child.id, status: 'done' }] } });
+        expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === wait.id && !input.deliveredAt)).toEqual([]);
+        expect(store.readEvents(run.id).filter(event => event.type === 'turn-end')).toHaveLength(0);
+        // A new worker wait and then CI can both register before releasing the held turn.
+        const next = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
+        manager.reconcileWorkerWaits();
+        manager.cancelWorkerWait(run.id, next.id);
+        await expect(callCiWait({ pr }, tools.env)).resolves.toMatchObject({ prUrl: pr });
+      } finally { wire.release(); await controller.close(); }
+    });
+  }
+
 });

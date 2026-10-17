@@ -28,6 +28,26 @@ import { blockRunWrites, readPersistedRuns, readPersistedText } from '../runs/ru
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
 describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
+  it('restart delivers a destroyed worker wake instead of stranding a parked parent', async () => {
+    const p = await parent();
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id);
+    const wait = register(p.id, [w.id]);
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+    fixtureUpdateRun(w.id, { status: 'done' });
+    const delegation = store.getRun(w.id)!.delegation;
+    if (delegation?.role !== 'worker') throw Error('worker fixture');
+    store.commitDelegation([{ id: w.id, delegation: { ...delegation,
+      destroy: { requestedAt: new Date().toISOString(), phase: 'complete', remaining: [] } } }]);
+    store.flush();
+    const disk = readPersistedRuns(join(root, '.ai/cezar'));
+    await restart(false, disk);
+    await until(() => store.getRun(p.id)?.agentInputs?.some(input => input.id === wait.id && !!input.deliveredAt) === true);
+    expect(waitOf(store.getRun(p.id))).toBeUndefined();
+    expect(store.getRun(p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id,
+      outcomes: [{ workerId: w.id, status: 'done' }] } });
+  });
+
   it('a deadline write failure is contained and retried without losing intent or capacity', async () => {
     // This fault exercises only deadline persistence, never an unrelated live turn.
     const release = join(root, 'release-deadline-turn'); const wire = controlledWire({ firstResultGate: release });

@@ -2556,14 +2556,14 @@ export class RunStore extends EventEmitter {
   }
 
   /** Retain the settled receipt and retire exactly one wait together with any human message that superseded it. */
-  commitWorkerWaitWithdrawal(id: string, waitId: string, acceptedHumanMessage?: QueuedMessage): void {
+  commitWorkerWaitWithdrawal(id: string, waitId: string, acceptedHumanMessage?: QueuedMessage, reason?: 'cancelled'): void {
     const run = this.peek(id);
     if (!run?.delegation || run.delegation.role === 'invalid' || run.delegation.wait?.id !== waitId) {
       throw new Error('worker wait changed before withdrawal');
     }
     const { wait, ...delegation } = run.delegation;
     const message = acceptedHumanMessage ? queuedMessageSchema.parse(acceptedHumanMessage) : undefined;
-    this.commitIndex(new Map([[id, { ...run, delegation: { ...delegation, lastWait: wait.phase === 'wake-pending'
+    this.commitIndex(new Map([[id, { ...run, delegation: { ...delegation, lastWait: reason ? { ...wait, phase: 'wake-pending', reason, wakeId: wait.wakeId ?? wait.id } : wait.phase === 'wake-pending'
       ? reconcileWorkerWait(wait, [], new Date().toISOString())
       : { ...wait, phase: 'wake-pending', reason: wait.reason ?? 'cancelled', wakeId: wait.wakeId ?? wait.id } },
       // An adopted agent input belongs to its sender, even when it carries the wait receipt.
