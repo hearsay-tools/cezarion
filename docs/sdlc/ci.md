@@ -43,7 +43,10 @@ requested full local browser run or CI failure investigation, use
 `npm run test:changed -- --base=<ref>`. `--plan` prints the selection and command
 without executing it. Ordinary TS/JS source changes use Vitest's import graph.
 Contract/configuration/unknown input, removed paths, missing base or failed Git
-inspection run full Vitest. Clean and Markdown-only changes explicitly skip.
+inspection run full Vitest. Clean changes, and changes confined to CI's docs-only
+list (`isDocsPath` in `.github/scripts/change-surface.cjs`, which includes Markdown
+under `packages/` outside fixture directories but not the Markdown a test reads),
+explicitly skip.
 Inspect `--plan` before running it; if it selects the full suite, choose focused
 checks and leave full verification to CI. No matching tests fails rather than
 reporting a pass; select test files explicitly and report any coverage gap.
@@ -84,7 +87,7 @@ intentionally trading single-run latency for lower concurrency on a shared host.
 Verification runs in ten parallel jobs. Eight use the current Node LTS; the two Node floor shards use exactly the `engines.node` minimum (Node 24.15.0):
 
 - Three Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/3 --maxWorkers=4` for N=1..3.
-- Two Node floor shards on `ubuntu-24.04` (`node-floor`) run on exactly Node 24.15.0, the root `engines.node` minimum, so a Node API newer than the floor (such as a `node:sqlite` call) fails here instead of on a user's machine. Both install dependencies, build the server and run `npm test -- --shard=N/2 --maxWorkers=4`; shard 1 also runs `npm run typecheck` and `npm run test:unit`.
+- Two Node floor shards on `ubuntu-24.04` (`node-floor`) run on exactly Node 24.15.0, the root `engines.node` minimum, so a Node API newer than the floor (such as a `node:sqlite` call) fails here instead of on a user's machine. Both install dependencies, build the server and run `npm test -- --shard=N/2 --maxWorkers=4`; shard 1 also runs `npm run typecheck` and `npm run test:unit`. Their Node setup has a three-minute step timeout and one retry, so a stalled Node download costs minutes instead of the job's 20-minute budget (hearsay-tools/cezarion#1214).
 - The build/package job on `ubuntu-24.04` runs typechecking, Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing.
 - Four cockpit browser E2E shards on `ubuntu-latest` each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
 

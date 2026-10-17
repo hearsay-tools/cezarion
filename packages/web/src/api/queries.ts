@@ -26,6 +26,7 @@ import {
   getAgentProfiles,
   getConfig,
   getGithub,
+  getGithubCommentCounts,
   getGithubProjects,
   getGithubChecks,
   getGithubSearch,
@@ -114,6 +115,7 @@ import type {
   OpenAgentAccountFileInput,
   ProjectListEntry,
   ProjectsResponse,
+  GithubData,
   GithubRefStatusData,
   ProviderStatusResponse,
   ReferenceStatus,
@@ -127,6 +129,14 @@ import type {
   NotifyRunInput,
 } from '@open-mercato/cezar-api-client'
 import { liveRefetchInterval } from '@/lib/live-refetch'
+import {
+  flattenGithubPages,
+  GITHUB_PAGE_SIZE,
+  nextGithubPageParam,
+  reconcileGithubHead,
+  type GithubPageParam,
+} from './github-pages'
+import type { InfiniteData } from '@tanstack/react-query'
 import { subscribeTopic } from './ws'
 
 /**
@@ -221,6 +231,13 @@ export const queryKeys = {
     return [queryScope(), 'worktrees'] as const
   },
   github: (params: { limit?: number } = {}) => [queryScope(), 'github', params.limit ?? null] as const,
+  /** The paged list (hearsay-tools/cezarion#1183): one infinite query per page size. */
+  githubPages: (pageSize: number) => [queryScope(), 'github', 'pages', pageSize] as const,
+  /** Page 1 as the live read last saw it; reconciled into `githubPages`, never rendered. */
+  githubPagesHead: (pageSize: number) => [queryScope(), 'github', 'pages-head', pageSize] as const,
+  /** Deferred comment counts, keyed by kind and the sorted numbers. */
+  githubCommentCounts: (kind: 'issue' | 'pr', numbers: readonly number[]) =>
+    [queryScope(), 'github', 'comment-counts', kind, [...numbers].sort((a, b) => a - b).join(',')] as const,
   /** Lazy PR checks glyphs (`GET /api/github/checks`, #664), keyed by the sorted PR numbers so the
    *  same visible window de-dupes to one cache entry. */
   githubChecks: (prNumbers: readonly number[]) =>
@@ -1780,6 +1797,146 @@ export function useProjectGithub(scope: string, params: { limit?: number } = {},
     staleTime: 60_000,
     refetchOnWindowFocus: true,
   })
+}
+
+type GithubPages = InfiniteData<GithubData, GithubPageParam>
+
+/** A later page GitHub could not serve. The server degrades in the payload (`available: false`,
+ *  HTTP 200), which as a page would end the list with no way on: thrown instead, it surfaces as
+ *  the failed page whose Retry asks for the same cursor again. */
+class GithubPageUnavailableError extends Error {}
+
+/** The options both readers of one paged list share, so either can start the query. */
+function githubPagesOptions(key: readonly unknown[], pageSize: number, projectId?: string) {
+  return {
+    queryKey: key,
+    initialPageParam: {} as GithubPageParam,
+    queryFn: async ({ pageParam, signal }: { pageParam: GithubPageParam; signal: AbortSignal }) => {
+      const page = await getGithub({ limit: pageSize, ...pageParam, ...(projectId ? { projectId } : {}) }, { signal })
+      // Page 1 keeps its payload: the tab's own unavailable state explains it.
+      if (!page.available && Object.keys(pageParam).length > 0) throw new GithubPageUnavailableError(page.reason ?? 'GitHub is unavailable.')
+      return page
+    },
+    getNextPageParam: (last: GithubData) => nextGithubPageParam(last),
+    // GitHub's own answer is not retried behind the user's back: Retry is theirs to press.
+    retry: (failureCount: number, error: Error) => !(error instanceof GithubPageUnavailableError)
+      && !(error instanceof ApiError && error.status >= 400 && error.status < 500) && failureCount < 1,
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+  }
+}
+
+/**
+ * The GitHub tab's list, a page at a time (hearsay-tools/cezarion#1183). `pages` is the infinite
+ * query (`fetchNextPage`, `hasNextPage`, errors); `data` flattens every loaded page into the
+ * single-list shape the tab rendered before paging.
+ *
+ * The minute-long live read (#152) watches page 1 only. When page 1's rows or either total moved
+ * and later pages are loaded, every cursor after it may have shifted, so all loaded pages refetch
+ * in order (TanStack refetches an infinite query page by page from the first param). An unmoved
+ * head is folded in place. Board metadata follows up per page, each under its own generation.
+ */
+export function useGithubPages(pageSize = GITHUB_PAGE_SIZE, enabled = true) {
+  const client = useQueryClient()
+  const key = queryKeys.githubPages(pageSize)
+  const headKey = queryKeys.githubPagesHead(pageSize)
+  useLiveRead(`/api/v1/p/${queryScope()}/github?limit=${pageSize}`, headKey, liveRefetchInterval(enabled ? 60_000 : false))
+  const pages = useInfiniteQuery({ ...githubPagesOptions(key, pageSize), enabled, refetchInterval: false, refetchIntervalInBackground: false })
+  // Observes what the live read writes; never fetches on its own.
+  const head = useQuery({
+    queryKey: headKey,
+    queryFn: ({ signal }) => getGithub({ limit: pageSize }, { signal }),
+    enabled: false,
+    staleTime: Infinity,
+  })
+  const { refetch } = pages
+  useEffect(() => {
+    if (!head.data) return
+    const current = client.getQueryData<GithubPages>(key)
+    if (!current || current.pages.length === 0) return
+    const next = reconcileGithubHead(current.pages, head.data)
+    if (next === 'refetch') void refetch()
+    else client.setQueryData<GithubPages>(key, { ...current, pages: next })
+    // `head.dataUpdatedAt` alone decides when a new head arrived.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, head.dataUpdatedAt, refetch])
+
+  const refreshing = (pages.data?.pages ?? []).flatMap((page) =>
+    page.projectsState === 'refreshing' && page.projectsGeneration ? [page.projectsGeneration] : [])
+  const metadata = useQueries({
+    queries: refreshing.map((generation) => ({
+      queryKey: [...key, 'projects', generation],
+      queryFn: ({ signal }: { signal: AbortSignal }) => getGithubProjects(generation, { signal }),
+      enabled,
+      staleTime: Infinity,
+      retry: false,
+    })),
+  })
+  const settled = metadata.map((result, index) => (result.data || result.error ? refreshing[index] : '')).join(',')
+  useEffect(() => {
+    metadata.forEach((result, index) => {
+      const generation = refreshing[index]
+      if (!generation || (!result.data && !result.error)) return
+      client.setQueryData<GithubPages>(key, (current) => {
+        if (!current) return current
+        let changed = false
+        const next = current.pages.map((page) => {
+          if (page.projectsGeneration !== generation || page.projectsState !== 'refreshing') return page
+          const answer = result.data
+          if (answer?.generation && answer.generation !== generation) return page
+          changed = true
+          return answer?.state === 'ready' ? {
+            ...page, projectsState: 'ready' as const, projects: answer.projects,
+            issues: page.issues.map((issue) => ({ ...issue, projectIds: answer.membership?.[issue.number] ?? [] })),
+          } : {
+            ...page, projectsState: 'unavailable' as const,
+            projectsReason: answer?.reason ?? 'Project boards unavailable. Refresh to try again.',
+          }
+        })
+        return changed ? { ...current, pages: next } : current
+      })
+    })
+    // `settled` names exactly the generations with an answer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, settled])
+
+  const data = useMemo(() => flattenGithubPages(pages.data?.pages ?? []), [pages.data])
+  return { pages, data }
+}
+
+/**
+ * The paged list for an EXPLICIT project scope: the sidebar's and the filter screen's read of the
+ * cache entry `useGithubPages` fills for the routed view (see `useProjectGithub` for why the scope
+ * is explicit). Read-only: no live read and no board follow-up; the routed view owns both.
+ */
+export function useProjectGithubPages(scope: string, pageSize = GITHUB_PAGE_SIZE, enabled = true) {
+  const pages = useInfiniteQuery({ ...githubPagesOptions([scope, 'github', 'pages', pageSize] as const, pageSize, scope), enabled })
+  const data = useMemo(() => flattenGithubPages(pages.data?.pages ?? []), [pages.data])
+  return { pages, data }
+}
+
+/**
+ * Deferred comment counts (hearsay-tools/cezarion#1183), one request per group of row numbers
+ * (one group per loaded page, so each stays under the route's 100-number cap), merged into one
+ * map. An absent number is unknown; a failed group leaves its rows without a badge.
+ */
+export function useGithubCommentCounts(kind: 'issue' | 'pr', groups: readonly (readonly number[])[], enabled = true): Record<number, number> {
+  const results = useQueries({
+    queries: groups.filter((numbers) => numbers.length > 0).map((numbers) => ({
+      queryKey: queryKeys.githubCommentCounts(kind, numbers),
+      queryFn: ({ signal }: { signal: AbortSignal }) => getGithubCommentCounts(kind, numbers, {}, { signal }),
+      enabled,
+      staleTime: 60_000,
+    })),
+  })
+  const signature = results.map((result) => result.dataUpdatedAt).join(',')
+  return useMemo(() => {
+    const counts: Record<number, number> = {}
+    for (const result of results) if (result.data?.available) Object.assign(counts, result.data.counts)
+    return counts
+    // `signature` changes exactly when an answer does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature])
 }
 
 /** `useGithubSearch` for an explicit scope (see `useProjectGithub`); shares its cache entry. */

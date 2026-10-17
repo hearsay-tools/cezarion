@@ -2,12 +2,11 @@ const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
-const { classifyJsonLines, classifyPaths } = require('./change-surface.cjs');
+const { classifyJsonLines, classifyPaths, isDocsPath, testReadDocuments } = require('./change-surface.cjs');
+const docsPathCases = require('./fixtures/docs-path-cases.cjs');
 
 const rootProcessDocuments = [
-  'AGENT_PROTOCOL.md',
   'AGENTS.md',
-  'BACKWARD_COMPATIBILITY.md',
   'CODE_REVIEW.md',
   'SDLC.md',
 ];
@@ -27,6 +26,9 @@ const infraScripts = [
   '.github/scripts/ci-sweep-patterns.cjs',
   '.github/scripts/ci-sweep-report.cjs',
   '.github/scripts/apply-issue-intake.cjs',
+  '.github/scripts/issue-intake-candidates.cjs',
+  '.github/scripts/jev-issue-intake.cjs',
+  '.github/scripts/jev-intake-replay.cjs',
 ];
 
 test('classifies every allowlisted path group as docs-only', () => {
@@ -40,6 +42,52 @@ test('classifies every allowlisted path group as docs-only', () => {
   for (const license of ['LICENSE', 'LICENSE.md', 'LICENSE.txt', 'LICENSE-THIRD-PARTY', 'LICENSE.custom']) {
     assert.equal(classifyPaths([license]), 'docs-only');
   }
+});
+
+test('Markdown under packages/ is docs-only unless it sits in a fixture directory', () => {
+  assert.equal(classifyPaths(['packages/web/e2e/README.md']), 'docs-only');
+  assert.equal(classifyPaths(['packages/api-client/README.md']), 'docs-only');
+  assert.equal(classifyPaths(['packages/web/e2e/README.md', 'README.md', 'docs/guide.md']), 'docs-only');
+  for (const fixture of [
+    'packages/cezar/src/core/__fixtures__/omp/README.md',
+    'packages/web/e2e/fixtures/README.md',
+    'packages/cezar/src/__snapshots__/notes.md',
+  ]) assert.equal(classifyPaths([fixture]), 'full-matrix', fixture);
+  for (const notDocs of ['packages/web/e2e/README.MD', 'packages/web/e2e/smoke.e2e.ts']) {
+    assert.equal(classifyPaths([notDocs]), 'full-matrix', notDocs);
+  }
+  assert.equal(classifyPaths(['packages/web/e2e/README.md', 'packages/web/e2e/smoke.e2e.ts']), 'full-matrix');
+});
+
+test('Markdown a test reads runs the full matrix', () => {
+  // bc-route-inventory.test.ts reads BACKWARD_COMPATIBILITY.md, and
+  // harness-parity.test.ts reads AGENT_PROTOCOL.md and the parity matrix spec,
+  // so none of them can skip Vitest.
+  assert.deepEqual([...testReadDocuments].sort(), [
+    '.ai/specs/2026-09-04-harness-parity-matrix.md',
+    'AGENT_PROTOCOL.md',
+    'BACKWARD_COMPATIBILITY.md',
+  ]);
+  for (const document of testReadDocuments) {
+    assert.equal(isDocsPath(document), false, document);
+    assert.equal(classifyPaths([document]), 'full-matrix', document);
+    assert.equal(classifyPaths(['README.md', document]), 'full-matrix', document);
+  }
+});
+
+test('isDocsPath agrees with the shared docs verdict list', () => {
+  for (const { path, docs } of docsPathCases) {
+    assert.equal(isDocsPath(path), docs, path);
+    assert.equal(classifyPaths([path]), docs ? 'docs-only' : 'full-matrix', path);
+  }
+});
+
+test('isDocsPath fails closed for unsafe paths', () => {
+  for (const unsafe of [
+    undefined, null, 42, '', '/README.md', 'docs\\guide.md', 'docs/guide.md\0',
+    'docs/../README.md', 'docs//guide.md', 'packages/web/e2e/../README.md',
+    'packages//web/README.md', 'packages/web/e2e/',
+  ]) assert.equal(isDocsPath(unsafe), false, JSON.stringify(unsafe));
 });
 
 test('generated upstream ledger files skip the matrix without allowing arbitrary upstream code', () => {
@@ -85,6 +133,8 @@ test('classifies infra harness and unnamed github paths as full-matrix', () => {
     '.github/workflows/ci-benchmark.yml',
     '.github/scripts/change-surface.cjs',
     '.github/scripts/change-surface.test.cjs',
+    '.github/scripts/change-surface-readers.test.cjs',
+    '.github/scripts/fixtures/docs-path-cases.cjs',
     '.github/scripts/require-e2e-passed.cjs',
     '.github/scripts/ci-test-sequencer.mjs',
     '.github/scripts/automated-review.cjs',

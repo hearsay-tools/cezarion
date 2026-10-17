@@ -219,7 +219,9 @@ describe('the GitHub tab against the live dry-run server', () => {
       };
       document.querySelector('a[href="${scoped('/github')}"]').click();
     })()`)
-    browser.waitForFunction(`document.querySelectorAll('[data-slot="gh-row"]').length === 40`)
+    // The list is virtualized (hearsay-tools/cezarion#1183): only a window of the 40 rows mounts, so
+    // wait for the first fixture row inside the virtualizer rather than for all of them.
+    browser.waitForFunction(`document.querySelector('[data-slot="gh-rows"][data-virtualized="true"] [data-slot="gh-row"][data-number="9000"]') !== null`)
     browser.waitForFunction(`document.querySelector('[data-slot="gh-detail"]') !== null`)
 
     const atTop = waitForSettledSample<{ titleVisible: boolean }>(browser, `(() => {

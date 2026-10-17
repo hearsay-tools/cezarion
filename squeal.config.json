@@ -12,6 +12,11 @@
     "onStart": "lookup-only"
   },
   "inputs": {
+    "packages/web/src/test/card-2-contrast.test.ts": [
+      "packages/web/src/**/*.tsx",
+      "packages/web/src/test/card-2-contrast.baseline.json",
+      "packages/web/src/styles/index.css"
+    ],
     "packages/cezar/test/e2e/*.test.ts": [
       "packages/cezar/dist/**",
       "packages/cezar/web/dist/**",
@@ -41,7 +46,8 @@
       ".ai/scripts/e2e-served-repo.mjs",
       ".ai/scripts/e2e-lanes.mjs",
       ".ai/browsers/agent-browser.md",
-      "packages/web/e2e/**"
+      "packages/web/e2e/**/*.{ts,mjs}",
+      "packages/web/e2e/fixtures/**"
     ],
     ".github/scripts/*.test.cjs": [
       ".github/workflows/**",
@@ -95,7 +101,13 @@
     ],
     "scripts/test-changed.test.mjs": [
       "scripts/test-changed.mjs",
+      ".github/scripts/change-surface.cjs",
+      ".github/scripts/fixtures/docs-path-cases.cjs",
       "package.json"
+    ],
+    ".github/scripts/change-surface-readers.test.cjs": [
+      "packages/**",
+      "squeal.config.json"
     ],
     "packages/cezar/src/pid-file.testkit.test.ts": [
       "packages/cezar/src/**/*.test.ts",

@@ -230,6 +230,30 @@ test('classification is not a path filter and build-and-package stays unconditio
   assert.equal(ci.jobs['build-and-package'].needs, undefined);
 });
 
+test('build-and-package lints workflows with pinned, hash-verified actionlint and shellcheck (hearsay-tools/cezarion#1130)', () => {
+  const steps = workflow().jobs['build-and-package'].steps;
+  const index = steps.findIndex((step) => step.name === 'Lint workflows');
+  assert.ok(index > 0, 'expected a Lint workflows step');
+  assert.equal(steps[index - 1].name, 'Check out repository', 'lint before Node setup so it fails in seconds');
+  const { env, run } = steps[index];
+  const [major, minor, patch] = String(env.ACTIONLINT_VERSION).split('.').map(Number);
+  assert.ok(major * 1e6 + minor * 1e3 + patch >= 1_007_010,
+    `actionlint ${env.ACTIONLINT_VERSION}: 1.7.10 is the first release that reads YAML anchors`);
+  assert.match(String(env.SHELLCHECK_VERSION), /^\d+\.\d+\.\d+$/);
+  assert.match(env.ACTIONLINT_SHA256, /^[0-9a-f]{64}$/);
+  assert.match(env.SHELLCHECK_SHA256, /^[0-9a-f]{64}$/);
+  assert.equal(env.SHELLCHECK_OPTS, '--severity=warning');
+  assert.doesNotMatch(run, /\$\{\{/, 'versions and hashes reach the script through env, not interpolation');
+  const verify = run.indexOf('sha256sum -c');
+  assert.ok(verify > run.lastIndexOf('curl -fsSL --retry 3 '), 'verify after both downloads');
+  assert.ok(verify < run.indexOf('tar '), 'verify before extracting');
+  assert.match(run, /\$ACTIONLINT_SHA256/);
+  assert.match(run, /\$SHELLCHECK_SHA256/);
+  const lint = run.split('\n').find((line) => line.includes('-shellcheck='));
+  assert.match(lint ?? '', /-shellcheck="[^"]*shellcheck-v\$\{SHELLCHECK_VERSION\}\/shellcheck"/, 'shellcheck comes from the pinned download, not the runner image');
+  assert.match(lint, /-pyflakes=(\s|$)/, 'pyflakes is off');
+});
+
 test('test jobs require full-matrix classification without losing the bot bump skip', () => {
   const ci = workflow();
   for (const name of ['vitest', 'node-floor', 'cockpit-browser']) {
@@ -379,6 +403,40 @@ test('the engines floor is proven on exactly the minimum Node, and verify requir
   }
   const skipped = { BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'success', COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE: 'full-matrix', BUMP_PR: 'false', NODE_FLOOR_RESULT: 'skipped' };
   assert.notEqual(runShell(gate.run, skipped).status, 0, 'a skipped floor job must not green a full-matrix run');
+});
+
+test('a stalled floor Node setup times out and retries once inside the job budget (#1214)', () => {
+  const { runInNewContext } = require('node:vm');
+  const job = workflow().jobs['node-floor'];
+  assert.equal(job['timeout-minutes'], 20);
+  const setups = job.steps.filter(s => s.uses?.startsWith('actions/setup-node@'));
+  assert.equal(setups.length, 2, 'one setup and exactly one retry');
+  const [setup, retry] = setups;
+  for (const step of setups) {
+    assert.equal(typeof step['timeout-minutes'], 'number', step.name);
+    assert.ok(step['timeout-minutes'] < 5, `${step.name} must not spend the job budget on a stalled download`);
+  }
+  assert.equal(setup['continue-on-error'], true, 'a stalled first attempt must hand over to the retry');
+  assert.equal(retry['continue-on-error'], undefined, 'a second failure must fail the job');
+  assert.equal(retry.uses, setup.uses);
+  assert.deepEqual(retry.with, setup.with);
+  const index = job.steps.indexOf(setup);
+  assert.equal(job.steps.indexOf(retry), index + 1);
+  const firstInstall = job.steps.findIndex(s => /^(?:npm ci|pnpm install)/.test(s.run || ''));
+  assert.ok(firstInstall > index + 1, 'the retry must finish before anything installs');
+  // A step without a status function runs under an implicit success(), so a first
+  // attempt skipped after an earlier failure must keep the retry skipped too.
+  assert.ok(setup.id, 'the retry reads the first attempt by id');
+  assert.doesNotMatch(retry.if, /\b(?:success|failure|cancelled|always)\(/);
+  // continue-on-error reports a failed attempt's conclusion as success; only outcome tells.
+  const runs = (outcome, jobOk = true) => runInNewContext(`success() && (${retry.if})`, {
+    steps: { [setup.id]: { outcome, conclusion: outcome === 'skipped' ? 'skipped' : 'success' } }, success: () => jobOk,
+  });
+  assert.equal(runs('success'), false);
+  // A timeout fails the first attempt; a cancelled attempt must retry too.
+  assert.equal(runs('failure'), true);
+  assert.equal(runs('cancelled'), true);
+  assert.equal(runs('skipped', false), false);
 });
 
 test('genuine failure and cancellation never green the aggregate', () => {

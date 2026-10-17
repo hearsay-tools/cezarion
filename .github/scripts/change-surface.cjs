@@ -1,16 +1,33 @@
 const fs = require('node:fs');
 
+// Docs: paths no Vitest test or cockpit browser spec reads (testReadDocuments
+// below names the exceptions). A change confined to them skips both suites and
+// the automated review; scripts/test-changed.mjs skips the same set through
+// isDocsPath. build-and-package still runs every node:test file, so Markdown
+// that only a .github/scripts test reads stays docs.
 const docsAllowlisted = [
   /^[^/]+\.md$/,
   /^docs\/(?:[^/]+\/)*[^/]+$/,
   /^\.ai\/specs\/(?:[^/]+\/)*[^/]+$/,
   /^\.ai\/analysis\/(?:[^/]+\/)*[^/]+$/,
+  // Markdown at any depth under packages/, except in a fixture or snapshot
+  // directory, where it may be test data (hearsay-tools/cezarion#1099).
+  // change-surface-readers.test.cjs fails when package code names one.
+  /^packages\/(?!(?:[^/]+\/)*(?:__fixtures__|fixtures|__snapshots__)\/)(?:[^/]+\/)*[^/]+\.md$/,
   // Generated scan data only, not arbitrary files under .ai/upstream. The
   // unconditional build-and-package job validates the ledger via test:unit.
   /^\.ai\/upstream\/(?:ledger\.yaml|LEDGER\.md)$/,
   /^\.ai\/upstream\/scans\/\d{4}-\d{2}-\d{2}(?:-(?:[2-9]|[1-9]\d+))?\.md$/,
-  /^(?:AGENT_PROTOCOL|AGENTS|BACKWARD_COMPATIBILITY|CODE_REVIEW|SDLC)\.md$/,
+  /^(?:AGENTS|CODE_REVIEW|SDLC)\.md$/,
   /^LICENSE[^/]*$/,
+];
+
+// Markdown a Vitest test or a cockpit browser spec reads. A listed path is
+// never docs, so changing it runs the full matrix and the test that reads it.
+const testReadDocuments = [
+  'AGENT_PROTOCOL.md', // packages/cezar/src/core/harness-parity.test.ts
+  'BACKWARD_COMPATIBILITY.md', // packages/cezar/src/server/bc-route-inventory.test.ts
+  '.ai/specs/2026-09-04-harness-parity-matrix.md', // packages/cezar/src/core/harness-parity.test.ts
 ];
 
 // Ops workflows that never run product-test suites, plus the engine scripts of
@@ -28,7 +45,7 @@ const docsAllowlisted = [
 // the unconditional build-and-package job.
 const infraAllowlisted = [
   /^\.github\/workflows\/(?:report-workflow-failure|sweep-ci-failures|upstream-scan|npm-preview-cleanup|publish-pr-snapshot|issue-intake)\.yml$/,
-  /^\.github\/scripts\/(?:ci-sweep-api|ci-sweep-collect|ci-sweep-patterns|ci-sweep-report|apply-issue-intake)(?:\.test)?\.cjs$/,
+  /^\.github\/scripts\/(?:ci-sweep-api|ci-sweep-collect|ci-sweep-patterns|ci-sweep-report|apply-issue-intake|issue-intake-candidates|jev-issue-intake|jev-intake-replay)(?:\.test)?\.cjs$/,
 ];
 
 function isSafePath(path) {
@@ -43,11 +60,17 @@ function isSafePath(path) {
       || infraAllowlisted.some((pattern) => pattern.test(path)));
 }
 
+function isDocsPath(path) {
+  return isSafePath(path)
+    && docsAllowlisted.some((pattern) => pattern.test(path))
+    && !testReadDocuments.includes(path);
+}
+
 function classifyPaths(paths) {
   if (!Array.isArray(paths) || paths.length === 0 || !paths.every(isSafePath)) {
     return 'full-matrix';
   }
-  if (paths.every((path) => docsAllowlisted.some((pattern) => pattern.test(path)))) {
+  if (paths.every(isDocsPath)) {
     return 'docs-only';
   }
   if (paths.every((path) => infraAllowlisted.some((pattern) => pattern.test(path)))) {
@@ -86,4 +109,4 @@ if (require.main === module) {
   process.stdout.write(`${classifyJsonLines(fs.readFileSync(0, 'utf8'))}\n`);
 }
 
-module.exports = { classifyPaths, classifyJsonLines };
+module.exports = { classifyPaths, classifyJsonLines, isDocsPath, testReadDocuments };

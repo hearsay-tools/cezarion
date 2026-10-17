@@ -74,3 +74,26 @@ test('rejects malformed intake and refuses to act on another issue', () => {
     knownLabels,
   }), /duplicate_of/);
 });
+
+test('a duplicate outside the candidate set labels instead of closing, and says why', () => {
+  const warnings = [];
+  const warn = (message) => warnings.push(message);
+  const intake = loadIntake({ action: 'duplicate', duplicate_of: 211, comment: 'self', labels: ['bug'] });
+  assert.deepEqual(planIntakeMutations({ intake, issueNumber, knownLabels, candidateNumbers: new Set([14]), warn }), [
+    ['issue', 'edit', '211', '--add-label', 'bug'],
+  ]);
+  assert.match(warnings[0], /#211 is not a duplicate candidate/);
+
+  const parent = loadIntake({ action: 'duplicate', duplicate_of: 13, comment: 'Same as #13.', labels: [] });
+  assert.deepEqual(planIntakeMutations({ intake: parent, issueNumber, knownLabels, candidateNumbers: new Set([14]), warn }), []);
+  assert.equal(warnings.length, 2);
+});
+
+test('a duplicate inside the candidate set still closes', () => {
+  const intake = loadIntake({ action: 'duplicate', duplicate_of: 14, comment: 'Same work as #14.', labels: [] });
+  assert.deepEqual(planIntakeMutations({ intake, issueNumber, knownLabels, candidateNumbers: new Set([14]) }), [
+    ['issue', 'close', '211', '--reason', 'duplicate', '--duplicate-of', '14', '--comment', 'Same work as #14.'],
+    ['issue', 'edit', '211', '--add-label', 'duplicate'],
+  ]);
+  assert.throws(() => planIntakeMutations({ intake, issueNumber, knownLabels, candidateNumbers: [14] }), /candidateNumbers/);
+});

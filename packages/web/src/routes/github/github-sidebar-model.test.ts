@@ -7,6 +7,7 @@ import type { GithubData, GithubItem, GithubSearchData, RunSummary } from '@open
 import {
   FAILING_QUERY,
   REVIEW_QUERY,
+  countTitle,
   filterCounts,
   formatCount,
   githubFilterPath,
@@ -131,11 +132,26 @@ describe('filterCounts', () => {
     expect(c.assigned).toBeNull()
     expect(c.mine).toBeNull()
   })
-  it('marks list-derived counts as lower bounds once the list hits the 1000 cap', () => {
-    const issues = Array.from({ length: 1000 }, (_, i) => issue(i + 1))
-    const c = filterCounts({ ...base, gh: data({ issues, prs: [] }), tasks: new Set() })
-    expect(c.all).toEqual({ value: 1000, bound: 'atLeast' })
-    expect(c['no-task']).toEqual({ value: 1000, bound: 'atLeast' })
+  it('preset counts are lower bounds until the side is exhausted (hearsay-tools/cezarion#1183)', () => {
+    const c = filterCounts({
+      ...base,
+      gh: { ...base.gh, issuesTotal: 88, prsTotal: 2, issuesNextCursor: 'c50', prsNextCursor: null },
+    })
+    // The tab totals are the server's exact counts, whatever is loaded.
+    expect(c.all).toEqual({ value: 88, bound: 'exact' })
+    expect(c['all-prs']).toEqual({ value: 2, bound: 'exact' })
+    // Issues still page, so issue presets only count what is loaded.
+    expect(c.assigned).toEqual({ value: 1, bound: 'atLeast' })
+    expect(c['has-task']).toEqual({ value: 1, bound: 'atLeast' })
+    expect(c['no-task']).toEqual({ value: 2, bound: 'atLeast' })
+    // Pull requests are exhausted, so their preset is exact.
+    expect(c.mine).toEqual({ value: 1, bound: 'exact' })
+  })
+  it('explains a paged lower bound in its tooltip', () => {
+    expect(countTitle('no-task', { value: 12, bound: 'atLeast' }))
+      .toBe('At least 12: only the loaded pages are counted. Scroll to load more.')
+    expect(countTitle('review', { value: 50, bound: 'atLeast' })).toMatch(/GitHub search returns at most/)
+    expect(countTitle('all', { value: 88, bound: 'exact' })).toBeUndefined()
   })
   it('exposes the exact qualifier queries', () => {
     expect(REVIEW_QUERY).toBe('is:open review-requested:@me')

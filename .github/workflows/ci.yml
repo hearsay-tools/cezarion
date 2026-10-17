@@ -218,6 +218,34 @@ jobs:
           allow-unsafe-pr-checkout: true
           persist-credentials: false
 
+      # Lint the merge result's workflows, so an unknown input or secret on a
+      # `uses: ./.github/workflows/…` caller, or a bad expression, fails here in
+      # seconds instead of in a live PR run (hearsay-tools/cezarion#1130).
+      # actionlint 1.7.10 is the first release that reads YAML anchors such as
+      # `*resolve-dispatch`. shellcheck is pinned too, so a runner-image update
+      # cannot change which findings fail the gate; warning level keeps info and
+      # style findings out.
+      - name: Lint workflows
+        env:
+          ACTIONLINT_VERSION: '1.7.12'
+          ACTIONLINT_SHA256: '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8'
+          SHELLCHECK_VERSION: '0.11.0'
+          SHELLCHECK_SHA256: 'b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6'
+          SHELLCHECK_OPTS: '--severity=warning'
+        run: |
+          tools="$RUNNER_TEMP/workflow-lint"
+          mkdir -p "$tools"
+          curl -fsSL --retry 3 -o "$tools/actionlint.tar.gz" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$tools/shellcheck.tar.gz" \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.gz"
+          printf '%s  %s\n' \
+            "$ACTIONLINT_SHA256" "$tools/actionlint.tar.gz" \
+            "$SHELLCHECK_SHA256" "$tools/shellcheck.tar.gz" | sha256sum -c -
+          tar -xzf "$tools/actionlint.tar.gz" -C "$tools" actionlint
+          tar -xzf "$tools/shellcheck.tar.gz" -C "$tools" "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+          "$tools/actionlint" -shellcheck="$tools/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" -pyflakes=
+
       # Select the installer from the checked-out merge result: this trusted-base
       # workflow must support a PR that replaces the npm lockfile with pnpm.
       # `lts/*` — the current Node LTS, whatever it is on the day the job runs, so
@@ -365,8 +393,24 @@ jobs:
         with:
           version: '12.11.2'
 
+      # A stalled Node download once spent the whole job budget before the tests
+      # finished (hearsay-tools/cezarion#1214). Bound each attempt and retry once;
+      # only a second failure fails the job.
       - name: Set up Node.js
+        id: setup-node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          node-version: '24.15.0'
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
+          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
+
+      # A timeout fails the first attempt; test for anything but success so a cancelled attempt retries too.
+      - name: Retry Node.js setup
+        if: steps['setup-node'].outcome != 'success'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 3
         with:
           node-version: '24.15.0'
           cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}

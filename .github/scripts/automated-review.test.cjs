@@ -5,6 +5,7 @@ const {
   loadReview,
   changedLinesFromFiles,
   countAutomatedReviews,
+  isAutomatedReviewRound,
   postReview,
   assertLiveHead,
   listReviewThreads,
@@ -17,6 +18,38 @@ const {
 } = require('./automated-review.cjs');
 
 const sha = 'a'.repeat(40);
+const roundMarker = '<!-- cez-review-round -->';
+const bot = { login: 'github-actions[bot]' };
+// Each verdict reply on an earlier thread arrives as its own empty-body bot
+// review. Rounds posted before the round marker carry a patch-id marker, a
+// malformed one (11), or only a summary (12, 13: dispatch or a failed patch-id).
+// Any non-empty string body counts and neither side trims, so whitespace-only
+// bodies (14-16) count and jq and JS agree byte for byte, whatever each engine
+// calls whitespace. Both check the type, so a non-string body (17-20) counts in
+// neither. automated-code-review.workflow.test.cjs runs the workflow's
+// review_count jq filter over a copy of this history.
+const roundHistory = [
+  { id: 1, user: bot, submitted_at: '2026-10-01T10:00:00Z', body: `<!-- cez-review-patch-id: ${'1'.repeat(40)} -->` },
+  { id: 2, user: bot, submitted_at: '2026-10-01T10:01:00Z', body: '' },
+  { id: 3, user: bot, submitted_at: '2026-10-01T10:02:00Z', body: `summary\n\n<!-- cez-review-patch-id: ${'2'.repeat(40)} -->` },
+  { id: 4, user: bot, submitted_at: '2026-10-01T10:03:00Z', body: '' },
+  { id: 5, user: bot, submitted_at: '2026-10-01T10:04:00Z', body: 'summary\n\n<!-- cez-review-round -->' },
+  { id: 6, user: bot, submitted_at: '2026-10-01T10:05:00Z', body: `<!-- cez-review-round -->\n\n<!-- cez-review-patch-id: ${'3'.repeat(40)} -->` },
+  { id: 7, user: bot, submitted_at: '2026-10-01T10:06:00Z', body: '' },
+  { id: 8, user: bot, submitted_at: '2026-10-01T10:07:00Z', body: null },
+  { id: 9, user: bot, submitted_at: null, body: '<!-- cez-review-round -->' },
+  { id: 10, user: { login: 'octocat' }, submitted_at: '2026-10-01T10:08:00Z', body: '<!-- cez-review-round -->' },
+  { id: 11, user: bot, submitted_at: '2026-10-01T10:09:00Z', body: `<!-- cez-review-patch-id: ${'4'.repeat(39)} -->` },
+  { id: 12, user: bot, submitted_at: '2026-10-01T10:10:00Z', body: 'No issues found' },
+  { id: 13, user: bot, submitted_at: '2026-10-01T10:11:00Z', body: 'Guard the null input before parsing.' },
+  { id: 14, user: bot, submitted_at: '2026-10-01T10:12:00Z', body: ' \n\t' },
+  { id: 15, user: bot, submitted_at: '2026-10-01T10:13:00Z', body: '\u00a0' },
+  { id: 16, user: bot, submitted_at: '2026-10-01T10:14:00Z', body: '\ufeff' },
+  { id: 17, user: bot, submitted_at: '2026-10-01T10:15:00Z', body: 42 },
+  { id: 18, user: bot, submitted_at: '2026-10-01T10:16:00Z', body: true },
+  { id: 19, user: bot, submitted_at: '2026-10-01T10:17:00Z', body: {} },
+  { id: 20, user: bot, submitted_at: '2026-10-01T10:18:00Z', body: [] },
+];
 
 test('counts no automated reviews when review history is empty', () => {
   assert.equal(countAutomatedReviews([]), 0);
@@ -24,23 +57,28 @@ test('counts no automated reviews when review history is empty', () => {
 
 test('counts three automated reviews from review history', () => {
   assert.equal(countAutomatedReviews([
-    { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:00:00Z' },
-    { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:01:00Z' },
-    { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:02:00Z' },
+    { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:00:00Z', body: roundMarker },
+    { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:01:00Z', body: formatReviewPatchIdMarker(sha) },
+    { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:02:00Z', body: `summary\n\n${roundMarker}` },
   ]), 3);
+});
+
+test('counts only review rounds, never the empty-body reviews that wrap verdict replies', () => {
+  assert.deepEqual(roundHistory.filter((review) => isAutomatedReviewRound(review)).map((review) => review.id), [1, 3, 5, 6, 11, 12, 13, 14, 15, 16]);
+  assert.equal(countAutomatedReviews(roundHistory), 10);
 });
 
 test('does not count pending automated reviews', () => {
   assert.equal(countAutomatedReviews([
-    { user: { login: 'github-actions[bot]' }, submitted_at: null },
-    { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:00:00Z' },
+    { user: { login: 'github-actions[bot]' }, submitted_at: null, body: roundMarker },
+    { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:00:00Z', body: roundMarker },
   ]), 1);
 });
 
 test('does not count human reviews', () => {
   assert.equal(countAutomatedReviews([
-    { user: { login: 'octocat' } },
-    { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:00:00Z' },
+    { user: { login: 'octocat' }, body: roundMarker },
+    { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:00:00Z', body: roundMarker },
   ]), 1);
 });
 
@@ -253,9 +291,9 @@ test('loads JSON and posts inline or summary-only reviews against the reviewed c
   await postReview({ github, owner: 'o', repo: 'r', pullNumber: 7, eventHeadSha: sha, reviewedHeadSha: sha, comments: [], body: 'summary' });
   assert.deepEqual(calls, [
     ['get', { owner: 'o', repo: 'r', pull_number: 7 }],
-    ['createReview', { owner: 'o', repo: 'r', pull_number: 7, commit_id: sha, event: 'COMMENT', body: '', comments: [{ path: 'a', line: 2, side: 'RIGHT', body: 'Fix it' }] }],
+    ['createReview', { owner: 'o', repo: 'r', pull_number: 7, commit_id: sha, event: 'COMMENT', body: roundMarker, comments: [{ path: 'a', line: 2, side: 'RIGHT', body: 'Fix it' }] }],
     ['get', { owner: 'o', repo: 'r', pull_number: 7 }],
-    ['createReview', { owner: 'o', repo: 'r', pull_number: 7, commit_id: sha, event: 'COMMENT', body: 'summary', comments: [] }],
+    ['createReview', { owner: 'o', repo: 'r', pull_number: 7, commit_id: sha, event: 'COMMENT', body: `summary\n\n${roundMarker}`, comments: [] }],
   ]);
 });
 
@@ -295,9 +333,9 @@ test('does not post after three completed automated reviews', async () => {
   let posted = false;
   const github = {
     paginate: async () => [
-      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:00:00Z' },
-      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:01:00Z' },
-      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:02:00Z' },
+      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:00:00Z', body: roundMarker },
+      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:01:00Z', body: roundMarker },
+      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:02:00Z', body: roundMarker },
     ],
     rest: { pulls: {
       get: async () => ({ data: { head: { sha } } }),
@@ -315,9 +353,9 @@ test('posts a later round when maxRounds is raised above the review count', asyn
   let posted = false;
   const github = {
     paginate: async () => [
-      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:00:00Z' },
-      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:01:00Z' },
-      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:02:00Z' },
+      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:00:00Z', body: roundMarker },
+      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:01:00Z', body: roundMarker },
+      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:02:00Z', body: roundMarker },
     ],
     rest: { pulls: {
       get: async () => ({ data: { head: { sha } } }),
@@ -329,6 +367,27 @@ test('posts a later round when maxRounds is raised above the review count', asyn
     comments: [{ path: 'a', line: 2, body: 'Fix it' }], body: null, maxRounds: 5,
   });
   assert.equal(posted, true);
+});
+
+test('the round cap counts review rounds, not the reviews that wrap verdict replies', async () => {
+  // The third is an unmarked round from before the round marker.
+  const rounds = [roundMarker, formatReviewPatchIdMarker(sha), 'No issues found']
+    .map((body, i) => ({ user: bot, submitted_at: `2026-10-01T10:0${i}:00Z`, body }));
+  const replies = Array.from({ length: 6 }, (_, i) => ({ user: bot, submitted_at: `2026-10-01T11:0${i}:00Z`, body: '' }));
+  const post = async (history) => {
+    let posted = 0;
+    const github = { paginate: async () => history, rest: { pulls: {
+      get: async () => ({ data: { head: { sha } } }),
+      createReview: async () => { posted += 1; },
+    } } };
+    const opened = await postReview({
+      github, owner: 'o', repo: 'r', pullNumber: 7, eventHeadSha: sha, reviewedHeadSha: sha,
+      comments: [{ path: 'a', line: 2, body: 'Fix it' }], body: null, maxRounds: 3,
+    });
+    return { opened, posted };
+  };
+  assert.deepEqual(await post([...rounds.slice(0, 2), ...replies]), { opened: 1, posted: 1 });
+  assert.deepEqual(await post([...rounds, ...replies]), { opened: 0, posted: 0 });
 });
 
 test('refuses a non-numeric maxRounds instead of reviewing unbounded', async () => {
@@ -349,9 +408,9 @@ test('posts after the cap when ignoreCap is set', async () => {
   let posted = false;
   const github = {
     paginate: async () => [
-      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:00:00Z' },
-      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:01:00Z' },
-      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:02:00Z' },
+      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:00:00Z', body: roundMarker },
+      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:01:00Z', body: roundMarker },
+      { user: { login: 'github-actions[bot]' }, submitted_at: '2026-08-18T10:02:00Z', body: roundMarker },
     ],
     rest: { pulls: {
       get: async () => ({ data: { head: { sha } } }),
@@ -446,6 +505,26 @@ test('uses the most recent bot review that carries a patch-id marker', () => {
   assert.equal(latestAutomatedReviewPatchId(reviews), otherPatchId);
 });
 
+test('stamps the round marker on every posted round without a valid patch id', async () => {
+  const calls = [];
+  const github = { paginate: async () => [], rest: { pulls: {
+    get: async () => ({ data: { head: { sha } } }),
+    createReview: async (input) => calls.push(input.body),
+  } } };
+  for (const missing of [undefined, '', 'nope']) {
+    await postReview({
+      github, owner: 'o', repo: 'r', pullNumber: 7, eventHeadSha: sha, reviewedHeadSha: sha,
+      comments: [{ path: 'a', line: 2, body: 'Fix it' }], body: null, patchId: missing,
+    });
+    await postReview({
+      github, owner: 'o', repo: 'r', pullNumber: 7, eventHeadSha: sha, reviewedHeadSha: sha,
+      comments: [], body: 'summary', patchId: missing,
+    });
+  }
+  assert.deepEqual(calls, Array.from({ length: 3 }, () => [roundMarker, `summary\n\n${roundMarker}`]).flat());
+  assert.equal(countAutomatedReviews(calls.map((body) => ({ user: bot, submitted_at: '2026-10-01T10:00:00Z', body }))), calls.length);
+});
+
 test('appends the patch-id marker to summary and findings-only review bodies', async () => {
   const calls = [];
   const github = { paginate: async () => [], rest: { pulls: {
@@ -460,8 +539,9 @@ test('appends the patch-id marker to summary and findings-only review bodies', a
     github, owner: 'o', repo: 'r', pullNumber: 7, eventHeadSha: sha, reviewedHeadSha: sha,
     comments: [], body: 'summary', patchId,
   });
-  assert.equal(calls[0].body, formatReviewPatchIdMarker(patchId));
-  assert.equal(calls[1].body, `summary\n\n${formatReviewPatchIdMarker(patchId)}`);
+  assert.equal(calls[0].body, `${roundMarker}\n\n${formatReviewPatchIdMarker(patchId)}`);
+  assert.equal(calls[1].body, `summary\n\n${roundMarker}\n\n${formatReviewPatchIdMarker(patchId)}`);
+  assert.equal(countAutomatedReviews(calls.map((call) => ({ user: bot, submitted_at: '2026-10-01T10:00:00Z', body: call.body }))), 2);
 });
 
 test('validates prior-finding verdicts and keeps the first verdict per thread', () => {
@@ -511,7 +591,7 @@ test('postReview reports how many inline threads it opened', async () => {
   const alreadyReviewed = { paginate: async () => [{ user: { login: 'github-actions[bot]' }, commit_id: sha }], rest: { pulls } };
   assert.equal(await postReview({ github: alreadyReviewed, owner: 'o', repo: 'r', pullNumber: 7, eventHeadSha: sha, reviewedHeadSha: sha,
     comments: [{ path: 'a', line: 1, body: 'One' }], body: null }), 0, 'a re-run on a reviewed head opens nothing new');
-  const capped = { paginate: async () => [{ user: { login: 'github-actions[bot]' }, submitted_at: 'x' }], rest: { pulls } };
+  const capped = { paginate: async () => [{ user: { login: 'github-actions[bot]' }, submitted_at: 'x', body: roundMarker }], rest: { pulls } };
   assert.equal(await postReview({ github: capped, owner: 'o', repo: 'r', pullNumber: 7, eventHeadSha: sha, reviewedHeadSha: sha,
     comments: [{ path: 'a', line: 1, body: 'One' }], body: null, maxRounds: 1 }), 0, 'a cap-skipped post opens nothing new');
 });
