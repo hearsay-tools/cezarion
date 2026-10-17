@@ -183,6 +183,18 @@ describe('the cold window agrees with the store', () => {
   });
 });
 
+describe('cold issue attribution repair in search', () => {
+  it('finds an originating issue absent from the stored summary', () => {
+    seedRuns(dir, [record({ task: 'Fix issue #1200', title: 'Investigating attribution',
+      issueNumber: 1216, markerRefs: { issue: 1216 },
+      referencedIssueUrl: 'https://github.com/local/repo/issues/1216',
+      referencedIssueCandidates: ['https://github.com/local/repo/issues/1200',
+        'https://github.com/local/repo/issues/1216'],
+      referencedPullRequestUrl: undefined, referencedPrCandidates: [] })]);
+    expect(searchRunIndexFromDisk(dir, '#1200', { limit: 1 }).runs.map(run => run.id)).toEqual(['cold']);
+  });
+});
+
 describe('cold search counts matches after projection', () => {
   it('keeps scanning past candidates that scoping the repository drops', () => {
     // Three newer runs match `43` only through a foreign issue the handle scopes away; the

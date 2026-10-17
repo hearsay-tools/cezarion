@@ -120,11 +120,11 @@ function searchDatabase(db: RunDatabase, dataDir: string, query: string, { handl
   const matched: RunSummary[] = [];
   db.visitRootSummaries(sqlPrefilterTokens(query), (row) => {
     const summary = parseSummary(row.summary);
-    if (summary !== undefined && !matchesRunQuery(summary, query)) return true;
+    if (summary !== undefined && summary.markerRefs?.issue === undefined && !matchesRunQuery(summary, query)) return true;
     const [projected] = projectRows(db, [row], dataDir, handle);
     if (projected && matchesRunQuery(projected, query)) matched.push(projected);
     return matched.length <= limit;
-  });
+  }, { includeIssueMarked: true });
   return matched.length > limit ? { runs: matched.slice(0, limit), truncated: true } : { runs: matched, truncated: false };
 }
 

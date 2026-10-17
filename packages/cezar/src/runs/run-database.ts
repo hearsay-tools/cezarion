@@ -717,8 +717,12 @@ export class RunDatabase {
 
   /** The rows `searchRootSummaries` answers, one at a time, until `visit` answers false: a search
    *  that needs only its first matches stops reading there. */
-  visitRootSummaries(prefilter: readonly string[], visit: (row: RunSummaryRow) => boolean): void {
-    const where = ['parent_run_id IS NULL', ...prefilter.map(() => 'instr(lower(summary), ?) > 0')].join(' AND ');
+  visitRootSummaries(prefilter: readonly string[], visit: (row: RunSummaryRow) => boolean,
+    opts: { includeIssueMarked?: boolean } = {}): void {
+    const tokens = prefilter.map(() => 'instr(lower(summary), ?) > 0').join(' AND ');
+    const matches = opts.includeIssueMarked && tokens
+      ? `(${tokens}) OR json_extract(summary, '$.markerRefs.issue') IS NOT NULL` : tokens;
+    const where = ['parent_run_id IS NULL', ...(matches ? [`(${matches})`] : [])].join(' AND ');
     this.run(() => {
       for (const row of this.db.prepare(`${SUMMARY_SELECT} WHERE ${where} ${NEWEST_FIRST}`).iterate(...prefilter)) {
         if (!visit(toSummaryRow(row as SqlRow))) break;

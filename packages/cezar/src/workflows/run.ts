@@ -7672,7 +7672,7 @@ export class RunManager {
       const current = this.store.getRun(runId);
       const promptRefs = extractTaskRefs(run.task);
       const promptIssue = promptRefs.issueNumber ?? (promptRefs.prNumber === undefined ? promptRefs.ambiguousNumber : undefined);
-      const refNumber = promptIssue !== undefined && promptIssue === current?.issueNumber
+      const refNumber = promptRefs.prNumber === undefined && promptIssue !== undefined && promptIssue === current?.issueNumber
         ? current.issueNumber : current?.prNumber ?? current?.issueNumber;
       const validated = postValidateTitle(markers.title, refNumber);
       // Same junk guard as composeNameResult: a declaration that validates to
