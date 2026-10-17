@@ -9,6 +9,7 @@ import { withDelayedCommand, withHeldPipeResponse, withHeldPrintResponse } from 
 import { attentionFields } from '../task-cli/projections.ts';
 import { ASK_TEXT, MONITORING_TEXT, messagesPrompt, REJECTED_ASK_TEXT } from './monitoring-turn.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
+import { monitoringWakeOf } from './waits.testkit.ts';
 import { fixtureUpdateRun, manager, parent, queuedWake, register, store, root, terminal, worker, until, semaphore, useWorkerWaitFixture, waitOf } from './worker-wait.testkit.ts';
 
 // Exhaustive transport classification: a new runner must provide either the real
@@ -44,7 +45,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
           }
           expect(store.getRun(p.id)).toMatchObject({ status: 'waiting' });
           expect(store.getRun(p.id)?.activity).toBeUndefined();
-          expect(store.getRun(p.id)?.monitoringWakeAt).toBeUndefined();
+          expect(monitoringWakeOf(store.getRun(p.id))).toBeUndefined();
           const w = await worker(p.id);
           process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
           manager.enqueueOwnedRun(w.id);
@@ -98,12 +99,12 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
                 expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested')).toHaveLength(0);
               }
               expect(store.getRun(p.id)?.activity).toBeUndefined();
-              expect(store.getRun(p.id)?.monitoringWakeAt).toBeUndefined();
+              expect(monitoringWakeOf(store.getRun(p.id))).toBeUndefined();
               expect(store.getRun(p.id)?.agentInputs?.find(input => input.id === laterId)?.deliveredAt).toBeUndefined();
               expect(manager.sendMessage(p.id, [{ type: 'text', text: 'Approved, continue mock:hold' }])).toBe(true);
               await until(() => !!store.getRun(p.id)?.agentInputs?.find(input => input.id === laterId)?.deliveredAt && store.getRun(p.id)?.activity === 'monitoring');
               expect(store.readEvents(p.id).some(event => event.type === 'human-input-delivered')).toBe(true);
-            } else expect(store.getRun(p.id)?.monitoringWakeAt).toBeDefined();
+            } else expect(monitoringWakeOf(store.getRun(p.id))).toBeDefined();
           } finally { release(); credentials.close(); }
         };
         if (transport === 'protocol' && backend !== 'claude' && backend !== 'cursor') await withDelayedCommand(backend, exercise);
@@ -133,7 +134,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
       manager.sendMessage(p.id, [{ type: 'text', text: `mock:agent-echo\nCEZ:ASK ${JSON.stringify(ask)}` }]);
       await until(() => store.getRun(p.id)?.hasPendingHumanAsk === true);
       expect(store.getRun(p.id)?.status).toBe('waiting');
-      expect(store.getRun(p.id)?.monitoringWakeAt).toBeUndefined();
+      expect(monitoringWakeOf(store.getRun(p.id))).toBeUndefined();
     });
   }
 

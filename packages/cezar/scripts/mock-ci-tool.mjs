@@ -69,11 +69,21 @@ export async function ciPrompt(backend, wire, text) {
 
 // `mock:cezar-tool <name> <base64-json-args>` calls any cezar tool with those arguments
 // (hearsay-tools/cezarion#1233). Base64, standard or URL-safe, survives every wire's escaping.
+// Several calls run in order within one turn; `"wait_id": "last"` names the wait the previous
+// answer registered, so a turn can open a wait and cancel it.
 export async function toolPrompt(backend, wire, text) {
-  const match = /mock:cezar-tool\s+([a-z_]+)\s+([A-Za-z0-9+/=_-]+)/.exec(text);
-  if (!match) throw new Error('mock:cezar-tool needs a tool name and base64 JSON arguments');
-  const result = await probeCezarTool(backend, wire, match[1], JSON.parse(Buffer.from(match[2], 'base64').toString('utf8')));
-  return JSON.stringify(result.response);
+  const matches = [...text.matchAll(/mock:cezar-tool\s+([a-z_]+)\s+([A-Za-z0-9+/=_-]+)/g)];
+  if (!matches.length) throw new Error('mock:cezar-tool needs a tool name and base64 JSON arguments');
+  const responses = [];
+  let last;
+  for (const [, name, encoded] of matches) {
+    const args = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
+    if (args.wait_id === 'last') args.wait_id = last;
+    const result = await probeCezarTool(backend, wire, name, args);
+    try { last = JSON.parse(result.response.content[0].text.split('\n')[0]).wait_id ?? last; } catch { /* a refusal names no wait */ }
+    responses.push(JSON.stringify(result.response));
+  }
+  return responses.join('\n');
 }
 
 // `mock:preview-serve <port>` registers the e2e fixture app (`node preview-app.mjs <port>`) as a live preview.

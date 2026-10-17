@@ -1,10 +1,7 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { dirname, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CiWait, CiWaitResult } from '@open-mercato/cezar-contract';
+import type { CiWaitResult, Wait } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { supportsProfiles } from '../core/agent-profiles.ts';
@@ -12,6 +9,13 @@ import { acceptedWorkerIdentitySchema, workerWorkflowHash } from '../delegation/
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { eventCheckpoint, manager, restart, root, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW, stepKind, type WorkflowDef } from './types.ts';
+import { gatedProviderFailure } from './waits-parity.testkit.ts';
+
+// hearsay-tools/cezarion#1233: CI waits live in the run's wait list; a parked one is an open wait
+// on a monitoring park.
+const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'ci');
+const lastCiWaitOf = (id: string) => [...(store.getRun(id)?.lastWaits ?? [])].reverse().find(entry => entry.kind === 'ci');
+const parked = (id: string) => ciWaitOf(id)?.phase === 'open' && store.getRun(id)?.activity === 'monitoring';
 
 const externalResource = vi.hoisted(() => ({ supervisor: {} }));
 vi.mock('../ci-wait/resources.ts', () => ({ acquireCiResources: () => ({
@@ -31,7 +35,7 @@ function github() {
 function active(id: string) {
   return (manager as unknown as { active: Map<string, { session: AgentSession; ciGeneration: string }> }).active.get(id);
 }
-function register(id: string): Promise<CiWait> {
+function register(id: string): Promise<Wait> {
   return manager.registerCiWait(id, { pr: identity.prUrl, timeout_seconds: 30 }, active(id)!.ciGeneration);
 }
 
@@ -55,42 +59,6 @@ async function ownedChain(runner: RunnerId, workflow: WorkflowDef) {
   return run;
 }
 
-// Hold the existing native provider-error fixture until CI intent is durable.
-// A scheduler-owned opening prompt fails once; the next process/turn uses the
-// unchanged success fixture. No runner methods or normalized events are mocked.
-function gatedProviderFailure(runner: RunnerId) {
-  const adapter = HARNESS_ADAPTERS[runner];
-  const held = join(root, 'provider-held'), released = join(root, 'provider-released'), failed = join(root, 'provider-failed');
-  const anchor: Record<RunnerId, string> = {
-    claude: "if (userText.includes('mock:auth-error')) {",
-    codex: "if (turnText.includes('mock:provider-error') || turnText.includes('mock:empty-success')) {",
-    opencode: "if (body.includes('mock:provider-error')) {",
-    pi: "if (command.type === 'prompt' && command.message.includes('mock:provider-error')) {",
-    cursor: "if (mode === 'provider-error') {",
-    omp: "if (message.includes('mock:provider-error')) {",
-  };
-  const text: Record<RunnerId, string> = { claude: 'userText', codex: 'turnText', opencode: 'body', pi: 'command.message', cursor: 'prompt', omp: 'message' };
-  let source = readFileSync(adapter.mockBin, 'utf8').replace(/^#!.*\n/, '');
-  expect(source.split(anchor[runner])).toHaveLength(2);
-  source = source.replace(anchor[runner], `if (ciFailurePrompt(${text[runner]})) { await ciFailureGate();`);
-  if (runner === 'cursor') source = source.replace("prompt.includes('mock:provider-error')", 'ciFailurePrompt(prompt)');
-  source = source.replace(/import\('(\.\/[^']+)'\)/g, (_match, path: string) => `import(${JSON.stringify(pathToFileURL(join(dirname(adapter.mockBin), path)).href)})`);
-  source = `import * as ciFailureFs from 'node:fs';
-function ciFailurePrompt(text) {
-  return typeof text === 'string' && !ciFailureFs.existsSync(${JSON.stringify(failed)}) && (text.includes(${JSON.stringify(adapter.scenarios['provider-error'])}) || text.includes('Resume to receive the queued CI observation.'));
-}
-async function ciFailureGate() {
-  ciFailureFs.writeFileSync(${JSON.stringify(held)}, 'held');
-  while (!ciFailureFs.existsSync(${JSON.stringify(released)})) await new Promise(resolve => setTimeout(resolve, 5));
-  ciFailureFs.writeFileSync(${JSON.stringify(failed)}, 'failed');
-}
-${source}`;
-  const mock = join(root, 'ci-failure-native.mjs');
-  writeFileSync(mock, '#!/usr/bin/env node\n' + source, { mode: 0o755 });
-  process.env.CEZ_DRY_RUN = '0'; process.env[adapter.binEnv] = mock;
-  return { held: () => existsSync(held), release: () => writeFileSync(released, '') };
-}
-
 describe('CI wait failure history through every native runner (hearsay-tools/cezarion#994)', { timeout: 45_000 }, () => {
   useWorkerWaitFixture();
   afterEach(() => vi.restoreAllMocks());
@@ -99,10 +67,10 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
     const cell = mode === 'fresh' ? 'R72' : 'R73';
     it(`${runner} ${cell} preserves a failed CI attempt through automatic recovery and final success`, async () => {
       const settle = github();
-      const wire = gatedProviderFailure(runner);
+      const wire = gatedProviderFailure(root, runner);
       const adapter = HARNESS_ADAPTERS[runner];
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: adapter.scenarios[mode === 'fresh' ? 'provider-error' : 'baseline']! });
-      let wait: CiWait;
+      let wait: Wait;
       if (mode === 'fresh') {
         await until(wire.held);
         wait = await register(run.id);
@@ -130,17 +98,17 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
       expect.soft(failedStep.error).toBe(providerError.message);
       expect.soft(store.readEvents(run.id)).toContainEqual(expect.objectContaining({ type: 'session.ended', stepId: failedStepId, reason: 'error', message: providerError.message }));
       expect.soft(store.readEvents(run.id)).toContainEqual(expect.objectContaining({ type: 'step-end', stepId: failedStepId, status: 'failed' }));
-      expect(store.getRun(run.id)?.ciWait?.id).toBe(wait.id);
-      expect(store.getRun(run.id)?.agentInputs?.find(input => input.id === wait.wakeId)?.deliveredAt).toBeUndefined();
+      expect(ciWaitOf(run.id)?.id).toBe(wait.id);
+      expect(store.getRun(run.id)?.agentInputs?.find(input => input.id === wait.id)?.deliveredAt).toBeUndefined();
       if (mode === 'fresh') settle();
-      await until(() => !!store.getRun(run.id)?.lastCiWait?.deliveredAt);
+      await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
       await until(() => store.getRun(run.id)?.status === 'waiting');
       expect(manager.finish(run.id)).toBe(true);
       await until(() => !manager.isActive(run.id));
       expect(store.getRun(run.id)?.status).toBe('done');
       expect(store.getRun(run.id)?.steps.find(step => step.id === failedStepId)).toMatchObject({ status: 'failed', error: failedStep.error, finishedAt: failedStep.finishedAt });
-      expect(store.getRun(run.id)?.ciWait).toBeUndefined();
-      expect(store.getRun(run.id)?.lastCiWait?.id).toBe(wait.id);
+      expect(ciWaitOf(run.id)).toBeUndefined();
+      expect(lastCiWaitOf(run.id)?.id).toBe(wait.id);
     });
   }
 
@@ -148,7 +116,7 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
     const cell = outcome === 'source-retry' ? 'R76' : 'R74';
     it(`${runner} ${cell} resumes a failed nonfinal CI agent with ${outcome} checks and preserves failure history`, async () => {
       const settle = github();
-      const wire = gatedProviderFailure(runner);
+      const wire = gatedProviderFailure(root, runner);
       const adapter = HARNESS_ADAPTERS[runner];
       const command = outcome === 'failed'
         ? 'node -e "process.exit(1)"'
@@ -172,7 +140,7 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
       }
       settle();
       const refusal = () => store.readEvents(run.id).find(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('continuation unavailable'));
-      await until(() => !!store.getRun(run.id)?.lastCiWait?.deliveredAt || !!refusal());
+      await until(() => !!lastCiWaitOf(run.id)?.deliveredAt || !!refusal());
       expect(refusal()).toBeUndefined();
       await until(() => store.getRun(run.id)?.status === 'waiting');
       // Close the recovered native session normally; Finish would intentionally skip the tail.
@@ -194,8 +162,8 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
       expect(store.getRun(run.id)?.steps.find(step => step.id === 'check')).toMatchObject({
         status: outcome === 'failed' ? 'failed' : 'done', iterations: 2, retriesUsed: 1,
       });
-      expect(store.getRun(run.id)?.ciWait).toBeUndefined();
-      expect(store.getRun(run.id)?.lastCiWait).toMatchObject({ id: wait.id, phase: 'delivered' });
+      expect(ciWaitOf(run.id)).toBeUndefined();
+      expect(lastCiWaitOf(run.id)).toMatchObject({ id: wait.id, phase: 'delivered' });
       expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === wait.id && input.deliveredAt)).toHaveLength(1);
     });
   }
@@ -203,7 +171,7 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
   for (const runner of RUNNER_IDS) for (const boundary of ['CI acknowledgement', 'queued tail'] as const) {
     it(`${runner} R75 resumes the owned workflow after restart at ${boundary} without rewriting its failed source`, async () => {
       const settle = github();
-      const wire = gatedProviderFailure(runner);
+      const wire = gatedProviderFailure(root, runner);
       const adapter = HARNESS_ADAPTERS[runner];
       const run = await ownedChain(runner, { name: 'owned-ci-chain', source: 'built-in', steps: [
         { id: 'first', prompt: adapter.scenarios['provider-error']!, runner, agentProfile: 'default' },
@@ -216,8 +184,8 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
       await until(() => !manager.isActive(run.id));
       const failed = structuredClone(store.getRun(run.id)!.steps.find(step => step.id === 'first')!);
       settle();
-      await until(() => !!store.getRun(run.id)?.lastCiWait?.deliveredAt && store.getRun(run.id)?.status === 'waiting');
-      expect(store.getRun(run.id)?.ciWait).toBeUndefined();
+      await until(() => !!lastCiWaitOf(run.id)?.deliveredAt && store.getRun(run.id)?.status === 'waiting');
+      expect(ciWaitOf(run.id)).toBeUndefined();
       if (boundary === 'queued tail') {
         // Hold only scheduler dispatch, after the real CI input ACK. Native teardown
         // durably queues the workflow remainder before any next execute can start.

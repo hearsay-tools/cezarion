@@ -7,9 +7,12 @@ import type { RunRecord } from '../runs/store.ts';
 
 const pr = 'https://github.com/acme/repo/pull/12';
 const identity = { prUrl: pr, repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40) };
+const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'ci');
+// hearsay-tools/cezarion#1233 dropped `human_ask_pending` and `human_ask_unanswered`: a wait now
+// registers under a pending question, which outranks it in `waitingOn` (pinned below).
 const codes = ['manager_disposed', 'capability_revoked', 'run_missing', 'run_not_running', 'run_stopping',
   'session_replaced', 'session_closed', 'run_cancelled', 'finish_requested', 'generation_mismatch',
-  'human_ask_pending', 'human_ask_unanswered', 'worker_execution_stopped', 'root_finish_pending'] as const;
+  'worker_execution_stopped', 'root_finish_pending'] as const;
 
 describe('CI registration guards before and after metadata lookup', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
@@ -21,7 +24,7 @@ describe('CI registration guards before and after metadata lookup', { timeout: 3
     const run = await parent(); await until(wire.initialReceived);
     const engine = manager as unknown as {
       disposed: boolean; active: Map<string, Record<string, unknown>>;
-      hasUnansweredHumanAsk(id: string): boolean; workerExecutionStopped(id: string): boolean;
+      workerExecutionStopped(id: string): boolean;
       executionBlockedByRootFinish(run: RunRecord): boolean;
     };
     const state = engine.active.get(run.id)!;
@@ -51,8 +54,6 @@ describe('CI registration guards before and after metadata lookup', { timeout: 3
         case 'run_cancelled': state.cancelled = true; break;
         case 'finish_requested': state.finishRequested = true; break;
         case 'generation_mismatch': state.ciGeneration = 'replaced'; break;
-        case 'human_ask_pending': state.pendingHumanAsk = true; break;
-        case 'human_ask_unanswered': vi.spyOn(engine, 'hasUnansweredHumanAsk').mockReturnValue(true); break;
         case 'worker_execution_stopped': vi.spyOn(engine, 'workerExecutionStopped').mockReturnValue(true); break;
         case 'root_finish_pending': vi.spyOn(engine, 'executionBlockedByRootFinish').mockReturnValue(true); break;
       }
@@ -67,7 +68,24 @@ describe('CI registration guards before and after metadata lookup', { timeout: 3
       vi.restoreAllMocks();
       writeFileSync(gate, '');
     }
-    expect(store.getRun(run.id)?.ciWait).toBeUndefined();
+    expect(ciWaitOf(run.id)).toBeUndefined();
+  });
+
+  it.each(['pending', 'unanswered'] as const)('registers CI and a timer while a human question is %s', async kind => {
+    const gate = join(root, 'end-turn');
+    const wire = controlledWire({ firstResultGate: gate });
+    const run = await parent(); await until(wire.initialReceived);
+    const engine = manager as unknown as { active: Map<string, Record<string, unknown>>; hasUnansweredHumanAsk(id: string): boolean };
+    const state = engine.active.get(run.id)!;
+    vi.spyOn(CiWatcherSupervisor.prototype, 'resolve').mockResolvedValue(identity);
+    vi.spyOn(CiWatcherSupervisor.prototype, 'watch').mockReturnValue(new Promise(() => {}));
+    if (kind === 'pending') state.pendingHumanAsk = true;
+    else vi.spyOn(engine, 'hasUnansweredHumanAsk').mockReturnValue(true);
+    try {
+      const ci = await manager.registerCiWait(run.id, { pr, timeout_seconds: 30 }, state.ciGeneration as string);
+      const timer = await manager.registerWait(run.id, { kind: 'timer', seconds: 60 }, 'cezar_wait', state.ciGeneration as string);
+      expect(store.getRun(run.id)?.waits?.map(wait => wait.id)).toEqual([ci.id, timer.id]);
+    } finally { state.pendingHumanAsk = false; vi.restoreAllMocks(); writeFileSync(gate, ''); }
   });
 });
 
@@ -81,7 +99,7 @@ describe('CI metadata lookup interruption', { timeout: 30_000 }, () => {
     const run = await parent(); await until(wire.initialReceived);
     const engine = manager as unknown as {
       active: Map<string, { ciGeneration: string; ciTurnId: string }>;
-      ciRegistrations: Map<string, { abort: AbortController }>;
+      ciRegistrations: Map<string, { runId: string; abort: AbortController }>;
     };
     const state = engine.active.get(run.id)!;
     const previousTurn = state.ciTurnId;
@@ -91,12 +109,13 @@ describe('CI metadata lookup interruption', { timeout: 30_000 }, () => {
     const pending = manager.registerCiWait(run.id, { pr, timeout_seconds: 30 }, state.ciGeneration, capability.signal);
     const assertion = expect(pending).rejects.toMatchObject({ code });
     try {
-      if (code === 'registration_aborted') engine.ciRegistrations.get(run.id)!.abort.abort();
+      // Keyed by run and normalised PR URL since hearsay-tools/cezarion#1233.
+      if (code === 'registration_aborted') [...engine.ciRegistrations.values()].find(entry => entry.runId === run.id)!.abort.abort();
       else if (code === 'turn_changed') state.ciTurnId = 'next-turn';
       else capability.abort();
       fail(new Error('lookup aborted'));
       await assertion;
-      expect(store.getRun(run.id)?.ciWait).toBeUndefined();
+      expect(ciWaitOf(run.id)).toBeUndefined();
     } finally { state.ciTurnId = previousTurn; writeFileSync(gate, ''); }
   });
 });

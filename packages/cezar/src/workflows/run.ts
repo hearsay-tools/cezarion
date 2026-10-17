@@ -1,7 +1,8 @@
 import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
-import { ciErrorMessage } from '../ci-wait/errors.ts';
-import { ciWaitRequestSchema, ciWaitResultSchema, previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type CiWait, type CiWaitRequest, type CiWaitResult, type CiWaitErrorCode, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract';
+import { waitErrorMessage } from '../ci-wait/errors.ts';
+import { cezarWaitRequestSchema, ciWaitResultSchema, previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type CiWaitRequest, type CiWaitResult, type PreviewServeRequest, type PreviewServeResult, type CezarCancelWaitAnswer, type CezarWaitRequest, type CiWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT } from '@open-mercato/cezar-contract';
+import { ciWatchRequest, hasCiWait, identicalWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, resolvedWaits, waitResultText } from './waits.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import { previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
@@ -449,7 +450,7 @@ interface ActiveRun {
   revokeCiTools?: () => void;
   ciGeneration?: string;
   ciTurnId?: string;
-  ciWakeTurn?: AgentSession;
+  waitWakeTurn?: AgentSession;
   cancelled: boolean;
   /** Explicit human Finish survives disposal; shutdown-only result callbacks do not settle. */
   finishRequested?: boolean;
@@ -503,9 +504,11 @@ interface ActiveRun {
   idleTimer?: NodeJS.Timeout;
   /** The inactivity timer closed the wire; resource teardown must not imply task success. */
   idleClosed?: boolean;
-  monitoringWakeTimer?: NodeJS.Timeout;
-  monitoringWakeIntervalMinutes?: number;
+  /** Timer wakes delivered in this session (hearsay-tools/cezarion#1233); at `MAX_AUTO_CONTINUES`
+   *  agent timers refuse and monitoring timers stop. A human message resets it. */
   monitoringWakeups?: number;
+  /** The monitoring-timer cap note was written for this session. */
+  monitoringCapNoted?: boolean;
   autosaveTimer?: NodeJS.Timeout;
   /* The screenshot counter lives on `RunManager.queuedImageSeq` (#472), keyed by
    * run id — a queued run persists attachments with no `ActiveRun` at all. */
@@ -558,10 +561,13 @@ export const FINAL_MESSAGE_NUDGE_REPLY_MS = 5 * 60_000;
 export const MAX_AUTO_CONTINUES = 40;
 export const AUTONOMOUS_NUDGE =
   'Continue working autonomously until the task is fully complete. Do not ask me for confirmation or clarification — make reasonable assumptions and proceed. When everything is done, end the session with your done signal.';
+/** `cezar_cancel_wait` answers that cancel nothing (hearsay-tools/cezarion#1233). */
+const CANCEL_MESSAGES = {
+  not_found: 'No open wait has this wait_id. open_waits lists the waits still open.',
+  already_resolved: 'This wait already resolved; its result arrives with your next wake. Cancelling it changed nothing.',
+} as const;
 export const FINAL_MESSAGE_NUDGE =
   'Your last turn ended without a message to the user. Write your user-facing reply now: what you did, where things stand, and anything you need from the user. If the task goal is fully achieved, end that message with CEZ:DONE.';
-const MONITORING_WAKE_NUDGE =
-  'Re-check the downstream work you were monitoring. Continue toward the task goal. When the watched work is finished and the task goal is complete, end your final message with CEZ:DONE. If the watched work is still pending, end with CEZ:MONITORING. Never yield markerless for a monitoring wrap-up. If you genuinely need user input, follow the normal question path instead.';
 
 /**
  * Auto-resume after a provider usage limit (spec 2026-08-03-auto-resume-after-usage-limit).
@@ -958,7 +964,7 @@ export class RunManager {
     if (this.executions.get(runId) === execution) this.executions.delete(runId);
     execution.resolve();
     if (!this.disposed) {
-      try { this.queueCiWake(runId); } catch { this.retryCiAdmission(runId); }
+      try { this.queueWaitWake(runId); } catch { this.retryWaitAdmission(runId); }
     }
     if (!this.disposed && this.store.getRun(runId)?.stopping) this.store.updateRun(runId, { stopping: undefined });
     if (!this.disposed) this.releaseSlot();
@@ -1267,12 +1273,20 @@ export class RunManager {
   private readonly waiting = new Set<string>();
   /** Durable monitoring subset. Only the configured number receives the waiting-slot exemption. */
   private readonly monitoring = new Set<string>();
-  /** Separate from human waiting: these resumes MUST reacquire scheduler capacity. */
-  private readonly ciWakeQueuedAt = new Map<string, number>();
-  private readonly ciWakeAdmitted = new Set<string>();
-  private readonly ciWatches = new Map<string, { id: string; abort: AbortController }>();
-  private readonly ciRegistrations = new Map<string, { abort: AbortController; pr: string; seconds: number; promise: Promise<CiWait> }>();
-  private readonly ciRetries = new Map<string, NodeJS.Timeout>();
+  /** A run whose resolved waits wait for a wake (hearsay-tools/cezarion#1233). Separate from
+   *  human waiting: these resumes MUST reacquire scheduler capacity. Keyed by run id. */
+  private readonly waitWakeQueuedAt = new Map<string, number>();
+  private readonly waitWakeAdmitted = new Set<string>();
+  /** One CI watch per open CI wait, keyed by wait id. */
+  private readonly ciWatches = new Map<string, { runId: string; abort: AbortController }>();
+  /** CI lookups in flight, keyed by run id and normalized PR URL: two PRs may register at once. */
+  private readonly ciRegistrations = new Map<string, { runId: string; abort: AbortController; promise: Promise<Wait> }>();
+  /** A resolution whose checkpoint failed, retried by wait id. */
+  private readonly ciRetries = new Map<string, { runId: string; timer: NodeJS.Timeout }>();
+  /** A wake that could not be admitted yet, retried by run id. */
+  private readonly wakeRetries = new Map<string, NodeJS.Timeout>();
+  /** One timer per open timer wait, keyed by wait id. */
+  private readonly waitTimers = new Map<string, { runId: string; timer: NodeJS.Timeout }>();
   private readonly ciResources: ReturnType<typeof acquireCiResources>;
   /** #781: the workspace-wide preview host. Absent (`cez run`, tests) means every registration is `headless`. */
   private readonly preview?: PreviewHostLike;
@@ -1327,7 +1341,7 @@ export class RunManager {
   private readonly onDelegationRun = (run: RunRecord, source?: CommitSource): void => {
     // Delegation metadata checkpoints do not change task status.
     if (!this.disposed && source === undefined) this.reapTerminalScratch(run.id);
-    if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status)) this.withdrawCiWait(run.id);
+    if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status)) this.cancelOpenWaits(run.id);
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.active.get(run.id)?.revokeDelegation?.();
     // Cleanup checkpoints emit terminal records too. With delegation disabled,
     // these observations must not replay the project's conversation histories.
@@ -1434,6 +1448,7 @@ export class RunManager {
     this.queueWatchdog = setInterval(() => void this.rescueStalledQueue(), QUEUE_WATCHDOG_MS);
     this.queueWatchdog.unref?.();
     this.store.on('run', this.onDelegationRun);
+    this.store.on('deleted', this.onRunDeleted);
   }
 
   /**
@@ -1453,8 +1468,13 @@ export class RunManager {
     this.ciWatches.clear();
     for (const task of this.ciRegistrations.values()) task.abort.abort();
     this.ciRegistrations.clear();
-    for (const timer of this.ciRetries.values()) clearTimeout(timer);
+    for (const retry of this.ciRetries.values()) clearTimeout(retry.timer);
     this.ciRetries.clear();
+    for (const timer of this.wakeRetries.values()) clearTimeout(timer);
+    this.wakeRetries.clear();
+    // Wait records stay as they are: a later manager re-arms them from their deadlines.
+    for (const entry of this.waitTimers.values()) clearTimeout(entry.timer);
+    this.waitTimers.clear();
     this.ciResources.release();
     this.delegationProvisioner = undefined;
     this.finalizedWorkers.clear();
@@ -1462,6 +1482,7 @@ export class RunManager {
     this.orphanProbes.clear(); this.orphanBlockers.clear(); this.reportedOrphanBlockers.clear();
     for (const settle of this.terminationWaiters) settle();
     this.store.off('run', this.onDelegationRun);
+    this.store.off('deleted', this.onRunDeleted);
     for (const timer of this.workerWaitTimers.values()) clearTimeout(timer);
     this.workerWaitTimers.clear();
     for (const timer of this.inboxClaimTimers.values()) clearTimeout(timer);
@@ -1476,7 +1497,6 @@ export class RunManager {
       state.revokeCiTools?.(); state.revokeCiTools = undefined;
       state.revokeDelegation?.(); state.revokeDelegation = undefined;
       this.clearIdleTimer(state);
-      this.clearMonitoringWakeTimer(state, runId);
       this.clearAutosaveTimer(state);
       state.releaseRepoRoot?.();
       state.releaseRepoRoot = undefined;
@@ -1786,26 +1806,30 @@ export class RunManager {
   }
 
   /**
-   * The trusted callbacks behind one session's cezar tools. hearsay-tools/cezarion#1233: until the
-   * wait list lands here, `cezar_wait` with kind "ci" (and its `cezar_wait_for_ci` alias) still
-   * registers through `registerCiWait`, whose coded refusals the tool server turns into fixed
-   * messages; timers and `cezar_cancel_wait` answer `unavailable`.
+   * The trusted callbacks behind one session's cezar tools (hearsay-tools/cezarion#1233). Both
+   * answers list the waits still open; a coded refusal answers with its fixed message, never the
+   * thrower's text, and anything else is left to the tool server's `unavailable`.
    */
   cezarToolHandlers(runId: string, generation: string): CezarToolHandlers {
-    const notYet = 'This wait tool is not available in this Cezar session yet.';
+    const listOpen = () => openWaitList(this.store.getRun(runId)?.waits ?? []);
     return {
       registerWait: async (request, via, signal) => {
-        if (request.kind !== 'ci') return { answer: { ok: false, code: 'unavailable', message: notYet } };
-        const wait = await this.registerCiWait(runId, { pr: request.pr, timeout_seconds: request.timeout_seconds }, generation, signal);
-        const phase = ({ registered: 'open', parked: 'open', 'wake-pending': 'resolved', delivered: 'delivered', withdrawn: 'cancelled' } as const)[wait.phase];
-        const { wakeId: _wakeId, deliveredAt, ...entry } = wait;
-        const open = phase === 'open' ? [{ wait_id: wait.id, kind: 'ci' as const, deadline: wait.deadline, summary: `CI for ${wait.repository}#${wait.prNumber}` }] : [];
-        return {
-          answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: open },
-          wait: { ...entry, kind: 'ci', source: 'agent', via, phase, ...(deliveredAt ? { deliveredAt } : {}) },
-        };
+        try {
+          const wait = await this.registerWait(runId, request, via, generation, signal);
+          return { answer: { ok: true, wait_id: wait.id, kind: wait.kind, deadline: wait.deadline, open_waits: listOpen() }, wait };
+        } catch (error) {
+          const code = waitErrorCodeSchema.safeParse(error && typeof error === 'object' && 'code' in error ? error.code : undefined);
+          if (!code.success) throw error;
+          return { answer: { ok: false, code: code.data, message: waitErrorMessage(code.data), open_waits: listOpen() } };
+        }
       },
-      cancelWait: async () => ({ cancelled: false, code: 'unavailable', message: notYet }),
+      cancelWait: async ({ wait_id }) => {
+        let outcome: ReturnType<RunManager['cancelWait']>;
+        try { outcome = this.cancelWait(runId, wait_id, generation); }
+        catch { return { cancelled: false, code: 'unavailable', message: waitErrorMessage('unavailable'), open_waits: listOpen() }; }
+        if (outcome.cancelled) return { cancelled: true, wait_id, open_waits: listOpen() };
+        return { cancelled: false, code: outcome.code, message: CANCEL_MESSAGES[outcome.code], open_waits: listOpen() } satisfies CezarCancelWaitAnswer;
+      },
       registerPreview: (request, signal) => this.registerPreviewServer(runId, request, signal),
       stopPreview: (request, signal) => this.stopPreviewServer(runId, request, signal),
     };
@@ -1870,14 +1894,24 @@ export class RunManager {
     return checked.answer();
   }
 
-  /** Trusted capability callbacks supply run identity; the model supplies only a PR and deadline. */
-  async registerCiWait(runId: string, request: CiWaitRequest, generation: string, capabilitySignal?: AbortSignal): Promise<CiWait> {
-    const parsed = ciWaitRequestSchema.parse(request);
+  /** The deprecated `cezar_wait_for_ci` route's registration, kept for its callers and tests. */
+  registerCiWait(runId: string, request: CiWaitRequest, generation: string, capabilitySignal?: AbortSignal): Promise<Wait> {
+    return this.registerWait(runId, { kind: 'ci', ...request }, 'cezar_wait_for_ci', generation, capabilitySignal);
+  }
+
+  /**
+   * Open a CI or timer wait (hearsay-tools/cezarion#1233). Trusted capability callbacks supply run
+   * identity; the model supplies only the PR and deadline, or the seconds and note. Refusals throw
+   * `{ code }`. An identical registration (same PR; or same seconds and note in the same turn)
+   * returns the open wait it repeats.
+   */
+  async registerWait(runId: string, request: CezarWaitRequest, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<Wait> {
+    const parsed = cezarWaitRequestSchema.parse(request);
     const state = this.active.get(runId);
-    const refuse = (code: CiWaitErrorCode): never => {
+    const refuse = (code: WaitErrorCode): never => {
       // Fixed codes only: no tool arguments, credentials or provider diagnostics.
-      console.warn(`[cez] CI wait registration refused: ${code}`);
-      throw Object.assign(new Error(ciErrorMessage(code)), { code });
+      console.warn(`[cez] wait registration refused: ${code}`);
+      throw Object.assign(new Error(waitErrorMessage(code)), { code });
     };
     const assertCanRegister = () => {
       const run = this.store.getRun(runId);
@@ -1891,27 +1925,31 @@ export class RunManager {
       if (state.cancelled) refuse('run_cancelled');
       if (state.finishRequested) refuse('finish_requested');
       if (state.ciGeneration !== generation) refuse('generation_mismatch');
-      if (state.pendingHumanAsk) refuse('human_ask_pending');
-      if (this.hasUnansweredHumanAsk(runId)) refuse('human_ask_unanswered');
       // Settlement queues a wake; it does not prove provider delivery. Keep the
       // wait until its acknowledgement, and tell the agent how to release it.
       if (this.workerWait(runId)) refuse('worker_wait_pending');
       if (this.workerExecutionStopped(runId)) refuse('worker_execution_stopped');
       if (this.executionBlockedByRootFinish(run)) refuse('root_finish_pending');
-      return state;
+      return { state, run };
     };
-    const active = assertCanRegister();
-    const current = this.store.getRun(runId)?.ciWait;
-    if (current) {
-      if (current.prUrl.toLowerCase() === parsed.pr.replace(/\/$/, '').toLowerCase() && current.timeoutSeconds === parsed.timeout_seconds) return current;
-      throw Object.assign(new Error('wait_conflict: a different CI wait is already registered'), { code: 'wait_conflict' });
-    }
-    const pending = this.ciRegistrations.get(runId);
-    if (pending) {
-      if (pending.pr === parsed.pr && pending.seconds === parsed.timeout_seconds) return pending.promise;
-      throw Object.assign(new Error('wait_conflict: a different CI registration is already in progress'), { code: 'wait_conflict' });
-    }
+    const { state: active, run } = assertCanRegister();
     const turnId = active.ciTurnId ??= randomUUID();
+    const existing = identicalWait(run.waits ?? [], parsed, turnId);
+    if (existing) return existing;
+    // Counted as the store counts them, so a registration accepted here is never refused there.
+    if (openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
+    if (parsed.kind === 'timer') {
+      if (this.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
+      if ((active.monitoringWakeups ?? 0) >= MAX_AUTO_CONTINUES) refuse('wake_budget_spent');
+      const now = Date.now();
+      const wait: TimerWaitEntry = { id: randomUUID(), kind: 'timer', source: 'agent', via, registeredAt: new Date(now).toISOString(),
+        deadline: new Date(now + parsed.seconds * 1000).toISOString(), phase: 'open', turnId, seconds: parsed.seconds,
+        ...(parsed.note === undefined ? {} : { note: parsed.note }) };
+      return this.openWait(runId, active, wait);
+    }
+    const key = `${runId}\n${normalizePrUrl(parsed.pr)}`;
+    const pending = this.ciRegistrations.get(key);
+    if (pending) return pending.promise;
     const abort = new AbortController();
     const signal = capabilitySignal ? AbortSignal.any([abort.signal, capabilitySignal]) : abort.signal;
     const promise = (async () => {
@@ -1925,123 +1963,236 @@ export class RunManager {
         throw error;
       });
       assertLookupCurrent();
-      const registeredAt = new Date().toISOString();
-      const wait: CiWait = { ...identity, id: randomUUID(), generation, turnId, timeoutSeconds: parsed.timeout_seconds,
-        registeredAt, deadline: new Date(Date.now() + parsed.timeout_seconds * 1000).toISOString(), phase: 'registered' };
-      try { this.store.commitCiWait(runId, wait); }
-      catch { throw Object.assign(new Error('CI registration could not be saved; retry when storage is writable'), { code: 'persistence' }); }
-      this.startCiWatch(runId, wait);
-      if (active.atTurnBoundary === active.session || this.waiting.has(runId)) this.parkCiWait(runId, active);
-      return this.store.getRun(runId)!.ciWait ?? wait;
+      // The same PR may have registered while this lookup was in flight under another spelling.
+      const repeated = identicalWait(this.store.getRun(runId)?.waits ?? [], parsed, turnId);
+      if (repeated) return repeated;
+      if (openWaits(this.store.getRun(runId) ?? {}).length >= WAIT_LIMIT) refuse('capacity');
+      const now = Date.now();
+      const wait: CiWaitEntry = { ...identity, id: randomUUID(), kind: 'ci', source: 'agent', via, generation, turnId,
+        timeoutSeconds: parsed.timeout_seconds, registeredAt: new Date(now).toISOString(),
+        deadline: new Date(now + parsed.timeout_seconds * 1000).toISOString(), phase: 'open' };
+      return this.openWait(runId, active, wait);
     })();
-    this.ciRegistrations.set(runId, { abort, pr: parsed.pr, seconds: parsed.timeout_seconds, promise });
+    this.ciRegistrations.set(key, { runId, abort, promise });
     try { return await promise; }
-    finally { if (this.ciRegistrations.get(runId)?.abort === abort) this.ciRegistrations.delete(runId); }
+    finally { if (this.ciRegistrations.get(key)?.abort === abort) this.ciRegistrations.delete(key); }
   }
 
-  private startCiWatch(runId: string, wait: CiWait): void {
-    if (this.disposed || this.ciWatches.has(runId) || wait.result) return;
+  /** Commit, arm and (at a boundary) park on a newly registered wait. */
+  private openWait(runId: string, state: ActiveRun, wait: Wait): Wait {
+    try { this.store.commitWait(runId, wait); }
+    catch { throw Object.assign(new Error(waitErrorMessage('persistence')), { code: 'persistence' }); }
+    this.armWait(runId, wait);
+    if (state.atTurnBoundary === state.session || this.waiting.has(runId)) this.parkWaits(runId, state);
+    return this.store.getRun(runId)?.waits?.find(entry => entry.id === wait.id) ?? wait;
+  }
+
+  /**
+   * The agent's `cezar_cancel_wait`. An open wait is cancelled with its watch or timer, and no
+   * result for it is ever delivered. A resolved wait is already owed: cancelling it is a no-op and
+   * its result arrives with the next wake. A settled or unknown id is `not_found`.
+   */
+  cancelWait(runId: string, waitId: string, generation: string): { cancelled: true } | { cancelled: false; code: 'not_found' | 'already_resolved' } {
+    const state = this.active.get(runId);
+    if (this.disposed || !state || state.ciGeneration !== generation) {
+      throw Object.assign(new Error(waitErrorMessage('generation_mismatch')), { code: 'generation_mismatch' });
+    }
+    const wait = this.store.getRun(runId)?.waits?.find(entry => entry.id === waitId);
+    if (!wait) return { cancelled: false, code: 'not_found' };
+    if (wait.phase !== 'open') return { cancelled: false, code: 'already_resolved' };
+    this.store.commitWaitCancellation(runId, [waitId]);
+    this.disarmWait(waitId);
+    return { cancelled: true };
+  }
+
+  /** Start what resolves an open wait: its CI watch, or its timer from the stored deadline. An
+   *  overdue timer (restart) resolves at once. */
+  private armWait(runId: string, wait: Wait): void {
+    if (this.disposed || wait.phase !== 'open') return;
+    if (wait.kind === 'ci') { this.startCiWatch(runId, wait); return; }
+    if (this.waitTimers.has(wait.id)) return;
+    // A stopping, stopped or finishing run takes no self-generated wake: the timer stays open
+    // for that transition to cancel, as the monitoring timer did before it was a wait.
+    const fire = () => {
+      const run = this.store.getRun(runId);
+      if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
+      this.settleWait(runId, wait.id);
+    };
+    const due = Date.parse(wait.deadline) - Date.now();
+    if (due <= 0) { fire(); return; }
+    const timer = setTimeout(() => {
+      if (this.waitTimers.get(wait.id)?.timer !== timer) return;
+      this.waitTimers.delete(wait.id);
+      fire();
+    }, due);
+    timer.unref?.();
+    this.waitTimers.set(wait.id, { runId, timer });
+  }
+
+  /** Stop everything that could still resolve this wait. */
+  private disarmWait(waitId: string): void {
+    this.ciWatches.get(waitId)?.abort.abort(); this.ciWatches.delete(waitId);
+    const timer = this.waitTimers.get(waitId); if (timer) clearTimeout(timer.timer); this.waitTimers.delete(waitId);
+    const retry = this.ciRetries.get(waitId); if (retry) clearTimeout(retry.timer); this.ciRetries.delete(waitId);
+  }
+
+  private startCiWatch(runId: string, wait: CiWaitEntry): void {
+    if (this.disposed || this.ciWatches.has(wait.id) || wait.phase !== 'open') return;
     const abort = new AbortController();
-    const watch = { id: wait.id, abort };
-    this.ciWatches.set(runId, watch);
-    const current = () => !this.disposed && !abort.signal.aborted && this.ciWatches.get(runId) === watch &&
-      this.store.getRun(runId)?.ciWait?.id === wait.id;
+    const watch = { runId, abort };
+    this.ciWatches.set(wait.id, watch);
+    const current = () => !this.disposed && !abort.signal.aborted && this.ciWatches.get(wait.id) === watch;
     const settle = (result: CiWaitResult) => {
       if (!current()) return;
-      try {
-        const latest = this.store.getRun(runId)?.ciWait;
-        if (!latest || latest.id !== wait.id) return;
-        const parsed = ciWaitResultSchema.safeParse(result);
-        const validated: CiWaitResult = parsed.success ? parsed.data : { outcome: 'error', headSha: wait.headSha,
-          observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false,
-          diagnostic: 'CI watcher returned an invalid observation; inspect the PR and register a new wait.' };
-        const settled: CiWait = { ...latest, phase: 'wake-pending', result: validated, wakeId: wait.id };
-        const input: AgentInput = { id: wait.id, parentRunId: runId, source: 'lifecycle', createdAt: new Date().toISOString(),
-          text: `CI wait observation ${wait.id} for ${wait.prUrl}. External data follows: ${JSON.stringify(validated)}. This observation is not merge approval or task completion. Reported checks may not include every expected workflow. Duplicate observations retain this ID.` };
-        this.store.commitCiWait(runId, settled, input);
-        this.ciWatches.delete(runId);
-        try { this.queueCiWake(runId); }
-        catch { this.retryCiAdmission(runId); }
-      } catch {
-        // A failed durable checkpoint may not drop the accepted intent or publish a false result.
-        if (!current()) return;
-        console.warn('[cez] CI wait checkpoint unavailable; retaining result for retry.');
-        const timer = setTimeout(() => { this.ciRetries.delete(runId); settle(result); }, 1000);
-        timer.unref(); this.ciRetries.set(runId, timer);
-      }
+      const parsed = ciWaitResultSchema.safeParse(result);
+      const validated: CiWaitResult = parsed.success ? parsed.data : { outcome: 'error', headSha: wait.headSha,
+        observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false,
+        diagnostic: 'CI watcher returned an invalid observation; inspect the PR and register a new wait.' };
+      this.ciWatches.delete(wait.id);
+      this.settleWait(runId, wait.id, validated);
     };
-    void this.ciSupervisor.watch(wait, abort.signal).then(settle, () => settle({ outcome: 'error', headSha: wait.headSha,
+    void this.ciSupervisor.watch(ciWatchRequest(wait), abort.signal).then(settle, () => settle({ outcome: 'error', headSha: wait.headSha,
       observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false,
       diagnostic: 'CI watcher unavailable; inspect the pull request and retry the wait.' }));
   }
 
-  private retryCiAdmission(runId: string): void {
-    if (this.disposed || this.ciRetries.has(runId) || !this.store.getRun(runId)?.ciWait) return;
-    const timer = setTimeout(() => {
-      this.ciRetries.delete(runId);
-      try { this.queueCiWake(runId); } catch { this.retryCiAdmission(runId); }
-    }, 1000);
-    timer.unref(); this.ciRetries.set(runId, timer);
+  /** `resolveWait`, retried while its durable checkpoint is unavailable: a failed write may not
+   *  drop the accepted intent or publish a false result. */
+  private settleWait(runId: string, waitId: string, result?: CiWaitResult): void {
+    if (this.disposed) return;
+    try { this.resolveWait(runId, waitId, result); }
+    catch {
+      if (this.ciRetries.has(waitId)) return;
+      console.warn('[cez] wait checkpoint unavailable; retaining result for retry.');
+      const timer = setTimeout(() => { this.ciRetries.delete(waitId); this.settleWait(runId, waitId, result); }, 1000);
+      timer.unref(); this.ciRetries.set(waitId, { runId, timer });
+    }
   }
 
-  private parkCiWait(runId: string, state: ActiveRun): boolean {
-    const wait = this.store.getRun(runId)?.ciWait;
-    if (!wait || !state.session?.open || state.cancelled || state.pendingHumanAsk) return false;
-    if (wait.phase === 'registered') this.store.commitCiWait(runId, { ...wait, phase: 'parked' });
-    this.clearIdleTimer(state); this.clearMonitoringWakeTimer(state, runId);
+  /** Commit an open wait as resolved together with its lifecycle input (id = wait id), then
+   *  queue the run's wake. Throws when the checkpoint fails; a wait no longer open is ignored. */
+  private resolveWait(runId: string, waitId: string, result?: CiWaitResult): void {
+    const latest = this.store.getRun(runId)?.waits?.find(wait => wait.id === waitId);
+    if (!latest || latest.phase !== 'open') return;
+    const resolvedAt = new Date().toISOString();
+    const settled: Wait = latest.kind === 'ci'
+      ? { ...latest, phase: 'resolved', resolvedAt, result: result ?? { outcome: 'deadline', headSha: latest.headSha, observedAt: resolvedAt, checks: [], totalChecks: 0, truncated: false } }
+      : { ...latest, phase: 'resolved', resolvedAt };
+    const input: AgentInput = { id: latest.id, parentRunId: runId, source: 'lifecycle', createdAt: resolvedAt, text: waitResultText(settled) };
+    this.store.commitWait(runId, settled, input);
+    // A timer expiry is a self-generated wake: it counts against the session's budget, as the
+    // monitoring timer's wakes did. CI wakes are external events and do not.
+    const state = latest.kind === 'timer' ? this.active.get(runId) : undefined;
+    if (state) {
+      state.monitoringWakeups = (state.monitoringWakeups ?? 0) + 1;
+      this.store.appendEvent(runId, { type: 'note', message: `automatic ${isMonitoringTimer(latest) ? 'monitoring' : 'timer'} wake-up (${state.monitoringWakeups}/${MAX_AUTO_CONTINUES})` });
+    }
+    try { this.queueWaitWake(runId); }
+    catch { this.retryWaitAdmission(runId); }
+  }
+
+  private retryWaitAdmission(runId: string): void {
+    if (this.disposed || this.wakeRetries.has(runId) || !resolvedWaits(this.store.getRun(runId) ?? {}).length) return;
+    const timer = setTimeout(() => {
+      this.wakeRetries.delete(runId);
+      try { this.queueWaitWake(runId); } catch { this.retryWaitAdmission(runId); }
+    }, 1000);
+    timer.unref(); this.wakeRetries.set(runId, timer);
+  }
+
+  /** Park a session on its open or resolved waits: today's monitoring park (status `running`,
+   *  `activity: 'monitoring'`), which frees the slot; a resolved wait queues its wake at once. */
+  private parkWaits(runId: string, state: ActiveRun): boolean {
+    const run = this.store.getRun(runId);
+    if (!run?.waits?.length || !state.session?.open || state.cancelled || state.pendingHumanAsk) return false;
+    this.clearIdleTimer(state);
     this.waiting.add(runId); this.monitoring.add(runId);
-    this.store.updateRun(runId, { status: 'running', activity: 'monitoring', monitoringWakeAt: undefined });
+    this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
     if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'running' });
-    this.queueCiWake(runId);
+    this.queueWaitWake(runId);
     this.releaseSlot();
     return true;
   }
 
-  private queueCiWake(runId: string): void {
+  /** Queue one wake for every resolved wait of a run: a parked live session waits for scheduler
+   *  admission; a run with no session reopens through a scheduler-owned continuation. */
+  private queueWaitWake(runId: string): void {
     const run = this.store.getRun(runId);
-    const wait = run?.ciWait;
-    if (this.disposed || this.recoveringRun(run) || !run || !wait?.result || !wait.wakeId ||
+    const resolved = run ? resolvedWaits(run) : [];
+    if (this.disposed || this.recoveringRun(run) || !run || !resolved.length ||
       !['running', 'waiting', 'queued'].includes(run.status) || run.stopping ||
       this.hasPendingHumanAsk(runId) || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
     // Settlement ends the watcher. Keep a bounded-rate wake source until ACK,
     // withdrawal or termination, including refusals with no runner-ready callback.
-    this.retryCiAdmission(runId);
-    if (this.ciWakeAdmitted.has(runId)) { this.flushAgentInputs(runId); return; }
-    if (this.ciWakeQueuedAt.has(runId)) { this.releaseSlot(); return; }
+    this.retryWaitAdmission(runId);
+    if (this.waitWakeAdmitted.has(runId)) { this.flushAgentInputs(runId); return; }
+    if (this.waitWakeQueuedAt.has(runId)) { this.releaseSlot(); return; }
     const state = this.active.get(runId);
     if (state) {
       if (!this.monitoring.has(runId) || state.atTurnBoundary !== state.session || state.pendingHumanAsk) return;
-      this.ciWakeQueuedAt.set(runId, Date.now());
+      this.waitWakeQueuedAt.set(runId, Date.now());
       if (!this.queue.includes(runId)) this.queue.push(runId);
     } else if (!this.isActive(runId)) {
       // No live session: create a scheduler-owned continuation, never a direct provider call.
       this.store.updateRun(runId, { status: 'waiting', activity: undefined });
-      const resumed = this.continueRun(runId, { text: 'Resume to receive the queued CI observation. End this opening turn so Cezar can deliver it; do not poll CI.' }, true);
+      const text = resolved.some(wait => wait.kind === 'ci')
+        ? 'Resume to receive the queued CI observation. End this opening turn so Cezar can deliver it; do not poll CI.'
+        : 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.';
+      const resumed = this.continueRun(runId, { text }, true);
       if (!resumed.ok) {
-        this.store.appendEvent(runId, { type: 'note', message: `CI result retained; continuation unavailable: ${resumed.error ?? 'unknown'}` });
+        this.store.appendEvent(runId, { type: 'note', message: `Wait result retained; continuation unavailable: ${resumed.error ?? 'unknown'}` });
         return;
       }
-      this.ciWakeQueuedAt.set(runId, Date.now());
+      this.waitWakeQueuedAt.set(runId, Date.now());
     }
     this.releaseSlot();
   }
 
-  private withdrawCiWait(runId: string, message?: QueuedMessage): void {
-    this.ciRegistrations.get(runId)?.abort.abort(); this.ciRegistrations.delete(runId);
-    this.store.commitCiWaitWithdrawal(runId, message);
-    this.ciWatches.get(runId)?.abort.abort(); this.ciWatches.delete(runId);
-    const timer = this.ciRetries.get(runId); if (timer) clearTimeout(timer); this.ciRetries.delete(runId);
-    if (this.ciWakeQueuedAt.delete(runId) && this.active.has(runId)) {
+  /**
+   * Cancel every open or resolved wait of a run without waking the agent: stop, Finish, cancel,
+   * deletion, any terminal status, and (until phase 1's later work) human input. With `message`,
+   * a human message accepted together with the CI withdrawal (#476) rides the same checkpoint.
+   */
+  private cancelOpenWaits(runId: string, message?: QueuedMessage): void {
+    const before = this.store.getRun(runId)?.waits ?? [];
+    if (message) this.store.commitCiWaitWithdrawal(runId, message);
+    const remaining = (this.store.getRun(runId)?.waits ?? []).map(wait => wait.id);
+    if (remaining.length) this.store.commitWaitCancellation(runId, remaining);
+    for (const wait of before) this.disarmWait(wait.id);
+    this.disarmRunWaits(runId);
+  }
+
+  /** Stop every watch, timer, retry and queued wake a run's waits hold in memory. */
+  private disarmRunWaits(runId: string): void {
+    for (const [key, registration] of this.ciRegistrations) {
+      if (registration.runId !== runId) continue;
+      registration.abort.abort(); this.ciRegistrations.delete(key);
+    }
+    for (const [id, watch] of this.ciWatches) if (watch.runId === runId) this.disarmWait(id);
+    for (const [id, entry] of this.waitTimers) if (entry.runId === runId) this.disarmWait(id);
+    for (const [id, retry] of this.ciRetries) if (retry.runId === runId) this.disarmWait(id);
+    const timer = this.wakeRetries.get(runId); if (timer) clearTimeout(timer); this.wakeRetries.delete(runId);
+    if (this.waitWakeQueuedAt.delete(runId) && this.active.has(runId)) {
       const index = this.queue.indexOf(runId); if (index >= 0) this.queue.splice(index, 1);
     }
-    this.ciWakeAdmitted.delete(runId);
+    this.waitWakeAdmitted.delete(runId);
+  }
+
+  /** A deleted run's row is gone with its waits; only what they armed in memory is left. */
+  private readonly onRunDeleted = (runId: string): void => { this.disarmRunWaits(runId); };
+
+  /** Human input withdraws CI waits (#476) until phase 1's later work keeps them open; timers go
+   *  with them, as human input cleared the monitoring timer. */
+  private withdrawCiWait(runId: string, message?: QueuedMessage): void {
+    this.cancelOpenWaits(runId, message);
   }
 
   /** Reconstruct delivery context from durable state, including refused input and restart. */
   private ciWaitWithdrawalNote(runId: string): string | undefined {
     const run = this.store.getRun(runId);
-    const wait = run?.lastCiWait;
-    if (run?.ciWait || wait?.phase !== 'withdrawn') return undefined;
+    if (!run || run.waits?.some(entry => entry.kind === 'ci')) return undefined;
+    const wait = [...(run.lastWaits ?? [])].reverse().find(entry => entry.kind === 'ci');
+    if (wait?.kind !== 'ci' || wait.phase !== 'cancelled') return undefined;
     return `Cezar CI wait status: wait ${wait.id} for ${wait.prUrl} (head ${wait.headSha}) was withdrawn and is no longer registered. ` +
       'Human input interrupts an active CI wait. If CI monitoring is still needed, call cezar_wait_for_ci again and end your turn after registration. ' +
       'CEZ:MONITORING and ordinary automatic wake-ups do not register or restore a CI wait. Follow the current user request.';
@@ -2268,8 +2419,8 @@ export class RunManager {
    */
   private busySlots(): number {
     const ordinaryWaiting = this.waiting.size - this.monitoring.size;
-    // An admitted CI wake reserves its slot while remaining visibly parked until ACK.
-    const admittedMonitoring = [...this.ciWakeAdmitted].filter(id => this.monitoring.has(id)).length;
+    // An admitted wait wake reserves its slot while remaining visibly parked until ACK.
+    const admittedMonitoring = [...this.waitWakeAdmitted].filter(id => this.monitoring.has(id)).length;
     const exemptMonitoring = Math.min(this.monitoring.size - admittedMonitoring, this.semaphore.maxMonitoringSessions());
     return this.active.size + this.starting.size - ordinaryWaiting - exemptMonitoring - this.workerWaiting.size;
   }
@@ -2281,7 +2432,7 @@ export class RunManager {
   private oldestQueuedAt(): number | null {
     const head = this.queue[0];
     if (!head) return null;
-    const wakeQueuedAt = this.workerWakeQueuedAt.get(head) ?? this.ciWakeQueuedAt.get(head);
+    const wakeQueuedAt = this.workerWakeQueuedAt.get(head) ?? this.waitWakeQueuedAt.get(head);
     if (wakeQueuedAt !== undefined) return wakeQueuedAt;
     const createdAt = this.store.getRun(head)?.createdAt;
     const ms = createdAt ? Date.parse(createdAt) : Number.NaN;
@@ -2313,7 +2464,7 @@ export class RunManager {
   private async pump(): Promise<void> {
     // Any recovery, scoped or not: each ends with a pump of its own, so nothing waits for long.
     if (this.disposed || this.recovering) return;
-    this.reconcileMonitoringWakeTimers();
+    this.reconcileMonitoringTimers();
     this.reconcileAutoResumes();
     // A pump requested while one is in flight can't just be dropped: the
     // in-flight pass may already have read capacity (it awaits `getRepoInfo`
@@ -2363,8 +2514,8 @@ export class RunManager {
         // no runner, and then the account it would use is the configured default.
         const defaultRunner = anyHold ? (await loadConfig(this.repoRoot)).defaultRunner : undefined;
         // Removing one monitor above the exemption cap needs no new slot: it already holds one.
-        const chargedCiWake = (id: string) => this.ciWakeQueuedAt.has(id) && this.monitoring.has(id) &&
-          this.monitoring.size - [...this.ciWakeAdmitted].filter(id => this.monitoring.has(id)).length > this.semaphore.maxMonitoringSessions();
+        const chargedCiWake = (id: string) => this.waitWakeQueuedAt.has(id) && this.monitoring.has(id) &&
+          this.monitoring.size - [...this.waitWakeAdmitted].filter(id => this.monitoring.has(id)).length > this.semaphore.maxMonitoringSessions();
         while (this.queue.length > 0) {
           // Recovery may have begun while this pump awaited repository/config discovery.
           if (this.disposed || this.recovering) return;
@@ -2395,23 +2546,24 @@ export class RunManager {
           }
           const runId = this.queue.splice(next, 1)[0];
           if (!runId) break;
-          if (this.ciWakeQueuedAt.has(runId) && this.active.has(runId)) {
-            this.ciWakeQueuedAt.delete(runId);
+          if (this.waitWakeQueuedAt.has(runId) && this.active.has(runId)) {
+            this.waitWakeQueuedAt.delete(runId);
             const state = this.active.get(runId)!;
-            if (!state.pendingHumanAsk && this.store.getRun(runId)?.ciWait?.result && state.atTurnBoundary === state.session) {
-              this.ciWakeAdmitted.add(runId);
+            const owed = resolvedWaits(this.store.getRun(runId) ?? {}).length > 0;
+            if (!state.pendingHumanAsk && owed && state.atTurnBoundary === state.session) {
+              this.waitWakeAdmitted.add(runId);
               this.flushAgentInputs(runId);
-            } else if (this.store.getRun(runId)?.ciWait?.result) {
+            } else if (owed) {
               // The runner may lose its boundary between queueing and admission.
               // Retain the wake, but do not spin on it in this pump pass.
-              this.ciWakeQueuedAt.set(runId, Date.now());
+              this.waitWakeQueuedAt.set(runId, Date.now());
               this.queue.push(runId);
-              this.retryCiAdmission(runId);
+              this.retryWaitAdmission(runId);
               break;
             }
             continue;
           }
-          if (this.ciWakeQueuedAt.delete(runId)) this.ciWakeAdmitted.add(runId);
+          if (this.waitWakeQueuedAt.delete(runId)) this.waitWakeAdmitted.add(runId);
           if (this.workerWakeQueuedAt.has(runId) && this.active.has(runId)) {
             this.workerWakeQueuedAt.delete(runId);
             const state = this.active.get(runId)!;
@@ -2729,13 +2881,14 @@ export class RunManager {
         if (run.continuationMessage?.origin === 'human') this.continueRun(run.id, {}, true);
         continue;
       }
-      if (run.ciWait && !this.hasPendingHumanAsk(run.id)) {
-        if (run.ciWait.phase === 'registered') this.store.commitCiWait(run.id, { ...run.ciWait, phase: 'parked' });
-        this.store.updateRun(run.id, { status: 'running', activity: 'monitoring', monitoringWakeAt: undefined });
-        this.startCiWatch(run.id, this.store.getRun(run.id)!.ciWait!);
+      // No process survived. Open waits re-arm from their stored deadlines (an overdue timer
+      // resolves now); resolved ones wake through a scheduler-owned continuation after recovery.
+      if (run.waits?.length && !this.hasPendingHumanAsk(run.id)) {
+        this.store.updateRun(run.id, { status: 'running', activity: 'monitoring' });
+        for (const wait of openWaits(run)) this.armWait(run.id, wait);
         continue;
       }
-      if (run.ciWait) this.withdrawCiWait(run.id);
+      if (run.waits?.length) this.withdrawCiWait(run.id);
       if (run.status === 'queued') {
         await this.reviveQueuedRun(run, 'cezar restarted');
         continue;
@@ -2766,7 +2919,7 @@ export class RunManager {
           continue;
         }
         if (this.ciWorkflowResumeStepIndex(run) >= 0) {
-          // CI ACK retires ciWait, but not the failed workflow source. A closed
+          // CI ACK retires the wait, but not the failed workflow source. A closed
           // worker at this boundary must resume before its remaining checks run.
           const resumed = this.continueRun(run.id, { text: RESTART_CONTINUATION_PROMPT }, true);
           this.store.appendEvent(run.id, { type: 'lifecycle', message: resumed.ok
@@ -2868,8 +3021,9 @@ export class RunManager {
     // The rest re-arms wakes from durable state and is idempotent, so it runs for every live run
     // even after one adopted family: anything the recovery window held back goes out now.
     for (const run of this.store.listRuns()) {
-      if (run.ciWait && !['running', 'waiting', 'queued'].includes(run.status)) this.withdrawCiWait(run.id);
-      else if (run.ciWait) this.queueCiWake(run.id);
+      // A terminal row keeps its waits (and stays live) until something cancels them.
+      if (run.waits?.length && !['running', 'waiting', 'queued'].includes(run.status)) this.cancelOpenWaits(run.id);
+      else if (run.waits?.length) this.queueWaitWake(run.id);
     }
     this.reconcileAutoResumes();
     void this.pump();
@@ -2913,7 +3067,7 @@ export class RunManager {
 
   private isDisposedDelegatedRun(runId: string): boolean {
     const role = this.store.getRun(runId)?.delegation?.role;
-    return this.disposed && (role === 'root' || role === 'worker' || !!this.store.getRun(runId)?.ciWait);
+    return this.disposed && (role === 'root' || role === 'worker' || !!this.store.getRun(runId)?.waits?.length);
   }
 
   /** Shutdown is not completion. Explicit terminal controls retain their precedence. */
@@ -2952,14 +3106,14 @@ export class RunManager {
     this.monitoring.delete(runId);
     this.workerWaiting.delete(runId);
     this.workerWakeAdmitted.delete(runId);
-    this.ciWakeAdmitted.delete(runId);
-    if (this.ciWakeQueuedAt.delete(runId)) {
+    this.waitWakeAdmitted.delete(runId);
+    if (this.waitWakeQueuedAt.delete(runId)) {
       const index = this.queue.indexOf(runId); if (index >= 0) this.queue.splice(index, 1);
     }
-    if (state) this.clearMonitoringWakeTimer(state, runId);
     this.active.delete(runId);
     this.store.unpin(runId, 'active');
-    if (!this.disposed && this.store.getRun(runId)?.ciWait) this.queueCiWake(runId);
+    // Open waits keep their watch or timer: their result reopens the run when it resolves.
+    if (!this.disposed && this.store.getRun(runId)?.waits?.length) this.queueWaitWake(runId);
     if (!this.executions.has(runId) && this.store.getRun(runId)?.stopping) this.store.updateRun(runId, { stopping: undefined });
     this.memoryPausing.delete(runId);
     this.lastNamerKey.delete(runId);
@@ -3430,8 +3584,8 @@ export class RunManager {
         this.store.commitWorkerExecutionComplete(runId, proof.generation);
       }
     }
-    const hadCiWait = !!this.store.getRun(runId)?.ciWait;
-    this.withdrawCiWait(runId);
+    const hadWaits = !!this.store.getRun(runId)?.waits?.length;
+    this.cancelOpenWaits(runId);
     const cancelledFinish = this.store.commitRootFinishCancellation(runId);
     this.withdrawWorkerWait(runId);
     // Still waiting in the queue: just drop it there.
@@ -3455,7 +3609,7 @@ export class RunManager {
       }
       if (cancelledFinish) return true;
       const run = this.store.getRun(runId);
-      if (run && (run.delegation || hadCiWait) && ['queued', 'running', 'waiting'].includes(run.status)) {
+      if (run && (run.delegation || hadWaits) && ['queued', 'running', 'waiting'].includes(run.status)) {
         this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
         return true;
       }
@@ -3698,7 +3852,7 @@ export class RunManager {
     const run = this.store.getRun(runId);
     if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return null;
     const message = this.toQueuedMessage(runId, content);
-    if (run.ciWait) this.withdrawCiWait(runId, message);
+    if (hasCiWait(run)) this.withdrawCiWait(runId, message);
     else if (this.workerWait(runId)) this.withdrawWorkerWait(runId, message);
     else this.store.updateRun(runId, { queuedMessages: [...(run.queuedMessages ?? []), message] });
     return message;
@@ -3822,8 +3976,8 @@ export class RunManager {
     if (!startingUp) return false;
     // The pending maps were removed only AFTER hydration. This entry therefore
     // needs live delivery, never a second fold into the already-created opening.
-    const message = this.workerWait(runId) || run.ciWait ? this.toQueuedMessage(runId, content) : undefined;
-    if (run.ciWait) this.withdrawCiWait(runId, message);
+    const message = this.workerWait(runId) || hasCiWait(run) ? this.toQueuedMessage(runId, content) : undefined;
+    if (hasCiWait(run)) this.withdrawCiWait(runId, message);
     else if (message) this.withdrawWorkerWait(runId, message);
     const pending = this.deferredMessages.get(runId) ?? [];
     pending.push({ content, ...(message ? { messageId: message.id } : {}) });
@@ -3951,12 +4105,12 @@ export class RunManager {
       this.store.updateRun(runId, { status: monitoring ? 'running' : 'waiting', activity: monitoring ? 'monitoring' : undefined, finishedAt: undefined });
       this.store.flush();
       if (state) {
-        this.clearIdleTimer(state); this.clearMonitoringWakeTimer(state, runId);
+        this.clearIdleTimer(state); this.cancelMonitoringTimers(runId);
         this.monitoring.delete(runId); this.workerWaiting.delete(runId); this.waiting.add(runId);
         if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: monitoring ? 'running' : 'waiting' });
         if (monitoring) {
           this.monitoring.add(runId);
-          this.armMonitoringWakeTimer(runId, state);
+          this.openMonitoringTimer(runId, state);
         }
         this.releaseSlot();
       }
@@ -3995,7 +4149,7 @@ export class RunManager {
     if (this.historyDeletionPending(runId)) refuse('History deletion is pending; finish deletion before registering a wait');
     if (this.executionBlockedByRootFinish(run!)) refuse('Parent finish is pending; a finishing parent cannot register a wait');
     if (state?.pendingHumanAsk || this.hasUnansweredHumanAsk(runId)) refuse('A human question is pending; answer it before registering a wait');
-    if (run?.ciWait) refuse('A CI wait is already active; finish or withdraw it before registering a worker wait');
+    if (run && hasCiWait(run)) refuse('A CI wait is already active; finish or withdraw it before registering a worker wait');
     const wait = this.workerWait(runId);
     if (wait) refuse(`Wait ${wait.id} is already active; keep it or run worker cancel-wait ${wait.id} before registering another`);
     if (!['running', 'waiting'].includes(run!.status) || !state?.session?.open || state.cancelled) {
@@ -4138,7 +4292,7 @@ export class RunManager {
     if (this.hasUnansweredHumanAsk(runId)) { this.answerRoutedQuestion(runId); return; }
     // Retain conversation input until the registered CI wait receives scheduler admission.
     // Converting this monitor into a worker wake would strand both admission paths.
-    if (run.ciWait) { this.queueCiWake(runId); return; }
+    if (hasCiWait(run)) { this.queueWaitWake(runId); return; }
     const input = run.agentInputs?.find(entry => entry.conversation && !entry.deliveredAt && !hasLiveInboxClaim(entry));
     if (!input) return;
     const state = this.active.get(runId);
@@ -4148,7 +4302,7 @@ export class RunManager {
         deadline: new Date().toISOString(), phase: 'wake-pending', reason: 'message', wakeId: input.id };
       this.store.commitDelegation([{ id: runId, delegation: { ...run.delegation, wait } }]);
       if (state) {
-        this.clearIdleTimer(state); this.clearMonitoringWakeTimer(state, runId);
+        this.clearIdleTimer(state); this.cancelMonitoringTimers(runId);
         this.waiting.delete(runId); this.monitoring.delete(runId); this.workerWaiting.add(runId);
         this.store.updateRun(runId, { status: 'waiting', activity: undefined });
       }
@@ -4253,7 +4407,7 @@ export class RunManager {
         if (current?.role !== 'worker') return;
         this.store.commitDelegation([{ id: runId, delegation: { ...current, wait } }]);
       }
-      this.clearIdleTimer(state); this.clearMonitoringWakeTimer(state, runId);
+      this.clearIdleTimer(state); this.cancelMonitoringTimers(runId);
       this.waiting.delete(runId); this.monitoring.delete(runId); this.workerWaiting.add(runId);
       this.queueWorkerWake(runId);
       return;
@@ -4720,7 +4874,7 @@ export class RunManager {
     if (run.delegation.wait.phase === 'registered') {
       this.store.commitDelegation([{ id: runId, delegation: { ...run.delegation, wait: { ...run.delegation.wait, phase: 'parked' } } }]);
     }
-    this.clearIdleTimer(state); this.clearMonitoringWakeTimer(state, runId);
+    this.clearIdleTimer(state); this.cancelMonitoringTimers(runId);
     this.waiting.delete(runId); this.monitoring.delete(runId);
     this.workerWaiting.add(runId);
     this.store.updateRun(runId, { status: 'waiting', activity: undefined });
@@ -4876,7 +5030,7 @@ export class RunManager {
    * conversation input leads the queue (lifecycle input stays a barrier). */
   private pendingConversationBatch(runId: string, state: ActiveRun, answerId?: string): { inputs: AgentInput[]; text: string } | undefined {
     const run = this.store.getRun(runId);
-    if (!run || run.ciWait || state.agentInputFlight || this.workerWait(runId)) return undefined;
+    if (!run || run.waits?.length || state.agentInputFlight || this.workerWait(runId)) return undefined;
     const batch = agentInputBatch((run.agentInputs ?? []).filter(input => input.id !== state.openingAgentInputId && input.id !== answerId),
       input => this.formatAgentInput(runId, input));
     return batch?.inputs.every(input => input.conversation) ? batch : undefined;
@@ -4926,7 +5080,7 @@ export class RunManager {
     // An in-flight acknowledgement still owns this boundary; its .then re-settles.
     if (this.harnessHoldsHumanInput(state) || state.agentInputFlight) return;
     const proseGate = state.parkAfterAck?.session === session && state.parkAfterAck.humanGate;
-    if (state.atTurnBoundary !== session || (state.pendingHumanAsk && !proseGate) || this.workerWait(runId) || this.store.getRun(runId)?.ciWait || (!proseGate && this.hasQueuedAgentInputs(runId))) return;
+    if (state.atTurnBoundary !== session || (state.pendingHumanAsk && !proseGate) || this.workerWait(runId) || this.store.getRun(runId)?.waits?.length || (!proseGate && this.hasQueuedAgentInputs(runId))) return;
     if (state.doneAtBoundary === session) {
       if (this.deferParentCompletion(runId)) return;
       this.store.appendEvent(runId, { type: 'lifecycle', message: 'goal achieved — session closed' });
@@ -4951,7 +5105,7 @@ export class RunManager {
         if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'running' });
         this.monitoring.add(runId);
         this.clearIdleTimer(state);
-        this.armMonitoringWakeTimer(runId, state);
+        this.openMonitoringTimer(runId, state);
       } else if (state.currentStepId && this.maybeFinalMessageNudge(runId, state, state.currentStepId, {
         ask: false,
         humanGate: !!state.parkAfterAck.humanGate,
@@ -5130,25 +5284,30 @@ export class RunManager {
         if (inputIds.length) {
           const queue = this.store.getRun(runId)?.agentInputs ?? [];
           if (!queue.some(input => inputIds.includes(input.id) && !input.deliveredAt)) return;
-          const ciWakeId = this.store.getRun(runId)?.ciWait?.wakeId;
-          if (ciWakeId && inputIds.includes(ciWakeId)) {
-            // CI lifecycle input owns its turn; never retire a conversation batch with it.
-            if (inputIds.length !== 1) throw new Error('CI observation must be delivered separately');
-            this.store.commitCiWaitDelivery(runId, ciWakeId);
-            this.ciWakeAdmitted.delete(runId);
-            const retry = this.ciRetries.get(runId);
-            if (retry) clearTimeout(retry);
-            this.ciRetries.delete(runId);
+          // One checkpoint per wake batch: every resolved wait it carries is delivered together
+          // (hearsay-tools/cezarion#1233); the rest of the batch keeps the ordinary bookkeeping.
+          const resolvedIds = resolvedWaits(this.store.getRun(runId) ?? {}).map(wait => wait.id).filter(id => inputIds.includes(id));
+          const conversationIds = inputIds.filter(id => !resolvedIds.includes(id));
+          if (resolvedIds.length) {
+            this.store.commitWaitDelivery(runId, resolvedIds);
+            this.waitWakeAdmitted.delete(runId);
+            if (!resolvedWaits(this.store.getRun(runId) ?? {}).length) {
+              const retry = this.wakeRetries.get(runId);
+              if (retry) clearTimeout(retry);
+              this.wakeRetries.delete(runId);
+            }
             this.waiting.delete(runId); this.monitoring.delete(runId);
             this.store.updateRun(runId, { status: 'running', activity: undefined });
-          } else {
+          }
+          if (conversationIds.length) {
+            const queue = this.store.getRun(runId)?.agentInputs ?? [];
             const deliveredAt = new Date().toISOString();
             // An observable harness still owes a read: mark it so a restart replays it (#505).
             const awaiting = state.inputDelivery?.consumption === 'observable' ? { awaitingRead: true as const } : {};
             // Input the harness reported unread while this very POST was pending stays queued:
             // the flush after this acknowledgement resubmits it (#505 review).
-            const accepted = inputIds.filter(id => !state.retiredInFlight?.has(id));
-            for (const id of inputIds) state.retiredInFlight?.delete(id);
+            const accepted = conversationIds.filter(id => !state.retiredInFlight?.has(id));
+            for (const id of conversationIds) state.retiredInFlight?.delete(id);
             this.store.commitAgentInputs(runId, queue.map(input => accepted.includes(input.id) && !input.deliveredAt
               ? { ...input, deliveredAt, ...awaiting } : input));
             if (state.inputDelivery?.consumption === 'observable') {
@@ -5188,7 +5347,7 @@ export class RunManager {
     void flight.settled.then(() => deliveries?.delete(flight.settled!));
     this.resumeParkedRun(runId, state);
     if (inputIds.includes(this.workerWait(runId)?.wakeId ?? '')) state.workerWakeTurn = session;
-    if (inputIds.includes(this.store.getRun(runId)?.ciWait?.wakeId ?? '')) state.ciWakeTurn = session;
+    if (resolvedWaits(this.store.getRun(runId) ?? {}).some(wait => inputIds.includes(wait.id))) state.waitWakeTurn = session;
     return true;
   }
 
@@ -5204,13 +5363,25 @@ export class RunManager {
     if (state.pendingHumanAsk || this.hasUnansweredHumanAsk(runId)) return false;
     // The opening prompt already carries its own input; later input steers the
     // opening turn instead of waiting for it to end (#505).
-    const queue = (run.agentInputs ?? []).filter(input => input.id !== state.openingAgentInputId);
-    if (run.ciWait) {
-      if (!this.ciWakeAdmitted.has(runId) || state.atTurnBoundary !== state.session) return false;
-      // Preserve CI admission and atomic retirement; conversations batch on the next turn.
-      const input = run.agentInputs?.find(entry => entry.id === run.ciWait?.wakeId && !entry.deliveredAt);
-      return !!input && this.submitAgentInput(runId, state, [{ type: 'text', text: this.formatAgentInput(runId, input) }], [input.id]);
+    const resolved = resolvedWaits(run);
+    const owed = new Set(resolved.map(wait => wait.id));
+    // A resolved wait's input is delivered only by its admitted wake, never as ordinary input.
+    const queue = (run.agentInputs ?? []).filter(input => input.id !== state.openingAgentInputId && !owed.has(input.id));
+    if (resolved.length && this.waitWakeAdmitted.has(runId) && state.atTurnBoundary === state.session) {
+      // One wake turn delivers every resolved wait, oldest first, then the conversation input
+      // that would lead the next batch (hearsay-tools/cezarion#1233).
+      const results = resolved.flatMap(wait => run.agentInputs?.find(input => input.id === wait.id && !input.deliveredAt) ?? []);
+      if (!results.length) return false;
+      const conversation = agentInputBatch(queue, input => this.formatAgentInput(runId, input, false));
+      const following = conversation?.inputs.every(input => input.conversation) ? conversation.inputs : [];
+      const progressOnly = following.every(input => input.conversation?.kind === 'progress');
+      const note = this.ciWaitWithdrawalNote(runId);
+      const text = [...results.map(input => this.formatAgentInput(runId, input)),
+        ...following.map(input => this.formatAgentInput(runId, input, progressOnly)), ...(note ? [note] : [])].join('\n\n');
+      return this.submitAgentInput(runId, state, [{ type: 'text', text }], [...results, ...following].map(input => input.id));
     }
+    // An open or owed CI wait holds conversation input for its own admitted wake (#476).
+    if (hasCiWait(run) || (resolved.length && !queue.some(input => !input.deliveredAt))) return false;
     // Select within the byte budget using the longer interruption context, then
     // format the selected snapshot consistently. Do not change durable wait intent
     // merely to format inputs that the provider may refuse.
@@ -5280,9 +5451,8 @@ export class RunManager {
     const delivered = this.deliverMessage(runId, content, true);
     if (delivered) {
       const state = this.active.get(runId);
-      if (state) state.monitoringWakeups = 0;
+      if (state) { state.monitoringWakeups = 0; state.monitoringCapNoted = undefined; }
       this.resetParentCompletion(runId);
-      this.store.updateRun(runId, { monitoringWakeCapReached: undefined });
     }
     return delivered;
   }
@@ -5307,10 +5477,11 @@ export class RunManager {
     state.parkAfterAck = undefined;
     this.workerWaiting.delete(runId);
     this.clearIdleTimer(state);
-    this.clearMonitoringWakeTimer(state, runId);
-    // A CI command can emit activity before its transport ACK. Keep its park
+    // A wake command can emit activity before its transport ACK. Keep its park
     // until the durable delivery checkpoint; admission already reserves capacity.
-    if (this.store.getRun(runId)?.ciWait && this.ciWakeAdmitted.has(runId)) return;
+    if (resolvedWaits(this.store.getRun(runId) ?? {}).length && this.waitWakeAdmitted.has(runId)) return;
+    // The run left its monitoring park: the timer it parked with goes, as the in-memory one did.
+    if (this.monitoring.has(runId)) this.cancelMonitoringTimers(runId);
     this.waiting.delete(runId);
     this.monitoring.delete(runId);
     this.store.updateRun(runId, { status: 'running', activity: undefined });
@@ -5327,7 +5498,7 @@ export class RunManager {
     const run = this.store.getRun(runId);
     if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return false;
 
-    if (!userAuthored && run.ciWait) return false;
+    if (!userAuthored && run.waits?.length) return false;
     if (userAuthored && this.routedAsk(runId)) {
       this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: ROUTED_QUESTION_REFUSAL });
       return false;
@@ -5341,7 +5512,7 @@ export class RunManager {
     // these as user attachments (vs. agent tool screenshots) on disk (#357).
     const persisted = userAuthored ? this.persistPastedAttachments(runId, content) : [];
     const images = persisted.map((saved) => saved.url);
-    const ciHumanMessage: QueuedMessage | undefined = userAuthored && run.ciWait
+    const ciHumanMessage: QueuedMessage | undefined = userAuthored && hasCiWait(run)
       ? { id: randomUUID(), text, images, createdAt: new Date().toISOString() } : undefined;
     if (userAuthored) {
       this.withdrawCiWait(runId, ciHumanMessage);
@@ -5405,7 +5576,7 @@ export class RunManager {
     }
     const state = this.active.get(runId);
     if (decision.action === 'session' && state?.session) {
-      try { this.withdrawCiWait(runId); this.withdrawWorkerWait(runId); } catch { return false; }
+      try { this.cancelOpenWaits(runId); this.withdrawWorkerWait(runId); } catch { return false; }
       state.finishRequested = true;
       this.clearIdleTimer(state);
       this.store.appendEvent(runId, { type: 'lifecycle', message: 'session closed by user' });
@@ -5465,7 +5636,7 @@ export class RunManager {
     const steps = run.workflowDef?.steps ?? run.steps.filter(step => !isSyntheticContinuation(run, step));
     if (!steps.length) return -1;
     // CI recovery can resume a failed attempt. Its cursor must survive both the
-    // synthetic continuation replacing currentStepId and CI delivery clearing ciWait.
+    // synthetic continuation replacing currentStepId and wait delivery retiring the wait.
     const ciSource = this.ciWorkflowResumeStepIndex(run);
     if (ciSource >= 0) return ciSource;
     const interrupted = steps.findIndex((step) => {
@@ -5600,12 +5771,12 @@ export class RunManager {
       return { ok: false, error: 'pending human question requires an explicit answer' };
     }
     // A disconnected CI monitor has durable intent but no live session to receive human input.
-    const disconnectedCiWait = !!run.ciWait && !this.isActive(runId) && !hasRegisteredRunProcess(runId);
+    const disconnectedCiWait = !!run.waits?.length && !this.isActive(runId) && !hasRegisteredRunProcess(runId);
     // `review` is continuable too — that's the "Send back" path (spec 009).
     if (!disconnectedCiWait && !['done', 'failed', 'cancelled', 'review'].includes(run.status) && !(pendingHumanAsk && run.status === 'waiting') &&
       !(run.status === 'waiting' && !this.isActive(runId) && ((!hasRegisteredRunProcess(runId) &&
         (run.delegation === undefined || run.delegation.role === 'root')) ||
-        (deferForCapacity && run.delegation?.role === 'worker' && (!!this.workerWait(runId) || !!run.ciWait || this.ciWorkflowResumeStepIndex(run) >= 0))))) {
+        (deferForCapacity && run.delegation?.role === 'worker' && (!!this.workerWait(runId) || !!run.waits?.length || this.ciWorkflowResumeStepIndex(run) >= 0))))) {
       return { ok: false, error: `cannot continue a ${run.status} run` };
     }
     const sessionStep = [...run.steps].reverse().find((s) => s.sessionId);
@@ -6030,7 +6201,7 @@ export class RunManager {
         this.retireUnreadInputs(runId, state, event.unconsumedInputIds ?? [], false);
         this.readBundledInputs(runId, state);
         state.workerWakeTurn = undefined;
-        state.ciWakeTurn = undefined;
+        state.waitWakeTurn = undefined;
         state.atTurnBoundary = state.session;
         state.ciTurnId = randomUUID();
         // A completed turn acknowledges the opening payload. Until then a restart
@@ -6075,7 +6246,7 @@ export class RunManager {
           sessionOpen: !!sessionOpen, interactive: true, pendingHumanAsk: !!state.pendingHumanAsk,
           completionAttention: this.parentCompletionAttention(runId), scheduledWake: sawClaudeScheduleWakeup,
           liveWorkers: this.hasLiveWorkers(runId),
-          dependencyWait: !!(this.workerWait(runId) || this.store.getRun(runId)?.ciWait),
+          dependencyWait: !!(this.workerWait(runId) || this.store.getRun(runId)?.waits?.length),
         });
         const { done, monitoring, humanGate, ask, notes: askNotes } = turn;
         discardQueuedMessagesOnAsk(state.session, turn);
@@ -6093,7 +6264,7 @@ export class RunManager {
         let autoContinued = !!ask && !!sessionOpen && this.tryAutonomousNudge(runId, state, stepId, ask);
         if (ask && !autoContinued) this.prepareHumanAsk(runId, state);
         if (humanGate && !ask && !state.pendingHumanAsk) this.prepareProseHumanGate(runId, state);
-        const ciWaitParked = !humanGate && !!sessionOpen && this.parkCiWait(runId, state);
+        const ciWaitParked = !humanGate && !!sessionOpen && this.parkWaits(runId, state);
         const completionBlocked = !ciWaitParked && !!done && this.deferParentCompletion(runId);
         const workerWaitParked = ciWaitParked || completionBlocked || (!humanGate && !!sessionOpen && this.parkWorkerWait(runId, state));
         state.doneAtBoundary = done ? state.session : undefined;
@@ -6129,13 +6300,13 @@ export class RunManager {
               this.store.updateStep(runId, stepId, { status: 'running' });
               this.monitoring.add(runId);
               this.clearIdleTimer(state);
-              this.armMonitoringWakeTimer(runId, state);
+              this.openMonitoringTimer(runId, state);
             } else {
               this.store.updateRun(runId, { status: 'waiting', activity: undefined });
               this.store.updateStep(runId, stepId, { status: 'waiting' });
               this.store.flush();
               this.monitoring.delete(runId);
-              this.clearMonitoringWakeTimer(state, runId);
+              this.cancelMonitoringTimers(runId);
             }
             this.waiting.add(runId);
             if (!monitoring) this.armIdleTimer(runId, state);
@@ -6427,7 +6598,7 @@ export class RunManager {
       this.persistWorkerAssistantResult(runId, stepId, result.text);
       // A durable CI wait keeps recovery live, not this failed attempt successful.
       if (sessionError || state.agentInputError) throw new Error(sessionError ?? state.agentInputError);
-      if (this.store.getRun(runId)?.ciWait && !state.cancelled) {
+      if (this.store.getRun(runId)?.waits?.length && !state.cancelled) {
         sink.sessionEnded('end_turn');
         this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
         return;
@@ -6501,7 +6672,7 @@ export class RunManager {
       sink.sessionEnded('error', message);
       this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt: finishedAt() });
       appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
-      if (this.store.getRun(runId)?.ciWait && !state.cancelled) {
+      if (this.store.getRun(runId)?.waits?.length && !state.cancelled) {
         // Retain the wait and scheduler wake source while closing this attempt.
         // settleSuccess only completes running/waiting steps, so its failure is durable.
         this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
@@ -6849,11 +7020,11 @@ export class RunManager {
         // runAgentStep already emitted session.ended(error). Record the failed
         // attempt before parking so later successful CI recovery cannot erase it.
         if (failure) {
-          if (current?.ciWait) this.store.updateRun(runId, { workflowResumeStepId: step.id });
+          if (current?.waits?.length) this.store.updateRun(runId, { workflowResumeStepId: step.id });
           this.finishStep(runId, step.id, 'failed', failure, emit);
           runError = `step "${step.id}" failed: ${failure}`;
         }
-        if (this.store.getRun(runId)?.ciWait && !state.cancelled) {
+        if (this.store.getRun(runId)?.waits?.length && !state.cancelled) {
           this.store.updateRun(runId, { status: 'running', activity: 'monitoring',
             ...(failure ? { error: runError! } : {}) });
           this.store.flush(); // checkpoint the failed attempt and its recoverable workflow cursor before parking
@@ -7076,7 +7247,7 @@ export class RunManager {
         this.retireUnreadInputs(runId, state, event.unconsumedInputIds ?? [], false);
         this.readBundledInputs(runId, state);
         state.workerWakeTurn = undefined;
-        state.ciWakeTurn = undefined;
+        state.waitWakeTurn = undefined;
         state.atTurnBoundary = state.session;
         state.ciTurnId = randomUUID();
         // v2 `turn.completed` already flushed the coalescers; the v1 turn
@@ -7088,7 +7259,7 @@ export class RunManager {
           sessionOpen: !!sessionOpen, interactive, pendingHumanAsk: !!state.pendingHumanAsk,
           completionAttention: this.parentCompletionAttention(runId), scheduledWake: sawClaudeScheduleWakeup,
           liveWorkers: this.hasLiveWorkers(runId),
-          dependencyWait: !!(this.workerWait(runId) || this.store.getRun(runId)?.ciWait),
+          dependencyWait: !!(this.workerWait(runId) || this.store.getRun(runId)?.waits?.length),
         });
         const { done, monitoring, humanGate, ask, notes: askNotes } = turn;
         discardQueuedMessagesOnAsk(state.session, turn);
@@ -7106,7 +7277,7 @@ export class RunManager {
         let autoContinued = !!ask && !!sessionOpen && this.tryAutonomousNudge(runId, state, step.id, ask);
         if (ask && !autoContinued) this.prepareHumanAsk(runId, state);
         if (humanGate && !ask && !state.pendingHumanAsk) this.prepareProseHumanGate(runId, state);
-        const ciWaitParked = !humanGate && !!sessionOpen && this.parkCiWait(runId, state);
+        const ciWaitParked = !humanGate && !!sessionOpen && this.parkWaits(runId, state);
         const completionBlocked = !ciWaitParked && !!done && this.deferParentCompletion(runId);
         const workerWaitParked = ciWaitParked || completionBlocked || (!humanGate && !!sessionOpen && this.parkWorkerWait(runId, state));
         state.doneAtBoundary = done ? state.session : undefined;
@@ -7144,13 +7315,13 @@ export class RunManager {
             this.store.updateStep(runId, step.id, { status: 'running' });
             this.monitoring.add(runId);
             this.clearIdleTimer(state);
-            this.armMonitoringWakeTimer(runId, state);
+            this.openMonitoringTimer(runId, state);
           } else {
             this.store.updateRun(runId, { status: 'waiting', activity: undefined });
             this.store.updateStep(runId, step.id, { status: 'waiting' });
             this.store.flush();
             this.monitoring.delete(runId);
-            this.clearMonitoringWakeTimer(state, runId);
+            this.cancelMonitoringTimers(runId);
           }
           this.waiting.add(runId);
           if (!monitoring) this.armIdleTimer(runId, state);
@@ -7238,8 +7409,8 @@ export class RunManager {
     let session: AgentSession | undefined;
     const shouldAutoEnd = () => this.active.get(runId) !== state || state.session !== session ||
       (state.atTurnBoundary === session && !state.pendingHumanAsk && !this.hasPendingHumanAsk(runId) &&
-        !this.workerWait(runId) && !this.store.getRun(runId)?.ciWait && !this.parentCompletionPending(runId) &&
-        state.workerWakeTurn !== session && state.ciWakeTurn !== session && !state.agentInputFlight &&
+        !this.workerWait(runId) && !this.store.getRun(runId)?.waits?.length && !this.parentCompletionPending(runId) &&
+        state.workerWakeTurn !== session && state.waitWakeTurn !== session && !state.agentInputFlight &&
         !this.hasQueuedAgentInputs(runId));
     state.currentStepId = step.id;
     this.beginUsageInvocation(runId, state, step.id);
@@ -7363,7 +7534,6 @@ export class RunManager {
       this.clearIdleTimer(state);
       this.monitoring.delete(runId);
       this.waiting.delete(runId);
-      this.clearMonitoringWakeTimer(state, runId);
       this.workerWaiting.delete(runId);
       this.workerWakeAdmitted.delete(runId);
       if (this.workerWakeQueuedAt.delete(runId)) {
@@ -7371,7 +7541,7 @@ export class RunManager {
       }
       state.resumeInboxAutoEnd = undefined;
       state.workerWakeTurn = undefined;
-      state.ciWakeTurn = undefined;
+      state.waitWakeTurn = undefined;
       state.atTurnBoundary = undefined;
       state.doneAtBoundary = undefined;
       state.parkAfterAck = undefined;
@@ -7457,7 +7627,7 @@ export class RunManager {
       this.clearUnreadInputTimer(state);
       this.clearHeldHumanInputTimer(state);
       this.monitoring.delete(runId);
-      this.clearMonitoringWakeTimer(state, runId);
+      this.cancelMonitoringTimers(runId);
       this.waiting.add(runId);
       this.store.updateRun(runId, { status: 'waiting', activity: undefined, hasPendingPermission: true });
       if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
@@ -7480,7 +7650,7 @@ export class RunManager {
       this.prepareHumanAsk(runId, state);
       this.clearIdleTimer(state);
       this.monitoring.delete(runId);
-      this.clearMonitoringWakeTimer(state, runId);
+      this.cancelMonitoringTimers(runId);
       this.waiting.add(runId);
       this.store.updateRun(runId, { status: 'waiting', activity: undefined });
       if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
@@ -7876,7 +8046,7 @@ export class RunManager {
       await this.settleIdleClosedWorker(runId);
       return;
     }
-    if (!run || !state.autonomousNudgePending || run.ciWait || this.workerWait(runId) || this.hasPendingHumanAsk(runId)) return;
+    if (!run || !state.autonomousNudgePending || run.waits?.length || this.workerWait(runId) || this.hasPendingHumanAsk(runId)) return;
     for (const step of run.steps) {
       if (step.status === 'running') this.store.updateStep(runId, step.id, { status: 'waiting' });
     }
@@ -8001,7 +8171,7 @@ export class RunManager {
     return !!run && !this.disposed && !run.stopping && !state.cancelled && !state.finishRequested &&
       !state.agentInputError && !state.pendingHumanAsk && !this.hasPendingHumanAsk(runId) && !!state.session?.open &&
       !this.workerExecutionStopped(runId) && !this.executionBlockedByRootFinish(run) && !this.parentCompletionPending(runId) &&
-      !this.workerWait(runId) && !run.ciWait && !this.workerWakeAdmitted.has(runId) &&
+      !this.workerWait(runId) && !run.waits?.length && !this.workerWakeAdmitted.has(runId) &&
       !state.agentInputFlight && !this.harnessOwesInput(state) && !this.hasQueuedAgentInputs(runId);
   }
 
@@ -8170,27 +8340,34 @@ export class RunManager {
     this.clearFinalMessageNudgeReplyTimer(state);
   }
 
-  private reconcileMonitoringWakeTimers(): void {
+  /**
+   * A monitoring park with no timer gets one: a park that began while timers were off ("Park until
+   * resumed") starts re-checking once they are back on. An open timer keeps its deadline whatever
+   * the interval does now (hearsay-tools/cezarion#1233).
+   */
+  private reconcileMonitoringTimers(): void {
     for (const runId of this.monitoring) {
       const state = this.active.get(runId);
-      if (state) this.armMonitoringWakeTimer(runId, state);
+      if (state && !this.store.getRun(runId)?.waits?.length) this.openMonitoringTimer(runId, state);
     }
   }
 
-  private armMonitoringWakeTimer(runId: string, state: ActiveRun): void {
-    if (this.parentCompletionAttention(runId)) { this.clearMonitoringWakeTimer(state, runId); return; }
+  /**
+   * The monitoring park's timer (hearsay-tools/cezarion#1233): the monitoring line, Claude's
+   * `ScheduleWakeup` and a parent's live-worker park open a timer wait for the configured interval.
+   * Its wake is the monitoring nudge, delivered like any resolved wait. None while timers are off,
+   * a CI wait is open, a timer is already open, or the session spent `MAX_AUTO_CONTINUES` wakes.
+   */
+  private openMonitoringTimer(runId: string, state: ActiveRun): void {
+    if (this.parentCompletionAttention(runId)) { this.cancelMonitoringTimers(runId); return; }
     const run = this.store.getRun(runId);
     if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
-    if (run.ciWait) { this.clearMonitoringWakeTimer(state, runId); return; }
+    if (run.waits?.some(wait => wait.kind === 'ci' || isMonitoringTimer(wait))) return;
     const minutes = this.semaphore.monitoringWakeIntervalMinutes();
-    if (minutes === null) {
-      this.clearMonitoringWakeTimer(state, runId);
-      return;
-    }
+    if (minutes === null) return;
     if ((state.monitoringWakeups ?? 0) >= MAX_AUTO_CONTINUES) {
-      this.clearMonitoringWakeTimer(state, runId);
-      if (!this.store.getRun(runId)?.monitoringWakeCapReached) {
-        this.store.updateRun(runId, { monitoringWakeCapReached: true });
+      if (!state.monitoringCapNoted) {
+        state.monitoringCapNoted = true;
         this.store.appendEvent(runId, {
           type: 'note',
           message: `automatic monitoring wake-up cap reached (${MAX_AUTO_CONTINUES}); session remains parked`,
@@ -8198,44 +8375,24 @@ export class RunManager {
       }
       return;
     }
-    if (state.monitoringWakeTimer && state.monitoringWakeIntervalMinutes === minutes) return;
-    this.clearMonitoringWakeTimer(state, runId);
-    state.monitoringWakeIntervalMinutes = minutes;
-    this.store.updateRun(runId, { monitoringWakeCapReached: undefined });
-    const deadline = Date.now() + minutes * 60_000;
-    this.store.updateRun(runId, { monitoringWakeAt: new Date(deadline).toISOString() });
-    state.monitoringWakeTimer = setTimeout(() => {
-      state.monitoringWakeTimer = undefined;
-      // A wake armed while workers were live must still deliver their settled
-      // results for collection. The next turn rechecks the spent completion budget.
-      const run = this.store.getRun(runId);
-      if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
-      this.store.updateRun(runId, { monitoringWakeAt: undefined });
-      if (!this.monitoring.has(runId) || !state.session?.open || state.cancelled) return;
-      const wakeups = state.monitoringWakeups ?? 0;
-      if (wakeups >= MAX_AUTO_CONTINUES) {
-        this.store.updateRun(runId, { monitoringWakeCapReached: true });
-        this.store.appendEvent(runId, {
-          type: 'note',
-          message: `automatic monitoring wake-up cap reached (${MAX_AUTO_CONTINUES}); session remains parked`,
-        });
-        return;
-      }
-      state.monitoringWakeups = wakeups + 1;
-      this.store.appendEvent(runId, {
-        type: 'note',
-        message: `automatic monitoring wake-up (${state.monitoringWakeups}/${MAX_AUTO_CONTINUES})`,
-      });
-      this.deliverMessage(runId, [{ type: 'text', text: MONITORING_WAKE_NUDGE }], false);
-    }, Math.max(0, deadline - Date.now()));
-    state.monitoringWakeTimer.unref?.();
+    if (openWaits(run).length >= WAIT_LIMIT) return;
+    const now = Date.now();
+    // `seconds` is the record's bound; the deadline is the interval itself (tests run it sub-minute).
+    const wait: TimerWaitEntry = { id: randomUUID(), kind: 'timer', source: 'agent', via: 'monitoring-line', registeredAt: new Date(now).toISOString(),
+      deadline: new Date(now + minutes * 60_000).toISOString(), phase: 'open', turnId: state.ciTurnId ?? 'monitoring',
+      seconds: Math.min(TIMER_MAX_SECONDS, Math.max(TIMER_MIN_SECONDS, Math.round(minutes * 60))) };
+    try { this.store.commitWait(runId, wait); }
+    catch (error) { console.warn(`[cez] monitoring timer checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return; }
+    this.armWait(runId, wait);
   }
 
-  private clearMonitoringWakeTimer(state: ActiveRun, runId?: string): void {
-    if (state.monitoringWakeTimer) clearTimeout(state.monitoringWakeTimer);
-    state.monitoringWakeTimer = undefined;
-    state.monitoringWakeIntervalMinutes = undefined;
-    if (runId) this.store.updateRun(runId, { monitoringWakeAt: undefined });
+  /** The run left its monitoring park: its monitoring timer goes, as the in-memory timer did.
+   *  Agent timers (`cezar_wait`) stay open. */
+  private cancelMonitoringTimers(runId: string): void {
+    const ids = (this.store.getRun(runId)?.waits ?? []).filter(wait => wait.phase === 'open' && isMonitoringTimer(wait)).map(wait => wait.id);
+    if (!ids.length) return;
+    this.store.commitWaitCancellation(runId, ids);
+    for (const id of ids) this.disarmWait(id);
   }
 
   /** The save may finish execution while its strict writer proof remains pending. */

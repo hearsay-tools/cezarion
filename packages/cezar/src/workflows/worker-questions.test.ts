@@ -12,6 +12,7 @@ import { DelegationService } from '../delegation/service.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { bookkeeping, eventCheckpoint, fixtureUpdateRun, manager, parent, register, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { monitoringWakeOf } from './waits.testkit.ts';
 
 /** #505 PR B: a worker's question goes to its owning parent, not to the human. */
 describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () => {
@@ -131,7 +132,8 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     const parentIdle = async () => {
       // Routing and recovery can wake the parent. Finish that turn's real Git
       // bookkeeping before testing a one-shot reply into a quiescent worktree.
-      await until(() => manager['waiting'].has(f.p.id));
+      // Recovery leaves a monitoring park inactive on its persisted timer (hearsay-tools/cezarion#1233).
+      await until(() => manager['waiting'].has(f.p.id) || (!manager.isActive(f.p.id) && !!monitoringWakeOf(store.getRun(f.p.id))));
       await Promise.all(bookkeeping);
     };
     await parentIdle();

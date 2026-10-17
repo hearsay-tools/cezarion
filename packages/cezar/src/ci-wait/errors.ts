@@ -1,4 +1,4 @@
-import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, type CiWaitErrorCode, type PreviewResultCode, type PreviewServeResult } from '@open-mercato/cezar-contract';
+import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, type CiWaitErrorCode, type PreviewResultCode, type PreviewServeResult, type WaitErrorCode } from '@open-mercato/cezar-contract';
 import type { z } from 'zod';
 
 /** Safe diagnostics shared by the manager and private transport. Never forward raw errors. */
@@ -38,6 +38,17 @@ const messages: Record<CiWaitErrorCode, string> = {
 
 export function ciErrorMessage(code: CiWaitErrorCode): string {
   return messages[code];
+}
+
+// hearsay-tools/cezarion#1233: `cezar_wait` refusals. Each names what the agent can do next.
+const waitMessages: Partial<Record<WaitErrorCode, string>> = {
+  timers_disabled: 'Automatic re-checks are turned off for this workspace (Park until resumed). Do not register a timer; end your turn and the user resumes the task.',
+  wake_budget_spent: 'This session spent its automatic timer wakes. Do not register another timer; end your turn and the user resumes the task.',
+  capacity: 'Cezar cannot open another wait now: this run has the maximum open waits, or the CI watcher is full. Cancel a wait you no longer need with cezar_cancel_wait, or retry later.',
+};
+
+export function waitErrorMessage(code: WaitErrorCode): string {
+  return waitMessages[code] ?? messages[code as CiWaitErrorCode];
 }
 
 // #781: `cezar_preview_serve` results. Every one carries the agent's next step; none quotes a

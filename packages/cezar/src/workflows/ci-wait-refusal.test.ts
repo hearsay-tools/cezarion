@@ -43,6 +43,7 @@ async function ciRefusalGate() {
 
 const pr = 'https://github.com/acme/repo/pull/12';
 const identity = { prUrl: pr, repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40) };
+const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'ci');
 
 describe('R27 CI registration refusal after worker settlement — #713', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
@@ -70,12 +71,12 @@ describe('R27 CI registration refusal after worker settlement — #713', { timeo
       expect(queued()?.deliveredAt).toBeUndefined();
       expect(store.readEvents(run.id).filter(e => e.type === 'turn-end')).toHaveLength(0);
       await expect(callCiWait({ pr }, tools.env)).rejects.toThrow(/worker_wait_pending:.*worker wait.*[Ee]nd your turn/);
-      expect(store.getRun(run.id)?.ciWait).toBeUndefined();
+      expect(ciWaitOf(run.id)).toBeUndefined();
       expect(waitOf(store.getRun(run.id))?.id).toBe(wait.id);
       wire.release();
       await until(() => !!queued()?.deliveredAt && !waitOf(store.getRun(run.id)));
       await expect(callCiWait({ pr }, tools.env)).resolves.toMatchObject({ prUrl: pr });
-      expect(store.getRun(run.id)?.ciWait).toBeDefined();
+      expect(ciWaitOf(run.id)).toBeDefined();
       expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
     } finally { wire.release(); await controller.close(); }
   });

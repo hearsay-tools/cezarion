@@ -24,6 +24,8 @@ import {
   store, terminal, track, until, useWorkerWaitFixture, waitOf, worker,
 } from './worker-wait.testkit.ts';
 import { blockRunWrites, readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { monitoringWakeOf } from './waits.testkit.ts';
+import { MONITORING_WAKE_NUDGE } from './waits.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -220,10 +222,11 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => store.getRun(p.id)?.status === 'waiting');
     expect(store.getRun(p.id)?.status).toBe('waiting');
     expect(store.getRun(p.id)?.activity).toBeUndefined();
-    expect(store.getRun(p.id)?.monitoringWakeAt).toBeUndefined();
+    expect(monitoringWakeOf(store.getRun(p.id))).toBeUndefined();
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
     expect(manager.finish(p.id)).toBe(false); // Still must collect the settled result.
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle')).toHaveLength(1);
+    // The monitoring timer's wake is a lifecycle input too since hearsay-tools/cezarion#1233.
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle' && input.text !== MONITORING_WAKE_NUDGE)).toHaveLength(1);
   });
 
   it('readiness settled uncollected completion sends one collection response then remains attention', async () => {
@@ -347,11 +350,11 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           await until(() => !waitOf(store.getRun(p.id)));
           expect.soft(store.getRun(p.id)?.status).toBe('running');
           expect.soft(store.getRun(p.id)?.activity).toBe('monitoring');
-          expect.soft(store.getRun(p.id)?.monitoringWakeAt).toBeDefined();
+          expect.soft(monitoringWakeOf(store.getRun(p.id))).toBeDefined();
           expect.soft(semaphore.busy()).toBe(0);
           await vi.advanceTimersByTimeAsync(300_001);
           expect(store.readEvents(p.id).filter(event => event.type === 'note' && String(event.message).includes('automatic monitoring wake-up'))).toHaveLength(1);
-          expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle')).toHaveLength(1);
+          expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle' && input.text !== MONITORING_WAKE_NUDGE)).toHaveLength(1);
           expect(store.getRun(w.id)?.status).toBe('queued');
           const receipt = store.getRun(p.id)?.delegation;
           expect(receipt).toMatchObject({ completion: { phase: 'attention' }, lastWait: { id: wait.id, reason: 'timeout' } });
@@ -361,7 +364,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           expect(manager.sendMessage(p.id, [{ type: 'text', text: delayedAck ? 'mock:agent-echo' : 'mock:monitoring' }])).toBe(true);
           await until(() => store.getRun(p.id)?.activity === 'monitoring');
           expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
-          expect(store.getRun(p.id)?.monitoringWakeAt).toBeDefined();
+          expect(monitoringWakeOf(store.getRun(p.id))).toBeDefined();
         };
         try {
           if (delayedAck) await withDelayedCommand('opencode', exercise, 'Worker wait');
