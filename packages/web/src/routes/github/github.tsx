@@ -1,6 +1,7 @@
 import './github-layout.css'
-import { hashKey, useMutation, useQueryClient } from '@tanstack/react-query'
+import { hashKey, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { LoaderCircleIcon } from 'lucide-react'
+import { Virtualizer } from 'virtua'
 import { ArrowLeftIcon, CheckIcon, CircleDotIcon, ChevronDownIcon, GitPullRequestIcon, RefreshCwIcon, SearchIcon, TriangleAlertIcon } from '@/components/design-icons'
 import {
   useEffect,
@@ -17,9 +18,11 @@ import { queryScope } from '@open-mercato/cezar-api-client'
 
 import { Link, Navigate } from '@/lib/project-router'
 
-import { getGithub, getGithubComments, getGithubItem, putUiState } from '@/api/client'
-import { queryKeys, useGithub, useGithubChecks, useGithubItem, useProjectRuns, useGithubSearch, useHealth, useUiState } from '@/api/queries'
+import { getGithub, getGithubCommentCounts, getGithubComments, getGithubItem, putUiState } from '@/api/client'
+import { queryKeys, useGithubChecks, useGithubCommentCounts, useGithubItem, useGithubPages, useProjectRuns, useGithubSearch, useHealth, useUiState } from '@/api/queries'
+import type { GithubPageParam } from '@/api/github-pages'
 import type {
+  GithubData,
   GithubItem,
   UiState,
 } from '@open-mercato/cezar-api-client'
@@ -49,9 +52,10 @@ import { IssueFilters } from './issue-filters'
 import { allLabels, filterGithubItems, labelChipStyle, shouldSearchForge } from './github-filter'
 import { GithubFilterScreen } from './github-filter-screen'
 import { GithubLoading } from './github-loading'
+import { useListScrollOwner, useLoadMoreSentinel, useStartMargin } from './github-paging'
 import {
   FAILING_QUERY, REVIEW_QUERY, githubFilterPath, isSearchBackedFilter, issueNumbersWithTask, parseGithubFilter,
-  rowsFromSearch, searchQueryFor, GITHUB_LIST_LIMIT, ISSUE_ROWS, PR_ROWS, ACTIVE_FILTER_LABEL, type GithubFilter,
+  rowsFromSearch, searchQueryFor, GITHUB_PAGE_SIZE, ISSUE_ROWS, PR_ROWS, ACTIVE_FILTER_LABEL, type GithubFilter,
 } from './github-sidebar-model'
 import { useIsDesktop } from '@/lib/use-desktop'
 import { HandToAgent } from './hand-to-agent'
@@ -68,24 +72,17 @@ export { groupCommitRuns, type GroupedRow, type ThreadRow } from '@/components/g
  * `/github/prs`, `/github/issues/:n`, `/github/prs/:n`. PR rows also carry a compact checks
  * glyph (#400) — the same tones as the detail pane's `ChecksBadge`, just the symbol.
  *
- * Data loads in ONE fast shot (#664): the list call no longer fetches `statusCheckRollup` — the
- * CI rollup for every open PR was the dominant cost and forced the old two-shot `30 → 1000`
- * pattern — so a single `limit`-capped fetch paints the whole open set quickly and search works
- * across it immediately. Each PR row's checks glyph is then hydrated lazily, for the on-screen
- * rows only, via `useGithubChecks` (`GET /api/github/checks`), the same way comment counts fill
- * in a beat later. A cheap React-Query prefetch on row hover/focus warms the thread so an opened
- * item is usually instant. (Cursor pagination + "Load more"/infinite scroll + row virtualization
- * are the Phase 2 follow-up.)
+ * Data loads a page at a time (hearsay-tools/cezarion#1183): `GITHUB_PAGE_SIZE` rows per side,
+ * each side on its own cursor, with the server's exact open totals in the tab labels. The list
+ * call fetches neither `statusCheckRollup` (#664) nor comment counts: each PR row's checks glyph
+ * and every row's comment badge are hydrated after paint, for the loaded rows only, through
+ * `useGithubChecks` and `useGithubCommentCounts`. A cheap React-Query prefetch on row hover/focus
+ * warms the thread so an opened item is usually instant.
  *
  * Gating: the nav item is hidden by the shell when health reports no forge — but the URL
  * stays reachable (pasted links), so an unavailable payload renders the honest explainer
  * with the server's own reason, never an error.
  */
-
-/** The single fast list fetch (`/api/github` limit). No longer split into a fast batch + a slow
- *  everything-open shot — dropping `statusCheckRollup` from the list made one fetch of the whole
- *  open set cheap. A count AT this cap still reads `N+`, since the open set may exceed it. */
-const LIST_LIMIT = GITHUB_LIST_LIMIT
 
 /** How many on-screen PR rows one checks request covers (matches the server's `GH_CHECKS_MAX`).
  *  The visible window is hydrated first; without virtualization (Phase 2) rows past this stay
@@ -220,14 +217,13 @@ export function GithubRoute({
     else next.set('filter', value)
     return next
   }, { replace: true })
-  // One fast shot now that the list dropped `statusCheckRollup` (#664) — no more fast/full swap.
-  const list = useGithub({ limit: LIST_LIMIT })
+  // Paged (hearsay-tools/cezarion#1183): `list` is the infinite query, `gh` every loaded page.
+  const { pages: list, data: gh } = useGithubPages(GITHUB_PAGE_SIZE)
   // #801: automations are opt-in, so the cross-link into them exists exactly while the server
   // says the feature does — otherwise this tab would advertise a page that only says "off".
   // `capabilities?.` because this tab renders against minimal health payloads too; absent is
   // fail-closed, which is the honest answer while the server has not spoken.
   const automationsAvailable = useHealth().data?.capabilities?.automations === true
-  const gh = list.data
 
   const queryClient = useQueryClient()
 
@@ -278,13 +274,31 @@ export function GithubRoute({
       // Started beside the list, not after it: the item has its own cache and its own failure, and
       // a list refresh that fails must still be able to recover a failed exact fetch.
       void refetchExact(exact)
-      return getGithub({ refresh: true, limit: LIST_LIMIT })
+      return getGithub({ refresh: true, limit: GITHUB_PAGE_SIZE })
     },
-    onSuccess: (data) => {
-      // One list query now (#664) — patch it directly, then re-hydrate the visible checks window
-      // so glyphs track the fresh rows (they carry their own ≤60 s cache server-side).
-      queryClient.setQueryData(queryKeys.github({ limit: LIST_LIMIT }), data)
+    onSuccess: async (data) => {
+      // A refresh starts the list over at one fresh first page: later pages were cut against the
+      // old cursors, and the next scroll loads them again from this page's (#1183). A page load
+      // still in flight is cancelled first, or it would land its old pages over the fresh one.
+      // Then re-hydrate the visible checks window so glyphs track the fresh rows.
+      await queryClient.cancelQueries({ queryKey: queryKeys.githubPages(GITHUB_PAGE_SIZE), exact: true })
+      queryClient.setQueryData<InfiniteData<GithubData, GithubPageParam>>(
+        queryKeys.githubPages(GITHUB_PAGE_SIZE), { pages: [data], pageParams: [{}] })
       void queryClient.invalidateQueries({ queryKey: queryKeys.githubChecks(checkPrNumbers) })
+      // Comment counts past the server's 60 s cache for the fresh page; every other cached
+      // count is dropped so it is asked for again when its page is next loaded.
+      const countsKind = view === 'issues' ? 'issue' : 'pr'
+      const fresh = (view === 'issues' ? data.issues : data.prs).map((item) => item.number)
+      const freshKey = queryKeys.githubCommentCounts(countsKind, fresh)
+      void queryClient.removeQueries({
+        queryKey: queryKeys.githubCommentCounts(countsKind, []).slice(0, 4),
+        predicate: (q) => q.queryHash !== hashKey(freshKey),
+      })
+      if (data.available && data.commentsDeferred && fresh.length > 0) {
+        void getGithubCommentCounts(countsKind, fresh, { refresh: true })
+          .then((counts) => queryClient.setQueryData(freshKey, counts))
+          .catch(() => { /* the badges keep what they had */ })
+      }
       // Search has no server cache; refresh the active narrow as well as the open list.
       void queryClient.invalidateQueries({ queryKey: queryKeys.githubSearch(view === 'issues' ? 'issue' : 'pr', debouncedQuery) })
       // The sidebar's qualifier searches (Review requested / Checks failing) have no server cache
@@ -339,7 +353,7 @@ export function GithubRoute({
   // The geometry/wheel effect must follow the workspace's real mount lifetime: keyed on availability
   // alone it ran once against null refs there and never again after a filter pushed the list.
   const filterScreen = index && !isDesktop && rawFilterParam === null && n === undefined
-  const workspaceAvailable = list.data?.available === true && !filterScreen
+  const workspaceAvailable = gh?.available === true && !filterScreen
   useEffect(() => {
     if (!workspaceAvailable) return
     const route = routeRef.current
@@ -471,7 +485,7 @@ export function GithubRoute({
   }, [view, activeFilter, taskNumbers, gh?.viewerLogin, filterHits])
   // Evaluated against the DEBOUNCED query, not the live one: the fallback must be decided by the
   // same text the request will carry, or a fast typist fires a `gh` subprocess per keystroke.
-  // Memoized because this walks the whole open set — up to `LIST_LIMIT` rows — and only its three
+  // Memoized because this walks every loaded row and only its three
   // inputs can change the answer; unmemoized it re-filtered that set on every unrelated render,
   // doubling the filtering the render body below already does for the live query (#838).
   const localMatches = useMemo(
@@ -579,6 +593,46 @@ export function GithubRoute({
   })()
   const checksQuery = useGithubChecks(checkPrNumbers, view === 'prs')
   const checksMap = checksQuery.data?.available ? checksQuery.data.checks : undefined
+  // Deferred comment counts (#1183): one request per loaded page of the active kind. A row the
+  // list deferred shows no badge until its count lands; a search hit carries its own.
+  const countsKind = view === 'issues' ? 'issue' : 'pr'
+  const countGroups = useMemo(() => (list.data?.pages ?? []).map((page) =>
+    (view === 'issues' ? page.issues : page.prs).map((item) => item.number)), [list.data, view])
+  const commentCounts = useGithubCommentCounts(countsKind, countGroups, gh?.available === true && gh.commentsDeferred === true)
+  const deferredNumbers = useMemo(() => new Set(gh?.commentsDeferred
+    ? (view === 'issues' ? gh.issues : gh.prs).map((item) => item.number) : []), [gh, view])
+  const commentsOf = (item: GithubItem): number | undefined =>
+    commentCounts[item.number] ?? (deferredNumbers.has(item.number) ? undefined : item.comments)
+
+  // Scroll-driven paging (#1183, port of open-mercato/cezar#1374). The rows virtualize against
+  // the element that really scrolls them (the list pane from `md` up, the shell's `main` below
+  // it), and the next page loads when the sentinel nears that element's bottom. No automatic
+  // paging under a text, label, assignee or board narrow: a narrowed list would keep the sentinel
+  // in view and crawl every page, so the next page waits for the user's Load more. The
+  // list-backed presets keep paging, so their counts read `N+` until a side is done; the
+  // search-backed ones never page. A failed page stops the observer too, or the still-visible
+  // sentinel would retry it in a tight loop.
+  const [listEl, setListEl] = useState<HTMLElement | null>(null)
+  const [rowsEl, setRowsEl] = useState<HTMLDivElement | null>(null)
+  const scrollOwner = useListScrollOwner(listEl)
+  const scrollOwnerRef = useRef<HTMLElement | null>(null)
+  scrollOwnerRef.current = scrollOwner
+  const startMargin = useStartMargin(rowsEl, scrollOwner)
+  const narrowing = query.trim() !== '' || labelFilter.length > 0
+    || (view === 'issues' && ((!isAssignedFilter && assigneeFilter.length > 0) || activeProject !== ''))
+  // Gated on the loaded SIDE, not on the preset's matches: a preset with nothing on the loaded
+  // pages must still page on to the match a later page holds.
+  const loadedSide = view === 'issues' ? gh?.issues.length ?? 0 : gh?.prs.length ?? 0
+  const pagingAvailable = list.hasNextPage && backedQuery === null && loadedSide > 0
+  const pagingShown = pagingAvailable && !narrowing
+  // Under a narrow the next page waits for the user's Load more: the filter only sees loaded
+  // rows, and a match on a later page must stay reachable without crawling every page.
+  const manualPaging = pagingAvailable && narrowing
+  const loadMoreRef = useLoadMoreSentinel(
+    pagingShown && !list.isFetchingNextPage && !list.isFetchNextPageError,
+    scrollOwner,
+    () => void list.fetchNextPage(),
+  )
 
   // The bare `/github` restores the remembered sub-tab (#417). It lives HERE rather than in a
   // wrapper component so `/github` and `/github/issues/:n` render the same element type: React
@@ -774,10 +828,10 @@ export function GithubRoute({
           <div data-slot="gh-tabs" className="flex min-h-11 flex-wrap items-center gap-3">
             {/* On a phone the bare `/github` is the filter screen, so the Issues tab names `all`. */}
             <TabLink to={isDesktop ? '/github' : '/github?filter=all'} active={view === 'issues'} onClick={() => saveGithubView('issues')}>
-              Issues · {countLabel(gh.issues.length)}
+              Issues · {gh.issuesTotal ?? gh.issues.length}
             </TabLink>
             <TabLink to="/github/prs" active={view === 'prs'} onClick={() => saveGithubView('prs')}>
-              Pull requests · {countLabel(gh.prs.length)}
+              Pull requests · {gh.prsTotal ?? gh.prs.length}
             </TabLink>
             {automationsAvailable ? (
               <Link
@@ -835,6 +889,7 @@ export function GithubRoute({
       >
       {/* Stack whenever columns would leave less than 360px for the detail. */}
       <section
+        ref={setListEl}
         data-slot="gh-list"
         data-mobile-preview={compactPreview || undefined}
         style={{ '--github-list-width': `${githubListWidth}px` } as CSSProperties}
@@ -853,22 +908,79 @@ export function GithubRoute({
             </div>
           )
         ) : (
-          <ul data-slot="gh-rows" className="flex flex-col gap-1">
-            {items.map((item, index) => (
-              <GithubRow
-                key={item.url}
-                item={item}
-                view={view}
-                filter={linkFilter}
-                colors={labelColors}
-                active={selected?.url === item.url}
-                compactHidden={compactPreview && index >= 2 && selected?.url !== item.url}
-                queued={queued.has(item.url)}
-                checks={item.kind === 'pr' ? checksMap?.[item.number] ?? item.checks : item.checks}
-              />
-            ))}
-          </ul>
+          <div ref={setRowsEl} data-slot="gh-rows" data-virtualized={scrollOwner ? 'true' : undefined} role="list">
+            {(() => {
+              // The item wrapper carries what the old `ul > li` selectors did: a virtualizer puts
+              // its own element around each child, so a sibling selector cannot reach the next row.
+              const rendered = items.map((item, index) => (
+                <div
+                  key={item.url}
+                  role="listitem"
+                  data-slot="gh-row-item"
+                  data-divided={index > 0 || undefined}
+                  data-compact-hidden={(compactPreview && index >= 2 && selected?.url !== item.url) || undefined}
+                >
+                  <GithubRow
+                    item={item}
+                    view={view}
+                    filter={linkFilter}
+                    colors={labelColors}
+                    active={selected?.url === item.url}
+                    queued={queued.has(item.url)}
+                    checks={item.kind === 'pr' ? checksMap?.[item.number] ?? item.checks : item.checks}
+                    comments={commentsOf(item)}
+                  />
+                </div>
+              ))
+              // Keyed by the owner, so a breakpoint that moves the scroll owner remounts the
+              // virtualizer against the new one instead of keeping the stale scroll offset.
+              return scrollOwner ? (
+                <Virtualizer key={scrollOwner === listEl ? 'list' : 'main'} scrollRef={scrollOwnerRef} startMargin={startMargin}>
+                  {rendered}
+                </Virtualizer>
+              ) : rendered
+            })()}
+          </div>
         )}
+
+        {pagingAvailable ? (
+          <div
+            ref={loadMoreRef}
+            data-slot="gh-load-more"
+            className="flex min-h-6 items-center justify-center gap-1.5 px-4 pb-3 text-xs text-soft-foreground"
+          >
+            {list.isFetchingNextPage ? (
+              <>
+                <LoaderCircleIcon aria-hidden="true" className="size-3.5 motion-safe:animate-spin" />
+                Loading more…
+              </>
+            ) : list.isFetchNextPageError ? (
+              <>
+                Could not load more.
+                <button
+                  type="button"
+                  data-slot="gh-load-more-retry"
+                  onClick={() => void list.fetchNextPage()}
+                  className="font-medium text-accent-text hover:underline"
+                >
+                  Retry
+                </button>
+              </>
+            ) : manualPaging ? (
+              <>
+                Filters cover the loaded {view === 'issues' ? 'issues' : 'pull requests'}.
+                <button
+                  type="button"
+                  data-slot="gh-load-more-manual"
+                  onClick={() => void list.fetchNextPage()}
+                  className="font-medium text-accent-text hover:underline"
+                >
+                  Load more
+                </button>
+              </>
+            ) : null}
+          </div>
+        ) : null}
 
         {backedQuery !== null && filterSearch.data?.available && filterSearch.data.truncated ? (
           <div data-slot="gh-filter-note" role="status" className="px-4 py-3 text-xs text-soft-foreground">
@@ -903,16 +1015,18 @@ export function GithubRoute({
             </p>
             <ul className="flex flex-col gap-0.5 px-2 pb-2">
               {searchHits.map((item) => (
-                <GithubRow
-                  key={item.url}
-                  item={item}
-                  view={view}
-                  filter={linkFilter}
-                  colors={labelColors}
-                  active={selected?.url === item.url}
-                  queued={queued.has(item.url)}
-                  checks={item.kind === 'pr' ? checksMap?.[item.number] ?? item.checks : item.checks}
-                />
+                <li key={item.url}>
+                  <GithubRow
+                    item={item}
+                    view={view}
+                    filter={linkFilter}
+                    colors={labelColors}
+                    active={selected?.url === item.url}
+                    queued={queued.has(item.url)}
+                    checks={item.kind === 'pr' ? checksMap?.[item.number] ?? item.checks : item.checks}
+                    comments={commentsOf(item)}
+                  />
+                </li>
               ))}
             </ul>
           </div>
@@ -931,6 +1045,7 @@ export function GithubRoute({
         {selected ? (
           <GithubItemDetail
             item={selected}
+            comments={commentsOf(selected)}
             afterHeading={selected.kind === 'issue' ? (
               // The list can retain this same issue as its preview; reopening still resets it.
               <IssueLinkedTasks key={n ?? 'list'} number={selected.number} repo={gh.repo} />
@@ -1015,21 +1130,15 @@ function focusHandToAgentPrompt() {
   prompt?.focus({ preventScroll: true })
 }
 
-/** The exact open count from the single fast fetch — with a `+` only when it hit the list cap, so
- *  a repo with more than `LIST_LIMIT` open items reads honestly as "at least this many". */
-function countLabel(count: number): string {
-  return `${count}${count >= LIST_LIMIT ? '+' : ''}`
-}
-
 function GithubRow({
   item,
   view,
   filter,
   colors,
   active,
-  compactHidden,
   queued,
   checks,
+  comments,
 }: {
   item: GithubItem
   view: GithubView
@@ -1037,10 +1146,11 @@ function GithubRow({
   filter: GithubFilter | null
   colors: Record<string, string>
   active: boolean
-  compactHidden?: boolean
   queued: boolean
   /** Resolved checks glyph — the lazily-hydrated value overrides the list's `null` (#664). */
   checks?: GithubItem['checks']
+  /** Resolved comment count; `undefined` while a deferred count has not landed (#1183). */
+  comments: number | undefined
 }) {
   const Icon = item.kind === 'issue' ? CircleDotIcon : GitPullRequestIcon
   const queryClient = useQueryClient()
@@ -1067,53 +1177,51 @@ function GithubRow({
   }
 
   return (
-    <li data-compact-hidden={compactHidden || undefined}>
-      <Link
-        to={githubFilterPath(view, filter, item.number)}
-        draggable
-        onDragStart={onDragStart}
-        onMouseEnter={prefetchThread}
-        onFocus={prefetchThread}
-        data-slot="gh-row"
-        data-number={item.number}
-        data-kind={item.kind}
-        aria-current={active ? 'page' : undefined}
-        title="Drag into the composer to prefill a task"
-        className={cn(
-          'flex flex-col gap-2 rounded-md px-3 py-4 transition-colors hover:bg-muted',
-          active && 'bg-accent-strong/10 text-accent-text',
-        )}
-      >
-        <span className="flex min-w-0 items-start gap-2 md:items-center">
-          <Icon
-            aria-hidden="true"
-            className={cn('mt-0.5 size-3.5 shrink-0 md:mt-0', item.kind === 'issue' ? 'text-success' : 'text-accent-icon')}
-          />
-          <span className={cn('line-clamp-2 min-w-0 text-[13px] font-medium md:block md:truncate', active && 'font-semibold')}>
-            {item.title}
-          </span>
+    <Link
+      to={githubFilterPath(view, filter, item.number)}
+      draggable
+      onDragStart={onDragStart}
+      onMouseEnter={prefetchThread}
+      onFocus={prefetchThread}
+      data-slot="gh-row"
+      data-number={item.number}
+      data-kind={item.kind}
+      aria-current={active ? 'page' : undefined}
+      title="Drag into the composer to prefill a task"
+      className={cn(
+        'flex flex-col gap-2 rounded-md px-3 py-4 transition-colors hover:bg-muted',
+        active && 'bg-accent-strong/10 text-accent-text',
+      )}
+    >
+      <span className="flex min-w-0 items-start gap-2 md:items-center">
+        <Icon
+          aria-hidden="true"
+          className={cn('mt-0.5 size-3.5 shrink-0 md:mt-0', item.kind === 'issue' ? 'text-success' : 'text-accent-icon')}
+        />
+        <span className={cn('line-clamp-2 min-w-0 text-[13px] font-medium md:block md:truncate', active && 'font-semibold')}>
+          {item.title}
         </span>
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-[22px] font-mono text-[11px] text-muted-foreground md:flex-nowrap md:gap-y-0">
-          <span>#{item.number}</span>
-          <span className="max-w-full shrink-0 truncate md:min-w-0 md:shrink">{item.author}</span>
-          <span>{shortAge(item.createdAt)}</span>
-          <CommentCount count={item.comments} />
-          {checks ? <ChecksGlyph checks={checks} /> : null}
-          {queued ? (
-            <span data-slot="gh-queued-flag" className="font-sans font-medium text-accent-text">
-              ↗ run queued
-            </span>
-          ) : null}
-        </span>
-        {item.labels.length > 0 ? (
-          <span data-slot="gh-row-labels" className="flex flex-wrap gap-1 pl-[22px]">
-            {item.labels.map((label) => (
-              <LabelChip key={label} label={label} color={colors[label]} plain />
-            ))}
+      </span>
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-[22px] font-mono text-[11px] text-muted-foreground md:flex-nowrap md:gap-y-0">
+        <span>#{item.number}</span>
+        <span className="max-w-full shrink-0 truncate md:min-w-0 md:shrink">{item.author}</span>
+        <span>{shortAge(item.createdAt)}</span>
+        <CommentCount count={comments} />
+        {checks ? <ChecksGlyph checks={checks} /> : null}
+        {queued ? (
+          <span data-slot="gh-queued-flag" className="font-sans font-medium text-accent-text">
+            ↗ run queued
           </span>
         ) : null}
-      </Link>
-    </li>
+      </span>
+      {item.labels.length > 0 ? (
+        <span data-slot="gh-row-labels" className="flex flex-wrap gap-1 pl-[22px]">
+          {item.labels.map((label) => (
+            <LabelChip key={label} label={label} color={colors[label]} plain />
+          ))}
+        </span>
+      ) : null}
+    </Link>
   )
 }
 

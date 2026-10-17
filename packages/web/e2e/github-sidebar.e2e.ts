@@ -131,6 +131,25 @@ const countsJs = (container: string) => `(() => {
 
 /** The numbers of the rows in the main list, sorted (the order is the list's own, not the subject). */
 const rowNumbersJs = `[...document.querySelectorAll(${JSON.stringify(ROWS)})].map((row) => Number(row.dataset.number)).sort((a, b) => a - b)`
+/** Every row's number, not only the mounted ones: the list is virtualized (hearsay-tools/cezarion#1183),
+ *  so the expression walks the desktop list pane from top to bottom, collecting each window after
+ *  a frame has rendered it, then returns to the top. The scroll and the read are one sample
+ *  (README rule 3). */
+const allRowNumbersJs = `(async () => {
+  const pane = document.querySelector('[data-slot="gh-list"]');
+  if (!pane) return null;
+  const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const seen = new Set();
+  pane.scrollTop = 0;
+  for (let step = 0; step < 200; step += 1) {
+    await frame();
+    for (const row of document.querySelectorAll(${JSON.stringify(ROWS)})) seen.add(Number(row.dataset.number));
+    if (pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 1) break;
+    pane.scrollTop += Math.max(1, Math.floor(pane.clientHeight / 2));
+  }
+  pane.scrollTop = 0;
+  return [...seen].sort((a, b) => a - b);
+})()`
 const locationJs = `location.pathname + location.search`
 const currentJs = (container: string) => `(() => {
   const box = document.querySelector(${JSON.stringify(container)});
@@ -237,7 +256,7 @@ describe('GitHub desktop sidebar (#622)', () => {
     }
     for (const [filter, numbers] of Object.entries(expected)) {
       browser.click(`${SIDEBAR} [data-gh-filter="${filter}"]`)
-      expect(browser.waitForValue(rowNumbersJs, sameJson(numbers))).toEqual(numbers)
+      expect(browser.waitForValue(allRowNumbersJs, sameJson(numbers))).toEqual(numbers)
       expect(browser.waitForValue(locationJs, (value) => value === `${scoped('/github/prs')}?filter=${filter}`)).toBe(`${scoped('/github/prs')}?filter=${filter}`)
       expect(browser.waitForValue(currentJs(SIDEBAR), sameJson([filter]))).toEqual([filter])
     }
@@ -418,36 +437,21 @@ describe('GitHub desktop sidebar (#622)', () => {
 })
 
 describe('GitHub counts that cannot be known (#622)', () => {
-  it('says N+ for a capped open list and never invents a total', () => {
+  it('says N+ for a preset while pages remain, and the exact total for all (#1183)', () => {
     const capped = session('capped')
-    // The list is NOT routed here: a 1000-item page is served in-page (routeJson bodies ride a
-    // 128 KiB argv), through a CLIENT navigation so the stub is in place before the first fetch.
-    capped.routeJson(REVIEW_QUERY, searchPayload([]))
-    capped.routeJson(FAILING_QUERY, searchPayload([]))
-    capped.goto(`${base}${scoped('/')}`)
-    capped.waitForFunction(`document.querySelector('a[href="${scoped('/github')}"]') !== null`)
-    capped.evaluate(`(() => {
-      const items = Array.from({ length: 1000 }, (_, index) => ({
-        kind: 'issue', number: 1001 + index, title: 'Capped ' + index, author: 'reporter', createdAt: '2026-01-01T00:00:00Z',
-        labels: [], body: '', url: 'https://github.com/${REPO}/issues/' + (1001 + index), comments: 0,
-        assignees: index % 4 === 0 ? ['${VIEWER}'] : [],
-      }));
-      const body = JSON.stringify({ available: true, repo: '${REPO}', issues: items, prs: [], viewerLogin: '${VIEWER}' });
-      const nativeFetch = window.fetch;
-      window.fetch = (input, init) => {
-        const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
-        if (new URL(url, location.href).pathname.endsWith('/github')) {
-          return Promise.resolve(new Response(body, { status: 200, headers: { 'content-type': 'application/json' } }));
-        }
-        return nativeFetch(input, init);
-      };
-      document.querySelector('a[href="${scoped('/github')}"]').click();
-    })()`)
+    // One loaded page of a longer list: the route answers a cursor and the repository's total.
+    const items = Array.from({ length: 50 }, (_, index) => issue(1001 + index, { assignees: index % 4 === 0 ? [VIEWER] : [] }))
+    route(capped, {
+      list: listPayload({ issues: items, prs: [], issuesTotal: 1234, prsTotal: 0, issuesNextCursor: 'c1', prsNextCursor: null }),
+      review: searchPayload([]),
+      failing: searchPayload([]),
+    })
+    capped.goto(`${base}${scoped('/github?filter=all')}`)
     capped.waitForFunction(`document.querySelector(${JSON.stringify(SIDEBAR)} + ' [data-gh-filter="all"]') !== null`)
     const counts = capped.waitForValue<Record<string, string | null>>(countsJs(SIDEBAR), (value) => Boolean(value && value.all && /\d/.test(value.all)))
-    // 1000 is the fetch cap, not the repository's total: the cap must show.
-    expect(counts.all).toBe('1000+')
-    expect(counts.assigned).toBe('250+')
+    // `all` is the total GitHub reports; a preset counts the loaded pages only, so it says so.
+    expect(counts.all).toBe('1234')
+    expect(counts.assigned).toBe('13+')
     // Search-backed counts with zero hits are a real, complete zero; the open PR list is empty.
     expect(counts['all-prs']).toBe('0')
     capped.screenshot(`${artifactsDir}/github-sidebar-capped.png`, { viewport: true })

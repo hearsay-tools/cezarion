@@ -4,8 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import { GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, type GithubItemResponse, type GithubProjectsData } from '@open-mercato/cezar-contract';
-import { fetchIssueProjects, fetchViewerLogin } from './github-filters.ts';
+import { GITHUB_COMMENT_COUNTS_MAX, GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, type GithubCommentCountsData, type GithubItemResponse, type GithubProject, type GithubProjectsData } from '@open-mercato/cezar-contract';
+import { fetchIssueProjects, fetchRepositoryProjects, fetchViewerLogin } from './github-filters.ts';
 import { fetchGithubMergeRequirements, type GithubMergeRequirements } from './github-merge-requirements.ts';
 import { autosaveCommit } from '../../git-worktree.ts';
 import { refNumberFromUrl } from '../../runs/run-search.ts';
@@ -17,6 +17,7 @@ import type {
   ForgeCommentsData,
   ForgeDriver,
   ForgeItem,
+  ForgeListOptions,
   ForgeMergeInput,
   ForgeMergeMethod,
   ForgeMergeResult,
@@ -283,89 +284,22 @@ async function gh(repoRoot: string, args: string[], timeout = 15_000, signal?: A
   return stdout;
 }
 
-// ---- comment counts (#499 Phase 1) -----------------------------------------
-// `gh … --json comments` is off the table for the list calls — it ships every
-// comment body for every row (the reason `comments` was hard-coded to 0). Real
-// counts come from one lightweight GraphQL query per kind returning only
-// `number → totalCount`, run in parallel with the list calls. This whole seam
-// degrades to empty maps on any failure, so the tab renders exactly as before
-// when the counts call fails (plan rule: counts never break the tab).
+// ---- GraphQL plumbing ----------------------------------------------------
 
-/** Runs a GraphQL query with String variables — injected so pagination is unit-testable
- *  without shelling to `gh`. */
-export type GraphqlRunner = (query: string, variables: Record<string, string>) => Promise<string>;
+/** Runs a GraphQL query — injected so pagination is unit-testable without shelling to `gh`.
+ *  Number variables reach GitHub typed (`-F`), strings raw (`-f`): see `ghGraphqlArgs`. */
+export type GraphqlRunner = (query: string, variables: Record<string, string | number>) => Promise<string>;
 
-/** GraphQL's max page size; pagination is capped at 10 pages/kind (1000 rows — the GUI's full
- *  background shot). Rows past the window keep `comments: 0`, which the UI reads as "no badge". */
-export const GH_COUNTS_MAX_PAGES = 10;
-
-const countsQuery = (root: 'issues' | 'pullRequests'): string => `
-query ($owner: String!, $name: String!, $endCursor: String) {
-  repository(owner: $owner, name: $name) {
-    ${root}(first: 100, after: $endCursor, states: OPEN,
-           orderBy: {field: CREATED_AT, direction: DESC}) {
-      nodes { number comments { totalCount } }
-      pageInfo { hasNextPage endCursor }
-    }
+/** `gh api graphql` argv. `-f` sends every value as a String, and GitHub rejects a String where
+ *  the query declares `Int!` ("Could not coerce value to Int", open-mercato/cezar#1366), so a
+ *  number goes through `-F`. A string never does: `-F` would read `@file` and coerce
+ *  `true`/numerals, which is not what an opaque cursor or a login means. */
+export function ghGraphqlArgs(query: string, variables: Record<string, string | number> = {}): string[] {
+  const args = ['api', 'graphql', '-f', `query=${query}`];
+  for (const [key, value] of Object.entries(variables)) {
+    args.push(typeof value === 'number' ? '-F' : '-f', `${key}=${value}`);
   }
-}`;
-
-const ghCountsPageSchema = z.object({
-  nodes: z.array(z.object({ number: z.number(), comments: z.object({ totalCount: z.number() }) })),
-  pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullish() }),
-});
-
-/** Validate + flatten one gh GraphQL counts response into a `number → count` map plus the page
- *  cursor. Exported for unit tests (the zod boundary + shape). Throws on a malformed envelope. */
-export function parseCountsPage(
-  out: string,
-  root: 'issues' | 'pullRequests',
-): { counts: Record<number, number>; hasNextPage: boolean; endCursor: string | null } {
-  const parsed = JSON.parse(out) as { data?: { repository?: Record<string, unknown> | null } };
-  const page = ghCountsPageSchema.parse(parsed?.data?.repository?.[root]);
-  const counts: Record<number, number> = {};
-  for (const node of page.nodes) counts[node.number] = node.comments.totalCount;
-  return { counts, hasNextPage: page.pageInfo.hasNextPage, endCursor: page.pageInfo.endCursor ?? null };
-}
-
-async function paginateCounts(
-  runGraphql: GraphqlRunner,
-  owner: string,
-  name: string,
-  root: 'issues' | 'pullRequests',
-  maxPages: number,
-): Promise<Record<number, number>> {
-  const counts: Record<number, number> = {};
-  let cursor: string | null = null;
-  for (let page = 0; page < maxPages; page++) {
-    const variables: Record<string, string> = { owner, name };
-    if (cursor) variables.endCursor = cursor;
-    const res = parseCountsPage(await runGraphql(countsQuery(root), variables), root);
-    Object.assign(counts, res.counts);
-    if (!res.hasNextPage || !res.endCursor) break;
-    cursor = res.endCursor;
-  }
-  return counts;
-}
-
-/** Comment counts for open issues and PRs as `number → count` maps. Two independent paginated
- *  queries (issues and PRs need separate cursors) run in parallel; any failure degrades the whole
- *  thing to empty maps so the tab is never held up by counts. Exported for unit tests. */
-export async function fetchCommentCounts(
-  runGraphql: GraphqlRunner,
-  owner: string,
-  name: string,
-  maxPages = GH_COUNTS_MAX_PAGES,
-): Promise<{ issues: Record<number, number>; prs: Record<number, number> }> {
-  try {
-    const [issues, prs] = await Promise.all([
-      paginateCounts(runGraphql, owner, name, 'issues', maxPages),
-      paginateCounts(runGraphql, owner, name, 'pullRequests', maxPages),
-    ]);
-    return { issues, prs };
-  } catch {
-    return { issues: {}, prs: {} };
-  }
+  return args;
 }
 
 /** `owner/name` → `{ owner, name }`, or null when the handle isn't a clean two-part slug. */
@@ -374,80 +308,216 @@ export function parseOwnerName(nameWithOwner: string): { owner: string; name: st
   return owner && name && rest.length === 0 ? { owner, name } : null;
 }
 
+// ---- the paged open list (hearsay-tools/cezarion#1183) ----------------------
+// One GraphQL request per connection per page, both connections and the viewer in parallel.
+// Comment counts are deliberately absent: they were about 0.4 s of a 50-row page on a real repo,
+// so rows ship `comments: 0` with `commentsDeferred` and the counts route hydrates them after
+// paint. `body` stays (deprecated, still sent) — it measured no cost at all.
+
+/** GitHub GraphQL rejects `first` above 100 (EXCESSIVE_PAGINATION); larger limits walk pages. */
+export const GH_GRAPHQL_PAGE_MAX = 100;
+
+export type ListSide = 'issues' | 'pullRequests';
+
+// Labels up to 100, which is what `gh issue list --json labels` read before the GraphQL page.
+const LIST_NODE_FIELDS = 'number title author { login } createdAt url body labels(first: 100) { nodes { name color } }';
+const listQuery = (side: ListSide): string => `
+query ($owner: String!, $name: String!, $first: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    ${side}(first: $first, after: $after, states: OPEN, orderBy: {field: CREATED_AT, direction: DESC}) {
+      totalCount
+      pageInfo { hasNextPage endCursor }
+      nodes { ${LIST_NODE_FIELDS} ${side === 'issues' ? 'assignees(first: 20) { nodes { login } }' : 'isDraft additions deletions'} }
+    }
+  }
+}`;
+
+/** A GraphQL connection (`{ nodes }`) read as the flat array `gh … --json` used to return. */
+const connectionOf = <T extends z.ZodType>(item: T) =>
+  z.object({ nodes: z.array(item.nullable()).default([]) }).nullish()
+    .transform((connection) => (connection?.nodes ?? []).filter((node): node is NonNullable<typeof node> => node != null));
+
+const ghListNodeSchema = z.object({
+  number: z.number(),
+  title: z.string(),
+  author: ghAuthor,
+  createdAt: z.string(),
+  url: z.string(),
+  body: z.string().nullish(),
+  labels: connectionOf(ghLabel),
+  assignees: connectionOf(z.object({ login: z.string() })),
+  isDraft: z.boolean().nullish(),
+  additions: z.number().nullish(),
+  deletions: z.number().nullish(),
+});
+export type ListNode = z.infer<typeof ghListNodeSchema>;
+
+const ghListConnectionSchema = z.object({
+  totalCount: z.number().int().nonnegative(),
+  pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullish() }),
+  nodes: z.array(ghListNodeSchema.nullable()),
+});
+
+function parseListConnection(out: string, side: ListSide): z.infer<typeof ghListConnectionSchema> {
+  const parsed = JSON.parse(out) as { data?: { repository?: Record<string, unknown> | null }; errors?: Array<{ message?: string }> };
+  const message = parsed.errors?.map((e) => e.message).filter(Boolean).join(' ');
+  if (message) throw new Error(message);
+  if (!parsed.data?.repository) throw new Error('GitHub did not resolve this repository');
+  return ghListConnectionSchema.parse(parsed.data.repository[side]);
+}
+
+/**
+ * One side of the open list: up to `limit` rows from `cursor`, in requests of at most
+ * `GH_GRAPHQL_PAGE_MAX`. `nextCursor` is where the rows stop, or `null` once the side is
+ * exhausted. `done` asks for `first: 0`, which still answers `totalCount`, so an exhausted side
+ * keeps a fresh total without ever restarting from its first page (open-mercato/cezar#1366
+ * restarted it while the other side paged).
+ */
+export async function fetchListConnection(
+  run: GraphqlRunner,
+  owner: string,
+  name: string,
+  side: ListSide,
+  limit: number,
+  cursor?: string,
+  done = false,
+): Promise<{ totalCount: number; nodes: ListNode[]; nextCursor: string | null }> {
+  const query = listQuery(side);
+  if (done) {
+    const page = parseListConnection(await run(query, { owner, name, first: 0 }), side);
+    return { totalCount: page.totalCount, nodes: [], nextCursor: null };
+  }
+  const nodes: ListNode[] = [];
+  let after = cursor;
+  for (;;) {
+    const first = Math.min(GH_GRAPHQL_PAGE_MAX, limit - nodes.length);
+    const page = parseListConnection(await run(query, { owner, name, first, ...(after ? { after } : {}) }), side);
+    const rows = page.nodes.filter((node): node is ListNode => node !== null);
+    nodes.push(...rows);
+    const next = page.pageInfo.hasNextPage ? page.pageInfo.endCursor ?? null : null;
+    // An empty page that claims more would loop forever; read it as the end of the side.
+    if (next === null || rows.length === 0) return { totalCount: page.totalCount, nodes, nextCursor: null };
+    if (next === after) throw new Error('GitHub list cursor did not advance');
+    // A short page with more behind it still ends this request: the cursor resumes it exactly.
+    if (nodes.length >= limit || rows.length < first) return { totalCount: page.totalCount, nodes, nextCursor: next };
+    after = next;
+  }
+}
+
 /* Reads degrade to `available: false` with a hint — never an error (plan rule
    7): no `gh`, no remote, offline all land on the same quiet path. A short
    cache keeps tab switches from hammering the GitHub API; a cached fetch with
    a bigger limit than asked serves fine (it's a superset). Keyed by repository/host/account context
-   (multi-project workspace, step 2.6): one project's — possibly private —
-   issues/PRs must never be served under another project's scope. Bounded like
-   `commentsCache` so an unbounded workspace can't grow it without limit. */
+   (multi-project workspace, step 2.6) plus the page asked for: one project's — possibly private —
+   issues/PRs must never be served under another project's scope, and page 2 is never page 1.
+   Bounded like `commentsCache` so an unbounded workspace can't grow it without limit. */
 let listRequestOrder = 0;
-const listCache = new Map<string, { order: number; at: number; limit: number; data: GithubData; projects: Promise<GithubProjectsData> }>();
+/** Per context, the order of the newest page-1 refresh. A refresh drops the context's later
+ *  pages (their cursors were cut from the old first page), and a later page that started before
+ *  it may answer its caller but never re-enters the cache. Bounded with `listCache`. */
+const listRefreshOrder = new Map<string, number>();
+const listCache = new Map<string, {
+  contextKey: string; order: number; at: number; limit: number; data: GithubData; projects: Promise<GithubProjectsData>;
+}>();
 const LIST_CACHE_MAX = 50;
 const CACHE_MS = 60_000;
+/** Which page key holds a projects generation, so `fetchGithubProjects` never scans the cache.
+ *  Installed and evicted in step with `listCache`, so it shares its bound. */
+const projectGenerations = new Map<string, string>();
+/** Board discovery (the `projectsV2` walk) per context: page 2 pays for membership only. A
+ *  failed discovery is dropped, so the next page or refresh asks again. */
+const repositoryProjectsCache = new Map<string, { at: number; projects: Promise<GithubProject[]> }>();
+
+function dropListEntry(key: string): void {
+  const generation = listCache.get(key)?.data.projectsGeneration;
+  if (generation && projectGenerations.get(generation) === key) projectGenerations.delete(generation);
+  listCache.delete(key);
+}
+
+function discoverRepositoryProjects(contextKey: string, refresh: boolean, start: () => Promise<GithubProject[]>): Promise<GithubProject[]> {
+  const hit = repositoryProjectsCache.get(contextKey);
+  if (!refresh && hit && Date.now() - hit.at < CACHE_MS) return hit.projects;
+  const projects = start();
+  const entry = { at: Date.now(), projects };
+  repositoryProjectsCache.delete(contextKey);
+  repositoryProjectsCache.set(contextKey, entry);
+  projects.catch(() => {
+    if (repositoryProjectsCache.get(contextKey) === entry) repositoryProjectsCache.delete(contextKey);
+  });
+  while (repositoryProjectsCache.size > LIST_CACHE_MAX) {
+    const oldest = repositoryProjectsCache.keys().next().value;
+    if (oldest === undefined) break;
+    repositoryProjectsCache.delete(oldest);
+  }
+  return projects;
+}
 export const GH_MAX_LIMIT = 1000;
 
-export async function fetchGithub(repoRoot: string, refresh = false, limit = 30): Promise<GithubData> {
-  if (process.env.CEZ_DRY_RUN === '1') return mockGithub();
+/** Where one list page starts on each side. A done side answered `nextCursor: null` already. */
+export type GithubPageRequest = Pick<ForgeListOptions, 'issuesCursor' | 'prsCursor' | 'issuesDone' | 'prsDone'>;
+
+function listPageKey(contextKey: string, page: GithubPageRequest): string {
+  return JSON.stringify([contextKey, page.issuesCursor ?? null, page.prsCursor ?? null, !!page.issuesDone, !!page.prsDone]);
+}
+
+export async function fetchGithub(repoRoot: string, refresh = false, limit = 30, page: GithubPageRequest = {}): Promise<GithubData> {
+  if (process.env.CEZ_DRY_RUN === '1') return mockGithubPage(limit, page);
   const context = githubContext(repoRoot);
   const capped = Math.min(Math.max(limit, 1), GH_MAX_LIMIT);
-  const hit = listCache.get(context.key);
+  const key = listPageKey(context.key, page);
+  const hit = listCache.get(key);
   if (!refresh && hit && Date.now() - hit.at < CACHE_MS && hit.limit >= capped) {
     return hit.data;
   }
   const order = ++listRequestOrder;
+  if (refresh && !page.issuesCursor && !page.prsCursor && !page.issuesDone && !page.prsDone) {
+    listRefreshOrder.delete(context.key);
+    listRefreshOrder.set(context.key, order);
+    while (listRefreshOrder.size > LIST_CACHE_MAX) {
+      const oldest = listRefreshOrder.keys().next().value;
+      if (oldest === undefined) break;
+      listRefreshOrder.delete(oldest);
+    }
+    for (const [cached, entry] of [...listCache]) {
+      if (entry.contextKey === context.key && cached !== key) dropListEntry(cached);
+    }
+  }
   try {
-    // No `comments` field — `gh … --json comments` ships full comment bodies.
-    // No `statusCheckRollup` either (#664): the CI rollup for every open PR was the
-    // dominant cost — it forced the 60 s budget below — and is now hydrated lazily per
-    // on-screen PR row via `fetchGithubChecks`. A big list still gets a little more wall
-    // clock than the default 30, but nothing like the old rollup walk.
+    // No `statusCheckRollup` (#664): it is hydrated lazily per on-screen PR row via
+    // `fetchGithubChecks`. A big aggregate list still gets a little more wall clock.
     const timeout = capped > 100 ? 30_000 : 15_000;
-    const fields = 'number,title,author,createdAt,labels,body,url';
-    // The repo handle first (cheap) so the counts GraphQL query — which needs owner/name —
-    // can run parallel to the two expensive list calls below.
     const ownerName = await resolveRepoHandleStrict(repoRoot, context);
-    const runGraphql: GraphqlRunner = (query, variables) => {
-      const args = ['api', 'graphql', '-f', `query=${query}`];
-      for (const [key, value] of Object.entries(variables)) args.push('-f', `${key}=${value}`);
-      return gh(repoRoot, args, timeout, undefined, context);
-    };
-    // Bound the counts pagination to the rows actually being fetched: a page is 100, so
-    // `ceil(capped / 100)` pages (still capped at GH_COUNTS_MAX_PAGES) cover exactly the visible
-    // window and no more — the default 30-item load pays ONE counts round-trip, not ten. Rows
-    // beyond the window keep `comments: 0`, which the UI reads as "no badge" (same as before).
-    const countsMaxPages = Math.min(GH_COUNTS_MAX_PAGES, Math.max(1, Math.ceil(capped / 100)));
+    if (!ownerName) return { available: false, reason: 'Could not resolve this repository on GitHub.', issues: [], prs: [] };
+    const runGraphql: GraphqlRunner = (query, variables) =>
+      gh(repoRoot, ghGraphqlArgs(query, variables), timeout, undefined, context);
     // Optional project queries have one shared wall-clock budget. A missing scope, a cap,
     // or malformed metadata must never turn an otherwise working list into unavailable.
     const deadline = Date.now() + 15_000;
     const projectGraphql: GraphqlRunner = (query, variables) => {
       const remaining = deadline - Date.now();
       if (remaining <= 0) return Promise.reject(new Error('Project lookup timed out'));
-      const args = ['api', 'graphql', '-f', `query=${query}`];
-      for (const [key, value] of Object.entries(variables)) args.push('-f', `${key}=${value}`);
-      return gh(repoRoot, args, Math.min(remaining, 8_000), undefined, context);
+      return gh(repoRoot, ghGraphqlArgs(query, variables), Math.min(remaining, 8_000), undefined, context);
     };
-    const issueList = gh(repoRoot, ['issue', 'list', '--limit', String(capped), '--json', `${fields},assignees`], timeout, undefined, context);
-    const projectLookup = ownerName
-      ? fetchIssueProjects(projectGraphql, ownerName.owner, ownerName.name,
-          async () => z.array(ghIssueSchema).parse(JSON.parse(await issueList)).map(i => i.number))
-      : Promise.resolve({ projectsReason: 'Project boards unavailable for this repository.' });
-    const [issuesOut, prsOut, counts, viewerLogin] = await Promise.all([
-      issueList,
-      gh(repoRoot, ['pr', 'list', '--limit', String(capped), '--json', `${fields},isDraft,additions,deletions`], timeout, undefined, context),
-      // Real comment counts (#499). Degrades to empty maps on its own — a failure here leaves
-      // every count at 0, never fails the tab. Skipped entirely if the handle isn't parseable.
-      ownerName
-        ? fetchCommentCounts(runGraphql, ownerName.owner, ownerName.name, countsMaxPages)
-        : Promise.resolve<{ issues: Record<number, number>; prs: Record<number, number> }>({ issues: {}, prs: {} }),
-      fetchViewerLogin((query) => gh(repoRoot, ['api', 'graphql', '-f', `query=${query}`], 8_000, undefined, context)),
+    const firstPage = !page.issuesCursor && !page.prsCursor && !page.issuesDone && !page.prsDone;
+    const issueSide = fetchListConnection(runGraphql, ownerName.owner, ownerName.name, 'issues', capped, page.issuesCursor, page.issuesDone);
+    const projectLookup = fetchIssueProjects(projectGraphql, ownerName.owner, ownerName.name,
+      async () => (await issueSide).nodes.map((node) => node.number),
+      () => discoverRepositoryProjects(context.key, refresh,
+        () => fetchRepositoryProjects(projectGraphql, ownerName.owner, ownerName.name)));
+    const [issuesPage, prsPage, viewerLogin] = await Promise.all([
+      issueSide,
+      fetchListConnection(runGraphql, ownerName.owner, ownerName.name, 'pullRequests', capped, page.prsCursor, page.prsDone),
+      // The viewer is the same on every page; only the first one asks.
+      firstPage
+        ? fetchViewerLogin((query) => gh(repoRoot, ghGraphqlArgs(query), 8_000, undefined, context))
+        : Promise.resolve(undefined),
     ]);
     // One repo-wide label→color map, filled as we flatten each item's labels.
     const labelColors: Record<string, string> = {};
     const recordColor = (l: { name: string; color: string }) => {
       if (l.color && !labelColors[l.name]) labelColors[l.name] = l.color;
     };
-    const issues = z.array(ghIssueSchema).parse(JSON.parse(issuesOut)).map(
+    const issues = issuesPage.nodes.map(
       (i): GithubItem => {
         i.labels.forEach(recordColor);
         return {
@@ -459,27 +529,28 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30)
           labels: i.labels.map((l) => l.name),
           body: (i.body ?? '').slice(0, 8_000),
           url: i.url,
-          comments: counts.issues[i.number] ?? 0,
+          comments: 0,
           assignees: i.assignees.map(a => a.login),
         };
       },
     );
-    const prs = z.array(ghPrSchema).parse(JSON.parse(prsOut)).map(
+    const prs = prsPage.nodes.map(
       (p): GithubItem => {
         p.labels.forEach(recordColor);
+        const isDraft = p.isDraft ?? false;
         return {
           kind: 'pr',
           number: p.number,
           title: p.title,
           author: p.author?.login ?? '?',
           createdAt: p.createdAt,
-          labels: [...p.labels.map((l) => l.name), ...(p.isDraft ? ['draft'] : [])],
+          labels: [...p.labels.map((l) => l.name), ...(isDraft ? ['draft'] : [])],
           body: (p.body ?? '').slice(0, 8_000),
           url: p.url,
-          comments: counts.prs[p.number] ?? 0,
-          isDraft: p.isDraft,
-          additions: p.additions,
-          deletions: p.deletions,
+          comments: 0,
+          isDraft,
+          additions: p.additions ?? 0,
+          deletions: p.deletions ?? 0,
           // Hydrated lazily by `fetchGithubChecks` for on-screen rows (#664) — the list no
           // longer pays for the CI rollup of every open PR.
           checks: null,
@@ -487,7 +558,7 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30)
       },
     );
     // Only verified values from the same repository may survive a refresh.
-    const previous = ownerName && hit?.data.repo === `${ownerName.owner}/${ownerName.name}` ? hit.data : undefined;
+    const previous = hit?.data.repo === `${ownerName.owner}/${ownerName.name}` ? hit.data : undefined;
     for (const issue of issues) {
       const known = previous?.issues.find(row => row.number === issue.number)?.projectIds;
       if (known !== undefined) issue.projectIds = known;
@@ -495,7 +566,7 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30)
     const generation = randomUUID();
     const data: GithubData = {
       available: true,
-      ...(ownerName ? { repo: `${ownerName.owner}/${ownerName.name}` } : {}),
+      repo: `${ownerName.owner}/${ownerName.name}`,
       syncedAt: new Date().toISOString(),
       issues,
       prs,
@@ -504,12 +575,17 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30)
       projectsState: 'refreshing',
       projectsGeneration: generation,
       ...(previous?.projects ? { projects: previous.projects } : {}),
+      issuesTotal: issuesPage.totalCount,
+      prsTotal: prsPage.totalCount,
+      issuesNextCursor: issuesPage.nextCursor,
+      prsNextCursor: prsPage.nextCursor,
+      commentsDeferred: true,
     };
     const projects = projectLookup.then((result): GithubProjectsData => {
       const metadata: GithubProjectsData = 'membership' in result
         ? { generation, state: 'ready', projects: result.projects, membership: result.membership }
         : { generation, state: 'unavailable', reason: result.projectsReason };
-      const current = listCache.get(context.key);
+      const current = listCache.get(key);
       if (current?.data.projectsGeneration === generation) {
         current.data = {
           ...current.data,
@@ -524,29 +600,47 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30)
     });
     // Concurrent refreshes may finish in reverse order. An older list must not evict
     // the newer generation (and invalidate the newer client's metadata follow-up).
-    if ((listCache.get(context.key)?.order ?? -1) < order) {
-      listCache.delete(context.key); // re-insert so this key becomes the newest
-      listCache.set(context.key, { order, at: Date.now(), limit: capped, data, projects });
+    if ((listCache.get(key)?.order ?? -1) < order && order >= (listRefreshOrder.get(context.key) ?? 0)) {
+      dropListEntry(key); // re-insert so this key becomes the newest
+      listCache.set(key, { contextKey: context.key, order, at: Date.now(), limit: capped, data, projects });
+      projectGenerations.set(generation, key);
     }
     while (listCache.size > LIST_CACHE_MAX) {
       const oldest = listCache.keys().next().value;
       if (oldest === undefined) break;
-      listCache.delete(oldest);
+      dropListEntry(oldest);
     }
     return data;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const reason = /ENOENT/.test(message)
-      ? 'gh CLI not found — install it and run `gh auth login`'
-      : firstLine(message);
-    return { available: false, reason, issues: [], prs: [] };
+    return { available: false, reason: ghFailureReason(err), issues: [], prs: [] };
   }
+}
+
+/** A `gh` failure as one readable line. GitHub's own words come on stderr; the Node message
+ *  starts with the whole argv, and a GraphQL argv is a multi-line query, so its first line is
+ *  a fragment of that query rather than the reason (open-mercato/cezar#1366). */
+export function ghFailureReason(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (/ENOENT/.test(message)) return 'gh CLI not found — install it and run `gh auth login`';
+  const failure = (err ?? {}) as { stderr?: unknown; killed?: unknown; signal?: unknown };
+  const stderr = typeof failure.stderr === 'string' ? failure.stderr : '';
+  if (stderr.trim()) {
+    const lines = stderr.split('\n').map((line) => line.trim()).filter(Boolean);
+    return lines.find((line) => !/^Command failed:/i.test(line)) ?? lines[0]!;
+  }
+  if (failure.killed === true || typeof failure.signal === 'string') return 'GitHub did not answer in time. Refresh to try again.';
+  // Without stderr, everything after "Command failed:" is the argv, which is query text.
+  if (/^Command failed:/i.test(message)) return 'GitHub request failed. Refresh to try again.';
+  return message.split('\n').map((line) => line.trim()).find(Boolean) ?? 'gh failed';
 }
 
 /** Bounded lookup already started by the list. Never launch work for an expired generation. */
 export async function fetchGithubProjects(repoRoot: string, generation: string): Promise<GithubProjectsData> {
-  const entry = listCache.get(githubContext(repoRoot).key);
-  if (!entry || entry.data.projectsGeneration !== generation) {
+  const key = projectGenerations.get(generation);
+  const entry = key === undefined ? undefined : listCache.get(key);
+  // A generation from another repository, host or account never resolves here, even when
+  // its UUID is known: the context is part of what the generation was issued for.
+  if (!entry || entry.contextKey !== githubContext(repoRoot).key || entry.data.projectsGeneration !== generation) {
     return { generation, state: 'unavailable', reason: 'Project metadata expired. Refresh to try again.' };
   }
   return entry.projects;
@@ -828,13 +922,39 @@ async function hydrateSearchProjects(
   const run: GraphqlRunner = (query, variables) => {
     const remaining = deadline - Date.now();
     if (remaining <= 0) return Promise.reject(new Error('Project lookup timed out'));
-    const args = ['api', 'graphql', '-f', `query=${query}`];
-    for (const [key, value] of Object.entries(variables)) args.push('-f', `${key}=${value}`);
+    const args = ghGraphqlArgs(query, variables);
     return gh(repoRoot, args, Math.min(remaining, 8_000));
   };
   const projects = await fetchIssueProjects(run, handle.owner, handle.name, data.items.map(item => item.number));
   if ('projectsReason' in projects) return { ...data, projectsReason: projects.projectsReason };
   return { ...data, items: data.items.map(item => ({ ...item, projectIds: projects.membership[item.number] ?? [] })) };
+}
+
+/** The dry-run catalog, paged like the real list: numeric offset cursors per side, done flags
+ *  honored, exact totals, and counts deferred to the counts route (hearsay-tools/cezarion#1183). */
+function mockGithubPage(limit: number, page: GithubPageRequest): GithubData {
+  const full = mockGithub();
+  const side = (rows: GithubItem[], cursor: string | undefined, done: boolean | undefined) => {
+    const start = done ? rows.length : Number(cursor ?? 0);
+    const slice = rows.slice(start, start + Math.max(limit, 1));
+    const end = start + slice.length;
+    return { rows: slice.map((row) => ({ ...row, comments: 0 })), next: end < rows.length ? String(end) : null };
+  };
+  const issues = side(full.issues, page.issuesCursor, page.issuesDone);
+  const prs = side(full.prs, page.prsCursor, page.prsDone);
+  const firstPage = !page.issuesCursor && !page.prsCursor && !page.issuesDone && !page.prsDone;
+  const { viewerLogin, ...rest } = full;
+  return {
+    ...rest,
+    ...(firstPage && viewerLogin ? { viewerLogin } : {}),
+    issues: issues.rows,
+    prs: prs.rows,
+    issuesTotal: full.issues.length,
+    prsTotal: full.prs.length,
+    issuesNextCursor: issues.next,
+    prsNextCursor: prs.next,
+    commentsDeferred: true,
+  };
 }
 
 /** CEZ_DRY_RUN=1 — a small fixed catalog so the GitHub tab is demoable offline. */
@@ -1565,6 +1685,101 @@ export async function fetchPrChecks(
   return out;
 }
 
+const itemDetailSchema = z.object({
+  body: z.string().nullish(),
+  additions: z.number().int().nonnegative().optional(),
+  deletions: z.number().int().nonnegative().optional(),
+});
+
+/** One item's body (and a PR's diffstat), or `undefined` on any failure. */
+async function fetchItemDetail(repoRoot: string, kind: 'issue' | 'pr', number: number): Promise<ForgeCommentsData['detail']> {
+  try {
+    const out = await gh(repoRoot, [kind, 'view', String(number), '--json', kind === 'pr' ? 'body,additions,deletions' : 'body']);
+    const parsed = itemDetailSchema.parse(JSON.parse(out));
+    return {
+      body: (parsed.body ?? '').slice(0, COMMENT_BODY_CAP),
+      ...(kind === 'pr' && parsed.additions !== undefined ? { additions: parsed.additions } : {}),
+      ...(kind === 'pr' && parsed.deletions !== undefined ? { deletions: parsed.deletions } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+// Per-item comment counts (hearsay-tools/cezarion#1183): the list defers them, and the cockpit
+// asks for its loaded rows after paint. Keyed `context␀kind␀number`, same TTL and bound as checks.
+const commentCountsCache = new Map<string, { at: number; count: number }>();
+const commentCountsSchema = z.object({
+  data: z.object({
+    repository: z.record(z.string(), z.object({ comments: z.object({ totalCount: z.number().int().nonnegative() }) }).nullable()),
+  }),
+});
+
+/**
+ * Comment counts for the given issue or PR numbers, in one aliased GraphQL query. A number GitHub
+ * does not know is absent (unknown), never 0. Degrades to `{ available: false, reason }` — never a
+ * throw. Numbers are de-duplicated, validated and capped at `GITHUB_COMMENT_COUNTS_MAX`.
+ */
+export async function fetchGithubCommentCounts(
+  repoRoot: string, kind: 'issue' | 'pr', numbers: number[], refresh = false,
+): Promise<GithubCommentCountsData> {
+  if (process.env.CEZ_DRY_RUN === '1') return mockGithubCommentCounts(kind, numbers);
+  const context = githubContext(repoRoot);
+  const wanted = [...new Set(numbers)].filter((n) => Number.isSafeInteger(n) && n > 0).slice(0, GITHUB_COMMENT_COUNTS_MAX);
+  const counts: Record<number, number> = {};
+  const misses: number[] = [];
+  const now = Date.now();
+  const keyOf = (n: number) => `${context.key}\0${kind}\0${n}`;
+  for (const n of wanted) {
+    const hit = commentCountsCache.get(keyOf(n));
+    if (!refresh && hit && now - hit.at < CACHE_MS) counts[n] = hit.count;
+    else misses.push(n);
+  }
+  if (misses.length === 0) return { available: true, counts };
+  try {
+    const handle = await resolveRepoHandleStrict(repoRoot, context);
+    if (!handle) return { available: false, reason: 'Could not resolve this repository on GitHub.' };
+    // Integers only in the aliases; owner and name travel as variables.
+    const fields = misses.map((n) => `n${n}: issueOrPullRequest(number: ${n}) {
+      ... on Issue { comments { totalCount } }
+      ... on PullRequest { comments { totalCount } }
+    }`).join('\n');
+    // A number GitHub does not know comes back NOT_FOUND and makes `gh` exit 1 with the rest of
+    // the batch on stdout; `refStatusGraphql` keeps that partial answer.
+    const raw = await refStatusGraphql(repoRoot, context)(
+      `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`,
+      { owner: handle.owner, name: handle.name },
+    );
+    const rows = commentCountsSchema.parse(JSON.parse(raw)).data.repository;
+    for (const n of misses) {
+      const count = rows[`n${n}`]?.comments.totalCount;
+      if (count === undefined) continue; // unknown number: absent, and asked again next time
+      counts[n] = count;
+      commentCountsCache.delete(keyOf(n));
+      commentCountsCache.set(keyOf(n), { at: now, count });
+    }
+    while (commentCountsCache.size > CHECKS_CACHE_MAX) {
+      const oldest = commentCountsCache.keys().next().value;
+      if (oldest === undefined) break;
+      commentCountsCache.delete(oldest);
+    }
+    return { available: true, counts };
+  } catch (err) {
+    return { available: false, reason: ghFailureReason(err) };
+  }
+}
+
+/** CEZ_DRY_RUN=1 — the catalog's own counts, so the offline list shows its badges. */
+function mockGithubCommentCounts(kind: 'issue' | 'pr', numbers: number[]): GithubCommentCountsData {
+  const rows = kind === 'pr' ? mockGithub().prs : mockGithub().issues;
+  const counts: Record<number, number> = {};
+  for (const n of numbers) {
+    const row = rows.find((item) => item.number === n);
+    if (row) counts[n] = row.comments;
+  }
+  return { available: true, counts };
+}
+
 // Per-PR checks cache: keyed `repoRoot␀number`, same 60 s TTL as the list cache but BOUNDED. Lets
 // a repeated visible-window hydration within a minute serve cached glyphs instead of re-querying.
 const checksCache = new Map<string, { at: number; glyph: ChecksGlyph }>();
@@ -1598,8 +1813,7 @@ export async function fetchGithubChecks(repoRoot: string, numbers: number[]): Pr
     const ownerName = parseOwnerName(repoOut);
     if (!ownerName) return { available: false, reason: 'repository handle unavailable' };
     const runGraphql: GraphqlRunner = (query, variables) => {
-      const args = ['api', 'graphql', '-f', `query=${query}`];
-      for (const [key, value] of Object.entries(variables)) args.push('-f', `${key}=${value}`);
+      const args = ghGraphqlArgs(query, variables);
       return gh(repoRoot, args);
     };
     const fetched = await fetchPrChecks(runGraphql, ownerName.owner, ownerName.name, misses);
@@ -2288,8 +2502,7 @@ const REF_STATUS_RETRY_MS = 5 * 60_000;
  */
 function refStatusGraphql(repoRoot: string, context = githubContext(repoRoot)): GraphqlRunner {
   return async (query, variables) => {
-    const args = ['api', 'graphql', '-f', `query=${query}`];
-    for (const [key, value] of Object.entries(variables)) args.push('-f', `${key}=${value}`);
+    const args = ghGraphqlArgs(query, variables);
     try {
       return await gh(repoRoot, args, 15_000, undefined, context);
     } catch (err) {
@@ -2507,7 +2720,7 @@ export async function fetchGithubComments(
   number: number,
   refresh = false,
 ): Promise<ForgeCommentsData> {
-  if (process.env.CEZ_DRY_RUN === '1') return mockGithubComments(kind);
+  if (process.env.CEZ_DRY_RUN === '1') return mockGithubComments(kind, number);
   // NUL separator: cannot appear in a filesystem path, so roots can never alias.
   const key = `${repoRoot}\0${kind}#${number}`;
   const hit = commentsCache.get(key);
@@ -2515,6 +2728,10 @@ export async function fetchGithubComments(
   // PR conversation comments live on the issues endpoint too — always use it for the body thread.
   const legacyComments = () =>
     gh(repoRoot, ['api', `repos/{owner}/{repo}/issues/${number}/comments`, '--paginate']);
+  // The detail tier (hearsay-tools/cezarion#1183): the list no longer has to carry a body, so
+  // the pane asks for it here, in parallel with the thread. It is attached only to a thread
+  // that loaded, and a failed view never costs the thread.
+  const detail = fetchItemDetail(repoRoot, kind, number);
   try {
     let commentRows: unknown[] = [];
     let events: ForgeTimelineEvent[] | undefined;
@@ -2590,8 +2807,7 @@ export async function fetchGithubComments(
       const handle = await resolveRepoHandle(repoRoot);
       if (handle) {
         const runGraphql: GraphqlRunner = (query, variables) => {
-          const args = ['api', 'graphql', '-f', `query=${query}`];
-          for (const [k, v] of Object.entries(variables)) args.push('-f', `${k}=${v}`);
+          const args = ghGraphqlArgs(query, variables);
           return gh(repoRoot, args);
         };
         const checks = await fetchCommitChecks(runGraphql, handle.owner, handle.name, commitShas);
@@ -2616,6 +2832,8 @@ export async function fetchGithubComments(
       truncated: truncated || eventsTruncated || stoppedShort || undefined,
     };
     if (events) data.events = events;
+    const itemDetail = await detail;
+    if (itemDetail) data.detail = itemDetail;
     cacheComments(key, data);
     return data;
   } catch (err) {
@@ -2631,7 +2849,7 @@ export async function fetchGithubComments(
 
 /** CEZ_DRY_RUN=1 — a small fixed thread (one image-bearing comment, plus a review for PRs) so
  *  the whole feature is demoable and e2e-testable offline. */
-function mockGithubComments(kind: 'issue' | 'pr'): ForgeCommentsData {
+function mockGithubComments(kind: 'issue' | 'pr', number?: number): ForgeCommentsData {
   const base = Date.now() - 3_600_000;
   const at = (offset: number) => new Date(base + offset).toISOString();
   const comments: ForgeComment[] = [
@@ -2740,7 +2958,14 @@ function mockGithubComments(kind: 'issue' | 'pr'): ForgeCommentsData {
     });
   }
 
-  return { available: true, comments, events };
+  // The detail tier (hearsay-tools/cezarion#1183): the catalog row's own body and diffstat.
+  const row = number === undefined ? undefined
+    : (kind === 'pr' ? mockGithub().prs : mockGithub().issues).find((item) => item.number === number);
+  const detail = row ? {
+    body: row.body ?? '',
+    ...(kind === 'pr' ? { additions: row.additions ?? 0, deletions: row.deletions ?? 0 } : {}),
+  } : undefined;
+  return { available: true, comments, events, ...(detail ? { detail } : {}) };
 }
 
 // ---- draft-PR creation (review gate, spec 009) ------------------------------
@@ -3150,7 +3375,14 @@ async function fetchPrMergeState(
 }
 
 export function evictGithubProjectCaches(repoRoot: string): void {
-  listCache.delete(githubContext(repoRoot).key);
+  const contextKey = githubContext(repoRoot).key;
+  listCache.forEach((entry, key) => {
+    if (entry.contextKey === contextKey) dropListEntry(key);
+  });
+  repositoryProjectsCache.delete(contextKey);
+  commentCountsCache.forEach((_value, key) => {
+    if (key.startsWith(`${contextKey}\0`)) commentCountsCache.delete(key);
+  });
   mergeStateCache.forEach((_value, key) => {
     if (key.startsWith(`${repoRoot}:`)) mergeStateCache.delete(key);
   });
@@ -3228,9 +3460,9 @@ export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | nu
     detect: () => detectGithub(repoRoot),
     detectCached: () => detectGithubCached(repoRoot),
 
-    listIssues: async (opts) => (await fetchGithub(repoRoot, opts?.refresh, opts?.limit)).issues,
+    listIssues: async (opts) => (await fetchGithub(repoRoot, opts?.refresh, opts?.limit, opts)).issues,
 
-    listPRs: async (opts) => (await fetchGithub(repoRoot, opts?.refresh, opts?.limit)).prs,
+    listPRs: async (opts) => (await fetchGithub(repoRoot, opts?.refresh, opts?.limit, opts)).prs,
 
     // The open-only list tier's escape hatch (#730) — this is the only path that can reach a
     // closed or merged item.

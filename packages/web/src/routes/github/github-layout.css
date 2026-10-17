@@ -33,7 +33,7 @@
 [data-slot='gh-hand'] > [data-slot='prompt-template-trigger'] { align-self: flex-start; min-height: 44px; border-radius: 8px; padding-block: 0; padding-inline: 12px; }
 
 @media (max-width: 767px) {
-  [data-slot='gh-list'][data-mobile-preview] [data-slot='gh-rows'] > li[data-compact-hidden] { display: none; }
+  [data-slot='gh-list'][data-mobile-preview] [data-slot='gh-row-item'][data-compact-hidden] { display: none; }
 }
 
 [data-slot='gh-merge-box'] > div > svg { display: none; }
@@ -57,7 +57,7 @@
 [data-slot='gh-header'] > div:first-child { row-gap: 8px; }
 [data-slot='gh-search'] { border-radius: 8px; padding-inline-start: 36px; font-size: 12px; }
 [data-slot='gh-rows'] { gap: 0; }
-[data-slot='gh-rows'] > li + li { border-block-start: 1px solid var(--border); }
+[data-slot='gh-row-item'][data-divided] { border-block-start: 1px solid var(--border); }
 [data-slot='gh-row'] { padding-block: 14px; padding-inline: 12px; border-radius: 8px; }
 [data-slot='gh-row'][data-kind='issue'] > span:first-child > svg { display: none; }
 [data-slot='gh-row'][data-kind='issue'] > span { padding-inline-start: 0; }

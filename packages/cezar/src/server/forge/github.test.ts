@@ -20,8 +20,11 @@ import {
   detectGithubCached,
   createGithubDriver,
   fetchGithubComments,
+  fetchGithubCommentCounts,
+  ghFailureReason,
   fetchTimelinePages,
-  fetchCommentCounts,
+  fetchListConnection,
+  ghGraphqlArgs,
   fetchCommitChecks,
   fetchPrChecks,
   fetchRefStatuses,
@@ -48,7 +51,6 @@ import {
   normalizeEvents,
   normalizeReviews,
   normalizeMergeState,
-  parseCountsPage,
   parseOwnerName,
   rollupToChecks,
   THREAD_ENTRY_CAP,
@@ -516,77 +518,6 @@ describe('parseOwnerName', () => {
   });
 });
 
-describe('parseCountsPage', () => {
-  it('flattens nodes into a number→count map and surfaces the cursor', () => {
-    expect(parseCountsPage(page('issues', [{ number: 7, count: 3 }, { number: 9, count: 0 }], 'CUR'), 'issues')).toEqual({
-      counts: { 7: 3, 9: 0 },
-      hasNextPage: true,
-      endCursor: 'CUR',
-    });
-  });
-
-  it('normalizes a missing endCursor to null', () => {
-    expect(parseCountsPage(page('pullRequests', [{ number: 1, count: 2 }], null), 'pullRequests')).toEqual({
-      counts: { 1: 2 },
-      hasNextPage: false,
-      endCursor: null,
-    });
-  });
-
-  it('throws on a malformed envelope (zod boundary)', () => {
-    expect(() => parseCountsPage('{"data":{"repository":{"issues":{"nodes":"nope"}}}}', 'issues')).toThrow();
-  });
-});
-
-describe('fetchCommentCounts', () => {
-  it('returns per-kind maps for a single page each', async () => {
-    // Distinguish issues vs PRs by the query text (contains `issues(` or `pullRequests(`).
-    const runGraphql = vi.fn(async (q: string) =>
-      q.includes('pullRequests(')
-        ? page('pullRequests', [{ number: 10, count: 4 }], null)
-        : page('issues', [{ number: 1, count: 2 }], null),
-    );
-    const counts = await fetchCommentCounts(runGraphql, 'o', 'n');
-    expect(counts).toEqual({ issues: { 1: 2 }, prs: { 10: 4 } });
-  });
-
-  it('accumulates across pages and passes the endCursor forward', async () => {
-    const issuePages = [page('issues', [{ number: 1, count: 1 }], 'C1'), page('issues', [{ number: 2, count: 2 }], null)];
-    let issueCall = 0;
-    const runGraphql = vi.fn(async (q: string, vars: Record<string, string>) => {
-      if (q.includes('pullRequests(')) return page('pullRequests', [], null);
-      // Page 1 must not carry a cursor; page 2 must forward 'C1'.
-      if (issueCall === 0) expect(vars.endCursor).toBeUndefined();
-      else expect(vars.endCursor).toBe('C1');
-      return issuePages[issueCall++]!;
-    });
-    const counts = await fetchCommentCounts(runGraphql, 'o', 'n');
-    expect(counts.issues).toEqual({ 1: 1, 2: 2 });
-  });
-
-  it('stops at the page cap even when hasNextPage never goes false', async () => {
-    const runGraphql = vi.fn(async (q: string) =>
-      q.includes('pullRequests(') ? page('pullRequests', [], null) : page('issues', [{ number: 1, count: 1 }], 'MORE'),
-    );
-    await fetchCommentCounts(runGraphql, 'o', 'n', 3);
-    // 3 issue pages + 1 PR page (PR stops immediately with no next).
-    const issueCalls = runGraphql.mock.calls.filter(([q]) => !q.includes('pullRequests(')).length;
-    expect(issueCalls).toBe(3);
-  });
-
-  it('degrades to empty maps when the runner throws (never fails the tab)', async () => {
-    const runGraphql = vi.fn(async () => {
-      throw new Error('rate limited');
-    });
-    expect(await fetchCommentCounts(runGraphql, 'o', 'n')).toEqual({ issues: {}, prs: {} });
-  });
-});
-
-/** Comment threads (#499 Phase 2): the pure normalize/merge seam behind
- *  `GET /api/v1/github/comments/:kind/:number`. The `gh`-shelling in `fetchGithubComments` isn't
- *  unit-tested (it degrades on any failure and is covered by the route + component tests); the
- *  transforms below carry the real logic — review filtering, chronological merge, and caps. */
-
 describe('normalizeComments', () => {
   it('maps gh issue-comment JSON into ForgeComment, capping the body and defaulting the author', () => {
     const [c] = normalizeComments([
@@ -693,6 +624,36 @@ describe('mergeThread', () => {
  *  assert one project's payload is NEVER served under another project's scope. */
 
 /** Route every mocked `gh` invocation by argv + cwd. */
+/** A `gh api graphql -f query=…` argv's value for `key`, as `gh` would read it. */
+const graphqlVar = (argv: string[], key: string): string | undefined =>
+  argv.find((a) => a.startsWith(`${key}=`))?.slice(key.length + 1);
+/** Which list connection a `gh api graphql` argv asks for (hearsay-tools/cezarion#1183). */
+const listSide = (argv: string[]): 'issues' | 'pullRequests' | null => {
+  if (argv[0] !== 'api' || argv[1] !== 'graphql') return null;
+  const query = graphqlVar(argv, 'query') ?? '';
+  return query.includes('pullRequests(') ? 'pullRequests' : query.includes('issues(') ? 'issues' : null;
+};
+/** One list connection page as real GitHub answers it: labels and assignees are connections. */
+const listReply = (
+  side: 'issues' | 'pullRequests',
+  nodes: unknown[],
+  opts: { total?: number; next?: string | null } = {},
+): string => JSON.stringify({ data: { repository: { [side]: {
+  totalCount: opts.total ?? nodes.length,
+  pageInfo: { hasNextPage: opts.next != null, endCursor: opts.next ?? null },
+  nodes,
+} } } });
+const listNode = (number: number, over: Record<string, unknown> = {}) => ({
+  number,
+  title: `#${number}`,
+  author: { login: 'x' },
+  createdAt: '2026-07-01T00:00:00Z',
+  url: `https://github.com/owner/n/issues/${number}`,
+  body: '',
+  labels: { nodes: [] },
+  ...over,
+});
+
 const ghByCwd = () =>
   execFileMock.mockImplementation((...args: unknown[]) => {
     const argv = args[1] as string[];
@@ -701,19 +662,11 @@ const ghByCwd = () =>
     const who = opts?.cwd?.includes('proj-b') ? 'b' : 'a';
     let stdout = '';
     if (argv[0] === 'repo') stdout = `owner/${who}\n`;
-    else if (argv[0] === 'issue')
-      stdout = JSON.stringify([
-        {
-          number: 1,
-          title: `${who}-issue`,
-          author: { login: who },
-          createdAt: '2026-07-01T00:00:00Z',
-          labels: [],
-          body: `${who} body`,
-          url: `https://github.com/owner/${who}/issues/1`,
-        },
+    else if (listSide(argv) === 'issues')
+      stdout = listReply('issues', [
+        listNode(1, { title: `${who}-issue`, author: { login: who }, body: `${who} body`, url: `https://github.com/owner/${who}/issues/1` }),
       ]);
-    else if (argv[0] === 'pr') stdout = '[]';
+    else if (listSide(argv) === 'pullRequests') stdout = listReply('pullRequests', []);
     else if (argv[1]?.includes('/comments'))
       stdout = JSON.stringify([
         {
@@ -725,7 +678,7 @@ const ghByCwd = () =>
         },
       ]);
     else if (argv[1]?.includes('/reviews')) stdout = '[]';
-    else stdout = '{}'; // graphql counts — malformed page degrades to empty maps
+    else stdout = '{}'; // viewer and project lookups — malformed replies degrade to absent
     cb(null, { stdout, stderr: '' });
   });
 
@@ -1405,7 +1358,9 @@ describe('fetchGithubComments timeline integration (#525)', () => {
 
     expect(data.available).toBe(false);
     expect(data.reason).toMatch(/gh CLI not found/);
-    expect(execFileMock).toHaveBeenCalledTimes(1); // no second spawn
+    // No second THREAD spawn. The detail tier's own `view` (hearsay-tools/cezarion#1183) runs in
+    // parallel from the start, so it is not a retry and is not counted.
+    expect(execFileMock.mock.calls.filter((call) => (call[1] as string[])[1] !== 'view')).toHaveLength(1);
   });
 
   it('tops up comments[] when the fetch stopped short on a comment-poor prefix', async () => {
@@ -1802,37 +1757,208 @@ describe('fetchGithub omits statusCheckRollup from the list call (#664)', () => 
   });
 
   it('does not request the rollup field and leaves list PR checks null', async () => {
-    let prJsonArg = '';
+    let prQuery = '';
     execFileMock.mockImplementation((...args: unknown[]) => {
       const argv = args[1] as string[];
       const cb = args[args.length - 1] as (e: unknown, r: unknown) => void;
       let stdout = '{}';
       if (argv[0] === 'repo') stdout = 'owner/n\n';
-      else if (argv[0] === 'issue') stdout = '[]';
-      else if (argv[0] === 'pr') {
-        prJsonArg = argv[argv.indexOf('--json') + 1] ?? '';
-        stdout = JSON.stringify([
-          {
-            number: 7,
-            title: 'a pr',
-            author: { login: 'x' },
-            createdAt: '2026-07-01T00:00:00Z',
-            labels: [],
-            body: 'b',
-            url: 'https://github.com/owner/n/pull/7',
-            isDraft: false,
-            additions: 1,
-            deletions: 2,
-          },
+      else if (listSide(argv) === 'issues') stdout = listReply('issues', []);
+      else if (listSide(argv) === 'pullRequests') {
+        prQuery = graphqlVar(argv, 'query') ?? '';
+        stdout = listReply('pullRequests', [
+          listNode(7, { title: 'a pr', body: 'b', url: 'https://github.com/owner/n/pull/7', isDraft: false, additions: 1, deletions: 2 }),
         ]);
       }
       cb(null, { stdout, stderr: '' });
     });
 
     const data = await fetchGithub('/repo/no-rollup-664');
-    expect(prJsonArg).not.toContain('statusCheckRollup');
-    expect(prJsonArg).toContain('isDraft');
+    expect(prQuery).not.toContain('statusCheckRollup');
+    expect(prQuery).toContain('isDraft');
     expect(data.prs[0]?.checks).toBeNull();
+  });
+});
+
+/**
+ * The paged list (hearsay-tools/cezarion#1183, ports open-mercato/cezar#1362 and #1366): one
+ * GraphQL request per connection per page, typed integers, connections normalized, each side
+ * advancing on its own cursor, and an exhausted side never restarted.
+ */
+describe('paged GitHub list (#1183)', () => {
+  beforeEach(() => {
+    vi.stubEnv('CEZ_DRY_RUN', '');
+    execFileMock.mockReset();
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('ghGraphqlArgs types numbers with -F and strings with -f', () => {
+    expect(ghGraphqlArgs('query { x }', { owner: 'o', first: 50, after: '30' })).toEqual([
+      'api', 'graphql', '-f', 'query=query { x }', '-f', 'owner=o', '-F', 'first=50', '-f', 'after=30',
+    ]);
+  });
+
+  /** A fake GitHub connection of `total` issues with numeric cursors; records each request. */
+  const fakeConnection = (total: number) => {
+    const calls: Array<{ first: number; after?: string }> = [];
+    const run = async (_query: string, variables: Record<string, string | number>) => {
+      const first = variables.first as number;
+      const after = variables.after as string | undefined;
+      calls.push({ first, ...(after ? { after } : {}) });
+      const start = after ? Number(after) : 0;
+      const end = Math.min(total, start + first);
+      const nodes = Array.from({ length: end - start }, (_, i) => listNode(start + i + 1));
+      return listReply('issues', nodes, { total, next: end < total ? String(end) : null });
+    };
+    return { calls, run };
+  };
+
+  it('fetchListConnection splits 150 into requests of ≤100 and resumes from the exact cursor', async () => {
+    const { calls, run } = fakeConnection(500);
+    const page = await fetchListConnection(run, 'o', 'n', 'issues', 150, '20');
+    expect(calls).toEqual([{ first: 100, after: '20' }, { first: 50, after: '120' }]);
+    expect(page.nodes.map((n) => n.number)).toEqual(Array.from({ length: 150 }, (_, i) => i + 21));
+    expect(page.nextCursor).toBe('170');
+    expect(page.totalCount).toBe(500);
+  });
+
+  it('fetchListConnection with done asks first: 0 and returns no nodes but the total', async () => {
+    const { calls, run } = fakeConnection(88);
+    const page = await fetchListConnection(run, 'o', 'n', 'issues', 50, undefined, true);
+    expect(calls).toEqual([{ first: 0 }]);
+    expect(page).toEqual({ totalCount: 88, nodes: [], nextCursor: null });
+  });
+
+  it('a side whose page comes back empty or without hasNextPage stops', async () => {
+    const exhausted = await fetchListConnection(fakeConnection(12).run, 'o', 'n', 'issues', 150);
+    expect(exhausted.nodes).toHaveLength(12);
+    expect(exhausted.nextCursor).toBeNull();
+    let requests = 0;
+    const lying = async () => {
+      requests++;
+      return listReply('issues', [], { total: 5, next: 'again' });
+    };
+    expect((await fetchListConnection(lying, 'o', 'n', 'issues', 150)).nextCursor).toBeNull();
+    expect(requests).toBe(1);
+  });
+
+  /** Serves `issues`/`prs` as one page each and records every `gh` spawn. */
+  const serveList = (opts: {
+    issues?: unknown[]; prs?: unknown[]; issuesTotal?: number; prsTotal?: number;
+    issuesNext?: string | null; prsNext?: string | null; hold?: boolean;
+  } = {}) => {
+    const spawns: string[][] = [];
+    const pending: Array<() => void> = [];
+    execFileMock.mockImplementation((...args: unknown[]) => {
+      const argv = args[1] as string[];
+      const cb = args[args.length - 1] as (e: unknown, r: unknown) => void;
+      spawns.push(argv);
+      let stdout = '{}';
+      if (argv[0] === 'repo') return cb(null, { stdout: 'owner/n\n', stderr: '' });
+      const side = listSide(argv);
+      // One page per side: a request that already carries a cursor reaches the end.
+      const resumed = graphqlVar(argv, 'after') !== undefined;
+      if (side === 'issues') stdout = listReply('issues', opts.issues ?? [], { total: opts.issuesTotal, next: resumed ? null : opts.issuesNext });
+      else if (side === 'pullRequests') stdout = listReply('pullRequests', opts.prs ?? [], { total: opts.prsTotal, next: resumed ? null : opts.prsNext });
+      else if ((graphqlVar(argv, 'query') ?? '').includes('viewer')) stdout = JSON.stringify({ data: { viewer: { login: 'me' } } });
+      const answer = () => cb(null, { stdout, stderr: '' });
+      if (opts.hold) pending.push(answer);
+      else answer();
+    });
+    return { spawns, release: () => pending.splice(0).forEach((answer) => answer()) };
+  };
+  const firstVar = (argv: string[]) => Number(graphqlVar(argv, 'first'));
+
+  it('fetchGithub runs the issue, PR and viewer queries in parallel and returns totals and cursors', async () => {
+    const { spawns, release } = serveList({
+      issues: [listNode(9, {
+        labels: { nodes: [{ name: 'bug', color: 'd73a4a' }] },
+        assignees: { nodes: [{ login: 'ada' }] },
+        body: 'x'.repeat(9_000),
+      })],
+      prs: [listNode(7, { url: 'https://github.com/owner/n/pull/7', isDraft: true, additions: 3, deletions: 1 })],
+      issuesTotal: 88, prsTotal: 12, issuesNext: 'i-next', prsNext: null, hold: true,
+    });
+    const pending = fetchGithub('/repo/paged-parallel', true, 50);
+    await vi.waitFor(() => {
+      const kinds = spawns.map((argv) => listSide(argv)
+        ?? ((graphqlVar(argv, 'query') ?? '').includes('viewer') ? 'viewer' : null)).filter(Boolean);
+      expect(kinds.sort()).toEqual(['issues', 'pullRequests', 'viewer']);
+    });
+    release();
+    const data = await pending;
+    expect(data).toMatchObject({
+      available: true, repo: 'owner/n', viewerLogin: 'me', commentsDeferred: true,
+      issuesTotal: 88, prsTotal: 12, issuesNextCursor: 'i-next', prsNextCursor: null,
+      labelColors: { bug: 'd73a4a' },
+    });
+    expect(data.issues[0]).toMatchObject({ number: 9, labels: ['bug'], assignees: ['ada'], comments: 0 });
+    expect(data.issues[0]?.body).toHaveLength(8_000);
+    expect(data.prs[0]).toMatchObject({ number: 7, labels: ['draft'], isDraft: true, additions: 3, deletions: 1, comments: 0, checks: null });
+    for (const argv of spawns.filter((a) => listSide(a))) {
+      expect(argv[argv.findIndex((a) => a.startsWith('first=')) - 1]).toBe('-F');
+      expect(graphqlVar(argv, 'query')).not.toContain('comments');
+      // `gh issue list --json labels` read up to 100 labels; the GraphQL page keeps that.
+      expect(graphqlVar(argv, 'query')).toContain('labels(first: 100) { nodes');
+    }
+  });
+
+  it('fetchGithub with issuesDone sends first: 0 for issues and keeps prs paging', async () => {
+    const { spawns } = serveList({ prs: [listNode(5)], issuesTotal: 88, prsTotal: 60 });
+    const data = await fetchGithub('/repo/paged-done', true, 50, { issuesDone: true, prsCursor: 'p1' });
+    const issues = spawns.find((argv) => listSide(argv) === 'issues')!;
+    const prs = spawns.find((argv) => listSide(argv) === 'pullRequests')!;
+    expect(firstVar(issues)).toBe(0);
+    expect(graphqlVar(issues, 'after')).toBeUndefined();
+    expect(firstVar(prs)).toBe(50);
+    expect(graphqlVar(prs, 'after')).toBe('p1');
+    expect(data).toMatchObject({ issues: [], issuesTotal: 88, issuesNextCursor: null, prsTotal: 60, prs: [{ number: 5 }] });
+  });
+
+  it('viewer is fetched only on a first page', async () => {
+    const { spawns } = serveList();
+    const data = await fetchGithub('/repo/paged-viewer', true, 50, { issuesCursor: 'i1' });
+    expect(spawns.some((argv) => (graphqlVar(argv, 'query') ?? '').includes('viewer'))).toBe(false);
+    expect(data.viewerLogin).toBeUndefined();
+  });
+
+  it('serves each page from its own cache entry', async () => {
+    const { spawns } = serveList({ issues: [listNode(1)], issuesNext: 'i1' });
+    // Background project lookups spawn too; count the list requests only.
+    const listed = () => spawns.filter((argv) => listSide(argv)).length;
+    await fetchGithub('/repo/paged-cache', false, 50);
+    expect(listed()).toBe(2);
+    const second = await fetchGithub('/repo/paged-cache', false, 50, { issuesCursor: 'i1' });
+    expect(second.available).toBe(true);
+    expect(listed()).toBe(4); // page 2 is not page 1's cache hit
+    await fetchGithub('/repo/paged-cache', false, 50, { issuesCursor: 'i1' });
+    await fetchGithub('/repo/paged-cache', false, 50);
+    expect(listed()).toBe(4);
+  });
+
+  it('reports gh stderr, not a line of the multi-line query argv', async () => {
+    execFileMock.mockImplementation((...args: unknown[]) => {
+      const argv = args[1] as string[];
+      const cb = args[args.length - 1] as (e: unknown, r: unknown) => void;
+      if (argv[0] === 'repo') return cb(null, { stdout: 'owner/n\n', stderr: '' });
+      const err = Object.assign(new Error(`Command failed: gh ${argv.join(' ')}`), {
+        stderr: "gh: Field 'name' doesn't exist on type 'LabelConnection'\n",
+      });
+      cb(err, null);
+    });
+    const data = await fetchGithub('/repo/paged-stderr', true);
+    expect(data.available).toBe(false);
+    expect(data.reason).toBe("gh: Field 'name' doesn't exist on type 'LabelConnection'");
+  });
+
+  it('never reports a line of the query argv when gh wrote no stderr (a timeout)', () => {
+    const argvMessage = 'Command failed: gh api graphql -f query=\nquery ($owner: String!, $name: String!, $first: Int!) {\n  repository(owner: $owner) {';
+    const timedOut = Object.assign(new Error(argvMessage), { killed: true, signal: 'SIGTERM', stderr: '' });
+    expect(ghFailureReason(timedOut)).toBe('GitHub did not answer in time. Refresh to try again.');
+    const silent = Object.assign(new Error(argvMessage), { stderr: '' });
+    expect(ghFailureReason(silent)).toBe('GitHub request failed. Refresh to try again.');
+    expect(ghFailureReason(new Error('spawn gh ENOENT'))).toMatch(/gh CLI not found/);
+    expect(ghFailureReason(new Error('socket hang up'))).toBe('socket hang up');
   });
 });
 
@@ -2257,8 +2383,8 @@ describe('searchGithubItems (#730)', () => {
       let stdout = '';
       if (argv[0] === 'repo') stdout = 'owner/n\n';
       // The list tier: `gh pr list` without --state returns OPEN PRs only, and #4507 is merged.
-      else if (argv[0] === 'pr' && argv[1] === 'list') stdout = '[]';
-      else if (argv[0] === 'issue' && argv[1] === 'list') stdout = '[]';
+      else if (listSide(argv) === 'pullRequests') stdout = listReply('pullRequests', []);
+      else if (listSide(argv) === 'issues') stdout = listReply('issues', []);
       else if (argv[0] === 'pr' && argv[1] === 'view') {
         stdout = JSON.stringify({
           number: 4507,
@@ -3512,8 +3638,8 @@ describe('asynchronous list project metadata (#662)', () => {
       const send = (value: unknown) => cb(null, { stdout: JSON.stringify(value), stderr: '' });
       const query = argv.join(' ');
       if (argv[0] === 'repo') return cb(null, { stdout: 'owner/async', stderr: '' });
-      if (argv[0] === 'issue') return send([{ number: 1, title: 'One', author: null, createdAt: '', labels: [], url: 'https://github.com/owner/async/issues/1' }]);
-      if (argv[0] === 'pr') return send([]);
+      if (listSide(argv) === 'issues') return cb(null, { stdout: listReply('issues', [listNode(1, { title: 'One', author: null, createdAt: '', url: 'https://github.com/owner/async/issues/1' })]), stderr: '' });
+      if (listSide(argv) === 'pullRequests') return cb(null, { stdout: listReply('pullRequests', []), stderr: '' });
       if (query.includes('projectsV2')) return send({ data: { repository: { projectsV2: { nodes: [{ id: 'P1', title: 'Board', url: 'https://github.com/orgs/owner/projects/1' }], pageInfo: { hasNextPage: false, endCursor: null } } } } });
       if (query.includes('projectItems')) {
         finishMembership = () => send({ data: { repository: { i1: { projectItems: { nodes: [{ project: { id: 'P1' } }], pageInfo: { hasNextPage: false, endCursor: null } } } } } });
@@ -3716,5 +3842,87 @@ describe('fetchGithubItem (#692)', () => {
     });
     expect(await fetchGithubItem('/repo/item-dry', 'pr', 99999)).toEqual({ available: true, item: null });
     expect(execFileMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('comment counts and the detail tier (hearsay-tools/cezarion#1183)', () => {
+  beforeEach(() => {
+    vi.stubEnv('CEZ_DRY_RUN', '');
+    execFileMock.mockReset();
+    __clearCommentsCacheForTests();
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  /** Answers `gh repo view` with a handle and every other call through `reply`; records argv. */
+  const fakeGh = (reply: (argv: string[]) => string | Error) => {
+    const calls: string[][] = [];
+    execFileMock.mockImplementation((...args: unknown[]) => {
+      const argv = args[1] as string[];
+      const cb = args.at(-1) as (err: unknown, result: unknown) => void;
+      calls.push(argv);
+      if (argv[0] === 'repo') return cb(null, { stdout: 'o/r', stderr: '' });
+      const out = reply(argv);
+      return out instanceof Error ? cb(out, null) : cb(null, { stdout: out, stderr: '' });
+    });
+    return calls;
+  };
+  /** Each alias `nN` in the query answers N + 1 comments, except the numbers in `unknown`. */
+  const countsReply = (unknown: number[] = []) => (argv: string[]) => {
+    const query = argv.find((a) => a.startsWith('query=')) ?? '';
+    const numbers = [...query.matchAll(/n(\d+): issueOrPullRequest/g)].map((m) => Number(m[1]));
+    return JSON.stringify({ data: { repository: Object.fromEntries(numbers.map((n) =>
+      [`n${n}`, unknown.includes(n) ? null : { comments: { totalCount: n + 1 } }])) } });
+  };
+  const graphqlCalls = (calls: string[][]) => calls.filter((argv) => argv[1] === 'graphql');
+
+  it('comment counts alias each number and cache per context', async () => {
+    vi.stubEnv('GH_CONFIG_DIR', 'account-a');
+    const calls = fakeGh(countsReply([7]));
+    expect(await fetchGithubCommentCounts('/counts', 'issue', [142, 139, 142, 7])).toEqual({
+      available: true, counts: { 142: 143, 139: 140 },
+    });
+    const sent = graphqlCalls(calls);
+    expect(sent).toHaveLength(1);
+    const query = sent[0]!.find((a) => a.startsWith('query='))!;
+    expect(query).toContain('n142: issueOrPullRequest(number: 142)');
+    expect(query).toContain('... on Issue { comments { totalCount } }');
+    expect(query).toContain('... on PullRequest { comments { totalCount } }');
+    // Served from the cache: same context, kind and numbers.
+    expect(await fetchGithubCommentCounts('/counts', 'issue', [139, 142])).toEqual({ available: true, counts: { 142: 143, 139: 140 } });
+    expect(graphqlCalls(calls)).toHaveLength(1);
+    // refresh, another kind and another account each ask again.
+    await fetchGithubCommentCounts('/counts', 'issue', [142], true);
+    await fetchGithubCommentCounts('/counts', 'pr', [142]);
+    vi.stubEnv('GH_CONFIG_DIR', 'account-b');
+    await fetchGithubCommentCounts('/counts', 'issue', [142]);
+    expect(graphqlCalls(calls)).toHaveLength(4);
+  });
+
+  it('a failed counts query degrades to available:false with the stderr reason', async () => {
+    fakeGh(() => Object.assign(new Error('Command failed: gh api graphql -f query=query($owner:String!'), {
+      stderr: 'HTTP 401: Bad credentials (https://api.github.com/graphql)\n',
+    }));
+    expect(await fetchGithubCommentCounts('/counts-fail', 'pr', [1])).toEqual({
+      available: false, reason: 'HTTP 401: Bad credentials (https://api.github.com/graphql)',
+    });
+  });
+
+  it('detail body arrives with the thread and a failed view leaves the thread intact', async () => {
+    let failView = false;
+    const calls = fakeGh((argv) => {
+      if (argv[1] === 'view') {
+        return failView ? new Error('view failed') : JSON.stringify({ body: 'x'.repeat(9_000), additions: 5, deletions: 2 });
+      }
+      return '[]'; // timeline, comments and reviews: an empty thread
+    });
+    const pr = await fetchGithubComments('/detail', 'pr', 7);
+    expect(pr.available).toBe(true);
+    expect(pr.detail).toEqual({ body: 'x'.repeat(8_000), additions: 5, deletions: 2 });
+    expect(calls).toContainEqual(['pr', 'view', '7', '--json', 'body,additions,deletions']);
+    failView = true;
+    const issue = await fetchGithubComments('/detail', 'issue', 8);
+    expect(issue).toMatchObject({ available: true, comments: [] });
+    expect(issue.detail).toBeUndefined();
+    expect(calls).toContainEqual(['issue', 'view', '8', '--json', 'body']);
   });
 });
