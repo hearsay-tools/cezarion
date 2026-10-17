@@ -776,11 +776,15 @@ function referencedPrDeclaration(run: RunRecord): number | undefined {
 /** Prompt attribution survives declarations of follow-up issues. Bare hashes become issues
  * only after an issue signal; explicit PR prompts never acquire an invented issue identity. */
 function originatingIssue(run: RunRecord): number | undefined {
-  const refs = extractTaskRefs(run.task);
-  const issueContext = run.prNumber === undefined || run.issueNumber === refs.ambiguousNumber ||
-    /\bfix\s+#?\d+/i.test(run.task);
-  return refs.issueNumber ?? (refs.prNumber === undefined && issueContext &&
-    (run.issueNumber !== undefined || run.markerRefs?.issue !== undefined) ? refs.ambiguousNumber : undefined);
+  // Only an issue-led subject is stable attribution. Mentions inside comparisons or
+  // background instructions remain evidence, but an agent declaration may supersede them.
+  const prompt = run.task.trimStart().replace(
+    /^(?:please\s+)?(?:fix|resolve|address|implement|investigate|review|work(?:\s+on)?)\s+/i, '');
+  const subject = /^(?:(?:github\s+)?issue\s*|(?:fork|upstream)\s+)?(?:https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+|(?:[\w.-]+\/[\w.-]+)?#?\d+)\b/i.exec(prompt);
+  if (!subject) return undefined;
+  const refs = extractTaskRefs(subject[0]);
+  return refs.issueNumber ?? ((run.issueNumber !== undefined || run.markerRefs?.issue !== undefined)
+    ? refs.ambiguousNumber : undefined);
 }
 
 function referencedIssueDeclaration(run: RunRecord): number | undefined {

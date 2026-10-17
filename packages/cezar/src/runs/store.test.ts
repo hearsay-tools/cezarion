@@ -1398,6 +1398,20 @@ describe('RunStore — referenced-issue discovery (spec 2026-07-21-report-ref-di
       expect(RunStore.open(dataDir).getRun(run.id)?.issueNumber).toBe(1200);
     });
 
+  it('lets the marker replace incidental issue mentions in a comparison prompt', () => {
+    const { store, run } = freshRun('Compare against issue #1200 while fixing issue #1216');
+    store.updateRun(run.id, { issueNumber: 1200 });
+    store.appendEvent(run.id, { type: 'result', result:
+      'https://github.com/open-mercato/cezar/issues/1200 https://github.com/open-mercato/cezar/issues/1216' });
+    store.applyMarkerRefs(run.id, { issue: 1216 });
+    expect(run.issueNumber).toBe(1216);
+    expect(run.referencedIssueUrl).toBe('https://github.com/open-mercato/cezar/issues/1216');
+    store.close();
+    const reopened = RunStore.open(dataDir);
+    expect(reopened.getRun(run.id)?.issueNumber).toBe(1216);
+    reopened.close();
+  });
+
   it('keeps equal-number prompt issues across repositories ambiguous', () => {
     const urls = ['https://github.com/one/repo/issues/1200', 'https://github.com/two/repo/issues/1200'];
     const { store, run } = freshRun(`Compare ${urls.join(' and ')}`);
