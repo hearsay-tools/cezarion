@@ -29,7 +29,7 @@ import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-r
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { archivePullRequests, pullRequestKey, mergePullRequests } from './pull-requests.ts';
 import type { ArchivePullRequestIdentity, MergedPullRequest, RunPullRequest } from '@open-mercato/cezar-contract';
-import { MAX_REF } from './task-refs.ts';
+import { extractTaskRefs, MAX_REF } from './task-refs.ts';
 // Type-only module (zod + nothing else), so this cannot cycle back into the store.
 import { workflowDefSchema } from '../workflows/types.ts';
 
@@ -773,6 +773,50 @@ function referencedPrDeclaration(run: RunRecord): number | undefined {
   return declared === refUrlNumber(run.pullRequestUrl) ? undefined : declared;
 }
 
+/** Prompt attribution survives declarations of follow-up issues. Bare hashes become issues
+ * only after an issue signal; explicit PR prompts never acquire an invented issue identity. */
+function originatingIssue(run: RunRecord): number | undefined {
+  // Only an issue-led subject is stable attribution. Mentions inside comparisons or
+  // background instructions remain evidence, but an agent declaration may supersede them.
+  const prompt = run.task.trimStart()
+    .replace(/^(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+|i\s+(?:want|would\s+like)\s+you\s+to\s+)/i, '')
+    .replace(/^(?:please\s+)?(?:fix|resolve|address|implement|investigate|review|work(?:\s+on)?)\s+/i, '');
+  const subject = /^(?:(?:the\s+)?(?:(?:github|fork|upstream)\s+)?issue\s*|(?:fork|upstream)\s+)?(?:https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+|(?:[\w.-]+\/[\w.-]+)?#?\d+)\b/i.exec(prompt);
+  if (!subject) return undefined;
+  const refs = extractTaskRefs(subject[0]);
+  return refs.issueNumber ?? ((run.issueNumber !== undefined || run.markerRefs?.issue !== undefined)
+    ? refs.ambiguousNumber : undefined);
+}
+
+function referencedIssueDeclaration(run: RunRecord): number | undefined {
+  return run.markerRefs?.issue === undefined ? undefined : originatingIssue(run) ?? run.markerRefs.issue;
+}
+
+function resolveIssueReference(run: RunRecord, handle?: RepoHandle | null): string | undefined {
+  const declared = referencedIssueDeclaration(run);
+  const candidates = run.referencedIssueCandidates ?? [];
+  // Prompt URLs remain evidence even in legacy records without a candidate working set.
+  const promptUrls = [...new Set([...run.task.matchAll(new RegExp(ISSUE_URL_RE.source, 'g'))]
+    .map(match => match[0]).filter(url => refUrlNumber(url) === declared))];
+  if (promptUrls.length > 1) return undefined;
+  if (promptUrls.length === 1) return resolveReferencedRef(promptUrls, run.task, declared, handle);
+  // A number cannot choose between two repositories' issues with that same number.
+  if (declared !== undefined && new Set(candidates.filter(url => refUrlNumber(url) === declared)).size > 1) {
+    return undefined;
+  }
+  return resolveReferencedRef(candidates, run.task, declared, handle);
+}
+
+function restoreOriginatingIssue(run: RunRecord): void {
+  const origin = originatingIssue(run);
+  if (origin === undefined || run.markerRefs?.issue === undefined) return;
+  run.issueNumber = origin;
+  delete run.referencedIssueNumberSeeded;
+  if (run.referencedIssueCandidates !== undefined || refUrlNumber(run.referencedIssueUrl) !== origin) {
+    run.referencedIssueUrl = resolveIssueReference(run);
+  }
+}
+
 /**
  * The PR URL a creation phrase *introduces*, or undefined. The created URL is
  * the first one at or after the `CREATED_PR_RE` phrase — a PR the same event
@@ -887,6 +931,7 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
       undefined,
     );
   }
+  restoreOriginatingIssue(run);
   // Repository scoping follows reconciliation: stores arm a handle asynchronously, while
   // the read-only index applies its cached handle to these fresh records (#97). This ordering
   // also scopes any referenced PR restored above without filtering candidate evidence first.
@@ -965,7 +1010,8 @@ export function rescopeRun(run: RunRecord, handle?: RepoHandle | null): boolean 
 function loadNormalizedFields(run: RunRecord): string {
   return JSON.stringify([
     run.stopping, run.status, run.finishedAt, run.error, run.activity, run.monitoringWakeAt, run.autoResumeAt,
-    run.monitoringWakeCapReached, run.referencedPullRequestUrl, run.pullRequests, run.hasPendingHumanAsk, run.hasPendingPermission, run.steps.map((step) => step.status),
+    run.monitoringWakeCapReached, run.referencedPullRequestUrl, run.pullRequests,
+    run.issueNumber, run.referencedIssueUrl, run.referencedIssueNumberSeeded, run.hasPendingHumanAsk, run.hasPendingPermission, run.steps.map((step) => step.status),
   ]);
 }
 
@@ -1063,11 +1109,13 @@ function importLegacyIndex(db: RunDatabase, dataDir: string): void {
 
 /**
  * Finished rows whose stored summary an open-time normalization would still change: a referenced
- * PR an older cezar's created-PR declaration erased (see `reconcileLoadedRun`). Not live, so not
+ * PR an older cezar's created-PR declaration erased, or issue attribution displaced by a
+ * follow-up declaration (see `reconcileLoadedRun`). Not live, so not
  * in the `live` column; open decodes these few and keeps the ones it actually repaired.
  */
 const LEGACY_REFERENCE_HEAL_SQL =
-  "json_extract(summary, '$.markerRefs.pr') IS NOT NULL AND json_extract(summary, '$.referencedPullRequestUrl') IS NULL";
+  "(json_extract(summary, '$.markerRefs.pr') IS NOT NULL AND json_extract(summary, '$.referencedPullRequestUrl') IS NULL)" +
+  " OR (NOT EXISTS (SELECT 1 FROM meta WHERE key = 'issue-attribution:' || runs.id AND value = CAST(runs.revision AS TEXT)) AND json_extract(summary, '$.markerRefs.issue') IS NOT NULL)";
 
 /** Mark-all-read's rule (see `RunStore.markAllRead`) over the columns and the stored summary. */
 const MARK_ALL_READ_SQL = "archived = 0 AND status IN ('done', 'failed') AND finished_at IS NOT NULL" +
@@ -1514,7 +1562,13 @@ export class RunStore extends EventEmitter {
       if (!healable.has(rowFamily(row))) continue;
       const decoded = decode(row);
       // Held only when the repair changed it: the next save writes it, then it leaves.
-      if (decoded) this.adoptLoadedRun(decoded, { keepLive: this.keepLive, onlyIfChanged: true }, row);
+      if (decoded) {
+        // Persist verification once even when legacy issue attribution was already correct.
+        const needsIssueCheck = decoded.run.markerRefs?.issue !== undefined &&
+          this.db!.getMeta(`issue-attribution:${row.id}`) !== String(row.revision);
+        this.adoptLoadedRun(decoded, { keepLive: this.keepLive, onlyIfChanged: !needsIssueCheck }, row);
+        if (needsIssueCheck) this.dirty.add(row.id);
+      }
     }
     for (const rootId of this.anchoredFamilies()) this.holdFamily(rootId, decode);
     this.releaseUnheldClaims();
@@ -2949,9 +3003,7 @@ export class RunStore extends EventEmitter {
       );
     }
     if (run.referencedIssueCandidates !== undefined) {
-      run.referencedIssueUrl = resolveReferencedRef(
-        run.referencedIssueCandidates, run.task, run.markerRefs?.issue, this.repoHandle,
-      );
+      run.referencedIssueUrl = resolveIssueReference(run, this.repoHandle);
       const number = refUrlNumber(run.referencedIssueUrl);
       if (run.referencedIssueNumberSeeded) {
         // We may change only the number this janitor owns, including clearing an ambiguous one.
@@ -3486,12 +3538,7 @@ export class RunStore extends EventEmitter {
     const candidatesChanged = seen.size !== before;
     if (candidatesChanged) run.referencedIssueCandidates = [...seen];
     const prev = run.referencedIssueUrl;
-    run.referencedIssueUrl = resolveReferencedRef(
-      run.referencedIssueCandidates ?? [],
-      run.task,
-      run.markerRefs?.issue,
-      this.repoHandle,
-    );
+    run.referencedIssueUrl = resolveIssueReference(run, this.repoHandle);
     let numberChanged = false;
     if (run.markerRefs?.issue === undefined && ISSUE_URL_RE.test(seedHaystack)) {
       if (run.referencedIssueUrl && run.issueNumber === undefined) {
@@ -3515,7 +3562,7 @@ export class RunStore extends EventEmitter {
   /**
    * Apply agent-declared reference markers (spec 2026-07-18-task-ref-markers).
    * Marker values are authoritative for the display tier: they overwrite the
-   * regex/namer numbers, and a declared PR re-resolves the referenced URL
+   * regex/namer numbers unless the prompt identifies the originating issue, and a declared PR re-resolves the referenced URL
    * against the candidate working set — including down to `undefined` when no
    * candidate matches (a wrong chip is worse than no chip). The created tier
    * (`pullRequestUrl`) is deliberately untouched.
@@ -3549,7 +3596,7 @@ export class RunStore extends EventEmitter {
       run.prNumber = refs.pr;
     }
     if (refs.issue !== undefined) {
-      run.issueNumber = refs.issue;
+      run.issueNumber = originatingIssue(run) ?? refs.issue;
       delete run.referencedIssueNumberSeeded;
     }
     if (run.markerRefs.pr !== undefined) {
@@ -3561,12 +3608,7 @@ export class RunStore extends EventEmitter {
       );
     }
     if (run.markerRefs.issue !== undefined) {
-      run.referencedIssueUrl = resolveReferencedRef(
-        run.referencedIssueCandidates ?? [],
-        run.task,
-        run.markerRefs.issue,
-        this.repoHandle,
-      );
+      run.referencedIssueUrl = resolveIssueReference(run, this.repoHandle);
     }
     this.touch(run);
     return run;
@@ -4289,7 +4331,10 @@ export class RunStore extends EventEmitter {
     const encode = (run: RunRecord) => {
       const encoded = encodeRawRecord(run, (this.base.get(run.id) ?? this.coldBase.get(run.id))?.extras);
       extras.set(run.id, encoded.extras);
-      upserts.push(encodeRunRow(run, encoded.data));
+      const projected = { ...run };
+      restoreOriginatingIssue(projected);
+      upserts.push({ ...encodeRunRow(run, encoded.data),
+        issueAttributionCurrent: isDeepStrictEqual(projected, run) });
     };
     for (const [id, next] of staged) {
       if (next) encode(next);

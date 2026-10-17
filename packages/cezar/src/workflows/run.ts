@@ -7709,7 +7709,10 @@ export class RunManager {
     }
     if (markers.title && run.titleOrigin !== 'user') {
       const current = this.store.getRun(runId);
-      const refNumber = current?.prNumber ?? current?.issueNumber;
+      const promptRefs = extractTaskRefs(run.task);
+      const promptIssue = promptRefs.issueNumber ?? (promptRefs.prNumber === undefined ? promptRefs.ambiguousNumber : undefined);
+      const refNumber = promptRefs.prNumber === undefined && promptIssue !== undefined && promptIssue === current?.issueNumber
+        ? current.issueNumber : current?.prNumber ?? current?.issueNumber;
       const validated = postValidateTitle(markers.title, refNumber);
       // Same junk guard as composeNameResult: a declaration that validates to
       // nothing (or to a bare number prefix) must not blank the title.

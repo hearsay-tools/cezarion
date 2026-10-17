@@ -181,6 +181,8 @@ export interface RunRowInput {
   worktreePath?: string | null;
   branch?: string | null;
   baseBranch?: string | null;
+  /** Whether originating-issue attribution was verified for this write. */
+  issueAttributionCurrent?: boolean;
   /** The complete record, serialized. */
   data: string;
   /** The record's summary projection, serialized. */
@@ -717,8 +719,12 @@ export class RunDatabase {
 
   /** The rows `searchRootSummaries` answers, one at a time, until `visit` answers false: a search
    *  that needs only its first matches stops reading there. */
-  visitRootSummaries(prefilter: readonly string[], visit: (row: RunSummaryRow) => boolean): void {
-    const where = ['parent_run_id IS NULL', ...prefilter.map(() => 'instr(lower(summary), ?) > 0')].join(' AND ');
+  visitRootSummaries(prefilter: readonly string[], visit: (row: RunSummaryRow) => boolean,
+    opts: { includeIssueMarked?: boolean } = {}): void {
+    const tokens = prefilter.map(() => 'instr(lower(summary), ?) > 0').join(' AND ');
+    const matches = opts.includeIssueMarked && tokens
+      ? `(${tokens}) OR CASE WHEN json_valid(summary) THEN json_extract(summary, '$.markerRefs.issue') IS NOT NULL ELSE 1 END` : tokens;
+    const where = ['parent_run_id IS NULL', ...(matches ? [`(${matches})`] : [])].join(' AND ');
     this.run(() => {
       for (const row of this.db.prepare(`${SUMMARY_SELECT} WHERE ${where} ${NEWEST_FIRST}`).iterate(...prefilter)) {
         if (!visit(toSummaryRow(row as SqlRow))) break;
@@ -866,7 +872,10 @@ export class RunDatabase {
           return;
         }
         if (changes.fence) claims = this.checkFence(changes.fence);
-        for (const id of changes.deletes) this.statements.delete.run(id);
+        for (const id of changes.deletes) {
+          this.statements.delete.run(id);
+          this.statements.deleteMeta.run(`issue-attribution:${id}`);
+        }
         const revision = changes.upserts.length > 0 ? this.nextSequence(COMMIT_SEQ_KEY) : 0;
         for (const row of changes.upserts) {
           const inserted = this.statements.upsert.get({
@@ -886,6 +895,9 @@ export class RunDatabase {
             data: row.data,
             summary: row.summary,
           });
+          // Revision binding makes an older writer invalidate this optional repair cache.
+          if (row.issueAttributionCurrent) this.statements.setMeta.run(`issue-attribution:${row.id}`, String(revision));
+          else this.statements.deleteMeta.run(`issue-attribution:${row.id}`);
           revisions.set(row.id, revision);
           seqs.set(row.id, inserted!.seq as number);
         }

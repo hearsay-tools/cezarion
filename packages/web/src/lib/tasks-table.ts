@@ -196,7 +196,7 @@ export function taskIssueUrl(run: TaskReferenceInput, repoBase?: string): string
   // `referenced*Url`, which are transcript scrapings that routinely name other repositories:
   // `CEZ:ISSUE=524` beside an incidental `github.com/other/repo/pull/1` would rebuild the exact
   // wrong-link defect #526 exists to kill, just pointing at an issue instead of a PR.
-  const number = run.markerRefs?.issue ?? run.issueNumber
+  const number = run.issueNumber ?? run.markerRefs?.issue
   if (!number || !repoBase) return undefined
   return `${repoBase}/issues/${number}`
 }
