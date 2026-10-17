@@ -257,6 +257,19 @@ describe('AutomationStore', () => {
     expect(receipts[0]).toMatchObject({ automationId: 'one', candidate: { number: 7 }, runId: 'run' });
   });
 
+  it.each([true, false])('keeps a retained failed issue receipt discoverable after log compaction (original log: %s)', async (hasLog) => {
+    const dir = await directory();
+    const store = AutomationStore.open(dir, { now: () => new Date('2026-10-17T00:00:00Z') });
+    const candidate = { timestamp: '2026-01-01T00:00:00Z', tieBreaker: 'I_7', event: 'issue.opened' as const, eventId: 'opened', nodeId: 'I_7', repo: 'acme/demo', number: 7, title: 'Issue', url: 'https://github.com/acme/demo/issues/7', author: 'alice', assignees: [], labels: [] };
+    const receipt = store.reserveReceipt({ automationId: 'one', revision: 1, eventId: 'opened', candidate })!;
+    store.appendReceipt({ ...receipt, status: 'launch-error', error: 'offline', updatedAt: '2026-01-01T00:00:00Z' });
+    const failure = await store.appendLog({ automationId: 'one', revision: 1, result: 'error', receiptId: receipt.receiptId });
+    writeFileSync(join(dir, 'automation-log.ndjson'), [...(hasLog ? [failure] : []), ...Array.from({ length: 10_000 }, (_, i) => ({ ...failure, seq: i + 2, result: 'no-match', receiptId: undefined }))].map((row) => JSON.stringify(row)).join('\n') + '\n');
+    await store.compact();
+    expect(store.latestReceipts().get(receipt.receiptKey)?.status).toBe('launch-error');
+    expect(store.logs({ result: 'error' })).toEqual([expect.objectContaining({ receiptId: receipt.receiptId, result: 'error' })]);
+  });
+
   it('keeps every row when compaction overlaps an append from another store', async () => {
     const dir = await directory();
     const owner = AutomationStore.open(dir);

@@ -2158,9 +2158,9 @@ export class RunStore extends EventEmitter {
         .filter((value): value is string => value !== undefined)
         .map((value) => value.replace(/\/+$/, '').toLowerCase())
         .filter((value) => value.endsWith(`/issues/${number}`));
-      // Numeric display fields can describe a foreign issue. Qualified evidence wins;
-      // a bare number belongs to this project only when no URL contradicts it.
-      return urls.includes(url) || (urls.length === 0 && (run.issueNumber === number || run.markerRefs?.issue === number));
+      // The legacy issueNumber is display-only and cannot establish repository identity.
+      // Explicit task markers remain project-scoped unless a qualified URL contradicts them.
+      return urls.includes(url) || (urls.length === 0 && run.markerRefs?.issue === number);
     };
     for (const run of this.held.values()) if (matches(run)) return run.id;
     // Secondary references are record-only: query them in SQLite rather than hydrating every

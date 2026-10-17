@@ -104,14 +104,13 @@ describe('automation task templates', () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
-  it.each(['primary', 'marker', 'url', 'secondary', 'automation', 'prompt'] as const)('skips backfill when a non-archived task references the issue via %s', async (source) => {
+  it.each(['marker', 'url', 'secondary', 'automation', 'prompt'] as const)('skips backfill when a non-archived task references the issue via %s', async (source) => {
     const root = await mkdtemp(join(tmpdir(), 'cezar-existing-issue-'));
     let store = RunStore.open(join(root, '.ai/cezar'));
     try {
       const existing = store.createRun({ title: 'Manual task', workflow: 'quick-task', task: source === 'prompt' ? `Fix ${candidate.url}` : 'Work', steps: [] });
       const references = {
         prompt: { issueNumber: 1216, markerRefs: { issue: 1216 } },
-        primary: { issueNumber: 7 },
         marker: { markerRefs: { issue: 7 } },
         url: { referencedIssueUrl: candidate.url },
         secondary: { issueNumber: 1216, markerRefs: { issue: 1216 }, referencedIssueCandidates: [candidate.url, 'https://github.com/acme/demo/issues/1216'] },
@@ -165,12 +164,13 @@ describe('automation task templates', () => {
     } finally { store.close(); await rm(root, { recursive: true, force: true }); }
   });
 
-  it.each(['archived', 'foreign', 'pull-request', 'foreign-number'] as const)('allows an issue launch when the other task reference is %s', async (kind) => {
+  it.each(['archived', 'foreign', 'pull-request', 'foreign-number', 'bare-number'] as const)('allows an issue launch when the other task reference is %s', async (kind) => {
     const root = await mkdtemp(join(tmpdir(), 'cezar-issue-guard-'));
     const store = RunStore.open(join(root, '.ai/cezar'));
     try {
       const other = store.createRun({ title: 'Other task', workflow: 'quick-task', task: 'Work', steps: [] });
       store.updateRun(other.id, kind === 'archived' ? { archived: true, issueNumber: 7 }
+        : kind === 'bare-number' ? { issueNumber: 7 }
         : kind === 'foreign-number' ? { issueNumber: 7, markerRefs: { issue: 7 }, referencedIssueUrl: 'https://github.com/other/repo/issues/7' }
         : kind === 'foreign' ? { referencedIssueCandidates: ['https://github.com/other/repo/issues/7'] }
         : { prNumber: 7, referencedPrCandidates: ['https://github.com/acme/demo/pull/7'] });

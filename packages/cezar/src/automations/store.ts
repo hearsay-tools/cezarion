@@ -411,7 +411,23 @@ export class AutomationStore {
     this.rewriteNdjson(RECEIPTS, latest);
     await this.withLogLease(() => {
       const logs = this.readNdjson(LOG, automationLogRecordSchema);
-      this.rewriteNdjson(LOG, logs.slice(-10_000));
+      // Failed durable reservations need a visible Retry task even after the bounded
+      // activity history rolls over. Keep their latest entry, repairing legacy gaps.
+      const retryLogs = new Map<string, AutomationLogRecord>();
+      const failed = latest.filter((row) => row.status === 'launch-error');
+      const failedIds = new Set(failed.map((row) => row.receiptId));
+      for (const log of logs) if (log.receiptId && failedIds.has(log.receiptId)) retryLogs.set(log.receiptId, log);
+      let seq = logs.reduce((highest, row) => Math.max(highest, row.seq), 0);
+      for (const receipt of failed) if (!retryLogs.has(receipt.receiptId)) {
+        retryLogs.set(receipt.receiptId, automationLogRecordSchema.parse({
+          seq: ++seq, ts: receipt.updatedAt, automationId: receipt.automationId,
+          revision: receipt.revision, result: 'error', receiptId: receipt.receiptId,
+          reason: receipt.error ?? 'Task launch failed; retry is available.',
+        }));
+      }
+      const kept = new Map(logs.slice(-10_000).map((log) => [log.seq, log]));
+      for (const log of retryLogs.values()) kept.set(log.seq, log);
+      this.rewriteNdjson(LOG, [...kept.values()].sort((a, b) => a.seq - b.seq));
     });
   }
 
