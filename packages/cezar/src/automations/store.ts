@@ -397,13 +397,37 @@ export class AutomationStore {
 
   async compact(): Promise<void> {
     const cutoff = this.now().getTime() - RETENTION_MS;
-    const latest = [...this.latestReceipts().values()].filter(
-      (row) => Date.parse(row.updatedAt) >= cutoff,
-    );
+    const issues = new Set<string>();
+    const latest = [...this.latestReceipts().values()].filter((row) => {
+      // Event history expires; the first reservation of an issue must not. Keep one
+      // durable issue reservation so a new label months later cannot launch it again.
+      const issue = row.candidate?.event.startsWith('issue.')
+        ? `${row.automationId}:${row.candidate.repo.toLowerCase()}:${row.candidate.number}`
+        : undefined;
+      const firstIssue = issue !== undefined && !issues.has(issue);
+      if (issue !== undefined) issues.add(issue);
+      return firstIssue || Date.parse(row.updatedAt) >= cutoff;
+    });
     this.rewriteNdjson(RECEIPTS, latest);
     await this.withLogLease(() => {
       const logs = this.readNdjson(LOG, automationLogRecordSchema);
-      this.rewriteNdjson(LOG, logs.slice(-10_000));
+      // Failed durable reservations need a visible Retry task even after the bounded
+      // activity history rolls over. Keep their latest entry, repairing legacy gaps.
+      const retryLogs = new Map<string, AutomationLogRecord>();
+      const failed = latest.filter((row) => row.status === 'launch-error');
+      const failedIds = new Set(failed.map((row) => row.receiptId));
+      for (const log of logs) if (log.receiptId && failedIds.has(log.receiptId)) retryLogs.set(log.receiptId, log);
+      let seq = logs.reduce((highest, row) => Math.max(highest, row.seq), 0);
+      for (const receipt of failed) if (!retryLogs.has(receipt.receiptId)) {
+        retryLogs.set(receipt.receiptId, automationLogRecordSchema.parse({
+          seq: ++seq, ts: receipt.updatedAt, automationId: receipt.automationId,
+          revision: receipt.revision, result: 'error', receiptId: receipt.receiptId,
+          reason: receipt.error ?? 'Task launch failed; retry is available.',
+        }));
+      }
+      const kept = new Map(logs.slice(-10_000).map((log) => [log.seq, log]));
+      for (const log of retryLogs.values()) kept.set(log.seq, log);
+      this.rewriteNdjson(LOG, [...kept.values()].sort((a, b) => a.seq - b.seq));
     });
   }
 

@@ -15,6 +15,7 @@ import {
   finishRun,
   getGithub,
   getGithubChecks,
+  getGithubCommentCounts,
   getGithubSearch,
   getGithubRefStatus,
   getGithubOwners,
@@ -184,6 +185,24 @@ describe('request shapes', () => {
     // `refresh: false` must not become `refresh=0` — the server tests `=== '1'`, but sending a
     // parameter we do not mean is how a "false" ends up read as truthy somewhere downstream.
     { name: 'getGithub (refresh false)', call: () => getGithub({ refresh: false }), path: '/api/v1/github', method: 'GET' },
+    {
+      name: 'getGithub (a page: one side by cursor, the other done) (hearsay-tools/cezarion#1183)',
+      call: () => getGithub({ limit: 50, prsCursor: 'p', issuesDone: true }),
+      path: '/api/v1/github?limit=50&prsCursor=p&issuesDone=1',
+      method: 'GET',
+    },
+    {
+      name: 'getGithubCommentCounts (hearsay-tools/cezarion#1183)',
+      call: () => getGithubCommentCounts('pr', [7, 3]),
+      path: '/api/v1/github/comment-counts?kind=pr&numbers=7%2C3',
+      method: 'GET',
+    },
+    {
+      name: 'getGithubCommentCounts (refresh)',
+      call: () => getGithubCommentCounts('issue', [1], { refresh: true }),
+      path: '/api/v1/github/comment-counts?kind=issue&numbers=1&refresh=1',
+      method: 'GET',
+    },
     {
       name: 'getGithubChecks (#664)',
       call: () => getGithubChecks([7, 12]),

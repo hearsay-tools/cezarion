@@ -126,6 +126,7 @@ describe('every mutating route carries a typed body into AppType', () => {
     Assert<HasTypedInput<'/api/v1/github', '$get', 'query'>>,
     Assert<HasTypedInput<'/api/v1/github/projects', '$get', 'query'>>,
     Assert<HasTypedInput<'/api/v1/github/checks', '$get', 'query'>>,
+    Assert<HasTypedInput<'/api/v1/github/comment-counts', '$get', 'query'>>,
     Assert<HasTypedInput<'/api/v1/github/search', '$get', 'query'>>,
     Assert<HasTypedInput<'/api/v1/github/comments/:kind/:number', '$get', 'query'>>,
     Assert<HasTypedInput<'/api/v1/github/prs/:number/merge-state', '$get', 'query'>>,

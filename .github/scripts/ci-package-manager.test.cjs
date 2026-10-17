@@ -12,11 +12,12 @@ const yaml = createRequire(path.join(__dirname, '../../packages/cezar/package.js
 const workflow = yaml.parse(fs.readFileSync(path.join(__dirname, '../workflows/ci.yml'), 'utf8'));
 const jobs = ['build-and-package', 'vitest', 'node-floor', 'cockpit-browser', 'publish-snapshot', 'prepare-pr-snapshot'];
 
-function evaluate(value, root) {
+function evaluate(value, root, steps = {}) {
   if (!value) return true;
   const expression = value.startsWith('${{') ? value.slice(3, -2) : value;
   return runInNewContext(expression, {
     hashFiles: file => fs.existsSync(path.join(root, file)) ? 'present-lockfile-hash' : '',
+    steps,
   });
 }
 
@@ -32,14 +33,18 @@ for (const jobName of jobs) {
         fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ type: 'commonjs' }));
         for (const file of locks) fs.writeFileSync(path.join(root, file), 'fixture');
         const steps = workflow.jobs[jobName].steps;
+        // Every earlier step succeeded, so a retry gated on a step's outcome stays unselected.
+        const succeeded = Object.fromEntries(steps.filter(step => step.id).map(step => [step.id, { outcome: 'success', conclusion: 'success' }]));
         const selected = steps.filter(step => (
           step.uses?.startsWith('actions/setup-node@') ||
           step.uses?.startsWith('pnpm/action-setup@') ||
           /^(?:npm ci|pnpm install)/.test(step.run || '')
-        ) && evaluate(step.if, root));
-        const node = selected.find(step => step.uses?.startsWith('actions/setup-node@'));
+        ) && evaluate(step.if, root, succeeded));
+        const nodes = selected.filter(step => step.uses?.startsWith('actions/setup-node@'));
+        const [node] = nodes;
         const pnpm = selected.filter(step => step.uses?.startsWith('pnpm/action-setup@'));
         assert.ok(node, 'Node setup is required for both installers');
+        assert.equal(nodes.length, 1, 'a successful Node setup must not be repeated');
         assert.equal(pnpm.length, manager === 'pnpm' ? 1 : 0);
         if (manager === 'pnpm') {
           assert.equal(pnpm[0].with.version, '12.11.2');

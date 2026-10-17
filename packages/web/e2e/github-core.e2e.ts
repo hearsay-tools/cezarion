@@ -257,7 +257,7 @@ describe('the GitHub tab against the live dry-run server', () => {
           `[...document.querySelectorAll('[data-slot="gh-rows"] [data-slot="gh-row"]')].filter(row => row.offsetParent !== null).length === ${count}`
         const visibleRows = () => waitForSettledSample(browser, `[...document.querySelectorAll('[data-slot="gh-rows"] [data-slot="gh-row"]')].filter(row => row.offsetParent !== null).length`)
         const selectedIndex = Number(browser.evaluate(
-          `[...document.querySelectorAll('[data-slot="gh-rows"] > li')].findIndex(li => li.querySelector("[aria-current='page']"))`,
+          `[...document.querySelectorAll('[data-slot="gh-rows"] [data-slot="gh-row-item"]')].findIndex(item => item.querySelector("[aria-current='page']"))`,
         ))
         const compactedVisible = 2 + (selectedIndex >= 2 ? 1 : 0)
         // Wait on both observables the toggle drives, never on a clock (#341): the control's

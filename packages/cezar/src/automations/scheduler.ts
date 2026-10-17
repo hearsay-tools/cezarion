@@ -5,7 +5,7 @@ import { AutomationProjectUnavailableError, ScheduleRunner, type ScheduleLaunche
 import type { AutomationLease, AutomationStore } from './store.ts';
 import { isGithubAutomation, isScheduleAutomation, type AutomationRuntimeState, type GithubAutomationDefinition } from './types.ts';
 
-export interface AutomationLaunchResult { runId: string }
+export interface AutomationLaunchResult { runId: string; existing?: boolean }
 export type AutomationLauncher = (
   definition: GithubAutomationDefinition,
   candidate: GithubCandidate,
@@ -180,6 +180,21 @@ export class ProjectAutomationScheduler {
   }
 
   private async launch(definition: GithubAutomationDefinition, candidate: GithubCandidate): Promise<void> {
+    // Keep event receipts (including old ones) for retry/recovery, but collapse every issue
+    // event onto its first reservation, even after restart or a definition edit.
+    const previous = candidate.event.startsWith('issue.')
+      ? [...this.handle.store.latestReceipts().values()].find((receipt) => receipt.automationId === definition.id
+        && receipt.candidate?.event.startsWith('issue.')
+        && receipt.candidate.repo.toLowerCase() === candidate.repo.toLowerCase()
+        && receipt.candidate.number === candidate.number)
+      : undefined;
+    if (previous) {
+      await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event,
+        result: 'duplicate', reason: `A durable receipt already exists for this automation and issue.${previous.runId ? ` Task: ${previous.runId}.` : ''}`,
+        ...(previous.runId ? { runId: previous.runId } : {}),
+        githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url });
+      return;
+    }
     const receipt = this.handle.store.reserveReceipt({ automationId: definition.id, revision: definition.revision, eventId: candidate.eventId, candidate });
     if (!receipt) {
       await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event, result: 'duplicate', reason: 'A durable receipt already exists for this automation and event.', githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url });
@@ -188,7 +203,13 @@ export class ProjectAutomationScheduler {
     try {
       const launched = await this.handle.launch!(definition, candidate, receipt.receiptId);
       this.handle.store.appendReceipt({ ...receipt, status: 'launched', runId: launched.runId, updatedAt: new Date().toISOString() });
-      await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event, result: 'launched', receiptId: receipt.receiptId, runId: launched.runId, githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url });
+      await this.handle.store.appendLog({
+        automationId: definition.id, revision: definition.revision, event: candidate.event,
+        result: launched.existing ? 'skipped' : 'launched',
+        ...(launched.existing ? { reason: `Issue already has non-archived task ${launched.runId}.` } : {}),
+        receiptId: receipt.receiptId, runId: launched.runId,
+        githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url,
+      });
     } catch (error) {
       this.handle.store.appendReceipt({ ...receipt, status: 'launch-error', error: error instanceof Error ? error.message : String(error), updatedAt: new Date().toISOString() });
       throw error;
