@@ -239,6 +239,25 @@ the repo root, lists that spec:
 grep -lE 'link-safety|data-streamdown|thread-markdown' packages/web/e2e/*.e2e.ts
 ```
 
+**In a unit test, a timeout is a hang guard, never the thing the test waits on.**
+Wait for the product's own signal: an event, a callback, a store write, a file
+the fixture publishes. A test that proves something did NOT happen moves past
+the window with fake timers, or says at the call site why it needs real time.
+Size a bound per step, not per row or sequence: a loop of N turns gets a
+per-turn budget, or a window that restarts on each sign of progress
+(hearsay-tools/cezarion#1145). A product budget a test shrinks, such as a Git
+timeout or an autosave budget, applies only to the step it exercises and never
+races its own fixture's startup (hearsay-tools/cezarion#1144,
+hearsay-tools/cezarion#1146). Any bound that remains states its reason at the
+call site, as a `// bound: <reason>` comment. In the server unit tests,
+`packages/cezar/src/test-wait-discipline.test.ts` flags bare sleeps and wait
+bounds under 10 s against a baseline that only shrinks; Vitest's 1 s default
+for `vi.waitFor` and `expect.poll` counts as one. A new site gets the product's
+signal or a `// bound:` reason, never a baseline entry. After fixing a site,
+shrink the baseline with
+`TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts`.
+The scan cannot see a shrunk product budget, so review checks that one.
+
 **The final gate and full-suite runs belong in CI.** Do not run the entire local
 gate, `squeal run --all`, or the full Vitest or browser suite just to finish a
 task, commit, open a PR, or complete a review. Run a full local suite only when
