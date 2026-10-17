@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { agentHomePaths } from '../paths.ts';
 import { CONFIG_FILES } from './catalog.ts';
 
@@ -50,6 +50,11 @@ async function ensureExcluded(commonGitDir: string, line: string): Promise<void>
   await writeFile(excludePath, `${current}${sep}${line}\n`, 'utf8');
 }
 
+/** Whether the native repo-relative `rel` is one of the caller's POSIX `preserve` paths. */
+export function isPreserved(preserve: ReadonlySet<string>, rel: string, separator: string = sep): boolean {
+  return preserve.has(rel.split(separator).join('/'));
+}
+
 /**
  * Copy the seeded personal-layer files from `repoRoot` into `worktreeCwd`.
  * Guards every file with `git check-ignore` so a file the user genuinely tracked
@@ -80,7 +85,7 @@ export async function seedAgentConfigLocalLayer(
     const rel = relative(repoRoot, src);
     // Never seed something outside the repo, or that isn't there.
     if (rel.startsWith('..') || !(await fileExists(src))) continue;
-    if (preserve.has(rel)) continue;
+    if (isPreserved(preserve, rel)) continue;
     // Only seed a genuinely-ignored file — never force-exclude a tracked one.
     const ignored = await git(repoRoot, ['check-ignore', '-q', '--', rel]);
     if (!ignored.ok) continue;
