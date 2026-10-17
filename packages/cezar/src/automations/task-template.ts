@@ -108,9 +108,15 @@ export async function launchAutomationRun(options: {
   definition: GithubAutomationDefinition;
   candidate: GithubCandidate;
   receiptId: string;
-}): Promise<{ runId: string }> {
+}): Promise<{ runId: string; existing?: boolean }> {
   const { definition, candidate } = options;
   const workflow = await resolveWorkflow(options.root, definition);
+  // Check after workflow loading: no async gap between the final check and run creation.
+  // This shared launcher also covers manual execute checks and explicit receipt retries.
+  if (candidate.event.startsWith('issue.')) {
+    const existing = options.store.findNonArchivedRunByIssue(candidate.repo, candidate.number);
+    if (existing) return { runId: existing, existing: true };
+  }
   const runs = startRuns(options.manager, workflow, definition, renderAutomationTask(definition, candidate));
   const provenance = {
     automationId: definition.id,

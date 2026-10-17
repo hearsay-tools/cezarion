@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
+const require = createRequire(import.meta.url);
+const { isDocsPath } = require('../.github/scripts/change-surface.cjs');
+const docsPathCases = require('../.github/scripts/fixtures/docs-path-cases.cjs');
 const script = fileURLToPath(new URL('./test-changed.mjs', import.meta.url));
 function fixture(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'test-changed-'));
@@ -103,6 +107,34 @@ test('clean and documentation-only changes explicitly skip iteration tests', t =
   const p = plan(cwd);
   assert.equal(p.mode, 'skip');
   assert.deepEqual(p.args, []);
+});
+
+test('Markdown under packages/ skips unless a test may read it', t => {
+  const { cwd, put } = fixture(t);
+  for (const [path, mode] of [
+    ['packages/web/e2e/README.md', 'skip'],
+    ['packages/contract/README.md', 'skip'],
+    ['BACKWARD_COMPATIBILITY.md', 'full'],
+    ['packages/web/e2e/fixtures/README.md', 'full'],
+  ]) {
+    put(path, '# Docs\n');
+    const p = plan(cwd);
+    assert.equal(p.mode, mode, `${path}: ${JSON.stringify(p)}`);
+    if (mode === 'full') assert.equal(p.reason, 'Shared, configuration, or unclassified input');
+    rmSync(join(cwd, path));
+  }
+});
+
+test('skips exactly the paths CI classifies as docs-only', t => {
+  // The same verdict list pins change-surface.test.cjs, so the two selectors cannot drift.
+  const { cwd, put } = fixture(t);
+  for (const { path, docs } of docsPathCases) {
+    assert.equal(isDocsPath(path), docs, path);
+    put(path, path.endsWith('.json') ? '{}\n' : '# Docs\n');
+    const p = plan(cwd);
+    assert.equal(p.mode === 'skip', docs, `${path}: ${JSON.stringify(p)}`);
+    rmSync(join(cwd, path));
+  }
 });
 
 test('an explicit base overrides automatic main selection', t => {

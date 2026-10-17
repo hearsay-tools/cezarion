@@ -45,7 +45,7 @@ export function AutomationsList({ data, error, refresh }: { data: AutomationsRes
     for (let attempt = 0; attempt < 60; attempt += 1) {
       const check = await getAutomationCheck(checkId)
       if (check.status === 'complete') {
-        note(automation.id, { text: `${check.matches ?? 0} match${check.matches === 1 ? '' : 'es'} found; no tasks launched.`, tone: 'info' })
+        note(automation.id, { text: `${check.matches ?? 0} filter match${check.matches === 1 ? '' : 'es'} found; no tasks launched. Counts can include closed items and previously processed events.`, tone: 'info' })
         void refresh()
         return
       }

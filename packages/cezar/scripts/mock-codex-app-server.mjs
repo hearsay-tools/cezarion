@@ -226,6 +226,7 @@ rl.on('line', async (line) => {
     } else {
       emit({ id: msg.id, result: { thread: { id: msg.params?.threadId }, sandbox } });
     }
+    // owned-input-delivery.testkit.ts patches the branch line below to reject one turn; keep it verbatim.
   } else if (msg.method === 'turn/start') {
     const openingCrashText = msg.params?.input?.map?.((part) => part.text ?? '').join('\n') ?? '';
     if (openingCrashText.includes('mock:crash-stderr-pre-ack')) {
@@ -391,6 +392,7 @@ rl.on('line', async (line) => {
       completeSteerTurn(turnId);
       return;
     }
+    // owned-input-delivery.testkit.ts widens the condition below to its delay marker; keep it verbatim.
     if (turnText.includes('mock:agent-echo')) {
       // Same documented agentMessage/turn completion frames as the baseline below.
       emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: `item_echo_${++echoSerial}`, text: turnText } } });

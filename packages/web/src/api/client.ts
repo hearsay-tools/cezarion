@@ -58,6 +58,7 @@ import type {
   GitCommitResponse,
   GitPushResponse,
   GithubChecksData,
+  GithubCommentCountsData,
   GithubSearchData,
   GithubRefStatusData,
   GithubCommentsData,
@@ -906,7 +907,11 @@ export async function getRunCommit(
 export async function getGithub(
   /** `projectId` is for callers that render outside the routed view's scope (the shell's sidebar
    *  list, which sits above the provider); everyone else leaves it to `queryScope()`. */
-  params: { limit?: number; refresh?: boolean; projectId?: string } = {},
+  params: {
+    limit?: number; refresh?: boolean; projectId?: string
+    /** One page (hearsay-tools/cezarion#1183): each side's cursor, or that side done. */
+    issuesCursor?: string; prsCursor?: string; issuesDone?: boolean; prsDone?: boolean
+  } = {},
   opts?: ReadOptions,
 ): Promise<GithubData> {
   return unwrap(
@@ -918,11 +923,35 @@ export async function getGithub(
         query: {
           limit: params.limit === undefined ? undefined : String(params.limit),
           refresh: params.refresh ? '1' : undefined,
+          issuesCursor: params.issuesCursor,
+          prsCursor: params.prsCursor,
+          issuesDone: params.issuesDone ? '1' : undefined,
+          prsDone: params.prsDone ? '1' : undefined,
         },
       },
       init(opts),
     ),
     '/github',
+  )
+}
+
+/** Comment counts for loaded list rows (hearsay-tools/cezarion#1183), which the list defers.
+ *  Degrades to `{ available: false, reason }` server-side — a missing badge, never an ApiError. */
+export async function getGithubCommentCounts(
+  kind: 'issue' | 'pr',
+  numbers: readonly number[],
+  params: { refresh?: boolean } = {},
+  opts?: ReadOptions,
+): Promise<GithubCommentCountsData> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].github['comment-counts'].$get(
+      {
+        param: { projectId: queryScope() },
+        query: { kind, numbers: numbers.join(','), refresh: params.refresh ? '1' : undefined },
+      },
+      init(opts),
+    ),
+    '/github/comment-counts',
   )
 }
 

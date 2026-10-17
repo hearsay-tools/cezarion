@@ -6,6 +6,7 @@ import {
   type RunSummary,
 } from '@open-mercato/cezar-api-client'
 
+import { GITHUB_PAGE_SIZE, githubSideExhausted } from '@/api/github-pages'
 import { isOwnedWorker } from '@/lib/task-groups'
 import { taskReferences } from '@/lib/tasks-table'
 
@@ -16,8 +17,9 @@ import { taskReferences } from '@/lib/tasks-table'
  * opens can never disagree about what "Has a task" or "Review requested" means.
  *
  * Nothing here invents data. A count is `null` (unknown) when its source has not answered, and a
- * lower bound (`atLeast`) when its source is capped: the open list at `GITHUB_LIST_LIMIT`, and a
- * qualifier search at the server's `GITHUB_SEARCH_MAX` hits.
+ * lower bound (`atLeast`) when its source is incomplete: a list preset while its side still has
+ * pages to load (hearsay-tools/cezarion#1183), and a qualifier search at the server's
+ * `GITHUB_SEARCH_MAX` hits. The two tab totals are the server's exact open counts.
  */
 
 export type GithubListView = 'issues' | 'prs'
@@ -31,8 +33,8 @@ export type GithubFilter = IssueFilter | PrFilter
 /** The row ids (`data-gh-filter`): `all` is the Issues row, `all-prs` its pull-request twin. */
 export type GithubRowId = 'assigned' | 'no-task' | 'has-task' | 'all' | 'review' | 'mine' | 'failing' | 'all-prs'
 
-/** The open-list fetch cap. A count that reaches it reads `N+`. */
-export const GITHUB_LIST_LIMIT = 1000
+/** Rows per side per list page (hearsay-tools/cezarion#1183). */
+export { GITHUB_PAGE_SIZE }
 export const GITHUB_FILTER_SEARCH_CAP = GITHUB_SEARCH_MAX
 
 /** `gh search prs` qualifiers, passed through the existing `/github/search` route verbatim. */
@@ -108,7 +110,7 @@ export function countTitle(id: GithubRowId, count: FilterCount | null): string |
   if (count?.bound !== 'atLeast') return undefined
   return id === 'review' || id === 'failing'
     ? `At least ${count.value}: GitHub search returns at most ${GITHUB_FILTER_SEARCH_CAP} results.`
-    : `At least ${count.value}: only the first ${GITHUB_LIST_LIMIT} open items are loaded.`
+    : `At least ${count.value}: only the loaded pages are counted. Scroll to load more.`
 }
 
 const sameLogin = (a: string | undefined, b: string | undefined) =>
@@ -194,14 +196,15 @@ export function filterCounts({ gh, tasks, review, failing }: CountInputs): Recor
     mine: null, failing: fromSearch(failing), 'all-prs': null,
   }
   if (!gh?.available) return none
-  const issuesCapped = gh.issues.length >= GITHUB_LIST_LIMIT
-  const prsCapped = gh.prs.length >= GITHUB_LIST_LIMIT
+  // A preset counts loaded rows only, so it is a lower bound until its side has no next page.
+  const issuesCapped = !githubSideExhausted(gh, 'issues')
+  const prsCapped = !githubSideExhausted(gh, 'prs')
   const listed = (value: number, capped: boolean): FilterCount => ({ value, bound: capped ? 'atLeast' : 'exact' })
   const withTask = tasks ? gh.issues.filter((issue) => tasks.has(issue.number)).length : null
   return {
     ...none,
-    all: listed(gh.issues.length, issuesCapped),
-    'all-prs': listed(gh.prs.length, prsCapped),
+    all: listed(gh.issuesTotal ?? gh.issues.length, false),
+    'all-prs': listed(gh.prsTotal ?? gh.prs.length, false),
     assigned: gh.viewerLogin
       ? listed(gh.issues.filter((issue) => issue.assignees?.some((login) => sameLogin(login, gh.viewerLogin))).length, issuesCapped)
       : null,

@@ -1,4 +1,6 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Writable } from 'node:stream';
@@ -50,6 +52,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     expect(help).toContain('collect');
     expect(help).toContain('--baseline');
     expect(help).toContain('--request-id');
+    expect(help).toContain('--attach');
     expect(help).not.toContain('invalid_input');
   });
   it.each(['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'collect', 'wait',
@@ -70,6 +73,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     expect(spawnHelp).toContain('--baseline');
     expect(spawnHelp).toContain('--request-id');
     expect(spawnHelp).toContain('--context-file');
+    expect(spawnHelp).toContain('--attach');
     await runWorkerCommand(['wait', '--help'], {});
     const waitHelp = String(output.mock.calls.at(-1)?.[0]);
     expect(waitHelp).toContain('<worker-id>');
@@ -281,6 +285,68 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     expect(f.store.getRun(json().workerId)?.workflowDef?.steps[0]?.skill).toBe('worker-skill');
     await runWorkerCommand(['spawn', '--help'], {});
     expect(String(output.mock.calls.at(-1)?.[0])).toContain('--skill');
+  });
+  describe('--attach (hearsay-tools/cezarion#1149)', () => {
+    let repo: string, outside: string, cwd: ReturnType<typeof vi.spyOn>, fetchMock: ReturnType<typeof vi.spyOn>;
+    const spawnArgs = (...flags: string[]) => ['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), ...flags, 'work'];
+    const body = () => JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body));
+    beforeEach(() => {
+      repo = realpathSync(mkdtempSync(join(tmpdir(), 'cez-attach-repo-')));
+      outside = realpathSync(mkdtempSync(join(tmpdir(), 'cez-attach-outside-')));
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
+      mkdirSync(join(repo, 'qa')); mkdirSync(join(repo, 'sub'));
+      writeFileSync(join(repo, 'qa/a.md'), 'a'); writeFileSync(join(repo, 'qa/b.md'), 'b');
+      writeFileSync(join(outside, 'secret.md'), 'x');
+      symlinkSync(join(repo, 'qa/a.md'), join(repo, 'qa/link.md'));
+      cwd = vi.spyOn(process, 'cwd').mockReturnValue(repo);
+      // A refusal answer: these tests read the request body, not the spawn result.
+      fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({ code: 'invalid_input', error: 'stub' }), { status: 400 }));
+    });
+    afterEach(() => { cwd.mockRestore(); rmSync(repo, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); });
+    it('sends repeated --attach values as parent-file references, alongside --context', async () => {
+      await runWorkerCommand(spawnArgs('--attach', 'qa/a.md', '--attach', 'qa/b.md'), env);
+      expect(body().context).toEqual({ artifacts: [{ kind: 'parent-file', path: 'qa/a.md' }, { kind: 'parent-file', path: 'qa/b.md' }] });
+      await runWorkerCommand(spawnArgs('--attach', 'qa/a.md', '--attach', 'qa/b.md', '--context', 'notes'), env);
+      expect(body().context).toEqual({ text: 'notes', artifacts: [{ kind: 'parent-file', path: 'qa/a.md' }, { kind: 'parent-file', path: 'qa/b.md' }] });
+    });
+    it('resolves from a subdirectory to a root-relative path', async () => {
+      cwd.mockReturnValue(join(repo, 'sub'));
+      await runWorkerCommand(spawnArgs('--attach', '../qa/a.md'), env);
+      expect(body().context.artifacts).toEqual([{ kind: 'parent-file', path: 'qa/a.md' }]);
+    });
+    it('fails a missing path before any request, naming it', async () => {
+      expect(await runWorkerCommand(spawnArgs('--attach', 'qa/missing.md'), env)).toBe(1);
+      expect(json()).toEqual({ code: 'invalid_input', error: 'spawn --attach path not found: qa/missing.md' });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+    it.each([
+      ['outside the worktree', () => join(outside, 'secret.md'), 'is outside your worktree'],
+      ['outside via ..', () => '../' + outside.split('/').at(-1) + '/secret.md', 'is outside your worktree'],
+      ['a directory', () => 'qa', 'is not a regular file'],
+      ['a symlink', () => 'qa/link.md', 'is not a regular file'],
+    ])('refuses %s, naming the path as typed', async (_name, value, reason) => {
+      const typed = value();
+      expect(await runWorkerCommand(spawnArgs('--attach', typed), env)).toBe(1);
+      expect(json()).toEqual({ code: 'invalid_input', error: `spawn --attach path ${reason}: ${typed}` });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+    it('names --attach and the path for a duplicate or a .gitignore, which the schema refuses', async () => {
+      writeFileSync(join(repo, 'qa/.gitignore'), '*');
+      expect(await runWorkerCommand(spawnArgs('--attach', 'qa/a.md', '--attach', 'qa/../qa/a.md'), env)).toBe(1);
+      expect(json()).toEqual({ code: 'invalid_input', error: 'duplicate --attach path: qa/a.md' });
+      expect(await runWorkerCommand(spawnArgs('--attach', 'qa/.gitignore'), env)).toBe(1);
+      expect(json()).toEqual({ code: 'invalid_input', error: '--attach cannot attach a .gitignore: qa/.gitignore; ignore rules must come from the baseline' });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+    it('names the rejected --attach value for a path the schema refuses without a custom message', async () => {
+      mkdirSync(join(repo, '.git/x'), { recursive: true }); writeFileSync(join(repo, '.git/x/f'), 'x');
+      expect(await runWorkerCommand(spawnArgs('--attach', '.git/x/f'), env)).toBe(1);
+      expect(json()).toEqual({ code: 'invalid_input', error: 'spawn has invalid --attach: .git/x/f' });
+      // With several attachments, the index in the schema issue picks the bad one, as the parent typed it.
+      expect(await runWorkerCommand(spawnArgs('--attach', 'qa/a.md', '--attach=./.git/x/f', '--attach', 'qa/b.md'), env)).toBe(1);
+      expect(json()).toEqual({ code: 'invalid_input', error: 'spawn has invalid --attach: ./.git/x/f' });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
   describe('runner flag (hearsay-tools/cezarion#632)', () => {
     const spawnArgs = (flags: string[]) => ['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), ...flags, 'work'];

@@ -1,10 +1,10 @@
 import { useMemo } from 'react'
 
-import { useProjectGithub, useProjectGithubSearch, useProjectRuns } from '@/api/queries'
+import { useProjectGithubPages, useProjectGithubSearch, useProjectRuns } from '@/api/queries'
 
 import {
   FAILING_QUERY,
-  GITHUB_LIST_LIMIT,
+  GITHUB_PAGE_SIZE,
   REVIEW_QUERY,
   filterCounts,
   issueNumbersWithTask,
@@ -24,8 +24,8 @@ import {
  * available, so a repo without `gh` costs nothing.
  */
 export function useGithubFilterModel(scope: string) {
-  const list = useProjectGithub(scope, { limit: GITHUB_LIST_LIMIT })
-  const gh = list.data
+  // Every loaded page, flattened: presets count what is loaded and say `N+` until a side is done.
+  const gh = useProjectGithubPages(scope, GITHUB_PAGE_SIZE).data
   const forge = gh?.available === true
   const runs = useProjectRuns(scope, true, scope === 'default')
   const review = useProjectGithubSearch(scope, 'pr', REVIEW_QUERY, forge)

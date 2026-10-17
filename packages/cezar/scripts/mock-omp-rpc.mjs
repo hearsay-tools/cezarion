@@ -347,6 +347,7 @@ async function handle(command) {
   }
 }
 
+// owned-input-delivery.testkit.ts patches the two lines below to reject one prompt; keep them verbatim.
 async function prompt(command) {
   const message = command.message;
   const gated = message.includes('mock:gate-prompt-ack');
@@ -413,7 +414,7 @@ async function prompt(command) {
     }
   } else if (message.includes('mock:deferred-turn-start')) {
     // hearsay-tools/cezarion#1112: the acknowledged prompt opens its native run late. A
-    // separate branch: owned-input-delivery.testkit.ts patches the exact two lines below.
+    // separate branch: owned-input-delivery.testkit.ts patches the exact two `else` lines below.
     respond(command);
     await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
     beginTurn(command);

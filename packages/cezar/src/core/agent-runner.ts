@@ -295,13 +295,20 @@ export interface AgentSession {
   discardQueuedMessages(): void;
   /** True while this session still holds a human follow-up from `sendMessage`
    *  that the model has not consumed and that the runner will still deliver (#486).
-   *  Queueing runners drop on `discardQueuedMessages` and return false immediately.
-   *  Write-through/steer wires report true until the harness settles that line
-   *  (their discard is a no-op). A drain with no new turn must call
-   *  `onAgentInputReady` so run.ts can re-settle the idle boundary. A drain that
-   *  opens a new native turn keeps reporting true until that turn's `turn.started`
-   *  has been emitted: a spawn, an ack or a queue shift is not a turn start, and
-   *  run.ts parks a boundary whose hold reads false (hearsay-tools/cezarion#1112). */
+   *  A held input releases only when (a) the normalized `turn.started` of the turn
+   *  that carries it has been emitted, (b) it is read inside an open normalized turn,
+   *  or (c) a rejection or a close means it can never start, or a
+   *  `discardQueuedMessages` drops it. A discard cannot retract an input the wire
+   *  already wrote or spawned: the runner then either drops only the hold, and the
+   *  input can still run, or keeps the hold because its discard is a no-op (the H2
+   *  exemptions in AGENT_PROTOCOL.md §7). Close needs no runner code: run.ts reads
+   *  the hold only while the session is `open`. A native ack, a native run-start
+   *  frame, a spawn or a queue shift is not a release on its own; it releases only
+   *  when one of those exits already holds. run.ts parks a boundary whose hold reads
+   *  false (hearsay-tools/cezarion#1112). A held follow-up that
+   *  drains at an idle boundary without opening a new turn must call
+   *  `onAgentInputReady` so run.ts can re-settle that boundary; the 250 ms recheck is
+   *  the backstop. AGENT_PROTOCOL.md §7 lists each runner's exit frames. */
   holdsHumanInput(): boolean;
   /** Count of human follow-ups still held behind `holdsHumanInput`. Every built-in
    *  runner reports it from the same state `holdsHumanInput` reads

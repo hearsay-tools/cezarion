@@ -7,6 +7,7 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
+import { queryKeys } from '@/api/queries'
 import type {
   GithubComment,
   GithubCommentsData,
@@ -28,6 +29,7 @@ import {
 import { githubTaskRef } from '@/lib/github-task'
 
 import { GithubRoute, groupCommitRuns, type ThreadRow } from './github'
+import { ListViewportResizeObserver } from './github-geometry.testkit'
 import { readFollowupPrompt, readFollowupSelection, writeFollowupSelection } from './hand-to-agent-draft'
 
 beforeAll(() => {
@@ -36,15 +38,9 @@ beforeAll(() => {
 })
 
 beforeEach(() => {
-  // Radix popovers position with floating-ui, which needs a ResizeObserver; jsdom has none.
-  vi.stubGlobal(
-    'ResizeObserver',
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
-  )
+  // Radix popovers position with floating-ui, which needs a ResizeObserver; jsdom has none. The
+  // list's scroll owner gets a tall viewport so the virtualized rows mount (#1183).
+  vi.stubGlobal('ResizeObserver', ListViewportResizeObserver)
   // The #408 follow-up persistence (remembered selection + per-item draft) is localStorage-
   // backed and jsdom's localStorage survives across tests in this file — start every test clean.
   localStorage.clear()
@@ -210,6 +206,10 @@ function stubFetch(
           { path: 'logo.png', status: 'modified', additions: 0, deletions: 0, patchUnavailableReason: 'binary' },
         ],
       })
+      // Deferred comment counts (hearsay-tools/cezarion#1183) default to "nothing known".
+      if (method === 'GET' && path.startsWith('/api/v1/github/comment-counts')) {
+        return jsonResponse({ available: true, counts: {} })
+      }
       // Lazy PR checks (#664) default to an empty map — a test overrides to hydrate specific glyphs.
       if (method === 'GET' && path.startsWith('/api/v1/github/checks')) {
         return jsonResponse({ available: true, checks: {} })
@@ -542,7 +542,7 @@ describe('the GitHub tab lists', () => {
     const p203: GithubItem = { ...PR_137, number: 203, url: 'u203', checks: null }
     const pr137: GithubItem = { ...PR_137, checks: null }
     stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, prs: [pr137, p201, p202, p203] }),
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: [pr137, p201, p202, p203] }),
       'GET /api/v1/github/checks?prs=137%2C201%2C202%2C203': () =>
         jsonResponse({ available: true, checks: { 137: 'failing', 201: 'passing', 202: 'pending', 203: null } }),
     })
@@ -614,7 +614,7 @@ describe('the GitHub tab lists', () => {
       issues: Array.from({ length: 45 }, (_, i) => ({ ...ISSUE_142, number: i + 1, url: `u${i}` })),
     }
     stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse(many),
+      'GET /api/v1/github?limit=50': () => jsonResponse(many),
     })
     renderAt('/github')
 
@@ -661,6 +661,229 @@ describe('the GitHub tab lists', () => {
       expect.stringContaining('Fix GitHub issue #142: Login form drops session on refresh'),
     )
     expect(setData.mock.calls[0]?.[1]).toContain(ISSUE_142.url)
+  })
+})
+
+describe('scroll-driven paging (hearsay-tools/cezarion#1183, port of open-mercato/cezar#1374)', () => {
+  /** jsdom has no IntersectionObserver; this one lets a test say "the sentinel scrolled into view". */
+  let observers: { target: Element | null; root: Element | null; fire: (visible: boolean) => void }[]
+  beforeEach(() => {
+    observers = []
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        constructor(cb: (entries: { isIntersecting: boolean }[]) => void, opts: { root?: Element | null }) {
+          const record = { target: null as Element | null, root: opts.root ?? null, fire: (v: boolean) => cb([{ isIntersecting: v }]) }
+          observers.push(record)
+          this.observe = (el: Element) => { record.target = el }
+          this.disconnect = () => { record.target = null }
+        }
+        observe: (el: Element) => void
+        disconnect: () => void
+        unobserve() {}
+      },
+    )
+  })
+
+  const ISSUE_120: GithubItem = { ...ISSUE_139, number: 120, title: 'Older issue', url: 'https://github.com/acme/demo/issues/120' }
+  const listPage = (path: string) => path === '/api/v1/github' || path.startsWith('/api/v1/github?')
+  const sentinel = () => document.querySelector('[data-slot="gh-load-more"]')
+  const live = () => observers.filter((o) => o.target !== null)
+
+  /** First list page carries a cursor; the cursored page carries ISSUE_120 and ends the list. */
+  function stubPaged(): SentRequest[] {
+    const sent = stubFetch()
+    const base = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input)
+      if ((init?.method ?? 'GET') === 'GET' && listPage(path)) {
+        sent.push({ path, method: 'GET', body: undefined })
+        return path.includes('issuesCursor=')
+          ? jsonResponse({ ...GITHUB, issues: [ISSUE_120], prs: [], issuesNextCursor: null, prsNextCursor: null })
+          : jsonResponse({ ...GITHUB, issuesNextCursor: 'c1', prsNextCursor: null })
+      }
+      return base(input, init)
+    })
+    return sent
+  }
+
+  it('fetches the next page when the sentinel intersects, with no button', async () => {
+    const sent = stubPaged()
+    renderAt('/github?filter=all')
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    expect(screen.queryByRole('button', { name: /load more/i })).toBeNull()
+    await waitFor(() => expect(live()).toHaveLength(1))
+    // Observed against the element that really scrolls the list: with no shell `main` around it,
+    // that is the list pane itself.
+    expect(live()[0]!.root?.getAttribute('data-slot')).toBe('gh-list')
+    expect(live()[0]!.target).toBe(sentinel())
+
+    act(() => live()[0]!.fire(true))
+    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142', '139', '120']))
+    expect(sent.filter((r) => listPage(r.path) && r.path.includes('issuesCursor=c1'))).toHaveLength(1)
+    // The last page is in: no sentinel, no observer, nothing left to offer.
+    expect(sentinel()).toBeNull()
+    expect(live()).toHaveLength(0)
+  })
+
+  it('does not fetch while the sentinel stays out of view', async () => {
+    const sent = stubPaged()
+    renderAt('/github?filter=all')
+    await waitFor(() => expect(live()).toHaveLength(1))
+    act(() => live()[0]!.fire(false))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(sent.filter((r) => r.path.includes('issuesCursor='))).toHaveLength(0)
+    expect(rows()).toHaveLength(2)
+  })
+
+  it('a failed page stops auto-paging and Retry is the only way on', async () => {
+    const sent = stubPaged()
+    const paged = vi.mocked(fetch).getMockImplementation()!
+    let failNext = true
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input).includes('issuesCursor=') && failNext) {
+        failNext = false
+        sent.push({ path: String(input), method: 'GET', body: undefined })
+        return jsonResponse({ error: 'boom' }, 400)
+      }
+      return paged(input, init)
+    })
+    renderAt('/github?filter=all')
+    await waitFor(() => expect(live()).toHaveLength(1))
+    act(() => live()[0]!.fire(true))
+    const retry = await screen.findByRole('button', { name: 'Retry' })
+    expect(sentinel()?.textContent).toContain('Could not load more.')
+    expect(retry.getAttribute('data-slot')).toBe('gh-load-more-retry')
+    expect(live()).toHaveLength(0)
+    expect(sent.filter((r) => r.path.includes('issuesCursor='))).toHaveLength(1)
+
+    fireEvent.click(retry)
+    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142', '139', '120']))
+  })
+
+  it('a page GitHub could not serve (HTTP 200, available: false) keeps Retry instead of ending the list', async () => {
+    const sent = stubPaged()
+    const paged = vi.mocked(fetch).getMockImplementation()!
+    let failNext = true
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input).includes('issuesCursor=') && failNext) {
+        failNext = false
+        sent.push({ path: String(input), method: 'GET', body: undefined })
+        // The server's degrade contract: a timeout or lost auth answers 200 with a reason.
+        return jsonResponse({ available: false, reason: 'GitHub did not answer in time. Refresh to try again.', issues: [], prs: [] })
+      }
+      return paged(input, init)
+    })
+    renderAt('/github?filter=all')
+    await waitFor(() => expect(live()).toHaveLength(1))
+    act(() => live()[0]!.fire(true))
+    const retry = await screen.findByRole('button', { name: 'Retry' })
+    expect(sentinel()?.textContent).toContain('Could not load more.')
+    expect(rows()).toHaveLength(2)
+    expect(sent.filter((r) => r.path.includes('issuesCursor='))).toHaveLength(1)
+
+    fireEvent.click(retry)
+    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142', '139', '120']))
+  })
+
+  it('a preset with no match on the loaded pages still pages on to find one', async () => {
+    const sent = stubPaged()
+    const paged = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input)
+      // Page 1's issues are both assigned to someone else; the viewer's issue is on page 2.
+      if ((init?.method ?? 'GET') === 'GET' && listPage(path)) {
+        sent.push({ path, method: 'GET', body: undefined })
+        return path.includes('issuesCursor=')
+          ? jsonResponse({ ...GITHUB, viewerLogin: 'octocat', issues: [{ ...ISSUE_120, assignees: ['octocat'] }], prs: [], issuesNextCursor: null, prsNextCursor: null })
+          : jsonResponse({
+            ...GITHUB, viewerLogin: 'octocat', issuesNextCursor: 'c1', prsNextCursor: null,
+            issues: GITHUB.issues.map((issue) => ({ ...issue, assignees: ['someone-else'] })),
+          })
+      }
+      return paged(input, init)
+    })
+    renderAt('/github?filter=assigned')
+    await waitFor(() => expect(live()).toHaveLength(1))
+    expect(rows()).toHaveLength(0)
+    act(() => live()[0]!.fire(true))
+    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['120']))
+    expect(sent.filter((r) => listPage(r.path) && r.path.includes('issuesCursor=c1'))).toHaveLength(1)
+  })
+
+  it('under a text narrow, Load more reaches matches on later pages without auto-paging', async () => {
+    const sent = stubPaged()
+    renderAt('/github?filter=all')
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    // 'session' matches #142 on page 1; page 2's #120 is titled to match too.
+    const paged = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input).includes('issuesCursor=')) {
+        sent.push({ path: String(input), method: 'GET', body: undefined })
+        return jsonResponse({ ...GITHUB, issues: [{ ...ISSUE_120, title: 'Older session bug' }], prs: [], issuesNextCursor: null, prsNextCursor: null })
+      }
+      return paged(input, init)
+    })
+    fireEvent.change(document.querySelector('[data-slot="gh-search"]')!, { target: { value: 'session' } })
+    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142']))
+    // No observer: a narrowed list would keep the sentinel in view and crawl every page.
+    expect(live()).toHaveLength(0)
+    expect(sent.filter((r) => r.path.includes('issuesCursor='))).toHaveLength(0)
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more' }))
+    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142', '120']))
+    expect(sent.filter((r) => r.path.includes('issuesCursor='))).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull()
+  })
+
+  it('Refresh during a pending page load keeps the fresh first page', async () => {
+    let finishPage!: (response: Response) => void
+    stubPaged()
+    const paged = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input)
+      if (path.includes('issuesCursor=')) return new Promise<Response>((resolve) => { finishPage = resolve })
+      if (path.includes('refresh=1') && listPage(path)) {
+        return jsonResponse({ ...GITHUB, issues: [{ ...ISSUE_142, title: 'Fresh title' }], prs: [], issuesNextCursor: null, prsNextCursor: null })
+      }
+      return paged(input, init)
+    })
+    renderAt('/github?filter=all')
+    await waitFor(() => expect(live()).toHaveLength(1))
+    act(() => live()[0]!.fire(true))
+    await waitFor(() => expect(finishPage).toBeTypeOf('function'))
+    fireEvent.click(document.querySelector<HTMLElement>('[data-slot="gh-refresh"]')!)
+    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142']))
+    // The old page lands after the refresh: it must not restore the pre-refresh pages.
+    await act(async () => { finishPage(jsonResponse({ ...GITHUB, issues: [ISSUE_120], prs: [], issuesNextCursor: null, prsNextCursor: null })) })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(rows().map((row) => row.dataset.number)).toEqual(['142'])
+    expect(rows()[0]?.textContent).toContain('Fresh title')
+  })
+
+  it('a text search pauses paging; the No task yet preset keeps paging', async () => {
+    stubPaged()
+    renderAt('/github?filter=all')
+    await waitFor(() => expect(sentinel()).not.toBeNull())
+    fireEvent.change(document.querySelector('[data-slot="gh-search"]')!, { target: { value: '142' } })
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    // Paused, not gone: the next page waits for Load more.
+    expect(live()).toHaveLength(0)
+    expect(screen.getByRole('button', { name: 'Load more' })).toBeTruthy()
+    cleanup()
+    observers = []
+    stubPaged()
+    renderAt('/github?filter=no-task')
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    await waitFor(() => expect(live()).toHaveLength(1))
+    act(() => live()[0]!.fire(true))
+    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142', '139', '120']))
+  })
+
+  it('no sentinel when the first page is the whole list', async () => {
+    stubFetch()
+    renderAt('/github?filter=all')
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    expect(sentinel()).toBeNull()
   })
 })
 
@@ -745,6 +968,31 @@ describe('the GitHub detail pane', () => {
     expect(checks?.getAttribute('href')).toBe(`${PR_137.url}/checks`)
     expect(checks?.getAttribute('target')).toBe('_blank')
     expect(checks?.getAttribute('rel')).toBe('noopener noreferrer')
+  })
+
+  it('hydrates the selected PR body and diffstat from the thread detail (hearsay-tools/cezarion#1183)', async () => {
+    stubFetch({
+      'GET /api/v1/github/comments/pr/137': () => jsonResponse({
+        ...THREAD,
+        detail: { body: 'Hydrated PR description', additions: 240, deletions: 12 },
+      }),
+    })
+    renderAt('/github/prs/137')
+
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-body"]')?.textContent).toContain('Hydrated PR description'))
+    expect(document.querySelector('[data-slot="gh-diffstat"]')?.textContent).toBe('+240 −12')
+  })
+
+  it('an issue whose list row has no body shows the detail body', async () => {
+    const { body: _body, ...bodiless } = ISSUE_142
+    stubFetch({
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issues: [bodiless, ISSUE_139] }),
+      'GET /api/v1/github/comments/issue/142': () => jsonResponse({ ...THREAD, detail: { body: 'Body from the detail tier' } }),
+    })
+    renderAt('/github/issues/142')
+
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-body"]')?.textContent).toContain('Body from the detail tier'))
+    expect(document.querySelector('[data-slot="gh-body"]')?.textContent).not.toContain('(no description)')
   })
 
   it('renders the issue body through the markdown pipeline', async () => {
@@ -1255,16 +1503,84 @@ describe('the comment thread', () => {
 
   it('manual Refresh bypasses the list cache and updates the selected issue body', async () => {
     const sent = stubFetch({
-      'GET /api/v1/github?limit=1000&refresh=1': () => jsonResponse({
+      'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse({
         ...GITHUB, issues: [{ ...ISSUE_142, body: 'Edited upstream requirements' }, ISSUE_139],
       }),
     })
     renderAt('/github/issues/142')
-    await screen.findByText(ISSUE_142.body)
+    await screen.findByText(ISSUE_142.body!)
     fireEvent.click(document.querySelector<HTMLElement>('[data-slot="gh-refresh"]')!)
     await screen.findByText('Edited upstream requirements')
-    expect(screen.queryByText(ISSUE_142.body)).toBeNull()
-    expect(sent.some(({ path }) => path === '/api/v1/github?limit=1000&refresh=1')).toBe(true)
+    expect(screen.queryByText(ISSUE_142.body!)).toBeNull()
+    expect(sent.some(({ path }) => path === '/api/v1/github?limit=50&refresh=1')).toBe(true)
+  })
+
+  it('tabs show the server totals, not the loaded length (hearsay-tools/cezarion#1183)', async () => {
+    const many = Array.from({ length: 45 }, (_, i) => ({ ...ISSUE_139, number: 1000 + i, url: `https://github.com/acme/demo/issues/${1000 + i}` }))
+    stubFetch({
+      'GET /api/v1/github?limit=50': () => jsonResponse({
+        ...GITHUB, issues: many, issuesTotal: 88, prsTotal: 12, issuesNextCursor: 'c45', prsNextCursor: 'p1',
+      }),
+    })
+    renderAt('/github?filter=all')
+    expect(await screen.findByText('Issues · 88')).toBeTruthy()
+    expect(screen.getByText('Pull requests · 12')).toBeTruthy()
+  })
+
+  it('a deferred row shows no badge until its count lands, then shows it', async () => {
+    let answer!: (response: Response) => void
+    stubFetch({
+      'GET /api/v1/github?limit=50': () => jsonResponse({
+        ...GITHUB, issues: [{ ...ISSUE_142, comments: 0 }, { ...ISSUE_139, comments: 0 }], commentsDeferred: true,
+      }),
+      'GET /api/v1/github/comment-counts?kind=issue&numbers=142%2C139': () => new Promise<Response>((resolve) => { answer = resolve }),
+    })
+    renderAt('/github?filter=all')
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    await waitFor(() => expect(answer).toBeTypeOf('function'))
+    expect(document.querySelector('[data-slot="gh-comment-count"]')).toBeNull()
+    await act(async () => { answer(jsonResponse({ available: true, counts: { 142: 3, 139: 0 } })) })
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-row"] [data-slot="gh-comment-count"]')?.getAttribute('data-count')).toBe('3'))
+    // Rows only: the previewed detail shows the same hydrated count in its own meta line.
+    expect(document.querySelectorAll('[data-slot="gh-row"] [data-slot="gh-comment-count"]')).toHaveLength(1)
+  })
+
+  it('the open detail shows the hydrated comment count, not the deferred placeholder', async () => {
+    stubFetch({
+      'GET /api/v1/github?limit=50': () => jsonResponse({
+        ...GITHUB, issues: [{ ...ISSUE_142, comments: 0 }, { ...ISSUE_139, comments: 0 }], commentsDeferred: true,
+      }),
+      'GET /api/v1/github/comment-counts?kind=issue&numbers=142%2C139': () => jsonResponse({ available: true, counts: { 142: 4, 139: 0 } }),
+    })
+    renderAt('/github/issues/142')
+    await waitFor(() => expect(
+      document.querySelector('[data-slot="gh-meta"] [data-slot="gh-comment-count"]')?.getAttribute('data-count'),
+    ).toBe('4'))
+  })
+
+  it('Refresh collapses to a fresh first page', async () => {
+    const sent = stubFetch({
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issuesNextCursor: 'c2', prsNextCursor: null }),
+      'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse({
+        ...GITHUB, issues: [{ ...ISSUE_142, title: 'Fresh title' }], issuesNextCursor: 'c1', prsNextCursor: null,
+      }),
+    })
+    const client = renderAt('/github?filter=all')
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    // A second page is loaded (the scroll sentinel lands in a later change).
+    const key = queryKeys.githubPages(50)
+    await act(async () => {
+      client.setQueryData(key, (current: { pages: GithubData[]; pageParams: unknown[] } | undefined) => ({
+        pages: [...current!.pages, { ...GITHUB, issues: [{ ...ISSUE_139, number: 7, url: 'https://github.com/acme/demo/issues/7' }], prs: [] }],
+        pageParams: [...current!.pageParams, { issuesCursor: 'c2', prsDone: true }],
+      }))
+    })
+    await waitFor(() => expect(rows()).toHaveLength(3))
+    fireEvent.click(document.querySelector<HTMLElement>('[data-slot="gh-refresh"]')!)
+    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142']))
+    expect(rows()[0]!.textContent).toContain('Fresh title')
+    expect(client.getQueryData<{ pages: unknown[]; pageParams: unknown[] }>(key)).toMatchObject({ pages: [expect.anything()], pageParams: [{}] })
+    expect(sent.some(({ path }) => path === '/api/v1/github?limit=50&refresh=1')).toBe(true)
   })
 
   it('sends refresh=1 for the OPEN THREAD when the tab is manually refreshed', async () => {
@@ -1313,8 +1629,8 @@ describe('the unavailable forge state', () => {
   it('renders the server reason and the gh hint, and Try again refetches with refresh=1', async () => {
     const unavailable: GithubData = { available: false, reason: 'gh not installed', issues: [], prs: [] }
     const sent = stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse(unavailable),
-      'GET /api/v1/github?limit=1000&refresh=1': () => jsonResponse(unavailable),
+      'GET /api/v1/github?limit=50': () => jsonResponse(unavailable),
+      'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse(unavailable),
     })
     renderAt('/github')
 
@@ -1322,12 +1638,12 @@ describe('the unavailable forge state', () => {
       expect(screen.getByRole('heading', { level: 1, name: 'GitHub is unavailable here' })).toBeTruthy(),
     )
     expect(screen.getByText('gh not installed')).toBeTruthy()
-    // One fast fetch now (#664): the single limit=1000 load is what proved the forge unreachable.
-    expect(sent.some((request) => request.path === '/api/v1/github?limit=1000')).toBe(true)
+    // One fast fetch now (#664): the single limit=50 load is what proved the forge unreachable.
+    expect(sent.some((request) => request.path === '/api/v1/github?limit=50')).toBe(true)
 
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     await waitFor(() =>
-      expect(sent.some((request) => request.path === '/api/v1/github?limit=1000&refresh=1')).toBe(true),
+      expect(sent.some((request) => request.path === '/api/v1/github?limit=50&refresh=1')).toBe(true),
     )
   })
 })
@@ -1408,6 +1724,12 @@ describe('GitHub handoff field chrome (#243)', () => {
   ].find((file) => existsSync(file))
   if (!cssPath) throw new Error(`github-layout.css not found from ${process.cwd()}`)
   const css = readFileSync(cssPath, 'utf8')
+
+  it('styles row dividers and the phone preview on the row item, which survives virtualization (#1183)', () => {
+    expect(css).toMatch(/\[data-slot='gh-row-item'\]\[data-divided\]\s*\{\s*border-block-start:/)
+    expect(css).toMatch(/\[data-mobile-preview\] \[data-slot='gh-row-item'\]\[data-compact-hidden\]\s*\{\s*display:\s*none/)
+    expect(css).not.toMatch(/\[data-slot='gh-rows'\] > li/)
+  })
 
   it('keeps phone filters wrapping instead of stacking a column that hides the first row (#325)', () => {
     expect(css).not.toMatch(/\[data-slot='gh-issue-filters'\]\s*\{[^}]*flex-direction:\s*column/)
@@ -2812,7 +3134,7 @@ describe('issue assignee and board controls', () => {
     { ...ISSUE_139, assignees: ['bob'], projectIds: [] },
   ] }
   it('composes Assigned to me with the board and search, then clears every filter', async () => {
-    stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse(filteredData) })
+    stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse(filteredData) })
     renderAt('/github')
     fireEvent.click(await screen.findByRole('button', { name: 'Assigned to me' }))
     expect(rows().map(r => r.textContent).join()).toContain(ISSUE_142.title)
@@ -2822,10 +3144,12 @@ describe('issue assignee and board controls', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search issues' }), { target: { value: 'no match' } })
     expect(rows()).toHaveLength(0)
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
-    expect(rows()).toHaveLength(2)
+    // The emptied list unmounted its virtualizer (#1183); the remount sizes its viewport on the
+    // next ResizeObserver tick, which a browser delivers before paint.
+    await waitFor(() => expect(rows()).toHaveLength(2))
   })
   it('marks Assigned to me active only when the viewer is the sole assignee, including manual selection', async () => {
-    stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse(filteredData) })
+    stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse(filteredData) })
     renderAt('/github')
     const me = await screen.findByRole('button', { name: 'Assigned to me' })
     expect(me.getAttribute('aria-pressed')).toBe('false')
@@ -2840,7 +3164,7 @@ describe('issue assignee and board controls', () => {
     expect(me.getAttribute('aria-pressed')).toBe('false')
   })
   it('keeps issue filters off the PR list when changing tabs', async () => {
-    stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse(filteredData) })
+    stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse(filteredData) })
     renderAt('/github')
     fireEvent.click(await screen.findByRole('button', { name: 'Assigned to me' }))
     fireEvent.click(screen.getByRole('link', { name: /Pull requests ·/ }))
@@ -2856,8 +3180,8 @@ it('selects multiple assignees and retains filter chrome during refresh', async 
     { ...ISSUE_142, assignees: ['alice'] }, { ...ISSUE_139, assignees: ['bob'] },
   ] }
   stubFetch({
-    'GET /api/v1/github?limit=1000': () => jsonResponse(data),
-    'GET /api/v1/github?limit=1000&refresh=1': () => new Promise(resolve => { finish = resolve }),
+    'GET /api/v1/github?limit=50': () => jsonResponse(data),
+    'GET /api/v1/github?limit=50&refresh=1': () => new Promise(resolve => { finish = resolve }),
   })
   renderAt('/github')
   fireEvent.click(await screen.findByRole('button', { name: 'Assignee' }))
@@ -2884,7 +3208,7 @@ it('keeps legacy metadata usable with disabled personal filtering and no board p
 })
 
 it('renders a disabled No boards picker on the filter row when projects is empty', async () => {
-  stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, viewerLogin: 'alice', projects: [] }) })
+  stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, viewerLogin: 'alice', projects: [] }) })
   renderAt('/github')
   const picker = await screen.findByRole('combobox', { name: 'Project board' }) as HTMLSelectElement
   expect(picker.disabled).toBe(true)
@@ -2901,8 +3225,8 @@ it.each([[], undefined])('does not restore a stale board selection after refresh
   ] }
   let refreshes = 0
   stubFetch({
-    'GET /api/v1/github?limit=1000': () => jsonResponse(boardData),
-    'GET /api/v1/github?limit=1000&refresh=1': () => jsonResponse(++refreshes === 1 ? { ...boardData, projects } : boardData),
+    'GET /api/v1/github?limit=50': () => jsonResponse(boardData),
+    'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse(++refreshes === 1 ? { ...boardData, projects } : boardData),
   })
   renderAt('/github')
   fireEvent.change(await screen.findByRole('combobox', { name: 'Project board' }), { target: { value: 'P1' } })
@@ -2946,7 +3270,7 @@ describe('cross-state search fallback (#730)', () => {
 
   it.each(['4507', '#4507'])('searches exact numeric %s despite an open substring match', async (query) => {
     const sent = stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, prs: [{ ...PR_137, number: 14507 }] }),
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: [{ ...PR_137, number: 14507 }] }),
       [`GET /api/v1/github/search?kind=pr&q=${encodeURIComponent(query)}`]: () => jsonResponse({ available: true, items: [MERGED_PR] }),
     })
     renderAt('/github/prs')
@@ -2960,7 +3284,7 @@ describe('cross-state search fallback (#730)', () => {
   it.each(['unavailable', 'empty'])('reports exact lookup %s alongside local substring rows', async (outcome) => {
     let finish!: (response: Response) => void
     const sent = stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, prs: [{ ...PR_137, number: 14507 }] }),
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: [{ ...PR_137, number: 14507 }] }),
       'GET /api/v1/github/search?kind=pr&q=4507': () => new Promise(resolve => { finish = resolve }),
     })
     renderAt('/github/prs')
@@ -2978,8 +3302,8 @@ describe('cross-state search fallback (#730)', () => {
     let outcome: 'success' | 'failure' | 'recovered' = 'success'
     const listData = { ...GITHUB, prs: withLocal ? [{ ...PR_137, number: 14507 }] : [PR_137] }
     const sent = stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse(listData),
-      'GET /api/v1/github?limit=1000&refresh=1': () => jsonResponse(listData),
+      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
+      'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse(listData),
       'GET /api/v1/github/search?kind=pr&q=4507': () => outcome === 'failure'
         ? jsonResponse({ error: 'Search refresh unavailable' }, 400)
         : jsonResponse({ available: true, items: [{ ...MERGED_PR, title: outcome === 'recovered' ? 'Updated remote title' : MERGED_PR.title }] }),
@@ -3042,7 +3366,7 @@ describe('cross-state search fallback (#730)', () => {
     const expectedNumbers = [...(selected === null ? [] : [selected]), MERGED_PR.number, ...openPrs.slice(0, selected === null ? 99 : 98).map(pr => pr.number)]
     const checksPath = `/api/v1/github/checks?prs=${encodeURIComponent(expectedNumbers.join(','))}`
     const sent = stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, prs: openPrs }),
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: openPrs }),
       'GET /api/v1/github/search?kind=pr&q=4507': () => jsonResponse({ available: true, items: [MERGED_PR] }),
       [`GET ${checksPath}`]: () => jsonResponse({ available: true, checks: { 4507: 'passing' } }),
     })
@@ -3259,7 +3583,7 @@ describe('cross-state search fallback (#730)', () => {
     const MERGED_STREAM: GithubItem = { ...MERGED_PR, title: 'Stream reconcile' }
 
     const sent = stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, prs: [PR_137, PR_200] }),
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: [PR_137, PR_200] }),
       // A real `gh search prs Stream` answers with the OPEN #137 alongside the merged one — which
       // is what made the stale payload render #137 a second time.
       'GET /api/v1/github/search?kind=pr&q=Stream': () =>
@@ -3360,7 +3684,7 @@ describe('cross-state search fallback (#730)', () => {
       checks: null,
     }
     const sent = stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, prs: [PR_137, PR_200] }),
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: [PR_137, PR_200] }),
     })
     renderAt('/github/prs')
     await waitFor(() => expect(rows()).toHaveLength(2))
@@ -3426,7 +3750,7 @@ describe('cross-state search preserves fork filters', () => {
   const hitTitles = () => Array.from(hits()?.querySelectorAll('li') ?? []).map(row => row.textContent).join('|')
   it('uses the full local narrow to trigger search, then ANDs labels and board with OR assignees', async () => {
     stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse(listData),
+      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
       'GET /api/v1/github/search?kind=issue&q=payment': () => jsonResponse({ available: true, items: remote }),
     })
     renderAt('/github')
@@ -3448,7 +3772,7 @@ describe('cross-state search preserves fork filters', () => {
 
   it('keeps the selected remote detail when filters hide its row', async () => {
     stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse(listData),
+      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
       'GET /api/v1/github/search?kind=issue&q=remote': () => jsonResponse({ available: true, items: [remote[0]] }),
     })
     renderAt('/github')
@@ -3464,8 +3788,8 @@ describe('cross-state search preserves fork filters', () => {
   it('refresh retries an incomplete search without losing the active filter', async () => {
     let attempts = 0
     stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse(listData),
-      'GET /api/v1/github?limit=1000&refresh=1': () => jsonResponse(listData),
+      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
+      'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse(listData),
       'GET /api/v1/github/search?kind=issue&q=remote': () => jsonResponse(++attempts === 1
         ? { available: true, items: [{ ...remote[0], projectIds: undefined }], projectsReason: 'Project board lookup timed out.' }
         : { available: true, items: [remote[2]] }),
@@ -3481,7 +3805,7 @@ describe('cross-state search preserves fork filters', () => {
 
   it('does not claim exhaustive absence when filters discard a truncated search window', async () => {
     stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse(listData),
+      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
       'GET /api/v1/github/search?kind=issue&q=remote': () => jsonResponse({ available: true, items: [remote[0]], truncated: true }),
     })
     renderAt('/github')
@@ -3493,7 +3817,7 @@ describe('cross-state search preserves fork filters', () => {
 
   it('reports incomplete search board metadata without clearing query or selected board', async () => {
     stubFetch({
-      'GET /api/v1/github?limit=1000': () => jsonResponse(listData),
+      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
       'GET /api/v1/github/search?kind=issue&q=remote': () => jsonResponse({ available: true,
         items: [{ ...remote[0], projectIds: undefined }], projectsReason: 'Project board lookup timed out.' }),
     })
@@ -3553,11 +3877,11 @@ it('keeps passing checks with unknown requirements blocked', async () => {
 
 
 const compactHiddenFlags = () =>
-  rows().map((row) => row.closest('li')?.hasAttribute('data-compact-hidden') ?? false)
+  rows().map((row) => row.closest('[data-slot="gh-row-item"]')?.hasAttribute('data-compact-hidden') ?? false)
 
 it('hides phone-list rows past the second unless that row is the open detail (#344)', async () => {
   const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
-  stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
+  stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
   renderAt('/github/issues/142')
   await screen.findByRole('button', { name: 'View all 3 issues' })
   expect(compactHiddenFlags()).toEqual([false, false, true])
@@ -3565,16 +3889,29 @@ it('hides phone-list rows past the second unless that row is the open detail (#3
 
 it('keeps the selected phone-list row when it sits past the second (#344)', async () => {
   const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
-  stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
+  stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
   renderAt('/github/issues/138')
   await screen.findByRole('button', { name: 'View all 3 issues' })
   expect(compactHiddenFlags()).toEqual([false, false, false])
   expect(rows()[2]?.getAttribute('aria-current')).toBe('page')
 })
 
+it('wraps each list row in one item that carries the divider and the phone-preview flag (#1183)', async () => {
+  const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
+  stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
+  renderAt('/github/issues/142')
+  await screen.findByRole('button', { name: 'View all 3 issues' })
+  const items = rows().map((row) => row.closest('[data-slot="gh-row-item"]'))
+  // The virtualizer wraps every child in its own element, so `ul > li` and `li + li` no longer
+  // reach the rows: the item itself says whether it draws a divider or hides on a phone.
+  expect(items.map((item) => item?.getAttribute('role'))).toEqual(['listitem', 'listitem', 'listitem'])
+  expect(items.map((item) => item?.hasAttribute('data-divided'))).toEqual([false, true, true])
+  expect(document.querySelectorAll('[data-slot="gh-rows"] li')).toHaveLength(0)
+})
+
 it('lets a mobile detail preview reveal every issue without losing its selected item', async () => {
   const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
-  stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
+  stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
   renderAt('/github/issues/142')
   const expand = await screen.findByRole('button', { name: 'View all 3 issues' })
   expect(expand.getAttribute('aria-expanded')).toBe('false')
@@ -3593,8 +3930,8 @@ it.each(['ready', 'unavailable', 'network'] as const)('keeps the board filter an
   ] }
   let finish!: (value: Response) => void
   stubFetch({
-    'GET /api/v1/github?limit=1000': () => jsonResponse(boardData),
-    'GET /api/v1/github?limit=1000&refresh=1': () => jsonResponse({ ...boardData, projectsState: 'refreshing', projectsGeneration: generation,
+    'GET /api/v1/github?limit=50': () => jsonResponse(boardData),
+    'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse({ ...boardData, projectsState: 'refreshing', projectsGeneration: generation,
       issues: [boardData.issues[0], { ...ISSUE_139 }] }),
     [`GET /api/v1/github/projects?generation=${generation}`]: () => new Promise<Response>(resolve => { finish = resolve }),
   })

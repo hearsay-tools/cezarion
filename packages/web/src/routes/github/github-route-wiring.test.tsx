@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
 import { AppRoutes } from '@/routes'
+import { ListViewportResizeObserver } from './github-geometry.testkit'
 
 /**
  * The GitHub tab's ROUTE WIRING, tested through the real `AppRoutes` (#730).
@@ -169,11 +170,7 @@ const TEST_TIMEOUT = 30_000
 beforeEach(() => {
   vi.stubGlobal(
     'ResizeObserver',
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
+    ListViewportResizeObserver,
   )
 })
 

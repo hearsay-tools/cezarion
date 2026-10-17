@@ -1583,9 +1583,13 @@ entries:
     pr: 1362
     title: "feat: speed up GitHub tab with paged hydration (#1362)"
     date: 2026-10-10
-    status: pending
+    status: ported
     hint:
       conflicts: 10
+    fork:
+      pr: 1189
+    decided: 2026-10-17
+    reason: "re-implemented together with open-mercato/cezar#1362, #1366 and #1374 on the fork's own GitHub surface (assignees, viewer filters, boards, account-keyed cache, sidebar); owner decisions: list-backed presets keep paging, and the list keeps a deprecated body"
   - sha: 7a57e1c9c0baff3158bb0f64bcb032e4a693a5b5
     pr: 1364
     title: "chore: set up e2e browser tests (#1364)"
@@ -1611,9 +1615,13 @@ entries:
     pr: 1366
     title: "fix(github): make the paged GitHub list query valid on real GitHub (#1366)"
     date: 2026-10-11
-    status: pending
+    status: ported
     hint:
       conflicts: 1
+    fork:
+      pr: 1189
+    decided: 2026-10-17
+    reason: "re-implemented together with open-mercato/cezar#1362, #1366 and #1374 on the fork's own GitHub surface (assignees, viewer filters, boards, account-keyed cache, sidebar); owner decisions: list-backed presets keep paging, and the list keeps a deprecated body"
   - sha: e19ae5fe329e72cec14812ac3b2257f786654a46
     pr: 1373
     title: "fix(redaction): an sk- key never follows a letter, so task-… stays a word (#1373)"
@@ -1653,9 +1661,13 @@ entries:
     pr: 1374
     title: "fix(github): virtualize the list against its own pane and auto-load pages on scroll (#1374)"
     date: 2026-10-11
-    status: pending
+    status: ported
     hint:
       conflicts: 1
+    fork:
+      pr: 1189
+    decided: 2026-10-17
+    reason: "re-implemented together with open-mercato/cezar#1362, #1366 and #1374 on the fork's own GitHub surface (assignees, viewer filters, boards, account-keyed cache, sidebar); owner decisions: list-backed presets keep paging, and the list keeps a deprecated body"
   - sha: 09e1557940b4f1d29d9acf38a0282228da869904
     pr: 1375
     title: "docs(changelog): add the changes merged since #1365 under Unreleased (#1375)"

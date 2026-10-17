@@ -48,7 +48,7 @@ export function filterGithubItems(
     if (opts.projectId && item.projectIds !== undefined && !item.projectIds.includes(opts.projectId)) return false
     if (query === '') return true
     if (idOnly) return String(item.number).includes(numeric)
-    const haystack = `#${item.number} ${item.title} ${item.author} ${item.body}`.toLowerCase()
+    const haystack = `#${item.number} ${item.title} ${item.author} ${item.body ?? ''}`.toLowerCase()
     return haystack.includes(query)
   })
 }

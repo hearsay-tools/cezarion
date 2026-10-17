@@ -273,6 +273,7 @@ async function handle(command) {
     send({ type: 'agent_start' }); send({ type: 'turn_start' });
     for (const text of turnMessages(command.message)) sendText([text]);
     sendTurnEnd();
+    // owned-input-delivery.testkit.ts patches the branch line below and the four send lines under it; keep them verbatim.
   } else if (command.type === 'prompt' && command.message.includes('mock:agent-echo')) {
     // rpc-lifecycle.ndjson's normal prompt/assistant/settled sequence.
     send({ id: command.id, type: 'response', command: 'prompt', success: true });

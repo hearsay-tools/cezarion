@@ -92,7 +92,7 @@ import {
 } from '../worktree-setup.ts';
 import { getHeadCommit, getRepoInfo } from '../server/git.ts';
 import { ensureOwnedWorkspace, verifyOwnedWorkspace } from '../delegation/workspace.ts';
-import { verifyWorkerContext } from '../delegation/context.ts';
+import { placeWorkerAttachments, verifyWorkerContext } from '../delegation/context.ts';
 import { enqueueAgentInput, agentInputBatch, hasLiveInboxClaim } from '../delegation/input.ts';
 import { parseDelegationEffort } from '../delegation/effort.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
@@ -3959,7 +3959,9 @@ export class RunManager {
     this.store.commitDelegation([{ id: parentId, delegation: { ...run.delegation, wait } }]);
     this.reconcileWorkerWaits();
     if (this.waiting.has(parentId) || state.atTurnBoundary === state.session) this.parkWorkerWait(parentId, state);
-    return this.workerWait(parentId)!;
+    // Completed destruction may retire this wait during reconciliation.
+    const current = this.store.getRun(parentId)?.delegation;
+    return current?.role === 'root' ? current.wait ?? current.lastWait ?? wait : wait;
   }
 
   private assertCanRegisterWorkerWait(runId: string): void {
@@ -4320,7 +4322,18 @@ export class RunManager {
     }
     // Settled receipts are immutable observations, including a current receipt recovered
     // on a terminal parent. Reading one neither resumes work nor cancels a later wait.
-    if (wait.phase === 'wake-pending') return reconcileWorkerWait(wait, [], new Date().toISOString());
+    if (wait.phase === 'wake-pending') {
+      // A caller still executing its turn has observed the receipt. Retire the
+      // obsolete wake now; parked parents still need their queued delivery to resume.
+      if (!this.disposed && ['queued', 'running', 'waiting'].includes(run.status) &&
+        !this.rootFinishRequested(parentId) && !this.historyDeletionPending(parentId) &&
+        this.isExecutingWorkerWaitTurn(parentId)) {
+        const cancelled = { ...wait, reason: 'cancelled' as const };
+        this.withdrawWorkerWait(parentId, undefined, 'cancelled');
+        return cancelled;
+      }
+      return reconcileWorkerWait(wait, [], new Date().toISOString());
+    }
     if (this.disposed || !['queued', 'running', 'waiting'].includes(run.status) || this.rootFinishRequested(parentId) || this.historyDeletionPending(parentId)) {
       throw new DelegationPolicyError('incompatible_state', 'Parent cannot cancel a worker wait');
     }
@@ -4328,6 +4341,13 @@ export class RunManager {
     this.store.commitDelegation([{ id: parentId, delegation: { ...run.delegation, wait: settled, lastWait: settled } }]);
     this.reconcileWorkerWaits();
     return this.workerWait(parentId) ?? settled;
+  }
+
+  /** Absence from admission caches is not proof of a live turn after restart. */
+  private isExecutingWorkerWaitTurn(runId: string): boolean {
+    const state = this.active.get(runId);
+    return !!state?.session?.open && !state.cancelled && !this.recoveringRun(runId) &&
+      state.atTurnBoundary !== state.session && !this.workerWaiting.has(runId) && !this.workerWakeAdmitted.has(runId);
   }
 
   private workerWait(parentId: string): WorkerWait | undefined {
@@ -4583,6 +4603,16 @@ export class RunManager {
           }
         }
         if (next.phase === 'wake-pending') {
+          // Completed destruction leaves no selected resource to await. A live
+          // turn can move straight to another wait; a parked parent must still wake.
+          if (!next.requestIds && next.workerIds.length && next.workerIds.every(id => {
+            const child = this.store.getRun(id)?.delegation;
+            return child?.role === 'worker' ? child.destroy?.phase === 'complete'
+              : deletedResults.get(id)?.cleanup === 'complete';
+          }) && this.isExecutingWorkerWaitTurn(parent.id)) {
+            this.withdrawWorkerWait(parent.id);
+            continue;
+          }
           const timer = this.workerWaitTimers.get(parent.id);
           if (timer) clearTimeout(timer);
           this.workerWaitTimers.delete(parent.id);
@@ -4710,13 +4740,13 @@ export class RunManager {
     return true;
   }
 
-  private withdrawWorkerWait(runId: string, acceptedHumanMessage?: QueuedMessage): void {
+  private withdrawWorkerWait(runId: string, acceptedHumanMessage?: QueuedMessage, reason?: 'cancelled'): void {
     const run = this.store.getRun(runId);
     const wait = this.workerWait(runId);
     if (!run || !run.delegation || run.delegation.role === 'invalid' || !wait) return;
     // Publish intent retirement, exact wake removal and accepted human input
     // together. A disk failure must leave both durable and admission state intact.
-    this.store.commitWorkerWaitWithdrawal(runId, wait.id, acceptedHumanMessage);
+    this.store.commitWorkerWaitWithdrawal(runId, wait.id, acceptedHumanMessage, reason);
     this.clearWorkerWaitAdmission(runId);
   }
 
@@ -5801,7 +5831,8 @@ export class RunManager {
       try {
         if (record.delegation.destroy) throw new Error('Worker destruction has begun');
         cwd = (await verifyOwnedWorkspace(this.repoRoot, record)).path;
-        await verifyWorkerContext({ dataDir: this.dataDir, parentId: record.delegation.parentRunId, workspace: record.delegation.workspace, context: record.delegation.context });
+        await verifyWorkerContext({ dataDir: this.dataDir, parentId: record.delegation.parentRunId, workspace: record.delegation.workspace, context: record.delegation.context,
+          parentCwd: this.store.getRun(record.delegation.parentRunId)?.worktreePath ?? this.repoRoot });
       } catch (error) {
         const message = `owned workspace unavailable: ${error instanceof Error ? error.message : String(error)}`;
         const finishedAt = new Date().toISOString();
@@ -6610,7 +6641,11 @@ export class RunManager {
       try {
         if (this.workerExecutionStopped(runId)) { this.dropActive(runId); return; }
         const ownedWorkspace = owned && ownedRun ? await ensureOwnedWorkspace(this.repoRoot, ownedRun) : undefined;
-        if (ownedRun?.delegation?.role === 'worker') await verifyWorkerContext({ dataDir: this.dataDir, parentId: ownedRun.delegation.parentRunId, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context });
+        if (ownedRun?.delegation?.role === 'worker') await verifyWorkerContext({ dataDir: this.dataDir, parentId: ownedRun.delegation.parentRunId, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context,
+          parentCwd: this.store.getRun(ownedRun.delegation.parentRunId)?.worktreePath ?? this.repoRoot });
+        // First launch only (hearsay-tools/cezarion#1149): a worker re-queued past its first step and
+        // runContinuation never re-place attachments the worker may have edited or deleted.
+        if (ownedRun?.delegation?.role === 'worker' && startAt === 0) await placeWorkerAttachments({ dataDir: this.dataDir, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context });
         const wt = ownedWorkspace
           ? { path: ownedWorkspace.path, branch: ownedWorkspace.branch, baseBranch: ownedWorkspace.baselineSha }
           : await createWorktree(this.repoRoot, runId, base);
@@ -6624,7 +6659,11 @@ export class RunManager {
         emit({ type: 'note', message: `worktree ready — branch ${wt.branch} (base ${wt.baseBranch})` });
         // Seed from this manager's project root: each multi-project context has
         // its own manager/repoRoot and must never copy another project's layer.
-        const seededConfig = await seedAgentConfigLocalLayer(this.repoRoot, state.cwd).catch(() => []);
+        // A worker's explicit `--attach` files win over the main checkout's copy (hearsay-tools/cezarion#1149).
+        const attached = new Set(ownedRun?.delegation?.role === 'worker'
+          ? (ownedRun.delegation.context?.inputs ?? []).flatMap(input => input.source.kind === 'parent-file' ? [input.source.path] : [])
+          : []);
+        const seededConfig = await seedAgentConfigLocalLayer(this.repoRoot, state.cwd, process.env, attached).catch(() => []);
         if (seededConfig.length > 0) {
           emit({ type: 'note', message: `seeded personal agent config: ${seededConfig.join(', ')}` });
         }

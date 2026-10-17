@@ -2147,6 +2147,39 @@ export class RunStore extends EventEmitter {
     return [...ids];
   }
 
+  /** First non-archived task referencing a project issue, including secondary references. */
+  findNonArchivedRunByIssue(repo: string, number: number): string | undefined {
+    const url = `https://github.com/${repo}/issues/${number}`.toLowerCase();
+    const matches = (run: RunRecord) => {
+      if (run.archived) return false;
+      const urls = [run.referencedIssueUrl, ...(run.referencedIssueCandidates ?? []),
+        ...(run.automation?.event.startsWith('issue.') ? [run.automation.githubUrl] : []),
+        ...[...run.task.matchAll(new RegExp(ISSUE_URL_RE.source, 'gi'))].map((match) => match[0])]
+        .filter((value): value is string => value !== undefined)
+        .map((value) => value.replace(/\/+$/, '').toLowerCase())
+        .filter((value) => value.endsWith(`/issues/${number}`));
+      // The legacy issueNumber is display-only and cannot establish repository identity.
+      // Explicit task markers remain project-scoped unless a qualified URL contradicts them.
+      return urls.includes(url) || (urls.length === 0 && run.markerRefs?.issue === number);
+    };
+    for (const run of this.held.values()) if (matches(run)) return run.id;
+    // Secondary references are record-only: query them in SQLite rather than hydrating every
+    // finished transcript or relying on the slim summary's primary issue number.
+    const where = `archived = 0 AND (
+      json_extract(data, '$.issueNumber') = ? OR json_extract(data, '$.markerRefs.issue') = ?
+      OR lower(rtrim(json_extract(data, '$.referencedIssueUrl'), '/')) = ?
+      OR EXISTS (SELECT 1 FROM json_each(data, '$.referencedIssueCandidates') WHERE lower(rtrim(value, '/')) = ?)
+      OR (json_extract(data, '$.automation.event') LIKE 'issue.%' AND lower(rtrim(json_extract(data, '$.automation.githubUrl'), '/')) = ?)
+      OR instr(lower(json_extract(data, '$.task')), ?) > 0
+    )`;
+    for (const key of this.db?.listKeysWhere(where, [number, number, url, url, url, url]) ?? []) {
+      if (this.held.has(key.id) || this.deleted.has(key.id) || this.unreadable.has(key.id)) continue;
+      const run = this.getRun(key.id);
+      if (run && matches(run)) return key.id;
+    }
+    return undefined;
+  }
+
   /**
    * The runs automation receipts launched, by receipt id (`automation.receiptId` or
    * `automationTrigger.receiptId`). Memory answers first; a receipt it does not know costs one
@@ -2523,14 +2556,14 @@ export class RunStore extends EventEmitter {
   }
 
   /** Retain the settled receipt and retire exactly one wait together with any human message that superseded it. */
-  commitWorkerWaitWithdrawal(id: string, waitId: string, acceptedHumanMessage?: QueuedMessage): void {
+  commitWorkerWaitWithdrawal(id: string, waitId: string, acceptedHumanMessage?: QueuedMessage, reason?: 'cancelled'): void {
     const run = this.peek(id);
     if (!run?.delegation || run.delegation.role === 'invalid' || run.delegation.wait?.id !== waitId) {
       throw new Error('worker wait changed before withdrawal');
     }
     const { wait, ...delegation } = run.delegation;
     const message = acceptedHumanMessage ? queuedMessageSchema.parse(acceptedHumanMessage) : undefined;
-    this.commitIndex(new Map([[id, { ...run, delegation: { ...delegation, lastWait: wait.phase === 'wake-pending'
+    this.commitIndex(new Map([[id, { ...run, delegation: { ...delegation, lastWait: reason ? { ...wait, phase: 'wake-pending', reason, wakeId: wait.wakeId ?? wait.id } : wait.phase === 'wake-pending'
       ? reconcileWorkerWait(wait, [], new Date().toISOString())
       : { ...wait, phase: 'wake-pending', reason: wait.reason ?? 'cancelled', wakeId: wait.wakeId ?? wait.id } },
       // An adopted agent input belongs to its sender, even when it carries the wait receipt.

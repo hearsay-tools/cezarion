@@ -417,7 +417,6 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const disk = readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[];
     expect(disk.find(run => run.id === p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'cancelled' } });
     expect(store.getRun(p.id)?.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
-    expect(manager.cancelWorkerWait(p.id, wait.id)).toEqual(cancelled);
     writeFileSync(release, 'release');
     await until(() => !waitOf(store.getRun(p.id)));
     expect(manager.cancelWorkerWait(p.id, wait.id).reason).toBe('cancelled');

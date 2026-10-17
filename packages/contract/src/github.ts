@@ -17,7 +17,9 @@ const checksGlyphSchema = z.enum(['passing', 'failing', 'pending']).nullable();
 
 /**
  * One issue or pull request, flattened for the cockpit (`ForgeItem` server-side).
- * A protected shape — BACKWARD_COMPATIBILITY.md §2 forbids reshaping it.
+ * A protected shape — BACKWARD_COMPATIBILITY.md §2 forbids reshaping it outside a documented
+ * deprecation. `body` is in one (hearsay-tools/cezarion#1183): optional, still sent by list
+ * routes, and hydrated from `detail.body` on the comments route by new consumers.
  */
 export const githubItemSchema = z.object({
   kind: z.enum(['issue', 'pr']),
@@ -26,7 +28,9 @@ export const githubItemSchema = z.object({
   author: z.string(),
   createdAt: z.string(),
   labels: z.array(z.string()),
-  body: z.string(),
+  /** Deprecated in the list tier (hearsay-tools/cezarion#1183): still sent, removed in a later
+   *  minor release. Read `detail.body` from `GET /api/v1/github/comments/:kind/:number`. */
+  body: z.string().optional(),
   url: z.string(),
   comments: z.number(),
   /** Issues only; absent on older servers. */
@@ -92,8 +96,73 @@ export const githubDataSchema = z.object({
   projectsReason: z.string().optional(),
   projectsState: z.enum(['refreshing', 'ready', 'unavailable']).optional(),
   projectsGeneration: z.string().optional(),
+  /** Exact open totals per connection (hearsay-tools/cezarion#1183); absent on older servers. */
+  issuesTotal: z.number().int().nonnegative().optional(),
+  prsTotal: z.number().int().nonnegative().optional(),
+  /** Opaque cursor for the next page of that side, or `null` once the side is exhausted.
+   *  Absent: an older server that does not page. */
+  issuesNextCursor: z.string().nullable().optional(),
+  prsNextCursor: z.string().nullable().optional(),
+  /** The rows' `comments` are placeholders (`0`): hydrate them through
+   *  `GET /api/v1/github/comment-counts`. */
+  commentsDeferred: z.literal(true).optional(),
 });
 export type GithubData = z.infer<typeof githubDataSchema>;
+
+/** Longest opaque page cursor the list route accepts. GitHub's are well under 100 characters. */
+export const GITHUB_CURSOR_MAX = 2_000;
+
+const pageCursorSchema = z.string().min(1).max(GITHUB_CURSOR_MAX).optional();
+
+/**
+ * `GET /api/v1/github` query (hearsay-tools/cezarion#1183). Each side pages on its own: a side
+ * whose previous page answered `nextCursor: null` is sent as `<side>Done=1` so the server never
+ * restarts it while the other side keeps paging. `limit` stays a bare string — the handler's
+ * fallback to 30 already accepts `?limit=banana`.
+ */
+export const githubListQuerySchema = z.object({
+  limit: z.string().optional(),
+  refresh: z.string().optional(),
+  issuesCursor: pageCursorSchema,
+  prsCursor: pageCursorSchema,
+  issuesDone: z.literal('1').optional(),
+  prsDone: z.literal('1').optional(),
+}).superRefine((query, ctx) => {
+  if (query.issuesDone && query.issuesCursor) ctx.addIssue({ code: 'custom', message: 'issuesDone and issuesCursor are exclusive' });
+  if (query.prsDone && query.prsCursor) ctx.addIssue({ code: 'custom', message: 'prsDone and prsCursor are exclusive' });
+  if (query.issuesDone && query.prsDone) ctx.addIssue({ code: 'custom', message: 'both sides are done; there is no page to ask for' });
+});
+export type GithubListQuery = z.infer<typeof githubListQuerySchema>;
+
+/** Most numbers one comment-count request may name — the same cap as `/github/checks`. */
+export const GITHUB_COMMENT_COUNTS_MAX = 100;
+
+/** Positive integers without leading zeros, comma-separated, no spaces. */
+const GITHUB_NUMBER_CSV = /^[1-9]\d{0,15}(,[1-9]\d{0,15})*$/;
+
+/** `GET /api/v1/github/comment-counts` query (hearsay-tools/cezarion#1183). */
+export const githubCommentCountsQuerySchema = z.object({
+  kind: z.enum(['issue', 'pr']),
+  numbers: z.string().regex(GITHUB_NUMBER_CSV).refine((csv) => {
+    const parts = csv.split(',');
+    return parts.length <= GITHUB_COMMENT_COUNTS_MAX && parts.every((part) => Number.isSafeInteger(Number(part)));
+  }, { message: `at most ${GITHUB_COMMENT_COUNTS_MAX} safe positive integers` }),
+  refresh: z.literal('1').optional(),
+});
+export type GithubCommentCountsQuery = z.infer<typeof githubCommentCountsQuerySchema>;
+
+/** Comment counts for list rows, hydrated after first paint. An absent number means unknown. */
+export const githubCommentCountsDataSchema = z.discriminatedUnion('available', [
+  z.object({
+    available: z.literal(true),
+    counts: z.record(z.number(), z.number().int().nonnegative()),
+  }),
+  z.object({
+    available: z.literal(false),
+    reason: z.string(),
+  }),
+]);
+export type GithubCommentCountsData = z.infer<typeof githubCommentCountsDataSchema>;
 
 /**
  * `GET /api/v1/github/checks?prs=…` (#664) — lazy PR checks glyphs, `number → glyph`. The list
@@ -334,6 +403,13 @@ export const githubCommentsDataSchema = z.object({
   /** Timeline events (#525) — additive; absent when the server degraded to the legacy
    *  comments-only fetch. Capped independently of `comments`. */
   events: z.array(githubTimelineEventSchema).optional(),
+  /** The item's own body and PR diffstat (hearsay-tools/cezarion#1183) — the detail-tier home
+   *  of the list row's deprecated `body`. Absent when that lookup failed. */
+  detail: z.object({
+    body: z.string(),
+    additions: z.number().int().nonnegative().optional(),
+    deletions: z.number().int().nonnegative().optional(),
+  }).optional(),
 });
 export type GithubCommentsData = z.infer<typeof githubCommentsDataSchema>;
 

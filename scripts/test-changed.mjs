@@ -2,7 +2,11 @@
 // Iteration feedback only: never substitutes for the final validation gate.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
+
+// CI's docs-only rule: skip exactly the paths that skip CI's Vitest shards.
+const { isDocsPath } = createRequire(import.meta.url)('../.github/scripts/change-surface.cjs');
 
 const options = { plan: false, base: undefined };
 for (const arg of process.argv.slice(2)) {
@@ -39,9 +43,7 @@ function select() {
     // Removed paths (including the old side of a rename) may no longer appear
     // in Vitest's current import graph. Fall back instead of losing consumers.
     if (files.some(file => !existsSync(join(cwd, file)))) return { ...full('Deleted or renamed input', files), cwd };
-    const docs = file => /^[^/]+\.md$/.test(file)
-      || /^(?:docs|\.ai\/(?:specs|analysis))\/.*\.md$/.test(file);
-    const inputs = files.filter(file => !docs(file));
+    const inputs = files.filter(file => !isDocsPath(file));
     if (!inputs.length) return { mode: 'skip', reason: files.length ? 'Documentation-only changes' : 'No changes', base, files, args: [], cwd };
     // Only ordinary TS/JS source is eligible for import-graph selection.
     // Contract, build inputs, configs, fixtures, scripts and unknown surfaces

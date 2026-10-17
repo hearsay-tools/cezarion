@@ -95,9 +95,19 @@ function changedLinesFromFiles(files) {
   }
   return changed;
 }
+const REVIEW_ROUND_MARKER = '<!-- cez-review-round -->';
+// A round is a submitted bot review with a non-empty string body: each verdict
+// reply arrives wrapped in its own review whose body is exactly '' and never
+// counts. postReview stamps REVIEW_ROUND_MARKER on every round, so a findings-only
+// round without a patch id is never empty. Older unmarked rounds (dispatch, failed
+// patch-id) count through their summary. The review-round step's review_count jq
+// filter applies the same rule: both check the type and neither trims.
+function isAutomatedReviewRound(review, author = 'github-actions[bot]') {
+  return review?.user?.login === author && review?.submitted_at != null && typeof review.body === 'string' && review.body !== '';
+}
 function countAutomatedReviews(reviews, author = 'github-actions[bot]') {
   if (!Array.isArray(reviews)) return 0;
-  return reviews.filter((review) => review?.user?.login === author && review?.submitted_at != null).length;
+  return reviews.filter((review) => isAutomatedReviewRound(review, author)).length;
 }
 function formatReviewPatchIdMarker(patchId) {
   if (typeof patchId !== 'string' || !SHA.test(patchId)) return null;
@@ -134,8 +144,7 @@ async function postReview({ github, owner, repo, pullNumber, eventHeadSha, revie
   const reviews = await github.paginate(github.rest.pulls.listReviews, { owner, repo, pull_number: pullNumber, per_page: 100 });
   if (!ignoreCap && countAutomatedReviews(reviews) >= maxRounds) return 0;
   if (reviews.some((review) => review?.user?.login === 'github-actions[bot]' && review.commit_id === reviewedHeadSha)) return 0;
-  const marker = formatReviewPatchIdMarker(patchId);
-  const postedBody = marker ? (body ? `${body}\n\n${marker}` : marker) : (body || '');
+  const postedBody = [body, REVIEW_ROUND_MARKER, formatReviewPatchIdMarker(patchId)].filter(Boolean).join('\n\n');
   await github.rest.pulls.createReview({ owner, repo, pull_number: pullNumber, commit_id: reviewedHeadSha, event: 'COMMENT', body: postedBody, comments: comments.map(({ path, line, body: commentBody }) => ({ path, line, side: 'RIGHT', body: commentBody })) });
   return comments.length;
 }
@@ -212,6 +221,7 @@ module.exports = {
   loadReview,
   changedLinesFromFiles,
   countAutomatedReviews,
+  isAutomatedReviewRound,
   postReview,
   assertLiveHead,
   listReviewThreads,
