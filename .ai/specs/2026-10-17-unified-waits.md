@@ -1,6 +1,7 @@
 # Unified waits: one list, three tools, one turn-end rule
 
-Status: approved by the owner (2026-10-17). Phase 1: hearsay-tools/cezarion#1233.
+Status: approved by the owner (2026-10-17). Phase 1: hearsay-tools/cezarion#1233; the
+calls its build made are under [Phase 1 decisions](#phase-1-decisions).
 Supersedes the narrow re-arm design for hearsay-tools/cezarion#1197 and absorbs
 hearsay-tools/cezarion#1226 (agent-facing cancel).
 
@@ -403,3 +404,37 @@ Phases ship in order; each leaves the default path complete.
 Helper and field names beyond those above; the shape of `Wait` payload types as
 long as they reuse the existing CI, worker and ask schemas; the exact nudge and
 footer wording within the meaning above; how the pools are tracked in memory.
+
+## Phase 1 decisions
+
+Calls made while building phase 1 (hearsay-tools/cezarion#1233), within "Left to the
+builder" unless a bullet says otherwise.
+
+- **Timer bounds.** `seconds` is 60–7,200 (`TIMER_MIN_SECONDS`, `TIMER_MAX_SECONDS`) and
+  `note` at most 512 characters. The floor keeps a timer from turning into a busy loop; the
+  ceiling matches the CI deadline's.
+- **`via`.** Every entry records what opened it, beside `source`: `cezar_wait`,
+  `cezar_wait_for_ci`, `monitoring-line` or `schedule-wakeup`. An alias registration stays
+  distinguishable from the tool without a per-kind field, for the transcript and for the U7
+  parity cells.
+- **Flat tool schema.** The Anthropic tool API refuses a top-level `oneOf`/`anyOf`/`allOf`,
+  so `cezar_wait` advertises one flat `type: 'object'`: a `kind` enum and every kind's fields
+  side by side, each with the bounds of its kind's schema. The discriminated union
+  (`cezarWaitRequestSchema`) validates only on the server, and a field that does not fit its
+  kind answers `invalid_request` naming it.
+- **`wake_budget_spent`.** Phase 1 has no human wait to fall back to, so once the
+  automatic-wake budget is spent `cezar_wait` refuses a timer with `wake_budget_spent`, a new
+  code beside `timers_disabled`. Timer wakes count against the existing
+  `MAX_AUTO_CONTINUES = 40`. Phase 2 replaces the refusal with the `reason: budget` human wait
+  described above.
+- **`lastWaitsError`.** `lastCiWaitError` becomes `lastWaitsError` (at most 256 characters):
+  the retained recovery message when saved wait metadata cannot be trusted. It keeps today's
+  rule that invalid wait state degrades to a visible "unavailable" observation, never success.
+- **Open timers survive an interval change.** `resources.monitoringWakeIntervalMinutes`
+  supplies the seconds of a timer the monitoring-line alias opens. Changing it affects only
+  timers opened afterwards; a timer already open keeps its deadline.
+- **Header.** The run header lists every open CI and timer wait (a CI wait with its PR link
+  and deadline, a timer with its time and note), then the newest settled CI observation from
+  `lastWaits`, or `lastWaitsError`, unless a CI wait is open. A settled timer is not shown.
+  Kinds the header does not render (phase 2's human waits, phase 3's worker waits) are
+  skipped; the pill already reports them through `waitingOn`.

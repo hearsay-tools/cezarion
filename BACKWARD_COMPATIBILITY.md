@@ -74,6 +74,9 @@ What is protected now: **the shape of each route under `/api/v1`**, the three-wa
   - **Attachments widened, not renamed (#950).** The `images` key on `POST /runs`, `POST /runs/:id/messages`, `PATCH /runs/:id/queued-messages/:msgId` and `POST /runs/:id/continue` still carries `{mediaType, data}` entries, and every `image/*` type it ever accepted is still accepted — the element schema only ADDS `application/pdf`, `text/plain`, `text/markdown` and `text/x-markdown`. A client that sends what it always sent sees no change; one that sends a PDF to an older cezar gets the 400 it always would. Two refusal STRINGS widened with it (`too many queued images` → `too many queued attachments`, `… at least one image` → `… at least one attachment`); the statuses and the `{error}` shape are unchanged. `GET /api/v1/runs/:id/images/:file` keeps its path and answers an image byte-identically, headers included; a non-image attachment is the additive case and leaves with its own content type plus `X-Content-Type-Options: nosniff` and `Content-Disposition: attachment`, because it is user-supplied bytes coming back from the cockpit's own origin.
   - **Idempotent start (#504, additive).** `POST /runs` accepts an optional `clientRequestId` (UUID). Without it nothing changes: every request creates a run and answers `201`. With it, the first request answers `201`; a repeat with the same id and the same start payload answers `200` with the run the first one created, whatever its state, archived included; a repeat with a different payload answers `409 {error: "request id payload conflict"}`. The id is scoped to the project and cannot be combined with `variants > 1` (400). The response body shape is unchanged.
   - `DELETE /api/v1/runs/:id/auto-resume` (spec `.ai/specs/2026-08-03-auto-resume-after-usage-limit.md`, additive) retires a pending usage-limit resume for ONE task, leaving the workspace-wide `resources.autoResumeOnUsageLimit` untouched. Idempotent — a run with nothing scheduled answers `200 {cancelled: true}` too; only an unknown run 404s. Archiving a run does the same thing implicitly, because archiving is how a user resigns from a task.
+  - **The wait list (hearsay-tools/cezarion#1233, phase 1 of spec `.ai/specs/2026-10-17-unified-waits.md`; deliberate break).** The run record (`GET /api/v1/runs`, `GET /api/v1/runs/:id`, the `run` SSE and every mutation that answers a `RunRecord`) no longer sends `ciWait`, `lastCiWait`, `lastCiWaitError`, `monitoringWakeAt` or `monitoringWakeCapReached`. They are replaced by `waits`, `lastWaits` and `lastWaitsError`. `waits` holds the run's open and recently resolved waits, at most 16 open. Each entry is `{ id, kind, source, via, registeredAt, deadline, phase, turnId, resolvedAt?, deliveredAt?, cancelledAt? }`, with `phase` one of `open`, `resolved`, `delivered` or `cancelled`. A `kind: 'ci'` entry also carries what `ciWait` carried: the PR identity, `headSha`, `generation`, `timeoutSeconds` and, once observed, `result`. A `kind: 'timer'` entry carries `seconds` (60–7,200) and an optional `note`. `lastWaits` holds settled waits, newest last, at most 16. `lastWaitsError` is the retained recovery message that `lastCiWaitError` was. To migrate, read the `kind: 'ci'` entries of `waits` instead of `ciWait`, and a `kind: 'timer'` entry's `deadline` instead of `monitoringWakeAt`. `monitoringWakeCapReached` has no replacement: once the automatic-wake budget is spent, `cezar_wait` refuses a new timer with `wake_budget_spent`, so the agent learns it from the tool's answer. Phase 2 adds `human` waits and phase 3 `worker` waits, so a reader must skip kinds it does not know. Older rows are read and converted on load (section 3).
+    - **Status.** `waiting` now also covers a run parked on an open CI or timer wait, which was `running` with `activity: 'monitoring'`. `activity: 'monitoring'` is no longer written for new parks; `activity` stays in the schema so older rows and summaries parse. A webhook consumer gets one `task.status` change to `waiting` per park and reads `task.attention` to learn whether a human is needed; `task.activity` events stop for new parks.
+    - **`waitingOn` (additive).** `RunSummary`, and so the `run-summaries` rows and runs-index rows, adds an optional `waitingOn`: the run's top open wait in the order human > usage limit > workers > CI > timer (`{ kind: 'human' }`, `{ kind: 'usage-limit', at }`, `{ kind: 'workers', count }`, `{ kind: 'ci', waitId, prUrl, repository, prNumber, deadline }` or `{ kind: 'timer', waitId, at, note? }`). The full record does not carry it; `computeWaitingOn` in `packages/contract` derives it from `waits`. A `waiting` run whose top wait is CI or a timer keeps the running bucket and a ring in `deriveAttention` (labels `waiting for CI` and `monitoring`); it does not read as Needs you.
 - Worktrees: `GET /api/v1/worktrees`, `POST /api/v1/worktrees/reclaim`, `POST /api/v1/worktrees/:runId/reclaim` (issue 08 §B4: one finished run's worktree DIRECTORY, by retention's rule and helper — the branch is kept; answers `{runId, worktreeReclaimedAt}`, 404 for an unknown id, 409 + `{error}` when the run is live, at `review`, an owned worker mid-destroy, or already reclaimed. Breaking: deleting the branch from this route, or reclaiming a run retention would not)
 - Open-in: `GET /api/v1/open-targets`, `POST /api/v1/open-in` — the latter opens the SCOPED PROJECT'S root in an `open-targets` id (Settings → "Project folder"). It takes `{target}` and no path at all: the folder is the registry's own root, so there is nothing for a client to point elsewhere. `cli:<runner>` targets are refused with a 400 (an agent CLI belongs in a task worktree), as is an app this machine does not have; localHandoff-gated like the rest of the family.
 - Variants: `GET /api/v1/groups/:groupId`, `POST /api/v1/groups/:groupId/pick`
@@ -147,7 +150,8 @@ memory-only capability determines project, run and session generation. No caller
 run ID or path is accepted. `CEZ_TOOL_TOKEN` / `CEZ_TOOL_SOCKET` are internal
 provisioned environment values, not authored configuration or delegation grants.
 The MCP tool name `cezar_wait_for_ci` and its default 1,800-second timeout (range
-1–7,200) are model-facing compatibility surfaces. Preserve user MCP configuration
+1–7,200) are model-facing compatibility surfaces, deprecated since
+hearsay-tools/cezarion#1233 (see below). Preserve user MCP configuration
 and explicit denials when provisioning a session.
 
 Additive for #781 (live preview v1): `POST /api/v1/tools/preview-serve` joins the same
@@ -169,6 +173,29 @@ unchanged owner-approved command after stop or crash; command, cwd or path chang
 invalidate approval and require Run and open again. Adopted/other-run servers and
 ports occupied after teardown are refused with recovery hints. Approval is local to
 the running host, not persisted across cockpit restarts.
+
+Additive for hearsay-tools/cezarion#1233 (unified waits, phase 1): `POST /api/v1/tools/wait`
+and `POST /api/v1/tools/cancel-wait` join the same private family, behind the same bearer
+capability and a 16 KiB body limit. Middleware validates the strict shared
+`CezarWaitRequest` (`{ kind: 'ci', pr, timeout_seconds? }` or
+`{ kind: 'timer', seconds, note? }`) and `CezarCancelWaitRequest` (`{ wait_id }`). Every
+answer except a missing or revoked capability (`401`) is `200` with the typed
+`CezarWaitAnswer` (`{ ok: true, wait_id, kind, deadline, open_waits }` or
+`{ ok: false, code, message, open_waits? }`) or `CezarCancelWaitAnswer`
+(`{ cancelled: true, wait_id, open_waits }` or `{ cancelled: false, code, message, open_waits? }`,
+where `already_resolved` means the result still arrives with the next wake). The MCP tools
+`cezar_wait` and `cezar_cancel_wait` are listed and admitted on every runner. `cezar_wait`
+advertises one flat `type: 'object'` input schema with a `kind` enum, because the Anthropic
+tool API refuses a top-level `oneOf`/`anyOf`/`allOf`; the union is checked only on the
+server. Their names, the `kind` values, the timer range (60–7,200 seconds, `note` up to 512
+characters) and the CI timeout default and range are model-facing compatibility surfaces.
+
+**Deprecated (hearsay-tools/cezarion#1233):** `cezar_wait_for_ci` and
+`GET`/`POST /api/v1/tools/ci-wait` keep working with an unchanged receipt, and a
+registration through them opens a `ci` entry in the same wait list. The tool's description
+now points to `cezar_wait`, and the server instructions no longer suggest it. Phase 4
+(hearsay-tools/cezarion#1236) removes the tool and its route, and records the break and
+its migration (call `cezar_wait` with `kind: "ci"`) here.
 
 - Task file links and published output (#418, additive): `GET /api/v1/runs/:id/file-link`, `GET /api/v1/runs/:id/artifacts`, `GET /api/v1/runs/:id/artifacts/:artifactId`, `GET /api/v1/runs/:id/artifacts/:artifactId/download`, `GET /api/v1/runs/:id/artifacts/:artifactId/image`. All have the normal project aliases. The resolver accepts a bounded `path` and optional `raw=1` (raster images only); external paths match published metadata only and never authorize a source-file read. Artifact routes address validated IDs, not host paths. Download uses attachment disposition and `nosniff`; active documents are never served inline. Existing `/files` and pasted-attachment behavior is unchanged. Files-page query selectors `path` and `artifact` are mutually exclusive.
 

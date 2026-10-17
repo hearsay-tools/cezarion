@@ -560,21 +560,31 @@ segment.
 
 ---
 
-## Waiting for PR checks
+## Waiting for PR checks and timers
 
-An agent can call `cezar_wait_for_ci` with a GitHub PR URL to ask Cezar to watch CI
-outside the model. The optional `timeout_seconds` defaults to 1,800 and accepts
-1–7,200. No authored configuration or worker delegation permission is needed.
-Registration requires `gh`, access to the repository, and a supported GitHub host;
-GitHub Enterprise hosts must already be recognized by the forge/auth configuration.
-Tool startup itself makes no GitHub request.
+An agent waits on something outside its turn with `cezar_wait`. With `kind: "ci"` and
+a GitHub PR URL in `pr`, Cezar watches the PR's CI outside the model. The optional
+`timeout_seconds` defaults to 1,800 and accepts 1–7,200. With `kind: "timer"`,
+`seconds` (60–7,200) and an optional `note`, Cezar wakes the agent at that time and
+hands the note back. No authored configuration or worker delegation permission is
+needed. A CI wait requires `gh`, access to the repository, and a supported GitHub
+host; GitHub Enterprise hosts must already be recognized by the forge/auth
+configuration. Tool startup itself makes no GitHub request. With **Monitoring
+wake-up** turned off in **Settings → Resources**, `cezar_wait` refuses a timer
+(`timers_disabled`); once the automatic-wake budget of 40 is spent, it refuses one
+with `wake_budget_spent`.
 
-A successful registration returns a durable receipt and an absolute deadline. The
-agent ends its turn to wait, with no marker required. The header keeps the active
-run status during registration, then shows Monitoring with **Waiting for CI —
-owner/repo#N**, a PR link and the deadline. **CI result ready — waiting for capacity**
-means the observation is queued for the agent to resume. Ordinary monitoring keeps
-its existing automatic-check schedule when no CI wait is registered.
+A run can have several waits open at once, up to 16. Each answer carries the
+wait's id, its absolute deadline and the list of waits still open, and
+`cezar_cancel_wait` closes one by its id. The agent ends its turn to wait, with no
+marker required. The run is then `waiting`, and the pill reads **waiting for CI**
+or **monitoring** rather than Needs you. The header lists every open wait: **Waiting
+for CI — owner/repo#N** with a PR link and the deadline, or **Next automatic check**
+with its time and note. **CI result ready — waiting for capacity** means the
+observation is owed to the agent and its wake turn has not started yet. A run parked
+on CI or a timer keeps its agent slot, a monitoring slot when one is free, so the
+wake usually starts at once. The older `CEZ:MONITORING` line and Claude's
+`ScheduleWakeup` open a timer in the same list.
 
 Cezar reports passed, failed, cancelled or skipped checks, no checks, changed head,
 timeout or an operational error. It watches the registered commit: a new PR head
@@ -584,12 +594,17 @@ seconds, and no setting changes that interval. Four watchers run concurrently;
 queued waits retain their original deadline. Results are bounded
 observations, not merge approval or evidence that every expected workflow appeared.
 The agent still decides its next action; CI success never completes the task or
-accepts review. A human message cancels the current wait and tells the agent that
-it must register a new wait if CI monitoring is still needed. The header retains
-the cancellation and explains that general monitoring does not restart that CI
-wait. A cancelled wait stays cancelled even when the task's next automatic check
-wakes the agent. CI never answers a pending human question. Controller recovery can replay an observation after an
-ambiguous delivery checkpoint, identified by its stable lifecycle input ID.
+accepts review. A wait ends only when its own result arrives, its deadline passes,
+or someone cancels it: the agent with `cezar_cancel_wait`, or Cezar when the task
+is stopped, finished, cancelled or deleted. A human message wakes the agent without
+closing any wait, and every delivered turn ends with a list of the waits still open.
+CI never answers a pending human question. Controller recovery can replay an
+observation after an ambiguous delivery checkpoint, identified by its stable
+lifecycle input ID.
+
+`cezar_wait_for_ci` (a `pr` and an optional `timeout_seconds`) still works and opens
+the same CI wait, but it is deprecated: new prompts and skills should call
+`cezar_wait` with `kind: "ci"`. It will be removed (hearsay-tools/cezarion#1236).
 
 The adapters are bundled for Claude (including `claude-cli`), Codex, OpenCode,
 Cursor, Pi and OMP. Internal socket/capability environment values are runtime wiring,
@@ -796,7 +811,8 @@ bot that tails to terminal state adds `--until settled`. `log` without `--follow
 **A bot that lives behind an HTTP endpoint** does not have to poll. Set a **Task webhook** (URL
 and an optional Bearer token) in the project's **Settings → General**, and every task that opts
 in POSTs `task.status` on each status change, `task.question` when it asks something,
-`task.activity` when monitoring starts or ends, and `task.subscribed` when it opts in (at start, or when it is handed off). Each
+`task.activity` when an older run's monitoring ends (a run parked on CI or a timer now changes status to
+`waiting` instead), and `task.subscribed` when it opts in (at start, or when it is handed off). Each
 body carries the same slim projection `cez task status` prints, under `task`. `cez task start`
 opts in whenever the project has a webhook (`--no-notify` to skip it); the cockpit's New task form
 has a **Notify webhook** toggle; and a running task's **Hand off** button (or
