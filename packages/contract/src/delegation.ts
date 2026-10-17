@@ -374,5 +374,5 @@ export const workerEmptyRequestSchema = z.object({}).strict();
 
 export const workerCancelWaitRequestSchema = z.object({ waitId: z.uuid() }).strict();
 export type WorkerCancelWaitRequest = z.infer<typeof workerCancelWaitRequestSchema>;
-export const workerCancelWaitResultSchema = z.object({ wait: workerWaitSchema }).strict();
+export const workerCancelWaitResultSchema = z.object({ wait: workerWaitSchema, instruction: z.string().min(1).max(1_000) }).strict();
 export type WorkerCancelWaitResult = z.infer<typeof workerCancelWaitResultSchema>;

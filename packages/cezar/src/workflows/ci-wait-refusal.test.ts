@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { workerWaitRequestSchema } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
+import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { CiToolController } from '../ci-wait/controller.ts';
 import { callCiWait } from '../ci-wait/client.ts';
@@ -96,14 +98,14 @@ describe('R27 CI registration refusal after worker settlement — #713', { timeo
         fixtureUpdateRun(child.id, { status: 'done' });
         manager.reconcileWorkerWaits();
         expect(waitOf(store.getRun(run.id))?.phase).toBe('wake-pending');
-        if (action === 'cancel') manager.cancelWorkerWait(run.id, wait.id);
-        else {
-          const service = new DelegationService();
-          const unregister = service.registerProject({ id: 'project', root, store, manager });
-          try {
-            expect(await service.destroyForHuman('project', child.id)).toMatchObject({ state: 'complete', remaining: [] });
-          } finally { unregister(); }
-        }
+        const service = new DelegationService();
+        const unregister = service.registerProject({ id: 'project', root, store, manager });
+        try {
+          if (action === 'cancel') {
+            expect(await cancelAsAgent(service, run.id, wait.id)).toMatchObject({ wait: { id: wait.id, reason: 'cancelled' },
+              instruction: `Wait ${wait.id} had already settled; cancelling freed the wait slot and its outcomes stay in this receipt. Register another wait in this turn.` });
+          } else expect(await service.destroyForHuman('project', child.id)).toMatchObject({ state: 'complete', remaining: [] });
+        } finally { unregister(); }
         expect(waitOf(store.getRun(run.id))).toBeUndefined();
         expect(store.getRun(run.id)?.delegation).toMatchObject({ lastWait: { id: wait.id,
           reason: action === 'cancel' ? 'cancelled' : 'outcome', outcomes: [{ workerId: child.id, status: 'done' }] } });
@@ -117,5 +119,69 @@ describe('R27 CI registration refusal after worker settlement — #713', { timeo
       } finally { wire.release(); await controller.close(); }
     });
   }
+  it.each(RUNNER_IDS)('%s R80 cancel-wait twice frees a live wait during the same native turn', async runner => {
+    const wire = holdNativeTurn(runner);
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.hold!, runner });
+    store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+    const service = new DelegationService();
+    const unregister = service.registerProject({ id: 'project', root, store, manager });
+    try {
+      await until(wire.received);
+      const child = await worker(run.id);
+      const wait = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
+      expect(await cancelAsAgent(service, run.id, wait.id)).toMatchObject({ wait: { id: wait.id, phase: 'wake-pending', reason: 'cancelled' },
+        instruction: `Wait ${wait.id} cancelled; it holds the wait slot until its cancellation is delivered. Run worker cancel-wait ${wait.id} again to free the slot and register another wait in this turn.` });
+      expect(await cancelAsAgent(service, run.id, wait.id)).toMatchObject({ wait: { id: wait.id, reason: 'cancelled' },
+        instruction: `Wait ${wait.id} had already settled; cancelling freed the wait slot and its outcomes stay in this receipt. Register another wait in this turn.` });
+      expect(waitOf(store.getRun(run.id))).toBeUndefined();
+      const next = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
+      expect(next).toMatchObject({ phase: 'registered' });
+      expect(store.readEvents(run.id).filter(event => event.type === 'turn-end')).toHaveLength(0);
+      // Settle the worker so it never starts once the parent frees its slot, then retire the new wait as R80 does.
+      fixtureUpdateRun(child.id, { status: 'done' });
+      manager.reconcileWorkerWaits();
+      manager.cancelWorkerWait(run.id, next.id);
+      expect(waitOf(store.getRun(run.id))).toBeUndefined();
+    } finally { unregister(); wire.release(); }
+  });
+  it.each(RUNNER_IDS)('%s R80 cancel-wait over destroyed workers frees the slot during the same native turn', async runner => {
+    const wire = holdNativeTurn(runner);
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.hold!, runner });
+    store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+    const service = new DelegationService();
+    const unregister = service.registerProject({ id: 'project', root, store, manager });
+    try {
+      await until(wire.received);
+      const child = await worker(run.id);
+      const wait = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
+      // Destruction completes before the worker yields an outcome, so the wait stays registered until the cancel settles it.
+      const delegation = store.getRun(child.id)!.delegation;
+      if (delegation?.role !== 'worker') throw Error('worker fixture');
+      store.commitDelegation([{ id: child.id, delegation: { ...delegation,
+        destroy: { requestedAt: new Date().toISOString(), phase: 'complete', remaining: [] } } }]);
+      manager.reconcileWorkerWaits();
+      expect(waitOf(store.getRun(run.id))).toMatchObject({ id: wait.id, phase: 'registered' });
+      expect(await cancelAsAgent(service, run.id, wait.id)).toMatchObject({ wait: { id: wait.id, reason: 'cancelled' },
+        instruction: `Wait ${wait.id} cancelled and retired; the wait slot is free and its outcomes stay in this receipt. Register another wait in this turn.` });
+      expect(waitOf(store.getRun(run.id))).toBeUndefined();
+      expect(store.getRun(run.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'cancelled' } });
+      const next = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
+      expect(next).toMatchObject({ phase: 'registered' });
+      expect(store.readEvents(run.id).filter(event => event.type === 'turn-end')).toHaveLength(0);
+      // A destroyed worker cannot record an execution, so end it directly: it is never dequeued once the parent
+      // frees its slot. Cancelling the new wait then retires it through the same destroyed-worker path.
+      store.updateRun(child.id, { status: 'cancelled' });
+      manager.cancelWorkerWait(run.id, next.id);
+      expect(waitOf(store.getRun(run.id))).toBeUndefined();
+    } finally { unregister(); wire.release(); }
+  });
 
 });
+
+/** Cancel with the parent's own credential, as `cez worker cancel-wait` does, so the instruction is pinned (hearsay-tools/cezarion#1200). */
+async function cancelAsAgent(service: DelegationService, runId: string, waitId: string) {
+  vi.stubEnv('CEZ_DELEGATION', '1');
+  const credentials = new CredentialRegistry();
+  try { return await service.cancelWait(credentials.authenticate(credentials.issue('project', runId, randomUUID()))!, { waitId }); }
+  finally { credentials.close(); vi.unstubAllEnvs(); }
+}

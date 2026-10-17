@@ -426,7 +426,8 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
       id: waitId, workerIds: [workerId], phase: 'registered', deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [],
     } } }]);
     expect(await runWorkerCommand(['cancel-wait', waitId], env)).toBe(0);
-    expect(json()).toMatchObject({ wait: { id: waitId, reason: 'cancelled' } });
+    expect(json()).toMatchObject({ wait: { id: waitId, reason: 'cancelled' },
+      instruction: `Wait ${waitId} cancelled. End your turn to receive the cancellation, then register another wait.` });
     expect(f.store.getRun(workerId)?.status).toBe('queued');
     for (const argv of [['wait', workerId, randomUUID(), '--mode', 'one'], ['wait', workerId, '--mode', 'invalid'], ['cancel-wait'], ['cancel-wait', 'bad'], ['cancel-wait', waitId, 'extra']]) {
       expect(await runWorkerCommand(argv, env)).toBe(1); expect(json().code).toBe('invalid_input');

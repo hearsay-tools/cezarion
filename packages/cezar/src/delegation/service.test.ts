@@ -595,8 +595,19 @@ describe('delegation service durable authority', () => {
     const settled = await f.service.cancelWait(f.caller, { waitId });
     f.store.commitWorkerWaitWithdrawal(f.parent.id, waitId); f.store.updateRun(f.parent.id, { status });
     const before = structuredClone(f.store.getRun(f.parent.id));
-    expect(await f.service.cancelWait(f.caller, { waitId })).toEqual(settled);
+    expect((await f.service.cancelWait(f.caller, { waitId })).wait).toEqual(settled.wait);
     expect(f.store.getRun(f.parent.id)).toEqual(before);
+  });
+  // hearsay-tools/cezarion#1200: with no executing turn nothing frees the wait, so only a turn-end lets the caller wait again.
+  it('tells the caller what each cancellation outcome means for its turn', async () => {
+    const { waitId } = await cancellableWait();
+    expect(await f.service.cancelWait(f.caller, { waitId })).toMatchObject({ wait: { id: waitId, phase: 'wake-pending', reason: 'cancelled' },
+      instruction: `Wait ${waitId} cancelled. End your turn to receive the cancellation, then register another wait.` });
+    expect(await f.service.cancelWait(f.caller, { waitId })).toMatchObject({ wait: { id: waitId, phase: 'wake-pending' },
+      instruction: `Wait ${waitId} already settled (cancelled) and is waiting for delivery; this cancel could not clear it. End your turn to receive its result, then register another wait.` });
+    f.store.commitWorkerWaitWithdrawal(f.parent.id, waitId);
+    expect(await f.service.cancelWait(f.caller, { waitId })).toMatchObject({ wait: { id: waitId },
+      instruction: `Wait ${waitId} already settled and is no longer current; cancelling changes nothing.` });
   });
   it('collect settles a worker whose crashed generation left no live process (#469)', { timeout: 15_000 }, async () => {
     const { workerId } = await f.service.spawn(f.caller, input());
@@ -625,7 +636,7 @@ describe('delegation service durable authority', () => {
     const next = { id: randomUUID(), workerIds: [workerId], phase: 'registered' as const, deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [] };
     f.store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, wait: next } }]);
     f.store.updateRun(parent.id, { status: 'queued' });
-    expect(await f.service.cancelWait(f.caller, { waitId })).toEqual(old);
+    expect((await f.service.cancelWait(f.caller, { waitId })).wait).toEqual(old.wait);
     await expect(f.service.cancelWait(f.caller, { waitId: randomUUID() })).rejects.toMatchObject({ code: 'incompatible_state' });
     expect(f.store.getRun(parent.id)?.delegation).toMatchObject({ wait: next });
   });

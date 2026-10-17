@@ -188,9 +188,13 @@ describe('authenticated delegation HTTP family', () => {
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true }); const manager = createFixtureManager(reopened, f.root);
     f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager });
     try {
+      // A finished parent queues no wake, so ending its turn would deliver nothing.
+      const instruction = status === 'queued'
+        ? `Wait ${waitId} already settled (timeout) and is waiting for delivery; this cancel could not clear it. End your turn to receive its result, then register another wait.`
+        : `Wait ${waitId} already settled (timeout); cancelling changes nothing.`;
       for (let i = 0; i < 2; i++) {
         const response = await request('/cancel-wait', { waitId });
-        expect(response.status).toBe(200); expect(await response.json()).toEqual({ wait });
+        expect(response.status).toBe(200); expect(await response.json()).toEqual({ wait, instruction });
       }
       expect(reopened.getRun(workerId)?.status).toBe('queued');
       expect(reopened.getRun(f.parent.id)?.status).toBe(status);

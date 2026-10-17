@@ -620,7 +620,25 @@ export class DelegationService {
       if (!wait?.requestIds?.length) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
       for (const requestId of wait.requestIds) this.ownRequest(caller, requestId);
     } else authorizeCancelWait(caller, sender, project.id);
-    return { wait: project.manager.cancelWorkerWait(caller.runId, waitId) };
+    // Read in the same tick as the cancel: the outcome depends on what the wait was before it.
+    const run = project.store.getRun(caller.runId); const before = run?.delegation;
+    const current = before && before.role !== 'invalid' && before.wait?.id === waitId ? before.wait.phase : undefined;
+    // A finished run queues no wake, so ending its turn would deliver nothing.
+    const live = !!run && ['queued', 'running', 'waiting'].includes(run.status);
+    const wait = project.manager.cancelWorkerWait(caller.runId, waitId);
+    // And again after it: a settled wait it retired (hearsay-tools/cezarion#1228) queues no wake, and one it
+    // has just settled in an executing turn is retired by a second cancel.
+    const after = project.store.getRun(caller.runId)?.delegation;
+    const kept = !!after && after.role !== 'invalid' && after.wait?.id === waitId;
+    // A wait the call retired leaves the slot free whatever its phase was, so no turn-end advice follows it.
+    const instruction = current === undefined ? `Wait ${waitId} already settled and is no longer current; cancelling changes nothing.`
+      : !kept ? (current === 'wake-pending' ? `Wait ${waitId} had already settled; cancelling freed the wait slot and its outcomes stay in this receipt. Register another wait in this turn.`
+        : `Wait ${waitId} cancelled and retired; the wait slot is free and its outcomes stay in this receipt. Register another wait in this turn.`)
+      : current === 'wake-pending' ? (live ? `Wait ${waitId} already settled (${wait.reason}) and is waiting for delivery; this cancel could not clear it. End your turn to receive its result, then register another wait.`
+        : `Wait ${waitId} already settled (${wait.reason}); cancelling changes nothing.`)
+      : project.manager.canFreeSettledWorkerWait(caller.runId) ? `Wait ${waitId} cancelled; it holds the wait slot until its cancellation is delivered. Run worker cancel-wait ${waitId} again to free the slot and register another wait in this turn.`
+        : `Wait ${waitId} cancelled. End your turn to receive the cancellation, then register another wait.`;
+    return { wait, instruction };
   }
   async destroy(caller: Caller, params: WorkerParams) {
     const { project, worker } = this.target(caller, params, 'destroy');

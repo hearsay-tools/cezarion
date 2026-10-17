@@ -3974,6 +3974,9 @@ export class RunManager {
     if (state?.pendingHumanAsk || this.hasUnansweredHumanAsk(runId)) refuse('A human question is pending; answer it before registering a wait');
     if (run?.ciWait) refuse('A CI wait is already active; finish or withdraw it before registering a worker wait');
     const wait = this.workerWait(runId);
+    if (wait?.phase === 'wake-pending') refuse(this.canFreeSettledWorkerWait(runId)
+      ? `Wait ${wait.id} has settled and its outcomes are kept. Run worker cancel-wait ${wait.id} to free the slot now, then register another wait.`
+      : `Wait ${wait.id} has settled and its result is waiting for delivery. End your turn to receive it, then register another wait.`);
     if (wait) refuse(`Wait ${wait.id} is already active; keep it or run worker cancel-wait ${wait.id} before registering another`);
     if (!['running', 'waiting'].includes(run!.status) || !state?.session?.open || state.cancelled) {
       refuse(`Run is ${run!.status} with no available active session; register a wait from an executing parent or worker`);
@@ -4324,9 +4327,7 @@ export class RunManager {
     if (wait.phase === 'wake-pending') {
       // A caller still executing its turn has observed the receipt. Retire the
       // obsolete wake now; parked parents still need their queued delivery to resume.
-      if (!this.disposed && ['queued', 'running', 'waiting'].includes(run.status) &&
-        !this.rootFinishRequested(parentId) && !this.historyDeletionPending(parentId) &&
-        this.isExecutingWorkerWaitTurn(parentId)) {
+      if (this.canFreeSettledWorkerWait(parentId)) {
         const cancelled = { ...wait, reason: 'cancelled' as const };
         this.withdrawWorkerWait(parentId, undefined, 'cancelled');
         return cancelled;
@@ -4340,6 +4341,13 @@ export class RunManager {
     this.store.commitDelegation([{ id: parentId, delegation: { ...run.delegation, wait: settled, lastWait: settled } }]);
     this.reconcileWorkerWaits();
     return this.workerWait(parentId) ?? settled;
+  }
+
+  /** Whether a cancel-wait from this run retires its settled wait now instead of leaving the wake to deliver. */
+  canFreeSettledWorkerWait(runId: string): boolean {
+    const run = this.store.getRun(runId);
+    return !this.disposed && !!run && ['queued', 'running', 'waiting'].includes(run.status) &&
+      !this.rootFinishRequested(runId) && !this.historyDeletionPending(runId) && this.isExecutingWorkerWaitTurn(runId);
   }
 
   /** Absence from admission caches is not proof of a live turn after restart. */
