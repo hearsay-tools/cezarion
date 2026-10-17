@@ -2,6 +2,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { setTimeout as realSetTimeout } from 'node:timers';
 import { describe, expect, it, vi } from 'vitest';
 import * as worktrees from '../git-worktree.ts';
 import { RunStore } from '../runs/store.ts';
@@ -82,6 +83,8 @@ if (((args.includes('add') && args.includes('-N')) || args.includes('diff')) && 
   fs.writeFileSync(${JSON.stringify(join(bin, 'unexpected-writer'))}, 'index mutation: ' + args.join(' '));
 }
 if (args.includes('status') && args.includes('--porcelain')) {
+  // Reproduce startup delayed past the 500 ms command budget (hearsay-tools/cezarion#1216).
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 800);
   // Born after the holder baseline in a session of its own, outside Git's group.
   const holder = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(`setInterval(() => { if (require('node:fs').existsSync(${JSON.stringify(join(bin, 'move'))})) process.chdir(${JSON.stringify(bin)}); }, 10)`)}], { detached: true, stdio: 'ignore' });
   holder.unref();
@@ -99,6 +102,23 @@ if (args.includes('status') && args.includes('--porcelain')) {
 `, { mode: 0o755 });
               process.env.PATH = `${bin}:${path}`;
               budget = { timeoutMs: 500, killGraceMs: 100, confirmMs: 100 };
+              // hearsay-tools/cezarion#1216: an 800 ms shim startup reproduces R63's
+              // missing pid: the 500 ms command deadline kills Node before it writes it.
+              // Gate only that deadline on the holder handshake, not runner/poll timers.
+              // Keep the same timer handle so autosave's clearTimeout still cancels it.
+              // The existing 10 s precondition bound also limits a missing handshake.
+              const startupDeadline = Date.now() + 10_000;
+              const deadlineClock = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((callback: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+                if (ms !== budget!.timeoutMs) return realSetTimeout(callback, ms, ...args);
+                let ready = existsSync(join(bin, 'pid'));
+                const timer = realSetTimeout(() => {
+                  if (!ready && Date.now() < startupDeadline) {
+                    ready = existsSync(join(bin, 'pid'));
+                    timer.refresh();
+                  } else callback(...args);
+                }, ms);
+                return timer;
+              }) as typeof setTimeout);
               try {
                 const prompt = HARNESS_ADAPTERS[backend].scenarios['provider-error']!;
                 if (continuation) {
@@ -167,6 +187,7 @@ setInterval(() => require('node:child_process').spawn(process.execPath, ['-e', '
                   expect(replacement.manager.claimForBranchCleanup([runId])).toBeNull();
                 }
               } finally {
+                deadlineClock.mockRestore();
                 process.env.PATH = path;
                 unrelated?.kill('SIGKILL');
                 await unrelatedExit;
