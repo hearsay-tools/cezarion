@@ -365,8 +365,24 @@ jobs:
         with:
           version: '12.11.2'
 
+      # A stalled Node download once spent the whole job budget before the tests
+      # finished (hearsay-tools/cezarion#1214). Bound each attempt and retry once;
+      # only a second failure fails the job.
       - name: Set up Node.js
+        id: setup-node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          node-version: '24.15.0'
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
+          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
+
+      # A timeout fails the first attempt; test for anything but success so a cancelled attempt retries too.
+      - name: Retry Node.js setup
+        if: steps['setup-node'].outcome != 'success'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 3
         with:
           node-version: '24.15.0'
           cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}

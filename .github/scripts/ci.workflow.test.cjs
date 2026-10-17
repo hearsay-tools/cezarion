@@ -381,6 +381,40 @@ test('the engines floor is proven on exactly the minimum Node, and verify requir
   assert.notEqual(runShell(gate.run, skipped).status, 0, 'a skipped floor job must not green a full-matrix run');
 });
 
+test('a stalled floor Node setup times out and retries once inside the job budget (#1214)', () => {
+  const { runInNewContext } = require('node:vm');
+  const job = workflow().jobs['node-floor'];
+  assert.equal(job['timeout-minutes'], 20);
+  const setups = job.steps.filter(s => s.uses?.startsWith('actions/setup-node@'));
+  assert.equal(setups.length, 2, 'one setup and exactly one retry');
+  const [setup, retry] = setups;
+  for (const step of setups) {
+    assert.equal(typeof step['timeout-minutes'], 'number', step.name);
+    assert.ok(step['timeout-minutes'] < 5, `${step.name} must not spend the job budget on a stalled download`);
+  }
+  assert.equal(setup['continue-on-error'], true, 'a stalled first attempt must hand over to the retry');
+  assert.equal(retry['continue-on-error'], undefined, 'a second failure must fail the job');
+  assert.equal(retry.uses, setup.uses);
+  assert.deepEqual(retry.with, setup.with);
+  const index = job.steps.indexOf(setup);
+  assert.equal(job.steps.indexOf(retry), index + 1);
+  const firstInstall = job.steps.findIndex(s => /^(?:npm ci|pnpm install)/.test(s.run || ''));
+  assert.ok(firstInstall > index + 1, 'the retry must finish before anything installs');
+  // A step without a status function runs under an implicit success(), so a first
+  // attempt skipped after an earlier failure must keep the retry skipped too.
+  assert.ok(setup.id, 'the retry reads the first attempt by id');
+  assert.doesNotMatch(retry.if, /\b(?:success|failure|cancelled|always)\(/);
+  // continue-on-error reports a failed attempt's conclusion as success; only outcome tells.
+  const runs = (outcome, jobOk = true) => runInNewContext(`success() && (${retry.if})`, {
+    steps: { [setup.id]: { outcome, conclusion: outcome === 'skipped' ? 'skipped' : 'success' } }, success: () => jobOk,
+  });
+  assert.equal(runs('success'), false);
+  // A timeout fails the first attempt; a cancelled attempt must retry too.
+  assert.equal(runs('failure'), true);
+  assert.equal(runs('cancelled'), true);
+  assert.equal(runs('skipped', false), false);
+});
+
 test('genuine failure and cancellation never green the aggregate', () => {
   const gate = workflow().jobs.verify.steps.find(s => s.name === 'Require every verification job');
   for (const result of ['failure', 'cancelled', 'timed_out']) {
