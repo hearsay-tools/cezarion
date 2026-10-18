@@ -1,4 +1,5 @@
-import { deriveAttention, type ApiRun, type AttentionBucket, type RunStatus, type RunSummary } from '@open-mercato/cezar-contract';
+import { deriveAttention, type AttentionBucket } from '@open-mercato/cezar-contract/attention';
+import type { ApiRun, RunStatus, RunSummary } from '@open-mercato/cezar-contract';
 
 /**
  * The slim shapes `cez task` prints (#504). A bot polls these every few seconds, so each one

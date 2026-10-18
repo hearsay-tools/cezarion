@@ -1,5 +1,6 @@
 import { ATTENTION_RANK, deriveAttention } from './attention'
-import { normalizeSidebarLimits, type RunSummary, type SidebarLimits } from '@open-mercato/cezar-api-client'
+import { normalizeSidebarLimits, type SidebarLimits } from '@open-mercato/cezar-api-client/contract/workspace'
+import type { RunSummary } from '@open-mercato/cezar-api-client'
 
 /**
  * How the task list is bucketed, sorted and collapsed — the pure half of the sidebar quick-list

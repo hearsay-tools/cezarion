@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { automationKindSchema, automationScheduleSchema, type AutomationSchedule } from '@open-mercato/cezar-contract';
+import { automationKindSchema } from '@open-mercato/cezar-contract/automations';
+import { automationScheduleSchema, type AutomationSchedule } from '@open-mercato/cezar-contract/automation-schedule';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { workflowStepSchema } from '../workflows/types.ts';
 

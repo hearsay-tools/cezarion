@@ -5,7 +5,8 @@ import { brotliCompressSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { readFiniteRunFeed, readRunEventBatch, subscribeRunFeed } from './run-event-feed.ts';
-import { LIVE_BYTE_LIMIT, type RunEvent } from '@open-mercato/cezar-contract';
+import { LIVE_BYTE_LIMIT } from '@open-mercato/cezar-contract/live-limits';
+import type { RunEvent } from '@open-mercato/cezar-contract';
 
 let dataDir: string;
 let store: RunStore;

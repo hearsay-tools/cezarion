@@ -25,7 +25,7 @@ import { Link } from '@/lib/project-router'
 import { cn } from '@/lib/utils'
 
 import { GIT_SECTION_PATH } from './git-sections'
-import { queryScope } from '@open-mercato/cezar-api-client'
+import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 
 /** The note the whole Git view shows when the forge could not answer (issue 08 §A). */
 export const NO_FORGE_NOTE = 'Squash-merged branches may show as not landed without GitHub'

@@ -3,7 +3,7 @@ import type {
   ProviderStatusResponse,
 } from '../core/provider-auth.ts';
 import type { RunRecord } from '../runs/store.ts';
-export { providersRequiredByWorkflow } from '@open-mercato/cezar-contract';
+export { providersRequiredByWorkflow } from '@open-mercato/cezar-contract/workflows';
 
 const LABEL: Record<ProviderId, string> = {
   claude: 'Claude Code',

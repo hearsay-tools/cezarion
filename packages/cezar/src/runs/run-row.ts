@@ -1,4 +1,4 @@
-import { toRunSummary } from '@open-mercato/cezar-contract';
+import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 
 import type { RunRowInput } from './run-database.ts';
 // Type-only: the store imports this module, so a value import back would be a cycle.

@@ -2,7 +2,8 @@ import { ChevronDownIcon, SearchIcon } from '@/components/design-icons'
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
-import { DEFAULT_AGENT_ACCOUNT_ID, type Runner } from '@open-mercato/cezar-api-client'
+import { DEFAULT_AGENT_ACCOUNT_ID } from '@open-mercato/cezar-api-client/contract/agent-profiles'
+import type { Runner } from '@open-mercato/cezar-api-client'
 import {
   DropdownMenu,
   DropdownMenuContent,

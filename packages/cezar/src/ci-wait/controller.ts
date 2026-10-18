@@ -11,7 +11,9 @@ import { bodyLimit } from 'hono/body-limit';
 import { previewStopResult } from '../preview/registration.ts';
 import { ciErrorMessage, doneErrorMessage, doneInvalidInput, previewInvalidInput, previewOversized, previewRefusal, waitInvalidInput } from './errors.ts';
 import { previewToolEnabled } from './tools.ts';
-import { cezarCancelWaitAnswerSchema, cezarCancelWaitRequestSchema, cezarDoneAnswerSchema, cezarDoneRequestSchema, cezarWaitAnswerSchema, cezarWaitRequestSchema, ciWaitRequestSchema, ciWaitReceiptSchema, ciWaitErrorCodeSchema, previewStopRequestSchema, previewStopResultSchema, type CezarCancelWaitAnswer, type CezarCancelWaitRequest, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitAnswer, type CezarWaitRequest, type CiWait, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, previewServeResultSchema, type PreviewServeRequest, type PreviewServeResult, type Wait, type WaitVia } from '@open-mercato/cezar-contract';
+import { cezarCancelWaitAnswerSchema, cezarCancelWaitRequestSchema, cezarDoneAnswerSchema, cezarDoneRequestSchema, cezarWaitAnswerSchema, cezarWaitRequestSchema, type CezarCancelWaitAnswer, type CezarCancelWaitRequest, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitAnswer, type CezarWaitRequest, type Wait, type WaitVia } from '@open-mercato/cezar-contract/waits';
+import { ciWaitRequestSchema, ciWaitReceiptSchema, ciWaitErrorCodeSchema, type CiWait } from '@open-mercato/cezar-contract/ci-wait';
+import { previewStopRequestSchema, previewStopResultSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, previewServeResultSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { jsonZodValidator } from '../server/validators.ts';
 import type { AgentRunSpec } from '../core/agent-runner.ts';
 

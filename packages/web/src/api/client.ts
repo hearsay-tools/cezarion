@@ -138,20 +138,26 @@ import { parseProviderStatusResponse } from '@/lib/provider-status'
 import {
   API_PREFIX,
   apiPath,
-  createCezarClient,
   getApiBaseUrl,
   getApiScope,
   queryScope,
+} from '@open-mercato/cezar-api-client/utils/project-scope'
+import { createCezarClient } from '@open-mercato/cezar-api-client/client'
+import {
   runHistoryContextSchema,
-  runRelationshipsSchema,
   runHistoryPageSchema,
+} from '@open-mercato/cezar-api-client/contract/events'
+import { runRelationshipsSchema } from '@open-mercato/cezar-api-client/contract/delegation'
+import {
   archivedRunsResponseSchema,
   runsSearchResponseSchema,
-  githubOwnersResponseSchema,
+} from '@open-mercato/cezar-api-client/contract/runs'
+import { githubOwnersResponseSchema } from '@open-mercato/cezar-api-client/contract/projects'
+import {
   repoPullBranchesResponseSchema,
   repoPullConfirmationSchema,
   repoPullResponseSchema,
-} from '@open-mercato/cezar-api-client'
+} from '@open-mercato/cezar-api-client/contract/repo'
 import type { Ok, OkJson } from '@open-mercato/cezar-api-client'
 import type { ClientResponse } from 'hono/client'
 import type { ResponseFormat } from 'hono/types'

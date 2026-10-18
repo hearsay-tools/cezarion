@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runPullRequestSchema, type RunPullRequest } from '@open-mercato/cezar-contract';
+import { runPullRequestSchema, type RunPullRequest } from '@open-mercato/cezar-contract/runs';
 import { mergePullRequests, ownPullRequestNumbers } from './pull-requests.ts';
 
 const repo = 'https://github.com/o/r';

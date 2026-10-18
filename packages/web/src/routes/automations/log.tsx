@@ -1,6 +1,6 @@
 import { onLiveReconcile } from '@/api/live-coordinator'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { automationEventSchema, automationLogResultSchema, type AutomationLogRecord, type AutomationLogResult } from '@open-mercato/cezar-api-client'
+import { automationEventSchema, automationLogResultSchema, type AutomationLogRecord, type AutomationLogResult } from '@open-mercato/cezar-api-client/contract/automations'
 
 import { retryAutomationReceipt, getAutomationLog } from '@/api/client'
 import { onWorkspaceEvent } from '@/api/global-events'

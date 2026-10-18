@@ -1,7 +1,7 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
-import { setApiScope } from '@open-mercato/cezar-api-client'
+import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { createQueryClient } from '@/api/query-client'
 import { useProjectUiState } from '@/api/queries'
 

@@ -1,4 +1,5 @@
-import { LIVE_BYTE_LIMIT, LIVE_RUN_LIMIT, type LiveRunDemand } from '@open-mercato/cezar-api-client'
+import { LIVE_BYTE_LIMIT, LIVE_RUN_LIMIT } from '@open-mercato/cezar-api-client/contract/live-limits'
+import type { LiveRunDemand } from '@open-mercato/cezar-api-client'
 import { LEASE_MS, LIVE_PROTOCOL, ownerInputSchema, runKey, type LiveDemand, type LiveFrame, type OwnerOutput } from './live-protocol'
 
 export interface LivePort {

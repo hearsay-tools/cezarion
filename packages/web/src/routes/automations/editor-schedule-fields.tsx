@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { SCHEDULE_HOURS_OPTIONS, WEEKDAY_NAMES, cronOf, type NormalizedSchedule, type ScheduleEvery, type ScheduleType } from '@open-mercato/cezar-api-client'
+import { SCHEDULE_HOURS_OPTIONS, WEEKDAY_NAMES, cronOf, type NormalizedSchedule, type ScheduleEvery, type ScheduleType } from '@open-mercato/cezar-api-client/contract/automation-schedule'
 
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'

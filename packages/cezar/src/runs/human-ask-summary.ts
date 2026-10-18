@@ -1,4 +1,5 @@
-import { pendingHumanAsk, type RunEvent } from '@open-mercato/cezar-contract';
+import { pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
+import type { RunEvent } from '@open-mercato/cezar-contract';
 import { readHistoryText } from './history-file.ts';
 
 type AttentionSummary = { id: string; hasPendingHumanAsk?: boolean };

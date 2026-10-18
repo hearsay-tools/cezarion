@@ -1,7 +1,9 @@
 import { request } from 'node:http';
 import { previewStopResult } from '../preview/registration.ts';
 import { previewRefusal } from './errors.ts';
-import { cezarCancelWaitAnswerSchema, cezarDoneAnswerSchema, cezarWaitAnswerSchema, ciWaitRequestSchema, ciWaitReceiptSchema, ciWaitErrorSchema, previewServeResultSchema, previewStopResultSchema, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarWaitAnswer, type PreviewStopResult, type CiWaitReceipt, type PreviewServeResult } from '@open-mercato/cezar-contract';
+import { cezarCancelWaitAnswerSchema, cezarDoneAnswerSchema, cezarWaitAnswerSchema, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarWaitAnswer } from '@open-mercato/cezar-contract/waits';
+import { ciWaitRequestSchema, ciWaitReceiptSchema, ciWaitErrorSchema, type CiWaitReceipt } from '@open-mercato/cezar-contract/ci-wait';
+import { previewServeResultSchema, previewStopResultSchema, type PreviewStopResult, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 
 const UNAVAILABLE = 'CI tool unavailable: the owning session is closed or the private IPC connection failed.';
 export async function callCiWait(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<CiWaitReceipt> {

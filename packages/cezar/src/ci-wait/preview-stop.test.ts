@@ -3,7 +3,7 @@ import type { PreviewStopRequest, PreviewStopResult } from '@open-mercato/cezar-
 import type { CezarToolHandlers, CiToolApp } from './controller.ts';
 import { request } from 'node:http';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
-import { previewStopRequestSchema, previewStopResultSchema } from '@open-mercato/cezar-contract';
+import { previewStopRequestSchema, previewStopResultSchema } from '@open-mercato/cezar-contract/preview';
 import { CiToolController } from './controller.ts';
 import { callPreviewStop } from './client.ts';
 import { invokePreviewStopTool } from './tools.ts';

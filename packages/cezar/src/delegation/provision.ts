@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { workerOperationSchema } from '@open-mercato/cezar-contract';
+import { workerOperationSchema } from '@open-mercato/cezar-contract/delegation';
 import type { RunStore } from '../runs/store.ts';
 import { CredentialRegistry } from './credentials.ts';
 import { DelegationService, delegationEnabled, type DelegationProject } from './service.ts';

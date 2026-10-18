@@ -2,8 +2,8 @@ import {
   attachmentExtension,
   isAttachmentMediaType,
   isImageMediaType,
-  type AttachmentInput,
-} from '@open-mercato/cezar-api-client'
+} from '@open-mercato/cezar-api-client/contract/attachments'
+import type { AttachmentInput } from '@open-mercato/cezar-api-client'
 
 /**
  * The composer's attachment intake — paperclip, ⌘V paste, and drag-drop all funnel here, exactly

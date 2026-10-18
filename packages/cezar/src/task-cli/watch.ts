@@ -1,14 +1,13 @@
+import { ATTENTION_RANK } from '@open-mercato/cezar-contract/attention';
 import {
-  ATTENTION_RANK,
   apiRunSchema,
   toRunSummary,
-  runHistoryPageSchema,
   runRecordSchema,
   runSummarySchema,
   type RunSummary,
-  type RunHistoryEvent,
   type RunStatus,
-} from '@open-mercato/cezar-contract';
+} from '@open-mercato/cezar-contract/runs';
+import { runHistoryPageSchema, type RunHistoryEvent } from '@open-mercato/cezar-contract/events';
 import { invalidResponse, refuse, request, TaskCliError, type Cockpit } from './http.ts';
 import { attentionFields, TERMINAL_STATUSES, type AttentionFields } from './projections.ts';
 

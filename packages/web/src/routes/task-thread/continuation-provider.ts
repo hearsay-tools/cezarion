@@ -1,5 +1,6 @@
 import { useConfig, useProviderStatus } from '@/api/queries'
-import { providersRequiredByWorkflow, type ApiRun, type Runner } from '@open-mercato/cezar-api-client'
+import { providersRequiredByWorkflow } from '@open-mercato/cezar-api-client/contract/workflows'
+import type { ApiRun, Runner } from '@open-mercato/cezar-api-client'
 import { usableRunners } from '@/lib/provider-status'
 import { resolveRunner } from '@/routes/new-task-form'
 import { isStoppedBeforeStarting } from './run-actions'

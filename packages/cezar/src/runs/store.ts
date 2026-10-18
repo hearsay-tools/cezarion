@@ -9,12 +9,31 @@ import { isDeepStrictEqual } from 'node:util';
 import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
+import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
 import {
-  ciWaitSchema, agentInputSchema, inboxClaimSchema, delegationStateSchema, workerCreationReceiptSchema, workerCollectedResultSchema, workerResultFileSchema,
-  continuationMessageSchema, previewServerSchema, toRunSummary, workerDestroyRetrySchema,
-  runRecordSchema as contractRunRecordSchema, runPullRequestSchema, mergedPullRequestSchema,
-  waitSchema, LAST_WAITS_LIMIT, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT,
-} from '@open-mercato/cezar-contract';
+  agentInputSchema,
+  inboxClaimSchema,
+  delegationStateSchema,
+  workerCreationReceiptSchema,
+  workerCollectedResultSchema,
+  workerResultFileSchema,
+  workerDestroyRetrySchema,
+} from '@open-mercato/cezar-contract/delegation';
+import {
+  continuationMessageSchema,
+  toRunSummary,
+  runRecordSchema as contractRunRecordSchema,
+  runPullRequestSchema,
+  mergedPullRequestSchema,
+} from '@open-mercato/cezar-contract/runs';
+import { previewServerSchema } from '@open-mercato/cezar-contract/preview';
+import {
+  waitSchema,
+  LAST_WAITS_LIMIT,
+  TIMER_MAX_SECONDS,
+  TIMER_MIN_SECONDS,
+  WAIT_LIMIT,
+} from '@open-mercato/cezar-contract/waits';
 import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, CiWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry } from '@open-mercato/cezar-contract';
 import { matchesRunQuery, sqlPrefilterTokens } from './run-search.ts';
 import { storedDelegationStateSchema } from './delegation-state.ts';

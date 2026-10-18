@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { conversationMessageSchema, type AgentInput, type AskRequest } from '@open-mercato/cezar-contract';
+import { conversationMessageSchema } from '@open-mercato/cezar-contract/conversations';
+import type { AgentInput, AskRequest } from '@open-mercato/cezar-contract';
 import { answersQuestion, formatQuestionText, questionMessage } from './questions.ts';
 
 const W = randomUUID(); const P = randomUUID();

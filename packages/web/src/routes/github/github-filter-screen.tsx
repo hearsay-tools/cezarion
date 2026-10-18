@@ -1,4 +1,4 @@
-import { queryScope } from '@open-mercato/cezar-api-client'
+import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 
 import { RefreshCwIcon } from '@/components/design-icons'
 import { SCREEN_LIST_BODY_CLASS, SCREEN_LIST_TITLE_CLASS } from '@/components/nav-row-styles'

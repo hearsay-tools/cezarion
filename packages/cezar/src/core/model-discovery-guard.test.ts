@@ -11,7 +11,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MODEL_DISCOVERY_RUNNERS } from '@open-mercato/cezar-contract';
+import { MODEL_DISCOVERY_RUNNERS } from '@open-mercato/cezar-contract/workspace';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 import { hostModelCatalogAdapters } from './host-model-catalog.ts';

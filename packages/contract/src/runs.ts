@@ -3,6 +3,9 @@ import { agentInputSchema, delegationStateSchema, runDelegationSummarySchema, wo
 import { runnerSchema } from './health.ts';
 import { referenceStatusSchema } from './github.ts';
 import { previewServerSchema } from './preview.ts';
+import { isAttachmentMediaType } from './attachments.ts';
+import { runWorkflowLabel } from './run-labels.ts';
+import { ARCHIVED_RUNS_PAGE_MAX } from './run-limits.ts';
 // The chain shapes belong to the workflows family; the run record embeds one, so this file
 // consumes them rather than redeclaring. One-way on purpose — see the header of `./workflows.ts`.
 import { workflowDefSchema, workflowStepDefSchema } from './workflows.ts';
@@ -561,16 +564,6 @@ const SUMMARY_OPTIONAL_KEYS = [
   'outputTokens', 'currentStepId', 'error', 'worktreePath',
 ] as const satisfies readonly (keyof RunSummary & keyof RunRecord)[];
 
-/** `(planned)` and `(inbox)` chains carry their meaning in their first agent step's name. */
-export function runWorkflowLabel(run: Pick<RunRecord, 'workflow' | 'steps'>): string {
-  if (run.workflow === '(planned)' || run.workflow === '(inbox)') {
-    // `?? []`: the cockpit also projects streamed records, whose shape only `id` was checked on.
-    const agent = (run.steps ?? []).find((step) => step.kind === 'agent');
-    if (agent?.name) return agent.name;
-  }
-  return run.workflow;
-}
-
 /**
  * The one projection from a run record to its list row (#817). Optional keys are copied only when
  * present, so the wire never carries an `undefined` the schema calls absent; `delegation` goes
@@ -632,10 +625,6 @@ export const referenceStatusesByProjectSchema = z.record(
     issues: z.record(z.number(), referenceStatusSchema),
   }),
 );
-
-/** The archived roots `GET /run-summaries/archived` answers per page by default, and at most (#864). */
-export const ARCHIVED_RUNS_PAGE_DEFAULT = 50;
-export const ARCHIVED_RUNS_PAGE_MAX = 200;
 
 /**
  * `GET /run-summaries?archived=` (#864). `all` (the default) is every run, as the route has always
@@ -904,68 +893,6 @@ export type PickVariantResponse = z.infer<typeof pickVariantResponseSchema>;
 // Request types are `z.input`, not `z.infer`: a caller writes what the schema ACCEPTS, and the
 // defaults/transforms below (`text`, `images`, `systemPrompt`) mean the parsed output is not the
 // same shape. `z.infer` here would demand keys the server fills in for you.
-
-/**
- * Non-image attachment types the composer may send (#950). Deliberately an allowlist and
- * deliberately short: cezar serves these files back from the cockpit's own origin, so every entry
- * here is one more thing that must be safe to hand a browser. `image/*` stays a regex — narrowing
- * what the route has always accepted would be the breaking half of this change.
- *
- * `text/x-markdown` is the spelling some browsers still report for a `.md`.
- */
-export const FILE_ATTACHMENT_MEDIA_TYPES = [
-  'text/plain',
-  'text/markdown',
-  'text/x-markdown',
-  'application/pdf',
-] as const;
-
-/** Does this media type travel as an inline image block the model can look at? */
-export function isImageMediaType(mediaType: string): boolean {
-  return /^image\//.test(mediaType);
-}
-
-/** Is this something the composer may attach at all — an image, or one of the file types above? */
-export function isAttachmentMediaType(mediaType: string): boolean {
-  return (
-    isImageMediaType(mediaType) ||
-    (FILE_ATTACHMENT_MEDIA_TYPES as readonly string[]).includes(mediaType)
-  );
-}
-
-/**
- * The on-disk extension for an attachment, derived from its media type ALONE — the user's own
- * filename never reaches the wire, and therefore never reaches a path. `img` is the pre-existing
- * catch-all for an image type cezar does not name (an SVG, a BMP), kept so those files land where
- * they always did.
- */
-export function attachmentExtension(mediaType: string): string {
-  return /png/.test(mediaType) ? 'png'
-    : /jpe?g/.test(mediaType) ? 'jpg'
-    : /webp/.test(mediaType) ? 'webp'
-    : /gif/.test(mediaType) ? 'gif'
-    : mediaType === 'application/pdf' ? 'pdf'
-    : mediaType === 'text/plain' ? 'txt'
-    : mediaType === 'text/markdown' || mediaType === 'text/x-markdown' ? 'md'
-    : 'img';
-}
-
-/** Extensions `attachmentExtension` produces for an inline image. */
-const IMAGE_ATTACHMENT_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'img']);
-
-/**
- * Does a persisted attachment name (`pasted-3.pdf`, `screenshot-1.png`) refer to an image?
- *
- * The one predicate every reader branches on — the engine deciding whether to re-encode a file as
- * an image block, and the cockpit deciding between a thumbnail and a named chip. Branch on the
- * NAME, never on the list an entry came from: images and files share one list and one numbering
- * space on disk, and that is what keeps the orphan sweep, the restart re-read and the per-stack
- * cap on a single code path.
- */
-export function isImageAttachmentName(name: string): boolean {
-  const ext = name.split('.').pop()?.toLowerCase();
-  return ext !== undefined && IMAGE_ATTACHMENT_EXTENSIONS.has(ext);
-}
 
 /**
  * One inline attachment, base64 — ≤4 per request, 7,000,000 encoded characters each.

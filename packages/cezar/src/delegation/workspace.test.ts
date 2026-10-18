@@ -8,7 +8,7 @@ import { lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { workerDiffSchema } from '@open-mercato/cezar-contract';
+import { workerDiffSchema } from '@open-mercato/cezar-contract/delegation';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';

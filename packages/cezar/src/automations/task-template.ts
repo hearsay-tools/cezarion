@@ -1,4 +1,4 @@
-import { zonedParts } from '@open-mercato/cezar-contract';
+import { zonedParts } from '@open-mercato/cezar-contract/zoned-time';
 import { loadWorkflows } from '../workflows/load.ts';
 import { stepsIssue, type WorkflowDef } from '../workflows/types.ts';
 import type { RunStore } from '../runs/store.ts';

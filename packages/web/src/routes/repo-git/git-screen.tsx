@@ -1,5 +1,5 @@
 import { useIsFetching, useQueryClient } from '@tanstack/react-query'
-import { queryScope } from '@open-mercato/cezar-api-client'
+import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 
 import { queryKeys, useRepo } from '@/api/queries'
 import { RefreshCwIcon } from '@/components/design-icons'

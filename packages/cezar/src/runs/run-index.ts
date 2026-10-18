@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { runSummarySchema, toRunSummary, type RunSummary } from '@open-mercato/cezar-contract';
+import { runSummarySchema, toRunSummary, type RunSummary } from '@open-mercato/cezar-contract/runs';
 
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunSummaryRow } from './run-database.ts';
 import { decodeRunRecord, LEGACY_INDEX_FILE, reconcileLoadedRun, rescopeRun, parseRunRecords, type RepoHandle, type RunRecord } from './store.ts';

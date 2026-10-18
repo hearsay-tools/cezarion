@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runTaskCommand, type TaskIo } from './cli.ts';
 import { pollHitDeadline, abortedPoll, TIMEOUT_GRACE_MS } from './watch.ts';
 import { TaskCliError } from './http.ts';
-import { runRecordSchema, toRunSummary } from '@open-mercato/cezar-contract';
+import { runRecordSchema, toRunSummary } from '@open-mercato/cezar-contract/runs';
 import { startTestCockpit, type TestCockpit } from './cockpit.testkit.ts';
 
 /** `cez task wait` / `log` / `log --follow` / `start --wait` (#504). */

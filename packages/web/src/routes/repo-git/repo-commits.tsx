@@ -1,7 +1,7 @@
 import { ArrowDownToLineIcon, LoaderCircleIcon, SearchXIcon } from 'lucide-react'
 import { ArrowDownIcon, ArrowLeftIcon, BotIcon, GitCommitHorizontalIcon, GitMergeIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { useMemo, useRef, useState } from 'react'
-import { queryScope } from '@open-mercato/cezar-api-client'
+import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { useParams } from 'react-router'
 
 import { Link } from '@/lib/project-router'

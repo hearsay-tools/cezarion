@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runRecordSchema as contractRunRecordSchema } from '@open-mercato/cezar-contract';
+import { runRecordSchema as contractRunRecordSchema } from '@open-mercato/cezar-contract/runs';
 import { historyPaths } from './history-file.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
 import { RunDatabase } from './run-database.ts';

@@ -1,5 +1,5 @@
 import { writeFileSync } from 'node:fs'
-import { runEventSchema } from '@open-mercato/cezar-api-client'
+import { runEventSchema } from '@open-mercato/cezar-api-client/contract/events'
 
 /** Validate every nonblank NDJSON line before writing any of the seeded transcript. */
 export function seedTranscript(path: string, transcript: string): void {

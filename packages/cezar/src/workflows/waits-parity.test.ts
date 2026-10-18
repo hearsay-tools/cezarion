@@ -1,7 +1,9 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { deriveAttention, toRunSummary, type CiWaitResult, type HumanWaitEntry, type Wait } from '@open-mercato/cezar-contract';
+import { deriveAttention } from '@open-mercato/cezar-contract/attention';
+import { toRunSummary } from '@open-mercato/cezar-contract/runs';
+import type { CiWaitResult, HumanWaitEntry, Wait } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';

@@ -2,7 +2,7 @@ import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/pro
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { automationLogRecordSchema as contractLogRecordSchema } from '@open-mercato/cezar-contract';
+import { automationLogRecordSchema as contractLogRecordSchema } from '@open-mercato/cezar-contract/automations';
 import { AutomationCoordinator } from './coordinator.ts';
 import { AutomationStore } from './store.ts';
 import { GithubPoller } from './github-poller.ts';

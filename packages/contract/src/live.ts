@@ -1,9 +1,6 @@
 import { z } from 'zod';
 import { runHistoryCursorSchema, runHistoryEventSchema, runIdParamSchema } from './events.ts';
-
-export const LIVE_RUN_LIMIT = 32;
-export const LIVE_EVENT_LIMIT = 256;
-export const LIVE_BYTE_LIMIT = 1024 * 1024;
+import { LIVE_EVENT_LIMIT, LIVE_RUN_LIMIT } from './live-limits.ts';
 
 export const liveRunDemandSchema = z.object({
   projectId: z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/),

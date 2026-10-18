@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { request } from 'node:http';
-import { ciWaitRequestSchema, ciWaitSchema, ciWaitResultSchema, ciWaitReceiptSchema, previewServeResultSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract';
+import { ciWaitRequestSchema, ciWaitSchema, ciWaitResultSchema, ciWaitReceiptSchema } from '@open-mercato/cezar-contract/ci-wait';
+import { previewServeResultSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { cezarServerInstructions, cezarTools, doneToolDefinition } from './tools.ts';
 
 describe('CI wait contract', () => {
@@ -55,7 +56,7 @@ it.each([
   'human_ask_pending', 'human_ask_unanswered', 'worker_wait_pending', 'worker_execution_stopped',
   'root_finish_pending', 'registration_aborted', 'turn_changed',
 ])('accepts the specific registration refusal %s without losing its diagnostic', async code => {
-  const { ciWaitErrorSchema } = await import('@open-mercato/cezar-contract');
+  const { ciWaitErrorSchema } = await import('@open-mercato/cezar-contract/ci-wait');
   expect(ciWaitErrorSchema.parse({ code, message: 'Blocking state; retry after resolving it.' }))
     .toEqual({ code, message: 'Blocking state; retry after resolving it.' });
   expect(ciWaitErrorSchema.safeParse({ code: 'invented_refusal', message: 'no' }).success).toBe(false);

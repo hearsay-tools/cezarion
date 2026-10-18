@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { toRunSummary } from '@open-mercato/cezar-contract';
+import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 import { readRunIndexFromDisk, searchRunIndexFromDisk } from './run-index.ts';
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase } from './run-database.ts';
 import { encodeRunRow } from './run-row.ts';

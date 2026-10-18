@@ -1,4 +1,5 @@
-import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, type CiWaitErrorCode, type DoneErrorCode, type PreviewResultCode, type PreviewServeResult, type WaitErrorCode } from '@open-mercato/cezar-contract';
+import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, type DoneErrorCode, type WaitErrorCode } from '@open-mercato/cezar-contract/waits';
+import type { CiWaitErrorCode, PreviewResultCode, PreviewServeResult } from '@open-mercato/cezar-contract';
 import type { z } from 'zod';
 
 /** Safe diagnostics shared by the manager and private transport. Never forward raw errors. */

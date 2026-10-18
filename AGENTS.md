@@ -68,6 +68,16 @@ wake timer. Cezar has no process-exit callback, no CI webhook and no sub-agent-c
 event, so a state whose only on-by-default exit is "a human types something" is a dead end,
 however well it renders.
 
+A spec or plan that adds or changes a run state MUST carry a **Transitions out**
+table, reviewed with the spec or plan before implementation starts. Cover every
+state the change adds or keeps, with one row per exit: **State | Trigger | Who or
+what fires it | Behavior at shipped defaults**. A state whose only default exit
+is a human action must say so explicitly in the table; a state with no default
+exit must also say so. For example,
+[the unified-waits spec](.ai/specs/2026-10-17-unified-waits.md) needs this table:
+its list of input mechanisms and exits does not enumerate the transitions out of
+every state the change retains.
+
 **Find every construction site of a shared in-memory object — grep the TYPE, not the
 field.** `ActiveRun` is built in `execute` AND in `runContinuation`; open-mercato/cezar#811 populated
 `state.skills` in the first only, so registry `/skill` expansion worked on new tasks and
@@ -144,6 +154,15 @@ or `_`, and the handler then refused those names through `isValidCheckoutName`. 
 exports one project-name pattern from the contract, and the schema, the handler and the New project
 dialog all test against it.
 
+Import a contract VALUE from the module that defines it, never through a package root. The
+service writes `@open-mercato/cezar-contract/<module>`. The cockpit writes
+`@open-mercato/cezar-api-client/contract/<module>`, or `@open-mercato/cezar-api-client/<path>` for
+the api-client's own modules. Both roots re-export every contract module, delegation's schemas
+among them, so one value imported through a root loads them all, and an edit to any shared schema
+then reruns tests that never use it (hearsay-tools/cezarion#1237). Types still come from the
+roots, as `import type`. `packages/cezar/src/contract-import-boundaries.test.ts` refuses every
+other root import, and its failure names the subpath for each value.
+
 ## Repository layout
 
 Four pnpm workspaces (npm script metadata retained) under a `private` root that publishes nothing itself:
@@ -151,8 +170,8 @@ Four pnpm workspaces (npm script metadata retained) under a `private` root that 
 | Path | Package | What it is |
 | --- | --- | --- |
 | `packages/cezar` | `@wjarka/cezarion` | The service + CLI, and everything behind them (runs, workflows, agent runners, workspace state). The published artifact: `bin`, plus the built cockpit in `web/dist`. |
-| `packages/contract` | `@open-mercato/cezar-contract` | The HTTP contract itself: every request and response as a zod schema with its TypeScript type inferred from it, so no shape is written twice. **Node-free on the same terms as the api-client** (`lib: ["ES2022"]`, `types: []` in its tsconfig make a `node:*` import a compile error). `private`, and that has a cost: the service imports a contract VALUE (`workspaceUiStateSchema`, in `workspace/migrations.ts`), so a published tarball naming a package npm has never seen would fail on install. `packages/cezar/scripts/inline-contract.mjs` runs as `postbuild` to fold the contract into `dist/contract/` — bundle AND declarations — and repoint the emitted references. Delete that script the day the contract is published, or the day nothing in the service imports a contract value. |
-| `packages/api-client` | `@open-mercato/cezar-api-client` | The contract between the two: the typed client over `AppType`, the SSE/protocol types, and the scope helpers. Re-exports `packages/contract` so a consumer needs one import. **Node-free by construction** — no `node:*`, no `@types/node` — because it is bundled into a browser AND imported by the Node service. `private` for now: versioned with the release but not on npm. The service may therefore only import it in TESTS — a runtime import would make the published CLI depend on something npm cannot resolve. |
+| `packages/contract` | `@open-mercato/cezar-contract` | The HTTP contract itself: every request and response as a zod schema with its TypeScript type inferred from it, so no shape is written twice. **Node-free on the same terms as the api-client** (`lib: ["ES2022"]`, `types: []` in its tsconfig make a `node:*` import a compile error). `private`, and that has a cost: the service imports a contract VALUE (`workspaceUiStateSchema`, in `workspace/migrations.ts`), so a published tarball naming a package npm has never seen would fail on install. `packages/cezar/scripts/inline-contract.mjs` runs as `postbuild` to fold the contract into `dist/contract/` — bundle AND declarations — and repoint the emitted references, module subpaths included. Each module is also a subpath, `@open-mercato/cezar-contract/<module>`, which is how code imports a contract value (see § The HTTP API). Delete that script the day the contract is published, or the day nothing in the service imports a contract value. |
+| `packages/api-client` | `@open-mercato/cezar-api-client` | The contract between the two: the typed client over `AppType`, the SSE/protocol types, and the scope helpers. Re-exports `packages/contract` so a consumer needs one import, for types. Values come through its subpaths: `/contract/<module>` (a one-line re-export of each contract module) and `/<path>` for its own modules. **Node-free by construction** — no `node:*`, no `@types/node` — because it is bundled into a browser AND imported by the Node service. `private` for now: versioned with the release but not on npm. The service may therefore only import it in TESTS — a runtime import would make the published CLI depend on something npm cannot resolve. |
 | `packages/web` | `@open-mercato/cezar-web` | The cockpit SPA. Private; its output is an artifact of the service (`vite build` writes into `packages/cezar/web/dist`, which the CLI ships and serves). |
 
 Rules that follow from that:

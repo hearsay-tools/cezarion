@@ -15,7 +15,10 @@ import {
   type GlobalEvent,
   type UsageStore,
 } from './events'
-import { healthResponseSchema, runnerModelCatalogResponseSchema, apiPath, getApiScope, toRunSummary } from '@open-mercato/cezar-api-client'
+import { healthResponseSchema } from '@open-mercato/cezar-api-client/contract/health'
+import { runnerModelCatalogResponseSchema } from '@open-mercato/cezar-api-client/contract/workspace'
+import { apiPath, getApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
+import { toRunSummary } from '@open-mercato/cezar-api-client/contract/runs'
 import { queryKeys, useHealthSubscription, workspaceQueryKeys } from './queries'
 import type {
   ApiRun,

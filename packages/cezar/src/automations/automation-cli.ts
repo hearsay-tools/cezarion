@@ -5,10 +5,9 @@ import {
   SCHEDULE_TYPES,
   parseCron,
   scheduleLabel,
-  type AutomationEvent,
   type AutomationSchedule,
-  type CreateAutomationInput,
-} from '@open-mercato/cezar-contract';
+} from '@open-mercato/cezar-contract/automation-schedule';
+import type { AutomationEvent, CreateAutomationInput } from '@open-mercato/cezar-contract';
 import { EXIT } from '../task-cli/cli.ts';
 import { discoverCockpit, type DiscoverOptions } from '../task-cli/discovery.ts';
 import { fetchJson, refuse, TaskCliError, type Cockpit, type HttpResult } from '../task-cli/http.ts';
