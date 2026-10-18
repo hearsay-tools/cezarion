@@ -4,6 +4,7 @@ import { askErrorMessage, doneErrorMessage, waitErrorMessage } from '../ci-wait/
 import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type DoneErrorCode, type CiWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, computeWaitingOn, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
 import { ciWaitResultSchema, type CiWaitRequest, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
+import { AUTONOMOUS_NUDGE } from './turn-end.ts';
 import { ciWatchRequest, hasCiWait, identicalWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import { previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
@@ -589,8 +590,7 @@ export const FINAL_MESSAGE_NUDGE_REPLY_MS = 5 * 60_000;
 export const MAX_AUTO_CONTINUES = 40;
 /** Claude's `ScheduleWakeup` accepts at most an hour (hearsay-tools/cezarion#1233). */
 const SCHEDULE_WAKEUP_MAX_SECONDS = 3600;
-export const AUTONOMOUS_NUDGE =
-  'Continue working autonomously until the task is fully complete. Do not ask me for confirmation or clarification — make reasonable assumptions and proceed. When everything is done, end the session with your done signal.';
+export { AUTONOMOUS_NUDGE };
 /** `cezar_cancel_wait` answers that cancel nothing (hearsay-tools/cezarion#1233). */
 const CANCEL_MESSAGES = {
   not_found: 'No open wait has this wait_id. open_waits lists the waits still open.',
