@@ -69,6 +69,36 @@ describe('authenticated delegation HTTP family', () => {
     f.store.updateRun(parent.id, { delegation: { ...parent.delegation, permissions: ['spawn'] } });
     expect((await request('/list')).status).toBe(403);
   });
+  it('pages worker summaries without repeating inspection inputs or outcomes', async () => {
+    const { workerId } = await spawn();
+    const original = f.store.getRun(workerId)!;
+    if (original.delegation?.role !== 'worker') throw Error('worker');
+    const parent = f.store.getRun(f.parent.id)!;
+    if (parent.delegation?.role !== 'root') throw Error('parent');
+    const receipts = [...parent.delegation.receipts];
+    for (let i = 0; i < 34; i++) {
+      const worker = f.store.createRun({ title: 'worker', task: 'work', workflow: 'quick-task', steps: [] });
+      f.store.updateRun(worker.id, { delegation: { ...original.delegation,
+        workspace: { ...original.delegation.workspace, ownerRunId: worker.id, resourceId: randomUUID() } } });
+      receipts.push({ requestId: randomUUID(), workerId: worker.id, requestHash: 'a'.repeat(64) });
+    }
+    f.store.updateRun(parent.id, { delegation: { ...parent.delegation, receipts } });
+    const first = await (await request('/list')).json() as { workers: unknown[]; nextOffset?: number };
+    expect(first.workers).toHaveLength(32);
+    expect(first.nextOffset).toBe(32);
+    const second = await (await request('/list?offset=32')).json() as { workers: { workerId: string }[]; nextOffset?: number };
+    expect(second.workers.map(worker => worker.workerId)).toEqual(receipts.slice(32).map(receipt => receipt.workerId));
+    expect(second.nextOffset).toBeUndefined();
+    expect((await request('/list?offset=-1')).status).toBe(400);
+    expect((await request('/list?offset=1025')).status).toBe(400);
+    expect((await request(`/${workerId}?offset=1`)).status).toBe(400);
+    const inspection = await f.service.inspect(f.caller, { workerId });
+    vi.spyOn(f.service, 'inspect').mockResolvedValue({ ...inspection, inputs: [],
+      outcome: { workerId, status: 'done', observedAt: new Date().toISOString(), summary: 'x'.repeat(4_000) } });
+    const result = await (await request('/list')).json() as { workers: Record<string, unknown>[] };
+    expect(result.workers[0]).not.toHaveProperty('inputs');
+    expect(result.workers[0]).not.toHaveProperty('outcome');
+  });
   it('accepts a catalog workflow on spawn and rejects a malformed one before the service (#451)', async () => {
     const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'review.yaml'), 'name: review\nsteps:\n  - id: inspect\n    prompt: "{{task}}"\n  - id: verify\n    command: \"true\"\n');

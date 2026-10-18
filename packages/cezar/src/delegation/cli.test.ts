@@ -33,6 +33,18 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     expect(await runWorkerCommand(['list', '--help'], {})).toBe(0);
     expect(output.mock.calls.at(-1)?.[0]).toContain('cez worker list');
   });
+  it('follows every list page and emits one complete worker list', async () => {
+    const spawned = await f.service.spawn(f.caller, { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
+    const inspection = await f.service.inspect(f.caller, { workerId: spawned.workerId });
+    const entry = { workerId: inspection.workerId, parentRunId: inspection.parentRunId,
+      status: inspection.status, workspace: inspection.workspace, revision: 0, settled: false, destroyed: false };
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ workers: [entry], nextOffset: 32 })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ workers: [{ ...entry, workerId: randomUUID() }] })));
+    expect(await runWorkerCommand(['list'], env)).toBe(0);
+    expect(json().workers).toHaveLength(2);
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual([`${transport.url}/list`, `${transport.url}/list?offset=32`]);
+  });
   it('preserves JSON usage for no args', async () => {
     expect(await runWorkerCommand([], env)).toBe(1);
     const help = json();

@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import {
   conversationSendRequestSchema, conversationSendResultSchema, conversationInspectResultSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReserveResultSchema, inboxReceiptResultSchema, requestOutcomeSchema, requestWaitRequestSchema,
-  workerListResultSchema, workerCollectedResultSchema, workerCancelWaitRequestSchema, workerCancelWaitResultSchema, workerOperationSchema, workerParamsSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema,
+  workerListPageSchema, workerListResultSchema, workerCollectedResultSchema, workerCancelWaitRequestSchema, workerCancelWaitResultSchema, workerOperationSchema, workerParamsSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema,
   workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema,
   workerDiffSchema, workerWaitResultSchema, delegationErrorResponseSchema,
 } from '@open-mercato/cezar-contract';
@@ -320,6 +320,25 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
       token = z.string().regex(/^[A-Za-z0-9_-]{43}$/).parse(env.CEZ_DELEGATION_TOKEN);
     } catch { throw new DelegationPolicyError('unavailable_transport', 'Delegation session is unavailable'); }
     try {
+      if (operation === 'list') {
+        const workers: z.infer<typeof workerListResultSchema>['workers'] = [];
+        let offset = 0;
+        for (;;) {
+          const response = await fetch(`${endpoint.href}/list${offset ? `?offset=${offset}` : ''}`, {
+            method: 'GET', redirect: 'error', headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(45_000),
+          });
+          const data = await boundedJson(response);
+          if (!response.ok) { print(delegationErrorResponseSchema.parse(data)); return 1; }
+          const page = workerListPageSchema.parse(data);
+          workers.push(...page.workers);
+          if (workers.length > 1_024) throw Error('Worker list too large');
+          if (page.nextOffset === undefined) break;
+          if (page.nextOffset <= offset) throw Error('Worker list did not advance');
+          offset = page.nextOffset;
+        }
+        print(workerListResultSchema.parse({ workers }));
+        return 0;
+      }
       if (operation === 'inbox') {
         const postInbox = async (action: '' | '/ack' | '/release', payload: object) => {
           const response = await fetch(`${endpoint.href}/inbox${action}`, { method: 'POST', redirect: 'error',

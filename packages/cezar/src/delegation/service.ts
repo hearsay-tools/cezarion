@@ -11,7 +11,7 @@ import {
   conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReceiptRequestSchema, requestWaitRequestSchema,
   type ConversationSendRequest, type ConversationSendResult, type ConversationInspectRequest, type ConversationInspectResult, type ConversationCancelRequest, type ConversationState, type InboxReserveResult, type InboxReceiptRequest, type InboxReceiptResult, type RequestWaitRequest, type RequestOutcome,
   workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerCancelWaitRequestSchema, type WorkerCancelWaitRequest,
-  type WorkerListResult, type WorkerCollectedResult, type WorkerDestroy, type WorkerDestroyResult, type WorkerInspection, type WorkerOperation,
+  type WorkerListPage, type WorkerListQuery, type WorkerCollectedResult, type WorkerDestroy, type WorkerDestroyResult, type WorkerInspection, type WorkerOperation,
   type WorkerParams, type WorkerSpawnRequest, type WorkerSteerRequest, type WorkerWaitRequest,
 } from '@open-mercato/cezar-contract';
 import type { RunStore, RunRecord } from '../runs/store.ts';
@@ -544,23 +544,27 @@ export class DelegationService {
       } finally { if (!accepted) await prepared?.discard(); }
     });
   }
-  async list(caller: Caller): Promise<WorkerListResult> {
+  async list(caller: Caller, query: WorkerListQuery = {}): Promise<WorkerListPage> {
     const project = this.context(caller);
     const parent = project.store.getRun(caller.runId);
     authorizeWorkerList(caller, parent, project.id);
     if (parent?.delegation?.role !== 'root') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
-    const workers: WorkerListResult['workers'] = [];
-    for (const receipt of parent.delegation.receipts) {
+    const workers: WorkerListPage['workers'] = [];
+    const offset = Number(query.offset ?? 0);
+    const end = Math.min(offset + 32, parent.delegation.receipts.length);
+    for (const receipt of parent.delegation.receipts.slice(offset, end)) {
       const worker = project.store.getRun(receipt.workerId);
       // Deleted histories have no resources to supervise. Never expose an unrelated receipt target.
       if (worker?.delegation?.role !== 'worker' || worker.delegation.parentRunId !== parent.id ||
           worker.delegation.workspace.ownerRunId !== worker.id) continue;
       const inspection = await this.inspect(caller, { workerId: worker.id });
-      workers.push({ ...inspection, revision: workerRevision(worker),
+      workers.push({ workerId: inspection.workerId, parentRunId: inspection.parentRunId,
+        status: inspection.status, workspace: inspection.workspace,
+        ...(inspection.destroy ? { destroy: inspection.destroy } : {}), revision: workerRevision(worker),
         settled: inspection.outcome !== undefined && project.store.readWorkerExecution(worker.id)?.phase === 'complete',
         destroyed: worker.delegation.destroy?.phase === 'complete' });
     }
-    return { workers };
+    return { workers, ...(end < parent.delegation.receipts.length ? { nextOffset: end } : {}) };
   }
   async inspect(caller: Caller, params: WorkerParams): Promise<WorkerInspection> {
     const { project, worker, parent } = this.target(caller, params, 'inspect');
