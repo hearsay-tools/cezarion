@@ -469,8 +469,16 @@ builder" unless a bullet says otherwise.
   through `releaseSlot()`. A pool member running its wake turn keeps its slot until that turn
   ends; a wake of a pool member is admitted at once, with no `chargedCiWake` bookkeeping.
 - **Wakes beside questions.** At a boundary, a wake is delivered beside a pending portable
-  question; the card stays answerable and its answer keeps its `askSeq`. A pending native
-  question delivers nothing mid-turn: the wake waits for the answer's turn end.
+  question; the card stays answerable and its answer keeps its `askSeq`. The wake goes through
+  `sendAgentMessage(content, ids, { besideQuestion: true })`, never the answer transport. The
+  runners that refuse agent input while a portable `CEZ:ASK` is pending (Claude, Pi, OMP,
+  Cursor) skip only that refusal for it, and its provider acknowledgement is the checkpoint.
+  A rejected acknowledgement fails the session like any rejected agent input (every runner
+  that can reject one reports it as a provider error), and the waits stay resolved and the
+  question pending: the run stays `waiting` on its waits, and a scheduler continuation delivers
+  them and re-parks as Needs you. An acknowledgement after the wake turn ended parks the run for
+  the question again. A pending native question delivers nothing mid-turn:
+  the wake waits for the answer's turn end.
 - **Recovery.** A parked run with waits stays parked and its wake folds in queued messages.
   A run with a pending question, or one that was not `waiting` and has queued messages,
   falls through to ordinary recovery so they are handled; its waits are re-armed either way.

@@ -8,7 +8,8 @@ import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { manager, parent, register, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { claudeScheduleWakeupDelay } from './run.ts';
-import { messagesPrompt } from './monitoring-turn.testkit.ts';
+import { ASK_TEXT, messagesPrompt } from './monitoring-turn.testkit.ts';
+import { withDelayedCommand, withHeldPrintResponse, withRejectedCommand } from '../core/owned-input-delivery.testkit.ts';
 import { ciNativeMessages, gatedProviderFailure, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
 
 // hearsay-tools/cezarion#1233: every runner opens, cancels and survives CI and timer waits on its
@@ -50,6 +51,32 @@ const turnEnds = (id: string) => store.readEvents(id).filter(event => event.type
 const viaOf = (id: string, via: Wait['via']) => store.getRun(id)?.waits?.find(wait => wait.via === via);
 const parkedOn = (id: string, wait: Wait | undefined) => wait?.phase === 'open' && store.getRun(id)?.status === 'waiting';
 const prompted = (runner: RunnerId, text: string) => ciNativeMessages(runner, root).filter(prompt => prompt.includes(text));
+const asks = (id: string) => store.readEvents(id).filter(event => event.type === 'ask.requested');
+const answered = (id: string, askSeq: number) => store.readEvents(id).some(event => event.type === 'human-input-delivered' && event.askSeq === askSeq);
+const pendingQuestion = (id: string) => store.getRun(id)?.hasPendingHumanAsk === true && store.getRun(id)?.status === 'waiting';
+
+/** A portable question parked, then a timer whose note carries a native mock's ACK marker. */
+async function timerBesideQuestion(runner: RunnerId, note: string) {
+  nativeWire(runner);
+  const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
+  await until(() => store.getRun(run.id)?.status === 'waiting');
+  expect(manager.sendMessage(run.id, [{ type: 'text', text: messagesPrompt(runner, [ASK_TEXT]) }])).toBe(true);
+  await until(() => pendingQuestion(run.id) && asks(run.id).length === 1);
+  const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+  const registered = await tools.registerWait({ kind: 'timer', seconds: 60, note }, 'cezar_wait', new AbortController().signal);
+  if (!('wait' in registered)) throw Error('registration refused');
+  return { run, timer: registered.wait, askSeq: asks(run.id)[0]!.seq };
+}
+
+/** The question is still the one the human answers: its card stays, and the answer keeps its askSeq. */
+async function answerQuestion(id: string, askSeq: number) {
+  await until(() => pendingQuestion(id));
+  expect(deriveAttention(store.getRun(id)!).label).toBe('needs you');
+  expect(asks(id)[0]!.seq).toBe(askSeq);
+  expect(manager.sendMessage(id, [{ type: 'text', text: 'Parser' }])).toBe(true);
+  await until(() => answered(id, asks(id).at(-1)!.seq));
+}
+
 const timerText = (wait: Wait, note: string) => `Timer ${wait.id} fired: ${note}. Continue toward the task goal; register another wait if you are still waiting.`;
 
 describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', { timeout: 45_000 }, () => {
@@ -57,7 +84,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -293,6 +320,47 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       external.settle();
       await until(() => settled(run.id, ci.id)?.phase === 'delivered' && prompted(runner, `CI wait observation ${ci.id}`).length > 0);
       expect(state.monitoringWakeups).toBe(40);
+    });
+
+    it(`${runner} U12 a wait result beside a pending portable question is checkpointed only on its delayed provider acknowledgement, and the question stays answerable`, async () => {
+      if (exemptionFor('U12', runner)) {
+        expect(exemptionFor('U12', runner)?.kind).toBe('capability-absent');
+        return;
+      }
+      const exercise = async (release: () => void) => {
+        const { run, timer, askSeq } = await timerBesideQuestion(runner, 'mock:agent-echo delay-owned-ack');
+        fireTimer(timer.id);
+        await until(() => prompted(runner, `Timer ${timer.id} fired`).length > 0);
+        await flushMicrotasks();
+        // On the wire, acknowledgement withheld: the result is not delivered yet.
+        expect(store.getRun(run.id)?.waits?.find(wait => wait.id === timer.id)?.phase).toBe('resolved');
+        expect(inputsFor(run.id, timer.id).map(input => input.deliveredAt)).toEqual([undefined]);
+        expect(store.getRun(run.id)?.hasPendingHumanAsk).toBe(true);
+        release();
+        await until(() => settled(run.id, timer.id)?.phase === 'delivered');
+        // An acknowledgement after the wake turn ended still leaves the run in the question's park.
+        await answerQuestion(run.id, askSeq);
+      };
+      if (runner === 'cursor') await withHeldPrintResponse(exercise);
+      else await withDelayedCommand(runner as 'codex' | 'opencode' | 'pi' | 'omp', exercise);
+    });
+
+    it(`${runner} U13 a wait result beside a pending portable question whose acknowledgement is rejected stays resolved, is retried, and the question stays answerable`, async () => {
+      if (exemptionFor('U13', runner)) {
+        expect(exemptionFor('U13', runner)?.kind).toBe('capability-absent');
+        return;
+      }
+      await withRejectedCommand(runner as 'codex' | 'opencode' | 'pi' | 'omp', async () => {
+        const { run, timer, askSeq } = await timerBesideQuestion(runner, `reject-owned-turn${runner === 'opencode' ? ' mock:reject-agent-post' : ''}`);
+        fireTimer(timer.id);
+        await until(() => settled(run.id, timer.id)?.phase === 'delivered');
+        // The rejection failed the session, not the run: a continuation sent the result again, and
+        // only that accepted submission delivered it.
+        expect(prompted(runner, `Timer ${timer.id} fired`).length).toBeGreaterThanOrEqual(2);
+        expect(inputsFor(run.id, timer.id)).toHaveLength(1);
+        expect(store.getRun(run.id)?.status).not.toBe('failed');
+        await answerQuestion(run.id, askSeq);
+      });
     });
 
     it(`${runner} U11 an alias timer survives a later worker park with its deadline, is held while the workers outrank it, and is delivered after the worker wake`, async () => {

@@ -5128,6 +5128,14 @@ export class RunManager {
     // An in-flight acknowledgement still owns this boundary; its .then re-settles.
     if (this.harnessHoldsHumanInput(state) || state.agentInputFlight) return;
     const proseGate = state.parkAfterAck?.session === session && state.parkAfterAck.humanGate;
+    // A wake beside a pending question can be acknowledged after its turn ended, and its
+    // checkpoint takes the run out of the question's park: park for the question again
+    // (hearsay-tools/cezarion#1233).
+    if (state.pendingHumanAsk && !proseGate && state.atTurnBoundary === session && session.open &&
+      !this.waiting.has(runId) && state.currentStepId) {
+      this.parkForUser(runId, state, state.currentStepId);
+      return;
+    }
     if (state.atTurnBoundary !== session || (state.pendingHumanAsk && !proseGate) || this.workerWait(runId) || (!proseGate && this.hasQueuedAgentInputs(runId))) return;
     if (state.doneAtBoundary === session) {
       if (this.deferParentCompletion(runId)) return;
@@ -5341,12 +5349,14 @@ export class RunManager {
     };
     let retainedWorkerWaitId: string | undefined;
     let acknowledgement: false | Promise<void>;
+    // A wake beside a pending question tells the runner so: native wires refuse agent input while
+    // a portable CEZ:ASK is pending, and this input is not its answer. The question stays Cezar's
+    // and its card stays answerable; the provider's acknowledgement is still the checkpoint, and a
+    // rejected one fails the session like any other, leaving the waits resolved for a continuation.
+    const besideQuestion = !!state.pendingHumanAsk;
     try {
       this.prepareWorkerWaitBatch(runId, inputIds);
-      // Several native wires refuse agent input while a portable CEZ:ASK is pending. A wake beside
-      // one opens its turn through the answer transport, as the autonomous override does; Cezar
-      // keeps the question pending, so its card stays answerable. Acceptance is the ACK.
-      acknowledgement = state.pendingHumanAsk ? (session.sendMessage(content) ? Promise.resolve() : false)
+      acknowledgement = besideQuestion ? session.sendAgentMessage(content, inputIds, { besideQuestion })
         : session.sendAgentMessage(content, inputIds);
     }
     catch (error) { refund(); fail(error, false); state.agentInputFlight = undefined; return false; }

@@ -105,7 +105,7 @@ interface AgentSession {
   result: Promise<AgentRunResult>;   // resolves when the process exits
   readonly pid?: number;             // root of the run's process tree (resource telemetry, open-mercato/cezar#348)
   sendMessage(content: ContentBlock[]): boolean;  // human input; false when closed
-  sendAgentMessage(content: ContentBlock[], inputIds?: readonly string[]): false | Promise<void>; // reserve now, harness acceptance later
+  sendAgentMessage(content: ContentBlock[], inputIds?: readonly string[], options?: AgentInputOptions): false | Promise<void>; // reserve now, harness acceptance later; `besideQuestion` admits wait results beside a portable CEZ:ASK
   respondPermission?(requestId: string, optionId: string): boolean; // explicit offered native approval choice
   discardQueuedMessages(): void;     // drop mid-turn follow-ups; CEZ:ASK park calls this
   holdsHumanInput(): boolean;        // true while a sendMessage follow-up is held undelivered (hearsay-tools/cezarion#486). Queueing runners drop on discardQueuedMessages and return false; write-through/steer wires report true until the harness settles that line (their discard is a no-op). A drain with no new turn notifies onAgentInputReady so run.ts re-settles.
@@ -151,7 +151,10 @@ after the whole turn; a `boundary` runner refuses it until the turn ends. Routin
 input never cancels a running tool. Every runner refuses while a native question or
 a trailing `CEZ:ASK` is pending, and before its opening prompt exists (Codex until
 startup completes, OpenCode until the opening prompt starts), then emits one
-readiness hint if it refused. Human input keeps priority: an outstanding human prompt
+readiness hint if it refused. The one exception is `options.besideQuestion`
+(hearsay-tools/cezarion#1233): the caller delivers wait results beside a pending
+portable `CEZ:ASK`, so the runner skips only that refusal. The input is not the
+question's answer, the question stays the caller's, and a native question still refuses. Human input keeps priority: an outstanding human prompt
 acknowledgement refuses, then hints once it lands.
 
 `inputIds` name the durable inputs in the submission. A runner reports
@@ -872,7 +875,13 @@ notice.
 
 A pending portable question (the ask-marker card) never takes CI data as its answer:
 a wake at a boundary is delivered beside it, the card stays answerable, and the
-answer keeps its `askSeq`. A pending native question (Codex, OpenCode, Cursor)
+answer keeps its `askSeq`. That wake goes through `sendAgentMessage` with
+`besideQuestion`, never the answer transport, and its provider acknowledgement is the
+checkpoint as for any wake. A rejected acknowledgement delivers nothing and fails the
+session like any rejected agent input (Codex, OpenCode, Pi and OMP report it as a provider
+error). The waits stay resolved and the question stays pending, the run stays `waiting` on
+its waits, and a scheduler continuation delivers them and re-parks as Needs you. An
+acknowledgement that lands after the wake turn ended parks the run for the question again. A pending native question (Codex, OpenCode, Cursor)
 delivers nothing mid-turn: the wake waits for the answer and that turn's end. A
 question whose session closed idle reopens through the scheduler-owned continuation
 to deliver the wake, then re-parks as Needs you.
@@ -1008,7 +1017,7 @@ the observation. Later successful settlement must leave that failed attempt inta
 Clean session closure while CI is pending still parks without failure. No runner
 exemptions or normalized-event injection.
 
-**U0–U4, U7–U11** (hearsay-tools/cezarion#1233) pin the wait list on every `RUNNER_IDS`
+**U0–U4, U7–U13** (hearsay-tools/cezarion#1233) pin the wait list on every `RUNNER_IDS`
 backend through its `HARNESS_ADAPTERS` native wire, with no normalized-event injection.
 U0, in `core/ci-tools.test.ts`, calls `cezar_wait` and `cezar_cancel_wait` through each
 native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
@@ -1031,7 +1040,15 @@ cancelled, the held batch keeps the fortieth wake, and a CI result still wakes t
 uncharged. U11 opens a monitoring-line timer, parks
 the parent on a worker, fires the timer, and checks that the timer kept its deadline, was
 held while the parent read **waiting on 1 worker**, and was delivered after the worker
-wake. Scenario cases that need one wire live in
+wake. U12 delivers a timer result beside a pending portable question and holds its
+provider acknowledgement: the wait stays `resolved` and its input undelivered until the
+acknowledgement lands after the wake turn ended, and then the run is back in Needs you and
+the answer keeps its `askSeq`. U13 rejects that acknowledgement once: the session fails, the
+run does not, a continuation sends the result again and delivers it once, and the question
+is answered. Claude is
+exempt from both, and Cursor from U13, as `capability-absent`. Claude acknowledges agent
+input with the local stdin write, and Cursor print acknowledges on the first model work of
+the process it spawns, so neither wire can delay or reject that acknowledgement. Scenario cases that need one wire live in
 `workflows/waits-wake.test.ts`: a CI result beside a pending portable question (U3b,
 Claude and Codex), a Codex native question, an idle-closed question, two waits in one
 submission, the footer and the monitoring pool.

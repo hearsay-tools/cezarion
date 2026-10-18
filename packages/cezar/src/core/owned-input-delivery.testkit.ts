@@ -1,11 +1,17 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { HARNESS_ADAPTERS } from './harness-parity.testkit.ts';
 import { patchMockOnce } from './mock-patch.testkit.ts';
 
 const patch = (mockBin: string, source: string, anchor: string, replacement: string | ((anchor: string) => string)) =>
   patchMockOnce('owned-input-delivery.testkit.ts', mockBin, source, anchor, replacement);
+
+/** The patched copy runs from a temporary directory: point the mock's sibling `import('./…')`
+ *  calls (turn messages, cezar tools) back at the originals. */
+const writeMock = (mock: string, mockBin: string, source: string) => writeFileSync(mock, '#!/usr/bin/env node\n' +
+  source.replace(/import\('(\.\/[^']+)'\)/g, (_match, path: string) => `import(${JSON.stringify(pathToFileURL(join(dirname(mockBin), path)).href)})`), { mode: 0o755 });
 
 /** Reject exactly one identified command through the real protocol; a reopened
  * process accepts it. No session/manager mock and no transport-error inference. */
@@ -32,7 +38,7 @@ export async function withRejectedCommand(backend: 'codex' | 'opencode' | 'pi' |
       const anchor = "  } else if (command.type === 'prompt' && command.message.includes('mock:agent-echo')) {";
       source = patch(original, source, anchor, found => `  } else if(command.type==='prompt' && command.message.includes('reject-owned-turn') && !${rejected}) {${mark};send({id:command.id,type:'response',command:'prompt',success:false,error:{message:'owned turn rejected'}});` + found);
     }
-    writeFileSync(mock, '#!/usr/bin/env node\n' + source, { mode: 0o755 });
+    writeMock(mock, original, source);
     adapter.mockBin = mock;
     await body();
   } finally {
@@ -73,7 +79,7 @@ export async function withDelayedCommand(backend: 'codex' | 'opencode' | 'pi' | 
     if (echo && marker !== 'mock:provider-error') {
       source = patch(original, source, `${echo}.includes('mock:agent-echo')`, found => `(${found} || ${echo}.includes(${JSON.stringify(marker)}))`);
     }
-    writeFileSync(mock, '#!/usr/bin/env node\n' + source, { mode: 0o755 });
+    writeMock(mock, original, source);
     adapter.mockBin = mock;
     await body(() => writeFileSync(released, ''));
   } finally { adapter.mockBin = original; rmSync(root, { recursive: true, force: true }); }
@@ -98,7 +104,7 @@ export async function withHeldPipeResponse(
     while (!pipeGateFs.existsSync(${JSON.stringify(released)})) await new Promise(resolve => setTimeout(resolve, 5));
   `);
   try {
-    writeFileSync(mock, '#!/usr/bin/env node\n' + source, { mode: 0o755 });
+    writeMock(mock, original, source);
     adapter.mockBin = mock;
     await body(() => writeFileSync(released, ''), () => existsSync(received));
   } finally { adapter.mockBin = original; rmSync(root, { recursive: true, force: true }); }
@@ -121,7 +127,7 @@ export async function withHeldPrintResponse(
     finish(prompt);`)}`);
   source = `import * as pipeGateFs from 'node:fs';\n${source}`;
   try {
-    writeFileSync(mock, '#!/usr/bin/env node\n' + source, { mode: 0o755 });
+    writeMock(mock, original, source);
     adapter.mockBin = mock;
     await body(() => writeFileSync(released, ''), () => existsSync(received));
   } finally { adapter.mockBin = original; rmSync(root, { recursive: true, force: true }); }

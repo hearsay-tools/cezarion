@@ -575,11 +575,12 @@ export class PiRunner implements AgentRunner {
     const session: AgentSession = {
       result,
       sendMessage,
-      sendAgentMessage: (content, inputIds = []) => {
-        // #505: a running turn is steered; only a pending CEZ:ASK or an unacknowledged
-        // prompt refuses.
-        if (open && !pendingMarkerAsk && (agentAck || humanPromptAcks)) { refusedForAck = true; return false; }
-        if (!open || pendingMarkerAsk) return false;
+      sendAgentMessage: (content, inputIds = [], options) => {
+        // #505: a running turn is steered; only a pending CEZ:ASK (unless the caller delivers
+        // beside it) or an unacknowledged prompt refuses.
+        const askRefuses = pendingMarkerAsk && !options?.besideQuestion;
+        if (open && !askRefuses && (agentAck || humanPromptAcks)) { refusedForAck = true; return false; }
+        if (!open || askRefuses) return false;
         const id = `cezar-agent-${++promptSerial}`;
         let resolve!: () => void, reject!: (error: Error) => void;
         const acknowledged = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
