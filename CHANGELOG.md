@@ -44,6 +44,11 @@
   is a 400, matching `POST /api/v1/runs`. Spec: `.ai/specs/2026-07-29-agent-profiles.md`.
 
 ## 🐛 Fixes
+- 🐛 **Loading earlier history keeps your place when the page starts inside a turn.** A history
+  page that began inside a turn carried the turn's `turn.started` without the user message
+  before it, so the cockpit keyed the turn's rows differently until the older page arrived. The
+  reading position then had no row to hold on to, and the thread jumped into the older page.
+  Every page now carries the turn's opening user message too. (hearsay-tools/cezarion#1234)
 - 🐛 **A deep checkout no longer breaks the tools an agent runs inside it.** Every task hands its
   agent a private `TMPDIR` at `.ai/cezar/tmp/<task-id>` (#785), and from a nested checkout —
   Cezar's own task worktrees included — that path ran past 100 characters. Tools bind *named*

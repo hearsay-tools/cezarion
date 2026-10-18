@@ -189,6 +189,32 @@ describe('readRunHistoryPage', () => {
     expect(forward.events.at(-1)?.seq).toBe(651);
   });
 
+  // The cockpit opens a turn at its v1 `user-message` and attaches the v2 `turn.started` to it.
+  // A page carrying only the `turn.started` keyed the turn by that seq, so its rows changed
+  // keys when the older page arrived and the history anchor lost the reader's place.
+  it("carries a cut turn's opening user message with its turn.started in both directions", async () => {
+    const events: Array<Partial<RunEvent> & Pick<RunEvent, 'seq' | 'type'>> = [
+      { seq: 1, type: 'user-message', text: 'go' },
+      { seq: 2, type: 'turn.started', turnId: 'cut-turn' },
+    ];
+    for (let seq = 3; seq <= 152; seq += 1) {
+      events.push({
+        seq,
+        type: 'item.completed',
+        item: { kind: 'message', id: `m-${seq}`, role: 'assistant', text: String(seq) },
+      });
+    }
+    const { dataDir, id } = fixture(events);
+    const newest = await readRunHistoryPage(dataDir, id);
+    const older = await readRunHistoryPage(dataDir, id, newest.olderCursor);
+    const forward = await readRunHistoryPage(dataDir, id, older.newerCursor);
+    const opening = (page: typeof newest) => page.events.slice(0, 3).map(({ seq, type }) => ({ seq, type }));
+    expect(opening(newest).slice(0, 2)).toEqual([{ seq: 1, type: 'user-message' }, { seq: 2, type: 'turn.started' }]);
+    expect(opening(newest)[2]!.seq).toBeGreaterThan(3);
+    expect(opening(forward).slice(0, 2)).toEqual([{ seq: 1, type: 'user-message' }, { seq: 2, type: 'turn.started' }]);
+    expect(opening(forward)[2]!.seq).toBeGreaterThan(3);
+  });
+
   it('preserves UTF-8 when a multibyte code point crosses a reverse-read chunk boundary', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cez-history-utf8-'));
     dirs.push(dir);
