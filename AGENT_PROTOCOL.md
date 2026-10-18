@@ -799,7 +799,7 @@ object schema, because the Anthropic tool API refuses a top-level union; the ser
 validates the discriminated union. Every answer carries the wait id, its absolute
 deadline and `open_waits`. At most 16 waits are open at once. A timer is refused with
 `timers_disabled` when `resources.monitoringWakeIntervalMinutes` is `null`, and with
-`wake_budget_spent` once the run's automatic-wake budget (`MAX_AUTO_CONTINUES`, 40)
+`wake_budget_spent` once the session's automatic-wake budget (`MAX_AUTO_CONTINUES`, 40)
 is spent. `cezar_cancel_wait({ wait_id })` moves an open wait to `lastWaits` as
 cancelled and answers `open_waits`; a resolved but undelivered wait answers
 `already_resolved` and its result is still delivered with the next wake.
@@ -862,7 +862,10 @@ and a human message resets the budget. The count, reservations included, is chec
 a timer comes due and before a batch with timer results is sent: at the budget, those
 timers are cancelled with a cap note and wake nothing, and CI results beside them are
 still delivered. A parked run left with no wait becomes a plain park that reads as Needs
-you and gives its slot back.
+you and gives its slot back. In phase 1 the budget belongs to the live session, not the
+run: it is in-memory `ActiveRun` state, so a restart, any continuation (including the
+scheduler continuation that delivers a wait result) and a human message start it again
+at 0. Durable per-run accounting is phase 2.
 
 Human input never cancels a wait. A human message, `resumeParkedRun`, a question and
 a permission request leave every open wait, whatever its `via`, and its deadline as

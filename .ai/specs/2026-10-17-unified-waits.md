@@ -493,3 +493,8 @@ builder" unless a bullet says otherwise.
   in the same batch are still delivered and other waits are untouched. A parked run left with
   nothing open or resolved becomes a plain park: it reads Needs you, leaves the monitoring pool
   and arms the idle timer.
+- **The budget is per live session in phase 1.** `monitoringWakeups` lives on the in-memory
+  `ActiveRun`, not the run record, so it bounds automatic wakes per live session, not per run.
+  A restart, any continuation (Continue, and the scheduler continuation that delivers a wait
+  result to a closed session) and a human message start it again at 0. Durable per-run
+  accounting is phase 2, with the `reason: budget` human wait.

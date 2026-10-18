@@ -572,7 +572,8 @@ host; GitHub Enterprise hosts must already be recognized by the forge/auth
 configuration. Tool startup itself makes no GitHub request. With **Monitoring
 wake-up** turned off in **Settings → Resources**, `cezar_wait` refuses a timer
 (`timers_disabled`); once the automatic-wake budget of 40 is spent, it refuses one
-with `wake_budget_spent`.
+with `wake_budget_spent`. The budget counts automatic wakes in one live session: a
+message from you, a Continue or a cockpit restart starts it again.
 
 A run can have several waits open at once, up to 16. Each answer carries the
 wait's id, its absolute deadline and the list of waits still open, and
