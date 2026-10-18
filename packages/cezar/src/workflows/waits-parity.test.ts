@@ -6,6 +6,7 @@ import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runn
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { manager, parent, register, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { claudeScheduleWakeupDelay, MAX_WAKE_DELIVERY_ATTEMPTS, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR } from './run.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
@@ -72,7 +73,7 @@ function expectHeldAtTheBound(id: string, waitId: string, { error = /^continue f
 const fireTimer = (waitId: string) => engine().waitTimers.get(waitId)!.timer._onTimeout();
 const flushMicrotasks = async () => { for (let n = 0; n < 5; n++) await Promise.resolve(); };
 const turnEnds = (id: string) => store.readEvents(id).filter(event => event.type === 'turn-end').length;
-const viaOf = (id: string, via: Wait['via']) => store.getRun(id)?.waits?.find(wait => wait.via === via);
+const viaOf = (id: string, via: Wait['via']) => store.getRun(id)?.waits?.find((wait): wait is TimedWait => wait.via === via && wait.kind !== 'human');
 const parkedOn = (id: string, wait: Wait | undefined) => wait?.phase === 'open' && store.getRun(id)?.status === 'waiting';
 const prompted = (runner: RunnerId, text: string) => ciNativeMessages(runner, root).filter(prompt => prompt.includes(text));
 const asks = (id: string) => store.readEvents(id).filter(event => event.type === 'ask.requested');

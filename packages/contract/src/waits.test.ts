@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { RunRecord } from './runs.ts';
 import {
   cezarCancelWaitAnswerSchema,
+  cezarDoneAnswerSchema,
+  cezarDoneRequestSchema,
   cezarCancelWaitRequestSchema,
   cezarWaitAnswerSchema,
   cezarWaitRequestSchema,
@@ -15,6 +17,7 @@ import {
   waitingOnSchema,
   waitSchema,
   type CiWaitEntry,
+  type HumanWaitEntry,
   type TimerWaitEntry,
 } from './waits.ts';
 
@@ -59,6 +62,22 @@ function openTimer(over: Partial<TimerWaitEntry> = {}): TimerWaitEntry {
     phase: 'open',
     turnId: 'turn-1',
     seconds: 300,
+    ...over,
+  };
+}
+
+const HUMAN_ID = '66666666-6666-4666-8666-666666666666';
+const CARD = [{ header: 'Library', question: 'Which test library?', options: [{ label: 'Vitest' }, { label: 'Node test' }] }];
+
+function openHuman(over: Partial<HumanWaitEntry> = {}): HumanWaitEntry {
+  return {
+    kind: 'human',
+    id: HUMAN_ID,
+    source: 'agent',
+    via: 'cezar_wait',
+    registeredAt: '2026-10-17T15:20:00.000Z',
+    phase: 'open',
+    turnId: 'turn-1',
     ...over,
   };
 }
@@ -176,11 +195,11 @@ describe('resolveWaitingOn', () => {
 });
 
 describe('cezar_wait request', () => {
-  it('accepts the ci and timer request shapes and refuses the rest', () => {
+  it('accepts the ci, timer and human request shapes and refuses the rest', () => {
     expect(cezarWaitRequestSchema.parse({ kind: 'ci', pr: 'https://github.com/o/r/pull/1' })).toMatchObject({ timeout_seconds: 1800 });
     expect(cezarWaitRequestSchema.safeParse({ kind: 'timer', seconds: 59 }).success).toBe(false);
     expect(cezarWaitRequestSchema.safeParse({ kind: 'timer', seconds: 7201 }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: 'human' }).success).toBe(false); // phase 2
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'worker' }).success).toBe(false); // phase 3
   });
 
   it('keeps the ci bounds of cezar_wait_for_ci and refuses stray keys', () => {
@@ -218,5 +237,58 @@ describe('answers', () => {
     expect(cezarCancelWaitAnswerSchema.parse({ cancelled: false, code: 'already_resolved', message: 'delivered with the next wake', open_waits: [openWait] }).cancelled).toBe(false);
     expect(cezarCancelWaitAnswerSchema.safeParse({ cancelled: false, code: 'capacity', message: 'x' }).success).toBe(false);
     expect(cezarCancelWaitAnswerSchema.safeParse({ cancelled: true, wait_id: CI_ID, open_waits: [{ ...openWait, summary: 'x'.repeat(257) }] }).success).toBe(false);
+  });
+});
+
+// hearsay-tools/cezarion#1234: the human wait and `cezar_done` (unified waits, phase 2).
+describe('human waits', () => {
+  it('a human wait parses without a deadline; ci and timer still require one', () => {
+    expect(waitSchema.safeParse(openHuman()).success).toBe(true);
+    expect(waitSchema.safeParse(openHuman({ questions: CARD, askSeq: 7 })).success).toBe(true);
+    const { deadline: _ci, ...ciWithoutDeadline } = openCi();
+    const { deadline: _timer, ...timerWithoutDeadline } = openTimer();
+    expect(waitSchema.safeParse(ciWithoutDeadline).success).toBe(false);
+    expect(waitSchema.safeParse(timerWithoutDeadline).success).toBe(false);
+    expect(waitSchema.safeParse({ ...openHuman(), deadline: '2026-10-17T15:40:00.000Z' }).success).toBe(false);
+  });
+
+  it('a human request validates its card with the ask bounds', () => {
+    expect(cezarWaitRequestSchema.parse({ kind: 'human' })).toEqual({ kind: 'human' });
+    expect(cezarWaitRequestSchema.parse({ kind: 'human', questions: CARD })).toEqual({ kind: 'human', questions: CARD });
+    const five = Array.from({ length: 5 }, (_, n) => ({ ...CARD[0]!, question: `Question ${n}?` }));
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'human', questions: five }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'human', seconds: 60 }).success).toBe(false);
+  });
+
+  it('an open human wait outranks usage limit, workers, ci and timer', () => {
+    expect(computeWaitingOn({ waits: [openCi(), openTimer(), openHuman()], autoResumeAt: '2026-10-17T16:00:00.000Z', delegation: parkedRootWait() }))
+      .toEqual({ kind: 'human' });
+    for (const phase of ['delivered', 'cancelled'] as const) {
+      expect(computeWaitingOn({ waits: [openCi(), openHuman({ phase })] })?.kind).toBe('ci');
+    }
+  });
+
+  it('lists an open human wait without a deadline in both answers', () => {
+    const human = { wait_id: HUMAN_ID, kind: 'human' as const, summary: 'human: Which test library?' };
+    expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: HUMAN_ID, kind: 'human', open_waits: [human] }).ok).toBe(true);
+    expect(cezarCancelWaitAnswerSchema.parse({ cancelled: false, code: 'human_question', message: 'm', open_waits: [human] }).cancelled).toBe(false);
+    expect(waitErrorCodeSchema.options).toEqual(expect.arrayContaining(['autonomous_run', 'questions_required']));
+  });
+});
+
+describe('cezar_done', () => {
+  it('takes an optional bounded summary and nothing else', () => {
+    expect(cezarDoneRequestSchema.parse({})).toEqual({});
+    expect(cezarDoneRequestSchema.parse({ summary: 'shipped' })).toEqual({ summary: 'shipped' });
+    expect(cezarDoneRequestSchema.safeParse({ summary: 'x'.repeat(2001) }).success).toBe(false);
+    expect(cezarDoneRequestSchema.safeParse({ force: true }).success).toBe(false);
+  });
+
+  it('cezar_done answers round-trip', () => {
+    expect(cezarDoneAnswerSchema.parse({ ok: true, finishes: 'at_turn_end', open_waits: [] }).ok).toBe(true);
+    const refused = { ok: false, code: 'workers_outstanding', message: 'm', workers: [{ worker_id: 'w', reason: 'outstanding' }] };
+    expect(cezarDoneAnswerSchema.parse(refused)).toEqual(refused);
+    expect(cezarDoneAnswerSchema.safeParse({ ok: false, code: 'not_a_code', message: 'm' }).success).toBe(false);
+    expect(cezarDoneAnswerSchema.safeParse({ ok: true, finishes: 'now', open_waits: [] }).success).toBe(false);
   });
 });

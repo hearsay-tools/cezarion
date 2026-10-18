@@ -926,8 +926,9 @@ const IN_FLIGHT_STATUSES: readonly ApiRun['status'][] = ['running', 'queued', 'w
 
 /** The kinds this header renders. Streamed records were only checked for `id`, and a later phase
  *  of the wait list adds human and worker waits, which the pill already reports. */
-function renderableWaits(value: unknown): Wait[] {
-  return Array.isArray(value) ? value.filter((wait): wait is Wait => wait?.kind === 'ci' || wait?.kind === 'timer') : []
+/** CI and timer waits. A human wait shows as Needs you and the question card, never in this list. */
+function renderableWaits(value: unknown): Array<CiWait | TimerWait> {
+  return Array.isArray(value) ? value.filter((wait): wait is CiWait | TimerWait => wait?.kind === 'ci' || wait?.kind === 'timer') : []
 }
 
 function formatInstant(value: string | undefined) {

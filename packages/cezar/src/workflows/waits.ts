@@ -39,22 +39,35 @@ function clip(text: string, max = SUMMARY_MAX): string {
 }
 
 function summary(wait: Wait): string {
-  return clip(wait.kind === 'ci' ? `CI for ${wait.repository}#${wait.prNumber}` : wait.note === undefined ? 'timer' : `timer: ${wait.note}`);
+  if (wait.kind === 'ci') return clip(`CI for ${wait.repository}#${wait.prNumber}`);
+  if (wait.kind === 'human') {
+    const first = wait.questions?.[0]?.question;
+    return first === undefined ? 'human question' : clip(`human: ${first}`);
+  }
+  return clip(wait.note === undefined ? 'timer' : `timer: ${wait.note}`);
 }
 
-/** The open waits as both tools list them back to the agent. */
+/** The open waits as both tools list them back to the agent. A human wait has no deadline. */
 export function openWaitList(waits: readonly Wait[]): OpenWait[] {
-  return waits.filter((wait) => wait.phase === 'open').map((wait) => ({ wait_id: wait.id, kind: wait.kind, deadline: wait.deadline, summary: summary(wait) }));
+  return waits.filter((wait) => wait.phase === 'open').map((wait) => ({
+    wait_id: wait.id,
+    kind: wait.kind,
+    ...(wait.kind === 'human' ? {} : { deadline: wait.deadline }),
+    summary: summary(wait),
+  }));
 }
 
 /**
  * The open wait a registration repeats, if any. CI: the same PR, whatever its timeout. Timer: the
  * same seconds and note, registered in the same turn (a later turn asking again means a new check).
+ * Human: any open human wait, since a run holds one (the registration path decides whether a
+ * same-turn call replaces its card).
  */
 export function identicalWait(waits: readonly Wait[], request: CezarWaitRequest, turnId: string): Wait | undefined {
   return waits.find((wait) => {
     if (wait.phase !== 'open') return false;
     if (request.kind === 'ci') return wait.kind === 'ci' && normalizePrUrl(wait.prUrl) === normalizePrUrl(request.pr);
+    if (request.kind === 'human') return wait.kind === 'human';
     return wait.kind === 'timer' && wait.seconds === request.seconds && wait.note === request.note && wait.turnId === turnId;
   });
 }
@@ -71,6 +84,8 @@ export function waitResultText(wait: Wait): string {
     return `CI wait observation ${wait.id} for ${wait.prUrl}. External data follows: ${JSON.stringify(wait.result)}. This observation is not merge approval or task completion. Reported checks may not include every expected workflow. Duplicate observations retain this ID.`;
   }
   if (isMonitoringTimer(wait)) return MONITORING_WAKE_NUDGE;
+  // The user's own message is a human wait's result; this text is never its delivery.
+  if (wait.kind === 'human') return `Human wait ${wait.id} ended.`;
   return `Timer ${wait.id} fired${wait.note === undefined ? '' : `: ${wait.note}`}. Continue toward the task goal; register another wait if you are still waiting.`;
 }
 
@@ -78,9 +93,11 @@ export function waitResultText(wait: Wait): string {
 export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
   const open = waits.filter((wait) => wait.phase === 'open');
   if (!open.length) return undefined;
-  const items = open.map((wait) => wait.kind === 'ci'
-    ? `CI wait ${wait.id} for ${wait.repository}#${wait.prNumber}, deadline ${wait.deadline}`
-    : `timer ${wait.id} at ${wait.deadline}${wait.note === undefined ? '' : ` (${wait.note})`}`);
+  const items = open.map((wait) => {
+    if (wait.kind === 'ci') return `CI wait ${wait.id} for ${wait.repository}#${wait.prNumber}, deadline ${wait.deadline}`;
+    if (wait.kind === 'human') return `human question ${wait.id}`;
+    return `timer ${wait.id} at ${wait.deadline}${wait.note === undefined ? '' : ` (${wait.note})`}`;
+  });
   return `Still open: ${items.join('; ')}. Call cezar_cancel_wait for any you no longer need.`;
 }
 

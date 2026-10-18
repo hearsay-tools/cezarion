@@ -1,11 +1,20 @@
-import type { Wait } from '@open-mercato/cezar-contract';
+import type { TimerWaitEntry, Wait } from '@open-mercato/cezar-contract';
 import { isMonitoringTimer } from './waits.ts';
 
 // hearsay-tools/cezarion#1233: a monitoring park's re-check is an open timer on the wait list.
 // `monitoringWakeAt` became its deadline and `ActiveRun.monitoringWakeTimer` its armed timer.
 
-export function monitoringTimerWait(run?: { waits?: Wait[] }): Wait | undefined {
-  return run?.waits?.find(wait => wait.phase === 'open' && isMonitoringTimer(wait));
+export function monitoringTimerWait(run?: { waits?: Wait[] }): TimerWaitEntry | undefined {
+  return run?.waits?.find((wait): wait is TimerWaitEntry => wait.kind === 'timer' && wait.phase === 'open' && isMonitoringTimer(wait));
+}
+
+/** A CI or timer wait: the kinds with a deadline. */
+export type TimedWait = Exclude<Wait, { kind: 'human' }>;
+
+/** Narrows a registration the test made with a CI or timer request. */
+export function timed(wait: Wait): TimedWait {
+  if (wait.kind === 'human') throw new Error(`expected a CI or timer wait, got human wait ${wait.id}`);
+  return wait;
 }
 
 export function monitoringWakeOf(run?: { waits?: Wait[] }): string | undefined {

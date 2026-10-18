@@ -6,6 +6,7 @@ import type { AgentSession, RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { manager, restart, root, semaphore, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { timed, type TimedWait } from './waits.testkit.ts';
 import { MAX_WAKE_DELIVERY_ATTEMPTS, WAITS_DISCARDED_NOTE } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { ciNativeMessages, persistentWakeFailure, TIMER_WAKE_OPENING, toolCall } from './waits-parity.testkit.ts';
@@ -47,11 +48,11 @@ const engine = () => manager as unknown as {
   wakeDeliveryFailures: Map<string, number>;
   autoResumeTimers: Map<string, NodeJS.Timeout>;
 };
-async function openWait(id: string, request: CezarWaitRequest): Promise<Wait> {
+async function openWait(id: string, request: CezarWaitRequest): Promise<TimedWait> {
   const tools = manager.cezarToolHandlers(id, engine().active.get(id)!.ciGeneration);
   const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
   if (!('wait' in registered)) throw Error('registration refused');
-  return registered.wait;
+  return timed(registered.wait);
 }
 const fireTimer = (waitId: string) => engine().waitTimers.get(waitId)!.timer._onTimeout();
 const turnStarted = (id: string) => store.readEvents(id).some(event => event.type === 'turn.started');

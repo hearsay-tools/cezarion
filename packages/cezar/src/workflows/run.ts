@@ -1853,7 +1853,7 @@ export class RunManager {
       registerWait: async (request, via, signal) => {
         try {
           const wait = await this.registerWait(runId, request, via, generation, signal);
-          return { answer: { ok: true, wait_id: wait.id, kind: wait.kind, deadline: wait.deadline, open_waits: listOpen() }, wait };
+          return { answer: { ok: true, wait_id: wait.id, kind: wait.kind, ...(wait.kind === 'human' ? {} : { deadline: wait.deadline }), open_waits: listOpen() }, wait };
         } catch (error) {
           const code = waitErrorCodeSchema.safeParse(error && typeof error === 'object' && 'code' in error ? error.code : undefined);
           if (!code.success) throw error;
@@ -1975,6 +1975,8 @@ export class RunManager {
     if (existing) return existing;
     // Counted as the store counts them, so a registration accepted here is never refused there.
     if (openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
+    // Human waits register in hearsay-tools/cezarion#1234's next task; until then the tool refuses them.
+    if (parsed.kind === 'human') return refuse('invalid_request');
     if (parsed.kind === 'timer') {
       if (this.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
       if ((active.monitoringWakeups ?? 0) >= MAX_AUTO_CONTINUES) refuse('wake_budget_spent');
@@ -2047,6 +2049,8 @@ export class RunManager {
   private armWait(runId: string, wait: Wait): void {
     if (this.disposed || wait.phase !== 'open') return;
     if (wait.kind === 'ci') { this.startCiWatch(runId, wait); return; }
+    // Only the user's answer, or a cancel, ends a human wait: nothing to arm.
+    if (wait.kind === 'human') return;
     if (this.waitTimers.has(wait.id)) return;
     // A stopping, stopped or finishing run takes no self-generated wake: the timer stays open
     // for that transition to cancel, as the monitoring timer did before it was a wait.

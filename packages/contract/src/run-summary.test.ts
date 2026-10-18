@@ -132,6 +132,16 @@ describe('toRunSummary', () => {
     expect('waitingOn' in toRunSummary(record())).toBe(false);
   });
 
+  it('a summary of a run with an open human wait reads waitingOn human', () => {
+    const waits = [{
+      kind: 'human', id: '66666666-6666-4666-8666-666666666666', source: 'agent', via: 'cezar_wait',
+      registeredAt: '2026-10-04T10:00:00.000Z', phase: 'open', turnId: 'turn-1',
+    }] as RunRecord['waits'];
+    const summary = toRunSummary(record({ status: 'waiting', waits }));
+    expect(summary.waitingOn).toEqual({ kind: 'human' });
+    expect(runSummarySchema.parse(summary)).toEqual(summary);
+  });
+
   it('flags a resolved wait as an owed wake, and only then', () => {
     const resolved = [{
       kind: 'timer', id: '44444444-4444-4444-8444-444444444444', source: 'cezar', via: 'monitoring-line',

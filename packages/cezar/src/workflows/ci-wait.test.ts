@@ -9,6 +9,7 @@ import type { AgentSession } from '../core/agent-runner.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
 import { WAIT_LIMIT, type CiWait, type CiWaitResult, type Wait } from '@open-mercato/cezar-contract';
 import { controlledWire, manager, parent, root, restart, semaphore, store, until, worker, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { timed, type TimedWait } from './waits.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { ciWatchRequest, waitResultText } from './waits.ts';
 
@@ -39,9 +40,9 @@ function github() {
   return { settle, aborted: () => signal?.aborted };
 }
 
-function register(id: string) {
+async function register(id: string) {
   const state = (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(id)!;
-  return manager.registerCiWait(id, { pr, timeout_seconds: 30 }, state.ciGeneration);
+  return timed(await manager.registerCiWait(id, { pr, timeout_seconds: 30 }, state.ciGeneration));
 }
 
 describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () => {
@@ -451,11 +452,11 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
 // resolves, is cancelled or is recovered on its own.
 const generationOf = (id: string) => (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(id)!.ciGeneration;
 const prUrl = (n: number) => `https://github.com/acme/repo/pull/${n}`;
-const registerPr = (id: string, n: number, timeout = 30) =>
-  manager.registerWait(id, { kind: 'ci', pr: prUrl(n), timeout_seconds: timeout }, 'cezar_wait', generationOf(id));
-const registerTimer = (id: string, seconds = 60, note?: string) =>
-  manager.registerWait(id, { kind: 'timer', seconds, ...(note === undefined ? {} : { note }) }, 'cezar_wait', generationOf(id));
-const waitById = (id: string, waitId: string) => store.getRun(id)?.waits?.find(entry => entry.id === waitId);
+const registerPr = async (id: string, n: number, timeout = 30) =>
+  timed(await manager.registerWait(id, { kind: 'ci', pr: prUrl(n), timeout_seconds: timeout }, 'cezar_wait', generationOf(id)));
+const registerTimer = async (id: string, seconds = 60, note?: string) =>
+  timed(await manager.registerWait(id, { kind: 'timer', seconds, ...(note === undefined ? {} : { note }) }, 'cezar_wait', generationOf(id)));
+const waitById = (id: string, waitId: string) => store.getRun(id)?.waits?.find((entry): entry is TimedWait => entry.id === waitId && entry.kind !== 'human');
 const settledById = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(entry => entry.id === waitId);
 const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
 const armed = () => manager as unknown as { waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>; ciWatches: Map<string, unknown>; ciRegistrations: Map<string, unknown> };
