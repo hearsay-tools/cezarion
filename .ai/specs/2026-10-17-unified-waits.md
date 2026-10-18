@@ -265,6 +265,9 @@ waking the agent, as it retires CI intent today. A failure or a clean close whil
 resolved results are still undelivered is a failed delivery: the retry waits for a short backoff,
 and the delivery bound below settles the run `failed` with the results kept
 instead of retrying forever. Only a `failed` run that owes results keeps its waits.
+One exception keeps an authored deadline terminal (hearsay-tools/cezarion#427 Q8,
+hearsay-tools/cezarion#470 T3): when a step's own `timeoutMs` has passed, its human waits
+are cancelled with it and the failure settles `failed`. CI and timer waits still park it.
 
 ### Liveness bounds
 
@@ -623,8 +626,10 @@ shipped ones: re-checks on, budget 40, no autonomy.
 | | `cezar_cancel_wait` | The agent | Moved to `lastWaits` as `cancelled` |
 | | `cezar_done` accepted in the same turn | The agent, then the turn end | The run finishes; the wait is cancelled |
 | | Provider failure, clean close, or a crash and restart | The failure, close or recovery path | It is shown and the run parks `waiting`, Needs you; recovery resumes nothing |
+| | The step's authored `timeoutMs` passes | The runner's deadline kill | Cancelled into `lastWaits`; the run settles `failed` as before human waits (Q8). CI and timer waits still park it |
 | `waiting` on a shown human wait (Needs you) | A human message, Continue, or the card's answer | The user | Settled `delivered`; the answer starts the next turn. **The only default exit that ends the wait is a human action** (for a worker, its parent's `worker reply`) |
 | | 15 minutes idle | The idle timer (`IDLE_TIMEOUT_MS`) | The session closes; the run stays `waiting` with the wait, and the answer reopens it through the continuation |
+| | The step's authored `timeoutMs` passes | The runner's deadline kill | Cancelled into `lastWaits`; the run settles `failed` and later steps do not run (Q8). CI and timer waits still park it |
 | | A CI or timer wait resolves | The CI watcher or the wait timer | Its wake is delivered beside the question and the run re-parks Needs you; the human wait stays open |
 | | Stop, Finish, delete | The user | Cancelled into `lastWaits`; the run settles |
 | `cezar_done` accepted, turn still running (in memory) | The turn ends | The runner's turn end | The run closes as done there, or at the boundary that settles input still owed to the agent; a completion gate that fails at the turn end (`deferParentCompletion`) parks it instead |

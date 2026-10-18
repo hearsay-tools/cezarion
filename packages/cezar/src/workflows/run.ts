@@ -7360,6 +7360,7 @@ export class RunManager {
         // The last agent step of the workflow is interactive: after its turn
         // the session stays open for follow-ups until finish/idle/cancel.
         const interactive = i === lastAgentIdx && i === workflow.steps.length - 1;
+        const attemptStartedAt = Date.now();
         const failure = await this.runAgentStep(
           runId,
           state,
@@ -7385,6 +7386,14 @@ export class RunManager {
         if (this.active.get(runId) !== state &&
           !(this.disposed && (state.cancelled || state.finishRequested))) return;
         if (state.cancelled || this.preserveRunAfterDisposal(runId, state)) break;
+        // An authored step deadline bounds the whole step, its question included (#427 Q8, #470 T3):
+        // once it has passed, the step's human waits expire with it and the failure settles as it
+        // did before questions were waits. CI and timer waits still park the failure below. The
+        // clock starts before session setup, so a failure that close to the deadline counts as it.
+        if (failure && step.timeoutMs && Date.now() - attemptStartedAt >= step.timeoutMs) {
+          const human = openWaits(this.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'human').map(wait => wait.id);
+          if (human.length) this.store.commitWaitCancellation(runId, human);
+        }
         const current = this.store.getRun(runId);
         if (current && this.executionBlockedByRootFinish(current) && !state.sessionEverOpened) {
           this.store.updateStep(runId, step.id, { status: 'pending' });

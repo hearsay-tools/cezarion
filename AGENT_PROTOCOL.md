@@ -1152,7 +1152,9 @@ first), and a Continue that answers one question and asks the next keeps the nex
 and shows its card. U9h registers a human wait
 mid-turn and fails the provider, and separately registers one at a boundary and closes the
 session cleanly: each time the card is shown once with its `askSeq`, the run reads Needs you,
-and the answer delivers it. U6 calls `cezar_done` from a parent with a live worker
+and the answer delivers it. A step's authored `timeoutMs` is the exception: once it has passed,
+the step's human waits are cancelled and the run fails, which `workflow-ask-parity` Q8 pins on
+every runner. U6 calls `cezar_done` from a parent with a live worker
 (`workers_outstanding`), then with that worker settled but not collected
 (`workers_uncollected`), and once it is collected with a CI wait open: the run finishes, the
 CI wait is cancelled into `lastWaits`, and the closing event carries `via: 'cezar_done'`. U7d
