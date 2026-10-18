@@ -609,3 +609,33 @@ nudge, and the dry-run mocks answering it) are recorded with it.
   authoritative until then, and `computeWaitingOn` reads both.
 - **Schema 5.** The run store moves to schema 5, so a phase-1 build refuses a store that holds
   human waits (`unsupported-schema`) instead of dropping them as unreadable.
+
+### Transitions out (phase 2a)
+
+Required by AGENTS.md (hearsay-tools/cezarion#1247) for every state phase 2a adds or keeps. Added
+with the 2a pull request, after its implementation; review it with that PR. Defaults are the
+shipped ones: re-checks on, budget 40, no autonomy.
+
+| State | Trigger | Who or what fires it | Behavior at shipped defaults |
+| --- | --- | --- | --- |
+| Human wait open, not yet shown (registered this turn) | The turn ends | The runner's turn end | It is shown (card, or the gate without one), and the run parks `waiting`, Needs you |
+| | A human message arrives mid-turn | The user (`deliverMessage`) | Settled `delivered`; no card is raised for it |
+| | `cezar_cancel_wait` | The agent | Moved to `lastWaits` as `cancelled` |
+| | `cezar_done` accepted in the same turn | The agent, then the turn end | The run finishes; the wait is cancelled |
+| | Provider failure, clean close, or a crash and restart | The failure, close or recovery path | It is shown and the run parks `waiting`, Needs you; recovery resumes nothing |
+| `waiting` on a shown human wait (Needs you) | A human message, Continue, or the card's answer | The user | Settled `delivered`; the answer starts the next turn. **The only default exit that ends the wait is a human action** (for a worker, its parent's `worker reply`) |
+| | 15 minutes idle | The idle timer (`IDLE_TIMEOUT_MS`) | The session closes; the run stays `waiting` with the wait, and the answer reopens it through the continuation |
+| | A CI or timer wait resolves | The CI watcher or the wait timer | Its wake is delivered beside the question and the run re-parks Needs you; the human wait stays open |
+| | Stop, Finish, delete | The user | Cancelled into `lastWaits`; the run settles |
+| `cezar_done` accepted, turn still running (in memory) | The turn ends | The runner's turn end | The run closes as done there, or at the boundary that settles input still owed to the agent; a completion gate that fails at the turn end (`deferParentCompletion`) parks it instead |
+| | A human message arrives | The user | The request is cleared; the agent must call `cezar_done` again |
+| | The session fails or the process exits | The failure path | The request is lost with the session; the run follows its failure path |
+| `waiting` on CI or timer waits (kept from phase 1) | A wait resolves (result, deadline) | The CI watcher or the wait timer | Its wake is delivered; a timer wake spends one unit of `automaticWakes` |
+| | A timer comes due with the budget spent | The wait timer | The timer is cancelled with the cap note; with nothing else open, a `budget` human wait opens and the run reads Needs you |
+| | A human message | The user | Delivered; every wait stays open with its deadline; the budget resets |
+| | Stop, Finish, delete | The user | Every wait cancelled; the run settles |
+| `waiting` with a result owed (waiting for capacity, kept) | A slot or a monitoring slot frees | The scheduler | The wake turn starts and delivers every resolved wait |
+| | The delivery fails | The session's failure or clean close | Retried after 15 s, then 30 s (`waitDeliveryFailures` survives a restart); the third failure settles `failed` holding the results |
+| `failed` holding wait results (kept) | Continue | The user | Delivers the results once |
+| | Stop | The user | Discards them; the run stays `failed`. **No default exit is automatic** |
+| Automatic-wake budget spent (`automaticWakes` ≥ 40) | A human message or a human Continue | The user | Reset to 0. A restart, a scheduler continuation and a parent's answer keep it. **Only a human action resets it** |
