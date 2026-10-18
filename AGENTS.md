@@ -68,6 +68,16 @@ wake timer. Cezar has no process-exit callback, no CI webhook and no sub-agent-c
 event, so a state whose only on-by-default exit is "a human types something" is a dead end,
 however well it renders.
 
+A spec or plan that adds or changes a run state MUST carry a **Transitions out**
+table, reviewed with the spec or plan before implementation starts. Cover every
+state the change adds or keeps, with one row per exit: **State | Trigger | Who or
+what fires it | Behavior at shipped defaults**. A state whose only default exit
+is a human action must say so explicitly in the table; a state with no default
+exit must also say so. For example,
+[the unified-waits spec](.ai/specs/2026-10-17-unified-waits.md) needs this table:
+its list of input mechanisms and exits does not enumerate the transitions out of
+every state the change retains.
+
 **Find every construction site of a shared in-memory object — grep the TYPE, not the
 field.** `ActiveRun` is built in `execute` AND in `runContinuation`; open-mercato/cezar#811 populated
 `state.skills` in the first only, so registry `/skill` expansion worked on new tasks and
