@@ -462,6 +462,10 @@ const settledById = (id: string, waitId: string) => store.getRun(id)?.lastWaits?
 const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
 const armed = () => manager as unknown as { waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>; ciWatches: Map<string, unknown>; ciRegistrations: Map<string, unknown> };
 const fireTimer = (waitId: string) => armed().waitTimers.get(waitId)!.timer._onTimeout();
+/** This suite's sessions have no cezar tool controller (`controller: async () => undefined`), so a
+ *  timer wakes them in the marker wording (hearsay-tools/cezarion#1234). */
+const timerFired = (waitId: string, note: string) =>
+  `Timer ${waitId} fired: ${note}. Continue toward the task goal. If the watched work is still pending, end your final message with CEZ:MONITORING.`;
 const flushMicrotasks = async () => { for (let n = 0; n < 5; n++) await Promise.resolve(); };
 
 /** External GitHub per PR number: each watch settles on its own; a gate holds every lookup. */
@@ -500,8 +504,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     expect([waitById(run.id, first.id)?.phase, waitById(run.id, timer.id)?.phase]).toEqual(['open', 'open']);
     fireTimer(timer.id);
     await until(() => settledById(run.id, timer.id)?.phase === 'delivered');
-    expect(inputsFor(run.id, timer.id).map(input => input.text)).toEqual([
-      `Timer ${timer.id} fired: check the deploy. Continue toward the task goal; register another wait if you are still waiting.`]);
+    expect(inputsFor(run.id, timer.id).map(input => input.text)).toEqual([timerFired(timer.id, 'check the deploy')]);
     expect(waitById(run.id, first.id)?.phase).toBe('open');
     external.settle(12);
     await until(() => settledById(run.id, first.id)?.phase === 'delivered');
@@ -531,8 +534,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
       expect(waitById(run.id, wait.id)?.phase).toBe('open');
       expect(inputsFor(run.id, wait.id)).toEqual([]);
       await vi.advanceTimersByTimeAsync(1_000);
-      expect(inputsFor(run.id, wait.id)).toMatchObject([{ source: 'lifecycle',
-        text: `Timer ${wait.id} fired: check the deploy. Continue toward the task goal; register another wait if you are still waiting.` }]);
+      expect(inputsFor(run.id, wait.id)).toMatchObject([{ source: 'lifecycle', text: timerFired(wait.id, 'check the deploy') }]);
       await until(() => settledById(run.id, wait.id)?.phase === 'delivered');
       expect(inputsFor(run.id, wait.id)).toHaveLength(1);
       // A timer expiry is a self-generated wake: its admitted turn counts against the session's budget.

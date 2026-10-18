@@ -91,7 +91,11 @@ export function waitResultText(wait: Wait, { tools }: { tools: boolean } = { too
   if (isMonitoringTimer(wait)) return tools ? MONITORING_WAKE_NUDGE : MONITORING_WAKE_NUDGE_MARKERS;
   // The user's own message is a human wait's result; this text is never its delivery.
   if (wait.kind === 'human') return `Human wait ${wait.id} ended.`;
-  return `Timer ${wait.id} fired${wait.note === undefined ? '' : `: ${wait.note}`}. Continue toward the task goal; register another wait if you are still waiting.`;
+  const fired = `Timer ${wait.id} fired${wait.note === undefined ? '' : `: ${wait.note}`}.`;
+  // A session without cezar tools cannot register another wait; it was taught the marker.
+  return tools
+    ? `${fired} Continue toward the task goal; register another wait if you are still waiting.`
+    : `${fired} Continue toward the task goal. If the watched work is still pending, end your final message with CEZ:MONITORING.`;
 }
 
 /** The footer a delivered turn ends with: every wait still open, or undefined when none is. */

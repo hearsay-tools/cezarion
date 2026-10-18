@@ -65,6 +65,8 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     // hearsay-tools/cezarion#1234: a session without cezar tools was taught the markers instead.
     expect(waitResultText(timer({ via: 'monitoring-line' }), { tools: false })).toBe(MONITORING_WAKE_NUDGE_MARKERS);
     expect(MONITORING_WAKE_NUDGE_MARKERS).toContain('end with CEZ:MONITORING');
+    // A session without cezar tools cannot register another wait, so its timer wake names the marker.
+    expect(waitResultText(timer({ note: 'check the deploy' }), { tools: false })).toBe(`Timer ${timer().id} fired: check the deploy. Continue toward the task goal. If the watched work is still pending, end your final message with CEZ:MONITORING.`);
     expect(MONITORING_WAKE_NUDGE).not.toContain('CEZ:');
     expect(isMonitoringTimer(timer())).toBe(false);
     expect(isMonitoringTimer(ci())).toBe(false);
