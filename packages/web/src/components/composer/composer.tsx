@@ -693,8 +693,8 @@ export function Composer({
                   </div>
                 ) : null}
                 <div className="flex min-w-[100px] items-center justify-end gap-1" data-slot="composer-actions">
-                  {/* One outline slot: Stop while the engine owns the run, the host's own control
-                      once it does not. Never both — the two flags partition the statuses. */}
+                  {/* One outline slot: Stop while the host offers it, the host's own control
+                      otherwise. Never both — the host hands over one or the other. */}
                   {stopControl ?? secondaryAction}
                   {finishControl}
                   {!primaryStop && !primaryFinish ? (

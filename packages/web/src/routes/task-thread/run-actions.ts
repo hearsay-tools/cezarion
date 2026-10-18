@@ -121,10 +121,18 @@ export interface RunActionFlags {
    *  read. Both halves come from `lib/read-state.ts` so the header can never offer an action
    *  whose result the marker rule would ignore. */
   markUnread: boolean
-  /** Stop an active run. Mutually exclusive with delete, by construction below. */
+  /** Stop an active run, or discard the wait results a failed run still holds
+   *  (hearsay-tools/cezarion#1233). Mutually exclusive with delete on every other record: the
+   *  failed run has no session to stop, so Delete stays offered there as on any failed run. */
   cancel: boolean
   /** Remove the run, its transcript, worktree and branch. Terminal runs only. */
   deleteRun: boolean
+}
+
+/** A failed run that kept its wait results at the delivery bound: Continue delivers them once,
+ *  Stop discards them and leaves it failed. Finish stays off, as on every failed run. */
+export function holdsWaitResults(run: RunRecord): boolean {
+  return run.status === 'failed' && (run.waits?.length ?? 0) > 0
 }
 
 /** Only a saved original workflow that has never executed may be requeued. */
@@ -148,9 +156,16 @@ export function runActionFlags(run: RunRecord): RunActionFlags {
     archive: !active,
     pin: !run.archived && !isOwnedWorker(run),
     markUnread: canBeUnread(run) && !isUnread(run),
-    cancel: active,
+    cancel: active || holdsWaitResults(run),
     deleteRun: !active,
   }
+}
+
+/** Archive in the composer's outline slot (#281). Stop takes the slot when the run offers both,
+ *  on a failed run holding wait results, and the header carries Archive on the Session tab then. */
+export function archiveInComposer(run: RunRecord): boolean {
+  const flags = runActionFlags(run)
+  return flags.archive && !flags.cancel
 }
 
 /** Promote only an authoritative clear verdict on a Needs-you task. Unknown eligibility

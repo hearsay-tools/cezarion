@@ -1904,6 +1904,29 @@ describe('the promoted actions, per tab (#281)', () => {
     expect(headerArchive()?.textContent).toContain('Unarchive')
   })
 
+  // hearsay-tools/cezarion#1233: Stop takes the composer slot on a failed run holding wait results,
+  // so the header carries Archive on the Session tab too, and the kebab still offers Delete.
+  const heldFailed = (extra: Partial<ApiRun> = {}) => run('failed', {
+    waits: [{
+      id: '00000000-0000-4000-8000-0000000000e2', kind: 'timer', source: 'agent', via: 'cezar_wait',
+      turnId: 'turn-1', seconds: 60, registeredAt: '2026-09-22T12:00:00.000Z',
+      deadline: '2026-09-22T12:01:00.000Z', resolvedAt: '2026-09-22T12:01:00.000Z', phase: 'resolved',
+    }],
+    ...extra,
+  })
+
+  it.each(['session', 'changes'] as const)('%s — a failed run holding wait results gets Archive in the header', (tab) => {
+    stubFetch()
+    renderTab(heldFailed(), tab)
+    expect(headerArchive()?.textContent).toContain('Archive task')
+  })
+
+  it('a failed run holding wait results keeps Delete in the kebab', () => {
+    stubFetch()
+    renderTab(heldFailed(), 'session')
+    expect(actionBar().getByRole('menuitem', { name: 'Delete task…' })).toBeTruthy()
+  })
+
   it('Session — the kebab drops Finish, because the composer promoted it', () => {
     stubFetch()
     renderTab(run('waiting'), 'session')

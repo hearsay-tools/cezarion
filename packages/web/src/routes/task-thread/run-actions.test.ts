@@ -10,6 +10,7 @@ import { isUnread } from '@/lib/read-state'
 import { commands as goldenCommands, sessionId, unsafeSessionIds } from '../../../../cezar/test/fixtures/resume-commands.ts'
 
 import {
+  archiveInComposer,
   cliTargetResumes,
   finishTitle,
   isRunActive,
@@ -45,6 +46,15 @@ const run = (status: RunStatus, extra: Partial<ApiRun> = {}): ApiRun => ({
   steps: [step({ sessionId: 'sess-1' })],
   ...extra,
 })
+
+/** A failed run still holding a wait result after the delivery bound (hearsay-tools/cezarion#1233). */
+const heldWait = (phase: 'open' | 'resolved'): NonNullable<ApiRun['waits']>[number] => ({
+  id: phase === 'open' ? '00000000-0000-4000-8000-0000000000e1' : '00000000-0000-4000-8000-0000000000e2',
+  kind: 'timer', source: 'agent', via: 'cezar_wait', seconds: 60, phase, turnId: 'turn-1',
+  registeredAt: '2026-07-14T12:00:00.000Z', deadline: '2026-07-14T12:01:00.000Z',
+  ...(phase === 'resolved' ? { resolvedAt: '2026-07-14T12:01:00.000Z' } : {}),
+})
+const heldFailed = (extra: Partial<ApiRun> = {}) => run('failed', { waits: [heldWait('resolved'), heldWait('open')], ...extra })
 
 describe('runActionFlags — the visibility matrix, all 7 statuses × archived', () => {
   // The legacy header's rules verbatim (web/app.js `updateDetail`):
@@ -82,6 +92,25 @@ describe('runActionFlags — the visibility matrix, all 7 statuses × archived',
         expect(flags.cancel && flags.deleteRun).toBe(false)
       }
     }
+  })
+
+  // The one record that offers both: Stop discards the results it holds and leaves it failed, and
+  // the engine has no session to stop, so Delete stays offered as on every failed run.
+  it.each([false, true])('a failed run holding wait results offers Stop beside Continue, Archive and Delete, never Finish (archived: %s)', (archived) => {
+    expect(runActionFlags(heldFailed({ archived }))).toEqual({
+      finish: false, continueRun: true, terminal: true, archive: true, markUnread: false, pin: !archived,
+      cancel: true, deleteRun: true, notes: true,
+    })
+  })
+
+  it('a failed run with no waits, or only settled ones, offers no Stop', () => {
+    expect(runActionFlags(run('failed')).cancel).toBe(false)
+    expect(runActionFlags(run('failed', { waits: [] })).cancel).toBe(false)
+    expect(runActionFlags(run('failed', { waits: [], lastWaits: [{ ...heldWait('resolved'), phase: 'delivered' }] })).cancel).toBe(false)
+  })
+
+  it.each(['done', 'cancelled', 'review'] as const)('a %s run never offers Stop, whatever it lists', (status) => {
+    expect(runActionFlags(run(status, { waits: [heldWait('resolved')] })).cancel).toBe(false)
   })
 
   it('continue/terminal need a session — a closed run without one offers neither', () => {
@@ -436,18 +465,31 @@ describe('offersComposerFinish — the gold primary on a Needs-you task (#281)',
   })
 })
 
-describe('cancel and archive are exact complements — the shared secondary slot (#281)', () => {
-  // The composer's outline slot holds Stop on an active run and Archive on any other. That is only
-  // safe because the two flags partition the statuses: `cancel` is `active`, `archive` is
-  // `!active`, so the slot is never contested and never empty. Pinned here because the slot's
-  // correctness rests on it — a future status that made both true would put two controls in one
-  // place, and one that made both false would leave a hole.
+describe('the composer slot holds exactly one of Stop and Archive (#281)', () => {
+  // The composer's outline slot holds Stop when the run offers it and Archive otherwise. On every
+  // status `cancel` is `active` and `archive` is `!active`, so the slot is never contested and
+  // never empty. A failed run holding wait results offers both: Stop takes the slot and the header
+  // carries Archive instead (`archiveInComposer`). Pinned here because the slot's correctness rests
+  // on it — a record that put two controls in one place, or left a hole, fails below.
   const statuses: RunStatus[] = ['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']
+  const records = [...statuses.map(status => run(status)), heldFailed()]
 
-  it.each(statuses)('%s offers exactly one of Stop and Archive', (status) => {
-    for (const archived of [false, true]) {
-      const flags = runActionFlags(run(status, { archived }))
-      expect([flags.cancel, flags.archive].filter(Boolean)).toHaveLength(1)
+  it.each(records.map(record => [record.waits?.length ? 'failed holding wait results' : record.status, record] as const))(
+    '%s puts exactly one control in the slot',
+    (_name, record) => {
+      for (const archived of [false, true]) {
+        const flags = runActionFlags({ ...record, archived })
+        expect([flags.cancel, archiveInComposer({ ...record, archived })].filter(Boolean)).toHaveLength(1)
+      }
+    },
+  )
+
+  it('Archive leaves the slot only for the run that offers both, so the header carries it there', () => {
+    for (const record of records) {
+      const flags = runActionFlags(record)
+      expect(archiveInComposer(record)).toBe(flags.archive && !flags.cancel)
     }
+    expect(archiveInComposer(heldFailed())).toBe(false)
+    expect(runActionFlags(heldFailed()).archive).toBe(true)
   })
 })

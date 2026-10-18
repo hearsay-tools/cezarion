@@ -80,7 +80,7 @@ import { ArchiveButton } from './archive-action'
 import { HandoffAction } from './handoff-action'
 import { Markdown } from './markdown'
 import { TaskFileScope } from './task-file-scope'
-import { cliTargetResumes, cliTargetRunner, lastSessionBackend, resumeHint, runActionFlags } from './run-actions'
+import { archiveInComposer, cliTargetResumes, cliTargetRunner, lastSessionBackend, resumeHint, runActionFlags } from './run-actions'
 
 /**
  * The run header (spec §"Task thread" → Header): editable title + status pill, the meta line,
@@ -300,8 +300,10 @@ export function RunHeader({
   // #281: Archive out of the kebab. The Session tab's composer carries it — within a
   // thumb's reach, which this header is not on a phone, where it scrolls away by
   // design. The three git tabs have no composer, so the header carries it there, and
-  // exactly one surface offers it on any given screen.
-  const archiveButton = tab !== 'session' && flags.archive ? <ArchiveButton run={run} /> : null
+  // exactly one surface offers it on any given screen. Stop takes the composer's slot on a
+  // failed run holding wait results (hearsay-tools/cezarion#1233), so the header carries
+  // Archive on the Session tab too.
+  const archiveButton = flags.archive && (tab !== 'session' || !archiveInComposer(run)) ? <ArchiveButton run={run} /> : null
 
   return (
     <ReferenceStatusProvider projectId={referenceProjectId} repoBase={repoBase} requests={referenceRequests}>
