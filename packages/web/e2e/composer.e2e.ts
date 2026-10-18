@@ -54,13 +54,16 @@ beforeAll(async () => {
     'utf8',
   )
 
+  // The mock answers the no-wait nudge in plain text (hearsay-tools/cezarion#1234), so the run
+  // parks on Cezar's own wait with no card, as it parked on its prose question before. A card
+  // would stay pending after Finish and hide the one-click Continue this file pins.
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
-    { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
+    { env: fixtureServeEnv(dataRoot, { CEZ_MOCK_NUDGE_REPLY: 'plain' }), stdio: 'ignore' },
   )
   baseUrl = await waitForFixtureServer(server)
 
   // Boot the run the composer will talk to. The mock's reply has no CEZ:DONE marker, so after
-  // its first turn the session stays open and the run parks at `waiting`.
+  // its first turn and the no-wait nudge the session stays open and the run parks at `waiting`.
   const created = (await (
     await fetch(`${baseUrl}/api/v1/runs`, {
       method: 'POST',
