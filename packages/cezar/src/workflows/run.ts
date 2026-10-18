@@ -5446,8 +5446,9 @@ export class RunManager {
     if (state.doneAtBoundary === session) {
       if (this.deferParentCompletion(runId)) return;
       this.closeAsDone(runId, state, session);
-    } else if (!proseGate && !this.waiting.has(runId) && this.store.getRun(runId)?.waits?.length) {
+    } else if (!proseGate && !this.waiting.has(runId) && this.holdsAgentWaits(runId)) {
       // A wake acknowledged after its turn ended (OpenCode HTTP/SSE): park on what is still owed.
+      // Cezar's own human wait is not owed: the rule below decides, and the agent's wait replaces it.
       this.parkOnWaits(runId, state);
     } else if (state.parkAfterAck?.session === session && !this.waiting.has(runId)) {
       // The nudged turn may finish before its transport ACK (OpenCode HTTP/SSE). Its turn end
