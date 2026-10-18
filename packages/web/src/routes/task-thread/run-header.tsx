@@ -925,9 +925,9 @@ type TimerWait = Extract<Wait, { kind: 'timer' }>
 /** Only these statuses can have a wait in flight; a finished run's leftovers are history. */
 const IN_FLIGHT_STATUSES: readonly ApiRun['status'][] = ['running', 'queued', 'waiting']
 
-/** The kinds this header renders. Streamed records were only checked for `id`, and a later phase
- *  of the wait list adds human and worker waits, which the pill already reports. */
-/** CI and timer waits. A human wait shows as Needs you and the question card, never in this list. */
+/** The kinds this header renders: CI and timer waits. Streamed records were only checked for `id`.
+ *  A human wait shows as Needs you and its question card, and phase 3's worker waits through the
+ *  pill, never in this list. */
 function renderableWaits(value: unknown): Array<CiWait | TimerWait> {
   return Array.isArray(value) ? value.filter((wait): wait is CiWait | TimerWait => wait?.kind === 'ci' || wait?.kind === 'timer') : []
 }
