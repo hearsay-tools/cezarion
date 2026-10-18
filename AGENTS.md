@@ -142,6 +142,12 @@ writing `key: maybeUndefined` types a key as always-present that `JSON.stringify
 wire (spread it conditionally), and an object-literal `type: 'x'` widens to `string` during hono's
 inference, erasing a discriminant consumers narrow on (`as const`).
 
+When a new variant lacks a field the other variants require, give it its own arm in
+`z.discriminatedUnion` on the existing discriminant; never make the shared field optional
+to admit it. See `openWaitSchema` in `packages/contract/src/waits.ts` as changed in
+hearsay-tools/cezarion#1250: CI and timer waits require `deadline`, while the human arm
+has none.
+
 A request schema is just as exact about what the route TAKES: it refuses everything its handler
 would refuse for a shape reason — a pattern, a length, a character set — so a body the middleware
 admits never comes back a 400 from the handler, and `AppType` never promises an input the route
