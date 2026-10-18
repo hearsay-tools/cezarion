@@ -149,7 +149,7 @@ describe('autonomous turn-end parity — #426', () => {
           // Progress is the manager's own nudge count (see ROW_SETTLE_MS).
           await waitForProgressing(
             () => store.getRun(runId)?.status === 'waiting' || ['done', 'review', 'failed'].includes(store.getRun(runId)?.status ?? '') || store.getRun(runId)?.activity === 'monitoring',
-            () => manager['active'].get(runId)?.autoContinues,
+            () => store.getRun(runId)?.automaticWakes,
             ROW_SETTLE_MS,
           );
           // A native ask parks mid-turn. Let that wire advance if it incorrectly

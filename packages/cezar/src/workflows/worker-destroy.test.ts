@@ -552,10 +552,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); releases.push(() => vi.useRealTimers());
     manager.enqueueOwnedRun(w.id); await until(() => !!monitoringWakeOf(store.getRun(w.id)));
     const deadline = monitoringWakeOf(store.getRun(w.id))!;
-    const engine = manager as unknown as { active: Map<string, { monitoringWakeups?: number }> };
-    const state = engine.active.get(w.id)!;
     destroy(w); await vi.advanceTimersByTimeAsync(Date.parse(deadline) - Date.now() + 1);
-    expect(state.monitoringWakeups ?? 0).toBe(0);
+    expect(manager['automaticWakes'](w.id)).toBe(0);
     expect(monitoringWakeOf(store.getRun(w.id))).toBe(deadline);
     expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
     vi.useRealTimers();

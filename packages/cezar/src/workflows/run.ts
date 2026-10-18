@@ -470,7 +470,8 @@ interface ActiveRun {
   pendingPermissions?: Set<string>;
   agentInputError?: string;
   agentInputFlight?: { session: AgentSession; inputIds: readonly string[]; settled?: Promise<void>;
-    /** This batch carries timer results and holds one unit of the automatic-wake budget. */
+    /** This batch carries timer results: it holds one unit of the automatic-wake budget, which
+     *  every budget check counts, and charges it to the record on its acknowledgement. */
     wakeReserved?: boolean };
   /** The current session's declared input delivery (#505). */
   inputDelivery?: InputDelivery;
@@ -512,9 +513,6 @@ interface ActiveRun {
   idleTimer?: NodeJS.Timeout;
   /** The inactivity timer closed the wire; resource teardown must not imply task success. */
   idleClosed?: boolean;
-  /** Timer wakes delivered in this session (hearsay-tools/cezarion#1233); at `MAX_AUTO_CONTINUES`
-   *  agent timers refuse and monitoring timers stop. A human message resets it. */
-  monitoringWakeups?: number;
   /** The monitoring-timer cap note was written for this session. */
   monitoringCapNoted?: boolean;
   autosaveTimer?: NodeJS.Timeout;
@@ -528,7 +526,6 @@ interface ActiveRun {
   /** Autonomous mode (#autonomous): nudge eligible turn ends until done or the cap.
    *  Pending input, native asks and lifecycle waits retain priority. */
   autonomous?: boolean;
-  autoContinues?: number;
   /** An eligible boundary nudge refused until the current transport becomes ready.
    * Retains its slot, bounded by the existing idle timer; never represents a sent input. */
   autonomousNudgePending?: AgentSession;
@@ -1314,8 +1311,6 @@ export class RunManager {
   private readonly ciRetries = new Map<string, { runId: string; timer: NodeJS.Timeout }>();
   /** A wake that could not be admitted yet, retried by run id. */
   private readonly wakeRetries = new Map<string, NodeJS.Timeout>();
-  /** Consecutive failed automatic deliveries of a run's wait results (`MAX_WAKE_DELIVERY_ATTEMPTS`). */
-  private readonly wakeDeliveryFailures = new Map<string, number>();
   /** The wait before the next automatic delivery attempt after a failed one, by run id. */
   private readonly wakeBackoffs = new Map<string, NodeJS.Timeout>();
   // Private and overridable so tests need not wait out production cadence.
@@ -1979,7 +1974,7 @@ export class RunManager {
     if (parsed.kind === 'human') return refuse('invalid_request');
     if (parsed.kind === 'timer') {
       if (this.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
-      if ((active.monitoringWakeups ?? 0) >= MAX_AUTO_CONTINUES) refuse('wake_budget_spent');
+      if (this.automaticWakes(runId) >= MAX_AUTO_CONTINUES) refuse('wake_budget_spent');
       const now = Date.now();
       const wait: TimerWaitEntry = { id: randomUUID(), kind: 'timer', source: 'agent', via, registeredAt: new Date(now).toISOString(),
         deadline: new Date(now + parsed.seconds * 1000).toISOString(), phase: 'open', turnId, seconds: parsed.seconds,
@@ -2117,7 +2112,7 @@ export class RunManager {
     if (!latest || latest.phase !== 'open') return;
     const state = this.active.get(runId);
     // The count includes a timer batch still awaiting its acknowledgement.
-    if (latest.kind === 'timer' && (state?.monitoringWakeups ?? 0) >= MAX_AUTO_CONTINUES) {
+    if (latest.kind === 'timer' && this.automaticWakes(runId) >= MAX_AUTO_CONTINUES) {
       this.cancelTimersAtCap(runId, [latest]);
       if (state) this.reparkWithoutWaits(runId, state);
       return;
@@ -2166,14 +2161,14 @@ export class RunManager {
   private failedWakeDelivery(runId: string, error: string): 'park' | 'settle' | 'capped' {
     if (!resolvedWaits(this.store.getRun(runId) ?? {}).length) return 'park';
     if (parseUsageLimit(error)) return 'settle';
-    const failures = (this.wakeDeliveryFailures.get(runId) ?? 0) + 1;
+    const failures = (this.store.getRun(runId)?.waitDeliveryFailures ?? 0) + 1;
     if (failures >= MAX_WAKE_DELIVERY_ATTEMPTS) {
       // Nothing may wake the settled run: its admission retry goes with the count.
       this.resetWakeDelivery(runId);
       const retry = this.wakeRetries.get(runId); if (retry) clearTimeout(retry); this.wakeRetries.delete(runId);
       return 'capped';
     }
-    this.wakeDeliveryFailures.set(runId, failures);
+    this.store.updateRun(runId, { waitDeliveryFailures: failures });
     const previous = this.wakeBackoffs.get(runId); if (previous) clearTimeout(previous);
     const timer = setTimeout(() => {
       if (this.wakeBackoffs.get(runId) !== timer) return;
@@ -2186,8 +2181,36 @@ export class RunManager {
 
   /** A delivery, a human or a terminal path ends a run of failed deliveries and its backoff. */
   private resetWakeDelivery(runId: string): void {
-    this.wakeDeliveryFailures.delete(runId);
+    this.clearWakeDeliveryFailures(runId);
     const timer = this.wakeBackoffs.get(runId); if (timer) clearTimeout(timer); this.wakeBackoffs.delete(runId);
+  }
+
+  /** The failure count is on the run record, so a restart keeps it (hearsay-tools/cezarion#1234). */
+  private clearWakeDeliveryFailures(runId: string): void {
+    if (this.store.getRun(runId)?.waitDeliveryFailures !== undefined) this.store.updateRun(runId, { waitDeliveryFailures: undefined });
+  }
+
+  /**
+   * Automatic wakes spent since the user last wrote: timer wakes and autonomous nudges, against
+   * one budget of `MAX_AUTO_CONTINUES` (hearsay-tools/cezarion#1234). The count is on the run
+   * record, so a restart, a scheduler continuation and a usage-limit resume keep it. A timer batch
+   * still awaiting its acknowledgement counts the unit it reserved.
+   */
+  private automaticWakes(runId: string): number {
+    const reserved = this.active.get(runId)?.agentInputFlight?.wakeReserved ? 1 : 0;
+    return (this.store.getRun(runId)?.automaticWakes ?? 0) + reserved;
+  }
+
+  /** Spend one automatic wake on the record; returns the count after it. */
+  private chargeAutomaticWake(runId: string): number {
+    const next = (this.store.getRun(runId)?.automaticWakes ?? 0) + 1;
+    this.store.updateRun(runId, { automaticWakes: next });
+    return next;
+  }
+
+  /** A human message or a human Continue restarts the budget. */
+  private resetAutomaticWakes(runId: string): void {
+    if (this.store.getRun(runId)?.automaticWakes) this.store.updateRun(runId, { automaticWakes: 0 });
   }
 
   private retryWaitAdmission(runId: string): void {
@@ -5407,12 +5430,8 @@ export class RunManager {
     // timer that comes due before this acknowledgement counts it, and gives it back if the batch is
     // refused or its acknowledgement rejects (hearsay-tools/cezarion#1233).
     const timerResults = resolvedWaits(this.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'timer' && inputIds.includes(wait.id));
-    if (timerResults.length) { state.monitoringWakeups = (state.monitoringWakeups ?? 0) + 1; flight.wakeReserved = true; }
-    const refund = (): void => {
-      if (!flight.wakeReserved) return;
-      flight.wakeReserved = false;
-      state.monitoringWakeups = Math.max(0, (state.monitoringWakeups ?? 0) - 1);
-    };
+    if (timerResults.length) flight.wakeReserved = true;
+    const refund = (): void => { flight.wakeReserved = false; };
     state.agentInputFlight = flight;
     const current = (): boolean => !this.disposed && this.active.get(runId) === state && state.session === session &&
       state.agentInputFlight === flight && !state.cancelled && !state.finishRequested && !this.workerExecutionStopped(runId) &&
@@ -5457,13 +5476,15 @@ export class RunManager {
           const conversationIds = inputIds.filter(id => !resolvedIds.includes(id));
           if (resolvedIds.length) {
             this.store.commitWaitDelivery(runId, resolvedIds);
-            this.wakeDeliveryFailures.delete(runId);
+            this.clearWakeDeliveryFailures(runId);
             // A timer expiry is a self-generated wake: one admitted turn that carries timer results
             // spends the one unit it reserved, however many it carries. CI wakes are external events
             // and do not count.
             const timers = batch.filter(wait => wait.kind === 'timer');
             if (timers.length && flight.wakeReserved) {
-              this.store.appendEvent(runId, { type: 'note', message: `automatic ${timers.some(isMonitoringTimer) ? 'monitoring' : 'timer'} wake-up (${state.monitoringWakeups}/${MAX_AUTO_CONTINUES})` });
+              flight.wakeReserved = false;
+              const spent = this.chargeAutomaticWake(runId);
+              this.store.appendEvent(runId, { type: 'note', message: `automatic ${timers.some(isMonitoringTimer) ? 'monitoring' : 'timer'} wake-up (${spent}/${MAX_AUTO_CONTINUES})` });
             }
             this.waitWakeAdmitted.delete(runId);
             if (!resolvedWaits(this.store.getRun(runId) ?? {}).length) {
@@ -5542,7 +5563,7 @@ export class RunManager {
     if (askPending && state.atTurnBoundary !== state.session) return false;
     // A timer result still owed when the budget is spent is cancelled before its batch is sent; the
     // CI results beside it are delivered.
-    if ((state.monitoringWakeups ?? 0) >= MAX_AUTO_CONTINUES && this.waitWakeAdmitted.has(runId) && state.atTurnBoundary === state.session) {
+    if (this.automaticWakes(runId) >= MAX_AUTO_CONTINUES && this.waitWakeAdmitted.has(runId) && state.atTurnBoundary === state.session) {
       const owedTimers = resolvedWaits(run).filter(wait => wait.kind === 'timer');
       if (owedTimers.length) {
         this.cancelTimersAtCap(runId, owedTimers);
@@ -5641,10 +5662,11 @@ export class RunManager {
     const delivered = this.deliverMessage(runId, content, true);
     if (delivered) {
       const state = this.active.get(runId);
-      // A human message restarts the budget; a timer batch still awaiting its acknowledgement keeps
-      // the unit it reserved.
-      if (state) { state.monitoringWakeups = state.agentInputFlight?.wakeReserved ? 1 : 0; state.monitoringCapNoted = undefined; }
-      this.wakeDeliveryFailures.delete(runId);
+      // A human message, a question's answer included, restarts the budget; a timer batch still
+      // awaiting its acknowledgement keeps the unit it reserved and charges it then.
+      this.resetAutomaticWakes(runId);
+      if (state) state.monitoringCapNoted = undefined;
+      this.clearWakeDeliveryFailures(runId);
       this.resetParentCompletion(runId);
     }
     return delivered;
@@ -6094,7 +6116,8 @@ export class RunManager {
     // human got there first — and then the counter starts over, because the cap only exists to
     // bound UNATTENDED resumes.
     this.clearAutoResume(runId);
-    if (!deferForCapacity) { this.withdrawWorkerWait(runId); this.resetParentCompletion(runId); this.resetWakeDelivery(runId); }
+    // Only a human Continue is immediate; it restarts the automatic-wake budget too.
+    if (!deferForCapacity) { this.withdrawWorkerWait(runId); this.resetParentCompletion(runId); this.resetWakeDelivery(runId); this.resetAutomaticWakes(runId); }
 
     let continuationNumber = 1;
     while (run.steps.some(step => step.id === `continue-${continuationNumber}`)) continuationNumber++;
@@ -6244,7 +6267,7 @@ export class RunManager {
       cancelled: false, interrupt: () => undefined, cwd,
       pendingHumanAsk: this.hasPendingHumanAsk(runId),
       pendingPermissions: new Set(),
-      autonomous: record?.autonomous === true, autoContinues: 0,
+      autonomous: record?.autonomous === true,
     };
     this.activate(runId, state);
     this.starting.delete(runId);
@@ -6919,7 +6942,6 @@ export class RunManager {
       interrupt: () => undefined,
       cwd: this.repoRoot,
       autonomous: input.autonomous === true,
-      autoContinues: 0,
     };
     this.activate(runId, state);
     this.starting.delete(runId);
@@ -8383,7 +8405,8 @@ export class RunManager {
     if (!state.autonomous || !session || !this.canAutoContinue(runId, state)) return false;
     state.autonomousNudgePending = undefined;
     this.clearIdleTimer(state);
-    if ((state.autoContinues ?? 0) >= MAX_AUTO_CONTINUES) {
+    // One budget with the timer wakes (hearsay-tools/cezarion#1234).
+    if (this.automaticWakes(runId) >= MAX_AUTO_CONTINUES) {
       this.store.appendEvent(runId, { type: 'note', stepId, message: `autonomous — safety cap reached (${MAX_AUTO_CONTINUES}); automatic continuation paused` });
       return false;
     }
@@ -8406,10 +8429,10 @@ export class RunManager {
       return false;
     }
     if (ask) this.resumeParkedRun(runId, state);
-    state.autoContinues = (state.autoContinues ?? 0) + 1;
+    const spent = this.chargeAutomaticWake(runId);
     this.store.appendEvent(runId, {
       type: 'note', stepId,
-      message: `autonomous — continuing without pausing (${state.autoContinues}/${MAX_AUTO_CONTINUES})`,
+      message: `autonomous — continuing without pausing (${spent}/${MAX_AUTO_CONTINUES})`,
     });
     // The marker is stripped from visible text. Retain the question as a note,
     // never an ask card or a fabricated human-input-delivered acknowledgement.
@@ -8578,7 +8601,7 @@ export class RunManager {
   private openTimerAlias(runId: string, state: ActiveRun, scheduleWakeup: number | null | undefined): void {
     const run = this.store.getRun(runId);
     if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run) || this.parentCompletionAttention(runId)) return;
-    if (state.autonomous && (state.autoContinues ?? 0) < MAX_AUTO_CONTINUES && this.canAutoContinue(runId, state)) return;
+    if (state.autonomous && this.automaticWakes(runId) < MAX_AUTO_CONTINUES && this.canAutoContinue(runId, state)) return;
     const via: WaitVia = scheduleWakeup === undefined ? 'monitoring-line' : 'schedule-wakeup';
     if (openWaits(run).some(wait => wait.kind === 'timer' && wait.via === via)) return;
     const minutes = this.semaphore.monitoringWakeIntervalMinutes();
@@ -8586,7 +8609,7 @@ export class RunManager {
       this.store.appendEvent(runId, { type: 'note', message: 'automatic re-checks are off; waiting for you' });
       return;
     }
-    if ((state.monitoringWakeups ?? 0) >= MAX_AUTO_CONTINUES) {
+    if (this.automaticWakes(runId) >= MAX_AUTO_CONTINUES) {
       if (!state.monitoringCapNoted) {
         state.monitoringCapNoted = true;
         this.store.appendEvent(runId, {

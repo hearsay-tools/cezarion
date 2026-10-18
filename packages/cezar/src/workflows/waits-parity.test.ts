@@ -43,12 +43,11 @@ const waitOfKind = (id: string, kind: Wait['kind']) => store.getRun(id)?.waits?.
 const settled = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(wait => wait.id === waitId);
 const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
 const engine = () => manager as unknown as {
-  active: Map<string, { session: AgentSession & { end(): void }; ciGeneration: string; monitoringWakeups?: number }>;
+  active: Map<string, { session: AgentSession & { end(): void }; ciGeneration: string }>;
   waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>;
   monitoring: Set<string>;
   wakeRetryBackoff: Backoff;
   wakeBackoffs: Map<string, NodeJS.Timeout>;
-  wakeDeliveryFailures: Map<string, number>;
   wakeRetries: Map<string, NodeJS.Timeout>;
   queue: string[];
 };
@@ -109,7 +108,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -276,7 +275,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
         return registered.wait;
       };
       const first = await open(60, 'u10 first'), second = await open(61, 'u10 second'), last = await open(62, 'u10 last');
-      engine().active.get(run.id)!.monitoringWakeups = 39;
+      store.updateRun(run.id, { automaticWakes: 39 });
       // Two timers resolve before one boundary: one admitted turn carries both and spends one wake.
       fireTimer(first.id); fireTimer(second.id);
       await until(() => store.getRun(run.id)?.waits?.filter(wait => wait.phase === 'resolved').length === 2);
@@ -284,7 +283,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       await until(() => settled(run.id, first.id)?.phase === 'delivered' && settled(run.id, second.id)?.phase === 'delivered');
       await until(() => prompted(runner, timerText(first, 'u10 first')).length > 0);
       expect(prompted(runner, timerText(first, 'u10 first')).at(-1)).toContain(timerText(second, 'u10 second'));
-      expect(engine().active.get(run.id)?.monitoringWakeups).toBe(40);
+      expect(store.getRun(run.id)?.automaticWakes).toBe(40);
       const charged = store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic timer wake-up ('));
       expect(charged.map(event => event.message)).toEqual(['automatic timer wake-up (40/40)']);
       await until(() => parkedOn(run.id, store.getRun(run.id)?.waits?.find(wait => wait.id === last.id)));
@@ -317,7 +316,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       const second = await open({ kind: 'timer', seconds: 61, note: 'u10 second' });
       const ci = await open({ kind: 'ci', pr, timeout_seconds: 600 });
       const state = engine().active.get(run.id)!;
-      state.monitoringWakeups = 39;
+      store.updateRun(run.id, { automaticWakes: 39 });
       // The first wake reaches the native wire; its provider acknowledgement is held.
       let release!: () => void;
       const gate = new Promise<void>(resolve => { release = resolve; });
@@ -335,7 +334,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(inputsFor(run.id, second.id)).toEqual([]);
       release();
       await until(() => settled(run.id, first.id)?.phase === 'delivered');
-      expect(state.monitoringWakeups).toBe(40);
+      expect(store.getRun(run.id)?.automaticWakes).toBe(40);
       const notes = () => store.readEvents(run.id).filter(event => event.type === 'note').map(event => String(event.message));
       expect(notes().filter(note => note.startsWith('automatic timer wake-up ('))).toEqual(['automatic timer wake-up (40/40)']);
       expect(notes()).toContain(`automatic timer wake-up cap reached (40); timer ${second.id} cancelled`);
@@ -344,7 +343,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       await until(() => parkedOn(run.id, waitOfKind(run.id, 'ci')));
       external.settle();
       await until(() => settled(run.id, ci.id)?.phase === 'delivered' && prompted(runner, `CI wait observation ${ci.id}`).length > 0);
-      expect(state.monitoringWakeups).toBe(40);
+      expect(store.getRun(run.id)?.automaticWakes).toBe(40);
     });
 
     it(`${runner} U12 a wait result beside a pending portable question is checkpointed only on its delayed provider acknowledgement, and the question stays answerable`, async () => {
@@ -381,7 +380,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
         fireTimer(timer.id);
         await until(() => settled(run.id, timer.id)?.phase === 'delivered');
         // The acknowledged delivery ends the run of failed attempts.
-        expect(engine().wakeDeliveryFailures.has(run.id)).toBe(false);
+        expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
         // The rejection failed the session, not the run: a continuation sent the result again, and
         // only that accepted submission delivered it.
         expect(prompted(runner, `Timer ${timer.id} fired`).length).toBeGreaterThanOrEqual(2);
@@ -445,6 +444,33 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(manager.finish(id)).toBe(true);
       await until(() => terminal.includes(store.getRun(id)?.status ?? ''));
     }
+
+    // hearsay-tools/cezarion#1234: the budget is on the record, so a new session does not refill it.
+    it(`${runner} U16 a scheduler continuation keeps the automatic-wake budget and a human Continue resets it`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+      await until(() => store.getRun(run.id)?.status === 'waiting');
+      const { timer } = await timerWaits(run.id);
+      store.updateRun(run.id, { automaticWakes: 39 });
+      engine().active.get(run.id)!.session.end();
+      await until(() => !manager.isActive(run.id));
+      fireTimer(timer.id);
+      await until(() => settled(run.id, timer.id)?.phase === 'delivered');
+      expect(store.getRun(run.id)?.automaticWakes).toBe(40);
+      expect(store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic timer wake-up ('))
+        .map(event => event.message)).toEqual(['automatic timer wake-up (40/40)']);
+      await until(() => store.getRun(run.id)?.status === 'waiting' && manager.isActive(run.id));
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const refused = await tools.registerWait({ kind: 'timer', seconds: 60 }, 'cezar_wait', new AbortController().signal);
+      expect(refused.answer).toMatchObject({ ok: false, code: 'wake_budget_spent' });
+      engine().active.get(run.id)!.session.end();
+      await until(() => !manager.isActive(run.id));
+      expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
+      expect(store.getRun(run.id)?.automaticWakes).toBe(0);
+      await until(() => store.getRun(run.id)?.status === 'waiting');
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
 
     it(`${runner} U14 a wait-wake continuation that fails persistently stops at the delivery bound, the run fails keeping its result, and Continue delivers it once`, async () => {
       nativeWire(runner);
@@ -522,7 +548,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(settled(run.id, later.id)?.phase).toBe('cancelled');
       expect(inputsFor(run.id, timer.id)).toEqual([]);
       expect(engine().waitTimers.has(later.id)).toBe(false);
-      expect(engine().wakeDeliveryFailures.has(run.id)).toBe(false);
+      expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
       expectNoWakeFor(run.id);
       expect(store.readEvents(run.id).filter(event => event.type === 'note' && event.message === WAITS_DISCARDED_NOTE)).toHaveLength(1);
       expect(prompted(runner, TIMER_WAKE_OPENING)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS);

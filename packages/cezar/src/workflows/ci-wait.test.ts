@@ -606,10 +606,10 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     expect(armed().waitTimers.has(wait.id)).toBe(true);
   });
 
-  it('timer refuses wake_budget_spent once the session spent its automatic wakes', async () => {
+  it('timer refuses wake_budget_spent once the run spent its automatic wakes', async () => {
     githubByPr();
     const run = await waitingParent();
-    (manager as unknown as { active: Map<string, { monitoringWakeups?: number }> }).active.get(run.id)!.monitoringWakeups = 40;
+    store.updateRun(run.id, { automaticWakes: 40 });
     await expect(registerTimer(run.id)).rejects.toMatchObject({ code: 'wake_budget_spent' });
     await expect(registerPr(run.id, 12)).resolves.toMatchObject({ kind: 'ci' });
   });

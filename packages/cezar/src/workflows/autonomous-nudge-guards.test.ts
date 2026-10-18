@@ -34,7 +34,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
       sendMessage: vi.fn(() => true), sendAgentMessage: vi.fn(() => Promise.resolve()),
       end: vi.fn(), interrupt: vi.fn(), discardQueuedMessages: vi.fn(), holdsHumanInput: () => false,
     };
-    state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, autonomous: true, autoContinues: 0, session };
+    state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, autonomous: true, session };
   });
   afterEach(() => { manager['clearIdleTimer'](state); manager.dispose(); vi.useRealTimers(); store.close(); rmSync(root, { recursive: true, force: true }); });
 
@@ -69,14 +69,28 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(manager['tryAutonomousNudge'](id, state, 'task', portable ? ask : null)).toBe(false);
     expect(session.sendMessage).not.toHaveBeenCalled();
     expect(session.sendAgentMessage).not.toHaveBeenCalled();
-    expect(state.autoContinues).toBe(0);
+    expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
     expect(store.readEvents(id).some(e => e.type === 'note' && String(e.message).includes('autonomous'))).toBe(false);
+  });
+
+  // hearsay-tools/cezarion#1234: one budget of automatic wakes on the record, for nudges and timers.
+  it('autonomous nudges and timer wakes share one budget of 40', async () => {
+    store.updateRun(id, { automaticWakes: 39 });
+    expect(manager['tryAutonomousNudge'](id, state, 'task', null)).toBe(true);
+    expect(store.getRun(id)?.automaticWakes).toBe(40);
+    expect(store.readEvents(id).some(e => e.type === 'note' && e.message === 'autonomous — continuing without pausing (40/40)')).toBe(true);
+    // The nudge's input was acknowledged; only the budget stands in the way of the next one.
+    await state.agentInputFlight?.settled;
+    state.agentInputFlight = undefined;
+    expect(manager['tryAutonomousNudge'](id, state, 'task', null)).toBe(false);
+    expect(store.getRun(id)?.automaticWakes).toBe(40);
+    expect(store.readEvents(id).some(e => e.type === 'note' && String(e.message).startsWith('autonomous — safety cap reached (40)'))).toBe(true);
   });
 
   it('a refused portable override leaves the question and budget untouched', () => {
     vi.mocked(session.sendMessage).mockReturnValue(false);
     expect(manager['tryAutonomousNudge'](id, state, 'task', ask)).toBe(false);
-    expect(state.autoContinues).toBe(0);
+    expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
     expect(store.readEvents(id).filter(e => e.type === 'note' || e.type === 'human-input-delivered')).toEqual([]);
   });
 
@@ -92,7 +106,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     applyGuard(guard);
     manager['handleAgentInputReady'](id, state, session);
     expect(session.sendMessage).not.toHaveBeenCalled();
-    expect(state.autoContinues).toBe(0);
+    expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
     if (guard === 'queued-input') {
       expect(session.sendAgentMessage).toHaveBeenCalledOnce();
       expect(session.sendAgentMessage).not.toHaveBeenCalledWith([{ type: 'text', text: AUTONOMOUS_NUDGE }], []);
@@ -115,7 +129,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
       manager['handleAgentInputReady'](id, state, session);
       expect(session.sendMessage).not.toHaveBeenCalled();
       expect(session.sendAgentMessage).not.toHaveBeenCalled();
-      expect(state.autoContinues).toBe(0);
+      expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
     },
   );
 
@@ -125,14 +139,14 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(manager['tryAutonomousNudge'](id, state, 'task', null)).toBe(false);
     expect(state.autonomousNudgePending).toBe(session);
     expect(state.idleTimer).toBeDefined();
-    expect(state.autoContinues).toBe(0);
+    expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
     expect(store.getRun(id)?.status).toBe('running');
     expect(manager['waiting'].has(id)).toBe(false);
     manager['handleAgentInputReady'](id, state, session);
     expect(session.sendAgentMessage).toHaveBeenLastCalledWith([{ type: 'text', text: AUTONOMOUS_NUDGE }], []);
     expect(state.autonomousNudgePending).toBeUndefined();
     expect(state.idleTimer).toBeUndefined();
-    expect(state.autoContinues).toBe(1);
+    expect(store.getRun(id)?.automaticWakes).toBe(1);
     expect(session.sendMessage).not.toHaveBeenCalled();
   });
 
@@ -146,7 +160,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(state.idleClosed).toBe(true);
     manager['handleAgentInputReady'](id, state, session);
     expect(session.sendAgentMessage).toHaveBeenCalledOnce();
-    expect(state.autoContinues).toBe(0);
+    expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
   });
 
   it('parent activity invalidates the refused boundary and its timer', () => {

@@ -442,7 +442,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     manager.enqueueOwnedRun(w.id);
     await until(() => !!monitoringWakeOf(store.getRun(w.id)));
     const engine = manager as unknown as {
-      active: Map<string, { monitoringWakeups?: number; session: { sendAgentMessage(...args: unknown[]): false | Promise<void> } }>;
+      active: Map<string, { session: { sendAgentMessage(...args: unknown[]): false | Promise<void> } }>;
       monitoring: Set<string>;
       settleSuccess(id: string, durable?: boolean): Promise<void>;
       deliverMessage(id: string, content: { type: 'text'; text: string }[], human: boolean): boolean;
@@ -459,7 +459,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       await vi.advanceTimersByTimeAsync(Date.parse(deadline) - Date.now() + 1);
       if (pending) {
         expect(send).not.toHaveBeenCalled();
-        expect(state.monitoringWakeups ?? 0).toBe(0);
+        expect(manager['automaticWakes'](w.id)).toBe(0);
         expect({ ...store.getRun(w.id), monitoringWakeAt: monitoringWakeOf(store.getRun(w.id)) }).toMatchObject({ status: 'waiting', activity: undefined, monitoringWakeAt: deadline });
         expect(engine.monitoring.has(w.id)).toBe(true);
         expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
@@ -467,7 +467,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         expect(send).not.toHaveBeenCalled();
       } else {
         expect(send).toHaveBeenCalledTimes(1);
-        expect(state.monitoringWakeups).toBe(1);
+        expect(manager['automaticWakes'](w.id)).toBe(1);
         // hearsay-tools/cezarion#1233: the wake turn keeps its pool slot until its own turn end.
         expect(engine.monitoring.has(w.id)).toBe(true);
         expect(store.getRun(w.id)?.activity).toBeUndefined();
