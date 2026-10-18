@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 import { createDelegationRoutes } from './routes.ts';
 import { fixture } from './service.testkit.ts';
-import { conversationSendResultSchema, conversationInspectResultSchema, inboxReserveResultSchema, inboxReceiptResultSchema, requestOutcomeSchema, delegationErrorResponseSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema } from '@open-mercato/cezar-contract';
+import { conversationSendResultSchema, conversationInspectResultSchema, inboxReserveResultSchema, inboxReceiptResultSchema, requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
+import { delegationErrorResponseSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema } from '@open-mercato/cezar-contract/delegation';
 import { seedRuns } from '../runs/run-store.testkit.ts';
 
 describe('authenticated delegation HTTP family', () => {

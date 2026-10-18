@@ -24,3 +24,11 @@ Three consumers, one definition:
    defect, not a convenience: the per-route guard in `src/server/contract-parity.test.ts` asserts
    `z.infer<schema>` and the route's own inferred type are MUTUALLY assignable, so a schema that
    drifts either way fails to compile.
+4. **Values through module subpaths.** Each module is a package subpath:
+   `@open-mercato/cezar-contract/<module>`, and `@open-mercato/cezar-api-client/contract/<module>`
+   from the cockpit. Import a value from the module that defines it. The package root re-exports
+   every module, delegation's schemas among them, so a value taken from the root loads them all
+   (hearsay-tools/cezarion#1237). Types may still come from the root as `import type`;
+   `packages/cezar/src/contract-import-boundaries.test.ts` refuses any other root import. A pure
+   helper that has no schema to import goes in a module with no runtime import, as
+   `run-labels.ts` and the `*-limits.ts` modules do, so its users load no schema.

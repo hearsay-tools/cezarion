@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { workerWaitRequestSchema } from '@open-mercato/cezar-contract';
+import { workerWaitRequestSchema } from '@open-mercato/cezar-contract/delegation';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { DelegationService } from '../delegation/service.ts';

@@ -1,4 +1,5 @@
-import { healthResponseSchema, type LiveRunDemand } from '@open-mercato/cezar-api-client'
+import { healthResponseSchema } from '@open-mercato/cezar-api-client/contract/health'
+import type { LiveRunDemand } from '@open-mercato/cezar-api-client'
 import { createLiveFallback, type FallbackEntry } from './live-fallback'
 import { LEASE_MS, LIVE_PROTOCOL, LIVE_WORKER_NAME, RENEW_MS, liveDemandSchema, ownerOutputSchema, type LiveDemand, type LiveFrame } from './live-protocol'
 import { pageIsActive, subscribePageActivity } from './live-visibility'

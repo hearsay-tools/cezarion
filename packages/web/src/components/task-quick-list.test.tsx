@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
 import { workspaceQueryKeys } from '@/api/queries'
-import { setApiScope } from '@open-mercato/cezar-api-client'
+import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import type { RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
 import { ListViewProvider } from '@/components/list-view'
 import { ReferenceStatusProvider, ReferenceStatusRegistry } from '@/components/reference-status'

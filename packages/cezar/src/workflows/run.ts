@@ -1,7 +1,9 @@
 import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { waitErrorMessage } from '../ci-wait/errors.ts';
-import { cezarWaitRequestSchema, ciWaitResultSchema, previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type CiWaitRequest, type CiWaitResult, type PreviewServeRequest, type PreviewServeResult, type CezarCancelWaitAnswer, type CezarWaitRequest, type CiWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, computeWaitingOn, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT } from '@open-mercato/cezar-contract';
+import { cezarWaitRequestSchema, type CezarCancelWaitAnswer, type CezarWaitRequest, type CiWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, computeWaitingOn, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
+import { ciWaitResultSchema, type CiWaitRequest, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
+import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { ciWatchRequest, hasCiWait, identicalWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import { previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
@@ -55,21 +57,25 @@ import { todosPath } from '../todos.ts';
 // wire and the disk can never disagree about what counts as an image (#950).
 import {
   type AgentInput,
-  type RunEvent,
   type InboxClaim,
   type WorkerStopResult,
   type WorkerWait,
   type WorkerWaitRequest,
+  workerWaitRequestSchema,
+  delegationStateSchema,
+} from '@open-mercato/cezar-contract/delegation';
+import type { RunEvent } from '@open-mercato/cezar-contract';
+import {
   type ConversationMessage,
   type RequestWaitRequest,
   requestWaitRequestSchema,
-  workerWaitRequestSchema,
+} from '@open-mercato/cezar-contract/conversations';
+import {
   attachmentExtension,
-  delegationStateSchema,
-  askRequestSchema,
   isImageAttachmentName,
   isImageMediaType,
-} from '@open-mercato/cezar-contract';
+} from '@open-mercato/cezar-contract/attachments';
+import { askRequestSchema } from '@open-mercato/cezar-contract/ask-schema';
 import type { AgentEvent, ContentBlock, InputDelivery } from '../core/agent-runner.ts';
 import { inputDeliveryOf } from '../core/agent-runner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';

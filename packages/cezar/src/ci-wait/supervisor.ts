@@ -1,5 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import { ciWaitSchema, ciWaitResultSchema, type CiPrIdentity, type CiWait, type CiWaitResult } from '@open-mercato/cezar-contract';
+import { ciWaitSchema, ciWaitResultSchema, type CiPrIdentity, type CiWait, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { CiGithubError, CiSemaphore, GithubCiClient, type GithubCheck } from './github.ts';
 
 export const CI_WATCHER_LIMIT = 4;

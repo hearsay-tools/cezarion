@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { apiRunSchema, runIndexEntrySchema, toRunSummary } from '@open-mercato/cezar-contract';
+import { apiRunSchema, runIndexEntrySchema, toRunSummary } from '@open-mercato/cezar-contract/runs';
 import { RunStore } from './store.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
 import { readPersistedRuns, readPersistedText, seedRuns } from './run-store.testkit.ts';

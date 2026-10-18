@@ -3,7 +3,7 @@ import { StrictMode, useEffect } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { ProjectScopeProvider, useProjectScope } from './project-scope-context'
-import { getApiScope, queryScope, apiPath, setApiScope } from '@open-mercato/cezar-api-client'
+import { getApiScope, queryScope, apiPath, setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 
 afterEach(() => {
   cleanup()

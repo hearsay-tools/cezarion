@@ -4,7 +4,8 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
-import { deriveAttention, workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract';
+import { deriveAttention } from '@open-mercato/cezar-contract/attention';
+import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';

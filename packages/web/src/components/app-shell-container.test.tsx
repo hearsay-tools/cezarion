@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
-import { setApiScope } from '@open-mercato/cezar-api-client'
+import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { workspaceQueryKeys } from '@/api/queries'
 import { ProjectScopeProvider } from '@/api/project-scope-context'
 import type {
@@ -1038,7 +1038,7 @@ it.each(['/tasks', '/tools'])('keeps sidebar navigation on its displayed boot pr
   expect(sidebar.getByRole('link', { name: /New task/ }).getAttribute('href')).toBe('/p/cezar/new')
   expect(document.querySelector('[data-slot="task-row"] a')?.getAttribute('href')).toBe('/p/cezar/tasks/boot-task')
   // Publishing navigation context must not change the routed view's API scope.
-  const { queryScope } = await import('@open-mercato/cezar-api-client')
+  const { queryScope } = await import('@open-mercato/cezar-api-client/utils/project-scope')
   expect(queryScope()).toBe('shop')
 })
 

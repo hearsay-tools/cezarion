@@ -1,4 +1,4 @@
-import { delegationStateSchema } from '@open-mercato/cezar-contract';
+import { delegationStateSchema } from '@open-mercato/cezar-contract/delegation';
 import type { DelegationErrorResponse, WorkerOperation, WorkerCollectedResult, ModelChoices } from '@open-mercato/cezar-contract';
 import type { RunRecord } from '../runs/store.ts';
 import { isAuthenticatedCaller, type Caller } from './credentials.ts';

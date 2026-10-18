@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { queryScope, sidebarLimitsSchema, normalizeSidebarLimits, type SidebarLimits } from '@open-mercato/cezar-api-client'
+import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
+import { sidebarLimitsSchema, normalizeSidebarLimits, type SidebarLimits } from '@open-mercato/cezar-api-client/contract/workspace'
 import { putUiState } from '@/api/client'
 import { useProjectUiState } from '@/api/queries'
 import { Button } from '@/components/ui/button'

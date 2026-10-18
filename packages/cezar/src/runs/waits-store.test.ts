@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LAST_WAITS_LIMIT, WAIT_LIMIT, type AgentInput, type CiWaitResult, type Wait } from '@open-mercato/cezar-contract';
+import { LAST_WAITS_LIMIT, WAIT_LIMIT, type Wait } from '@open-mercato/cezar-contract/waits';
+import type { AgentInput, CiWaitResult } from '@open-mercato/cezar-contract';
 
 import { RunDatabase, RUNS_DB_FILE } from './run-database.ts';
 import { isLiveRecord } from './run-row.ts';

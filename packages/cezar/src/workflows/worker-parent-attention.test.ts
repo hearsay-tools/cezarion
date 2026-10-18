@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { deriveAttention } from '@open-mercato/cezar-contract';
+import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';

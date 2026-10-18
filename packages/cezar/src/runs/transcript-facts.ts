@@ -5,7 +5,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { renameSync, rmSync, writeFileSync } from 'node:fs';
-import { type RunEvent } from '@open-mercato/cezar-contract';
+import type { RunEvent } from '@open-mercato/cezar-contract';
 import { historyPaths, historyStat } from './history-file.ts';
 
 export { emptyFacts, foldEvent, foldText, stampOf, PROSE_HUMAN_GATE, workerOutcomeKey, type PendingAskFacts, type ArchiveStamp, type TranscriptFacts } from './transcript-facts-fold.ts';

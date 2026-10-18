@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { summaryOf } from '@/test/run-summary-fixture'
-import { runDelegationSummarySchema, type RunRecord } from '@open-mercato/cezar-api-client'
+import { runDelegationSummarySchema } from '@open-mercato/cezar-api-client/contract/delegation'
+import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { deriveAttention, wantsAttention } from './attention'
 import { bucketOf, listCounts } from './task-groups'
 import { diffRunTransitions } from './notifications'

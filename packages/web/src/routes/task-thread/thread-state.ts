@@ -1,23 +1,28 @@
-import type { RunEvent, RunStatus } from '@open-mercato/cezar-api-client'
+import type {
+  RunEvent,
+  RunStatus,
+  ConversationMessage,
+  PlanEntry,
+  PlanStatus,
+  RequestOutcome,
+  StopReason,
+  UiAskQuestion,
+  UiItem,
+  UiPermissionRequestedEvent,
+  UiToolItem,
+} from '@open-mercato/cezar-api-client'
+import { toolDisplay } from '@open-mercato/cezar-api-client/protocol/tool-display'
 import {
-  toolDisplay,
   agentInputEventSchema,
   conversationMessageEventSchema,
+  requestOutcomeEventSchema,
+} from '@open-mercato/cezar-api-client/contract/events'
+import {
   previewServerSchema,
   previewServerStateSchema,
-  requestOutcomeEventSchema,
-  type ConversationMessage,
-  type PlanEntry,
-  type PlanStatus,
   type PreviewServer,
   type PreviewServerState,
-  type RequestOutcome,
-  type StopReason,
-  type UiAskQuestion,
-  type UiItem,
-  type UiPermissionRequestedEvent,
-  type UiToolItem,
-} from '@open-mercato/cezar-api-client'
+} from '@open-mercato/cezar-api-client/contract/preview'
 
 /**
  * The thread reducer: folds one run's ordered event list (`useRunEvents` — v1 lines and

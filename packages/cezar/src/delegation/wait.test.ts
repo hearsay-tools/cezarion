@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { workerWaitRequestSchema, type WorkerOutcome, type WorkerWait } from '@open-mercato/cezar-contract';
+import { workerWaitRequestSchema, type WorkerOutcome, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { reconcileWorkerWait } from './wait.ts';
 
 const now = '2026-09-06T12:00:00.000Z';

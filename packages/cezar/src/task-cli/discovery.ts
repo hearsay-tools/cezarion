@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
-import { healthResponseSchema, projectsResponseSchema } from '@open-mercato/cezar-contract';
+import { healthResponseSchema } from '@open-mercato/cezar-contract/health';
+import { projectsResponseSchema } from '@open-mercato/cezar-contract/projects';
 import { fetchJson, TaskCliError, type Cockpit } from './http.ts';
 
 /**

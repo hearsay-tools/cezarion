@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { artifactListSchema, artifactParamsSchema, fileLinkQuerySchema, fileLinkResultSchema, filePreviewDataSchema, publishedArtifactSchema } from '@open-mercato/cezar-contract';
+import { artifactListSchema, artifactParamsSchema, fileLinkQuerySchema, fileLinkResultSchema, filePreviewDataSchema, publishedArtifactSchema } from '@open-mercato/cezar-contract/artifacts';
 
 const metadata = { id: 'c0b82ee1-57c0-4bd4-b8b8-4b55f77ba230', runId: '12345678-1234-4234-8234-123456789012', name: 'notes.md', sourcePath: '/tmp/notes.md', createdAt: '2026-09-23T21:00:00.000Z', size: 0, sha256: 'a'.repeat(64) };
 describe('artifact wire contract', () => {

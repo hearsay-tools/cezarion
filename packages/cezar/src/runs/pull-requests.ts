@@ -1,4 +1,4 @@
-import { runPullRequestSchema, type ArchivePullRequestIdentity } from '@open-mercato/cezar-contract';
+import { runPullRequestSchema, type ArchivePullRequestIdentity } from '@open-mercato/cezar-contract/runs';
 import type { RunPullRequest, RunSummary } from '@open-mercato/cezar-contract';
 
 /** Compare repository identities rather than URL formatting or reference numbers alone. */

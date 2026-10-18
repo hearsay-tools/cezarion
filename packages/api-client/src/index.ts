@@ -21,6 +21,12 @@
  *     renders (a frozen surface, BACKWARD_COMPATIBILITY.md §2).
  *   - `utils/*` — pure helpers both sides need, notably the version prefixing and the
  *     `/api/v1` ↔ `/api/v1/p/:projectId` scope prefixing.
+ *
+ * This barrel is for TYPES. A value comes from its module's subpath: `./contract/<module>` (one
+ * re-export line per contract module) or `./<path>` for the modules above, e.g.
+ * `@open-mercato/cezar-api-client/utils/project-scope`. Importing a value here loads every
+ * contract module, delegation's schemas among them (hearsay-tools/cezarion#1237);
+ * `packages/cezar/src/contract-import-boundaries.test.ts` enforces it.
  */
 
 export * from './client.ts'

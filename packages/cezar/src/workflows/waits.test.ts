@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ciWaitSchema, type CiWaitEntry, type TimerWaitEntry, type Wait } from '@open-mercato/cezar-contract';
+import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
+import type { CiWaitEntry, TimerWaitEntry, Wait } from '@open-mercato/cezar-contract';
 import { ciWatchRequest, identicalWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 
 // hearsay-tools/cezarion#1233: the wait list's pure helpers. RunManager behaviour lives in

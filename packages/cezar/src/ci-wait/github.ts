@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { z } from 'zod';
-import { ciPrIdentitySchema, ciWaitRequestSchema, type CiPrIdentity, type CiWaitErrorCode } from '@open-mercato/cezar-contract';
+import { ciPrIdentitySchema, ciWaitRequestSchema, type CiPrIdentity, type CiWaitErrorCode } from '@open-mercato/cezar-contract/ci-wait';
 
 export const CI_QUERY_TIMEOUT_MS = 10_000;
 /** `gh pr checks --watch --interval`, in seconds. Not the query timeout. */

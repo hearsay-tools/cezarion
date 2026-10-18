@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { artifactDirectory, publishArtifact } from '../artifacts/store.ts';
-import { artifactListSchema, fileLinkResultSchema, filePreviewDataSchema } from '@open-mercato/cezar-contract';
+import { artifactListSchema, fileLinkResultSchema, filePreviewDataSchema } from '@open-mercato/cezar-contract/artifacts';
 import type { RunManager } from '../workflows/run.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';

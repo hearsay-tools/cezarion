@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from './client'
 import { createQueryClient } from './query-client'
-import { setApiScope } from '@open-mercato/cezar-api-client'
+import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { ProjectScopeContext } from './project-scope-context'
 import type { GithubRefStatusData } from '@open-mercato/cezar-api-client'
 import {

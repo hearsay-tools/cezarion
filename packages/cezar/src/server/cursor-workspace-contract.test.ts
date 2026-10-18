@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  runnerModelsSchema, setConfigInputSchema, setWorkspaceConfigInputSchema,
-  setWorkspaceUiStateInputSchema, workspaceConfigResponseSchema, workspaceUiStateSchema,
-} from '@open-mercato/cezar-contract';
+  runnerModelsSchema,
+  setConfigInputSchema,
+  setWorkspaceConfigInputSchema,
+  setWorkspaceUiStateInputSchema,
+  workspaceConfigResponseSchema,
+  workspaceUiStateSchema,
+} from '@open-mercato/cezar-contract/workspace';
 
 describe('Cursor workspace contract maps', () => {
   it('retains Cursor model defaults in both directions at both scopes', () => {

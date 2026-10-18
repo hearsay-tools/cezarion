@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
-import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract';
+import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
 import { collectWorkerEvidence } from '../delegation/results.ts';

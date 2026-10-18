@@ -1,9 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
-  conversationMessageSchema, humanInputDeliveredEventSchema, requestOutcomeSchema,
-  workerQuestionFallbackEventSchema, workerQuestionRoutedEventSchema,
-} from '@open-mercato/cezar-contract';
+  conversationMessageSchema,
+  requestOutcomeSchema,
+} from '@open-mercato/cezar-contract/conversations';
+import {
+  humanInputDeliveredEventSchema,
+  workerQuestionFallbackEventSchema,
+  workerQuestionRoutedEventSchema,
+} from '@open-mercato/cezar-contract/events';
 
 // #505 PR B: a worker question travels as a conversation request carrying the structured ask.
 const question = { questions: [{ header: 'DB', question: 'Which database?', options: [{ label: 'Postgres' }, { label: 'SQLite' }] }] };

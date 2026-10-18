@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { access, cp, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { constants as fsConstants, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
-import { applicationUpdateStateSchema, type ApplicationUpdateState } from '@open-mercato/cezar-contract';
+import { applicationUpdateStateSchema, type ApplicationUpdateState } from '@open-mercato/cezar-contract/application-update';
 import { z } from 'zod';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 import { isNewerVersion } from '../update-check.ts';

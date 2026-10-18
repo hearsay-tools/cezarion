@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { REFERENCE_STATUS_MAX } from '@open-mercato/cezar-api-client'
+import { REFERENCE_STATUS_MAX } from '@open-mercato/cezar-api-client/contract/github'
 
 import {
   __clearRememberedStatusesForTests,

@@ -1,6 +1,6 @@
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { createFixtureManager, managerDisposed } from '../workflows/fixture-cleanup.testkit.ts';
-import { type WorkerSpawnRequest, workerDiffSchema, workerWaitResultSchema } from '@open-mercato/cezar-contract';
+import { type WorkerSpawnRequest, workerDiffSchema, workerWaitResultSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { onTestFinished, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

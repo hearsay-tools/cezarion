@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { runsIndexResponseSchema, runsSearchResponseSchema, type RunsIndexResponse } from '@open-mercato/cezar-contract';
+import { runsIndexResponseSchema, runsSearchResponseSchema, type RunsIndexResponse } from '@open-mercato/cezar-contract/runs';
 import { readPersistedText, seedRuns } from '../runs/run-store.testkit.ts';
 const resolveRepoHandle = vi.hoisted(() => vi.fn());
 vi.mock('./forge/github.ts', async (importOriginal) => ({

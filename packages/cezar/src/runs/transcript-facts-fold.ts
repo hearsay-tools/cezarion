@@ -1,7 +1,8 @@
 /** Pure transcript folding and version-1 sidecar validation. */
 import { type Stats } from 'node:fs';
 import { z } from 'zod';
-import { advancePendingHumanAsk, type RunEvent } from '@open-mercato/cezar-contract';
+import { advancePendingHumanAsk } from '@open-mercato/cezar-contract/ask';
+import type { RunEvent } from '@open-mercato/cezar-contract';
 
 /** A prose gate a turn ended on without a structured ask; answered like one. */
 export const PROSE_HUMAN_GATE = 'unstructured-human-gate';

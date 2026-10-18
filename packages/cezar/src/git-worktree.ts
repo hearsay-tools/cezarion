@@ -1,7 +1,7 @@
 import { inspectGeneration } from './delegation/process-liveness.ts';
 import { execFile } from 'node:child_process';
 import { autosaveGit, type AutosaveOptions } from './autosave-git.ts';
-import { workerWorkspaceSchema } from '@open-mercato/cezar-contract';
+import { workerWorkspaceSchema } from '@open-mercato/cezar-contract/delegation';
 import { existsSync, realpathSync, type Dirent } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

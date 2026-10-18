@@ -2,7 +2,8 @@ import { hostModelCatalogAdapters } from '../core/host-model-catalog.ts';
 import { providerAuthChecksDisabled, type ProviderAuthService } from '../core/provider-auth.ts';
 import { applyProviderEnablement } from '../core/provider-availability.ts';
 import { loadWorkspaceConfig } from '../workspace/config.ts';
-import { MODEL_DISCOVERY_RUNNERS, type ModelDiscoveryRunner, type ModelChoices, type DiscoveredRunners, type ProviderStatusResponse } from '@open-mercato/cezar-contract';
+import { MODEL_DISCOVERY_RUNNERS, type ModelDiscoveryRunner, type ProviderStatusResponse } from '@open-mercato/cezar-contract/workspace';
+import type { ModelChoices, DiscoveredRunners } from '@open-mercato/cezar-contract';
 import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
 
 export interface HostDiscovery {

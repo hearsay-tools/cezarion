@@ -1,4 +1,5 @@
-import { runWorkflowLabel, type ArchiveFinishedScope, type ProcessUsage, type RunRecord, type RunSummary, type RunStatus } from '@open-mercato/cezar-api-client'
+import { runWorkflowLabel } from '@open-mercato/cezar-api-client/contract/run-labels'
+import type { ArchiveFinishedScope, ProcessUsage, RunRecord, RunSummary, RunStatus } from '@open-mercato/cezar-api-client'
 import { isScheduledResume } from '@/lib/read-state'
 import { groupTitle, isOwnedWorker, runTitle, type ListView } from '@/lib/task-groups'
 

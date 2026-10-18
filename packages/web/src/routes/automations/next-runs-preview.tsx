@@ -1,4 +1,4 @@
-import { occurrencesBetween, type NormalizedSchedule } from '@open-mercato/cezar-api-client'
+import { occurrencesBetween, type NormalizedSchedule } from '@open-mercato/cezar-api-client/contract/automation-schedule'
 
 import { dayTime, relativeIn } from '@/lib/automation-format'
 

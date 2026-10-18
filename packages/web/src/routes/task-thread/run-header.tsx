@@ -21,7 +21,8 @@ import {
   useRunHandoff,
   useRuns,
 } from '@/api/queries'
-import { DEFAULT_AGENT_ACCOUNT_ID, type ApiRun, type OpenTarget, type Wait } from '@open-mercato/cezar-api-client'
+import { DEFAULT_AGENT_ACCOUNT_ID } from '@open-mercato/cezar-api-client/contract/agent-profiles'
+import type { ApiRun, OpenTarget, Wait } from '@open-mercato/cezar-api-client'
 import { hasAccountChoice, useAgentAccounts } from '@/api/agent-accounts'
 import { DiffStatLabel } from '@/components/diff-stat'
 import { TitleEditInput, useTitleEditor } from '@/components/editable-title'

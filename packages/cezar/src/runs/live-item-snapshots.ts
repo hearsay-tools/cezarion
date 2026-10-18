@@ -1,4 +1,5 @@
-import { LIVE_BYTE_LIMIT, type RunEvent } from '@open-mercato/cezar-contract';
+import { LIVE_BYTE_LIMIT } from '@open-mercato/cezar-contract/live-limits';
+import type { RunEvent } from '@open-mercato/cezar-contract';
 
 // A store-wide bound, including items whose runner never emitted completion.
 const MAX_ITEMS = 256;

@@ -2,7 +2,8 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { runnerSchema, type AgentConfigFile } from '@open-mercato/cezar-api-client'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
+import type { AgentConfigFile } from '@open-mercato/cezar-api-client'
 import { AGENT_DESCRIPTORS, descriptorFor } from './agent-descriptors'
 
 /** The descriptor table driving Settings → Agent config (spec 2026-07-17-agent-config-by-agent). */

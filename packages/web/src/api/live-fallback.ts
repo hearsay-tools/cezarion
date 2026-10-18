@@ -1,4 +1,4 @@
-import { liveRunBatchResponseSchema, type LiveRunDemand } from '@open-mercato/cezar-api-client'
+import { liveRunBatchResponseSchema, type LiveRunDemand } from '@open-mercato/cezar-api-client/contract/live'
 import type { LiveDemand, LiveFrame } from './live-protocol'
 
 export interface FallbackEntry {

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { workerOperationSchema, type WorkerOperation } from '@open-mercato/cezar-contract';
+import { workerOperationSchema, type WorkerOperation } from '@open-mercato/cezar-contract/delegation';
 import { runRecordSchema, type RunRecord } from '../runs/store.ts';
 import { CredentialRegistry, type Caller } from './credentials.ts';
 import { authorizeSpawn, authorizeSpawnReplay, authorizeWorker } from './policy.ts';

@@ -3,8 +3,8 @@ import {
   type GithubData,
   type GithubItem,
   type GithubSearchData,
-  type RunSummary,
-} from '@open-mercato/cezar-api-client'
+} from '@open-mercato/cezar-api-client/contract/github'
+import type { RunSummary } from '@open-mercato/cezar-api-client'
 
 import { GITHUB_PAGE_SIZE, githubSideExhausted } from '@/api/github-pages'
 import { isOwnedWorker } from '@/lib/task-groups'

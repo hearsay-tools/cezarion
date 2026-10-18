@@ -15,9 +15,11 @@ import {
 import {
   PROJECT_TAGS_MAX,
   PROJECT_TAG_MAX_LENGTH,
-  type ProjectListEntry,
-  type ProjectsResponse,
-  type WorkspaceConfigResponse,
+} from '@open-mercato/cezar-api-client/contract/project-limits'
+import type {
+  ProjectListEntry,
+  ProjectsResponse,
+  WorkspaceConfigResponse,
 } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { Button } from '@/components/ui/button'
