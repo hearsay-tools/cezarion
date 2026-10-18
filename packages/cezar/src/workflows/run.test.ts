@@ -50,10 +50,15 @@ type UsageAccountingHarness = {
   ): void;
 };
 
-// Naming has its own suite; no background LLM call may outlive these fixtures.
+// Naming has its own suite; no background LLM call may outlive these fixtures. The mocks answer
+// Cezar's no-wait nudge in plain text (hearsay-tools/cezarion#1234), so a turn end with no wait
+// reaches Cezar's own wait, not a question the mock made up.
 const fixtureAutoname = process.env.CEZ_AUTONAME;
-beforeEach(() => { process.env.CEZ_AUTONAME = '0'; });
+const fixtureNudgeReply = process.env.CEZ_MOCK_NUDGE_REPLY;
+beforeEach(() => { process.env.CEZ_AUTONAME = '0'; process.env.CEZ_MOCK_NUDGE_REPLY = 'plain'; });
 afterAll(() => {
+  if (fixtureNudgeReply === undefined) delete process.env.CEZ_MOCK_NUDGE_REPLY;
+  else process.env.CEZ_MOCK_NUDGE_REPLY = fixtureNudgeReply;
   if (fixtureAutoname === undefined) delete process.env.CEZ_AUTONAME;
   else process.env.CEZ_AUTONAME = fixtureAutoname;
 });

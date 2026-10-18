@@ -972,12 +972,16 @@ export async function driveRun(
     mockBin?: string;
   } = {},
 ): Promise<RunObservation> {
-  const { beforeStart, during, env, mockBin, worktree, ...runOptions } = options;
+  const { beforeStart, during, env: extraEnv, mockBin, worktree, ...runOptions } = options;
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
   const savedDry = process.env.CEZ_DRY_RUN;
   const savedAutoName = process.env.CEZ_AUTONAME;
-  const savedEnv = Object.keys(env ?? {}).map(name => [name, process.env[name]] as const);
+  // The mock answers Cezar's no-wait nudge in plain text (hearsay-tools/cezarion#1234), so a row
+  // that ends a turn with no wait reaches Cezar's own wait rather than a question the mock made
+  // up. `options.env` may opt back in to the card.
+  const env = { CEZ_MOCK_NUDGE_REPLY: 'plain', ...extraEnv };
+  const savedEnv = Object.keys(env).map(name => [name, process.env[name]] as const);
   Object.assign(process.env, env);
   process.env.CEZ_AUTONAME = '0';
   process.env[adapter.binEnv] = mockBin ?? adapter.mockBin;
