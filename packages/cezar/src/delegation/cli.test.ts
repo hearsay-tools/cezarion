@@ -25,6 +25,14 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
   });
   afterEach(async () => { await transport?.close(); await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   const json = () => JSON.parse(String(output.mock.calls.at(-1)?.[0]));
+  it('lists owned workers through the private transport and rejects extra arguments', async () => {
+    expect(await runWorkerCommand(['list'], env)).toBe(0);
+    expect(json()).toEqual({ workers: [] });
+    expect(await runWorkerCommand(['list', 'extra'], env)).toBe(1);
+    expect(json()).toMatchObject({ code: 'invalid_input' });
+    expect(await runWorkerCommand(['list', '--help'], {})).toBe(0);
+    expect(output.mock.calls.at(-1)?.[0]).toContain('cez worker list');
+  });
   it('preserves JSON usage for no args', async () => {
     expect(await runWorkerCommand([], env)).toBe(1);
     const help = json();

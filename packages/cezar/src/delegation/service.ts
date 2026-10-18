@@ -11,7 +11,7 @@ import {
   conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReceiptRequestSchema, requestWaitRequestSchema,
   type ConversationSendRequest, type ConversationSendResult, type ConversationInspectRequest, type ConversationInspectResult, type ConversationCancelRequest, type ConversationState, type InboxReserveResult, type InboxReceiptRequest, type InboxReceiptResult, type RequestWaitRequest, type RequestOutcome,
   workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerCancelWaitRequestSchema, type WorkerCancelWaitRequest,
-  type WorkerCollectedResult, type WorkerDestroy, type WorkerDestroyResult, type WorkerInspection, type WorkerOperation,
+  type WorkerListResult, type WorkerCollectedResult, type WorkerDestroy, type WorkerDestroyResult, type WorkerInspection, type WorkerOperation,
   type WorkerParams, type WorkerSpawnRequest, type WorkerSteerRequest, type WorkerWaitRequest,
 } from '@open-mercato/cezar-contract';
 import type { RunStore, RunRecord } from '../runs/store.ts';
@@ -24,7 +24,7 @@ import type { RunnerId } from '../core/agent-runner.ts';
 import type { Caller } from './credentials.ts';
 import { isAuthenticatedCaller } from './credentials.ts';
 import { parseDelegationEffort } from './effort.ts';
-import { authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError } from './policy.ts';
+import { authorizeWorkerList, authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError } from './policy.ts';
 import { releaseThenRemoveOwnedWorkspace } from '../git-worktree-release.ts';
 import { gitCommonDir, planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline, WorkspaceHeldError } from './workspace.ts';
 import { holdersStillHold, observeDestroy, recordHolders, type DestroyObservation } from './destroy-observation.ts';
@@ -543,6 +543,24 @@ export class DelegationService {
         return { workerId: worker.id, baselineSha };
       } finally { if (!accepted) await prepared?.discard(); }
     });
+  }
+  async list(caller: Caller): Promise<WorkerListResult> {
+    const project = this.context(caller);
+    const parent = project.store.getRun(caller.runId);
+    authorizeWorkerList(caller, parent, project.id);
+    if (parent?.delegation?.role !== 'root') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    const workers: WorkerListResult['workers'] = [];
+    for (const receipt of parent.delegation.receipts) {
+      const worker = project.store.getRun(receipt.workerId);
+      // Deleted histories have no resources to supervise. Never expose an unrelated receipt target.
+      if (worker?.delegation?.role !== 'worker' || worker.delegation.parentRunId !== parent.id ||
+          worker.delegation.workspace.ownerRunId !== worker.id) continue;
+      const inspection = await this.inspect(caller, { workerId: worker.id });
+      workers.push({ ...inspection, revision: workerRevision(worker),
+        settled: inspection.outcome !== undefined && project.store.readWorkerExecution(worker.id)?.phase === 'complete',
+        destroyed: worker.delegation.destroy?.phase === 'complete' });
+    }
+    return { workers };
   }
   async inspect(caller: Caller, params: WorkerParams): Promise<WorkerInspection> {
     const { project, worker, parent } = this.target(caller, params, 'inspect');

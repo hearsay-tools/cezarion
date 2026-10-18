@@ -56,6 +56,7 @@ export function createDelegationRoutes(service: DelegationService, credentials: 
     .post('/inbox/ack', jsonZodValidator(inboxReceiptRequestSchema, invalid), async c => c.json(await service.ackInbox(c.get('caller'), c.req.valid('json')), 200))
     .post('/inbox/release', jsonZodValidator(inboxReceiptRequestSchema, invalid), async c => c.json(await service.releaseInbox(c.get('caller'), c.req.valid('json')), 200))
     .post('/cancel-request', jsonZodValidator(conversationCancelRequestSchema, invalid), async c => c.json(await service.cancelRequest(c.get('caller'), c.req.valid('json')), 200))
+    .get('/list', async c => c.json(await service.list(c.get('caller')), 200))
     .get('/:workerId', paramZodValidator(workerParamsSchema, invalid), async c => c.json(await service.inspect(c.get('caller'), c.req.valid('param')), 200))
     .post('/:workerId/collect', paramZodValidator(workerParamsSchema, invalid), jsonZodValidator(workerEmptyRequestSchema, { ...invalid, absent: {}, malformed: null }), async c => c.json(await service.collect(c.get('caller'), c.req.valid('param')), 200))
     .post('/:workerId/steer', paramZodValidator(workerParamsSchema, invalid), jsonZodValidator(workerSteerRequestSchema, invalid), async c => c.json(await service.steer(c.get('caller'), c.req.valid('param'), c.req.valid('json')), 200))

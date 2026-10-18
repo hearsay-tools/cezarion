@@ -297,6 +297,17 @@ export const workerInspectionSchema = z.object({
 });
 export type WorkerInspection = z.infer<typeof workerInspectionSchema>;
 
+/** Parent-owned workers, including resources awaiting a destroy retry. Uses the inspect grant. */
+export const workerListResultSchema = z.object({
+  workers: z.array(workerInspectionSchema.extend({
+    revision: z.number().int().nonnegative(),
+    settled: z.boolean(),
+    destroyed: z.boolean(),
+  })).max(1_024),
+}).strict();
+export type WorkerListResult = z.infer<typeof workerListResultSchema>;
+
+
 export const workerDiffSchema = z.object({
   workerId: z.uuid(),
   baselineSha: commitShaSchema,

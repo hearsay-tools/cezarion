@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import {
   conversationSendRequestSchema, conversationSendResultSchema, conversationInspectResultSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReserveResultSchema, inboxReceiptResultSchema, requestOutcomeSchema, requestWaitRequestSchema,
-  workerCollectedResultSchema, workerCancelWaitRequestSchema, workerCancelWaitResultSchema, workerOperationSchema, workerParamsSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema,
+  workerListResultSchema, workerCollectedResultSchema, workerCancelWaitRequestSchema, workerCancelWaitResultSchema, workerOperationSchema, workerParamsSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema,
   workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema,
   workerDiffSchema, workerWaitResultSchema, delegationErrorResponseSchema,
 } from '@open-mercato/cezar-contract';
@@ -23,8 +23,8 @@ export function delegationEndpoint(value: string | undefined): URL {
   return url;
 }
 
-const conversationOperationSchema = z.enum(['send', 'progress', 'follow-up', 'reply', 'conversation', 'inbox', 'cancel-request', 'wait-requests']);
-const responseSchemas = { send: conversationSendResultSchema, progress: conversationSendResultSchema, 'follow-up': conversationSendResultSchema, reply: conversationSendResultSchema, conversation: conversationInspectResultSchema, 'cancel-request': requestOutcomeSchema, 'wait-requests': workerWaitResultSchema, collect: workerCollectedResultSchema, spawn: workerSpawnResultSchema, inspect: workerInspectionSchema, steer: workerSteerResultSchema,
+const conversationOperationSchema = z.enum(['list', 'send', 'progress', 'follow-up', 'reply', 'conversation', 'inbox', 'cancel-request', 'wait-requests']);
+const responseSchemas = { list: workerListResultSchema, send: conversationSendResultSchema, progress: conversationSendResultSchema, 'follow-up': conversationSendResultSchema, reply: conversationSendResultSchema, conversation: conversationInspectResultSchema, 'cancel-request': requestOutcomeSchema, 'wait-requests': workerWaitResultSchema, collect: workerCollectedResultSchema, spawn: workerSpawnResultSchema, inspect: workerInspectionSchema, steer: workerSteerResultSchema,
   stop: workerStopResultSchema, destroy: workerDestroyResultSchema, diff: workerDiffSchema, wait: workerWaitResultSchema, 'cancel-wait': workerCancelWaitResultSchema };
 const RESPONSE_BYTES = 3_145_728;
 const CLI_FLAG: Record<string, string> = {
@@ -49,6 +49,7 @@ function attachIssue(error: z.ZodError, operation: string, typed: string[]): str
 }
 const WORKER_USAGE = { operations: [
   { name: 'spawn', positionals: 1, required: ['--baseline', '--request-id'], optional: ['--workflow', '--skill', '--runner', '--backend', '--model', '--effort', '--context', '--context-file', '--attach'] },
+  { name: 'list', positionals: 0 },
   { name: 'inspect', positionals: 1 },
   { name: 'steer', positionals: 2 },
   { name: 'stop', positionals: 1 },
@@ -69,6 +70,7 @@ const WORKER_USAGE = { operations: [
 ] };
 const WORKER_HELP: Record<string, { args: string; description: string }> = {
   spawn: { args: '"<task>" --baseline <ref> --request-id <UUID>', description: 'Create an owned worker from a committed baseline.' },
+  list: { args: '', description: 'List your owned workers, execution revisions and remaining cleanup resources.' },
   inspect: { args: '<worker-id>', description: 'Show worker state and input locations.' },
   steer: { args: '<worker-id> "<text>"', description: 'Send instructions to a running worker.' },
   stop: { args: '<worker-id>', description: 'Stop a worker.' },
@@ -261,6 +263,8 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
         ...(values.resume === undefined ? {} : { resume: values.resume }),
         ...(values['request-id'] === undefined ? {} : { requestId: values['request-id'] }), ...(timeout === undefined ? {} : { timeoutSeconds: Number(timeout) }) });
       if (operation === 'progress') path = 'send';
+    } else if (operation === 'list') {
+      expectCount(operation, positionals, 0);
     } else if (operation === 'inbox') {
       expectCount(operation, positionals, 0);
       body = {};

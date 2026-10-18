@@ -83,7 +83,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         `Inspect reports worker-local input paths.`,
         `Omitted --runner inherits the active parent's runner; same-runner workers inherit omitted model/account/effort, while mixed-runner workers use that runner's project/default account and model.`,
         `Accepted identity and grants remain fixed.`,
-        `Use inspect <worker-id>, collect <worker-id>, steer <worker-id> '<text>', stop <worker-id>, destroy <worker-id>, diff <worker-id>, or wait <worker-id>... --mode <one|any|all> --timeout-seconds <1-1800>.`,
+        `Use list to find every worker you own, including incomplete cleanup with remaining resources. Use inspect <worker-id>, collect <worker-id>, steer <worker-id> '<text>', stop <worker-id>, destroy <worker-id>, diff <worker-id>, or wait <worker-id>... --mode <one|any|all> --timeout-seconds <1-1800>.`,
         `Mode defaults to any; one requires one worker, all requires every selected worker to settle.`,
         `cancel-wait <wait-id> cancels only waiting and is safe to retry, never workers.`,
         `Wait registers and returns immediately: end your turn to release capacity, then Cezar resumes you on a selected terminal outcome or deadline (default 600 seconds).`,
