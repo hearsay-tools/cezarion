@@ -92,16 +92,23 @@ export function waitResultText(wait: Wait, { tools }: { tools: boolean } = { too
     : `${fired} Continue toward the task goal. If the watched work is still pending, end your final message with CEZ:MONITORING.`;
 }
 
-/** The footer a delivered turn ends with: every wait still open, or undefined when none is. */
+/** The footer a delivered turn ends with: every wait still open, or undefined when none is. The
+ *  user's reply settles a question and a question the user saw cannot be cancelled, so cancel is
+ *  offered only for CI waits and timers (hearsay-tools/cezarion#1234). */
 export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
   const open = waits.filter((wait) => wait.phase === 'open');
   if (!open.length) return undefined;
   const items = open.map((wait) => {
     if (wait.kind === 'ci') return `CI wait ${wait.id} for ${wait.repository}#${wait.prNumber}, deadline ${wait.deadline}`;
-    if (wait.kind === 'human') return `human question ${wait.id}`;
+    if (wait.kind === 'human') return `your question ${wait.id} to the user`;
     return `timer ${wait.id} at ${wait.deadline}${wait.note === undefined ? '' : ` (${wait.note})`}`;
   });
-  return `Still open: ${items.join('; ')}. Call cezar_cancel_wait for any you no longer need.`;
+  const asked = open.some((wait) => wait.kind === 'human');
+  const cancellable = open.some((wait) => wait.kind !== 'human');
+  const close = !asked ? 'Call cezar_cancel_wait for any you no longer need.'
+    : cancellable ? "The user's reply answers your question; call cezar_cancel_wait for any CI wait or timer you no longer need."
+    : "The user's reply answers it.";
+  return `Still open: ${items.join('; ')}. ${close}`;
 }
 
 /** An open or resolved CI wait: it holds conversation input for its own wake (#476). */

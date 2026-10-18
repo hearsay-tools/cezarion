@@ -179,8 +179,10 @@ At a turn boundary with at least one resolved wait or one pending message, Cezar
 runs one turn that delivers all of them together: resolved waits' results
 (CI observation, worker outcomes, timer note), worker messages, and human
 messages as user messages. Every delivered turn — human or automatic — ends with
-a footer listing the waits still open ("Still open: human question q1; CI wait
-w2 for org/repo#12, deadline 15:40"). The footer replaces the CI withdrawal note.
+a footer listing the waits still open ("Still open: your question q1 to the user; CI wait
+w2 for org/repo#12, deadline 15:40"). The footer replaces the CI withdrawal note. It
+offers `cezar_cancel_wait` only for CI waits and timers, and says the user's reply answers
+an open question, which cannot be cancelled once the user has seen it.
 
 Results that land mid-turn wait for the boundary. A human message mid-turn keeps
 its current native delivery.

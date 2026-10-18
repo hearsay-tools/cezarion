@@ -308,6 +308,8 @@ describe('handoffInstructions', () => {
       expect(text).toContain('When you need the user — a decision only they can make, or missing input — call cezar_ask with up to four questions, then end your turn. Give a question 2–4 options to show them as choices, or leave its options out and the user types the answer.');
       expect(text).toContain('call cezar_wait with kind "ci" for a pull request\'s checks or kind "timer" to re-check later');
       expect(text).not.toContain('kind "human"');
+      // A reply settles the question; only CI waits and timers wait for a result or a cancel.
+      expect(text).toContain("A human message or any resolved wait wakes you. The user's reply answers your question; CI waits and timers stay open until they resolve or you cancel them with cezar_cancel_wait.");
       expect(text).toContain('Never call cezar_done while anything is unfinished or unverified.');
       for (const marker of ['CEZ:DONE', 'CEZ:MONITORING', 'CEZ:ASK']) expect(text).not.toContain(marker);
       expect(text).toContain('CEZ:PR=');

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
-import type { CiWaitEntry, TimerWaitEntry, Wait } from '@open-mercato/cezar-contract';
+import type { CiWaitEntry, HumanWaitEntry, TimerWaitEntry, Wait } from '@open-mercato/cezar-contract';
 import { ciWatchRequest, identicalWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, MONITORING_WAKE_NUDGE_MARKERS, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 
 // hearsay-tools/cezarion#1233: the wait list's pure helpers. RunManager behaviour lives in
@@ -78,6 +78,17 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     expect(openWaitsFooter([ci(), timer({ note: 'deploy' }), timer({ id: '33333333-3333-4333-8333-333333333333' })])).toBe(
       `Still open: CI wait ${ci().id} for Acme/Repo#12, deadline ${ci().deadline}; timer ${timer().id} at ${timer().deadline} (deploy); ` +
       `timer 33333333-3333-4333-8333-333333333333 at ${timer().deadline}. Call cezar_cancel_wait for any you no longer need.`);
+  });
+
+  // hearsay-tools/cezarion#1234: the user's reply settles a question, and a question the user saw
+  // cannot be cancelled, so the footer offers cezar_cancel_wait only for CI waits and timers.
+  it('the footer says the reply answers an open question and offers cancel only for the rest', () => {
+    const human: HumanWaitEntry = { id: '55555555-5555-4555-8555-555555555555', kind: 'human', source: 'agent', via: 'cezar_ask',
+      registeredAt: '2026-10-17T10:00:00.000Z', phase: 'open', turnId: 'turn-1', askSeq: 4 };
+    expect(openWaitsFooter([human])).toBe(`Still open: your question ${human.id} to the user. The user's reply answers it.`);
+    expect(openWaitsFooter([human, ci()])).toBe(
+      `Still open: your question ${human.id} to the user; CI wait ${ci().id} for Acme/Repo#12, deadline ${ci().deadline}. ` +
+      `The user's reply answers your question; call cezar_cancel_wait for any CI wait or timer you no longer need.`);
   });
 
   it('hands the CI watcher a valid schema-3 wait', () => {

@@ -946,8 +946,10 @@ they were; the message is delivered and the wait's result arrives in a later tur
 Every delivered turn, human or automatic, including a continuation's opening prompt,
 ends with the open-waits footer: `Still open: CI wait <id> for <repo>#<n>, deadline
 <iso>; timer <id> at <iso> (<note>). Call cezar_cancel_wait for any you no longer
-need.` A turn with nothing open gets no footer. The footer replaces the CI withdrawal
-notice.
+need.` An open question is listed as `your question <id> to the user`, and the closing
+sentence then says the user's reply answers it, offering `cezar_cancel_wait` only for the
+CI waits and timers (a question the user saw cannot be cancelled). A turn with nothing open
+gets no footer. The footer replaces the CI withdrawal notice.
 
 A pending portable question (the ask-marker card) never takes CI data as its answer:
 a wake at a boundary is delivered beside it, the card stays answerable, and the
