@@ -620,8 +620,9 @@ nudge, and the dry-run mocks answering it) are recorded with it.
   `worker_questions`, `workers_outstanding` or `workers_uncollected`, listing up to 64 workers
   and the command that clears each. The session refusals are the ones `cezar_wait` and `cezar_ask` answer. An
   accepted done is taken by the turn end that reads it, and a human message clears it, so a
-  later turn must call it again. A non-interactive workflow step ignores it, as it ignores the
-  done line. A human wait from the same turn is cancelled by the done (a later done beats an
+  later turn must call it again. A workflow step that is not the last refuses it with
+  `not_final_step`, because that step's turn end runs the next step; it still ignores the done
+  line. A human wait from the same turn is cancelled by the done (a later done beats an
   earlier ask).
 - **The closing record.** `cezar_done`'s `summary` becomes a `note` event just before
   `goal achieved — session closed`, and that lifecycle event carries `via: 'cezar_done'` or

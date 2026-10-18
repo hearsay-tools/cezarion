@@ -520,6 +520,9 @@ interface ActiveRun {
   doneAtBoundary?: AgentSession;
   /** `cezar_done` accepted in this session since its last turn end (hearsay-tools/cezarion#1234). */
   doneRequested?: { session: AgentSession; summary?: string };
+  /** The session of a workflow step that is not the last: its turn end runs the next step and
+   *  never closes as done, so `cezar_done` is refused in it. */
+  nonFinalStepSession?: AgentSession;
   /** What declared the done `doneAtBoundary` closes on: the closing event names it. */
   doneClose?: { via: 'cezar_done' | 'done-line'; summary?: string };
   parkAfterAck?: { session: AgentSession; monitoring: boolean; humanGate?: boolean; silentTail?: boolean; alreadyFinalMessageNudged?: boolean; scheduleWakeup?: number | null };
@@ -1937,6 +1940,7 @@ export class RunManager {
     const session = this.toolSessionRefusal(runId, state, generation, signal);
     const run = this.store.getRun(runId);
     if (session || !run || !state?.session) return refuse(session ?? 'run_missing', doneErrorMessage(session ?? 'run_missing'));
+    if (state.nonFinalStepSession === state.session) return refuse('not_final_step', doneErrorMessage('not_final_step'));
     if (this.workerWait(runId)) return refuse('worker_wait_pending', doneErrorMessage('worker_wait_pending'));
     if (this.executionBlockedByRootFinish(run)) return refuse('root_finish_pending', doneErrorMessage('root_finish_pending'));
     // The answer a continuation opened with is not a pending question while its turn runs.
@@ -7903,6 +7907,7 @@ export class RunManager {
     }
     const sessionClosed = this.trackWorkerSessionResult(runId, session);
     state.session = session;
+    state.nonFinalStepSession = interactive ? undefined : session;
     state.resumeInboxAutoEnd = interactive ? undefined : () => {
       // ACK may consume the last input after the runner's one-shot close timer fired.
       // Release/expiry instead submit a provider turn through normal admission.

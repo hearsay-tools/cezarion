@@ -216,7 +216,8 @@ with options keeps the 2–4 bound. `POST /api/v1/tools/done` joins the same pri
 a 16 KiB body limit. Middleware validates the strict `CezarDoneRequest` (`{ summary? }`, at
 most 2,000 characters). Every answer except a missing or revoked capability (`401`) is `200`
 with the typed `CezarDoneAnswer`: `{ ok: true, finishes: 'at_turn_end', open_waits }` or
-`{ ok: false, code, message, workers?, open_waits? }`, where `workers` lists up to 64
+`{ ok: false, code, message, workers?, open_waits? }`, where `code` includes `not_final_step` for a
+workflow step that is not the last, and `workers` lists up to 64
 `{ worker_id, reason }` with `reason` one of `outstanding`, `uncollected` or `question`. The MCP
 tools `cezar_ask` and `cezar_done` are listed and admitted on every runner. Their names,
 `cezar_ask`'s card bounds (open questions included) and `cezar_done`'s `summary` bound are

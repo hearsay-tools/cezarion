@@ -177,7 +177,7 @@ export type CezarDoneRequest = z.infer<typeof cezarDoneRequestSchema>;
 
 export const doneErrorCodeSchema = z.enum([
   'workers_outstanding', 'workers_uncollected', 'worker_questions', 'human_question_pending', 'worker_wait_pending',
-  'root_finish_pending', 'manager_disposed', 'capability_revoked', 'run_missing', 'run_not_running', 'run_stopping',
+  'root_finish_pending', 'not_final_step', 'manager_disposed', 'capability_revoked', 'run_missing', 'run_not_running', 'run_stopping',
   'session_replaced', 'session_closed', 'run_cancelled', 'finish_requested', 'generation_mismatch', 'invalid_request',
   'unavailable',
 ]);

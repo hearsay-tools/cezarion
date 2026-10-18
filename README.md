@@ -587,8 +587,8 @@ open the same kind of wait. When the work is
 done and verified, the agent calls `cezar_done` (an optional `summary`), and the task
 finishes at the end of that turn: its open waits are cancelled and the summary is
 written as a note. `cezar_done` refuses while owned workers are live or uncollected,
-a worker question is unanswered, or a question to you is still pending, and says what
-to do first. The `CEZ:DONE` line keeps working and finishes the same way. An
+a worker question is unanswered, a question to you is still pending, or the step is not
+the workflow's last, and says what to do first. The `CEZ:DONE` line keeps working and finishes the same way. An
 autonomous task does not wait for you until its automatic-wake budget is spent.
 
 A run can have several waits open at once, up to 16. Each answer carries the

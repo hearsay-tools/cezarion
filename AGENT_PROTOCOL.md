@@ -832,14 +832,15 @@ phase 4, the transcript's question facts stay authoritative for attention, and
 most 2,000 characters and unknown keys are `invalid_request`. It answers
 `{ ok: true, finishes: 'at_turn_end', open_waits }`, or `{ ok: false, code, message,
 workers?, open_waits? }`. It is refused, in this order, by the session refusals
-`cezar_wait` answers, then `worker_wait_pending`, `root_finish_pending`,
+`cezar_wait` answers, then `not_final_step` (a workflow step that is not the last, whose turn
+end runs the next step), `worker_wait_pending`, `root_finish_pending`,
 `human_question_pending` (an earlier turn's question is unanswered), and for a root parent
 `worker_questions`, `workers_outstanding` and `workers_uncollected`, each listing up to 64
 `{ worker_id, reason }` and naming the command that clears them (a general form of the
 command when listing every worker would pass `WAIT_MESSAGE_MAX`, 4,096 characters). The answer
 a Continue opened with is not a pending question while its turn runs. The turn end that reads an
-accepted done takes it, and a human message clears it. A non-interactive workflow step
-ignores it, as it ignores the done line. The close writes `summary` as a `note`, then the
+accepted done takes it, and a human message clears it. A non-interactive workflow step still
+ignores the done line. The close writes `summary` as a `note`, then the
 lifecycle event `goal achieved — session closed` with `via: 'cezar_done'` (or
 `via: 'done-line'` for the `CEZ:DONE` line, which closes through the same path), and cancels
 every open wait, a human wait from the same turn included.

@@ -9,7 +9,7 @@ import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.t
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { collect, manager, parent, register, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
-import { QUICK_TASK_WORKFLOW } from './types.ts';
+import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { claudeScheduleWakeupDelay, MAX_WAKE_DELIVERY_ATTEMPTS, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR } from './run.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt } from './monitoring-turn.testkit.ts';
@@ -135,7 +135,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U7h', 'U9h', 'U6', 'U7d']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U7h', 'U9h', 'U6', 'U7d', 'U6s']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -821,6 +821,26 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(external.aborted()).toBe(true);
       const closed = store.readEvents(p.id).filter(event => event.type === 'lifecycle' && event.message === 'goal achieved — session closed');
       expect(closed).toEqual([expect.objectContaining({ via: 'cezar_done' })]);
+    });
+
+    // The turn end of a step that is not the last runs the next step, so the done it would
+    // promise never happens: the tool refuses instead of answering a finish.
+    it(`${runner} U6s cezar_done in a workflow step that is not the last is refused with not_final_step, and the next step runs`, async () => {
+      nativeWire(runner);
+      const answers = join(root, 'done-answers');
+      process.env.CEZ_MOCK_CI_RESULT = answers;
+      const chain = workflowDefSchema.parse({ name: 'done-chain', source: 'file', steps: [
+        { id: 'implement', prompt: '{{task}}' },
+        { id: 'review', prompt: HARNESS_ADAPTERS[runner].scenarios.baseline! },
+      ] });
+      const run = manager.startRun(chain, { task: toolCall('cezar_done', { summary: 'too early' }), runner });
+      await until(() => store.getRun(run.id)?.status === 'waiting' && existsSync(answers));
+      const answer = JSON.parse(JSON.parse(readFileSync(answers, 'utf8')).response.content[0].text.split('\n')[0]);
+      expect(answer).toMatchObject({ ok: false, code: 'not_final_step' });
+      expect(answer.message).toContain('next step');
+      expect(store.getRun(run.id)!.steps.map(step => [step.id, step.status])).toEqual([['implement', 'done'], ['review', 'waiting']]);
+      expect(store.readEvents(run.id).some(event => event.type === 'lifecycle' && event.message === 'goal achieved — session closed')).toBe(false);
+      expect(store.readEvents(run.id).some(event => event.type === 'note' && event.message === 'too early')).toBe(false);
     });
 
     it(`${runner} U7d the done line and cezar_done finish through the same path`, async () => {
