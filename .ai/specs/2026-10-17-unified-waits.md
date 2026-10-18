@@ -438,3 +438,33 @@ builder" unless a bullet says otherwise.
   `lastWaits`, or `lastWaitsError`, unless a CI wait is open. A settled timer is not shown.
   Kinds the header does not render (phase 2's human waits, phase 3's worker waits) are
   skipped; the pill already reports them through `waitingOn`.
+- **Human input cancels nothing.** No wait, CI or timer, whatever its `via`, is cancelled by
+  a human message, `resumeParkedRun`, a question or a permission request. The message is
+  delivered and the wait keeps its deadline; the footer replaces the CI withdrawal note.
+  A question or permission park leaves the monitoring pool and keeps its waits.
+- **Aliases are idempotent per run and `via`.** The monitoring line opens a `monitoring-line`
+  timer of the interval × 60 seconds, and `ScheduleWakeup` a `schedule-wakeup` timer of its
+  `delaySeconds` clamped to 60–3,600, or of the interval when it gave none. While one is
+  open, a later alias of the same `via` keeps it; a line and `ScheduleWakeup` in one turn
+  open the `schedule-wakeup` timer only. A `cezar_wait` timer keeps the tool's own rule: the
+  same seconds and note in the same turn return the open one. With re-checks off or the
+  budget spent, an alias registers nothing, adds a note, and the run parks as a plain wait
+  (phase 1 has no human wait for it to open). An autonomous run whose nudge would fire skips
+  the alias. Until phase 3 moves worker waits into the list, a worker park withdraws the
+  alias timers, as the monitoring wake was withdrawn before; `cezar_wait` timers stay open.
+- **A resolved wait in the line reads `waiting for capacity`.** Rung 10: a `waiting` run with
+  a resolved wait and no human signal is bucket none, tone running, a ring, no pulse. An open
+  CI or timer wait still reads `waiting for CI` or `monitoring`.
+- **Turn-end order.** A question or permission gate, then `CEZ:DONE`, then a worker wait,
+  then the owed-input checks (held human input, unread or in-flight agent input, an admitted
+  wake), and only then the wait park. A turn that parks on waits gets no final-message
+  nudge. A non-interactive workflow step parks on its open waits too.
+- **Slots.** Pool membership changes only at a turn end or on a terminal path, and always
+  through `releaseSlot()`. A pool member running its wake turn keeps its slot until that turn
+  ends; a wake of a pool member is admitted at once, with no `chargedCiWake` bookkeeping.
+- **Wakes beside questions.** At a boundary, a wake is delivered beside a pending portable
+  question; the card stays answerable and its answer keeps its `askSeq`. A pending native
+  question delivers nothing mid-turn: the wake waits for the answer's turn end.
+- **Recovery.** A parked run with waits stays parked and its wake folds in queued messages.
+  A run with a pending question, or one that was not `waiting` and has queued messages,
+  falls through to ordinary recovery so they are handled; its waits are re-armed either way.
