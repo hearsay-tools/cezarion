@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CiWaitResult, Wait } from '@open-mercato/cezar-contract';
+import { deriveAttention, type CiWaitResult, type Wait } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
@@ -40,8 +40,9 @@ const waitOfKind = (id: string, kind: Wait['kind']) => store.getRun(id)?.waits?.
 const settled = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(wait => wait.id === waitId);
 const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
 const engine = () => manager as unknown as {
-  active: Map<string, { session: AgentSession & { end(): void }; ciGeneration: string }>;
+  active: Map<string, { session: AgentSession & { end(): void }; ciGeneration: string; monitoringWakeups?: number }>;
   waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>;
+  monitoring: Set<string>;
 };
 const fireTimer = (waitId: string) => engine().waitTimers.get(waitId)!.timer._onTimeout();
 const flushMicrotasks = async () => { for (let n = 0; n < 5; n++) await Promise.resolve(); };
@@ -56,7 +57,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -209,6 +210,45 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
         await until(() => store.getRun(parked.id)?.status === 'waiting' && !store.getRun(parked.id)?.waits?.length);
       });
     }
+
+    it(`${runner} U10 timer wakes stop at the automatic-wake budget; one admitted turn is charged once`, async () => {
+      nativeWire(runner);
+      const release = join(root, 'u10-release');
+      process.env.CEZ_MOCK_RELEASE_FILE = release;
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-gated']!, runner });
+      await until(() => store.readEvents(run.id).some(event => event.type === 'turn.started'));
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const open = async (seconds: number, note: string) => {
+        const registered = await tools.registerWait({ kind: 'timer', seconds, note }, 'cezar_wait', new AbortController().signal);
+        if (!('wait' in registered)) throw Error('registration refused');
+        return registered.wait;
+      };
+      const first = await open(60, 'u10 first'), second = await open(61, 'u10 second'), last = await open(62, 'u10 last');
+      engine().active.get(run.id)!.monitoringWakeups = 39;
+      // Two timers resolve before one boundary: one admitted turn carries both and spends one wake.
+      fireTimer(first.id); fireTimer(second.id);
+      await until(() => store.getRun(run.id)?.waits?.filter(wait => wait.phase === 'resolved').length === 2);
+      writeFileSync(release, '');
+      await until(() => settled(run.id, first.id)?.phase === 'delivered' && settled(run.id, second.id)?.phase === 'delivered');
+      await until(() => prompted(runner, timerText(first, 'u10 first')).length > 0);
+      expect(prompted(runner, timerText(first, 'u10 first')).at(-1)).toContain(timerText(second, 'u10 second'));
+      expect(engine().active.get(run.id)?.monitoringWakeups).toBe(40);
+      const charged = store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic timer wake-up ('));
+      expect(charged.map(event => event.message)).toEqual(['automatic timer wake-up (40/40)']);
+      await until(() => parkedOn(run.id, store.getRun(run.id)?.waits?.find(wait => wait.id === last.id)));
+      const turns = turnEnds(run.id);
+      // The budget is spent: the next timer to come due is cancelled and wakes nothing.
+      fireTimer(last.id);
+      await until(() => settled(run.id, last.id)?.phase === 'cancelled');
+      await flushMicrotasks();
+      expect(inputsFor(run.id, last.id)).toEqual([]);
+      expect(prompted(runner, `Timer ${last.id} fired`)).toEqual([]);
+      expect(turnEnds(run.id)).toBe(turns);
+      expect(store.readEvents(run.id).some(event => event.type === 'note' && event.message === `automatic timer wake-up cap reached (40); timer ${last.id} cancelled`)).toBe(true);
+      expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
+      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
+      expect(engine().monitoring.has(run.id)).toBe(false);
+    });
 
     for (const kind of ['ci', 'timer'] as const) {
       it(`${runner} U9 provider failure with a ${kind} wait open leaves the run recoverable and the next wake delivers`, async () => {

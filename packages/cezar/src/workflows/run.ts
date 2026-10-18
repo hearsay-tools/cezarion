@@ -2082,21 +2082,35 @@ export class RunManager {
   private resolveWait(runId: string, waitId: string, result?: CiWaitResult): void {
     const latest = this.store.getRun(runId)?.waits?.find(wait => wait.id === waitId);
     if (!latest || latest.phase !== 'open') return;
+    const state = this.active.get(runId);
+    if (latest.kind === 'timer' && (state?.monitoringWakeups ?? 0) >= MAX_AUTO_CONTINUES) {
+      // A timer due once the automatic-wake budget is spent wakes nothing: it is cancelled, and the
+      // run keeps whatever else it waits on (hearsay-tools/cezarion#1233).
+      this.store.commitWaitCancellation(runId, [latest.id]);
+      this.disarmWait(latest.id);
+      this.store.appendEvent(runId, { type: 'note',
+        message: `automatic ${isMonitoringTimer(latest) ? 'monitoring' : 'timer'} wake-up cap reached (${MAX_AUTO_CONTINUES}); timer ${latest.id} cancelled` });
+      if (state) this.reparkWithoutWaits(runId, state);
+      return;
+    }
     const resolvedAt = new Date().toISOString();
     const settled: Wait = latest.kind === 'ci'
       ? { ...latest, phase: 'resolved', resolvedAt, result: result ?? { outcome: 'deadline', headSha: latest.headSha, observedAt: resolvedAt, checks: [], totalChecks: 0, truncated: false } }
       : { ...latest, phase: 'resolved', resolvedAt };
     const input: AgentInput = { id: latest.id, parentRunId: runId, source: 'lifecycle', createdAt: resolvedAt, text: waitResultText(settled) };
     this.store.commitWait(runId, settled, input);
-    // A timer expiry is a self-generated wake: it counts against the session's budget, as the
-    // monitoring timer's wakes did. CI wakes are external events and do not.
-    const state = latest.kind === 'timer' ? this.active.get(runId) : undefined;
-    if (state) {
-      state.monitoringWakeups = (state.monitoringWakeups ?? 0) + 1;
-      this.store.appendEvent(runId, { type: 'note', message: `automatic ${isMonitoringTimer(latest) ? 'monitoring' : 'timer'} wake-up (${state.monitoringWakeups}/${MAX_AUTO_CONTINUES})` });
-    }
     try { this.queueWaitWake(runId); }
     catch { this.retryWaitAdmission(runId); }
+  }
+
+  /** A parked run whose last wait was cancelled without a wake becomes a plain park: it needs the
+   *  user, so it leaves the monitoring pool and its slot, as `parkForUser` does. A turn in progress
+   *  is left to its own turn end. */
+  private reparkWithoutWaits(runId: string, state: ActiveRun): void {
+    const run = this.store.getRun(runId);
+    if (!run || run.status !== 'waiting' || !this.waiting.has(runId) || state.atTurnBoundary !== state.session || run.waits?.length) return;
+    this.leaveMonitoringPool(runId);
+    this.armIdleTimer(runId, state);
   }
 
   private retryWaitAdmission(runId: string): void {
@@ -5335,10 +5349,19 @@ export class RunManager {
           if (!queue.some(input => inputIds.includes(input.id) && !input.deliveredAt)) return;
           // One checkpoint per wake batch: every resolved wait it carries is delivered together
           // (hearsay-tools/cezarion#1233); the rest of the batch keeps the ordinary bookkeeping.
-          const resolvedIds = resolvedWaits(this.store.getRun(runId) ?? {}).map(wait => wait.id).filter(id => inputIds.includes(id));
+          const batch = resolvedWaits(this.store.getRun(runId) ?? {}).filter(wait => inputIds.includes(wait.id));
+          const resolvedIds = batch.map(wait => wait.id);
           const conversationIds = inputIds.filter(id => !resolvedIds.includes(id));
           if (resolvedIds.length) {
             this.store.commitWaitDelivery(runId, resolvedIds);
+            // A timer expiry is a self-generated wake: one admitted turn that carries timer results
+            // spends one wake of the budget, however many it carries. CI wakes are external events
+            // and do not count.
+            const timers = batch.filter(wait => wait.kind === 'timer');
+            if (timers.length) {
+              state.monitoringWakeups = (state.monitoringWakeups ?? 0) + 1;
+              this.store.appendEvent(runId, { type: 'note', message: `automatic ${timers.some(isMonitoringTimer) ? 'monitoring' : 'timer'} wake-up (${state.monitoringWakeups}/${MAX_AUTO_CONTINUES})` });
+            }
             this.waitWakeAdmitted.delete(runId);
             if (!resolvedWaits(this.store.getRun(runId) ?? {}).length) {
               const retry = this.wakeRetries.get(runId);

@@ -468,3 +468,10 @@ builder" unless a bullet says otherwise.
 - **Recovery.** A parked run with waits stays parked and its wake folds in queued messages.
   A run with a pending question, or one that was not `waiting` and has queued messages,
   falls through to ordinary recovery so they are handled; its waits are re-armed either way.
+- **The automatic-wake budget counts admitted turns.** `monitoringWakeups` grows by one per
+  admitted automatic turn whose batch carries a timer result, at that batch's delivery
+  checkpoint: never per resolution, never per retry, never for a human-opened turn, and a human
+  message resets it as before. A timer that comes due with the budget spent
+  (`MAX_AUTO_CONTINUES`, 40) is cancelled into `lastWaits` with a cap note and wakes nothing;
+  other waits are untouched. A parked run left with nothing open or resolved becomes a plain
+  park: it reads Needs you, leaves the monitoring pool and arms the idle timer.

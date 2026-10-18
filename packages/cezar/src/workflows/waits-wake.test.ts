@@ -35,8 +35,9 @@ function nativeWire(runner: RunnerId) {
 }
 
 const engine = () => manager as unknown as {
-  active: Map<string, { session?: AgentSession; ciGeneration: string; idleTimer?: NodeJS.Timeout & { _onTimeout(): void } }>;
+  active: Map<string, { session?: AgentSession; ciGeneration: string; idleTimer?: NodeJS.Timeout & { _onTimeout(): void }; monitoringWakeups?: number }>;
   waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>;
+  monitoring: Set<string>;
   pump(): Promise<void>;
 };
 async function openWait(id: string, request: CezarWaitRequest): Promise<Wait> {
@@ -56,6 +57,7 @@ const label = (id: string) => deriveAttention(store.getRun(id)!).label;
 const answered = (id: string, askSeq: number) => store.readEvents(id).some(event => event.type === 'human-input-delivered' && event.askSeq === askSeq);
 const flushMicrotasks = async () => { for (let n = 0; n < 5; n++) await Promise.resolve(); };
 const FOOTER_END = 'Call cezar_cancel_wait for any you no longer need.';
+const notes = (id: string, text: string) => store.readEvents(id).filter(event => event.type === 'note' && String(event.message).includes(text));
 
 /** A portable question parked beside an open CI wait registered during its turn. */
 async function questionBesideCi(runner: RunnerId) {
@@ -137,7 +139,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     expect(asks(run.id)[0]!.seq).toBe(askSeq);
   });
 
-  it('claude two waits resolved before one boundary are delivered in one submission', async () => {
+  it('claude two waits resolved before one boundary are delivered in one submission and charged once', async () => {
     nativeWire('claude');
     const release = join(root, 'turn-release');
     process.env.CEZ_MOCK_RELEASE_FILE = release;
@@ -153,6 +155,38 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     expect(wakes).toHaveLength(1);
     expect(wakes[0]).toContain(`Timer ${second.id} fired`);
     expect(wakes[0]!.indexOf(first.id)).toBeLessThan(wakes[0]!.indexOf(second.id));
+    // One admitted automatic turn spends one wake of the budget, however many timers it carries.
+    expect(engine().active.get(run.id)?.monitoringWakeups).toBe(1);
+    expect(notes(run.id, 'automatic timer wake-up (').map(event => event.message)).toEqual(['automatic timer wake-up (1/40)']);
+  });
+
+  it('claude staggered timers at 39 spent wakes: the first wakes at 40, the second is cancelled with the cap note and wakes nothing', async () => {
+    nativeWire('claude');
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios.baseline!, runner: 'claude' });
+    await until(() => store.getRun(run.id)?.status === 'waiting');
+    const first = await openWait(run.id, { kind: 'timer', seconds: 60, note: 'first' });
+    const second = await openWait(run.id, { kind: 'timer', seconds: 120, note: 'second' });
+    engine().active.get(run.id)!.monitoringWakeups = 39;
+    const turns = turnEnds(run.id);
+    fireTimer(first.id);
+    await until(() => settled(run.id, first.id)?.phase === 'delivered');
+    expect(notes(run.id, 'automatic timer wake-up (').map(event => event.message)).toEqual(['automatic timer wake-up (40/40)']);
+    await until(() => turnEnds(run.id) > turns && store.getRun(run.id)?.status === 'waiting');
+    expect(label(run.id)).toBe('monitoring');
+    const parkedTurns = turnEnds(run.id);
+    fireTimer(second.id);
+    await until(() => settled(run.id, second.id)?.phase === 'cancelled');
+    expect(notes(run.id, 'cap reached').map(event => event.message)).toEqual([`automatic timer wake-up cap reached (40); timer ${second.id} cancelled`]);
+    await flushMicrotasks();
+    expect(store.getRun(run.id)?.agentInputs?.some(input => input.id === second.id)).toBe(false);
+    expect(prompted('claude', `Timer ${second.id} fired`)).toEqual([]);
+    expect(turnEnds(run.id)).toBe(parkedTurns);
+    expect(engine().active.get(run.id)?.monitoringWakeups).toBe(40);
+    // Nothing open or resolved: a plain park that needs the user and holds no slot.
+    expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
+    expect(label(run.id)).toBe('needs you');
+    expect(engine().monitoring.has(run.id)).toBe(false);
+    expect(semaphore.busy()).toBe(0);
   });
 
   it('claude every delivered turn ends with the open-waits footer, and none when nothing is open', async () => {

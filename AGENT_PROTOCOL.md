@@ -848,7 +848,12 @@ scheduler admission (a pool member is admitted immediately) and the session's na
 `sendAgentMessage`; the provider acknowledgement checkpoints delivery and moves the
 waits to `lastWaits` as delivered. Settled results retry admission and refused
 delivery once per second without human input; cancellation, terminal state and
-disposal stop retries. A result that lands mid-turn waits for the boundary.
+disposal stop retries. A result that lands mid-turn waits for the boundary. An admitted
+automatic turn whose batch carries a timer result spends one wake of the automatic-wake
+budget at its delivery checkpoint, however many timers it carries; a CI result spends
+none, and a human message resets the budget. A timer that comes due with the budget
+spent is cancelled with a cap note and wakes nothing; a parked run left with no wait
+becomes a plain park that reads as Needs you and gives its slot back.
 
 Human input never cancels a wait. A human message, `resumeParkedRun`, a question and
 a permission request leave every open wait, whatever its `via`, and its deadline as
@@ -997,7 +1002,7 @@ the observation. Later successful settlement must leave that failed attempt inta
 Clean session closure while CI is pending still parks without failure. No runner
 exemptions or normalized-event injection.
 
-**U0–U4, U7–U9** (hearsay-tools/cezarion#1233) pin the wait list on every `RUNNER_IDS`
+**U0–U4, U7–U10** (hearsay-tools/cezarion#1233) pin the wait list on every `RUNNER_IDS`
 backend through its `HARNESS_ADAPTERS` native wire, with no normalized-event injection.
 U0, in `core/ci-tools.test.ts`, calls `cezar_wait` and `cezar_cancel_wait` through each
 native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
@@ -1012,7 +1017,9 @@ in the same list with their `via`; only `ScheduleWakeup` is exempt, as
 `native scheduler tool exists only on the Claude wire`. U8 parks on a CI wait, and separately on a
 timer, at `maxParallel: 1` and wakes without queueing behind the held slot. U9 leaves the run
 recoverable after a provider failure and after a clean close with each kind open, and
-the next wake delivers. Scenario cases that need one wire live in
+the next wake delivers. U10 resolves two timers before one boundary with 39 wakes spent:
+one turn carries both and spends one wake, and a third timer due at the budget is
+cancelled with the cap note and wakes nothing. Scenario cases that need one wire live in
 `workflows/waits-wake.test.ts`: a CI result beside a pending portable question (U3b,
 Claude and Codex), a Codex native question, an idle-closed question, two waits in one
 submission, the footer and the monitoring pool.

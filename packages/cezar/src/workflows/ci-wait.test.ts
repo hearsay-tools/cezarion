@@ -527,10 +527,10 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
       await vi.advanceTimersByTimeAsync(1_000);
       expect(inputsFor(run.id, wait.id)).toMatchObject([{ source: 'lifecycle',
         text: `Timer ${wait.id} fired: check the deploy. Continue toward the task goal; register another wait if you are still waiting.` }]);
-      // A timer expiry is a self-generated wake: it counts against the session's budget.
-      expect(store.readEvents(run.id).filter(event => event.type === 'note' && event.message === 'automatic timer wake-up (1/40)')).toHaveLength(1);
       await until(() => settledById(run.id, wait.id)?.phase === 'delivered');
       expect(inputsFor(run.id, wait.id)).toHaveLength(1);
+      // A timer expiry is a self-generated wake: its admitted turn counts against the session's budget.
+      expect(store.readEvents(run.id).filter(event => event.type === 'note' && event.message === 'automatic timer wake-up (1/40)')).toHaveLength(1);
     } finally { vi.useRealTimers(); }
   });
 

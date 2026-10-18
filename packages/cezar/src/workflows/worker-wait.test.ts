@@ -358,7 +358,10 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           expect.soft(monitoringWakeOf(store.getRun(p.id))).toBeDefined();
           expect.soft(semaphore.busy()).toBe(0);
           await vi.advanceTimersByTimeAsync(300_001);
-          expect(store.readEvents(p.id).filter(event => event.type === 'note' && String(event.message).includes('automatic monitoring wake-up'))).toHaveLength(1);
+          // The wake's admitted turn is charged at its delivery checkpoint, after the provider ACK.
+          const charged = () => store.readEvents(p.id).filter(event => event.type === 'note' && String(event.message).includes('automatic monitoring wake-up'));
+          await until(() => charged().length > 0);
+          expect(charged()).toHaveLength(1);
           expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle' && input.text !== MONITORING_WAKE_NUDGE)).toHaveLength(1);
           expect(store.getRun(w.id)?.status).toBe('queued');
           const receipt = store.getRun(p.id)?.delegation;
