@@ -607,6 +607,8 @@ export const MAX_WAKE_DELIVERY_ATTEMPTS = 3;
 export const WAKE_DELIVERY_CAP_NOTE = `could not deliver wait results after ${MAX_WAKE_DELIVERY_ATTEMPTS} attempts — continue this task to retry`;
 /** The error of a session that closed cleanly while it still owed wait results. */
 export const WAKE_SESSION_CLOSED_ERROR = 'the session closed before the wait results were delivered';
+/** Stop on a failed run that held wait results: the results and the open waits are gone. */
+export const WAITS_DISCARDED_NOTE = 'Stop discarded the waits this task held and their results; the task stays failed';
 
 /** A run that failed while it still owed wait results keeps them, and its open waits, until a human
  *  acts: Continue delivers them, Stop discards them (hearsay-tools/cezarion#1233). */
@@ -3719,8 +3721,14 @@ export class RunManager {
       }
       if (cancelledFinish) return true;
       const run = this.store.getRun(runId);
-      // Stop on a failed run that held wait results discards them; the run stays failed.
-      if (hadWaits && run?.status === 'failed') return true;
+      // Stop on a failed run that held wait results discards them, and the automatic resume that
+      // would start a session on it later; the run stays failed.
+      if (hadWaits && run?.status === 'failed') {
+        this.store.appendEvent(runId, { type: 'note', message: WAITS_DISCARDED_NOTE });
+        this.cancelAutoResume(runId);
+        this.store.flush();
+        return true;
+      }
       if (run && (run.delegation || hadWaits) && ['queued', 'running', 'waiting'].includes(run.status)) {
         this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
         return true;

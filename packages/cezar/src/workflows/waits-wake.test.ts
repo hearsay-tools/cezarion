@@ -6,7 +6,7 @@ import type { AgentSession, RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { manager, restart, root, semaphore, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
-import { MAX_WAKE_DELIVERY_ATTEMPTS } from './run.ts';
+import { MAX_WAKE_DELIVERY_ATTEMPTS, WAITS_DISCARDED_NOTE } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { ciNativeMessages, persistentWakeFailure, TIMER_WAKE_OPENING, toolCall } from './waits-parity.testkit.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
@@ -45,6 +45,7 @@ const engine = () => manager as unknown as {
   wakeRetryBackoff: Backoff;
   wakeBackoffs: Map<string, NodeJS.Timeout & { _onTimeout(): void; _idleTimeout: number }>;
   wakeDeliveryFailures: Map<string, number>;
+  autoResumeTimers: Map<string, NodeJS.Timeout>;
 };
 async function openWait(id: string, request: CezarWaitRequest): Promise<Wait> {
   const tools = manager.cezarToolHandlers(id, engine().active.get(id)!.ciGeneration);
@@ -370,5 +371,36 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     expect(engine().wakeDeliveryFailures.has(run.id)).toBe(false);
     expect(engine().wakeBackoffs.has(run.id)).toBe(false);
     expect(notes(run.id, 'could not deliver wait results')).toEqual([]);
+  });
+
+  it('claude Stop on a usage-limited failed run holding a wait result discards it and cancels the automatic resume, so no session starts later', async () => {
+    nativeWire('claude');
+    persistentWakeFailure(root, 'claude', { usageLimit: true });
+    process.env.CEZ_MOCK_LIMIT_RESET_SECONDS = '3600';
+    const { run, timer } = await timerOwedWithoutSession();
+    fireTimer(timer.id);
+    await until(() => store.getRun(run.id)?.status === 'failed' && !manager.isActive(run.id) && engine().autoResumeTimers.has(run.id));
+    expect(manager.cancel(run.id)).toBe(true);
+    expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
+    expect(settled(run.id, timer.id)?.phase).toBe('cancelled');
+    expect(store.getRun(run.id)?.status).toBe('failed');
+    // The resume would have started a provider session on a run Stop just discarded.
+    expect(engine().autoResumeTimers.has(run.id)).toBe(false);
+    expect(store.getRun(run.id)?.autoResumeAt).toBeUndefined();
+    expect(notes(run.id, 'automatic resume cancelled for this task')).toHaveLength(1);
+    expect(notes(run.id, WAITS_DISCARDED_NOTE)).toHaveLength(1);
+    expect(manager.isActive(run.id)).toBe(false);
+  });
+
+  it('claude Stop on an ordinary failed run is refused and leaves its automatic resume armed', async () => {
+    nativeWire('claude');
+    process.env.CEZ_MOCK_LIMIT_RESET_SECONDS = '3600';
+    // A usage-limited first turn fails the run without any wait.
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:limit ship it', runner: 'claude' });
+    await until(() => store.getRun(run.id)?.status === 'failed' && !manager.isActive(run.id) && engine().autoResumeTimers.has(run.id));
+    expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
+    expect(manager.cancel(run.id)).toBe(false);
+    expect(engine().autoResumeTimers.has(run.id)).toBe(true);
+    expect(notes(run.id, WAITS_DISCARDED_NOTE)).toEqual([]);
   });
 });

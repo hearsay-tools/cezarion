@@ -7,7 +7,7 @@ import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.t
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { manager, parent, register, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { claudeScheduleWakeupDelay, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR } from './run.ts';
+import { claudeScheduleWakeupDelay, MAX_WAKE_DELIVERY_ATTEMPTS, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR } from './run.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt } from './monitoring-turn.testkit.ts';
 import { withDelayedCommand, withHeldPrintResponse, withRejectedCommand } from '../core/owned-input-delivery.testkit.ts';
@@ -499,6 +499,42 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       } finally {
         store.off('event', closeAtTurnEnd);
       }
+    });
+
+    it(`${runner} U14 Stop on a failed run holding wait results at the delivery bound discards every wait, starts nothing, leaves the run failed, and a later Continue delivers none of them`, async () => {
+      nativeWire(runner);
+      const failure = persistentWakeFailure(root, runner);
+      retryAtOnce();
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+      await until(() => store.getRun(run.id)?.status === 'waiting');
+      const { timer, later } = await timerWaits(run.id);
+      engine().active.get(run.id)!.session.end();
+      await until(() => !manager.isActive(run.id));
+      fireTimer(timer.id);
+      await until(() => store.getRun(run.id)?.status === 'failed' && !manager.isActive(run.id));
+      expectHeldAtTheBound(run.id, timer.id);
+      expect(store.getRun(run.id)?.waits?.find(wait => wait.id === later.id)?.phase).toBe('open');
+      // Stop before any Continue: the resolved result and the open wait both go, the run stays failed.
+      expect(manager.cancel(run.id)).toBe(true);
+      expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
+      expect(settled(run.id, timer.id)?.phase).toBe('cancelled');
+      expect(settled(run.id, later.id)?.phase).toBe('cancelled');
+      expect(inputsFor(run.id, timer.id)).toEqual([]);
+      expect(engine().waitTimers.has(later.id)).toBe(false);
+      expect(engine().wakeDeliveryFailures.has(run.id)).toBe(false);
+      expectNoWakeFor(run.id);
+      expect(store.readEvents(run.id).filter(event => event.type === 'note' && event.message === WAITS_DISCARDED_NOTE)).toHaveLength(1);
+      expect(prompted(runner, TIMER_WAKE_OPENING)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS);
+      // Continue is a plain continuation: nothing from the discarded waits reaches the agent.
+      failure.lift();
+      expect(manager.continueRun(run.id, { text: 'carry on without them' })).toEqual({ ok: true });
+      await until(() => store.getRun(run.id)?.status === 'waiting' && prompted(runner, 'carry on without them').length > 0);
+      expect(prompted(runner, `Timer ${timer.id} fired`)).toEqual([]);
+      expect(prompted(runner, `Timer ${later.id} fired`)).toEqual([]);
+      expect(prompted(runner, 'carry on without them').at(-1)).not.toContain('Still open');
+      expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
 
     it(`${runner} U11 an alias timer survives a later worker park with its deadline, is held while the workers outrank it, and is delivered after the worker wake`, async () => {
