@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createAutomationInputSchema, SCHEDULE_HOURS_OPTIONS, SCHEDULE_TYPES } from '@open-mercato/cezar-contract';
+import { createAutomationInputSchema } from '@open-mercato/cezar-contract/automations';
+import { SCHEDULE_HOURS_OPTIONS, SCHEDULE_TYPES } from '@open-mercato/cezar-contract/automation-schedule';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { GITHUB_PLACEHOLDERS, SCHEDULE_PLACEHOLDERS } from './task-template.ts';
 import { automationDefinitionObjectSchema, automationEventSchema, automationFiltersSchema, automationTaskSchema } from './types.ts';

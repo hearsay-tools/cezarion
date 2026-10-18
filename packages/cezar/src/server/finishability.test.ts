@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { apiRunSchema } from '@open-mercato/cezar-contract';
+import { apiRunSchema } from '@open-mercato/cezar-contract/runs';
 import { createApp } from './server.js';
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.js';
 import { apiRequest } from './loopback-request.testkit.js';

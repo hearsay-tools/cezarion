@@ -1,4 +1,6 @@
-import { runDelegationSummarySchema, runWorkflowLabel, type RunRecord, type RunSummary } from '@open-mercato/cezar-api-client'
+import { runDelegationSummarySchema } from '@open-mercato/cezar-api-client/contract/delegation'
+import { runWorkflowLabel } from '@open-mercato/cezar-api-client/contract/run-labels'
+import type { RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
 
 /**
  * A list-row fixture from a full test record (#817). List views now read `RunSummary`; the fields

@@ -4,7 +4,7 @@ import { constants, type Stats } from 'node:fs';
 import { lstat, mkdir, open, realpath, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
-import { parentFileRefusal, type WorkerInput, type WorkerInputRecipe, type WorkerSpawnRequest, type WorkerWorkspace } from '@open-mercato/cezar-contract';
+import { parentFileRefusal, type WorkerInput, type WorkerInputRecipe, type WorkerSpawnRequest, type WorkerWorkspace } from '@open-mercato/cezar-contract/delegation';
 import { resolveAttachmentPath } from '../workflows/attachment-path.ts';
 import { DelegationPolicyError } from './policy.ts';
 

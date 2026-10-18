@@ -1,9 +1,14 @@
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
+import { delegationErrorResponseSchema } from '@open-mercato/cezar-contract/delegation';
 import {
-  delegationErrorResponseSchema, discoveredRunnersSchema, discoveryRequestSchema,
-  providerStatusResponseSchema, runnerModelCatalogResponseSchema,
-} from '@open-mercato/cezar-contract';
+  discoveredRunnersSchema,
+  discoveryRequestSchema,
+} from '@open-mercato/cezar-contract/discovery';
+import {
+  providerStatusResponseSchema,
+  runnerModelCatalogResponseSchema,
+} from '@open-mercato/cezar-contract/workspace';
 import { boundedJson, delegationEndpoint } from '../delegation/cli.ts';
 import { discoverCockpit, type DiscoverOptions } from '../task-cli/discovery.ts';
 import { fetchJson, invalidResponse, refuse, TaskCliError, type Cockpit } from '../task-cli/http.ts';

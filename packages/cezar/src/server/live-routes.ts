@@ -1,6 +1,7 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { LIVE_BYTE_LIMIT, liveRunsRequestSchema, type LiveRunBatchResult, type LiveRunFrame, type LiveRunDemand } from '@open-mercato/cezar-contract';
+import { LIVE_BYTE_LIMIT } from '@open-mercato/cezar-contract/live-limits';
+import { liveRunsRequestSchema, type LiveRunBatchResult, type LiveRunFrame, type LiveRunDemand } from '@open-mercato/cezar-contract/live';
 import { HistoryCursorError } from '../runs/event-history.ts';
 import { CockpitAlreadyRunningError } from './cockpit-ownership.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';

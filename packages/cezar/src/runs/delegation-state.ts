@@ -1,4 +1,4 @@
-import { delegationStateSchema, type WorkerDestroyView, type WorkerOutcome } from '@open-mercato/cezar-contract';
+import { delegationStateSchema, type WorkerDestroyView, type WorkerOutcome } from '@open-mercato/cezar-contract/delegation';
 import type { RunRecord } from './store.ts';
 
 /** Malformed authority quarantines only this record, never the whole index or into an eligible root. */

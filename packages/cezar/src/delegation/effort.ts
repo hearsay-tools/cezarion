@@ -1,4 +1,4 @@
-import { parseEffort } from '@open-mercato/cezar-contract';
+import { parseEffort } from '@open-mercato/cezar-contract/effort';
 import { DelegationPolicyError } from './policy.ts';
 
 export function parseDelegationEffort(value: string | undefined | null) {

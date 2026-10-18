@@ -18,7 +18,7 @@ import {
   previewServerMessageSchema,
   type PreviewClientMessage,
   type PreviewServerMessage,
-} from '@open-mercato/cezar-api-client'
+} from '@open-mercato/cezar-api-client/contract/preview'
 
 export type PreviewTransport = 'connecting' | 'open' | 'reconnecting' | 'blocked' | 'closed'
 

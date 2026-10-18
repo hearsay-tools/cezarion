@@ -11,7 +11,7 @@ import {
   parseWorkspaceEvent,
   type GlobalEvent,
 } from './events'
-import { toRunSummary, type ApiRun, type RunRecord, type RunSummary } from '@open-mercato/cezar-api-client'
+import { toRunSummary, type ApiRun, type RunRecord, type RunSummary } from '@open-mercato/cezar-api-client/contract/runs'
 
 function run(id: string, over: Partial<RunRecord> = {}): RunRecord {
   return {

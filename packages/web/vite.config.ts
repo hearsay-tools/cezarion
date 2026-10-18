@@ -53,11 +53,16 @@ export default defineConfig({
   // that build: aliasing to source keeps `npm run dev` a single step and gives HMR when the
   // contract changes. Vite maps the package's internal `./x.ts` specifiers directly. Mirrored
   // in tsconfig.json `paths`.
+  //
+  // The api-client alias matches the bare name ONLY. A string alias also rewrites
+  // `<name>/<sub>` to `index.ts/<sub>`; its subpaths (`/contract/workspace`,
+  // `/utils/project-scope`, hearsay-tools/cezarion#1237) resolve through the package's own
+  // `exports` instead, to the same source files the root re-exports.
   resolve: {
-    alias: {
-      '@': resolve(appDir, 'src'),
-      '@open-mercato/cezar-api-client': resolve(packagesDir, 'api-client/src/index.ts'),
-    },
+    alias: [
+      { find: '@', replacement: resolve(appDir, 'src') },
+      { find: /^@open-mercato\/cezar-api-client$/, replacement: resolve(packagesDir, 'api-client/src/index.ts') },
+    ],
   },
   build: {
     // Built INTO the server package, because the CLI ships and serves it: `resolveWebDir()`

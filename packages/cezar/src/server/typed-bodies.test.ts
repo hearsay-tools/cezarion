@@ -1,6 +1,8 @@
 import type { ExtractSchema } from 'hono/types';
 import { describe, expect, it } from 'vitest';
-import { archiveFinishedRequestSchema, permissionDecisionSchema, pinRunInputSchema, setWorkspaceUiStateInputSchema } from '@open-mercato/cezar-contract';
+import { archiveFinishedRequestSchema, pinRunInputSchema } from '@open-mercato/cezar-contract/runs';
+import { permissionDecisionSchema } from '@open-mercato/cezar-contract/permissions';
+import { setWorkspaceUiStateInputSchema } from '@open-mercato/cezar-contract/workspace';
 import type { z } from 'zod';
 import type { AppType } from './app-type.ts';
 

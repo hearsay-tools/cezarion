@@ -3,7 +3,8 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { localTimeZone, nextOccurrence } from '@open-mercato/cezar-contract';
+import { localTimeZone } from '@open-mercato/cezar-contract/zoned-time';
+import { nextOccurrence } from '@open-mercato/cezar-contract/automation-schedule';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { GithubPoller } from '../automations/github-poller.ts';
 import { ScheduleRunner } from '../automations/schedule-runner.ts';

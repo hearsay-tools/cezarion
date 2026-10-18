@@ -1,5 +1,5 @@
 import { subscribeLive } from './live-coordinator'
-import { queryScope } from '@open-mercato/cezar-api-client'
+import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import type { LiveRunDemand } from '@open-mercato/cezar-api-client'
 import { useEffect, useState } from 'react'
 

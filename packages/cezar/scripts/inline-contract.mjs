@@ -11,6 +11,10 @@
  * build folds it in: esbuild compiles the contract's source to one ESM file under `dist/contract/`,
  * `tsc` emits its declarations beside it, and the emitted references are repointed at both.
  *
+ * The service imports contract values through module subpaths, so the scan matches those too and
+ * repoints each to the same bundle: `index.js` re-exports every module and `index.d.ts` every
+ * declaration, so a subpath's names all resolve there.
+ *
  * Nothing is copied at the SOURCE level — the package graph still states the dependency, and this
  * runs only when `dist` actually names it. Delete this the day the contract is published, or the
  * day nothing here imports a contract VALUE.
@@ -39,7 +43,9 @@ const dist = process.argv[2] ? resolve(process.argv[2]) : join(here, '..', 'dist
 const contractRoot = join(here, '..', '..', 'contract');
 const entry = join(contractRoot, 'src', 'index.ts');
 const outdir = join(dist, 'contract');
-const SPEC = /(['"])@open-mercato\/cezar-contract\1/g;
+// The bare name and every module subpath (`@open-mercato/cezar-contract/runs`, hearsay-tools/cezarion#1237):
+// all of them repoint to the one bundle, which exports every module's names.
+const SPEC = /(['"])@open-mercato\/cezar-contract(?:\/[^'"]*)?\1/g;
 
 /** Emitted files that name the package — the copy happens only if it is really used. */
 const referrers = [];

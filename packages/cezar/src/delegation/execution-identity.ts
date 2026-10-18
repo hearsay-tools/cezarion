@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { workerInputRecipeSchema, type WorkerInputRecipe } from '@open-mercato/cezar-contract';
+import { workerInputRecipeSchema, type WorkerInputRecipe } from '@open-mercato/cezar-contract/delegation';
 import { isAbsolute } from 'node:path';
 import { realpathSync, statSync } from 'node:fs';
 import { z } from 'zod';

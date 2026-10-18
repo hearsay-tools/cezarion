@@ -5,12 +5,24 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  agentInputSchema, agentInputEventSchema, delegationStateSchema, runRelationshipsSchema,
-  workerDestroySchema, workerDestroyResultSchema, workerDiffSchema, workerInspectionSchema,
-  workerOperationSchema, workerOutcomeSchema, workerSpawnRequestSchema, workerSteerRequestSchema,
-  workerStopResultSchema, workerWaitRequestSchema, workerWaitSchema, workerWorkspaceSchema,
+  agentInputSchema,
+  delegationStateSchema,
+  runRelationshipsSchema,
+  workerDestroySchema,
+  workerDestroyResultSchema,
+  workerDiffSchema,
+  workerInspectionSchema,
+  workerOperationSchema,
+  workerOutcomeSchema,
+  workerSpawnRequestSchema,
+  workerSteerRequestSchema,
+  workerStopResultSchema,
+  workerWaitRequestSchema,
+  workerWaitSchema,
+  workerWorkspaceSchema,
   delegationErrorResponseSchema,
-} from '@open-mercato/cezar-contract';
+} from '@open-mercato/cezar-contract/delegation';
+import { agentInputEventSchema } from '@open-mercato/cezar-contract/events';
 import type { DelegationState } from '@open-mercato/cezar-contract';
 import { RunStore, runRecordSchema } from './store.ts';
 import { parentReadiness } from '../delegation/readiness.ts';

@@ -1,4 +1,6 @@
-import { cezarCancelWaitRequestSchema, cezarWaitRequestSchema, ciWaitRequestSchema, previewStopRequestSchema, previewServeRequestSchema } from '@open-mercato/cezar-contract';
+import { cezarCancelWaitRequestSchema, cezarWaitRequestSchema } from '@open-mercato/cezar-contract/waits';
+import { ciWaitRequestSchema } from '@open-mercato/cezar-contract/ci-wait';
+import { previewStopRequestSchema, previewServeRequestSchema } from '@open-mercato/cezar-contract/preview';
 import { z } from 'zod';
 import { callCezarCancelWait, callCezarWait, callCiWait, callPreviewServe, callPreviewStop } from './client.ts';
 

@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { paletteHex } from '@/test/palette'
 
-import { setApiScope } from '@open-mercato/cezar-api-client'
+import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import type { RunEvent } from '@open-mercato/cezar-api-client'
 import type { UiHookItem, UiToolItem } from '@open-mercato/cezar-api-client'
 

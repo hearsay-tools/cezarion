@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Hono } from 'hono';
-import { delegationErrorResponseSchema } from '@open-mercato/cezar-contract';
+import { delegationErrorResponseSchema } from '@open-mercato/cezar-contract/delegation';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { RUNS_DB_FILE } from '../runs/run-database.ts';

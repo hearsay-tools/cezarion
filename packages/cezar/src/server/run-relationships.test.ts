@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { runRelationshipsSchema, type WorkerSpawnResult } from '@open-mercato/cezar-contract';
+import { runRelationshipsSchema, type WorkerSpawnResult } from '@open-mercato/cezar-contract/delegation';
 import { createApp } from './server.ts';
 import { fixture } from '../delegation/service.testkit.ts';
 let f: ReturnType<typeof fixture>;

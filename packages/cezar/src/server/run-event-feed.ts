@@ -1,4 +1,5 @@
-import { LIVE_BYTE_LIMIT, LIVE_EVENT_LIMIT, type LiveRunBatch, type LiveRunDemand, type RunEvent } from '@open-mercato/cezar-contract';
+import { LIVE_BYTE_LIMIT, LIVE_EVENT_LIMIT } from '@open-mercato/cezar-contract/live-limits';
+import type { LiveRunBatch, LiveRunDemand, RunEvent } from '@open-mercato/cezar-contract';
 import { decodeLiveCursor } from '../runs/event-history.ts';
 import { streamHistoryAfter } from '../runs/history-stream.ts';
 import type { ProjectContext } from './project-context.ts';

@@ -9,10 +9,14 @@ export * from './effort.ts';
 export * from './health.ts';
 export * from './application-update.ts';
 export * from './runs.ts';
+export * from './run-labels.ts';
+export * from './run-limits.ts';
+export * from './attachments.ts';
 export * from './attention.ts';
 export * from './repo.ts';
 export * from './github.ts';
 export * from './projects.ts';
+export * from './project-limits.ts';
 export * from './workspace.ts';
 export * from './workflows.ts';
 export * from './skills.ts';
@@ -30,6 +34,7 @@ export * from './artifacts.ts';
 export * from './discovery.ts';
 
 export * from './live.ts';
+export * from './live-limits.ts';
 export * from './live-coordination.ts';
 
 export * from './permissions.ts';

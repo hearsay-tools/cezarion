@@ -8,7 +8,7 @@ import type { RunManager, StartRunInput } from '../workflows/run.ts';
 import type { WorkflowDef } from '../workflows/types.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
-import { workflowsResponseSchema } from '@open-mercato/cezar-contract';
+import { workflowsResponseSchema } from '@open-mercato/cezar-contract/workflows';
 import { connectedProviderAuth } from './provider-auth.testkit.ts';
 
 /**

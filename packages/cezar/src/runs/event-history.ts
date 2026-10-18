@@ -7,13 +7,13 @@ import {
   conversationMessageEventSchema,
   requestOutcomeEventSchema,
   agentInputEventSchema,
-  advancePendingHumanAsk,
-  permissionRequestedSchema,
   type RunEvent,
   type RunHistoryContext,
   type RunHistoryEvent,
   type RunHistoryPage,
-} from '@open-mercato/cezar-contract';
+} from '@open-mercato/cezar-contract/events';
+import { advancePendingHumanAsk } from '@open-mercato/cezar-contract/ask';
+import { permissionRequestedSchema } from '@open-mercato/cezar-contract/permissions';
 
 import { emptyHistorySource, openHistorySource, type HistorySource } from './history-file.ts';
 

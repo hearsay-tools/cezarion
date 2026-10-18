@@ -1,13 +1,15 @@
 import {
   normalizeSchedule,
-  type AutomationEvent,
-  type AutomationFilters,
-  type AutomationKind,
   type AutomationSchedule,
-  type CreateAutomationInput,
   type NormalizedSchedule,
-  type Runner,
-  type UpdateAutomationInput,
+} from '@open-mercato/cezar-api-client/contract/automation-schedule'
+import type {
+  AutomationEvent,
+  AutomationFilters,
+  AutomationKind,
+  CreateAutomationInput,
+  Runner,
+  UpdateAutomationInput,
 } from '@open-mercato/cezar-api-client'
 
 /** A task as a request carries it (`z.input`): the editor writes it, so it takes the writable side. */

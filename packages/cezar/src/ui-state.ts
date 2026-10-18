@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { normalizeSidebarLimits, type UiState } from '@open-mercato/cezar-contract';
+import { normalizeSidebarLimits, type UiState } from '@open-mercato/cezar-contract/workspace';
 
 /**
  * `.ai/cezar/ui-state.json` — small GUI preferences the cockpit persists (files, not a DB).

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { workflowStepDefSchema } from '@open-mercato/cezar-contract';
+import { workflowStepDefSchema } from '@open-mercato/cezar-contract/workflows';
 import { skillStackOf, skillsToSteps, workflowStepSchema } from './types.ts';
 
 describe('authored workflow timeout policy', () => {

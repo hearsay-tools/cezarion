@@ -1,8 +1,8 @@
 import { isCockpitE2e } from '@/lib/e2e-mode'
 import { useLiveRead, subscribeLiveRead } from './live-reads'
 import { configureLiveSession, resetLiveSession } from './live-coordinator'
-import { getApiBaseUrl } from '@open-mercato/cezar-api-client'
-import { normalizeSidebarLimits, runnerModelCatalogResponseSchema } from '@open-mercato/cezar-api-client'
+import { getApiBaseUrl } from '@open-mercato/cezar-api-client/utils/project-scope'
+import { normalizeSidebarLimits, runnerModelCatalogResponseSchema } from '@open-mercato/cezar-api-client/contract/workspace'
 import { toast } from '@/components/ui/toaster'
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type QueryClient, type MutateOptions } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo } from 'react'
@@ -97,7 +97,10 @@ import {
   putAgentConfigFile,
   retryProviderAuth,
 } from './client'
-import { ARCHIVED_RUNS_PAGE_MAX, queryScope, REFERENCE_STATUS_MAX, runnerDiscoversModels } from '@open-mercato/cezar-api-client'
+import { ARCHIVED_RUNS_PAGE_MAX } from '@open-mercato/cezar-api-client/contract/run-limits'
+import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
+import { REFERENCE_STATUS_MAX } from '@open-mercato/cezar-api-client/contract/github'
+import { runnerDiscoversModels } from '@open-mercato/cezar-api-client/contract/workspace'
 import { useProjectScope } from './project-scope-context'
 import { isReferenceStatus } from '@/lib/reference-status'
 import { githubRepoBase } from '@/lib/tasks-table'

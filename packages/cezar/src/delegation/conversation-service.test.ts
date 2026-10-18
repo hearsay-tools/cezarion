@@ -5,9 +5,13 @@ import { RunStore } from '../runs/store.ts';
 import { fixture } from './service.testkit.ts';
 import { projectConversationEvents } from './conversations.ts';
 import {
-  conversationInspectResultSchema, conversationStateSchema, inboxClaimSchema, inboxReceiptRequestSchema,
-  inboxReceiptResultSchema, inboxReserveResultSchema,
-} from '@open-mercato/cezar-contract';
+  conversationInspectResultSchema,
+  conversationStateSchema,
+  inboxReceiptRequestSchema,
+  inboxReceiptResultSchema,
+  inboxReserveResultSchema,
+} from '@open-mercato/cezar-contract/conversations';
+import { inboxClaimSchema } from '@open-mercato/cezar-contract/delegation';
 import { readPersistedText } from '../runs/run-store.testkit.ts';
 
 describe('worker inbox contract', () => {

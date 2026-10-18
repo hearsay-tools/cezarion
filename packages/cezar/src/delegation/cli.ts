@@ -5,11 +5,34 @@ import { readBoundedContextFile } from './context.ts';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import {
-  conversationSendRequestSchema, conversationSendResultSchema, conversationInspectResultSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReserveResultSchema, inboxReceiptResultSchema, requestOutcomeSchema, requestWaitRequestSchema,
-  workerCollectedResultSchema, workerCancelWaitRequestSchema, workerCancelWaitResultSchema, workerOperationSchema, workerParamsSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema,
-  workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema,
-  workerDiffSchema, workerWaitResultSchema, delegationErrorResponseSchema,
-} from '@open-mercato/cezar-contract';
+  conversationSendRequestSchema,
+  conversationSendResultSchema,
+  conversationInspectResultSchema,
+  conversationInspectRequestSchema,
+  conversationCancelRequestSchema,
+  inboxReserveResultSchema,
+  inboxReceiptResultSchema,
+  requestOutcomeSchema,
+  requestWaitRequestSchema,
+} from '@open-mercato/cezar-contract/conversations';
+import {
+  workerCollectedResultSchema,
+  workerCancelWaitRequestSchema,
+  workerCancelWaitResultSchema,
+  workerOperationSchema,
+  workerParamsSchema,
+  workerSpawnRequestSchema,
+  workerSteerRequestSchema,
+  workerWaitRequestSchema,
+  workerSpawnResultSchema,
+  workerInspectionSchema,
+  workerSteerResultSchema,
+  workerStopResultSchema,
+  workerDestroyResultSchema,
+  workerDiffSchema,
+  workerWaitResultSchema,
+  delegationErrorResponseSchema,
+} from '@open-mercato/cezar-contract/delegation';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { runnerFlag, skillFlagIssue } from '../workflows/types.ts';
 import { DelegationPolicyError } from './policy.ts';

@@ -29,7 +29,9 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { agentInputEventSchema, deriveAttention, type AgentInput } from '@open-mercato/cezar-contract';
+import { agentInputEventSchema } from '@open-mercato/cezar-contract/events';
+import { deriveAttention } from '@open-mercato/cezar-contract/attention';
+import type { AgentInput } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 

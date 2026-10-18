@@ -12,6 +12,20 @@
     "onStart": "lookup-only"
   },
   "inputs": {
+    "packages/cezar/src/contract-import-boundaries.test.ts": [
+      "packages/cezar/src/**/*.ts",
+      "packages/cezar/test/**/*.ts",
+      "packages/web/src/**/*.{ts,tsx}",
+      "packages/web/e2e/**/*.ts",
+      "packages/api-client/src/**/*.ts",
+      "packages/contract/src/**/*.ts"
+    ],
+    "packages/cezar/src/contract-subpaths.test.ts": [
+      "packages/contract/src/**",
+      "packages/contract/package.json",
+      "packages/api-client/src/**",
+      "packages/api-client/package.json"
+    ],
     "packages/web/src/test/card-2-contrast.test.ts": [
       "packages/web/src/**/*.tsx",
       "packages/web/src/test/card-2-contrast.baseline.json",

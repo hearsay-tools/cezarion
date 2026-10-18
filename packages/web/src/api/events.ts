@@ -1,4 +1,5 @@
-import { toRunSummary, type ApiRun, type ProcessUsage, type RunRecord, type RunSummary, type TodoItem } from '@open-mercato/cezar-api-client'
+import { toRunSummary, type ApiRun, type ProcessUsage, type RunRecord, type RunSummary } from '@open-mercato/cezar-api-client/contract/runs'
+import type { TodoItem } from '@open-mercato/cezar-api-client'
 
 /**
  * The global stream's data layer: parse one SSE message, and fold it into cached state.
