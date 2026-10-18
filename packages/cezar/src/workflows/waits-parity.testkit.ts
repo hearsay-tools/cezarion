@@ -24,6 +24,8 @@ export const WAIT_CRITERIA = [
   // hearsay-tools/cezarion#1234: human waits.
   { id: 'U7h', scenario: 'ask', name: 'the ask line, cezar_wait human and a native ask land in the same wait list' },
   { id: 'U9h', scenario: 'provider-error', name: 'provider failure and clean close with a human wait open leave the run recoverable' },
+  { id: 'U6', scenario: 'baseline', name: 'cezar_done is refused with live workers and with settled but uncollected workers, accepted once collected, and open waits are cancelled' },
+  { id: 'U7d', scenario: 'baseline', name: 'the done line and cezar_done finish through the same path' },
 ] as const;
 
 /** The native mocks' `mock:cezar-tool` prompt: one cezar tool call through the runner's own wire.

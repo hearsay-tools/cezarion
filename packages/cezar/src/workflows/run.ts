@@ -1,7 +1,7 @@
 import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
-import { waitErrorMessage } from '../ci-wait/errors.ts';
-import { cezarWaitRequestSchema, ciWaitResultSchema, previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type CiWaitRequest, type CiWaitResult, type PreviewServeRequest, type PreviewServeResult, type CezarCancelWaitAnswer, type CezarWaitRequest, type CiWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, computeWaitingOn, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT } from '@open-mercato/cezar-contract';
+import { doneErrorMessage, waitErrorMessage } from '../ci-wait/errors.ts';
+import { cezarDoneRequestSchema, cezarWaitRequestSchema, ciWaitResultSchema, previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type CiWaitRequest, type CiWaitResult, type PreviewServeRequest, type PreviewServeResult, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type DoneErrorCode, type CiWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, computeWaitingOn, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT } from '@open-mercato/cezar-contract';
 import { ciWatchRequest, hasCiWait, identicalWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import { previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
@@ -348,17 +348,18 @@ function orderedTurnText(v1: string, v2: string): string | undefined {
  * declaration or live workers; a false pending-ASK flag alone proves nothing.
  * A human wait this turn registered and nobody has seen yet (hearsay-tools/cezarion#1234)
  * raises its card, or the gate when it has none, unless DONE wins or a valid ask line
- * replaces its card; `waitCard` says the card is the wait's own. */
+ * replaces its card; `waitCard` says the card is the wait's own. An accepted `cezar_done` is DONE
+ * whatever the text says, and beats any ask line in it. */
 function classifyTurnEnd(turnText: string, completedAssistantText: string, options: {
   sessionOpen: boolean; interactive: boolean; pendingHumanAsk: boolean;
   completionAttention: boolean; scheduledWake: boolean; liveWorkers: boolean; dependencyWait: boolean;
-  humanWait?: { questions?: AskRequest['questions'] };
+  humanWait?: { questions?: AskRequest['questions'] }; doneRequested?: boolean;
 }): AskTurnOutcome & { done: boolean; monitoring: boolean; humanGate: boolean; waitCard: boolean } {
   const complete = orderedTurnText(turnText, completedAssistantText);
   const v1 = turnParkSignals(complete ?? turnText);
   const v2 = complete === undefined ? turnParkSignals(completedAssistantText) : v1;
-  const done = options.interactive && options.sessionOpen && (v1.done || v2.done) &&
-    v1.askResult.kind === 'none' && v2.askResult.kind === 'none' && !v1.humanGate && !v2.humanGate;
+  const doneLine = (v1.done || v2.done) && v1.askResult.kind === 'none' && v2.askResult.kind === 'none' && !v1.humanGate && !v2.humanGate;
+  const done = options.interactive && options.sessionOpen && (!!options.doneRequested || doneLine);
   const askTurn = resolveAskTurn(v1.askResult, v2.askResult, options.sessionOpen && !done);
   // Ordinary markerless autonomous turns keep their existing nudge policy.
   // Prose and rejected-ASK fallbacks override a quiet park this turn would
@@ -509,6 +510,10 @@ interface ActiveRun {
   openingAgentInputId?: string;
   agentSessionError?: string;
   doneAtBoundary?: AgentSession;
+  /** `cezar_done` accepted in this session since its last turn end (hearsay-tools/cezarion#1234). */
+  doneRequested?: { session: AgentSession; summary?: string };
+  /** What declared the done `doneAtBoundary` closes on: the closing event names it. */
+  doneClose?: { via: 'cezar_done' | 'done-line'; summary?: string };
   parkAfterAck?: { session: AgentSession; monitoring: boolean; humanGate?: boolean; silentTail?: boolean; alreadyFinalMessageNudged?: boolean; scheduleWakeup?: number | null };
   /** A delivered worker wake must receive its own turn before nonfinal auto-end. */
   workerWakeTurn?: AgentSession;
@@ -1870,9 +1875,97 @@ export class RunManager {
         if (outcome.cancelled) return { cancelled: true, wait_id, open_waits: listOpen() };
         return { cancelled: false, code: outcome.code, message: CANCEL_MESSAGES[outcome.code], open_waits: listOpen() } satisfies CezarCancelWaitAnswer;
       },
+      finishTurn: async (request, signal) => this.acceptDone(runId, generation, request, signal),
       registerPreview: (request, signal) => this.registerPreviewServer(runId, request, signal),
       stopPreview: (request, signal) => this.stopPreviewServer(runId, request, signal),
     };
+  }
+
+  /** The refusals every cezar tool call shares: it must come from the run's current, open session,
+   *  the one `state` was when the call began. */
+  private toolSessionRefusal(runId: string, state: ActiveRun | undefined, generation: string, signal?: AbortSignal) {
+    const run = this.store.getRun(runId);
+    if (this.disposed) return 'manager_disposed' as const;
+    if (signal?.aborted) return 'capability_revoked' as const;
+    if (!run) return 'run_missing' as const;
+    if (!['running', 'waiting'].includes(run.status)) return 'run_not_running' as const;
+    if (run.stopping) return 'run_stopping' as const;
+    if (!state || this.active.get(runId) !== state) return 'session_replaced' as const;
+    if (!state.session?.open) return 'session_closed' as const;
+    if (state.cancelled) return 'run_cancelled' as const;
+    if (state.finishRequested) return 'finish_requested' as const;
+    if (state.ciGeneration !== generation) return 'generation_mismatch' as const;
+    return undefined;
+  }
+
+  /**
+   * `cezar_done` (hearsay-tools/cezarion#1234). Accepted, the run finishes at this turn's end
+   * through the done branch, which cancels every open wait; refused, the answer says what to do
+   * first. The gate is today's completion gate, in order: the session, a worker wait, a root
+   * finish, the user's question, then for a root its workers' questions, live workers and
+   * uncollected results. The turn end re-checks it (`deferParentCompletion`).
+   */
+  acceptDone(runId: string, generation: string, request: CezarDoneRequest, signal?: AbortSignal): CezarDoneAnswer {
+    const parsed = cezarDoneRequestSchema.parse(request);
+    const state = this.active.get(runId);
+    const open_waits = openWaitList(this.store.getRun(runId)?.waits ?? []);
+    const refuse = (code: DoneErrorCode, message: string, workers: { worker_id: string; reason: 'outstanding' | 'uncollected' | 'question' }[] = []): CezarDoneAnswer => {
+      // Fixed codes only, as for wait registration.
+      console.warn(`[cez] cezar_done refused: ${code}`);
+      return { ok: false, code, message, ...(workers.length ? { workers: workers.slice(0, 64) } : {}), open_waits };
+    };
+    const session = this.toolSessionRefusal(runId, state, generation, signal);
+    const run = this.store.getRun(runId);
+    if (session || !run || !state?.session) return refuse(session ?? 'run_missing', doneErrorMessage(session ?? 'run_missing'));
+    if (this.workerWait(runId)) return refuse('worker_wait_pending', doneErrorMessage('worker_wait_pending'));
+    if (this.executionBlockedByRootFinish(run)) return refuse('root_finish_pending', doneErrorMessage('root_finish_pending'));
+    if (state.pendingHumanAsk || this.hasPendingHumanAsk(runId)) return refuse('human_question_pending', doneErrorMessage('human_question_pending'));
+    if (run.delegation?.role === 'root') {
+      const questions = this.unansweredQuestions(runId);
+      if (questions.length) {
+        return refuse('worker_questions', `Your workers asked questions you have not answered. Answer each (${questions.map(q => `\`worker reply ${q.workerId} '<answer>' --id <new-UUID> --request-id ${q.messageId}\``).join(', ')}), then call cezar_done again.`,
+          questions.map(q => ({ worker_id: q.workerId, reason: 'question' })));
+      }
+      const blockers = this.parentCompletionBlockers(runId);
+      const live = blockers.filter(b => b.reason === 'outstanding').map(b => b.workerId);
+      if (live.length) {
+        return refuse('workers_outstanding', `Workers are still live: ${live.join(', ')}. Wait for them (\`worker wait ${live.join(' ')}\`, then end your turn) or stop them (${live.map(id => `\`worker stop ${id}\``).join(', ')}), collect their results, then call cezar_done again.`,
+          live.map(worker_id => ({ worker_id, reason: 'outstanding' })));
+      }
+      const uncollected = blockers.filter(b => b.reason === 'uncollected').map(b => b.workerId);
+      if (uncollected.length) {
+        return refuse('workers_uncollected', `Settled worker results are not collected yet. Collect each (${uncollected.map(id => `\`worker collect ${id}\``).join(', ')}), then call cezar_done again.`,
+          uncollected.map(worker_id => ({ worker_id, reason: 'uncollected' })));
+      }
+    }
+    state.doneRequested = { session: state.session, ...(parsed.summary === undefined ? {} : { summary: parsed.summary }) };
+    return { ok: true, finishes: 'at_turn_end', open_waits };
+  }
+
+  /** The `cezar_done` this session accepted since its last turn end, taken by this turn end: a
+   *  later turn must call it again, as it must repeat the done line. */
+  private takeDoneRequest(state: ActiveRun) {
+    const request = state.doneRequested?.session === state.session ? state.doneRequested : undefined;
+    state.doneRequested = undefined;
+    return request;
+  }
+
+  /** The boundary a turn end closes on when it is DONE, and what declared it. */
+  private recordDoneAtBoundary(state: ActiveRun, done: boolean, request: ActiveRun['doneRequested']): void {
+    state.doneAtBoundary = done ? state.session : undefined;
+    state.doneClose = done ? { via: request ? 'cezar_done' : 'done-line', ...(request?.summary === undefined ? {} : { summary: request.summary }) } : undefined;
+  }
+
+  /** Goal achieved (agent contract, #347): the summary `cezar_done` gave as a note, the closing
+   *  event naming what declared it, every open wait cancelled (DONE ranks above every wait), and
+   *  the session closes instead of parking, so the run completes and frees its slot. */
+  private closeAsDone(runId: string, state: ActiveRun, session: AgentSession | undefined): void {
+    const close = state.doneClose;
+    if (close?.summary) this.store.appendEvent(runId, { type: 'note', message: close.summary });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: 'goal achieved — session closed', via: close?.via ?? 'done-line' });
+    appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — goal achieved, session closed');
+    this.cancelOpenWaits(runId);
+    session?.end();
   }
 
   async stopPreviewServer(runId: string, request: PreviewStopRequest, signal?: AbortSignal): Promise<PreviewStopResult> {
@@ -1956,17 +2049,9 @@ export class RunManager {
       throw Object.assign(new Error(waitErrorMessage(code)), { code });
     };
     const assertCanRegister = () => {
+      const refused = this.toolSessionRefusal(runId, state, generation, capabilitySignal);
       const run = this.store.getRun(runId);
-      if (this.disposed) refuse('manager_disposed');
-      if (capabilitySignal?.aborted) refuse('capability_revoked');
-      if (!run) return refuse('run_missing');
-      if (!['running', 'waiting'].includes(run.status)) refuse('run_not_running');
-      if (run.stopping) refuse('run_stopping');
-      if (!state || this.active.get(runId) !== state) return refuse('session_replaced');
-      if (!state.session?.open) refuse('session_closed');
-      if (state.cancelled) refuse('run_cancelled');
-      if (state.finishRequested) refuse('finish_requested');
-      if (state.ciGeneration !== generation) refuse('generation_mismatch');
+      if (refused || !run || !state) return refuse(refused ?? 'run_missing');
       // Settlement queues a wake; it does not prove provider delivery. Keep the
       // wait until its acknowledgement, and tell the agent how to release it.
       if (this.workerWait(runId)) refuse('worker_wait_pending');
@@ -5286,10 +5371,7 @@ export class RunManager {
     if (state.atTurnBoundary !== session || (state.pendingHumanAsk && !proseGate) || this.workerWait(runId) || (!proseGate && this.hasQueuedAgentInputs(runId))) return;
     if (state.doneAtBoundary === session) {
       if (this.deferParentCompletion(runId)) return;
-      this.store.appendEvent(runId, { type: 'lifecycle', message: 'goal achieved — session closed' });
-      appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — goal achieved, session closed');
-      this.cancelOpenWaits(runId); // DONE ranks above every wait
-      session.end();
+      this.closeAsDone(runId, state, session);
     } else if (!proseGate && !this.waiting.has(runId) && this.store.getRun(runId)?.waits?.length) {
       // A wake acknowledged after its turn ended (OpenCode HTTP/SSE): park on what is still owed.
       this.parkOnWaits(runId, state);
@@ -5803,6 +5885,8 @@ export class RunManager {
       : this.submitAgentInput(runId, state, deliverable);
     if (delivered) {
       if (userAuthored) {
+        // The turn that would have finished now answers the user (hearsay-tools/cezarion#1234).
+        state.doneRequested = undefined;
         state.finalMessageNudged = undefined;
         state.finalMessageNudgeParked = undefined;
         state.finalMessageNudgeSawContent = undefined;
@@ -6508,12 +6592,13 @@ export class RunManager {
         this.trackTurnEnd(runId, turnText); // titleSummary + diffStat (#389)
         const sessionOpen = !state.cancelled && state.session?.open;
         const humanWait = this.turnEndHumanWait(runId);
+        const doneRequest = this.takeDoneRequest(state);
         const turn = classifyTurnEnd(turnText, completedAssistantText, {
           sessionOpen: !!sessionOpen, interactive: true, pendingHumanAsk: !!state.pendingHumanAsk,
           completionAttention: this.parentCompletionAttention(runId), scheduledWake: scheduleWakeup !== undefined,
           liveWorkers: this.hasLiveWorkers(runId),
           dependencyWait: !!(this.workerWait(runId) || this.store.getRun(runId)?.waits?.length),
-          humanWait,
+          humanWait, doneRequested: !!doneRequest,
         });
         const { done, monitoring, humanGate, ask, notes: askNotes, waitCard } = turn;
         discardQueuedMessagesOnAsk(state.session, turn);
@@ -6534,7 +6619,7 @@ export class RunManager {
         if (humanGate && !ask && !state.pendingHumanAsk) this.prepareProseHumanGate(runId, state);
         if (humanGate && !ask) this.recordTurnEndQuestion(runId, state, humanWait, null, askNotes.length > 0);
         const workerWaitParked = this.parkAtTurnEnd(runId, state, { done, humanGate, sessionOpen: !!sessionOpen });
-        state.doneAtBoundary = done ? state.session : undefined;
+        this.recordDoneAtBoundary(state, done, doneRequest);
         state.parkAfterAck = sessionOpen && state.session ? { session: state.session, monitoring, humanGate, silentTail, alreadyFinalMessageNudged, scheduleWakeup: turnWakeDelay } : undefined;
         // #505: input the harness accepted but has not read yet runs as its next turn.
         // An in-flight submission is settled by its acknowledgement (parkAfterAck), not here.
@@ -6545,10 +6630,7 @@ export class RunManager {
         if (state.agentInputError) return;
         if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !state.agentInputFlight && !this.hasQueuedAgentInputs(runId)) {
           // Goal achieved (agent contract, #347) — same as in runAgentStep.
-          this.store.appendEvent(runId, { type: 'lifecycle', message: 'goal achieved — session closed' });
-          appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — goal achieved, session closed');
-          this.cancelOpenWaits(runId); // DONE ranks above every wait
-          state.session?.end();
+          this.closeAsDone(runId, state, state.session);
           return;
         }
         if (sessionOpen && !agentInputDelivered && !workerWaitParked && !this.workerWakeAdmitted.has(runId)) {
@@ -7542,12 +7624,13 @@ export class RunManager {
         this.trackTurnEnd(runId, turnText); // titleSummary + diffStat (#389)
         const sessionOpen = !state.cancelled && state.session?.open;
         const humanWait = this.turnEndHumanWait(runId);
+        const doneRequest = this.takeDoneRequest(state);
         const turn = classifyTurnEnd(turnText, completedAssistantText, {
           sessionOpen: !!sessionOpen, interactive, pendingHumanAsk: !!state.pendingHumanAsk,
           completionAttention: this.parentCompletionAttention(runId), scheduledWake: scheduleWakeup !== undefined,
           liveWorkers: this.hasLiveWorkers(runId),
           dependencyWait: !!(this.workerWait(runId) || this.store.getRun(runId)?.waits?.length),
-          humanWait,
+          humanWait, doneRequested: !!doneRequest,
         });
         const { done, monitoring, humanGate, ask, notes: askNotes, waitCard } = turn;
         discardQueuedMessagesOnAsk(state.session, turn);
@@ -7568,7 +7651,7 @@ export class RunManager {
         if (humanGate && !ask && !state.pendingHumanAsk) this.prepareProseHumanGate(runId, state);
         if (humanGate && !ask) this.recordTurnEndQuestion(runId, state, humanWait, null, askNotes.length > 0);
         const workerWaitParked = this.parkAtTurnEnd(runId, state, { done, humanGate, sessionOpen: !!sessionOpen });
-        state.doneAtBoundary = done ? state.session : undefined;
+        this.recordDoneAtBoundary(state, done, doneRequest);
         state.parkAfterAck = (interactive || humanGate) && sessionOpen && state.session ? { session: state.session, monitoring, humanGate, silentTail, alreadyFinalMessageNudged, scheduleWakeup: turnWakeDelay } : undefined;
         // #505: input the harness accepted but has not read yet runs as its next turn.
         // An in-flight submission is settled by its acknowledgement (parkAfterAck), not here.
@@ -7580,10 +7663,7 @@ export class RunManager {
         if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !state.agentInputFlight && !this.hasQueuedAgentInputs(runId)) {
           // Goal achieved (agent contract, #347): close the session instead
           // of parking at `waiting` — the run completes and frees its slot.
-          emit({ type: 'lifecycle', message: 'goal achieved — session closed' });
-          appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — goal achieved, session closed');
-          this.cancelOpenWaits(runId); // DONE ranks above every wait
-          state.session?.end();
+          this.closeAsDone(runId, state, state.session);
           return;
         }
         const parkable = sessionOpen && !agentInputDelivered && !workerWaitParked && !this.workerWakeAdmitted.has(runId);

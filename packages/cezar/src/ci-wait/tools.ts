@@ -1,6 +1,6 @@
-import { cezarCancelWaitRequestSchema, cezarWaitRequestSchema, ciWaitRequestSchema, previewStopRequestSchema, previewServeRequestSchema } from '@open-mercato/cezar-contract';
+import { cezarCancelWaitRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, ciWaitRequestSchema, previewStopRequestSchema, previewServeRequestSchema } from '@open-mercato/cezar-contract';
 import { z } from 'zod';
-import { callCezarCancelWait, callCezarWait, callCiWait, callPreviewServe, callPreviewStop } from './client.ts';
+import { callCezarCancelWait, callCezarDone, callCezarWait, callCiWait, callPreviewServe, callPreviewStop } from './client.ts';
 
 /**
  * The one list of cezar tools (#781). The MCP adapter lists it, Pi's extension registers it, and
@@ -86,6 +86,18 @@ export async function invokeCancelWaitTool(input: unknown) {
   return { content: [{ type: 'text' as const, text: `${JSON.stringify(answer)}\n${hint}` }], isError: !answer.cancelled, details: answer };
 }
 
+/** hearsay-tools/cezarion#1234: the explicit form of the done line. */
+export const doneToolDefinition = {
+  name: 'cezar_done',
+  description: 'Finish the task. Call it when the goal is fully achieved and verified and you have no question for the user; end your turn after it answers. Cezar closes the session at the end of this turn and cancels every open wait. It refuses, naming what to do first, while owned workers are live or uncollected, a worker question is unanswered, or your question to the user is still pending.',
+  inputSchema: { ...z.toJSONSchema(cezarDoneRequestSchema, { io: 'input' }), type: 'object' as const },
+};
+export async function invokeDoneTool(input: unknown) {
+  const answer = await callCezarDone(input);
+  const hint = answer.ok ? 'Accepted. End your turn; Cezar finishes the task at its end.' : 'Not finished. Do what the message says, then call cezar_done again.';
+  return { content: [{ type: 'text' as const, text: `${JSON.stringify(answer)}\n${hint}` }], isError: !answer.ok, details: answer };
+}
+
 export const previewToolDefinition = {
   name: 'cezar_preview_serve',
   description: 'Register a web dev server of this task so the user can click through it in the cockpit\'s live preview. Always pin the port (`vite --strictPort`, `next dev -p`) so the server comes up on the port you register. Cezar starts the command itself when the user opens the preview; do not wait for the user.',
@@ -113,10 +125,11 @@ const PREVIEW_STOP_TOOL: CezarTool = { definition: previewStopToolDefinition, tr
 const CI_TOOL: CezarTool = { definition: ciToolDefinition, label: 'Wait for CI', invoke: invokeCiTool };
 const WAIT_TOOL: CezarTool = { definition: waitToolDefinition, trigger: 'load when you are waiting on the user, on CI for a PR, or want to re-check something later; end your turn after it answers.', label: 'Wait', invoke: invokeWaitTool };
 const CANCEL_WAIT_TOOL: CezarTool = { definition: cancelWaitToolDefinition, trigger: 'load when a wait you registered is no longer needed.', label: 'Cancel wait', invoke: invokeCancelWaitTool };
+const DONE_TOOL: CezarTool = { definition: doneToolDefinition, trigger: 'load when the task is complete and verified.', label: 'Done', invoke: invokeDoneTool };
 const PREVIEW_TOOL: CezarTool = { definition: previewToolDefinition, trigger: 'load when you have started, or are about to start, a web server the user should click through.', label: 'Live preview', invoke: invokePreviewTool };
 
 export function cezarTools(env: NodeJS.ProcessEnv = process.env): CezarTool[] {
-  const waits = [CI_TOOL, WAIT_TOOL, CANCEL_WAIT_TOOL];
+  const waits = [CI_TOOL, WAIT_TOOL, CANCEL_WAIT_TOOL, DONE_TOOL];
   return previewToolEnabled(env) ? [...waits, PREVIEW_TOOL, PREVIEW_STOP_TOOL] : waits;
 }
 export function cezarToolNames(env: NodeJS.ProcessEnv = process.env): string[] {

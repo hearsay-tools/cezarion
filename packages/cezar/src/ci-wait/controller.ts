@@ -9,9 +9,9 @@ import { getRequestListener } from '@hono/node-server';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { previewStopResult } from '../preview/registration.ts';
-import { ciErrorMessage, previewInvalidInput, previewOversized, previewRefusal, waitInvalidInput } from './errors.ts';
+import { ciErrorMessage, doneErrorMessage, doneInvalidInput, previewInvalidInput, previewOversized, previewRefusal, waitInvalidInput } from './errors.ts';
 import { previewToolEnabled } from './tools.ts';
-import { cezarCancelWaitAnswerSchema, cezarCancelWaitRequestSchema, cezarWaitAnswerSchema, cezarWaitRequestSchema, ciWaitRequestSchema, ciWaitReceiptSchema, ciWaitErrorCodeSchema, previewStopRequestSchema, previewStopResultSchema, type CezarCancelWaitAnswer, type CezarCancelWaitRequest, type CezarWaitAnswer, type CezarWaitRequest, type CiWait, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, previewServeResultSchema, type PreviewServeRequest, type PreviewServeResult, type Wait, type WaitVia } from '@open-mercato/cezar-contract';
+import { cezarCancelWaitAnswerSchema, cezarCancelWaitRequestSchema, cezarDoneAnswerSchema, cezarDoneRequestSchema, cezarWaitAnswerSchema, cezarWaitRequestSchema, ciWaitRequestSchema, ciWaitReceiptSchema, ciWaitErrorCodeSchema, previewStopRequestSchema, previewStopResultSchema, type CezarCancelWaitAnswer, type CezarCancelWaitRequest, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitAnswer, type CezarWaitRequest, type CiWait, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, previewServeResultSchema, type PreviewServeRequest, type PreviewServeResult, type Wait, type WaitVia } from '@open-mercato/cezar-contract';
 import { jsonZodValidator } from '../server/validators.ts';
 import type { AgentRunSpec } from '../core/agent-runner.ts';
 
@@ -31,6 +31,8 @@ export type CezarToolHandlers = {
   /** `via` names the tool that opened the wait: `cezar_wait`, or the `cezar_wait_for_ci` alias. */
   registerWait: (request: CezarWaitRequest, via: WaitVia, signal: AbortSignal) => Promise<WaitRegistration>;
   cancelWait: (request: CezarCancelWaitRequest, signal: AbortSignal) => Promise<CezarCancelWaitAnswer>;
+  /** `cezar_done` (hearsay-tools/cezarion#1234): accepted means the run finishes at this turn's end. */
+  finishTurn: (request: CezarDoneRequest, signal: AbortSignal) => Promise<CezarDoneAnswer>;
   /** #781: absent where no cockpit owns the run, which the route answers as `headless`. */
   registerPreview?: PreviewRegistration;
   stopPreview?: PreviewStop;
@@ -115,10 +117,10 @@ const thrownCode = (error: unknown) => error && typeof error === 'object' && 'co
 const receiptPhase = { open: 'registered', resolved: 'wake-pending', delivered: 'delivered', cancelled: 'withdrawn' } as const satisfies Record<Wait['phase'], CiWait['phase']>;
 
 /**
- * Typed private route inventory: GET holds adapter lifetime; POST wait opens a CI or timer wait and
- * POST cancel-wait closes one (hearsay-tools/cezarion#1233); POST ci-wait is their deprecated CI
- * alias; POST preview-serve registers a dev server (#781); preview-stop controls its approved
- * process (#803).
+ * Typed private route inventory: GET holds adapter lifetime; POST wait opens a CI, timer or human
+ * wait and POST cancel-wait closes one (hearsay-tools/cezarion#1233); POST done finishes the task at
+ * the turn's end (hearsay-tools/cezarion#1234); POST ci-wait is the deprecated CI alias; POST
+ * preview-serve registers a dev server (#781); preview-stop controls its approved process (#803).
  */
 export function ciToolRoutes(capabilities: Map<string, Capability>) {
   const authorized = (authorization: string | undefined) => {
@@ -201,6 +203,23 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
       } catch {
         if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
         return c.json({ cancelled: false as const, code: 'unavailable' as const, message: ciErrorMessage('unavailable') });
+      }
+    })
+    .use('/api/v1/tools/done', async (c, next) => {
+      const capability = authorized(c.req.header('authorization'));
+      if (!capability) return c.json(unauthorized, 401);
+      c.set('capability', capability);
+      await next();
+    })
+    .post('/api/v1/tools/done', bodyLimit({ maxSize: 16_384, onError: c => c.json({ ok: false as const, code: 'invalid_request' as const, message: 'The arguments exceed 16 KiB.' }) }), jsonZodValidator(cezarDoneRequestSchema, { invalid: (c, error) => c.json({ ok: false as const, code: 'invalid_request' as const, message: doneInvalidInput(error) }) }), async c => {
+      const capability = c.get('capability');
+      try {
+        const answer = cezarDoneAnswerSchema.parse(await capability.finishTurn(c.req.valid('json'), capability.lifetime.signal));
+        capability.lifetime.signal.throwIfAborted();
+        return c.json(answer);
+      } catch {
+        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
+        return c.json({ ok: false as const, code: 'unavailable' as const, message: doneErrorMessage('unavailable') });
       }
     })
     .use('/api/v1/tools/preview-stop', async (c, next) => {

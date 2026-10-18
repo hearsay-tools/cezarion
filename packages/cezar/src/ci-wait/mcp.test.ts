@@ -40,7 +40,7 @@ describe('cezar-ci MCP server instructions', () => {
   it('lists cezar_preview_serve with its trigger line only when CEZ_PREVIEW=1', async () => {
     const on = await connect({ CEZ_PREVIEW: '1' });
     try {
-      expect((await on.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait', 'cezar_preview_serve', 'cezar_preview_stop']);
+      expect((await on.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait', 'cezar_done', 'cezar_preview_serve', 'cezar_preview_stop']);
       const instructions = on.client.getInstructions()!;
       expect(instructions).toContain('- cezar_wait: load when you are waiting on the user, on CI for a PR, or want to re-check something later; end your turn after it answers.');
       expect(instructions).toContain('- cezar_preview_serve: load when you have started, or are about to start, a web server the user should click through.');
@@ -48,7 +48,7 @@ describe('cezar-ci MCP server instructions', () => {
     for (const value of [undefined, '0', 'true']) {
       const off = await connect(value === undefined ? {} : { CEZ_PREVIEW: value });
       try {
-        expect((await off.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait']);
+        expect((await off.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait', 'cezar_done']);
         expect(off.client.getInstructions()).not.toContain('cezar_preview_serve');
       } finally { await off.close(); }
     }

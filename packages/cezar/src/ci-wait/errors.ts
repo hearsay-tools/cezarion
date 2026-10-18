@@ -1,4 +1,4 @@
-import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, type CiWaitErrorCode, type PreviewResultCode, type PreviewServeResult, type WaitErrorCode } from '@open-mercato/cezar-contract';
+import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, type CiWaitErrorCode, type DoneErrorCode, type PreviewResultCode, type PreviewServeResult, type WaitErrorCode } from '@open-mercato/cezar-contract';
 import type { z } from 'zod';
 
 /** Safe diagnostics shared by the manager and private transport. Never forward raw errors. */
@@ -52,6 +52,40 @@ const waitMessages: Partial<Record<WaitErrorCode, string>> = {
 
 export function waitErrorMessage(code: WaitErrorCode): string {
   return waitMessages[code] ?? messages[code as CiWaitErrorCode];
+}
+
+// hearsay-tools/cezarion#1234: `cezar_done` refusals that name no worker. The worker refusals list
+// their workers and the commands that clear them, so the run manager writes those.
+const doneMessages: Record<Exclude<DoneErrorCode, 'workers_outstanding' | 'workers_uncollected' | 'worker_questions'>, string> = {
+  human_question_pending: 'Your question to the user is still unanswered. End your turn to wait for the answer; call cezar_done after it if the task is then complete.',
+  worker_wait_pending: 'A worker wait is still pending, including any result awaiting delivery. End your turn to receive its result, then call cezar_done again.',
+  root_finish_pending: 'The parent is finishing. End your turn; the parent completes that transition.',
+  manager_disposed: 'The run manager was disposed. Resume the task in a running cockpit before finishing.',
+  capability_revoked: 'This session\'s cezar tools were revoked. Use the current session tool.',
+  run_missing: 'The run no longer exists.',
+  run_not_running: 'The run is not running or waiting. Resume it before finishing.',
+  run_stopping: 'The run is stopping. End your turn; it stops without cezar_done.',
+  session_replaced: 'The session was replaced or there is no active session. Use the current session tool after resuming.',
+  session_closed: 'The agent session is closed. Resume the task before finishing.',
+  run_cancelled: 'The run was cancelled.',
+  finish_requested: 'Finish was already requested for this run. End your turn.',
+  generation_mismatch: 'This tool belongs to an earlier session. Use the current session tool.',
+  invalid_request: 'Invalid cezar_done arguments.',
+  unavailable: 'Cezar could not accept cezar_done now. Retry once; if it fails again, end your turn and say the task is complete.',
+};
+
+export function doneErrorMessage(code: keyof typeof doneMessages): string {
+  return doneMessages[code];
+}
+
+const DONE_FIELDS = 'cezar_done takes only an optional summary of at most 2000 characters';
+
+/** Names the unknown field or the failing summary, never the value the agent sent. */
+export function doneInvalidInput(error?: z.ZodError): string {
+  const issue = error?.issues[0];
+  if (issue?.code === 'unrecognized_keys') return `Unknown field ${issue.keys.map(key => JSON.stringify(key.slice(0, 64))).join(', ')}: ${DONE_FIELDS}.`;
+  if (error?.issues.some(entry => entry.path[0] === 'summary')) return '`summary` must be a string of at most 2000 characters.';
+  return `The arguments must be a JSON object: ${DONE_FIELDS}.`;
 }
 
 // #781: `cezar_preview_serve` results. Every one carries the agent's next step; none quotes a

@@ -1,11 +1,11 @@
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { deriveAttention, toRunSummary, type CiWaitResult, type HumanWaitEntry, type Wait } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
-import { manager, parent, register, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { collect, manager, parent, register, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { claudeScheduleWakeupDelay, MAX_WAKE_DELIVERY_ATTEMPTS, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR } from './run.ts';
@@ -132,7 +132,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U7h', 'U9h']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U7h', 'U9h', 'U6', 'U7d']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -746,6 +746,72 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
       expect(manager.continueRun(run.id, { text: answerOf(run.id) }).ok).toBe(true);
       await until(() => settled(run.id, registered.wait.id)?.phase === 'delivered' && answered(run.id, asks(run.id)[0]!.seq));
+    });
+
+    it(`${runner} U6 cezar_done is refused with live workers and with settled but uncollected workers, accepted once collected, and open waits are cancelled`, async () => {
+      const external = github();
+      nativeWire(runner);
+      const answers = join(root, 'done-answers');
+      process.env.CEZ_MOCK_CI_RESULT = answers;
+      const p = await parent(HARNESS_ADAPTERS[runner].scenarios.baseline!, runner);
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+      const w = await worker(p.id);
+      /** One turn through the native wire; the answer of its last cezar tool call. */
+      const turn = async (text: string) => {
+        const turns = turnEnds(p.id);
+        rmSync(answers, { force: true });
+        expect(manager.sendMessage(p.id, [{ type: 'text', text }])).toBe(true);
+        await until(() => turnEnds(p.id) > turns && existsSync(answers) && store.getRun(p.id)?.status !== 'running');
+        return JSON.parse(JSON.parse(readFileSync(answers, 'utf8')).response.content[0].text.split('\n')[0]);
+      };
+      const outstanding = await turn(toolCall('cezar_done', {}));
+      expect(outstanding).toMatchObject({ ok: false, code: 'workers_outstanding', workers: [{ worker_id: w.id, reason: 'outstanding' }] });
+      expect(outstanding.message).toContain('worker wait');
+      expect(outstanding.message).toContain(`worker stop ${w.id}`);
+      expect(manager.isActive(p.id)).toBe(true);
+      manager.requestWorkerStop(w.id);
+      expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
+      const uncollected = await turn(toolCall('cezar_done', {}));
+      expect(uncollected).toMatchObject({ ok: false, code: 'workers_uncollected', workers: [{ worker_id: w.id, reason: 'uncollected' }] });
+      expect(uncollected.message).toContain(`worker collect ${w.id}`);
+      await collect(w.id);
+      const accepted = await turn(`${toolCall('cezar_wait', { kind: 'ci', pr })} ${toolCall('cezar_done', {})}`);
+      const ci = store.getRun(p.id)?.lastWaits?.find(wait => wait.kind === 'ci');
+      expect(accepted).toMatchObject({ ok: true, finishes: 'at_turn_end' });
+      expect(accepted.open_waits).toEqual(expect.arrayContaining([expect.objectContaining({ wait_id: ci?.id, kind: 'ci' })]));
+      await until(() => terminal.includes(store.getRun(p.id)?.status ?? '') && !manager.isActive(p.id));
+      expect(ci).toMatchObject({ phase: 'cancelled', via: 'cezar_wait' });
+      expect(store.getRun(p.id)?.waits ?? []).toEqual([]);
+      expect(external.aborted()).toBe(true);
+      const closed = store.readEvents(p.id).filter(event => event.type === 'lifecycle' && event.message === 'goal achieved — session closed');
+      expect(closed).toEqual([expect.objectContaining({ via: 'cezar_done' })]);
+    });
+
+    it(`${runner} U7d the done line and cezar_done finish through the same path`, async () => {
+      nativeWire(runner);
+      const closings = (id: string) => store.readEvents(id).filter(event => event.type === 'lifecycle' && event.message === 'goal achieved — session closed');
+      const finished = (id: string) => terminal.includes(store.getRun(id)?.status ?? '') && !manager.isActive(id);
+      const finish = async (text: string) => {
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
+        await until(() => store.getRun(run.id)?.status === 'waiting');
+        expect(manager.sendMessage(run.id, [{ type: 'text', text }])).toBe(true);
+        await until(() => finished(run.id));
+        return run.id;
+      };
+      const line = await finish(messagesPrompt(runner, ['All done.\nCEZ:DONE']));
+      const tool = await finish(toolCall('cezar_done', { summary: 'u7d shipped' }));
+      expect(store.getRun(tool)!.status).toBe(store.getRun(line)!.status);
+      expect(closings(line)).toEqual([expect.objectContaining({ via: 'done-line' })]);
+      expect(closings(tool)).toEqual([expect.objectContaining({ via: 'cezar_done' })]);
+      // The summary is the note right before the closing event; the done line has none.
+      const events = store.readEvents(tool);
+      expect(events[events.findIndex(event => event.seq === closings(tool)[0]!.seq) - 1]).toMatchObject({ type: 'note', message: 'u7d shipped' });
+      expect(store.readEvents(line).some(event => event.type === 'note' && event.message === 'u7d shipped')).toBe(false);
+      // A Continue turn finishes through the same path on its own handler.
+      expect(manager.continueRun(tool, { text: toolCall('cezar_done', {}) }).ok).toBe(true);
+      await until(() => closings(tool).length === 2 && finished(tool));
+      expect(closings(tool).map(event => event.via)).toEqual(['cezar_done', 'cezar_done']);
+      expect(store.getRun(tool)!.status).toBe(store.getRun(line)!.status);
     });
   }
 });
