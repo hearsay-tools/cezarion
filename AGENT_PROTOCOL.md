@@ -826,7 +826,9 @@ workers?, open_waits? }`. It is refused, in this order, by the session refusals
 `cezar_wait` answers, then `worker_wait_pending`, `root_finish_pending`,
 `human_question_pending` (an earlier turn's question is unanswered), and for a root parent
 `worker_questions`, `workers_outstanding` and `workers_uncollected`, each listing up to 64
-`{ worker_id, reason }` and naming the command that clears them. The turn end that reads an
+`{ worker_id, reason }` and naming the command that clears them (a general form of the
+command when listing every worker would pass `WAIT_MESSAGE_MAX`, 4,096 characters). The answer
+a Continue opened with is not a pending question while its turn runs. The turn end that reads an
 accepted done takes it, and a human message clears it. A non-interactive workflow step
 ignores it, as it ignores the done line. The close writes `summary` as a `note`, then the
 lifecycle event `goal achieved — session closed` with `via: 'cezar_done'` (or
@@ -1143,7 +1145,11 @@ the fortieth wake, `cezar_wait` then refuses a timer with `wake_budget_spent`, a
 Continue resets the count to 0. U7h lands the ask line, `cezar_wait` with kind `human` and a
 native ask in the same list with their `via`, and the user's answer delivers each; Claude, Pi,
 Cursor (print) and OMP are exempt from the native case as `native ask arrives as the portable
-marker on this wire` and assert the `ask-line` alias instead. U9h registers a human wait
+marker on this wire` and assert the `ask-line` alias instead. Two more U7h cases run on every
+runner: a valid ask line later in the turn replaces a `cezar_wait` card (on Cursor print the
+turn end re-enters a boundary from `discardQueuedMessages`, so the replacement is saved
+first), and a Continue that answers one question and asks the next keeps the next one open
+and shows its card. U9h registers a human wait
 mid-turn and fails the provider, and separately registers one at a boundary and closes the
 session cleanly: each time the card is shown once with its `askSeq`, the run reads Needs you,
 and the answer delivers it. U6 calls `cezar_done` from a parent with a live worker
@@ -1152,7 +1158,9 @@ and the answer delivers it. U6 calls `cezar_done` from a parent with a live work
 CI wait is cancelled into `lastWaits`, and the closing event carries `via: 'cezar_done'`. U7d
 finishes one run with the done line and one with `cezar_done` and a summary, which lands as a
 note just before the closing event, and then finishes a Continue turn through `cezar_done`
-again, so both turn-end handlers are covered.
+again, so both turn-end handlers are covered. A third U7d case closes the session while a
+question is shown, then Continues with a message that answers it and calls `cezar_done`: the
+answer in flight is not a pending question, so the done is accepted and the run finishes.
 
 **R74** extends that native-wire matrix to a failed nonfinal workflow agent.
 CI recovery must retain the failed attempt, including across restart and CI
