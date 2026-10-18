@@ -458,6 +458,13 @@ builder" unless a bullet says otherwise.
   or timer wait. Until phase 3 puts worker waits in the list, a wait that resolves during the
   worker park is held: the worker wake is delivered first, and the held result at a later
   boundary.
+- **Worker completion keeps `activity: monitoring` until phase 3.** Worker waits keep their old
+  machinery in phase 1, and so does the completion gate: `deferParentCompletion` still writes a
+  root parent whose completion is blocked on live workers, while its session is open
+  (completion `attention`), as `running` with `activity: 'monitoring'`. That parent keeps a
+  monitoring slot for its workers' wakes and opens no timer. It is the only remaining writer of
+  that activity. A store read of that row (a restart, the read-only runs index) upgrades it like
+  any legacy row: `waiting`, no timer, `activity` dropped. Phase 3 moves it into the wait list.
 - **A resolved wait in the line reads `waiting for capacity`.** Rung 10: a `waiting` run with
   a resolved wait and no human signal is bucket none, tone running, a ring, no pulse. An open
   CI or timer wait still reads `waiting for CI` or `monitoring`.
