@@ -537,6 +537,36 @@ instruction rather than silently.
   behavior wholesale, which is what the "keep the old spelling for a minor release" rule exists to
   provide.
 
+## One turn-end rule (hearsay-tools/cezarion#1234, phase 2b) — deliberate, 2026-10-19
+
+The markers keep their meaning (section 8). What changed is what a turn end does when it carries
+no wait, no question and no done. Spec: `.ai/specs/2026-10-17-unified-waits.md`, "The turn-end
+rule" and "Phase 2b decisions".
+
+- **A turn end with no wait costs one more turn.** Cezar sends the no-wait nudge, which spends one
+  unit of the automatic-wake budget. If that turn also ends with no wait, or no reply comes within
+  5 minutes, Cezar opens its own `no-wait` human wait and the run reads Needs you. Before, the run
+  parked `waiting` at once, so a webhook or `cez task watch` now sees `waiting` one turn later. An
+  owned worker still parks plain after its nudge.
+- **Prose no longer raises Needs you.** A question or review request in prose, beside the
+  monitoring line, live workers or another wait, used to raise the prose gate. Now the run parks
+  on those waits. With no wait, it gets the nudge. An agent asks with `cezar_ask` or the ask line.
+- **A rejected ask line registers nothing.** Its diagnostic note and raw text stay, and the turn is
+  one with no wait, so it gets the nudge. A worker whose nudge reply also registers nothing now
+  settles `done`, not `failed` with `invalid structured question`.
+- **An autonomous run's ask line before the budget is not registered.** Its note changes from
+  `autonomous — question overridden by the auto-continue nudge: …` to
+  `autonomous — question not registered; continuing: …`.
+- **The final-message nudge is the no-wait nudge.** Its notes and heartbeat change to the no-wait
+  nudge's: `no wait or done — reminding the agent once (n/40)`,
+  `no reply to the no-wait nudge — waiting for you`, and `status=running (no-wait nudge)` in the
+  handoff journal. A consumer that matched the old note text must match the new text.
+- **The `unstructured-human-gate` note code** now marks the gate that a human wait without a card
+  raises (the monitoring line with re-checks off). Older transcripts carry it for the prose gate.
+  Both are answered the same way, so no record migrates.
+- **Dry run.** The native mocks answer the nudge with a `cezar_ask` card, so a dry-run task parks
+  on a question after one extra turn. `CEZ_MOCK_NUDGE_REPLY=plain` makes them answer in plain text.
+
 ## When in doubt
 
 If a change might break any surface above, say so in the PR description, label the PR `risk-high`, and route it through the review + QA gates in `SDLC.md`. A silent break found in review is a blocker per `CODE_REVIEW.md`.

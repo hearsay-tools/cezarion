@@ -616,8 +616,8 @@ nudge, and the dry-run mocks answering it) are recorded with it.
   shown, can be cancelled.
 - **Aliases.** `cezar_ask` opens a `cezar_ask` human wait. The ask line opens an `ask-line` human wait with its card, a native ask a
   `native-ask` one, the monitoring line with re-checks off a `monitoring-line` one, and a spent
-  budget a `budget` one (`source: 'cezar'`). Until 2b, a rejected ask line opens a cardless
-  `ask-line` wait only where the turn already raises the prose gate.
+  budget a `budget` one (`source: 'cezar'`). In 2a a rejected ask line opened a cardless
+  `ask-line` wait only where the turn already raised the prose gate; from 2b it opens nothing.
 - **`cezar_done` keeps the completion gate.** It refuses with `human_question_pending` while an
   earlier turn's question is pending and with `worker_wait_pending` while a worker wait is
   registered, as the done line is overridden today; a root parent also refuses with
@@ -668,3 +668,82 @@ shipped ones: re-checks on, budget 40, no autonomy.
 | `failed` holding wait results (kept) | Continue | The user | Delivers the results once |
 | | Stop | The user | Discards them; the run stays `failed`. **No default exit is automatic** |
 | Automatic-wake budget spent (`automaticWakes` ≥ 40) | A human message or a human Continue | The user | Reset to 0. A restart, a scheduler continuation and a parent's answer keep it. **Only a human action resets it** |
+
+### Phase 2b decisions
+
+Calls made while building 2b (hearsay-tools/cezarion#1234), within "Left to the builder".
+
+- **One rule, applied in one place.** `decideTurnEnd` (`workflows/turn-end.ts`) is a pure function;
+  `applyTurnEnd` applies it in both turn-end handlers and at the boundary an acknowledgement
+  settles after its turn ended (`settleIdleBoundary`). Its order: input already owed defers; done
+  finishes; any open wait or question parks; a step that is not the last completes; a spent budget
+  opens a `budget` human wait; an autonomous run gets the autonomous nudge; any other turn end gets
+  the no-wait nudge, once, before Cezar opens a `no-wait` human wait. A spent budget outranks the
+  second no-wait turn end, because the cap is the more specific cause.
+- **The nudge's words.** "Your turn ended without a wait or done. Call cezar_ask if you need the
+  user, cezar_wait (ci or timer) if you are waiting on something, or cezar_done if the task is
+  complete. If you owe the user a reply, write it in the same turn." It names only the kinds
+  `cezar_wait` takes in this phase. A session without cezar tools gets the same sentence with the
+  three marker lines, because it was taught the markers (phase 2 decision 1). The nudge spends one
+  unit of the automatic-wake budget.
+- **The no-wait nudge absorbs the final-message nudge (#544).** A silent tail is a turn end with no
+  wait, so it gets the same one nudge. The final-message nudge's reply bound stays as the no-wait
+  nudge's (`NO_WAIT_NUDGE_REPLY_MS`, 5 minutes): with no reply, the run notes it and Cezar opens
+  its no-wait wait, and a reply that arrives later still resumes the run. Its rows F1–F11 stay and
+  pin the no-wait nudge.
+- **Cezar's own human waits raise no gate.** A `no-wait` or `budget` wait is not the agent's
+  question. It is shown as its note, which is recorded as its `askSeq`, and the run reads Needs
+  you because it is `waiting`. The run takes what the plain park took before: worker messages wake
+  it, and its wait registrations, `cezar_done` and the user's Finish are not refused. A wait or
+  question the agent registers replaces it (cancelled into `lastWaits`). It ends with the session
+  that opened it, so a clean close completes the step and an idle close settles as the plain park
+  did. The agent never registered it, so `open_waits` and the "Still open" footer leave it out, and
+  a closing session or a late acknowledgement counts only the agent's waits.
+- **A worker's fallback stays the plain park** (decision 4 above). A worker gets the no-wait nudge;
+  its second no-wait turn end, or a nudge it never answers, parks it as before.
+- **No prose is read.** `turnParkSignals` finds the markers only. A question or review request in
+  prose with no wait gets the nudge; beside the monitoring line, live workers or another wait, the
+  run parks on them and does not read Needs you. The gate a human wait without a card raises (the
+  monitoring line with re-checks off) keeps the `unstructured-human-gate` note code, which older
+  transcripts carry for the prose gate.
+- **A rejected ask line registers nothing.** Its diagnostic note and raw text stay, and the turn is
+  a turn end with no wait. `invalidAsk` clears at the next turn end, so a worker whose nudge reply
+  also registers nothing settles done, not failed.
+- **An autonomous ask line before the budget is not registered**, as `cezar_ask` refuses
+  `autonomous_run`. The run notes `autonomous — question not registered; continuing` with the
+  questions, and takes the autonomous nudge. The nudge still goes through the answer transport,
+  because the runner holds the line as a pending portable ask; a wire that refuses the nudge
+  registers the line after all.
+- **The dry-run mocks answer the nudge.** With `CEZ_MOCK_NUDGE_REPLY` unset, every native mock
+  answers the nudge with a `cezar_ask` card (the ask line in a session taught the markers), so a
+  dry-run task parks on a question after one extra turn. With `plain` the mocks answer in plain
+  text, and the run reaches Cezar's no-wait wait. The unit fixtures default to `plain`, the
+  closest to the plain park they were written for, and so does `composer.e2e.ts`. The cells that
+  need the card opt out.
+- **The compare column keeps the agent's summary.** The nudge's extra turn writes another
+  `turn complete — …` heartbeat at the top of the Progress log. The variants compare column reads
+  the log's first lines, so `handoffProgressExcerpt` now shows the agent's own lines and falls back
+  to the lifecycle heartbeats only when the agent wrote none.
+
+### Transitions out (phase 2b)
+
+Required by AGENTS.md for every state 2b adds or keeps. Defaults are the shipped ones: re-checks
+on, budget 40, no autonomy. The 2a table above still holds for the states it lists.
+
+| State | Trigger | Who or what fires it | Behavior at shipped defaults |
+| --- | --- | --- | --- |
+| No-wait nudge sent, reply turn running (`running`, slot held) | The reply turn ends with a wait, a question or done | The runner's turn end | The rule parks, shows the question or finishes |
+| | The reply turn ends with no wait again | The runner's turn end | Cezar opens its `no-wait` human wait and the run reads Needs you; a worker parks plain |
+| | No reply within `NO_WAIT_NUDGE_REPLY_MS` (5 minutes) | The reply timer | The no-reply note, then the same as above; a reply that arrives later resumes the run |
+| | A human message | The user | Delivered as the next turn; the budget resets |
+| | Stop, Finish | The user | The run settles |
+| | Provider failure or process exit | The failure path | The failure path as before; nothing is owed to the nudge |
+| `waiting` on Cezar's own human wait (`no-wait` or `budget`, Needs you) | A human message, Continue | The user | Settled `delivered`; the answer starts the next turn; the budget resets |
+| | A worker message | The worker (`worker send`) | Wakes the run, as the plain park did; the wait stays open until the agent's own wait or question replaces it |
+| | The agent registers a wait or question in a woken turn | The agent | Cezar's wait is cancelled into `lastWaits`; the run parks on the agent's wait |
+| | `cezar_done` in a woken turn | The agent | Accepted; the run finishes |
+| | 15 minutes idle | The idle timer (`IDLE_TIMEOUT_MS`) | The session closes and the wait ends with it; the run stays `waiting`, and Continue reopens it. **No default exit other than this close and a human action** |
+| | Stop, Finish, delete | The user | The run settles; Finish is not refused |
+| Autonomous run, ask line before the budget | The turn ends | The runner's turn end | The line is not registered; the note and the autonomous nudge; this repeats until the budget |
+| | The budget is spent | The runner's turn end | The nudge is refused with the cap note and the line is registered as an `ask-line` human wait (Needs you) |
+| Prose question or rejected ask line beside the monitoring line, live workers or another wait | The turn ends | The runner's turn end | The run parks on its waits (monitoring or waiting on workers) and does not read Needs you; the timer's wake or the worker's message is the next exit |

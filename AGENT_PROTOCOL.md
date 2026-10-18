@@ -1099,7 +1099,7 @@ the observation. Later successful settlement must leave that failed attempt inta
 Clean session closure while CI is pending still parks without failure. No runner
 exemptions or normalized-event injection.
 
-**U0–U4, U6, U7–U14, U16** (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234, with U6s, U9c and U16b) pin the
+**U0–U17** (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234, with U5a, U5c, U5d, U6s, U7d, U7h, U9c, U9h and U16b) pin the
 wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
 normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`, `cezar_ask`,
 `cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
@@ -1183,6 +1183,29 @@ note just before the closing event, and then finishes a Continue turn through `c
 again, so both turn-end handlers are covered. A third U7d case closes the session while a
 question is shown, then Continues with a message that answers it and calls `cezar_done`: the
 answer in flight is not a pending question, so the done is accepted and the run finishes.
+
+Phase 2b (hearsay-tools/cezarion#1234) adds the turn-end rule. `decideTurnEnd`
+(`workflows/turn-end.ts`) is one pure function that both turn-end handlers, and the boundary an
+acknowledgement settles late, apply through `applyTurnEnd`. Input already owed defers the decision;
+then done finishes; any open wait or question parks; a workflow step that is not the last
+completes; a spent budget opens a `budget` human wait; an autonomous run gets the autonomous nudge;
+and any other turn end gets the no-wait nudge once, charged to the automatic-wake budget, before
+Cezar opens a `no-wait` human wait (`source: 'cezar'`). Nothing reads the turn's prose. Cezar's own
+human waits raise no human gate: they are shown as their note, worker messages still wake the run,
+the agent's own wait or question replaces them, they end with the session that opened them, and
+the agent's `open_waits` and footer leave them out. A worker keeps the nudge, and its fallback is
+the plain park. The native mocks answer the nudge with a `cezar_ask` card, or with the ask line in
+a session taught the markers, unless `CEZ_MOCK_NUDGE_REPLY=plain`. The unit fixtures set `plain`,
+and the cells that need the card opt out. U5 ends a turn with no wait: one nudge, then a second
+no-wait turn end opens the `no-wait` wait, which reads Needs you and is answered by the user's
+reply, which restarts the budget. U5a answers the nudge with `cezar_ask` and parks on that question
+after one extra turn, the default dry-run path. U5c finishes a root parked on Cezar's no-wait wait,
+and pins that an agent question still blocks Finish. U5d pins that the no-wait wait raises no
+question (its `askSeq` is its note, and no gate fact is pending), and that a timer the agent
+registers cancels it into `lastWaits` and parks the run as monitoring. U17 sends a prose question
+with no wait, which gets the nudge, then the same question after the monitoring line, which leaves
+the line's timer in place with no gate note. U15 nudges an autonomous run with the autonomous
+wording until the budget, then opens a `budget` human wait.
 
 **R74** extends that native-wire matrix to a failed nonfinal workflow agent.
 CI recovery must retain the failed attempt, including across restart and CI
@@ -1551,35 +1574,39 @@ unwrite a line already on the pipe. On Claude, a mid-turn line is queued by the 
 and runs as a fresh turn after the ASK park while the card is pending — the inverted
 H2 assertion does not pin that.
 
-Final-message nudge rows **F1–F11** live in
-`core/workflow-final-message-parity.test.ts` and the same parity guard (hearsay-tools/cezarion#544).
-Every adapter covers a reasoning-or-tool tail with no later assistant message, on fresh and Continue
-paths: one visible-message nudge that can complete with DONE, a still-silent nudge that parks
-waiting (#119), reasoning that names `CEZ:DONE` never completing the run (#399), a markerless
-message-then-tool tail getting exactly one nudge, an explicit DONE with zero nudge notes, and an
-autonomous silent tail that stays `running` with a held slot and no idle timer at the first
-`continuing without pausing` note, with zero final-message notes. F7 covers the park-after-ACK site:
-a silent-tail turn that ends while its agent-input ACK is still pending produces exactly one
-`no final message` note and the `status=running (final message nudge)` heartbeat after the ACK.
+No-wait nudge rows **F1–F11** live in
+`core/workflow-final-message-parity.test.ts` and the same parity guard. They were written for the
+final-message nudge (hearsay-tools/cezarion#544), which the no-wait nudge absorbed
+(hearsay-tools/cezarion#1234): a silent tail is a turn end with no wait, so it gets the same one
+nudge, reply bound and heartbeat. Every adapter covers a reasoning-or-tool tail with no later
+assistant message, on fresh and Continue paths: one nudge that can complete with DONE, a
+still-silent nudge that opens Cezar's no-wait human wait (#119), reasoning that names `CEZ:DONE`
+never completing the run (#399), a markerless message-then-tool tail getting exactly one nudge, an
+explicit DONE with zero nudge notes, and an autonomous silent tail that stays `running` with a held
+slot and no idle timer at the first `continuing without pausing` note, with zero no-wait nudge
+notes. F7 covers the park-after-ACK site: a silent-tail turn that ends while its agent-input ACK is
+still pending produces exactly one `no wait or done — reminding the agent once` note and the
+`status=running (no-wait nudge)` heartbeat after the ACK.
 Only OpenCode's HTTP ACK is independent of the SSE turn; the other adapters have named executable
 exemptions because turn frames and the transport ACK share one stream, so turn-end-before-ACK
 cannot be constructed.
 F8 covers an ACKed nudge that never opens a turn (OpenCode keeps sending SSE heartbeat comments):
-after `FINAL_MESSAGE_NUDGE_REPLY_MS` the run parks `waiting` with busySlots 0. Cursor's ACK is the
+after `NO_WAIT_NUDGE_REPLY_MS` (5 minutes) the run notes `no reply to the no-wait nudge — waiting
+for you` and opens Cezar's no-wait human wait, `waiting` with busySlots 0; a worker parks plain. Cursor's ACK is the
 stdin write callback, as for Claude: the mock accepts `session/prompt` and sends nothing. A synthetic
 `turn.started` emitted inside `sendAgentMessage` before the reply timer is armed does not count as a
 reply; items, text and tools count at any time, and nested `item.*` events with `parentItemId` do not.
 F9 lets a late reply after expiry unpark the run (`running`, slot held) and then complete normally;
-`alreadyFinalMessageNudged` still prevents a second nudge. F11 lets the bound expire, then starts the
+the nudged-last-turn latch still prevents a second nudge. F11 lets the bound expire, then starts the
 late reply turn on the wire and holds before any content longer than the test poll window: `turn.started`
 alone unparks (`running`, slot held) before content arrives, then the run completes normally. Only Codex
 emits a native `turn/started` after the nudge is sent; the other adapters have named executable exemptions
 because `turn.started` is synthetic inside `sendAgentMessage` and fires at nudge send, before the bound.
-F10 starts streaming content before the bound and ends after it: no `no reply to the final-message nudge`
+F10 starts streaming content before the bound and ends after it: no `no reply to the no-wait nudge`
 note, and a normal DONE. A user-authored
 delivery resets the one-shot latch so the next silent tail can nudge; expiry does not. The one-shot
 latch keeps #48 closed; control markers are never read from reasoning. A pending autonomous retry is
-never replaced by the final-message nudge.
+never replaced by the no-wait nudge.
 
 > Every criterion in the harness parity matrix MUST hold for **every** backend,
 > or carry a declared exemption naming the wire limitation that prevents it.
