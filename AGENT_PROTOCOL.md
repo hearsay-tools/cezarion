@@ -785,7 +785,8 @@ runner DOES — is §7, and a new backend has to satisfy both.
 
 A run's waits live in one list on its record (`waits`, settled ones in `lastWaits`),
 typed by `packages/contract/src/waits.ts`; spec `.ai/specs/2026-10-17-unified-waits.md`.
-There are three kinds: `ci`, `timer` and, since phase 2, `human`. A wait is an observation the agent asked for;
+There are three kinds: `ci`, `timer` and, since phase 2, `human`. The agent opens the first two with
+`cezar_wait` and a human wait with `cezar_ask`. A wait is an observation the agent asked for;
 it never grants merge, review acceptance, or task-completion authority. There is no
 wait marker and no delegation prerequisite. `claude-cli` uses the Claude adapter.
 
@@ -793,13 +794,21 @@ wait marker and no delegation prerequisite. `claude-cli` uses the Claude adapter
 observation. `pr` is an HTTPS GitHub PR URL (at most 2,048 characters, positive PR
 number, no userinfo, port, query or fragment); `timeout_seconds` is an integer
 1–7,200, default 1,800. `cezar_wait({ kind: 'timer', seconds, note? })` opens a
-timer of 60–7,200 seconds with a note of at most 512 characters.
-`cezar_wait({ kind: 'human', questions? })` waits for the user; `questions` is an optional
-card in the ask format (1–4 questions of 2–4 options). Unknown keys and a
-field that does not fit its kind are `invalid_request`. The tool advertises one flat
-object schema, because the Anthropic tool API refuses a top-level union; the server
-validates the discriminated union. Every answer carries the wait id, its absolute
-deadline (none for a human wait) and `open_waits`. At most 16 waits are open at once. A
+timer of 60–7,200 seconds with a note of at most 512 characters. Unknown keys, a
+field that does not fit its kind, and `kind: "human"` are `invalid_request`; the last one's
+message names `cezar_ask`. The tool advertises one flat object schema, because the Anthropic
+tool API refuses a top-level union; the server validates the discriminated union. Every
+answer carries the wait id, its kind, its absolute deadline and `open_waits`.
+
+`cezar_ask({ questions })` waits for the user (hearsay-tools/cezarion#1234). `questions` is
+required: a card in the ask format, 1–4 questions, each with a header of at most 12
+characters, the question, and 2–4 options with unique labels. A question with its `options`
+left out is open: the cockpit shows only an answer field and sends `header: text`. An empty or
+one-option list is `invalid_request`, never an open question, and `multiSelect` applies only
+to options. The answer carries the wait id and `open_waits`, with no deadline. The ask line
+takes open questions too, since both share `askRequestSchema`.
+
+At most 16 waits are open at once. A
 timer is refused with `timers_disabled` when `resources.monitoringWakeIntervalMinutes` is
 `null`, and with `wake_budget_spent` once the run's automatic-wake budget
 (`MAX_AUTO_CONTINUES`, 40) is spent. `cezar_cancel_wait({ wait_id })` moves an open wait
@@ -813,9 +822,9 @@ A human wait is shown to the user at the end of the turn that registered it (an
 `ask.requested` event, recorded as its `askSeq`), at once when registered at a boundary,
 or by the failure, close or recovery path, never mid-turn. Any human message settles every
 human wait as `delivered`: it is never `resolved`, so it queues no wake, and a message to a
-run whose only open wait is human is delivered as the answer. An autonomous run is refused
-with `autonomous_run` until its automatic-wake budget is spent, and a worker without
-`questions` with `questions_required`, because only a card reaches its parent. Until
+run whose only open wait is human is delivered as the answer. `cezar_ask` in an autonomous run
+is refused with `autonomous_run` until its automatic-wake budget is spent. A worker's card
+reaches its parent, and an open question asks the parent for its own words. Until
 phase 4, the transcript's question facts stay authoritative for attention, and
 `computeWaitingOn` reads both them and the human wait.
 
@@ -1088,7 +1097,7 @@ exemptions or normalized-event injection.
 
 **U0–U4, U6, U7–U14, U16** (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234) pin the
 wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
-normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`,
+normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`, `cezar_ask`,
 `cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
 `workflows/waits-parity.testkit.ts`, run by `workflows/waits-parity.test.ts`. U1
 registers a CI wait and a timer through `cezar_wait`, parks, and wakes with each result.
@@ -1142,11 +1151,11 @@ usage-limited held run, which also cancels its automatic resume.
 Phase 2 (hearsay-tools/cezarion#1234) adds five cells. U16 spends the automatic-wake budget to
 39, closes the session, and fires a timer: the scheduler continuation that delivers it charges
 the fortieth wake, `cezar_wait` then refuses a timer with `wake_budget_spent`, and a human
-Continue resets the count to 0. U7h lands the ask line, `cezar_wait` with kind `human` and a
-native ask in the same list with their `via`, and the user's answer delivers each; Claude, Pi,
+Continue resets the count to 0. U7h lands the ask line, `cezar_ask` (its card holding an open
+question) and a native ask in the same list with their `via`, and the user's answer delivers each; Claude, Pi,
 Cursor (print) and OMP are exempt from the native case as `native ask arrives as the portable
 marker on this wire` and assert the `ask-line` alias instead. Two more U7h cases run on every
-runner: a valid ask line later in the turn replaces a `cezar_wait` card (on Cursor print the
+runner: a valid ask line later in the turn replaces a `cezar_ask` card (on Cursor print the
 turn end re-enters a boundary from `discardQueuedMessages`, so the replacement is saved
 first), and a Continue that answers one question and asks the next keeps the next one open
 and shows its card. U9h registers a human wait
@@ -1625,7 +1634,7 @@ prompt channel for fresh, Continue and restart-recovered sessions, and the
 automatic monitoring wake. Every runner honors `cezarTools`, so since
 hearsay-tools/cezarion#1234 the contract names the tools: finished and verified work calls
 `cezar_done`, pending work calls `cezar_wait`, and a question for the user calls
-`cezar_wait` with kind `"human"`. A session started without cezar tools keeps the
+`cezar_ask`. A session started without cezar tools keeps the
 marker prompt and the marker wake (`CEZ:DONE`, `CEZ:MONITORING`); `human-waits.test.ts`
 pins that form on the Claude wire. R40 keeps completion prose without a marker parked as waiting;
 the harness does not infer completion from prose. Offline prompt recordings prove

@@ -78,7 +78,7 @@ What is protected now: **the shape of each route under `/api/v1`**, the three-wa
     - **Status.** `waiting` now also covers a run parked on an open CI or timer wait, which was `running` with `activity: 'monitoring'`. `activity: 'monitoring'` is no longer written for new parks; `activity` stays in the schema so older rows and summaries parse. One writer is left until phase 3, because worker waits keep their old machinery until then: a root parent whose completion is blocked on live workers while its session is open (completion `attention`) is still written `running` with `activity: 'monitoring'`, opens no timer, and keeps a monitoring slot for its workers' wakes. A store read of that row (a restart, the read-only runs index) upgrades it like a legacy row (see §3): `waiting`, no timer, `activity` dropped. A webhook consumer gets one `task.status` change to `waiting` per park and reads `task.attention` to learn whether a human is needed; `task.activity` events stop for new parks.
     - **`waitingOn` (additive).** `RunSummary`, and so the `run-summaries` rows and runs-index rows, adds an optional `waitingOn`: the run's top open wait in the order human > usage limit > workers > CI > timer (`{ kind: 'human' }`, `{ kind: 'usage-limit', at }`, `{ kind: 'workers', count }`, `{ kind: 'ci', waitId, prUrl, repository, prNumber, deadline }` or `{ kind: 'timer', waitId, at, note? }`). The full record does not carry it; `computeWaitingOn` in `packages/contract` derives it from `waits`. A `waiting` run whose top wait is CI or a timer keeps the running bucket and a ring in `deriveAttention` (labels `waiting for CI` and `monitoring`); it does not read as Needs you. A summary also adds an optional `waitWakePending: true` when a wait has resolved and its wake turn has not started; with no other wait open, such a `waiting` run reads `waiting for capacity` (bucket none, a ring), not Needs you.
     - **A failed run can keep its waits.** A session that keeps failing, or closing cleanly, while the run owes resolved results stops after 3 consecutive failed delivery attempts and settles the run `failed` with the note `could not deliver wait results after 3 attempts — continue this task to retry`. That `failed` record keeps its `waits`: the resolved entries stay `resolved` and their inputs undelivered, and open entries stay open and may still resolve, until Continue delivers them (moving them to `lastWaits`) or Stop cancels them. `POST /runs/:id/cancel` on that record answers `{ cancelled: true }`, moves every wait to `lastWaits` as `cancelled`, writes the note `Stop discarded the waits this task held and their results; the task stays failed`, and leaves the run `failed`; on a `failed` run with no `waits` it still answers `{ cancelled: false }`. Every other terminal record still has no `waits`. A reader must not assume a `failed` run's `waits` is empty.
-    - **Human waits and durable counters (hearsay-tools/cezarion#1234, phase 2, additive).** `waits` and `lastWaits` may hold `kind: 'human'` entries: the base fields without `deadline`, plus an optional `questions` (the ask card) and `askSeq` (the `ask.requested` event it was shown as). `via` gains `ask-line`, `native-ask`, `no-wait` and `budget`, and `source` is `'cezar'` for the waits Cezar opens itself. A human wait goes from `open` straight to `delivered` when any human message answers it, or to `cancelled`; it is never `resolved`. A run holds at most one. The record adds optional `automaticWakes` (automatic wakes spent since the user last wrote) and `waitDeliveryFailures` (consecutive failed wake deliveries); both survive a restart. A reader that skips kinds it does not know, as phase 1 asked, needs no change. The store moves to schema 5 (section 3).
+    - **Human waits and durable counters (hearsay-tools/cezarion#1234, phase 2, additive).** `waits` and `lastWaits` may hold `kind: 'human'` entries: the base fields without `deadline`, plus an optional `questions` (the ask card) and `askSeq` (the `ask.requested` event it was shown as). `via` gains `cezar_ask`, `ask-line`, `native-ask`, `no-wait` and `budget`, and `source` is `'cezar'` for the waits Cezar opens itself. A human wait goes from `open` straight to `delivered` when any human message answers it, or to `cancelled`; it is never `resolved`. A run holds at most one. The record adds optional `automaticWakes` (automatic wakes spent since the user last wrote) and `waitDeliveryFailures` (consecutive failed wake deliveries); both survive a restart. A reader that skips kinds it does not know, as phase 1 asked, needs no change. The store moves to schema 5 (section 3).
 - Worktrees: `GET /api/v1/worktrees`, `POST /api/v1/worktrees/reclaim`, `POST /api/v1/worktrees/:runId/reclaim` (issue 08 §B4: one finished run's worktree DIRECTORY, by retention's rule and helper — the branch is kept; answers `{runId, worktreeReclaimedAt}`, 404 for an unknown id, 409 + `{error}` when the run is live, at `review`, an owned worker mid-destroy, or already reclaimed. Breaking: deleting the branch from this route, or reclaiming a run retention would not)
 - Open-in: `GET /api/v1/open-targets`, `POST /api/v1/open-in` — the latter opens the SCOPED PROJECT'S root in an `open-targets` id (Settings → "Project folder"). It takes `{target}` and no path at all: the folder is the registry's own root, so there is nothing for a client to point elsewhere. `cli:<runner>` targets are refused with a 400 (an agent CLI belongs in a task worktree), as is an app this machine does not have; localHandoff-gated like the rest of the family.
 - Variants: `GET /api/v1/groups/:groupId`, `POST /api/v1/groups/:groupId/pick`
@@ -199,20 +199,28 @@ now points to `cezar_wait`, and the server instructions no longer suggest it. Ph
 (hearsay-tools/cezarion#1236) removes the tool and its route, and records the break and
 its migration (call `cezar_wait` with `kind: "ci"`) here.
 
-Additive for hearsay-tools/cezarion#1234 (unified waits, phase 2): `CezarWaitRequest` gains
-`{ kind: 'human', questions? }`, where `questions` is the ask card (1–4 questions, each with a
-header, the question and 2–4 options). Its answer has no `deadline`, so `deadline` is optional
-on `CezarWaitAnswer` and on each `open_waits` entry, whose `kind` gains `human`.
-`CezarWaitAnswer` refusals gain `autonomous_run` and `questions_required`, and
+Additive for hearsay-tools/cezarion#1234 (unified waits, phase 2): `POST /api/v1/tools/ask` joins
+the private family, behind the same bearer capability and a 16 KiB body limit. Middleware
+validates the strict `CezarAskRequest` (`{ questions }`, the ask card: 1–4 questions, each with a
+header of at most 12 characters, the question, and 2–4 options or none for an open question).
+Every answer except a missing or revoked capability (`401`) is `200` with the typed
+`CezarAskAnswer`: `{ ok: true, wait_id, open_waits }` or `{ ok: false, code, message, open_waits? }`,
+where `code` includes `autonomous_run`. `CezarWaitRequest` and `CezarWaitAnswer` are unchanged:
+`cezar_wait` refuses `kind: "human"` with `invalid_request`, and its message names `cezar_ask`.
+Each `open_waits` entry's `kind` gains `human`, which carries no `deadline`, and
 `CezarCancelWaitAnswer` refusals gain `human_question` (the user already saw the question).
-`POST /api/v1/tools/done` joins the same private family, behind the same bearer capability and
+The ask format (`askQuestionSchema`) makes `options` optional: a question without them is open,
+and the user answers it in words. The ask line, the `ask.requested` event, a native-ask card and a
+worker question routed to its parent may therefore carry a question without `options`; a question
+with options keeps the 2–4 bound. `POST /api/v1/tools/done` joins the same private family, behind the same bearer capability and
 a 16 KiB body limit. Middleware validates the strict `CezarDoneRequest` (`{ summary? }`, at
 most 2,000 characters). Every answer except a missing or revoked capability (`401`) is `200`
 with the typed `CezarDoneAnswer`: `{ ok: true, finishes: 'at_turn_end', open_waits }` or
 `{ ok: false, code, message, workers?, open_waits? }`, where `workers` lists up to 64
 `{ worker_id, reason }` with `reason` one of `outstanding`, `uncollected` or `question`. The MCP
-tool `cezar_done` is listed and admitted on every runner. Its name, its `summary` bound, the
-`human` kind and its card bounds are model-facing compatibility surfaces. A session with cezar
+tools `cezar_ask` and `cezar_done` are listed and admitted on every runner. Their names,
+`cezar_ask`'s card bounds (open questions included) and `cezar_done`'s `summary` bound are
+model-facing compatibility surfaces. A session with cezar
 tools is taught these tools in place of the `CEZ:DONE`, `CEZ:MONITORING` and ask-marker lines;
 the lines keep working as aliases that open the same waits and close through the same path.
 

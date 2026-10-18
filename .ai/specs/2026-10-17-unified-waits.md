@@ -1,7 +1,9 @@
-# Unified waits: one list, three tools, one turn-end rule
+# Unified waits: one list, four tools, one turn-end rule
 
 Status: approved by the owner (2026-10-17). Phase 1: hearsay-tools/cezarion#1233; the
-calls its build made are under [Phase 1 decisions](#phase-1-decisions).
+calls its build made are under [Phase 1 decisions](#phase-1-decisions). On 2026-10-18 the owner
+split the human wait out of `cezar_wait` into its own tool, `cezar_ask`, with a required card
+that may hold open questions (hearsay-tools/cezarion#1234, [Phase 2 decisions](#phase-2-decisions)).
 Supersedes the narrow re-arm design for hearsay-tools/cezarion#1197 and absorbs
 hearsay-tools/cezarion#1226 (agent-facing cancel).
 
@@ -68,7 +70,7 @@ A run holds `waits: Wait[]` (open and recently settled) on its `RunRecord`.
 
 | Kind | Registered by | Payload | Deadline | Resolves when |
 |---|---|---|---|---|
-| `human` | agent (`cezar_wait`), an alias, a native ask, or Cezar's no-wait fallback | optional question card (`askRequestSchema`) | none | a human message arrives |
+| `human` | agent (`cezar_ask`), an alias, a native ask, or Cezar's no-wait fallback | question card (`askRequestSchema`), required from `cezar_ask` | none | a human message arrives |
 | `ci` | agent or the `cezar_wait_for_ci` alias | PR identity and head, as `ciWaitSchema` today | required, 1 s–2 h, default 30 min | checks settle, head changes, or deadline |
 | `worker` | agent or the `cez worker wait` alias | worker ids or request ids, mode `one`/`any`/`all`, as `workerWaitSchema` today | required, as today | worker outcome(s), request reply, or deadline |
 | `timer` | agent, the monitoring-marker alias, or Claude `ScheduleWakeup` | seconds and an optional note | required: the timer itself | the time passes |
@@ -103,8 +105,7 @@ result that resolves meanwhile waits for the boundary, as any mid-turn result
 does. This is not an exception to "everything wakes"; the agent simply is not
 parked. Its answer path through the human seam, and its behaviour in autonomous
 runs (`AGENT_PROTOCOL.md` 1185-1189), are unchanged. Cezar's prompt teaches
-`cezar_wait({kind:'human'})`, which parks at a real boundary and lets everything
-else wake the agent.
+`cezar_ask`, which parks at a real boundary and lets everything else wake the agent.
 
 ### Tools
 
@@ -112,9 +113,15 @@ One MCP server, already wired into every runner through the `cezarTools` list in
 `ci-wait/tools.ts` (Claude `--mcp-config`, Codex `mcp_servers`, OpenCode, Cursor
 `mcpServers`, Pi and OMP extensions). Adding a tool there reaches every runner.
 
-- `cezar_wait({ kind, ... })` → `{ wait_id, kind, deadline?, open_waits }`.
-  Validates synchronously and refuses with a typed reason (`invalid_request`,
-  `capacity`, `autonomous_run` for a human wait in an autonomous run, …).
+- `cezar_wait({ kind, ... })` → `{ wait_id, kind, deadline, open_waits }`, for every kind but
+  `human`. Validates synchronously and refuses with a typed reason (`invalid_request`,
+  `capacity`, `timers_disabled`, …).
+- `cezar_ask({ questions })` → `{ wait_id, open_waits }`: the human wait, with its card. The
+  card is required: 1–4 questions in the ask format, each with 2–4 options or, with the
+  options left out, an open question the user answers in words. Refuses with a typed reason
+  (`invalid_request`, `capacity`, `autonomous_run` in an autonomous run, …). A separate tool,
+  so `cezar_wait`'s schema never carries a field only one kind takes, and the one call that
+  needs a card always has one.
 - `cezar_cancel_wait({ wait_id })` → `{ cancelled, open_waits }`, or
   `not_found` with `open_waits`. Cancel of an already-resolved but undelivered
   wait is a no-op that says so: its result is delivered with the next wake.
@@ -156,9 +163,9 @@ At a turn end, in both handlers, through one shared function:
      apply to every step: a non-final step parks on its open waits, as it parks on
      questions and CI/worker waits today.)
    - Otherwise, if the previous turn was not already Cezar's no-wait nudge: send
-     the nudge — "Your turn ended without a wait or done. Call `cezar_wait`
-     (`human` if you need the user; `ci`, `worker` or `timer` if you are waiting on
-     something) or `cezar_done`." It counts against the automatic-wake budget.
+     the nudge — "Your turn ended without a wait or done. Call `cezar_ask` if you
+     need the user, `cezar_wait` (`ci`, `worker` or `timer`) if you are waiting on
+     something, or `cezar_done`." It counts against the automatic-wake budget.
    - Otherwise Cezar opens a human wait (`source: cezar`, reason `no-wait`) and
      the run shows Needs you, with a note.
 
@@ -294,7 +301,7 @@ are cancelled with it and the failure settles `failed`. CI and timer waits still
 
 ### Autonomous runs
 
-`cezar_wait({kind:'human'})` refuses with `autonomous_run` and the autonomy
+`cezar_ask` refuses with `autonomous_run` and the autonomy
 instruction until the automatic-wake budget is spent; the no-wait nudge uses the
 autonomous wording and repeats until the budget instead of falling back after
 one. After the budget, human waits are accepted and the fallback opens one.
@@ -342,7 +349,7 @@ Each phase adds `RUNNER_IDS` cells driven through each runner's native mock wire
 for genuine wire gaps, and proven red without the change (`AGENTS.md` §Runner
 regressions):
 
-- **U1** each kind registers through the tool on the native wire, parks, and
+- **U1** each kind registers through its tool on the native wire, parks, and
   wakes with its result.
 - **U2** two waits open (CI + worker, CI + human): one resolving wakes the agent,
   the other stays open and is listed in the footer; turn end re-parks without
@@ -377,7 +384,7 @@ Phases ship in order; each leaves the default path complete.
    human messages and asks stop withdrawing CI; the footer; CI/timer slot rule;
    `waiting` + `waitingOn` for CI/timer parks; `cezar_wait_for_ci` deprecated.
    Closes #1197 and #1226.
-2. **Human waits and done.** `cezar_wait({kind:'human'})` and `cezar_done`;
+2. **Human waits and done.** `cezar_ask` and `cezar_done`;
    ask and done lines and native asks become aliases; the three-branch turn-end
    rule replaces `classifyTurnEnd`'s park inference, the prose gate, the
    final-message nudge and the ask override; autonomous handling; the budget.
@@ -401,7 +408,7 @@ Phases ship in order; each leaves the default path complete.
 - A non-final workflow step with no open wait completes without a nudge.
 - `cezar_done` cancels open waits instead of refusing while they are open.
 - Native asks stay a mid-turn block (like permission prompts) instead of being
-  disabled in favour of `cezar_wait({kind:'human'})`.
+  disabled in favour of `cezar_ask`.
 - A session that fails or closes with open waits parks and recovers for every
   kind, generalising today's CI rule.
 - `monitoringWakeIntervalMinutes: null` refuses agent timers and turns the
@@ -567,9 +574,21 @@ nudge, and the dry-run mocks answering it) are recorded with it.
   "Lifecycle tools (cezar)" paragraph in place of the completion, still-working and
   structured-question marker paragraphs, and a wake that names `cezar_done` and `cezar_wait`.
   The marker lines stay accepted as aliases either way.
-- **A worker's human wait carries a card.** `cezar_wait({kind:'human'})` from a worker without
-  `questions` refuses with `questions_required`, because only a card can be routed to the
-  parent. A worker's no-wait fallback stays today's plain park until phase 3.
+- **The user is asked with `cezar_ask`, and its card is required (owner, 2026-10-18).** The
+  human kind left `cezar_wait`, whose one flat schema (the Anthropic tool API refuses a
+  top-level union) otherwise carried a `questions` field only one kind takes; the narrower
+  tools make the call that needs a card unmistakable. `cezar_wait` refuses `kind: "human"`
+  with `invalid_request` and a message that names `cezar_ask`. The answer has no `kind` and no
+  `deadline`, and the wait's `via` is `cezar_ask`. Nothing shipped with the human kind, so
+  nothing is aliased.
+- **Open questions.** A question with its `options` left out is open: the cockpit card shows only
+  an answer field, like today's Other answer, and sends `header: text`. A list of options keeps
+  its 2–4 bound, so an empty or one-option list is refused rather than read as open, and
+  `multiSelect` applies only to options. The ask format is shared, so the ask line accepts open
+  questions too; the native mappers still build questions with options. A worker's open question
+  reaches its parent with `<header>: <your answer>` as its reply line.
+- **A worker's human wait carries a card**, since every `cezar_ask` does. A worker's no-wait
+  fallback stays today's plain park until phase 3.
 - **The budget is durable.** `automaticWakes` (timers, and in 2b nudges) lives on the run
   record. A human message and a human Continue reset it; a scheduler continuation and a restart
   keep it. A parent's answer to its worker does not reset it. A batch carrying timer results
@@ -591,7 +610,7 @@ nudge, and the dry-run mocks answering it) are recorded with it.
 - **A shown human wait cannot be cancelled by the agent.** `cezar_cancel_wait` answers
   `human_question` for it; only the user's answer ends it. One from the same turn, not yet
   shown, can be cancelled.
-- **Aliases.** The ask line opens an `ask-line` human wait with its card, a native ask a
+- **Aliases.** `cezar_ask` opens a `cezar_ask` human wait. The ask line opens an `ask-line` human wait with its card, a native ask a
   `native-ask` one, the monitoring line with re-checks off a `monitoring-line` one, and a spent
   budget a `budget` one (`source: 'cezar'`). Until 2b, a rejected ask line opens a cardless
   `ask-line` wait only where the turn already raises the prose gate.
@@ -599,7 +618,7 @@ nudge, and the dry-run mocks answering it) are recorded with it.
   earlier turn's question is pending and with `worker_wait_pending` while a worker wait is
   registered, as the done line is overridden today; a root parent also refuses with
   `worker_questions`, `workers_outstanding` or `workers_uncollected`, listing up to 64 workers
-  and the command that clears each. The session refusals are the ones `cezar_wait` answers. An
+  and the command that clears each. The session refusals are the ones `cezar_wait` and `cezar_ask` answer. An
   accepted done is taken by the turn end that reads it, and a human message clears it, so a
   later turn must call it again. A non-interactive workflow step ignores it, as it ignores the
   done line. A human wait from the same turn is cancelled by the done (a later done beats an

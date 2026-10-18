@@ -576,11 +576,14 @@ with `wake_budget_spent`, and a run with nothing else to wait on waits for you. 
 budget is kept on the task, so a cockpit restart keeps it; a message from you or a
 Continue starts it again.
 
-With `kind: "human"` the agent waits for you, optionally with a card of up to four
-questions (`questions`, in the ask format). The task reads Needs you once the turn
-ends, and your next message answers it. A run has one such wait at a time, and the
-agent cannot cancel it once you have seen it. The ask-marker card, a native question
-and `CEZ:MONITORING` with re-checks off open the same kind of wait. When the work is
+The agent asks you with `cezar_ask`, a card of one to four questions in the ask
+format. A question with two to four options shows them as choices; a question without
+options is open, and the card shows a text box for your answer. The task reads Needs
+you once the turn ends, and your next message answers it. `cezar_wait` takes CI and
+timers only, and points an agent that asks it for a human wait to `cezar_ask`. A run
+has one question to you at a time, and the agent cannot cancel it once you have seen
+it. The ask-marker card, a native question and `CEZ:MONITORING` with re-checks off
+open the same kind of wait. When the work is
 done and verified, the agent calls `cezar_done` (an optional `summary`), and the task
 finishes at the end of that turn: its open waits are cancelled and the summary is
 written as a note. `cezar_done` refuses while owned workers are live or uncollected,
