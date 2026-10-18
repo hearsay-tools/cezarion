@@ -1,5 +1,12 @@
 import { checkoutProgressEventSchema } from './events.ts';
 import { z } from 'zod';
+import {
+  PROJECT_NAME_PATTERN,
+  PROJECT_TAG_MAX_LENGTH,
+  PROJECT_TAGS_MAX,
+  PROJECT_WEBHOOK_TOKEN_MAX_LENGTH,
+  PROJECT_WEBHOOK_URL_MAX_LENGTH,
+} from './project-limits.ts';
 
 /**
  * The project-registry family: `GET/POST/PATCH/DELETE /api/v1/projects`, the folder picker
@@ -107,17 +114,6 @@ export const updateProjectResponseSchema = z.object({
 });
 export type UpdateProjectResponse = z.infer<typeof updateProjectResponseSchema>;
 
-/** Bounds for one tag and for a project's tag list. Named because three places must agree: this
- *  schema, the registry schema that must never `.catch` away a value this accepts
- *  (`workspaceProjectSchema` in the service), and the settings editor that refuses input early. */
-export const PROJECT_TAG_MAX_LENGTH = 32;
-export const PROJECT_TAGS_MAX = 20;
-
-/** Bounds shared by the PATCH body and the registry schema, so a stored value can never be
- *  degraded away by the next load's `.catch`. */
-export const PROJECT_WEBHOOK_URL_MAX_LENGTH = 2048;
-export const PROJECT_WEBHOOK_TOKEN_MAX_LENGTH = 1024;
-
 /** An `http(s)` URL. Anything else (`file:`, `javascript:`) is refused before it is stored. */
 export const projectWebhookUrlSchema = z
   .string()
@@ -197,15 +193,6 @@ export const checkoutProjectInputSchema = z.object({
   checkoutId: z.string().trim().max(128).optional(),
 });
 export type CheckoutProjectInput = z.infer<typeof checkoutProjectInputSchema>;
-
-/**
- * A new project's name: GitHub's repository-name characters (letters, digits, `.`, `-`, `_`, at
- * most 100), starting with a letter or digit as every checkout folder must. It is the folder name
- * and, with `github`, the repository name, so a name GitHub would rewrite is refused — and the
- * schema, the server and the dialog share this ONE rule, so the middleware never passes a name the
- * handler then rejects.
- */
-export const PROJECT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 
 /**
  * `POST /api/v1/projects/create` (spec 2026-10-15-create-new-project, a port of

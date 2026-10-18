@@ -72,3 +72,43 @@ describe('contract module subpaths', () => {
     expect(() => probe(specifier)).toThrow(/ERR_PACKAGE_PATH_NOT_EXPORTED/);
   });
 });
+
+/** The pure helpers moved out of `runs.ts`, `live.ts` and `projects.ts`, by their new module. */
+const MOVED: Record<string, string[]> = {
+  attachments: ['FILE_ATTACHMENT_MEDIA_TYPES', 'isImageMediaType', 'isAttachmentMediaType', 'attachmentExtension', 'isImageAttachmentName'],
+  'run-labels': ['runWorkflowLabel'],
+  'run-limits': ['ARCHIVED_RUNS_PAGE_DEFAULT', 'ARCHIVED_RUNS_PAGE_MAX'],
+  'live-limits': ['LIVE_RUN_LIMIT', 'LIVE_EVENT_LIMIT', 'LIVE_BYTE_LIMIT'],
+  'project-limits': ['PROJECT_TAG_MAX_LENGTH', 'PROJECT_TAGS_MAX', 'PROJECT_WEBHOOK_URL_MAX_LENGTH', 'PROJECT_WEBHOOK_TOKEN_MAX_LENGTH', 'PROJECT_NAME_PATTERN'],
+};
+
+describe('pure helpers in their own modules', () => {
+  it.each([
+    '@open-mercato/cezar-contract/run-labels',
+    '@open-mercato/cezar-api-client/contract/run-labels',
+  ])('%s labels runs without loading delegation', (specifier) => {
+    const { loaded, result } = probe(specifier, `[
+      m.runWorkflowLabel({ workflow: '(planned)', steps: [{ kind: 'check', name: 'lint' }, { kind: 'agent', name: 'implement' }] }),
+      m.runWorkflowLabel({ workflow: '(inbox)', steps: [] }),
+      m.runWorkflowLabel({ workflow: 'quick-task', steps: [{ kind: 'agent', name: 'implement' }] }),
+    ]`);
+    expect(result).toEqual(['implement', '(inbox)', 'quick-task']);
+    expect(loaded).not.toContain('contract/src/delegation.ts');
+  });
+
+  it.each(Object.keys(MOVED))('contract/%s loads only itself', (name) => {
+    expect(probe(`@open-mercato/cezar-contract/${name}`).loaded).toEqual([`contract/src/${name}.ts`]);
+  });
+
+  it('the root still exports every moved name, bound to its new module', () => {
+    const { result } = probe('@open-mercato/cezar-contract', `(async () => {
+      const mismatched = [];
+      for (const [name, exported] of Object.entries(${JSON.stringify(MOVED)})) {
+        const own = await load('@open-mercato/cezar-contract/' + name);
+        for (const key of exported) if (own[key] === undefined || m[key] !== own[key]) mismatched.push(name + '.' + key);
+      }
+      return mismatched;
+    })()`);
+    expect(result).toEqual([]);
+  });
+});
