@@ -21,6 +21,7 @@ export const WAIT_CRITERIA = [
   { id: 'U13', scenario: 'turn-messages', name: 'a wait result beside a pending portable question whose acknowledgement is rejected stays resolved, is retried, and the question stays answerable' },
   { id: 'U14', scenario: 'provider-error', name: 'a wait-result delivery whose sessions persistently fail or close cleanly stops at the delivery bound, the run fails keeping its result, Continue delivers it once, and Stop discards it' },
   { id: 'U16', scenario: 'baseline', name: 'a scheduler continuation keeps the automatic-wake budget and a human Continue resets it' },
+  { id: 'U16b', scenario: 'baseline', name: 'timers due at the spent budget with no live session are cancelled, and the last one opens a budget human wait the user answers' },
   { id: 'U9c', scenario: 'baseline', name: 'with a delivery-failure count on the record and the store refusing writes, Finish still stops the run' },
   // hearsay-tools/cezarion#1234: human waits.
   { id: 'U7h', scenario: 'ask', name: 'the ask line, cezar_ask (an open question included) and a native ask land in the same wait list' },

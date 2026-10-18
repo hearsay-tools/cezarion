@@ -2266,6 +2266,7 @@ export class RunManager {
     if (latest.kind === 'timer' && this.automaticWakes(runId) >= MAX_AUTO_CONTINUES) {
       this.cancelTimersAtCap(runId, [latest]);
       if (state) this.reparkWithoutWaits(runId, state);
+      else this.waitOnUserWithoutSession(runId);
       return;
     }
     const resolvedAt = new Date().toISOString();
@@ -2301,6 +2302,16 @@ export class RunManager {
     this.surfaceHumanWait(runId, state, this.openHumanAlias(runId, state, 'budget'));
     this.leaveMonitoringPool(runId);
     this.armIdleTimer(runId, state);
+  }
+
+  /** The same for a parked run with no live session, as when recovery fires an overdue timer
+   *  before any session exists: once no wait is left, the `budget` human wait opens and is shown,
+   *  and the user's Continue answers it. */
+  private waitOnUserWithoutSession(runId: string): void {
+    const run = this.store.getRun(runId);
+    if (!run || run.status !== 'waiting' || this.active.has(runId) || run.waits?.length) return;
+    this.surfaceHumanWait(runId, undefined, this.openHumanAlias(runId, undefined, 'budget'));
+    this.leaveMonitoringPool(runId);
   }
 
   /**

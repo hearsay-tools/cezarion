@@ -660,7 +660,7 @@ shipped ones: re-checks on, budget 40, no autonomy.
 | | A human message arrives | The user | The request is cleared; the agent must call `cezar_done` again |
 | | The session fails or the process exits | The failure path | The request is lost with the session; the run follows its failure path |
 | `waiting` on CI or timer waits (kept from phase 1) | A wait resolves (result, deadline) | The CI watcher or the wait timer | Its wake is delivered; a timer wake spends one unit of `automaticWakes` |
-| | A timer comes due with the budget spent | The wait timer | The timer is cancelled with the cap note; with nothing else open, a `budget` human wait opens and the run reads Needs you |
+| | A timer comes due with the budget spent | The wait timer | The timer is cancelled with the cap note; with nothing else open, a `budget` human wait opens and the run reads Needs you, with or without a live session (recovery fires an overdue timer before one exists; U16b) |
 | | A human message | The user | Delivered; every wait stays open with its deadline; the budget resets |
 | | Stop, Finish, delete | The user | Every wait cancelled; the run settles |
 | `waiting` with a result owed (waiting for capacity, kept) | A slot or a monitoring slot frees | The scheduler | The wake turn starts and delivers every resolved wait |

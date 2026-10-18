@@ -136,7 +136,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -511,6 +511,35 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
       expect(store.getRun(run.id)?.automaticWakes).toBe(0);
       await until(() => store.getRun(run.id)?.status === 'waiting');
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+
+    // Recovery fires an overdue timer before any session exists. At the spent budget it wakes
+    // nothing, and once no wait is left the run must still wait on the user through a wait.
+    it(`${runner} U16b timers due at the spent budget with no live session are cancelled, and the last one opens a budget human wait the user answers`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+      await until(() => store.getRun(run.id)?.status === 'waiting');
+      const { timer, later } = await timerWaits(run.id);
+      store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES });
+      engine().active.get(run.id)!.session.end();
+      await until(() => !manager.isActive(run.id));
+      fireTimer(timer.id);
+      await until(() => settled(run.id, timer.id)?.phase === 'cancelled');
+      // The other timer is still open: the run waits on it, not on the user.
+      expect(humanOpen(run.id)).toEqual([]);
+      fireTimer(later.id);
+      await until(() => settled(run.id, later.id)?.phase === 'cancelled' && humanOpen(run.id)[0]?.askSeq !== undefined);
+      expect(humanOpen(run.id)).toMatchObject([{ via: 'budget', source: 'cezar', phase: 'open' }]);
+      expect(store.getRun(run.id)?.status).toBe('waiting');
+      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
+      expect(manager.isActive(run.id)).toBe(false);
+      const [budget] = humanOpen(run.id);
+      expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
+      await until(() => settled(run.id, budget!.id)?.phase === 'delivered');
+      expect(store.getRun(run.id)?.automaticWakes ?? 0).toBe(0);
+      await until(() => store.getRun(run.id)?.status === 'waiting' && manager.isActive(run.id));
       expect(manager.finish(run.id)).toBe(true);
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
