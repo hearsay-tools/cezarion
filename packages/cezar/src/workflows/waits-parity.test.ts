@@ -12,7 +12,7 @@ import { claudeScheduleWakeupDelay, MAX_WAKE_DELIVERY_ATTEMPTS, WAITS_DISCARDED_
 import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt } from './monitoring-turn.testkit.ts';
 import { withDelayedCommand, withHeldPrintResponse, withRejectedCommand } from '../core/owned-input-delivery.testkit.ts';
-import { ciNativeMessages, gatedProviderFailure, persistentWakeFailure, TIMER_WAKE_OPENING, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
+import { ciNativeMessages, gatedProviderFailure, persistentWakeFailure, thenSay, TIMER_WAKE_OPENING, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
 
 // hearsay-tools/cezarion#1233: every runner opens, cancels and survives CI and timer waits on its
 // own native wire. The production tool controller, bundled tool, runner, store and scheduler stay
@@ -708,6 +708,37 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       await expectHumanWaitAnswered(run.id, 'native-ask');
     });
 
+    // A valid ask line later in the turn replaces the card; a boundary the turn end re-enters
+    // (Cursor print's discardQueuedMessages) must show the later card too.
+    it(`${runner} U7h a later ask line in the same turn replaces the cezar_wait card`, async () => {
+      nativeWire(runner);
+      const first = [{ header: 'Parser', question: 'Which parser?', options: [{ label: 'Peg' }, { label: 'Lalr' }] }];
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: `${toolCall('cezar_wait', { kind: 'human', questions: first })} ${thenSay(ASK_TEXT)}`, runner });
+      const wait = await expectHumanWaitAnswered(run.id, 'cezar_wait');
+      expect(wait.questions).toMatchObject(questions);
+      expect(asks(run.id)[0]).toMatchObject({ questions });
+    });
+
+    // The Continue's answer settles the question it answers, never one its own turn asks.
+    it(`${runner} U7h a Continue that answers one question and asks the next keeps the next one open`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'human', questions }), runner });
+      await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined);
+      const [first] = humanOpen(run.id);
+      engine().active.get(run.id)!.session.end();
+      await until(() => !manager.isActive(run.id));
+      const next = [{ header: 'Runner', question: 'Which runner next?', options: [{ label: 'Codex' }, { label: 'Pi' }] }];
+      expect(manager.continueRun(run.id, { text: toolCall('cezar_wait', { kind: 'human', questions: next }) }).ok).toBe(true);
+      await until(() => settled(run.id, first!.id)?.phase === 'delivered' && turnEnds(run.id) > 1 && store.getRun(run.id)?.status === 'waiting');
+      const [second, ...more] = humanOpen(run.id);
+      expect(more).toEqual([]);
+      expect(second).toMatchObject({ phase: 'open', questions: next });
+      expect(second!.id).not.toBe(first!.id);
+      expect(asks(run.id)).toHaveLength(2);
+      expect(second!.askSeq).toBe(asks(run.id)[1]!.seq);
+      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
+    });
+
     it(`${runner} U9h provider failure with a human wait open leaves the run recoverable`, async () => {
       const wire = gatedProviderFailure(root, runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
@@ -812,6 +843,26 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       await until(() => closings(tool).length === 2 && finished(tool));
       expect(closings(tool).map(event => event.via)).toEqual(['cezar_done', 'cezar_done']);
       expect(store.getRun(tool)!.status).toBe(store.getRun(line)!.status);
+    });
+
+    // The answer a Continue opens with is no longer a pending question to cezar_done.
+    it(`${runner} U7d a Continue that answers the question finishes through cezar_done`, async () => {
+      nativeWire(runner);
+      const answers = join(root, 'done-answers');
+      process.env.CEZ_MOCK_CI_RESULT = answers;
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'human', questions }), runner });
+      await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined);
+      const [wait] = humanOpen(run.id);
+      engine().active.get(run.id)!.session.end();
+      await until(() => !manager.isActive(run.id));
+      rmSync(answers, { force: true });
+      expect(manager.continueRun(run.id, { text: toolCall('cezar_done', { summary: 'answered and shipped' }) }).ok).toBe(true);
+      await until(() => existsSync(answers));
+      expect(JSON.parse(JSON.parse(readFileSync(answers, 'utf8')).response.content[0].text.split('\n')[0])).toMatchObject({ ok: true, finishes: 'at_turn_end' });
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? '') && !manager.isActive(run.id));
+      expect(store.readEvents(run.id).filter(event => event.type === 'lifecycle' && event.message === 'goal achieved — session closed'))
+        .toEqual([expect.objectContaining({ via: 'cezar_done' })]);
+      expect(settled(run.id, wait!.id)?.phase).toBe('delivered');
     });
   }
 });

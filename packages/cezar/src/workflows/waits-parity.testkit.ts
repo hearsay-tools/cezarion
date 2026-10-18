@@ -33,6 +33,10 @@ export const WAIT_CRITERIA = [
 export function toolCall(name: 'cezar_wait' | 'cezar_wait_for_ci' | 'cezar_cancel_wait' | 'cezar_done', args: Record<string, unknown>): string {
   return `mock:cezar-tool ${name} ${Buffer.from(JSON.stringify(args)).toString('base64url')}`;
 }
+/** After the `toolCall`s in the same prompt, the turn ends with `text`. */
+export function thenSay(text: string): string {
+  return `mock:then ${Buffer.from(text).toString('base64url')}`;
+}
 
 // Hold the existing native provider-error fixture until CI intent is durable.
 // A scheduler-owned opening prompt fails once; the next process/turn uses the

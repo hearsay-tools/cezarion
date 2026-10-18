@@ -1,7 +1,7 @@
 import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { doneErrorMessage, waitErrorMessage } from '../ci-wait/errors.ts';
-import { cezarDoneRequestSchema, cezarWaitRequestSchema, ciWaitResultSchema, previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type CiWaitRequest, type CiWaitResult, type PreviewServeRequest, type PreviewServeResult, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type DoneErrorCode, type CiWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, computeWaitingOn, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT } from '@open-mercato/cezar-contract';
+import { cezarDoneRequestSchema, cezarWaitRequestSchema, ciWaitResultSchema, previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type CiWaitRequest, type CiWaitResult, type PreviewServeRequest, type PreviewServeResult, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type DoneErrorCode, type CiWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, computeWaitingOn, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract';
 import { ciWatchRequest, hasCiWait, identicalWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import { previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
@@ -1922,22 +1922,29 @@ export class RunManager {
     if (session || !run || !state?.session) return refuse(session ?? 'run_missing', doneErrorMessage(session ?? 'run_missing'));
     if (this.workerWait(runId)) return refuse('worker_wait_pending', doneErrorMessage('worker_wait_pending'));
     if (this.executionBlockedByRootFinish(run)) return refuse('root_finish_pending', doneErrorMessage('root_finish_pending'));
-    if (state.pendingHumanAsk || this.hasPendingHumanAsk(runId)) return refuse('human_question_pending', doneErrorMessage('human_question_pending'));
+    // The answer a continuation opened with is not a pending question while its turn runs.
+    if (state.pendingHumanAsk || this.hasUnansweredHumanAsk(runId)) return refuse('human_question_pending', doneErrorMessage('human_question_pending'));
     if (run.delegation?.role === 'root') {
+      // Every command spelled out while it fits the contract's bound, else the general form:
+      // `workers` still lists each worker.
+      const fit = (full: string, general: string) => full.length <= WAIT_MESSAGE_MAX ? full : general;
       const questions = this.unansweredQuestions(runId);
       if (questions.length) {
-        return refuse('worker_questions', `Your workers asked questions you have not answered. Answer each (${questions.map(q => `\`worker reply ${q.workerId} '<answer>' --id <new-UUID> --request-id ${q.messageId}\``).join(', ')}), then call cezar_done again.`,
+        return refuse('worker_questions', fit(`Your workers asked questions you have not answered. Answer each (${questions.map(q => `\`worker reply ${q.workerId} '<answer>' --id <new-UUID> --request-id ${q.messageId}\``).join(', ')}), then call cezar_done again.`,
+          `Your workers asked ${questions.length} questions you have not answered; \`workers\` lists the workers and \`worker inbox\` shows each question. Answer each (\`worker reply <worker-id> '<answer>' --id <new-UUID> --request-id <question-id>\`), then call cezar_done again.`),
           questions.map(q => ({ worker_id: q.workerId, reason: 'question' })));
       }
       const blockers = this.parentCompletionBlockers(runId);
       const live = blockers.filter(b => b.reason === 'outstanding').map(b => b.workerId);
       if (live.length) {
-        return refuse('workers_outstanding', `Workers are still live: ${live.join(', ')}. Wait for them (\`worker wait ${live.join(' ')}\`, then end your turn) or stop them (${live.map(id => `\`worker stop ${id}\``).join(', ')}), collect their results, then call cezar_done again.`,
+        return refuse('workers_outstanding', fit(`Workers are still live: ${live.join(', ')}. Wait for them (\`worker wait ${live.join(' ')}\`, then end your turn) or stop them (${live.map(id => `\`worker stop ${id}\``).join(', ')}), collect their results, then call cezar_done again.`,
+          `${live.length} workers are still live; \`workers\` lists them. Wait for them (\`worker wait <worker-id>...\`, then end your turn) or stop them (\`worker stop <worker-id>\`), collect their results, then call cezar_done again.`),
           live.map(worker_id => ({ worker_id, reason: 'outstanding' })));
       }
       const uncollected = blockers.filter(b => b.reason === 'uncollected').map(b => b.workerId);
       if (uncollected.length) {
-        return refuse('workers_uncollected', `Settled worker results are not collected yet. Collect each (${uncollected.map(id => `\`worker collect ${id}\``).join(', ')}), then call cezar_done again.`,
+        return refuse('workers_uncollected', fit(`Settled worker results are not collected yet. Collect each (${uncollected.map(id => `\`worker collect ${id}\``).join(', ')}), then call cezar_done again.`,
+          `${uncollected.length} settled worker results are not collected yet; \`workers\` lists them. Collect each (\`worker collect <worker-id>\`), then call cezar_done again.`),
           uncollected.map(worker_id => ({ worker_id, reason: 'uncollected' })));
       }
     }
@@ -6496,6 +6503,9 @@ export class RunManager {
     });
     let openingAnswerAskSeq = checkpoint?.origin === 'human' ? this.pendingHumanAskSeq(runId) : undefined;
     state.openingAnswerAskSeq = openingAnswerAskSeq;
+    // The human waits this answer answers; one the opening turn opens is its next question.
+    const openingAnswerWaits = openingAnswerAskSeq === undefined ? []
+      : openWaits(this.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'human').map(wait => wait.id);
     state.pendingHumanAsk = openingAnswerAskSeq === undefined && this.hasPendingHumanAsk(runId);
 
     let turnText = '';
@@ -6581,7 +6591,7 @@ export class RunManager {
           }
           if (openingAnswerAskSeq !== undefined && state.session?.open) {
             this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: openingAnswerAskSeq, ...(parentAnswer ? { source: 'parent' } : {}) });
-            this.settleHumanWaits(runId);
+            this.settleHumanWaits(runId, openingAnswerWaits);
             openingAnswerAskSeq = undefined;
             state.openingAnswerAskSeq = undefined;
           }
@@ -6604,6 +6614,7 @@ export class RunManager {
           humanWait, doneRequested: !!doneRequest,
         });
         const { done, monitoring, humanGate, ask, notes: askNotes, waitCard } = turn;
+        this.latchAskLineCard(runId, humanWait, turn);
         discardQueuedMessagesOnAsk(state.session, turn);
         const silentTail = turnTail === 'silent';
         const alreadyFinalMessageNudged = state.finalMessageNudged === state.session;
@@ -7636,6 +7647,7 @@ export class RunManager {
           humanWait, doneRequested: !!doneRequest,
         });
         const { done, monitoring, humanGate, ask, notes: askNotes, waitCard } = turn;
+        this.latchAskLineCard(runId, humanWait, turn);
         discardQueuedMessagesOnAsk(state.session, turn);
         const silentTail = turnTail === 'silent';
         const alreadyFinalMessageNudged = state.finalMessageNudged === state.session;
@@ -8029,9 +8041,20 @@ export class RunManager {
   }
 
   /** A human message answers every open human wait, and nothing else (hearsay-tools/cezarion#1234). */
-  private settleHumanWaits(runId: string): void {
-    try { this.store.commitHumanWaitsAnswered(runId); }
+  private settleHumanWaits(runId: string, only?: readonly string[]): void {
+    try { this.store.commitHumanWaitsAnswered(runId, only); }
     catch (error) { console.warn(`[cez] human wait settlement failed: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+
+  /** A valid ask line replaces the card of the human wait its turn registered. It is saved
+   *  before the turn end can re-enter a boundary (Cursor print's ready callback from
+   *  `discardQueuedMessages`), so a wait shown there shows the later card. */
+  private latchAskLineCard(runId: string, wait: HumanWaitEntry | undefined, turn: { ask: AskRequest | null; waitCard: boolean }): void {
+    if (!wait || !turn.ask || turn.waitCard) return;
+    const latest = this.store.getRun(runId)?.waits?.find((entry): entry is HumanWaitEntry => entry.id === wait.id && entry.kind === 'human');
+    if (!latest || latest.phase !== 'open' || latest.askSeq !== undefined) return;
+    try { this.store.commitWait(runId, { ...latest, questions: turn.ask.questions }); }
+    catch (error) { console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
   /** Read fresh: a boundary the turn end re-enters (Cursor print's ready callback from

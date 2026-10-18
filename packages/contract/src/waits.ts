@@ -108,7 +108,9 @@ export const waitErrorCodeSchema = z.enum([
 ]);
 export type WaitErrorCode = z.infer<typeof waitErrorCodeSchema>;
 
-const message = z.string().max(4096);
+/** The bound on every wait and done refusal's `message`; the run manager fits its own to it. */
+export const WAIT_MESSAGE_MAX = 4096;
+const message = z.string().max(WAIT_MESSAGE_MAX);
 
 export const cezarWaitAnswerSchema = z.discriminatedUnion('ok', [
   z.object({

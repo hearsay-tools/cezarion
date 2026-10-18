@@ -412,7 +412,10 @@ const server = createServer((req, res) => {
       if (body.includes('mock:cezar-tool')) {
         const { toolPrompt } = await import('./mock-ci-tool.mjs');
         const text = await toolPrompt('opencode', JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}'), body);
-        send({ type: 'message.part.updated', properties: { part: { id: 'tool-result', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text } } });
+        // A completed assistant message, as on the other runners' wires, so its text (an ask line
+        // after the calls, say) reaches the turn end.
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        send({ type: 'message.part.updated', properties: { part: { id: 'tool-result', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text, time: { start: 1, end: 2 } } } });
         send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
         return;
       }

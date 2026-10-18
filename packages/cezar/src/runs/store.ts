@@ -2771,9 +2771,9 @@ export class RunStore extends EventEmitter {
 
   /** The user answered: every open human wait moves to `lastWaits` as `delivered` in one commit
    *  (hearsay-tools/cezarion#1234). Returns their ids, empty when none was open. */
-  commitHumanWaitsAnswered(id: string): string[] {
+  commitHumanWaitsAnswered(id: string, only?: readonly string[]): string[] {
     const run = this.peek(id);
-    const answered = (run?.waits ?? []).filter((wait) => wait.kind === 'human' && wait.phase === 'open');
+    const answered = (run?.waits ?? []).filter((wait) => wait.kind === 'human' && wait.phase === 'open' && (!only || only.includes(wait.id)));
     if (!run || !answered.length) return [];
     const deliveredAt = new Date().toISOString();
     const ids = new Set(answered.map((wait) => wait.id));

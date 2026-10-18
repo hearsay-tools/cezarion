@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { deriveAttention, toRunSummary, type CezarWaitRequest, type HumanWaitEntry } from '@open-mercato/cezar-contract';
+import { cezarDoneAnswerSchema, deriveAttention, toRunSummary, type CezarWaitRequest, type HumanWaitEntry } from '@open-mercato/cezar-contract';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
@@ -253,6 +253,40 @@ describe('the lifecycle prompt follows the session\'s cezar tools', { timeout: 4
     for (const prompt of prompts()) {
       expect(prompt).toContain(handoffInstructions({ tools: true, followups: false }));
       expect(prompt).not.toContain('CEZ:DONE');
+    }
+  });
+});
+
+// hearsay-tools/cezarion#1234: a refusal that lists every blocking worker still fits the contract's
+// message bound at worker capacity, so the controller never turns it into `unavailable`.
+describe('cezar_done refusals at worker capacity', { timeout: 45_000 }, () => {
+  useWorkerWaitFixture();
+  afterEach(() => vi.restoreAllMocks());
+
+  const ids = () => Array.from({ length: 32 }, () => randomUUID());
+  const internals = () => manager as unknown as {
+    unansweredQuestions(id: string): { workerId: string; messageId: string }[];
+    parentCompletionBlockers(id: string): { workerId: string; reason: string }[];
+  };
+  const done = (id: string) => tools(id).finishTurn({}, new AbortController().signal);
+
+  it('every refusal naming 32 workers parses as a CezarDoneAnswer', async () => {
+    claudeWire();
+    const p = await parent(HARNESS_ADAPTERS.claude.scenarios.baseline!, 'claude');
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const asked = vi.spyOn(internals(), 'unansweredQuestions').mockReturnValue(ids().map(workerId => ({ workerId, messageId: randomUUID() })));
+    const questions = await done(p.id);
+    expect(cezarDoneAnswerSchema.safeParse(questions).success).toBe(true);
+    expect(questions).toMatchObject({ ok: false, code: 'worker_questions' });
+    expect(questions.ok === false && questions.workers).toHaveLength(32);
+    asked.mockReturnValue([]);
+    const blockers = vi.spyOn(internals(), 'parentCompletionBlockers');
+    for (const reason of ['outstanding', 'uncollected'] as const) {
+      blockers.mockReturnValue(ids().map(workerId => ({ workerId, reason })));
+      const refused = await done(p.id);
+      expect(cezarDoneAnswerSchema.safeParse(refused).success).toBe(true);
+      expect(refused).toMatchObject({ ok: false, code: reason === 'outstanding' ? 'workers_outstanding' : 'workers_uncollected' });
+      expect(refused.ok === false && refused.workers).toHaveLength(32);
     }
   });
 });
