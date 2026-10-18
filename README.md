@@ -599,7 +599,7 @@ accepts review. A wait ends only when its own result arrives, its deadline passe
 or someone cancels it: the agent with `cezar_cancel_wait`, or Cezar when the task
 is stopped, finished, cancelled or deleted. A human message wakes the agent without
 closing any wait, and every delivered turn ends with a list of the waits still open.
-CI never answers a pending human question. If the agent's session fails while a
+CI never answers a pending human question. If the agent's session fails or closes while a
 result is owed, Cezar retries the delivery after 15 and then 30 seconds; a third
 failure marks the task failed and keeps the result, and Continue delivers it.
 Controller recovery can replay an

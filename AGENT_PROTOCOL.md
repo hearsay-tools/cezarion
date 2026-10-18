@@ -871,16 +871,17 @@ scheduler continuation that delivers a wait result) and a human message start it
 at 0. Durable per-run accounting is phase 2.
 
 That budget cannot stop a delivery whose session keeps failing, since every retry is a
-new session, so failed deliveries have their own bound. A session that fails while the run
-owes resolved results (a provider error on the opening or resume prompt, a rejected
-acknowledgement beside a question, a crash) counts one failed delivery, and the next
+new session, so failed deliveries have their own bound. A session that fails (a provider
+error on the opening or resume prompt, a rejected acknowledgement beside a question, a crash)
+or closes cleanly while the run owes resolved, unacknowledged results counts one failed delivery, and the next
 attempt starts after `WAKE_RETRY_BACKOFF` (15 s, then 30 s), not at once. The third
 consecutive failure (`MAX_WAKE_DELIVERY_ATTEMPTS`) settles the run `failed` through the
 ordinary failure path, with the last error and the note `could not deliver wait results
-after 3 attempts — continue this task to retry`. The count is in-memory `RunManager` state
+after 3 attempts — continue this task to retry`; after a clean close the error is `the session
+closed before the wait results were delivered`. The count is in-memory `RunManager` state
 in phase 1, so a restart starts it again; a delivery acknowledgement, human input or a
-question answer, Continue, Stop, Finish and cancel reset it. A failure with nothing
-resolved, and a clean close, are not counted. A usage-limit failure that owes results
+question answer, Continue, Stop, Finish and cancel reset it. A failure or clean close with
+nothing resolved is not counted and parks as before. A usage-limit failure that owes results
 settles `failed` at once, uncounted, so the usage-limit hold and its automatic resume take
 it. A `failed` run that owes results is the one terminal run that keeps its waits: they stay
 resolved and undelivered, its open waits stay armed (across a restart too) and still
@@ -1082,7 +1083,10 @@ acknowledges on the first model work of the process it spawns, which U12 delays,
 print wire has no rejection of an admitted prompt. U14 fails every wait-wake continuation's
 opening prompt through each runner's native provider-error wire, with a resolved timer and no
 question: the same bound, a timer that resolves on the failed run stays resolved and wakes
-nothing, and Continue delivers both results once. Scenario cases that need one wire live in
+nothing (no queued continuation, admission retry or backoff is left), and Continue delivers both
+results once. A second U14 case closes every session cleanly at a turn end while the result is
+owed, as U9 closes one at a boundary: the original session, whose turn the timer resolves in, and
+two continuations, then the same held state with the clean-close error, and Continue delivers once. Scenario cases that need one wire live in
 `workflows/waits-wake.test.ts`: a CI result beside a pending portable question (U3b,
 Claude and Codex), a Codex native question, an idle-closed question, two waits in one
 submission, the footer and the monitoring pool, and on the Claude wire the delivery bound's

@@ -261,8 +261,8 @@ continuation and delivers what resolved. This generalises today's CI policy
 (R72–R76) to workers, timers and human waits. Today's "clean close with an
 outstanding worker wait is an error" (`run.ts` `7276-7280`) becomes a park. A
 terminal status (stop, Finish, cancel, deletion) cancels open waits without
-waking the agent, as it retires CI intent today. A failure while resolved results
-are still undelivered is a failed delivery: the retry waits for a short backoff,
+waking the agent, as it retires CI intent today. A failure or a clean close while
+resolved results are still undelivered is a failed delivery: the retry waits for a short backoff,
 and the delivery bound below settles the run `failed` with the results kept
 instead of retrying forever. Only a `failed` run that owes results keeps its waits.
 
@@ -517,16 +517,18 @@ builder" unless a bullet says otherwise.
 - **Failed deliveries are bounded across sessions.** The per-session budget cannot stop a
   delivery whose session keeps failing, because every retry is a new session. So a session that
   fails (a provider error on the opening or resume prompt, a rejected acknowledgement beside a
-  question, a crash) while the run still owes resolved results counts one failed delivery, in
-  `execute` and in `runContinuation` alike. The next attempt waits `WAKE_RETRY_BACKOFF` (15 s,
+  question, a crash) or closes cleanly while the run still owes resolved, unacknowledged results
+  counts one failed delivery, in `execute` and in `runContinuation` alike. The next attempt waits `WAKE_RETRY_BACKOFF` (15 s,
   then 30 s) instead of starting at once; the third consecutive failure
   (`MAX_WAKE_DELIVERY_ATTEMPTS`, beside `MAX_AUTO_RESUMES`) settles the run `failed` through
   the ordinary failure path, with the last error and the note `could not deliver wait results
-  after 3 attempts — continue this task to retry`. The count lives on the `RunManager`, in
+  after 3 attempts — continue this task to retry`. When the last attempt closed cleanly, that
+  error is `the session closed before the wait results were delivered`
+  (`WAKE_SESSION_CLOSED_ERROR`), on the step and, prefixed as any failure is, on the run. The count lives on the `RunManager`, in
   memory: a restart starts it again, like the per-session budget. A delivery acknowledgement,
   human input or a question answer, Continue, Stop, Finish and cancel reset it. A session that
-  fails with nothing resolved is not counted (its open waits wake it later), nor is a clean
-  close. A usage-limit failure that owes results settles `failed` at once without being counted,
+  fails or closes cleanly with nothing resolved is not counted, and keeps today's park: its open
+  waits wake it later. A usage-limit failure that owes results settles `failed` at once without being counted,
   so the usage-limit hold and its automatic resume take it, and the resume delivers them.
 - **A failed run keeps the results it owes.** A `failed` run with a resolved wait is the one
   terminal row whose waits are not cancelled: its resolved waits stay resolved and undelivered,
