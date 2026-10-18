@@ -90,7 +90,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(store.readEvents(id).some(e => e.type === 'note' && String(e.message).startsWith('autonomous — safety cap reached (40)'))).toBe(true);
   });
 
-  it('a refused portable override leaves the question and budget untouched', () => {
+  it('a nudge the wire refuses after an ask line leaves the question and budget untouched', () => {
     vi.mocked(session.sendMessage).mockReturnValue(false);
     expect(manager['tryAutonomousNudge'](id, state, 'task', ask)).toBe(false);
     expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);

@@ -154,13 +154,13 @@ export const IDLE_TIMEOUT_MS = 15 * 60_000;
  * (codex, opencode) can't split the marker across text events.
  */
 import { PROSE_HUMAN_GATE, workerOutcomeKey } from '../runs/transcript-facts.ts';
-/** Classify only active prose: quoted/indented examples and fenced code cannot
- * declare a park or request a human. A standalone monitoring line belongs to
- * this turn even when a later assistant block acknowledges a new instruction. */
-function turnParkSignals(text: string): { monitoring: boolean; humanGate: boolean; done: boolean; askResult: AskMarkerParseResult } {
+/** Find the turn's active markers: quoted/indented examples and fenced code declare
+ * nothing. A standalone monitoring line belongs to this turn even when a later
+ * assistant block acknowledges a new instruction. The prose itself is never read
+ * (hearsay-tools/cezarion#1234). */
+function turnParkSignals(text: string): { monitoring: boolean; done: boolean; askResult: AskMarkerParseResult } {
   let fence: { char: string; length: number } | undefined;
   let monitoring = false;
-  let humanGate = false;
   let done = false;
   let askResult: AskMarkerParseResult = { kind: 'none' };
   let previous = '';
@@ -183,12 +183,10 @@ function turnParkSignals(text: string): { monitoring: boolean; humanGate: boolea
     const example = /\b(?:example|sample|literal|quoted)(?: marker)?\s*:\s*$/i.test(previous);
     if (!example && raw.trim() === 'CEZ:MONITORING') {
       monitoring = true;
-      humanGate = false; // a later declaration supersedes earlier, resolved prose
       done = false;
     }
     if (!example && raw.trim() === 'CEZ:DONE') {
       done = true;
-      humanGate = false;
       askResult = { kind: 'none' }; // retain the existing later-DONE precedence
     }
     // Preserve the existing payload validation/repair and latest malformed
@@ -196,19 +194,9 @@ function turnParkSignals(text: string): { monitoring: boolean; humanGate: boolea
     // a real ASK must not erase its card, nor turn examples into questions.
     const candidate = example ? { kind: 'none' as const } : parseAskMarkerResult(raw);
     if (candidate.kind !== 'none') { askResult = candidate; done = false; }
-    // Deliberately require a direct question/request, not words like "review",
-    // "checks" or "approval" in progress reports (hearsay-tools/cezarion#772 and hearsay-tools/cezarion#609).
-    const prose = line.replace(/`[^`]*`|"[^"]*"/g, '');
-    if (!example && prose.split(/(?<=[.!?])\s+/).some(sentence =>
-      /^(?:(?:should|shall|can|may) I\b|(?:do|would|could|can|will|are) you\b).*\?\s*$/i.test(sentence) ||
-      /^(?:which|what|how|where|when|who)\b.*\b(?:you|(?:should|shall|can|may) (?:I|we))\b.*\?\s*$/i.test(sentence) ||
-      /^(?:which|what) (?:module|option|approach|strategy|framework|library)\?\s*$/i.test(sentence) ||
-      /^(?:is|are) (?:this|these|that|it)\b.*\b(?:ok(?:ay)?|acceptable|approved)\?\s*$/i.test(sentence) ||
-      /^(?:please\s+(?:review|approve|confirm|choose|decide|answer|select|provide)\b|(?:I(?:['’]m| am)?\s+)?(?:need|awaiting|waiting for)\s+your\s+(?:review|approval|confirmation|answer|decision|input|permission)\b|(?:the )?PR (?:is )?ready for (?:your )?review\b)/i.test(sentence)
-    )) { humanGate = true; done = false; }
     previous = line;
   }
-  return { monitoring, humanGate, done, askResult };
+  return { monitoring, done, askResult };
 }
 /** Claude's native scheduler is the backend-level equivalent of the textual
  * monitoring marker. Keep this recognition here, at the workflow boundary,
@@ -353,29 +341,25 @@ function orderedTurnText(v1: string, v2: string): string | undefined {
  * ACK settles. DONE and human/completion gates take precedence over a quiet
  * declaration or live workers; a false pending-ASK flag alone proves nothing.
  * A human wait this turn registered and nobody has seen yet (hearsay-tools/cezarion#1234)
- * raises its card, or the gate when it has none, unless DONE wins or a valid ask line
+ * raises its card, or the human gate when it has none, unless DONE wins or a valid ask line
  * replaces its card; `waitCard` says the card is the wait's own. An accepted `cezar_done` is DONE
- * whatever the text says, and beats any ask line in it. */
+ * whatever the text says, and beats any ask line in it. Only markers and waits count: no prose
+ * raises the gate, and a rejected ask line is a turn end with no wait. */
 function classifyTurnEnd(turnText: string, completedAssistantText: string, options: {
   sessionOpen: boolean; interactive: boolean; pendingHumanAsk: boolean;
-  completionAttention: boolean; scheduledWake: boolean; liveWorkers: boolean; dependencyWait: boolean;
+  completionAttention: boolean; scheduledWake: boolean; liveWorkers: boolean;
   humanWait?: { questions?: AskRequest['questions'] }; doneRequested?: boolean;
 }): AskTurnOutcome & { done: boolean; monitoring: boolean; humanGate: boolean; waitCard: boolean } {
   const complete = orderedTurnText(turnText, completedAssistantText);
   const v1 = turnParkSignals(complete ?? turnText);
   const v2 = complete === undefined ? turnParkSignals(completedAssistantText) : v1;
-  const doneLine = (v1.done || v2.done) && v1.askResult.kind === 'none' && v2.askResult.kind === 'none' && !v1.humanGate && !v2.humanGate;
+  const doneLine = (v1.done || v2.done) && v1.askResult.kind === 'none' && v2.askResult.kind === 'none';
   const done = options.interactive && options.sessionOpen && (!!options.doneRequested || doneLine);
   const askTurn = resolveAskTurn(v1.askResult, v2.askResult, options.sessionOpen && !done);
-  // Ordinary markerless autonomous turns keep their existing nudge policy.
-  // Prose and rejected-ASK fallbacks override a quiet park this turn would
-  // otherwise enter. Recovery notes beside a valid card are not rejections.
-  const quietPark = v1.monitoring || v2.monitoring || options.scheduledWake || options.liveWorkers || options.dependencyWait;
-  const rejectedAsk = !askTurn.ask && askTurn.notes.length > 0;
   const surfaced = options.humanWait && options.sessionOpen && !done && !askTurn.ask ? options.humanWait : undefined;
   const waitCard = !!surfaced?.questions;
   const ask = askTurn.ask ?? (surfaced?.questions ? { questions: surfaced.questions } : null);
-  const humanGate = (!done && quietPark && (v1.humanGate || v2.humanGate || rejectedAsk)) || (!!surfaced && !waitCard);
+  const humanGate = !!surfaced && !waitCard;
   const monitoring = options.interactive && options.sessionOpen && !done && !ask &&
     !options.pendingHumanAsk && !options.completionAttention && !humanGate &&
     (v1.monitoring || v2.monitoring || options.scheduledWake || options.liveWorkers);
@@ -592,6 +576,8 @@ export const NO_WAIT_NUDGE_REPLY_MS = 5 * 60_000;
 export const NO_WAIT_NUDGE_NOTE = 'no wait or done — reminding the agent once';
 export const NO_WAIT_NOTE = 'waiting for you: the agent ended its turn without a wait or done';
 export const NO_WAIT_NO_REPLY_NOTE = 'no reply to the no-wait nudge — waiting for you';
+/** An autonomous run's ask line before the budget, which `cezar_ask` would refuse: its questions follow. */
+export const AUTONOMOUS_ASK_NOTE = 'autonomous — question not registered; continuing';
 type TurnEndOutcome = 'defer' | 'done' | 'park' | 'complete-step' | 'nudge' | 'human-wait';
 /** Bound one unattended session; an explicit Continue starts a new budget. */
 export const MAX_AUTO_CONTINUES = 40;
@@ -6654,7 +6640,6 @@ export class RunManager {
           sessionOpen: !!sessionOpen, interactive: true, pendingHumanAsk: !!state.pendingHumanAsk,
           completionAttention: this.parentCompletionAttention(runId), scheduledWake: scheduleWakeup !== undefined,
           liveWorkers: this.hasLiveWorkers(runId),
-          dependencyWait: !!(this.workerWait(runId) || this.store.getRun(runId)?.waits?.length),
           humanWait, doneRequested: !!doneRequest,
         });
         const { done, monitoring, humanGate, ask, notes: askNotes, waitCard } = turn;
@@ -6670,12 +6655,13 @@ export class RunManager {
         scheduleWakeup = undefined;
         for (const note of askNotes) this.store.appendEvent(runId, { type: 'note', ...note, stepId });
         this.store.updateRun(runId, { invalidAsk: !ask && askNotes.length > 0 ? true : undefined });
-        // Only a newly parsed portable ASK can be overridden. Do this before
+        // An autonomous run registers no newly parsed ask line before the budget, as `cezar_ask`
+        // refuses it (hearsay-tools/cezarion#1234): the autonomous nudge goes instead. Do this before
         // prepareHumanAsk latches it; an existing/native ask or a human wait's card still blocks the helper.
         let autoContinued = !!ask && !waitCard && !!sessionOpen && this.tryAutonomousNudge(runId, state, stepId, ask);
         if (ask && !autoContinued) this.prepareHumanAsk(runId, state);
-        if (humanGate && !ask && !state.pendingHumanAsk) this.prepareProseHumanGate(runId, state);
-        if (humanGate && !ask) this.recordTurnEndQuestion(runId, state, humanWait, null, askNotes.length > 0);
+        if (humanGate && !ask && !state.pendingHumanAsk) this.raiseHumanGate(runId, state);
+        if (humanGate && !ask) this.recordTurnEndQuestion(runId, state, humanWait, null);
         const workerWaitParked = this.parkAtTurnEnd(runId, state, { done, humanGate, sessionOpen: !!sessionOpen });
         this.recordDoneAtBoundary(state, done, doneRequest);
         state.parkAfterAck = sessionOpen && state.session ? { session: state.session, monitoring, humanGate, nudgedLastTurn, scheduleWakeup: turnWakeDelay } : undefined;
@@ -6695,7 +6681,7 @@ export class RunManager {
         if (sessionOpen && !agentInputDelivered && !workerWaitParked && !this.workerWakeAdmitted.has(runId)) {
           // `CEZ:ASK` surfaces the structured question as an ask card (#473) before the rule parks
           // on it; the rule then decides the rest (hearsay-tools/cezarion#1234).
-          if (ask && !this.humanWaitShown(runId, humanWait)) { emitAskRequested(sink, ask); this.recordTurnEndQuestion(runId, state, humanWait, ask, !waitCard); this.routeWorkerQuestion(runId); }
+          if (ask && !this.humanWaitShown(runId, humanWait)) { emitAskRequested(sink, ask); this.recordTurnEndQuestion(runId, state, humanWait, ask); this.routeWorkerQuestion(runId); }
           outcome = this.applyTurnEnd(runId, state, stepId, { finalStep: true, monitoring, scheduleWakeup: turnWakeDelay, question: !!ask || humanGate, nudgedLastTurn });
         }
         // A turn that completed is the ONLY evidence the provider's window actually reopened, so
@@ -7688,7 +7674,6 @@ export class RunManager {
           sessionOpen: !!sessionOpen, interactive, pendingHumanAsk: !!state.pendingHumanAsk,
           completionAttention: this.parentCompletionAttention(runId), scheduledWake: scheduleWakeup !== undefined,
           liveWorkers: this.hasLiveWorkers(runId),
-          dependencyWait: !!(this.workerWait(runId) || this.store.getRun(runId)?.waits?.length),
           humanWait, doneRequested: !!doneRequest,
         });
         const { done, monitoring, humanGate, ask, notes: askNotes, waitCard } = turn;
@@ -7704,12 +7689,13 @@ export class RunManager {
         scheduleWakeup = undefined;
         for (const note of askNotes) emit({ type: 'note', stepId: step.id, ...note });
         this.store.updateRun(runId, { invalidAsk: !ask && askNotes.length > 0 ? true : undefined });
-        // Only a newly parsed portable ASK can be overridden. Do this before
+        // An autonomous run registers no newly parsed ask line before the budget, as `cezar_ask`
+        // refuses it (hearsay-tools/cezarion#1234): the autonomous nudge goes instead. Do this before
         // prepareHumanAsk latches it; an existing/native ask or a human wait's card still blocks the helper.
         let autoContinued = !!ask && !waitCard && !!sessionOpen && this.tryAutonomousNudge(runId, state, step.id, ask);
         if (ask && !autoContinued) this.prepareHumanAsk(runId, state);
-        if (humanGate && !ask && !state.pendingHumanAsk) this.prepareProseHumanGate(runId, state);
-        if (humanGate && !ask) this.recordTurnEndQuestion(runId, state, humanWait, null, askNotes.length > 0);
+        if (humanGate && !ask && !state.pendingHumanAsk) this.raiseHumanGate(runId, state);
+        if (humanGate && !ask) this.recordTurnEndQuestion(runId, state, humanWait, null);
         const workerWaitParked = this.parkAtTurnEnd(runId, state, { done, humanGate, sessionOpen: !!sessionOpen });
         this.recordDoneAtBoundary(state, done, doneRequest);
         state.parkAfterAck = (interactive || humanGate) && sessionOpen && state.session ? { session: state.session, monitoring, humanGate, nudgedLastTurn, scheduleWakeup: turnWakeDelay } : undefined;
@@ -7730,7 +7716,7 @@ export class RunManager {
         // Turn over, session open: the rule decides (hearsay-tools/cezarion#1234). A structured
         // `CEZ:ASK` question is shown as an ask card (#473) first; a step that is not the last
         // parks only on its waits, and otherwise its session ends and the next step runs.
-        if (parkable && ask && !this.humanWaitShown(runId, humanWait)) { emitAskRequested(sink, ask); this.recordTurnEndQuestion(runId, state, humanWait, ask, !waitCard); this.routeWorkerQuestion(runId); }
+        if (parkable && ask && !this.humanWaitShown(runId, humanWait)) { emitAskRequested(sink, ask); this.recordTurnEndQuestion(runId, state, humanWait, ask); this.routeWorkerQuestion(runId); }
         const outcome = parkable
           ? this.applyTurnEnd(runId, state, step.id, { finalStep: interactive, monitoring, scheduleWakeup: turnWakeDelay, question: !!ask || humanGate, nudgedLastTurn })
           : undefined;
@@ -7998,10 +7984,10 @@ export class RunManager {
     }
   }
 
-  /** A prose or rejected-ASK fallback supersedes a registered autonomous wait. Keep the
-   * checkpoint through idle closure/restart and hold worker input until a
-   * successful human delivery, just as for a structured ask. */
-  private prepareProseHumanGate(runId: string, state: ActiveRun): void {
+  /** The human gate a human wait without a card raises (the monitoring line with re-checks off):
+   * `PROSE_HUMAN_GATE` names it in the transcript. Keep the checkpoint through idle closure/restart
+   * and hold worker input until a successful human delivery, just as for a structured ask. */
+  private raiseHumanGate(runId: string, state: ActiveRun): void {
     this.store.appendEvent(runId, { type: 'note', stepId: state.currentStepId,
       code: PROSE_HUMAN_GATE, message: 'waiting for a human response to the assistant’s request' });
     this.prepareHumanAsk(runId, state);
@@ -8068,7 +8054,7 @@ export class RunManager {
       if (wait.questions) {
         this.store.appendEvent(runId, { type: 'ask.requested', requestId: randomUUID(), questions: wait.questions, ...(stepId ? { stepId } : {}) });
         if (state) this.prepareHumanAsk(runId, state);
-      } else if (state) this.prepareProseHumanGate(runId, state);
+      } else if (state) this.raiseHumanGate(runId, state);
       else {
         this.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), code: PROSE_HUMAN_GATE, message: 'waiting for a human response to the assistant’s request' });
         this.withdrawWorkerWait(runId);
@@ -8136,9 +8122,9 @@ export class RunManager {
   }
 
   /** The turn end raised a card or the gate: record the human wait it shows. A turn that registered
-   *  none opens the ask line's, without a card when the line was rejected. A prose gate opens none. */
-  private recordTurnEndQuestion(runId: string, state: ActiveRun, wait: HumanWaitEntry | undefined, ask: AskRequest | null, askLine: boolean): void {
-    const shown = wait ?? (askLine ? this.openHumanAlias(runId, state, 'ask-line', ask?.questions) : undefined);
+   *  none opens the ask line's. */
+  private recordTurnEndQuestion(runId: string, state: ActiveRun, wait: HumanWaitEntry | undefined, ask: AskRequest | null): void {
+    const shown = wait ?? (ask ? this.openHumanAlias(runId, state, 'ask-line', ask.questions) : undefined);
     if (shown) this.markHumanWaitSurfaced(runId, shown, ask?.questions);
   }
 
@@ -8724,7 +8710,8 @@ export class RunManager {
    * teardown. Native mid-turn asks still park for an answer (outside this policy).
    * A refused ordinary nudge waits for readiness at this exact boundary; the idle
    * timeout bounds a missing readiness signal. New activity/input invalidates it.
-   * A refused portable override falls back to normal question parking.
+   * `ask` is this turn's ask line, which an autonomous run does not register before the budget
+   * (hearsay-tools/cezarion#1234). A wire that refuses the nudge registers it after all.
    */
   private tryAutonomousNudge(runId: string, state: ActiveRun, stepId: string, ask: AskRequest | null): boolean {
     const session = state.session;
@@ -8739,12 +8726,12 @@ export class RunManager {
     const content: ContentBlock[] = [{ type: 'text', text: AUTONOMOUS_NUDGE }];
     // sendAgentMessage deliberately refuses portable asks on some native wires.
     // The existing answer transport clears that marker, but is safe ONLY for this
-    // fresh turn-end ASK: the guards above exclude every pending native/persisted
+    // fresh turn-end ask line: the guards above exclude every pending native/persisted
     // question. Do not route via deliverMessage, which attributes a human answer.
     // Ordinary nudges keep #505's acknowledged agent-input failure semantics.
     const sent = ask ? session.sendMessage(content) : this.submitAgentInput(runId, state, content);
     if (!sent) {
-      // A portable override uses sendMessage: its POST may still be awaiting ACK
+      // An unregistered ask line uses sendMessage: its POST may still be awaiting ACK
       // after the next SSE turn ends. It is not an agentInputFlight. Keep this
       // exact boundary running until onAgentInputReady retries, without charging
       // the cap or claiming delivery. Missing readiness closes via the idle bound.
@@ -8755,16 +8742,16 @@ export class RunManager {
       return false;
     }
     if (ask) this.resumeParkedRun(runId, state);
-    const spent = this.chargeAutomaticWake(runId);
-    this.store.appendEvent(runId, {
-      type: 'note', stepId,
-      message: `autonomous — continuing without pausing (${spent}/${MAX_AUTO_CONTINUES})`,
-    });
     // The marker is stripped from visible text. Retain the question as a note,
     // never an ask card or a fabricated human-input-delivered acknowledgement.
     if (ask) this.store.appendEvent(runId, {
       type: 'note', stepId,
-      message: `autonomous — question overridden by the auto-continue nudge: ${ask.questions.map(question => question.question).join(' | ')}`,
+      message: `${AUTONOMOUS_ASK_NOTE}: ${ask.questions.map(question => question.question).join(' | ')}`,
+    });
+    const spent = this.chargeAutomaticWake(runId);
+    this.store.appendEvent(runId, {
+      type: 'note', stepId,
+      message: `autonomous — continuing without pausing (${spent}/${MAX_AUTO_CONTINUES})`,
     });
     return true;
   }

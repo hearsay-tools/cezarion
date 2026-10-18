@@ -1,5 +1,4 @@
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, it, describe } from 'vitest';
@@ -7,13 +6,12 @@ import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import type { ApiRun } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
-import { CredentialRegistry } from '../delegation/credentials.ts';
-import { DelegationService } from '../delegation/service.ts';
 import { attentionFields, projectStatus } from '../task-cli/projections.ts';
 import { endsWait } from '../task-cli/watch.ts';
 import { TaskWebhook, type TaskWebhookPayload } from '../runs/webhook.ts';
+import { AUTONOMOUS_ASK_NOTE } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { manager, store, root, worker, until, semaphore, useWorkerWaitFixture, register, waitOf, restart, eventCheckpoint } from './worker-wait.testkit.ts';
+import { manager, store, root, worker, until, semaphore, useWorkerWaitFixture, register, waitOf } from './worker-wait.testkit.ts';
 import { MONITORING_TURN_CRITERIA, messagesPrompt, MONITORING_TEXT, ACK_TEXT, ASK_TEXT, REJECTED_ASK_TEXT } from './monitoring-turn.testkit.ts';
 import { monitoringTimerOf, monitoringWakeOf } from './waits.testkit.ts';
 
@@ -68,61 +66,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
       });
       store.updateRun(p.id, { notify: true });
       try {
-        if (row.id === 'M16' || row.id === 'M25') {
-          process.env.CEZ_DELEGATION = '1';
-          store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
-          const w = await worker(p.id);
-          process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
-          manager.enqueueOwnedRun(w.id);
-          await until(() => store.getRun(w.id)?.status === 'waiting');
-          let acceptedWaitId = '';
-          await send([MONITORING_TEXT, ...(row.id === 'M25' ? [ASK_TEXT, REJECTED_ASK_TEXT, ACK_TEXT] : ['Please review the changes before I continue.'])], () => {
-            acceptedWaitId = register(p.id, [w.id]).id;
-            expect(waitOf(run())?.phase).toBe('registered');
-          });
-          attention('needs you', true);
-          expect(run().hasPendingHumanAsk).not.toBe(true);
-          expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested')).toHaveLength(0);
-          const gateSeq = store.readEvents(p.id).filter(event => event.type === 'note' && event.code === 'unstructured-human-gate').at(-1)!.seq;
-          if (row.id === 'M25') {
-            expect(run().invalidAsk).toBe(true);
-            expect(store.readEvents(p.id).some(event => event.type === 'text' && String(event.text).includes(REJECTED_ASK_TEXT))).toBe(true);
-          }
-          const timer = manager['active'].get(p.id)!.idleTimer! as NodeJS.Timeout & { _onTimeout(): void };
-          const expire = timer._onTimeout; clearTimeout(timer); expire();
-          await until(() => !manager.isActive(p.id));
-          expect(run().status).toBe('waiting');
-          expect(run().error).toBeUndefined();
-          expect(store.getRun(w.id)?.status).toBe('waiting');
-          expect(manager.isActive(w.id)).toBe(true);
-          expect(waitOf(run())).toBeUndefined();
-          expect(run().agentInputs?.some(input => input.id === acceptedWaitId)).not.toBe(true);
-          const credentials = new CredentialRegistry();
-          const service = new DelegationService();
-          service.registerProject({ id: 'project', root, store, manager });
-          const id = randomUUID();
-          try {
-            const caller = credentials.authenticate(credentials.issue('project', w.id, randomUUID()))!;
-            await service.send(caller, { id, recipientRunId: p.id, kind: 'progress',
-              text: messagesPrompt(backend, [MONITORING_TEXT, ACK_TEXT]), timeoutSeconds: 600 });
-            expect(run().agentInputs?.find(input => input.id === id)?.deliveredAt).toBeUndefined();
-            attention('needs you', true);
-          } finally { credentials.close(); }
-          const events = eventCheckpoint();
-          hook.dispose(); // restart replaces the fixture store
-          await restart(false, undefined, events);
-          attention('needs you', true);
-          expect(manager.isActive(p.id)).toBe(false);
-          expect(waitOf(run())).toBeUndefined();
-          expect(run().agentInputs?.find(input => input.id === id)?.deliveredAt).toBeUndefined();
-          expect(store.getRun(w.id)?.status).not.toBe('cancelled');
-          expect(manager.continueRun(p.id, { text: messagesPrompt(backend, [MONITORING_TEXT, ACK_TEXT]) }).ok).toBe(true);
-          await until(() => run().status === 'waiting' && !!monitoringWakeOf(run()));
-          attention('monitoring', false);
-          expect(store.readEvents(p.id).some(event => event.type === 'human-input-delivered' && event.askSeq === gateSeq)).toBe(true);
-          expect(run().invalidAsk).not.toBe(true);
-          expect(run().agentInputs?.find(input => input.id === id)?.deliveredAt).toBeDefined();
-        } else if (row.id === 'M1') {
+        if (row.id === 'M1') {
           await send([MONITORING_TEXT, ACK_TEXT]);
           attention('monitoring', false);
           expect(monitoringWakeOf(run())).toBeDefined();
@@ -135,12 +79,6 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           // Its mock response has no declaration.
           await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && run().status === 'waiting');
           attention('needs you', true);
-        } else if (row.id === 'M15') {
-          for (const gate of ['### Should I merge this PR?', '- [ ] Please review the changes before I continue.', '- Should I merge this PR?', '**Please review the changes before I continue.**', '1. __I need your approval before proceeding.__', '*Should I merge this PR?* Please let me know.']) {
-            await send([MONITORING_TEXT, gate]);
-            attention('needs you', true);
-            expect(monitoringWakeOf(run())).toBeUndefined();
-          }
         } else if (row.id === 'M12') {
           await send(['Should I merge this PR?', 'That step is approved; the load campaign is still running.\nCEZ:MONITORING', ACK_TEXT]);
           attention('monitoring', false);
@@ -150,21 +88,27 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           attention('monitoring', false);
           expect(monitoringWakeOf(run())).toBeDefined();
         } else if (row.id === 'M2' || row.id === 'M3') {
-          for (const gate of row.id === 'M2' ? ['Should I merge this PR?', 'The checks passed. Do you want me to merge?', 'Which module?', 'Is this okay?'] : ['Please review the changes before I continue.', 'The checks passed. I need your approval before proceeding.', 'The PR is ready for your review.']) {
+          // No prose is read (hearsay-tools/cezarion#1234): questions, review requests and their
+          // Markdown forms leave the monitoring line's timer in place.
+          for (const gate of row.id === 'M2'
+            ? ['Should I merge this PR?', 'The checks passed. Do you want me to merge?', 'Which module?', 'Is this okay?', '### Should I merge this PR?', '- Should I merge this PR?', '*Should I merge this PR?* Please let me know.']
+            : ['Please review the changes before I continue.', 'The checks passed. I need your approval before proceeding.', 'The PR is ready for your review.', '- [ ] Please review the changes before I continue.', '**Please review the changes before I continue.**', '1. __I need your approval before proceeding.__']) {
             await send([MONITORING_TEXT, gate]);
-            attention('needs you', true);
+            attention('monitoring', false);
+            expect(monitoringWakeOf(run())).toBeDefined();
           }
           expect(run().hasPendingHumanAsk).not.toBe(true);
-          expect(monitoringWakeOf(run())).toBeUndefined();
+          expect(store.readEvents(p.id).some(event => event.type === 'note' && event.code === 'unstructured-human-gate')).toBe(false);
         } else if (row.id === 'M24') {
+          // A rejected ask line registers nothing: its diagnostic stays, and the line's timer parks the run.
           for (const messages of [[MONITORING_TEXT, REJECTED_ASK_TEXT], [MONITORING_TEXT, ASK_TEXT, REJECTED_ASK_TEXT, ACK_TEXT], [MONITORING_TEXT, REJECTED_ASK_TEXT, ACK_TEXT, MONITORING_TEXT], [MONITORING_TEXT, 'CEZ:ASK {', ACK_TEXT]]) {
             const before = store.readEvents(p.id).at(-1)!.seq;
             await send(messages);
             const turnEvents = store.readEvents(p.id).filter(event => event.seq > before);
-            attention('needs you', true);
+            attention('monitoring', false);
             expect(run().invalidAsk).toBe(true);
             expect(run().hasPendingHumanAsk).not.toBe(true);
-            expect(monitoringWakeOf(run())).toBeUndefined();
+            expect(monitoringWakeOf(run())).toBeDefined();
             expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested')).toHaveLength(0);
             expect(turnEvents.some(event => event.type === 'text' && String(event.text).includes(messages.includes(REJECTED_ASK_TEXT) ? REJECTED_ASK_TEXT : 'CEZ:ASK {'))).toBe(true);
             expect(turnEvents.some(event => event.type === 'note' && event.tone === 'danger')).toBe(true);
@@ -180,7 +124,9 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           await send([ASK_TEXT, malformed]);
           attention('needs you', true);
           expect(run().hasPendingHumanAsk).not.toBe(true);
-          expect(run().invalidAsk).toBe(true);
+          // A rejected ask line is a turn end with no wait: the nudge's reply ends without one too,
+          // so Cezar waits for the user (hearsay-tools/cezarion#1234).
+          expect(run().waits).toMatchObject([{ kind: 'human', via: 'no-wait' }]);
           expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested')).toHaveLength(0);
           expect(store.readEvents(p.id).some(event => event.type === 'note' && event.tone === 'danger' && String(event.message).includes('payload failed validation'))).toBe(true);
           expect(store.readEvents(p.id).some(event => event.type === 'text' && String(event.text).includes(malformed))).toBe(true);
@@ -260,7 +206,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
         }
         await hook.idle();
         const final = calls.at(-1)!;
-        if (row.id !== 'M16' && row.id !== 'M25') expect(final.task.attentionLabel).toBe(deriveAttention(run()).label);
+        expect(final.task.attentionLabel).toBe(deriveAttention(run()).label);
         if (row.id === 'M1') expect(calls.some(call => call.task.status === 'waiting' && call.task.attentionLabel === 'monitoring')).toBe(true);
       } finally { hook.dispose(); }
     });
@@ -298,7 +244,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
     expect(store.getRun(w.id)?.status).toBe('cancelled');
   });
 
-  for (const mode of ['fresh', 'continuation'] as const) for (const rejected of [false, true]) it(`${mode} ${rejected ? 'M28 ordinary rejected ASK keeps the existing autonomous nudge policy' : 'M23 portable ASK followed by acknowledgement keeps the existing autonomous override'}`, async () => {
+  for (const mode of ['fresh', 'continuation'] as const) for (const rejected of [false, true]) it(`${mode} ${rejected ? 'M28 ordinary rejected ASK keeps the existing autonomous nudge policy' : 'M23 an autonomous ask line followed by acknowledgement is not registered, and the run continues'}`, async () => {
     process.env.CEZ_DRY_RUN = '0';
     process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
     const prompt = messagesPrompt(backend, rejected ? [REJECTED_ASK_TEXT] : [MONITORING_TEXT, ASK_TEXT, ACK_TEXT]);
@@ -312,7 +258,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
     }
     await until(() => !manager.isActive(p.id));
     expect(store.getRun(p.id)?.status).toBe('done');
-    expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).includes(rejected ? 'autonomous — continuing without pausing' : 'question overridden'))).toBe(true);
+    expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).startsWith(rejected ? 'autonomous — continuing without pausing' : AUTONOMOUS_ASK_NOTE))).toBe(true);
     expect(store.readEvents(p.id).some(event => event.type === 'note' && event.code === 'unstructured-human-gate')).toBe(false);
     expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested' || event.type === 'human-input-delivered')).toHaveLength(0);
   });

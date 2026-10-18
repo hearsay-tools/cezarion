@@ -13,8 +13,9 @@ import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { claudeScheduleWakeupDelay, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR } from './run.ts';
 import { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE } from './turn-end.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
-import { ASK_TEXT, messagesPrompt } from './monitoring-turn.testkit.ts';
+import { ASK_TEXT, messagesPrompt, MONITORING_TEXT } from './monitoring-turn.testkit.ts';
 import { blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
 import { withDelayedCommand, withHeldPrintResponse, withRejectedCommand } from '../core/owned-input-delivery.testkit.ts';
 import { ciNativeMessages, gatedProviderFailure, persistentWakeFailure, thenSay, TIMER_WAKE_OPENING, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
 
@@ -142,7 +143,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U15']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U17', 'U15']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -1052,6 +1053,26 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(humanOpen(run.id)).toEqual([]);
       await until(() => parkedOn(run.id, waitOfKind(run.id, 'timer')));
       expect(deriveAttention(store.getRun(run.id)!).label).toBe('monitoring');
+    });
+
+    // No prose classification (hearsay-tools/cezarion#1234): a question the agent only wrote gets
+    // the nudge, like any turn end with no wait.
+    it(`${runner} U17 a question in prose without a wait no longer parks the run by itself`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: messagesPrompt(runner, ['Should I use Vitest?']) });
+      const proseGates = () => store.readEvents(run.id).filter(event => event.type === 'note' && event.code === PROSE_HUMAN_GATE);
+      await until(() => gated(run.id) || proseGates().length > 0);
+      expect(proseGates()).toEqual([]);
+      expect(prompted(runner, NO_WAIT_NUDGE)).toHaveLength(1);
+      expect(humanOpen(run.id)).toMatchObject([{ via: 'no-wait', source: 'cezar' }]);
+      // Beside the monitoring line it raises no gate either: the run parks on the line's timer.
+      expect(manager.sendMessage(run.id, [{ type: 'text', text: messagesPrompt(runner, [MONITORING_TEXT, 'Should I use Vitest?']) }])).toBe(true);
+      await until(() => parkedOn(run.id, viaOf(run.id, 'monitoring-line')) || proseGates().length > 0);
+      expect(proseGates()).toEqual([]);
+      expect(humanOpen(run.id)).toEqual([]);
+      expect(deriveAttention(store.getRun(run.id)!).label).toBe('monitoring');
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
 
     it(`${runner} U15 an autonomous run is nudged with the autonomous wording until the budget, then opens a budget human wait`, async () => {

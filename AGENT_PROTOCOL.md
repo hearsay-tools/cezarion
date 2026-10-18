@@ -1403,8 +1403,8 @@ and turn-completion wire; the malformed variant changes only the text inside
 the existing snapshot fixture. No wire exemption is needed. The rows cover
 same-session answers and trailing checks, malformed markers, final interactive
 asks, idle close/Continue, disk-round-trip restart recovery, cancellation,
-Finish on fresh and continued sessions, authored timeouts, autonomous overrides,
-and clean unanswered session exit. Unrun checks remain pending on stop/failure;
+Finish on fresh and continued sessions, authored timeouts, autonomous ask lines
+that are not registered (Q9), and clean unanswered session exit. Unrun checks remain pending on stop/failure;
 an unanswered clean close retains durable waiting and releases capacity.
 
 
@@ -1426,17 +1426,22 @@ releases capacity early. Standalone wall-clock limits remain unchanged.
 
 Autonomous turn-end rows **A1–A14** live in
 `core/workflow-autonomous-parity.test.ts` and the same parity guard (hearsay-tools/cezarion#426).
-Every adapter covers fresh and Continue nudges, portable ASK attribution, the
+Every adapter covers fresh and Continue nudges, the unregistered ask line, the
 40-nudge cap, non-autonomous parking, monitoring, DONE and persisted-question
 priority. A9 preserves native mid-turn questions; Claude/Pi have executable
 exemptions proving their native wire uses the portable marker fallback instead.
-Only a new portable turn-end ASK may use the existing answer transport for a
-synthetic nudge, without a human message or answer checkpoint. Queued/accepted
-input, worker/CI waits, existing questions and lifecycle stops block that override.
+Before the budget an autonomous run registers no ask line, as `cezar_ask` refuses with
+`autonomous_run` (hearsay-tools/cezarion#1234): A3/A4 record the note
+`autonomous — question not registered; continuing` with its questions, and the
+autonomous nudge goes instead. Only that fresh turn-end ask line may use the existing
+answer transport for the nudge, without a human message or answer checkpoint, because
+the runner holds the line as a pending portable ask. Queued/accepted input, worker/CI
+waits, existing questions and lifecycle stops block it, and a wire that refuses the
+nudge registers the line after all.
 OpenCode's cap cell holds each nudge's HTTP ACK until after its SSE turn ends;
 deferred idle-boundary settlement applies the same policy after the ACK, including
 the cap note and the heartbeat for the state actually entered. A11/A12 start with
-an overridden portable ASK before markerless turns, covering the separate answer
+an unregistered ask line before markerless turns, covering the separate answer
 transport's delayed ACK on fresh and Continue sessions. A refused ordinary nudge
 retains its capacity slot and a running heartbeat until input readiness retries
 that exact completed boundary, after durable input. New parent activity, accepted
@@ -1803,36 +1808,38 @@ Monitoring turn rows **M1–M30** (hearsay-tools/cezarion#772) live in
 `workflows/monitoring-turn.test.ts`, `workflows/worker-parent-attention.test.ts`
 and `workflows/monitoring-channel-order.test.ts` and enter the shared parity guard.
 Every `RUNNER_IDS` adapter carries multiple parent assistant text segments through its native wire on fresh and Continue sessions.
-A standalone `CEZ:MONITORING` declaration survives a same-turn acknowledgement;
-subsequent explicit human questions and direct review/approval requests take
-precedence. A later monitoring declaration supersedes an earlier prose question
-resolved within the same turn; durable structured questions, DONE and spent parent
-completion gates retain their existing precedence. Ordinary markerless autonomous
-turns retain their nudge policy (M13/M14); prose recognition changes only quiet
-monitoring/dependency parks. Quoted/indented marker
-examples and fenced code cannot declare monitoring, and routine mentions of
-review or checks cannot create a human gate. M1 fires the real monitoring wake
+A standalone `CEZ:MONITORING` declaration survives a same-turn acknowledgement.
+No prose is read (hearsay-tools/cezarion#1234): a later question or review request,
+in any Markdown form, leaves the monitoring line's timer in place (M2, and M3 with
+live workers). Durable structured questions, DONE and spent parent completion gates
+retain their existing precedence. Ordinary markerless autonomous turns retain their
+nudge policy (M13/M14). Quoted/indented marker examples and fenced code cannot
+declare monitoring. M1 fires the real monitoring wake
 callback and proves capacity was released. M7 closes the actual idle session,
 retains the unanswered question, then delivers its answer through Continue and
-checks that a later monitoring turn carries no stale attention. M15 recognizes
-active Markdown lists/emphasis while retaining example exclusions. M16 withdraws
-a wait superseded by a prose gate, keeps its child alive on idle closure, retains
-the gate across restart and holds later worker input until a successful human
-answer. M9/M10 hold later worker input across delayed ACKs as well, then deliver
-it with the human answer. M17 pins the fresh path's genuine accepted-wait
-session-failure protection. Prose gates use a durable note plus the existing exact delivery receipt;
-they do not manufacture a structured question card. M18 retains a real ASK
+checks that a later monitoring turn carries no stale attention. M17 pins the fresh
+path's genuine accepted-wait session-failure protection. M18 retains a real ASK
 card across a routine acknowledgement, idle close and delivered answer; M19
 retains DONE through an acknowledgement and reaches review. M20 excludes
 quoted/fenced/indented/example ASK and DONE declarations. M21 retains later
 DONE precedence over an earlier portable ASK; M22 retains the latest malformed
-ASK diagnostic and raw fallback. M23 keeps autonomous portable overrides on
-both turn-end paths. M24 retains rejected active ASK intent over monitoring
-without a card, including latest malformed replacement and later valid replacement.
-M25 carries that fallback through registered wait withdrawal, idle/restart and
-late worker input until an exact delivered human response. M26/M27 pin delayed
-ACK admission; M28 preserves ordinary rejected-ASK autonomous nudging. Active
-ASK lines use the existing payload parser unchanged.
+ASK diagnostic and raw fallback, and the turn, which registered no wait, takes the
+no-wait nudge before Cezar's no-wait human wait. M23 does not register an autonomous
+ask line on either turn-end path. A rejected ask line registers nothing either: M24
+keeps its diagnostic and raw text beside the monitoring line's timer, including
+latest malformed replacement, and a later valid ASK still shows its card. M26/M27
+pin the same through delayed ACK admission with live workers; M28 preserves ordinary
+rejected-ASK autonomous nudging. Active ASK lines use the existing payload parser
+unchanged.
+
+M9, M10, M15, M16 and M25 are retired (hearsay-tools/cezarion#1234). They pinned
+the prose gate and the rejected-ASK fallback gate, which raised Needs you beside a
+monitoring line, live workers or a dependency wait and held later worker input until
+the user answered. No prose raises a gate now: M2, M3 and U17 pin that a prose
+question beside the monitoring line leaves its timer in place, and U17 that one with
+no wait takes the no-wait nudge. M24, M26 and M27 pin the rejected ask line. The gate
+a human wait without a card raises, which keeps the `unstructured-human-gate` note
+code, is pinned by `workflows/human-waits.test.ts`.
 M29/M30 in `workflows/monitoring-channel-order.test.ts` retain ordering across
 partial channels on fresh/Continue. Native Codex completion refreshes and
 Codex/OpenCode omitted completion text exercise actual channel divergence;

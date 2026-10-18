@@ -154,7 +154,7 @@ export const WORKFLOW_ASK_CRITERIA = [
   { id: 'Q6', scenario: 'ask-snapshot', name: 'cancel leaves later steps pending' },
   { id: 'Q7', scenario: 'ask-snapshot', name: 'Finish stops at the parked step on fresh and Continue sessions' },
   { id: 'Q8', scenario: 'ask-snapshot', name: 'an authored timeout fails without running later steps' },
-  { id: 'Q9', scenario: 'ask-snapshot', name: 'autonomous intermediate asks use the bounded override before the tail' },
+  { id: 'Q9', scenario: 'ask-snapshot', name: 'autonomous intermediate ask lines are not registered before the tail' },
   { id: 'Q10', scenario: 'ask-snapshot', name: 'an unanswered clean session close stays resumable without success' },
 ] as const;
 
@@ -193,16 +193,16 @@ export const FOLLOWUP_CRITERIA = [
 export const AUTONOMOUS_CRITERIA = [
   { id: 'A1', scenario: 'autonomous', name: 'nudges fresh markerless turns to completion' },
   { id: 'A2', scenario: 'autonomous', name: 'hydrates autonomous Continue sessions' },
-  { id: 'A3', scenario: 'ask-snapshot', name: 'records overridden portable questions on fresh turns' },
-  { id: 'A4', scenario: 'ask-snapshot', name: 'records overridden portable questions on Continue' },
+  { id: 'A3', scenario: 'ask-snapshot', name: 'records an unregistered ask line on fresh turns' },
+  { id: 'A4', scenario: 'ask-snapshot', name: 'records an unregistered ask line on Continue' },
   { id: 'A5', scenario: 'autonomous-cap', name: 'parks at the cap with an explicit note' },
   { id: 'A6', scenario: 'autonomous', name: 'keeps non-autonomous parking reachable' },
   { id: 'A7', scenario: 'split-text', name: 'nudges monitoring without a false waiting heartbeat' },
   { id: 'A8', scenario: 'done', name: 'honors DONE without a nudge' },
   { id: 'A9', scenario: 'ask', name: 'preserves native mid-turn questions' },
-  { id: 'A10', scenario: 'ask-snapshot', name: 'never overrides a persisted unanswered question' },
-  { id: 'A11', scenario: 'autonomous-ask-cap', name: 'continues after a portable override and delayed readiness' },
-  { id: 'A12', scenario: 'autonomous-ask-cap', name: 'continues a resumed portable override after delayed readiness' },
+  { id: 'A10', scenario: 'ask-snapshot', name: 'never continues past a persisted unanswered question' },
+  { id: 'A11', scenario: 'autonomous-ask-cap', name: 'continues after an unregistered ask line and delayed readiness' },
+  { id: 'A12', scenario: 'autonomous-ask-cap', name: 'continues a resumed unregistered ask line after delayed readiness' },
   { id: 'A13', scenario: 'autonomous-readiness-idle', name: 'settles a root readiness timeout after process exit' },
   { id: 'A14', scenario: 'autonomous-readiness-idle', name: 'settles a continued root readiness timeout after process exit' },
 ] as const;

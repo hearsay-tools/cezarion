@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { AUTONOMOUS_CRITERIA, driveRun, driveSeam, exemptionFor, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 import { handoffPath } from '../handoff.ts';
-import { MAX_AUTO_CONTINUES } from '../workflows/run.ts';
+import { AUTONOMOUS_ASK_NOTE, MAX_AUTO_CONTINUES } from '../workflows/run.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 
 // The settle budget for the row cells below. OpenCode's A5, A11 and A12 cells run
@@ -168,7 +168,7 @@ describe('autonomous turn-end parity — #426', () => {
             if (row.id !== 'A6') {
               expect(events.some(e => e.type === 'ask.requested')).toBe(true);
               expect(events.some(e => e.type === 'human-input-delivered')).toBe(false);
-              expect(events.some(e => e.type === 'note' && String(e.message).includes('question overridden'))).toBe(false);
+              expect(events.some(e => e.type === 'note' && String(e.message).startsWith(AUTONOMOUS_ASK_NOTE))).toBe(false);
             }
           } else {
             expect(store.getRun(runId)?.status).toBe('done');
@@ -180,13 +180,13 @@ describe('autonomous turn-end parity — #426', () => {
             const stepId = store.getRun(runId)!.steps.at(-1)!.id;
             expect(notes.every(note => note.stepId === stepId)).toBe(true);
             if (row.id === 'A3' || row.id === 'A4') {
-              expect(events.some(e => e.type === 'note' && e.stepId === stepId && String(e.message).includes('question overridden') && String(e.message).includes('Which test library?'))).toBe(true);
+              expect(events.some(e => e.type === 'note' && e.stepId === stepId && String(e.message).startsWith(AUTONOMOUS_ASK_NOTE) && String(e.message).includes('Which test library?'))).toBe(true);
               expect(events.filter(e => e.type === 'ask.requested' || e.type === 'human-input-delivered')).toEqual([]);
               expect(events.filter(e => e.type === 'user-message' && String(e.text).startsWith('Continue working autonomously'))).toEqual([]);
             }
           }
           if (row.id === 'A11' || row.id === 'A12') {
-            expect(events.filter(e => e.type === 'note' && String(e.message).includes('question overridden'))).toHaveLength(1);
+            expect(events.filter(e => e.type === 'note' && String(e.message).startsWith(AUTONOMOUS_ASK_NOTE))).toHaveLength(1);
             expect(events.filter(e => e.type === 'ask.requested' || e.type === 'human-input-delivered')).toEqual([]);
             expect(events.filter(e => e.type === 'user-message' && String(e.text).startsWith('Continue working autonomously'))).toEqual([]);
             // Prove the native SSE boundary actually beat the portable answer's
