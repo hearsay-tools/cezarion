@@ -32,7 +32,9 @@ describe('conversation backlog delivery (#475)', { timeout: 30_000 }, () => {
     try {
       writeFileSync(release, 'go');
       await until(() => store.getRun(p.id)?.agentInputs?.every(input => !!input.deliveredAt) === true);
-      const accepted = send.mock.calls.filter((_, i) => send.mock.results[i]?.value !== false);
+      // The no-wait nudge at the batch turn's end is a submission of its own (hearsay-tools/cezarion#1234).
+      const accepted = send.mock.calls.filter((call, i) => send.mock.results[i]?.value !== false &&
+        messages.some(message => JSON.stringify(call).includes(message.id)));
       expect(accepted).toHaveLength(1);
       const payload = JSON.stringify(accepted[0]);
       for (const message of messages) { expect(payload).toContain(message.id); expect(payload).toContain(message.text); }

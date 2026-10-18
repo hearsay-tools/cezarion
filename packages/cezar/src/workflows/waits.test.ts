@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
 import type { CiWaitEntry, HumanWaitEntry, TimerWaitEntry, Wait } from '@open-mercato/cezar-contract';
-import { ciWatchRequest, identicalWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, MONITORING_WAKE_NUDGE_MARKERS, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
+import { ciWatchRequest, identicalWait, isCezarHumanWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, MONITORING_WAKE_NUDGE_MARKERS, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 
 // hearsay-tools/cezarion#1233: the wait list's pure helpers. RunManager behaviour lives in
 // the ci-wait*.test.ts files and the U-cells in waits-parity.test.ts.
@@ -89,6 +89,19 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     expect(openWaitsFooter([human, ci()])).toBe(
       `Still open: your question ${human.id} to the user; CI wait ${ci().id} for Acme/Repo#12, deadline ${ci().deadline}. ` +
       `The user's reply answers your question; call cezar_cancel_wait for any CI wait or timer you no longer need.`);
+  });
+
+  // Cezar's own wait stands in for a wait the agent never registered (hearsay-tools/cezarion#1234):
+  // listing it back would tell the agent it asked the user something.
+  it('leaves Cezar\'s own human wait out of the list and the footer the agent reads', () => {
+    const noWait: HumanWaitEntry = { id: '66666666-6666-4666-8666-666666666666', kind: 'human', source: 'cezar', via: 'no-wait',
+      registeredAt: '2026-10-17T10:00:00.000Z', phase: 'open', turnId: 'no-wait', askSeq: 7 };
+    expect(isCezarHumanWait(noWait)).toBe(true);
+    expect(isCezarHumanWait({ ...noWait, source: 'agent', via: 'cezar_ask' })).toBe(false);
+    expect(openWaitList([noWait])).toEqual([]);
+    expect(openWaitsFooter([noWait])).toBeUndefined();
+    expect(openWaitsFooter([noWait, ci()])).toBe(
+      `Still open: CI wait ${ci().id} for Acme/Repo#12, deadline ${ci().deadline}. Call cezar_cancel_wait for any you no longer need.`);
   });
 
   it('hands the CI watcher a valid schema-3 wait', () => {

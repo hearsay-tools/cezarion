@@ -56,6 +56,15 @@ async function openWait(id: string, request: CezarWaitRequest): Promise<TimedWai
   if (!('wait' in registered)) throw Error('registration refused');
   return timed(registered.wait);
 }
+/** A Claude run parked on the timers its first turn registered through `cezar_wait`, in order.
+ *  Nothing human is open, so a baseline turn's no-wait nudge never interferes (hearsay-tools/cezarion#1234).
+ *  Live sessions only: a scheduler continuation quotes the task, and the mock would call the tools again. */
+async function parkedOnTimers<const T extends readonly { seconds: number; note: string }[]>(...timers: T) {
+  const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: timers.map(timer => toolCall('cezar_wait', { kind: 'timer', ...timer })).join(' '), runner: 'claude' });
+  await until(() => store.getRun(run.id)?.status === 'waiting' && store.getRun(run.id)?.waits?.length === timers.length);
+  const waits = timers.map(timer => store.getRun(run.id)!.waits!.find(wait => wait.kind === 'timer' && wait.note === timer.note)!) as { [K in keyof T]: Wait };
+  return { run, waits };
+}
 const fireTimer = (waitId: string) => engine().waitTimers.get(waitId)!.timer._onTimeout();
 const turnStarted = (id: string) => store.readEvents(id).some(event => event.type === 'turn.started');
 const turnEnds = (id: string) => store.readEvents(id).filter(event => event.type === 'turn-end').length;
@@ -85,7 +94,7 @@ async function questionBesideCi(runner: RunnerId) {
 }
 
 describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233)', { timeout: 45_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ nudgeReply: 'card' });
   afterEach(() => vi.restoreAllMocks());
 
   for (const runner of ['claude', 'codex'] as const) {
@@ -101,8 +110,10 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
       expect(store.readEvents(run.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
       expect(manager.sendMessage(run.id, [{ type: 'text', text: 'Vitest' }])).toBe(true);
       await until(() => answered(run.id, askSeq));
-      await until(() => store.getRun(run.id)?.status === 'waiting');
-      expect(store.getRun(run.id)?.hasPendingHumanAsk).not.toBe(true);
+      // The answer's own turn end gets the no-wait nudge (hearsay-tools/cezarion#1234): the card
+      // pending now is the one the mock answered it with, not the answered one.
+      await until(() => asks(run.id).length === 2 && store.getRun(run.id)?.status === 'waiting');
+      expect(asks(run.id)[1]).toMatchObject({ questions: [expect.objectContaining({ header: 'Next step' })] });
     });
   }
 
@@ -172,10 +183,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
 
   it('claude staggered timers at 39 spent wakes: the first wakes at 40, the second is cancelled with the cap note and wakes nothing', async () => {
     nativeWire('claude');
-    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios.baseline!, runner: 'claude' });
-    await until(() => store.getRun(run.id)?.status === 'waiting');
-    const first = await openWait(run.id, { kind: 'timer', seconds: 60, note: 'first' });
-    const second = await openWait(run.id, { kind: 'timer', seconds: 120, note: 'second' });
+    const { run, waits: [first, second] } = await parkedOnTimers({ seconds: 60, note: 'first' }, { seconds: 120, note: 'second' });
     store.updateRun(run.id, { automaticWakes: 39 });
     const turns = turnEnds(run.id);
     fireTimer(first.id);
@@ -226,9 +234,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
 
   it('claude a refused timer batch gives its budget reservation back and is retried', async () => {
     nativeWire('claude');
-    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios.baseline!, runner: 'claude' });
-    await until(() => store.getRun(run.id)?.status === 'waiting');
-    const timer = await openWait(run.id, { kind: 'timer', seconds: 60, note: 'refused' });
+    const { run, waits: [timer] } = await parkedOnTimers({ seconds: 60, note: 'refused' });
     const state = engine().active.get(run.id)!;
     store.updateRun(run.id, { automaticWakes: 39 });
     const send = state.session!.sendAgentMessage.bind(state.session);
@@ -292,7 +298,8 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     expect(store.getRun(second.id)?.waits?.[0]?.phase).toBe('open');
   });
 
-  /** A timer owed by a run whose session is closed: its wake is a scheduler continuation. */
+  /** A timer owed by a run whose session is closed: its wake is a scheduler continuation. The
+   *  baseline task, quoted in that continuation's opening prompt, starts no scenario of its own. */
   async function timerOwedWithoutSession() {
     const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios.baseline!, runner: 'claude' });
     await until(() => store.getRun(run.id)?.status === 'waiting');
@@ -336,14 +343,12 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
   // hearsay-tools/cezarion#1234: the budget and the failure count live on the run record.
   it('claude the automatic-wake budget survives a restart, a batch cut off by it is charged once, and a human message resets it', async () => {
     nativeWire('claude');
-    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios.baseline!, runner: 'claude' });
-    await until(() => store.getRun(run.id)?.status === 'waiting');
-    const first = await openWait(run.id, { kind: 'timer', seconds: 60, note: 'first' });
+    // `later` stays open, so each delivered turn parks on it instead of taking the no-wait nudge.
+    const { run, waits: [first, second] } = await parkedOnTimers({ seconds: 60, note: 'first' }, { seconds: 60, note: 'second' }, { seconds: 7200, note: 'later' });
     let turns = turnEnds(run.id);
     fireTimer(first.id);
     await until(() => settled(run.id, first.id)?.phase === 'delivered' && turnEnds(run.id) > turns && store.getRun(run.id)?.status === 'waiting');
     expect(store.getRun(run.id)?.automaticWakes).toBe(1);
-    const second = await openWait(run.id, { kind: 'timer', seconds: 60, note: 'second' });
     // The second wake reaches the wire; the process stops after the disk saw the batch and before
     // its acknowledgement did.
     const state = engine().active.get(run.id)!;

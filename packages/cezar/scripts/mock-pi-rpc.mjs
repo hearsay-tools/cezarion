@@ -36,6 +36,8 @@ function watchdogStall(prompt) {
 
 import readline from 'node:readline';
 import { appendFileSync, existsSync as mockReleaseExists } from 'node:fs';
+// Dynamic, like every sibling import here, so a test's copy of this mock can repoint it.
+const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 async function waitForMockRelease(fallbackMs) {
   const file = process.env.CEZ_MOCK_RELEASE_FILE;
@@ -156,6 +158,8 @@ rl.on('close', () => { queue.then(() => process.exit(0)); });
 async function handle(command) {
   if (command.type === 'prompt' && (command.message.includes('mock:autonomous') || command.message.startsWith('Continue working autonomously until the task is fully complete.'))) {
     const { autonomousReply } = await import('./mock-autonomous.mjs');
+    // Recorded like every other prompt, so a test can count the autonomous nudges pi received.
+    if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: command.message, imageCount: 0 })}\n`);
     send({ id: command.id, type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' });
     send({ type: 'turn_start' });
@@ -163,7 +167,7 @@ async function handle(command) {
     sendTurnEnd();
     return;
   }
-  if (command.type === 'prompt' && (command.message.includes('mock:silent-tail') || command.message.includes('mock:tool-tail') || command.message.includes('Your last turn ended without a message to the user.'))) {
+  if (command.type === 'prompt' && (command.message.includes('mock:silent-tail') || command.message.includes('mock:tool-tail') || silentNudge(command.message))) {
     const silent = await import('./mock-silent-tail.mjs');
     silent.noteSilentTailPrompt(command.message);
     if (silent.isFinalMessageNudge(command.message)) {
@@ -218,6 +222,7 @@ async function handle(command) {
       // best effort — never break the mock over the hook
     }
   }
+  if (command.type === 'prompt') command.message = answerNudge(command.message);
   if (command.type === 'get_state') {
     send({
       id: command.id,

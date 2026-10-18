@@ -56,7 +56,7 @@ const settled = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.fin
 const needsYou = (id: string) => store.getRun(id)?.status === 'waiting' && deriveAttention(store.getRun(id)!).label === 'needs you';
 
 describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ nudgeReply: 'card' });
   afterEach(() => vi.restoreAllMocks());
 
   it('a mid-turn human message settles an unsurfaced human wait', async () => {
@@ -70,8 +70,9 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     release();
     // The held turn ends, then the message runs as its own turn.
     await until(() => store.getRun(run.id)?.status === 'waiting' && store.readEvents(run.id).filter(event => event.type === 'turn-end').length >= 2);
-    // The question is answered already: its turn end raises no card.
-    expect(asks(run.id)).toEqual([]);
+    // The question is answered already: no turn end raises it again. The message's own turn end
+    // gets the no-wait nudge, which the mock answers with a card of its own (phase 2b).
+    expect(asks(run.id).map(event => event.questions)).toEqual([[expect.objectContaining({ header: 'Next step' })]]);
     expect(gates(run.id)).toEqual([]);
   });
 
@@ -211,7 +212,13 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     engine().waitTimers.get(timer.id)!.timer._onTimeout();
     await until(() => needsYou(run.id));
     expect(settled(run.id, timer.id)?.phase).toBe('cancelled');
-    expect(humanOpen(run.id)).toMatchObject([{ via: 'budget', source: 'cezar', phase: 'open', askSeq: gates(run.id)[0]!.seq }]);
+    const [budget, ...more] = humanOpen(run.id);
+    expect(more).toEqual([]);
+    expect(budget).toMatchObject({ via: 'budget', source: 'cezar', phase: 'open' });
+    // Cezar's own wait is shown as its note and raises no human gate (hearsay-tools/cezarion#1234).
+    expect(store.readEvents(run.id).find(event => event.seq === budget!.askSeq))
+      .toMatchObject({ type: 'note', message: `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you` });
+    expect(gates(run.id)).toEqual([]);
     expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human' });
   });
 });
@@ -219,7 +226,7 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
 // hearsay-tools/cezarion#1234: the prompt teaches the tools a session has. A session whose tool
 // controller is unavailable keeps the marker prompt, and the marker lines keep working there.
 describe('the lifecycle prompt follows the session\'s cezar tools', { timeout: 45_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ nudgeReply: 'card' });
   afterEach(() => vi.restoreAllMocks());
 
   /** The `--append-system-prompt` of every Claude process the mock started, oldest first. */
@@ -289,7 +296,8 @@ describe('the lifecycle prompt follows the session\'s cezar tools', { timeout: 4
     wire({ tools: true });
     const run = await opened();
     engine().active.get(run.id)!.session!.end();
-    await until(() => finished(run.id));
+    // The run waits on the card the mock answered the no-wait nudge with; Continue answers it.
+    await until(() => !manager.isActive(run.id) && store.getRun(run.id)?.status === 'waiting');
     expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
     await until(() => prompts().length === 2 && store.getRun(run.id)?.status === 'waiting');
     for (const prompt of prompts()) {
@@ -302,7 +310,7 @@ describe('the lifecycle prompt follows the session\'s cezar tools', { timeout: 4
 // hearsay-tools/cezarion#1234: a refusal that lists every blocking worker still fits the contract's
 // message bound at worker capacity, so the controller never turns it into `unavailable`.
 describe('cezar_done refusals at worker capacity', { timeout: 45_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ nudgeReply: 'card' });
   afterEach(() => vi.restoreAllMocks());
 
   const ids = () => Array.from({ length: 32 }, () => randomUUID());
@@ -314,7 +322,8 @@ describe('cezar_done refusals at worker capacity', { timeout: 45_000 }, () => {
 
   it('every refusal naming 32 workers parses as a CezarDoneAnswer', async () => {
     claudeWire();
-    const p = await parent(HARNESS_ADAPTERS.claude.scenarios.baseline!, 'claude');
+    // A parent parked on a timer, not on a question of its own: the worker checks decide.
+    const p = await parent(toolCall('cezar_wait', { kind: 'timer', seconds: 600, note: 'recheck' }), 'claude');
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const asked = vi.spyOn(internals(), 'unansweredQuestions').mockReturnValue(ids().map(workerId => ({ workerId, messageId: randomUUID() })));
     const questions = await done(p.id);

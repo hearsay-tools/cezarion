@@ -39,6 +39,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   beforeEach(() => {
     scopeFixtureProcesses();
     vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
+    // Workers ignore the no-wait nudge and reach their plain park (hearsay-tools/cezarion#1234).
+    vi.stubEnv('CEZ_MOCK_NUDGE_REPLY', 'plain');
     root = mkdtempSync(join(tmpdir(), 'cez-worker-destroy-'));
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
     execFileSync('git', ['config', 'gc.auto', '0'], { cwd: root });

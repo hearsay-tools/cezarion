@@ -409,8 +409,11 @@ describe('harness parity — skill system prompt on Continue (#790)', () => {
           status: 'running', sessionId, backend,
           ...(original.sessionTransport ? { sessionTransport: original.sessionTransport } : {}),
         });
+        // A user's Continue checkpoints its message before the session opens; it answers the
+        // question the run parked on (hearsay-tools/cezarion#1234).
         fixture.store.updateRun(fixture.runId, {
           status: 'running', currentStepId: 'continue-1', finishedAt: undefined,
+          continuationMessage: { id: 'continue-1', text: promptFor(backend, 'baseline'), origin: 'human', createdAt: new Date().toISOString() },
         });
         expect(fixture.store.readEvents(fixture.runId).some(event =>
           event.type === 'session' && event.stepId === 'continue-1')).toBe(false);
@@ -433,7 +436,8 @@ describe('harness parity — skill system prompt on Continue (#790)', () => {
         const continuedWire = await continueAndPark(fixture, { text: promptFor(backend, 'baseline') }, marked);
         const warnings = fixture.store.readEvents(fixture.runId).filter((event) => event.type === 'lifecycle' && String(event.message).includes('is not in the skill registry'));
         const continued = systemPromptsFrom(backend, continuedWire);
-        const last = continued.at(-1) ?? '';
+        // The continuation's opening prompt; its turn end's nudge follows (hearsay-tools/cezarion#1234).
+        const last = continued[0] ?? '';
         expect(last.includes(SKILL_BODY)).toBe(false);
         expect(last.includes(`Selected skill: /${SKILL_NAME}`)).toBe(false);
         if (RESENT.has(backend)) {
@@ -463,7 +467,8 @@ describe('harness parity — skill system prompt on Continue (#790)', () => {
           }, marked);
           const continued = systemPromptsFrom(backend, continuedWire);
           expect(continued.length).toBeGreaterThan(0);
-          const last = continued.at(-1)!;
+          // The continuation's opening prompt; its turn end's nudge follows (hearsay-tools/cezarion#1234).
+          const last = continued[0]!;
           expect(skillInPrompt(last, fixture.repoRoot)).toBe(true);
           expect(last.startsWith(expectedSkillPrompt(fixture.repoRoot))).toBe(true);
           expect(launchPrompt.startsWith(expectedSkillPrompt(fixture.repoRoot))).toBe(true);
@@ -572,8 +577,8 @@ describe('opencode lost-session fallback (#790)', () => {
       expect(opencodeSessionPosts(continued)).toHaveLength(1);
       const prompts = systemPromptsFrom('opencode', continued);
       expect(prompts.length).toBeGreaterThan(0);
-      expect(skillInPrompt(prompts.at(-1)!, fixture.repoRoot)).toBe(true);
-      expect(prompts.at(-1)!.startsWith(expectedSkillPrompt(fixture.repoRoot))).toBe(true);
+      expect(skillInPrompt(prompts[0]!, fixture.repoRoot)).toBe(true);
+      expect(prompts[0]!.startsWith(expectedSkillPrompt(fixture.repoRoot))).toBe(true);
       expect(launchPrompt.startsWith(expectedSkillPrompt(fixture.repoRoot))).toBe(true);
       const events = fixture.store.readEvents(fixture.runId);
       const notices = events.filter((event) => String(event.message).includes('no longer exists'));

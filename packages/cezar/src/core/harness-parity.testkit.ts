@@ -213,8 +213,8 @@ export const FINAL_MESSAGE_CRITERIA = [
   { id: 'F2', scenario: 'silent-tail-again', name: 'parks waiting after one still-silent nudge' },
   { id: 'F3', scenario: 'silent-tail-again', name: 'never completes from reasoning that names CEZ:DONE' },
   { id: 'F4', scenario: 'tool-tail', name: 'nudges a markerless message-then-tool tail once' },
-  { id: 'F5', scenario: 'done', name: 'honors DONE without a final-message nudge' },
-  { id: 'F6', scenario: 'tool-tail', name: 'keeps an autonomous silent tail running without a final-message nudge' },
+  { id: 'F5', scenario: 'done', name: 'honors DONE without a nudge' },
+  { id: 'F6', scenario: 'tool-tail', name: 'keeps an autonomous silent tail running without the no-wait nudge' },
   { id: 'F7', scenario: 'silent-tail-ack-delay', name: 'nudges a silent tail after a delayed ACK' },
   { id: 'F8', scenario: 'silent-tail-no-reply', name: 'parks waiting when a nudge is ACKed without a turn' },
   { id: 'F9', scenario: 'silent-tail-late-reply', name: 'resumes when a nudge reply arrives after the bound' },
@@ -1111,8 +1111,11 @@ export async function withOwnedInputRun(
   for (const extra of options.extraBackends ?? []) process.env[HARNESS_ADAPTERS[extra].binEnv] = HARNESS_ADAPTERS[extra].mockBin;
   const savedDry = process.env.CEZ_DRY_RUN;
   const savedAutoName = process.env.CEZ_AUTONAME;
-  const savedEnv = Object.keys(options.env ?? {}).map(name => [name, process.env[name]] as const);
-  Object.assign(process.env, options.env);
+  // The worker ignores Cezar's no-wait nudge (hearsay-tools/cezarion#1234) and reaches its plain
+  // park, so input delivery is what these fixtures decide. `options.env` may opt back in.
+  const env = { CEZ_MOCK_NUDGE_REPLY: 'plain', ...options.env };
+  const savedEnv = Object.keys(env).map(name => [name, process.env[name]] as const);
+  Object.assign(process.env, env);
   // Naming is a separate auxiliary invocation, not part of input delivery.
   process.env.CEZ_AUTONAME = '0';
   process.env[adapter.binEnv] = options.mockBin ?? adapter.mockBin;

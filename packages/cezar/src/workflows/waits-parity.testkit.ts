@@ -29,6 +29,12 @@ export const WAIT_CRITERIA = [
   { id: 'U6', scenario: 'baseline', name: 'cezar_done is refused with live workers and with settled but uncollected workers, accepted once collected, and open waits are cancelled' },
   { id: 'U7d', scenario: 'baseline', name: 'the done line and cezar_done finish through the same path' },
   { id: 'U6s', scenario: 'baseline', name: 'cezar_done in a workflow step that is not the last is refused with not_final_step, and the next step runs' },
+  // hearsay-tools/cezarion#1234 phase 2b: the turn-end rule.
+  { id: 'U5', scenario: 'baseline', name: 'a turn end with no wait gets one nudge, then a second no-wait turn end opens a no-wait human wait and reads needs you' },
+  { id: 'U5a', scenario: 'baseline', name: 'a nudge the agent answers with cezar_ask parks on that question after one extra turn' },
+  { id: 'U5c', scenario: 'baseline', name: 'a root parked on its no-wait human wait is finished by the user, and an agent question still blocks it' },
+  { id: 'U5d', scenario: 'baseline', name: 'the no-wait human wait raises no question, and the agent\'s own wait replaces it' },
+  { id: 'U15', scenario: 'autonomous-cap', name: 'an autonomous run is nudged with the autonomous wording until the budget, then opens a budget human wait' },
 ] as const;
 
 /** The native mocks' `mock:cezar-tool` prompt: one cezar tool call through the runner's own wire.

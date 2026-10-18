@@ -40,6 +40,8 @@ function watchdogStall(prompt) {
 
 import { createInterface } from 'node:readline';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+// Dynamic, like every sibling import here, so a test's copy of this mock can repoint it.
+const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
 
 import * as parityGateFs from 'node:fs';
 async function waitForMockRelease(fallbackMs) {
@@ -156,7 +158,7 @@ async function respond(userText, imageCount, uuid) {
     emit({ type: 'result', subtype: 'success', result: text, user_message_uuids: [uuid].filter(Boolean), usage: { input_tokens: 10, output_tokens: 5 } });
     return;
   }
-  if (userText.includes('mock:silent-tail') || userText.includes('mock:tool-tail') || userText.includes('Your last turn ended without a message to the user.')) {
+  if (userText.includes('mock:silent-tail') || userText.includes('mock:tool-tail') || silentNudge(userText)) {
     const silent = await import('./mock-silent-tail.mjs');
     silent.noteSilentTailPrompt(userText);
     if (silent.isFinalMessageNudge(userText)) {
@@ -859,6 +861,7 @@ rl.on('line', (line) => {
   // and never runs it). CEZ_MOCK_DROP_ONCE=1 drops only the first match.
   const drop = process.env.CEZ_MOCK_DROP_LINES;
   if (drop && userText.includes(drop) && !(process.env.CEZ_MOCK_DROP_ONCE === '1' && droppedOnce)) { droppedOnce = true; return; }
+  userText = answerNudge(userText);
   if (steering) { steering.push({ userText, uuid }); return; }
   queue = queue.then(() => respond(userText, imageCount, uuid));
 });

@@ -66,7 +66,8 @@ export const timerWaitEntrySchema = z.object({
 export type TimerWaitEntry = z.infer<typeof timerWaitEntrySchema>;
 
 /** The user. `questions` is the card the agent asked with, absent for a plain "your turn";
- *  `askSeq` is the `ask.requested` event cezar surfaced it as, once the turn ended. */
+ *  `askSeq` is the event cezar showed it as, once the turn ended: its `ask.requested`, the human
+ *  gate a wait without a card raises, or the note that shows Cezar's own wait. */
 export const humanWaitEntrySchema = z.object({
   ...waitBaseShape,
   kind: z.literal('human'),

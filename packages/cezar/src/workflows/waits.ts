@@ -34,6 +34,13 @@ export function isMonitoringTimer(wait: Wait): boolean {
   return wait.kind === 'timer' && (wait.via === 'monitoring-line' || wait.via === 'schedule-wakeup');
 }
 
+/** Cezar's own human wait (`no-wait`, `budget`): it stands in for a wait the agent never registered
+ *  and is replaced by the agent's own (hearsay-tools/cezarion#1234), so the agent is never told of
+ *  it as one of its waits. */
+export function isCezarHumanWait(wait: Wait): boolean {
+  return wait.kind === 'human' && wait.source === 'cezar';
+}
+
 /** One PR, however the agent spelled it: case-insensitive, trailing slash ignored. */
 export function normalizePrUrl(url: string): string {
   return url.replace(/\/+$/, '').toLowerCase();
@@ -54,7 +61,7 @@ function summary(wait: Wait): string {
 
 /** The open waits as both tools list them back to the agent. A human wait has no deadline. */
 export function openWaitList(waits: readonly Wait[]): OpenWait[] {
-  return waits.filter((wait) => wait.phase === 'open').map((wait): OpenWait => wait.kind === 'human'
+  return waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait)).map((wait): OpenWait => wait.kind === 'human'
     ? { wait_id: wait.id, kind: wait.kind, summary: summary(wait) }
     : { wait_id: wait.id, kind: wait.kind, deadline: wait.deadline, summary: summary(wait) });
 }
@@ -96,7 +103,7 @@ export function waitResultText(wait: Wait, { tools }: { tools: boolean } = { too
  *  user's reply settles a question and a question the user saw cannot be cancelled, so cancel is
  *  offered only for CI waits and timers (hearsay-tools/cezarion#1234). */
 export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
-  const open = waits.filter((wait) => wait.phase === 'open');
+  const open = waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait));
   if (!open.length) return undefined;
   const items = open.map((wait) => {
     if (wait.kind === 'ci') return `CI wait ${wait.id} for ${wait.repository}#${wait.prNumber}, deadline ${wait.deadline}`;

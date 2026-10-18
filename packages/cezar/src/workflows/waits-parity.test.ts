@@ -10,7 +10,8 @@ import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { collect, manager, parent, register, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
-import { claudeScheduleWakeupDelay, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR } from './run.ts';
+import { claudeScheduleWakeupDelay, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR } from './run.ts';
+import { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE } from './turn-end.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt } from './monitoring-turn.testkit.ts';
 import { blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns } from '../runs/run-store.testkit.ts';
@@ -43,6 +44,9 @@ function nativeWire(runner: RunnerId) {
 }
 
 const waitOfKind = (id: string, kind: Wait['kind']) => store.getRun(id)?.waits?.find(wait => wait.kind === kind);
+/** The agent's waits. A delivered turn that ends with none takes the no-wait nudge, and the mock's
+ *  plain reply leaves Cezar's own no-wait wait open (hearsay-tools/cezarion#1234). */
+const agentWaits = (id: string) => (store.getRun(id)?.waits ?? []).filter(wait => wait.source !== 'cezar');
 const settled = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(wait => wait.id === waitId);
 const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
 const engine = () => manager as unknown as {
@@ -107,6 +111,8 @@ async function answerQuestion(id: string, askSeq: number) {
 // hearsay-tools/cezarion#1234: one human wait per run, shown as one card.
 const questions = [{ header: 'Choice', question: 'Which module?', options: [{ label: 'Parser' }, { label: 'Runner' }] }];
 const humanOpen = (id: string) => store.getRun(id)?.waits?.filter((wait): wait is HumanWaitEntry => wait.kind === 'human') ?? [];
+/** The run waits on an open human wait it has shown: as a card, or as the gate a wait without one raises. */
+const gated = (id: string) => store.getRun(id)?.status === 'waiting' && humanOpen(id)[0]?.askSeq !== undefined;
 /** `Header: label` per question of the newest card: the line every native answer seam parses. An
  *  open question takes typed words, as the card sends them. */
 const answerOf = (id: string) => (asks(id).at(-1) as unknown as { questions: Array<{ header: string; options?: Array<{ label: string }> }> })
@@ -136,7 +142,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U15']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -163,7 +169,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       await until(() => settled(run.id, timer.id)?.phase === 'delivered');
       expect(inputsFor(run.id, timer.id).map(input => input.text)).toEqual([timerText(timer, 'u1')]);
       await until(() => store.getRun(run.id)?.status === 'waiting');
-      expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
+      expect(agentWaits(run.id)).toEqual([]);
     });
 
     it(`${runner} U4 cezar_cancel_wait cancels and no observation is delivered`, async () => {
@@ -189,7 +195,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(engine().waitTimers.has(timer.id)).toBe(false);
       await until(() => store.getRun(run.id)?.status === 'waiting');
       expect(inputsFor(run.id, timer.id)).toEqual([]);
-      expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
+      expect(agentWaits(run.id)).toEqual([]);
     });
 
     it(`${runner} U2 ci and timer open: the timer wakes, ci stays open and is in the footer, the turn end re-parks without re-registering, the later ci result is delivered`, async () => {
@@ -210,7 +216,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       external.settle();
       await until(() => settled(run.id, ci.id)?.phase === 'delivered' && prompted(runner, `CI wait observation ${ci.id}`).length > 0);
       expect(prompted(runner, `CI wait observation ${ci.id}`).at(-1)).not.toContain('Still open');
-      await until(() => store.getRun(run.id)?.status === 'waiting' && !store.getRun(run.id)?.waits?.length);
+      await until(() => store.getRun(run.id)?.status === 'waiting' && !agentWaits(run.id).length);
     });
 
     it(`${runner} U3 a human message during a ci wait is delivered, the wait stays open, and its result arrives in a later turn`, async () => {
@@ -286,7 +292,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
           expect(push.mock.calls.flat()).not.toContain(parked.id);
         } finally { writeFileSync(release, ''); }
         await until(() => store.getRun(blocker.id)?.status === 'waiting');
-        await until(() => store.getRun(parked.id)?.status === 'waiting' && !store.getRun(parked.id)?.waits?.length);
+        await until(() => store.getRun(parked.id)?.status === 'waiting' && !agentWaits(parked.id).length);
       });
     }
 
@@ -648,7 +654,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(prompted(runner, `Timer ${timer.id} fired`)).toEqual([]);
       expect(prompted(runner, `Timer ${later.id} fired`)).toEqual([]);
       expect(prompted(runner, 'carry on without them').at(-1)).not.toContain('Still open');
-      expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
+      expect(agentWaits(run.id)).toEqual([]);
       expect(manager.finish(run.id)).toBe(true);
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
@@ -964,6 +970,102 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(store.readEvents(run.id).filter(event => event.type === 'lifecycle' && event.message === 'goal achieved — session closed'))
         .toEqual([expect.objectContaining({ via: 'cezar_done' })]);
       expect(settled(run.id, wait!.id)?.phase).toBe('delivered');
+    });
+
+    // hearsay-tools/cezarion#1234 phase 2b: one turn-end rule. Nothing reads the turn's prose.
+    it(`${runner} U5 a turn end with no wait gets one nudge, then a second no-wait turn end opens a no-wait human wait and reads needs you`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+      await until(() => gated(run.id));
+      expect(prompted(runner, NO_WAIT_NUDGE)).toHaveLength(1);
+      const [wait, ...more] = humanOpen(run.id);
+      expect(more).toEqual([]);
+      expect(wait).toMatchObject({ kind: 'human', via: 'no-wait', source: 'cezar', phase: 'open' });
+      expect(wait!.questions).toBeUndefined();
+      expect(store.getRun(run.id)?.automaticWakes).toBe(1);
+      expect(store.readEvents(run.id).filter(event => event.type === 'note' && event.message === NO_WAIT_NOTE)).toHaveLength(1);
+      expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human' });
+      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
+      // The user's reply answers it and restarts the budget; the reply's own turn is nudged again.
+      expect(manager.sendMessage(run.id, [{ type: 'text', text: 'carry on' }])).toBe(true);
+      await until(() => settled(run.id, wait!.id)?.phase === 'delivered');
+      await until(() => prompted(runner, NO_WAIT_NUDGE).length === 2 && gated(run.id));
+      expect(store.getRun(run.id)?.automaticWakes).toBe(1);
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+
+    it(`${runner} U5a a nudge the agent answers with cezar_ask parks on that question after one extra turn`, async () => {
+      nativeWire(runner);
+      delete process.env.CEZ_MOCK_NUDGE_REPLY;
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+      await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined);
+      expect(prompted(runner, NO_WAIT_NUDGE)).toHaveLength(1);
+      expect(turnEnds(run.id)).toBe(2);
+      expect(store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith(NO_WAIT_NUDGE_NOTE))).toHaveLength(1);
+      const wait = await expectHumanWaitAnswered(run.id, 'cezar_ask');
+      expect(wait).toMatchObject({ source: 'agent', questions: [expect.objectContaining({ header: 'Next step' })] });
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+
+    // Finish answers Cezar's own human wait; it keeps the agent's question (the #151 guard).
+    it(`${runner} U5c a root parked on its no-wait human wait is finished by the user, and an agent question still blocks it`, async () => {
+      nativeWire(runner);
+      const asRoot = (task: string) => {
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task });
+        store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+        return run;
+      };
+      const plain = asRoot(HARNESS_ADAPTERS[runner].scenarios.baseline!);
+      await until(() => gated(plain.id));
+      expect(humanOpen(plain.id)).toMatchObject([{ via: 'no-wait', source: 'cezar' }]);
+      expect(manager.finishBlockedReason(plain.id)).toBeUndefined();
+      expect(manager.finish(plain.id)).toBe(true);
+      await until(() => store.getRun(plain.id)?.status === 'done' && !manager.isActive(plain.id));
+      delete process.env.CEZ_MOCK_NUDGE_REPLY;
+      const asked = asRoot(HARNESS_ADAPTERS[runner].scenarios.baseline!);
+      await until(() => pendingQuestion(asked.id));
+      expect(humanOpen(asked.id)).toMatchObject([{ via: 'cezar_ask', source: 'agent' }]);
+      expect(manager.finishBlockedReason(asked.id)).toBe('Answer the pending human question before finishing.');
+      expect(manager.finish(asked.id)).toBe(false);
+      expect(manager.cancel(asked.id)).toBe(true);
+      await until(() => !manager.isActive(asked.id));
+    });
+
+    // Cezar's own wait is no question (hearsay-tools/cezarion#1234): it raises no human gate, so the
+    // run takes what a plain park took before it, and a wait the agent registers replaces it.
+    it(`${runner} U5d the no-wait human wait raises no question, and the agent's own wait replaces it`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+      await until(() => gated(run.id));
+      const noWait = humanOpen(run.id)[0]!;
+      expect(noWait).toMatchObject({ via: 'no-wait', source: 'cezar' });
+      expect(store.readEvents(run.id).find(event => event.seq === noWait.askSeq)).toMatchObject({ type: 'note', message: NO_WAIT_NOTE });
+      expect(store.transcriptFacts(run.id).pendingGateSeq).toBeUndefined();
+      expect(store.getRun(run.id)?.hasPendingHumanAsk).toBeFalsy();
+      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const registered = await tools.registerWait({ kind: 'timer', seconds: 60, note: 'u5d' }, 'cezar_wait', new AbortController().signal);
+      if (!('wait' in registered)) throw Error('registration refused');
+      expect(store.getRun(run.id)?.lastWaits?.find(wait => wait.id === noWait.id)?.phase).toBe('cancelled');
+      expect(humanOpen(run.id)).toEqual([]);
+      await until(() => parkedOn(run.id, waitOfKind(run.id, 'timer')));
+      expect(deriveAttention(store.getRun(run.id)!).label).toBe('monitoring');
+    });
+
+    it(`${runner} U15 an autonomous run is nudged with the autonomous wording until the budget, then opens a budget human wait`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['autonomous-cap']!, autonomous: true });
+      store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES - 2 });
+      await until(() => gated(run.id));
+      expect(prompted(runner, AUTONOMOUS_NUDGE)).toHaveLength(2);
+      expect(prompted(runner, NO_WAIT_NUDGE)).toEqual([]);
+      expect(humanOpen(run.id)).toMatchObject([{ kind: 'human', via: 'budget', source: 'cezar', phase: 'open' }]);
+      expect(store.getRun(run.id)?.automaticWakes).toBe(MAX_AUTO_CONTINUES);
+      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
   }
 });
