@@ -246,6 +246,24 @@ describe('the lifecycle prompt follows the session\'s cezar tools', { timeout: 4
     });
   }
 
+  it('a monitoring wake that reopens the run speaks the lifecycle of the session that receives it', async () => {
+    wire({ tools: true });
+    const stdin = join(root, 'stdin');
+    process.env.CEZ_MOCK_STDIN_FILE = stdin;
+    const inbound = () => existsSync(stdin) ? readFileSync(stdin, 'utf8').trim().split('\n').map(line => (JSON.parse(line) as { userText: string }).userText) : [];
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: messagesPrompt('claude', ['Still waiting for the load test.\nCEZ:MONITORING']), runner: 'claude' });
+    await until(() => store.getRun(run.id)?.waits?.some(wait => wait.kind === 'timer') === true && engine().active.get(run.id)?.session?.open === true);
+    const timer = store.getRun(run.id)!.waits!.find(wait => wait.kind === 'timer')!;
+    engine().active.get(run.id)!.session!.end();
+    await until(() => !manager.isActive(run.id));
+    // The timer resolves with no session, and the continuation it opens has no cezar tools.
+    vi.spyOn((manager as unknown as { ciResources: { controller(): Promise<unknown> } }).ciResources, 'controller').mockResolvedValue(undefined);
+    engine().waitTimers.get(timer.id)!.timer._onTimeout();
+    await until(() => inbound().some(text => text.includes(MONITORING_WAKE_NUDGE_MARKERS)));
+    expect(inbound().some(text => text.includes(MONITORING_WAKE_NUDGE))).toBe(false);
+    expect(prompts()[1]).toContain(HANDOFF_ONLY_INSTRUCTIONS);
+  });
+
   it('a session with cezar tools is taught the tools when it opens and when it continues', async () => {
     wire({ tools: true });
     const run = await opened();

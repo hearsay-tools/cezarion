@@ -5724,7 +5724,12 @@ export class RunManager {
     if (resolved.length && this.waitWakeAdmitted.has(runId) && state.atTurnBoundary === state.session) {
       // One wake turn delivers every resolved wait, oldest first, then the conversation input
       // that would lead the next batch (hearsay-tools/cezarion#1233).
-      const results = resolved.flatMap(wait => run.agentInputs?.find(input => input.id === wait.id && !input.deliveredAt) ?? []);
+      // Each result speaks the lifecycle of the session that receives it: a wake resolved with no
+      // session, or delivered by a continuation without cezar tools, keeps that session's wording.
+      const results = resolved.flatMap(wait => {
+        const input = run.agentInputs?.find(entry => entry.id === wait.id && !entry.deliveredAt);
+        return input ? [{ ...input, text: waitResultText(wait, { tools: !state.toolless }) }] : [];
+      });
       if (!results.length) return false;
       const conversation = askPending ? undefined : agentInputBatch(queue, input => this.formatAgentInput(runId, input, false));
       const following = conversation?.inputs.every(input => input.conversation) ? conversation.inputs : [];
