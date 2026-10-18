@@ -595,7 +595,9 @@ nudge, and the dry-run mocks answering it) are recorded with it.
   reserves its unit in memory when submitted and charges the record on the provider
   acknowledgement, so a batch a restart cuts off is charged once, at its redelivery. The
   delivery-failure count (`waitDeliveryFailures`) is on the record too and keeps phase 1's reset
-  points.
+  points. Both counters are committed at once, never on the store's debounced save: the charge
+  and the cleared failure count are part of the delivery's own commit, and every other change
+  to them (a nudge, a failed delivery, a reset) is its own commit.
 - **One human wait per run.** A second registration in the turn that opened it replaces its card
   and returns the same `wait_id`. A registration after the user saw it returns that wait
   unchanged. A human wait registered while a question without a wait is pending (a prose gate)

@@ -914,7 +914,8 @@ you and gives its slot back: a `budget` human wait opens and is shown. The budge
 run record's `automaticWakes` (hearsay-tools/cezarion#1234): a restart and a scheduler
 continuation keep it, a human message and a human Continue reset it, and a parent's answer
 to its worker does not. A batch's reserved unit stays in memory and is charged to the record
-on the provider acknowledgement, so a batch a restart cuts off is charged once.
+on the provider acknowledgement, in the delivery's own commit, so a batch a restart cuts off
+is charged once and a crash cannot keep the delivery without its charge.
 
 That budget cannot stop a delivery whose session keeps failing, since every retry is a
 new session, so failed deliveries have their own bound. A session that fails (a provider

@@ -2321,7 +2321,7 @@ export class RunManager {
       const retry = this.wakeRetries.get(runId); if (retry) clearTimeout(retry); this.wakeRetries.delete(runId);
       return 'capped';
     }
-    this.store.updateRun(runId, { waitDeliveryFailures: failures });
+    this.store.commitWakeCounters(runId, { waitDeliveryFailures: failures });
     const previous = this.wakeBackoffs.get(runId); if (previous) clearTimeout(previous);
     const timer = setTimeout(() => {
       if (this.wakeBackoffs.get(runId) !== timer) return;
@@ -2340,7 +2340,7 @@ export class RunManager {
 
   /** The failure count is on the run record, so a restart keeps it (hearsay-tools/cezarion#1234). */
   private clearWakeDeliveryFailures(runId: string): void {
-    if (this.store.getRun(runId)?.waitDeliveryFailures !== undefined) this.store.updateRun(runId, { waitDeliveryFailures: undefined });
+    if (this.store.getRun(runId)?.waitDeliveryFailures !== undefined) this.store.commitWakeCounters(runId, { waitDeliveryFailures: undefined });
   }
 
   /**
@@ -2357,13 +2357,13 @@ export class RunManager {
   /** Spend one automatic wake on the record; returns the count after it. */
   private chargeAutomaticWake(runId: string): number {
     const next = (this.store.getRun(runId)?.automaticWakes ?? 0) + 1;
-    this.store.updateRun(runId, { automaticWakes: next });
+    this.store.commitWakeCounters(runId, { automaticWakes: next });
     return next;
   }
 
   /** A human message or a human Continue restarts the budget. */
   private resetAutomaticWakes(runId: string): void {
-    if (this.store.getRun(runId)?.automaticWakes) this.store.updateRun(runId, { automaticWakes: 0 });
+    if (this.store.getRun(runId)?.automaticWakes) this.store.commitWakeCounters(runId, { automaticWakes: 0 });
   }
 
   private retryWaitAdmission(runId: string): void {
@@ -5646,15 +5646,14 @@ export class RunManager {
           const resolvedIds = batch.map(wait => wait.id);
           const conversationIds = inputIds.filter(id => !resolvedIds.includes(id));
           if (resolvedIds.length) {
-            this.store.commitWaitDelivery(runId, resolvedIds);
-            this.clearWakeDeliveryFailures(runId);
             // A timer expiry is a self-generated wake: one admitted turn that carries timer results
             // spends the one unit it reserved, however many it carries. CI wakes are external events
-            // and do not count.
+            // and do not count. The charge and the cleared failure count commit with the delivery.
             const timers = batch.filter(wait => wait.kind === 'timer');
-            if (timers.length && flight.wakeReserved) {
+            const spent = timers.length && flight.wakeReserved ? (this.store.getRun(runId)?.automaticWakes ?? 0) + 1 : undefined;
+            this.store.commitWaitDelivery(runId, resolvedIds, { waitDeliveryFailures: undefined, ...(spent === undefined ? {} : { automaticWakes: spent }) });
+            if (spent !== undefined) {
               flight.wakeReserved = false;
-              const spent = this.chargeAutomaticWake(runId);
               this.store.appendEvent(runId, { type: 'note', message: `automatic ${timers.some(isMonitoringTimer) ? 'monitoring' : 'timer'} wake-up (${spent}/${MAX_AUTO_CONTINUES})` });
             }
             this.waitWakeAdmitted.delete(runId);

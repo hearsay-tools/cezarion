@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { RunStore } from '../runs/store.ts';
+import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { AUTONOMOUS_NUDGE, RunManager } from './run.ts';
 
 // Focused policy guards complement workflow-autonomous-parity's actual native
@@ -78,6 +79,8 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     store.updateRun(id, { automaticWakes: 39 });
     expect(manager['tryAutonomousNudge'](id, state, 'task', null)).toBe(true);
     expect(store.getRun(id)?.automaticWakes).toBe(40);
+    // The charge is committed at once, so a crash before the debounced save cannot lose it.
+    expect(readPersistedRuns(join(root, '.ai/cezar')).find(record => record.id === id)?.automaticWakes).toBe(40);
     expect(store.readEvents(id).some(e => e.type === 'note' && e.message === 'autonomous — continuing without pausing (40/40)')).toBe(true);
     // The nudge's input was acknowledged; only the budget stands in the way of the next one.
     await state.agentInputFlight?.settled;

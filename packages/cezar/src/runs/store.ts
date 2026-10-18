@@ -629,6 +629,9 @@ export { LEGACY_INDEX_BACKUP_FILE, LEGACY_INDEX_FILE } from './legacy-index.ts';
 export type StepState = z.infer<typeof stepStateSchema>;
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
 export type RunRecord = z.infer<typeof runRecordSchema>;
+/** The automatic-wake budget and the failed wake-delivery count (hearsay-tools/cezarion#1234). A
+ *  key present as `undefined` clears that counter. */
+export type WakeCounters = Partial<Pick<RunRecord, 'automaticWakes' | 'waitDeliveryFailures'>>;
 
 /** One persisted event line; `type` mirrors AgentEvent plus engine lifecycle. */
 export interface RunEvent {
@@ -2772,8 +2775,10 @@ export class RunStore extends EventEmitter {
 
   /** One delivery checkpoint for a wake batch: every named agent input is marked delivered (one
    *  already delivered keeps its time), and each resolved wait among them (input id = wait id)
-   *  moves to `lastWaits` as `delivered`. Open waits a batch names stay open. */
-  commitWaitDelivery(id: string, inputIds: readonly string[]): void {
+   *  moves to `lastWaits` as `delivered`. Open waits a batch names stay open. `counters` are the
+   *  wake counters the delivery spends or clears, in the same commit, so a crash keeps both or
+   *  neither; nothing is written when nothing is delivered. */
+  commitWaitDelivery(id: string, inputIds: readonly string[], counters: WakeCounters = {}): void {
     const run = this.peek(id);
     if (!run) return;
     const ids = new Set(inputIds);
@@ -2781,11 +2786,18 @@ export class RunStore extends EventEmitter {
     if (!delivered.length && !run.agentInputs?.some((input) => ids.has(input.id) && !input.deliveredAt)) return;
     const deliveredAt = new Date().toISOString();
     const retired = new Set(delivered.map((wait) => wait.id));
-    this.commitIndex(new Map([[id, { ...run,
+    this.commitIndex(new Map([[id, { ...run, ...counters,
       waits: nonEmpty((run.waits ?? []).filter((wait) => !retired.has(wait.id))),
       lastWaits: settleWaits(run.lastWaits, delivered.map((wait) => ({ ...wait, phase: 'delivered' as const, deliveredAt }))),
       ...(run.agentInputs ? { agentInputs: run.agentInputs.map((input) => ids.has(input.id) && !input.deliveredAt ? { ...input, deliveredAt } : input) } : {}),
     }]]));
+  }
+
+  /** The wake counters alone, committed at once instead of on the debounced save: a crash after
+   *  an autonomous nudge or a failed delivery keeps what it spent or counted. */
+  commitWakeCounters(id: string, counters: WakeCounters): void {
+    const run = this.peek(id);
+    if (run) this.commitIndex(new Map([[id, { ...run, ...counters }]]));
   }
 
   /** The user answered: every open human wait moves to `lastWaits` as `delivered` in one commit

@@ -13,6 +13,7 @@ import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { claudeScheduleWakeupDelay, MAX_WAKE_DELIVERY_ATTEMPTS, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR } from './run.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt } from './monitoring-turn.testkit.ts';
+import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { withDelayedCommand, withHeldPrintResponse, withRejectedCommand } from '../core/owned-input-delivery.testkit.ts';
 import { ciNativeMessages, gatedProviderFailure, persistentWakeFailure, thenSay, TIMER_WAKE_OPENING, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
 
@@ -302,7 +303,19 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
         return registered.wait;
       };
       const first = await open(60, 'u10 first'), second = await open(61, 'u10 second'), last = await open(62, 'u10 last');
-      store.updateRun(run.id, { automaticWakes: 39 });
+      store.updateRun(run.id, { automaticWakes: 39, waitDeliveryFailures: 2 });
+      // What a crash at the charge would leave: the committed row, read as the charge's note is
+      // written, before any debounced save could land.
+      let committed: { automaticWakes?: number; waitDeliveryFailures?: number; delivered: string[] } | undefined;
+      const append = store.appendEvent.bind(store);
+      vi.spyOn(store, 'appendEvent').mockImplementation((id, event) => {
+        if (!committed && event.type === 'note' && String(event.message).startsWith('automatic timer wake-up (')) {
+          const row = readPersistedRuns(join(root, '.ai/cezar')).find(record => record.id === run.id);
+          committed = { automaticWakes: row?.automaticWakes, waitDeliveryFailures: row?.waitDeliveryFailures,
+            delivered: (row?.lastWaits ?? []).filter((wait: Wait) => wait.phase === 'delivered').map((wait: Wait) => wait.id).sort() };
+        }
+        return append(id, event);
+      });
       // Two timers resolve before one boundary: one admitted turn carries both and spends one wake.
       fireTimer(first.id); fireTimer(second.id);
       await until(() => store.getRun(run.id)?.waits?.filter(wait => wait.phase === 'resolved').length === 2);
@@ -313,6 +326,8 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(store.getRun(run.id)?.automaticWakes).toBe(40);
       const charged = store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic timer wake-up ('));
       expect(charged.map(event => event.message)).toEqual(['automatic timer wake-up (40/40)']);
+      // The delivery, its charge and the cleared failure count are one commit.
+      expect(committed).toEqual({ automaticWakes: 40, waitDeliveryFailures: undefined, delivered: [first.id, second.id].sort() });
       await until(() => parkedOn(run.id, store.getRun(run.id)?.waits?.find(wait => wait.id === last.id)));
       const turns = turnEnds(run.id);
       // The budget is spent: the next timer to come due is cancelled and wakes nothing.

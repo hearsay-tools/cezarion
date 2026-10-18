@@ -275,6 +275,31 @@ describe('wait checkpoints', () => {
     }
   });
 
+  // hearsay-tools/cezarion#1234: a wake's charge and its cleared failure count commit with it.
+  it('commitWaitDelivery commits the wake counters in the same commit', () => {
+    const resolved = timerEntry({ phase: 'resolved', resolvedAt: iso(0) });
+    store.commitWait(id, resolved, input(resolved.id));
+    store.updateRun(id, { automaticWakes: 6, waitDeliveryFailures: 2 });
+    const commits = vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex');
+    store.commitWaitDelivery(id, [resolved.id], { automaticWakes: 7, waitDeliveryFailures: undefined });
+    expect(commits).toHaveBeenCalledTimes(1);
+    for (const run of [store.getRun(id)!, reopen()]) {
+      expect(run.lastWaits).toEqual([{ ...resolved, phase: 'delivered', deliveredAt: expect.any(String) }]);
+      expect(run.automaticWakes).toBe(7);
+      expect(run.waitDeliveryFailures).toBeUndefined();
+    }
+  });
+
+  it('commitWakeCounters writes the counters durably, not on the debounced save', () => {
+    store.commitWakeCounters(id, { automaticWakes: 3 });
+    expect(readPersistedRuns(directory).find((record) => record.id === id)?.automaticWakes).toBe(3);
+    store.commitWakeCounters(id, { waitDeliveryFailures: 4 });
+    store.commitWakeCounters(id, { waitDeliveryFailures: undefined });
+    const row = readPersistedRuns(directory).find((record) => record.id === id);
+    expect(row).toMatchObject({ automaticWakes: 3 });
+    expect(row).not.toHaveProperty('waitDeliveryFailures');
+  });
+
   // hearsay-tools/cezarion#1234: the user's answer ends every open human wait at once.
   it('commitHumanWaitsAnswered settles every open human wait as delivered and leaves ci open', () => {
     const human = humanEntry({ questions: [{ header: 'Pick', question: 'Which one?', options: [{ label: 'A' }, { label: 'B' }] }], askSeq: 3 });
