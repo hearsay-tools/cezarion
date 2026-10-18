@@ -4908,23 +4908,16 @@ export class RunManager {
     if (run.delegation.wait.phase === 'registered') {
       this.store.commitDelegation([{ id: runId, delegation: { ...run.delegation, wait: { ...run.delegation.wait, phase: 'parked' } } }]);
     }
-    this.clearIdleTimer(state); this.withdrawMonitoringTimers(runId);
+    // Open waits stay open: the workers outrank them (`computeWaitingOn`), so the park holds no
+    // slot, and a timer that resolves meanwhile is held for the next boundary
+    // (hearsay-tools/cezarion#1233).
+    this.clearIdleTimer(state);
     this.waiting.delete(runId); this.leaveMonitoringPool(runId);
     this.workerWaiting.add(runId);
     this.store.updateRun(runId, { status: 'waiting', activity: undefined });
     if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
     this.reconcileWorkerWaits(); this.releaseSlot();
     return true;
-  }
-
-  /** A worker park replaces cezar's own re-check, as it did before the wait list: workers are not
-   *  in the list until phase 3 and their park holds no slot (hearsay-tools/cezarion#1233). Timers
-   *  the agent registered through `cezar_wait` stay open. */
-  private withdrawMonitoringTimers(runId: string): void {
-    const ids = openWaits(this.store.getRun(runId) ?? {}).filter(isMonitoringTimer).map(wait => wait.id);
-    if (!ids.length) return;
-    this.store.commitWaitCancellation(runId, ids);
-    for (const id of ids) this.disarmWait(id);
   }
 
   /** Progress owns a delivery turn, not the parent's completion-wait intent. */

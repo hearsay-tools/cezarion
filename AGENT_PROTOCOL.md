@@ -820,9 +820,12 @@ or of the interval when it gave none (`via: 'schedule-wakeup'`). An alias opens 
 most one open timer per run and `via`: a later turn's line keeps the timer already
 open. With re-checks off, or the budget spent, an alias opens nothing, adds a note,
 and the run parks as a plain wait that reads as Needs you. An autonomous run whose
-nudge would fire skips the alias. A worker wait (`cez worker wait`) withdraws the
-alias timers in phase 1, as the monitoring line was withdrawn before; a `cezar_wait`
-timer stays open.
+nudge would fire skips the alias. A worker wait (`cez worker wait`) cancels no wait:
+every open timer and CI wait keeps its deadline through a worker park. Workers outrank
+CI and timers, so the park holds no slot and reads as the workers, and their owed wake
+reads **waiting for capacity**. A wait that resolves while the run is parked on workers
+is held: the worker wake is delivered first and the held result at a later boundary
+(phase-1 interim, until phase 3 puts worker waits in the list).
 
 The agent ends its turn after registering. At a turn end, in both turn-end handlers:
 a question or a permission gate parks for the human, an accepted `CEZ:DONE` finishes,
@@ -1002,7 +1005,7 @@ the observation. Later successful settlement must leave that failed attempt inta
 Clean session closure while CI is pending still parks without failure. No runner
 exemptions or normalized-event injection.
 
-**U0–U4, U7–U10** (hearsay-tools/cezarion#1233) pin the wait list on every `RUNNER_IDS`
+**U0–U4, U7–U11** (hearsay-tools/cezarion#1233) pin the wait list on every `RUNNER_IDS`
 backend through its `HARNESS_ADAPTERS` native wire, with no normalized-event injection.
 U0, in `core/ci-tools.test.ts`, calls `cezar_wait` and `cezar_cancel_wait` through each
 native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
@@ -1019,7 +1022,10 @@ timer, at `maxParallel: 1` and wakes without queueing behind the held slot. U9 l
 recoverable after a provider failure and after a clean close with each kind open, and
 the next wake delivers. U10 resolves two timers before one boundary with 39 wakes spent:
 one turn carries both and spends one wake, and a third timer due at the budget is
-cancelled with the cap note and wakes nothing. Scenario cases that need one wire live in
+cancelled with the cap note and wakes nothing. U11 opens a monitoring-line timer, parks
+the parent on a worker, fires the timer, and checks that the timer kept its deadline, was
+held while the parent read **waiting on 1 worker**, and was delivered after the worker
+wake. Scenario cases that need one wire live in
 `workflows/waits-wake.test.ts`: a CI result beside a pending portable question (U3b,
 Claude and Codex), a Codex native question, an idle-closed question, two waits in one
 submission, the footer and the monitoring pool.

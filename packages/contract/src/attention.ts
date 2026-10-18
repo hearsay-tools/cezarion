@@ -144,6 +144,20 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
   if (run.status === 'failed') {
     return { bucket: 'error', tone: 'danger', shape: 'filled', pulse: false, label: 'failed' };
   }
+  if (
+    !hasPendingHumanAsk && !run.hasPendingHumanAsk
+    && (run.status === 'waiting' || run.status === 'queued')
+    && run.delegation?.role !== 'invalid'
+    && run.delegation?.wait?.phase === 'wake-pending'
+  ) {
+    // A queued automatic wake is a scheduler/capacity wait, not a human gate (#971).
+    // Covers both the parked session still open (`waiting`) and a leftover after restart
+    // / Continue (`queued`). Workers already settled; the ring is the same “waiting for
+    // a slot” shape as queued CI. Running still wins because it is checked later. Ahead of
+    // the CI and timer rungs: workers outrank them, and a worker park keeps its open waits
+    // (hearsay-tools/cezarion#1233).
+    return { bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' };
+  }
   // A CI or timer park is `waiting` on its own downstream work, not on you: it keeps the
   // running bucket and ring the `activity: 'monitoring'` rung below gave it before the wait list.
   // An open human signal makes `waitingOn` human (or the transcript argument says so), which
@@ -160,18 +174,6 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
     // Its own workers → the robot; a worker waiting on its parent is waiting on something
     // outside it → a ring. Both violet: still in motion, just not on this turn.
     return { bucket: 'none', tone: 'running', shape: run.delegation.role === 'root' ? 'workers' : 'ring', pulse: false, label: dependencyLabel };
-  }
-  if (
-    !hasPendingHumanAsk && !run.hasPendingHumanAsk
-    && (run.status === 'waiting' || run.status === 'queued')
-    && run.delegation?.role !== 'invalid'
-    && run.delegation?.wait?.phase === 'wake-pending'
-  ) {
-    // A queued automatic wake is a scheduler/capacity wait, not a human gate (#971).
-    // Covers both the parked session still open (`waiting`) and a leftover after restart
-    // / Continue (`queued`). Workers already settled; the ring is the same “waiting for
-    // a slot” shape as queued CI. Running still wins because it is checked later.
-    return { bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' };
   }
   if (!hasPendingHumanAsk && waitingOn === undefined && run.status === 'waiting' && hasResolvedWait(run)) {
     // A resolved CI or timer wait owes the agent a wake that has not started: the same

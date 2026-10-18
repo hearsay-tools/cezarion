@@ -238,6 +238,21 @@ describe('open waits', () => {
     expect(deriveAttention({ status: 'running', waits: [resolved] }).label).toBe('running');
   });
 
+  // Workers outrank CI and timers (`computeWaitingOn`), and a worker park keeps its open waits
+  // (hearsay-tools/cezarion#1233): the workers' label and their owed wake stay on top.
+  it('keeps a parked or wake-pending worker wait above open CI and timer waits', () => {
+    const root = (phase: 'parked' | 'wake-pending', waits: unknown[]) => ({
+      status: 'waiting', waits, delegation: { role: 'root', wait: { phase, workerIds: ['a'], outcomes: [] } },
+    } as unknown as AttentionInput);
+    for (const waits of [[openTimer()], [openCi()], [openCi(), openTimer()]]) {
+      expect(deriveAttention(root('parked', waits))).toMatchObject({ shape: 'workers', label: 'waiting on 1 worker' });
+      expect(deriveAttention(root('wake-pending', waits))).toEqual({
+        bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity',
+      });
+      expect(deriveAttention({ ...root('wake-pending', waits), hasPendingHumanAsk: true }).label).toBe('needs you');
+    }
+  });
+
   it('leaves every other status alone', () => {
     expect(deriveAttention({ status: 'running', waits: [openCi()] }).label).toBe('running');
     expect(deriveAttention({ status: 'review', waits: [openCi()] }).label).toBe('needs review');

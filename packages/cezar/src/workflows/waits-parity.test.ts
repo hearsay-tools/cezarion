@@ -5,7 +5,7 @@ import { deriveAttention, type CiWaitResult, type Wait } from '@open-mercato/cez
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
-import { manager, root, semaphore, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { manager, parent, register, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { claudeScheduleWakeupDelay } from './run.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
@@ -57,7 +57,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -248,6 +248,47 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
       expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
       expect(engine().monitoring.has(run.id)).toBe(false);
+    });
+
+    it(`${runner} U11 an alias timer survives a later worker park with its deadline, is held while the workers outrank it, and is delivered after the worker wake`, async () => {
+      nativeWire(runner);
+      // Workers run on the Claude wire whatever the parent's runner is.
+      process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
+      const p = await parent(HARNESS_ADAPTERS[runner].scenarios.baseline!, runner);
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+      let turns = turnEnds(p.id);
+      expect(manager.sendMessage(p.id, [{ type: 'text', text: messagesPrompt(runner, ['Still checking.\nCEZ:MONITORING']) }])).toBe(true);
+      await until(() => turnEnds(p.id) > turns && parkedOn(p.id, viaOf(p.id, 'monitoring-line')));
+      const timer = viaOf(p.id, 'monitoring-line')!;
+      const w = await worker(p.id);
+      turns = turnEnds(p.id);
+      expect(manager.sendMessage(p.id, [{ type: 'text', text: messagesPrompt(runner, ['Waiting on my worker.']) }])).toBe(true);
+      const workerWait = register(p.id, [w.id]);
+      await until(() => turnEnds(p.id) > turns && waitOf(store.getRun(p.id))?.phase === 'parked');
+      // The worker park cancels nothing: the timer keeps its deadline, and the workers outrank it.
+      expect(store.getRun(p.id)?.waits).toEqual([expect.objectContaining({ id: timer.id, phase: 'open', deadline: timer.deadline })]);
+      expect(deriveAttention(store.getRun(p.id)!).label).toBe('waiting on 1 worker');
+      expect(engine().monitoring.has(p.id)).toBe(false);
+      fireTimer(timer.id);
+      await until(() => store.getRun(p.id)?.waits?.[0]?.phase === 'resolved');
+      await flushMicrotasks();
+      // Held behind the worker park: nothing is delivered, and attention still follows the workers.
+      expect(inputsFor(p.id, timer.id).map(input => input.deliveredAt)).toEqual([undefined]);
+      const result = inputsFor(p.id, timer.id)[0]!.text;
+      expect(prompted(runner, result)).toEqual([]);
+      expect(deriveAttention(store.getRun(p.id)!).label).toBe('waiting on 1 worker');
+      manager.enqueueOwnedRun(w.id);
+      await until(() => store.getRun(w.id)?.status === 'waiting');
+      expect(manager.finish(w.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(w.id)?.status ?? ''));
+      await until(() => settled(p.id, timer.id)?.phase === 'delivered' && !waitOf(store.getRun(p.id)));
+      expect(inputsFor(p.id, timer.id)).toHaveLength(1);
+      // After the worker wake's own prompt, never inside the parked worker turn.
+      const prompts = ciNativeMessages(runner, root);
+      const wake = prompts.findIndex(prompt => prompt.includes(`Worker wait ${workerWait.id}`));
+      expect(wake).toBeGreaterThanOrEqual(0);
+      expect(prompts.findIndex(prompt => prompt.includes(result))).toBeGreaterThanOrEqual(wake);
+      await until(() => store.getRun(p.id)?.status === 'waiting');
     });
 
     for (const kind of ['ci', 'timer'] as const) {

@@ -450,8 +450,14 @@ builder" unless a bullet says otherwise.
   same seconds and note in the same turn return the open one. With re-checks off or the
   budget spent, an alias registers nothing, adds a note, and the run parks as a plain wait
   (phase 1 has no human wait for it to open). An autonomous run whose nudge would fire skips
-  the alias. Until phase 3 moves worker waits into the list, a worker park withdraws the
-  alias timers, as the monitoring wake was withdrawn before; `cezar_wait` timers stay open.
+  the alias.
+- **A worker park cancels no wait.** Every open timer, whatever its `via`, and every CI wait
+  keeps its deadline when the run parks on workers. Attention and slots follow
+  `computeWaitingOn`: workers outrank CI and timers, so the park holds no slot and reads as
+  the workers, and a `wake-pending` worker wait reads `waiting for capacity` above an open CI
+  or timer wait. Until phase 3 puts worker waits in the list, a wait that resolves during the
+  worker park is held: the worker wake is delivered first, and the held result at a later
+  boundary.
 - **A resolved wait in the line reads `waiting for capacity`.** Rung 10: a `waiting` run with
   a resolved wait and no human signal is bucket none, tone running, a ring, no pulse. An open
   CI or timer wait still reads `waiting for CI` or `monitoring`.
