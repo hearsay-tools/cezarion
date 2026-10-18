@@ -261,7 +261,10 @@ continuation and delivers what resolved. This generalises today's CI policy
 (R72–R76) to workers, timers and human waits. Today's "clean close with an
 outstanding worker wait is an error" (`run.ts` `7276-7280`) becomes a park. A
 terminal status (stop, Finish, cancel, deletion) cancels open waits without
-waking the agent, as it retires CI intent today.
+waking the agent, as it retires CI intent today. A failure while resolved results
+are still undelivered is a failed delivery: the retry waits for a short backoff,
+and the delivery bound below settles the run `failed` with the results kept
+instead of retrying forever. Only a `failed` run that owes results keeps its waits.
 
 ### Liveness bounds
 
@@ -276,6 +279,11 @@ waking the agent, as it retires CI intent today.
   nudges) since the last human message. At the budget, Cezar opens a human wait
   (`reason: budget`) instead. CI, worker and usage-limit wakes are external events
   and do not count; usage-limit resumes keep their own cap of 12.
+- **Delivery bound:** at most 3 consecutive failed automatic attempts to deliver
+  resolved results, counted across the sessions that retry them, each retry after
+  a short backoff. At the bound the run settles `failed` with its last error and a
+  note; it keeps the results for a human, and nothing wakes it automatically.
+  Usage-limit failures are not counted; their own hold and resume take them.
 - Parks that hold no slot close their session after 15 minutes idle (today's
   `IDLE_TIMEOUT_MS`, now for worker and usage-limit parks too); a wake reopens it
   through the existing scheduler-owned continuation. CI and timer parks hold a
@@ -483,7 +491,8 @@ builder" unless a bullet says otherwise.
   A rejected acknowledgement fails the session like any rejected agent input (every runner
   that can reject one reports it as a provider error), and the waits stay resolved and the
   question pending: the run stays `waiting` on its waits, and a scheduler continuation delivers
-  them and re-parks as Needs you. An acknowledgement after the wake turn ended parks the run for
+  them after the wake backoff and re-parks as Needs you; a rejection that persists stops at the
+  delivery bound (below). An acknowledgement after the wake turn ended parks the run for
   the question again. A pending native question delivers nothing mid-turn:
   the wake waits for the answer's turn end.
 - **Recovery.** A parked run with waits stays parked and its wake folds in queued messages.
@@ -505,3 +514,23 @@ builder" unless a bullet says otherwise.
   A restart, any continuation (Continue, and the scheduler continuation that delivers a wait
   result to a closed session) and a human message start it again at 0. Durable per-run
   accounting is phase 2, with the `reason: budget` human wait.
+- **Failed deliveries are bounded across sessions.** The per-session budget cannot stop a
+  delivery whose session keeps failing, because every retry is a new session. So a session that
+  fails (a provider error on the opening or resume prompt, a rejected acknowledgement beside a
+  question, a crash) while the run still owes resolved results counts one failed delivery, in
+  `execute` and in `runContinuation` alike. The next attempt waits `WAKE_RETRY_BACKOFF` (15 s,
+  then 30 s) instead of starting at once; the third consecutive failure
+  (`MAX_WAKE_DELIVERY_ATTEMPTS`, beside `MAX_AUTO_RESUMES`) settles the run `failed` through
+  the ordinary failure path, with the last error and the note `could not deliver wait results
+  after 3 attempts — continue this task to retry`. The count lives on the `RunManager`, in
+  memory: a restart starts it again, like the per-session budget. A delivery acknowledgement,
+  human input or a question answer, Continue, Stop, Finish and cancel reset it. A session that
+  fails with nothing resolved is not counted (its open waits wake it later), nor is a clean
+  close. A usage-limit failure that owes results settles `failed` at once without being counted,
+  so the usage-limit hold and its automatic resume take it, and the resume delivers them.
+- **A failed run keeps the results it owes.** A `failed` run with a resolved wait is the one
+  terminal row whose waits are not cancelled: its resolved waits stay resolved and undelivered,
+  its open waits stay armed (also after a restart) and still resolve, and nothing wakes it.
+  Continue delivers them once; a pending portable question stays answerable, and its answer
+  opens the turn that also delivers them. Stop discards them and leaves the run `failed`;
+  deletion drops them with the row.

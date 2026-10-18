@@ -870,6 +870,23 @@ run: it is in-memory `ActiveRun` state, so a restart, any continuation (includin
 scheduler continuation that delivers a wait result) and a human message start it again
 at 0. Durable per-run accounting is phase 2.
 
+That budget cannot stop a delivery whose session keeps failing, since every retry is a
+new session, so failed deliveries have their own bound. A session that fails while the run
+owes resolved results (a provider error on the opening or resume prompt, a rejected
+acknowledgement beside a question, a crash) counts one failed delivery, and the next
+attempt starts after `WAKE_RETRY_BACKOFF` (15 s, then 30 s), not at once. The third
+consecutive failure (`MAX_WAKE_DELIVERY_ATTEMPTS`) settles the run `failed` through the
+ordinary failure path, with the last error and the note `could not deliver wait results
+after 3 attempts — continue this task to retry`. The count is in-memory `RunManager` state
+in phase 1, so a restart starts it again; a delivery acknowledgement, human input or a
+question answer, Continue, Stop, Finish and cancel reset it. A failure with nothing
+resolved, and a clean close, are not counted. A usage-limit failure that owes results
+settles `failed` at once, uncounted, so the usage-limit hold and its automatic resume take
+it. A `failed` run that owes results is the one terminal run that keeps its waits: they stay
+resolved and undelivered, its open waits stay armed (across a restart too) and still
+resolve, and nothing wakes it. Continue delivers them once; a pending portable question
+stays answerable, and its answer opens the turn that also delivers them. Stop discards them.
+
 Human input never cancels a wait. A human message, `resumeParkedRun`, a question and
 a permission request leave every open wait, whatever its `via`, and its deadline as
 they were; the message is delivered and the wait's result arrives in a later turn.
@@ -886,13 +903,15 @@ answer keeps its `askSeq`. That wake goes through `sendAgentMessage` with
 checkpoint as for any wake. A rejected acknowledgement delivers nothing and fails the
 session like any rejected agent input (Codex, OpenCode, Pi and OMP report it as a provider
 error). The waits stay resolved and the question stays pending, the run stays `waiting` on
-its waits, and a scheduler continuation delivers them and re-parks as Needs you. An
+its waits, and a scheduler continuation delivers them after the wake backoff and re-parks
+as Needs you; a rejection that persists stops at the delivery bound. An
 acknowledgement that lands after the wake turn ended parks the run for the question again. A pending native question (Codex, OpenCode, Cursor)
 delivers nothing mid-turn: the wake waits for the answer and that turn's end. A
 question whose session closed idle reopens through the scheduler-owned continuation
 to deliver the wake, then re-parks as Needs you.
 
-Stop, finish, review and deletion cancel open waits without waking the agent.
+Stop, finish, review and deletion cancel open waits without waking the agent, and so does
+every other terminal status except a `failed` run that owes results (above).
 Project disposal aborts owned processes while retaining durable intent for recovery.
 Recovery preserves the absolute deadline and the stable lifecycle input id (the wait
 id) and re-arms every open wait; a parked run stays parked and its wake folds in any
@@ -1025,7 +1044,7 @@ the observation. Later successful settlement must leave that failed attempt inta
 Clean session closure while CI is pending still parks without failure. No runner
 exemptions or normalized-event injection.
 
-**U0–U4, U7–U13** (hearsay-tools/cezarion#1233) pin the wait list on every `RUNNER_IDS`
+**U0–U4, U7–U14** (hearsay-tools/cezarion#1233) pin the wait list on every `RUNNER_IDS`
 backend through its `HARNESS_ADAPTERS` native wire, with no normalized-event injection.
 U0, in `core/ci-tools.test.ts`, calls `cezar_wait` and `cezar_cancel_wait` through each
 native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
@@ -1053,13 +1072,22 @@ provider acknowledgement: the wait stays `resolved` and its input undelivered un
 acknowledgement lands after the wake turn ended, and then the run is back in Needs you and
 the answer keeps its `askSeq`. U13 rejects that acknowledgement once: the session fails, the
 run does not, a continuation sends the result again and delivers it once, and the question
-is answered. Claude is
-exempt from both, and Cursor from U13, as `capability-absent`. Claude acknowledges agent
-input with the local stdin write, and Cursor print acknowledges on the first model work of
-the process it spawns, so neither wire can delay or reject that acknowledgement. Scenario cases that need one wire live in
+is answered. A second U13 case keeps rejecting it: exactly `MAX_WAKE_DELIVERY_ATTEMPTS`
+rejected submissions, each in its own session, then the run is `failed` with the result
+resolved, its input undelivered and the cap note, and the question still pending; once the
+rejection lifts, the answer delivers the result once. Claude is exempt from U12 and U13 as
+`capability-absent`: it acknowledges agent input with the local stdin write, so its wire can
+neither delay nor reject that acknowledgement. Cursor is exempt from U13 only: Cursor print
+acknowledges on the first model work of the process it spawns, which U12 delays, but the
+print wire has no rejection of an admitted prompt. U14 fails every wait-wake continuation's
+opening prompt through each runner's native provider-error wire, with a resolved timer and no
+question: the same bound, a timer that resolves on the failed run stays resolved and wakes
+nothing, and Continue delivers both results once. Scenario cases that need one wire live in
 `workflows/waits-wake.test.ts`: a CI result beside a pending portable question (U3b,
 Claude and Codex), a Codex native question, an idle-closed question, two waits in one
-submission, the footer and the monitoring pool.
+submission, the footer and the monitoring pool, and on the Claude wire the delivery bound's
+backoff (each retry waits for it, and Continue clears it), the usage-limit failure that is
+not counted, and a failed run's held result across a restart and Stop.
 
 **R74** extends that native-wire matrix to a failed nonfinal workflow agent.
 CI recovery must retain the failed attempt, including across restart and CI
