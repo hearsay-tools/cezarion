@@ -1,7 +1,7 @@
 import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
-import { doneErrorMessage, waitErrorMessage } from '../ci-wait/errors.ts';
-import { cezarDoneRequestSchema, cezarWaitRequestSchema, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitAnswer, type CezarWaitRequest, type DoneErrorCode, type CiWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, computeWaitingOn, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
+import { askErrorMessage, doneErrorMessage, waitErrorMessage } from '../ci-wait/errors.ts';
+import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type DoneErrorCode, type CiWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, computeWaitingOn, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
 import { ciWaitResultSchema, type CiWaitRequest, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { ciWatchRequest, hasCiWait, identicalWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
@@ -1327,7 +1327,7 @@ export class RunManager {
   /** One CI watch per open CI wait, keyed by wait id. */
   private readonly ciWatches = new Map<string, { runId: string; abort: AbortController }>();
   /** CI lookups in flight, keyed by run id and normalized PR URL: two PRs may register at once. */
-  private readonly ciRegistrations = new Map<string, { runId: string; abort: AbortController; promise: Promise<Wait> }>();
+  private readonly ciRegistrations = new Map<string, { runId: string; abort: AbortController; promise: Promise<CiWaitEntry | TimerWaitEntry> }>();
   /** A resolution whose checkpoint failed, retried by wait id. */
   private readonly ciRetries = new Map<string, { runId: string; timer: NodeJS.Timeout }>();
   /** A wake that could not be admitted yet, retried by run id. */
@@ -1866,18 +1866,26 @@ export class RunManager {
    */
   cezarToolHandlers(runId: string, generation: string): CezarToolHandlers {
     const listOpen = () => openWaitList(this.store.getRun(runId)?.waits ?? []);
+    const thrownCode = (error: unknown) => error && typeof error === 'object' && 'code' in error ? error.code : undefined;
     return {
       registerWait: async (request, via, signal) => {
         try {
           const wait = await this.registerWait(runId, request, via, generation, signal);
-          const answer: CezarWaitAnswer = wait.kind === 'human'
-            ? { ok: true, wait_id: wait.id, kind: wait.kind, open_waits: listOpen() }
-            : { ok: true, wait_id: wait.id, kind: wait.kind, deadline: wait.deadline, open_waits: listOpen() };
-          return { answer, wait };
+          return { answer: { ok: true, wait_id: wait.id, kind: wait.kind, deadline: wait.deadline, open_waits: listOpen() }, wait };
         } catch (error) {
-          const code = waitErrorCodeSchema.safeParse(error && typeof error === 'object' && 'code' in error ? error.code : undefined);
+          const code = waitErrorCodeSchema.safeParse(thrownCode(error));
           if (!code.success) throw error;
           return { answer: { ok: false, code: code.data, message: waitErrorMessage(code.data), open_waits: listOpen() } };
+        }
+      },
+      ask: async (request, signal): Promise<CezarAskAnswer> => {
+        try {
+          const wait = await this.registerAsk(runId, request, generation, signal);
+          return { ok: true, wait_id: wait.id, open_waits: listOpen() };
+        } catch (error) {
+          const code = askErrorCodeSchema.safeParse(thrownCode(error));
+          if (!code.success) throw error;
+          return { ok: false, code: code.data, message: askErrorMessage(code.data), open_waits: listOpen() };
         }
       },
       cancelWait: async ({ wait_id }) => {
@@ -2047,25 +2055,18 @@ export class RunManager {
   }
 
   /** The deprecated `cezar_wait_for_ci` route's registration, kept for its callers and tests. */
-  registerCiWait(runId: string, request: CiWaitRequest, generation: string, capabilitySignal?: AbortSignal): Promise<Wait> {
+  registerCiWait(runId: string, request: CiWaitRequest, generation: string, capabilitySignal?: AbortSignal): Promise<CiWaitEntry | TimerWaitEntry> {
     return this.registerWait(runId, { kind: 'ci', ...request }, 'cezar_wait_for_ci', generation, capabilitySignal);
   }
 
-  /**
-   * Open a CI, timer or human wait (hearsay-tools/cezarion#1233, #1234). Trusted capability
-   * callbacks supply run identity; the model supplies only the PR and deadline, the seconds and
-   * note, or the card. Refusals throw `{ code }`. An identical registration (same PR; or same
-   * seconds and note in the same turn) returns the open wait it repeats. A run holds one human
-   * wait: a registration in the turn that opened it replaces its card and keeps its id, and one
-   * after the user saw it returns it unchanged.
-   */
-  async registerWait(runId: string, request: CezarWaitRequest, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<Wait> {
-    const parsed = cezarWaitRequestSchema.parse(request);
+  /** The checks every wait registration shares: the session that called is the run's current one,
+   *  and no worker wait or root finish blocks it. Refusals throw `{ code }`. */
+  private registrationGate(runId: string, generation: string, capabilitySignal?: AbortSignal) {
     const state = this.active.get(runId);
-    const refuse = (code: WaitErrorCode): never => {
+    const refuse = (code: WaitErrorCode | AskErrorCode): never => {
       // Fixed codes only: no tool arguments, credentials or provider diagnostics.
       console.warn(`[cez] wait registration refused: ${code}`);
-      throw Object.assign(new Error(waitErrorMessage(code)), { code });
+      throw Object.assign(new Error(code === 'autonomous_run' ? askErrorMessage(code) : waitErrorMessage(code)), { code });
     };
     const assertCanRegister = () => {
       const refused = this.toolSessionRefusal(runId, state, generation, capabilitySignal);
@@ -2078,20 +2079,39 @@ export class RunManager {
       if (this.executionBlockedByRootFinish(run)) refuse('root_finish_pending');
       return { state, run };
     };
+    return { refuse, assertCanRegister };
+  }
+
+  /**
+   * `cezar_ask` (hearsay-tools/cezarion#1234): open the run's human wait with its card. A run holds
+   * one: a registration in the turn that opened it replaces its card and keeps its id, and one after
+   * the user saw it returns it unchanged. An autonomous run assumes and continues instead, until
+   * its automatic wakes are spent.
+   */
+  async registerAsk(runId: string, request: CezarAskRequest, generation: string, capabilitySignal?: AbortSignal): Promise<HumanWaitEntry> {
+    const { questions } = cezarAskRequestSchema.parse(request);
+    const { refuse, assertCanRegister } = this.registrationGate(runId, generation, capabilitySignal);
     const { state: active, run } = assertCanRegister();
     const turnId = active.ciTurnId ??= randomUUID();
-    if (parsed.kind === 'human') {
-      // An autonomous run assumes and continues until its automatic wakes are spent.
-      if (active.autonomous && this.automaticWakes(runId) < MAX_AUTO_CONTINUES) refuse('autonomous_run');
-      // Only a card can be carried to a worker's parent.
-      if (run.delegation?.role === 'worker' && !parsed.questions) refuse('questions_required');
-      const open = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human');
-      if (open?.askSeq !== undefined) return open;
-      if (!open && openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
-      const base: HumanWaitEntry = open ?? { id: randomUUID(), kind: 'human', source: 'agent', via, registeredAt: new Date().toISOString(), phase: 'open', turnId };
-      const { questions: _replaced, ...kept } = base;
-      return this.openWait(runId, active, { ...kept, ...(parsed.questions ? { questions: parsed.questions } : {}) });
-    }
+    if (active.autonomous && this.automaticWakes(runId) < MAX_AUTO_CONTINUES) refuse('autonomous_run');
+    const open = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human');
+    if (open?.askSeq !== undefined) return open;
+    if (!open && openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
+    const base: HumanWaitEntry = open ?? { id: randomUUID(), kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: new Date().toISOString(), phase: 'open', turnId };
+    return this.openWait(runId, active, { ...base, questions });
+  }
+
+  /**
+   * Open a CI or timer wait (hearsay-tools/cezarion#1233). Trusted capability callbacks supply run
+   * identity; the model supplies only the PR and deadline, or the seconds and note. Refusals throw
+   * `{ code }`. An identical registration (same PR; or same seconds and note in the same turn)
+   * returns the open wait it repeats.
+   */
+  async registerWait(runId: string, request: CezarWaitRequest, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<CiWaitEntry | TimerWaitEntry> {
+    const parsed = cezarWaitRequestSchema.parse(request);
+    const { refuse, assertCanRegister } = this.registrationGate(runId, generation, capabilitySignal);
+    const { state: active, run } = assertCanRegister();
+    const turnId = active.ciTurnId ??= randomUUID();
     const existing = identicalWait(run.waits ?? [], parsed, turnId);
     if (existing) return existing;
     // Counted as the store counts them, so a registration accepted here is never refused there.
@@ -2137,12 +2157,13 @@ export class RunManager {
   }
 
   /** Commit, arm and (at a boundary) park on a newly registered wait. */
-  private openWait(runId: string, state: ActiveRun, wait: Wait): Wait {
+  private openWait<W extends Wait>(runId: string, state: ActiveRun, wait: W): W {
     try { this.store.commitWait(runId, wait); }
     catch { throw Object.assign(new Error(waitErrorMessage('persistence')), { code: 'persistence' }); }
     this.armWait(runId, wait);
     if (state.atTurnBoundary === state.session || this.waiting.has(runId)) this.parkOnWaits(runId, state);
-    return this.store.getRun(runId)?.waits?.find(entry => entry.id === wait.id) ?? wait;
+    // The store keeps the entry it was given; only its phase can have moved since.
+    return (this.store.getRun(runId)?.waits?.find(entry => entry.id === wait.id) as W | undefined) ?? wait;
   }
 
   /**

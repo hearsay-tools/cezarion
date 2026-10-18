@@ -1,4 +1,4 @@
-import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, type DoneErrorCode, type WaitErrorCode } from '@open-mercato/cezar-contract/waits';
+import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, type AskErrorCode, type DoneErrorCode, type WaitErrorCode } from '@open-mercato/cezar-contract/waits';
 import type { CiWaitErrorCode, PreviewResultCode, PreviewServeResult } from '@open-mercato/cezar-contract';
 import type { z } from 'zod';
 
@@ -44,15 +44,51 @@ export function ciErrorMessage(code: CiWaitErrorCode): string {
 // hearsay-tools/cezarion#1233: `cezar_wait` refusals. Each names what the agent can do next.
 const waitMessages: Partial<Record<WaitErrorCode, string>> = {
   timers_disabled: 'Automatic re-checks are turned off for this workspace (Park until resumed). Do not register a timer; end your turn and the user resumes the task.',
-  wake_budget_spent: 'This run spent its automatic wakes. Do not register another timer; call cezar_wait with kind "human" if you need the user, or end your turn.',
-  // hearsay-tools/cezarion#1234: human waits.
-  autonomous_run: 'This is an autonomous run: do not wait for the user. Make a reasonable assumption and continue; the user can steer you at any time.',
-  questions_required: 'A worker\'s question goes to its parent as a card: call again with questions.',
+  wake_budget_spent: 'This run spent its automatic wakes. Do not register another timer; call cezar_ask if you need the user, or end your turn.',
   capacity: 'Cezar cannot open another wait now: this run has the maximum open waits, or the CI watcher is full. Cancel a wait you no longer need with cezar_cancel_wait, or retry later.',
 };
 
 export function waitErrorMessage(code: WaitErrorCode): string {
   return waitMessages[code] ?? messages[code as CiWaitErrorCode];
+}
+
+// hearsay-tools/cezarion#1234: `cezar_ask` refusals. A question never meets a CI lookup, so none
+// borrows the CI wording.
+const askMessages: Record<AskErrorCode, string> = {
+  autonomous_run: 'This is an autonomous run: do not wait for the user. Make a reasonable assumption and continue; the user can steer you at any time.',
+  capacity: 'Cezar cannot open another wait now: this run has the maximum open waits. Cancel a wait you no longer need with cezar_cancel_wait, then ask again.',
+  invalid_request: 'Invalid cezar_ask arguments.',
+  persistence: 'Your question could not be saved; retry once, and if it fails again ask it in your final message.',
+  unavailable: 'Cezar could not show your question now. Retry once; if it fails again, ask it in your final message.',
+  unauthorized: 'This session\'s cezar tools are missing or revoked. Use the current session tool.',
+  manager_disposed: 'The run manager was disposed. Ask your question in your final message.',
+  capability_revoked: 'This session\'s cezar tools were revoked. Use the current session tool.',
+  run_missing: 'The run no longer exists.',
+  run_not_running: 'The run is not running or waiting. Resume it before asking.',
+  run_stopping: 'The run is stopping. End your turn; it stops without your question.',
+  session_replaced: 'The session was replaced or there is no active session. Use the current session tool after resuming.',
+  session_closed: 'The agent session is closed. Resume the task before asking.',
+  run_cancelled: 'The run was cancelled.',
+  finish_requested: 'Finish was already requested for this run. End your turn.',
+  generation_mismatch: 'This tool belongs to an earlier session. Use the current session tool.',
+  worker_wait_pending: 'A worker wait is still pending, including any result awaiting delivery. End your turn to receive its result, then ask again if you still need the user.',
+  worker_execution_stopped: 'Worker execution has stopped. Ask the parent to resume the worker before asking.',
+  root_finish_pending: 'The parent is finishing. End your turn; the parent completes that transition.',
+};
+
+export function askErrorMessage(code: AskErrorCode): string {
+  return askMessages[code];
+}
+
+const ASK_FIELDS = 'cezar_ask takes only questions: 1–4 questions, each with a header of at most 12 characters, the question, and either 2–4 options with unique labels or no options for an open question';
+
+/** Names the unknown field or the failing question, never the value the agent sent. */
+export function askInvalidInput(error?: z.ZodError): string {
+  const issue = error?.issues[0];
+  if (issue?.code === 'unrecognized_keys') return `Unknown field ${issue.keys.map(key => JSON.stringify(key.slice(0, 64))).join(', ')}: ${ASK_FIELDS}.`;
+  const path = error?.issues.find(entry => entry.path[0] === 'questions')?.path;
+  if (path) return `\`${path.filter(part => typeof part === 'string' || typeof part === 'number').join('.')}\` is invalid: ${ASK_FIELDS}.`;
+  return `The arguments must be a JSON object: ${ASK_FIELDS}.`;
 }
 
 // hearsay-tools/cezarion#1234: `cezar_done` refusals that name no worker. The worker refusals list
@@ -133,15 +169,14 @@ export function previewInvalidInput(error: z.ZodError, input: unknown): PreviewS
 // hearsay-tools/cezarion#1233: `cezar_wait` and `cezar_cancel_wait` refusals name the first
 // failing field and its rule, never the value the agent sent.
 const WAIT_FIELD_RULES: Record<string, string> = {
-  kind: 'must be "ci", "timer" or "human"',
+  kind: 'must be "ci" or "timer"; ask the user with cezar_ask',
   pr: 'must be an HTTPS GitHub pull request URL (kind "ci")',
   timeout_seconds: 'must be an integer between 1 and 7200 (kind "ci")',
   seconds: `must be an integer between ${TIMER_MIN_SECONDS} and ${TIMER_MAX_SECONDS} (kind "timer")`,
   note: 'must be a string of at most 512 characters (kind "timer")',
-  questions: 'must be 1–4 questions, each with a header, the question and 2–4 options (kind "human")',
   wait_id: 'must be a wait_id that cezar_wait answered',
 };
-const WAIT_FIELDS = 'kind "ci" takes pr and timeout_seconds; kind "timer" takes seconds and note; kind "human" takes questions';
+const WAIT_FIELDS = 'kind "ci" takes pr and timeout_seconds; kind "timer" takes seconds and note';
 
 export function waitInvalidInput(error?: z.ZodError): string {
   const issue = error?.issues[0];

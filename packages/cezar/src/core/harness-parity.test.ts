@@ -2262,10 +2262,10 @@ describe('harness parity — cezarTools list behind CEZ_PREVIEW', () => {
       const controller = await CiToolController.start();
       const dir = mkdtempSync(join(tmpdir(), 'cez-tools-list-'));
       try {
-        const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'ci', source: 'agent', via: 'cezar_wait_for_ci', phase: 'open' } }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', open_waits: [] }) });
+        const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'ci', source: 'agent', via: 'cezar_wait_for_ci', phase: 'open' } }), ask: async () => ({ ok: false, code: 'unavailable', message: 'none' }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', open_waits: [] }) });
         const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, allowedTools: ['Read'], env: { ...session.env, CEZ_MOCK_ARGS_FILE: join(dir, 'wire'), CEZ_MOCK_CI_PR: wait.prUrl, CEZ_MOCK_CI_RESULT: join(dir, 'result'), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
         expect(obs.v1.filter((event) => event.type === 'error')).toEqual([]);
-        const waits = ['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait', 'cezar_done'];
+        const waits = ['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'];
         const expected = enabled ? [...waits, 'cezar_preview_serve', 'cezar_preview_stop'] : waits;
         expect(JSON.parse(readFileSync(join(dir, 'result'), 'utf8')).names).toEqual(expected);
         const argv: string[] = JSON.parse(readFileSync(join(dir, 'wire'), 'utf8').trim().split('\n')[0]!);
@@ -2638,7 +2638,7 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
                 await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
               }
               assertRules(systemPrompt(backend, dir), promptRules);
-              expect(systemPrompt(backend, dir)).toContain('When you need the user — a decision only they can make, or missing input — call cezar_wait with kind "human"');
+              expect(systemPrompt(backend, dir)).toContain('When you need the user — a decision only they can make, or missing input — call cezar_ask');
             });
         });
       }, 60_000);

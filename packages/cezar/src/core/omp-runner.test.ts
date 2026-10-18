@@ -108,7 +108,7 @@ describe('ompTools', () => {
 
   it('exclude narrows before cezar_wait_for_ci is appended, so it never turns --no-tools into a CI-only list', () => {
     expect(ompTools(['TodoWrite'], { cezarTools: true, exclude: ['todo'] })).toEqual({ flag: 'no-tools', tools: [], dropped: [] });
-    expect(ompTools(['Read', 'TodoWrite'], { cezarTools: true, exclude: ['todo'] }).tools).toEqual(['read', 'cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait', 'cezar_done']);
+    expect(ompTools(['Read', 'TodoWrite'], { cezarTools: true, exclude: ['todo'] }).tools).toEqual(['read', 'cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
   });
 
   it('undefined passes no flag, [] passes --no-tools, all-dropped passes --no-tools', () => {
@@ -118,8 +118,8 @@ describe('ompTools', () => {
   });
 
   it('cezarTools admits the preview tools exactly when the extension registers it (CEZ_PREVIEW=1)', () => {
-    expect(ompTools(['Read'], { cezarTools: true, env: { CEZ_PREVIEW: '1' } }).tools).toEqual(['read', 'cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait', 'cezar_done', 'cezar_preview_serve', 'cezar_preview_stop']);
-    expect(ompTools(['Read'], { cezarTools: true, env: { CEZ_PREVIEW: '0' } }).tools).toEqual(['read', 'cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait', 'cezar_done']);
+    expect(ompTools(['Read'], { cezarTools: true, env: { CEZ_PREVIEW: '1' } }).tools).toEqual(['read', 'cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_preview_serve', 'cezar_preview_stop']);
+    expect(ompTools(['Read'], { cezarTools: true, env: { CEZ_PREVIEW: '0' } }).tools).toEqual(['read', 'cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
     expect(ompTools(['Read'], { env: { CEZ_PREVIEW: '1' } }).tools).toEqual(['read']);
   });
 
@@ -127,7 +127,7 @@ describe('ompTools', () => {
     expect(ompTools(['Read', 'Bash'], { bashAllowlist: ['npm test'] }).tools).toEqual(['read']);
     expect(ompTools(['Read', 'Bash'], { bashAllowlist: [] }).tools).toEqual(['read', 'bash']);
     expect(ompTools(['Read', 'Subagent', 'wait', 'eval'], { restrictNativeDelegation: true }).tools).toEqual(['read']);
-    expect(ompTools(['Read'], { cezarTools: true }).tools).toEqual(['read', 'cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait', 'cezar_done']);
+    expect(ompTools(['Read'], { cezarTools: true }).tools).toEqual(['read', 'cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
   });
 
   it('fails closed when every granted tool is narrowed away, and adds no cezar tool to --no-tools', () => {
@@ -183,7 +183,7 @@ describe('buildOmpArgs', () => {
       '--mode', 'rpc',
       '--extension', expect.stringMatching(/scripts\/omp-ci-wait\.mjs$/),
       '--append-system-prompt', 'S',
-      '--tools', 'read,edit,write,grep,glob,bash,cezar_wait_for_ci,cezar_wait,cezar_cancel_wait,cezar_done',
+      '--tools', 'read,edit,write,grep,glob,bash,cezar_wait_for_ci,cezar_wait,cezar_ask,cezar_cancel_wait,cezar_done',
     ]);
   });
 

@@ -22,7 +22,7 @@ export const WAIT_CRITERIA = [
   { id: 'U14', scenario: 'provider-error', name: 'a wait-result delivery whose sessions persistently fail or close cleanly stops at the delivery bound, the run fails keeping its result, Continue delivers it once, and Stop discards it' },
   { id: 'U16', scenario: 'baseline', name: 'a scheduler continuation keeps the automatic-wake budget and a human Continue resets it' },
   // hearsay-tools/cezarion#1234: human waits.
-  { id: 'U7h', scenario: 'ask', name: 'the ask line, cezar_wait human and a native ask land in the same wait list' },
+  { id: 'U7h', scenario: 'ask', name: 'the ask line, cezar_ask (an open question included) and a native ask land in the same wait list' },
   { id: 'U9h', scenario: 'provider-error', name: 'provider failure and clean close with a human wait open leave the run recoverable' },
   { id: 'U6', scenario: 'baseline', name: 'cezar_done is refused with live workers and with settled but uncollected workers, accepted once collected, and open waits are cancelled' },
   { id: 'U7d', scenario: 'baseline', name: 'the done line and cezar_done finish through the same path' },
@@ -30,7 +30,7 @@ export const WAIT_CRITERIA = [
 
 /** The native mocks' `mock:cezar-tool` prompt: one cezar tool call through the runner's own wire.
  *  Several in one prompt run in order; `wait_id: 'last'` names the previous answer's wait. */
-export function toolCall(name: 'cezar_wait' | 'cezar_wait_for_ci' | 'cezar_cancel_wait' | 'cezar_done', args: Record<string, unknown>): string {
+export function toolCall(name: 'cezar_wait' | 'cezar_wait_for_ci' | 'cezar_ask' | 'cezar_cancel_wait' | 'cezar_done', args: Record<string, unknown>): string {
   return `mock:cezar-tool ${name} ${Buffer.from(JSON.stringify(args)).toString('base64url')}`;
 }
 /** After the `toolCall`s in the same prompt, the turn ends with `text`. */

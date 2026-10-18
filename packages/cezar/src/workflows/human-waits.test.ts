@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cezarDoneAnswerSchema } from '@open-mercato/cezar-contract/waits';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
-import type { CezarWaitRequest, HumanWaitEntry } from '@open-mercato/cezar-contract';
+import type { AskQuestion, HumanWaitEntry } from '@open-mercato/cezar-contract';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
@@ -46,7 +46,7 @@ const engine = () => manager as unknown as {
   waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>;
 };
 const tools = (id: string) => manager.cezarToolHandlers(id, engine().active.get(id)!.ciGeneration);
-const register = (id: string, request: CezarWaitRequest) => tools(id).registerWait(request, 'cezar_wait', new AbortController().signal);
+const ask = (id: string, questions: AskQuestion[]) => tools(id).ask({ questions }, new AbortController().signal);
 const turnStarted = (id: string) => store.readEvents(id).some(event => event.type === 'turn.started');
 const asks = (id: string) => store.readEvents(id).filter(event => event.type === 'ask.requested');
 const gates = (id: string) => store.readEvents(id).filter(event => event.type === 'note' && event.code === PROSE_HUMAN_GATE);
@@ -61,10 +61,11 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
 
   it('a mid-turn human message settles an unsurfaced human wait', async () => {
     const { run, release } = await heldTurn();
-    const registered = await register(run.id, { kind: 'human', questions: card('Which module?') });
-    if (!('wait' in registered)) throw Error('registration refused');
+    const registered = await ask(run.id, card('Which module?'));
+    if (!registered.ok) throw Error('registration refused');
+    expect(humanOpen(run.id)).toMatchObject([{ id: registered.wait_id, source: 'agent', via: 'cezar_ask', questions: card('Which module?') }]);
     expect(manager.sendMessage(run.id, [{ type: 'text', text: 'Start with the parser.' }])).toBe(true);
-    expect(settled(run.id, registered.wait.id)).toMatchObject({ phase: 'delivered' });
+    expect(settled(run.id, registered.wait_id)).toMatchObject({ phase: 'delivered' });
     expect(humanOpen(run.id)).toEqual([]);
     release();
     // The held turn ends, then the message runs as its own turn.
@@ -76,20 +77,18 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
 
   it('a second registration in one turn replaces the card and keeps the wait_id', async () => {
     const { run, release } = await heldTurn();
-    const first = await register(run.id, { kind: 'human', questions: card('Which module?') });
-    const second = await register(run.id, { kind: 'human', questions: card('Which runner?') });
-    expect(first.answer).toMatchObject({ ok: true, kind: 'human' });
-    expect(second.answer).toMatchObject({ ok: true, kind: 'human' });
-    if (!first.answer.ok || !second.answer.ok) throw Error('registration refused');
-    expect(second.answer.wait_id).toBe(first.answer.wait_id);
-    expect(humanOpen(run.id)).toMatchObject([{ id: first.answer.wait_id, questions: card('Which runner?') }]);
+    const first = await ask(run.id, card('Which module?'));
+    const second = await ask(run.id, card('Which runner?'));
+    if (!first.ok || !second.ok) throw Error('registration refused');
+    expect(second.wait_id).toBe(first.wait_id);
+    expect(humanOpen(run.id)).toMatchObject([{ id: first.wait_id, questions: card('Which runner?') }]);
     release();
     await until(() => needsYou(run.id));
     expect(asks(run.id)).toMatchObject([{ questions: card('Which runner?') }]);
-    expect(humanOpen(run.id)).toMatchObject([{ id: first.answer.wait_id, askSeq: asks(run.id)[0]!.seq }]);
+    expect(humanOpen(run.id)).toMatchObject([{ id: first.wait_id, askSeq: asks(run.id)[0]!.seq }]);
     // An earlier turn's question still pending: a new registration returns it unchanged.
-    const again = await register(run.id, { kind: 'human', questions: card('Which library?') });
-    expect(again.answer).toMatchObject({ ok: true, wait_id: first.answer.wait_id });
+    const again = await ask(run.id, card('Which library?'));
+    expect(again).toMatchObject({ ok: true, wait_id: first.wait_id });
     expect(humanOpen(run.id)).toMatchObject([{ questions: card('Which runner?') }]);
     expect(asks(run.id)).toHaveLength(1);
   });
@@ -97,37 +96,48 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
   it('cezar_cancel_wait refuses a surfaced human wait with human_question', async () => {
     const { run, release } = await heldTurn();
     // Not yet shown (the same turn): the agent may withdraw it.
-    const withdrawn = await register(run.id, { kind: 'human', questions: card('Which module?') });
-    if (!('wait' in withdrawn)) throw Error('registration refused');
-    expect(await tools(run.id).cancelWait({ wait_id: withdrawn.wait.id }, new AbortController().signal)).toMatchObject({ cancelled: true });
-    const kept = await register(run.id, { kind: 'human', questions: card('Which runner?') });
-    if (!('wait' in kept)) throw Error('registration refused');
+    const withdrawn = await ask(run.id, card('Which module?'));
+    if (!withdrawn.ok) throw Error('registration refused');
+    expect(await tools(run.id).cancelWait({ wait_id: withdrawn.wait_id }, new AbortController().signal)).toMatchObject({ cancelled: true });
+    const kept = await ask(run.id, card('Which runner?'));
+    if (!kept.ok) throw Error('registration refused');
     release();
     await until(() => needsYou(run.id));
-    const refused = await tools(run.id).cancelWait({ wait_id: kept.wait.id }, new AbortController().signal);
-    expect(refused).toMatchObject({ cancelled: false, code: 'human_question', open_waits: [{ wait_id: kept.wait.id, kind: 'human' }] });
-    expect(humanOpen(run.id)).toMatchObject([{ id: kept.wait.id, phase: 'open' }]);
+    const refused = await tools(run.id).cancelWait({ wait_id: kept.wait_id }, new AbortController().signal);
+    expect(refused).toMatchObject({ cancelled: false, code: 'human_question', open_waits: [{ wait_id: kept.wait_id, kind: 'human' }] });
+    expect(humanOpen(run.id)).toMatchObject([{ id: kept.wait_id, phase: 'open' }]);
     expect(needsYou(run.id)).toBe(true);
   });
 
-  it('an autonomous run refuses cezar_wait human with autonomous_run until the budget is spent', async () => {
+  // hearsay-tools/cezarion#1234: a question without options reaches the user as an open question.
+  it('an open question is shown as a card question without options', async () => {
+    const { run, release } = await heldTurn();
+    const open = [{ header: 'Name', question: 'What should the command be called?' }];
+    expect(await ask(run.id, [...card('Which module?'), ...open])).toMatchObject({ ok: true });
+    release();
+    await until(() => needsYou(run.id));
+    expect(asks(run.id)).toMatchObject([{ questions: [...card('Which module?'), ...open] }]);
+    expect((asks(run.id)[0] as unknown as { questions: object[] }).questions[1]).not.toHaveProperty('options');
+  });
+
+  it('an autonomous run refuses cezar_ask with autonomous_run until the budget is spent', async () => {
     const { run } = await heldTurn({ autonomous: true });
-    const refused = await register(run.id, { kind: 'human', questions: card('Which module?') });
-    expect(refused.answer).toEqual({ ok: false, code: 'autonomous_run', open_waits: [],
+    const refused = await ask(run.id, card('Which module?'));
+    expect(refused).toEqual({ ok: false, code: 'autonomous_run', open_waits: [],
       message: 'This is an autonomous run: do not wait for the user. Make a reasonable assumption and continue; the user can steer you at any time.' });
     expect(humanOpen(run.id)).toEqual([]);
     store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES });
-    expect((await register(run.id, { kind: 'human', questions: card('Which module?') })).answer).toMatchObject({ ok: true, kind: 'human' });
+    expect(await ask(run.id, card('Which module?'))).toMatchObject({ ok: true });
     expect(humanOpen(run.id)).toHaveLength(1);
   });
 
-  // The handlers return their refusals, so the MCP server and the `/api/v1/tools/wait` route carry
+  // The handlers return their refusals, so the MCP server and the `/api/v1/tools/ask` route carry
   // the code and its message to the agent unchanged; only a thrown non-wait error reads `unavailable`.
   it('a refusal reaches the agent through the wire with its own code and message', async () => {
     claudeWire();
     const answers = join(root, 'answers');
     process.env.CEZ_MOCK_CI_RESULT = answers;
-    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'human', questions: card('Which module?') }), runner: 'claude', autonomous: true });
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { questions: card('Which module?') }), runner: 'claude', autonomous: true });
     await until(() => existsSync(answers));
     const answer = JSON.parse(JSON.parse(readFileSync(answers, 'utf8')).response.content[0].text.split('\n')[0]);
     expect(answer).toMatchObject({ ok: false, code: 'autonomous_run',
@@ -135,7 +145,7 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     expect(humanOpen(run.id)).toEqual([]);
   });
 
-  it('a worker without questions is refused with questions_required; with questions it routes to the parent and the parent reply settles the wait', async () => {
+  it('a worker\'s question routes to the parent and the parent reply settles the wait', async () => {
     process.env.CEZ_DELEGATION = '1';
     claudeWire();
     const p = await parent();
@@ -148,11 +158,8 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     const w = await worker(p.id, HARNESS_ADAPTERS.claude.scenarios['hold-gated']!);
     manager.enqueueOwnedRun(w.id);
     await until(() => engine().active.get(w.id)?.session?.open === true && turnStarted(w.id));
-    const bare = await register(w.id, { kind: 'human' });
-    expect(bare.answer).toEqual({ ok: false, code: 'questions_required', open_waits: [],
-      message: 'A worker\'s question goes to its parent as a card: call again with questions.' });
-    const registered = await register(w.id, { kind: 'human', questions: card('Which module?') });
-    if (!('wait' in registered)) throw Error('registration refused');
+    const registered = await ask(w.id, card('Which module?'));
+    if (!registered.ok) throw Error('registration refused');
     writeFileSync(gate, '');
     await until(() => store.readEvents(w.id).some(event => event.type === 'worker-question-routed') && store.getRun(w.id)?.status === 'waiting');
     const routed = store.readEvents(w.id).find(event => event.type === 'worker-question-routed')!;
@@ -163,22 +170,22 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
       const service = new DelegationService();
       service.registerProject({ id: 'project', root, store, manager });
       await service.send(caller, { id: randomUUID(), recipientRunId: w.id, kind: 'reply', requestId: String(routed.messageId), text: 'Choice: Parser', timeoutSeconds: 600 });
-      await until(() => settled(w.id, registered.wait.id)?.phase === 'delivered');
+      await until(() => settled(w.id, registered.wait_id)?.phase === 'delivered');
       expect(store.readEvents(w.id).filter(event => event.type === 'human-input-delivered')).toMatchObject([{ askSeq: asks(w.id)[0]!.seq, source: 'parent' }]);
     } finally { credentials.close(); }
   });
 
   it('recovery surfaces an unsurfaced human wait', async () => {
     const { run } = await heldTurn();
-    const registered = await register(run.id, { kind: 'human', questions: card('Which module?') });
-    if (!('wait' in registered)) throw Error('registration refused');
+    const registered = await ask(run.id, card('Which module?'));
+    if (!registered.ok) throw Error('registration refused');
     // The process dies mid-turn, after the registration and before its turn end.
     const events = eventCheckpoint();
     const disk = readPersistedRuns(join(root, '.ai/cezar'));
     await restart(false, disk, events);
     await until(() => needsYou(run.id));
     expect(asks(run.id)).toMatchObject([{ questions: card('Which module?') }]);
-    expect(humanOpen(run.id)).toMatchObject([{ id: registered.wait.id, askSeq: asks(run.id)[0]!.seq }]);
+    expect(humanOpen(run.id)).toMatchObject([{ id: registered.wait_id, askSeq: asks(run.id)[0]!.seq }]);
     expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human' });
     expect(manager.isActive(run.id)).toBe(false);
   });

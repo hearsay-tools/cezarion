@@ -58,7 +58,7 @@ function ciEntry(overrides: Partial<Extract<Wait, { kind: 'ci' }>> = {}): Wait {
 }
 
 function humanEntry(overrides: Partial<Extract<Wait, { kind: 'human' }>> = {}): Wait {
-  return { id: randomUUID(), kind: 'human', source: 'agent', via: 'cezar_wait', registeredAt: iso(0), phase: 'open', turnId: 'turn-1', ...overrides } as Wait;
+  return { id: randomUUID(), kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: iso(0), phase: 'open', turnId: 'turn-1', ...overrides } as Wait;
 }
 
 function timerEntry(overrides: Partial<Extract<Wait, { kind: 'timer' }>> = {}): Wait {

@@ -134,7 +134,7 @@ describe('toRunSummary', () => {
 
   it('a summary of a run with an open human wait reads waitingOn human', () => {
     const waits = [{
-      kind: 'human', id: '66666666-6666-4666-8666-666666666666', source: 'agent', via: 'cezar_wait',
+      kind: 'human', id: '66666666-6666-4666-8666-666666666666', source: 'agent', via: 'cezar_ask',
       registeredAt: '2026-10-04T10:00:00.000Z', phase: 'open', turnId: 'turn-1',
     }] as RunRecord['waits'];
     const summary = toRunSummary(record({ status: 'waiting', waits }));

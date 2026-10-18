@@ -1,4 +1,4 @@
-import type { CezarWaitRequest, CiWait, CiWaitEntry, OpenWait, RunRecord, Wait } from '@open-mercato/cezar-contract';
+import type { CezarWaitRequest, CiWait, CiWaitEntry, OpenWait, RunRecord, TimerWaitEntry, Wait } from '@open-mercato/cezar-contract';
 
 /**
  * Pure helpers over a run's wait list (spec `.ai/specs/2026-10-17-unified-waits.md`, phase 1:
@@ -8,7 +8,7 @@ import type { CezarWaitRequest, CiWait, CiWaitEntry, OpenWait, RunRecord, Wait }
 
 /** What a monitoring timer (the monitoring line or Claude's `ScheduleWakeup`) says when it fires. */
 export const MONITORING_WAKE_NUDGE =
-  'Re-check the downstream work you were monitoring. Continue toward the task goal. When the goal is complete and verified, call cezar_done. If the watched work is still pending, call cezar_wait again. If you need the user, call cezar_wait with kind "human".';
+  'Re-check the downstream work you were monitoring. Continue toward the task goal. When the goal is complete and verified, call cezar_done. If the watched work is still pending, call cezar_wait again. If you need the user, call cezar_ask.';
 
 /** hearsay-tools/cezarion#1234: the same wake for a session without cezar tools, whose prompt
  *  taught the lifecycle markers. */
@@ -62,14 +62,11 @@ export function openWaitList(waits: readonly Wait[]): OpenWait[] {
 /**
  * The open wait a registration repeats, if any. CI: the same PR, whatever its timeout. Timer: the
  * same seconds and note, registered in the same turn (a later turn asking again means a new check).
- * Human: any open human wait, since a run holds one (the registration path decides whether a
- * same-turn call replaces its card).
  */
-export function identicalWait(waits: readonly Wait[], request: CezarWaitRequest, turnId: string): Wait | undefined {
-  return waits.find((wait) => {
+export function identicalWait(waits: readonly Wait[], request: CezarWaitRequest, turnId: string): CiWaitEntry | TimerWaitEntry | undefined {
+  return waits.find((wait): wait is CiWaitEntry | TimerWaitEntry => {
     if (wait.phase !== 'open') return false;
     if (request.kind === 'ci') return wait.kind === 'ci' && normalizePrUrl(wait.prUrl) === normalizePrUrl(request.pr);
-    if (request.kind === 'human') return wait.kind === 'human';
     return wait.kind === 'timer' && wait.seconds === request.seconds && wait.note === request.note && wait.turnId === turnId;
   });
 }

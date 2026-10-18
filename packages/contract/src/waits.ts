@@ -10,7 +10,8 @@ import type { RunRecord } from './runs.ts';
  * `RunRecord.waits`; the agent opens one with `cezar_wait` and closes it with
  * `cezar_cancel_wait`. A wait ends only when its own event fires, its deadline passes, or someone
  * cancels it. Phase 1 carries the `ci` and `timer` kinds; phase 2 (hearsay-tools/cezarion#1234)
- * adds `human`, which has no deadline: it ends when the user answers or the agent cancels it.
+ * adds `human`, which the agent opens with `cezar_ask` and which has no deadline: it ends when
+ * the user answers or the agent cancels it.
  * Worker waits keep `delegation.wait` until phase 3, and `computeWaitingOn` reads it here so
  * `waitingOn` already follows the spec's order.
  */
@@ -28,7 +29,7 @@ export type WaitPhase = z.infer<typeof waitPhaseSchema>;
  *  `no-wait` is the human wait cezar opens when a nudged turn still ends without one; `budget`
  *  is the one it opens when the automatic-wake budget is spent. */
 export const waitViaSchema = z.enum([
-  'cezar_wait', 'cezar_wait_for_ci', 'monitoring-line', 'schedule-wakeup', 'ask-line', 'native-ask', 'no-wait', 'budget',
+  'cezar_wait', 'cezar_wait_for_ci', 'cezar_ask', 'monitoring-line', 'schedule-wakeup', 'ask-line', 'native-ask', 'no-wait', 'budget',
 ]);
 export type WaitVia = z.infer<typeof waitViaSchema>;
 
@@ -87,7 +88,6 @@ export const cezarWaitRequestSchema = z.discriminatedUnion('kind', [
     seconds: z.number().int().min(TIMER_MIN_SECONDS).max(TIMER_MAX_SECONDS),
     note: z.string().max(NOTE_MAX).optional(),
   }).strict(),
-  z.object({ kind: z.literal('human'), questions: askRequestSchema.shape.questions.optional() }).strict(),
 ]);
 export type CezarWaitRequest = z.infer<typeof cezarWaitRequestSchema>;
 
@@ -103,21 +103,21 @@ export const openWaitSchema = z.discriminatedUnion('kind', [
 ]);
 export type OpenWait = z.infer<typeof openWaitSchema>;
 
-export const waitErrorCodeSchema = z.enum([
-  ...ciWaitErrorCodeSchema.options, 'timers_disabled', 'wake_budget_spent', 'autonomous_run', 'questions_required',
-]);
+export const waitErrorCodeSchema = z.enum([...ciWaitErrorCodeSchema.options, 'timers_disabled', 'wake_budget_spent']);
 export type WaitErrorCode = z.infer<typeof waitErrorCodeSchema>;
 
 /** The bound on every wait and done refusal's `message`; the run manager fits its own to it. */
 export const WAIT_MESSAGE_MAX = 4096;
 const message = z.string().max(WAIT_MESSAGE_MAX);
 
-const acceptedFields = { ok: z.literal(true), wait_id: z.uuid(), open_waits: z.array(openWaitSchema).max(WAIT_LIMIT) };
 export const cezarWaitAnswerSchema = z.discriminatedUnion('ok', [
-  z.discriminatedUnion('kind', [
-    z.object({ ...acceptedFields, kind: z.enum(['ci', 'timer']), deadline: z.iso.datetime() }).strict(),
-    z.object({ ...acceptedFields, kind: z.literal('human') }).strict(),
-  ]),
+  z.object({
+    ok: z.literal(true),
+    wait_id: z.uuid(),
+    kind: z.enum(['ci', 'timer']),
+    deadline: z.iso.datetime(),
+    open_waits: z.array(openWaitSchema).max(WAIT_LIMIT),
+  }).strict(),
   z.object({
     ok: z.literal(false),
     code: waitErrorCodeSchema,
@@ -126,6 +126,33 @@ export const cezarWaitAnswerSchema = z.discriminatedUnion('ok', [
   }).strict(),
 ]);
 export type CezarWaitAnswer = z.infer<typeof cezarWaitAnswerSchema>;
+
+/**
+ * `cezar_ask` (hearsay-tools/cezarion#1234): the user's answer, asked with a card. A question
+ * without options is open, and the user types its answer. The wait it opens has no deadline.
+ */
+export const cezarAskRequestSchema = askRequestSchema;
+export type CezarAskRequest = z.infer<typeof cezarAskRequestSchema>;
+
+/** The refusals a question can meet: the session's, the run's capacity, and an autonomous run. */
+export const askErrorCodeSchema = z.enum([
+  'invalid_request', 'capacity', 'persistence', 'unavailable', 'unauthorized', 'autonomous_run',
+  'manager_disposed', 'capability_revoked', 'run_missing', 'run_not_running', 'run_stopping', 'session_replaced',
+  'session_closed', 'run_cancelled', 'finish_requested', 'generation_mismatch', 'worker_wait_pending',
+  'worker_execution_stopped', 'root_finish_pending',
+]);
+export type AskErrorCode = z.infer<typeof askErrorCodeSchema>;
+
+export const cezarAskAnswerSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), wait_id: z.uuid(), open_waits: z.array(openWaitSchema).max(WAIT_LIMIT) }).strict(),
+  z.object({
+    ok: z.literal(false),
+    code: askErrorCodeSchema,
+    message,
+    open_waits: z.array(openWaitSchema).max(WAIT_LIMIT).optional(),
+  }).strict(),
+]);
+export type CezarAskAnswer = z.infer<typeof cezarAskAnswerSchema>;
 
 /** `already_resolved`: the result is owed and arrives with the next wake; cancelling is a no-op.
  *  `human_question`: the question already reached the user, so only their answer ends it. */

@@ -1,7 +1,7 @@
 import { request } from 'node:http';
 import { previewStopResult } from '../preview/registration.ts';
 import { previewRefusal } from './errors.ts';
-import { cezarCancelWaitAnswerSchema, cezarDoneAnswerSchema, cezarWaitAnswerSchema, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarWaitAnswer } from '@open-mercato/cezar-contract/waits';
+import { cezarAskAnswerSchema, cezarCancelWaitAnswerSchema, cezarDoneAnswerSchema, cezarWaitAnswerSchema, type CezarAskAnswer, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarWaitAnswer } from '@open-mercato/cezar-contract/waits';
 import { ciWaitRequestSchema, ciWaitReceiptSchema, ciWaitErrorSchema, type CiWaitReceipt } from '@open-mercato/cezar-contract/ci-wait';
 import { previewServeResultSchema, previewStopResultSchema, type PreviewStopResult, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 
@@ -59,6 +59,11 @@ export function callCezarCancelWait(input: unknown, env: NodeJS.ProcessEnv = pro
 /** hearsay-tools/cezarion#1234: unparsed too, so the server names an unknown field. */
 export function callCezarDone(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<CezarDoneAnswer> {
   return callTool(input, env, 'done', cezarDoneAnswerSchema, { ok: false, code: 'unavailable', message: UNAVAILABLE });
+}
+
+/** hearsay-tools/cezarion#1234: unparsed too, so the server names the failing question. */
+export function callCezarAsk(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<CezarAskAnswer> {
+  return callTool(input, env, 'ask', cezarAskAnswerSchema, { ok: false, code: 'unavailable', message: UNAVAILABLE });
 }
 
 function callTool<T>(input: unknown, env: NodeJS.ProcessEnv, route: string, schema: { safeParse(input: unknown): { success: true; data: T } | { success: false } }, unavailable: T): Promise<T> {

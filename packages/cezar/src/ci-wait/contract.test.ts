@@ -62,12 +62,14 @@ it.each([
   expect(ciWaitErrorSchema.safeParse({ code: 'invented_refusal', message: 'no' }).success).toBe(false);
 });
 
-// hearsay-tools/cezarion#1234: `cezar_done` is the fourth cezar tool, ahead of the preview tools.
+// hearsay-tools/cezarion#1234: `cezar_ask` follows `cezar_wait`, and `cezar_done` closes the lifecycle
+// tools, ahead of the preview tools.
 describe('cezar_done tool contract', () => {
-  it('lists cezar_done after the wait tools and gives it a trigger line', () => {
+  it('lists cezar_ask and cezar_done with the wait tools and gives each a trigger line', () => {
     for (const env of [{}, { CEZ_PREVIEW: '1' }]) {
-      expect(cezarTools(env).map(tool => tool.definition.name).slice(0, 4)).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait', 'cezar_done']);
+      expect(cezarTools(env).map(tool => tool.definition.name).slice(0, 5)).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
       expect(cezarServerInstructions(env)).toContain('- cezar_done: load when the task is complete and verified.');
+      expect(cezarServerInstructions(env)).toContain('- cezar_ask: load when you need the user');
     }
     expect(doneToolDefinition.description).toBe('Finish the task. Call it when the goal is fully achieved and verified and you have no question for the user; end your turn after it answers. Cezar closes the session at the end of this turn and cancels every open wait. It refuses, naming what to do first, while owned workers are live or uncollected, a worker question is unanswered, or your question to the user is still pending.');
     expect(doneToolDefinition.inputSchema).toMatchObject({ type: 'object', additionalProperties: false, properties: { summary: { type: 'string', maxLength: 2000 } } });
@@ -84,7 +86,7 @@ describe('private preview-serve route', () => {
     const { CiToolController } = await import('./controller.ts');
     const owner = await CiToolController.start(); controllers.push(owner);
     const notWait = async (): Promise<never> => { throw new Error('not a CI test'); };
-    return owner.provision({ registerWait: notWait, cancelWait: notWait, finishTurn: notWait, registerPreview });
+    return owner.provision({ registerWait: notWait, ask: notWait, cancelWait: notWait, finishTurn: notWait, registerPreview });
   }
   function post(env: Record<string, string>, body: string, token = env.CEZ_TOOL_TOKEN!) {
     return new Promise<{ status: number; body: string }>((resolve, reject) => {

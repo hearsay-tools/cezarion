@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { stat, access, rm, mkdtemp, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { cezarCancelWaitAnswerSchema, cezarDoneAnswerSchema, cezarWaitAnswerSchema, type CezarCancelWaitAnswer, type CezarDoneAnswer, type Wait } from '@open-mercato/cezar-contract/waits';
+import { cezarAskAnswerSchema, cezarCancelWaitAnswerSchema, cezarDoneAnswerSchema, cezarWaitAnswerSchema, type CezarAskAnswer, type CezarCancelWaitAnswer, type CezarDoneAnswer, type Wait } from '@open-mercato/cezar-contract/waits';
 import { ciWaitErrorSchema, ciWaitReceiptSchema } from '@open-mercato/cezar-contract/ci-wait';
 import { fork, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +10,7 @@ import { request } from 'node:http';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { CiToolController, type CezarToolHandlers, type WaitRegistration } from './controller.ts';
-import { callCezarCancelWait, callCezarDone, callCezarWait, callCiWait } from './client.ts';
+import { callCezarAsk, callCezarCancelWait, callCezarDone, callCezarWait, callCiWait } from './client.ts';
 
 const wait = { id: '11111111-1111-4111-8111-111111111111', generation: 'generation', turnId: 'turn', timeoutSeconds: 1800, prUrl: 'https://github.com/owner/repo/pull/1', repository: 'owner/repo', prNumber: 1, headSha: 'a'.repeat(40), registeredAt: '2026-09-22T00:00:00.000Z', deadline: '2026-09-22T00:30:00.000Z', phase: 'registered' as const };
 const entry: Wait = { kind: 'ci', source: 'agent', via: 'cezar_wait', ...wait, phase: 'open' };
@@ -18,8 +18,10 @@ const openWait = { wait_id: wait.id, kind: 'ci' as const, deadline: wait.deadlin
 const registered: WaitRegistration = { answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: [openWait] }, wait: entry };
 const cancelled: CezarCancelWaitAnswer = { cancelled: true, wait_id: wait.id, open_waits: [] };
 const accepted: CezarDoneAnswer = { ok: true, finishes: 'at_turn_end', open_waits: [openWait] };
+const humanId = '22222222-2222-4222-8222-222222222222';
+const asked: CezarAskAnswer = { ok: true, wait_id: humanId, open_waits: [openWait, { wait_id: humanId, kind: 'human', summary: 'human: Which area?' }] };
 function handlers(overrides: Partial<CezarToolHandlers> = {}): CezarToolHandlers {
-  return { registerWait: async () => registered, cancelWait: async () => cancelled, finishTurn: async () => accepted, ...overrides };
+  return { registerWait: async () => registered, ask: async () => asked, cancelWait: async () => cancelled, finishTurn: async () => accepted, ...overrides };
 }
 const coded = (code: string) => async (): Promise<never> => { throw Object.assign(new Error('secret-sensitive'), { code }); };
 const controllers: CiToolController[] = [];
@@ -108,7 +110,7 @@ describe('private CI controller', () => {
     const client = new Client({ name: 'owner-death-test', version: '1' });
     try {
       await client.connect(new StdioClientTransport({ ...session.descriptor, env: session.env, stderr: 'pipe' }));
-      expect((await client.listTools()).tools).toHaveLength(4);
+      expect((await client.listTools()).tools).toHaveLength(5);
       const closed = new Promise<void>(resolve => { client.onclose = resolve; });
       child.kill('SIGKILL');
       await closed;
@@ -123,7 +125,7 @@ describe('private CI controller', () => {
     try {
       await client.connect(transport);
       const listed = await client.listTools();
-      expect(listed.tools.map(tool => tool.name)).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait', 'cezar_done']);
+      expect(listed.tools.map(tool => tool.name)).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
       for (const tool of listed.tools) expect(tool.inputSchema.additionalProperties).toBe(false);
       expect(register).not.toHaveBeenCalled();
       const result = await client.callTool({ name: 'cezar_wait_for_ci', arguments: { pr: wait.prUrl } });
@@ -254,6 +256,43 @@ describe('private wait routes', () => {
     expect(JSON.parse((await raw(session.env, ' '.repeat(16385), undefined, 'done')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
     expect((await raw(session.env, JSON.stringify({}), 'invalid', 'done')).status).toBe(401);
     expect(finish).not.toHaveBeenCalled();
+  });
+
+  // hearsay-tools/cezarion#1234: `cezar_ask` is the same shape of route; its card is required.
+  const card = { questions: [{ header: 'Area', question: 'Which area?', options: [{ label: 'Parser' }, { label: 'Lexer' }] }, { header: 'Name', question: 'What should it be called?' }] };
+  it('POST /tools/ask routes the card to the ask handler and answers its refusal with 200', async () => {
+    const ask = vi.fn(async (): Promise<CezarAskAnswer> => asked);
+    const session = (await controller()).provision(handlers({ ask }));
+    const opened = await raw(session.env, JSON.stringify(card), undefined, 'ask');
+    expect(opened.status).toBe(200);
+    expect(cezarAskAnswerSchema.parse(JSON.parse(opened.body))).toEqual(asked);
+    expect(ask).toHaveBeenLastCalledWith(card, expect.any(AbortSignal));
+    const refusal: CezarAskAnswer = { ok: false, code: 'autonomous_run', message: 'Assume and continue.', open_waits: [] };
+    ask.mockResolvedValueOnce(refusal);
+    await expect(callCezarAsk(card, session.env)).resolves.toEqual(refusal);
+    // A throw never forwards its text.
+    ask.mockImplementationOnce(coded('capacity'));
+    const failed = await raw(session.env, JSON.stringify(card), undefined, 'ask');
+    expect(JSON.parse(failed.body)).toEqual({ ok: false, code: 'unavailable', message: 'Cezar could not show your question now. Retry once; if it fails again, ask it in your final message.' });
+    expect(failed.body).not.toContain('secret-sensitive');
+    session.revoke();
+    expect((await raw(session.env, JSON.stringify(card), undefined, 'ask')).status).toBe(401);
+    expect(await callCezarAsk(card, session.env)).toMatchObject({ ok: false, code: 'unavailable' });
+  });
+
+  it('POST /tools/ask answers a call without a card with invalid_request, and cezar_wait points the old human kind at it', async () => {
+    const ask = vi.fn(async (): Promise<CezarAskAnswer> => asked); const register = vi.fn(async () => registered);
+    const session = (await controller()).provision(handlers({ ask, registerWait: register }));
+    const fields = 'cezar_ask takes only questions: 1–4 questions, each with a header of at most 12 characters, the question, and either 2–4 options with unique labels or no options for an open question';
+    expect(await callCezarAsk({}, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions\` is invalid: ${fields}.` });
+    expect(await callCezarAsk({ questions: [{ header: 'Area', question: 'Which?', options: [{ label: 'Only' }] }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.options\` is invalid: ${fields}.` });
+    expect(await callCezarAsk({ kind: 'human', ...card }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `Unknown field "kind": ${fields}.` });
+    expect(JSON.parse((await raw(session.env, '{', undefined, 'ask')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
+    expect(JSON.parse((await raw(session.env, ' '.repeat(16385), undefined, 'ask')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
+    expect(await callCezarWait({ kind: 'human', ...card }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: '`kind` must be "ci" or "timer"; ask the user with cezar_ask.' });
+    expect(ask).not.toHaveBeenCalled();
+    expect(register).not.toHaveBeenCalled();
+    expect((await raw(session.env, JSON.stringify(card), 'invalid', 'ask')).status).toBe(401);
   });
 
   it('maps a returned refusal on the deprecated route to its old error envelope', async () => {

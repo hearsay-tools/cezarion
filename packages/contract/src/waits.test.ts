@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { RunRecord } from './runs.ts';
 import {
+  askErrorCodeSchema,
+  cezarAskAnswerSchema,
+  cezarAskRequestSchema,
   cezarCancelWaitAnswerSchema,
   cezarDoneAnswerSchema,
   cezarDoneRequestSchema,
@@ -74,7 +77,7 @@ function openHuman(over: Partial<HumanWaitEntry> = {}): HumanWaitEntry {
     kind: 'human',
     id: HUMAN_ID,
     source: 'agent',
-    via: 'cezar_wait',
+    via: 'cezar_ask',
     registeredAt: '2026-10-17T15:20:00.000Z',
     phase: 'open',
     turnId: 'turn-1',
@@ -122,6 +125,11 @@ describe('waitSchema', () => {
     for (const via of ['cezar_wait', 'cezar_wait_for_ci', 'monitoring-line', 'schedule-wakeup'] as const) {
       expect(waitSchema.safeParse(openTimer({ via })).success).toBe(true);
     }
+    // hearsay-tools/cezarion#1234: the user's question names the tool that asked it, or its alias.
+    for (const via of ['cezar_ask', 'ask-line', 'native-ask', 'no-wait', 'budget'] as const) {
+      expect(waitSchema.safeParse(openHuman({ via })).success).toBe(true);
+    }
+    expect(waitSchema.safeParse(openHuman({ via: 'cezar_question' as never })).success).toBe(false);
   });
 });
 
@@ -195,8 +203,10 @@ describe('resolveWaitingOn', () => {
 });
 
 describe('cezar_wait request', () => {
-  it('accepts the ci, timer and human request shapes and refuses the rest', () => {
+  it('accepts the ci and timer request shapes and refuses the rest', () => {
     expect(cezarWaitRequestSchema.parse({ kind: 'ci', pr: 'https://github.com/o/r/pull/1' })).toMatchObject({ timeout_seconds: 1800 });
+    // hearsay-tools/cezarion#1234: the user is asked through cezar_ask, never cezar_wait.
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'human', questions: CARD }).success).toBe(false);
     expect(cezarWaitRequestSchema.safeParse({ kind: 'timer', seconds: 59 }).success).toBe(false);
     expect(cezarWaitRequestSchema.safeParse({ kind: 'timer', seconds: 7201 }).success).toBe(false);
     expect(cezarWaitRequestSchema.safeParse({ kind: 'worker' }).success).toBe(false); // phase 3
@@ -230,9 +240,10 @@ describe('answers', () => {
 
   // hearsay-tools/cezarion#1234: a CI or timer wait always carries its deadline; a human wait never does.
   it('ties the deadline to the kind, in the answer and in every open wait', () => {
-    const human = { wait_id: CI_ID, kind: 'human' as const, summary: 'human: Which module?' };
-    expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: CI_ID, kind: 'human', open_waits: [human] }).ok).toBe(true);
-    expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind: 'human', deadline: openWait.deadline, open_waits: [] }).success).toBe(false);
+    const human = { wait_id: HUMAN_ID, kind: 'human' as const, summary: 'human: Which module?' };
+    expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: CI_ID, kind: 'ci', deadline: openWait.deadline, open_waits: [openWait, human] }).ok).toBe(true);
+    // cezar_wait opens no human wait, so its answer never names one.
+    expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, kind: 'human', open_waits: [human] }).success).toBe(false);
     for (const kind of ['ci', 'timer'] as const) {
       expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind, open_waits: [] }).success).toBe(false);
       expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind, deadline: openWait.deadline, open_waits: [{ ...openWait, kind, deadline: undefined }] }).success).toBe(false);
@@ -243,6 +254,7 @@ describe('answers', () => {
 
   it('extends the CI error codes with the timer refusals', () => {
     expect(waitErrorCodeSchema.options).toEqual(expect.arrayContaining(['invalid_request', 'capacity', 'timers_disabled', 'wake_budget_spent']));
+    expect(waitErrorCodeSchema.options).not.toContain('autonomous_run');
   });
 
   it('parses cancel answers, with the open waits on either branch', () => {
@@ -265,14 +277,6 @@ describe('human waits', () => {
     expect(waitSchema.safeParse({ ...openHuman(), deadline: '2026-10-17T15:40:00.000Z' }).success).toBe(false);
   });
 
-  it('a human request validates its card with the ask bounds', () => {
-    expect(cezarWaitRequestSchema.parse({ kind: 'human' })).toEqual({ kind: 'human' });
-    expect(cezarWaitRequestSchema.parse({ kind: 'human', questions: CARD })).toEqual({ kind: 'human', questions: CARD });
-    const five = Array.from({ length: 5 }, (_, n) => ({ ...CARD[0]!, question: `Question ${n}?` }));
-    expect(cezarWaitRequestSchema.safeParse({ kind: 'human', questions: five }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: 'human', seconds: 60 }).success).toBe(false);
-  });
-
   it('an open human wait outranks usage limit, workers, ci and timer', () => {
     expect(computeWaitingOn({ waits: [openCi(), openTimer(), openHuman()], autoResumeAt: '2026-10-17T16:00:00.000Z', delegation: parkedRootWait() }))
       .toEqual({ kind: 'human' });
@@ -281,11 +285,42 @@ describe('human waits', () => {
     }
   });
 
-  it('lists an open human wait without a deadline in both answers', () => {
+  it('lists an open human wait without a deadline in every answer', () => {
     const human = { wait_id: HUMAN_ID, kind: 'human' as const, summary: 'human: Which test library?' };
-    expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: HUMAN_ID, kind: 'human', open_waits: [human] }).ok).toBe(true);
+    expect(cezarAskAnswerSchema.parse({ ok: true, wait_id: HUMAN_ID, open_waits: [human] }).ok).toBe(true);
     expect(cezarCancelWaitAnswerSchema.parse({ cancelled: false, code: 'human_question', message: 'm', open_waits: [human] }).cancelled).toBe(false);
-    expect(waitErrorCodeSchema.options).toEqual(expect.arrayContaining(['autonomous_run', 'questions_required']));
+  });
+});
+
+// hearsay-tools/cezarion#1234: the user is asked with its own tool, which always carries a card.
+describe('cezar_ask', () => {
+  it('requires a card within the ask bounds and takes nothing else', () => {
+    expect(cezarAskRequestSchema.parse({ questions: CARD })).toEqual({ questions: CARD });
+    expect(cezarAskRequestSchema.safeParse({}).success).toBe(false);
+    expect(cezarAskRequestSchema.safeParse({ questions: [] }).success).toBe(false);
+    const five = Array.from({ length: 5 }, (_, n) => ({ ...CARD[0]!, question: `Question ${n}?` }));
+    expect(cezarAskRequestSchema.safeParse({ questions: five }).success).toBe(false);
+    expect(cezarAskRequestSchema.safeParse({ kind: 'human', questions: CARD }).success).toBe(false);
+  });
+
+  it('takes an open question as a question without options', () => {
+    const open = [{ header: 'Name', question: 'What should the command be called?' }];
+    expect(cezarAskRequestSchema.parse({ questions: open })).toEqual({ questions: open });
+    expect(cezarAskRequestSchema.parse({ questions: [...CARD, ...open] }).questions).toHaveLength(2);
+    // A list of options keeps its bounds: an empty or one-option list is not an open question.
+    expect(cezarAskRequestSchema.safeParse({ questions: [{ ...open[0], options: [] }] }).success).toBe(false);
+    expect(cezarAskRequestSchema.safeParse({ questions: [{ ...open[0], options: [{ label: 'Only' }] }] }).success).toBe(false);
+  });
+
+  it('answers with the wait id and the open waits, or a refusal the agent can act on', () => {
+    expect(cezarAskAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, kind: 'human', open_waits: [] }).success).toBe(false);
+    expect(cezarAskAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, deadline: '2026-10-17T15:40:00.000Z', open_waits: [] }).success).toBe(false);
+    expect(cezarAskAnswerSchema.parse({ ok: false, code: 'autonomous_run', message: 'm' }).ok).toBe(false);
+    expect(askErrorCodeSchema.options).toEqual(expect.arrayContaining(['invalid_request', 'capacity', 'autonomous_run', 'session_closed', 'worker_wait_pending', 'unavailable']));
+    // Only refusals a question can meet: no CI lookup failures, no timer refusals.
+    for (const code of ['inaccessible_pr', 'gh_missing', 'timers_disabled', 'wake_budget_spent', 'questions_required']) {
+      expect(askErrorCodeSchema.options).not.toContain(code);
+    }
   });
 });
 
