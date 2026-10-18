@@ -155,7 +155,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     const ask = parseAskMarker(turnText);
     expect(ask).not.toBeNull();
     expect(ask!.questions[0]!.header).toBe('Design gate');
-    expect(ask!.questions[0]!.options.map((o) => o.label)).toEqual(['Reuse coalescer', 'Local buffer']);
+    expect(ask!.questions[0]!.options!.map((o) => o.label)).toEqual(['Reuse coalescer', 'Local buffer']);
   });
 
   it('emits a second assistant text block after a tool when both use contentIndex 0', async () => {
