@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PreviewServeRequest, PreviewServeResult } from '@open-mercato/cezar-contract';
-import { CiToolController } from '../ci-wait/controller.ts';
+import { CiToolController, type CezarToolHandlers } from '../ci-wait/controller.ts';
 import type { PreviewHostLike } from '../preview/registration.ts';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from './run.ts';
@@ -66,9 +66,9 @@ describe('RunManager.registerPreviewServer (#781)', { timeout: 30_000 }, () => {
     rmSync(repoRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
-  const callbackAt = async (provision: { mock: { calls: unknown[][] } }, index: number): Promise<PreviewCallback> => {
+  const callbackAt = async (provision: { mock: { calls: Array<[CezarToolHandlers]> } }, index: number): Promise<PreviewCallback> => {
     await expect.poll(() => provision.mock.calls.length, { timeout: 15_000 }).toBeGreaterThan(index);
-    const callback = provision.mock.calls[index]![1];
+    const callback = provision.mock.calls[index]![0].registerPreview;
     expect(callback).toBeTypeOf('function');
     return callback as PreviewCallback;
   };
@@ -110,7 +110,7 @@ describe('RunManager.registerPreviewServer (#781)', { timeout: 30_000 }, () => {
     const provision = vi.spyOn(CiToolController.prototype, 'provision');
     const record = manager!.startRun(QUICK_TASK_WORKFLOW, { task: 'build the app' });
     await (await callbackAt(provision, 0))({ command: 'npm run dev', port: 5173 });
-    const first = provision.mock.calls[0]![2]!;
+    const first = provision.mock.calls[0]![0].stopPreview!;
     expect(first).toBeTypeOf('function');
     const signal = new AbortController().signal;
     expect(await first({ port: 5173, restart: true }, signal)).toMatchObject({ ok: true });
@@ -123,7 +123,7 @@ describe('RunManager.registerPreviewServer (#781)', { timeout: 30_000 }, () => {
     await expect.poll(() => store.getRun(record.id)?.status, { timeout: 15_000 }).toSatisfy(status => ['done', 'review'].includes(String(status)));
     expect(manager!.continueRun(record.id, { text: 'restart preview' })).toEqual({ ok: true });
     await callbackAt(provision, 1);
-    const next = provision.mock.calls[1]![2]!;
+    const next = provision.mock.calls[1]![0].stopPreview!;
     expect(await next({ port: 5173 }, signal)).toMatchObject({ ok: true });
     expect(preview.stopPreview).toHaveBeenLastCalledWith(record.id, { port: 5173 }, signal);
   });
@@ -135,7 +135,7 @@ describe('RunManager.registerPreviewServer (#781)', { timeout: 30_000 }, () => {
     store.updateRun(record.id, { status: 'running', currentStepId: 'work', worktreePath: repoRoot, previewServers: [{ port: 5173, command: 'npm run dev', label: 'web', registeredAt: new Date().toISOString(), answeredAtRegistration: false }] });
     await manager!.recover();
     await callbackAt(provision, 0);
-    const stop = provision.mock.calls[0]![2]!;
+    const stop = provision.mock.calls[0]![0].stopPreview!;
     const signal = new AbortController().signal;
     expect(await stop({ port: 5173, restart: true }, signal)).toMatchObject({ ok: true });
     expect(preview.stopPreview).toHaveBeenCalledWith(record.id, { port: 5173, restart: true }, signal);

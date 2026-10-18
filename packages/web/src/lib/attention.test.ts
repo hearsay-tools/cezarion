@@ -270,6 +270,38 @@ it('keeps a queued leftover wake-pending parent with a pending ask as queued', (
   expect(wantsAttention(record)).toBe(false)
 })
 
+/** A CI or timer park is `waiting` with an open wait (spec 2026-10-17-unified-waits, phase 1).
+ *  `summaryOf` keeps the record's `waits` and adds no `waitingOn`, the shape of a full or
+ *  stream-patched record, which is what the cockpit derives attention from outside lists. */
+const openCi = () => ({
+  kind: 'ci' as const, id: '00000000-0000-4000-8000-0000000000c1', source: 'agent' as const, via: 'cezar_wait' as const,
+  registeredAt: '2026-10-17T15:10:00.000Z', deadline: '2026-10-17T15:40:00.000Z', phase: 'open' as const, turnId: 'turn-1',
+  prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40),
+  generation: 'gen-1', timeoutSeconds: 1800,
+})
+const openTimer = () => ({
+  kind: 'timer' as const, id: '00000000-0000-4000-8000-0000000000d1', source: 'agent' as const, via: 'cezar_wait' as const,
+  registeredAt: '2026-10-17T15:00:00.000Z', deadline: '2026-10-17T15:05:00.000Z', phase: 'open' as const, turnId: 'turn-1',
+  seconds: 300,
+})
+
+describe('a run parked on an open wait', () => {
+  it('reads as running on its own downstream work, never Needs you', () => {
+    for (const record of [run({ status: 'waiting', waits: [openCi()] }), run({ status: 'waiting', waits: [openTimer()] })]) {
+      expect(deriveAttention(record)).toMatchObject({ bucket: 'running', tone: 'running', shape: 'ring', pulse: true })
+      expect(wantsAttention(record)).toBe(false)
+    }
+    expect(deriveAttention(run({ status: 'waiting', waits: [openCi()] })).label).toBe('waiting for CI')
+    expect(deriveAttention(run({ status: 'waiting', waits: [openTimer()] })).label).toBe('monitoring')
+  })
+
+  it('is Needs you again with a pending human ask', () => {
+    const record = run({ status: 'waiting', waits: [openCi()], hasPendingHumanAsk: true })
+    expect(deriveAttention(record).label).toBe('needs you')
+    expect(wantsAttention(record)).toBe(true)
+  })
+})
+
 /** The status key (#617): hue says the family, shape says whether it is waiting. One row per
  *  state in the issue's table, so a regression in any rung is named by the row it broke. */
 describe('status key (#617)', () => {
@@ -282,8 +314,11 @@ describe('status key (#617)', () => {
     ['needs review', run({ status: 'review' }), { tone: 'info', shape: 'filled', pulse: true, label: 'needs review' }],
     ['running', run({ status: 'running' }), { tone: 'running', shape: 'filled', pulse: true, label: 'running' }],
     ['monitoring', run({ status: 'running', activity: 'monitoring' }), { tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' }],
+    ['waiting for CI', run({ status: 'waiting', waits: [openCi()] }), { tone: 'running', shape: 'ring', pulse: true, label: 'waiting for CI' }],
+    ['timer', run({ status: 'waiting', waits: [openTimer()] }), { tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' }],
     ['waiting on workers', parkedRoot(), { tone: 'running', shape: 'workers', pulse: false, label: 'waiting on 2 workers' }],
     ['waiting for capacity', parkedRoot({ phase: 'wake-pending' }), { tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' }],
+    ['wait result owed', run({ status: 'waiting', waits: [{ ...openCi(), phase: 'resolved', resolvedAt: '2026-10-17T15:20:00.000Z' }] }), { tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' }],
     ['queued', run({ status: 'queued' }), { tone: 'neutral', shape: 'ring', pulse: false, label: 'queued' }],
     ['scheduled', run({ status: 'failed', autoResumeAt: '2026-08-03T19:33:53.000Z' }), { tone: 'neutral', shape: 'ring', pulse: false, label: 'scheduled' }],
     ['done', run({ status: 'done' }), { tone: 'success', shape: 'filled', pulse: false, label: 'done' }],

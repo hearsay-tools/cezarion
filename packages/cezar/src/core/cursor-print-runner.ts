@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
-  AgentEvent, AgentRunResult, AgentRunner, AgentRunSpec, AgentRunSpecSupport,
+  AgentEvent, AgentInputOptions, AgentRunResult, AgentRunner, AgentRunSpec, AgentRunSpecSupport,
   AgentSession, AgentToolCallRecord, ContentBlock, InputDelivery, SessionOptions,
 } from './agent-runner.ts';
 import { prependSystemPrompt } from './agent-runner.ts';
@@ -433,8 +433,8 @@ class CursorPrintSession implements AgentSession {
     else this.beginTurn(content);
     return true;
   }
-  sendAgentMessage(content: ContentBlock[]): false | Promise<void> {
-    if (!this.isOpen || this.closing || this.busy || this.queue.length || this.markerAsk) return false;
+  sendAgentMessage(content: ContentBlock[], _inputIds?: readonly string[], options?: AgentInputOptions): false | Promise<void> {
+    if (!this.isOpen || this.closing || this.busy || this.queue.length || (this.markerAsk && !options?.besideQuestion)) return false;
     return new Promise<void>((resolve, reject) => {
       const receipt = { resolve, reject, settled: false };
       this.beginTurn(content, receipt);

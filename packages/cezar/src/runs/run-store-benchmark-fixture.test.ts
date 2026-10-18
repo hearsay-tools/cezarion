@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { delegationStateSchema } from '@open-mercato/cezar-contract';
 import { generateRunFixture, isLiveRun, liveRunCount, pickSaveTarget } from '../../scripts/benchmark-run-store-fixture.ts';
-import { parseRunRecords, reconcileLoadedRun } from './store.ts';
+import { parseRunRecords, reconcileLoadedRun, upgradeLegacyWaits } from './store.ts';
 
 /** Smoke test for the #779 benchmark fixture: it must be reproducible and must be what the real
  *  store would load, or the benchmark measures a file cezar never writes. */
@@ -21,8 +21,12 @@ describe('run-store benchmark fixture', { timeout: 30_000 }, () => {
     const wire = JSON.parse(JSON.stringify(records));
     const parsed = parseRunRecords(JSON.parse(JSON.stringify(records)));
     expect(parsed.success).toBe(true);
-    // Nothing stripped, defaulted or caught: every field the generator writes survives the parse.
-    expect(parsed.data).toEqual(wire);
+    // Nothing stripped, defaulted or caught: every field the generator writes survives the parse,
+    // except the schema-3 wait fields (`lastCiWait`), which store schema 4 reads into the wait list.
+    const upgraded = JSON.parse(JSON.stringify(records));
+    for (const record of upgraded) upgradeLegacyWaits(record);
+    expect(upgraded.some((record: { lastWaits?: unknown }) => record.lastWaits !== undefined)).toBe(true);
+    expect(parsed.data).toEqual(upgraded);
     // `storedDelegationStateSchema` quarantines bad authority instead of failing; check it strictly.
     for (const record of wire) {
       if (record.delegation) expect(delegationStateSchema.safeParse(record.delegation).success).toBe(true);

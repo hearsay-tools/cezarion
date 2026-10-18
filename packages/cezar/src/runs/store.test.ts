@@ -380,7 +380,7 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
     expect(RunStore.open(dataDir).getRun(run.id)?.worktreeReclaimedAt).toBeUndefined();
   });
 
-  it("round-trips activity:'monitoring' and lets updateRun clear it (#490)", () => {
+  it("reads a stored activity:'monitoring' as a waiting park (#490, store schema 4)", () => {
     const store = RunStore.open(dataDir);
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     // A fresh record has no activity (additive/optional).
@@ -388,34 +388,32 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
     store.updateRun(run.id, { status: 'running', activity: 'monitoring' });
     store.close();
 
+    // Schema 4 no longer keeps `activity`: a stored monitoring park reads as `waiting`, with no
+    // open wait when it named no wake deadline (unified waits, hearsay-tools/cezarion#1233).
     const reopened = RunStore.open(dataDir, { keepLive: true });
-    expect(reopened.getRun(run.id)?.activity).toBe('monitoring');
-    // Resume/terminal transitions clear it back to a plain running/other state.
-    reopened.updateRun(run.id, { status: 'running', activity: undefined });
+    expect(reopened.getRun(run.id)).toMatchObject({ status: 'waiting' });
+    expect(reopened.getRun(run.id)?.activity).toBeUndefined();
+    expect(reopened.getRun(run.id)?.waits).toBeUndefined();
     reopened.close();
-    expect(RunStore.open(dataDir, { keepLive: true }).getRun(run.id)?.activity).toBeUndefined();
+    expect(readPersistedRuns(dataDir).find((row) => row.id === run.id)).not.toHaveProperty('activity');
   });
 
-  it('round-trips the monitoring deadline and clears monitoring state on terminal writes', () => {
+  it('clears monitoring activity on terminal writes and leaves open waits for RunManager to cancel', () => {
     const store = RunStore.open(dataDir);
     const run = store.createRun({ title: 'monitor', task: 'monitor', workflow: 'quick-task', steps: [] });
-    const deadline = '2026-07-25T10:15:00.000Z';
-    store.updateRun(run.id, { status: 'running', activity: 'monitoring', monitoringWakeAt: deadline });
-    expect(store.getRun(run.id)?.monitoringWakeAt).toBe(deadline);
+    store.updateRun(run.id, { status: 'running', activity: 'monitoring' });
+    store.commitWait(run.id, { id: '44444444-4444-4444-8444-444444444444', kind: 'timer', source: 'agent', via: 'cezar_wait',
+      registeredAt: '2026-07-25T10:10:00.000Z', deadline: '2026-07-25T10:15:00.000Z', phase: 'open', turnId: 'turn', seconds: 300 });
     store.updateRun(run.id, { status: 'done' });
-    expect(store.getRun(run.id)).toMatchObject({ status: 'done' });
+    expect(store.getRun(run.id)).toMatchObject({ status: 'done', waits: [{ phase: 'open' }] });
     expect(store.getRun(run.id)?.activity).toBeUndefined();
-    expect(store.getRun(run.id)?.monitoringWakeAt).toBeUndefined();
   });
 
-  it('clears process-local wake-cap display state when records reopen', () => {
-    const store = RunStore.open(dataDir);
-    const run = store.createRun({ title: 'monitor', task: 'monitor', workflow: 'quick-task', steps: [] });
-    store.updateRun(run.id, { status: 'running', activity: 'monitoring', monitoringWakeCapReached: true });
-    store.flush();
-    const reopened = RunStore.open(dataDir, { keepLive: true }).getRun(run.id);
-    expect(reopened?.activity).toBe('monitoring');
-    expect(reopened?.monitoringWakeCapReached).toBeUndefined();
+  it('drops the legacy wake-cap flag when records reopen (store schema 4)', () => {
+    seedRuns(dataDir, [{ ...LEGACY_RUN, monitoringWakeCapReached: true }]);
+    const reopened = RunStore.open(dataDir, { keepLive: true }).getRun(LEGACY_RUN.id);
+    expect(reopened).toMatchObject({ status: 'done' });
+    expect(reopened).not.toHaveProperty('monitoringWakeCapReached');
   });
 
   it('salvages a malformed wake deadline and stale terminal monitoring activity', () => {
@@ -427,7 +425,8 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
     const loaded = RunStore.open(dataDir).getRun(LEGACY_RUN.id);
     expect(loaded?.status).toBe('done');
     expect(loaded?.activity).toBeUndefined();
-    expect(loaded?.monitoringWakeAt).toBeUndefined();
+    expect(loaded?.waits).toBeUndefined();
+    expect(loaded).not.toHaveProperty('monitoringWakeAt');
   });
 
   it('still loads an old record that predates activity (#490)', () => {
@@ -436,14 +435,16 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
     expect(store.getRun('legacy-1')?.activity).toBeUndefined();
   });
 
-  it('rejects an unknown activity value at the schema boundary (#490)', () => {
+  it('never lets an unknown activity value through the schema boundary (#490)', () => {
     seedRuns(dataDir, [{ ...LEGACY_RUN, id: 'bad-activity', status: 'running', activity: 'bogus' }]);
-    // A corrupt/unknown activity must not smuggle a run in with an invalid value:
-    // the schema drops the bad record (degrade-to-fresh), so it does not load.
+    // A corrupt/unknown activity must not smuggle a run in with an invalid value. Store schema 4
+    // reads `activity` only to upgrade a monitoring park and drops the key on every read, so the
+    // run loads without it instead of being dropped whole.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const store = RunStore.open(dataDir);
-    expect(store.getRun('bad-activity')?.activity).not.toBe('bogus');
-    expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('1 run(s) in runs.db could not be read'));
+    expect(store.getRun('bad-activity')).toBeDefined();
+    expect(store.getRun('bad-activity')?.activity).toBeUndefined();
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('could not be read'));
   });
 
   it('round-trips an effort pin while omission stays compatible (#45)', () => {

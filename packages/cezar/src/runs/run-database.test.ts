@@ -504,6 +504,38 @@ describe('RunDatabase', () => {
       expect(readFileSync(path).equals(bytes)).toBe(true);
     });
 
+    // Schema 4 (spec 2026-10-17-unified-waits): records stop carrying the legacy CI and
+    // monitoring fields, so a build that still reads them must refuse the store, not misread it.
+    it('creates a fresh database at schema 4, migrates a v3 one keeping its rows, and refuses version 5', () => {
+      expect(RUN_DATABASE_SCHEMA_VERSION).toBe(4);
+      openDb().close();
+      open.length = 0;
+      const fresh = new DatabaseSync(path, { readOnly: true });
+      try {
+        expect(fresh.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+      } finally {
+        fresh.close();
+      }
+      const writer = openDb();
+      writer.transaction({ upserts: [row('a')], deletes: [] });
+      writer.close();
+      open.length = 0;
+      const v3 = new DatabaseSync(path);
+      v3.exec('PRAGMA user_version = 3');
+      v3.close();
+      expect(openDb().listRevisions().map((r) => r.id)).toEqual(['a']);
+      for (const db of open.splice(0)) db.close();
+      const migrated = new DatabaseSync(path);
+      try {
+        expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+        migrated.exec('PRAGMA user_version = 5');
+      } finally {
+        migrated.close();
+      }
+      expect(() => openDb()).toThrow(RunDatabaseUnsupportedSchemaError);
+      expect(() => RunDatabase.openReadOnly(path)).toThrow(RunDatabaseUnsupportedSchemaError);
+    });
+
     it('reports a file that is not a database as corrupt and never deletes or resets it', () => {
       const garbage = Buffer.from('not a sqlite database '.repeat(400));
       writeFileSync(path, garbage);

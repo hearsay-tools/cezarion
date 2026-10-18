@@ -8,6 +8,8 @@ import { RunStore } from './store.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
 import { readPersistedRuns, readPersistedText, runIds, seedRuns } from './run-store.testkit.ts';
 
+// The legacy CI checkpoints, now thin wrappers over the wait list (store schema 4, unified waits):
+// a CI wait lives in `waits` and settles into `lastWaits`.
 describe('atomic CI wait checkpoints', () => {
   let directory: string;
   let store: RunStore;
@@ -31,7 +33,7 @@ describe('atomic CI wait checkpoints', () => {
     const events = vi.fn(); store.on('run', events);
     vi.spyOn(store as unknown as { writeIndex(): void }, 'writeIndex').mockImplementation(() => { throw new Error('read only'); });
     expect(() => store.commitCiWait(id, wait)).toThrow('read only');
-    expect(store.getRun(id)?.ciWait).toBeUndefined();
+    expect(store.getRun(id)?.waits).toBeUndefined();
     expect(events).not.toHaveBeenCalled();
     expect(readPersistedText(directory)).toBe(disk);
   });
@@ -43,7 +45,7 @@ describe('atomic CI wait checkpoints', () => {
     store.commitCiWait(id, settled, input(id, wait.id));
     store.commitCiWait(id, settled, input(id, wait.id));
     const reopened = RunStore.open(directory, { keepLive: true });
-    expect(reopened.getRun(id)?.ciWait?.result?.outcome).toBe('deadline');
+    expect(reopened.getRun(id)?.waits).toEqual([expect.objectContaining({ id: wait.id, kind: 'ci', phase: 'resolved', result: expect.objectContaining({ outcome: 'deadline' }) })]);
     expect(reopened.getRun(id)?.agentInputs).toHaveLength(1);
   });
 
@@ -52,8 +54,8 @@ describe('atomic CI wait checkpoints', () => {
     const human = { id: randomUUID(), text: 'change direction', createdAt: new Date().toISOString() };
     store.commitCiWaitWithdrawal(id, human);
     for (const record of [store.getRun(id), RunStore.open(directory, { keepLive: true }).getRun(id)]) {
-      expect(record?.ciWait).toBeUndefined();
-      expect(record?.lastCiWait?.phase).toBe('withdrawn');
+      expect(record?.waits).toBeUndefined();
+      expect(record?.lastWaits).toEqual([expect.objectContaining({ id: wait.id, phase: 'cancelled' })]);
       expect(record?.agentInputs).toEqual([]);
       expect(record?.queuedMessages).toEqual([human]);
     }
@@ -63,24 +65,29 @@ describe('atomic CI wait checkpoints', () => {
     store.commitCiWait(id, { ...wait, phase: 'wake-pending', wakeId: wait.id }, input(id, wait.id));
     store.commitCiWaitDelivery(id, wait.id);
     const record = RunStore.open(directory, { keepLive: true }).getRun(id);
-    expect(store.getRun(id)?.ciWait).toBeUndefined();
-    expect(record?.ciWait).toBeUndefined();
-    expect(record?.lastCiWait).toMatchObject({ id: wait.id, phase: 'delivered' });
-    expect(record?.agentInputs?.[0]?.deliveredAt).toBe(record?.lastCiWait?.deliveredAt);
+    expect(store.getRun(id)?.waits).toBeUndefined();
+    expect(record?.waits).toBeUndefined();
+    expect(record?.lastWaits).toEqual([expect.objectContaining({ id: wait.id, phase: 'delivered' })]);
+    expect(record?.agentInputs?.[0]?.deliveredAt).toBe(record?.lastWaits?.[0]?.deliveredAt);
   });
 
-  it('a corrupt persisted wait retains the registry and requests human attention', () => {
-    store.flush();
+  // Store schema 4 salvages a legacy CI wait like any wait entry: dropped, `lastWaitsError` set,
+  // and the status left alone, so the run reads as parked with nothing open (Needs you), not failed.
+  it('a corrupt persisted wait retains the registry and records the salvage', () => {
+    store.close();
     const records = readPersistedRuns(directory);
+    records[0].status = 'waiting';
     records[0].ciWait = { phase: 'parked', deadline: 'invalid' };
     seedRuns(directory, records);
     const indexed = readRunIndexFromDisk(directory).runs;
     expect(indexed).toHaveLength(1);
-    expect(indexed[0]).toMatchObject({ status: 'failed', error: expect.stringContaining('CI wait state is unreadable') });
     const reopened = RunStore.open(directory, { keepLive: true });
     expect(runIds(reopened)).toHaveLength(1);
-    expect(reopened.getRun(id)).toMatchObject({ status: 'failed', error: expect.stringContaining('CI wait state is unreadable') });
-    expect(reopened.getRun(id)?.ciWait).toBeUndefined();
+    expect(reopened.getRun(id)).toMatchObject({ status: 'waiting', lastWaitsError: expect.stringContaining('unreadable') });
+    expect(reopened.getRun(id)?.error).toBeUndefined();
+    expect(reopened.getRun(id)?.waits).toBeUndefined();
+    expect(reopened.getRun(id)).not.toHaveProperty('ciWait');
+    store = reopened;
   });
   it.each(['running', 'done'] as const)('retains an unreadable previous observation for %s runs across repeated reads', (status) => {
     // The reopen below is a restart: this store goes first, or it still owns the running run.
@@ -93,13 +100,13 @@ describe('atomic CI wait checkpoints', () => {
     // The read-only index intentionally marks orphan running records failed. It answers list rows,
     // which carry no CI observation; the salvaged field is the store's to keep.
     expect(readRunIndexFromDisk(directory).runs[0]?.status).toBe(status === 'running' ? 'failed' : status);
-    expect(reopened.getRun(id)).toMatchObject({ lastCiWaitError: expect.stringContaining('saved observation is unreadable') });
-    expect(reopened.getRun(id)?.lastCiWait).toBeUndefined();
+    expect(reopened.getRun(id)).toMatchObject({ lastWaitsError: expect.stringContaining('saved wait is unreadable') });
+    expect(reopened.getRun(id)?.lastWaits).toBeUndefined();
     reopened.flush();
-    expect(RunStore.open(directory, { keepLive: true }).getRun(id)?.lastCiWaitError).toContain('unreadable');
+    expect(RunStore.open(directory, { keepLive: true }).getRun(id)?.lastWaitsError).toContain('unreadable');
     reopened.commitCiWait(id, wait);
-    expect(reopened.getRun(id)?.lastCiWaitError).toBeUndefined();
-    expect(RunStore.open(directory, { keepLive: true }).getRun(id)?.lastCiWaitError).toBeUndefined();
+    expect(reopened.getRun(id)?.lastWaitsError).toBeUndefined();
+    expect(RunStore.open(directory, { keepLive: true }).getRun(id)?.lastWaitsError).toBeUndefined();
   });
 
 });

@@ -23,6 +23,7 @@ import {
   store, terminal, track, until, useWorkerWaitFixture, waitOf, worker,
 } from './worker-wait.testkit.ts';
 import { blockRunWrites, readPersistedRuns, readPersistedText } from '../runs/run-store.testkit.ts';
+import { monitoringWakeOf } from './waits.testkit.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -382,7 +383,8 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(manager.continueRun(p.id).ok).toBe(false);
     expect(store.readEvents(p.id).filter(e => e.type === 'human-input-delivered')).toEqual([]);
     expect(manager.continueRun(p.id, { text: 'Vitest' }).ok).toBe(true);
-    await until(() => store.getRun(p.id)?.activity === 'monitoring');
+    // hearsay-tools/cezarion#1233: with its worker still live the answered turn parks on a monitoring timer.
+    await until(() => store.getRun(p.id)?.status === 'waiting' && !!monitoringWakeOf(store.getRun(p.id)));
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
     expect(store.readEvents(p.id).filter(e => e.type === 'human-input-delivered')).toHaveLength(1);
   });

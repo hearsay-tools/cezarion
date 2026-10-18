@@ -1,4 +1,3 @@
-import { ciWaitSchema } from './ci-wait.ts';
 import { z } from 'zod';
 import { agentInputSchema, delegationStateSchema, runDelegationSummarySchema, workerDestroyRetrySchema } from './delegation.ts';
 import { runnerSchema } from './health.ts';
@@ -7,6 +6,7 @@ import { previewServerSchema } from './preview.ts';
 // The chain shapes belong to the workflows family; the run record embeds one, so this file
 // consumes them rather than redeclaring. One-way on purpose — see the header of `./workflows.ts`.
 import { workflowDefSchema, workflowStepDefSchema } from './workflows.ts';
+import { computeWaitingOn, hasResolvedWait, waitingOnSchema, waitSchema } from './waits.ts';
 
 /**
  * The RUNS family of `/api/v1` — a task's record, its lifecycle mutations, and the artifacts
@@ -220,10 +220,12 @@ export const runRecordSchema = z.object({
   delegation: delegationStateSchema.optional(),
   /** Durable non-human input, kept separate from human prompt/answer queues. */
   agentInputs: z.array(agentInputSchema).optional(),
-  ciWait: ciWaitSchema.optional(),
-  lastCiWait: ciWaitSchema.optional(),
-  /** Retained recovery observation when previous CI metadata cannot be trusted. */
-  lastCiWaitError: z.string().max(256).optional(),
+  /** Open and recently resolved waits (spec 2026-10-17-unified-waits): CI and timers in phase 1. */
+  waits: z.array(waitSchema).optional(),
+  /** Settled waits, newest last, capped at `LAST_WAITS_LIMIT`. */
+  lastWaits: z.array(waitSchema).optional(),
+  /** Retained recovery observation when previous wait metadata cannot be trusted. */
+  lastWaitsError: z.string().max(256).optional(),
   /** Dev servers the agent registered with `cezar_preview_serve` (#781). Salvaged per entry on load. */
   previewServers: z.array(previewServerSchema).optional(),
   /** URLs of images and document attachments on the initial task prompt; branch on isImageAttachmentName. */
@@ -290,17 +292,14 @@ export const runRecordSchema = z.object({
   webhook: runWebhookOutcomeSchema.optional(),
   status: runStatusSchema,
   /** `monitoring` while `status === 'running'` and the agent is working on downstream work.
-   *  Absent on old runs; cleared on resume/end. */
+   *  Absent on old runs; cleared on resume/end. No longer written: CI and timer parks are
+   *  `waiting` with an open wait. Still read from older rows and summaries. */
   activity: runActivitySchema.optional(),
   /** Derived from valid human questions and matching delivery receipts in durable history.
    * List attention only; never authorization to deliver an answer or wake a worker. */
   hasPendingHumanAsk: z.boolean().optional(),
   /** Live native approval attention; grants themselves never persist. */
   hasPendingPermission: z.boolean().optional(),
-  /** Exact ISO-8601 deadline for the next automatic monitoring check. */
-  monitoringWakeAt: z.string().optional(),
-  /** The current live monitoring epoch exhausted its 40 automatic checks. */
-  monitoringWakeCapReached: z.boolean().optional(),
   /** Exact ISO-8601 instant this run resumes itself after a provider usage limit stopped it
    *  (spec 2026-08-03-auto-resume-after-usage-limit). Present only on a `failed` run with a
    *  pending automatic resume — its absence is what "no resume is scheduled" looks like. */
@@ -443,6 +442,12 @@ export const runSummarySchema = z.object({
   activity: runActivitySchema.optional(),
   hasPendingHumanAsk: runRecordSchema.shape.hasPendingHumanAsk,
   hasPendingPermission: runRecordSchema.shape.hasPendingPermission,
+  /** The run's top open wait (`computeWaitingOn`), which `deriveAttention` reads. The wait list
+   *  itself stays on the record. */
+  waitingOn: waitingOnSchema.optional(),
+  /** Present when a wait has resolved and its wake turn has not started (`hasResolvedWait`):
+   *  attention's "waiting for capacity" rung. */
+  waitWakePending: z.literal(true).optional(),
   /** Only the relationship role and wait phase used by list attention. */
   delegation: runDelegationSummarySchema.optional(),
   createdAt: z.string(),
@@ -589,6 +594,10 @@ export function toRunSummary(run: RunRecord & { usage?: ProcessUsage }): RunSumm
     const delegation = runDelegationSummarySchema.safeParse(run.delegation);
     summary.delegation = delegation.success ? delegation.data : { role: 'invalid' };
   }
+  // The parsed slim delegation, not the raw one: a malformed record must not throw here either.
+  const waitingOn = computeWaitingOn({ ...run, delegation: summary.delegation as RunSummary['delegation'] });
+  if (waitingOn) summary.waitingOn = waitingOn;
+  if (hasResolvedWait(run)) summary.waitWakePending = true;
   if (run.usage) summary.usage = run.usage;
   return summary as RunSummary;
 }

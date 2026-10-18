@@ -28,6 +28,7 @@ import { parseTaskMarkers } from '../runs/task-markers.ts';
 import { appendTurnText, trackTurnTail, RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 import { readPersistedRuns, crashStore } from '../runs/run-store.testkit.ts';
+import { monitoringTimerOf, monitoringWakeOf } from './waits.testkit.ts';
 
 const runnerHook = vi.hoisted(() => ({ runner: undefined as AgentRunner | undefined }));
 
@@ -1151,12 +1152,13 @@ describe('a single agent step plus a check step gets NO chain note (#410)', () =
 });
 
 /**
- * #490 — the `CEZ:MONITORING` marker parks a still-working turn-end as
- * `running`/`activity:'monitoring'` (a non-attention state) instead of
- * `waiting`, while a markerless turn-end still parks as `waiting`. Resuming
- * clears the activity. Driven dry through the mock (`mock:monitoring`).
+ * #490 — the `CEZ:MONITORING` marker parks a still-working turn-end on an open
+ * monitoring timer (a non-attention state), while a markerless turn-end still
+ * parks as a plain wait. Since hearsay-tools/cezarion#1233 both read `waiting`;
+ * the open timer is what makes the first one `monitoring`, and no later message
+ * or backend activity withdraws it. Driven dry through the mock (`mock:monitoring`).
  */
-describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () => {
+describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)', () => {
   // Fresh repo + manager per test: these runs PARK (they never reach a terminal
   // status), and a `worktree:false` parked run holds the exclusive repo-root
   // lock — so a shared manager would starve the next test. Isolation avoids that.
@@ -1266,41 +1268,46 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     });
   });
 
-  it('a CEZ:MONITORING turn-end parks the run as running/monitoring', async () => {
+  it('a CEZ:MONITORING turn-end parks the run on an open monitoring timer', async () => {
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
     currentId = record.id;
-    await waitFor(record.id, (r) => r?.activity === 'monitoring');
+    await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
     const parked = store.getRun(record.id);
-    expect(parked?.status).toBe('running'); // a sub-state of running, NOT waiting
-    expect(parked?.activity).toBe('monitoring');
+    expect(parked?.activity).toBeUndefined();
+    expect(parked?.waits?.find(wait => wait.phase === 'open')).toMatchObject({ kind: 'timer', via: 'monitoring-line' });
     const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
     expect(state?.idleTimer).toBeUndefined(); // durable monitors do not inherit the 15-minute user-wait timer
   }, 30_000);
 
-  it('a Claude ScheduleWakeup turn-end parks as monitoring without a text marker', async () => {
+  it('a Claude ScheduleWakeup turn-end parks on a schedule-wakeup timer without a text marker', async () => {
     const record = manager.startRun(SINGLE_STEP, {
       task: 'mock:schedule-wakeup keep going',
       runner: 'claude',
       worktree: false,
     });
     currentId = record.id;
-    await waitFor(record.id, (r) => r?.status === 'waiting' || r?.activity === 'monitoring');
+    await waitFor(record.id, (r) => r?.status === 'waiting');
 
     const events = readFileSync(join(repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8');
     expect(events).toContain('"tool":"ScheduleWakeup"');
     expect(events).not.toContain('CEZ:MONITORING');
-    expect(store.getRun(record.id)).toMatchObject({ status: 'running', activity: 'monitoring' });
+    const timer = store.getRun(record.id)?.waits?.find(wait => wait.phase === 'open');
+    expect(timer).toMatchObject({ kind: 'timer', via: 'schedule-wakeup' });
     const state = (manager as unknown as {
-      active: Map<string, { idleTimer?: NodeJS.Timeout; monitoringWakeTimer?: NodeJS.Timeout }>;
+      active: Map<string, { idleTimer?: NodeJS.Timeout }>;
     }).active.get(record.id);
     expect(state?.idleTimer).toBeUndefined();
-    expect(state?.monitoringWakeTimer).toBeDefined();
+    expect(monitoringTimerOf(manager, record.id)).toBeDefined();
 
-    expect(manager.sendMessage(record.id, [{ type: 'text', text: 'the next turn is a plain wait' }])).toBe(true);
-    await waitFor(record.id, (r) => r?.status === 'waiting');
-    expect(store.getRun(record.id)?.activity).toBeUndefined();
-    expect(state?.idleTimer).toBeDefined();
-    expect(state?.monitoringWakeTimer).toBeUndefined();
+    // hearsay-tools/cezarion#1233: a human message withdraws no timer, so the markerless turn
+    // re-parks on the same one instead of becoming a plain wait.
+    const boundaries = () => readFileSync(join(repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8').split('"type":"turn-end"').length;
+    const before = boundaries();
+    expect(manager.sendMessage(record.id, [{ type: 'text', text: 'the next turn keeps the timer' }])).toBe(true);
+    await waitFor(record.id, (r) => r?.status === 'waiting' && boundaries() > before);
+    expect(store.getRun(record.id)?.waits?.find(wait => wait.phase === 'open')?.id).toBe(timer!.id);
+    expect(state?.idleTimer).toBeUndefined();
+    expect(monitoringTimerOf(manager, record.id)).toBeDefined();
   }, 30_000);
 
   it('recognizes Claude ScheduleWakeup on a reopened continuation too', async () => {
@@ -1311,13 +1318,13 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     await waitFor(record.id, (r) => r?.status === 'done' || r?.status === 'review');
 
     expect(manager.continueRun(record.id, { text: 'mock:schedule-wakeup check later' })).toEqual({ ok: true });
-    await waitFor(record.id, (r) => r?.status === 'waiting' || r?.activity === 'monitoring');
-    expect(store.getRun(record.id)).toMatchObject({ status: 'running', activity: 'monitoring' });
+    await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
+    expect(store.getRun(record.id)?.waits?.find(wait => wait.phase === 'open')).toMatchObject({ kind: 'timer', via: 'schedule-wakeup' });
     const state = (manager as unknown as {
-      active: Map<string, { idleTimer?: NodeJS.Timeout; monitoringWakeTimer?: NodeJS.Timeout }>;
+      active: Map<string, { idleTimer?: NodeJS.Timeout }>;
     }).active.get(record.id);
     expect(state?.idleTimer).toBeUndefined();
-    expect(state?.monitoringWakeTimer).toBeDefined();
+    expect(monitoringTimerOf(manager, record.id)).toBeDefined();
   }, 40_000);
 
   it('keeps CEZ:DONE ahead of Claude ScheduleWakeup', async () => {
@@ -1355,16 +1362,15 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
   it('a parked monitor schedules its own re-check under the zero-config default (#810)', async () => {
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
     currentId = record.id;
-    await waitFor(record.id, (r) => r?.activity === 'monitoring');
-    await waitFor(record.id, (r) => Boolean(r?.monitoringWakeAt));
+    await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
     const parked = store.getRun(record.id);
-    const deadline = Date.parse(String(parked?.monitoringWakeAt));
+    const deadline = Date.parse(String(monitoringWakeOf(parked)));
     expect(Number.isNaN(deadline)).toBe(false);
     expect(deadline).toBeGreaterThan(Date.now()); // a real future re-check, not a stale stamp
     const state = (manager as unknown as {
-      active: Map<string, { idleTimer?: NodeJS.Timeout; monitoringWakeTimer?: NodeJS.Timeout }>;
+      active: Map<string, { idleTimer?: NodeJS.Timeout }>;
     }).active.get(record.id);
-    expect(state?.monitoringWakeTimer).toBeDefined();
+    expect(monitoringTimerOf(manager, record.id)).toBeDefined();
     expect(state?.idleTimer).toBeUndefined(); // still no user-wait timeout — #661's fix stands
   }, 30_000);
 
@@ -1375,12 +1381,13 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     });
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
     currentId = record.id;
-    await waitFor(record.id, (r) => r?.activity === 'monitoring');
-    expect(store.getRun(record.id)?.monitoringWakeAt).toBeUndefined();
-    const state = (manager as unknown as {
-      active: Map<string, { monitoringWakeTimer?: NodeJS.Timeout }>;
-    }).active.get(record.id);
-    expect(state?.monitoringWakeTimer).toBeUndefined();
+    // hearsay-tools/cezarion#1233: with re-checks off nothing is registered; the run parks as a
+    // plain wait and says why.
+    await waitFor(record.id, (r) => r?.status === 'waiting');
+    await waitFor(record.id, () => readFileSync(join(repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8').includes('automatic re-checks are off; waiting for you'));
+    expect(store.getRun(record.id)?.waits ?? []).toEqual([]);
+    expect(monitoringWakeOf(store.getRun(record.id))).toBeUndefined();
+    expect(monitoringTimerOf(manager, record.id)).toBeUndefined();
   }, 30_000);
 
   it('optionally wakes a parked monitor without fabricating a user message', async () => {
@@ -1404,7 +1411,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
   it.each([
     { activity: 'tool', trigger: 'mock:backend-resume', eventNeedle: 'pi-autonomous-edit' },
     { activity: 'message', trigger: 'mock:backend-resume-text', eventNeedle: 'Pi resumed without a prompt' },
-  ])('backend $activity activity resumes a parked monitor before its wake deadline (#59)', async ({ trigger, eventNeedle }) => {
+  ])('backend $activity activity resumes a parked monitor before its wake deadline and keeps its timer (#59)', async ({ trigger, eventNeedle }) => {
     manager.dispose();
     const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.02 } });
     manager = createFixtureManager(store, repoRoot, { semaphore });
@@ -1414,7 +1421,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
       worktree: false,
     });
     currentId = record.id;
-    await waitFor(record.id, (r) => r?.activity === 'monitoring' && Boolean(r.monitoringWakeAt));
+    await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
 
     const internals = manager as unknown as {
       active: Map<string, Record<string, unknown>>;
@@ -1424,7 +1431,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     };
     const state = internals.active.get(record.id);
     if (!state) throw new Error('active run state missing');
-    const originalDeadline = Date.parse(String(store.getRun(record.id)?.monitoringWakeAt));
+    const originalDeadline = Date.parse(String(monitoringWakeOf(store.getRun(record.id))));
     expect(internals.waiting.has(record.id)).toBe(true);
     expect(internals.monitoring.has(record.id)).toBe(true);
     expect(internals.busySlots()).toBe(0);
@@ -1435,20 +1442,22 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
       return events.includes(eventNeedle);
     }, 3_000);
 
+    // hearsay-tools/cezarion#1233: the backend's own turn runs on the pool slot it parked with,
+    // and its timer stays open until it fires.
     expect(store.getRun(record.id)).toMatchObject({ status: 'running', activity: undefined });
-    expect(store.getRun(record.id)?.monitoringWakeAt).toBeUndefined();
-    expect(state.monitoringWakeTimer).toBeUndefined();
+    expect(Date.parse(String(monitoringWakeOf(store.getRun(record.id))))).toBe(originalDeadline);
+    expect(monitoringTimerOf(manager, record.id)).toBeDefined();
     expect(internals.waiting.has(record.id)).toBe(false);
-    expect(internals.monitoring.has(record.id)).toBe(false);
-    expect(internals.busySlots()).toBe(1);
-    expect(semaphore.busy()).toBe(1);
+    expect(internals.monitoring.has(record.id)).toBe(true);
+    expect(internals.busySlots()).toBe(0);
+    expect(semaphore.busy()).toBe(0);
     expect((state.session as { open?: boolean } | undefined)?.open).toBe(true);
 
-    await new Promise((resolve) => setTimeout(resolve, Math.max(0, originalDeadline - Date.now() + 100)));
-    const events = readFileSync(join(repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8')
-      .trim().split('\n').map((line) => JSON.parse(line) as { type: string; message?: string; item?: { id?: string } });
-    expect(events.some((event) => JSON.stringify(event).includes(eventNeedle))).toBe(true);
-    expect(events.some((event) => event.type === 'note' && event.message?.includes('automatic monitoring wake-up'))).toBe(false);
+    // The mock's backend turn never ends, so the fired timer stays owed: no boundary, no delivery.
+    await waitFor(record.id, (r) => r?.waits?.some(wait => wait.kind === 'timer' && wait.phase === 'resolved') === true);
+    expect(store.getRun(record.id)?.lastWaits?.some(wait => wait.phase === 'delivered')).not.toBe(true);
+    const events = readFileSync(join(repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8');
+    expect(events.includes(eventNeedle)).toBe(true);
     expect((state.session as { open?: boolean } | undefined)?.open).toBe(true);
   }, 30_000);
 
@@ -1458,7 +1467,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     manager = createFixtureManager(store, repoRoot, { semaphore });
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
     currentId = record.id;
-    await waitFor(record.id, (r) => r?.activity === 'monitoring' && Boolean(r.monitoringWakeAt));
+    await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
 
     const internals = manager as unknown as {
       active: Map<string, Record<string, unknown>>;
@@ -1475,7 +1484,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     };
     const state = internals.active.get(record.id);
     if (!state) throw new Error('active run state missing');
-    const wakeTimer = state.monitoringWakeTimer;
+    const wakeTimer = monitoringTimerOf(manager, record.id);
     internals.handleRunnerUiEvent(
       record.id,
       state,
@@ -1483,8 +1492,8 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
       { type: 'session.error', message: 'late non-fatal diagnostic', fatal: false },
     );
 
-    expect(store.getRun(record.id)?.activity).toBe('monitoring');
-    expect(state.monitoringWakeTimer).toBe(wakeTimer);
+    expect(store.getRun(record.id)?.status).toBe('waiting');
+    expect(monitoringTimerOf(manager, record.id)).toBe(wakeTimer);
     expect(internals.waiting.has(record.id)).toBe(true);
     expect(internals.monitoring.has(record.id)).toBe(true);
     expect(internals.busySlots()).toBe(0);
@@ -1508,7 +1517,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     manager = createFixtureManager(store, repoRoot, { semaphore });
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
     currentId = record.id;
-    await waitFor(record.id, (r) => r?.activity === 'monitoring' && Boolean(r.monitoringWakeAt));
+    await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
 
     const internals = manager as unknown as {
       active: Map<string, Record<string, unknown>>;
@@ -1525,8 +1534,8 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     };
     const state = internals.active.get(record.id);
     if (!state) throw new Error('active run state missing');
-    const wakeTimer = state.monitoringWakeTimer;
-    const deadline = store.getRun(record.id)?.monitoringWakeAt;
+    const wakeTimer = monitoringTimerOf(manager, record.id);
+    const deadline = monitoringWakeOf(store.getRun(record.id));
     const sink = internals.makeUiSink(record.id, 'task');
     const inject = (event: UiEvent) => internals.handleRunnerUiEvent(record.id, state, sink, event);
 
@@ -1574,9 +1583,9 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
       },
     });
 
-    expect(store.getRun(record.id)).toMatchObject({ status: 'running', activity: 'monitoring' });
-    expect(store.getRun(record.id)?.monitoringWakeAt).toBe(deadline);
-    expect(state.monitoringWakeTimer).toBe(wakeTimer);
+    expect(store.getRun(record.id)).toMatchObject({ status: 'waiting', activity: undefined });
+    expect(monitoringWakeOf(store.getRun(record.id))).toBe(deadline);
+    expect(monitoringTimerOf(manager, record.id)).toBe(wakeTimer);
     expect(internals.waiting.has(record.id)).toBe(true);
     expect(internals.monitoring.has(record.id)).toBe(true);
     expect(internals.busySlots()).toBe(0);
@@ -1594,7 +1603,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     manager = createFixtureManager(store, repoRoot, { semaphore });
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
     currentId = record.id;
-    await waitFor(record.id, (r) => r?.activity === 'monitoring' && Boolean(r.monitoringWakeAt));
+    await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
 
     const internals = manager as unknown as {
       active: Map<string, Record<string, unknown>>;
@@ -1618,13 +1627,15 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
       { type: 'turn.started', turnId: 'turn_parent_resume' },
     );
 
+    // hearsay-tools/cezarion#1233: the resumed turn keeps its pool slot and its open timer until
+    // its own turn end.
     expect(store.getRun(record.id)).toMatchObject({ status: 'running', activity: undefined });
-    expect(store.getRun(record.id)?.monitoringWakeAt).toBeUndefined();
-    expect(state.monitoringWakeTimer).toBeUndefined();
+    expect(monitoringWakeOf(store.getRun(record.id))).toBeDefined();
+    expect(monitoringTimerOf(manager, record.id)).toBeDefined();
     expect(internals.waiting.has(record.id)).toBe(false);
-    expect(internals.monitoring.has(record.id)).toBe(false);
-    expect(internals.busySlots()).toBe(1);
-    expect(semaphore.busy()).toBe(1);
+    expect(internals.monitoring.has(record.id)).toBe(true);
+    expect(internals.busySlots()).toBe(0);
+    expect(semaphore.busy()).toBe(0);
   }, 30_000);
 
   it('a markerless turn-end still parks as waiting with no activity', async () => {
@@ -1633,10 +1644,10 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     await waitFor(record.id, (r) => r?.status === 'waiting');
     expect(store.getRun(record.id)?.activity).toBeUndefined();
     const state = (manager as unknown as {
-      active: Map<string, { idleTimer?: NodeJS.Timeout; monitoringWakeTimer?: NodeJS.Timeout }>;
+      active: Map<string, { idleTimer?: NodeJS.Timeout }>;
     }).active.get(record.id);
     expect(state?.idleTimer).toBeDefined(); // genuine user waits still expire after IDLE_TIMEOUT_MS
-    expect(state?.monitoringWakeTimer).toBeUndefined();
+    expect(monitoringTimerOf(manager, record.id)).toBeUndefined();
   }, 30_000);
 
   it('does not Continue or Finish an inactive wait without durable idle-close proof', async () => {
@@ -2318,7 +2329,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
   it('strips the CEZ:MONITORING marker from server-emitted v1 text events', async () => {
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
     currentId = record.id;
-    await waitFor(record.id, (r) => r?.activity === 'monitoring');
+    await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
     // v1 `text` events are stripped server-side (like CEZ:DONE); v2 message items carry
     // the raw text and the thread reducer strips it on display (thread-state.test.ts).
     const ndjson = readFileSync(join(repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8');
@@ -2331,15 +2342,18 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     expect(v1Text.some((e) => String(e.text).includes('CEZ:MONITORING'))).toBe(false);
   }, 30_000);
 
-  it('resuming a monitoring run clears the activity', async () => {
+  it('a user reply to a monitoring run keeps its timer (hearsay-tools/cezarion#1233)', async () => {
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
     currentId = record.id;
-    await waitFor(record.id, (r) => r?.activity === 'monitoring');
-    // A user reply (no marker) resumes the run: the follow-up turn re-parks as
-    // plain `waiting`, and the monitoring activity is gone.
+    await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
+    const timer = monitoringWakeOf(store.getRun(record.id));
+    // A user reply (no marker) resumes the run; the follow-up turn re-parks on the same timer.
+    const boundaries = () => readFileSync(join(repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8').split('"type":"turn-end"').length;
+    const before = boundaries();
     expect(manager.sendMessage(record.id, [{ type: 'text', text: 'thanks, carry on' }])).toBe(true);
-    await waitFor(record.id, (r) => r?.status === 'waiting');
+    await waitFor(record.id, (r) => r?.status === 'waiting' && boundaries() > before);
     expect(store.getRun(record.id)?.activity).toBeUndefined();
+    expect(monitoringWakeOf(store.getRun(record.id))).toBe(timer);
   }, 30_000);
 });
 

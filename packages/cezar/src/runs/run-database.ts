@@ -30,7 +30,7 @@ export const RUNS_IMPORT_COMPLETE_KEY = 'import-complete';
 /** `PRAGMA user_version` of a database this build created. A higher number means a newer cezar
  *  wrote it; that is refused rather than read, because a newer schema may store what this one
  *  would silently drop on its next write. */
-export const RUN_DATABASE_SCHEMA_VERSION = 3;
+export const RUN_DATABASE_SCHEMA_VERSION = 4;
 
 /**
  * The oldest `user_version` the READ-ONLY reader can read as it stands (`openReadOnly`). It never
@@ -164,6 +164,21 @@ const MIGRATIONS: readonly string[] = [
   CREATE INDEX runs_archive_on_merge ON runs (seq)
     WHERE archived = 0 AND live = 0 AND parent_run_id IS NULL
       AND status IN ('review', 'done', 'failed', 'cancelled');
+  `,
+  `
+  -- Schema 4 changes no table: it changes the record JSON in data (spec 2026-10-17-unified-waits,
+  -- hearsay-tools/cezarion#1233). Records carry a wait list (waits, lastWaits) and are no longer
+  -- written with ciWait, lastCiWait, lastCiWaitError, monitoringWakeAt, monitoringWakeCapReached
+  -- or activity 'monitoring'; this build reads those into the list (upgradeLegacyWaits, store.ts).
+  -- An older cezar reading a row without ciWait would recover a parked run as a plain waiting
+  -- one, and settle an owned worker as successful. The version bump makes it refuse the store as
+  -- unsupported-schema instead; the recovery is to run this version again.
+  --
+  -- No live recompute: every row the new isLiveRecord (run-row.ts) calls live was live under the
+  -- old predicate too. An open or resolved wait comes from a ciWait or from activity 'monitoring'
+  -- with monitoringWakeAt, and the old predicate called each of those live. Rows it called live
+  -- that the new one does not (a settled ciWait, stale monitoring on a finished run) are loaded
+  -- once more, and open rewrites them, with their live column, as it upgrades them.
   `,
 ];
 

@@ -374,9 +374,21 @@ describe('loading normalizes and saves exactly the rows it changed', () => {
   const cases: Array<[string, RunRecord, boolean | undefined, (run: RunRecord) => void]> = [
     ['an accepted stop', record('stop', { status: 'running', stopping: true, steps }), true, (run) => expect(run).toMatchObject({ status: 'cancelled', steps: [{ status: 'cancelled' }] })],
     ['an interrupted live run', record('live', { status: 'running', steps }), undefined, (run) => expect(run).toMatchObject({ status: 'failed', error: expect.stringContaining('interrupted'), steps: [{ status: 'failed' }] })],
-    ['stale monitoring on a finished run', record('mon', { activity: 'monitoring', monitoringWakeAt: '2026-10-06T00:00:00.000Z' }), true, (run) => expect(run).not.toHaveProperty('activity')],
+    // Schema-3 wait fields are read into the wait list on load (store schema 4), which rewrites the row.
+    ['stale monitoring on a finished run', record('mon', { activity: 'monitoring', monitoringWakeAt: '2026-10-06T00:00:00.000Z' } as Partial<RunRecord>), true, (run) => {
+      expect(run).not.toHaveProperty('activity');
+      expect(run).not.toHaveProperty('monitoringWakeAt');
+    }],
+    ['a schema-3 CI park', record('ci', { status: 'running', activity: 'monitoring', steps, ciWait: {
+      id: '55555555-5555-4555-8555-555555555555', generation: 'g', turnId: 't', prUrl: 'https://github.com/o/r/pull/9', repository: 'o/r', prNumber: 9,
+      headSha: 'a'.repeat(40), timeoutSeconds: 1800, registeredAt: '2026-10-05T00:00:00.000Z', deadline: '2026-10-05T00:30:00.000Z', phase: 'parked',
+    } } as Partial<RunRecord>), true, (run) => {
+      expect(run).toMatchObject({ status: 'waiting', steps: [{ status: 'waiting' }], waits: [{ id: '55555555-5555-4555-8555-555555555555', kind: 'ci', phase: 'open' }] });
+      expect(run).not.toHaveProperty('ciWait');
+      expect(run).not.toHaveProperty('activity');
+    }],
     ['a usage-limit resume on a run that is not failed', record('auto', { autoResumeAt: '2026-10-06T00:00:00.000Z' }), true, (run) => expect(run).not.toHaveProperty('autoResumeAt')],
-    ['an exhausted wake cap from the previous process', record('cap', { status: 'running', monitoringWakeCapReached: true }), true, (run) => expect(run).not.toHaveProperty('monitoringWakeCapReached')],
+    ['an exhausted wake cap from the previous process', record('cap', { status: 'running', monitoringWakeCapReached: true } as Partial<RunRecord>), true, (run) => expect(run).not.toHaveProperty('monitoringWakeCapReached')],
     ['a referenced PR the created-PR declaration used to erase', record('heal', {
       markerRefs: { pr: 9 }, pullRequestUrl: 'https://github.com/o/r/pull/9', referencedPrCandidates: ['https://github.com/o/r/pull/4'],
     }), true, (run) => expect(run.referencedPullRequestUrl).toBe('https://github.com/o/r/pull/4')],

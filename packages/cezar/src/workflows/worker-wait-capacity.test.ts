@@ -23,6 +23,7 @@ import {
   store, terminal, track, until, useWorkerWaitFixture, waitOf, worker,
 } from './worker-wait.testkit.ts';
 import { blockRunWrites, readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { monitoringWakeOf } from './waits.testkit.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -439,7 +440,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const w = await worker(p.id, 'mock:monitoring keep going');
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     manager.enqueueOwnedRun(w.id);
-    await until(() => !!store.getRun(w.id)?.monitoringWakeAt);
+    await until(() => !!monitoringWakeOf(store.getRun(w.id)));
     const engine = manager as unknown as {
       active: Map<string, { monitoringWakeups?: number; session: { sendAgentMessage(...args: unknown[]): false | Promise<void> } }>;
       monitoring: Set<string>;
@@ -452,14 +453,14 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
     let completion: Promise<void> | undefined;
     engine.settleSuccess = (id, durable) => id === p.id ? completion = gate.then(() => settle(id, durable)) : settle(id, durable);
-    const deadline = store.getRun(w.id)!.monitoringWakeAt!;
+    const deadline = monitoringWakeOf(store.getRun(w.id))!;
     try {
       if (pending) store.commitRootFinishIntent(p.id);
       await vi.advanceTimersByTimeAsync(Date.parse(deadline) - Date.now() + 1);
       if (pending) {
         expect(send).not.toHaveBeenCalled();
         expect(state.monitoringWakeups ?? 0).toBe(0);
-        expect(store.getRun(w.id)).toMatchObject({ status: 'running', activity: 'monitoring', monitoringWakeAt: deadline });
+        expect({ ...store.getRun(w.id), monitoringWakeAt: monitoringWakeOf(store.getRun(w.id)) }).toMatchObject({ status: 'waiting', activity: undefined, monitoringWakeAt: deadline });
         expect(engine.monitoring.has(w.id)).toBe(true);
         expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
         expect(engine.deliverMessage(w.id, [{ type: 'text', text: 'synthetic retry' }], false)).toBe(false);
@@ -467,7 +468,8 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       } else {
         expect(send).toHaveBeenCalledTimes(1);
         expect(state.monitoringWakeups).toBe(1);
-        expect(engine.monitoring.has(w.id)).toBe(false);
+        // hearsay-tools/cezarion#1233: the wake turn keeps its pool slot until its own turn end.
+        expect(engine.monitoring.has(w.id)).toBe(true);
         expect(store.getRun(w.id)?.activity).toBeUndefined();
       }
     } finally { vi.useRealTimers(); release(); await completion; }

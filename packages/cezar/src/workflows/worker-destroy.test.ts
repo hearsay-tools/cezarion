@@ -25,6 +25,7 @@ import type { Backoff } from '../delegation/retry-backoff.ts';
 import { processesWithCwdUnder, processStartToken } from '../delegation/process-liveness.ts';
 import { signalSession, spawnSessionLeader } from '../core/session-process.ts';
 import { blockRunWrites } from '../runs/run-store.testkit.ts';
+import { monitoringWakeOf } from './waits.testkit.ts';
 
 const until = async (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 });
 function gate() { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve; }); return { promise, release }; }
@@ -549,13 +550,13 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   it('destruction intent prevents synthetic monitoring wake bookkeeping before stop is sent', async () => {
     const w = await worker('mock:monitoring keep going');
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); releases.push(() => vi.useRealTimers());
-    manager.enqueueOwnedRun(w.id); await until(() => !!store.getRun(w.id)?.monitoringWakeAt);
-    const deadline = store.getRun(w.id)!.monitoringWakeAt!;
+    manager.enqueueOwnedRun(w.id); await until(() => !!monitoringWakeOf(store.getRun(w.id)));
+    const deadline = monitoringWakeOf(store.getRun(w.id))!;
     const engine = manager as unknown as { active: Map<string, { monitoringWakeups?: number }> };
     const state = engine.active.get(w.id)!;
     destroy(w); await vi.advanceTimersByTimeAsync(Date.parse(deadline) - Date.now() + 1);
     expect(state.monitoringWakeups ?? 0).toBe(0);
-    expect(store.getRun(w.id)?.monitoringWakeAt).toBe(deadline);
+    expect(monitoringWakeOf(store.getRun(w.id))).toBe(deadline);
     expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
     vi.useRealTimers();
   });

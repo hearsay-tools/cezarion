@@ -409,6 +409,13 @@ const server = createServer((req, res) => {
       }
       // The raw body is enough to spot a `mock:` marker — the prompt text is
       // inside it whatever part shape the runner used to wrap it.
+      if (body.includes('mock:cezar-tool')) {
+        const { toolPrompt } = await import('./mock-ci-tool.mjs');
+        const text = await toolPrompt('opencode', JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}'), body);
+        send({ type: 'message.part.updated', properties: { part: { id: 'tool-result', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text } } });
+        send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+        return;
+      }
       if (body.includes('mock:ci-wait')) {
         const { ciPrompt } = await import('./mock-ci-tool.mjs');
         const text = await ciPrompt('opencode', JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}'), body);

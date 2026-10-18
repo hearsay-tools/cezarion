@@ -1,4 +1,4 @@
-import type { CiWaitErrorCode, PreviewResultCode, PreviewServeResult } from '@open-mercato/cezar-contract';
+import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, type CiWaitErrorCode, type PreviewResultCode, type PreviewServeResult, type WaitErrorCode } from '@open-mercato/cezar-contract';
 import type { z } from 'zod';
 
 /** Safe diagnostics shared by the manager and private transport. Never forward raw errors. */
@@ -40,6 +40,17 @@ export function ciErrorMessage(code: CiWaitErrorCode): string {
   return messages[code];
 }
 
+// hearsay-tools/cezarion#1233: `cezar_wait` refusals. Each names what the agent can do next.
+const waitMessages: Partial<Record<WaitErrorCode, string>> = {
+  timers_disabled: 'Automatic re-checks are turned off for this workspace (Park until resumed). Do not register a timer; end your turn and the user resumes the task.',
+  wake_budget_spent: 'This session spent its automatic timer wakes. Do not register another timer; end your turn and the user resumes the task.',
+  capacity: 'Cezar cannot open another wait now: this run has the maximum open waits, or the CI watcher is full. Cancel a wait you no longer need with cezar_cancel_wait, or retry later.',
+};
+
+export function waitErrorMessage(code: WaitErrorCode): string {
+  return waitMessages[code] ?? messages[code as CiWaitErrorCode];
+}
+
 // #781: `cezar_preview_serve` results. Every one carries the agent's next step; none quotes a
 // secret, an environment value or another task's path.
 const EXAMPLE_CALL = '{ "command": "npm run dev -- --port 5173 --strictPort", "port": 5173 }';
@@ -79,4 +90,24 @@ export function previewInvalidInput(error: z.ZodError, input: unknown): PreviewS
     message: `\`${field}\` ${FIELD_RULES[field]} (got ${got}).`,
     hint: `"${field}" ${FIELD_RULES[field]}. A valid call: ${EXAMPLE_CALL}. Fix the field and call again.`,
   };
+}
+
+// hearsay-tools/cezarion#1233: `cezar_wait` and `cezar_cancel_wait` refusals name the first
+// failing field and its rule, never the value the agent sent.
+const WAIT_FIELD_RULES: Record<string, string> = {
+  kind: 'must be "ci" or "timer"',
+  pr: 'must be an HTTPS GitHub pull request URL (kind "ci")',
+  timeout_seconds: 'must be an integer between 1 and 7200 (kind "ci")',
+  seconds: `must be an integer between ${TIMER_MIN_SECONDS} and ${TIMER_MAX_SECONDS} (kind "timer")`,
+  note: 'must be a string of at most 512 characters (kind "timer")',
+  wait_id: 'must be a wait_id that cezar_wait answered',
+};
+const WAIT_FIELDS = 'kind "ci" takes pr and timeout_seconds; kind "timer" takes seconds and note';
+
+export function waitInvalidInput(error?: z.ZodError): string {
+  const issue = error?.issues[0];
+  if (issue?.code === 'unrecognized_keys') return `Unknown field ${issue.keys.map(key => JSON.stringify(key.slice(0, 64))).join(', ')}: ${WAIT_FIELDS}.`;
+  const field = error?.issues.map(entry => entry.path[0]).find((key): key is string => typeof key === 'string' && key in WAIT_FIELD_RULES);
+  if (field) return `\`${field}\` ${WAIT_FIELD_RULES[field]}.`;
+  return `The arguments must be a JSON object: ${WAIT_FIELDS}.`;
 }

@@ -13,8 +13,9 @@ import {
   ciWaitSchema, agentInputSchema, inboxClaimSchema, delegationStateSchema, workerCreationReceiptSchema, workerCollectedResultSchema, workerResultFileSchema,
   continuationMessageSchema, previewServerSchema, toRunSummary, workerDestroyRetrySchema,
   runRecordSchema as contractRunRecordSchema, runPullRequestSchema, mergedPullRequestSchema,
+  waitSchema, LAST_WAITS_LIMIT, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT,
 } from '@open-mercato/cezar-contract';
-import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult, WorkerDestroyRetry } from '@open-mercato/cezar-contract';
+import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, CiWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry } from '@open-mercato/cezar-contract';
 import { matchesRunQuery, sqlPrefilterTokens } from './run-search.ts';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { HistoryCompressor } from './history-compressor.ts';
@@ -180,10 +181,14 @@ export const runRecordSchema = z.object({
   delegation: storedDelegationStateSchema,
   /** Non-human input must retain attribution through restart, separately from human answers. */
   agentInputs: z.array(agentInputSchema).optional(),
-  ciWait: ciWaitSchema.optional(),
-  lastCiWait: ciWaitSchema.optional(),
-  /** Retained recovery observation when previous CI metadata cannot be trusted. */
-  lastCiWaitError: z.string().max(256).optional(),
+  /** Open and resolved waits (spec 2026-10-17-unified-waits): CI waits and timers in phase 1.
+   *  Read from the legacy `ciWait` and monitoring fields by `upgradeLegacyWaits`, and salvaged per
+   *  entry, so one unreadable wait never evicts the run. */
+  waits: contractRunRecordSchema.shape.waits,
+  /** Settled waits, newest last, capped at `LAST_WAITS_LIMIT`. */
+  lastWaits: contractRunRecordSchema.shape.lastWaits,
+  /** Retained recovery observation when a saved wait could not be read. */
+  lastWaitsError: contractRunRecordSchema.shape.lastWaitsError.catch(undefined),
   /** Dev servers the agent registered with `cezar_preview_serve` (#781). Optional so old files parse. */
   previewServers: z.array(previewServerSchema).optional(),
   /** URLs of images attached to the initial task prompt, for the thread's first bubble
@@ -257,14 +262,11 @@ export const runRecordSchema = z.object({
   stopping: contractRunRecordSchema.shape.stopping.catch(undefined),
   /** Sub-state of `running` (spec 2026-07-18-subagent-monitoring-status, #490):
    *  `monitoring` while the agent is still working on its own downstream work.
-   *  Optional/absent on old runs; cleared when the run resumes or ends. */
+   *  Optional/absent on old runs; cleared when the run resumes or ends. Store schema 4 reads a
+   *  stored one into the wait list (`upgradeLegacyWaits`), so a loaded record never carries it. */
   activity: z.enum(['monitoring']).optional(),
   hasPendingHumanAsk: contractRunRecordSchema.shape.hasPendingHumanAsk.catch(undefined),
   hasPendingPermission: contractRunRecordSchema.shape.hasPendingPermission.catch(undefined),
-  /** Exact server-computed deadline for the next automatic monitoring check. */
-  monitoringWakeAt: z.string().datetime().optional().catch(undefined),
-  /** True only for the live epoch that exhausted all automatic monitoring checks. */
-  monitoringWakeCapReached: z.boolean().optional(),
   /**
    * Exact deadline at which a run stopped by a provider USAGE LIMIT resumes itself
    * (spec 2026-08-03-auto-resume-after-usage-limit) — the reset instant the provider named plus a
@@ -399,20 +401,116 @@ export const runRecordSchema = z.object({
   workflowDef: workflowDefSchema.optional().catch(undefined),
 });
 
-/** Salvage CI state identically for live stores and the read-only workspace index. */
+/** The keys a schema-3 record used for CI and monitoring parks. Schema 4 reads them into `waits`
+ *  and never writes them (spec 2026-10-17-unified-waits, § Compatibility). */
+const LEGACY_WAIT_KEYS = ['ciWait', 'lastCiWait', 'lastCiWaitError', 'monitoringWakeAt', 'monitoringWakeCapReached', 'activity'] as const;
+const UNREADABLE_WAIT = 'Wait unavailable — a saved wait is unreadable; register a new wait.';
+
+function hasLegacyWaitFields(row: unknown): boolean {
+  return !!row && typeof row === 'object' && LEGACY_WAIT_KEYS.some((key) => key in row);
+}
+
+/** A legacy `CiWait` as a wait entry. Its wake input's id was the wait's own (`wakeId`, which
+ *  `run.ts` set to the wait id), so the entry keeps that id and delivery still finds the input. */
+export function ciWaitEntry(wait: CiWait): CiWaitEntry {
+  const { wakeId: _wakeId, phase, result, deliveredAt, ...identity } = wait;
+  return {
+    ...identity, kind: 'ci', source: 'agent', via: 'cezar_wait_for_ci',
+    phase: phase === 'registered' || phase === 'parked' ? 'open' : phase === 'wake-pending' ? 'resolved' : phase === 'delivered' ? 'delivered' : 'cancelled',
+    ...(result ? { result, resolvedAt: result.observedAt } : {}),
+    ...(deliveredAt ? { deliveredAt } : {}),
+  };
+}
+
+/** A stable id for the timer a legacy monitoring park becomes. The row keeps its legacy JSON
+ *  until it is next written, so every read of it must name the same wait. */
+function legacyTimerId(runId: unknown, wakeAt: string): string {
+  const hex = createHash('sha256').update(`legacy-monitoring-timer:${String(runId)}:${wakeAt}`).digest('hex');
+  const variant = (8 | (Number.parseInt(hex[16]!, 16) & 3)).toString(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+/**
+ * Upgrade-on-read (store schema 4, spec 2026-10-17-unified-waits): read a schema-3 record's CI and
+ * monitoring fields into its wait list, then delete them. Mutates `row`, before validation.
+ *
+ * - `ciWait`: `registered`/`parked` → an open `ci` wait, `wake-pending` → resolved (resolved when
+ *   its result was observed), `delivered`/`withdrawn` → `lastWaits` as delivered/cancelled.
+ * - `lastCiWait` → `lastWaits`: `delivered` stays delivered, anything else was withdrawn intent and
+ *   reads as cancelled. `lastCiWaitError` → `lastWaitsError`.
+ * - `activity: 'monitoring'` on a live run: with `monitoringWakeAt`, an open timer due then
+ *   (`seconds` is what remains, clamped to a timer's bounds); without one, no wait. Either way a
+ *   `running` run parks as `waiting`, its running step with it, as every waiting park writes it.
+ *   On a finished run the fields are stale and only dropped.
+ *
+ * An unreadable legacy CI wait gets the per-entry salvage `parseRunRecords` gives `waits`: it is
+ * dropped, `lastWaitsError` says so, and the status is left alone. A `waiting` run with no open
+ * wait reads as Needs you, which a human can resume.
+ */
+export function upgradeLegacyWaits(row: Record<string, unknown>): void {
+  if (!hasLegacyWaitFields(row)) return;
+  const opened: Wait[] = [];
+  const settled: Wait[] = [];
+  let unreadable = false;
+  const legacyCi = (value: unknown, previous: boolean) => {
+    if (value === undefined) return;
+    const parsed = ciWaitSchema.safeParse(value);
+    if (!parsed.success) { unreadable = true; return; }
+    const entry = ciWaitEntry(parsed.data);
+    if (previous && entry.phase !== 'delivered') entry.phase = 'cancelled';
+    (entry.phase === 'open' || entry.phase === 'resolved' ? opened : settled).push(entry);
+  };
+  // The previous wait settled before the current one did, so it goes first.
+  legacyCi(row.lastCiWait, true);
+  legacyCi(row.ciWait, false);
+  const live = row.status === 'running' || row.status === 'queued' || row.status === 'waiting';
+  if (row.activity === 'monitoring' && live) {
+    const wakeAt = row.monitoringWakeAt;
+    // Schema 3 read an unreadable deadline as none (`.catch(undefined)`): no wait.
+    if (typeof wakeAt === 'string' && z.iso.datetime().safeParse(wakeAt).success) {
+      const now = Date.now();
+      const seconds = Math.min(TIMER_MAX_SECONDS, Math.max(TIMER_MIN_SECONDS, Math.round((Date.parse(wakeAt) - now) / 1000)));
+      opened.push({
+        id: legacyTimerId(row.id, wakeAt), kind: 'timer', source: 'agent', via: 'monitoring-line',
+        registeredAt: new Date(now).toISOString(), deadline: wakeAt, phase: 'open', turnId: 'legacy', seconds,
+      });
+    }
+    if (row.status === 'running') {
+      row.status = 'waiting';
+      if (Array.isArray(row.steps)) for (const step of row.steps) {
+        if (step && typeof step === 'object' && (step as { status?: unknown }).status === 'running') (step as { status: string }).status = 'waiting';
+      }
+    }
+  }
+  if (opened.length) {
+    const current = Array.isArray(row.waits) ? row.waits as Array<{ id?: unknown }> : [];
+    if (row.waits !== undefined && !Array.isArray(row.waits)) unreadable = true;
+    row.waits = [...current, ...opened.filter((wait) => !current.some((entry) => entry?.id === wait.id))];
+  }
+  if (settled.length) {
+    const current = Array.isArray(row.lastWaits) ? row.lastWaits : [];
+    if (row.lastWaits !== undefined && !Array.isArray(row.lastWaits)) unreadable = true;
+    row.lastWaits = [...settled, ...current].slice(-LAST_WAITS_LIMIT);
+  }
+  if (typeof row.lastCiWaitError === 'string' && row.lastWaitsError === undefined) row.lastWaitsError = row.lastCiWaitError;
+  if (unreadable) row.lastWaitsError = UNREADABLE_WAIT;
+  for (const key of LEGACY_WAIT_KEYS) delete row[key];
+}
+
+/** Read legacy wait fields into the wait list and salvage per entry, identically for live stores
+ *  and the read-only workspace index. */
 export function parseRunRecords(raw: unknown) {
   if (Array.isArray(raw)) for (const row of raw) {
     if (!row || typeof row !== 'object') continue;
-    if (row.ciWait !== undefined && !ciWaitSchema.safeParse(row.ciWait).success) {
-      delete row.ciWait;
-      if (['running', 'queued', 'waiting'].includes(row.status)) {
-        row.status = 'failed'; delete row.activity;
-        row.error = 'CI wait state is unreadable; continue the task to register a new wait.';
-      }
-    }
-    if (row.lastCiWait !== undefined && !ciWaitSchema.safeParse(row.lastCiWait).success) {
-      delete row.lastCiWait;
-      row.lastCiWaitError = 'CI wait unavailable — saved observation is unreadable; register a new wait.';
+    upgradeLegacyWaits(row);
+    // One unreadable wait must not evict the run, nor its readable siblings.
+    for (const key of ['waits', 'lastWaits'] as const) {
+      if (row[key] === undefined) continue;
+      const entries: unknown[] = Array.isArray(row[key]) ? row[key] : [];
+      const readable = entries.filter((entry) => waitSchema.safeParse(entry).success);
+      if (!Array.isArray(row[key]) || readable.length !== entries.length) row.lastWaitsError = UNREADABLE_WAIT;
+      if (readable.length) row[key] = readable;
+      else delete row[key];
     }
     // One unreadable registration must not evict the run, nor its readable siblings (#781).
     if (row.previewServers !== undefined) {
@@ -423,11 +521,38 @@ export function parseRunRecords(raw: unknown) {
   return z.array(runRecordSchema).safeParse(raw);
 }
 
+/** A wait list as the record stores it: absent when empty. */
+function nonEmpty(waits: Wait[]): Wait[] | undefined {
+  return waits.length ? waits : undefined;
+}
+
+/** Append settled waits to the history, newest last, dropping the oldest past `LAST_WAITS_LIMIT`. */
+function settleWaits(previous: readonly Wait[] | undefined, settled: readonly Wait[]): Wait[] | undefined {
+  return nonEmpty([...(previous ?? []), ...settled].slice(-LAST_WAITS_LIMIT));
+}
+
+/** `run` with the named open or resolved waits cancelled and their undelivered wake inputs dropped,
+ *  or undefined when none of them is open or resolved. */
+function withWaitsCancelled(run: RunRecord, waitIds: readonly string[]): RunRecord | undefined {
+  const ids = new Set(waitIds);
+  const cancelled = (run.waits ?? []).filter((wait) => ids.has(wait.id) && (wait.phase === 'open' || wait.phase === 'resolved'));
+  if (!cancelled.length) return undefined;
+  const cancelledAt = new Date().toISOString();
+  const retired = new Set(cancelled.map((wait) => wait.id));
+  return { ...run,
+    waits: nonEmpty((run.waits ?? []).filter((wait) => !retired.has(wait.id))),
+    lastWaits: settleWaits(run.lastWaits, cancelled.map((wait) => ({ ...wait, phase: 'cancelled' as const, cancelledAt }))),
+    ...(run.agentInputs ? { agentInputs: run.agentInputs.filter((input) => !retired.has(input.id) || input.deliveredAt) } : {}),
+  };
+}
+
 /** One stored record and what its JSON holds beyond the runtime schema (raw-record.ts), which
  *  the next write of its row puts back. */
 export interface DecodedRun {
   run: RunRecord;
   extras: RawExtras | undefined;
+  /** The stored JSON still had schema-3 wait fields (`upgradeLegacyWaits`): open rewrites it. */
+  upgraded?: true;
 }
 
 /** A row as this store last read or wrote it (see `RunStore.base`). */
@@ -449,10 +574,11 @@ function storedRow({ revision, seq, data, extras }: StoredRow): StoredRow {
  *  server entry) the runtime has decided to drop, and keeps dropping on the next write, as it always
  *  has; only what the schema does not know is put back. */
 function decodeStoredRecord(raw: unknown): DecodedRun | undefined {
+  const upgraded = hasLegacyWaitFields(raw);
   const parsed = parseRunRecords([raw]);
   if (!parsed.success) return undefined;
   const run = parsed.data[0]!;
-  return { run, extras: collectRawExtras(raw, run) };
+  return { run, extras: collectRawExtras(raw, run), ...(upgraded ? { upgraded: true as const } : {}) };
 }
 
 /** One database row's `data` back into a record and its extras. Undefined when it does not parse:
@@ -901,17 +1027,13 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
       if (step.status === 'running' || step.status === 'waiting') step.status = 'failed';
     }
   }
-  if (!['running', 'waiting', 'queued'].includes(run.status)) {
-    run.activity = undefined;
-    run.monitoringWakeAt = undefined;
-  }
+  if (!['running', 'waiting', 'queued'].includes(run.status)) run.activity = undefined;
+  // Open waits are left alone at every status: RunManager cancels them when a run ends (spec
+  // 2026-10-17-unified-waits), and recovery reads the ones a crash left behind.
   // A pending usage-limit resume survives the restart on purpose (the wait can be
   // hours) — `RunManager.recover()` re-arms it from this field. It can only mean
   // anything on a `failed` run, so anywhere else it is stale bookkeeping.
   if (run.status !== 'failed') run.autoResumeAt = undefined;
-  // The wake counter is intentionally process-local, so a restarted process
-  // starts a fresh epoch instead of displaying a stale cap.
-  run.monitoringWakeCapReached = undefined;
   // Heal a record written before `referencedPrDeclaration` existed: a task that re-declared
   // `CEZ:PR` with the PR it had just CREATED cleared the PR it was ABOUT, because no candidate
   // could match the created number. The evidence is all still on the record — only the
@@ -1009,8 +1131,8 @@ export function rescopeRun(run: RunRecord, handle?: RepoHandle | null): boolean 
  */
 function loadNormalizedFields(run: RunRecord): string {
   return JSON.stringify([
-    run.stopping, run.status, run.finishedAt, run.error, run.activity, run.monitoringWakeAt, run.autoResumeAt,
-    run.monitoringWakeCapReached, run.referencedPullRequestUrl, run.pullRequests,
+    run.stopping, run.status, run.finishedAt, run.error, run.activity, run.autoResumeAt,
+    run.referencedPullRequestUrl, run.pullRequests,
     run.issueNumber, run.referencedIssueUrl, run.referencedIssueNumberSeeded, run.hasPendingHumanAsk, run.hasPendingPermission, run.steps.map((step) => step.status),
   ]);
 }
@@ -1577,8 +1699,10 @@ export class RunStore extends EventEmitter {
 
   /** Normalize a record just read from `row` (see `reconcileLoadedRun`) and hold it. Marks the row
    *  dirty only when normalization changed it, so the next save persists exactly the runs open()
-   *  rewrote. The caller has claimed the row's family. */
-  private adoptLoadedRun({ run, extras }: DecodedRun, opts: { keepLive?: boolean; onlyIfChanged?: boolean; settle?: boolean; stop?: boolean }, row: RunRow): void {
+   *  rewrote. A row read up from schema-3 wait fields counts as changed: its rewrite drops them
+   *  and recomputes its summary and live column (`upgradeLegacyWaits`). The caller has claimed
+   *  the row's family. */
+  private adoptLoadedRun({ run, extras, upgraded }: DecodedRun, opts: { keepLive?: boolean; onlyIfChanged?: boolean; settle?: boolean; stop?: boolean }, row: RunRow): void {
     const before = loadNormalizedFields(run);
     if (run.delegation?.role === 'root' && (run.status === 'waiting' || run.delegation.wait !== undefined)) {
       let facts = this.facts.peek(run.id);
@@ -1598,7 +1722,7 @@ export class RunStore extends EventEmitter {
     }
     if (opts.settle) settleOrphanedRun(run, { stop: opts.stop });
     else reconcileLoadedRun(run, opts);
-    const changed = loadNormalizedFields(run) !== before;
+    const changed = upgraded === true || loadNormalizedFields(run) !== before;
     if (opts.onlyIfChanged && !changed) return;
     this.held.set(run.id, run);
     this.base.set(run.id, { revision: row.revision, seq: row.seq, data: row.data, extras });
@@ -2592,37 +2716,76 @@ export class RunStore extends EventEmitter {
     }) }]]));
   }
 
-  /** CI intent and its wake entry share one atomic index replacement. */
-  commitCiWait(id: string, wait: CiWait, input?: AgentInput): void {
+  /**
+   * A wait and its wake input share one atomic index replacement (spec 2026-10-17-unified-waits).
+   * Upserts `wait` by id into `waits` and clears `lastWaitsError`; `input` is appended once (an
+   * input whose id is already queued stays as it is). Only an open or resolved wait is committed
+   * here: settling goes through `commitWaitDelivery` or `commitWaitCancellation`. A new open wait
+   * past `WAIT_LIMIT` open ones is refused, so the list stays bounded whatever the caller checked.
+   */
+  commitWait(id: string, wait: Wait, input?: AgentInput): void {
     const run = this.peek(id);
-    if (!run) throw new Error('missing CI wait target');
-    const ciWait = ciWaitSchema.parse(wait);
-    const entry = input ? agentInputSchema.parse(input) : undefined;
-    this.commitIndex(new Map([[id, { ...run, ciWait, lastCiWaitError: undefined, ...(entry ? { agentInputs: run.agentInputs?.some(row => row.id === entry.id)
-      ? run.agentInputs : [...(run.agentInputs ?? []), entry] } : {}) }]]));
+    if (!run) throw new Error('missing wait target');
+    const entry = waitSchema.parse(wait);
+    if (entry.phase !== 'open' && entry.phase !== 'resolved') throw new Error('a settled wait is committed through its delivery or cancellation');
+    const waits = run.waits ?? [];
+    const known = waits.some((row) => row.id === entry.id);
+    if (!known && entry.phase === 'open' && waits.filter((row) => row.phase === 'open').length >= WAIT_LIMIT) {
+      throw new Error(`open wait limit reached (${WAIT_LIMIT})`);
+    }
+    const agentInput = input ? agentInputSchema.parse(input) : undefined;
+    this.commitIndex(new Map([[id, { ...run, waits: known ? waits.map((row) => row.id === entry.id ? entry : row) : [...waits, entry], lastWaitsError: undefined,
+      ...(agentInput ? { agentInputs: run.agentInputs?.some((row) => row.id === agentInput.id)
+        ? run.agentInputs : [...(run.agentInputs ?? []), agentInput] } : {}) }]]));
   }
 
-  /** Retire the wait and precisely its pending wake, optionally accepting human input. */
+  /** Cancel by the agent or by Cezar: each named open or resolved wait moves to `lastWaits` as
+   *  `cancelled`, and its undelivered wake input (the input whose id is the wait's) goes with it. */
+  commitWaitCancellation(id: string, waitIds: readonly string[]): void {
+    const run = this.peek(id);
+    const next = run && withWaitsCancelled(run, waitIds);
+    if (next) this.commitIndex(new Map([[id, next]]));
+  }
+
+  /** One delivery checkpoint for a wake batch: every named agent input is marked delivered (one
+   *  already delivered keeps its time), and each resolved wait among them (input id = wait id)
+   *  moves to `lastWaits` as `delivered`. Open waits a batch names stay open. */
+  commitWaitDelivery(id: string, inputIds: readonly string[]): void {
+    const run = this.peek(id);
+    if (!run) return;
+    const ids = new Set(inputIds);
+    const delivered = (run.waits ?? []).filter((wait) => wait.phase === 'resolved' && ids.has(wait.id));
+    if (!delivered.length && !run.agentInputs?.some((input) => ids.has(input.id) && !input.deliveredAt)) return;
+    const deliveredAt = new Date().toISOString();
+    const retired = new Set(delivered.map((wait) => wait.id));
+    this.commitIndex(new Map([[id, { ...run,
+      waits: nonEmpty((run.waits ?? []).filter((wait) => !retired.has(wait.id))),
+      lastWaits: settleWaits(run.lastWaits, delivered.map((wait) => ({ ...wait, phase: 'delivered' as const, deliveredAt }))),
+      ...(run.agentInputs ? { agentInputs: run.agentInputs.map((input) => ids.has(input.id) && !input.deliveredAt ? { ...input, deliveredAt } : input) } : {}),
+    }]]));
+  }
+
+  /** Legacy CI checkpoint over `commitWait`, kept until its callers move (unified waits, Task 4). */
+  commitCiWait(id: string, wait: CiWait, input?: AgentInput): void {
+    this.commitWait(id, ciWaitEntry(ciWaitSchema.parse(wait)), input);
+  }
+
+  /** Legacy withdrawal: cancels every open or resolved CI wait, optionally accepting human input in
+   *  the same commit. Kept until its callers move (unified waits, Task 4). */
   commitCiWaitWithdrawal(id: string, acceptedHumanMessage?: QueuedMessage): void {
     const run = this.peek(id);
-    if (!run?.ciWait) return;
-    const { ciWait, ...rest } = run;
-    const lastCiWait: CiWait = { ...ciWait, phase: 'withdrawn' };
-    this.commitIndex(new Map([[id, { ...rest, ciWait: undefined, lastCiWait,
-      ...(run.agentInputs ? { agentInputs: run.agentInputs.filter(input => input.id !== ciWait.wakeId || input.deliveredAt) } : {}),
+    const next = run && withWaitsCancelled(run, (run.waits ?? []).filter((wait) => wait.kind === 'ci').map((wait) => wait.id));
+    if (!run || !next) return;
+    this.commitIndex(new Map([[id, { ...next,
       ...(acceptedHumanMessage ? { queuedMessages: [...(run.queuedMessages ?? []), queuedMessageSchema.parse(acceptedHumanMessage)] } : {}),
     }]]));
   }
 
-  /** Provider acceptance and receipt retirement have one delivery checkpoint. */
+  /** Legacy CI delivery over `commitWaitDelivery`: only a resolved CI wait's own input. Kept until
+   *  its callers move (unified waits, Task 4). */
   commitCiWaitDelivery(id: string, inputId: string): void {
-    const run = this.peek(id);
-    if (!run?.ciWait || run.ciWait.wakeId !== inputId) return;
-    const { ciWait, ...rest } = run;
-    const deliveredAt = new Date().toISOString();
-    this.commitIndex(new Map([[id, { ...rest, ciWait: undefined, lastCiWait: { ...ciWait, phase: 'delivered' as const, deliveredAt },
-      agentInputs: (run.agentInputs ?? []).map(input => input.id === inputId ? { ...input, deliveredAt } : input),
-    }]]));
+    if (!this.peek(id)?.waits?.some((wait) => wait.kind === 'ci' && wait.phase === 'resolved' && wait.id === inputId)) return;
+    this.commitWaitDelivery(id, [inputId]);
   }
 
   /** Retain the settled receipt and retire exactly one wait together with any human message that superseded it. */
@@ -2683,7 +2846,7 @@ export class RunStore extends EventEmitter {
     const { finishRequestedAt: _intent, ...delegation } = run.delegation;
     const finishedAt = new Date().toISOString();
     this.commitIndex(new Map([[id, { ...run, delegation, status, finishedAt, currentStepId: undefined, autoResumeAttempts: undefined,
-      activity: undefined, monitoringWakeAt: undefined, monitoringWakeCapReached: undefined,
+      activity: undefined,
       steps: run.steps.map(step => step.status === 'waiting' || step.status === 'running'
         ? { ...step, status: 'done' as const, finishedAt: step.finishedAt ?? finishedAt } : step),
     }]]));
@@ -2978,10 +3141,10 @@ export class RunStore extends EventEmitter {
         return parsed.success ? [parsed.data] : [];
       }));
     }
+    // Waits are not cleared here: RunManager cancels them explicitly when a run ends (spec
+    // 2026-10-17-unified-waits), so a terminal patch never retires one as a side effect.
     if (normalized.status && !['running', 'waiting', 'queued'].includes(normalized.status)) {
       normalized.activity = undefined;
-      normalized.monitoringWakeAt = undefined;
-      normalized.monitoringWakeCapReached = undefined;
     }
     // …and the mirror image for the usage-limit resume (spec
     // 2026-08-03-auto-resume-after-usage-limit): it is a promise made ABOUT a failed run, so a

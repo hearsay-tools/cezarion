@@ -125,6 +125,7 @@ async function prompt(id, content) {
     const { crashWithStderr } = await import('./mock-runner-crash.mjs');
     if (crashWithStderr(input, '{"method":"session/update","params":')) return;
   }
+  if (input.includes('mock:cezar-tool')) { const { toolPrompt } = await import('./mock-ci-tool.mjs'); text(await toolPrompt('cursor', ciWire, input)); complete(id); return; }
   if (input.includes('mock:ci-wait')) { const { ciPrompt } = await import('./mock-ci-tool.mjs'); text(await ciPrompt('cursor', ciWire, input)); complete(id); return; }
   if (resumeDone) { resumeDone = false; text('Resumed work finished.\nCEZ:DONE'); complete(id); return; }
   if (watchdogStall(input)) return;

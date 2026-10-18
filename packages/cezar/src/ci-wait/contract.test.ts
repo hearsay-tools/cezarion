@@ -68,7 +68,8 @@ describe('private preview-serve route', () => {
   async function session(registerPreview?: (request: PreviewServeRequest) => Promise<PreviewServeResult>) {
     const { CiToolController } = await import('./controller.ts');
     const owner = await CiToolController.start(); controllers.push(owner);
-    return owner.provision(async () => { throw new Error('not a CI test'); }, registerPreview);
+    const notWait = async (): Promise<never> => { throw new Error('not a CI test'); };
+    return owner.provision({ registerWait: notWait, cancelWait: notWait, registerPreview });
   }
   function post(env: Record<string, string>, body: string, token = env.CEZ_TOOL_TOKEN!) {
     return new Promise<{ status: number; body: string }>((resolve, reject) => {

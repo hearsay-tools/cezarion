@@ -2,7 +2,7 @@ import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { parseCursorConfigOptions, cursorEffortSelection, type CursorConfigOption } from './cursor-config-options.ts';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import type { AgentEvent, AgentRunResult, AgentRunner, AgentRunSpec, AgentRunSpecSupport, AgentSession, AgentToolCallRecord, ContentBlock, InputDelivery, SessionOptions } from './agent-runner.ts';
+import type { AgentEvent, AgentInputOptions, AgentRunResult, AgentRunner, AgentRunSpec, AgentRunSpecSupport, AgentSession, AgentToolCallRecord, ContentBlock, InputDelivery, SessionOptions } from './agent-runner.ts';
 import { prependSystemPrompt, trackChildExit } from './agent-runner.ts';
 import { signalSession, spawnSessionLeader } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
@@ -431,8 +431,8 @@ class CursorSession implements AgentSession {
     else this.startTurn(content);
     return true;
   }
-  sendAgentMessage(content: ContentBlock[]): false | Promise<void> {
-    if (!this.open || !this.ready || this.busy || this.pendingAsk || this.markerAsk || this.queued.length > 0) return false;
+  sendAgentMessage(content: ContentBlock[], _inputIds?: readonly string[], options?: AgentInputOptions): false | Promise<void> {
+    if (!this.open || !this.ready || this.busy || this.pendingAsk || (this.markerAsk && !options?.besideQuestion) || this.queued.length > 0) return false;
     this.busy = true;
     return new Promise((resolve, reject) => this.startTurn(content, error => error ? reject(error) : resolve()));
   }

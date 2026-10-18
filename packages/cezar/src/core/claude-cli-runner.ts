@@ -467,9 +467,9 @@ export class ClaudeCliRunner implements AgentRunner {
     const session: AgentSession = {
       result,
       sendMessage: content => sendMessage(content, undefined, [], true),
-      sendAgentMessage: (content, inputIds = []) => {
+      sendAgentMessage: (content, inputIds = [], options) => {
         // #505: allowed mid-turn — the CLI steers the line into the running turn.
-        if (!stdinOpen || pendingMarkerAsk || agentWritePending) return false;
+        if (!stdinOpen || (pendingMarkerAsk && !options?.besideQuestion) || agentWritePending) return false;
         let resolve!: () => void, reject!: (error: Error) => void;
         const acknowledged = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
         agentWritePending = true;

@@ -24,6 +24,7 @@
  * `running` run. It draws from its own seeded stream, so the finished records keep the bytes and
  * ids the first benchmark table measured; `serve` opens with `keepLive`, which leaves them live.
  */
+import type { CiWait } from '@open-mercato/cezar-contract';
 import type { RunRecord } from '../src/runs/store.ts';
 
 export const FIXTURE_PROFILES = ['legacy', 'post-778'] as const;
@@ -367,7 +368,9 @@ function rootRun(rng: Rng, id: string, workerIds: readonly string[], at: number)
     }
   }
   record.delegation = delegation;
-  if (rng.chance(0.1)) record.lastCiWait = ciWait(rng, at);
+  // A schema-3 field, kept so the finished records stay the bytes the first table measured:
+  // store schema 4 reads it into `lastWaits` (`upgradeLegacyWaits`).
+  if (rng.chance(0.1)) (record as RunRecord & { lastCiWait?: CiWait }).lastCiWait = ciWait(rng, at);
   return record;
 }
 
@@ -408,7 +411,7 @@ function agentInputs(rng: Rng, parentRunId: string, sender: string, recipient: s
   return inputs;
 }
 
-function ciWait(rng: Rng, at: number): NonNullable<RunRecord['lastCiWait']> {
+function ciWait(rng: Rng, at: number): CiWait {
   const pr = rng.int(1, 999);
   const headSha = rng.hex(40);
   const id = rng.uuid();

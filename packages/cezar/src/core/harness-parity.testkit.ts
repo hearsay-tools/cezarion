@@ -762,6 +762,25 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
       'parentItemId and no child transcript), so there is no child terminal signal that could ' +
       'end the parent turn.',
   },
+  // hearsay-tools/cezarion#1233 U7: the `cezar_wait_for_ci` and monitoring-line aliases stay
+  // live on every wire; only the ScheduleWakeup alias is Claude's.
+  ...(['codex', 'opencode', 'pi', 'cursor', 'omp'] as const).map(backend => ({
+    criterion: 'U7', backend, kind: 'capability-absent' as const,
+    reason: 'native scheduler tool exists only on the Claude wire',
+  })),
+  // U12/U13: an agent-input acknowledgement the provider can delay or reject.
+  {
+    criterion: 'U12', backend: 'claude', kind: 'capability-absent',
+    reason: 'Claude acknowledges agent input with the local stdin pipe write, so the provider cannot delay the acknowledgement. U3b covers its delivery beside a pending question.',
+  },
+  {
+    criterion: 'U13', backend: 'claude', kind: 'capability-absent',
+    reason: 'Claude acknowledges agent input with the local stdin pipe write; a written line has no provider rejection.',
+  },
+  {
+    criterion: 'U13', backend: 'cursor', kind: 'capability-absent',
+    reason: 'Cursor print acknowledges agent input on the first model work of the process it spawns; the print wire has no rejection of an admitted prompt.',
+  },
 ];
 
 export function exemptionFor(criterion: string, backend: RunnerId): ParityExemption | undefined {

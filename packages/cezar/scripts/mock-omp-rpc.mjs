@@ -57,7 +57,7 @@ if (typeof flags.get('--tools') === 'string') {
   const disabled = (process.env.CEZ_MOCK_OMP_DISABLED_TOOLS ?? '').split(',').filter(Boolean);
   const registered = (name) => (BUILTIN_TOOLS.includes(name) && !GATED_TOOLS.has(name) && !disabled.includes(name))
     || mcpTools.includes(name)
-    || (extensions.length > 0 && (name === 'cezar_wait_for_ci' || ((name === 'cezar_preview_serve' || name === 'cezar_preview_stop') && process.env.CEZ_PREVIEW === '1')));
+    || (extensions.length > 0 && (['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait'].includes(name) || ((name === 'cezar_preview_serve' || name === 'cezar_preview_stop') && process.env.CEZ_PREVIEW === '1')));
   // Mirrors v18.4.11 `emt()`: every missing name in ONE error, unknown names first, then the
   // built-ins this session lacks, each line singular for one name.
   const missing = tools.filter((name) => !registered(name));
@@ -595,6 +595,12 @@ async function prompt(command) {
   if (message.includes('mock:done') || (resumeAfterAsk && message.trim() === 'Library: Vitest')) {
     resumeAfterAsk = false;
     assistantText(['parity done: the task is complete\n\nCEZ:DONE']);
+    endTurn();
+    return;
+  }
+  if (message.includes('mock:cezar-tool')) {
+    const { toolPrompt } = await import('./mock-ci-tool.mjs');
+    assistantText([await toolPrompt('omp', argv, message)]);
     endTurn();
     return;
   }

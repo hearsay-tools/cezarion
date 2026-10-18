@@ -216,7 +216,12 @@ describe('pins', () => {
 describe('the live set stays in memory', () => {
   it.each([
     ['a parked run', { status: 'waiting' as const }],
-    ['a monitoring run', { status: 'running' as const, activity: 'monitoring' as const, monitoringWakeAt: '2099-01-01T00:00:00.000Z' }],
+    // Store schema 4: a monitoring park is `waiting` with an open timer (unified waits).
+    ['a monitoring run', { status: 'waiting' as const, waits: [{ id: '66666666-6666-4666-8666-666666666666', kind: 'timer' as const, source: 'agent' as const,
+      via: 'monitoring-line' as const, registeredAt: '2099-01-01T00:00:00.000Z', deadline: '2099-01-01T00:05:00.000Z', phase: 'open' as const, turnId: 'turn', seconds: 300 }] }],
+    ['a finished run whose wake is still owed', { status: 'done' as const, waits: [{ id: '77777777-7777-4777-8777-777777777777', kind: 'timer' as const, source: 'agent' as const,
+      via: 'cezar_wait' as const, registeredAt: '2099-01-01T00:00:00.000Z', deadline: '2099-01-01T00:05:00.000Z', phase: 'resolved' as const,
+      resolvedAt: '2099-01-01T00:05:00.000Z', turnId: 'turn', seconds: 300 }] }],
     ['a run waiting out a usage limit', { status: 'failed' as const, autoResumeAt: '2099-01-01T00:00:00.000Z' }],
   ])('%s', (_name, over) => {
     const run = record(over);

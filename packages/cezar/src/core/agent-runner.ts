@@ -264,6 +264,15 @@ export interface SessionOptions {
   onPidChange?: (pid: number) => void;
 }
 
+/** How one `sendAgentMessage` reservation is admitted. */
+export interface AgentInputOptions {
+  /** The caller knows a portable `CEZ:ASK` is pending and delivers wait results beside it
+   *  (hearsay-tools/cezarion#1233): the runner skips only its portable-ask refusal, and the
+   *  question stays the caller's. A native question, an in-flight submission and a closed
+   *  session still refuse. */
+  besideQuestion?: boolean;
+}
+
 /**
  * A live logical agent session. Most backends retain one process and read
  * follow-ups from it. Cursor print replaces its process after each completed
@@ -285,7 +294,7 @@ export interface AgentSession {
    * the model consumed it (#505). Reject retains caller ownership for replay.
    * `inputIds` correlate `onAgentInputConsumed` and `turn-end.unconsumedInputIds`.
    * Never fall back to the human-answer seam. */
-  sendAgentMessage(content: ContentBlock[], inputIds?: readonly string[]): false | Promise<void>;
+  sendAgentMessage(content: ContentBlock[], inputIds?: readonly string[], options?: AgentInputOptions): false | Promise<void>;
   /**
    * Drop follow-ups queued while a turn was still in flight. A `CEZ:ASK` park
    * must call this so a mid-turn `sendMessage` cannot start a new turn after

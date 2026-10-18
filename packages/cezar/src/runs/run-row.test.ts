@@ -41,9 +41,10 @@ describe('isLiveRecord', () => {
     ['queued', { status: 'queued' }],
     ['running', { status: 'running' }],
     ['waiting', { status: 'waiting' }],
-    ['a pending monitoring wake', { monitoringWakeAt: '2026-10-06T00:00:00.000Z' }],
+    // A wait counts until it is delivered or cancelled (unified waits: `lastWaits` holds those).
+    ['an open wait', { waits: [{ id: 'w', phase: 'open' }] }],
+    ['a resolved wait not yet delivered', { waits: [{ id: 'w', phase: 'resolved' }] }],
     ['a pending usage-limit resume', { status: 'failed', autoResumeAt: '2026-10-06T00:00:00.000Z' }],
-    ['a pending CI wake', { ciWait: { id: 'w' } }],
     ['a parent waiting on workers', { delegation: { role: 'root', wait: { id: 'wait' } } }],
     ['a worker waiting on its parent', { delegation: worker({ wait: { id: 'wait' } }) }],
     ['a worker whose destroy is still owed', { delegation: worker({ destroy: { phase: 'requested' } }) }],
@@ -52,6 +53,10 @@ describe('isLiveRecord', () => {
     ['a monitoring activity left on the record', { activity: 'monitoring' }],
   ])('is true for %s', (_name, overrides) => {
     expect(isLiveRecord(record(overrides as Partial<RunRecord>))).toBe(true);
+  });
+
+  it('lets a run go once its waits are delivered or cancelled', () => {
+    expect(isLiveRecord(record({ lastWaits: [{ id: 'w', phase: 'delivered' }, { id: 'x', phase: 'cancelled' }] } as unknown as Partial<RunRecord>))).toBe(false);
   });
 
   it('lets a worker go once its destroy completed', () => {
@@ -67,7 +72,7 @@ describe('encodeRunRow', () => {
   it('stores the live predicate as the live column', () => {
     expect(encodeRunRow(record()).live).toBe(false);
     expect(encodeRunRow(record({ status: 'running' })).live).toBe(true);
-    expect(encodeRunRow(record({ ciWait: { id: 'w' } as unknown as RunRecord['ciWait'] })).live).toBe(true);
+    expect(encodeRunRow(record({ waits: [{ id: 'w', phase: 'open' }] as unknown as RunRecord['waits'] })).live).toBe(true);
   });
 
   it('copies the query columns off the record', () => {

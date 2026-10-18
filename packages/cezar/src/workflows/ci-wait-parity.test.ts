@@ -5,6 +5,12 @@ import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { manager, store, restart, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
+// hearsay-tools/cezarion#1233: CI waits live in the run's wait list; a parked one is an open wait
+// on a waiting run.
+const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'ci');
+const lastCiWaitOf = (id: string) => [...(store.getRun(id)?.lastWaits ?? [])].reverse().find(entry => entry.kind === 'ci');
+const parked = (id: string) => ciWaitOf(id)?.phase === 'open' && store.getRun(id)?.status === 'waiting';
+
 // The production controller, bundled tool, runner, store and scheduler remain real.
 // Only the external CI completion time is controlled; metadata uses the dry-run gh process.
 describe('CI tool registration and scheduled delivery across harnesses', { timeout: 30_000 }, () => {
@@ -18,28 +24,32 @@ describe('CI tool registration and scheduled delivery across harnesses', { timeo
     const watch = vi.spyOn(CiWatcherSupervisor.prototype, 'watch').mockReturnValue(observation);
     try {
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:ci-wait https://github.com/acme/repo/pull/12', runner });
-      await until(() => store.getRun(run.id)?.ciWait?.phase === 'parked');
-      const firstWait = store.getRun(run.id)!.ciWait!;
+      await until(() => parked(run.id));
+      const firstWait = ciWaitOf(run.id)!;
       if (mode === 'continued') {
         const state = (manager as unknown as { active: Map<string, { session: { end(): void } }> }).active.get(run.id)!;
         state.session.end();
         await until(() => !manager.isActive(run.id));
+        const boundaries = store.readEvents(run.id).filter(event => event.type === 'turn-end').length;
         expect(manager.continueRun(run.id, { text: 'mock:ci-wait https://github.com/acme/repo/pull/12' }).ok).toBe(true);
-        await until(() => store.getRun(run.id)?.ciWait?.phase === 'parked' && store.getRun(run.id)?.ciWait?.id !== firstWait.id);
+        await until(() => parked(run.id) && store.readEvents(run.id).filter(event => event.type === 'turn-end').length > boundaries);
+        // hearsay-tools/cezarion#1233: the wait outlives its session, and the continuation's
+        // registration for the same PR returns it.
+        expect(ciWaitOf(run.id)?.id).toBe(firstWait.id);
       } else if (mode === 'recovered') {
         await restart();
         expect(manager.isActive(run.id)).toBe(false);
-        expect(store.getRun(run.id)?.ciWait?.id).toBe(firstWait.id);
+        expect(ciWaitOf(run.id)?.id).toBe(firstWait.id);
       }
-      const wait = store.getRun(run.id)!.ciWait!;
-      expect(store.getRun(run.id)).toMatchObject({ status: 'running', activity: 'monitoring' });
+      const wait = ciWaitOf(run.id)!;
+      expect(store.getRun(run.id)).toMatchObject({ status: 'waiting', activity: undefined });
       expect(store.getRun(run.id)?.delegation).toBeUndefined();
-      expect(store.getRun(run.id)?.monitoringWakeAt).toBeUndefined();
+      expect(store.getRun(run.id)?.waits?.some(entry => entry.kind === 'timer')).toBeFalsy();
       settle({ outcome: 'passed', headSha: wait.headSha, observedAt: new Date().toISOString(),
         checks: [{ name: 'build', state: 'SUCCESS', link: '' }], totalChecks: 1, truncated: false });
-      await until(() => !!store.getRun(run.id)?.lastCiWait?.deliveredAt);
+      await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
       expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
-      expect(store.getRun(run.id)?.ciWait).toBeUndefined();
+      expect(ciWaitOf(run.id)).toBeUndefined();
       if (mode !== 'fresh') {
         const descriptors = provision.mock.results.filter(result => result.type === 'return').map(result => result.value.descriptor.name);
         expect(descriptors.length).toBeGreaterThanOrEqual(2);

@@ -75,7 +75,8 @@ describe('guarded automatic archive', () => {
     const fresh = store.archiveOnMergeSnapshot(id, repo)!;
     expect(store.archiveAfterMerge(fresh, observations(fresh), repo)).toBe(false);
   });
-  it.each([{ status: 'waiting' }, { activity: 'monitoring' }, { monitoringWakeAt: '2027-01-01T00:00:00.000Z' }, { hasPendingHumanAsk: true }, { hasPendingPermission: true }, { delegation: { role: 'invalid', reason: 'bad' } }])('defers live/uncertain evidence %j', overrides => {
+  it.each([{ status: 'waiting' }, { activity: 'monitoring' }, { waits: [{ id: '22222222-2222-4222-8222-222222222222', kind: 'timer', source: 'agent', via: 'cezar_wait',
+    registeredAt: '2026-12-31T23:55:00.000Z', deadline: '2027-01-01T00:00:00.000Z', phase: 'open', turnId: 'turn', seconds: 300 }] }, { hasPendingHumanAsk: true }, { hasPendingPermission: true }, { delegation: { role: 'invalid', reason: 'bad' } }])('defers live/uncertain evidence %j', overrides => {
     const { store, id } = setup(overrides as Partial<RunRecord>);
     expect(store.archiveOnMergeSnapshot(id, repo)).toBeUndefined();
   });

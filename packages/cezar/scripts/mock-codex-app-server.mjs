@@ -359,6 +359,13 @@ rl.on('line', async (line) => {
       emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
       return;
     }
+    if (turnText.includes('mock:cezar-tool')) {
+      const { toolPrompt } = await import('./mock-ci-tool.mjs');
+      const text = await toolPrompt('codex', ciWire, turnText);
+      emit({ method: 'item/completed', params: { item: { type: 'agentMessage', id: 'tool-result', text } } });
+      emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
+      return;
+    }
     if (turnText.includes('mock:ci-wait')) {
       const { ciPrompt } = await import('./mock-ci-tool.mjs');
       const text = await ciPrompt('codex', ciWire, turnText);

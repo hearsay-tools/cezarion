@@ -1765,6 +1765,33 @@ describe('the composer action row (#281)', () => {
     expect(archiveButton()).toBeNull()
     expect(composerActions().querySelector('[aria-label="Stop"]')).not.toBeNull()
   })
+
+  // hearsay-tools/cezarion#1233: a failed run holding wait results offers Stop to discard them. Stop
+  // takes the slot, and the header carries Archive on this tab instead (run-header.test.tsx).
+  it('a failed run holding wait results offers Stop in the slot, and Stop posts the cancel', async () => {
+    const sent = renderThread(run('failed', {
+      waits: [{
+        id: '00000000-0000-4000-8000-0000000000e2', kind: 'timer', source: 'agent', via: 'cezar_wait',
+        turnId: 'turn-1', seconds: 60, registeredAt: '2026-07-14T12:00:00.000Z',
+        deadline: '2026-07-14T12:01:00.000Z', resolvedAt: '2026-07-14T12:01:00.000Z', phase: 'resolved',
+      }],
+    }))
+    expect(archiveButton()).toBeNull()
+    expect(finishButton()).toBeNull()
+    const stop = composerActions().querySelector('[aria-label="Stop"]') as HTMLButtonElement
+    expect(stop).not.toBeNull()
+    expect(stop.disabled).toBe(false)
+    fireEvent.click(stop)
+    await waitFor(() =>
+      expect(sent.some((r) => r.method === 'POST' && r.path === '/api/v1/runs/r1/cancel')).toBe(true),
+    )
+  })
+
+  it('an ordinary failed run keeps Archive in the slot and offers no Stop', () => {
+    renderThread(run('failed'))
+    expect(archiveButton()?.textContent).toContain('Archive task')
+    expect(composerActions().querySelector('[aria-label="Stop"]')).toBeNull()
+  })
 })
 
 

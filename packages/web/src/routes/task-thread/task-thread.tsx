@@ -35,7 +35,7 @@ import { useContinueAction } from './follow-up-engine'
 import { findSubagent, subagentChildren } from './subagent-dock'
 import { SubagentSheet } from './subagent-sheet'
 import { AcceptCelebration, ReviewPanel } from './review-panel'
-import { offersComposerFinish, queuePosition, runActionFlags } from './run-actions'
+import { archiveInComposer, offersComposerFinish, queuePosition, runActionFlags } from './run-actions'
 import { ArchiveButton } from './archive-action'
 import { useFinishRun } from './use-finish-run'
 import { useStopAction } from './stop-action'
@@ -480,9 +480,9 @@ export function ThreadView({
                 : undefined
             }
             finishing={finishAction.isPending}
-            // Stop's own slot, once the engine has let go of the run. `archive` is exactly
-            // `!cancel`, so the composer is handed one control or the other and never two.
-            secondaryAction={runActionFlags(run).archive ? <ArchiveButton run={run} compactOnMobile /> : undefined}
+            // Stop's own slot, once Stop is not offered. A failed run holding wait results offers
+            // both, so the header carries its Archive and the composer is handed one control.
+            secondaryAction={archiveInComposer(run) ? <ArchiveButton run={run} compactOnMobile /> : undefined}
             stopOnEmpty={run.status === 'queued' || run.status === 'running' || (run.status === 'waiting' && attention.bucket === 'none' && !needsAnswer)}
             stopping={stopAction.stopping}
             retainDraftUntilSuccess
