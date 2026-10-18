@@ -808,10 +808,13 @@ Only github.com is currently accepted; the forge has no enterprise-host resolver
 registration resolves canonical repository, PR and head with a ten-second metadata
 budget, persists the intent before acknowledging, and returns immediately without
 waiting for checks. Invalid, unauthorized, conflicting or unpersisted requests create
-no durable wait. Identical canonical PR and effective timeout reuse the open wait
-without extending its deadline; a duplicate from the originating turn can still
-retrieve an early-settled receipt. After acknowledged delivery, an explicit call on a
-later turn is a new wait.
+no durable wait. A CI registration repeats an **open** CI wait for the same PR: the PR
+URLs are compared normalised (`identicalWait` in `workflows/waits.ts`), whatever either
+call's `timeout_seconds`, and the open wait is returned with its deadline unchanged.
+Concurrent calls for the same PR share one metadata lookup, and the lookup checks again
+for an open wait under another spelling of the URL. A wait that has resolved, been
+delivered or been cancelled matches nothing, so a later call for that PR opens a new
+wait. A timer repeats an open timer only with the same seconds and note in the same turn.
 
 Three aliases land in the same list, each recorded in the entry's `via`.
 `cezar_wait_for_ci({ pr, timeout_seconds? })` is deprecated and opens the same CI
@@ -941,8 +944,10 @@ This is cooperative same-user authorization, not isolation from unrestricted she
 Wait registration refusals name the blocking state (hearsay-tools/cezarion#713), with separate contract
 codes for manager disposal, capability revocation, missing/inactive/stopping runs,
 missing/replaced/closed sessions, cancellation/finish, stale session generation,
-pending/unanswered human questions, worker waits, stopped worker execution and
-parent finish. Registration checks again after metadata lookup, distinguishing an
+worker waits, stopped worker execution and parent finish. A pending or unanswered
+human question refuses nothing in phase 1 (hearsay-tools/cezarion#1233): the wait opens,
+and its result is delivered beside the question at a boundary. The contract still lists
+`human_ask_pending` and `human_ask_unanswered`, but registration never sends them. Registration checks again after metadata lookup, distinguishing an
 aborted registration from a changed turn. Only missing or revoked transport
 capabilities are `unauthorized`; an unknown registration failure is `unavailable`.
 Safe messages never forward request contents or raw provider errors.
