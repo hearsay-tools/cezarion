@@ -942,7 +942,22 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       engine().active.get(run.id)!.session.end();
       await until(() => !manager.isActive(run.id));
       rmSync(answers, { force: true });
-      expect(manager.continueRun(run.id, { text: toolCall('cezar_done', { summary: 'answered and shipped' }) }).ok).toBe(true);
+      // What a crash right after the answer settles the wait would leave: the committed row.
+      let committed: { answer?: string; delivered: boolean } | undefined;
+      const settle = store.commitHumanWaitsAnswered.bind(store);
+      vi.spyOn(store, 'commitHumanWaitsAnswered').mockImplementation((id, only) => {
+        const ids = settle(id, only);
+        if (!committed && ids.includes(wait!.id)) {
+          const row = readPersistedRuns(join(root, '.ai/cezar')).find(record => record.id === run.id);
+          committed = { answer: row?.continuationMessage?.text,
+            delivered: (row?.lastWaits ?? []).some((entry: Wait) => entry.id === wait!.id && entry.phase === 'delivered') };
+        }
+        return ids;
+      });
+      const answer = toolCall('cezar_done', { summary: 'answered and shipped' });
+      expect(manager.continueRun(run.id, { text: answer }).ok).toBe(true);
+      // The wait is never delivered in a row that lost the answer it was delivered with.
+      expect(committed).toEqual({ answer: answer.trim(), delivered: true });
       await until(() => existsSync(answers));
       expect(JSON.parse(JSON.parse(readFileSync(answers, 'utf8')).response.content[0].text.split('\n')[0])).toMatchObject({ ok: true, finishes: 'at_turn_end' });
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? '') && !manager.isActive(run.id));

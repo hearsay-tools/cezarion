@@ -651,7 +651,7 @@ shipped ones: re-checks on, budget 40, no autonomy.
 | | `cezar_done` accepted in the same turn | The agent, then the turn end | The run finishes; the wait is cancelled |
 | | Provider failure, clean close, or a crash and restart | The failure, close or recovery path | It is shown and the run parks `waiting`, Needs you; recovery resumes nothing |
 | | The step's authored `timeoutMs` passes | The runner's deadline kill | Cancelled into `lastWaits`; the run settles `failed` as before human waits (Q8). CI and timer waits still park it |
-| `waiting` on a shown human wait (Needs you) | A human message, Continue, or the card's answer | The user | Settled `delivered`; the answer starts the next turn. **The only default exit that ends the wait is a human action** (for a worker, its parent's `worker reply`) |
+| `waiting` on a shown human wait (Needs you) | A human message, Continue, or the card's answer | The user | Settled `delivered` only once the answer is saved; the answer starts the next turn. **The only default exit that ends the wait is a human action** (for a worker, its parent's `worker reply`) |
 | | 15 minutes idle | The idle timer (`IDLE_TIMEOUT_MS`) | The session closes; the run stays `waiting` with the wait, and the answer reopens it through the continuation |
 | | The step's authored `timeoutMs` passes | The runner's deadline kill | Cancelled into `lastWaits`; the run settles `failed` and later steps do not run (Q8). CI and timer waits still park it |
 | | A CI or timer wait resolves | The CI watcher or the wait timer | Its wake is delivered beside the question and the run re-parks Needs you; the human wait stays open |

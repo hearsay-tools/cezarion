@@ -6318,10 +6318,9 @@ export class RunManager {
     // bound UNATTENDED resumes.
     this.clearAutoResume(runId);
     // Only a human Continue is immediate; it restarts the automatic-wake budget too, and answers
-    // every human wait.
+    // every human wait once the answer itself is saved, below.
     if (!deferForCapacity) {
       this.withdrawWorkerWait(runId); this.resetParentCompletion(runId); this.resetWakeDelivery(runId); this.resetAutomaticWakes(runId);
-      this.settleHumanWaits(runId);
     }
 
     let continuationNumber = 1;
@@ -6360,6 +6359,8 @@ export class RunManager {
       }
     }
     else { this.store.updateRun(runId, acceptedPatch); this.store.flush(); }
+    // After the continuation checkpoint: a row that records the wait delivered also holds the answer.
+    if (!deferForCapacity) this.settleHumanWaits(runId);
     this.continuationGenerations.set(runId, Symbol());
     // Keep fresh viewable images even if persistence failed; recovery uses saved URLs.
     const images = contentBlocksOf(opts.images ?? []).filter((block) => block.type === 'image');
