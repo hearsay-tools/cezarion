@@ -301,11 +301,13 @@ describe('recordHandoffPeriodicAutosave', () => {
 // hearsay-tools/cezarion#1234: a session with cezar tools is taught the tools, not the lifecycle
 // markers; a session without them keeps today's prompt.
 describe('handoffInstructions', () => {
-  it('the tool variant teaches cezar_done and cezar_wait and no lifecycle marker', () => {
+  it('the tool variant teaches cezar_done, cezar_ask and cezar_wait and no lifecycle marker', () => {
     for (const followups of [false, true]) {
       const text = handoffInstructions({ tools: true, followups });
       expect(text).toContain('Lifecycle tools (cezar): End every turn with a cezar tool call that says what happens next. When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn.');
-      expect(text).toContain('call cezar_wait with kind "human"; pass questions to show them a card with up to four questions of 2–4 options each, then end your turn.');
+      expect(text).toContain('When you need the user — a decision only they can make, or missing input — call cezar_ask with up to four questions, then end your turn. Give a question 2–4 options to show them as choices, or leave its options out and the user types the answer.');
+      expect(text).toContain('call cezar_wait with kind "ci" for a pull request\'s checks or kind "timer" to re-check later');
+      expect(text).not.toContain('kind "human"');
       expect(text).toContain('Never call cezar_done while anything is unfinished or unverified.');
       for (const marker of ['CEZ:DONE', 'CEZ:MONITORING', 'CEZ:ASK']) expect(text).not.toContain(marker);
       expect(text).toContain('CEZ:PR=');

@@ -29,6 +29,13 @@ describe('parent-routed worker questions (#505)', () => {
     // The reply reaches the worker verbatim, so it asks for the lines a native answer parses.
     for (const question of request.questions) expect(text).toContain(`\n${question.header}: <option>`);
   });
+  // hearsay-tools/cezarion#1234: a question without options takes the parent's own words.
+  it('asks for the parent\'s own words on an open question', () => {
+    const open: AskRequest = { questions: [...request.questions, { header: 'Name', question: 'What should the table be called?' }] };
+    const text = formatQuestionText(W, randomUUID(), open);
+    expect(text).toContain('2. [Name] What should the table be called? (open question: answer in your own words)');
+    expect(text).toContain('\nDB: <option>\nName: <your answer>\n');
+  });
   it('treats only a reply to that question as its answer', () => {
     const message = questionMessage({ ...base, now: '2026-09-24T10:00:00.000Z' });
     const input = (kind: 'reply' | 'progress' | 'follow-up', requestId?: string): AgentInput => ({ id: randomUUID(), source: 'agent', parentRunId: P,
