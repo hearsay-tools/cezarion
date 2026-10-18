@@ -851,12 +851,15 @@ scheduler admission (a pool member is admitted immediately) and the session's na
 `sendAgentMessage`; the provider acknowledgement checkpoints delivery and moves the
 waits to `lastWaits` as delivered. Settled results retry admission and refused
 delivery once per second without human input; cancellation, terminal state and
-disposal stop retries. A result that lands mid-turn waits for the boundary. An admitted
-automatic turn whose batch carries a timer result spends one wake of the automatic-wake
-budget at its delivery checkpoint, however many timers it carries; a CI result spends
-none, and a human message resets the budget. A timer that comes due with the budget
-spent is cancelled with a cap note and wakes nothing; a parked run left with no wait
-becomes a plain park that reads as Needs you and gives its slot back.
+disposal stop retries. A result that lands mid-turn waits for the boundary. An automatic
+batch that carries a timer result reserves one wake of the automatic-wake budget when it
+is submitted, however many timers it carries; a refused submission or a rejected
+acknowledgement gives it back, and the acknowledgement keeps it. A CI result spends none,
+and a human message resets the budget. The count, reservations included, is checked when
+a timer comes due and before a batch with timer results is sent: at the budget, those
+timers are cancelled with a cap note and wake nothing, and CI results beside them are
+still delivered. A parked run left with no wait becomes a plain park that reads as Needs
+you and gives its slot back.
 
 Human input never cancels a wait. A human message, `resumeParkedRun`, a question and
 a permission request leave every open wait, whatever its `via`, and its deadline as
@@ -1022,7 +1025,10 @@ timer, at `maxParallel: 1` and wakes without queueing behind the held slot. U9 l
 recoverable after a provider failure and after a clean close with each kind open, and
 the next wake delivers. U10 resolves two timers before one boundary with 39 wakes spent:
 one turn carries both and spends one wake, and a third timer due at the budget is
-cancelled with the cap note and wakes nothing. U11 opens a monitoring-line timer, parks
+cancelled with the cap note and wakes nothing. A second U10 case holds the provider
+acknowledgement of a timer batch sent at 39: a timer that comes due meanwhile is
+cancelled, the held batch keeps the fortieth wake, and a CI result still wakes the agent
+uncharged. U11 opens a monitoring-line timer, parks
 the parent on a worker, fires the timer, and checks that the timer kept its deadline, was
 held while the parent read **waiting on 1 worker**, and was delivered after the worker
 wake. Scenario cases that need one wire live in

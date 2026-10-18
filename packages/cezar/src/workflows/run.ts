@@ -469,7 +469,9 @@ interface ActiveRun {
   /** Native grants belong only to this live session generation. */
   pendingPermissions?: Set<string>;
   agentInputError?: string;
-  agentInputFlight?: { session: AgentSession; inputIds: readonly string[]; settled?: Promise<void> };
+  agentInputFlight?: { session: AgentSession; inputIds: readonly string[]; settled?: Promise<void>;
+    /** This batch carries timer results and holds one unit of the automatic-wake budget. */
+    wakeReserved?: boolean };
   /** The current session's declared input delivery (#505). */
   inputDelivery?: InputDelivery;
   /** Accepted by this session's harness, not yet reported read (observable backends only).
@@ -2083,13 +2085,9 @@ export class RunManager {
     const latest = this.store.getRun(runId)?.waits?.find(wait => wait.id === waitId);
     if (!latest || latest.phase !== 'open') return;
     const state = this.active.get(runId);
+    // The count includes a timer batch still awaiting its acknowledgement.
     if (latest.kind === 'timer' && (state?.monitoringWakeups ?? 0) >= MAX_AUTO_CONTINUES) {
-      // A timer due once the automatic-wake budget is spent wakes nothing: it is cancelled, and the
-      // run keeps whatever else it waits on (hearsay-tools/cezarion#1233).
-      this.store.commitWaitCancellation(runId, [latest.id]);
-      this.disarmWait(latest.id);
-      this.store.appendEvent(runId, { type: 'note',
-        message: `automatic ${isMonitoringTimer(latest) ? 'monitoring' : 'timer'} wake-up cap reached (${MAX_AUTO_CONTINUES}); timer ${latest.id} cancelled` });
+      this.cancelTimersAtCap(runId, [latest]);
       if (state) this.reparkWithoutWaits(runId, state);
       return;
     }
@@ -2101,6 +2099,19 @@ export class RunManager {
     this.store.commitWait(runId, settled, input);
     try { this.queueWaitWake(runId); }
     catch { this.retryWaitAdmission(runId); }
+  }
+
+  /** A timer due, or still owed, once the automatic-wake budget is spent wakes nothing: it is
+   *  cancelled with the cap note, and the run keeps whatever else it waits on
+   *  (hearsay-tools/cezarion#1233). */
+  private cancelTimersAtCap(runId: string, timers: readonly Wait[]): void {
+    if (!timers.length) return;
+    this.store.commitWaitCancellation(runId, timers.map(wait => wait.id));
+    for (const wait of timers) {
+      this.disarmWait(wait.id);
+      this.store.appendEvent(runId, { type: 'note',
+        message: `automatic ${isMonitoringTimer(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${MAX_AUTO_CONTINUES}); timer ${wait.id} cancelled` });
+    }
   }
 
   /** A parked run whose last wait was cancelled without a wake becomes a plain park: it needs the
@@ -5305,6 +5316,16 @@ export class RunManager {
     const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? []);
     if (footer) content = [...content, { type: 'text', text: footer }];
     const flight: NonNullable<ActiveRun['agentInputFlight']> = { session, inputIds };
+    // A batch with timer results is an automatic wake: it reserves one unit of the budget now, so a
+    // timer that comes due before this acknowledgement counts it, and gives it back if the batch is
+    // refused or its acknowledgement rejects (hearsay-tools/cezarion#1233).
+    const timerResults = resolvedWaits(this.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'timer' && inputIds.includes(wait.id));
+    if (timerResults.length) { state.monitoringWakeups = (state.monitoringWakeups ?? 0) + 1; flight.wakeReserved = true; }
+    const refund = (): void => {
+      if (!flight.wakeReserved) return;
+      flight.wakeReserved = false;
+      state.monitoringWakeups = Math.max(0, (state.monitoringWakeups ?? 0) - 1);
+    };
     state.agentInputFlight = flight;
     const current = (): boolean => !this.disposed && this.active.get(runId) === state && state.session === session &&
       state.agentInputFlight === flight && !state.cancelled && !state.finishRequested && !this.workerExecutionStopped(runId) &&
@@ -5328,8 +5349,8 @@ export class RunManager {
       acknowledgement = state.pendingHumanAsk ? (session.sendMessage(content) ? Promise.resolve() : false)
         : session.sendAgentMessage(content, inputIds);
     }
-    catch (error) { fail(error, false); state.agentInputFlight = undefined; return false; }
-    if (!acknowledgement) { state.agentInputFlight = undefined; return false; }
+    catch (error) { refund(); fail(error, false); state.agentInputFlight = undefined; return false; }
+    if (!acknowledgement) { refund(); state.agentInputFlight = undefined; return false; }
     // Attach rejection handling before any persistence/capacity work can throw.
     flight.settled = acknowledgement.then(() => {
       // A positive command ACK can precede a provider-close frame in the same
@@ -5348,11 +5369,10 @@ export class RunManager {
           if (resolvedIds.length) {
             this.store.commitWaitDelivery(runId, resolvedIds);
             // A timer expiry is a self-generated wake: one admitted turn that carries timer results
-            // spends one wake of the budget, however many it carries. CI wakes are external events
+            // spends the one unit it reserved, however many it carries. CI wakes are external events
             // and do not count.
             const timers = batch.filter(wait => wait.kind === 'timer');
-            if (timers.length) {
-              state.monitoringWakeups = (state.monitoringWakeups ?? 0) + 1;
+            if (timers.length && flight.wakeReserved) {
               this.store.appendEvent(runId, { type: 'note', message: `automatic ${timers.some(isMonitoringTimer) ? 'monitoring' : 'timer'} wake-up (${state.monitoringWakeups}/${MAX_AUTO_CONTINUES})` });
             }
             this.waitWakeAdmitted.delete(runId);
@@ -5388,7 +5408,7 @@ export class RunManager {
           this.reconcileWorkerWaits();
         }
       } catch (error) { fail(error, true); }
-    }, error => fail(error, false)).then(() => {
+    }, error => { refund(); fail(error, false); }).then(() => {
       if (state.agentInputFlight !== flight) return;
       const authorized = current();
       state.agentInputFlight = undefined;
@@ -5420,7 +5440,7 @@ export class RunManager {
   /** False leaves the durable entry untouched. No human-answer/slash-expansion fallback. */
   private flushAgentInputs(runId: string): boolean {
     const state = this.active.get(runId);
-    const run = this.store.getRun(runId);
+    let run = this.store.getRun(runId);
     if (!state?.session?.open || state.cancelled || state.agentInputError || state.agentInputFlight || !run ||
       !['queued', 'running', 'waiting'].includes(run.status) || this.executionBlockedByRootFinish(run) ||
       (run.delegation?.role === 'worker' && run.delegation.destroy) || this.workerWaiting.has(runId) ||
@@ -5430,6 +5450,17 @@ export class RunManager {
     // pending mid-turn (a native ask) takes nothing until its turn ends.
     const askPending = state.pendingHumanAsk || this.hasUnansweredHumanAsk(runId);
     if (askPending && state.atTurnBoundary !== state.session) return false;
+    // A timer result still owed when the budget is spent is cancelled before its batch is sent; the
+    // CI results beside it are delivered.
+    if ((state.monitoringWakeups ?? 0) >= MAX_AUTO_CONTINUES && this.waitWakeAdmitted.has(runId) && state.atTurnBoundary === state.session) {
+      const owedTimers = resolvedWaits(run).filter(wait => wait.kind === 'timer');
+      if (owedTimers.length) {
+        this.cancelTimersAtCap(runId, owedTimers);
+        run = this.store.getRun(runId)!;
+        // Nothing left to wake for: the admission ends here, and a parked run becomes a plain park.
+        if (!resolvedWaits(run).length) { this.waitWakeAdmitted.delete(runId); this.reparkWithoutWaits(runId, state); }
+      }
+    }
     // The opening prompt already carries its own input; later input steers the
     // opening turn instead of waiting for it to end (#505).
     const resolved = resolvedWaits(run);
@@ -5520,7 +5551,9 @@ export class RunManager {
     const delivered = this.deliverMessage(runId, content, true);
     if (delivered) {
       const state = this.active.get(runId);
-      if (state) { state.monitoringWakeups = 0; state.monitoringCapNoted = undefined; }
+      // A human message restarts the budget; a timer batch still awaiting its acknowledgement keeps
+      // the unit it reserved.
+      if (state) { state.monitoringWakeups = state.agentInputFlight?.wakeReserved ? 1 : 0; state.monitoringCapNoted = undefined; }
       this.resetParentCompletion(runId);
     }
     return delivered;

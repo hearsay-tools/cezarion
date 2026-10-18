@@ -474,10 +474,14 @@ builder" unless a bullet says otherwise.
 - **Recovery.** A parked run with waits stays parked and its wake folds in queued messages.
   A run with a pending question, or one that was not `waiting` and has queued messages,
   falls through to ordinary recovery so they are handled; its waits are re-armed either way.
-- **The automatic-wake budget counts admitted turns.** `monitoringWakeups` grows by one per
-  admitted automatic turn whose batch carries a timer result, at that batch's delivery
-  checkpoint: never per resolution, never per retry, never for a human-opened turn, and a human
-  message resets it as before. A timer that comes due with the budget spent
-  (`MAX_AUTO_CONTINUES`, 40) is cancelled into `lastWaits` with a cap note and wakes nothing;
-  other waits are untouched. A parked run left with nothing open or resolved becomes a plain
-  park: it reads Needs you, leaves the monitoring pool and arms the idle timer.
+- **The automatic-wake budget counts admitted turns.** An automatic batch that carries a timer
+  result reserves one unit of `monitoringWakeups` when it is submitted, however many timers it
+  carries; a refused submission or a rejected acknowledgement gives the unit back, and the
+  acknowledgement keeps it. Nothing is charged per resolution, per retry or for a human-opened
+  turn, and a human message resets the count as before (a batch still awaiting its
+  acknowledgement keeps its unit). The count, reservations included, is checked when a timer
+  comes due and again before a batch with timer results is sent: at `MAX_AUTO_CONTINUES` (40)
+  those timers are cancelled into `lastWaits` with a cap note and wake nothing, while CI results
+  in the same batch are still delivered and other waits are untouched. A parked run left with
+  nothing open or resolved becomes a plain park: it reads Needs you, leaves the monitoring pool
+  and arms the idle timer.

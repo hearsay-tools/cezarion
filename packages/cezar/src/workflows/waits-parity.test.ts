@@ -250,6 +250,51 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(engine().monitoring.has(run.id)).toBe(false);
     });
 
+    it(`${runner} U10 a timer due while a charged batch awaits its acknowledgement is cancelled at the cap, and CI still wakes`, async () => {
+      const external = github();
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
+      await until(() => store.getRun(run.id)?.status === 'waiting');
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const open = async (request: Parameters<typeof tools.registerWait>[0]) => {
+        const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
+        if (!('wait' in registered)) throw Error('registration refused');
+        return registered.wait;
+      };
+      const first = await open({ kind: 'timer', seconds: 60, note: 'u10 first' });
+      const second = await open({ kind: 'timer', seconds: 61, note: 'u10 second' });
+      const ci = await open({ kind: 'ci', pr, timeout_seconds: 600 });
+      const state = engine().active.get(run.id)!;
+      state.monitoringWakeups = 39;
+      // The first wake reaches the native wire; its provider acknowledgement is held.
+      let release!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      const send = state.session.sendAgentMessage.bind(state.session);
+      vi.spyOn(state.session, 'sendAgentMessage').mockImplementation((content, ids) => {
+        const ack = send(content, ids);
+        return ack && ack.then(() => gate);
+      });
+      fireTimer(first.id);
+      await until(() => prompted(runner, timerText(first, 'u10 first')).length > 0);
+      expect(settled(run.id, first.id)).toBeUndefined();
+      // The pending batch already holds the last wake of the budget.
+      fireTimer(second.id);
+      await until(() => settled(run.id, second.id)?.phase === 'cancelled');
+      expect(inputsFor(run.id, second.id)).toEqual([]);
+      release();
+      await until(() => settled(run.id, first.id)?.phase === 'delivered');
+      expect(state.monitoringWakeups).toBe(40);
+      const notes = () => store.readEvents(run.id).filter(event => event.type === 'note').map(event => String(event.message));
+      expect(notes().filter(note => note.startsWith('automatic timer wake-up ('))).toEqual(['automatic timer wake-up (40/40)']);
+      expect(notes()).toContain(`automatic timer wake-up cap reached (40); timer ${second.id} cancelled`);
+      expect(prompted(runner, `Timer ${second.id} fired`)).toEqual([]);
+      // A CI result is an external event: it still wakes the agent at the cap and is not charged.
+      await until(() => parkedOn(run.id, waitOfKind(run.id, 'ci')));
+      external.settle();
+      await until(() => settled(run.id, ci.id)?.phase === 'delivered' && prompted(runner, `CI wait observation ${ci.id}`).length > 0);
+      expect(state.monitoringWakeups).toBe(40);
+    });
+
     it(`${runner} U11 an alias timer survives a later worker park with its deadline, is held while the workers outrank it, and is delivered after the worker wake`, async () => {
       nativeWire(runner);
       // Workers run on the Claude wire whatever the parent's runner is.

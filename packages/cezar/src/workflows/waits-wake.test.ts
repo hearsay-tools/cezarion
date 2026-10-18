@@ -189,6 +189,53 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     expect(semaphore.busy()).toBe(0);
   });
 
+  it('claude a timer result still owed when the budget is spent is cancelled before its batch is sent; the CI result beside it is delivered', async () => {
+    const external = github();
+    nativeWire('claude');
+    const release = join(root, 'turn-release');
+    process.env.CEZ_MOCK_RELEASE_FILE = release;
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios['hold-gated']!, runner: 'claude' });
+    await until(() => turnStarted(run.id));
+    const timer = await openWait(run.id, { kind: 'timer', seconds: 60, note: 'owed' });
+    const ci = await openWait(run.id, { kind: 'ci', pr, timeout_seconds: 600 });
+    fireTimer(timer.id); external.settle();
+    await until(() => waitById(run.id, timer.id)?.phase === 'resolved' && waitById(run.id, ci.id)?.phase === 'resolved');
+    // The budget runs out between the timer's resolution and the boundary that would send it.
+    engine().active.get(run.id)!.monitoringWakeups = 40;
+    writeFileSync(release, '');
+    await until(() => settled(run.id, ci.id)?.phase === 'delivered');
+    expect(settled(run.id, timer.id)?.phase).toBe('cancelled');
+    expect(notes(run.id, 'cap reached').map(event => event.message)).toEqual([`automatic timer wake-up cap reached (40); timer ${timer.id} cancelled`]);
+    const wake = prompted('claude', `CI wait observation ${ci.id}`);
+    expect(wake).toHaveLength(1);
+    expect(wake[0]).not.toContain(`Timer ${timer.id} fired`);
+    expect(engine().active.get(run.id)?.monitoringWakeups).toBe(40);
+    expect(notes(run.id, 'automatic timer wake-up (')).toEqual([]);
+  });
+
+  it('claude a refused timer batch gives its budget reservation back and is retried', async () => {
+    nativeWire('claude');
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios.baseline!, runner: 'claude' });
+    await until(() => store.getRun(run.id)?.status === 'waiting');
+    const timer = await openWait(run.id, { kind: 'timer', seconds: 60, note: 'refused' });
+    const state = engine().active.get(run.id)!;
+    state.monitoringWakeups = 39;
+    const send = state.session!.sendAgentMessage.bind(state.session);
+    const reserved: (number | undefined)[] = [];
+    let refusals = 0;
+    vi.spyOn(state.session!, 'sendAgentMessage').mockImplementation((content, ids) => {
+      reserved.push(state.monitoringWakeups);
+      if (refusals++ === 0) return false;
+      return send(content, ids);
+    });
+    fireTimer(timer.id);
+    await until(() => settled(run.id, timer.id)?.phase === 'delivered');
+    // Reserved for each attempt, given back after the refusal, kept after the acknowledgement.
+    expect(reserved).toEqual([40, 40]);
+    expect(state.monitoringWakeups).toBe(40);
+    expect(notes(run.id, 'automatic timer wake-up (').map(event => event.message)).toEqual(['automatic timer wake-up (40/40)']);
+  });
+
   it('claude every delivered turn ends with the open-waits footer, and none when nothing is open', async () => {
     github();
     nativeWire('claude');
