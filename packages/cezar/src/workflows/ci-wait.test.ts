@@ -9,7 +9,6 @@ import type { AgentSession } from '../core/agent-runner.ts';
 import { WAIT_LIMIT, type CiWait, type CiWaitResult, type Wait } from '@open-mercato/cezar-contract';
 import { controlledWire, manager, parent, root, restart, semaphore, store, until, worker, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
-import { ciNativeMessages } from './ci-wait-interruption.testkit.ts';
 import { ciWatchRequest, waitResultText } from './waits.ts';
 
 // Tool transport is exercised by adapter parity; lifecycle tests control only external resources.
@@ -23,10 +22,10 @@ const identity = { prUrl: pr, repository: 'acme/repo', prNumber: 12, headSha: 'a
 const success = (): CiWaitResult => ({ outcome: 'passed', headSha: identity.headSha, observedAt: new Date().toISOString(), checks: [], totalChecks: 1, truncated: true });
 
 // hearsay-tools/cezarion#1233: CI waits live in the run's wait list; a parked one is an open wait
-// on a monitoring park.
+// on a `waiting` run.
 const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'ci');
 const lastCiWaitOf = (id: string) => [...(store.getRun(id)?.lastWaits ?? [])].reverse().find(entry => entry.kind === 'ci');
-const parked = (id: string) => ciWaitOf(id)?.phase === 'open' && store.getRun(id)?.activity === 'monitoring';
+const parked = (id: string) => ciWaitOf(id)?.phase === 'open' && store.getRun(id)?.status === 'waiting';
 
 /** Control only external GitHub; RunManager, store, scheduler and runner wire stay real. */
 function github() {
@@ -68,9 +67,10 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     expect(store.getRun(run.id)?.activity).not.toBe('monitoring');
     writeFileSync(gate, 'end');
     await until(() => parked(run.id));
-    expect(store.getRun(run.id)).toMatchObject({ status: 'running', activity: 'monitoring' });
+    expect(store.getRun(run.id)?.activity).toBeUndefined();
     expect(store.getRun(run.id)?.waits?.some(entry => entry.kind === 'timer')).toBeFalsy();
-    expect(semaphore.busy()).toBe(0);
+    expect(semaphore.busy()).toBe(0); // its slot is a monitoring slot
+    expect((manager as unknown as { monitoring: Set<string> }).monitoring.has(run.id)).toBe(true);
     expect(external.aborted()).toBe(false);
   });
 
@@ -114,19 +114,24 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     external.settle(success());
     await until(() => send.mock.calls.length > 0);
     expect.soft(engine.monitoring.has(run.id)).toBe(true);
-    expect.soft(store.getRun(run.id)?.activity).toBe('monitoring');
+    expect.soft(store.getRun(run.id)?.status).toBe('waiting');
     expect(store.getRun(run.id)?.agentInputs?.find(input => input.id === receipt.id)?.deliveredAt).toBeUndefined();
-    expect.soft(semaphore.busy()).toBe(1); // Admission reserves capacity even while parked.
+    expect.soft(semaphore.busy()).toBe(0); // The park's monitoring slot carries the wake.
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
     expect(ciWaitOf(run.id)).toBeUndefined();
     expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === receipt.id)).toHaveLength(1);
     expect(store.readEvents(run.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
   });
 
+  // A park beside a pending question holds no slot, so its wake waits for admission
+  // (hearsay-tools/cezarion#1233); a CI or timer park is admitted at once instead.
   it('requeues a settled wake dequeued after losing its turn boundary', async () => {
     const external = github();
-    const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
+    const gate = join(root, 'ask-boundary'); controlledWire({ firstResultGate: gate });
+    const run = await parent('mock:ask');
     await register(run.id);
+    writeFileSync(gate, 'end');
+    await until(() => store.getRun(run.id)?.status === 'waiting' && store.readEvents(run.id).some(event => event.type === 'ask.requested'));
     const engine = manager as unknown as {
       active: Map<string, { session: AgentSession; atTurnBoundary?: AgentSession }>;
       queue: string[]; waitWakeQueuedAt: Map<string, number>; pump(): Promise<void>;
@@ -164,16 +169,17 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
       // Native activity and turn-end happen before the held transport ACK.
       await until(() => store.readEvents(run.id).filter(event => event.type === 'turn-end').length === 2);
       expect(engine.monitoring.has(run.id)).toBe(true);
-      expect(store.getRun(run.id)?.activity).toBe('monitoring');
-      expect(semaphore.busy()).toBe(1);
+      expect(store.getRun(run.id)?.status).toBe('waiting');
+      expect(semaphore.busy()).toBe(0);
       expect(ciWaitOf(run.id)?.phase).toBe('resolved');
       acknowledge();
       await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
-      expect(engine.monitoring.has(run.id)).toBe(false);
+      // Nothing left open: the boundary parks for the user and gives the pool slot back.
+      await until(() => !engine.monitoring.has(run.id) && store.getRun(run.id)?.status === 'waiting');
     } finally { acknowledge(); }
   });
 
-  it.each(['withdraw', 'cancel'] as const)('stops refused CI retries on %s', async action => {
+  it('stops refused CI retries on cancel', async () => {
     const external = github();
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     const wait = await register(run.id);
@@ -181,33 +187,30 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const send = vi.spyOn(engine.active.get(run.id)!.session, 'sendAgentMessage').mockReturnValue(false);
     external.settle(success());
     await until(() => send.mock.calls.length >= 2);
-    if (action === 'withdraw') expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:hold' }])).toBe(true);
-    else expect(manager.cancel(run.id)).toBe(true);
+    expect(manager.cancel(run.id)).toBe(true);
     expect(engine.wakeRetries.has(run.id)).toBe(false);
     expect(ciWaitOf(run.id)).toBeUndefined();
     expect(store.getRun(run.id)?.agentInputs?.some(input => input.id === wait.id)).toBe(false);
   });
 
-  it('does not count an admitted monitor as another charged wake at the exemption cap', async () => {
+  // hearsay-tools/cezarion#1233: a park beyond `maxMonitoringSessions` keeps its regular slot, so
+  // both wake at once; neither waits in the line.
+  it('wakes every CI park at once when the pool is smaller than the parks', async () => {
     const external = github();
     vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(1);
     const first = await parent(); await until(() => store.getRun(first.id)?.status === 'waiting');
     await register(first.id);
     const second = await parent(); await until(() => store.getRun(second.id)?.status === 'waiting');
     await register(second.id);
-    const engine = manager as unknown as { active: Map<string, { session: AgentSession }> };
-    const firstSend = vi.spyOn(engine.active.get(first.id)!.session, 'sendAgentMessage').mockReturnValue(false);
-    const secondSend = vi.spyOn(engine.active.get(second.id)!.session, 'sendAgentMessage');
+    expect(semaphore.busy()).toBe(1); // one pool slot, one regular slot
+    const queue = vi.spyOn((manager as unknown as { queue: string[] }).queue, 'push');
     external.settle(success());
-    await until(() => firstSend.mock.calls.length >= 2);
-    expect(secondSend).not.toHaveBeenCalled();
-    expect(semaphore.busy()).toBe(1);
-    firstSend.mockRestore();
-    await until(() => !!lastCiWaitOf(first.id)?.deliveredAt);
-    await until(() => !!lastCiWaitOf(second.id)?.deliveredAt);
+    await until(() => !!lastCiWaitOf(first.id)?.deliveredAt && !!lastCiWaitOf(second.id)?.deliveredAt);
+    expect(queue.mock.calls.flat()).not.toContain(first.id);
+    expect(queue.mock.calls.flat()).not.toContain(second.id);
   });
 
-  it.each(RUNNER_IDS)('%s charges native activity before CI admission', async runner => {
+  it.each(RUNNER_IDS)('%s resumes on native activity before CI admission', async runner => {
     github();
     process.env.CEZ_DRY_RUN = '0';
     const adapter = HARNESS_ADAPTERS[runner];
@@ -217,10 +220,13 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     await register(run.id);
     const engine = manager as unknown as { active: Map<string, { session: AgentSession }> };
     // Resume the backend itself, bypassing the manager's human-input path.
-    // Native frames must charge work even when no CI result has settled.
+    // Native frames resume the run; it works in the monitoring slot its park kept
+    // (hearsay-tools/cezarion#1233), so no regular slot is charged.
     expect(engine.active.get(run.id)!.session.sendMessage([{ type: 'text', text: adapter.scenarios.hold! }])).toBe(true);
     await until(() => store.readEvents(run.id).filter(event => event.type === 'turn.started').length >= 2);
-    expect(semaphore.busy()).toBe(1);
+    expect(store.getRun(run.id)?.status).toBe('running');
+    expect(semaphore.busy()).toBe(0);
+    expect(ciWaitOf(run.id)?.phase).toBe('open');
   });
 
   it('deduplicates matching registrations without extending the deadline', async () => {
@@ -232,131 +238,6 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     writeFileSync(gate, 'end');
   });
 
-  it('withdraws on human interruption and ignores late watcher results', async () => {
-    const external = github();
-    const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
-    const receipt = await register(run.id);
-    expect(manager.sendMessage(run.id, [{ type: 'text', text: 'Please continue with my change' }])).toBe(true);
-    expect(ciWaitOf(run.id)).toBeUndefined();
-    expect(lastCiWaitOf(run.id)?.phase).toBe('cancelled');
-    expect(external.aborted()).toBe(true);
-    external.settle(success());
-    await until(() => store.getRun(run.id)?.status === 'waiting');
-    expect(store.getRun(run.id)?.agentInputs?.some(input => input.id === receipt.id)).not.toBe(true);
-  });
-
-  const interruptionCases = RUNNER_IDS.flatMap(runner =>
-    (['fresh', 'continued', 'recovered', 'refused'] as const).map(mode => ({ runner, mode })));
-  it.each(interruptionCases)('$runner R69 $mode human interruption delivers the withdrawn CI status on its native wire', async ({ runner, mode }) => {
-    const external = github();
-    const adapter = HARNESS_ADAPTERS[runner];
-    process.env.CEZ_DRY_RUN = '0';
-    process.env[adapter.binEnv] = adapter.mockBin;
-    process.env.CEZ_MOCK_ARGS_FILE = join(root, 'args');
-    process.env.CEZ_MOCK_STDIN_FILE = join(root, 'stdin');
-    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: adapter.scenarios.hold!, runner });
-    await until(() => store.getRun(run.id)?.status === 'waiting');
-    if (mode === 'continued') {
-      expect(manager.finish(run.id)).toBe(true);
-      await until(() => !manager.isActive(run.id));
-      expect(manager.continueRun(run.id, { text: adapter.scenarios.hold! }).ok).toBe(true);
-      await until(() => store.getRun(run.id)?.status === 'waiting' && manager.isActive(run.id));
-    }
-    const wait = await register(run.id);
-    await until(() => parked(run.id));
-    const text = `${adapter.scenarios.hold!}\nKeep monitoring CI`;
-    if (mode === 'recovered') {
-      await restart();
-      expect(manager.isActive(run.id)).toBe(false);
-      expect(manager.continueRun(run.id, { text }).ok).toBe(true);
-    } else {
-      if (mode === 'refused') {
-        const session = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(run.id)!.session;
-        const refusal = vi.spyOn(session, 'sendMessage').mockReturnValueOnce(false);
-        expect(manager.sendMessage(run.id, [{ type: 'text', text }])).toBe(false);
-        expect(lastCiWaitOf(run.id)?.phase).toBe('cancelled');
-        refusal.mockRestore();
-      }
-      expect(manager.sendMessage(run.id, [{ type: 'text', text }])).toBe(true);
-    }
-    await until(() => ciNativeMessages(runner, root).some(prompt => prompt.includes(text)));
-    const delivered = ciNativeMessages(runner, root).filter(prompt => prompt.includes(text)).at(-1)!;
-    expect(delivered).toContain(text);
-    expect(delivered).toContain('is no longer registered');
-    expect(delivered).toContain(wait.id);
-    expect(delivered).toContain(pr);
-    expect(delivered).toContain(identity.headSha);
-    expect(delivered).toContain('cezar_wait_for_ci');
-    expect(ciWaitOf(run.id)).toBeUndefined();
-    expect(external.aborted()).toBe(true);
-    const human = store.readEvents(run.id).filter(event => event.type === 'user-message');
-    expect(human.some(event => event.text === text)).toBe(true);
-    expect(human.every(event => !String(event.text).includes('is no longer registered'))).toBe(true);
-  });
-
-  it.each(RUNNER_IDS)('%s R70 ordinary monitoring wakes carry withdrawn CI status without registering a wait', async runner => {
-    github();
-    const adapter = HARNESS_ADAPTERS[runner];
-    process.env.CEZ_DRY_RUN = '0';
-    process.env[adapter.binEnv] = adapter.mockBin;
-    process.env.CEZ_MOCK_ARGS_FILE = join(root, 'args');
-    process.env.CEZ_MOCK_STDIN_FILE = join(root, 'stdin');
-    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: adapter.scenarios['split-text']!, runner });
-    await until(() => store.getRun(run.id)?.activity === 'monitoring');
-    const wait = await register(run.id);
-    // Unique text parts on the follow-up: OpenCode's split-text mock reuses its opening part ID.
-    const followup = 'mock:turn-messages:' + Buffer.from(JSON.stringify(['Still waiting for CI.\nCEZ:MONITORING'])).toString('base64');
-    expect(manager.sendMessage(run.id, [{ type: 'text', text: followup }])).toBe(true);
-    // The monitoring line opens a timer wait (hearsay-tools/cezarion#1233); fire it now.
-    const timers = (manager as unknown as { waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }> }).waitTimers;
-    const timerOf = () => store.getRun(run.id)?.waits?.find(entry => entry.kind === 'timer' && entry.phase === 'open');
-    await until(() => !!timerOf() && timers.has(timerOf()!.id));
-    const before = ciNativeMessages(runner, root).length;
-    timers.get(timerOf()!.id)!.timer._onTimeout();
-    await until(() => ciNativeMessages(runner, root).length > before);
-    const prompt = ciNativeMessages(runner, root).at(-1)!;
-    expect(prompt).toContain(wait.id);
-    expect(prompt).toContain('is no longer registered');
-    expect(prompt).toContain('cezar_wait_for_ci');
-    expect(ciWaitOf(run.id)).toBeUndefined();
-    expect(store.readEvents(run.id).filter(event => event.type === 'user-message')).toHaveLength(1);
-  });
-
-  const queuedCases = RUNNER_IDS.flatMap(runner =>
-    (['queued', 'recovered'] as const).map(mode => ({ runner, mode })));
-  it.each(queuedCases)('$runner R71 $mode custom workflow opening carries withdrawal independently of task templating', async ({ runner, mode }) => {
-    github();
-    const adapter = HARNESS_ADAPTERS[runner];
-    process.env.CEZ_DRY_RUN = '0';
-    process.env[adapter.binEnv] = adapter.mockBin;
-    process.env.CEZ_MOCK_ARGS_FILE = join(root, 'args');
-    process.env.CEZ_MOCK_STDIN_FILE = join(root, 'stdin');
-    const release = semaphore.register({ busySlots: () => 1, pump() {}, oldestQueuedAt: () => null });
-    try {
-      const task = 'Original user task';
-      const run = manager.startRun({ name: 'custom-ci', source: 'built-in', steps: [
-        { id: 'task', prompt: adapter.scenarios.hold! },
-      ] }, { task, runner });
-      expect(store.getRun(run.id)?.status).toBe('queued');
-      // Durable wait history recovered before this queued workflow could open a session.
-      const wait: CiWait = { ...identity, id: randomUUID(), generation: 'previous-session', turnId: randomUUID(),
-        timeoutSeconds: 30, registeredAt: new Date().toISOString(), deadline: new Date(Date.now() + 30_000).toISOString(), phase: 'parked' };
-      store.commitCiWait(run.id, wait);
-      expect(manager.enqueueMessage(run.id, [{ type: 'text', text: 'Keep monitoring CI' }])).not.toBeNull();
-      if (mode === 'recovered') await restart();
-      release();
-      await semaphore.release();
-      await until(() => ciNativeMessages(runner, root).length > 0);
-      const prompt = ciNativeMessages(runner, root)[0]!;
-      expect(prompt).toContain(adapter.scenarios.hold!);
-      expect(prompt).toContain(wait.id);
-      expect(prompt).toContain('is no longer registered');
-      expect(prompt).toContain('cezar_wait_for_ci');
-      expect(store.getRun(run.id)?.task).toBe(task);
-      expect(store.getRun(run.id)?.queuedMessages?.[0]?.text).toBe('Keep monitoring CI');
-      expect(ciWaitOf(run.id)).toBeUndefined();
-    } finally { release(); }
-  });
   it('does not require worker delegation permissions', async () => {
     github();
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
@@ -367,19 +248,20 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     expect(store.getRun(run.id)?.delegation).toBeUndefined();
   });
 
-  it('reacquires capacity before delivering a completed wait', async () => {
+  // hearsay-tools/cezarion#1233: the park keeps its slot, so its result does not wait for the
+  // run holding the only regular one.
+  it('delivers a completed wait while another run holds the only regular slot', async () => {
     const external = github();
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     const receipt = await register(run.id);
     const blockerGate = join(root, 'blocker-gate'); controlledWire({ firstResultGate: blockerGate });
     const blocker = await parent();
     await until(() => semaphore.busy() === 1);
-    external.settle(success());
-    await until(() => ciWaitOf(run.id)?.phase === 'resolved');
-    expect(store.getRun(run.id)?.agentInputs?.find(input => input.id === receipt.id)?.deliveredAt).toBeUndefined();
-    expect(semaphore.busy()).toBe(1);
-    writeFileSync(blockerGate, 'end');
-    await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
+    try {
+      external.settle(success());
+      await until(() => !!store.getRun(run.id)?.agentInputs?.find(input => input.id === receipt.id)?.deliveredAt);
+      expect(store.getRun(blocker.id)?.status).toBe('running');
+    } finally { writeFileSync(blockerGate, 'end'); }
     expect(store.getRun(blocker.id)?.status).not.toBe('cancelled');
   });
 
@@ -401,7 +283,8 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     await restart();
     expect(manager.isActive(run.id)).toBe(false);
     expect(ciWaitOf(run.id)?.id).toBe(receipt.id);
-    expect(store.getRun(run.id)).toMatchObject({ status: 'running', activity: 'monitoring' });
+    expect(store.getRun(run.id)?.status).toBe('waiting');
+    expect(store.getRun(run.id)?.activity).toBeUndefined();
     external.settle(success());
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
     expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === receipt.id)).toHaveLength(1);
@@ -419,17 +302,19 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     expect(ciWaitOf(run.id)).toBeUndefined();
   });
 
-  it('refuses stale registration that resolves after a human interruption', async () => {
+  // hearsay-tools/cezarion#1233: a human message aborts nothing; a lookup that outlives its turn
+  // is still refused.
+  it('keeps a registration whose lookup resolves after a human message in the same turn', async () => {
     github();
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     let resolve!: (value: typeof identity) => void;
     const deferred = new Promise<typeof identity>(done => { resolve = done; });
-    Object.assign(manager, { ciSupervisor: { resolve: () => deferred } });
+    Object.assign(manager, { ciSupervisor: { resolve: () => deferred, watch: () => new Promise(() => {}), close() {} } });
     const registration = register(run.id);
     expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:hold new instruction' }])).toBe(true);
     resolve(identity);
-    await expect(registration).rejects.toMatchObject({ code: 'registration_aborted' });
-    expect(ciWaitOf(run.id)).toBeUndefined();
+    await expect(registration).resolves.toMatchObject({ phase: 'open' });
+    expect(ciWaitOf(run.id)?.phase).toBe('open');
   });
 
   it('coalesces concurrent identical registration requests', async () => {
@@ -468,19 +353,23 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
   });
 
-  it('a human ask at turn-end withdraws CI and remains unanswered by its result', async () => {
+  // hearsay-tools/cezarion#1233: the ask leaves CI open; its result wakes the run and never
+  // answers the question.
+  it('a human ask at turn-end keeps CI open and its result leaves the question unanswered', async () => {
     const external = github();
     const gate = join(root, 'ask-boundary'); controlledWire({ firstResultGate: gate });
     const run = await parent('mock:ask');
-    await register(run.id);
+    const wait = await register(run.id);
     writeFileSync(gate, 'end');
-    await until(() => store.getRun(run.id)?.status === 'waiting');
-    expect(ciWaitOf(run.id)).toBeUndefined();
-    expect(external.aborted()).toBe(true);
+    await until(() => store.getRun(run.id)?.status === 'waiting' && store.getRun(run.id)?.hasPendingHumanAsk === true);
+    expect(ciWaitOf(run.id)?.phase).toBe('open');
+    expect(external.aborted()).toBe(false);
     external.settle(success());
-    await Promise.resolve();
+    await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
+    expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
+    // This wire never echoes a consumed line, so the re-park itself is U3b's, on native wires.
     expect(store.getRun(run.id)?.hasPendingHumanAsk).toBe(true);
-    expect(store.getRun(run.id)?.agentInputs ?? []).toEqual([]);
+    expect(store.readEvents(run.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
   });
 
   it('backend disconnect retains the bounded wait and recovers only after settlement', async () => {
@@ -490,7 +379,8 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const state = (manager as unknown as { active: Map<string, { session: { end(): void } }> }).active.get(run.id)!;
     state.session.end();
     await until(() => !manager.isActive(run.id));
-    expect(store.getRun(run.id)).toMatchObject({ status: 'running', activity: 'monitoring' });
+    expect(store.getRun(run.id)?.status).toBe('waiting');
+    expect(store.getRun(run.id)?.activity).toBeUndefined();
     external.settle(success());
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
     expect(lastCiWaitOf(run.id)?.result?.outcome).toBe('passed');
@@ -522,7 +412,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
       createdAt: new Date().toISOString(), conversation: { senderRunId: randomUUID(), recipientRunId: run.id, kind: 'progress' as const } }));
     store.commitAgentInputs(run.id, messages);
     manager.deliverConversationInput(run.id);
-    expect(store.getRun(run.id)?.activity).toBe('monitoring');
+    expect(parked(run.id)).toBe(true);
     expect(waitOf(store.getRun(run.id))).toBeUndefined();
     external.settle(success());
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
@@ -597,7 +487,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     const second = await registerPr(run.id, 13);
     const timer = await registerTimer(run.id, 60, 'check the deploy');
     expect(store.getRun(run.id)?.waits?.map(wait => [wait.id, wait.phase])).toEqual([[first.id, 'open'], [second.id, 'open'], [timer.id, 'open']]);
-    expect(store.getRun(run.id)?.activity).toBe('monitoring');
+    expect(store.getRun(run.id)?.status).toBe('waiting');
     external.settle(13);
     await until(() => settledById(run.id, second.id)?.phase === 'delivered');
     expect(inputsFor(run.id, second.id).map(input => input.text)).toEqual([expect.stringContaining(prUrl(13))]);
@@ -740,7 +630,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     const wait = await registerTimer(run.id, 600);
     await restart();
     expect(manager.isActive(run.id)).toBe(false);
-    expect(store.getRun(run.id)).toMatchObject({ status: 'running', activity: 'monitoring' });
+    expect(store.getRun(run.id)?.status).toBe('waiting');
     expect(waitById(run.id, wait.id)).toMatchObject({ phase: 'open', deadline: wait.deadline });
     expect(armed().waitTimers.has(wait.id)).toBe(true);
     fireTimer(wait.id);
@@ -834,9 +724,15 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     const first = await registerPr(run.id, 12);
     const second = await registerPr(run.id, 13);
     const timer = await registerTimer(run.id, 60);
-    external.settle(12); await until(() => waitById(run.id, first.id)?.phase === 'resolved');
-    fireTimer(timer.id); await until(() => waitById(run.id, timer.id)?.phase === 'resolved');
-    external.settle(13); await until(() => waitById(run.id, second.id)?.phase === 'resolved');
+    // Resolutions are ordered by their millisecond `resolvedAt`; each waits for the clock to move on
+    // so the three never tie and fall back to registration order.
+    const resolve = async (id: string, act: () => void) => {
+      act(); await until(() => waitById(run.id, id)?.phase === 'resolved');
+      const at = Date.parse(waitById(run.id, id)!.resolvedAt!); await until(() => Date.now() > at);
+    };
+    await resolve(first.id, () => external.settle(12));
+    await resolve(timer.id, () => fireTimer(timer.id));
+    await resolve(second.id, () => external.settle(13));
     const session = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(run.id)!.session;
     const send = vi.spyOn(session, 'sendAgentMessage');
     writeFileSync(gate, 'end');

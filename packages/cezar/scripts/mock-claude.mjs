@@ -688,13 +688,15 @@ async function respond(userText, imageCount, uuid) {
   // `mock:schedule-wakeup` → Claude's native park tool, without also emitting
   // CEZ:MONITORING. The workflow engine must recognize the completed turn's
   // tool use rather than depending on the textual agent contract marker (#46).
+  // `mock:schedule-wakeup:<n>` sends the tool's `delaySeconds` (hearsay-tools/cezarion#1233).
   if (userText.includes('mock:schedule-wakeup')) {
     const id = `toolu_schedule_wakeup_${turn}`;
+    const seconds = /mock:schedule-wakeup:(\d+)/.exec(userText)?.[1];
     emit({
       type: 'assistant',
       message: {
         role: 'assistant',
-        content: [{ type: 'tool_use', id, name: 'ScheduleWakeup', input: { delay: '5m' } }],
+        content: [{ type: 'tool_use', id, name: 'ScheduleWakeup', input: seconds ? { delaySeconds: Number(seconds) } : { delay: '5m' } }],
         usage: { input_tokens: 40, output_tokens: 20 },
       },
     });

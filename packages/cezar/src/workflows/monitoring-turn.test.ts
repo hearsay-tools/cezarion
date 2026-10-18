@@ -116,7 +116,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           expect(run().agentInputs?.find(input => input.id === id)?.deliveredAt).toBeUndefined();
           expect(store.getRun(w.id)?.status).not.toBe('cancelled');
           expect(manager.continueRun(p.id, { text: messagesPrompt(backend, [MONITORING_TEXT, ACK_TEXT]) }).ok).toBe(true);
-          await until(() => run().activity === 'monitoring');
+          await until(() => run().status === 'waiting' && !!monitoringWakeOf(run()));
           attention('monitoring', false);
           expect(store.readEvents(p.id).some(event => event.type === 'human-input-delivered' && event.askSeq === gateSeq)).toBe(true);
           expect(run().invalidAsk).not.toBe(true);
@@ -127,9 +127,12 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           expect(monitoringWakeOf(run())).toBeDefined();
           const timer = monitoringTimerOf(manager, p.id)!;
           expect(timer).toBeDefined();
+          const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
           const expire = timer._onTimeout; clearTimeout(timer); expire();
           await until(() => store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).includes('automatic monitoring wake-up (1/')));
-          await until(() => run().status === 'waiting'); // mock wake response has no declaration
+          // The fired timer reads `waiting` until its wake is admitted; the wake's own turn ends it.
+          // Its mock response has no declaration.
+          await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && run().status === 'waiting');
           attention('needs you', true);
         } else if (row.id === 'M15') {
           for (const gate of ['### Should I merge this PR?', '- [ ] Please review the changes before I continue.', '- Should I merge this PR?', '**Please review the changes before I continue.**', '1. __I need your approval before proceeding.__', '*Should I merge this PR?* Please let me know.']) {
@@ -218,7 +221,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
             expect(run().hasPendingHumanAsk).toBe(true);
             attention('needs you', true);
             expect(manager.continueRun(p.id, { text: messagesPrompt(backend, [MONITORING_TEXT, ACK_TEXT]) }).ok).toBe(true);
-            await until(() => run().activity === 'monitoring' || run().status === 'waiting' && manager['active'].get(p.id)?.atTurnBoundary !== undefined);
+            await until(() => run().status === 'waiting' && manager['active'].get(p.id)?.atTurnBoundary !== undefined);
             attention('monitoring', false);
             expect(run().hasPendingHumanAsk).not.toBe(true);
             expect(store.readEvents(p.id).some(event => event.type === 'human-input-delivered')).toBe(true);
@@ -257,7 +260,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
         await hook.idle();
         const final = calls.at(-1)!;
         if (row.id !== 'M16' && row.id !== 'M25') expect(final.task.attentionLabel).toBe(deriveAttention(run()).label);
-        if (row.id === 'M1') expect(calls.some(call => call.activity === 'monitoring' && call.task.attentionLabel === 'monitoring')).toBe(true);
+        if (row.id === 'M1') expect(calls.some(call => call.task.status === 'waiting' && call.task.attentionLabel === 'monitoring')).toBe(true);
       } finally { hook.dispose(); }
     });
   }

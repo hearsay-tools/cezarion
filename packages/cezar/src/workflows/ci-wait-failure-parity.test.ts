@@ -12,10 +12,10 @@ import { QUICK_TASK_WORKFLOW, stepKind, type WorkflowDef } from './types.ts';
 import { gatedProviderFailure } from './waits-parity.testkit.ts';
 
 // hearsay-tools/cezarion#1233: CI waits live in the run's wait list; a parked one is an open wait
-// on a monitoring park.
+// on a waiting run.
 const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'ci');
 const lastCiWaitOf = (id: string) => [...(store.getRun(id)?.lastWaits ?? [])].reverse().find(entry => entry.kind === 'ci');
-const parked = (id: string) => ciWaitOf(id)?.phase === 'open' && store.getRun(id)?.activity === 'monitoring';
+const parked = (id: string) => ciWaitOf(id)?.phase === 'open' && store.getRun(id)?.status === 'waiting';
 
 const externalResource = vi.hoisted(() => ({ supervisor: {} }));
 vi.mock('../ci-wait/resources.ts', () => ({ acquireCiResources: () => ({
@@ -80,7 +80,8 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
         active(run.id)!.session.end();
         await until(() => !manager.isActive(run.id));
         // Clean CI parking must survive a close, without fabricating failure.
-        expect(store.getRun(run.id)).toMatchObject({ status: 'running', activity: 'monitoring' });
+        expect(store.getRun(run.id)).toMatchObject({ status: 'waiting', activity: undefined });
+        expect(store.getRun(run.id)?.waits?.find(open => open.id === wait.id)?.phase).toBe('open');
         expect(store.getRun(run.id)?.error).toBeUndefined();
         settle();
         await until(wire.held);

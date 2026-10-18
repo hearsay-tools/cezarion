@@ -23,14 +23,13 @@ import { apiRequest } from '../server/loopback-request.testkit.ts';
 import { TranscriptFactsQueue } from '../runs/transcript-facts-queue.ts';
 import { historyPaths } from '../runs/history-file.ts';
 import { MONITORING_TURN_CRITERIA, MONITORING_ACK_CRITERIA, MONITORING_ORDER_CRITERIA } from '../workflows/monitoring-turn.testkit.ts';
-import { CI_INTERRUPTION_CRITERIA } from '../workflows/ci-wait-interruption.testkit.ts';
 import { WAIT_CRITERIA } from '../workflows/waits-parity.testkit.ts';
 import { monitoringTimerOf, monitoringWakeOf } from '../workflows/waits.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { agentInputEventSchema, type AgentInput } from '@open-mercato/cezar-contract';
+import { agentInputEventSchema, deriveAttention, type AgentInput } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -535,13 +534,14 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
     // Group 6 / #48 — a declared park is a non-attention state. The same
     // scenario S8 asserts survives the seam: the cause below, the effect here.
     id: 'R5',
-    name: 'R5 parks a declared monitoring turn as running/monitoring, not waiting',
+    name: 'R5 parks a declared monitoring turn on an open monitoring timer, not as a plain wait',
     scenario: 'split-text',
-    settled: (record) => record?.activity === 'monitoring' || record?.status === 'waiting',
+    settled: (record) => record?.status === 'waiting',
     assert: (obs) => {
-      expect(obs.record?.activity).toBe('monitoring');
-      expect(obs.record?.status).toBe('running');
-      expect(obs.statuses).not.toContain('waiting');
+      // hearsay-tools/cezarion#1233: `waiting` plus an open timer reads as monitoring.
+      expect(obs.record).toMatchObject({ status: 'waiting', activity: undefined });
+      expect(monitoringWakeOf(obs.record)).toBeDefined();
+      expect(deriveAttention(obs.record!).label).toBe('monitoring');
     },
   },
   {
@@ -549,11 +549,11 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
     id: 'R12',
     name: 'R12 keeps monitoring parked when child text follows the parent marker',
     scenario: 'subagent',
-    settled: (record) => record?.activity === 'monitoring' || record?.status === 'waiting',
+    settled: (record) => record?.status === 'waiting',
     assert: (obs) => {
-      expect(obs.record?.activity).toBe('monitoring');
-      expect(obs.record?.status).toBe('running');
-      expect(obs.statuses).not.toContain('waiting');
+      expect(obs.record).toMatchObject({ status: 'waiting', activity: undefined });
+      expect(monitoringWakeOf(obs.record)).toBeDefined();
+      expect(deriveAttention(obs.record!).label).toBe('monitoring');
     },
   },
 ];
@@ -1234,9 +1234,9 @@ describe('harness parity — late child attention', () => {
       const release = join(dir, 'release');
       try {
         await driveRun(backend, { prompt: `${promptFor(backend, 'subagent-after-park')} parity-release=${release}` },
-          record => record?.activity === 'monitoring' || record?.status === 'waiting', 30_000,
+          record => record?.status === 'waiting', 30_000,
           async ({ store, runId }) => {
-            expect(store.getRun(runId)).toMatchObject({ status: 'running', activity: 'monitoring' });
+            expect(store.getRun(runId)).toMatchObject({ status: 'waiting', activity: undefined });
             const wake = monitoringWakeOf(store.getRun(runId));
             expect(wake).toBeDefined();
             const before = store.readEvents(runId).length;
@@ -1251,8 +1251,8 @@ describe('harness parity — late child attention', () => {
                 backend === 'opencode'
                   ? event.type === 'usage.updated' && (event.usage as { total?: number } | undefined)?.total === 424242
                   : JSON.stringify(event).includes('Post-park child update processed.')));
-              expect({ ...store.getRun(runId), monitoringWakeAt: monitoringWakeOf(store.getRun(runId)) }).toMatchObject({ status: 'running', activity: 'monitoring', monitoringWakeAt: wake });
-              for (const change of changes) expect(change).toEqual({ status: 'running', activity: 'monitoring', monitoringWakeAt: wake });
+              expect({ ...store.getRun(runId), monitoringWakeAt: monitoringWakeOf(store.getRun(runId)) }).toMatchObject({ status: 'waiting', activity: undefined, monitoringWakeAt: wake });
+              for (const change of changes) expect(change).toEqual({ status: 'waiting', activity: undefined, monitoringWakeAt: wake });
               const after = store.readEvents(runId).slice(before);
               expect(after.some(event => event.type === 'turn.started')).toBe(false);
               const childItems = (backend === 'opencode' ? store.readEvents(runId).slice(0, before) : after)
@@ -1284,9 +1284,9 @@ describe('harness parity — hooks never move run state', () => {
       const release = join(dir, 'release');
       try {
         await driveRun(backend, { prompt: `${promptFor(backend, 'hook-after-park')} parity-release=${release}` },
-          record => record?.activity === 'monitoring' || record?.status === 'waiting', 30_000,
+          record => record?.status === 'waiting', 30_000,
           async ({ store, runId }) => {
-            expect(store.getRun(runId)).toMatchObject({ status: 'running', activity: 'monitoring' });
+            expect(store.getRun(runId)).toMatchObject({ status: 'waiting', activity: undefined });
             const wake = monitoringWakeOf(store.getRun(runId));
             expect(wake).toBeDefined();
             const before = store.readEvents(runId).length;
@@ -1298,8 +1298,8 @@ describe('harness parity — hooks never move run state', () => {
             try {
               writeFileSync(release, 'go');
               await waitFor(() => store.readEvents(runId).slice(before).some(event => JSON.stringify(event).includes('Late hook processed.')));
-              expect({ ...store.getRun(runId), monitoringWakeAt: monitoringWakeOf(store.getRun(runId)) }).toMatchObject({ status: 'running', activity: 'monitoring', monitoringWakeAt: wake });
-              for (const change of changes) expect(change).toEqual({ status: 'running', activity: 'monitoring', monitoringWakeAt: wake });
+              expect({ ...store.getRun(runId), monitoringWakeAt: monitoringWakeOf(store.getRun(runId)) }).toMatchObject({ status: 'waiting', activity: undefined, monitoringWakeAt: wake });
+              for (const change of changes) expect(change).toEqual({ status: 'waiting', activity: undefined, monitoringWakeAt: wake });
               expect(store.readEvents(runId).slice(before).some(event => event.type === 'turn.started')).toBe(false);
               const hooks = store.readEvents(runId)
                 .filter(event => event.type === 'item.completed' && (event.item as { kind?: string } | undefined)?.kind === 'hook')
@@ -1808,7 +1808,6 @@ describe('harness parity — the matrix itself', () => {
     ...MONITORING_TURN_CRITERIA.map(c => c.id),
     ...MONITORING_ACK_CRITERIA.map(c => c.id),
     ...MONITORING_ORDER_CRITERIA.map(c => c.id),
-    ...CI_INTERRUPTION_CRITERIA.map(c => c.id),
     ...WAIT_CRITERIA.map(c => c.id),
     ...WORKFLOW_ASK_CRITERIA.map(c => c.id),
     ...FOLLOWUP_CRITERIA.map(c => c.id),
@@ -1830,7 +1829,7 @@ describe('harness parity — the matrix itself', () => {
     if (permission) return permission.scenario;
     const shutdown = SHUTDOWN_CRITERIA.find(c => c.id === id);
     if (shutdown) return shutdown.scenario;
-    const monitor = [...MONITORING_TURN_CRITERIA, ...MONITORING_ACK_CRITERIA, ...MONITORING_ORDER_CRITERIA, ...CI_INTERRUPTION_CRITERIA].find(c => c.id === id);
+    const monitor = [...MONITORING_TURN_CRITERIA, ...MONITORING_ACK_CRITERIA, ...MONITORING_ORDER_CRITERIA].find(c => c.id === id);
     if (monitor) return monitor.scenario;
     const wait = WAIT_CRITERIA.find(c => c.id === id);
     if (wait) return wait.scenario;
@@ -2641,7 +2640,7 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
       await recording(async dir => {
         await withOwnedInputRun(backend, 'split-text', async fixture => {
           fixture.manager.enqueueOwnedRun(fixture.runId);
-          await waitFor(() => fixture.store.getRun(fixture.runId)?.activity === 'monitoring');
+          await waitFor(() => fixture.store.getRun(fixture.runId)?.status === 'waiting' && !!monitoringWakeOf(fixture.store.getRun(fixture.runId)));
           clearRecording(dir);
           const { manager } = await fixture.restart();
           // hearsay-tools/cezarion#1233: recovery re-arms the park's persisted monitoring timer
@@ -2656,7 +2655,7 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
 
     it(`${backend} R39 monitoring wake delivers DONE and MONITORING instructions on the native message channel`, async () => {
       await recording(async dir => {
-        await driveRun(backend, 'split-text', record => record?.activity === 'monitoring', 30_000,
+        await driveRun(backend, 'split-text', record => record?.status === 'waiting' && !!monitoringWakeOf(record), 30_000,
           async ({ store, manager, runId }) => {
             const timer = monitoringTimerOf(manager, runId)!;
             expect(timer).toBeDefined();

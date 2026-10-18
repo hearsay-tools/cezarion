@@ -91,7 +91,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
             await until(() => !!store.getRun(p.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt);
             await until(() => semaphore.busy() === 0);
             expect(store.readEvents(p.id).some(event => event.type === 'conversation-message')).toBe(true);
-            expect(store.getRun(p.id)).toMatchObject(humanGate ? { status: 'waiting' } : { status: 'running', activity: 'monitoring' });
+            expect(store.getRun(p.id)).toMatchObject({ status: 'waiting', activity: undefined });
             expect(store.getRun(p.id)?.hasPendingHumanAsk).not.toBe(true);
             if (humanGate) {
               if (gate === 'rejected') {
@@ -102,7 +102,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
               expect(monitoringWakeOf(store.getRun(p.id))).toBeUndefined();
               expect(store.getRun(p.id)?.agentInputs?.find(input => input.id === laterId)?.deliveredAt).toBeUndefined();
               expect(manager.sendMessage(p.id, [{ type: 'text', text: 'Approved, continue mock:hold' }])).toBe(true);
-              await until(() => !!store.getRun(p.id)?.agentInputs?.find(input => input.id === laterId)?.deliveredAt && store.getRun(p.id)?.activity === 'monitoring');
+              await until(() => !!store.getRun(p.id)?.agentInputs?.find(input => input.id === laterId)?.deliveredAt && store.getRun(p.id)?.status === 'waiting' && !!monitoringWakeOf(store.getRun(p.id)));
               expect(store.readEvents(p.id).some(event => event.type === 'human-input-delivered')).toBe(true);
             } else expect(monitoringWakeOf(store.getRun(p.id))).toBeDefined();
           } finally { release(); credentials.close(); }
@@ -129,12 +129,16 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
       const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
       manager.sendMessage(p.id, [{ type: 'text', text: 'mock:hold' }]);
       await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
-      expect(store.getRun(p.id)).toMatchObject({ status: 'running', activity: 'monitoring' });
+      expect(store.getRun(p.id)).toMatchObject({ status: 'waiting', activity: undefined });
+      const timer = monitoringWakeOf(store.getRun(p.id));
+      expect(timer).toBeDefined();
       const ask = { questions: [{ header: 'Choice', question: 'Which module?', options: [{ label: 'Parser' }, { label: 'Runner' }] }] };
       manager.sendMessage(p.id, [{ type: 'text', text: `mock:agent-echo\nCEZ:ASK ${JSON.stringify(ask)}` }]);
       await until(() => store.getRun(p.id)?.hasPendingHumanAsk === true);
       expect(store.getRun(p.id)?.status).toBe('waiting');
-      expect(monitoringWakeOf(store.getRun(p.id))).toBeUndefined();
+      // hearsay-tools/cezarion#1233: the question outranks the open timer, which an ask never cancels.
+      expect(deriveAttention(store.getRun(p.id)!).label).toBe('needs you');
+      expect(monitoringWakeOf(store.getRun(p.id))).toBe(timer);
     });
   }
 

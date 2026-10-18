@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
-import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract';
+import { deriveAttention, workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
@@ -26,6 +26,11 @@ import {
 import { blockRunWrites, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 import { MONITORING_WAKE_NUDGE } from './waits.ts';
+
+// hearsay-tools/cezarion#1233: a monitoring park is `waiting` on an open monitoring timer; completion
+// attention with live workers still writes the older `running`/`monitoring` pair until phase 3.
+// Both read as the monitoring label.
+const monitors = (id: string) => deriveAttention(store.getRun(id)!).label === 'monitoring';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -179,7 +184,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(wait!.deadline);
     manager.reconcileWorkerWaits(); vi.useRealTimers();
     await until(() => !waitOf(store.getRun(p.id)));
-    await until(() => store.getRun(p.id)?.activity === 'monitoring');
+    await until(() => monitors(p.id));
     const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
     const engine = manager as unknown as { active: Map<string, { session: AgentSession }> };
     engine.active.get(p.id)!.session.sendMessage([{ type: 'text', text: 'mock:done' }]);
@@ -206,7 +211,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const wait = waitOf(store.getRun(p.id))!;
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime(wait.deadline);
     manager.reconcileWorkerWaits();
-    await until(() => !waitOf(store.getRun(p.id)) && store.getRun(p.id)?.activity === 'monitoring');
+    await until(() => !waitOf(store.getRun(p.id)) && monitors(p.id));
     const session = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!.session;
     const turn = async (text: string) => {
       const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
@@ -214,7 +219,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
     };
     if (repeated) await turn('mock:done');
-    expect(store.getRun(p.id)?.activity).toBe('monitoring');
+    expect(monitors(p.id)).toBe(true);
     fixtureUpdateRun(w.id, { status: 'done' });
     // The already armed wake must still let the parent collect newly settled work.
     // Its explicit MONITORING reply cannot renew the spent completion budget.
@@ -348,8 +353,8 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
             release(); await settled;
           }
           await until(() => !waitOf(store.getRun(p.id)));
-          expect.soft(store.getRun(p.id)?.status).toBe('running');
-          expect.soft(store.getRun(p.id)?.activity).toBe('monitoring');
+          expect.soft(store.getRun(p.id)?.status).toBe('waiting');
+          expect.soft(store.getRun(p.id)?.activity).toBeUndefined();
           expect.soft(monitoringWakeOf(store.getRun(p.id))).toBeDefined();
           expect.soft(semaphore.busy()).toBe(0);
           await vi.advanceTimersByTimeAsync(300_001);
@@ -362,7 +367,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           const deliberate = register(p.id, [w.id]);
           expect(deliberate.id).not.toBe(wait.id);
           expect(manager.sendMessage(p.id, [{ type: 'text', text: delayedAck ? 'mock:agent-echo' : 'mock:monitoring' }])).toBe(true);
-          await until(() => store.getRun(p.id)?.activity === 'monitoring');
+          await until(() => monitors(p.id));
           expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
           expect(monitoringWakeOf(store.getRun(p.id))).toBeDefined();
         };

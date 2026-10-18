@@ -6,16 +6,20 @@ import type { RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 
 // hearsay-tools/cezarion#1233: the wait list's RUNNER_IDS cells. U0 (tool admission) lives in
-// `core/ci-tools.test.ts`; Task 5 appends U2, U3, U7 and U8 here.
+// `core/ci-tools.test.ts`.
 export const WAIT_CRITERIA = [
   { id: 'U1', scenario: 'baseline', name: 'ci and timer register through cezar_wait on the native wire, park, and wake with their result' },
   { id: 'U4', scenario: 'baseline', name: 'cezar_cancel_wait cancels and no observation is delivered' },
   { id: 'U9', scenario: 'provider-error', name: 'provider failure and clean close with a ci or timer wait open leave the run recoverable and the next wake delivers' },
+  { id: 'U2', scenario: 'baseline', name: 'ci and timer open: the timer wakes, ci stays open and is in the footer, the turn end re-parks without re-registering, the later ci result is delivered' },
+  { id: 'U3', scenario: 'hold', name: 'a human message during a ci wait is delivered, the wait stays open, and its result arrives in a later turn' },
+  { id: 'U7', scenario: 'turn-messages', name: 'cezar_wait_for_ci, the monitoring line and ScheduleWakeup land in the same wait list' },
+  { id: 'U8', scenario: 'baseline', name: 'a ci or timer park keeps its slot and wakes without queueing at maxParallel 1' },
 ] as const;
 
 /** The native mocks' `mock:cezar-tool` prompt: one cezar tool call through the runner's own wire.
  *  Several in one prompt run in order; `wait_id: 'last'` names the previous answer's wait. */
-export function toolCall(name: 'cezar_wait' | 'cezar_cancel_wait', args: Record<string, unknown>): string {
+export function toolCall(name: 'cezar_wait' | 'cezar_wait_for_ci' | 'cezar_cancel_wait', args: Record<string, unknown>): string {
   return `mock:cezar-tool ${name} ${Buffer.from(JSON.stringify(args)).toString('base64url')}`;
 }
 
@@ -53,4 +57,29 @@ ${source}`;
   writeFileSync(mock, '#!/usr/bin/env node\n' + source, { mode: 0o755 });
   process.env.CEZ_DRY_RUN = '0'; process.env[adapter.binEnv] = mock;
   return { held: () => existsSync(held), release: () => writeFileSync(released, '') };
+}
+
+type NativeInput = {
+  userText?: string; method?: string; prompt?: string; url?: string;
+  params?: { input?: Array<{ text?: string }>; prompt?: Array<{ text?: string }> };
+  body?: { parts?: Array<{ text?: string }> };
+};
+
+/** Read the prompts admitted by each runner's native mock, not normalized events. */
+export function ciNativeMessages(runner: RunnerId, dir: string): string[] {
+  const records = (name: string): Array<NativeInput | string[]> => {
+    const path = join(dir, name);
+    return existsSync(path) ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
+  };
+  const stdin = runner === 'claude' || runner === 'pi' || runner === 'omp';
+  const rows = runner === 'cursor' ? [...records('args'), ...records('stdin')] : records(stdin ? 'stdin' : 'args');
+  return rows.flatMap(row => {
+    if (Array.isArray(row)) return runner === 'cursor' && row.at(-1)?.includes('\n\n---\n\n') ? [row.at(-1)!] : [];
+    if (stdin) return row.userText === undefined ? [] : [row.userText];
+    if (runner === 'cursor' && row.method === 'cursor-print/stdin' && row.prompt !== undefined) return [row.prompt];
+    const parts = runner === 'codex' && row.method === 'turn/start' ? row.params?.input
+      : runner === 'cursor' && row.method === 'session/prompt' ? row.params?.prompt
+      : runner === 'opencode' && /\/(message|prompt_async)$/.test(row.url ?? '') ? row.body?.parts : undefined;
+    return parts ? [parts.map((part: { text?: string }) => part.text ?? '').join('\n')] : [];
+  });
 }

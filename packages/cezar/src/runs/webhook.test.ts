@@ -120,6 +120,22 @@ describe('TaskWebhook', () => {
     ]);
   });
 
+  // hearsay-tools/cezarion#1233: a CI park is `waiting` with an open wait; no activity is written.
+  it('reports a CI park as task.status waiting with the waiting-for-CI label and no task.activity', async () => {
+    const { calls, fetchImpl } = recorder();
+    const webhook = attach(fetchImpl);
+    const run = optedIn();
+    store.updateRun(run.id, { status: 'running' });
+    const now = Date.now();
+    store.commitWait(run.id, { id: '55555555-5555-4555-8555-555555555555', kind: 'ci', source: 'agent', via: 'cezar_wait',
+      registeredAt: new Date(now).toISOString(), deadline: new Date(now + 1_800_000).toISOString(), phase: 'open', turnId: 'turn-1',
+      prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40), generation: 'gen-1', timeoutSeconds: 1800 });
+    store.updateRun(run.id, { status: 'waiting', activity: undefined });
+    await webhook.idle();
+    expect(calls.map((call) => call.body.event)).toEqual(['task.status', 'task.status']);
+    expect(calls.at(-1)!.body).toMatchObject({ event: 'task.status', activity: null, task: { status: 'waiting', attentionLabel: 'waiting for CI' } });
+  });
+
   it('sends task.subscribed with the hand-off note', async () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl);

@@ -6,6 +6,7 @@ import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runn
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
+import { monitoringWakeOf } from './waits.testkit.ts';
 import {
   checkpoint, controlledWire, manager, parent, restart, root, semaphore,
   store, until, useWorkerWaitFixture, waitOf, worker,
@@ -30,12 +31,14 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
     return { p, w, service, parentCaller: callers[0]!, workerCaller: callers[1]!, close: () => credentials.close() };
   }
 
-  // A parent with a live worker parks in monitoring after handling a request.
-  // Waiting for the old pre-delivery `waiting` state raced the scheduler's Git probe.
-  async function parentHandledRequest(parentId: string, inputId: string) {
+  // A parent with a live worker parks on a monitoring timer after handling a request
+  // (hearsay-tools/cezarion#1233). The parked state before delivery looks the same, and waiting
+  // for it raced the scheduler's Git probe, so the request's own turn must have ended.
+  const turnEnds = (runId: string) => store.readEvents(runId).filter(event => event.type === 'turn-end').length;
+  async function parentHandledRequest(parentId: string, inputId: string, boundaries: number) {
     await until(() => {
       const run = store.getRun(parentId);
-      return run?.status === 'running' && run.activity === 'monitoring' &&
+      return run?.status === 'waiting' && !!monitoringWakeOf(run) && turnEnds(parentId) > boundaries &&
         !!run.agentInputs?.find(input => input.id === inputId)?.deliveredAt;
     });
   }
@@ -146,10 +149,11 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
     const f = await conversationPair();
     try {
       const id = randomUUID();
+      const boundaries = turnEnds(f.p.id);
       await f.service.send(f.workerCaller, { id, recipientRunId: f.p.id, kind: 'request', text: 'Which module? mock:hold', timeoutSeconds: 600 });
       const wait = manager.registerRequestWait(f.w.id, { requestIds: [id], timeoutSeconds: 600 });
       await until(() => waitOf(store.getRun(f.w.id))?.phase === 'parked');
-      await parentHandledRequest(f.p.id, id);
+      await parentHandledRequest(f.p.id, id, boundaries);
       expect(semaphore.busy()).toBe(0);
       const reply = { id: randomUUID(), recipientRunId: f.w.id, kind: 'reply' as const, requestId: id, text: 'The parser. mock:hold', timeoutSeconds: 600 };
       await f.service.send(f.parentCaller, reply);
@@ -167,8 +171,9 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
     const f = await conversationPair();
     try {
       const id = randomUUID();
+      const boundaries = turnEnds(f.p.id);
       await f.service.send(f.workerCaller, { id, recipientRunId: f.p.id, kind: 'request', text: 'Early question mock:hold', timeoutSeconds: 600 });
-      await parentHandledRequest(f.p.id, id);
+      await parentHandledRequest(f.p.id, id, boundaries);
       await f.service.send(f.parentCaller, { id: randomUUID(), recipientRunId: f.w.id, kind: 'reply', requestId: id, text: 'Early reply mock:hold', timeoutSeconds: 600 });
       await until(() => store.getRun(f.w.id)?.status === 'waiting' && !waitOf(store.getRun(f.w.id)) && !!store.getRun(f.w.id)?.agentInputs?.every(input => input.deliveredAt));
       const wait = manager.registerRequestWait(f.w.id, { requestIds: [id], timeoutSeconds: 600 });
@@ -183,10 +188,11 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
     const f = await conversationPair();
     try {
       const first = randomUUID();
+      const boundaries = turnEnds(f.p.id);
       await f.service.send(f.workerCaller, { id: first, recipientRunId: f.p.id, kind: 'request', text: 'Need module mock:hold', timeoutSeconds: 600 });
       manager.registerRequestWait(f.w.id, { requestIds: [first], timeoutSeconds: 600 });
       await until(() => waitOf(store.getRun(f.w.id))?.phase === 'parked');
-      await parentHandledRequest(f.p.id, first);
+      await parentHandledRequest(f.p.id, first, boundaries);
       const second = randomUUID();
       await f.service.send(f.parentCaller, { id: second, recipientRunId: f.w.id, kind: 'request', text: 'Which options? mock:hold', timeoutSeconds: 600 });
       await until(() => !waitOf(store.getRun(f.w.id)));
@@ -294,8 +300,9 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
     const f = await conversationPair();
     const gate = join(root, 'conversation-monitor-gate');
     try {
+      const boundaries = turnEnds(f.p.id);
       expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:monitoring' }])).toBe(true);
-      await until(() => store.getRun(f.p.id)?.activity === 'monitoring');
+      await until(() => turnEnds(f.p.id) > boundaries && store.getRun(f.p.id)?.status === 'waiting' && !!monitoringWakeOf(store.getRun(f.p.id)));
       // A real in-flight turn occupies the sole slot until this gate opens.
       controlledWire({ firstResultGate: gate });
       const busy = await worker(f.p.id);

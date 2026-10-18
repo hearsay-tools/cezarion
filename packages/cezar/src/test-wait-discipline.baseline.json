@@ -1130,12 +1130,6 @@
       "count": 1
     },
     {
-      "file": "workflows/run.test.ts",
-      "rule": "sleep",
-      "site": "await new Promise((resolve) => setTimeout(resolve, Math.max(0, originalDeadline - Date.now() + 100)));",
-      "count": 1
-    },
-    {
       "file": "workflows/skill-resume-continuation.test.ts",
       "rule": "short-bound",
       "site": "await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: 8_000 });",

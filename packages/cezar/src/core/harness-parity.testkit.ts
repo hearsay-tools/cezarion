@@ -762,6 +762,12 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
       'parentItemId and no child transcript), so there is no child terminal signal that could ' +
       'end the parent turn.',
   },
+  // hearsay-tools/cezarion#1233 U7: the `cezar_wait_for_ci` and monitoring-line aliases stay
+  // live on every wire; only the ScheduleWakeup alias is Claude's.
+  ...(['codex', 'opencode', 'pi', 'cursor', 'omp'] as const).map(backend => ({
+    criterion: 'U7', backend, kind: 'capability-absent' as const,
+    reason: 'native scheduler tool exists only on the Claude wire',
+  })),
 ];
 
 export function exemptionFor(criterion: string, backend: RunnerId): ParityExemption | undefined {
