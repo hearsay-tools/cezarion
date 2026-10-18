@@ -78,6 +78,8 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       process.env[HARNESS_ADAPTERS[runner].binEnv] = HARNESS_ADAPTERS[runner].mockBin;
       const f = await conversationPair(runner);
       try {
+        await expect(f.service.send(f.parentCaller, { id: randomUUID(), recipientRunId: f.w.id,
+          kind: 'request', text: 'Still active', resume: true, timeoutSeconds: 3600 })).rejects.toMatchObject({ code: 'incompatible_state' });
         manager.finish(f.w.id);
         await until(() => !manager.isActive(f.w.id));
         const started = Date.now();

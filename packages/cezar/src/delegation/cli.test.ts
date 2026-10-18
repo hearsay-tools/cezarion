@@ -86,6 +86,14 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     const args = ['send', workerId, 'Fix review', '--id', randomUUID(), '--kind', 'request', '--timeout-seconds', '7200'];
     expect(await runWorkerCommand(args, env)).toBe(1);
     expect(json().code).toBe('invalid_input');
+    expect(await runWorkerCommand([...args, '--resume'], env)).toBe(1);
+    expect(json().code).toBe('incompatible_state');
+    f.manager.cancel(workerId);
+    await f.manager.awaitRunTermination(workerId, 10_000);
+    f.store.updateStep(workerId, 'task', { status: 'done', sessionId: 'previous-session', backend: 'claude' });
+    const generation = f.store.commitWorkerExecutionStart(workerId);
+    f.store.updateRun(workerId, { status: 'done' });
+    f.store.commitWorkerExecutionComplete(workerId, generation);
     expect(await runWorkerCommand([...args, '--resume'], env)).toBe(0);
     const sent = json();
     expect(Date.parse(sent.message.deadline) - Date.parse(sent.message.createdAt)).toBe(7_200_000);

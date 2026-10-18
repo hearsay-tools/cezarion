@@ -171,6 +171,14 @@ describe('durable conversations', () => {
     await expect(f.service.send(f.caller, { ...request, resume: true, timeoutSeconds: 86401 })).rejects.toThrow();
     expect((await f.service.send(f.caller, { ...request, resume: true })).message.deadline).toBeDefined();
   });
+  it.each(['queued', 'running', 'waiting'] as const)('refuses an extended --resume deadline for a %s worker without accepting input', async status => {
+    const w = await worker();
+    f.store.updateRun(w.id, { status });
+    await expect(f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'request',
+      text: 'Review', resume: true, timeoutSeconds: 86400 })).rejects.toMatchObject({ code: 'incompatible_state' });
+    expect(f.store.getRun(w.id)?.agentInputs ?? []).toEqual([]);
+    expect(f.store.getRun(f.parent.id)?.delegation).not.toHaveProperty('conversation');
+  });
   it('keeps a cancelled request cancelled when a reply arrives', async () => {
     const w = await worker();
     const sent = await f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'request', text: 'Report', timeoutSeconds: 600 });
@@ -186,6 +194,7 @@ describe('durable conversations', () => {
       const sent = await f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id,
         kind: 'request', text: 'Fix the review findings', resume: true, timeoutSeconds: 3600 });
       expect(sent.message.deadline).toBe('2026-10-18T11:00:00.000Z');
+      expect(await f.service.send(f.caller, { id: sent.message.id, recipientRunId: w.id, kind: 'request', text: 'Fix the review findings', resume: true, timeoutSeconds: 3600 })).toEqual(sent);
       f.store.updateRun(w.id, { status: 'running' });
       vi.setSystemTime(new Date('2026-10-18T10:45:00.000Z'));
       expect((await f.service.conversation(f.caller, { recipientRunId: w.id })).outcomes).toEqual([]);

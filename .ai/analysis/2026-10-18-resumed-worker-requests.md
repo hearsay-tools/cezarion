@@ -47,3 +47,12 @@ restored, all six WP2 cells failed at the old 1,800-second cap; restoring the fi
 made all six pass (`npm test -- packages/cezar/src/workflows/worker-wait-conversations.test.ts -t WP2`).
 These manual runs satisfy the repository's explicit mutation-proof gate.
 Typecheck and production build/check:pack passed. CI owns the complete suite gate.
+
+## Review follow-up
+
+Automated review identified that the resume flag alone admitted a long deadline
+for an already active worker. Queued, running and waiting workers now refuse that
+combination without accepting a message or input; only a request that actually
+starts a continuation can gain the longer bound. Exact retries of an accepted
+resume request still return its receipt after the worker becomes active. The
+added active-worker refusal failed on all six native WP2 wires before the fix.

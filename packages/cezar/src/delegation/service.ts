@@ -8,7 +8,7 @@ import { acceptedWorkerIdentitySchema, workerContextHash, workerWorkflowHash } f
 import { createHash, randomUUID } from 'node:crypto';
 import {
   discoveryRequestSchema, type DiscoveryRequest, type DiscoveryResponse,
-  conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReceiptRequestSchema, requestWaitRequestSchema,
+  MAX_CONVERSATION_REQUEST_SECONDS, conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReceiptRequestSchema, requestWaitRequestSchema,
   type ConversationSendRequest, type ConversationSendResult, type ConversationInspectRequest, type ConversationInspectResult, type ConversationCancelRequest, type ConversationState, type InboxReserveResult, type InboxReceiptRequest, type InboxReceiptResult, type RequestWaitRequest, type RequestOutcome,
   workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerCancelWaitRequestSchema, type WorkerCancelWaitRequest,
   type WorkerCollectedResult, type WorkerDestroy, type WorkerDestroyResult, type WorkerInspection, type WorkerOperation,
@@ -322,6 +322,11 @@ export class DelegationService {
       const destroyed = recipient.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete';
       const resumable = !['queued', 'running', 'waiting'].includes(recipient.status) || !!recipient.stopping || (recipient.delegation?.role === 'worker' && !!recipient.delegation.destroy);
       const resume = !!request.resume && resumable;
+      // The extended bound belongs to a new continuation, not merely the flag.
+      // Exact retries have already returned above, even if that continuation is now active.
+      if (request.timeoutSeconds > MAX_CONVERSATION_REQUEST_SECONDS && !resume) {
+        throw new DelegationPolicyError('incompatible_state', 'Extended request deadlines require resuming a settled worker; active workers accept at most 1800 seconds');
+      }
       if (resume && (destroyed || recipient.delegation?.role !== 'worker' || recipient.delegation.destroy ||
         recipient.status === 'cancelled' || recipient.stopping)) throw new DelegationPolicyError('incompatible_state',
           `Worker is ${destroyed ? 'destroyed' : 'stopped or being destroyed'}; --resume cannot restart it. Spawn a new worker with the follow-up instruction`);
