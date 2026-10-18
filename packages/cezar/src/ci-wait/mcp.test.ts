@@ -28,7 +28,7 @@ describe('cezar-ci MCP server instructions', () => {
       expect(lines).toHaveLength(suggested.length);
       for (const tool of suggested) expect(lines.some(line => line.startsWith(`- ${tool.name}:`))).toBe(true);
       expect(lines.some(line => line.startsWith(`- ${ciToolDefinition.name}:`))).toBe(false);
-      expect(lines.find(line => line.startsWith('- cezar_wait:'))).toMatch(/waiting on CI for a PR/);
+      expect(lines.find(line => line.startsWith('- cezar_wait:'))).toMatch(/waiting on the user, on CI for a PR/);
       // A trigger line names a situation, never the schema.
       for (const { definition } of cezarTools({ CEZ_PREVIEW: '1' })) {
         for (const key of Object.keys(definition.inputSchema.properties ?? {})) expect(instructions).not.toMatch(new RegExp(`\\b${key}\\b`));
@@ -42,7 +42,7 @@ describe('cezar-ci MCP server instructions', () => {
     try {
       expect((await on.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait', 'cezar_preview_serve', 'cezar_preview_stop']);
       const instructions = on.client.getInstructions()!;
-      expect(instructions).toContain('- cezar_wait: load when you are waiting on CI for a PR or want to re-check something later; end your turn after it answers.');
+      expect(instructions).toContain('- cezar_wait: load when you are waiting on the user, on CI for a PR, or want to re-check something later; end your turn after it answers.');
       expect(instructions).toContain('- cezar_preview_serve: load when you have started, or are about to start, a web server the user should click through.');
     } finally { await on.close(); }
     for (const value of [undefined, '0', 'true']) {

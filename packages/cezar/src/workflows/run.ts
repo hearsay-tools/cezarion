@@ -1,7 +1,7 @@
 import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { waitErrorMessage } from '../ci-wait/errors.ts';
-import { cezarWaitRequestSchema, ciWaitResultSchema, previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type CiWaitRequest, type CiWaitResult, type PreviewServeRequest, type PreviewServeResult, type CezarCancelWaitAnswer, type CezarWaitRequest, type CiWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, computeWaitingOn, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT } from '@open-mercato/cezar-contract';
+import { cezarWaitRequestSchema, ciWaitResultSchema, previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type CiWaitRequest, type CiWaitResult, type PreviewServeRequest, type PreviewServeResult, type CezarCancelWaitAnswer, type CezarWaitRequest, type CiWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, computeWaitingOn, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT } from '@open-mercato/cezar-contract';
 import { ciWatchRequest, hasCiWait, identicalWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import { previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
@@ -345,11 +345,15 @@ function orderedTurnText(v1: string, v2: string): string | undefined {
 }
 /** One turn-end decision for fresh and Continue, also retained until an input
  * ACK settles. DONE and human/completion gates take precedence over a quiet
- * declaration or live workers; a false pending-ASK flag alone proves nothing. */
+ * declaration or live workers; a false pending-ASK flag alone proves nothing.
+ * A human wait this turn registered and nobody has seen yet (hearsay-tools/cezarion#1234)
+ * raises its card, or the gate when it has none, unless DONE wins or a valid ask line
+ * replaces its card; `waitCard` says the card is the wait's own. */
 function classifyTurnEnd(turnText: string, completedAssistantText: string, options: {
   sessionOpen: boolean; interactive: boolean; pendingHumanAsk: boolean;
   completionAttention: boolean; scheduledWake: boolean; liveWorkers: boolean; dependencyWait: boolean;
-}): AskTurnOutcome & { done: boolean; monitoring: boolean; humanGate: boolean } {
+  humanWait?: { questions?: AskRequest['questions'] };
+}): AskTurnOutcome & { done: boolean; monitoring: boolean; humanGate: boolean; waitCard: boolean } {
   const complete = orderedTurnText(turnText, completedAssistantText);
   const v1 = turnParkSignals(complete ?? turnText);
   const v2 = complete === undefined ? turnParkSignals(completedAssistantText) : v1;
@@ -361,11 +365,14 @@ function classifyTurnEnd(turnText: string, completedAssistantText: string, optio
   // otherwise enter. Recovery notes beside a valid card are not rejections.
   const quietPark = v1.monitoring || v2.monitoring || options.scheduledWake || options.liveWorkers || options.dependencyWait;
   const rejectedAsk = !askTurn.ask && askTurn.notes.length > 0;
-  const humanGate = !done && quietPark && (v1.humanGate || v2.humanGate || rejectedAsk);
-  const monitoring = options.interactive && options.sessionOpen && !done && !askTurn.ask &&
+  const surfaced = options.humanWait && options.sessionOpen && !done && !askTurn.ask ? options.humanWait : undefined;
+  const waitCard = !!surfaced?.questions;
+  const ask = askTurn.ask ?? (surfaced?.questions ? { questions: surfaced.questions } : null);
+  const humanGate = (!done && quietPark && (v1.humanGate || v2.humanGate || rejectedAsk)) || (!!surfaced && !waitCard);
+  const monitoring = options.interactive && options.sessionOpen && !done && !ask &&
     !options.pendingHumanAsk && !options.completionAttention && !humanGate &&
     (v1.monitoring || v2.monitoring || options.scheduledWake || options.liveWorkers);
-  return { ...askTurn, done, monitoring, humanGate };
+  return { ...askTurn, ask, done, monitoring, humanGate, waitCard };
 }
 /** An active ASK marker — valid card or rejected payload — means the user
  *  must answer. Drop follow-ups queued mid-turn so they cannot start a new
@@ -572,6 +579,7 @@ export const AUTONOMOUS_NUDGE =
 const CANCEL_MESSAGES = {
   not_found: 'No open wait has this wait_id. open_waits lists the waits still open.',
   already_resolved: 'This wait already resolved; its result arrives with your next wake. Cancelling it changed nothing.',
+  human_question: 'The user already sees this question, so only their answer closes it. End your turn to wait for the answer.',
 } as const;
 export const FINAL_MESSAGE_NUDGE =
   'Your last turn ended without a message to the user. Write your user-facing reply now: what you did, where things stand, and anything you need from the user. If the task goal is fully achieved, end that message with CEZ:DONE.';
@@ -1932,10 +1940,12 @@ export class RunManager {
   }
 
   /**
-   * Open a CI or timer wait (hearsay-tools/cezarion#1233). Trusted capability callbacks supply run
-   * identity; the model supplies only the PR and deadline, or the seconds and note. Refusals throw
-   * `{ code }`. An identical registration (same PR; or same seconds and note in the same turn)
-   * returns the open wait it repeats.
+   * Open a CI, timer or human wait (hearsay-tools/cezarion#1233, #1234). Trusted capability
+   * callbacks supply run identity; the model supplies only the PR and deadline, the seconds and
+   * note, or the card. Refusals throw `{ code }`. An identical registration (same PR; or same
+   * seconds and note in the same turn) returns the open wait it repeats. A run holds one human
+   * wait: a registration in the turn that opened it replaces its card and keeps its id, and one
+   * after the user saw it returns it unchanged.
    */
   async registerWait(runId: string, request: CezarWaitRequest, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<Wait> {
     const parsed = cezarWaitRequestSchema.parse(request);
@@ -1966,12 +1976,22 @@ export class RunManager {
     };
     const { state: active, run } = assertCanRegister();
     const turnId = active.ciTurnId ??= randomUUID();
+    if (parsed.kind === 'human') {
+      // An autonomous run assumes and continues until its automatic wakes are spent.
+      if (active.autonomous && this.automaticWakes(runId) < MAX_AUTO_CONTINUES) refuse('autonomous_run');
+      // Only a card can be carried to a worker's parent.
+      if (run.delegation?.role === 'worker' && !parsed.questions) refuse('questions_required');
+      const open = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human');
+      if (open?.askSeq !== undefined) return open;
+      if (!open && openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
+      const base: HumanWaitEntry = open ?? { id: randomUUID(), kind: 'human', source: 'agent', via, registeredAt: new Date().toISOString(), phase: 'open', turnId };
+      const { questions: _replaced, ...kept } = base;
+      return this.openWait(runId, active, { ...kept, ...(parsed.questions ? { questions: parsed.questions } : {}) });
+    }
     const existing = identicalWait(run.waits ?? [], parsed, turnId);
     if (existing) return existing;
     // Counted as the store counts them, so a registration accepted here is never refused there.
     if (openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
-    // Human waits register in hearsay-tools/cezarion#1234's next task; until then the tool refuses them.
-    if (parsed.kind === 'human') return refuse('invalid_request');
     if (parsed.kind === 'timer') {
       if (this.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
       if (this.automaticWakes(runId) >= MAX_AUTO_CONTINUES) refuse('wake_budget_spent');
@@ -2024,9 +2044,10 @@ export class RunManager {
   /**
    * The agent's `cezar_cancel_wait`. An open wait is cancelled with its watch or timer, and no
    * result for it is ever delivered. A resolved wait is already owed: cancelling it is a no-op and
-   * its result arrives with the next wake. A settled or unknown id is `not_found`.
+   * its result arrives with the next wake. A settled or unknown id is `not_found`. A human wait the
+   * user already sees is theirs to answer (`human_question`); one from this turn can be withdrawn.
    */
-  cancelWait(runId: string, waitId: string, generation: string): { cancelled: true } | { cancelled: false; code: 'not_found' | 'already_resolved' } {
+  cancelWait(runId: string, waitId: string, generation: string): { cancelled: true } | { cancelled: false; code: 'not_found' | 'already_resolved' | 'human_question' } {
     const state = this.active.get(runId);
     if (this.disposed || !state || state.ciGeneration !== generation) {
       throw Object.assign(new Error(waitErrorMessage('generation_mismatch')), { code: 'generation_mismatch' });
@@ -2034,6 +2055,7 @@ export class RunManager {
     const wait = this.store.getRun(runId)?.waits?.find(entry => entry.id === waitId);
     if (!wait) return { cancelled: false, code: 'not_found' };
     if (wait.phase !== 'open') return { cancelled: false, code: 'already_resolved' };
+    if (wait.kind === 'human' && wait.askSeq !== undefined) return { cancelled: false, code: 'human_question' };
     this.store.commitWaitCancellation(runId, [waitId]);
     this.disarmWait(waitId);
     return { cancelled: true };
@@ -2140,12 +2162,14 @@ export class RunManager {
     }
   }
 
-  /** A parked run whose last wait was cancelled without a wake becomes a plain park: it needs the
-   *  user, so it leaves the monitoring pool and its slot, as `parkForUser` does. A turn in progress
-   *  is left to its own turn end. */
+  /** A parked run whose last wait was cancelled at the budget without a wake waits on the user: a
+   *  `budget` human wait opens and is shown (hearsay-tools/cezarion#1234), and the run leaves the
+   *  monitoring pool and its slot, as `parkForUser` does. A turn in progress is left to its own
+   *  turn end. */
   private reparkWithoutWaits(runId: string, state: ActiveRun): void {
     const run = this.store.getRun(runId);
     if (!run || run.status !== 'waiting' || !this.waiting.has(runId) || state.atTurnBoundary !== state.session || run.waits?.length) return;
+    this.surfaceHumanWait(runId, state, this.openHumanAlias(runId, state, 'budget'));
     this.leaveMonitoringPool(runId);
     this.armIdleTimer(runId, state);
   }
@@ -2226,11 +2250,18 @@ export class RunManager {
    * Park a session on its waits (hearsay-tools/cezarion#1233): `waiting`, no activity, no idle
    * timer. A CI or timer park keeps its slot in the monitoring pool, so its wake starts at once;
    * a resolved wait with nothing left open is a wake due now and keeps it too. Worker waits rank
-   * above CI and timers and keep their own park (`parkWorkerWait`).
+   * above CI and timers and keep their own park (`parkWorkerWait`). An open human wait is shown
+   * and parks for the user, with no slot (hearsay-tools/cezarion#1234).
    */
   private parkOnWaits(runId: string, state: ActiveRun): boolean {
     const run = this.store.getRun(runId);
     if (!run?.waits?.length || !state.session?.open || state.cancelled || state.pendingHumanAsk || this.workerWait(runId)) return false;
+    const human = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human');
+    if (human) {
+      this.surfaceHumanWait(runId, state, human);
+      this.parkForUser(runId, state, state.currentStepId);
+      return true;
+    }
     this.clearIdleTimer(state);
     const top = computeWaitingOn(run)?.kind;
     const keepsSlot = top === 'ci' || top === 'timer' || (top === undefined && resolvedWaits(run).length > 0);
@@ -2300,11 +2331,14 @@ export class RunManager {
   /**
    * Cancel every open or resolved wait of a run without waking the agent: stop, Finish, cancel,
    * deletion, DONE and any terminal status. Human input cancels none (hearsay-tools/cezarion#1233).
+   * A failed commit leaves the record as a crash would and never stops the disarm, so Stop still
+   * reaches the session when the store is closed or broken (hearsay-tools/cezarion#1234).
    */
   private cancelOpenWaits(runId: string): void {
     const before = this.store.getRun(runId)?.waits ?? [];
     const remaining = (this.store.getRun(runId)?.waits ?? []).map(wait => wait.id);
-    if (remaining.length) this.store.commitWaitCancellation(runId, remaining);
+    try { if (remaining.length) this.store.commitWaitCancellation(runId, remaining); }
+    catch (error) { console.warn(`[cez] wait cancellation failed: ${error instanceof Error ? error.message : String(error)}`); }
     for (const wait of before) this.disarmWait(wait.id);
     this.disarmRunWaits(runId);
   }
@@ -2996,6 +3030,14 @@ export class RunManager {
       }
       if (this.rootFinishRequested(run.id)) {
         await this.settleRequestedRootFinish(run.id);
+        continue;
+      }
+      // hearsay-tools/cezarion#1234: a crash after a human wait's registration and before its turn
+      // end shows the question now. The run waits on the user, its other waits re-armed.
+      if (this.unsurfacedHumanWait(run.id)) {
+        this.surfaceHumanWait(run.id, undefined);
+        this.store.updateRun(run.id, { status: 'waiting', activity: undefined });
+        for (const wait of openWaits(run)) this.armWait(run.id, wait);
         continue;
       }
       if (run.delegation && run.delegation.role !== 'invalid' && this.hasPendingHumanAsk(run.id)) {
@@ -4562,6 +4604,7 @@ export class RunManager {
     const bundle = state.atTurnBoundary === state.session ? this.pendingConversationBatch(runId, state, reply.id) : undefined;
     if (!state.session.sendMessage([{ type: 'text', text }, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : [])])) return;
     this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: routed.askSeq, source: 'parent' });
+    this.settleHumanWaits(runId);
     const delivered = [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])];
     this.commitBundledDelivery(runId, state, delivered);
     // As in submitAgentInput: the wake that admitted this answer is spent, and a stale one
@@ -5750,8 +5793,9 @@ export class RunManager {
     // held conversation messages in the same submission, after the answer.
     const bundle = userAuthored && answeringAskSeq !== undefined && state.atTurnBoundary === state.session
       ? this.pendingConversationBatch(runId, state) : undefined;
-    // The open-waits footer is the turn's last block; `submitAgentInput` adds its own.
-    const footer = userAuthored ? openWaitsFooter(this.store.getRun(runId)?.waits ?? []) : undefined;
+    // The open-waits footer is the turn's last block; `submitAgentInput` adds its own. This message
+    // answers every human wait, so the footer names none.
+    const footer = userAuthored ? openWaitsFooter((this.store.getRun(runId)?.waits ?? []).filter(wait => wait.kind !== 'human')) : undefined;
     const delivered = userAuthored ? state.session.sendMessage([...deliverable, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : []),
       ...(footer ? [{ type: 'text' as const, text: footer }] : [])])
       : this.submitAgentInput(runId, state, deliverable);
@@ -5763,6 +5807,7 @@ export class RunManager {
         if (answeringAskSeq !== undefined) {
           this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: answeringAskSeq });
         }
+        this.settleHumanWaits(runId);
         state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
         if (bundle) this.commitBundledDelivery(runId, state, bundle.inputs.map(input => input.id));
         // A native answer continues the turn, and a bundle can leave messages that did not
@@ -6116,8 +6161,12 @@ export class RunManager {
     // human got there first — and then the counter starts over, because the cap only exists to
     // bound UNATTENDED resumes.
     this.clearAutoResume(runId);
-    // Only a human Continue is immediate; it restarts the automatic-wake budget too.
-    if (!deferForCapacity) { this.withdrawWorkerWait(runId); this.resetParentCompletion(runId); this.resetWakeDelivery(runId); this.resetAutomaticWakes(runId); }
+    // Only a human Continue is immediate; it restarts the automatic-wake budget too, and answers
+    // every human wait.
+    if (!deferForCapacity) {
+      this.withdrawWorkerWait(runId); this.resetParentCompletion(runId); this.resetWakeDelivery(runId); this.resetAutomaticWakes(runId);
+      this.settleHumanWaits(runId);
+    }
 
     let continuationNumber = 1;
     while (run.steps.some(step => step.id === `continue-${continuationNumber}`)) continuationNumber++;
@@ -6443,6 +6492,7 @@ export class RunManager {
           }
           if (openingAnswerAskSeq !== undefined && state.session?.open) {
             this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: openingAnswerAskSeq, ...(parentAnswer ? { source: 'parent' } : {}) });
+            this.settleHumanWaits(runId);
             openingAnswerAskSeq = undefined;
             state.openingAnswerAskSeq = undefined;
           }
@@ -6455,13 +6505,15 @@ export class RunManager {
         sink.flushAll();
         this.trackTurnEnd(runId, turnText); // titleSummary + diffStat (#389)
         const sessionOpen = !state.cancelled && state.session?.open;
+        const humanWait = this.turnEndHumanWait(runId);
         const turn = classifyTurnEnd(turnText, completedAssistantText, {
           sessionOpen: !!sessionOpen, interactive: true, pendingHumanAsk: !!state.pendingHumanAsk,
           completionAttention: this.parentCompletionAttention(runId), scheduledWake: scheduleWakeup !== undefined,
           liveWorkers: this.hasLiveWorkers(runId),
           dependencyWait: !!(this.workerWait(runId) || this.store.getRun(runId)?.waits?.length),
+          humanWait,
         });
-        const { done, monitoring, humanGate, ask, notes: askNotes } = turn;
+        const { done, monitoring, humanGate, ask, notes: askNotes, waitCard } = turn;
         discardQueuedMessagesOnAsk(state.session, turn);
         const silentTail = turnTail === 'silent';
         const alreadyFinalMessageNudged = state.finalMessageNudged === state.session;
@@ -6474,10 +6526,11 @@ export class RunManager {
         for (const note of askNotes) this.store.appendEvent(runId, { type: 'note', ...note, stepId });
         this.store.updateRun(runId, { invalidAsk: !ask && askNotes.length > 0 ? true : undefined });
         // Only a newly parsed portable ASK can be overridden. Do this before
-        // prepareHumanAsk latches it; an existing/native ask still blocks the helper.
-        let autoContinued = !!ask && !!sessionOpen && this.tryAutonomousNudge(runId, state, stepId, ask);
+        // prepareHumanAsk latches it; an existing/native ask or a human wait's card still blocks the helper.
+        let autoContinued = !!ask && !waitCard && !!sessionOpen && this.tryAutonomousNudge(runId, state, stepId, ask);
         if (ask && !autoContinued) this.prepareHumanAsk(runId, state);
         if (humanGate && !ask && !state.pendingHumanAsk) this.prepareProseHumanGate(runId, state);
+        if (humanGate && !ask) this.recordTurnEndQuestion(runId, state, humanWait, null, askNotes.length > 0);
         const workerWaitParked = this.parkAtTurnEnd(runId, state, { done, humanGate, sessionOpen: !!sessionOpen });
         state.doneAtBoundary = done ? state.session : undefined;
         state.parkAfterAck = sessionOpen && state.session ? { session: state.session, monitoring, humanGate, silentTail, alreadyFinalMessageNudged, scheduleWakeup: turnWakeDelay } : undefined;
@@ -6510,7 +6563,7 @@ export class RunManager {
             // hearsay-tools/cezarion#1233); one that reaches here had its timer off or spent and
             // parks for the user too. The slot is freed and the idle timer armed; the
             // autonomous nudge above still wins.
-            if (ask) { emitAskRequested(sink, ask); this.routeWorkerQuestion(runId); }
+            if (ask && !this.humanWaitShown(runId, humanWait)) { emitAskRequested(sink, ask); this.recordTurnEndQuestion(runId, state, humanWait, ask, !waitCard); this.routeWorkerQuestion(runId); }
             this.parkForUser(runId, state, stepId);
           }
         }
@@ -6804,6 +6857,8 @@ export class RunManager {
         // A clean close that leaves results undelivered is a failed delivery too.
         const delivery = resolvedWaits(this.store.getRun(runId) ?? {}).length ? this.failedWakeDelivery(runId, WAKE_SESSION_CLOSED_ERROR) : 'park';
         if (delivery === 'park') {
+          // No turn end will show a human wait this session registered (hearsay-tools/cezarion#1234).
+          this.surfaceHumanWait(runId, state);
           this.store.updateRun(runId, { status: 'waiting', activity: undefined });
           return;
         }
@@ -6888,6 +6943,7 @@ export class RunManager {
       if (delivery === 'park') {
         // Retain the wait and scheduler wake source while closing this attempt.
         // settleSuccess only completes running/waiting steps, so its failure is durable.
+        this.surfaceHumanWait(runId, state);
         this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
         this.store.updateRun(runId, { status: 'waiting', activity: undefined, error: `continue failed: ${message}` });
         return;
@@ -7250,6 +7306,7 @@ export class RunManager {
           }
         }
         if (delivery === 'park') {
+          this.surfaceHumanWait(runId, state);
           this.store.updateRun(runId, { status: 'waiting', activity: undefined,
             ...(failure ? { error: runError! } : {}) });
           this.store.flush(); // checkpoint the failed attempt and its recoverable workflow cursor before parking
@@ -7482,13 +7539,15 @@ export class RunManager {
         sink.flushAll();
         this.trackTurnEnd(runId, turnText); // titleSummary + diffStat (#389)
         const sessionOpen = !state.cancelled && state.session?.open;
+        const humanWait = this.turnEndHumanWait(runId);
         const turn = classifyTurnEnd(turnText, completedAssistantText, {
           sessionOpen: !!sessionOpen, interactive, pendingHumanAsk: !!state.pendingHumanAsk,
           completionAttention: this.parentCompletionAttention(runId), scheduledWake: scheduleWakeup !== undefined,
           liveWorkers: this.hasLiveWorkers(runId),
           dependencyWait: !!(this.workerWait(runId) || this.store.getRun(runId)?.waits?.length),
+          humanWait,
         });
-        const { done, monitoring, humanGate, ask, notes: askNotes } = turn;
+        const { done, monitoring, humanGate, ask, notes: askNotes, waitCard } = turn;
         discardQueuedMessagesOnAsk(state.session, turn);
         const silentTail = turnTail === 'silent';
         const alreadyFinalMessageNudged = state.finalMessageNudged === state.session;
@@ -7501,10 +7560,11 @@ export class RunManager {
         for (const note of askNotes) emit({ type: 'note', stepId: step.id, ...note });
         this.store.updateRun(runId, { invalidAsk: !ask && askNotes.length > 0 ? true : undefined });
         // Only a newly parsed portable ASK can be overridden. Do this before
-        // prepareHumanAsk latches it; an existing/native ask still blocks the helper.
-        let autoContinued = !!ask && !!sessionOpen && this.tryAutonomousNudge(runId, state, step.id, ask);
+        // prepareHumanAsk latches it; an existing/native ask or a human wait's card still blocks the helper.
+        let autoContinued = !!ask && !waitCard && !!sessionOpen && this.tryAutonomousNudge(runId, state, step.id, ask);
         if (ask && !autoContinued) this.prepareHumanAsk(runId, state);
         if (humanGate && !ask && !state.pendingHumanAsk) this.prepareProseHumanGate(runId, state);
+        if (humanGate && !ask) this.recordTurnEndQuestion(runId, state, humanWait, null, askNotes.length > 0);
         const workerWaitParked = this.parkAtTurnEnd(runId, state, { done, humanGate, sessionOpen: !!sessionOpen });
         state.doneAtBoundary = done ? state.session : undefined;
         state.parkAfterAck = (interactive || humanGate) && sessionOpen && state.session ? { session: state.session, monitoring, humanGate, silentTail, alreadyFinalMessageNudged, scheduleWakeup: turnWakeDelay } : undefined;
@@ -7540,7 +7600,7 @@ export class RunManager {
           // still working through `CEZ:MONITORING` or Claude's native
           // `ScheduleWakeup`, which parked on its timer above (#490, #46,
           // hearsay-tools/cezarion#1233).
-          if (ask) { emitAskRequested(sink, ask); this.routeWorkerQuestion(runId); }
+          if (ask && !this.humanWaitShown(runId, humanWait)) { emitAskRequested(sink, ask); this.recordTurnEndQuestion(runId, state, humanWait, ask, !waitCard); this.routeWorkerQuestion(runId); }
           // The freed slot can start a queued run right away — in any project.
           this.parkForUser(runId, state, step.id);
         }
@@ -7821,6 +7881,89 @@ export class RunManager {
     this.clearHeldHumanInputTimer(state);
   }
 
+  /** The open human wait nobody has shown the user yet (hearsay-tools/cezarion#1234): one this
+   *  turn registered, or one a failure, close or crash caught before its turn end. */
+  private unsurfacedHumanWait(runId: string): HumanWaitEntry | undefined {
+    return openWaits(this.store.getRun(runId) ?? {}).find((wait): wait is HumanWaitEntry => wait.kind === 'human' && wait.askSeq === undefined);
+  }
+
+  /** The human wait this turn end raises: one nobody has seen yet. One registered while a question
+   *  is pending waits on that question instead, and raises nothing. */
+  private turnEndHumanWait(runId: string): HumanWaitEntry | undefined {
+    const wait = this.unsurfacedHumanWait(runId);
+    if (!wait || !this.hasPendingHumanAsk(runId)) return wait;
+    this.markHumanWaitSurfaced(runId, wait);
+    return undefined;
+  }
+
+  /** An alias's human wait, or the one already open: a run holds one. A full list opens none. */
+  private openHumanAlias(runId: string, state: ActiveRun | undefined, via: WaitVia, questions?: AskRequest['questions']): HumanWaitEntry | undefined {
+    const run = this.store.getRun(runId);
+    if (!run) return undefined;
+    const open = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human');
+    if (open || openWaits(run).length >= WAIT_LIMIT) return open;
+    const wait: HumanWaitEntry = { id: randomUUID(), kind: 'human', source: via === 'budget' ? 'cezar' : 'agent', via,
+      registeredAt: new Date().toISOString(), phase: 'open', turnId: state?.ciTurnId ?? via, ...(questions ? { questions } : {}) };
+    try { this.store.commitWait(runId, wait); }
+    catch (error) { console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return undefined; }
+    return wait;
+  }
+
+  /** Record which question a human wait is shown as: the pending card or gate, whose answer settles
+   *  it. A card shown in place of the wait's own replaces it. A wait already shown is left alone. */
+  private markHumanWaitSurfaced(runId: string, wait: HumanWaitEntry, questions?: AskRequest['questions']): void {
+    const askSeq = this.pendingHumanAskSeq(runId);
+    const latest = this.store.getRun(runId)?.waits?.find((entry): entry is HumanWaitEntry => entry.id === wait.id && entry.kind === 'human');
+    if (askSeq === undefined || !latest || latest.phase !== 'open' || latest.askSeq !== undefined) return;
+    const { questions: own, ...kept } = latest;
+    const card = questions ?? own;
+    try { this.store.commitWait(runId, { ...kept, ...(card ? { questions: card } : {}), askSeq }); }
+    catch (error) { console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+
+  /**
+   * Show a human wait outside its turn end (hearsay-tools/cezarion#1234): at a boundary, at the
+   * budget, or from the failure, close and recovery paths, where no turn end will. A card raises
+   * `ask.requested` and goes to a worker's parent; a wait without one raises the human gate. A
+   * question already pending is the one it waits on. A wait already shown is left alone.
+   */
+  private surfaceHumanWait(runId: string, state: ActiveRun | undefined, wait = this.unsurfacedHumanWait(runId)): void {
+    if (!wait || wait.askSeq !== undefined) return;
+    if (this.pendingHumanAskSeq(runId) === undefined) {
+      const run = this.store.getRun(runId);
+      const stepId = state?.currentStepId ?? run?.currentStepId ?? run?.steps.at(-1)?.id;
+      if (wait.questions) {
+        this.store.appendEvent(runId, { type: 'ask.requested', requestId: randomUUID(), questions: wait.questions, ...(stepId ? { stepId } : {}) });
+        if (state) this.prepareHumanAsk(runId, state);
+      } else if (state) this.prepareProseHumanGate(runId, state);
+      else {
+        this.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), code: PROSE_HUMAN_GATE, message: 'waiting for a human response to the assistant’s request' });
+        this.withdrawWorkerWait(runId);
+      }
+    } else if (state) state.pendingHumanAsk = true;
+    this.markHumanWaitSurfaced(runId, wait);
+    this.routeWorkerQuestion(runId);
+  }
+
+  /** A human message answers every open human wait, and nothing else (hearsay-tools/cezarion#1234). */
+  private settleHumanWaits(runId: string): void {
+    try { this.store.commitHumanWaitsAnswered(runId); }
+    catch (error) { console.warn(`[cez] human wait settlement failed: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+
+  /** Read fresh: a boundary the turn end re-enters (Cursor print's ready callback from
+   *  `discardQueuedMessages`) may have shown the wait already, and its card stands. */
+  private humanWaitShown(runId: string, wait: HumanWaitEntry | undefined): boolean {
+    return !!wait && this.store.getRun(runId)?.waits?.some(entry => entry.id === wait.id && entry.kind === 'human' && entry.askSeq !== undefined) === true;
+  }
+
+  /** The turn end raised a card or the gate: record the human wait it shows. A turn that registered
+   *  none opens the ask line's, without a card when the line was rejected. A prose gate opens none. */
+  private recordTurnEndQuestion(runId: string, state: ActiveRun, wait: HumanWaitEntry | undefined, ask: AskRequest | null, askLine: boolean): void {
+    const shown = wait ?? (askLine ? this.openHumanAlias(runId, state, 'ask-line', ask?.questions) : undefined);
+    if (shown) this.markHumanWaitSurfaced(runId, shown, ask?.questions);
+  }
+
   /** Native backend asks arrive before turn-end. Persist and park immediately
    * so the cockpit shows attention and the run releases its workspace slot. */
   private handleRunnerUiEvent(runId: string, state: ActiveRun, sink: UiEventSink, event: UiEvent): void {
@@ -7863,6 +8006,11 @@ export class RunManager {
     }
     if (event.type === 'ask.requested') {
       this.prepareHumanAsk(runId, state);
+      // A native ask is a human wait the user already sees (hearsay-tools/cezarion#1234).
+      const card = askRequestSchema.safeParse({ questions: event.questions });
+      const questions = card.success ? card.data.questions : undefined;
+      const wait = this.openHumanAlias(runId, state, 'native-ask', questions);
+      if (wait) this.markHumanWaitSurfaced(runId, wait, questions);
       this.clearIdleTimer(state);
       this.monitoring.delete(runId); // released below; its waits stay open
       this.waiting.add(runId);
@@ -8579,9 +8727,9 @@ export class RunManager {
 
   /** The turn-end tail's park for the user: `waiting` with the idle timer, no slot. A result
    *  already in (a pending question beside a resolved wait) still queues its wake. */
-  private parkForUser(runId: string, state: ActiveRun, stepId: string): void {
+  private parkForUser(runId: string, state: ActiveRun, stepId: string | undefined): void {
     this.store.updateRun(runId, { status: 'waiting', activity: undefined });
-    this.store.updateStep(runId, stepId, { status: 'waiting' });
+    if (stepId) this.store.updateStep(runId, stepId, { status: 'waiting' });
     this.store.flush();
     this.waiting.add(runId);
     this.leaveMonitoringPool(runId);
@@ -8594,9 +8742,10 @@ export class RunManager {
    * The monitoring line and Claude's `ScheduleWakeup` open a timer in the wait list
    * (hearsay-tools/cezarion#1233): the line for the configured interval, `ScheduleWakeup` for its
    * `delaySeconds` clamped to 60–3,600 (the interval without one). Idempotent per `via`: while one
-   * is open the alias registers nothing and the timer keeps its deadline. With timers off or the
-   * automatic-wake budget spent it registers nothing and says so, and the run parks for the user.
-   * An autonomous run's nudge keeps precedence over the line.
+   * is open the alias registers nothing and the timer keeps its deadline. With timers off it opens
+   * a `monitoring-line` human wait instead, and with the automatic-wake budget spent a `budget` one
+   * (hearsay-tools/cezarion#1234); the park shows it. An autonomous run's nudge keeps precedence
+   * over the line.
    */
   private openTimerAlias(runId: string, state: ActiveRun, scheduleWakeup: number | null | undefined): void {
     const run = this.store.getRun(runId);
@@ -8607,6 +8756,7 @@ export class RunManager {
     const minutes = this.semaphore.monitoringWakeIntervalMinutes();
     if (minutes === null) {
       this.store.appendEvent(runId, { type: 'note', message: 'automatic re-checks are off; waiting for you' });
+      this.openHumanAlias(runId, state, 'monitoring-line');
       return;
     }
     if (this.automaticWakes(runId) >= MAX_AUTO_CONTINUES) {
@@ -8617,6 +8767,7 @@ export class RunManager {
           message: `automatic monitoring wake-up cap reached (${MAX_AUTO_CONTINUES}); session remains parked`,
         });
       }
+      this.openHumanAlias(runId, state, 'budget');
       return;
     }
     if (openWaits(run).length >= WAIT_LIMIT) return;

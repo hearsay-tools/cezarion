@@ -61,7 +61,7 @@ describe('session provisioning', () => {
     const { workerId } = await f.service.spawn(f.caller, { task: 'worker', baseline: 'HEAD', requestId: randomUUID() });
     const worker = provision(workerId)!; expect(worker.instructions).toContain('cannot delegate'); expect(worker.instructions).toContain('wait --request'); expect(worker.instructions).toContain(f.parent.id); expect(worker.instructions).toContain('worker reply');
     // #505: a worker's questions go to its parent, which replies or asks the human.
-    expect(worker.instructions).toContain('Your questions, native or CEZ:ASK, go to your parent');
+    expect(worker.instructions).toContain('Your questions — cezar_wait with kind "human" and questions, or a native question — go to your parent');
     expect(worker.instructions).not.toContain('only a human can answer');
     expect(worker.instructions).not.toContain('Messages never answer human questions');
     const root = provision()!;

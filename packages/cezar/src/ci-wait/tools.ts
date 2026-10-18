@@ -51,11 +51,12 @@ function flatWaitInputSchema() {
   return {
     type: 'object' as const,
     properties: {
-      kind: { type: 'string', enum: cezarWaitRequestSchema.options.map(option => option.shape.kind.value), description: '"ci" waits for the checks of a GitHub pull request; "timer" wakes you after `seconds`.' },
+      kind: { type: 'string', enum: cezarWaitRequestSchema.options.map(option => option.shape.kind.value), description: '"ci" waits for the checks of a GitHub pull request; "timer" wakes you after `seconds`; "human" waits for the user\'s reply.' },
       pr: field('pr', 'kind "ci": the HTTPS GitHub pull request URL.'),
       timeout_seconds: field('timeout_seconds', 'kind "ci": the deadline in seconds (1–7200, default 1800).'),
       seconds: field('seconds', 'kind "timer": seconds until the wake (60–7200).'),
       note: field('note', 'kind "timer": what to re-check, handed back to you at the wake.'),
+      questions: field('questions', 'kind "human": an optional card, the same questions object as the ask format: 1–4 questions, each with a header, the question and 2–4 options.'),
     },
     required: ['kind'],
     additionalProperties: false,
@@ -64,7 +65,7 @@ function flatWaitInputSchema() {
 
 export const waitToolDefinition = {
   name: 'cezar_wait',
-  description: 'Open a wait on something outside this turn: CI on a GitHub pull request (kind "ci") or a timer (kind "timer"). End your turn after it answers; Cezar wakes you when any open wait resolves, with its result, and a human message wakes you too without closing the wait. Several waits can be open at once; the answer lists them. A CI observation is not merge approval.',
+  description: 'Open a wait on something outside this turn: the user\'s reply (kind "human"), CI on a GitHub pull request (kind "ci") or a timer (kind "timer"). End your turn after it answers; Cezar wakes you when any open wait resolves, with its result. A human message wakes you too: it answers every human wait and closes no other. Several waits can be open at once; the answer lists them. A CI observation is not merge approval.',
   inputSchema: flatWaitInputSchema(),
 };
 export const cancelWaitToolDefinition = {
@@ -110,7 +111,7 @@ const PREVIEW_STOP_TOOL: CezarTool = { definition: previewStopToolDefinition, tr
 
 // Deprecated: still listed, so every runner keeps admitting it, but with no trigger line.
 const CI_TOOL: CezarTool = { definition: ciToolDefinition, label: 'Wait for CI', invoke: invokeCiTool };
-const WAIT_TOOL: CezarTool = { definition: waitToolDefinition, trigger: 'load when you are waiting on CI for a PR or want to re-check something later; end your turn after it answers.', label: 'Wait', invoke: invokeWaitTool };
+const WAIT_TOOL: CezarTool = { definition: waitToolDefinition, trigger: 'load when you are waiting on the user, on CI for a PR, or want to re-check something later; end your turn after it answers.', label: 'Wait', invoke: invokeWaitTool };
 const CANCEL_WAIT_TOOL: CezarTool = { definition: cancelWaitToolDefinition, trigger: 'load when a wait you registered is no longer needed.', label: 'Cancel wait', invoke: invokeCancelWaitTool };
 const PREVIEW_TOOL: CezarTool = { definition: previewToolDefinition, trigger: 'load when you have started, or are about to start, a web server the user should click through.', label: 'Live preview', invoke: invokePreviewTool };
 

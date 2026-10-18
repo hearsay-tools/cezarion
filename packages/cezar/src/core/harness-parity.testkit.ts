@@ -768,6 +768,12 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'U7', backend, kind: 'capability-absent' as const,
     reason: 'native scheduler tool exists only on the Claude wire',
   })),
+  // U7h (hearsay-tools/cezarion#1234): the ask scenario on these wires prints the portable ask
+  // line, so its human wait opens through the ask-line alias; the cell asserts that instead.
+  ...(['claude', 'pi', 'cursor', 'omp'] as const).map(backend => ({
+    criterion: 'U7h', backend, kind: 'capability-absent' as const,
+    reason: 'native ask arrives as the portable marker on this wire',
+  })),
   // U12/U13: an agent-input acknowledgement the provider can delay or reject.
   {
     criterion: 'U12', backend: 'claude', kind: 'capability-absent',

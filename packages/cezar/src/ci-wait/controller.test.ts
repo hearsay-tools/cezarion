@@ -181,7 +181,7 @@ describe('private wait routes', () => {
     const answer = cezarWaitAnswerSchema.parse(JSON.parse(below.body));
     expect(answer).toMatchObject({ ok: false, code: 'invalid_request' });
     expect(answer.ok === false && answer.message).toMatch(/seconds.*60.*7200/);
-    for (const body of [{ kind: 'timer', seconds: 7201 }, { kind: 'human' }, { kind: 'ci', pr: wait.prUrl, runId: 'injected' }, { pr: wait.prUrl }]) {
+    for (const body of [{ kind: 'timer', seconds: 7201 }, { kind: 'worker' }, { kind: 'ci', pr: wait.prUrl, runId: 'injected' }, { pr: wait.prUrl }]) {
       expect(await callCezarWait(body, session.env)).toMatchObject({ ok: false, code: 'invalid_request' });
     }
     expect(JSON.parse((await raw(session.env, '{', undefined, 'wait')).body)).toMatchObject({ ok: false, code: 'invalid_request' });

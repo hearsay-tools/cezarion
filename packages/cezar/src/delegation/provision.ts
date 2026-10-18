@@ -55,7 +55,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         `You are an owned cezar worker. Your parent run ID is ${run.delegation.parentRunId}.`,
         conversationGuidance,
         `You cannot delegate, control peers, merge automatically, or accept your own review.`,
-        `Follow your assigned task and selected input context. Your questions, native or CEZ:ASK, go to your parent, which answers or asks the human; do not wait for a human.`,
+        `Follow your assigned task and selected input context. Your questions — cezar_wait with kind "human" and questions, or a native question — go to your parent, which answers or asks the human; do not wait for a human.`,
         `Native workers are not tracked by cezar: do not spawn them.`,
         `Per-run controls suppress verified native entry points only; custom extensions and same-user unrestricted shell are not hard isolation.`,
         `Commit reviewed work before your parent deliberately integrates it; report the summary, commits, tests and remaining concerns.`,

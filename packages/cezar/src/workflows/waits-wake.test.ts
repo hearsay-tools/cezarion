@@ -191,8 +191,9 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     expect(prompted('claude', `Timer ${second.id} fired`)).toEqual([]);
     expect(turnEnds(run.id)).toBe(parkedTurns);
     expect(store.getRun(run.id)?.automaticWakes).toBe(40);
-    // Nothing open or resolved: a plain park that needs the user and holds no slot.
-    expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
+    // Nothing else open or resolved: the budget's human wait parks for the user and holds no slot
+    // (hearsay-tools/cezarion#1234).
+    expect(store.getRun(run.id)?.waits).toMatchObject([{ kind: 'human', via: 'budget', source: 'cezar', phase: 'open' }]);
     expect(label(run.id)).toBe('needs you');
     expect(engine().monitoring.has(run.id)).toBe(false);
     expect(semaphore.busy()).toBe(0);
