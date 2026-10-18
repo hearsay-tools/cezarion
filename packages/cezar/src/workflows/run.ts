@@ -1,7 +1,7 @@
 import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { doneErrorMessage, waitErrorMessage } from '../ci-wait/errors.ts';
-import { cezarDoneRequestSchema, cezarWaitRequestSchema, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type DoneErrorCode, type CiWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, computeWaitingOn, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
+import { cezarDoneRequestSchema, cezarWaitRequestSchema, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitAnswer, type CezarWaitRequest, type DoneErrorCode, type CiWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, computeWaitingOn, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
 import { ciWaitResultSchema, type CiWaitRequest, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { ciWatchRequest, hasCiWait, identicalWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
@@ -1870,7 +1870,10 @@ export class RunManager {
       registerWait: async (request, via, signal) => {
         try {
           const wait = await this.registerWait(runId, request, via, generation, signal);
-          return { answer: { ok: true, wait_id: wait.id, kind: wait.kind, ...(wait.kind === 'human' ? {} : { deadline: wait.deadline }), open_waits: listOpen() }, wait };
+          const answer: CezarWaitAnswer = wait.kind === 'human'
+            ? { ok: true, wait_id: wait.id, kind: wait.kind, open_waits: listOpen() }
+            : { ok: true, wait_id: wait.id, kind: wait.kind, deadline: wait.deadline, open_waits: listOpen() };
+          return { answer, wait };
         } catch (error) {
           const code = waitErrorCodeSchema.safeParse(error && typeof error === 'object' && 'code' in error ? error.code : undefined);
           if (!code.success) throw error;

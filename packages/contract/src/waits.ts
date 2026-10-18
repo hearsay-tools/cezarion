@@ -94,13 +94,13 @@ export type CezarWaitRequest = z.infer<typeof cezarWaitRequestSchema>;
 export const cezarCancelWaitRequestSchema = z.object({ wait_id: z.uuid() }).strict();
 export type CezarCancelWaitRequest = z.infer<typeof cezarCancelWaitRequestSchema>;
 
-/** One still-open wait as both tools list it back to the agent. A human wait has no deadline. */
-export const openWaitSchema = z.object({
-  wait_id: z.uuid(),
-  kind: z.enum(['ci', 'timer', 'human']),
-  deadline: z.iso.datetime().optional(),
-  summary: z.string().max(256),
-}).strict();
+/** One still-open wait as both tools list it back to the agent. A CI or timer wait carries its
+ *  deadline; a human wait has none. */
+const openWaitFields = { wait_id: z.uuid(), summary: z.string().max(256) };
+export const openWaitSchema = z.discriminatedUnion('kind', [
+  z.object({ ...openWaitFields, kind: z.enum(['ci', 'timer']), deadline: z.iso.datetime() }).strict(),
+  z.object({ ...openWaitFields, kind: z.literal('human') }).strict(),
+]);
 export type OpenWait = z.infer<typeof openWaitSchema>;
 
 export const waitErrorCodeSchema = z.enum([
@@ -112,14 +112,12 @@ export type WaitErrorCode = z.infer<typeof waitErrorCodeSchema>;
 export const WAIT_MESSAGE_MAX = 4096;
 const message = z.string().max(WAIT_MESSAGE_MAX);
 
+const acceptedFields = { ok: z.literal(true), wait_id: z.uuid(), open_waits: z.array(openWaitSchema).max(WAIT_LIMIT) };
 export const cezarWaitAnswerSchema = z.discriminatedUnion('ok', [
-  z.object({
-    ok: z.literal(true),
-    wait_id: z.uuid(),
-    kind: openWaitSchema.shape.kind,
-    deadline: z.iso.datetime().optional(),
-    open_waits: z.array(openWaitSchema).max(WAIT_LIMIT),
-  }).strict(),
+  z.discriminatedUnion('kind', [
+    z.object({ ...acceptedFields, kind: z.enum(['ci', 'timer']), deadline: z.iso.datetime() }).strict(),
+    z.object({ ...acceptedFields, kind: z.literal('human') }).strict(),
+  ]),
   z.object({
     ok: z.literal(false),
     code: waitErrorCodeSchema,

@@ -54,12 +54,9 @@ function summary(wait: Wait): string {
 
 /** The open waits as both tools list them back to the agent. A human wait has no deadline. */
 export function openWaitList(waits: readonly Wait[]): OpenWait[] {
-  return waits.filter((wait) => wait.phase === 'open').map((wait) => ({
-    wait_id: wait.id,
-    kind: wait.kind,
-    ...(wait.kind === 'human' ? {} : { deadline: wait.deadline }),
-    summary: summary(wait),
-  }));
+  return waits.filter((wait) => wait.phase === 'open').map((wait): OpenWait => wait.kind === 'human'
+    ? { wait_id: wait.id, kind: wait.kind, summary: summary(wait) }
+    : { wait_id: wait.id, kind: wait.kind, deadline: wait.deadline, summary: summary(wait) });
 }
 
 /**

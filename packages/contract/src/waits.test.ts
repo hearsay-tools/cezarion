@@ -228,6 +228,19 @@ describe('answers', () => {
     expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind: 'ci', deadline: openWait.deadline }).success).toBe(false);
   });
 
+  // hearsay-tools/cezarion#1234: a CI or timer wait always carries its deadline; a human wait never does.
+  it('ties the deadline to the kind, in the answer and in every open wait', () => {
+    const human = { wait_id: CI_ID, kind: 'human' as const, summary: 'human: Which module?' };
+    expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: CI_ID, kind: 'human', open_waits: [human] }).ok).toBe(true);
+    expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind: 'human', deadline: openWait.deadline, open_waits: [] }).success).toBe(false);
+    for (const kind of ['ci', 'timer'] as const) {
+      expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind, open_waits: [] }).success).toBe(false);
+      expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind, deadline: openWait.deadline, open_waits: [{ ...openWait, kind, deadline: undefined }] }).success).toBe(false);
+    }
+    expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind: 'ci', deadline: openWait.deadline, open_waits: [{ ...human, deadline: openWait.deadline }] }).success).toBe(false);
+    expect(cezarCancelWaitAnswerSchema.safeParse({ cancelled: true, wait_id: CI_ID, open_waits: [{ ...human, deadline: openWait.deadline }] }).success).toBe(false);
+  });
+
   it('extends the CI error codes with the timer refusals', () => {
     expect(waitErrorCodeSchema.options).toEqual(expect.arrayContaining(['invalid_request', 'capacity', 'timers_disabled', 'wake_budget_spent']));
   });
