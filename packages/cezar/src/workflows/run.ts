@@ -39,11 +39,10 @@ import {
   normalizeModelForBackend,
 } from '../core/model-identity.ts';
 import {
-  HANDOFF_ONLY_INSTRUCTIONS,
-  HANDOFF_INSTRUCTIONS,
   appendHandoffAutosaveReport,
   appendHandoffHeartbeat,
   followupsEnabled,
+  handoffInstructions,
   handoffPath,
   recordHandoffPeriodicAutosave,
   seedHandoffFile,
@@ -462,6 +461,9 @@ interface ActiveRun {
   delegationSettings?: DelegationExecutionSettings;
   revokeDelegation?: () => void;
   revokeCiTools?: () => void;
+  /** hearsay-tools/cezarion#1234: the last session started without cezar tools, so its prompt
+   *  taught the lifecycle markers; kept after the session's tools are revoked. */
+  toolless?: boolean;
   ciGeneration?: string;
   ciTurnId?: string;
   waitWakeTurn?: AgentSession;
@@ -1844,6 +1846,7 @@ export class RunManager {
     state.ciTurnId = randomUUID();
     const generation = state.ciGeneration;
     const controller = await this.ciResources.controller();
+    state.toolless = !controller;
     if (!controller || this.disposed || state.cancelled || this.active.get(runId) !== state) return;
     const provisioned = controller.provision(this.cezarToolHandlers(runId, generation));
     state.revokeCiTools = provisioned.revoke;
@@ -2228,7 +2231,7 @@ export class RunManager {
     const settled: Wait = latest.kind === 'ci'
       ? { ...latest, phase: 'resolved', resolvedAt, result: result ?? { outcome: 'deadline', headSha: latest.headSha, observedAt: resolvedAt, checks: [], totalChecks: 0, truncated: false } }
       : { ...latest, phase: 'resolved', resolvedAt };
-    const input: AgentInput = { id: latest.id, parentRunId: runId, source: 'lifecycle', createdAt: resolvedAt, text: waitResultText(settled) };
+    const input: AgentInput = { id: latest.id, parentRunId: runId, source: 'lifecycle', createdAt: resolvedAt, text: waitResultText(settled, { tools: !state?.toolless }) };
     this.store.commitWait(runId, settled, input);
     try { this.queueWaitWake(runId); }
     catch { this.retryWaitAdmission(runId); }
@@ -6876,7 +6879,7 @@ export class RunManager {
       delegation?.instructions,
       this.automationsPart(),
       artifactInstructions(continueProfile.env.CEZ_ARTIFACTS_DIR),
-      generateFollowups ? HANDOFF_INSTRUCTIONS : HANDOFF_ONLY_INSTRUCTIONS,
+      handoffInstructions({ tools: !!ciTools, followups: generateFollowups }),
     );
     session = startManagedSession(runner,
       {
@@ -7800,9 +7803,7 @@ export class RunManager {
             delegation?.instructions,
             this.automationsPart(),
             artifactInstructions(stepProfile.env.CEZ_ARTIFACTS_DIR),
-            followupsEnabled() && input.generateFollowups !== false
-              ? HANDOFF_INSTRUCTIONS
-              : HANDOFF_ONLY_INSTRUCTIONS,
+            handoffInstructions({ tools: !!ciTools, followups: followupsEnabled() && input.generateFollowups !== false }),
           ),
           userPrompt,
           images,

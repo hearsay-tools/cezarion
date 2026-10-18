@@ -1,17 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { deriveAttention, toRunSummary, type CezarWaitRequest, type HumanWaitEntry } from '@open-mercato/cezar-contract';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
+import { HANDOFF_ONLY_INSTRUCTIONS, handoffInstructions } from '../handoff.ts';
 import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
-import { eventCheckpoint, manager, parent, restart, root, semaphore, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { eventCheckpoint, manager, parent, restart, root, semaphore, store, terminal, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
 import { MAX_AUTO_CONTINUES } from './run.ts';
+import { MONITORING_WAKE_NUDGE, MONITORING_WAKE_NUDGE_MARKERS } from './waits.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { toolCall } from './waits-parity.testkit.ts';
 
@@ -187,5 +189,70 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     expect(settled(run.id, timer.id)?.phase).toBe('cancelled');
     expect(humanOpen(run.id)).toMatchObject([{ via: 'budget', source: 'cezar', phase: 'open', askSeq: gates(run.id)[0]!.seq }]);
     expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human' });
+  });
+});
+
+// hearsay-tools/cezarion#1234: the prompt teaches the tools a session has. A session whose tool
+// controller is unavailable keeps the marker prompt, and the marker lines keep working there.
+describe('the lifecycle prompt follows the session\'s cezar tools', { timeout: 45_000 }, () => {
+  useWorkerWaitFixture();
+  afterEach(() => vi.restoreAllMocks());
+
+  /** The `--append-system-prompt` of every Claude process the mock started, oldest first. */
+  const prompts = () => existsSync(join(root, 'args')) ? readFileSync(join(root, 'args'), 'utf8').trim().split('\n')
+    .map(line => JSON.parse(line) as string[]).filter(argv => argv.includes('--append-system-prompt'))
+    .map(argv => argv[argv.indexOf('--append-system-prompt') + 1]!) : [];
+  const finished = (id: string) => terminal.includes(store.getRun(id)?.status ?? '') && !manager.isActive(id);
+  const closings = (id: string) => store.readEvents(id).filter(event => event.type === 'lifecycle' && event.message === 'goal achieved — session closed');
+  function wire({ tools }: { tools: boolean }) {
+    claudeWire();
+    process.env.CEZ_MOCK_ARGS_FILE = join(root, 'args');
+    if (!tools) vi.spyOn((manager as unknown as { ciResources: { controller(): Promise<unknown> } }).ciResources, 'controller').mockResolvedValue(undefined);
+  }
+  const opened = async () => {
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios.baseline!, runner: 'claude' });
+    await until(() => store.getRun(run.id)?.status === 'waiting');
+    return run;
+  };
+
+  it('a session without cezar tools keeps the marker prompt', async () => {
+    wire({ tools: false });
+    await opened();
+    const [prompt] = prompts();
+    expect(prompt).toContain(HANDOFF_ONLY_INSTRUCTIONS);
+    expect(prompt).not.toContain('Lifecycle tools (cezar)');
+  });
+
+  it('the done line still finishes a session without cezar tools', async () => {
+    wire({ tools: false });
+    const run = await opened();
+    expect(manager.sendMessage(run.id, [{ type: 'text', text: messagesPrompt('claude', ['All done.\nCEZ:DONE']) }])).toBe(true);
+    await until(() => finished(run.id));
+    expect(closings(run.id)).toEqual([expect.objectContaining({ via: 'done-line' })]);
+  });
+
+  for (const withTools of [false, true]) {
+    it(`a monitoring wake ${withTools ? 'with' : 'without'} cezar tools speaks the lifecycle the prompt taught`, async () => {
+      wire({ tools: withTools });
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: messagesPrompt('claude', ['Still waiting for the load test.\nCEZ:MONITORING']), runner: 'claude' });
+      await until(() => store.getRun(run.id)?.status === 'waiting' && store.getRun(run.id)?.waits?.some(wait => wait.kind === 'timer') === true);
+      const timer = store.getRun(run.id)!.waits!.find(wait => wait.kind === 'timer')!;
+      engine().waitTimers.get(timer.id)!.timer._onTimeout();
+      await until(() => store.getRun(run.id)?.agentInputs?.some(input => input.id === timer.id) === true);
+      expect(store.getRun(run.id)!.agentInputs!.find(input => input.id === timer.id)!.text).toBe(withTools ? MONITORING_WAKE_NUDGE : MONITORING_WAKE_NUDGE_MARKERS);
+    });
+  }
+
+  it('a session with cezar tools is taught the tools when it opens and when it continues', async () => {
+    wire({ tools: true });
+    const run = await opened();
+    engine().active.get(run.id)!.session!.end();
+    await until(() => finished(run.id));
+    expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
+    await until(() => prompts().length === 2 && store.getRun(run.id)?.status === 'waiting');
+    for (const prompt of prompts()) {
+      expect(prompt).toContain(handoffInstructions({ tools: true, followups: false }));
+      expect(prompt).not.toContain('CEZ:DONE');
+    }
   });
 });

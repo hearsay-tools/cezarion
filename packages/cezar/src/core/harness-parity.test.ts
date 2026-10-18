@@ -2562,10 +2562,17 @@ describe('harness parity — live task scratch', () => {
 // #399 incident: issue Agent context, run 3a3c1ffa (original history unavailable).
 // Prompt delivery is the contract under test; these offline wires cannot prove
 // that a live model follows the instruction. Markerless output must still wait.
+// hearsay-tools/cezarion#1234: every runner honors cezarTools, so every session here is taught
+// the lifecycle tools instead of the markers (the toolless form is in human-waits.test.ts).
 describe('harness parity — monitoring wrap-up contract (#399)', () => {
-  const finishedRule = 'When the watched work is finished and the task goal is complete, end your final message with CEZ:DONE.';
-  const pendingRule = 'If the watched work is still pending, end with CEZ:MONITORING.';
-  const markerlessRule = 'Never yield markerless for a monitoring wrap-up.';
+  const promptRules = [
+    'When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn.',
+    'call cezar_wait with kind "ci" for a pull request\'s checks or kind "timer" to re-check later, then end your turn.',
+  ];
+  const wakeRules = [
+    'When the goal is complete and verified, call cezar_done.',
+    'If the watched work is still pending, call cezar_wait again.',
+  ];
   type Wire = {
     userText?: string; method?: string; url?: string; prompt?: string;
     params?: { input?: { text?: string }[]; prompt?: { text?: string }[] };
@@ -2597,10 +2604,9 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
     expect(index).toBeGreaterThanOrEqual(0);
     return argv[index + 1] ?? '';
   };
-  const assertRules = (text: string) => {
-    expect(text).toContain(finishedRule);
-    expect(text).toContain(pendingRule);
-    expect(text).toContain(markerlessRule);
+  const assertRules = (text: string, rules: readonly string[]) => {
+    for (const rule of rules) expect(text).toContain(rule);
+    expect(text).not.toContain('CEZ:MONITORING');
   };
   const recording = async (body: (dir: string) => Promise<void>) => {
     const dir = mkdtempSync(join(tmpdir(), 'cez-monitoring-prompt-'));
@@ -2629,8 +2635,8 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
                 expect(manager.continueRun(runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
                 await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
               }
-              assertRules(systemPrompt(backend, dir));
-              expect(systemPrompt(backend, dir)).toContain('end plainly (no marker) only when you are genuinely waiting on the user');
+              assertRules(systemPrompt(backend, dir), promptRules);
+              expect(systemPrompt(backend, dir)).toContain('When you need the user — a decision only they can make, or missing input — call cezar_wait with kind "human"');
             });
         });
       }, 60_000);
@@ -2648,12 +2654,12 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
           await waitFor(() => !!monitoringTimerOf(manager, fixture.runId));
           monitoringTimerOf(manager, fixture.runId)!._onTimeout();
           await waitFor(() => manager.isActive(fixture.runId) && messages(backend, dir).length > 0);
-          assertRules(systemPrompt(backend, dir));
+          assertRules(systemPrompt(backend, dir), promptRules);
         });
       });
     }, 60_000);
 
-    it(`${backend} R39 monitoring wake delivers DONE and MONITORING instructions on the native message channel`, async () => {
+    it(`${backend} R39 monitoring wake delivers the cezar_done and cezar_wait instructions on the native message channel`, async () => {
       await recording(async dir => {
         await driveRun(backend, 'split-text', record => record?.status === 'waiting' && !!monitoringWakeOf(record), 30_000,
           async ({ store, manager, runId }) => {
@@ -2661,7 +2667,7 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
             expect(timer).toBeDefined();
             timer._onTimeout();
             await waitFor(() => messages(backend, dir).length > 1);
-            assertRules(messages(backend, dir)[1]!);
+            assertRules(messages(backend, dir)[1]!, wakeRules);
             expect(store.readEvents(runId).some(event => event.type === 'user-message')).toBe(false);
           });
       });

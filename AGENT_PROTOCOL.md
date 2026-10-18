@@ -1561,9 +1561,12 @@ the v2 fallback uses the same parent-only guard.
 
 R36–R39 (hearsay-tools/cezarion#399) record the shared monitoring wrap-up contract on every native
 prompt channel for fresh, Continue and restart-recovered sessions, and the
-automatic monitoring wake. Finished work with the task goal complete requires
-`CEZ:DONE`; pending work requires `CEZ:MONITORING`. Genuine user questions retain
-their own paths. R40 keeps completion prose without a marker parked as waiting;
+automatic monitoring wake. Every runner honors `cezarTools`, so since
+hearsay-tools/cezarion#1234 the contract names the tools: finished and verified work calls
+`cezar_done`, pending work calls `cezar_wait`, and a question for the user calls
+`cezar_wait` with kind `"human"`. A session started without cezar tools keeps the
+marker prompt and the marker wake (`CEZ:DONE`, `CEZ:MONITORING`); `human-waits.test.ts`
+pins that form on the Claude wire. R40 keeps completion prose without a marker parked as waiting;
 the harness does not infer completion from prose. Offline prompt recordings prove
 delivery, not live model compliance.
 

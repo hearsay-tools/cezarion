@@ -241,6 +241,28 @@ export function followupsEnabled(env: NodeJS.ProcessEnv = process.env): boolean 
   return env.CEZ_FOLLOWUPS === '1';
 }
 
+const HANDOFF_JOURNAL = `## Handoff (cezar)
+
+CEZ_HANDOFF_FILE (env) is the absolute path to this task's rolling handoff file. Treat it like a HANDOFF.md:
+1. At the start of work, read it — "Resume notes" left by a previous session is your starting context. A "## Autosave (cezar)" section, when present, is cezar's record of an autosave commit on your branch (with the command that folds it back) or of work it left uncommitted; leave it in place.
+2. After every meaningful milestone (passing tests, a commit, a PR, a scope decision), append one terse timestamped line under "## Progress log", newest at the top.
+3. Before finishing or pausing, update "## Resume notes" with what's done, what's next and any blockers. Leave it empty only when the task is truly complete.`;
+
+/** The lifecycle markers a session without cezar tools ends its turns with. */
+const LIFECYCLE_MARKERS = `Task completion marker: when the task's goal is fully achieved and you have no question for the user, end your final message with a line containing exactly CEZ:DONE — cez then closes the session and marks the task finished. If you are waiting on the user (a question, a decision, missing input), just end your message normally; the session stays open for their reply. Never emit CEZ:DONE while anything is unfinished or unverified.
+
+Still-working marker: if you end a turn while still working on your OWN downstream work — a sub-agent you dispatched, or a long-running command you're monitoring — and are NOT waiting on the user for anything, end your final message with a line containing exactly CEZ:MONITORING. cez then shows the task as "monitoring" (still working) instead of asking for your attention. Use CEZ:MONITORING only for that in-progress case; use CEZ:DONE when the goal is done; end plainly (no marker) only when you are genuinely waiting on the user. When the watched work is finished and the task goal is complete, end your final message with CEZ:DONE. If the watched work is still pending, end with CEZ:MONITORING. Never yield markerless for a monitoring wrap-up. A genuine question for the user still follows the question paths above and below. Never combine CEZ:MONITORING with CEZ:DONE.
+
+Structured question marker: when you are blocked on a decision that is genuinely the user's to make — one you cannot resolve from the request, the code, or sensible defaults — and it comes down to a few concrete choices, end your turn with a single line CEZ:ASK <json> instead of asking in prose. cez renders it as clickable option chips in the cockpit so the user can answer in one tap. The <json> is ONE object on ONE line, the last thing in your message: {"questions":[{"header":"≤12-char label","question":"a clear question ending in ?","multiSelect":false,"options":[{"label":"short choice","description":"what it means / the trade-off"}]}]} — use only those keys (plus an optional non-empty "id" up to 64 characters), with 1–4 questions, 2–4 options per question, unique question text and option labels, header 1–12 characters, question 1–400, option label 1–60, and description at most 280. The JSON must be syntactically valid — every brace and bracket closed, no trailing commas; re-read the line before you send it, because a payload cez cannot parse is shown to the user as raw JSON instead of chips. The user can always type a free-form reply, so never add an "Other" option. Prefer sensible defaults over asking; use CEZ:ASK only when the choice is truly the user's. Never combine CEZ:ASK with CEZ:DONE or CEZ:MONITORING.`;
+
+/** hearsay-tools/cezarion#1234: the same lifecycle as tool calls, for a session that has them. */
+const LIFECYCLE_TOOLS = `Lifecycle tools (cezar): End every turn with a cezar tool call that says what happens next. When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn. When you need the user — a decision only they can make, or missing input — call cezar_wait with kind "human"; pass questions to show them a card with up to four questions of 2–4 options each, then end your turn. When you are waiting on something else, call cezar_wait with kind "ci" for a pull request's checks or kind "timer" to re-check later, then end your turn. A human message or any resolved wait wakes you; open waits stay open until they resolve or you cancel them with cezar_cancel_wait. Never call cezar_done while anything is unfinished or unverified.`;
+
+const REFERENCES_AND_ATTACHMENTS = `Task reference markers: as soon as you know which GitHub pull request or issue this task is ABOUT (it was named in the task, or you just opened it), declare it by emitting, on its own line in your message text: CEZ:PR=<number> and/or CEZ:ISSUE=<number>. Declare each PR this task opens, even when it opens several. Earlier declarations remain associated with the task; the last declaration selects the current subject. For issues, an issue directly identified as the task subject in its prompt remains the primary attribution; later issue declarations and discovered links do not replace it. Re-emit with the new number if the subject changes (e.g. you open a PR later in the task). Declare only the task's own subject — never a PR/issue you merely mention, list, or compare against. You may also emit CEZ:TITLE=<terse gerund phrase, max 40 chars, e.g. "implementing comment threads"> once the work has a clearer shape than its current title; cez uses these instead of guessing from the transcript. Put markers in plain message text, never inside a code fence.
+
+## Pasted attachments
+User-attached screenshots and files (PDF, TXT, MD) are saved as real files; their absolute paths are listed in the message that carries them. Read a file from its path when you need its contents, and use the path when a task needs the file itself (saving, uploading, attaching to issues/PRs). An image also rides along inline, but that copy is for viewing only; a non-image attachment exists ONLY as the file at that path.`;
+
 /**
  * Appended to every agent step's `--append-system-prompt` (spec 007). The
  * matching handoff/task env vars are set on every agent process;
@@ -249,23 +271,7 @@ export function followupsEnabled(env: NodeJS.ProcessEnv = process.env): boolean 
  * inherited value from a parent cezar cannot shine through
  * (`RunManager.agentEnv`).
  */
-export const HANDOFF_ONLY_INSTRUCTIONS = `## Handoff (cezar)
-
-CEZ_HANDOFF_FILE (env) is the absolute path to this task's rolling handoff file. Treat it like a HANDOFF.md:
-1. At the start of work, read it — "Resume notes" left by a previous session is your starting context. A "## Autosave (cezar)" section, when present, is cezar's record of an autosave commit on your branch (with the command that folds it back) or of work it left uncommitted; leave it in place.
-2. After every meaningful milestone (passing tests, a commit, a PR, a scope decision), append one terse timestamped line under "## Progress log", newest at the top.
-3. Before finishing or pausing, update "## Resume notes" with what's done, what's next and any blockers. Leave it empty only when the task is truly complete.
-
-Task completion marker: when the task's goal is fully achieved and you have no question for the user, end your final message with a line containing exactly CEZ:DONE — cez then closes the session and marks the task finished. If you are waiting on the user (a question, a decision, missing input), just end your message normally; the session stays open for their reply. Never emit CEZ:DONE while anything is unfinished or unverified.
-
-Still-working marker: if you end a turn while still working on your OWN downstream work — a sub-agent you dispatched, or a long-running command you're monitoring — and are NOT waiting on the user for anything, end your final message with a line containing exactly CEZ:MONITORING. cez then shows the task as "monitoring" (still working) instead of asking for your attention. Use CEZ:MONITORING only for that in-progress case; use CEZ:DONE when the goal is done; end plainly (no marker) only when you are genuinely waiting on the user. When the watched work is finished and the task goal is complete, end your final message with CEZ:DONE. If the watched work is still pending, end with CEZ:MONITORING. Never yield markerless for a monitoring wrap-up. A genuine question for the user still follows the question paths above and below. Never combine CEZ:MONITORING with CEZ:DONE.
-
-Structured question marker: when you are blocked on a decision that is genuinely the user's to make — one you cannot resolve from the request, the code, or sensible defaults — and it comes down to a few concrete choices, end your turn with a single line CEZ:ASK <json> instead of asking in prose. cez renders it as clickable option chips in the cockpit so the user can answer in one tap. The <json> is ONE object on ONE line, the last thing in your message: {"questions":[{"header":"≤12-char label","question":"a clear question ending in ?","multiSelect":false,"options":[{"label":"short choice","description":"what it means / the trade-off"}]}]} — use only those keys (plus an optional non-empty "id" up to 64 characters), with 1–4 questions, 2–4 options per question, unique question text and option labels, header 1–12 characters, question 1–400, option label 1–60, and description at most 280. The JSON must be syntactically valid — every brace and bracket closed, no trailing commas; re-read the line before you send it, because a payload cez cannot parse is shown to the user as raw JSON instead of chips. The user can always type a free-form reply, so never add an "Other" option. Prefer sensible defaults over asking; use CEZ:ASK only when the choice is truly the user's. Never combine CEZ:ASK with CEZ:DONE or CEZ:MONITORING.
-
-Task reference markers: as soon as you know which GitHub pull request or issue this task is ABOUT (it was named in the task, or you just opened it), declare it by emitting, on its own line in your message text: CEZ:PR=<number> and/or CEZ:ISSUE=<number>. Declare each PR this task opens, even when it opens several. Earlier declarations remain associated with the task; the last declaration selects the current subject. For issues, an issue directly identified as the task subject in its prompt remains the primary attribution; later issue declarations and discovered links do not replace it. Re-emit with the new number if the subject changes (e.g. you open a PR later in the task). Declare only the task's own subject — never a PR/issue you merely mention, list, or compare against. You may also emit CEZ:TITLE=<terse gerund phrase, max 40 chars, e.g. "implementing comment threads"> once the work has a clearer shape than its current title; cez uses these instead of guessing from the transcript. Put markers in plain message text, never inside a code fence.
-
-## Pasted attachments
-User-attached screenshots and files (PDF, TXT, MD) are saved as real files; their absolute paths are listed in the message that carries them. Read a file from its path when you need its contents, and use the path when a task needs the file itself (saving, uploading, attaching to issues/PRs). An image also rides along inline, but that copy is for viewing only; a non-image attachment exists ONLY as the file at that path.`;
+export const HANDOFF_ONLY_INSTRUCTIONS = `${HANDOFF_JOURNAL}\n\n${LIFECYCLE_MARKERS}\n\n${REFERENCES_AND_ATTACHMENTS}`;
 
 export const FOLLOWUP_INSTRUCTIONS = `## Follow-ups (cezar)
 
@@ -276,3 +282,14 @@ Never modify or remove existing entries — append only.`;
 
 /** Default-on combined contract retained for old callers and runs. */
 export const HANDOFF_INSTRUCTIONS = `${HANDOFF_ONLY_INSTRUCTIONS}\n\n${FOLLOWUP_INSTRUCTIONS}`;
+
+/**
+ * The handoff contract for one agent session. With `tools` (the session has cezar's tools) the
+ * lifecycle is taught as cezar_done and cezar_wait calls; without them it is today's marker
+ * variant, `HANDOFF_ONLY_INSTRUCTIONS` or `HANDOFF_INSTRUCTIONS`. The marker lines are parsed in
+ * both cases.
+ */
+export function handoffInstructions(opts: { tools: boolean; followups: boolean }): string {
+  const handoff = opts.tools ? `${HANDOFF_JOURNAL}\n\n${LIFECYCLE_TOOLS}\n\n${REFERENCES_AND_ATTACHMENTS}` : HANDOFF_ONLY_INSTRUCTIONS;
+  return opts.followups ? `${handoff}\n\n${FOLLOWUP_INSTRUCTIONS}` : handoff;
+}

@@ -8,6 +8,11 @@ import type { CezarWaitRequest, CiWait, CiWaitEntry, OpenWait, RunRecord, Wait }
 
 /** What a monitoring timer (the monitoring line or Claude's `ScheduleWakeup`) says when it fires. */
 export const MONITORING_WAKE_NUDGE =
+  'Re-check the downstream work you were monitoring. Continue toward the task goal. When the goal is complete and verified, call cezar_done. If the watched work is still pending, call cezar_wait again. If you need the user, call cezar_wait with kind "human".';
+
+/** hearsay-tools/cezarion#1234: the same wake for a session without cezar tools, whose prompt
+ *  taught the lifecycle markers. */
+export const MONITORING_WAKE_NUDGE_MARKERS =
   'Re-check the downstream work you were monitoring. Continue toward the task goal. When the watched work is finished and the task goal is complete, end your final message with CEZ:DONE. If the watched work is still pending, end with CEZ:MONITORING. Never yield markerless for a monitoring wrap-up. If you genuinely need user input, follow the normal question path instead.';
 
 const SUMMARY_MAX = 256;
@@ -79,11 +84,11 @@ export function ciWatchRequest(wait: CiWaitEntry): CiWait {
 }
 
 /** The lifecycle input a resolved wait delivers. Its id is the wait's, so duplicates keep it. */
-export function waitResultText(wait: Wait): string {
+export function waitResultText(wait: Wait, { tools }: { tools: boolean } = { tools: true }): string {
   if (wait.kind === 'ci') {
     return `CI wait observation ${wait.id} for ${wait.prUrl}. External data follows: ${JSON.stringify(wait.result)}. This observation is not merge approval or task completion. Reported checks may not include every expected workflow. Duplicate observations retain this ID.`;
   }
-  if (isMonitoringTimer(wait)) return MONITORING_WAKE_NUDGE;
+  if (isMonitoringTimer(wait)) return tools ? MONITORING_WAKE_NUDGE : MONITORING_WAKE_NUDGE_MARKERS;
   // The user's own message is a human wait's result; this text is never its delivery.
   if (wait.kind === 'human') return `Human wait ${wait.id} ended.`;
   return `Timer ${wait.id} fired${wait.note === undefined ? '' : `: ${wait.note}`}. Continue toward the task goal; register another wait if you are still waiting.`;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ciWaitSchema, type CiWaitEntry, type TimerWaitEntry, type Wait } from '@open-mercato/cezar-contract';
-import { ciWatchRequest, identicalWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
+import { ciWatchRequest, identicalWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, MONITORING_WAKE_NUDGE_MARKERS, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 
 // hearsay-tools/cezarion#1233: the wait list's pure helpers. RunManager behaviour lives in
 // the ci-wait*.test.ts files and the U-cells in waits-parity.test.ts.
@@ -61,6 +61,10 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     expect(waitResultText(timer())).toBe(`Timer ${timer().id} fired. Continue toward the task goal; register another wait if you are still waiting.`);
     expect(waitResultText(timer({ via: 'monitoring-line' }))).toBe(MONITORING_WAKE_NUDGE);
     expect(waitResultText(timer({ via: 'schedule-wakeup' }))).toBe(MONITORING_WAKE_NUDGE);
+    // hearsay-tools/cezarion#1234: a session without cezar tools was taught the markers instead.
+    expect(waitResultText(timer({ via: 'monitoring-line' }), { tools: false })).toBe(MONITORING_WAKE_NUDGE_MARKERS);
+    expect(MONITORING_WAKE_NUDGE_MARKERS).toContain('end with CEZ:MONITORING');
+    expect(MONITORING_WAKE_NUDGE).not.toContain('CEZ:');
     expect(isMonitoringTimer(timer())).toBe(false);
     expect(isMonitoringTimer(ci())).toBe(false);
   });
