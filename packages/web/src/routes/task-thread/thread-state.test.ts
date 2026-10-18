@@ -879,6 +879,14 @@ describe('reduceThread — AskUser cards (#473)', () => {
     expect(ask).toMatchObject({ kind: 'ask', id: 'ask_1', resolved: false })
   })
 
+  // hearsay-tools/cezarion#1234: a question without options is open; it is kept, not dropped.
+  it('ask.requested keeps an open question that has no options', () => {
+    const open = { header: 'Name', question: 'What should it be called?' }
+    const ask = allItems([line(2, 'ask.requested', { requestId: 'ask_1', questions: [...ASK.questions, open, { question: 'No header?' }] })])
+      .find((i) => i.kind === 'ask')
+    expect(ask).toMatchObject({ kind: 'ask', questions: [ASK.questions[0], open] })
+  })
+
   it('the next user-message resolves the ask and records the answer', () => {
     const ask = allItems([
       line(1, 'text', { text: 'options' }),

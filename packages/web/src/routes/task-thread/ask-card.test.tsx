@@ -386,6 +386,52 @@ describe('AskCard — answering after the session has ended', () => {
   })
 })
 
+// hearsay-tools/cezarion#1234: a question without options is open; the user types the answer.
+const openAsk: ThreadAsk = {
+  kind: 'ask',
+  id: 'ask_open',
+  resolved: false,
+  questions: [{ header: 'Name', question: 'What should the command be called?' }],
+}
+
+describe('AskCard — open questions', () => {
+  it('shows a text field instead of choices and sends "header: text"', () => {
+    renderAsk(openAsk)
+    const question = screen.getByRole('group', { name: 'What should the command be called?' })
+    // No chips and no Other toggle: the field is the answer.
+    expect(within(question).queryByRole('button')).toBeNull()
+    const answer = within(question).getByRole('textbox', { name: 'Your answer' })
+    const send = screen.getByRole('button', { name: 'Send answer' }) as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    expect(document.querySelector('[data-slot="ask-hint"]')?.textContent).toBe('enter your answer above — or type a reply below')
+    fireEvent.change(answer, { target: { value: '   ' } })
+    expect(send.disabled).toBe(true)
+    fireEvent.change(answer, { target: { value: 'cez ask' } })
+    expect(send.disabled).toBe(false)
+    fireEvent.click(send)
+    expect(mutateAsync).toHaveBeenCalledWith({ text: 'Name: cez ask' })
+  })
+
+  it('beside a choice question, one Send answers both', () => {
+    renderAsk({ ...openAsk, questions: [singleAsk.questions[0]!, openAsk.questions[0]!] })
+    const send = screen.getByRole('button', { name: 'Send answer' }) as HTMLButtonElement
+    // The card is not one-tap any more: the chip only selects.
+    fireEvent.click(screen.getByRole('button', { name: /date-fns/ }))
+    expect(mutateAsync).not.toHaveBeenCalled()
+    expect(send.disabled).toBe(true)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your answer' }), { target: { value: 'cez ask' } })
+    fireEvent.click(send)
+    expect(mutateAsync).toHaveBeenCalledWith({ text: 'Library: date-fns\nName: cez ask' })
+  })
+
+  it('routed to the parent, it says the parent answers in words', () => {
+    renderAsk({ ...openAsk, routedToParent: true, parentRunId: '11111111-2222-4333-8444-555555555555' })
+    expect(screen.getByText('What should the command be called?')).toBeTruthy()
+    expect(screen.queryByRole('textbox')).toBeNull()
+    expect(document.querySelector('[data-slot="ask-open-routed"]')?.textContent).toBe('Open question: answered in words, with no options.')
+  })
+})
+
 describe('AskCard for a worker question routed to its parent (#505)', () => {
   const parentId = '11111111-2222-4333-8444-555555555555'
   it('renders the question read-only with a link to the parent task', () => {

@@ -971,12 +971,13 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
       }
       case 'ask.requested': {
         // A structured question (#473) — render it as an ask card in the current
-        // turn. Guard the payload (a bad line costs one event, never a throw).
+        // turn. Guard the payload (a bad line costs one event, never a throw). A question
+        // without options is open (hearsay-tools/cezarion#1234): the user types its answer.
         const requestId = str(event.requestId)
         if (requestId === undefined || !Array.isArray(event.questions)) break
         const questions = (event.questions as unknown[]).filter(
           (q): q is UiAskQuestion =>
-            isRecord(q) && typeof q.header === 'string' && Array.isArray(q.options),
+            isRecord(q) && typeof q.header === 'string' && (q.options === undefined || Array.isArray(q.options)),
         )
         if (questions.length === 0) break
         const ask: ThreadAsk = { kind: 'ask', id: requestId, questions, resolved: false, askSeq: event.seq }
