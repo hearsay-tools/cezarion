@@ -1099,7 +1099,7 @@ the observation. Later successful settlement must leave that failed attempt inta
 Clean session closure while CI is pending still parks without failure. No runner
 exemptions or normalized-event injection.
 
-**U0–U4, U6, U7–U14, U16** (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234) pin the
+**U0–U4, U6, U7–U14, U16** (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234, with U6s, U9c and U16b) pin the
 wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
 normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`, `cezar_ask`,
 `cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
@@ -1152,10 +1152,17 @@ backoff (each retry waits for it, and Continue clears it), the usage-limit failu
 not counted, a failed run's held result across a restart and Stop, and Stop on a
 usage-limited held run, which also cancels its automatic resume.
 
-Phase 2 (hearsay-tools/cezarion#1234) adds five cells. U16 spends the automatic-wake budget to
+Phase 2 (hearsay-tools/cezarion#1234) adds eight cells. U16 spends the automatic-wake budget to
 39, closes the session, and fires a timer: the scheduler continuation that delivers it charges
 the fortieth wake, `cezar_wait` then refuses a timer with `wake_budget_spent`, and a human
-Continue resets the count to 0. U7h lands the ask line, `cezar_ask` (its card holding an open
+Continue resets the count to 0. U16b spends the whole budget, closes the session and fires
+both timers, as recovery fires overdue ones: each is cancelled, the last opens a `budget`
+human wait that is shown and reads Needs you with no session, and Continue answers it. U9c
+puts a failure count on the record and blocks the store's writes: Finish still stops the
+run, because the counter writes outside a delivery are best-effort. U6s calls `cezar_done`
+in the first of two workflow steps: it is refused with `not_final_step`, nothing closes, and
+the second step runs. U10 also reads the committed row as the charge note is written: the
+delivery, the charge and the cleared failure count are there together. U7h lands the ask line, `cezar_ask` (its card holding an open
 question) and a native ask in the same list with their `via`, and the user's answer delivers each; Claude, Pi,
 Cursor (print) and OMP are exempt from the native case as `native ask arrives as the portable
 marker on this wire` and assert the `ask-line` alias instead. Two more U7h cases run on every
