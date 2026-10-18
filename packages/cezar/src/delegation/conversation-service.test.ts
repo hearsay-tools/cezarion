@@ -171,7 +171,7 @@ describe('durable conversations', () => {
     await expect(f.service.send(f.caller, { ...request, resume: true, timeoutSeconds: 86401 })).rejects.toThrow();
     expect((await f.service.send(f.caller, { ...request, resume: true })).message.deadline).toBeDefined();
   });
-  it('keeps a cancelled request cancelled when its reply arrives after the deadline', async () => {
+  it('keeps a cancelled request cancelled when a reply arrives', async () => {
     const w = await worker();
     const sent = await f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'request', text: 'Report', timeoutSeconds: 600 });
     const cancelled = await f.service.cancelRequest(f.caller, { requestId: sent.message.id });
