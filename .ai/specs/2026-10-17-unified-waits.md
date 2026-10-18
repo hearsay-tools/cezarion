@@ -718,8 +718,8 @@ Calls made while building 2b (hearsay-tools/cezarion#1234), within "Left to the 
   answers the nudge with a `cezar_ask` card (the ask line in a session taught the markers), so a
   dry-run task parks on a question after one extra turn. With `plain` the mocks answer in plain
   text, and the run reaches Cezar's no-wait wait. The unit fixtures default to `plain`, the
-  closest to the plain park they were written for, and so does `composer.e2e.ts`. The cells that
-  need the card opt out.
+  closest to the plain park they were written for, and so do `composer.e2e.ts` and the packaged
+  `task-cli.test.ts`. The cells that need the card opt out.
 - **The compare column keeps the agent's summary.** The nudge's extra turn writes another
   `turn complete — …` heartbeat at the top of the Progress log. The variants compare column reads
   the log's first lines, so `handoffProgressExcerpt` now shows the agent's own lines and falls back
