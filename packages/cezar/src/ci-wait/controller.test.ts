@@ -230,9 +230,10 @@ describe('private wait routes', () => {
 
   it('POST /tools/done answers 401 once the capability is revoked', async () => {
     let complete!: () => void;
-    const session = (await controller()).provision(handlers({ finishTurn: async () => { await new Promise<void>(resolve => complete = resolve); return accepted; } }));
+    let entered!: () => void; const handling = new Promise<void>(resolve => entered = resolve);
+    const session = (await controller()).provision(handlers({ finishTurn: async () => { await new Promise<void>(resolve => { complete = resolve; entered(); }); return accepted; } }));
     const pending = raw(session.env, JSON.stringify({}), undefined, 'done');
-    await vi.waitFor(() => expect(complete).toBeDefined());
+    await handling;
     session.revoke(); complete();
     const revoked = await pending;
     expect(revoked.status).toBe(401);
