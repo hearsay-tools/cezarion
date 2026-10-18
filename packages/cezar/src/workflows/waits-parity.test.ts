@@ -10,10 +10,10 @@ import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { collect, manager, parent, register, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
-import { claudeScheduleWakeupDelay, MAX_WAKE_DELIVERY_ATTEMPTS, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR } from './run.ts';
+import { claudeScheduleWakeupDelay, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR } from './run.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt } from './monitoring-turn.testkit.ts';
-import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { withDelayedCommand, withHeldPrintResponse, withRejectedCommand } from '../core/owned-input-delivery.testkit.ts';
 import { ciNativeMessages, gatedProviderFailure, persistentWakeFailure, thenSay, TIMER_WAKE_OPENING, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
 
@@ -136,7 +136,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U7h', 'U9h', 'U6', 'U7d', 'U6s']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -512,6 +512,23 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(store.getRun(run.id)?.automaticWakes).toBe(0);
       await until(() => store.getRun(run.id)?.status === 'waiting');
       expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+
+    // Clearing the wake counters is bookkeeping: a refused write may not stop a cleanup from
+    // stopping the run.
+    it(`${runner} U9c with a delivery-failure count on the record and the store refusing writes, Finish still stops the run`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+      await until(() => store.getRun(run.id)?.status === 'waiting');
+      store.updateRun(run.id, { waitDeliveryFailures: 2 });
+      store.flush();
+      const unmute = muteLockedDatabaseLogs();
+      const unblock = blockRunWrites(join(root, '.ai/cezar'));
+      try {
+        expect(manager.finish(run.id)).toBe(true);
+        await until(() => !manager.isActive(run.id));
+      } finally { unblock(); unmute(); }
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
 

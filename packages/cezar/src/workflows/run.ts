@@ -109,7 +109,7 @@ import { parentReadiness } from '../delegation/readiness.ts';
 import { answersQuestion, openQuestions, questionMessage } from '../delegation/questions.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
-import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
+import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState, type WakeCounters } from '../runs/store.ts';
 import { isReclaimable, reclaimWorktrees, rematerializeReclaimedWorktree } from '../runs/retention.ts';
 import {
   AgentTempDirError,
@@ -2321,7 +2321,7 @@ export class RunManager {
       const retry = this.wakeRetries.get(runId); if (retry) clearTimeout(retry); this.wakeRetries.delete(runId);
       return 'capped';
     }
-    this.store.commitWakeCounters(runId, { waitDeliveryFailures: failures });
+    this.writeWakeCounters(runId, { waitDeliveryFailures: failures });
     const previous = this.wakeBackoffs.get(runId); if (previous) clearTimeout(previous);
     const timer = setTimeout(() => {
       if (this.wakeBackoffs.get(runId) !== timer) return;
@@ -2340,7 +2340,18 @@ export class RunManager {
 
   /** The failure count is on the run record, so a restart keeps it (hearsay-tools/cezarion#1234). */
   private clearWakeDeliveryFailures(runId: string): void {
-    if (this.store.getRun(runId)?.waitDeliveryFailures !== undefined) this.store.commitWakeCounters(runId, { waitDeliveryFailures: undefined });
+    if (this.store.getRun(runId)?.waitDeliveryFailures !== undefined) this.writeWakeCounters(runId, { waitDeliveryFailures: undefined });
+  }
+
+  /** The wake counters outside a delivery commit: committed at once, so a crash keeps them, and
+   *  best-effort, so a refused write never stops the path that changes them (a cancel, a Finish,
+   *  a nudge). A refused commit warns and leaves the change to the store's debounced save. */
+  private writeWakeCounters(runId: string, counters: WakeCounters): void {
+    try { this.store.commitWakeCounters(runId, counters); }
+    catch (error) {
+      console.warn(`[cez] wake counter checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
+      this.store.updateRun(runId, counters);
+    }
   }
 
   /**
@@ -2357,13 +2368,13 @@ export class RunManager {
   /** Spend one automatic wake on the record; returns the count after it. */
   private chargeAutomaticWake(runId: string): number {
     const next = (this.store.getRun(runId)?.automaticWakes ?? 0) + 1;
-    this.store.commitWakeCounters(runId, { automaticWakes: next });
+    this.writeWakeCounters(runId, { automaticWakes: next });
     return next;
   }
 
   /** A human message or a human Continue restarts the budget. */
   private resetAutomaticWakes(runId: string): void {
-    if (this.store.getRun(runId)?.automaticWakes) this.store.commitWakeCounters(runId, { automaticWakes: 0 });
+    if (this.store.getRun(runId)?.automaticWakes) this.writeWakeCounters(runId, { automaticWakes: 0 });
   }
 
   private retryWaitAdmission(runId: string): void {
