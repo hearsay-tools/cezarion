@@ -318,6 +318,7 @@ describe('status key (#617)', () => {
     ['timer', run({ status: 'waiting', waits: [openTimer()] }), { tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' }],
     ['waiting on workers', parkedRoot(), { tone: 'running', shape: 'workers', pulse: false, label: 'waiting on 2 workers' }],
     ['waiting for capacity', parkedRoot({ phase: 'wake-pending' }), { tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' }],
+    ['wait result owed', run({ status: 'waiting', waits: [{ ...openCi(), phase: 'resolved', resolvedAt: '2026-10-17T15:20:00.000Z' }] }), { tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' }],
     ['queued', run({ status: 'queued' }), { tone: 'neutral', shape: 'ring', pulse: false, label: 'queued' }],
     ['scheduled', run({ status: 'failed', autoResumeAt: '2026-08-03T19:33:53.000Z' }), { tone: 'neutral', shape: 'ring', pulse: false, label: 'scheduled' }],
     ['done', run({ status: 'done' }), { tone: 'success', shape: 'filled', pulse: false, label: 'done' }],

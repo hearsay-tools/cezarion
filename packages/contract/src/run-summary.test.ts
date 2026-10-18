@@ -132,6 +132,21 @@ describe('toRunSummary', () => {
     expect('waitingOn' in toRunSummary(record())).toBe(false);
   });
 
+  it('flags a resolved wait as an owed wake, and only then', () => {
+    const resolved = [{
+      kind: 'timer', id: '44444444-4444-4444-8444-444444444444', source: 'cezar', via: 'monitoring-line',
+      registeredAt: '2026-10-04T10:00:00.000Z', deadline: '2026-10-04T10:05:00.000Z', phase: 'resolved',
+      resolvedAt: '2026-10-04T10:05:00.000Z', turnId: 'turn-1', seconds: 300,
+    }] as RunRecord['waits'];
+    const summary = toRunSummary(record({ status: 'waiting', waits: resolved }));
+    expect(summary.waitWakePending).toBe(true);
+    expect('waitingOn' in summary).toBe(false);
+    expect(runSummarySchema.parse(summary)).toEqual(summary);
+    expect('waitWakePending' in toRunSummary(record({ status: 'waiting', waits: [{ ...resolved![0]!, phase: 'delivered' }] as RunRecord['waits'] }))).toBe(false);
+    expect('waitWakePending' in toRunSummary(record())).toBe(false);
+    expect(() => toRunSummary(record({ waits: [null] as unknown as RunRecord['waits'] }))).not.toThrow();
+  });
+
   it('derives waitingOn without throwing from a streamed record whose waits or delegation are malformed', () => {
     expect(() => toRunSummary(record({ waits: 'nope' as unknown as RunRecord['waits'] }))).not.toThrow();
     expect(() => toRunSummary(record({ waits: [null] as unknown as RunRecord['waits'] }))).not.toThrow();

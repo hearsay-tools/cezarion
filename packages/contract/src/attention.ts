@@ -1,5 +1,5 @@
 import type { RunIndexEntry, RunRecord, RunSummary } from './runs.ts';
-import { resolveWaitingOn } from './waits.ts';
+import { hasResolvedWait, resolveWaitingOn } from './waits.ts';
 
 /**
  * The one canonical attention function (cockpit spec, "Design system" → status grammar).
@@ -93,7 +93,7 @@ function isUnseen(_run: AttentionInput): boolean {
 export type AttentionInput = Pick<RunRecord, 'status' | 'activity' | 'autoResumeAt' | 'hasPendingHumanAsk' | 'hasPendingPermission'> & Pick<RunIndexEntry, 'delegation'>
   // A summary carries `waitingOn`; a full or stream-patched record carries `waits` and no
   // `waitingOn`, and `resolveWaitingOn` computes it from them (spec 2026-10-17-unified-waits).
-  & Partial<Pick<RunSummary, 'waitingOn'>> & Partial<Pick<RunRecord, 'waits'>>;
+  & Partial<Pick<RunSummary, 'waitingOn' | 'waitWakePending'>> & Partial<Pick<RunRecord, 'waits'>>;
 
 /** Dependency wording shared by attention and relationship details (#375). A worker can only
  * wait on requests to its parent; only roots can wait for worker completion. */
@@ -171,6 +171,11 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
     // Covers both the parked session still open (`waiting`) and a leftover after restart
     // / Continue (`queued`). Workers already settled; the ring is the same “waiting for
     // a slot” shape as queued CI. Running still wins because it is checked later.
+    return { bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' };
+  }
+  if (!hasPendingHumanAsk && waitingOn === undefined && run.status === 'waiting' && hasResolvedWait(run)) {
+    // A resolved CI or timer wait owes the agent a wake that has not started: the same
+    // scheduler wait as the worker wake above, never a human gate (spec rung 10).
     return { bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' };
   }
   if (run.status === 'waiting') {

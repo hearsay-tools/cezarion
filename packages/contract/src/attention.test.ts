@@ -218,11 +218,30 @@ describe('open waits', () => {
     expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'timer', waitId: '22222222-2222-4222-8222-222222222222', at: '2026-10-17T15:05:00.000Z' } }).label).toBe('monitoring');
   });
 
+  // Rung 10: a resolved wait is a wake owed to the agent; until its turn starts the run waits for
+  // a slot, not for the user.
+  it('reads a waiting record with only a resolved wait as waiting for capacity', () => {
+    const resolved = { ...openCi(), phase: 'resolved' as const, resolvedAt: '2026-10-17T15:20:00.000Z' };
+    const capacity = { bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' };
+    expect(deriveAttention({ status: 'waiting', waits: [resolved] })).toEqual(capacity);
+    expect(deriveAttention({ status: 'waiting', waits: [{ ...openTimer(), phase: 'resolved' as const }] })).toEqual(capacity);
+    // A summary carries the flag instead of the list.
+    expect(deriveAttention({ status: 'waiting', waitWakePending: true })).toEqual(capacity);
+    // An open CI or timer wait still names what the run waits on.
+    expect(deriveAttention({ status: 'waiting', waits: [resolved, openTimer()] }).label).toBe('monitoring');
+    expect(deriveAttention({ status: 'waiting', waits: [{ ...openTimer(), phase: 'resolved' as const }, openCi()] }).label).toBe('waiting for CI');
+    // An open human signal still wins.
+    expect(deriveAttention({ status: 'waiting', waits: [resolved], hasPendingHumanAsk: true }).label).toBe('needs you');
+    expect(deriveAttention({ status: 'waiting', waits: [resolved] }, true).label).toBe('needs you');
+    // Delivered and cancelled entries are no wake.
+    expect(deriveAttention({ status: 'waiting', waits: [{ ...resolved, phase: 'delivered' as const }] }).label).toBe('needs you');
+    expect(deriveAttention({ status: 'running', waits: [resolved] }).label).toBe('running');
+  });
+
   it('leaves every other status alone', () => {
     expect(deriveAttention({ status: 'running', waits: [openCi()] }).label).toBe('running');
     expect(deriveAttention({ status: 'review', waits: [openCi()] }).label).toBe('needs review');
     expect(deriveAttention({ status: 'failed', waits: [openCi()] }).label).toBe('failed');
-    expect(deriveAttention({ status: 'waiting', waits: [{ ...openCi(), phase: 'resolved' as const }] }).label).toBe('needs you');
     expect(deriveAttention({ status: 'waiting' }).label).toBe('needs you'); // no wait: unchanged fallback
     expect(deriveAttention({ status: 'running', activity: 'monitoring' }).label).toBe('monitoring'); // legacy summary rows
   });

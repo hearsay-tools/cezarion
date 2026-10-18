@@ -189,6 +189,14 @@ export function computeWaitingOn(run: WaitingOnInput): WaitingOn | undefined {
   return undefined;
 }
 
+/** A resolved wait is a wake owed to the agent: its result is in, its turn has not started.
+ *  Rung 10 of the attention ladder ("waiting for capacity"); a summary carries it as
+ *  `waitWakePending`. */
+export function hasResolvedWait(run: { waitWakePending?: true } & Pick<WaitingOnInput, 'waits'>): boolean {
+  if (run.waitWakePending) return true;
+  return Array.isArray(run.waits) && run.waits.some((wait) => wait?.phase === 'resolved');
+}
+
 /** A summary's `waitingOn` when it has one; a full or stream-patched record computes it. */
 export function resolveWaitingOn(run: { waitingOn?: WaitingOn } & WaitingOnInput): WaitingOn | undefined {
   return run.waitingOn ?? computeWaitingOn(run);

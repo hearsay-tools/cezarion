@@ -6,7 +6,7 @@ import { previewServerSchema } from './preview.ts';
 // The chain shapes belong to the workflows family; the run record embeds one, so this file
 // consumes them rather than redeclaring. One-way on purpose — see the header of `./workflows.ts`.
 import { workflowDefSchema, workflowStepDefSchema } from './workflows.ts';
-import { computeWaitingOn, waitingOnSchema, waitSchema } from './waits.ts';
+import { computeWaitingOn, hasResolvedWait, waitingOnSchema, waitSchema } from './waits.ts';
 
 /**
  * The RUNS family of `/api/v1` — a task's record, its lifecycle mutations, and the artifacts
@@ -445,6 +445,9 @@ export const runSummarySchema = z.object({
   /** The run's top open wait (`computeWaitingOn`), which `deriveAttention` reads. The wait list
    *  itself stays on the record. */
   waitingOn: waitingOnSchema.optional(),
+  /** Present when a wait has resolved and its wake turn has not started (`hasResolvedWait`):
+   *  attention's "waiting for capacity" rung. */
+  waitWakePending: z.literal(true).optional(),
   /** Only the relationship role and wait phase used by list attention. */
   delegation: runDelegationSummarySchema.optional(),
   createdAt: z.string(),
@@ -594,6 +597,7 @@ export function toRunSummary(run: RunRecord & { usage?: ProcessUsage }): RunSumm
   // The parsed slim delegation, not the raw one: a malformed record must not throw here either.
   const waitingOn = computeWaitingOn({ ...run, delegation: summary.delegation as RunSummary['delegation'] });
   if (waitingOn) summary.waitingOn = waitingOn;
+  if (hasResolvedWait(run)) summary.waitWakePending = true;
   if (run.usage) summary.usage = run.usage;
   return summary as RunSummary;
 }
