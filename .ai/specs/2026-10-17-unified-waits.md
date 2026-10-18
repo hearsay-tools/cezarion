@@ -534,5 +534,17 @@ builder" unless a bullet says otherwise.
   terminal row whose waits are not cancelled: its resolved waits stay resolved and undelivered,
   its open waits stay armed (also after a restart) and still resolve, and nothing wakes it.
   Continue delivers them once; a pending portable question stays answerable, and its answer
-  opens the turn that also delivers them. Stop discards them and leaves the run `failed`;
-  deletion drops them with the row.
+  opens the turn that also delivers them. Stop discards them and leaves the run `failed`:
+  every wait, open and resolved, moves to `lastWaits` as `cancelled` and its undelivered input
+  goes, the backoff, the admission retry, the delivery count and any automatic resume are
+  cleared, no session starts, and the note `Stop discarded the waits this task held and their
+  results; the task stays failed` (`WAITS_DISCARDED_NOTE`) is written. A later Continue is a
+  plain continuation that delivers nothing from them. Deletion drops them with the row.
+- **The held failed run's controls.** The cockpit offers Continue (delivers the results once),
+  Stop (discards them, the run stays `failed`), Archive and Delete. `runActionFlags(run).cancel`
+  is true for a `failed` run with a non-empty `waits` (`holdsWaitResults`) as for an active run,
+  and the composer's Stop follows that flag. It is the one record that offers Stop and Delete
+  together, since there is no session to stop. Stop takes the composer's outline slot there, so
+  the header carries Archive on the Session tab (`archiveInComposer`). Finish stays unavailable,
+  as on every failed run: `finishDecision` needs an open session. Archive does not discard the
+  results; Continue on an archived run unarchives it and delivers them, as for any archived run.

@@ -886,7 +886,12 @@ settles `failed` at once, uncounted, so the usage-limit hold and its automatic r
 it. A `failed` run that owes results is the one terminal run that keeps its waits: they stay
 resolved and undelivered, its open waits stay armed (across a restart too) and still
 resolve, and nothing wakes it. Continue delivers them once; a pending portable question
-stays answerable, and its answer opens the turn that also delivers them. Stop discards them.
+stays answerable, and its answer opens the turn that also delivers them. Stop discards them:
+every wait, open and resolved, moves to `lastWaits` as `cancelled`, the backoff, the admission
+retry, the count and any automatic resume are cleared, no session starts, the run stays
+`failed`, and the note `Stop discarded the waits this task held and their results; the task
+stays failed` is written. The cockpit offers Stop for that record beside Continue, Archive and
+Delete; Finish stays unavailable, as on every failed run.
 
 Human input never cancels a wait. A human message, `resumeParkedRun`, a question and
 a permission request leave every open wait, whatever its `via`, and its deadline as
@@ -1086,12 +1091,17 @@ question: the same bound, a timer that resolves on the failed run stays resolved
 nothing (no queued continuation, admission retry or backoff is left), and Continue delivers both
 results once. A second U14 case closes every session cleanly at a turn end while the result is
 owed, as U9 closes one at a boundary: the original session, whose turn the timer resolves in, and
-two continuations, then the same held state with the clean-close error, and Continue delivers once. Scenario cases that need one wire live in
+two continuations, then the same held state with the clean-close error, and Continue delivers once.
+A third U14 case Stops the held run at the bound before any Continue, with the resolved timer and
+a still-open one: both are in `lastWaits` as `cancelled`, no wait, backoff, admission retry,
+delivery count or queued continuation is left, the run stays `failed` with the discard note, and
+a later Continue is a plain continuation that delivers neither. Scenario cases that need one wire live in
 `workflows/waits-wake.test.ts`: a CI result beside a pending portable question (U3b,
 Claude and Codex), a Codex native question, an idle-closed question, two waits in one
 submission, the footer and the monitoring pool, and on the Claude wire the delivery bound's
 backoff (each retry waits for it, and Continue clears it), the usage-limit failure that is
-not counted, and a failed run's held result across a restart and Stop.
+not counted, a failed run's held result across a restart and Stop, and Stop on a
+usage-limited held run, which also cancels its automatic resume.
 
 **R74** extends that native-wire matrix to a failed nonfinal workflow agent.
 CI recovery must retain the failed attempt, including across restart and CI
