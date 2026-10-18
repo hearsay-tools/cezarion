@@ -121,6 +121,20 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     expect(humanOpen(run.id)).toHaveLength(1);
   });
 
+  // The handlers return their refusals, so the MCP server and the `/api/v1/tools/wait` route carry
+  // the code and its message to the agent unchanged; only a thrown non-wait error reads `unavailable`.
+  it('a refusal reaches the agent through the wire with its own code and message', async () => {
+    claudeWire();
+    const answers = join(root, 'answers');
+    process.env.CEZ_MOCK_CI_RESULT = answers;
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'human', questions: card('Which module?') }), runner: 'claude', autonomous: true });
+    await until(() => existsSync(answers));
+    const answer = JSON.parse(JSON.parse(readFileSync(answers, 'utf8')).response.content[0].text.split('\n')[0]);
+    expect(answer).toMatchObject({ ok: false, code: 'autonomous_run',
+      message: 'This is an autonomous run: do not wait for the user. Make a reasonable assumption and continue; the user can steer you at any time.' });
+    expect(humanOpen(run.id)).toEqual([]);
+  });
+
   it('a worker without questions is refused with questions_required; with questions it routes to the parent and the parent reply settles the wait', async () => {
     process.env.CEZ_DELEGATION = '1';
     claudeWire();
