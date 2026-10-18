@@ -96,12 +96,12 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     // Not yet shown (the same turn): the agent may withdraw it.
     const withdrawn = await register(run.id, { kind: 'human', questions: card('Which module?') });
     if (!('wait' in withdrawn)) throw Error('registration refused');
-    expect(await tools(run.id).cancelWait({ wait_id: withdrawn.wait.id })).toMatchObject({ cancelled: true });
+    expect(await tools(run.id).cancelWait({ wait_id: withdrawn.wait.id }, new AbortController().signal)).toMatchObject({ cancelled: true });
     const kept = await register(run.id, { kind: 'human', questions: card('Which runner?') });
     if (!('wait' in kept)) throw Error('registration refused');
     release();
     await until(() => needsYou(run.id));
-    const refused = await tools(run.id).cancelWait({ wait_id: kept.wait.id });
+    const refused = await tools(run.id).cancelWait({ wait_id: kept.wait.id }, new AbortController().signal);
     expect(refused).toMatchObject({ cancelled: false, code: 'human_question', open_waits: [{ wait_id: kept.wait.id, kind: 'human' }] });
     expect(humanOpen(run.id)).toMatchObject([{ id: kept.wait.id, phase: 'open' }]);
     expect(needsYou(run.id)).toBe(true);
