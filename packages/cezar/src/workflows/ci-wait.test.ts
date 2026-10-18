@@ -6,6 +6,7 @@ import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
+import type { Backoff } from '../delegation/retry-backoff.ts';
 import { WAIT_LIMIT, type CiWait, type CiWaitResult, type Wait } from '@open-mercato/cezar-contract';
 import { controlledWire, manager, parent, root, restart, semaphore, store, until, worker, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
@@ -436,6 +437,9 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     external.settle(success());
     await until(() => ciWaitOf(child.id)?.phase === 'resolved');
     const state = (manager as unknown as { active: Map<string, { session: { end(): void } }> }).active.get(child.id)!;
+    // The session closes with the result owed: one failed delivery, retried after the wake backoff
+    // (hearsay-tools/cezarion#1233), which the test need not wait out.
+    (manager as unknown as { wakeRetryBackoff: Backoff }).wakeRetryBackoff = { fastMs: 0, fastCount: 1, capMs: 0 };
     state.session.end(); writeFileSync(gate, 'end');
     await until(() => !!lastCiWaitOf(child.id)?.deliveredAt);
     expect(ciWaitOf(child.id)).toBeUndefined();

@@ -596,14 +596,17 @@ export const AUTO_RESUME_GRACE_MS = 30_000;
 export const MAX_AUTO_RESUMES = 12;
 /**
  * Consecutive failed automatic attempts to deliver a run's wait results (hearsay-tools/cezarion#1233):
- * each is a session that failed while the results were still owed, counted across the replacement
- * sessions that retry them. At the bound the run settles `failed` and keeps the results for a human.
- * The count is in memory, per manager, so a restart starts it again, like the per-session wake budget.
- * A delivery acknowledgement, human input, Continue, Stop, Finish and cancel reset it; a usage-limit
- * failure is not counted, because its own hold and automatic resume take it.
+ * each is a session that failed, or closed cleanly, while the results were still owed, counted across
+ * the replacement sessions that retry them. At the bound the run settles `failed` and keeps the
+ * results for a human. The count is in memory, per manager, so a restart starts it again, like the
+ * per-session wake budget. A delivery acknowledgement, human input, Continue, Stop, Finish and
+ * cancel reset it; a usage-limit failure is not counted, because its own hold and automatic resume
+ * take it.
  */
 export const MAX_WAKE_DELIVERY_ATTEMPTS = 3;
 export const WAKE_DELIVERY_CAP_NOTE = `could not deliver wait results after ${MAX_WAKE_DELIVERY_ATTEMPTS} attempts — continue this task to retry`;
+/** The error of a session that closed cleanly while it still owed wait results. */
+export const WAKE_SESSION_CLOSED_ERROR = 'the session closed before the wait results were delivered';
 
 /** A run that failed while it still owed wait results keeps them, and its open waits, until a human
  *  acts: Continue delivers them, Stop discards them (hearsay-tools/cezarion#1233). */
@@ -2147,17 +2150,23 @@ export class RunManager {
   }
 
   /**
-   * A session failed while the run still owed wait results (hearsay-tools/cezarion#1233). Count the
-   * failed delivery and decide what the failing path does: `park` keeps the run waiting and retries
-   * after the backoff (or, with nothing resolved, leaves its open waits to wake it); `settle` fails
-   * the run the ordinary way, which a usage limit takes into its own hold and resume without being
-   * counted; `capped` fails it at `MAX_WAKE_DELIVERY_ATTEMPTS`. Every settled run keeps its results.
+   * A session failed, or closed cleanly, while the run still owed wait results
+   * (hearsay-tools/cezarion#1233). Count the failed delivery and decide what the closing path does:
+   * `park` keeps the run waiting and retries after the backoff (or, with nothing resolved, leaves
+   * its open waits to wake it); `settle` fails the run the ordinary way, which a usage limit takes
+   * into its own hold and resume without being counted; `capped` fails it at
+   * `MAX_WAKE_DELIVERY_ATTEMPTS`. Every settled run keeps its results.
    */
   private failedWakeDelivery(runId: string, error: string): 'park' | 'settle' | 'capped' {
     if (!resolvedWaits(this.store.getRun(runId) ?? {}).length) return 'park';
     if (parseUsageLimit(error)) return 'settle';
     const failures = (this.wakeDeliveryFailures.get(runId) ?? 0) + 1;
-    if (failures >= MAX_WAKE_DELIVERY_ATTEMPTS) { this.resetWakeDelivery(runId); return 'capped'; }
+    if (failures >= MAX_WAKE_DELIVERY_ATTEMPTS) {
+      // Nothing may wake the settled run: its admission retry goes with the count.
+      this.resetWakeDelivery(runId);
+      const retry = this.wakeRetries.get(runId); if (retry) clearTimeout(retry); this.wakeRetries.delete(runId);
+      return 'capped';
+    }
     this.wakeDeliveryFailures.set(runId, failures);
     const previous = this.wakeBackoffs.get(runId); if (previous) clearTimeout(previous);
     const timer = setTimeout(() => {
@@ -6757,7 +6766,18 @@ export class RunManager {
       if (sessionError || state.agentInputError) throw new Error(sessionError ?? state.agentInputError);
       if (this.store.getRun(runId)?.waits?.length && !state.cancelled) {
         sink.sessionEnded('end_turn');
-        this.store.updateRun(runId, { status: 'waiting', activity: undefined });
+        // A clean close that leaves results undelivered is a failed delivery too.
+        const delivery = resolvedWaits(this.store.getRun(runId) ?? {}).length ? this.failedWakeDelivery(runId, WAKE_SESSION_CLOSED_ERROR) : 'park';
+        if (delivery === 'park') {
+          this.store.updateRun(runId, { status: 'waiting', activity: undefined });
+          return;
+        }
+        this.store.updateStep(runId, stepId, { status: 'failed', error: WAKE_SESSION_CLOSED_ERROR, finishedAt: finishedAt() });
+        this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
+        appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
+        this.store.updateRun(runId, { status: 'failed', error: `continue failed: ${WAKE_SESSION_CLOSED_ERROR}`, finishedAt: finishedAt(), currentStepId: undefined });
+        this.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${WAKE_SESSION_CLOSED_ERROR}` });
+        this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
         return;
       }
       if (!state.cancelled) {
@@ -7184,9 +7204,17 @@ export class RunManager {
           this.finishStep(runId, step.id, 'failed', failure, emit);
           runError = `step "${step.id}" failed: ${failure}`;
         }
+        // A clean close that leaves results undelivered is a failed delivery too.
+        const undelivered = failure ?? (resolvedWaits(this.store.getRun(runId) ?? {}).length ? WAKE_SESSION_CLOSED_ERROR : undefined);
         const delivery = this.store.getRun(runId)?.waits?.length && !state.cancelled
-          ? failure ? this.failedWakeDelivery(runId, failure) : 'park' : 'settle';
-        if (delivery === 'capped') deliveryCapped = true;
+          ? undelivered ? this.failedWakeDelivery(runId, undelivered) : 'park' : 'settle';
+        if (delivery === 'capped') {
+          deliveryCapped = true;
+          if (!failure) {
+            this.finishStep(runId, step.id, 'failed', WAKE_SESSION_CLOSED_ERROR, emit);
+            runError = `step "${step.id}" failed: ${WAKE_SESSION_CLOSED_ERROR}`;
+          }
+        }
         if (delivery === 'park') {
           this.store.updateRun(runId, { status: 'waiting', activity: undefined,
             ...(failure ? { error: runError! } : {}) });
@@ -7194,7 +7222,7 @@ export class RunManager {
           this.dropActive(runId);
           return;
         }
-        if (failure) break;
+        if (failure || deliveryCapped) break;
         if (state.idleClosed || this.unansweredWorkflowAsk(runId, state)) break;
         this.finishStep(runId, step.id, 'done', undefined, emit);
         // Finish is an explicit stop, not an answer or permission to run checks.

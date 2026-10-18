@@ -7,7 +7,7 @@ import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.t
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { manager, parent, register, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { claudeScheduleWakeupDelay, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE } from './run.ts';
+import { claudeScheduleWakeupDelay, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR } from './run.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt } from './monitoring-turn.testkit.ts';
 import { withDelayedCommand, withHeldPrintResponse, withRejectedCommand } from '../core/owned-input-delivery.testkit.ts';
@@ -48,6 +48,8 @@ const engine = () => manager as unknown as {
   wakeRetryBackoff: Backoff;
   wakeBackoffs: Map<string, NodeJS.Timeout>;
   wakeDeliveryFailures: Map<string, number>;
+  wakeRetries: Map<string, NodeJS.Timeout>;
+  queue: string[];
 };
 // The delivery bound, not the backoff, is what these cells pin: retries start at once.
 const retryAtOnce = () => { engine().wakeRetryBackoff = { fastMs: 0, fastCount: MAX_WAKE_DELIVERY_ATTEMPTS, capMs: 0 }; };
@@ -55,15 +57,15 @@ const failedSteps = (id: string) => store.getRun(id)?.steps.filter(step => step.
 
 /** The run settled `failed` at the delivery bound and still holds the result: resolved, its input
  *  undelivered, with the cap note, the last error, and no automatic wake left. */
-function expectHeldAtTheBound(id: string, waitId: string) {
+function expectHeldAtTheBound(id: string, waitId: string, { error = /^continue failed: /, failed = MAX_WAKE_DELIVERY_ATTEMPTS }: { error?: RegExp | string; failed?: number } = {}) {
   const run = store.getRun(id)!;
   expect(run.status).toBe('failed');
-  expect(run.error).toMatch(/^continue failed: /);
+  expect(run.error).toMatch(error);
   expect(run.waits?.find(wait => wait.id === waitId)?.phase).toBe('resolved');
   expect(run.lastWaits?.find(wait => wait.id === waitId)).toBeUndefined();
   expect(inputsFor(id, waitId).map(input => input.deliveredAt)).toEqual([undefined]);
   expect(store.readEvents(id).filter(event => event.type === 'note' && event.message === WAKE_DELIVERY_CAP_NOTE)).toHaveLength(1);
-  expect(failedSteps(id)).toBe(MAX_WAKE_DELIVERY_ATTEMPTS);
+  expect(failedSteps(id)).toBe(failed);
   expect(manager.isActive(id)).toBe(false);
   expect(engine().wakeBackoffs.has(id)).toBe(false);
 }
@@ -413,20 +415,43 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       }, { persistent: true });
     });
 
+    // A held result wakes nothing: the wake is queued synchronously inside the resolution, so its
+    // absence shows at once, and no admission retry or backoff is left to start one later.
+    const expectNoWakeFor = (id: string) => {
+      expect(store.getRun(id)?.status).toBe('failed');
+      expect(manager.isActive(id)).toBe(false);
+      expect(engine().queue).not.toContain(id);
+      expect(engine().wakeRetries.has(id)).toBe(false);
+      expect(engine().wakeBackoffs.has(id)).toBe(false);
+    };
+    async function timerWaits(id: string) {
+      const tools = manager.cezarToolHandlers(id, engine().active.get(id)!.ciGeneration);
+      const timerWait = async (seconds: number, note: string) => {
+        const registered = await tools.registerWait({ kind: 'timer', seconds, note }, 'cezar_wait', new AbortController().signal);
+        if (!('wait' in registered)) throw Error('registration refused');
+        return registered.wait;
+      };
+      return { timer: await timerWait(60, 'u14'), later: await timerWait(7200, 'u14 later') };
+    }
+    /** Continue delivers every held result once, and the run parks and finishes as usual. */
+    async function continueDelivers(id: string, timer: Wait, later: Wait) {
+      expect(manager.continueRun(id, { text: 'go on' })).toEqual({ ok: true });
+      await until(() => settled(id, timer.id)?.phase === 'delivered' && settled(id, later.id)?.phase === 'delivered');
+      expect(prompted(runner, `Timer ${timer.id} fired`)).toHaveLength(1);
+      expect(prompted(runner, `Timer ${later.id} fired`)).toHaveLength(1);
+      expect(inputsFor(id, timer.id)).toHaveLength(1);
+      await until(() => store.getRun(id)?.status === 'waiting');
+      expect(manager.finish(id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(id)?.status ?? ''));
+    }
+
     it(`${runner} U14 a wait-wake continuation that fails persistently stops at the delivery bound, the run fails keeping its result, and Continue delivers it once`, async () => {
       nativeWire(runner);
       const failure = persistentWakeFailure(root, runner);
       retryAtOnce();
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
       await until(() => store.getRun(run.id)?.status === 'waiting');
-      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
-      const timerWait = async (seconds: number, note: string) => {
-        const registered = await tools.registerWait({ kind: 'timer', seconds, note }, 'cezar_wait', new AbortController().signal);
-        if (!('wait' in registered)) throw Error('registration refused');
-        return registered.wait;
-      };
-      const timer = await timerWait(60, 'u14');
-      const later = await timerWait(7200, 'u14 later');
+      const { timer, later } = await timerWaits(run.id);
       engine().active.get(run.id)!.session.end();
       await until(() => !manager.isActive(run.id));
       fireTimer(timer.id);
@@ -434,21 +459,46 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       // Each attempt is a scheduler continuation whose opening prompt the provider fails.
       expect(prompted(runner, TIMER_WAKE_OPENING)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS);
       expectHeldAtTheBound(run.id, timer.id);
-      // A wait that resolves on the failed run stays resolved: nothing wakes it (the wake is
-      // queued synchronously inside the resolution, so its absence shows now).
+      // A wait that resolves on the failed run stays resolved and wakes nothing.
       fireTimer(later.id);
       expect(store.getRun(run.id)?.waits?.find(wait => wait.id === later.id)?.phase).toBe('resolved');
-      expect(store.getRun(run.id)?.status).toBe('failed');
-      expect(manager.isActive(run.id)).toBe(false);
+      expectNoWakeFor(run.id);
       failure.lift();
-      expect(manager.continueRun(run.id, { text: 'go on' })).toEqual({ ok: true });
-      await until(() => settled(run.id, timer.id)?.phase === 'delivered' && settled(run.id, later.id)?.phase === 'delivered');
-      expect(prompted(runner, `Timer ${timer.id} fired`)).toHaveLength(1);
-      expect(prompted(runner, `Timer ${later.id} fired`)).toHaveLength(1);
-      expect(inputsFor(run.id, timer.id)).toHaveLength(1);
+      await continueDelivers(run.id, timer, later);
+    });
+
+    it(`${runner} U14 a session that keeps closing cleanly before its wait result is delivered stops at the delivery bound, the run fails keeping its result, and Continue delivers it once`, async () => {
+      nativeWire(runner);
+      retryAtOnce();
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
       await until(() => store.getRun(run.id)?.status === 'waiting');
-      expect(manager.finish(run.id)).toBe(true);
-      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+      const { timer, later } = await timerWaits(run.id);
+      // Every session closes cleanly at a turn end while the result is owed, before Cezar can
+      // submit it, as U9's clean close does at a boundary. The first is the original session: the
+      // timer resolves as its human turn ends. The others are the continuations that retry.
+      let closing = true, resolving = true;
+      const closeAtTurnEnd = ({ runId, event }: { runId: string; event: { type: string } }) => {
+        if (runId !== run.id || event.type !== 'turn-end' || !closing) return;
+        if (resolving) { resolving = false; fireTimer(timer.id); }
+        if (store.getRun(run.id)?.waits?.find(wait => wait.id === timer.id)?.phase === 'resolved') engine().active.get(run.id)?.session.end();
+      };
+      store.on('event', closeAtTurnEnd);
+      try {
+        expect(manager.sendMessage(run.id, [{ type: 'text', text: 'Check the deploy.' }])).toBe(true);
+        await until(() => store.getRun(run.id)?.status === 'failed' && !manager.isActive(run.id));
+        // The original session and two continuations, none of which received the result.
+        expect(prompted(runner, TIMER_WAKE_OPENING)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS - 1);
+        expect(prompted(runner, `Timer ${timer.id} fired`)).toEqual([]);
+        expectHeldAtTheBound(run.id, timer.id, { error: `continue failed: ${WAKE_SESSION_CLOSED_ERROR}`, failed: 1 });
+        expect(store.getRun(run.id)?.steps.at(-1)).toMatchObject({ status: 'failed', error: WAKE_SESSION_CLOSED_ERROR });
+        fireTimer(later.id);
+        expect(store.getRun(run.id)?.waits?.find(wait => wait.id === later.id)?.phase).toBe('resolved');
+        expectNoWakeFor(run.id);
+        closing = false;
+        await continueDelivers(run.id, timer, later);
+      } finally {
+        store.off('event', closeAtTurnEnd);
+      }
     });
 
     it(`${runner} U11 an alias timer survives a later worker park with its deadline, is held while the workers outrank it, and is delivered after the worker wake`, async () => {

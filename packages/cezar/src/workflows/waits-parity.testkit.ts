@@ -19,7 +19,7 @@ export const WAIT_CRITERIA = [
   { id: 'U11', scenario: 'turn-messages', name: 'an alias timer survives a later worker park with its deadline, is held while the workers outrank it, and is delivered after the worker wake' },
   { id: 'U12', scenario: 'turn-messages', name: 'a wait result beside a pending portable question is checkpointed only on its delayed provider acknowledgement, and the question stays answerable' },
   { id: 'U13', scenario: 'turn-messages', name: 'a wait result beside a pending portable question whose acknowledgement is rejected stays resolved, is retried, and the question stays answerable' },
-  { id: 'U14', scenario: 'provider-error', name: 'a wait-wake continuation that fails persistently stops at the delivery bound, the run fails keeping its result, and Continue delivers it once' },
+  { id: 'U14', scenario: 'provider-error', name: 'a wait-result delivery whose sessions persistently fail or close cleanly stops at the delivery bound, the run fails keeping its result, and Continue delivers it once' },
 ] as const;
 
 /** The native mocks' `mock:cezar-tool` prompt: one cezar tool call through the runner's own wire.
