@@ -229,7 +229,8 @@ export const runRecordSchema = z.object({
   /** Automatic wakes (timers and nudges) spent since the user last wrote; the budget survives
    *  a restart and a scheduler continuation (hearsay-tools/cezarion#1234). */
   automaticWakes: z.number().int().nonnegative().optional(),
-  /** Consecutive wake deliveries that failed; at the bound the run parks for the user. */
+  /** Consecutive wake deliveries that failed; at the bound the run settles `failed` and keeps
+   *  its results (hearsay-tools/cezarion#1234). */
   waitDeliveryFailures: z.number().int().nonnegative().optional(),
   /** Dev servers the agent registered with `cezar_preview_serve` (#781). Salvaged per entry on load. */
   previewServers: z.array(previewServerSchema).optional(),

@@ -781,11 +781,11 @@ runner DOES — is §7, and a new backend has to satisfy both.
 <a id="waits"></a>
 <a id="ci-wait-tool-contract-474"></a>
 
-## Waits (hearsay-tools/cezarion#1233; CI since hearsay-tools/cezarion#474)
+## Waits (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234; CI since hearsay-tools/cezarion#474)
 
 A run's waits live in one list on its record (`waits`, settled ones in `lastWaits`),
 typed by `packages/contract/src/waits.ts`; spec `.ai/specs/2026-10-17-unified-waits.md`.
-Phase 1 has two kinds, `ci` and `timer`. A wait is an observation the agent asked for;
+There are three kinds: `ci`, `timer` and, since phase 2, `human`. A wait is an observation the agent asked for;
 it never grants merge, review acceptance, or task-completion authority. There is no
 wait marker and no delegation prerequisite. `claude-cli` uses the Claude adapter.
 
@@ -793,16 +793,45 @@ wait marker and no delegation prerequisite. `claude-cli` uses the Claude adapter
 observation. `pr` is an HTTPS GitHub PR URL (at most 2,048 characters, positive PR
 number, no userinfo, port, query or fragment); `timeout_seconds` is an integer
 1–7,200, default 1,800. `cezar_wait({ kind: 'timer', seconds, note? })` opens a
-timer of 60–7,200 seconds with a note of at most 512 characters. Unknown keys and a
+timer of 60–7,200 seconds with a note of at most 512 characters.
+`cezar_wait({ kind: 'human', questions? })` waits for the user; `questions` is an optional
+card in the ask format (1–4 questions of 2–4 options). Unknown keys and a
 field that does not fit its kind are `invalid_request`. The tool advertises one flat
 object schema, because the Anthropic tool API refuses a top-level union; the server
 validates the discriminated union. Every answer carries the wait id, its absolute
-deadline and `open_waits`. At most 16 waits are open at once. A timer is refused with
-`timers_disabled` when `resources.monitoringWakeIntervalMinutes` is `null`, and with
-`wake_budget_spent` once the session's automatic-wake budget (`MAX_AUTO_CONTINUES`, 40)
-is spent. `cezar_cancel_wait({ wait_id })` moves an open wait to `lastWaits` as
-cancelled and answers `open_waits`; a resolved but undelivered wait answers
-`already_resolved` and its result is still delivered with the next wake.
+deadline (none for a human wait) and `open_waits`. At most 16 waits are open at once. A
+timer is refused with `timers_disabled` when `resources.monitoringWakeIntervalMinutes` is
+`null`, and with `wake_budget_spent` once the run's automatic-wake budget
+(`MAX_AUTO_CONTINUES`, 40) is spent. `cezar_cancel_wait({ wait_id })` moves an open wait
+to `lastWaits` as cancelled and answers `open_waits`; a resolved but undelivered wait
+answers `already_resolved` and its result is still delivered with the next wake, and a
+human wait the user has already seen answers `human_question`.
+
+A run holds at most one human wait. A second registration in the turn that opened it
+replaces its card and keeps its `wait_id`; one after the user saw it returns it unchanged.
+A human wait is shown to the user at the end of the turn that registered it (an
+`ask.requested` event, recorded as its `askSeq`), at once when registered at a boundary,
+or by the failure, close or recovery path, never mid-turn. Any human message settles every
+human wait as `delivered`: it is never `resolved`, so it queues no wake, and a message to a
+run whose only open wait is human is delivered as the answer. An autonomous run is refused
+with `autonomous_run` until its automatic-wake budget is spent, and a worker without
+`questions` with `questions_required`, because only a card reaches its parent. Until
+phase 4, the transcript's question facts stay authoritative for attention, and
+`computeWaitingOn` reads both them and the human wait.
+
+`cezar_done({ summary? })` finishes the task at the end of the current turn; `summary` is at
+most 2,000 characters and unknown keys are `invalid_request`. It answers
+`{ ok: true, finishes: 'at_turn_end', open_waits }`, or `{ ok: false, code, message,
+workers?, open_waits? }`. It is refused, in this order, by the session refusals
+`cezar_wait` answers, then `worker_wait_pending`, `root_finish_pending`,
+`human_question_pending` (an earlier turn's question is unanswered), and for a root parent
+`worker_questions`, `workers_outstanding` and `workers_uncollected`, each listing up to 64
+`{ worker_id, reason }` and naming the command that clears them. The turn end that reads an
+accepted done takes it, and a human message clears it. A non-interactive workflow step
+ignores it, as it ignores the done line. The close writes `summary` as a `note`, then the
+lifecycle event `goal achieved — session closed` with `via: 'cezar_done'` (or
+`via: 'done-line'` for the `CEZ:DONE` line, which closes through the same path), and cancels
+every open wait, a human wait from the same turn included.
 
 Only github.com is currently accepted; the forge has no enterprise-host resolver. CI
 registration resolves canonical repository, PR and head with a ten-second metadata
@@ -816,7 +845,7 @@ for an open wait under another spelling of the URL. A wait that has resolved, be
 delivered or been cancelled matches nothing, so a later call for that PR opens a new
 wait. A timer repeats an open timer only with the same seconds and note in the same turn.
 
-Three aliases land in the same list, each recorded in the entry's `via`.
+The aliases land in the same list, each recorded in the entry's `via`.
 `cezar_wait_for_ci({ pr, timeout_seconds? })` is deprecated and opens the same CI
 wait (`via: 'cezar_wait_for_ci'`); it is removed in phase 4 (hearsay-tools/cezarion#1236).
 At a turn end, the `CEZ:MONITORING` line opens a timer of
@@ -824,9 +853,13 @@ At a turn end, the `CEZ:MONITORING` line opens a timer of
 and Claude's `ScheduleWakeup` opens one of its `delaySeconds` clamped to 60–3,600,
 or of the interval when it gave none (`via: 'schedule-wakeup'`). An alias opens at
 most one open timer per run and `via`: a later turn's line keeps the timer already
-open. With re-checks off, or the budget spent, an alias opens nothing, adds a note,
-and the run parks as a plain wait that reads as Needs you. An autonomous run whose
-nudge would fire skips the alias. A worker wait (`cez worker wait`) cancels no wait:
+open. With re-checks off an alias opens a `monitoring-line` human wait instead, and with
+the budget spent a `budget` one (`source: 'cezar'`); either adds a note and the run reads
+as Needs you. An autonomous run whose nudge would fire skips the alias. The ask-marker
+card opens an `ask-line` human wait with its questions, and a native ask (Codex, OpenCode,
+Cursor ACP) a `native-ask` one. A session started without cezar tools (the controller is
+unavailable) is taught the marker lines instead of the tools, and its monitoring wake keeps
+the marker wording. A worker wait (`cez worker wait`) cancels no wait:
 every open timer and CI wait keeps its deadline through a worker park. Workers outrank
 CI and timers, so the park holds no slot and reads as the workers, and their owed wake
 reads **waiting for capacity**. A wait that resolves while the run is parked on workers
@@ -865,10 +898,11 @@ and a human message resets the budget. The count, reservations included, is chec
 a timer comes due and before a batch with timer results is sent: at the budget, those
 timers are cancelled with a cap note and wake nothing, and CI results beside them are
 still delivered. A parked run left with no wait becomes a plain park that reads as Needs
-you and gives its slot back. In phase 1 the budget belongs to the live session, not the
-run: it is in-memory `ActiveRun` state, so a restart, any continuation (including the
-scheduler continuation that delivers a wait result) and a human message start it again
-at 0. Durable per-run accounting is phase 2.
+you and gives its slot back: a `budget` human wait opens and is shown. The budget is the
+run record's `automaticWakes` (hearsay-tools/cezarion#1234): a restart and a scheduler
+continuation keep it, a human message and a human Continue reset it, and a parent's answer
+to its worker does not. A batch's reserved unit stays in memory and is charged to the record
+on the provider acknowledgement, so a batch a restart cuts off is charged once.
 
 That budget cannot stop a delivery whose session keeps failing, since every retry is a
 new session, so failed deliveries have their own bound. A session that fails (a provider
@@ -878,8 +912,8 @@ attempt starts after `WAKE_RETRY_BACKOFF` (15 s, then 30 s), not at once. The th
 consecutive failure (`MAX_WAKE_DELIVERY_ATTEMPTS`) settles the run `failed` through the
 ordinary failure path, with the last error and the note `could not deliver wait results
 after 3 attempts — continue this task to retry`; after a clean close the error is `the session
-closed before the wait results were delivered`. The count is in-memory `RunManager` state
-in phase 1, so a restart starts it again; a delivery acknowledgement, human input or a
+closed before the wait results were delivered`. The count is the run record's
+`waitDeliveryFailures`, so a restart keeps it; a delivery acknowledgement, human input or a
 question answer, Continue, Stop, Finish and cancel reset it. A failure or clean close with
 nothing resolved is not counted and parks as before. A usage-limit failure that owes results
 settles `failed` at once, uncounted, so the usage-limit hold and its automatic resume take
@@ -956,8 +990,8 @@ pipe closure after a hard exit. Never recover ownership from a stale PID alone.
 The tools are provisioned through `AgentRunSpec.cezarTools` independently of worker
 permissions. Claude, Codex, OpenCode and Cursor use the bundled stdio MCP adapter;
 Pi and OMP use a bundled extension over the same shared client. The private chained Hono
-family accepts `POST /api/v1/tools/wait`, `POST /api/v1/tools/cancel-wait` and the
-deprecated `POST /api/v1/tools/ci-wait` over a Unix-domain socket or Windows
+family accepts `POST /api/v1/tools/wait`, `POST /api/v1/tools/cancel-wait`,
+`POST /api/v1/tools/done` and the deprecated `POST /api/v1/tools/ci-wait` over a Unix-domain socket or Windows
 named pipe; authenticated GET holds the adapter lifetime connection. It is **not** a cockpit HTTP route or network listener. Middleware
 validates the shared schema. A memory-only session capability binds project, run
 and generation; the model supplies neither a run ID nor a filesystem path.
@@ -1050,10 +1084,10 @@ the observation. Later successful settlement must leave that failed attempt inta
 Clean session closure while CI is pending still parks without failure. No runner
 exemptions or normalized-event injection.
 
-**U0–U4, U7–U14** (hearsay-tools/cezarion#1233) pin the wait list on every `RUNNER_IDS`
-backend through its `HARNESS_ADAPTERS` native wire, with no normalized-event injection.
-U0, in `core/ci-tools.test.ts`, calls `cezar_wait` and `cezar_cancel_wait` through each
-native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
+**U0–U4, U6, U7–U14, U16** (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234) pin the
+wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
+normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`,
+`cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
 `workflows/waits-parity.testkit.ts`, run by `workflows/waits-parity.test.ts`. U1
 registers a CI wait and a timer through `cezar_wait`, parks, and wakes with each result.
 U2 opens both: the timer wakes, the CI wait stays open and is in that turn's footer,
@@ -1102,6 +1136,23 @@ submission, the footer and the monitoring pool, and on the Claude wire the deliv
 backoff (each retry waits for it, and Continue clears it), the usage-limit failure that is
 not counted, a failed run's held result across a restart and Stop, and Stop on a
 usage-limited held run, which also cancels its automatic resume.
+
+Phase 2 (hearsay-tools/cezarion#1234) adds five cells. U16 spends the automatic-wake budget to
+39, closes the session, and fires a timer: the scheduler continuation that delivers it charges
+the fortieth wake, `cezar_wait` then refuses a timer with `wake_budget_spent`, and a human
+Continue resets the count to 0. U7h lands the ask line, `cezar_wait` with kind `human` and a
+native ask in the same list with their `via`, and the user's answer delivers each; Claude, Pi,
+Cursor (print) and OMP are exempt from the native case as `native ask arrives as the portable
+marker on this wire` and assert the `ask-line` alias instead. U9h registers a human wait
+mid-turn and fails the provider, and separately registers one at a boundary and closes the
+session cleanly: each time the card is shown once with its `askSeq`, the run reads Needs you,
+and the answer delivers it. U6 calls `cezar_done` from a parent with a live worker
+(`workers_outstanding`), then with that worker settled but not collected
+(`workers_uncollected`), and once it is collected with a CI wait open: the run finishes, the
+CI wait is cancelled into `lastWaits`, and the closing event carries `via: 'cezar_done'`. U7d
+finishes one run with the done line and one with `cezar_done` and a summary, which lands as a
+note just before the closing event, and then finishes a Continue turn through `cezar_done`
+again, so both turn-end handlers are covered.
 
 **R74** extends that native-wire matrix to a failed nonfinal workflow agent.
 CI recovery must retain the failed attempt, including across restart and CI

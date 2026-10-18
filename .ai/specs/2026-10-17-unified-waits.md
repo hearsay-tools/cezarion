@@ -548,3 +548,64 @@ builder" unless a bullet says otherwise.
   the header carries Archive on the Session tab (`archiveInComposer`). Finish stays unavailable,
   as on every failed run: `finishDecision` needs an open session. Archive does not discard the
   results; Continue on an archived run unarchives it and delivers them, as for any archived run.
+
+## Phase 2 decisions
+
+Calls made while building phase 2 (hearsay-tools/cezarion#1234). The owner approved the first
+group at the design gate; the rest were made while building it, within "Left to the builder".
+Phase 2 ships as two pull requests: 2a adds the tools, the aliases, the durable counters and the
+prompt; 2b adds the three-branch turn-end rule and removes the prose gate, the final-message
+nudge and the ask override. The decisions for 2b (the no-wait nudge absorbing the final-message
+nudge, and the dry-run mocks answering it) are recorded with it.
+
+- **A session without cezar tools keeps the markers.** When the tool controller is unavailable,
+  the session gets today's marker prompt (`HANDOFF_ONLY_INSTRUCTIONS`), and its monitoring wake
+  keeps the marker wording (`MONITORING_WAKE_NUDGE_MARKERS`). Every other session gets one
+  "Lifecycle tools (cezar)" paragraph in place of the completion, still-working and
+  structured-question marker paragraphs, and a wake that names `cezar_done` and `cezar_wait`.
+  The marker lines stay accepted as aliases either way.
+- **A worker's human wait carries a card.** `cezar_wait({kind:'human'})` from a worker without
+  `questions` refuses with `questions_required`, because only a card can be routed to the
+  parent. A worker's no-wait fallback stays today's plain park until phase 3.
+- **The budget is durable.** `automaticWakes` (timers, and in 2b nudges) lives on the run
+  record. A human message and a human Continue reset it; a scheduler continuation and a restart
+  keep it. A parent's answer to its worker does not reset it. A batch carrying timer results
+  reserves its unit in memory when submitted and charges the record on the provider
+  acknowledgement, so a batch a restart cuts off is charged once, at its redelivery. The
+  delivery-failure count (`waitDeliveryFailures`) is on the record too and keeps phase 1's reset
+  points.
+- **One human wait per run.** A second registration in the turn that opened it replaces its card
+  and returns the same `wait_id`. A registration after the user saw it returns that wait
+  unchanged. A human wait registered while a question without a wait is pending (a prose gate)
+  attaches to that question at the turn end instead of raising a second card.
+- **Surfacing.** A human wait registered mid-turn is shown to the user (an `ask.requested`
+  event, recorded as its `askSeq`) at that turn's end, or by the failure, close or recovery path.
+  One registered at a boundary is shown at once. Recovery shows an unsurfaced human wait, sets
+  the run `waiting` with its other waits re-armed, and resumes nothing.
+- **The answer settles it.** Any human message settles every human wait as `delivered` (it never
+  becomes `resolved`, so it queues no wake), and messages to a run whose only open wait is human
+  are delivered as the answer, not held back.
+- **A shown human wait cannot be cancelled by the agent.** `cezar_cancel_wait` answers
+  `human_question` for it; only the user's answer ends it. One from the same turn, not yet
+  shown, can be cancelled.
+- **Aliases.** The ask line opens an `ask-line` human wait with its card, a native ask a
+  `native-ask` one, the monitoring line with re-checks off a `monitoring-line` one, and a spent
+  budget a `budget` one (`source: 'cezar'`). Until 2b, a rejected ask line opens a cardless
+  `ask-line` wait only where the turn already raises the prose gate.
+- **`cezar_done` keeps the completion gate.** It refuses with `human_question_pending` while an
+  earlier turn's question is pending and with `worker_wait_pending` while a worker wait is
+  registered, as the done line is overridden today; a root parent also refuses with
+  `worker_questions`, `workers_outstanding` or `workers_uncollected`, listing up to 64 workers
+  and the command that clears each. The session refusals are the ones `cezar_wait` answers. An
+  accepted done is taken by the turn end that reads it, and a human message clears it, so a
+  later turn must call it again. A non-interactive workflow step ignores it, as it ignores the
+  done line. A human wait from the same turn is cancelled by the done (a later done beats an
+  earlier ask).
+- **The closing record.** `cezar_done`'s `summary` becomes a `note` event just before
+  `goal achieved — session closed`, and that lifecycle event carries `via: 'cezar_done'` or
+  `via: 'done-line'`. Both close through one helper.
+- **Attention stays where it is.** Attention rung 3 ("an open human wait at any status") and the
+  upgrade-on-read of pending asks into human waits wait for phase 4. Transcript gate facts stay
+  authoritative until then, and `computeWaitingOn` reads both.
+- **Schema 5.** The run store moves to schema 5, so a phase-1 build refuses a store that holds
+  human waits (`unsupported-schema`) instead of dropping them as unreadable.

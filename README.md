@@ -572,8 +572,21 @@ host; GitHub Enterprise hosts must already be recognized by the forge/auth
 configuration. Tool startup itself makes no GitHub request. With **Monitoring
 wake-up** turned off in **Settings → Resources**, `cezar_wait` refuses a timer
 (`timers_disabled`); once the automatic-wake budget of 40 is spent, it refuses one
-with `wake_budget_spent`. The budget counts automatic wakes in one live session: a
-message from you, a Continue or a cockpit restart starts it again.
+with `wake_budget_spent`, and a run with nothing else to wait on waits for you. The
+budget is kept on the task, so a cockpit restart keeps it; a message from you or a
+Continue starts it again.
+
+With `kind: "human"` the agent waits for you, optionally with a card of up to four
+questions (`questions`, in the ask format). The task reads Needs you once the turn
+ends, and your next message answers it. A run has one such wait at a time, and the
+agent cannot cancel it once you have seen it. The ask-marker card, a native question
+and `CEZ:MONITORING` with re-checks off open the same kind of wait. When the work is
+done and verified, the agent calls `cezar_done` (an optional `summary`), and the task
+finishes at the end of that turn: its open waits are cancelled and the summary is
+written as a note. `cezar_done` refuses while owned workers are live or uncollected,
+a worker question is unanswered, or a question to you is still pending, and says what
+to do first. The `CEZ:DONE` line keeps working and finishes the same way. An
+autonomous task does not wait for you until its automatic-wake budget is spent.
 
 A run can have several waits open at once, up to 16. Each answer carries the
 wait's id, its absolute deadline and the list of waits still open, and
