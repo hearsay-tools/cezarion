@@ -5223,7 +5223,9 @@ export class RunManager {
    * conversation input leads the queue (lifecycle input stays a barrier). */
   private pendingConversationBatch(runId: string, state: ActiveRun, answerId?: string): { inputs: AgentInput[]; text: string } | undefined {
     const run = this.store.getRun(runId);
-    if (!run || run.waits?.length || state.agentInputFlight || this.workerWait(runId)) return undefined;
+    // The answer this batch rides on settles every human wait, so only a CI or timer wait holds it
+    // (hearsay-tools/cezarion#1234).
+    if (!run || run.waits?.some(wait => wait.kind !== 'human') || state.agentInputFlight || this.workerWait(runId)) return undefined;
     const batch = agentInputBatch((run.agentInputs ?? []).filter(input => input.id !== state.openingAgentInputId && input.id !== answerId),
       input => this.formatAgentInput(runId, input));
     return batch?.inputs.every(input => input.conversation) ? batch : undefined;
