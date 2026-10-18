@@ -14,15 +14,17 @@ const writeMock = (mock: string, mockBin: string, source: string) => writeFileSy
   source.replace(/import\('(\.\/[^']+)'\)/g, (_match, path: string) => `import(${JSON.stringify(pathToFileURL(join(dirname(mockBin), path)).href)})`), { mode: 0o755 });
 
 /** Reject exactly one identified command through the real protocol; a reopened
- * process accepts it. No session/manager mock and no transport-error inference. */
-export async function withRejectedCommand(backend: 'codex' | 'opencode' | 'pi' | 'omp', body: () => Promise<void>): Promise<void> {
+ * process accepts it. No session/manager mock and no transport-error inference.
+ * `persistent` rejects every such command, in every process, until `lift()`. */
+export async function withRejectedCommand(backend: 'codex' | 'opencode' | 'pi' | 'omp', body: (lift: () => void) => Promise<void>,
+  { persistent = false } = {}): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), 'cez-delivery-reject-'));
-  const once = join(root, 'rejected-once');
+  const gate = join(root, persistent ? 'rejection-lifted' : 'rejected-once');
   const adapter = HARNESS_ADAPTERS[backend] as { mockBin: string };
   const original = adapter.mockBin, mock = join(root, 'mock.mjs');
   // mock-omp-rpc.mjs already imports both; a second import of the same name is a SyntaxError.
   let source = (backend === 'omp' ? '' : "import {existsSync,writeFileSync} from 'node:fs';\n") + readFileSync(original, 'utf8').replace(/^#!.*\n/, '');
-  const rejected = `existsSync(${JSON.stringify(once)})`, mark = `writeFileSync(${JSON.stringify(once)},'rejected')`;
+  const rejected = `existsSync(${JSON.stringify(gate)})`, mark = persistent ? 'void 0' : `writeFileSync(${JSON.stringify(gate)},'rejected')`;
   try {
     if (backend === 'codex') {
       const anchor = "  } else if (msg.method === 'turn/start') {";
@@ -40,7 +42,7 @@ export async function withRejectedCommand(backend: 'codex' | 'opencode' | 'pi' |
     }
     writeMock(mock, original, source);
     adapter.mockBin = mock;
-    await body();
+    await body(() => writeFileSync(gate, ''));
   } finally {
     adapter.mockBin = original;
     rmSync(root, { recursive: true, force: true });

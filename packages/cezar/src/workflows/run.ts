@@ -25,7 +25,7 @@ import { type AgentSession } from '../core/claude-cli-runner.ts';
 import { hasRegisteredRunProcess, onUsage, registerRunProcess, replaceRunProcess, unregisterRunProcess, type ProcessUsage } from '../core/process-usage.ts';
 import { processGroupAlive, processGroupOf, sessionGroupOf, signalProcessGroup } from '../core/session-process.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
-import { noJitter, ORPHAN_BACKOFF, retryDelayMs, type Backoff } from '../delegation/retry-backoff.ts';
+import { noJitter, ORPHAN_BACKOFF, retryDelayMs, WAKE_RETRY_BACKOFF, type Backoff } from '../delegation/retry-backoff.ts';
 import { inspectExecutionGeneration, isCurrentProcess, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, sharedCwdScan, type CwdSource, type GenerationProbe, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
 import { startManagedSession } from '../core/managed-session.ts';
@@ -594,6 +594,20 @@ export const AUTO_RESUME_GRACE_MS = 30_000;
  * enough to sit through a couple of days of five-hour windows.
  */
 export const MAX_AUTO_RESUMES = 12;
+/**
+ * Consecutive failed automatic attempts to deliver a run's wait results (hearsay-tools/cezarion#1233):
+ * each is a session that failed while the results were still owed, counted across the replacement
+ * sessions that retry them. At the bound the run settles `failed` and keeps the results for a human.
+ * The count is in memory, per manager, so a restart starts it again, like the per-session wake budget.
+ * A delivery acknowledgement, human input, Continue, Stop, Finish and cancel reset it; a usage-limit
+ * failure is not counted, because its own hold and automatic resume take it.
+ */
+export const MAX_WAKE_DELIVERY_ATTEMPTS = 3;
+export const WAKE_DELIVERY_CAP_NOTE = `could not deliver wait results after ${MAX_WAKE_DELIVERY_ATTEMPTS} attempts — continue this task to retry`;
+
+/** A run that failed while it still owed wait results keeps them, and its open waits, until a human
+ *  acts: Continue delivers them, Stop discards them (hearsay-tools/cezarion#1233). */
+const holdsOwedResults = (run: RunRecord): boolean => run.status === 'failed' && resolvedWaits(run).length > 0;
 /**
  * How long a missed deadline stays worth acting on. The promise is "we pick this up when the
  * window reopens" — kept across a restart or an overnight close, which is the case the feature
@@ -1295,6 +1309,12 @@ export class RunManager {
   private readonly ciRetries = new Map<string, { runId: string; timer: NodeJS.Timeout }>();
   /** A wake that could not be admitted yet, retried by run id. */
   private readonly wakeRetries = new Map<string, NodeJS.Timeout>();
+  /** Consecutive failed automatic deliveries of a run's wait results (`MAX_WAKE_DELIVERY_ATTEMPTS`). */
+  private readonly wakeDeliveryFailures = new Map<string, number>();
+  /** The wait before the next automatic delivery attempt after a failed one, by run id. */
+  private readonly wakeBackoffs = new Map<string, NodeJS.Timeout>();
+  // Private and overridable so tests need not wait out production cadence.
+  private wakeRetryBackoff: Backoff = WAKE_RETRY_BACKOFF;
   /** One timer per open timer wait, keyed by wait id. */
   private readonly waitTimers = new Map<string, { runId: string; timer: NodeJS.Timeout }>();
   private readonly ciResources: ReturnType<typeof acquireCiResources>;
@@ -1351,7 +1371,7 @@ export class RunManager {
   private readonly onDelegationRun = (run: RunRecord, source?: CommitSource): void => {
     // Delegation metadata checkpoints do not change task status.
     if (!this.disposed && source === undefined) this.reapTerminalScratch(run.id);
-    if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status)) this.cancelOpenWaits(run.id);
+    if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status) && !holdsOwedResults(run)) this.cancelOpenWaits(run.id);
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.active.get(run.id)?.revokeDelegation?.();
     // Cleanup checkpoints emit terminal records too. With delegation disabled,
     // these observations must not replay the project's conversation histories.
@@ -1482,6 +1502,8 @@ export class RunManager {
     this.ciRetries.clear();
     for (const timer of this.wakeRetries.values()) clearTimeout(timer);
     this.wakeRetries.clear();
+    for (const timer of this.wakeBackoffs.values()) clearTimeout(timer);
+    this.wakeBackoffs.clear();
     // Wait records stay as they are: a later manager re-arms them from their deadlines.
     for (const entry of this.waitTimers.values()) clearTimeout(entry.timer);
     this.waitTimers.clear();
@@ -2124,6 +2146,35 @@ export class RunManager {
     this.armIdleTimer(runId, state);
   }
 
+  /**
+   * A session failed while the run still owed wait results (hearsay-tools/cezarion#1233). Count the
+   * failed delivery and decide what the failing path does: `park` keeps the run waiting and retries
+   * after the backoff (or, with nothing resolved, leaves its open waits to wake it); `settle` fails
+   * the run the ordinary way, which a usage limit takes into its own hold and resume without being
+   * counted; `capped` fails it at `MAX_WAKE_DELIVERY_ATTEMPTS`. Every settled run keeps its results.
+   */
+  private failedWakeDelivery(runId: string, error: string): 'park' | 'settle' | 'capped' {
+    if (!resolvedWaits(this.store.getRun(runId) ?? {}).length) return 'park';
+    if (parseUsageLimit(error)) return 'settle';
+    const failures = (this.wakeDeliveryFailures.get(runId) ?? 0) + 1;
+    if (failures >= MAX_WAKE_DELIVERY_ATTEMPTS) { this.resetWakeDelivery(runId); return 'capped'; }
+    this.wakeDeliveryFailures.set(runId, failures);
+    const previous = this.wakeBackoffs.get(runId); if (previous) clearTimeout(previous);
+    const timer = setTimeout(() => {
+      if (this.wakeBackoffs.get(runId) !== timer) return;
+      this.wakeBackoffs.delete(runId);
+      try { this.queueWaitWake(runId); } catch { this.retryWaitAdmission(runId); }
+    }, retryDelayMs(failures - 1, this.wakeRetryBackoff, noJitter));
+    timer.unref(); this.wakeBackoffs.set(runId, timer);
+    return 'park';
+  }
+
+  /** A delivery, a human or a terminal path ends a run of failed deliveries and its backoff. */
+  private resetWakeDelivery(runId: string): void {
+    this.wakeDeliveryFailures.delete(runId);
+    const timer = this.wakeBackoffs.get(runId); if (timer) clearTimeout(timer); this.wakeBackoffs.delete(runId);
+  }
+
   private retryWaitAdmission(runId: string): void {
     if (this.disposed || this.wakeRetries.has(runId) || !resolvedWaits(this.store.getRun(runId) ?? {}).length) return;
     const timer = setTimeout(() => {
@@ -2174,6 +2225,8 @@ export class RunManager {
     if (this.disposed || this.recoveringRun(run) || !run || !resolved.length ||
       !['running', 'waiting', 'queued'].includes(run.status) || run.stopping ||
       this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
+    // A failed delivery waits out its backoff; the backoff's own timer queues this wake again.
+    if (this.wakeBackoffs.has(runId)) return;
     const state = this.active.get(runId);
     if (state && (!state.session?.open || state.atTurnBoundary !== state.session || this.workerWaiting.has(runId))) return;
     // Settlement ends the watcher. Keep a bounded-rate wake source until ACK,
@@ -2228,6 +2281,7 @@ export class RunManager {
     for (const [id, entry] of this.waitTimers) if (entry.runId === runId) this.disarmWait(id);
     for (const [id, retry] of this.ciRetries) if (retry.runId === runId) this.disarmWait(id);
     const timer = this.wakeRetries.get(runId); if (timer) clearTimeout(timer); this.wakeRetries.delete(runId);
+    this.resetWakeDelivery(runId);
     if (this.waitWakeQueuedAt.delete(runId) && this.active.has(runId)) {
       const index = this.queue.indexOf(runId); if (index >= 0) this.queue.splice(index, 1);
     }
@@ -3066,8 +3120,10 @@ export class RunManager {
     // The rest re-arms wakes from durable state and is idempotent, so it runs for every live run
     // even after one adopted family: anything the recovery window held back goes out now.
     for (const run of this.store.listRuns()) {
-      // A terminal row keeps its waits (and stays live) until something cancels them.
-      if (run.waits?.length && !['running', 'waiting', 'queued'].includes(run.status)) this.cancelOpenWaits(run.id);
+      // A terminal row keeps its waits (and stays live) until something cancels them. A failed run
+      // that owes results keeps them for a human, and its open waits still resolve without a wake.
+      if (run.waits?.length && holdsOwedResults(run)) for (const wait of openWaits(run)) this.armWait(run.id, wait);
+      else if (run.waits?.length && !['running', 'waiting', 'queued'].includes(run.status)) this.cancelOpenWaits(run.id);
       else if (run.waits?.length) this.queueWaitWake(run.id);
     }
     this.reconcileAutoResumes();
@@ -3654,6 +3710,8 @@ export class RunManager {
       }
       if (cancelledFinish) return true;
       const run = this.store.getRun(runId);
+      // Stop on a failed run that held wait results discards them; the run stays failed.
+      if (hadWaits && run?.status === 'failed') return true;
       if (run && (run.delegation || hadWaits) && ['queued', 'running', 'waiting'].includes(run.status)) {
         this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
         return true;
@@ -5378,6 +5436,7 @@ export class RunManager {
           const conversationIds = inputIds.filter(id => !resolvedIds.includes(id));
           if (resolvedIds.length) {
             this.store.commitWaitDelivery(runId, resolvedIds);
+            this.wakeDeliveryFailures.delete(runId);
             // A timer expiry is a self-generated wake: one admitted turn that carries timer results
             // spends the one unit it reserved, however many it carries. CI wakes are external events
             // and do not count.
@@ -5564,6 +5623,7 @@ export class RunManager {
       // A human message restarts the budget; a timer batch still awaiting its acknowledgement keeps
       // the unit it reserved.
       if (state) { state.monitoringWakeups = state.agentInputFlight?.wakeReserved ? 1 : 0; state.monitoringCapNoted = undefined; }
+      this.wakeDeliveryFailures.delete(runId);
       this.resetParentCompletion(runId);
     }
     return delivered;
@@ -6013,7 +6073,7 @@ export class RunManager {
     // human got there first — and then the counter starts over, because the cap only exists to
     // bound UNATTENDED resumes.
     this.clearAutoResume(runId);
-    if (!deferForCapacity) { this.withdrawWorkerWait(runId); this.resetParentCompletion(runId); }
+    if (!deferForCapacity) { this.withdrawWorkerWait(runId); this.resetParentCompletion(runId); this.resetWakeDelivery(runId); }
 
     let continuationNumber = 1;
     while (run.steps.some(step => step.id === `continue-${continuationNumber}`)) continuationNumber++;
@@ -6769,7 +6829,8 @@ export class RunManager {
       sink.sessionEnded('error', message);
       this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt: finishedAt() });
       appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
-      if (this.store.getRun(runId)?.waits?.length && !state.cancelled) {
+      const delivery = this.store.getRun(runId)?.waits?.length && !state.cancelled ? this.failedWakeDelivery(runId, message) : 'settle';
+      if (delivery === 'park') {
         // Retain the wait and scheduler wake source while closing this attempt.
         // settleSuccess only completes running/waiting steps, so its failure is durable.
         this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
@@ -6783,6 +6844,7 @@ export class RunManager {
         currentStepId: undefined,
       });
       this.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${message}` });
+      if (delivery === 'capped') this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
     } finally {
       ciTools?.revoke(); state.revokeCiTools = undefined;
       delegation?.revoke(); state.revokeDelegation = undefined;
@@ -7016,6 +7078,7 @@ export class RunManager {
     state.skills = skills;
     let checkFailure: string | null = null;
     let runError: string | null = null;
+    let deliveryCapped = false;
     // `startRun` already persisted the task's attachments so a queued bubble can render them
     // (#612). Reuse those files for the agent-facing path note instead of minting
     // duplicate pasted files when execution finally begins.
@@ -7121,7 +7184,10 @@ export class RunManager {
           this.finishStep(runId, step.id, 'failed', failure, emit);
           runError = `step "${step.id}" failed: ${failure}`;
         }
-        if (this.store.getRun(runId)?.waits?.length && !state.cancelled) {
+        const delivery = this.store.getRun(runId)?.waits?.length && !state.cancelled
+          ? failure ? this.failedWakeDelivery(runId, failure) : 'park' : 'settle';
+        if (delivery === 'capped') deliveryCapped = true;
+        if (delivery === 'park') {
           this.store.updateRun(runId, { status: 'waiting', activity: undefined,
             ...(failure ? { error: runError! } : {}) });
           this.store.flush(); // checkpoint the failed attempt and its recoverable workflow cursor before parking
@@ -7201,6 +7267,7 @@ export class RunManager {
     } else if (runError) {
       this.store.updateRun(runId, { status: 'failed', error: runError, finishedAt, currentStepId: undefined });
       emit({ type: 'lifecycle', message: `run failed — ${runError}` });
+      if (deliveryCapped) emit({ type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
     } else if (state.idleClosed || this.unansweredWorkflowAsk(runId, state)) {
       await this.settleIdleClosedRun(runId, state);
       this.dropActive(runId);

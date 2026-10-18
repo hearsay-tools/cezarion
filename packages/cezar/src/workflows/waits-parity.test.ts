@@ -7,10 +7,11 @@ import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.t
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { manager, parent, register, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { claudeScheduleWakeupDelay } from './run.ts';
+import { claudeScheduleWakeupDelay, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE } from './run.ts';
+import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt } from './monitoring-turn.testkit.ts';
 import { withDelayedCommand, withHeldPrintResponse, withRejectedCommand } from '../core/owned-input-delivery.testkit.ts';
-import { ciNativeMessages, gatedProviderFailure, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
+import { ciNativeMessages, gatedProviderFailure, persistentWakeFailure, TIMER_WAKE_OPENING, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
 
 // hearsay-tools/cezarion#1233: every runner opens, cancels and survives CI and timer waits on its
 // own native wire. The production tool controller, bundled tool, runner, store and scheduler stay
@@ -44,7 +45,28 @@ const engine = () => manager as unknown as {
   active: Map<string, { session: AgentSession & { end(): void }; ciGeneration: string; monitoringWakeups?: number }>;
   waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>;
   monitoring: Set<string>;
+  wakeRetryBackoff: Backoff;
+  wakeBackoffs: Map<string, NodeJS.Timeout>;
+  wakeDeliveryFailures: Map<string, number>;
 };
+// The delivery bound, not the backoff, is what these cells pin: retries start at once.
+const retryAtOnce = () => { engine().wakeRetryBackoff = { fastMs: 0, fastCount: MAX_WAKE_DELIVERY_ATTEMPTS, capMs: 0 }; };
+const failedSteps = (id: string) => store.getRun(id)?.steps.filter(step => step.status === 'failed').length;
+
+/** The run settled `failed` at the delivery bound and still holds the result: resolved, its input
+ *  undelivered, with the cap note, the last error, and no automatic wake left. */
+function expectHeldAtTheBound(id: string, waitId: string) {
+  const run = store.getRun(id)!;
+  expect(run.status).toBe('failed');
+  expect(run.error).toMatch(/^continue failed: /);
+  expect(run.waits?.find(wait => wait.id === waitId)?.phase).toBe('resolved');
+  expect(run.lastWaits?.find(wait => wait.id === waitId)).toBeUndefined();
+  expect(inputsFor(id, waitId).map(input => input.deliveredAt)).toEqual([undefined]);
+  expect(store.readEvents(id).filter(event => event.type === 'note' && event.message === WAKE_DELIVERY_CAP_NOTE)).toHaveLength(1);
+  expect(failedSteps(id)).toBe(MAX_WAKE_DELIVERY_ATTEMPTS);
+  expect(manager.isActive(id)).toBe(false);
+  expect(engine().wakeBackoffs.has(id)).toBe(false);
+}
 const fireTimer = (waitId: string) => engine().waitTimers.get(waitId)!.timer._onTimeout();
 const flushMicrotasks = async () => { for (let n = 0; n < 5; n++) await Promise.resolve(); };
 const turnEnds = (id: string) => store.readEvents(id).filter(event => event.type === 'turn-end').length;
@@ -84,7 +106,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -351,9 +373,12 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
         return;
       }
       await withRejectedCommand(runner as 'codex' | 'opencode' | 'pi' | 'omp', async () => {
+        retryAtOnce();
         const { run, timer, askSeq } = await timerBesideQuestion(runner, `reject-owned-turn${runner === 'opencode' ? ' mock:reject-agent-post' : ''}`);
         fireTimer(timer.id);
         await until(() => settled(run.id, timer.id)?.phase === 'delivered');
+        // The acknowledged delivery ends the run of failed attempts.
+        expect(engine().wakeDeliveryFailures.has(run.id)).toBe(false);
         // The rejection failed the session, not the run: a continuation sent the result again, and
         // only that accepted submission delivered it.
         expect(prompted(runner, `Timer ${timer.id} fired`).length).toBeGreaterThanOrEqual(2);
@@ -361,6 +386,69 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
         expect(store.getRun(run.id)?.status).not.toBe('failed');
         await answerQuestion(run.id, askSeq);
       });
+    });
+
+    it(`${runner} U13 a persistently rejected wait result beside a pending portable question stops after the delivery bound, the run fails keeping the result and the question, and Continue delivers it once`, async () => {
+      if (exemptionFor('U13', runner)) {
+        expect(exemptionFor('U13', runner)?.kind).toBe('capability-absent');
+        return;
+      }
+      await withRejectedCommand(runner as 'codex' | 'opencode' | 'pi' | 'omp', async lift => {
+        retryAtOnce();
+        const { run, timer, askSeq } = await timerBesideQuestion(runner, `reject-owned-turn${runner === 'opencode' ? ' mock:reject-agent-post' : ''}`);
+        fireTimer(timer.id);
+        // The failure is recorded before the failing session is dropped.
+        await until(() => store.getRun(run.id)?.status === 'failed' && !manager.isActive(run.id));
+        // One rejected submission per attempt, each in its own session, then nothing.
+        expect(prompted(runner, `Timer ${timer.id} fired`)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS);
+        expectHeldAtTheBound(run.id, timer.id);
+        expect(store.getRun(run.id)?.hasPendingHumanAsk).toBe(true);
+        expect(asks(run.id).map(ask => ask.seq)).toEqual([askSeq]);
+        lift();
+        // The answer opens the turn that also delivers the result.
+        expect(manager.continueRun(run.id, { text: 'Parser' })).toEqual({ ok: true });
+        await until(() => settled(run.id, timer.id)?.phase === 'delivered' && answered(run.id, askSeq));
+        expect(inputsFor(run.id, timer.id)).toHaveLength(1);
+        expect(prompted(runner, `Timer ${timer.id} fired`)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS + 1);
+      }, { persistent: true });
+    });
+
+    it(`${runner} U14 a wait-wake continuation that fails persistently stops at the delivery bound, the run fails keeping its result, and Continue delivers it once`, async () => {
+      nativeWire(runner);
+      const failure = persistentWakeFailure(root, runner);
+      retryAtOnce();
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+      await until(() => store.getRun(run.id)?.status === 'waiting');
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const timerWait = async (seconds: number, note: string) => {
+        const registered = await tools.registerWait({ kind: 'timer', seconds, note }, 'cezar_wait', new AbortController().signal);
+        if (!('wait' in registered)) throw Error('registration refused');
+        return registered.wait;
+      };
+      const timer = await timerWait(60, 'u14');
+      const later = await timerWait(7200, 'u14 later');
+      engine().active.get(run.id)!.session.end();
+      await until(() => !manager.isActive(run.id));
+      fireTimer(timer.id);
+      await until(() => store.getRun(run.id)?.status === 'failed' && !manager.isActive(run.id));
+      // Each attempt is a scheduler continuation whose opening prompt the provider fails.
+      expect(prompted(runner, TIMER_WAKE_OPENING)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS);
+      expectHeldAtTheBound(run.id, timer.id);
+      // A wait that resolves on the failed run stays resolved: nothing wakes it (the wake is
+      // queued synchronously inside the resolution, so its absence shows now).
+      fireTimer(later.id);
+      expect(store.getRun(run.id)?.waits?.find(wait => wait.id === later.id)?.phase).toBe('resolved');
+      expect(store.getRun(run.id)?.status).toBe('failed');
+      expect(manager.isActive(run.id)).toBe(false);
+      failure.lift();
+      expect(manager.continueRun(run.id, { text: 'go on' })).toEqual({ ok: true });
+      await until(() => settled(run.id, timer.id)?.phase === 'delivered' && settled(run.id, later.id)?.phase === 'delivered');
+      expect(prompted(runner, `Timer ${timer.id} fired`)).toHaveLength(1);
+      expect(prompted(runner, `Timer ${later.id} fired`)).toHaveLength(1);
+      expect(inputsFor(run.id, timer.id)).toHaveLength(1);
+      await until(() => store.getRun(run.id)?.status === 'waiting');
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
 
     it(`${runner} U11 an alias timer survives a later worker park with its deadline, is held while the workers outrank it, and is delivered after the worker wake`, async () => {

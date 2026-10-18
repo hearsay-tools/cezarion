@@ -5,9 +5,11 @@ import { deriveAttention, type CezarWaitRequest, type CiWait, type CiWaitResult,
 import type { AgentSession, RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
-import { manager, root, semaphore, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { manager, restart, root, semaphore, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { MAX_WAKE_DELIVERY_ATTEMPTS } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { ciNativeMessages, toolCall } from './waits-parity.testkit.ts';
+import { ciNativeMessages, persistentWakeFailure, TIMER_WAKE_OPENING, toolCall } from './waits-parity.testkit.ts';
+import type { Backoff } from '../delegation/retry-backoff.ts';
 
 // hearsay-tools/cezarion#1233: how resolved waits wake a run beside a pending question, what every
 // delivered turn ends with, and which parks hold a slot. The runner wires, store and scheduler are
@@ -39,6 +41,10 @@ const engine = () => manager as unknown as {
   waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>;
   monitoring: Set<string>;
   pump(): Promise<void>;
+  queue: string[];
+  wakeRetryBackoff: Backoff;
+  wakeBackoffs: Map<string, NodeJS.Timeout & { _onTimeout(): void; _idleTimeout: number }>;
+  wakeDeliveryFailures: Map<string, number>;
 };
 async function openWait(id: string, request: CezarWaitRequest): Promise<Wait> {
   const tools = manager.cezarToolHandlers(id, engine().active.get(id)!.ciGeneration);
@@ -279,5 +285,90 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     expect(manager.cancel(first.id)).toBe(true);
     await until(() => store.getRun(third.id)?.status !== 'queued');
     expect(store.getRun(second.id)?.waits?.[0]?.phase).toBe('open');
+  });
+
+  /** A timer owed by a run whose session is closed: its wake is a scheduler continuation. */
+  async function timerOwedWithoutSession() {
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios.baseline!, runner: 'claude' });
+    await until(() => store.getRun(run.id)?.status === 'waiting');
+    const timer = await openWait(run.id, { kind: 'timer', seconds: 60, note: 'owed' });
+    engine().active.get(run.id)!.session!.end();
+    await until(() => !manager.isActive(run.id));
+    return { run, timer };
+  }
+
+  it('claude a failed wake delivery retries after its backoff, not at once, and Continue resets the count', async () => {
+    nativeWire('claude');
+    persistentWakeFailure(root, 'claude');
+    engine().wakeRetryBackoff = { fastMs: 60_000, fastCount: 1, capMs: 120_000 };
+    const { run, timer } = await timerOwedWithoutSession();
+    fireTimer(timer.id);
+    // The backoff is armed before the failing session is dropped.
+    await until(() => engine().wakeBackoffs.has(run.id) && !manager.isActive(run.id));
+    // The failed attempt armed the backoff instead of the next continuation: nothing runs or queues.
+    const first = engine().wakeBackoffs.get(run.id)!;
+    expect(first._idleTimeout).toBe(60_000);
+    expect(prompted('claude', TIMER_WAKE_OPENING)).toHaveLength(1);
+    expect(manager.isActive(run.id)).toBe(false);
+    expect(engine().queue).not.toContain(run.id);
+    expect(store.getRun(run.id)?.status).toBe('waiting');
+    expect(waitById(run.id, timer.id)?.phase).toBe('resolved');
+    expect(engine().wakeDeliveryFailures.get(run.id)).toBe(1);
+    // The backoff owns the retry: when it fires, the second attempt starts and backs off further.
+    first._onTimeout();
+    await until(() => engine().wakeBackoffs.has(run.id) && engine().wakeBackoffs.get(run.id) !== first && !manager.isActive(run.id));
+    expect(prompted('claude', TIMER_WAKE_OPENING)).toHaveLength(2);
+    expect(engine().wakeBackoffs.get(run.id)!._idleTimeout).toBe(120_000);
+    expect(engine().wakeDeliveryFailures.get(run.id)).toBe(2);
+    // Continue is a human act: it clears the count and the pending backoff, and delivers the result.
+    expect(manager.continueRun(run.id, { text: 'go on' }).ok).toBe(true);
+    expect(engine().wakeBackoffs.has(run.id)).toBe(false);
+    expect(engine().wakeDeliveryFailures.has(run.id)).toBe(false);
+    await until(() => settled(run.id, timer.id)?.phase === 'delivered');
+    expect(prompted('claude', TIMER_WAKE_OPENING)).toHaveLength(2);
+  });
+
+  it('claude a failed run holding a wait result keeps it and its armed open wait across a restart, and Stop discards them', async () => {
+    nativeWire('claude');
+    persistentWakeFailure(root, 'claude');
+    engine().wakeRetryBackoff = { fastMs: 0, fastCount: MAX_WAKE_DELIVERY_ATTEMPTS, capMs: 0 };
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios.baseline!, runner: 'claude' });
+    await until(() => store.getRun(run.id)?.status === 'waiting');
+    const timer = await openWait(run.id, { kind: 'timer', seconds: 60, note: 'owed' });
+    const later = await openWait(run.id, { kind: 'timer', seconds: 7200, note: 'later' });
+    engine().active.get(run.id)!.session!.end();
+    await until(() => !manager.isActive(run.id));
+    fireTimer(timer.id);
+    await until(() => store.getRun(run.id)?.status === 'failed' && !manager.isActive(run.id));
+    await restart();
+    // Recovery keeps the held result and re-arms the open wait, and nothing wakes the failed run.
+    expect(store.getRun(run.id)?.status).toBe('failed');
+    expect(waitById(run.id, timer.id)?.phase).toBe('resolved');
+    expect(waitById(run.id, later.id)?.phase).toBe('open');
+    expect(engine().waitTimers.has(later.id)).toBe(true);
+    expect(manager.isActive(run.id)).toBe(false);
+    expect(prompted('claude', TIMER_WAKE_OPENING)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS);
+    // Stop discards what the failed run held; the run stays failed.
+    expect(manager.cancel(run.id)).toBe(true);
+    expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
+    expect(store.getRun(run.id)?.status).toBe('failed');
+    expect(engine().waitTimers.has(later.id)).toBe(false);
+  });
+
+  it('claude a usage-limited wake continuation is not counted: the run fails into the usage-limit resume and keeps its result', async () => {
+    nativeWire('claude');
+    persistentWakeFailure(root, 'claude', { usageLimit: true });
+    // Far out, so the resume never fires during the test.
+    process.env.CEZ_MOCK_LIMIT_RESET_SECONDS = '3600';
+    const { run, timer } = await timerOwedWithoutSession();
+    fireTimer(timer.id);
+    // The usage-limit resume is scheduled as the failed session is dropped.
+    await until(() => store.getRun(run.id)?.status === 'failed' && !manager.isActive(run.id));
+    expect(prompted('claude', TIMER_WAKE_OPENING)).toHaveLength(1);
+    expect(store.getRun(run.id)?.autoResumeAt).toBeDefined();
+    expect(waitById(run.id, timer.id)?.phase).toBe('resolved');
+    expect(engine().wakeDeliveryFailures.has(run.id)).toBe(false);
+    expect(engine().wakeBackoffs.has(run.id)).toBe(false);
+    expect(notes(run.id, 'could not deliver wait results')).toEqual([]);
   });
 });

@@ -19,6 +19,7 @@ export const WAIT_CRITERIA = [
   { id: 'U11', scenario: 'turn-messages', name: 'an alias timer survives a later worker park with its deadline, is held while the workers outrank it, and is delivered after the worker wake' },
   { id: 'U12', scenario: 'turn-messages', name: 'a wait result beside a pending portable question is checkpointed only on its delayed provider acknowledgement, and the question stays answerable' },
   { id: 'U13', scenario: 'turn-messages', name: 'a wait result beside a pending portable question whose acknowledgement is rejected stays resolved, is retried, and the question stays answerable' },
+  { id: 'U14', scenario: 'provider-error', name: 'a wait-wake continuation that fails persistently stops at the delivery bound, the run fails keeping its result, and Continue delivers it once' },
 ] as const;
 
 /** The native mocks' `mock:cezar-tool` prompt: one cezar tool call through the runner's own wire.
@@ -61,6 +62,41 @@ ${source}`;
   writeFileSync(mock, '#!/usr/bin/env node\n' + source, { mode: 0o755 });
   process.env.CEZ_DRY_RUN = '0'; process.env[adapter.binEnv] = mock;
   return { held: () => existsSync(held), release: () => writeFileSync(released, '') };
+}
+
+/** The opening prompt of the scheduler continuation that delivers a timer result. */
+export const TIMER_WAKE_OPENING = 'Resume to receive the queued timer result.';
+
+// Fail every timer-wake continuation's opening prompt through the runner's own provider-error
+// branch (Claude's auth-error branch, as `gatedProviderFailure` uses), or with `usageLimit`
+// through Claude's usage-limit envelope, until the test lifts it. Every other prompt is unchanged.
+export function persistentWakeFailure(root: string, runner: RunnerId, { usageLimit = false } = {}) {
+  const adapter = HARNESS_ADAPTERS[runner];
+  const lifted = join(root, 'wake-failure-lifted');
+  const anchor: Record<RunnerId, string> = {
+    claude: usageLimit ? "if (userText.includes('mock:limit')) {" : "if (userText.includes('mock:auth-error')) {",
+    codex: "if (turnText.includes('mock:provider-error') || turnText.includes('mock:empty-success')) {",
+    opencode: "if (body.includes('mock:provider-error')) {",
+    pi: "if (command.type === 'prompt' && command.message.includes('mock:provider-error')) {",
+    cursor: "if (mode === 'provider-error') {",
+    omp: "if (message.includes('mock:provider-error')) {",
+  };
+  if (usageLimit) expect(runner).toBe('claude');
+  const text: Record<RunnerId, string> = { claude: 'userText', codex: 'turnText', opencode: 'body', pi: 'command.message', cursor: 'prompt', omp: 'message' };
+  let source = readFileSync(adapter.mockBin, 'utf8').replace(/^#!.*\n/, '');
+  expect(source.split(anchor[runner])).toHaveLength(2);
+  source = source.replace(anchor[runner], `if (wakeFailurePrompt(${text[runner]})) {`);
+  if (runner === 'cursor') source = source.replace("prompt.includes('mock:provider-error')", 'wakeFailurePrompt(prompt)');
+  source = source.replace(/import\('(\.\/[^']+)'\)/g, (_match, path: string) => `import(${JSON.stringify(pathToFileURL(join(dirname(adapter.mockBin), path)).href)})`);
+  source = `import * as wakeFailureFs from 'node:fs';
+function wakeFailurePrompt(text) {
+  return typeof text === 'string' && text.includes(${JSON.stringify(TIMER_WAKE_OPENING)}) && !wakeFailureFs.existsSync(${JSON.stringify(lifted)});
+}
+${source}`;
+  const mock = join(root, 'wake-failure-native.mjs');
+  writeFileSync(mock, '#!/usr/bin/env node\n' + source, { mode: 0o755 });
+  process.env.CEZ_DRY_RUN = '0'; process.env[adapter.binEnv] = mock;
+  return { lift: () => writeFileSync(lifted, '') };
 }
 
 type NativeInput = {

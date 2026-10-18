@@ -10,6 +10,14 @@ export const DESTROY_BACKOFF: Backoff = { fastMs: 60_000, fastCount: 5, capMs: 3
 export const SCRATCH_BACKOFF: Backoff = { fastMs: 60_000, fastCount: 5, capMs: 3_600_000 };
 /** The orphan reprobe kept 15 s for its first 15 minutes before hearsay-tools/cezarion#879; that window is unchanged. */
 export const ORPHAN_BACKOFF: Backoff = { fastMs: 15_000, fastCount: 60, capMs: 3_600_000 };
+/**
+ * The wait between automatic attempts to deliver wait results whose session failed
+ * (hearsay-tools/cezarion#1233). Unlike the cleanup loops above it stops: `MAX_WAKE_DELIVERY_ATTEMPTS`
+ * failed attempts settle the run, so only two retries ever wait, 15 s and then 30 s. The results are
+ * owed now, and a transient provider fault (a dropped connection, a rejected submission) usually
+ * clears within seconds; minutes would only delay a delivery that is likely to succeed.
+ */
+export const WAKE_RETRY_BACKOFF: Backoff = { fastMs: 15_000, fastCount: 1, capMs: 60_000 };
 /** For the batched reprobes: ids that probe together keep probing together, so they share a scan. */
 export const noJitter = () => 0;
 /** Scheduled destroy attempts after which the cockpit says the cleanup needs attention: the first capped delay. */
