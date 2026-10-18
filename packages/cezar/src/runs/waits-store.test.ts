@@ -56,6 +56,10 @@ function ciEntry(overrides: Partial<Extract<Wait, { kind: 'ci' }>> = {}): Wait {
   } as Wait;
 }
 
+function humanEntry(overrides: Partial<Extract<Wait, { kind: 'human' }>> = {}): Wait {
+  return { id: randomUUID(), kind: 'human', source: 'agent', via: 'cezar_wait', registeredAt: iso(0), phase: 'open', turnId: 'turn-1', ...overrides } as Wait;
+}
+
 function timerEntry(overrides: Partial<Extract<Wait, { kind: 'timer' }>> = {}): Wait {
   return {
     id: randomUUID(), kind: 'timer', source: 'agent', via: 'cezar_wait', registeredAt: iso(0), deadline: iso(300_000), phase: 'open',
@@ -268,6 +272,42 @@ describe('wait checkpoints', () => {
       expect(delivered.deliveredAt).toBe(run.lastWaits![0]!.deliveredAt);
       expect(run.agentInputs!.find((entry) => entry.id === second.id)!.deliveredAt).toBeUndefined();
     }
+  });
+
+  // hearsay-tools/cezarion#1234: the user's answer ends every open human wait at once.
+  it('commitHumanWaitsAnswered settles every open human wait as delivered and leaves ci open', () => {
+    const human = humanEntry({ questions: [{ header: 'Pick', question: 'Which one?', options: [{ label: 'A' }, { label: 'B' }] }], askSeq: 3 });
+    const ci = ciEntry();
+    store.commitWait(id, human);
+    store.commitWait(id, ci);
+    expect(store.commitHumanWaitsAnswered(id)).toEqual([human.id]);
+    for (const run of [store.getRun(id)!, reopen()]) {
+      expect(run.waits).toEqual([ci]);
+      expect(run.lastWaits).toEqual([{ ...human, phase: 'delivered', deliveredAt: expect.any(String) }]);
+    }
+    expect(store.commitHumanWaitsAnswered(id)).toEqual([]);
+  });
+
+  it('a human wait round-trips through close and reopen with its askSeq', () => {
+    const human = humanEntry();
+    store.commitWait(id, human);
+    store.commitWait(id, { ...human, askSeq: 12 } as Wait);
+    expect(reopen().waits).toEqual([{ ...human, askSeq: 12 }]);
+  });
+
+  it('an unreadable automaticWakes reads as absent', () => {
+    store.updateRun(id, { automaticWakes: 4, waitDeliveryFailures: 2 });
+    expect(reopen()).toMatchObject({ automaticWakes: 4, waitDeliveryFailures: 2 });
+    store.close();
+    const records = readPersistedRuns(directory);
+    records[0].automaticWakes = 'many';
+    records[0].waitDeliveryFailures = -1;
+    seedRuns(directory, records);
+    store = RunStore.open(directory, { keepLive: true });
+    const run = store.getRun(id)!;
+    expect(run.status).toBe('waiting');
+    expect(run.automaticWakes).toBeUndefined();
+    expect(run.waitDeliveryFailures).toBeUndefined();
   });
 
   it('caps lastWaits at 16, oldest dropped', () => {

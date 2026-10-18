@@ -30,7 +30,7 @@ export const RUNS_IMPORT_COMPLETE_KEY = 'import-complete';
 /** `PRAGMA user_version` of a database this build created. A higher number means a newer cezar
  *  wrote it; that is refused rather than read, because a newer schema may store what this one
  *  would silently drop on its next write. */
-export const RUN_DATABASE_SCHEMA_VERSION = 4;
+export const RUN_DATABASE_SCHEMA_VERSION = 5;
 
 /**
  * The oldest `user_version` the READ-ONLY reader can read as it stands (`openReadOnly`). It never
@@ -179,6 +179,15 @@ const MIGRATIONS: readonly string[] = [
   -- with monitoringWakeAt, and the old predicate called each of those live. Rows it called live
   -- that the new one does not (a settled ciWait, stale monitoring on a finished run) are loaded
   -- once more, and open rewrites them, with their live column, as it upgrades them.
+  `,
+  `
+  -- Schema 5 changes no table either: records may carry a human wait (kind 'human', no deadline)
+  -- in waits and lastWaits, and the automaticWakes and waitDeliveryFailures counters
+  -- (hearsay-tools/cezarion#1234). A schema-4 build would drop each human wait as unreadable and
+  -- recover the run without the question it parked on, so the bump makes it refuse the store as
+  -- unsupported-schema instead; the recovery is to run this version again.
+  --
+  -- No live recompute: isLiveRecord already calls a row with an open wait live, of any kind.
   `,
 ];
 

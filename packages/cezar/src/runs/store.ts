@@ -181,7 +181,7 @@ export const runRecordSchema = z.object({
   delegation: storedDelegationStateSchema,
   /** Non-human input must retain attribution through restart, separately from human answers. */
   agentInputs: z.array(agentInputSchema).optional(),
-  /** Open and resolved waits (spec 2026-10-17-unified-waits): CI waits and timers in phase 1.
+  /** Open and resolved waits (spec 2026-10-17-unified-waits): CI waits, timers and human waits.
    *  Read from the legacy `ciWait` and monitoring fields by `upgradeLegacyWaits`, and salvaged per
    *  entry, so one unreadable wait never evicts the run. */
   waits: contractRunRecordSchema.shape.waits,
@@ -189,6 +189,10 @@ export const runRecordSchema = z.object({
   lastWaits: contractRunRecordSchema.shape.lastWaits,
   /** Retained recovery observation when a saved wait could not be read. */
   lastWaitsError: contractRunRecordSchema.shape.lastWaitsError.catch(undefined),
+  /** The automatic-wake budget and the wake delivery failures (hearsay-tools/cezarion#1234). An
+   *  unreadable count reads as none, which restarts that bound rather than evicting the run. */
+  automaticWakes: contractRunRecordSchema.shape.automaticWakes.catch(undefined),
+  waitDeliveryFailures: contractRunRecordSchema.shape.waitDeliveryFailures.catch(undefined),
   /** Dev servers the agent registered with `cezar_preview_serve` (#781). Optional so old files parse. */
   previewServers: z.array(previewServerSchema).optional(),
   /** URLs of images attached to the initial task prompt, for the thread's first bubble
@@ -2763,6 +2767,21 @@ export class RunStore extends EventEmitter {
       lastWaits: settleWaits(run.lastWaits, delivered.map((wait) => ({ ...wait, phase: 'delivered' as const, deliveredAt }))),
       ...(run.agentInputs ? { agentInputs: run.agentInputs.map((input) => ids.has(input.id) && !input.deliveredAt ? { ...input, deliveredAt } : input) } : {}),
     }]]));
+  }
+
+  /** The user answered: every open human wait moves to `lastWaits` as `delivered` in one commit
+   *  (hearsay-tools/cezarion#1234). Returns their ids, empty when none was open. */
+  commitHumanWaitsAnswered(id: string): string[] {
+    const run = this.peek(id);
+    const answered = (run?.waits ?? []).filter((wait) => wait.kind === 'human' && wait.phase === 'open');
+    if (!run || !answered.length) return [];
+    const deliveredAt = new Date().toISOString();
+    const ids = new Set(answered.map((wait) => wait.id));
+    this.commitIndex(new Map([[id, { ...run,
+      waits: nonEmpty((run.waits ?? []).filter((wait) => !ids.has(wait.id))),
+      lastWaits: settleWaits(run.lastWaits, answered.map((wait) => ({ ...wait, phase: 'delivered' as const, deliveredAt }))),
+    }]]));
+    return [...ids];
   }
 
   /** Legacy CI checkpoint over `commitWait`, kept until its callers move (unified waits, Task 4). */
