@@ -17,7 +17,7 @@ export const conversationMessageSchema = conversationAttributionSchema.extend({
 });
 export type ConversationMessage = z.infer<typeof conversationMessageSchema>;
 export const requestOutcomeSchema = z.object({
-  requestId: z.uuid(), status: z.enum(['replied', 'completed-without-reply', 'failed', 'cancelled', 'destroyed', 'timed-out', 'sender-closed', 'human-fallback']),
+  requestId: z.uuid(), status: z.enum(['replied', 'replied-late', 'completed-without-reply', 'failed', 'cancelled', 'destroyed', 'timed-out', 'sender-closed', 'human-fallback']),
   observedAt: z.iso.datetime(), replyId: z.uuid().optional(),
 }).strict();
 export type RequestOutcome = z.infer<typeof requestOutcomeSchema>;
@@ -40,11 +40,16 @@ export const inboxReceiptResultSchema = z.object({
   receiptId: z.uuid(), status: z.enum(['acknowledged', 'already-acknowledged', 'released']),
 }).strict();
 export type InboxReceiptResult = z.infer<typeof inboxReceiptResultSchema>;
+/** Resume rounds may outlast ordinary message exchanges; waits keep their own shorter bound. */
+export const MAX_RESUME_REQUEST_SECONDS = 86_400;
+export const MAX_CONVERSATION_REQUEST_SECONDS = 1_800;
+export const DEFAULT_CONVERSATION_REQUEST_SECONDS = 600;
 export const conversationSendRequestSchema = z.object({
   id: z.uuid(), recipientRunId: z.uuid(), kind: conversationAttributionSchema.shape.kind,
-  requestId: z.uuid().optional(), text: z.string().min(1).max(100_000).refine(text => text.trim().length > 0), timeoutSeconds: z.number().int().min(1).max(1800).default(600),
+  requestId: z.uuid().optional(), text: z.string().min(1).max(100_000).refine(text => text.trim().length > 0), timeoutSeconds: z.number().int().min(1).max(MAX_RESUME_REQUEST_SECONDS).default(DEFAULT_CONVERSATION_REQUEST_SECONDS),
   resume: z.boolean().optional(),
-}).strict().refine(value => (value.kind === 'reply' || value.kind === 'follow-up') === (value.requestId !== undefined), { message: 'Replies and follow-ups require a request ID; new messages must omit it' })
+}).strict().refine(value => value.timeoutSeconds <= MAX_CONVERSATION_REQUEST_SECONDS || (value.resume === true && value.kind === 'request'), { path: ['timeoutSeconds'], message: 'Only --resume requests accept deadlines above 1800 seconds (maximum 86400)' })
+  .refine(value => (value.kind === 'reply' || value.kind === 'follow-up') === (value.requestId !== undefined), { message: 'Replies and follow-ups require a request ID; new messages must omit it' })
   .refine(value => !value.resume || value.kind === 'request' || value.kind === 'progress', { message: '--resume requires a new request or progress instruction' });
 export type ConversationSendRequest = z.infer<typeof conversationSendRequestSchema>;
 /** `consumed`: the recipient's harness reported the model read it (#505). */

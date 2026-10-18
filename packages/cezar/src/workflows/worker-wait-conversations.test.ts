@@ -1,3 +1,4 @@
+import { requestOutcomeSchema } from '@open-mercato/cezar-contract';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -21,7 +22,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
     if (metadata.role !== 'root') throw Error('missing root');
     store.commitDelegation([{ id: p.id, delegation: { ...metadata, permissions: [...metadata.permissions, 'steer'] } }]);
     await until(() => store.getRun(p.id)?.status === 'waiting');
-    const w = await worker(p.id);
+    const w = await worker(p.id, 'mock:hold', runner);
     manager.enqueueOwnedRun(w.id);
     await until(() => store.getRun(w.id)?.status === 'waiting');
     const credentials = new CredentialRegistry();
@@ -67,6 +68,34 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
         expect(store.getRun(f.p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
         expect(store.getRun(f.p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'outcome' } });
       } finally { f.close(); }
+    });
+  }
+
+  for (const runner of RUNNER_IDS) {
+    it(`${runner} WP2 preserves a resumed request for 45 minutes and delivers its late reply amendment`, async () => {
+      process.env.CEZ_DRY_RUN = '0';
+      process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
+      process.env[HARNESS_ADAPTERS[runner].binEnv] = HARNESS_ADAPTERS[runner].mockBin;
+      const f = await conversationPair(runner);
+      try {
+        manager.finish(f.w.id);
+        await until(() => !manager.isActive(f.w.id));
+        const started = Date.now();
+        const sent = await f.service.send(f.parentCaller, { id: randomUUID(), recipientRunId: f.w.id,
+          kind: 'request', text: 'Fix review mock:hold', resume: true, timeoutSeconds: 3600 });
+        await until(() => store.getRun(f.w.id)?.status === 'waiting');
+        // Only the wall clock changes: native mock wire/process timers keep running.
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(started + 45 * 60_000);
+        expect((await f.service.conversation(f.parentCaller, { recipientRunId: f.w.id })).outcomes).toEqual([]);
+        vi.setSystemTime(started + 61 * 60_000);
+        expect((await f.service.conversation(f.parentCaller, { recipientRunId: f.w.id })).outcomes[0]?.status).toBe('timed-out');
+        const reply = await f.service.reply(f.workerCaller, { id: randomUUID(), recipientRunId: f.p.id,
+          kind: 'reply', requestId: sent.message.id, text: 'Fixed mock:hold', timeoutSeconds: 600 });
+        expect(reply.outcome).toMatchObject({ status: 'replied-late', replyId: reply.message.id });
+        await until(() => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === reply.message.id)?.deliveredAt);
+        expect(store.readEvents(f.p.id).some(event => event.type === 'request-outcome' && requestOutcomeSchema.safeParse(event.outcome).data?.status === 'replied-late')).toBe(true);
+      } finally { vi.useRealTimers(); f.close(); }
     });
   }
 

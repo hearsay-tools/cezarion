@@ -1063,6 +1063,17 @@ describe('reduceThread — parent/worker conversation', () => {
   }
   const outcome = { requestId: id, status: 'replied' as const, observedAt: message.createdAt, replyId: '44444444-4444-4444-8444-444444444444' }
 
+  it('amends only a timeout with a late reply and keeps the amendment on replay', () => {
+    const expired = { requestId: id, status: 'timed-out', observedAt: message.createdAt }
+    const amended = { ...outcome, status: 'replied-late', observedAt: '2026-09-08T13:00:00.000Z' }
+    const { turns } = reduceThread([
+      line(1, 'conversation-message', { message, delivery: 'queued' }),
+      line(2, 'request-outcome', { outcome: expired }),
+      line(3, 'request-outcome', { outcome: amended }),
+      line(4, 'request-outcome', { outcome: expired }),
+    ])
+    expect(turns[0]!.items[0]).toMatchObject({ outcome: { status: 'replied-late', observedAt: amended.observedAt, replyId: amended.replyId } })
+  })
   it('attaches a later outcome onto the request and never emits a standalone outcome note', () => {
     const { turns } = reduceThread([
       line(1, 'conversation-message', { message, delivery: 'queued' }),

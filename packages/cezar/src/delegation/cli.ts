@@ -99,11 +99,11 @@ const WORKER_FLAG_HELP: Record<string, string> = {
   '--context-file': '<path>            UTF-8 context file; mutually exclusive with --context.',
   '--attach': '<path>                  Copy a git-ignored file from your worktree into the worker worktree at the same path; repeatable.',
   '--mode': '<one|any|all>             Wait mode (default any); one requires one target.',
-  '--timeout-seconds': '<1-1800>       Wait or request deadline (default 600 seconds).',
+  '--timeout-seconds': '<1-1800>       Wait or request deadline (default 600 seconds); --resume requests accept 1-86400.',
   '--request': '<UUID>                 Request to wait for; repeat for multiple requests.',
   '--id': '<UUID>                      Message ID; reuse only for an exact retry.',
   '--kind': '<request|progress>        Whether the message requires an explicit reply.',
-  '--resume': '                         Resume an owned finished worker with this new instruction.',
+  '--resume': '                         Resume an owned finished worker; request deadline defaults to 600 s, --timeout-seconds accepts up to 86400 s.',
 };
 function workerHelp(operation?: string): string {
   const operations = WORKER_USAGE.operations.filter(entry => operation === undefined || entry.name === operation);

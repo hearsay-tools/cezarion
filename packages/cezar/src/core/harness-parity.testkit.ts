@@ -225,6 +225,7 @@ export const FINAL_MESSAGE_CRITERIA = [
 /** hearsay-tools/cezarion#1138: worker-wait-conversations.test.ts, every native parent wire. */
 export const WORKER_PROGRESS_WAIT_CRITERIA = [
   { id: 'WP1', scenario: 'hold', name: 'delivers progress without retiring the registered worker wait' },
+  { id: 'WP2', scenario: 'hold', name: 'preserves a resumed request past 45 minutes and delivers a late reply amendment' },
 ] as const;
 
 /** #790: skill system prompt on Continue and restart recovery, every native wire. */

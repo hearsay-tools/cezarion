@@ -350,7 +350,13 @@ export class DelegationService {
       if (state.messages.length + reservedMessages >= 1024 || (enqueue && request.kind === 'request' && state.messages.filter(message => message.kind === 'request' && message.state === 'accepted' && !state.outcomes.some(outcome => outcome.requestId === message.id)).length >= 32) ||
         (enqueue && !answering && (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');
       const outcomes = [...state.outcomes];
-      if (request.kind === 'reply' && !settled) outcomes.push({ requestId: request.requestId!, status: 'replied', observedAt: now, replyId: request.id });
+      // Only deadline expiry can be amended. Cancellation, lifecycle settlement and an
+      // earlier reply still win; the request never becomes pending again.
+      if (request.kind === 'reply' && (!settled || settled.status === 'timed-out')) {
+        const outcome = { requestId: request.requestId!, status: settled ? 'replied-late' as const : 'replied' as const, observedAt: now, replyId: request.id };
+        if (settled) outcomes[outcomes.indexOf(settled)] = outcome;
+        else outcomes.push(outcome);
+      }
       const input = { id: message.id, source: 'agent' as const, parentRunId: root.id, text: message.text, createdAt: now,
         conversation: { senderRunId: sender.id, recipientRunId: recipient.id, kind: message.kind, ...(message.requestId ? { requestId: message.requestId } : {}) } };
       const next = { messages: [...state.messages, message], outcomes };

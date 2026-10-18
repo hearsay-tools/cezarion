@@ -81,6 +81,15 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     expect(waitHelp).toContain('--mode');
     expect(waitHelp).toContain('--timeout-seconds');
   });
+  it('sends a long resume deadline through the HTTP boundary and rejects it for an ordinary request', async () => {
+    const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
+    const args = ['send', workerId, 'Fix review', '--id', randomUUID(), '--kind', 'request', '--timeout-seconds', '7200'];
+    expect(await runWorkerCommand(args, env)).toBe(1);
+    expect(json().code).toBe('invalid_input');
+    expect(await runWorkerCommand([...args, '--resume'], env)).toBe(0);
+    const sent = json();
+    expect(Date.parse(sent.message.deadline) - Date.parse(sent.message.createdAt)).toBe(7_200_000);
+  });
   it('prints one inbox snapshot before ACK and rejects positional IDs', async () => {
     const listeners = process.stdout.listenerCount('error');
     const id = randomUUID(), receiptId = randomUUID();

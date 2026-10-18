@@ -5,7 +5,7 @@ import { RunStore } from '../runs/store.ts';
 import { fixture } from './service.testkit.ts';
 import { projectConversationEvents } from './conversations.ts';
 import {
-  conversationInspectResultSchema, conversationStateSchema, inboxClaimSchema, inboxReceiptRequestSchema,
+  requestOutcomeSchema, conversationInspectResultSchema, conversationStateSchema, inboxClaimSchema, inboxReceiptRequestSchema,
   inboxReceiptResultSchema, inboxReserveResultSchema,
 } from '@open-mercato/cezar-contract';
 import { readPersistedText } from '../runs/run-store.testkit.ts';
@@ -163,6 +163,63 @@ describe('durable conversations', () => {
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     expect(reopened.getRun(w.id)?.continuationMessage).toEqual(f.store.getRun(w.id)?.continuationMessage);
     expect(reopened.getRun(f.parent.id)?.delegation).toMatchObject({ conversation: { messages: [a.message] } }); reopened.flush();
+  });
+  it('allows a bounded day for resume requests but keeps ordinary requests bounded to 30 minutes', async () => {
+    const w = await completedWorker();
+    const request = { id: randomUUID(), recipientRunId: w.id, kind: 'request' as const, text: 'Fix review', timeoutSeconds: 86400 };
+    await expect(f.service.send(f.caller, request)).rejects.toThrow();
+    await expect(f.service.send(f.caller, { ...request, resume: true, timeoutSeconds: 86401 })).rejects.toThrow();
+    expect((await f.service.send(f.caller, { ...request, resume: true })).message.deadline).toBeDefined();
+  });
+  it('keeps a cancelled request cancelled when its reply arrives after the deadline', async () => {
+    const w = await worker();
+    const sent = await f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'request', text: 'Report', timeoutSeconds: 600 });
+    const cancelled = await f.service.cancelRequest(f.caller, { requestId: sent.message.id });
+    const reply = await f.service.reply(w.caller, { id: randomUUID(), recipientRunId: f.parent.id, kind: 'reply', requestId: sent.message.id, text: 'Report', timeoutSeconds: 600 });
+    expect(reply.outcome).toEqual(cancelled);
+  });
+  it('keeps a resumed request pending for a 45-minute reply inside its one-hour bound', async () => {
+    const w = await completedWorker();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-10-18T10:00:00.000Z'));
+      const sent = await f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id,
+        kind: 'request', text: 'Fix the review findings', resume: true, timeoutSeconds: 3600 });
+      expect(sent.message.deadline).toBe('2026-10-18T11:00:00.000Z');
+      f.store.updateRun(w.id, { status: 'running' });
+      vi.setSystemTime(new Date('2026-10-18T10:45:00.000Z'));
+      expect((await f.service.conversation(f.caller, { recipientRunId: w.id })).outcomes).toEqual([]);
+      const reply = await f.service.reply(w.caller, { id: randomUUID(), recipientRunId: f.parent.id,
+        kind: 'reply', requestId: sent.message.id, text: 'Fixed', timeoutSeconds: 600 });
+      expect(reply.outcome).toMatchObject({ status: 'replied', replyId: reply.message.id });
+    } finally { vi.useRealTimers(); }
+  });
+  it.each([false, true])('records the first reply after expiry as replied late (timeout observed: %s)', async observed => {
+    const w = await worker();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-10-18T10:00:00.000Z'));
+      const sent = await f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id,
+        kind: 'request', text: 'Report back', timeoutSeconds: 600 });
+      vi.setSystemTime(new Date('2026-10-18T10:45:00.000Z'));
+      if (observed) expect((await f.service.conversation(f.caller, { recipientRunId: w.id })).outcomes[0]?.status).toBe('timed-out');
+      const request = { id: randomUUID(), recipientRunId: f.parent.id, kind: 'reply' as const,
+        requestId: sent.message.id, text: 'Fixed', timeoutSeconds: 600 };
+      const reply = await f.service.reply(w.caller, request);
+      expect(reply).toMatchObject({ message: { state: 'late' }, outcome: { status: 'replied-late', replyId: request.id } });
+      expect(await f.service.reply(w.caller, request)).toEqual(reply);
+      const later = await f.service.reply(w.caller, { ...request, id: randomUUID() });
+      expect(later.outcome?.replyId).toBe(request.id);
+      expect((await f.service.conversation(f.caller, { recipientRunId: w.id })).outcomes).toEqual([reply.outcome]);
+      const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
+      expect(reopened.getRun(f.parent.id)?.delegation).toMatchObject({ conversation: { outcomes: [reply.outcome] } });
+      reopened.flush();
+      for (const id of [f.parent.id, w.id]) {
+        const events = f.store.readEvents(id).filter(event => event.type === 'request-outcome');
+        expect(events.at(-1)).toMatchObject({ outcome: { status: 'replied-late', replyId: request.id } });
+        expect(events.filter(event => event.type === 'request-outcome' && requestOutcomeSchema.safeParse(event.outcome).data?.status === 'replied-late')).toHaveLength(1);
+      }
+    } finally { vi.useRealTimers(); }
   });
   it('explains rejection with a parent-operated resume command and preserves that receipt on retry', async () => {
     const w = await completedWorker();

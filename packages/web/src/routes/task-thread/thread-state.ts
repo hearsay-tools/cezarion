@@ -641,8 +641,10 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
       }
       case 'request-outcome': {
         const parsed = requestOutcomeEventSchema.safeParse(event)
-        if (!parsed.success || outcomesByRequest.has(parsed.data.outcome.requestId)) break
+        if (!parsed.success) break
         const { outcome } = parsed.data
+        const previous = outcomesByRequest.get(outcome.requestId)
+        if (previous && !(previous.status === 'timed-out' && outcome.status === 'replied-late')) break
         outcomesByRequest.set(outcome.requestId, outcome)
         const existing = conversationEntries.get(outcome.requestId)
         if (existing) attachOutcome(existing)
