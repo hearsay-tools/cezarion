@@ -150,6 +150,8 @@ for (const backend of RUNNER_IDS) {
           // The beside turn ends and parks for a question again.
           await waitFor(() => store.readEvents(runId).some(event => event.type === 'text' && String(event.text).includes(input(store, runId, id)!.text)));
           await waitFor(() => store.getRun(runId)?.status === 'waiting' && store.transcriptFacts(runId).pendingAsk !== undefined);
+          // Delivered beside the card, not instead of it: the original question is still open.
+          expect(question(seq)).toBeDefined();
         }
         expect(checkpoints(store, runId, seq)).toEqual([]);
         expect(store.readEvents(runId).filter(event => event.type === 'user-message' && String(event.text).includes(input(store, runId, id)!.text))).toEqual([]);

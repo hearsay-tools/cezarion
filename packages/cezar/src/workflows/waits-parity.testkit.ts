@@ -37,6 +37,13 @@ export const WAIT_CRITERIA = [
   { id: 'U18', scenario: 'baseline', name: 'Finish on a run parked on an agent question closes the question without answering it' },
   { id: 'U17', scenario: 'turn-messages', name: 'a question in prose without a wait no longer parks the run by itself' },
   { id: 'U15', scenario: 'autonomous-cap', name: 'an autonomous run is nudged with the autonomous wording until the budget, then opens a budget human wait' },
+  // hearsay-tools/cezarion#1235 phase 3a: worker waits.
+  { id: 'U2w', scenario: 'baseline', name: 'ci and worker open: the worker resolving wakes the agent with ci still open and in the footer, and the later ci result is delivered' },
+  { id: 'U2t', scenario: 'baseline', name: 'timer and worker open: the timer resolving wakes the agent with the worker wait still open and in the footer, and the later worker result is delivered' },
+  { id: 'U3w', scenario: 'baseline', name: 'a worker message during a worker wait wakes the parent and the worker wait stays open' },
+  { id: 'U7w', scenario: 'baseline', name: 'cez worker wait and cezar_wait kind worker land in the same wait list' },
+  { id: 'U9w', scenario: 'provider-error', name: 'provider failure and clean close with a worker wait open leave the run recoverable and the next resolution delivers' },
+  { id: 'U19', scenario: 'turn-messages', name: 'a worker message beside a pending portable question is delivered and the question stays answerable' },
 ] as const;
 
 /** The native mocks' `mock:cezar-tool` prompt: one cezar tool call through the runner's own wire.

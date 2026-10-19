@@ -1,13 +1,16 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
-import type { CiWaitResult, HumanWaitEntry, Wait } from '@open-mercato/cezar-contract';
+import type { CiWaitResult, HumanWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
-import { collect, manager, parent, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { CredentialRegistry } from '../delegation/credentials.ts';
+import { DelegationService } from '../delegation/service.ts';
+import { collect, fixtureUpdateRun, manager, parent, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
@@ -137,6 +140,51 @@ async function expectHumanWaitAnswered(id: string, via: Wait['via']) {
   return wait!;
 }
 
+// hearsay-tools/cezarion#1235 phase 3a: worker waits in the list.
+const workerWaits = (id: string) => (store.getRun(id)?.waits ?? []).filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker');
+const workerWake = (wait: Wait) => `Worker wait ${wait.id} (terminal outcome)`;
+const delivered = (id: string, inputId: string) => !!store.getRun(id)?.agentInputs?.find(input => input.id === inputId)?.deliveredAt;
+
+/** A root parent on `runner`'s native wire, parked after its opening turn, and one worker it owns
+ *  that never starts: `fixtureUpdateRun` settles it. Workers run on the Claude wire. */
+async function parentWithWorker(runner: RunnerId) {
+  nativeWire(runner);
+  process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
+  const p = await parent(HARNESS_ADAPTERS[runner].scenarios.baseline!, runner);
+  await until(() => store.getRun(p.id)?.status === 'waiting');
+  return { p, w: await worker(p.id) };
+}
+
+/** One parent turn through the native wire: `text`'s tool calls run, and the turn ends parked. */
+async function parentTurn(id: string, text: string, parked: () => boolean) {
+  const turns = turnEnds(id);
+  expect(manager.sendMessage(id, [{ type: 'text', text }])).toBe(true);
+  await until(() => turnEnds(id) > turns && store.getRun(id)?.status === 'waiting' && parked());
+}
+
+/** A steering parent on `runner`'s native wire and a worker running on the Claude wire, parked,
+ *  with each one's credential on a delegation service, as `cez worker send` reaches them. */
+async function conversingParent(runner: RunnerId) {
+  process.env.CEZ_DELEGATION = '1';
+  const { p, w } = await parentWithWorker(runner);
+  const delegation = store.getRun(p.id)!.delegation!;
+  if (delegation.role !== 'root') throw Error('root fixture');
+  store.commitDelegation([{ id: p.id, delegation: { ...delegation, permissions: [...delegation.permissions, 'steer'] } }]);
+  manager.enqueueOwnedRun(w.id);
+  await until(() => store.getRun(w.id)?.status === 'waiting');
+  const credentials = new CredentialRegistry();
+  onTestFinished(() => credentials.close());
+  const workerCaller = credentials.authenticate(credentials.issue('project', w.id, randomUUID()))!;
+  const service = new DelegationService();
+  service.registerProject({ id: 'project', root, store, manager });
+  const progress = async (text: string) => {
+    const id = randomUUID();
+    await service.send(workerCaller, { id, recipientRunId: p.id, kind: 'progress', text, timeoutSeconds: 600 });
+    return id;
+  };
+  return { p, w, progress };
+}
+
 const timerText = (wait: Wait, note: string) => `Timer ${wait.id} fired: ${note}. Continue toward the task goal; register another wait if you are still waiting.`;
 
 describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', { timeout: 45_000 }, () => {
@@ -144,7 +192,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U3w', 'U7w', 'U9w', 'U19']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -1118,6 +1166,141 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
       expect(manager.finish(run.id)).toBe(true);
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+
+    it(`${runner} U2w ci and worker open: the worker resolving wakes the agent with ci still open and in the footer, and the later ci result is delivered`, async () => {
+      const external = github();
+      const { p, w } = await parentWithWorker(runner);
+      const opened = `${toolCall('cezar_wait', { kind: 'ci', pr })} ${toolCall('cezar_wait', { kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 })}`;
+      await parentTurn(p.id, opened, () => waitOfKind(p.id, 'ci')?.phase === 'open' && workerWaits(p.id)[0]?.phase === 'open');
+      const ci = waitOfKind(p.id, 'ci')!, workers = workerWaits(p.id)[0]!;
+      expect(workers).toMatchObject({ via: 'cezar_wait', source: 'agent', workerIds: [w.id] });
+      const turns = turnEnds(p.id);
+      fixtureUpdateRun(w.id, { status: 'done' });
+      await until(() => settled(p.id, workers.id)?.phase === 'delivered' && prompted(runner, workerWake(workers)).length > 0);
+      const wake = prompted(runner, workerWake(workers)).at(-1)!;
+      expect(wake).toContain(`Still open: CI wait ${ci.id} for acme/repo#12`);
+      expect(wake).not.toContain(`worker wait ${workers.id}`);
+      expect(external.aborted()).toBe(false);
+      await until(() => turnEnds(p.id) > turns && parkedOn(p.id, waitOfKind(p.id, 'ci')));
+      expect(agentWaits(p.id)).toEqual([expect.objectContaining({ id: ci.id, phase: 'open' })]);
+      external.settle();
+      await until(() => settled(p.id, ci.id)?.phase === 'delivered' && prompted(runner, `CI wait observation ${ci.id}`).length > 0);
+      expect(prompted(runner, `CI wait observation ${ci.id}`).at(-1)).not.toContain('Still open');
+      expect(inputsFor(p.id, workers.id)).toHaveLength(1);
+      await until(() => store.getRun(p.id)?.status === 'waiting' && !agentWaits(p.id).length);
+    });
+
+    it(`${runner} U2t timer and worker open: the timer resolving wakes the agent with the worker wait still open and in the footer, and the later worker result is delivered`, async () => {
+      const { p, w } = await parentWithWorker(runner);
+      const opened = `${toolCall('cezar_wait', { kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 })} ${toolCall('cezar_wait', { kind: 'timer', seconds: 60, note: 'u2t' })}`;
+      await parentTurn(p.id, opened, () => waitOfKind(p.id, 'timer')?.phase === 'open' && workerWaits(p.id)[0]?.phase === 'open');
+      const timer = waitOfKind(p.id, 'timer')!, workers = workerWaits(p.id)[0]!;
+      const turns = turnEnds(p.id);
+      fireTimer(timer.id);
+      await until(() => settled(p.id, timer.id)?.phase === 'delivered' && prompted(runner, timerText(timer, 'u2t')).length > 0);
+      expect(prompted(runner, timerText(timer, 'u2t')).at(-1)).toContain(`Still open: worker wait ${workers.id} on 1 worker`);
+      await until(() => turnEnds(p.id) > turns && parkedOn(p.id, workerWaits(p.id)[0]));
+      // The turn end re-parks on the same entry: nothing re-registered it, nothing delivered it.
+      expect(agentWaits(p.id)).toEqual([expect.objectContaining({ id: workers.id, phase: 'open', deadline: workers.deadline })]);
+      expect(inputsFor(p.id, workers.id)).toEqual([]);
+      fixtureUpdateRun(w.id, { status: 'done' });
+      await until(() => settled(p.id, workers.id)?.phase === 'delivered' && prompted(runner, workerWake(workers)).length > 0);
+      expect(prompted(runner, workerWake(workers)).at(-1)).not.toContain('Still open');
+      await until(() => store.getRun(p.id)?.status === 'waiting' && !agentWaits(p.id).length);
+    });
+
+    // Ticket criterion 2: messages are not waits.
+    it(`${runner} U3w a worker message during a worker wait wakes the parent and the worker wait stays open`, async () => {
+      const f = await conversingParent(runner);
+      await parentTurn(f.p.id, toolCall('cezar_wait', { kind: 'worker', worker_ids: [f.w.id], timeout_seconds: 600 }), () => parkedOn(f.p.id, workerWaits(f.p.id)[0]));
+      const workers = workerWaits(f.p.id)[0]!;
+      const turns = turnEnds(f.p.id);
+      const id = await f.progress('Worker progress u3w');
+      await until(() => delivered(f.p.id, id) && prompted(runner, 'Worker progress u3w').length > 0);
+      expect(prompted(runner, 'Worker progress u3w').at(-1)).toContain(`Still open: worker wait ${workers.id} on 1 worker`);
+      await until(() => turnEnds(f.p.id) > turns && parkedOn(f.p.id, workerWaits(f.p.id)[0]));
+      expect(workerWaits(f.p.id)).toEqual([expect.objectContaining({ id: workers.id, phase: 'open', deadline: workers.deadline })]);
+      expect(inputsFor(f.p.id, workers.id)).toEqual([]);
+      // The wait still ends on its own event, once.
+      expect(manager.finish(f.w.id)).toBe(true);
+      await until(() => settled(f.p.id, workers.id)?.phase === 'delivered' && prompted(runner, workerWake(workers)).length > 0);
+      expect(settled(f.p.id, workers.id)).toMatchObject({ result: { reason: 'outcome' } });
+      expect(inputsFor(f.p.id, workers.id)).toHaveLength(1);
+      await until(() => store.getRun(f.p.id)?.status === 'waiting');
+    });
+
+    it(`${runner} U7w cez worker wait and cezar_wait kind worker land in the same wait list`, async () => {
+      const { p, w } = await parentWithWorker(runner);
+      const other = await worker(p.id);
+      const alias = manager.registerWorkerWait(p.id, { workerIds: [w.id], timeoutSeconds: 600 });
+      await parentTurn(p.id, toolCall('cezar_wait', { kind: 'worker', worker_ids: [other.id], timeout_seconds: 600 }), () => workerWaits(p.id).length === 2);
+      expect(workerWaits(p.id).map(wait => [wait.via, wait.workerIds]).sort()).toEqual([['cez-worker-wait', [w.id]], ['cezar_wait', [other.id]]]);
+      expect(workerWaits(p.id).find(wait => wait.via === 'cez-worker-wait')).toMatchObject({ id: alias.id, phase: 'open', source: 'agent', deadline: alias.deadline });
+      // One engine resolves both, each on its own worker.
+      fixtureUpdateRun(w.id, { status: 'done' });
+      await until(() => settled(p.id, alias.id)?.phase === 'delivered' && prompted(runner, `Worker wait ${alias.id}`).length > 0);
+      expect(workerWaits(p.id)).toEqual([expect.objectContaining({ via: 'cezar_wait', phase: 'open' })]);
+      const tool = workerWaits(p.id)[0]!;
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+      fixtureUpdateRun(other.id, { status: 'done' });
+      await until(() => settled(p.id, tool.id)?.phase === 'delivered' && prompted(runner, workerWake(tool)).length > 0);
+      expect(store.getRun(p.id)?.lastWaits?.filter(wait => wait.kind === 'worker').map(wait => wait.via).sort()).toEqual(['cez-worker-wait', 'cezar_wait']);
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+    });
+
+    it(`${runner} U9w provider failure with a worker wait open leaves the run recoverable and the next resolution delivers`, async () => {
+      const wire = gatedProviderFailure(root, runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
+      store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+      await until(wire.held);
+      const w = await worker(run.id);
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const registered = await tools.registerWait({ kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal);
+      expect(registered.answer).toMatchObject({ ok: true, kind: 'worker' });
+      if (!('wait' in registered)) throw Error('registration refused');
+      const wait = registered.wait;
+      const failedState = engine().active.get(run.id);
+      wire.release();
+      await until(() => store.readEvents(run.id).some(event => event.type === 'error'));
+      await until(() => engine().active.get(run.id) !== failedState);
+      expect(store.getRun(run.id)?.waits?.find(entry => entry.id === wait.id)?.phase).toBe('open');
+      expect(store.getRun(run.id)?.status).not.toBe('failed');
+      fixtureUpdateRun(w.id, { status: 'done' });
+      await until(() => settled(run.id, wait.id)?.phase === 'delivered');
+      expect(inputsFor(run.id, wait.id)).toHaveLength(1);
+      await until(() => store.getRun(run.id)?.status === 'waiting');
+    });
+
+    it(`${runner} U9w clean close with a worker wait open leaves the run recoverable and the next resolution delivers`, async () => {
+      const { p, w } = await parentWithWorker(runner);
+      const tools = manager.cezarToolHandlers(p.id, engine().active.get(p.id)!.ciGeneration);
+      const registered = await tools.registerWait({ kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal);
+      if (!('wait' in registered)) throw Error('registration refused');
+      const wait = registered.wait;
+      engine().active.get(p.id)!.session.end();
+      await until(() => !manager.isActive(p.id));
+      // A clean close is not a failure: the park and its wait survive it (it was an error before 3a).
+      expect(store.getRun(p.id)?.status).toBe('waiting');
+      expect(store.getRun(p.id)?.error).toBeUndefined();
+      expect(store.getRun(p.id)?.steps.at(-1)?.error).toBeUndefined();
+      expect(store.getRun(p.id)?.waits?.find(entry => entry.id === wait.id)?.phase).toBe('open');
+      fixtureUpdateRun(w.id, { status: 'done' });
+      await until(() => settled(p.id, wait.id)?.phase === 'delivered' && prompted(runner, workerWake(wait)).length > 0);
+      expect(inputsFor(p.id, wait.id)).toHaveLength(1);
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+    });
+
+    it(`${runner} U19 a worker message beside a pending portable question is delivered and the question stays answerable`, async () => {
+      const f = await conversingParent(runner);
+      expect(manager.sendMessage(f.p.id, [{ type: 'text', text: messagesPrompt(runner, [ASK_TEXT]) }])).toBe(true);
+      await until(() => pendingQuestion(f.p.id) && asks(f.p.id).length === 1);
+      const askSeq = asks(f.p.id)[0]!.seq;
+      const id = await f.progress('Worker progress u19');
+      await until(() => delivered(f.p.id, id) && prompted(runner, 'Worker progress u19').length > 0);
+      // Delivered beside the card, which no message answers.
+      expect(answered(f.p.id, askSeq)).toBe(false);
+      await answerQuestion(f.p.id, askSeq);
     });
   }
 });

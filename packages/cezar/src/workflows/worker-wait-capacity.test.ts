@@ -20,8 +20,9 @@ import { QUICK_TASK_WORKFLOW } from './types.ts';
 import {
   bookkeeping, captureState, checkpoint, collect, controlledWire, executions, fixtureUpdateRun,
   manager, parent, queuedWake, register, reopenRuntime, restart, root, semaphore, setFailureState,
-  store, terminal, track, until, useWorkerWaitFixture, waitOf, worker,
+  store, terminal, track, until, useWorkerWaitFixture, waitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
+import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 import { blockRunWrites, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 
@@ -178,12 +179,16 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   it('a portable human ask still takes precedence over an accepted nonfinal worker wait', async () => {
     const run = manager.startRun({ name: 'ask chain', source: 'built-in', steps: [{ id: 'first', prompt: 'mock:ask' }, { id: 'next', command: 'echo checked' }] }, { task: 'parent', runner: 'claude' });
     store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
-    const engine = manager as unknown as { workerWaiting: Set<string>; active: Map<string, { sessionEverOpened?: boolean }> };
+    const engine = manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> };
     await until(() => !!engine.active.get(run.id)?.sessionEverOpened);
     const w = await worker(run.id); register(run.id, [w.id]);
     await until(() => store.getRun(run.id)?.status === 'waiting');
     expect(store.readEvents(run.id).some(event => event.type === 'ask.requested')).toBe(true);
-    expect(engine.workerWaiting.has(run.id)).toBe(false);
+    // hearsay-tools/cezarion#1235 phase 3a: the worker wait is an open list entry beside the
+    // question, and the question's park, like a worker park, holds no slot.
+    expect(workerEntryOf(store.getRun(run.id))).toMatchObject({ phase: 'open', workerIds: [w.id] });
+    expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human' });
+    expect(semaphore.busy()).toBe(0);
     manager.requestWorkerStop(w.id); await manager.awaitRunTermination(w.id, 15000);
     expect(store.getRun(run.id)?.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
     expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
