@@ -10,6 +10,7 @@ import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { collect, manager, parent, register, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
+import { pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
 import { claudeScheduleWakeupDelay, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR } from './run.ts';
 import { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE } from './turn-end.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
@@ -143,7 +144,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U17', 'U15']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -1053,6 +1054,33 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(humanOpen(run.id)).toEqual([]);
       await until(() => parkedOn(run.id, waitOfKind(run.id, 'timer')));
       expect(deriveAttention(store.getRun(run.id)!).label).toBe('monitoring');
+    });
+
+    // hearsay-tools/cezarion#1260: Finish ends the task, so it closes the agent's unanswered question
+    // instead of leaving an answerable card that hides the one-click Continue, with or without a session.
+    it(`${runner} U18 Finish on a run parked on an agent question closes the question without answering it`, async () => {
+      nativeWire(runner);
+      delete process.env.CEZ_MOCK_NUDGE_REPLY;
+      const finishParked = async (closeFirst: boolean) => {
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+        await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined);
+        const askSeq = store.transcriptFacts(run.id).pendingAsk!.seq;
+        if (closeFirst) {
+          engine().active.get(run.id)!.session.end();
+          await until(() => !manager.isActive(run.id));
+          expect(pendingQuestion(run.id)).toBe(true);
+        }
+        expect(manager.finish(run.id)).toBe(true);
+        await until(() => terminal.includes(store.getRun(run.id)?.status ?? '') && !manager.isActive(run.id));
+        const events = store.readEvents(run.id);
+        expect(events.filter(event => event.type === 'human-ask-closed')).toEqual([expect.objectContaining({ askSeq, reason: 'finish' })]);
+        expect(events.filter(event => event.type === 'human-input-delivered')).toEqual([]);
+        expect(pendingHumanAsk(events)).toBeUndefined();
+        expect(store.transcriptFacts(run.id).pendingGateSeq).toBeUndefined();
+        expect(store.getRun(run.id)?.hasPendingHumanAsk).toBeFalsy();
+      };
+      await finishParked(false);
+      await finishParked(true);
     });
 
     // No prose classification (hearsay-tools/cezarion#1234): a question the agent only wrote gets

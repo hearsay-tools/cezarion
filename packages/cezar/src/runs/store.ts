@@ -9,6 +9,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
+import { HUMAN_ASK_EVENT_TYPES } from '@open-mercato/cezar-contract/ask';
 import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
 import {
   agentInputSchema,
@@ -3666,8 +3667,7 @@ export class RunStore extends EventEmitter {
     appendFileSync(this.eventsPath(runId), line, 'utf8');
     this.facts.append(runId, full, Buffer.byteLength(line));
     this.maybeEnqueueHistoryCompress(run);
-    if ((full.type === 'ask.requested' || full.type === 'human-input-delivered') &&
-      this.syncHumanAskSummary(run)) this.touch(run);
+    if (HUMAN_ASK_EVENT_TYPES.has(full.type) && this.syncHumanAskSummary(run)) this.touch(run);
     this.liveItems.observe(runId, full, false);
     this.emit('event', { runId, event: full });
 

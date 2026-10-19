@@ -69,6 +69,24 @@ describe('transcript facts fold', () => {
     expect(facts.pendingGateSeq).toBeUndefined();
   });
 
+  // hearsay-tools/cezarion#1260: an accepted Finish closes the question without answering it.
+  it('retires the pending ask and gate when Finish closes that question, and only that one', () => {
+    const facts = emptyFacts();
+    const asked = ask();
+    foldEvent(facts, asked);
+    expect(foldEvent(facts, ev('human-ask-closed', { askSeq: asked.seq - 1, reason: 'finish' }))).toBe(false);
+    expect(facts.pendingAsk?.seq).toBe(asked.seq);
+    const closed = ev('human-ask-closed', { askSeq: asked.seq, reason: 'finish' });
+    expect(foldEvent(facts, closed)).toBe(true);
+    expect(facts.pendingAsk).toBeUndefined();
+    expect(facts.pendingGateSeq).toBeUndefined();
+    expect(pendingHumanAsk([asked, closed])).toBeUndefined();
+    const gate = ev('note', { code: PROSE_HUMAN_GATE, message: 'need a human' });
+    foldEvent(facts, gate);
+    expect(foldEvent(facts, ev('human-ask-closed', { askSeq: gate.seq, reason: 'finish' }))).toBe(true);
+    expect(facts.pendingGateSeq).toBeUndefined();
+  });
+
   it('keys worker outcomes by wait, worker and revision', () => {
     const facts = emptyFacts();
     expect(foldEvent(facts, ev('worker-outcome', { waitId: 'w', outcome: { workerId: 'x', status: 'done' } }))).toBe(true);

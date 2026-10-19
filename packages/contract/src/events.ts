@@ -52,6 +52,15 @@ export const humanInputDeliveredEventSchema = runEventSchema.extend({
 });
 export type HumanInputDeliveredEvent = z.infer<typeof humanInputDeliveredEventSchema>;
 
+/** An accepted Finish ended the task with this question unanswered (hearsay-tools/cezarion#1260).
+ * It retires the question like a delivery does, but nobody answered it. */
+export const humanAskClosedEventSchema = runEventSchema.extend({
+  type: z.literal('human-ask-closed'),
+  askSeq: z.number().int().nonnegative(),
+  reason: z.literal('finish'),
+});
+export type HumanAskClosedEvent = z.infer<typeof humanAskClosedEventSchema>;
+
 /** A worker's ask was sent to its owning parent as a conversation request (#505). */
 export const workerQuestionRoutedEventSchema = runEventSchema.extend({
   type: z.literal('worker-question-routed'),

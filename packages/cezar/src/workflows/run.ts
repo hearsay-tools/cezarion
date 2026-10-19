@@ -5958,6 +5958,7 @@ export class RunManager {
     const state = this.active.get(runId);
     if (decision.action === 'session' && state?.session) {
       try { this.cancelOpenWaits(runId); this.withdrawWorkerWait(runId); } catch { return false; }
+      this.closeQuestionOnFinish(runId);
       state.finishRequested = true;
       this.clearIdleTimer(state);
       this.store.appendEvent(runId, { type: 'lifecycle', message: 'session closed by user' });
@@ -5972,6 +5973,7 @@ export class RunManager {
       return true;
     }
     if (decision.action === 'waiting' && run) {
+      this.closeQuestionOnFinish(runId);
       const finishedAt = new Date().toISOString();
       for (const step of run.steps) {
         if (step.status === 'waiting' || step.status === 'running') {
@@ -5982,11 +5984,21 @@ export class RunManager {
       return true;
     }
     if (decision.action === 'review') {
+      this.closeQuestionOnFinish(runId);
       this.store.updateRun(runId, { status: 'done' });
       this.store.appendEvent(runId, { type: 'lifecycle', message: 'review accepted — finished without a PR' });
       return true;
     }
     return false;
+  }
+
+  /** Finish ends the task, so an unanswered question is closed rather than left answerable on a
+   * finished run (hearsay-tools/cezarion#1260). A root never gets here with one pending: its Finish
+   * is refused until the question is answered. Stop keeps the question, which a human may still
+   * answer to reopen the run (#505). */
+  private closeQuestionOnFinish(runId: string): void {
+    const askSeq = this.pendingHumanAskSeq(runId);
+    if (askSeq !== undefined) this.store.appendEvent(runId, { type: 'human-ask-closed', askSeq, reason: 'finish' });
   }
 
   /** A synthetic continuation can settle only the resumed agent turn. If the
