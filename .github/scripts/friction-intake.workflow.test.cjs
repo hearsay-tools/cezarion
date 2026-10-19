@@ -70,7 +70,8 @@ test('Jev failure produces an unavailable artifact so apply can revoke a previou
   const resolve = name => {
     if (name === 'node:fs') return { mkdirSync() {}, writeFileSync(_p, value) { artifact = JSON.parse(value); } };
     if (name === 'node:path') return path;
-    return { classify: async () => { throw new Error('Service unavailable'); } };
+    if (name.endsWith('/jev-friction-intake.cjs')) return { classify: async () => { throw new Error('Service unavailable'); } };
+    return require(path.resolve(__dirname, '../..', name));
   };
   const github = { rest: { issues: { get: async () => ({ data: { number: 12, title: 'Report', body: '', state: 'open', labels: [{ name: 'friction' }] } }) } } };
   const core = { warning() {}, summary: { addRaw() {}, async write() {} } };

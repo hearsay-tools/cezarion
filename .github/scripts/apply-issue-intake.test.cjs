@@ -99,7 +99,7 @@ test('a duplicate inside the candidate set still closes', () => {
 });
 
 test('ordinary intake cannot assign friction routing labels even when they exist', () => {
-  const labels = ['friction-auto', 'friction-design', 'friction-guarded', 'friction-diagnostics', 'friction-unclassified', 'bug'];
+  const labels = ['friction', 'friction-auto', 'friction-design', 'friction-guarded', 'friction-diagnostics', 'friction-unclassified', 'bug'];
   const intake = loadIntake({ action: 'label', duplicate_of: null, comment: null, labels });
   assert.deepEqual(planIntakeMutations({ intake, issueNumber, knownLabels: new Set(labels) }), [
     ['issue', 'edit', '211', '--add-label', 'bug'],

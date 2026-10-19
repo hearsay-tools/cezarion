@@ -110,3 +110,12 @@ test('three automation definitions match only their handling label and keep roll
     assert.notEqual(d.enabled, true);
   }
 });
+
+test('coercible category values cannot bypass a category minimum', () => {
+  for (const value of [['lifecycle'], ['semantics'], { toString: () => 'capability' }]) {
+    const answer = response();
+    answer.answers.category.choice = value;
+    answer.answers.category.probabilities = { lifecycle: 0.99, semantics: 0.99, capability: 0.99 };
+    assert.throws(() => map(answer));
+  }
+});

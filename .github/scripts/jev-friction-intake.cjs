@@ -30,7 +30,7 @@ function buildRequest(issue, model = DEFAULT_MODEL) {
 function mapAnswers({ request, response, truncated = false }) {
   const answers = response?.answers;
   const category = answers?.category;
-  if (category?.type !== 'choice' || !Object.hasOwn(request.questions.category.criteria, category.choice)) throw new Error('Invalid Jev friction category choice.');
+  if (category?.type !== 'choice' || typeof category.choice !== 'string' || !Object.hasOwn(request.questions.category.criteria, category.choice)) throw new Error('Invalid Jev friction category choice.');
   const probabilities = { category: category.probabilities?.[category.choice] };
   const judgments = { category: { type: category.type, choice: category.choice, probabilities: category.probabilities, ...(category.confidence === undefined ? {} : { confidence: category.confidence }) } };
   for (const key of JUDGMENTS) {

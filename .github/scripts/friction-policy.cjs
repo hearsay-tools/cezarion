@@ -28,7 +28,7 @@ const LABELS = Object.freeze([
 ]);
 
 function handlingFor(category, probabilities, truncated = false) {
-  if (!Object.hasOwn(CATEGORIES, category) && category !== FALLBACK) throw new Error('Unknown friction category.');
+  if (typeof category !== 'string' || !Object.hasOwn(CATEGORIES, category) && category !== FALLBACK) throw new Error('Unknown friction category.');
   for (const key of ['category', ...JUDGMENTS]) {
     const p = probabilities?.[key];
     if (typeof p !== 'number' || !Number.isFinite(p) || p < 0 || p > 1) throw new Error('Invalid friction probability.');
@@ -56,7 +56,7 @@ function buildAutomations() {
     events: ['issue.labeled'],
     intervalSeconds: 300,
     filters: {
-      includeExisting: false, authors: ['wjarka'], allLabels: ['friction', label],
+      includeExisting: false, requireCurrentLabels: true, authors: ['wjarka'], allLabels: ['friction', label],
       changedLabels: [label], excludeLabels: Object.values(HANDLING).map(r => r.label).filter(l => l !== label),
       lookbackDays: 7, maxRecords: 25,
     },

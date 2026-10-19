@@ -3,7 +3,7 @@ import { loadWorkflows } from '../workflows/load.ts';
 import { stepsIssue, type WorkflowDef } from '../workflows/types.ts';
 import type { RunStore } from '../runs/store.ts';
 import type { RunManager, StartRunInput } from '../workflows/run.ts';
-import type { GithubCandidate } from './github-poller.ts';
+import { GithubPoller, type GithubCandidate } from './github-poller.ts';
 import type { ScheduleOccurrence } from './schedule-runner.ts';
 import type { AutomationStore } from './store.ts';
 import { githubBaselineState } from './github-baseline.ts';
@@ -108,9 +108,13 @@ export async function launchAutomationRun(options: {
   definition: GithubAutomationDefinition;
   candidate: GithubCandidate;
   receiptId: string;
+  poller?: GithubPoller;
 }): Promise<{ runId: string; existing?: boolean }> {
   const { definition, candidate } = options;
   const workflow = await resolveWorkflow(options.root, definition);
+  if (definition.filters.requireCurrentLabels && !await (options.poller ?? new GithubPoller()).matchesCurrentLabels(candidate, definition)) {
+    throw new Error('Automation no longer matches current labels; no task was created.');
+  }
   // Check after workflow loading: no async gap between the final check and run creation.
   // This shared launcher also covers manual execute checks and explicit receipt retries.
   if (candidate.event.startsWith('issue.')) {

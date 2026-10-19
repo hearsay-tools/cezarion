@@ -52,6 +52,7 @@ jobs:
             const fs = require('node:fs');
             const path = require('node:path');
             const { classify } = require('./.github/scripts/jev-friction-intake.cjs');
+            const { LABELS } = require('./.github/scripts/friction-policy.cjs');
             const number = Number(process.env.ISSUE_NUMBER);
             if (!Number.isSafeInteger(number) || number <= 0) throw new Error('Invalid issue number.');
             const { data: issue } = await github.rest.issues.get({ ...context.repo, issue_number: number });
@@ -68,7 +69,8 @@ jobs:
                 core.warning('Jev classification unavailable or invalid; revoking prior routing labels. Rerun after resolving the failure.');
               }
             }
-            const output = { issue: { number, title: issue.title, body: issue.body ?? '' }, classification };
+            const managed = new Set(LABELS.map(label => label.name));
+            const output = { issue: { number, title: issue.title, body: issue.body ?? '', managedLabels: issue.labels.map(label => label.name).filter(name => managed.has(name)) }, classification };
             fs.mkdirSync(path.dirname(process.env.FRICTION_OUTPUT), { recursive: true });
             fs.writeFileSync(process.env.FRICTION_OUTPUT, JSON.stringify(output));
             core.summary.addRaw(classification

@@ -17,6 +17,7 @@ const stringList = z.array(boundedString).max(100).optional();
 export const automationFiltersSchema = z
   .object({
     includeExisting: z.boolean().optional(),
+    requireCurrentLabels: z.boolean().optional(),
     authors: stringList,
     assignees: stringList,
     allLabels: stringList,

@@ -54,7 +54,10 @@ Independent workers read the full current issue and comments before acting.
 Each run retains a seven-day classification artifact containing the snapshot,
 judgments, probabilities and final route. Read its summary and artifact to inspect
 a decision; credentials are never part of either. Invalid answers or service
-failures clear previous managed routing labels rather than authorize work.
+failures clear the captured managed routing labels rather than authorize work,
+even if the body was edited during classification. A different current route is
+preserved as a newer decision. Per-issue serialization prevents overlapping
+classifier runs from applying out of order.
 The action warns and can be rerun after the failure is resolved.
 
 Classification has read-only issue permissions. A separate apply job has issue
@@ -64,7 +67,10 @@ obsolete managed labels, and adds the category/handling pair. Unrelated labels
 survive. A second freshness check follows label setup. GitHub offers no atomic
 conditional label mutation, so the task must still verify current scope.
 Ordinary issue intake keeps duplicate detection and general labeling, but receives
-no `friction-*` choices and its structured applicator refuses those labels.
+no `friction` or `friction-*` choices and its structured applicator refuses those
+labels. Reporters and explicit friction-reporting tools set the provenance label;
+general intake must not infer it. This also avoids relying on a `GITHUB_TOKEN`
+label mutation to trigger another Actions workflow, which GitHub suppresses.
 
 ## Triggers and preview
 
@@ -95,6 +101,13 @@ All three require an open issue by `wjarka`, `friction`, their own handling labe
 no other handling label, exactly one recognized category, and no existing claim,
 assignee, implementation PR or other task. Polls use handling-label additions,
 a 300-second interval, a seven-day bounded lookback and at most 25 records.
+All three opt into `filters.requireCurrentLabels:true`: label filters are checked
+against a fresh GitHub read before reserving a receipt and again before creating
+a task. Historical label events cannot let an obsolete handler consume the
+issue task slot. Manual receipt retries use the same launch check. The default
+for other automations is unchanged: historical event labels still match. Preview
+counts describe historical matches; execution can skip a superseded route.
+
 Tasks use Codex, one isolated worktree, no generated follow-ups, and human review;
 none may merge or enable automation. Implementation routes can escalate to a
 design proposal whenever investigation exposes an unresolved decision.
@@ -113,8 +126,10 @@ work for an issue that already has a task.
 ## Rollout
 
 The previous Friction automation is disabled. Replacements are created **paused**,
-with `includeExisting:false`. They need the classifier workflow merged and the
-paused previews reviewed before a separate explicit enablement. Default enablement
+with `includeExisting:false`. They need the classifier workflow merged, a cockpit build with
+`requireCurrentLabels` support running, and paused previews reviewed before a
+separate explicit enablement. Older builds preserve this additive filter in
+storage but do not enforce it; keep the replacements paused until upgraded. Default enablement
 starts a current-time baseline, so earlier label additions do not replay.
 The paused state is intentional; no existing backlog is launched by this change.
 

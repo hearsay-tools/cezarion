@@ -27,17 +27,27 @@ async function applyClassification({ github, repo, issueNumber, input }) {
   const names = namesOf(current);
   const eligible = current.state === 'open' && names.includes('friction');
   let desired = [];
+  let result = null;
   if (eligible) {
-    if (current.title !== input.issue.title || (current.body ?? '') !== (input.issue.body ?? '')) return { status: 'stale' };
-    if (input.classification !== null) {
-      const result = validateClassification(input.classification);
+    try { result = validateClassification(input.classification); } catch { /* revoke the captured route below */ }
+    if (result) {
+      if (current.title !== input.issue.title || (current.body ?? '') !== (input.issue.body ?? '')) return { status: 'stale' };
       desired = [`friction-${result.category}`, HANDLING[result.handling].label];
+      for (const name of desired) await ensureLabel(github, repo, LABELS.find(l => l.name === name));
+    } else {
+      // Failure revocation is independent of title/body freshness. Queued runs
+      // are serialized by issue; a different route may still have been applied
+      // by a maintainer, so preserve it rather than revoke a newer decision.
+      const captured = input.issue.managedLabels;
+      if (!Array.isArray(captured) || captured.some(name => !managed.has(name))) throw new Error('Missing managed-label snapshot for failure revocation.');
+      const actual = names.filter(name => managed.has(name));
+      if (actual.length !== captured.length || actual.some(name => !captured.includes(name))) return { status: 'superseded' };
     }
-    for (const name of desired) await ensureLabel(github, repo, LABELS.find(l => l.name === name));
-    // Label creation can take several requests. Recheck after that gap. GitHub
-    // has no conditional label mutation; workers must also revalidate scope.
     const { data: latest } = await github.rest.issues.get({ ...repo, issue_number: issueNumber });
-    if (latest.state !== current.state || latest.title !== current.title || (latest.body ?? '') !== (current.body ?? '') || !namesOf(latest).includes('friction')) return { status: 'stale' };
+    if (result && (latest.state !== current.state || latest.title !== current.title || (latest.body ?? '') !== (current.body ?? '') || !namesOf(latest).includes('friction'))) return { status: 'stale' };
+    const latestManaged = namesOf(latest).filter(name => managed.has(name));
+    const currentManaged = names.filter(name => managed.has(name));
+    if (latestManaged.length !== currentManaged.length || latestManaged.some(name => !currentManaged.includes(name))) return { status: 'superseded' };
     names.splice(0, names.length, ...namesOf(latest));
   }
   // Remove obsolete managed labels before exposing the new route. Do not send
@@ -51,7 +61,7 @@ async function applyClassification({ github, repo, issueNumber, input }) {
   }
   const missing = desired.filter(n => !names.includes(n));
   if (missing.length > 0) await github.rest.issues.addLabels({ ...repo, issue_number: issueNumber, labels: missing });
-  return { status: eligible && input.classification !== null ? 'applied' : 'cleared', labels: desired };
+  return { status: eligible && result !== null ? 'applied' : 'cleared', labels: desired };
 }
 
 module.exports = { applyClassification, ensureLabel, namesOf };

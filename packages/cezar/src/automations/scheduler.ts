@@ -180,6 +180,16 @@ export class ProjectAutomationScheduler {
   }
 
   private async launch(definition: GithubAutomationDefinition, candidate: GithubCandidate): Promise<void> {
+    if (definition.filters.requireCurrentLabels) {
+      const matches = await this.handle.github!.poller.matchesCurrentLabels(candidate, definition);
+      this.assertCurrent(definition);
+      if (!matches) {
+        await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event,
+          result: 'skipped', reason: 'Automation no longer matches current labels; no receipt or task was created.',
+          githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url });
+        return;
+      }
+    }
     // Keep event receipts (including old ones) for retry/recovery, but collapse every issue
     // event onto its first reservation, even after restart or a definition edit.
     const previous = candidate.event.startsWith('issue.')

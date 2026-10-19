@@ -51,7 +51,7 @@ jobs:
             | jq -s '.' > "$RUNNER_TEMP/open-issues.raw.json"
           node .github/scripts/issue-intake-candidates.cjs .issue-intake-context/issue.json "$RUNNER_TEMP/open-issues.raw.json" \
             > .issue-intake-context/open-issues.json
-          gh label list --limit 100 --json name,description --jq '[.[] | select(.name | startswith("friction-") | not)]' > .issue-intake-context/labels.json
+          gh label list --limit 100 --json name,description --jq '[.[] | select(.name != "friction" and (.name | startswith("friction-") | not))]' > .issue-intake-context/labels.json
 
       - name: Run Claude Code issue triage
         id: issue-intake
@@ -89,7 +89,7 @@ jobs:
                read `.issue-intake-context/labels.json`, then apply zero or
                more existing labels that are a good content fit via
                `gh issue edit ${{ github.event.issue.number }} --add-label …`.
-               Never invent a label or assign friction-* routing labels; Friction Intake
+               Never invent a label or assign friction or friction-* labels; Friction Intake
                owns them. If none fit, skip labeling.
           # --allowedTools is scoped to exactly the gh subcommands the intake
           # process needs. Two deliberate narrowings, both because this
@@ -145,7 +145,7 @@ jobs:
             | jq -s '.' > "$RUNNER_TEMP/open-issues.raw.json"
           node .github/scripts/issue-intake-candidates.cjs .issue-intake-context/issue.json "$RUNNER_TEMP/open-issues.raw.json" \
             > .issue-intake-context/open-issues.json
-          gh label list --limit 100 --json name,description --jq '[.[] | select(.name | startswith("friction-") | not)]' > .issue-intake-context/labels.json
+          gh label list --limit 100 --json name,description --jq '[.[] | select(.name != "friction" and (.name | startswith("friction-") | not))]' > .issue-intake-context/labels.json
 
       - name: Run Codex issue triage
         uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56  # v1.11
@@ -206,7 +206,7 @@ jobs:
             | jq -s '.' > "$RUNNER_TEMP/open-issues.raw.json"
           node .github/scripts/issue-intake-candidates.cjs .issue-intake-context/issue.json "$RUNNER_TEMP/open-issues.raw.json" \
             > .issue-intake-context/open-issues.json
-          gh label list --limit 100 --json name,description --jq '[.[] | select(.name | startswith("friction-") | not)]' > .issue-intake-context/labels.json
+          gh label list --limit 100 --json name,description --jq '[.[] | select(.name != "friction" and (.name | startswith("friction-") | not))]' > .issue-intake-context/labels.json
 
       # Jev has no tools and answers only with the options offered, so the
       # untrusted issue body can at worst pick a wrong label or candidate.

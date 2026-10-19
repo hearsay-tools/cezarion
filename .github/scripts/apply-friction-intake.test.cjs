@@ -4,7 +4,7 @@ const { applyClassification } = require('./apply-friction-intake.cjs');
 
 function harness(overrides = {}) {
   const issue = { number: 12, title: 'Show events', body: 'Print evidence.', state: 'open', labels: [{ name: 'friction' }, { name: 'area-cezar' }], ...overrides };
-  const input = { issue: { number: 12, title: 'Show events', body: 'Print evidence.' }, classification: { category: 'diagnostics', handling: 'automatic', probabilities: { category: 0.95, established: 0.95, policy_change: 0.01, authority_change: 0.01, verification_change: 0.01, runtime_change: 0.01 } } };
+  const input = { issue: { number: 12, title: 'Show events', body: 'Print evidence.', managedLabels: issue.labels.map(l => l.name).filter(name => name.startsWith('friction-')) }, classification: { category: 'diagnostics', handling: 'automatic', probabilities: { category: 0.95, established: 0.95, policy_change: 0.01, authority_change: 0.01, verification_change: 0.01, runtime_change: 0.01 } } };
   const mutations = [];
   const github = { rest: { issues: {
     get: async () => ({ data: structuredClone(issue) }),
@@ -55,12 +55,12 @@ test('a closed or no-longer-friction issue loses only managed labels', async () 
   }
 });
 
-test('invalid or unsafe artifact routes never label an issue for automatic implementation', async () => {
-  for (const change of [{ category: 'lifecycle' }, { category: 'diagnostics', handling: 'execute' }, { probabilities: { category: 0.1, established: 0.1 } }]) {
-    const h = harness();
+test('invalid or unsafe artifact routes revoke prior execution labels', async () => {
+  for (const change of [{ category: 'lifecycle' }, { category: ['lifecycle'] }, { category: 'diagnostics', handling: 'execute' }, { probabilities: { category: 0.1, established: 0.1 } }]) {
+    const h = harness({ labels: [{ name: 'friction' }, { name: 'friction-auto' }, { name: 'friction-diagnostics' }] });
     Object.assign(h.input.classification, change);
-    await assert.rejects(h.run());
-    assert.deepEqual(h.mutations, []);
+    assert.equal((await h.run()).status, 'cleared');
+    assert.deepEqual(h.issue.labels.map(l => l.name), ['friction']);
   }
 });
 
@@ -97,4 +97,19 @@ test('a failed classification clears prior execution labels without inventing ju
   h.input.classification = null;
   assert.equal((await h.run()).status, 'cleared');
   assert.deepEqual(h.issue.labels.map(l => l.name), ['friction', 'bug']);
+});
+
+test('failed classification revokes the captured route even when the body was edited', async () => {
+  const h = harness({ body: 'New remedy', labels: [{ name: 'friction' }, { name: 'friction-auto' }, { name: 'friction-diagnostics' }] });
+  h.input.classification = null;
+  assert.equal((await h.run()).status, 'cleared');
+  assert.deepEqual(h.issue.labels.map(l => l.name), ['friction']);
+});
+
+test('failed classification preserves a newer route that differs from its snapshot', async () => {
+  const h = harness({ labels: [{ name: 'friction' }, { name: 'friction-auto' }, { name: 'friction-diagnostics' }] });
+  h.input.classification = null;
+  h.issue.labels = [{ name: 'friction' }, { name: 'friction-design' }, { name: 'friction-lifecycle' }];
+  assert.equal((await h.run()).status, 'superseded');
+  assert.deepEqual(h.mutations, []);
 });

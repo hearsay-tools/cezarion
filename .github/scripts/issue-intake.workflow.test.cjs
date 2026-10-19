@@ -172,6 +172,6 @@ test('all ordinary intake providers receive label context without friction routi
     const result = JSON.parse(execFileSync('jq', [expression], { input: JSON.stringify([
       { name: 'bug' }, { name: 'friction' }, { name: 'friction-auto' }, { name: 'friction-knowledge' },
     ]), encoding: 'utf8' }));
-    assert.deepEqual(result.map(l => l.name), ['bug', 'friction'], name);
+    assert.deepEqual(result.map(l => l.name), ['bug'], name);
   }
 });

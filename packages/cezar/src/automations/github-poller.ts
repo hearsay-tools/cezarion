@@ -79,6 +79,13 @@ export class GithubPoller {
     })).stdout);
   }
 
+  /** A separate live read: historical transition labels remain intact. */
+  async matchesCurrentLabels(candidate: GithubCandidate, definition: GithubAutomationDefinition): Promise<boolean> {
+    const raw = await this.run('gh', ['api', `repos/${candidate.repo}/issues/${candidate.number}`]);
+    const issue = z.object({ labels: z.array(z.object({ name: z.string() })) }).parse(JSON.parse(raw));
+    return matchesFilters({ ...candidate, labels: issue.labels.map(label => label.name) }, definition);
+  }
+
   async poll(
     owner: string,
     repo: string,

@@ -73,6 +73,7 @@ Top-level keys:
 
 "filters" keys:
 - "includeExisting": boolean (default false). When true, include matching events before enablement within lookbackDays. Turning this on for an enabled poll reopens the window on its next check; durable receipts prevent duplicate launches.
+- "requireCurrentLabels": boolean (default false). Opt in to rechecking label filters against the live issue before receipt reservation and task creation; obsolete transitions do not claim a task. Historical event matching is unchanged when omitted.
 - "authors": GitHub logins that opened it. "assignees": current assignees.
 - "allLabels": must carry every one of these labels. "anyLabels": must carry at least one. "excludeLabels": must carry none.
 - "changedLabels": REQUIRED for issue.labeled and issue.unlabeled: the label whose change fires it.
