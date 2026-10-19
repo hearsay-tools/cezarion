@@ -101,9 +101,9 @@ All three require an open issue by `wjarka`, `friction`, their own handling labe
 no other handling label, exactly one recognized category, and no existing claim,
 assignee, implementation PR or other task. Polls use handling-label additions,
 a 300-second interval, a seven-day bounded lookback and at most 25 records.
-All three opt into `filters.requireCurrentLabels:true`: label filters are checked
+All three opt into `filters.requireCurrentLabels:true`: an open state and label filters are checked
 against a fresh GitHub read before reserving a receipt and again before creating
-a task. Historical label events cannot let an obsolete handler consume the
+a task. A closed item is skipped; a missing or invalid state cannot authorize work. Historical label events cannot let an obsolete handler consume the
 issue task slot. Manual receipt retries use the same launch check. If the final read rejects a
 candidate after reservation, the receipt becomes `released`: it remains an audit
 record but cannot block the same event or a later event for that issue. Ordinary

@@ -185,7 +185,7 @@ export class ProjectAutomationScheduler {
       this.assertCurrent(definition);
       if (!matches) {
         await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event,
-          result: 'skipped', reason: 'Automation no longer matches current labels; no receipt or task was created.',
+          result: 'skipped', reason: 'Automation item is closed or no longer matches current labels; no receipt or task was created.',
           githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url });
         return;
       }

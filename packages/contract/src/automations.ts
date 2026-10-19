@@ -47,7 +47,7 @@ export const automationFiltersSchema = z.object({
   includeExisting: z.boolean().optional(),
   authors: z.array(z.string()).optional(),
   assignees: z.array(z.string()).optional(),
-  /** Opt-in: label filters must still match before reservation and launch. */
+  /** Opt-in: require an open item and matching live labels before reservation and launch. */
   requireCurrentLabels: z.boolean().optional(),
   allLabels: z.array(z.string()).optional(),
   anyLabels: z.array(z.string()).optional(),
