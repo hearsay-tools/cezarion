@@ -39,6 +39,8 @@ export function isLiveStatus(status: string): boolean {
 export function isLiveRecord(run: RunRecord): boolean {
   if (LIVE_STATUSES.has(run.status)) return true;
   if (run.autoResumeAt !== undefined || run.waits?.some((wait) => wait.phase === 'open' || wait.phase === 'resolved')) return true;
+  // Only the completion gate's wait is left here after the schema-6 upgrade; an agent's worker wait
+  // is a list entry, covered above. Goes with the completion gate (hearsay-tools/cezarion#1235 phase 3b).
   if (run.delegation && run.delegation.role !== 'invalid' && run.delegation.wait !== undefined) return true;
   if (run.delegation?.role === 'worker' && run.delegation.destroy !== undefined && run.delegation.destroy.phase !== 'complete') return true;
   if (run.delegation?.role === 'root' && run.delegation.finishRequestedAt !== undefined) return true;

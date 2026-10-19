@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { runSummarySchema, toRunSummary, type RunSummary } from '@open-mercato/cezar-contract/runs';
 
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunSummaryRow } from './run-database.ts';
-import { decodeRunRecord, LEGACY_INDEX_FILE, reconcileLoadedRun, rescopeRun, parseRunRecords, type RepoHandle, type RunRecord } from './store.ts';
+import { decodeRunRecord, holdsWorkerWait, LEGACY_INDEX_FILE, reconcileLoadedRun, rescopeRun, parseRunRecords, type RepoHandle, type RunRecord } from './store.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { matchesRunQuery, searchTokens, sqlPrefilterTokens } from './run-search.ts';
 
@@ -190,8 +190,11 @@ function needsRecord(summary: RunSummary, handle?: RepoHandle | null): boolean {
   if (summary.markerRefs?.issue !== undefined) return true;
   // A foreign reference the prompt does not corroborate is dropped; the prompt is in the record.
   if (handle && (summary.referencedPullRequestUrl !== undefined || summary.referencedIssueUrl !== undefined)) return true;
-  // A root waiting on workers has its pending human question re-read from the transcript.
-  return summary.delegation?.role === 'root' && summary.delegation.wait !== undefined;
+  // A root waiting on workers has its pending human question re-read from the transcript. After
+  // the schema-6 upgrade an agent's worker wait is a list entry, which a summary shows as
+  // `waitingOn: workers`; a summary stored before it, and the completion gate's wait (in
+  // `delegation.wait` until hearsay-tools/cezarion#1235 phase 3b), still show `delegation.wait`.
+  return summary.delegation?.role === 'root' && (summary.delegation.wait !== undefined || summary.waitingOn?.kind === 'workers');
 }
 
 function readLegacyIndex(dataDir: string, { handle, archivedWindow, roots }: { handle?: RepoHandle | null; archivedWindow?: number; roots?: boolean }): ColdRunIndex {
@@ -228,7 +231,7 @@ function readLegacyIndex(dataDir: string, { handle, archivedWindow, roots }: { h
  * Never `keepLive` — this reader has no RunManager, so there is nothing to recover into.
  */
 function coldSummary(run: RunRecord, dataDir: string, handle?: RepoHandle | null): RunSummary {
-  if (run.delegation?.role === 'root' && (run.status === 'waiting' || run.delegation.wait !== undefined)) {
+  if (run.delegation?.role === 'root' && (run.status === 'waiting' || holdsWorkerWait(run))) {
     refreshHumanAskSummary(run, dataDir);
   }
   reconcileLoadedRun(run);

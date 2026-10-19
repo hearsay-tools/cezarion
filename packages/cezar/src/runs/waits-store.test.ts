@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LAST_WAITS_LIMIT, WAIT_LIMIT, type Wait } from '@open-mercato/cezar-contract/waits';
 import type { AgentInput, CiWaitResult } from '@open-mercato/cezar-contract';
 
-import { RunDatabase, RUN_DATABASE_SCHEMA_VERSION, RUNS_DB_FILE } from './run-database.ts';
+import { RunDatabase, RunDatabaseUnsupportedSchemaError, RUN_DATABASE_SCHEMA_VERSION, RUNS_DB_FILE } from './run-database.ts';
+import { readRunIndexFromDisk } from './run-index.ts';
 import { isLiveRecord } from './run-row.ts';
 import { parseRunRecords, RunStore, workerWaitEntry, type RunRecord } from './store.ts';
 import { readPersistedRuns, seedRuns } from './run-store.testkit.ts';
@@ -425,7 +426,7 @@ describe('upgrade-on-read of agent worker waits', () => {
       const run = parseOne(rootRow({ wait: legacyWait({ phase }) }));
       expect(run.waits).toEqual([{
         id: WAIT_ID, kind: 'worker', source: 'agent', via: 'cez-worker-wait', phase: 'open', turnId: 'upgraded',
-        registeredAt: iso(0), deadline: iso(540_000), timeoutSeconds: 540, mode: 'any',
+        registeredAt: iso(-60_000), deadline: iso(540_000), timeoutSeconds: 600, mode: 'any',
         workerIds: [WORKER], revisions: [{ workerId: WORKER, revision: 2 }], outcomes: [],
       }]);
       expect(run.delegation).not.toHaveProperty('wait');
@@ -442,10 +443,29 @@ describe('upgrade-on-read of agent worker waits', () => {
     expect(run.lastWaitsError).toBeUndefined();
   });
 
-  it('derives timeoutSeconds from the deadline, clamped to 1-1800', () => {
-    expect(parseOne(rootRow({ wait: legacyWait({ deadline: iso(7_200_000) }) })).waits![0]).toMatchObject({ timeoutSeconds: 1800 });
-    expect(parseOne(rootRow({ wait: legacyWait({ deadline: iso(-60_000) }) })).waits![0]).toMatchObject({ timeoutSeconds: 1 });
+  it('registers an upgraded wait 600 s before its deadline, whatever time it is read at', () => {
+    // A legacy wait kept no registration time: the original deadline is kept, `timeoutSeconds` is
+    // the 600 default, and nothing is read from the clock, so two reads of one row agree.
+    const row = () => rootRow({ wait: legacyWait({ deadline: iso(7_200_000) }) });
+    const first = parseOne(row());
+    expect(first.waits![0]).toMatchObject({ deadline: iso(7_200_000), registeredAt: iso(6_600_000), timeoutSeconds: 600 });
+    vi.setSystemTime(NOW + 3 * 3_600_000);
+    expect(parseOne(row())).toEqual(first);
     expect(workerWaitEntry(legacyWait({ deadline: 'not a time' }) as never, new Date(NOW).toISOString())).toMatchObject({ timeoutSeconds: 600 });
+  });
+
+  it('upgrades every settled stamp from the row, never the clock', () => {
+    const row = () => rootRow({
+      wait: legacyWait({ phase: 'wake-pending', reason: 'cancelled', wakeId: WAKE_ID }),
+      lastWait: legacyWait({ id: '88888888-8888-4888-8888-888888888888', phase: 'wake-pending', reason: 'timeout', wakeId: WAKE_ID }),
+    }, { agentInputs: [wakeInput(WAKE_ID)] });
+    const first = parseOne(row());
+    expect(first.lastWaits).toEqual([
+      expect.objectContaining({ id: '88888888-8888-4888-8888-888888888888', phase: 'cancelled', cancelledAt: iso(540_000) }),
+      expect.objectContaining({ id: WAIT_ID, phase: 'cancelled', cancelledAt: iso(540_000) }),
+    ]);
+    vi.setSystemTime(NOW + 3 * 3_600_000);
+    expect(parseOne(row())).toEqual(first);
   });
 
   it('upgrades wake-pending outcome and timeout into a resolved entry keeping its queued wake input', () => {
@@ -482,7 +502,7 @@ describe('upgrade-on-read of agent worker waits', () => {
     const run = parseOne(rootRow({ wait: legacyWait({ phase: 'wake-pending', reason: 'cancelled', wakeId: WAKE_ID }) },
       { agentInputs: [wakeInput(WAKE_ID)] }));
     expect(run.waits).toBeUndefined();
-    expect(run.lastWaits).toEqual([expect.objectContaining({ id: WAIT_ID, kind: 'worker', phase: 'cancelled', cancelledAt: iso(0) })]);
+    expect(run.lastWaits).toEqual([expect.objectContaining({ id: WAIT_ID, kind: 'worker', phase: 'cancelled', cancelledAt: iso(540_000) })]);
     expect(run.lastWaits![0]).not.toHaveProperty('result');
     expect(run.agentInputs).toEqual([wakeInput(WAKE_ID)]);
   });
@@ -563,14 +583,69 @@ describe('upgrade-on-read of agent worker waits', () => {
     const directory = mkdtempSync(join(tmpdir(), 'cez-waits-schema6-'));
     try {
       RunStore.open(directory, { keepLive: true }).close();
-      const raw = new DatabaseSync(join(directory, RUNS_DB_FILE));
+      const path = join(directory, RUNS_DB_FILE);
+      const raw = new DatabaseSync(path);
       try {
         expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 6 });
       } finally {
         raw.close();
       }
+      // A schema-5 build's bound is 5: both of its openers must refuse a schema-6 store rather than
+      // read it, because it would drop each worker entry as unreadable on its next write.
+      expect(() => RunDatabase.open(path, 5)).toThrow(RunDatabaseUnsupportedSchemaError);
+      expect(() => RunDatabase.openReadOnly(path, 5)).toThrow(RunDatabaseUnsupportedSchemaError);
+      expect(() => RunDatabase.open(path, 5)).toThrow(expect.objectContaining({ kind: 'unsupported-schema', found: 6, supported: 5 }));
+      // This build still opens it.
+      RunDatabase.open(path).close();
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe('the summary and live column of an upgraded worker wait', () => {
+  const WORKER = '22222222-2222-4222-8222-222222222222';
+  const WAIT_ID = '33333333-3333-4333-8333-333333333333';
+  let directory: string;
+  beforeEach(() => { directory = mkdtempSync(join(tmpdir(), 'cez-waits-worker-summary-')); });
+  afterEach(() => { rmSync(directory, { recursive: true, force: true }); });
+
+  const stored = (wait: Record<string, unknown>, delegation: Record<string, unknown> = {}) => legacyRow({
+    status: 'waiting', delegation: { role: 'root', permissions: ['wait'], receipts: [], wait, ...delegation },
+  });
+  const parked = { id: WAIT_ID, workerIds: [WORKER], deadline: new Date(Date.now() + 3_600_000).toISOString(), phase: 'parked', outcomes: [] };
+
+  it('rewrites an agent wait without delegation.wait and keeps the row live', () => {
+    seedRuns(directory, [stored(parked)]);
+    const store = RunStore.open(directory, { keepLive: true });
+    try { store.flush(); } finally { store.close(); }
+    const db = RunDatabase.openReadOnly(join(directory, RUNS_DB_FILE))!;
+    try {
+      expect(db.get(RUN_ID)!.live).toBe(true);
+      const summary = JSON.parse(db.listAll()[0]!.summary);
+      expect(summary.delegation ?? {}).not.toHaveProperty('wait');
+      expect(summary.waitingOn).toMatchObject({ kind: 'workers' });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('keeps the completion wait in the summary, and projects nothing else from delegation.wait', () => {
+    seedRuns(directory, [stored(parked, { completion: { phase: 'waiting', waitId: WAIT_ID } })]);
+    const store = RunStore.open(directory, { keepLive: true });
+    try { store.flush(); } finally { store.close(); }
+    const db = RunDatabase.openReadOnly(join(directory, RUNS_DB_FILE))!;
+    try {
+      expect(db.get(RUN_ID)!.live).toBe(true);
+      expect(JSON.parse(db.listAll()[0]!.summary).delegation).toMatchObject({ wait: { phase: 'parked' } });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('reads a stored finished root\'s old wait cold as a worker entry, with no delegation.wait in its summary', () => {
+    seedRuns(directory, [{ ...stored(parked), status: 'cancelled', finishedAt: new Date().toISOString() }]);
+    const [summary] = readRunIndexFromDisk(directory).runs;
+    expect(summary!.delegation ?? {}).not.toHaveProperty('wait');
   });
 });

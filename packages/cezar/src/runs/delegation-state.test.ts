@@ -333,7 +333,9 @@ describe('RunStore durable delegation', () => {
     store.commitWorkerWaitWithdrawal(run.id, waitId, undefined, 'cancelled');
     const reopened = RunStore.open(dataDir, { keepLive: true });
     expect(reopened.getRun(run.id)?.delegation).not.toHaveProperty('wait');
-    expect(reopened.getRun(run.id)?.delegation).toMatchObject({ lastWait: { id: waitId, reason: 'cancelled', outcomes: [outcome] } });
+    // Upgrade-on-read (hearsay-tools/cezarion#1235): the retained receipt reads back as a cancelled list entry.
+    expect(reopened.getRun(run.id)?.delegation).not.toHaveProperty('lastWait');
+    expect(reopened.getRun(run.id)?.lastWaits).toEqual([expect.objectContaining({ id: waitId, kind: 'worker', phase: 'cancelled', outcomes: [outcome] })]);
     expect(reopened.getRun(run.id)?.agentInputs).toEqual([]);
   });
 
@@ -383,7 +385,9 @@ describe('RunStore durable delegation', () => {
     expect(JSON.stringify(store.getRun(run.id))).toBe(before);
     store.commitWorkerWaitWithdrawal(run.id, selected.id, next);
     const reopened = RunStore.open(dataDir, { keepLive: true }).getRun(run.id);
-    expect(reopened?.delegation).toEqual({ ...root, lastWait: { ...selected, reason: 'timeout' } });
+    // Upgrade-on-read (hearsay-tools/cezarion#1235): the retired receipt reads back as a list entry.
+    expect(reopened?.delegation).toEqual(root);
+    expect(reopened?.lastWaits).toEqual([expect.objectContaining({ id: selected.id, kind: 'worker', phase: 'cancelled' })]);
     expect(reopened?.agentInputs).toEqual([unrelated]);
     expect(reopened?.queuedMessages).toEqual([old, next]);
     expect(reopened?.continuationMessage).toMatchObject({ text: 'human opening', images: ['opening.png'], origin: 'human' });

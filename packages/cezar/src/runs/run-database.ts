@@ -657,8 +657,11 @@ export class RunDatabase {
    * connection is closed and no existing data is deleted or rewritten — but a fresh path may be
    * left holding an empty database (and its WAL), which the next open migrates. A reader that must
    * create nothing uses `openReadOnly`.
+   *
+   * `supported` is the newest schema this open accepts. Only a test passes it, to stand in for an
+   * older build's bound and prove that build refuses the store.
    */
-  static open(path: string): RunDatabase {
+  static open(path: string, supported: number = RUN_DATABASE_SCHEMA_VERSION): RunDatabase {
     let db: DatabaseSync | undefined;
     try {
       assertDatabaseHeader(path);
@@ -668,7 +671,7 @@ export class RunDatabase {
       db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
       db.exec('PRAGMA journal_mode = WAL');
       db.exec('PRAGMA synchronous = NORMAL');
-      migrate(db);
+      migrate(db, supported);
       return new RunDatabase(db, path);
     } catch (error) {
       const typed = toRunDatabaseError(error, path);
@@ -691,7 +694,7 @@ export class RunDatabase {
    * cannot, and the open fails as permission denied — deliberately not worked around with
    * `immutable=1`, which would read a stale snapshot without saying so.
    */
-  static openReadOnly(path: string): RunDatabase | null {
+  static openReadOnly(path: string, supported: number = RUN_DATABASE_SCHEMA_VERSION): RunDatabase | null {
     if (!existsSync(path)) return null;
     let db: DatabaseSync | undefined;
     try {
@@ -699,7 +702,7 @@ export class RunDatabase {
       db = new DatabaseSync(path, { readOnly: true });
       db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
       const found = readSchemaVersion(db);
-      if (found > RUN_DATABASE_SCHEMA_VERSION) throw new RunDatabaseUnsupportedSchemaError(found, RUN_DATABASE_SCHEMA_VERSION);
+      if (found > supported) throw new RunDatabaseUnsupportedSchemaError(found, supported);
       if (found < RUN_DATABASE_READABLE_FROM) {
         db.close();
         return null;
@@ -1165,14 +1168,14 @@ function readSchemaVersion(db: DatabaseSync): number {
  * read, never written. The version is re-read inside the write transaction, so two processes
  * opening a fresh file at once cannot both run the same migration.
  */
-function migrate(db: DatabaseSync): void {
+function migrate(db: DatabaseSync, supported: number): void {
   const found = readSchemaVersion(db);
-  if (found > RUN_DATABASE_SCHEMA_VERSION) throw new RunDatabaseUnsupportedSchemaError(found, RUN_DATABASE_SCHEMA_VERSION);
+  if (found > supported) throw new RunDatabaseUnsupportedSchemaError(found, supported);
   if (found === RUN_DATABASE_SCHEMA_VERSION) return;
   db.exec('BEGIN IMMEDIATE');
   try {
     let version = readSchemaVersion(db);
-    if (version > RUN_DATABASE_SCHEMA_VERSION) throw new RunDatabaseUnsupportedSchemaError(version, RUN_DATABASE_SCHEMA_VERSION);
+    if (version > supported) throw new RunDatabaseUnsupportedSchemaError(version, supported);
     for (; version < RUN_DATABASE_SCHEMA_VERSION; version++) db.exec(MIGRATIONS[version]!);
     db.exec(`PRAGMA user_version = ${RUN_DATABASE_SCHEMA_VERSION}`);
     db.exec('COMMIT');

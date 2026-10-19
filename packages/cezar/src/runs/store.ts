@@ -472,28 +472,41 @@ export function ciWaitEntry(wait: CiWait): CiWaitEntry {
  * cancelled. Undefined for the `message` stand-in, which was never an agent's wait: a message no
  * longer resolves a wait, and its input still wakes the run on its own.
  *
- * A `WorkerWait` kept no registration time, so the entry registers at `now` and its
- * `timeoutSeconds` is the time left to the deadline, clamped to a wait's 1-1800 (600 when the
- * deadline does not read).
+ * Deterministic, never read from the clock: a row is upgraded on every read until open rewrites
+ * it, and two reads must agree. A `WorkerWait` kept no registration time, so `timeoutSeconds` is
+ * the 600 default, `registeredAt` is 600 s before the original deadline (kept as it was), and the
+ * settled stamps come from the wait itself: `resolvedAt` is the latest observation it holds, else
+ * its deadline, and `cancelledAt` is its deadline. `now` is only the fallback for a deadline that
+ * does not read, which the wait schema never admits.
  */
 export function workerWaitEntry(wait: WorkerWait, now: string): WorkerWaitEntry | undefined {
   if (wait.phase === 'wake-pending' && wait.reason === 'message') return undefined;
-  const left = Math.round((Date.parse(wait.deadline) - Date.parse(now)) / 1000);
-  const timeoutSeconds = Number.isFinite(left) ? Math.min(1800, Math.max(1, left)) : 600;
+  const deadline = Date.parse(wait.deadline);
+  const registeredAt = Number.isFinite(deadline) ? new Date(deadline - 600_000).toISOString() : now;
   const open = wait.phase !== 'wake-pending';
   const reason = wait.reason === 'outcome' || wait.reason === 'timeout' ? wait.reason : undefined;
   const observed = [...(wait.outcomes ?? []), ...(wait.requestOutcomes ?? [])].map((outcome) => outcome.observedAt).sort().at(-1);
-  const resolvedAt = reason === 'timeout' ? (wait.deadline < now ? wait.deadline : now) : observed ?? now;
+  const resolvedAt = reason === 'outcome' && observed ? observed : wait.deadline;
   return {
-    id: wait.id, kind: 'worker', source: 'agent', via: 'cez-worker-wait', registeredAt: now, deadline: wait.deadline, timeoutSeconds, turnId: 'upgraded',
+    id: wait.id, kind: 'worker', source: 'agent', via: 'cez-worker-wait', registeredAt, deadline: wait.deadline, timeoutSeconds: 600, turnId: 'upgraded',
     phase: open ? 'open' : reason ? 'resolved' : 'cancelled',
     ...(wait.mode ? { mode: wait.mode } : {}),
     ...(wait.requestIds
       ? { requestIds: wait.requestIds, requestOutcomes: wait.requestOutcomes ?? [] }
       : { workerIds: wait.workerIds, revisions: wait.revisions ?? [], outcomes: wait.outcomes }),
     ...(!open && reason ? { result: { reason }, resolvedAt } : {}),
-    ...(!open && !reason ? { cancelledAt: now } : {}),
+    ...(!open && !reason ? { cancelledAt: wait.deadline } : {}),
   };
+}
+
+/** Whether a record is a root still parked on its workers: an open or resolved worker wait in the
+ *  list, or the completion gate's `delegation.wait`, which stays there until hearsay-tools/cezarion#1235
+ *  phase 3b. Such a root has its pending human question re-read from the transcript before a
+ *  manager parks it, so what an agent's worker wait looked like before the upgrade (a bare
+ *  `delegation.wait`) must keep answering true after it. */
+export function holdsWorkerWait(run: Pick<RunRecord, 'delegation' | 'waits'>): boolean {
+  if (run.delegation?.role !== 'root') return false;
+  return run.delegation.wait !== undefined || !!run.waits?.some((wait) => wait.kind === 'worker' && (wait.phase === 'open' || wait.phase === 'resolved'));
 }
 
 /** A stable id for the timer a legacy monitoring park becomes. The row keeps its legacy JSON
@@ -546,7 +559,8 @@ export function upgradeLegacyWaits(row: Record<string, unknown>): void {
   legacyCi(row.ciWait, false);
   const agentWaits = agentWorkerWaits(row);
   if (agentWaits.length) {
-    const now = new Date().toISOString();
+    // The wait's own stamps decide every time the entry carries (`workerWaitEntry`), not the clock.
+    const now = typeof row.createdAt === 'string' ? row.createdAt : new Date(0).toISOString();
     const inputs = Array.isArray(row.agentInputs) ? row.agentInputs as Array<{ id?: unknown; deliveredAt?: unknown }> : [];
     const current = agentWaits.find((found) => found.key === 'wait');
     for (const { key, wait } of agentWaits) {
@@ -557,7 +571,7 @@ export function upgradeLegacyWaits(row: Record<string, unknown>): void {
       const input = inputs.find((candidate) => candidate.id === (wait.wakeId ?? wait.id));
       const deliveredAt = typeof input?.deliveredAt === 'string' ? input.deliveredAt : undefined;
       if (entry.phase !== 'open' && deliveredAt) Object.assign(entry, { phase: 'delivered', deliveredAt });
-      else if (key === 'lastWait' && entry.phase !== 'cancelled') Object.assign(entry, { phase: 'cancelled', cancelledAt: now });
+      else if (key === 'lastWait' && entry.phase !== 'cancelled') Object.assign(entry, { phase: 'cancelled', cancelledAt: wait.deadline });
       else if (entry.phase === 'resolved' && input) entry.wakeInputId = input.id as string;
       (entry.phase === 'open' || entry.phase === 'resolved' ? opened : settled).push(entry);
     }
@@ -1811,7 +1825,7 @@ export class RunStore extends EventEmitter {
    *  the row's family. */
   private adoptLoadedRun({ run, extras, upgraded }: DecodedRun, opts: { keepLive?: boolean; onlyIfChanged?: boolean; settle?: boolean; stop?: boolean }, row: RunRow): void {
     const before = loadNormalizedFields(run);
-    if (run.delegation?.role === 'root' && (run.status === 'waiting' || run.delegation.wait !== undefined)) {
+    if (run.delegation?.role === 'root' && (run.status === 'waiting' || holdsWorkerWait(run))) {
       let facts = this.facts.peek(run.id);
       if (!facts) {
         // No transcript is a legacy summary, not evidence that an answer is pending.
