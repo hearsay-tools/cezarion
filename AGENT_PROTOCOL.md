@@ -1908,7 +1908,9 @@ worker's human answer after a restart closed its session and send a parent messa
 `DelegationService.send`. I3: a steer runner reads it before the answer turn ends. I4: delivery
 follows the declared mode while the answer is held: steer runners accept it in the turn, and Cursor
 receives it only after the turn-end `human-input-delivered` checkpoint. I5: a genuinely unanswered
-question, and a newer question raised by the answer, still hold the message until answered. The
+native question, and a newer one raised by the answer, hold the message until answered; beside a
+portable question the message is delivered at once and the card stays answerable
+(hearsay-tools/cezarion#1235 phase 3a). It is never the answer. The
 answer's checkpoint stays at turn-end in every row. Cursor is scenario-unconstructible for I3. R6–R11 exercise durable queued/startup input, before/during/
 after asks, restart with an unanswered ask, continuation asks, delayed native replies,
 DONE/explicit-stop precedence and post-send checkpoint failure. R13 runs a persisted

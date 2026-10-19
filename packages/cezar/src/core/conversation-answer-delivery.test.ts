@@ -22,6 +22,8 @@ interface AnswerFixture {
   store: RunStore; manager: RunManager; runId: string; askSeq: number;
   /** The parent's ordinary `worker send`, with no inbox read or manual flush. */
   send: (text: string, requestId?: string) => Promise<string>;
+  /** Close every session again; `store` and `manager` are the reopened ones afterwards. */
+  restart: () => Promise<void>;
 }
 
 /** A worker whose genuine human question survives a closed session, ready for Continue. */
@@ -34,7 +36,7 @@ async function withAnsweredWorker(backend: RunnerId, env: Record<string, string>
     await waitFor(() => fixture.store.getRun(runId)?.status === 'waiting');
     const askSeq = fixture.store.readEvents(runId).find(event => event.type === 'ask.requested')!.seq;
     // Native question turns stay open, so a restart is the session close every wire shares.
-    const { store, manager } = await fixture.restart();
+    let { store, manager } = await fixture.restart();
     expect(manager.isActive(runId)).toBe(false);
     const parent = store.getRun(parentRunId)!;
     if (parent.delegation?.role !== 'root') throw Error('fixture');
@@ -49,7 +51,12 @@ async function withAnsweredWorker(backend: RunnerId, env: Record<string, string>
         ...(requestId ? { kind: 'reply' as const, requestId } : { kind: 'progress' as const }) });
       return id;
     };
-    try { await body({ store, manager, runId, askSeq, send }); } finally { credentials.close(); }
+    const answerFixture: AnswerFixture = { store, manager, runId, askSeq, send, restart: async () => {
+      ({ store, manager } = await fixture.restart());
+      Object.assign(answerFixture, { store, manager });
+      service.registerProject({ id: 'project', root: repoRoot, store, manager });
+    } };
+    try { await body(answerFixture); } finally { credentials.close(); }
   }, { env });
 }
 
@@ -125,35 +132,63 @@ for (const backend of RUNNER_IDS) {
   }, 60_000);
 
   it(`${backend} ${held.id} ${held.name}`, async () => {
-    await withAnsweredWorker(backend, {}, async ({ store, manager, runId, askSeq, send }) => {
-      const quiet = () => new Promise(resolve => setTimeout(resolve, 300));
-      // A genuinely unanswered question holds the message; it is not the answer.
+    await withAnsweredWorker(backend, {}, async answerFixture => {
+      const { runId, askSeq, send } = answerFixture;
+      let { store, manager } = answerFixture;
+      const quiet = () => new Promise(resolve => setTimeout(resolve, 300)); // bound: proves a held message stays undelivered
+      // hearsay-tools/cezarion#1235 phase 3a (§ Messages beside a pending question): a native
+      // question takes nothing but its answer, so the message waits for the answer's turn end; a
+      // portable question takes it beside the card. Either way it is never the answer.
+      const question = (seq: number) => store.getRun(runId)?.waits?.find(wait => wait.kind === 'human' && wait.phase === 'open' && wait.askSeq === seq);
+      const expectBesideOrHeld = async (id: string, seq: number) => {
+        if (question(seq)?.via === 'native-ask') {
+          await quiet();
+          expect(input(store, runId, id)?.deliveredAt).toBeUndefined();
+          expect(question(seq)).toBeDefined();
+        } else {
+          await waitFor(() => !!input(store, runId, id)?.deliveredAt);
+          // The beside turn ends and parks for a question again.
+          await waitFor(() => store.readEvents(runId).some(event => event.type === 'text' && String(event.text).includes(input(store, runId, id)!.text)));
+          await waitFor(() => store.getRun(runId)?.status === 'waiting' && store.transcriptFacts(runId).pendingAsk !== undefined);
+        }
+        expect(checkpoints(store, runId, seq)).toEqual([]);
+        expect(store.readEvents(runId).filter(event => event.type === 'user-message' && String(event.text).includes(input(store, runId, id)!.text))).toEqual([]);
+      };
       const early = await send('mock:agent-echo progress before the answer');
-      await quiet();
-      expect(input(store, runId, early)?.deliveredAt).toBeUndefined();
-      expect(store.readEvents(runId).filter(event => event.type === 'user-message')).toEqual([]);
+      await expectBesideOrHeld(early, askSeq);
 
-      // The answer raises a newer question; it holds later input like the first one did.
+      // The answer raises a newer question; later input is held or delivered beside it the same way.
+      // A portable question's run reopened through the scheduler to take the message; close that
+      // session again so every wire answers in a fresh one. A mock that asked again there routed
+      // its new question to the parent (the steer grant), which answers it, as a human answers the
+      // one left with them.
+      if (manager.isActive(runId)) {
+        await answerFixture.restart();
+        ({ store, manager } = answerFixture);
+      }
+      const pending = store.transcriptFacts(runId).pendingAsk!;
+      const answered = pending.seq;
       const start = lastSeq(store, runId);
-      expect(manager.continueRun(runId, { text: `Vitest ${promptFor(backend, held.scenario)}` }).ok).toBe(true);
+      const answer = `Vitest ${promptFor(backend, held.scenario)}`;
+      if (pending.routedMessageId !== undefined && !pending.fallback) await send(answer, pending.routedMessageId);
+      else expect(manager.isActive(runId) ? manager.sendMessage(runId, [{ type: 'text', text: answer }]) : manager.continueRun(runId, { text: answer }).ok).toBe(true);
       await waitFor(() => firstAfter(store, runId, 'ask.requested', start) !== undefined);
       const newer = firstAfter(store, runId, 'ask.requested', start)!;
       await waitFor(() => store.getRun(runId)?.status === 'waiting');
+      await waitFor(() => checkpoints(store, runId, answered).length === 1);
+      expect(checkpoints(store, runId, answered)[0]?.source).toBe(pending.routedMessageId !== undefined && !pending.fallback ? 'parent' : undefined);
       const later = await send('mock:agent-echo progress after the newer question');
-      await quiet();
-      expect(input(store, runId, later)?.deliveredAt).toBeUndefined();
-      expect(checkpoints(store, runId, newer)).toEqual([]);
+      await expectBesideOrHeld(later, newer);
 
       // With the steer grant the newer question reaches the parent (#505), whose reply is
-      // the one input it admits. A steer wire may have read the early message inside the
-      // answer; a boundary wire holds it behind the newer question too. The reply releases both.
+      // the one input it answers, through the answer seam. Every message is delivered by then.
       const routedTo = () => store.readEvents(runId).find(event => event.type === 'worker-question-routed' && event.askSeq === newer);
       await waitFor(() => routedTo() !== undefined);
       const routed = routedTo()!;
       await send('Vitest', String(routed.messageId));
       await waitFor(() => [early, later].every(id => !!input(store, runId, id)?.deliveredAt));
       expect(projectionSeq(store, runId, later, 'delivered')).toBeGreaterThan(newer);
-      expect(checkpoints(store, runId, askSeq)).toHaveLength(1);
+      expect(checkpoints(store, runId, answered)).toHaveLength(1);
       await waitFor(() => checkpoints(store, runId, newer).length === 1);
       expect(checkpoints(store, runId, newer)[0]).toMatchObject({ source: 'parent' });
       await waitFor(() => store.getRun(runId)?.status === 'waiting');

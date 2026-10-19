@@ -2521,7 +2521,7 @@ export class RunManager {
     if (this.wakeBackoffs.has(runId)) return;
     const state = this.active.get(runId);
     this.restoreWorkerWaitInputs(runId);
-    if (state && (!state.session?.open || state.atTurnBoundary !== state.session || this.workerWaiting.has(runId))) return;
+    if (state && (!state.session?.open || !this.takesWake(runId, state) || this.workerWaiting.has(runId))) return;
     // Settlement ends the watcher. Keep a bounded-rate wake source until ACK,
     // cancellation or termination, including refusals with no runner-ready callback.
     this.retryWaitAdmission(runId);
@@ -2597,15 +2597,27 @@ export class RunManager {
    *  phase 3b (#1235): completion gate only: a run parked on the completion wait takes its
    *  messages through the old engine (`queueWorkerWake`), so only its resolved waits count. */
   private owesWake(run: RunRecord): boolean {
+    // A pending native question takes nothing but its answer: results and messages wait for the
+    // answer's turn end, and a run with no session is not reopened for them, where its provider
+    // would ask again (hearsay-tools/cezarion#1235, parent spec § Wakes beside questions).
+    if (openWaits(run).some(wait => wait.kind === 'human' && wait.via === 'native-ask')) return this.routedAnswer(run.id) !== undefined;
     if (resolvedWaits(run).length) return true;
     if (this.delegationWait(run.id)) return false;
     return this.pendingConversationWakes(run).length > 0 || this.routedAnswer(run.id) !== undefined;
   }
 
+  /** A live session takes a wake at its turn boundary. A native question is mid-turn and takes one
+   *  input there: the parent's answer to it, through the answer seam (#505). */
+  private takesWake(runId: string, state: ActiveRun): boolean {
+    return state.atTurnBoundary === state.session || (!!state.pendingHumanAsk && this.routedAnswer(runId) !== undefined);
+  }
+
   /** An admitted wake goes to the agent: a parent's answer through the answer seam, everything
    *  else as one submission. */
   private deliverAdmittedWake(runId: string): void {
-    if (!resolvedWaits(this.store.getRun(runId) ?? {}).length && this.routedAnswer(runId)) this.answerRoutedQuestion(runId, true);
+    const state = this.active.get(runId);
+    const midTurn = !!state && state.atTurnBoundary !== state.session;
+    if ((midTurn || !resolvedWaits(this.store.getRun(runId) ?? {}).length) && this.routedAnswer(runId)) this.answerRoutedQuestion(runId, true);
     else this.flushAgentInputs(runId);
   }
 
@@ -3009,7 +3021,7 @@ export class RunManager {
             const state = this.active.get(runId)!;
             const queued = this.store.getRun(runId);
             const owed = !!queued && this.owesWake(queued);
-            if (owed && state.atTurnBoundary === state.session) {
+            if (owed && this.takesWake(runId, state)) {
               // The wake holds a regular slot from admission until its acknowledgement.
               this.waiting.delete(runId);
               this.waitWakeAdmitted.add(runId);

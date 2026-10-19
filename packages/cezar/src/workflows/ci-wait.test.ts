@@ -349,14 +349,26 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     } finally { writeFileSync(release, 'go'); }
   });
 
-  it('rejects worker and request waits while CI is registered after the shared admission refactor', async () => {
+  // hearsay-tools/cezarion#1235 phase 3a (design § Registration and cancel): "A CI wait is already
+  // active" is a removed refusal. Worker and request waits are list entries beside CI.
+  it('registers worker and request waits beside a registered CI wait, which stays open', async () => {
     github(); const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id);
-    await register(p.id);
-    expect(() => manager.registerWorkerWait(p.id, { workerIds: [w.id], timeoutSeconds: 30 })).toThrow(/CI wait/);
-    expect(() => manager.registerRequestWait(p.id, { requestIds: [randomUUID()], timeoutSeconds: 30 })).toThrow(/CI wait/);
-    expect(waitOf(store.getRun(p.id))).toBeUndefined();
+    const ci = await register(p.id);
+    const now = new Date().toISOString();
+    const request = { id: randomUUID(), senderRunId: p.id, recipientRunId: w.id, kind: 'request' as const, text: 'Which module?', createdAt: now,
+      deadline: new Date(Date.now() + 600_000).toISOString(), requestHash: 'a'.repeat(64), state: 'accepted' as const };
+    store.commitConversation(p.id, { messages: [request], outcomes: [] }, { recipientRunId: w.id,
+      input: { id: request.id, source: 'agent', parentRunId: p.id, text: request.text, createdAt: now, conversation: { senderRunId: p.id, recipientRunId: w.id, kind: 'request' } } });
+    const workers = manager.registerWorkerWait(p.id, { workerIds: [w.id], timeoutSeconds: 30 });
+    const requests = manager.registerRequestWait(p.id, { requestIds: [request.id], timeoutSeconds: 30 });
+    expect([workers.phase, requests.phase]).toEqual(['registered', 'registered']);
+    const waits = store.getRun(p.id)!.waits!;
+    expect(waits.map(wait => [wait.id, wait.kind, wait.phase])).toEqual([[ci.id, 'ci', 'open'], [workers.id, 'worker', 'open'], [requests.id, 'worker', 'open']]);
+    expect(waits.find(wait => wait.id === workers.id)).toMatchObject({ via: 'cez-worker-wait', workerIds: [w.id] });
+    expect(waits.find(wait => wait.id === requests.id)).toMatchObject({ via: 'cez-worker-wait', requestIds: [request.id] });
+    expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
   });
 
   // hearsay-tools/cezarion#1233: the ask leaves CI open; its result wakes the run and never
@@ -408,28 +420,42 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
   });
 
   // hearsay-tools/cezarion#1233: one wake batch carries the observation first, then the conversations.
+  // hearsay-tools/cezarion#1235 phase 3a (design § Resolution and waking, Transitions out): a
+  // message alone is a wake of its own and leaves CI open; messages owed beside the CI result
+  // still ride its one wake.
   it('batches worker conversations behind the CI observation in one wake without losing admission', async () => {
     const external = github();
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     const wait = await register(run.id);
+    await until(() => parked(run.id));
     const session = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(run.id)!.session;
     const send = vi.spyOn(session, 'sendAgentMessage');
-    const messages = Array.from({ length: 3 }, (_, n) => ({ id: randomUUID(), parentRunId: run.id, source: 'agent' as const, text: `worker update ${n}`,
-      createdAt: new Date().toISOString(), conversation: { senderRunId: randomUUID(), recipientRunId: run.id, kind: 'progress' as const } }));
-    store.commitAgentInputs(run.id, messages);
+    const update = (n: number) => ({ id: randomUUID(), parentRunId: run.id, source: 'agent' as const, text: `worker update ${n}`,
+      createdAt: new Date().toISOString(), conversation: { senderRunId: randomUUID(), recipientRunId: run.id, kind: 'progress' as const } });
+    const inputOf = (id: string) => store.getRun(run.id)?.agentInputs?.find(input => input.id === id);
+    // A message during the CI park wakes the run at once; CI stays open and re-parks it.
+    const early = update(0);
+    store.commitAgentInputs(run.id, [early]);
+    const boundaries = store.readEvents(run.id).filter(event => event.type === 'turn-end').length;
     manager.deliverConversationInput(run.id);
-    expect(parked(run.id)).toBe(true);
+    await until(() => !!inputOf(early.id)?.deliveredAt);
+    expect(ciWaitOf(run.id)).toMatchObject({ id: wait.id, phase: 'open' });
+    await until(() => store.readEvents(run.id).filter(event => event.type === 'turn-end').length > boundaries && parked(run.id));
     expect(waitOf(store.getRun(run.id))).toBeUndefined();
+    send.mockClear();
+    // Messages owed when the observation lands go in its one wake, after it.
+    const messages = [1, 2, 3].map(update);
+    store.commitAgentInputs(run.id, messages);
     external.settle(success());
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
-    await until(() => messages.every(message => store.getRun(run.id)?.agentInputs?.find(input => input.id === message.id)?.deliveredAt));
+    await until(() => messages.every(message => inputOf(message.id)?.deliveredAt));
     const delivered = store.getRun(run.id)!.agentInputs!;
     expect(delivered.find(input => input.id === wait.id)?.deliveredAt).toBeTruthy();
     const accepted = send.mock.calls.filter((_, i) => send.mock.results[i]?.value !== false);
     expect(accepted).toHaveLength(1);
     const batch = JSON.stringify(accepted[0]);
     for (const message of messages) expect(batch.indexOf(message.id)).toBeGreaterThan(batch.indexOf(wait.id));
-    expect(new Set(delivered.filter(input => !!input.conversation).map(input => input.deliveredAt)).size).toBe(1);
+    expect(new Set(messages.map(message => inputOf(message.id)?.deliveredAt)).size).toBe(1);
   });
 
   it('reconciles a settled CI wake after an owned worker execution finalizes', async () => {
