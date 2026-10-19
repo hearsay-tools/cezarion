@@ -246,9 +246,12 @@ reuse the existing durable input; changed payloads are rejected. Follow-ups and
 progress cannot discharge obligations. Explicit reply and completed-without-reply
 are distinct outcomes, alongside failed, cancelled, destroyed, timed-out, and
 sender-closed. Late replies remain recorded without replacing a first settlement.
-Both roles can wait on their own requests using the existing bounded scheduler wake
-queue. An incoming message can interrupt that wait with reason `message`, retaining
-unresolved obligations. A worker
+Both roles can wait on their own requests: a request wait is a `worker` entry in the run's
+wait list (`requestIds`; hearsay-tools/cezarion#1235 phase 3a), and a reply resolves only the
+request wait that names it. An incoming message wakes the run with that wait still open and in
+the footer, and the turn end parks on it again; unresolved obligations are retained. Only the
+completion gate's own wait (`delegation.wait`, until phase 3b) is still interrupted by a
+non-progress message with reason `message`. A worker
 progress message wakes a parent waiting for worker completion without retiring
 that wait. After progress delivery the same wait parks again with its original
 ID, selected workers and deadline; terminal outcomes still produce one wake.
