@@ -85,6 +85,10 @@ After the workflow lands on the default branch, preview one issue with:
 gh workflow run friction-intake.yml -f issue_number=123 -f dry_run=true
 ```
 
+Manual runs are admitted only on the repository's current default branch.
+Feature-branch and tag dispatches are skipped before classification. Both jobs
+check out the admitted event's commit.
+
 Read the Actions summary and artifact. Set `dry_run=false` only to apply the
 result. This action does not bulk classify the reference issues. A failed run
 needs a rerun; no background retry task is created outside the bounded transport.

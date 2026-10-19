@@ -7,6 +7,33 @@ const { classify } = require('./jev-friction-intake.cjs');
 const workflow = () => yaml.parse(fs.readFileSync(path.join(__dirname, '../workflows/friction-intake.yml'), 'utf8'));
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
 
+test('manual classification rejects branch and tag refs outside the current default branch', () => {
+  // Evaluate this workflow's Boolean expression with GitHub's label projection
+  // and the two expression functions it uses, without calling Jev or GitHub.
+  const condition = workflow().jobs.classify.if.replace('github.event.issue.labels.*.name', 'github.event.issue.labels.map(label => label.name)');
+  const admits = github => new Function('github', 'contains', 'format', `return Boolean(${condition});`)(
+    github,
+    (values, value) => values.includes(value),
+    (template, value) => template.replace('{0}', value),
+  );
+  for (const defaultBranch of ['main', 'development']) {
+    for (const [ref, expected] of [
+      [`refs/heads/${defaultBranch}`, true],
+      ['refs/heads/classifier-preview', false],
+      [`refs/tags/${defaultBranch}`, false],
+    ]) {
+      assert.equal(admits({
+        event_name: 'workflow_dispatch', ref,
+        event: { repository: { default_branch: defaultBranch } },
+      }), expected, `${defaultBranch}: ${ref}`);
+    }
+    assert.equal(admits({
+      event_name: 'issues', ref: `refs/heads/${defaultBranch}`,
+      event: { action: 'edited', repository: { default_branch: defaultBranch }, issue: { labels: [{ name: 'friction' }] } },
+    }), true, 'ordinary friction issue events still classify');
+  }
+});
+
 test('classification has read permissions and only its job receives the Jev credential', () => {
   const w = workflow();
   assert.deepEqual(w.permissions, {});
