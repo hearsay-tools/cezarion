@@ -397,19 +397,50 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent(); const w = await worker(p.id);
     const wait = register(p.id, [w.id]);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    const delegation = store.getRun(p.id)!.delegation!;
-    if (delegation.role !== 'root') throw Error('fixture');
-    // Exact crash window: backend accepted, input receipt committed, but wait
-    // retirement and resumeParkedRun's status update have not happened yet.
-    store.commitDelegation([{ id: p.id, delegation: { ...delegation, wait: { ...wait, phase: 'wake-pending', wakeId: wait.id } } }]);
-    store.commitAgentInputs(p.id, [{ id: wait.id, parentRunId: p.id, source: 'lifecycle',
-      text: 'Worker deadline reached', createdAt: new Date().toISOString(), deliveredAt: new Date().toISOString() }]);
-    await restart();
+    // The old engine's exact crash window, as an older build left it on disk: backend accepted,
+    // input receipt committed, but wait retirement and resumeParkedRun's status update had not
+    // happened yet. hearsay-tools/cezarion#1235: the wait is `delegation.wait`, not a list entry,
+    // and upgrade-on-read reads the run as resumed.
+    store.flush();
+    const now = new Date().toISOString();
+    const disk = (readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[]).map(run => {
+      if (run.id !== p.id || run.delegation?.role !== 'root') return run;
+      const { waits: _waits, ...legacy } = run;
+      return { ...legacy, delegation: { ...run.delegation, wait: { ...wait, phase: 'wake-pending', reason: 'timeout', wakeId: wait.id } },
+        agentInputs: [{ id: wait.id, parentRunId: p.id, source: 'lifecycle', text: 'Worker deadline reached', createdAt: now, deliveredAt: now }] };
+    });
+    expect(disk.find(run => run.id === p.id)).toMatchObject({ status: 'waiting' });
+    await restart(false, disk);
     await until(() => store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true || terminal.includes(store.getRun(p.id)?.status ?? ''));
     expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
     expect(store.getRun(w.id)?.status).not.toBe('cancelled');
     expect(store.getRun(p.id)?.agentInputs).toHaveLength(1);
     expect(store.getRun(p.id)?.agentInputs?.[0]?.deliveredAt).toBeDefined();
+    expect(waitOf(store.getRun(p.id))).toBeUndefined();
+    expect(store.readEvents(p.id).filter(event => event.type === 'user-message')).toEqual([]);
+  });
+
+  it('a crash right after the delivery checkpoint recovers a resumed parent that owes nothing', async () => {
+    const p = await parent(); const w = await worker(p.id);
+    const wait = register(p.id, [w.id]);
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+    // hearsay-tools/cezarion#1235: the delivery and the resume are one commit. The disk as that
+    // commit left it is the crash image.
+    const commit = store.commitWaitDelivery.bind(store);
+    let image: unknown[] | undefined;
+    store.commitWaitDelivery = (...args) => {
+      commit(...args);
+      if (args[0] === p.id && !image) image = readPersistedRuns(join(root, '.ai/cezar'));
+    };
+    fixtureUpdateRun(w.id, { status: 'done' });
+    await until(() => image !== undefined);
+    const crashed = (image as RunRecord[]).find(run => run.id === p.id)!;
+    expect(crashed).toMatchObject({ status: 'running', lastWaits: [expect.objectContaining({ id: wait.id, phase: 'delivered' })] });
+    expect(crashed.agentInputs?.find(input => input.id === wait.id)?.deliveredAt).toBeDefined();
+    await restart(false, image);
+    await until(() => store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true || terminal.includes(store.getRun(p.id)?.status ?? ''));
+    expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
     expect(store.readEvents(p.id).filter(event => event.type === 'user-message')).toEqual([]);
   });
@@ -481,9 +512,10 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent('mock:slow'); const w = await worker(p.id);
     register(p.id, [w.id]); store.flush();
     const release = blockRunWrites(join(root, '.ai/cezar'));
-    const engine = manager as unknown as { active: Map<string, unknown>; parkWorkerWait(id: string, state: unknown): boolean };
+    // hearsay-tools/cezarion#1235: an agent worker wait parks through the wait list (`parkOnWaits`).
+    const engine = manager as unknown as { active: Map<string, unknown>; parkOnWaits(id: string, state: unknown): boolean };
     try {
-      expect(() => engine.parkWorkerWait(p.id, engine.active.get(p.id))).toThrow();
+      expect(() => engine.parkOnWaits(p.id, engine.active.get(p.id))).toThrow();
       expect(waitOf(store.getRun(p.id))?.phase).toBe('registered');
       expect(semaphore.busy()).toBe(1);
     } finally {

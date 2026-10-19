@@ -2455,16 +2455,18 @@ export class RunManager {
   }
 
   /**
-   * Park a session on its waits (hearsay-tools/cezarion#1233): `waiting`, no activity, no idle
-   * timer. A CI or timer park keeps its slot in the monitoring pool, so its wake starts at once;
-   * a resolved wait with nothing left open is a wake due now and keeps it too. Worker waits rank
-   * above CI and timers and keep their own park (`parkWorkerWait`). An open human wait is shown
-   * and parks for the user, with no slot (hearsay-tools/cezarion#1234).
+   * Park a session on its waits (hearsay-tools/cezarion#1233): `waiting`, no activity. A CI or
+   * timer park keeps its slot in the monitoring pool, so its wake starts at once, and needs no idle
+   * timer; a resolved wait with nothing left open is a wake due now and keeps it too. Worker waits
+   * rank above CI and timers (hearsay-tools/cezarion#1235): a park on them holds no slot and arms
+   * the idle timer, so the session closes after `IDLE_TIMEOUT_MS` and the run stays `waiting` for
+   * the next resolution or message to reopen it. Its intent reaches disk before the slot is freed.
+   * An open human wait is shown and parks for the user, with no slot (hearsay-tools/cezarion#1234).
    */
   private parkOnWaits(runId: string, state: ActiveRun): boolean {
     const run = this.store.getRun(runId);
-    // phase 3b (#1235): completion gate only
-    if (!run?.waits?.length || !state.session?.open || state.cancelled || state.pendingHumanAsk || this.delegationWait(runId)) return false;
+    // phase 3b (#1235): completion gate only. Its own park is `parkWorkerWait`.
+    if (!run?.waits?.length || !state.session?.open || state.cancelled || state.pendingHumanAsk || this.completionWait(runId)) return false;
     const human = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human');
     if (human) {
       this.surfaceHumanWait(runId, state, human);
@@ -2474,13 +2476,24 @@ export class RunManager {
     this.clearIdleTimer(state);
     const top = computeWaitingOn(run)?.kind;
     const keepsSlot = top === 'ci' || top === 'timer' || (top === undefined && resolvedWaits(run).length > 0);
+    // A park that frees its slot publishes the intent first: a refused write throws and keeps it.
+    if (keepsSlot) {
+      this.store.updateRun(runId, { status: 'waiting', activity: undefined });
+      if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
+    } else this.store.commitParked(runId, state.currentStepId);
     this.waiting.add(runId);
     if (keepsSlot) this.monitoring.add(runId); else this.leaveMonitoringPool(runId);
-    this.store.updateRun(runId, { status: 'waiting', activity: undefined });
-    if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
+    if (top === 'workers') this.armIdleTimer(runId, state);
     this.queueWaitWake(runId);
     this.releaseSlot();
     return true;
+  }
+
+  /** Parked on the wait list with `workers` as its top wait (hearsay-tools/cezarion#1235): the park
+   *  holds no slot, so runner activity resumes it as it resumes a monitoring park. */
+  private parkedOnWorkers(runId: string): boolean {
+    const run = this.store.getRun(runId);
+    return !!run && run.status === 'waiting' && !this.completionWait(runId) && computeWaitingOn(run)?.kind === 'workers';
   }
 
   /** Leave the monitoring pool. Only a turn end or a terminal path does; a member's slot
@@ -2865,9 +2878,11 @@ export class RunManager {
   private busySlots(): number {
     // A CI or timer park keeps its slot (hearsay-tools/cezarion#1233): up to
     // `maxMonitoringSessions` of them hold a monitoring slot instead of a regular one, and the
-    // rest keep their regular slot. Every other park holds none.
+    // rest keep their regular slot. Every other park holds none: a park whose top wait is human
+    // or workers (hearsay-tools/cezarion#1235) is in `waiting` and outside the pool.
     const parkedWithoutSlot = [...this.waiting].filter(id => !this.monitoring.has(id)).length;
     const pool = Math.min(this.monitoring.size, this.semaphore.maxMonitoringSessions());
+    // phase 3b (#1235): completion gate only. `workerWaiting` is the completion park.
     return this.active.size + this.starting.size - parkedWithoutSlot - pool - this.workerWaiting.size;
   }
 
@@ -5922,7 +5937,8 @@ export class RunManager {
             // and do not count. The charge and the cleared failure count commit with the delivery.
             const timers = batch.filter(wait => wait.kind === 'timer');
             const spent = timers.length && flight.wakeReserved ? (this.store.getRun(runId)?.automaticWakes ?? 0) + 1 : undefined;
-            this.store.commitWaitDelivery(runId, resolvedIds, { waitDeliveryFailures: undefined, ...(spent === undefined ? {} : { automaticWakes: spent }) });
+            // The delivery and the resume are one commit (hearsay-tools/cezarion#1235).
+            this.store.commitWaitDelivery(runId, resolvedIds, { waitDeliveryFailures: undefined, ...(spent === undefined ? {} : { automaticWakes: spent }) }, true);
             if (spent !== undefined) {
               flight.wakeReserved = false;
               this.store.appendEvent(runId, { type: 'note', message: `automatic ${timers.some(isMonitoringTimer) ? 'monitoring' : 'timer'} wake-up (${spent}/${MAX_AUTO_CONTINUES})` });
@@ -5933,14 +5949,15 @@ export class RunManager {
               if (retry) clearTimeout(retry);
               this.wakeRetries.delete(runId);
             }
-            // Pool membership changes only at a turn end or a terminal path.
-            this.waiting.delete(runId);
+            // Pool membership changes only at a turn end or a terminal path. A worker park's idle
+            // timer belongs to the park, not to the wake turn.
+            this.waiting.delete(runId); this.clearIdleTimer(state);
             this.store.updateRun(runId, { status: 'running', activity: undefined });
           } else if (flight.admittedWake && this.waitWakeAdmitted.delete(runId)) {
             // A wake of messages alone (hearsay-tools/cezarion#1235) spends its admission the same way.
             const left = this.store.getRun(runId);
             if (!left || !this.owesWake(left)) { const retry = this.wakeRetries.get(runId); if (retry) clearTimeout(retry); this.wakeRetries.delete(runId); }
-            this.waiting.delete(runId);
+            this.waiting.delete(runId); this.clearIdleTimer(state);
             this.store.updateRun(runId, { status: 'running', activity: undefined });
           }
           if (conversationIds.length) {
@@ -8505,7 +8522,9 @@ export class RunManager {
     // Pi can resume autonomously when an async subagent completes — the mapper
     // synthesizes a parent `turn.started` for that work (#61). Nested child
     // items without a parent turn must not unpark monitoring or worker waits (#121).
-    if (((this.waiting.has(runId) && this.monitoring.has(runId)) || this.workerWaiting.has(runId)) && isRunnerActivity(event)) {
+    // A list worker park (hearsay-tools/cezarion#1235) resumes the same way; `workerWaiting` is
+    // phase 3b's completion park.
+    if (((this.waiting.has(runId) && (this.monitoring.has(runId) || this.parkedOnWorkers(runId))) || this.workerWaiting.has(runId)) && isRunnerActivity(event)) {
       this.resumeParkedRun(runId, state);
     }
   }

@@ -543,12 +543,23 @@ function legacyTimerId(runId: unknown, wakeAt: string): string {
  *   id): a wait whose input was delivered reads as delivered, a `wake-pending` one whose input is
  *   still queued stays resolved and records it as `wakeInputId`, so it is delivered once, and a
  *   `lastWait` that was never delivered reads as cancelled. The `message` stand-in is dropped. No
- *   input is added or removed. The completion gate's wait is left where it is (phase 3b).
+ *   input is added or removed. The completion gate's wait is left where it is (phase 3b). A
+ *   current wait whose wake was delivered on a `waiting` run is the old engine's crash between the
+ *   delivery checkpoint and the resume: the run reads `running`, so recovery resumes it.
  *
  * An unreadable legacy CI wait gets the per-entry salvage `parseRunRecords` gives `waits`: it is
  * dropped, `lastWaitsError` says so, and the status is left alone. A `waiting` run with no open
  * wait reads as Needs you, which a human can resume.
  */
+/** A live run and its live step move from `from` to `to` together, as every park and resume writes them. */
+function setLiveStatus(row: Record<string, unknown>, from: 'running' | 'waiting', to: 'running' | 'waiting'): void {
+  row.status = to;
+  if (Array.isArray(row.steps)) for (const step of row.steps) {
+    if (step && typeof step === 'object' && (step as { status?: unknown }).status === from) (step as { status: string }).status = to;
+  }
+}
+const resumeParked = (row: Record<string, unknown>) => setLiveStatus(row, 'waiting', 'running');
+
 export function upgradeLegacyWaits(row: Record<string, unknown>): void {
   if (!hasLegacyWaitFields(row)) return;
   const opened: Wait[] = [];
@@ -578,7 +589,12 @@ export function upgradeLegacyWaits(row: Record<string, unknown>): void {
       if (!entry) continue;
       const input = inputs.find((candidate) => candidate.id === (wait.wakeId ?? wait.id));
       const deliveredAt = typeof input?.deliveredAt === 'string' ? input.deliveredAt : undefined;
-      if (entry.phase !== 'open' && deliveredAt) Object.assign(entry, { phase: 'delivered', deliveredAt });
+      if (entry.phase !== 'open' && deliveredAt) {
+        Object.assign(entry, { phase: 'delivered', deliveredAt });
+        // The old engine retired a delivered wake into `lastWait` with the resume: a current wait
+        // whose wake was delivered on a `waiting` run is a crash between the two, and resumed.
+        if (key === 'wait' && row.status === 'waiting') resumeParked(row);
+      }
       else if (key === 'lastWait' && entry.phase !== 'cancelled') Object.assign(entry, { phase: 'cancelled', cancelledAt: wait.deadline });
       else if (entry.phase === 'resolved' && input) entry.wakeInputId = input.id as string;
       (entry.phase === 'open' || entry.phase === 'resolved' ? opened : settled).push(entry);
@@ -596,12 +612,7 @@ export function upgradeLegacyWaits(row: Record<string, unknown>): void {
         registeredAt: new Date(now).toISOString(), deadline: wakeAt, phase: 'open', turnId: 'legacy', seconds,
       });
     }
-    if (row.status === 'running') {
-      row.status = 'waiting';
-      if (Array.isArray(row.steps)) for (const step of row.steps) {
-        if (step && typeof step === 'object' && (step as { status?: unknown }).status === 'running') (step as { status: string }).status = 'waiting';
-      }
-    }
+    if (row.status === 'running') setLiveStatus(row, 'running', 'waiting');
   }
   if (opened.length) {
     const current = Array.isArray(row.waits) ? row.waits as Array<{ id?: unknown }> : [];
@@ -2881,8 +2892,10 @@ export class RunStore extends EventEmitter {
    *  already delivered keeps its time), and each resolved wait among them (input id = wait id)
    *  moves to `lastWaits` as `delivered`. Open waits a batch names stay open. `counters` are the
    *  wake counters the delivery spends or clears, in the same commit, so a crash keeps both or
-   *  neither; nothing is written when nothing is delivered. */
-  commitWaitDelivery(id: string, inputIds: readonly string[], counters: WakeCounters = {}): void {
+   *  neither; nothing is written when nothing is delivered. `resumed` writes the run `running` in
+   *  the same commit (hearsay-tools/cezarion#1235): a crash after the provider's acknowledgement
+   *  then recovers a run that resumed, never a parked one that owes nothing. */
+  commitWaitDelivery(id: string, inputIds: readonly string[], counters: WakeCounters = {}, resumed = false): void {
     const run = this.peek(id);
     if (!run) return;
     const ids = new Set(inputIds);
@@ -2890,11 +2903,21 @@ export class RunStore extends EventEmitter {
     if (!delivered.length && !run.agentInputs?.some((input) => ids.has(input.id) && !input.deliveredAt)) return;
     const deliveredAt = new Date().toISOString();
     const retired = new Set(delivered.map((wait) => wait.id));
-    this.commitIndex(new Map([[id, { ...run, ...counters,
+    this.commitIndex(new Map([[id, { ...run, ...counters, ...(resumed ? { status: 'running' as const, activity: undefined } : {}),
       waits: nonEmpty((run.waits ?? []).filter((wait) => !retired.has(wait.id))),
       lastWaits: settleWaits(run.lastWaits, delivered.map((wait) => ({ ...wait, phase: 'delivered' as const, deliveredAt }))),
       ...(run.agentInputs ? { agentInputs: run.agentInputs.map((input) => ids.has(input.id) && !input.deliveredAt ? { ...input, deliveredAt } : input) } : {}),
     }]]));
+  }
+
+  /** A park that gives up its slot (hearsay-tools/cezarion#1235): the run and its step read
+   *  `waiting`, committed at once instead of on the debounced save, so a refused write throws with
+   *  nothing changed and the caller keeps the slot. */
+  commitParked(id: string, stepId?: string): void {
+    const run = this.peek(id);
+    if (!run) return;
+    this.commitIndex(new Map([[id, { ...run, status: 'waiting', activity: undefined,
+      ...(stepId ? { steps: run.steps.map((step) => step.id === stepId ? { ...step, status: 'waiting' as const } : step) } : {}) }]]));
   }
 
   /** The wake counters alone, committed at once instead of on the debounced save: a crash after
