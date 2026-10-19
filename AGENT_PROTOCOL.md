@@ -1108,7 +1108,7 @@ the observation. Later successful settlement must leave that failed attempt inta
 Clean session closure while CI is pending still parks without failure. No runner
 exemptions or normalized-event injection.
 
-**U0–U19** (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234, hearsay-tools/cezarion#1260, hearsay-tools/cezarion#1235, with U2t, U2w, U3w, U5a, U5c, U5d, U6s, U7d, U7h, U7w, U9c, U9h, U9w, U14m and U16b) pin the
+**U0–U19** (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234, hearsay-tools/cezarion#1260, hearsay-tools/cezarion#1235, with U2t, U2w, U3w, U5a, U5c, U5d, U6s, U7d, U7h, U7w, U9c, U9h, U9u, U9w, U14m and U16b) pin the
 wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
 normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`, `cezar_ask`,
 `cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
@@ -1219,7 +1219,7 @@ with no wait, which gets the nudge, then the same question after the monitoring 
 the line's timer in place with no gate note. U15 nudges an autonomous run with the autonomous
 wording until the budget, then opens a `budget` human wait.
 
-Phase 3a (hearsay-tools/cezarion#1235) adds seven cells for worker waits, with the workers on the
+Phase 3a (hearsay-tools/cezarion#1235) adds eight cells for worker waits, with the workers on the
 Claude wire and the parent on each runner's native wire, and no exemptions. U2w opens a CI wait
 and a worker wait through `cezar_wait`: the worker settling wakes the agent with the CI wait
 still open and in the footer, the turn end re-parks on it, and the later CI result is delivered.
@@ -1239,7 +1239,11 @@ with a worker message alone, and fails every continuation's opening prompt: the 
 settles the run `failed` with the message still undelivered and no backoff or retry left, and
 Continue delivers it once. A message-only wake that fails once counts the failure, and the
 delivered message clears the count. A message the agent has not read is not delivered: on
-Claude's wire the failure ends the process before the mock reads the steered message. U19 delivers a worker message beside a pending portable question on every runner:
+Claude's wire the failure ends the process before the mock reads the steered message. U9u
+restarts a parked parent from a row an older build wrote, with its worker wait in
+`delegation.wait`: a cancelled receipt's queued wake is delivered as ordinary input and the wait
+stays cancelled in `lastWaits`, and a `reason: 'message'` stand-in whose message a provider took
+before the crash reads as interrupted execution, so recovery resumes the parent. U19 delivers a worker message beside a pending portable question on every runner:
 the message reaches the wire, nothing answers the card, and the human's answer keeps its
 `askSeq`. No runner takes U12's exemption here: U19 pins delivery, not a delayed acknowledgement.
 

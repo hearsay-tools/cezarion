@@ -543,9 +543,11 @@ function legacyTimerId(runId: unknown, wakeAt: string): string {
  *   id): a wait whose input was delivered reads as delivered, a `wake-pending` one whose input is
  *   still queued stays resolved and records it as `wakeInputId`, so it is delivered once, and a
  *   `lastWait` that was never delivered reads as cancelled. The `message` stand-in is dropped. No
- *   input is added or removed. The completion gate's wait is left where it is (phase 3b). A
- *   current wait whose wake was delivered on a `waiting` run is the old engine's crash between the
- *   delivery checkpoint and the resume: the run reads `running`, so recovery resumes it.
+ *   input is added or removed: a cancelled receipt's undelivered wake stays queued and is delivered
+ *   as an ordinary input. The completion gate's wait is left where it is (phase 3b). A current wait
+ *   (the stand-in included) whose wake a provider took on a `waiting` run is the old engine's crash
+ *   between the delivery checkpoint and the resume: the run reads `running`, so recovery resumes
+ *   it. A wake an inbox read acknowledged, or one beside a pending question, resumes nothing.
  *
  * An unreadable legacy CI wait gets the per-entry salvage `parseRunRecords` gives `waits`: it is
  * dropped, `lastWaitsError` says so, and the status is left alone. A `waiting` run with no open
@@ -580,20 +582,24 @@ export function upgradeLegacyWaits(row: Record<string, unknown>): void {
   if (agentWaits.length) {
     // The wait's own stamps decide every time the entry carries (`workerWaitEntry`), not the clock.
     const now = typeof row.createdAt === 'string' ? row.createdAt : new Date(0).toISOString();
-    const inputs = Array.isArray(row.agentInputs) ? row.agentInputs as Array<{ id?: unknown; deliveredAt?: unknown }> : [];
+    const inputs = Array.isArray(row.agentInputs) ? row.agentInputs as Array<{ id?: unknown; deliveredAt?: unknown; inboxClaim?: { acknowledgedAt?: unknown } }> : [];
     const current = agentWaits.find((found) => found.key === 'wait');
+    // The old engine retired a delivered wake into `lastWait` with the resume: a current wait whose
+    // wake a provider took on a `waiting` run is a crash between the two, and resumed. An inbox
+    // read starts no provider turn, and a pending question still holds the run, as they did then.
+    const interrupted = (key: 'wait' | 'lastWait', input: (typeof inputs)[number] | undefined) => key === 'wait' && row.status === 'waiting' &&
+      typeof input?.deliveredAt === 'string' && !input.inboxClaim?.acknowledgedAt && row.hasPendingHumanAsk !== true;
     for (const { key, wait } of agentWaits) {
       // A wait that settles has its copy in `lastWait` too: it is the same wait.
       if (key === 'lastWait' && current?.wait.id === wait.id) continue;
-      const entry = workerWaitEntry(wait, now);
-      if (!entry) continue;
       const input = inputs.find((candidate) => candidate.id === (wait.wakeId ?? wait.id));
+      const entry = workerWaitEntry(wait, now);
+      // The `message` stand-in becomes no entry, but its delivered message may be that crash too.
+      if (!entry) { if (interrupted(key, input)) resumeParked(row); continue; }
       const deliveredAt = typeof input?.deliveredAt === 'string' ? input.deliveredAt : undefined;
       if (entry.phase !== 'open' && deliveredAt) {
         Object.assign(entry, { phase: 'delivered', deliveredAt });
-        // The old engine retired a delivered wake into `lastWait` with the resume: a current wait
-        // whose wake was delivered on a `waiting` run is a crash between the two, and resumed.
-        if (key === 'wait' && row.status === 'waiting') resumeParked(row);
+        if (interrupted(key, input)) resumeParked(row);
       }
       else if (key === 'lastWait' && entry.phase !== 'cancelled') Object.assign(entry, { phase: 'cancelled', cancelledAt: wait.deadline });
       else if (entry.phase === 'resolved' && input) entry.wakeInputId = input.id as string;

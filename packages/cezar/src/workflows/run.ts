@@ -2596,12 +2596,16 @@ export class RunManager {
    * received is an owed wake in its own right, beside its waits and beside a pending question. Not
    * one claimed by an inbox read, one a provider flight or opening already carries, one a resolved
    * wait carries as its wake, or the parent's answer to a routed question, which goes through the
-   * answer seam (`answerRoutedQuestion`).
+   * answer seam (`answerRoutedQuestion`). A lifecycle input no wait carries any more counts as one:
+   * the wake a legacy cancelled worker wait queued before the upgrade, which the wait list keeps as
+   * a cancelled entry and delivers as ordinary input. The completion gate's own wake is its wait's.
    */
   private pendingConversationWakes(run: RunRecord): AgentInput[] {
     const owed = new Set(resolvedWaits(run).map(waitInputId));
     const answer = this.routedAnswer(run.id);
-    return (run.agentInputs ?? []).filter(input => input.conversation && !input.deliveredAt && !hasLiveInboxClaim(input) &&
+    const completionWake = this.delegationWait(run.id)?.wakeId;
+    return (run.agentInputs ?? []).filter(input => (input.conversation || (input.source === 'lifecycle' && input.id !== completionWake)) &&
+      !input.deliveredAt && !hasLiveInboxClaim(input) &&
       !owed.has(input.id) && input.id !== answer?.id && !this.providerOwnsInboxInput(run.id, input.id));
   }
 

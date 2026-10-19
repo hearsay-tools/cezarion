@@ -420,6 +420,65 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(store.readEvents(p.id).filter(event => event.type === 'user-message')).toEqual([]);
   });
 
+  /** A parked parent as an older build left it on disk: its agent worker wait in `delegation.wait`
+   *  as `wait`, the list emptied, and `inputs` as its only agent inputs. */
+  async function legacyParked(legacyWait: (wait: WorkerWait) => WorkerWait, inputs: (p: RunRecord, w: RunRecord, wait: WorkerWait) => unknown[]) {
+    const p = await parent(); const w = await worker(p.id);
+    const wait = register(p.id, [w.id]);
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+    store.flush();
+    const disk = (readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[]).map(run => {
+      if (run.id !== p.id || run.delegation?.role !== 'root') return run;
+      const { waits: _waits, ...legacy } = run;
+      return { ...legacy, delegation: { ...run.delegation, wait: legacyWait(wait) }, agentInputs: inputs(p, w, wait) };
+    });
+    expect(disk.find(run => run.id === p.id)).toMatchObject({ status: 'waiting' });
+    return { p, w, wait, disk };
+  }
+
+  it('restart delivers the queued wake an upgraded cancelled worker wait left, without reopening the wait', async () => {
+    // hearsay-tools/cezarion#1235: an older build cancelled the wait into a `wake-pending` receipt
+    // and queued its wake; the parent was still parked, with no session, when it stopped.
+    const text = 'Worker wait cancelled, upgraded receipt marker';
+    const { p, wait, disk } = await legacyParked(wait => ({ ...wait, phase: 'wake-pending', reason: 'cancelled', wakeId: wait.id }),
+      (p, _w, wait) => [{ id: wait.id, parentRunId: p.id, source: 'lifecycle', text, createdAt: new Date().toISOString() }]);
+    await restart(false, disk);
+    await until(() => !!store.getRun(p.id)?.agentInputs?.find(input => input.id === wait.id)?.deliveredAt);
+    expect(store.getRun(p.id)?.agentInputs).toHaveLength(1);
+    expect(store.getRun(p.id)?.lastWaits).toEqual([expect.objectContaining({ id: wait.id, kind: 'worker', phase: 'cancelled' })]);
+    expect(store.getRun(p.id)?.waits?.filter(entry => entry.kind === 'worker') ?? []).toEqual([]);
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+  });
+
+  it('restart after a delivered message stand-in resumes the interrupted parent', async () => {
+    // The old engine's crash window for a message wake: the provider accepted the message and its
+    // delivery was committed, but the stand-in was not yet retired nor the parent resumed.
+    const messageId = randomUUID(); const now = new Date().toISOString();
+    const { p, disk } = await legacyParked(wait => ({ id: randomUUID(), workerIds: [], outcomes: [], deadline: wait.deadline, phase: 'wake-pending', reason: 'message', wakeId: messageId }),
+      (p, w) => [{ id: messageId, parentRunId: p.id, source: 'agent', text: 'Worker progress, delivered before the crash', createdAt: now, deliveredAt: now,
+        conversation: { senderRunId: w.id, recipientRunId: p.id, kind: 'progress' } }]);
+    await restart(false, disk);
+    await until(() => store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true || terminal.includes(store.getRun(p.id)?.status ?? ''));
+    expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === messageId)).toHaveLength(1);
+    expect(store.getRun(p.id)?.agentInputs?.[0]?.deliveredAt).toBe(now);
+    expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
+    expect(store.readEvents(p.id).filter(event => event.type === 'user-message')).toEqual([]);
+  });
+
+  it('restart after a message stand-in an inbox read acknowledged leaves the parent parked', async () => {
+    // An inbox acknowledgement starts no provider turn: there is no interrupted execution to resume.
+    const messageId = randomUUID(); const now = new Date().toISOString();
+    const claim = { receiptId: randomUUID(), generation: randomUUID(), expiresAt: now, acknowledgedAt: now };
+    const { p, disk } = await legacyParked(wait => ({ id: randomUUID(), workerIds: [], outcomes: [], deadline: wait.deadline, phase: 'wake-pending', reason: 'message', wakeId: messageId }),
+      (p, w) => [{ id: messageId, parentRunId: p.id, source: 'agent', text: 'Worker progress, read through the inbox', createdAt: now, deliveredAt: now,
+        conversation: { senderRunId: w.id, recipientRunId: p.id, kind: 'progress' }, inboxClaim: claim }]);
+    await restart(false, disk);
+    expect(store.getRun(p.id)?.status).toBe('waiting');
+    expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(false);
+    expect(manager.isActive(p.id)).toBe(false);
+  });
+
   it('a crash right after the delivery checkpoint recovers a resumed parent that owes nothing', async () => {
     const p = await parent(); const w = await worker(p.id);
     const wait = register(p.id, [w.id]);

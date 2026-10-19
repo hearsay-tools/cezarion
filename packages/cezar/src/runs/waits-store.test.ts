@@ -516,6 +516,21 @@ describe('upgrade-on-read of agent worker waits', () => {
     expect(run.agentInputs).toEqual([wakeInput(WAKE_ID, { source: 'agent' })]);
   });
 
+  it('reads a waiting run whose message stand-in a provider took as interrupted, and one an inbox read or a question holds as parked', () => {
+    const deliveredAt = iso(-500);
+    const standIn = { wait: legacyWait({ workerIds: [], revisions: undefined, phase: 'wake-pending', reason: 'message', wakeId: WAKE_ID }) };
+    const message = (overrides: Partial<AgentInput> = {}) => wakeInput(WAKE_ID, { source: 'agent', deliveredAt, ...overrides });
+    const parked = [{ id: 'main', name: 'main', kind: 'agent', status: 'waiting', iterations: 1, tokensUsed: 0 }];
+    const resumed = parseOne(rootRow(standIn, { agentInputs: [message()], steps: parked }));
+    expect(resumed.status).toBe('running');
+    expect(resumed.steps[0]!.status).toBe('running');
+    expect(resumed.delegation).not.toHaveProperty('wait');
+    const claim = { receiptId: randomUUID(), generation: randomUUID(), expiresAt: iso(0), acknowledgedAt: iso(-400) };
+    expect(parseOne(rootRow(standIn, { agentInputs: [message({ inboxClaim: claim })] })).status).toBe('waiting');
+    expect(parseOne(rootRow(standIn, { agentInputs: [message()], hasPendingHumanAsk: true })).status).toBe('waiting');
+    expect(parseOne(rootRow(standIn, { agentInputs: [message({ deliveredAt: undefined })] })).status).toBe('waiting');
+  });
+
   it('upgrades lastWait into lastWaits, delivered when its wake input was delivered and cancelled otherwise', () => {
     const deliveredAt = iso(-500);
     const delivered = parseOne(rootRow({ lastWait: legacyWait({ phase: 'wake-pending', reason: 'outcome', wakeId: WAKE_ID, outcomes: [outcome] }) },

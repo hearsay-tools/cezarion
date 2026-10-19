@@ -10,7 +10,7 @@ import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.t
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
-import { collect, fixtureUpdateRun, manager, parent, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { collect, fixtureUpdateRun, manager, parent, restart, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
@@ -192,7 +192,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U3w', 'U7w', 'U9w', 'U14m', 'U19']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U19']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -1340,6 +1340,45 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(store.getRun(f.p.id)?.waitDeliveryFailures).toBeUndefined();
       await until(() => store.getRun(f.p.id)?.status === 'waiting');
       expect(store.getRun(f.p.id)?.waitDeliveryFailures).toBeUndefined();
+    });
+
+    /** A parent on `runner`'s wire parked on a worker wait, written back to disk as an older build
+     *  left it (the wait in `delegation.wait`, the list empty, `inputs` its only agent inputs), and
+     *  restarted: upgrade-on-read and recovery decide what wakes it. */
+    async function restartLegacyParked(legacy: (wait: WorkerWaitEntry) => Record<string, unknown>, inputs: (parentId: string, workerId: string, wait: WorkerWaitEntry) => unknown[]) {
+      const { p, w } = await parentWithWorker(runner);
+      await parentTurn(p.id, toolCall('cezar_wait', { kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }), () => parkedOn(p.id, workerWaits(p.id)[0]));
+      const wait = workerWaits(p.id)[0]!;
+      store.flush();
+      const disk = readPersistedRuns(join(root, '.ai/cezar')).map(row => {
+        if (row.id !== p.id) return row;
+        const { waits: _waits, ...rest } = row;
+        return { ...rest, delegation: { ...row.delegation, wait: legacy(wait) }, agentInputs: inputs(p.id, w.id, wait) };
+      });
+      await restart(false, disk);
+      return { p, wait };
+    }
+    const legacyOf = (wait: WorkerWaitEntry) => ({ id: wait.id, workerIds: wait.workerIds, revisions: wait.revisions, deadline: wait.deadline, outcomes: [] });
+
+    it(`${runner} U9u after an upgrade, a cancelled worker wait's queued wake is delivered as ordinary input and the wait stays cancelled`, async () => {
+      const text = 'Worker wait cancelled, u9u marker';
+      const { p, wait } = await restartLegacyParked(wait => ({ ...legacyOf(wait), phase: 'wake-pending', reason: 'cancelled', wakeId: wait.id }),
+        (parentId, _workerId, wait) => [{ id: wait.id, parentRunId: parentId, source: 'lifecycle', text, createdAt: new Date().toISOString() }]);
+      await until(() => delivered(p.id, wait.id) && prompted(runner, text).length > 0);
+      expect(settled(p.id, wait.id)).toMatchObject({ kind: 'worker', phase: 'cancelled' });
+      expect(workerWaits(p.id)).toEqual([]);
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+    });
+
+    it(`${runner} U9u after an upgrade, a parent whose message stand-in a provider took before the crash resumes`, async () => {
+      const messageId = randomUUID(), now = new Date().toISOString();
+      const { p } = await restartLegacyParked(wait => ({ id: randomUUID(), workerIds: [], outcomes: [], deadline: wait.deadline, phase: 'wake-pending', reason: 'message', wakeId: messageId }),
+        (parentId, workerId) => [{ id: messageId, parentRunId: parentId, source: 'agent', text: 'Worker progress u9u', createdAt: now, deliveredAt: now,
+          conversation: { senderRunId: workerId, recipientRunId: parentId, kind: 'progress' } }]);
+      await until(() => store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true || terminal.includes(store.getRun(p.id)?.status ?? ''));
+      expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
+      expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === messageId)).toEqual([expect.objectContaining({ deliveredAt: now })]);
+      await until(() => store.getRun(p.id)?.status === 'waiting');
     });
 
     it(`${runner} U19 a worker message beside a pending portable question is delivered and the question stays answerable`, async () => {
