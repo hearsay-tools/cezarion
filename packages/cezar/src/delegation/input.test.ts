@@ -357,7 +357,11 @@ it.each(['live', 'expired'] as const)('restart recovers a %s receipt and expiry 
         await vi.advanceTimersByTimeAsync(60_000);
       }
       expect(reopened.getRun(runId)?.agentInputs?.[0]?.inboxClaim).toBeUndefined();
-      expect(reopened.getRun(runId)?.delegation).toMatchObject({ wait: { reason: 'message', wakeId: first.id } });
+      // hearsay-tools/cezarion#1235: the message is a wake of its own, not a `delegation.wait`
+      // stand-in: it asks for a scheduler continuation, which this stepless fixture cannot open, so
+      // the message stays queued for the next wake.
+      expect(reopened.getRun(runId)?.delegation).not.toHaveProperty('wait');
+      expect(reopened.readEvents(runId).filter(event => event.type === 'note' && String(event.message).startsWith('Messages retained; continuation unavailable: '))).toHaveLength(1);
       expect(reopened.getRun(runId)?.agentInputs?.[0]?.deliveredAt).toBeUndefined();
       expect(() => recovered.acknowledgeInbox(runId, generation, receipt.receiptId)).toThrow();
     } finally { recovered.dispose(); reopened.flush(); pump.mockRestore(); }

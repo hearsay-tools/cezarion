@@ -473,7 +473,10 @@ interface ActiveRun {
   agentInputFlight?: { session: AgentSession; inputIds: readonly string[]; settled?: Promise<void>;
     /** This batch carries timer results: it holds one unit of the automatic-wake budget, which
      *  every budget check counts, and charges it to the record on its acknowledgement. */
-    wakeReserved?: boolean };
+    wakeReserved?: boolean;
+    /** This batch is an admitted wake (hearsay-tools/cezarion#1235): its acknowledgement spends
+     *  the admission, a wake of messages alone included. */
+    admittedWake?: boolean };
   /** The current session's declared input delivery (#505). */
   inputDelivery?: InputDelivery;
   /** Accepted by this session's harness, not yet reported read (observable backends only).
@@ -2439,7 +2442,8 @@ export class RunManager {
   }
 
   private retryWaitAdmission(runId: string): void {
-    if (this.disposed || this.wakeRetries.has(runId) || !resolvedWaits(this.store.getRun(runId) ?? {}).length) return;
+    const run = this.store.getRun(runId);
+    if (this.disposed || this.wakeRetries.has(runId) || !run || !this.owesWake(run)) return;
     const timer = setTimeout(() => {
       this.wakeRetries.delete(runId);
       try { this.queueWaitWake(runId); } catch { this.retryWaitAdmission(runId); }
@@ -2456,7 +2460,7 @@ export class RunManager {
    */
   private parkOnWaits(runId: string, state: ActiveRun): boolean {
     const run = this.store.getRun(runId);
-    // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+    // phase 3b (#1235): completion gate only
     if (!run?.waits?.length || !state.session?.open || state.cancelled || state.pendingHumanAsk || this.delegationWait(runId)) return false;
     const human = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human');
     if (human) {
@@ -2483,17 +2487,18 @@ export class RunManager {
   }
 
   /**
-   * Queue one wake for every resolved wait of a run. A live session takes it only at a turn
-   * boundary: a turn in progress, a native question included, picks it up at its own turn end. A
-   * monitoring-pool member already holds its slot and is admitted at once; any other live session
-   * waits for scheduler admission; a run with no session reopens through a scheduler-owned
-   * continuation. A pending question does not hold the wake back: the wake turn delivers only the
-   * results, and the question stays answerable.
+   * Queue one wake for every resolved wait of a run and every message it has not received
+   * (`owesWake`). A live session takes it only at a turn boundary: a turn in progress, a native
+   * question included, picks it up at its own turn end. A monitoring-pool member already holds its
+   * slot and is admitted at once; any other live session waits for scheduler admission; a run with
+   * no session reopens through a scheduler-owned continuation. A pending question does not hold the
+   * wake back: the wake turn delivers the results and the messages beside it, and the question
+   * stays answerable (hearsay-tools/cezarion#1235).
    */
   private queueWaitWake(runId: string): void {
     const run = this.store.getRun(runId);
     const resolved = run ? resolvedWaits(run) : [];
-    if (this.disposed || this.recoveringRun(run) || !run || !resolved.length ||
+    if (this.disposed || this.recoveringRun(run) || !run || !this.owesWake(run) ||
       !['running', 'waiting', 'queued'].includes(run.status) || run.stopping ||
       this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
     // A failed delivery waits out its backoff; the backoff's own timer queues this wake again.
@@ -2504,11 +2509,11 @@ export class RunManager {
     // Settlement ends the watcher. Keep a bounded-rate wake source until ACK,
     // cancellation or termination, including refusals with no runner-ready callback.
     this.retryWaitAdmission(runId);
-    if (this.waitWakeAdmitted.has(runId)) { this.flushAgentInputs(runId); return; }
+    if (this.waitWakeAdmitted.has(runId)) { this.deliverAdmittedWake(runId); return; }
     if (state && this.monitoring.has(runId)) {
       if (this.waitWakeQueuedAt.delete(runId)) { const at = this.queue.indexOf(runId); if (at >= 0) this.queue.splice(at, 1); }
       this.waitWakeAdmitted.add(runId);
-      this.flushAgentInputs(runId);
+      this.deliverAdmittedWake(runId);
       return;
     }
     if (this.waitWakeQueuedAt.has(runId)) { this.releaseSlot(); return; }
@@ -2522,10 +2527,11 @@ export class RunManager {
         ? 'Resume to receive the queued CI observation. End this opening turn so Cezar can deliver it; do not poll CI.'
         : resolved.some(wait => wait.kind === 'worker')
           ? 'Resume to receive the queued worker wait result. End this opening turn so Cezar can deliver it.'
-          : 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.';
+          : resolved.length ? 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.'
+            : 'Resume to receive queued messages. End this opening turn so Cezar can deliver them.';
       const resumed = this.continueRun(runId, { text, waitWake: true }, true);
       if (!resumed.ok) {
-        this.store.appendEvent(runId, { type: 'note', message: `Wait result retained; continuation unavailable: ${resumed.error ?? 'unknown'}` });
+        this.store.appendEvent(runId, { type: 'note', message: `${resolved.length ? 'Wait result' : 'Messages'} retained; continuation unavailable: ${resumed.error ?? 'unknown'}` });
         return;
       }
       this.waitWakeQueuedAt.set(runId, Date.now());
@@ -2544,6 +2550,53 @@ export class RunManager {
       this.store.commitWait(runId, wait, { id: waitInputId(wait), parentRunId: runId, source: 'lifecycle', createdAt: wait.resolvedAt ?? new Date().toISOString(),
         text: waitResultText(wait, { tools: !this.active.get(runId)?.toolless, workerStatus: this.workerStatus }) });
     }
+  }
+
+  /**
+   * Messages are not waits (hearsay-tools/cezarion#1235): every conversation input the run has not
+   * received is an owed wake in its own right, beside its waits and beside a pending question. Not
+   * one claimed by an inbox read, one a provider flight or opening already carries, one a resolved
+   * wait carries as its wake, or the parent's answer to a routed question, which goes through the
+   * answer seam (`answerRoutedQuestion`).
+   */
+  private pendingConversationWakes(run: RunRecord): AgentInput[] {
+    const owed = new Set(resolvedWaits(run).map(waitInputId));
+    const answer = this.routedAnswer(run.id);
+    return (run.agentInputs ?? []).filter(input => input.conversation && !input.deliveredAt && !hasLiveInboxClaim(input) &&
+      !owed.has(input.id) && input.id !== answer?.id && !this.providerOwnsInboxInput(run.id, input.id));
+  }
+
+  /** The parent's reply that answers a worker's pending routed question, still undelivered. */
+  private routedAnswer(runId: string): AgentInput | undefined {
+    const routed = this.routedAsk(runId);
+    return routed && this.store.getRun(runId)?.agentInputs?.find(input => !input.deliveredAt && answersQuestion(routed.message, input));
+  }
+
+  /** A wake is owed: a resolved wait, a message, or a parent's answer the run has not received.
+   *  phase 3b (#1235): completion gate only: a run parked on the completion wait takes its
+   *  messages through the old engine (`queueWorkerWake`), so only its resolved waits count. */
+  private owesWake(run: RunRecord): boolean {
+    if (resolvedWaits(run).length) return true;
+    if (this.delegationWait(run.id)) return false;
+    return this.pendingConversationWakes(run).length > 0 || this.routedAnswer(run.id) !== undefined;
+  }
+
+  /** An admitted wake goes to the agent: a parent's answer through the answer seam, everything
+   *  else as one submission. */
+  private deliverAdmittedWake(runId: string): void {
+    if (!resolvedWaits(this.store.getRun(runId) ?? {}).length && this.routedAnswer(runId)) this.answerRoutedQuestion(runId, true);
+    else this.flushAgentInputs(runId);
+  }
+
+  /** An admitted or queued wake whose messages an inbox read took has nothing left to deliver: the
+   *  run goes back to its park and gives up the slot the admission reserved. */
+  private retireEmptyWake(runId: string): void {
+    const run = this.store.getRun(runId);
+    const state = this.active.get(runId);
+    if (!run || this.owesWake(run) || state?.agentInputFlight) return;
+    if (this.waitWakeQueuedAt.delete(runId)) { const at = this.queue.indexOf(runId); if (at >= 0) this.queue.splice(at, 1); }
+    if (this.waitWakeAdmitted.delete(runId) && state && run.status === 'waiting' && state.atTurnBoundary === state.session) this.waiting.add(runId);
+    const retry = this.wakeRetries.get(runId); if (retry) clearTimeout(retry); this.wakeRetries.delete(runId);
   }
 
   /**
@@ -2907,7 +2960,7 @@ export class RunManager {
             // Preserve its place and slot exemption until ACK/release/expiry re-pumps.
             if (this.workerWakeQueuedAt.has(id)) {
               const first = queued?.agentInputs?.find(input => !input.deliveredAt);
-              // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+              // phase 3b (#1235): completion gate only
               const wake = queued?.agentInputs?.find(input => input.id === this.delegationWait(id)?.wakeId);
               if ((first && hasLiveInboxClaim(first)) || (wake && hasLiveInboxClaim(wake))) return false;
             }
@@ -2930,12 +2983,13 @@ export class RunManager {
           if (this.waitWakeQueuedAt.has(runId) && this.active.has(runId)) {
             this.waitWakeQueuedAt.delete(runId);
             const state = this.active.get(runId)!;
-            const owed = resolvedWaits(this.store.getRun(runId) ?? {}).length > 0;
+            const queued = this.store.getRun(runId);
+            const owed = !!queued && this.owesWake(queued);
             if (owed && state.atTurnBoundary === state.session) {
               // The wake holds a regular slot from admission until its acknowledgement.
               this.waiting.delete(runId);
               this.waitWakeAdmitted.add(runId);
-              this.flushAgentInputs(runId);
+              this.deliverAdmittedWake(runId);
             } else if (owed) {
               // The runner may lose its boundary between queueing and admission.
               // Retain the wake, but do not spin on it in this pump pass.
@@ -3291,7 +3345,7 @@ export class RunManager {
         await this.reviveQueuedRun(run, 'cezar restarted');
         continue;
       }
-      // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+      // phase 3b (#1235): completion gate only
       if (!this.delegationWait(run.id)) this.deliverConversationInput(run.id);
       if (this.delegationWait(run.id)) {
         const wait = this.delegationWait(run.id)!;
@@ -3425,6 +3479,8 @@ export class RunManager {
       if (run.waits?.length && holdsOwedResults(run)) for (const wait of openWaits(run)) this.armWait(run.id, wait);
       else if (run.waits?.length && !['running', 'waiting', 'queued'].includes(run.status)) this.cancelOpenWaits(run.id);
       else if (run.waits?.length) this.queueWaitWake(run.id);
+      // A message the recovery window held back is a wake of its own (hearsay-tools/cezarion#1235).
+      else if (['running', 'waiting', 'queued'].includes(run.status) && this.owesWake(run)) this.queueWaitWake(run.id);
     }
     this.reconcileAutoResumes();
     void this.pump();
@@ -4261,10 +4317,12 @@ export class RunManager {
     const run = this.store.getRun(runId);
     if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return null;
     const message = this.toQueuedMessage(runId, content);
-    // Human input cancels no wait in the list (hearsay-tools/cezarion#1233, #1235); it still
-    // withdraws `delegation.wait`.
-    // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework).
+    // Human input cancels no wait in the list (hearsay-tools/cezarion#1233, #1235).
+    // phase 3b (#1235): completion gate only: it still withdraws the completion wait.
     if (this.delegationWait(runId)) this.withdrawWorkerWait(runId, message);
+    // Beside a wait the message is accepted durably and opens the wake's continuation, as the
+    // withdrawal above accepts it (hearsay-tools/cezarion#1235).
+    else if (run.waits?.length) this.store.commitHumanMessageBesideWaits(runId, message);
     else this.store.updateRun(runId, { queuedMessages: [...(run.queuedMessages ?? []), message] });
     return message;
   }
@@ -4387,9 +4445,12 @@ export class RunManager {
     if (!startingUp) return false;
     // The pending maps were removed only AFTER hydration. This entry therefore
     // needs live delivery, never a second fold into the already-created opening.
-    // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
-    const message = this.delegationWait(runId) ? this.toQueuedMessage(runId, content) : undefined;
-    if (message) this.withdrawWorkerWait(runId, message);
+    // phase 3b (#1235): completion gate only: the message withdraws the completion wait. Beside a
+    // wait in the list it is accepted durably instead, and every wait stays
+    // (hearsay-tools/cezarion#1235). Either way a crash before delivery replays it.
+    const message = this.delegationWait(runId) || run.waits?.length ? this.toQueuedMessage(runId, content) : undefined;
+    if (message && this.delegationWait(runId)) this.withdrawWorkerWait(runId, message);
+    else if (message) this.store.commitHumanMessageBesideWaits(runId, message);
     const pending = this.deferredMessages.get(runId) ?? [];
     pending.push({ content, ...(message ? { messageId: message.id } : {}) });
     this.deferredMessages.set(runId, pending);
@@ -4662,6 +4723,7 @@ export class RunManager {
     const result = this.store.ackInboxInputs(runId, receiptId, generation, new Date().toISOString());
     this.armInboxClaimExpiry(runId);
     this.reconcileWorkerWaits();
+    this.retireEmptyWake(runId);
     this.deliverConversationInput(runId);
     this.active.get(runId)?.resumeInboxAutoEnd?.();
     this.releaseSlot();
@@ -4717,33 +4779,20 @@ export class RunManager {
     if (!run?.delegation || run.delegation.role === 'invalid' || this.historyDeletionPending(runId) ||
       this.executionBlockedByRootFinish(run) || !['queued', 'running', 'waiting'].includes(run.status) ||
       this.workerExecutionStopped(runId)) return;
-    // A pending question holds every other input; only the parent's reply to a routed one
-    // answers it (#505), and the held inputs follow right behind that answer. An answer
-    // already executing keeps its checkpoint until turn-end but no longer holds input (#935).
-    if (this.hasUnansweredHumanAsk(runId)) { this.answerRoutedQuestion(runId); return; }
-    // Retain conversation input until the registered CI wait receives scheduler admission.
-    // Converting this monitor into a worker wake would strand both admission paths.
-    if (hasCiWait(run)) { this.queueWaitWake(runId); return; }
-    const input = run.agentInputs?.find(entry => entry.conversation && !entry.deliveredAt && !hasLiveInboxClaim(entry));
-    if (!input) return;
-    const state = this.active.get(runId);
-    // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+    // Only the parent's reply to a routed question answers it (#505), through the answer seam.
+    // An answer already executing keeps its checkpoint until turn-end but holds no input (#935).
+    if (this.hasUnansweredHumanAsk(runId)) this.answerRoutedQuestion(runId);
+    // phase 3b (#1235): completion gate only: a parent parked on the completion wait takes the
+    // message through the old engine, as a `reason: 'message'` stand-in (`reconcileWorkerFamily`).
     if (this.delegationWait(runId)) { this.reconcileWorkerWaits(); return; }
-    // hearsay-tools/cezarion#1235: a result the wait list already owes wakes the run through the
-    // list, and its wake turn takes the message too; a stand-in wake beside it would hold both.
-    if (resolvedWaits(run).length) { this.queueWaitWake(runId); return; }
-    if (run.status === 'waiting' && (!state || state.atTurnBoundary === state.session)) {
-      const wait: WorkerWait = { id: randomUUID(), workerIds: [], outcomes: [],
-        deadline: new Date().toISOString(), phase: 'wake-pending', reason: 'message', wakeId: input.id };
-      this.store.commitDelegation([{ id: runId, delegation: { ...run.delegation, wait } }]);
-      if (state) {
-        // An open timer stays open; the worker wake takes over the slot accounting.
-        this.clearIdleTimer(state);
-        this.waiting.delete(runId); this.leaveMonitoringPool(runId); this.workerWaiting.add(runId);
-        this.store.updateRun(runId, { status: 'waiting', activity: undefined });
-      }
-      this.queueWorkerWake(runId);
-    } else if (!this.recoveringRun(runId)) this.flushAgentInputs(runId);
+    // Messages are not waits (hearsay-tools/cezarion#1235): one the run has not received wakes it
+    // through the wait list's admission, beside every open wait and a pending question, and ends
+    // none of them. A turn in progress takes it at once, as steering.
+    const current = this.store.getRun(runId);
+    if (!current || !this.pendingConversationWakes(current).length) return;
+    const state = this.active.get(runId);
+    if (current.status === 'waiting' && (!state || state.atTurnBoundary === state.session)) this.queueWaitWake(runId);
+    else if (!this.recoveringRun(runId)) this.flushAgentInputs(runId);
   }
 
   /** A worker's pending question goes to its owning parent as a conversation request
@@ -4819,35 +4868,20 @@ export class RunManager {
     const state = this.active.get(runId);
     if (!state) {
       // An automated answer is not a human override: the reopened session waits for capacity.
+      // It withdraws no wait (hearsay-tools/cezarion#1235).
       if (this.isActive(runId)) return;
-      // As on the live path, the answer supersedes a wait registered before the question.
-      // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
-      if (this.delegationWait(runId)) { try { this.withdrawWorkerWait(runId); } catch { return; } }
       const result = this.continueRun(runId, { text, answerInputId: reply.id }, true);
       if (!result.ok) this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: `parent answer not delivered: ${result.error}` });
       return;
     }
     if (!state.session?.open || state.cancelled || state.openingAgentInputId === reply.id) return;
     // Already waiting for admission: only the admission itself may deliver it.
-    if (!admitted && (this.workerWaiting.has(runId) || this.workerWakeQueuedAt.has(runId))) return;
+    if (!admitted && (this.waitWakeQueuedAt.has(runId) || this.waitWakeAdmitted.has(runId))) return;
     if (!admitted && this.waiting.has(runId)) {
-      // The parked worker released its slot: the answer rides the ordinary message wake,
-      // which delivers it here once the scheduler admits the worker.
-      // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
-      const existing = this.delegationWait(runId);
-      if (existing?.wakeId !== reply.id) {
-        // An answer supersedes a wait the worker registered before asking, exactly as a
-        // human answer withdraws it; a failed checkpoint leaves both for a later retry.
-        if (existing) { try { this.withdrawWorkerWait(runId); } catch { return; } }
-        const wait: WorkerWait = { id: randomUUID(), workerIds: [], outcomes: [],
-          deadline: new Date().toISOString(), phase: 'wake-pending', reason: 'message', wakeId: reply.id };
-        const current = this.store.getRun(runId)?.delegation;
-        if (current?.role !== 'worker') return;
-        this.store.commitDelegation([{ id: runId, delegation: { ...current, wait } }]);
-      }
-      this.clearIdleTimer(state);
-      this.waiting.delete(runId); this.leaveMonitoringPool(runId); this.workerWaiting.add(runId);
-      this.queueWorkerWake(runId);
+      // The parked worker released its slot: the answer is a wake (`owesWake`), which the
+      // scheduler's admission delivers here (`deliverAdmittedWake`). It withdraws no wait the
+      // worker registered before asking (hearsay-tools/cezarion#1235).
+      this.queueWaitWake(runId);
       return;
     }
     const bundle = state.atTurnBoundary === state.session ? this.pendingConversationBatch(runId, state, reply.id) : undefined;
@@ -4858,11 +4892,7 @@ export class RunManager {
     this.commitBundledDelivery(runId, state, delivered);
     // As in submitAgentInput: the wake that admitted this answer is spent, and a stale one
     // would hold back every later message until the answer's turn ends.
-    // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
-    if (delivered.includes(this.delegationWait(runId)?.wakeId ?? '')) {
-      state.workerWakeTurn = state.session;
-      try { this.withdrawWorkerWait(runId); } catch { /* reconcileWorkerWaits retires it at the turn end */ }
-    }
+    if (this.waitWakeAdmitted.delete(runId)) state.waitWakeTurn = state.session;
     state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
     if (!state.pendingHumanAsk) this.flushAgentInputs(runId);
     this.resumeParkedRun(runId, state);
@@ -4995,10 +5025,10 @@ export class RunManager {
 
   /**
    * `delegation.wait`, the old worker-wait engine's one wait: since hearsay-tools/cezarion#1235
-   * phase 3a only the completion gate's wait (`completionWait`) and a message's `reason: 'message'`
-   * stand-in live here; an agent's worker wait is a `worker` entry in the wait list. Phase 3b
-   * (#1235) moves the completion wait into the list, and the message stand-in goes with the
-   * message-wake rework, so this and its machinery go then.
+   * phase 3a only the completion gate's wait (`completionWait`) lives here, with the `reason:
+   * 'message'` stand-in a message turns it into on a completion park; an agent's worker wait is a
+   * `worker` entry in the wait list, and any other message is a wake of its own (`owesWake`).
+   * Phase 3b (#1235) moves the completion wait into the list, so this and its machinery go then.
    */
   private delegationWait(parentId: string): WorkerWait | undefined {
     const delegation = this.store.getRun(parentId)?.delegation;
@@ -5165,7 +5195,7 @@ export class RunManager {
         if (this.executionBlockedByRootFinish(parent)) continue;
         const observed = (now: string) => this.workerObservations(parent, now);
         this.reconcileWorkerEntries(parent, observed);
-        // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework).
+        // phase 3b (#1235): completion gate only.
         // An agent's worker wait is a list entry, reconciled above.
         const wait = parent.delegation.wait;
         if (!wait) continue;
@@ -5376,7 +5406,7 @@ export class RunManager {
     }
   }
 
-  // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework).
+  // phase 3b (#1235): completion gate only.
   /** The wake for `delegation.wait`. */
   queueWorkerWake(parentId: string): void {
     const run = this.store.getRun(parentId);
@@ -5429,7 +5459,7 @@ export class RunManager {
   }
 
   /** Shared turn-end path; asks win, worker waits precede DONE/monitoring/nudges. */
-  // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework). List waits park in `parkOnWaits`.
+  // phase 3b (#1235): completion gate only. List waits park in `parkOnWaits`.
   private parkWorkerWait(runId: string, state: ActiveRun): boolean {
     const run = this.store.getRun(runId);
     if (!run || !run.delegation || run.delegation.role === 'invalid' || !run.delegation.wait || !state.session?.open ||
@@ -5472,7 +5502,7 @@ export class RunManager {
     if (interrupt) this.store.commitDelegation([{ id: runId, delegation: { ...run.delegation, wait: { ...wait, wakeId: interrupt.id } } }]);
   }
 
-  // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework).
+  // phase 3b (#1235): completion gate only.
   private retireDeliveredWorkerWake(runId: string): boolean {
     const run = this.store.getRun(runId);
     const wait = this.delegationWait(runId);
@@ -5486,7 +5516,7 @@ export class RunManager {
     return true;
   }
 
-  // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework); it never touches a list wait.
+  // phase 3b (#1235): completion gate only; it never touches a list wait.
   private withdrawWorkerWait(runId: string, acceptedHumanMessage?: QueuedMessage, reason?: 'cancelled'): void {
     const run = this.store.getRun(runId);
     const wait = this.delegationWait(runId);
@@ -5603,7 +5633,7 @@ export class RunManager {
     const run = this.store.getRun(runId);
     // The answer this batch rides on settles every human wait, so only a CI or timer wait holds it
     // (hearsay-tools/cezarion#1234).
-    // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+    // phase 3b (#1235): completion gate only
     if (!run || run.waits?.some(wait => wait.kind !== 'human') || state.agentInputFlight || this.delegationWait(runId)) return undefined;
     const batch = agentInputBatch((run.agentInputs ?? []).filter(input => input.id !== state.openingAgentInputId && input.id !== answerId),
       input => this.formatAgentInput(runId, input));
@@ -5662,7 +5692,7 @@ export class RunManager {
       this.parkForUser(runId, state, state.currentStepId);
       return;
     }
-    // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+    // phase 3b (#1235): completion gate only
     if (state.atTurnBoundary !== session || (state.pendingHumanAsk && !proseGate) || this.delegationWait(runId) || (!proseGate && this.hasQueuedAgentInputs(runId))) return;
     if (state.doneAtBoundary === session) {
       if (this.deferParentCompletion(runId)) return;
@@ -5813,16 +5843,19 @@ export class RunManager {
   private submitAgentInput(runId: string, state: ActiveRun, content: ContentBlock[], inputIds: readonly string[] = []): boolean {
     const session = state.session;
     if (!session?.open || state.agentInputFlight || state.cancelled || state.finishRequested || state.agentInputError) return false;
-    // A pending question admits only a wake made of resolved-wait results, at a turn boundary: it
-    // stays answerable, and nothing else is delivered until it is answered (hearsay-tools/cezarion#1233).
+    // A pending question admits only a wake made of resolved-wait results and messages, at a turn
+    // boundary: it stays answerable, and nothing else is delivered until it is answered
+    // (hearsay-tools/cezarion#1233, #1235).
     if (state.pendingHumanAsk) {
-      const owed = new Set(resolvedWaits(this.store.getRun(runId) ?? {}).map(waitInputId));
+      const run = this.store.getRun(runId);
+      const owed = new Set(run ? [...resolvedWaits(run).map(waitInputId), ...this.pendingConversationWakes(run).map(input => input.id)] : []);
       if (state.atTurnBoundary !== session || !inputIds.length || !inputIds.every(id => owed.has(id))) return false;
     }
     // Every delivered turn ends with the waits still open.
     const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? []);
     if (footer) content = [...content, { type: 'text', text: footer }];
-    const flight: NonNullable<ActiveRun['agentInputFlight']> = { session, inputIds };
+    const flight: NonNullable<ActiveRun['agentInputFlight']> = { session, inputIds,
+      ...(this.waitWakeAdmitted.has(runId) && state.atTurnBoundary === session ? { admittedWake: true } : {}) };
     // A batch with timer results is an automatic wake: it reserves one unit of the budget now, so a
     // timer that comes due before this acknowledgement counts it, and gives it back if the batch is
     // refused or its acknowledgement rejects (hearsay-tools/cezarion#1233).
@@ -5894,6 +5927,12 @@ export class RunManager {
             // Pool membership changes only at a turn end or a terminal path.
             this.waiting.delete(runId);
             this.store.updateRun(runId, { status: 'running', activity: undefined });
+          } else if (flight.admittedWake && this.waitWakeAdmitted.delete(runId)) {
+            // A wake of messages alone (hearsay-tools/cezarion#1235) spends its admission the same way.
+            const left = this.store.getRun(runId);
+            if (!left || !this.owesWake(left)) { const retry = this.wakeRetries.get(runId); if (retry) clearTimeout(retry); this.wakeRetries.delete(runId); }
+            this.waiting.delete(runId);
+            this.store.updateRun(runId, { status: 'running', activity: undefined });
           }
           if (conversationIds.length) {
             const queue = this.store.getRun(runId)?.agentInputs ?? [];
@@ -5913,7 +5952,7 @@ export class RunManager {
               if (early.length) this.store.commitAgentInputsConsumed(runId, early, deliveredAt);
             }
           }
-          // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+          // phase 3b (#1235): completion gate only
           const wait = this.delegationWait(runId);
           if (inputIds.includes(wait?.wakeId ?? '') && this.retireDeliveredWorkerWake(runId)) retainedWorkerWaitId = wait!.id;
           this.reconcileWorkerWaits();
@@ -5930,7 +5969,7 @@ export class RunManager {
       if (this.flushAgentInputs(runId)) return;
       // Only this progress ACK restored an intent. Generic input-readiness
       // callbacks must not park a freshly registered wait ahead of ASK parsing.
-      // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+      // phase 3b (#1235): completion gate only
       if (retainedWorkerWaitId && this.delegationWait(runId)?.id === retainedWorkerWaitId &&
         state.atTurnBoundary === session && !state.pendingHumanAsk && !state.parkAfterAck?.humanGate &&
         !this.hasUnansweredHumanAsk(runId) && this.parkWorkerWait(runId, state)) return;
@@ -5944,9 +5983,9 @@ export class RunManager {
     deliveries?.add(flight.settled);
     void flight.settled.then(() => deliveries?.delete(flight.settled!));
     this.resumeParkedRun(runId, state);
-    // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+    // phase 3b (#1235): completion gate only
     if (inputIds.includes(this.delegationWait(runId)?.wakeId ?? '')) state.workerWakeTurn = session;
-    if (resolvedWaits(this.store.getRun(runId) ?? {}).some(wait => inputIds.includes(waitInputId(wait)))) state.waitWakeTurn = session;
+    if (flight.admittedWake || resolvedWaits(this.store.getRun(runId) ?? {}).some(wait => inputIds.includes(waitInputId(wait)))) state.waitWakeTurn = session;
     return true;
   }
 
@@ -5957,11 +5996,11 @@ export class RunManager {
     if (!state?.session?.open || state.cancelled || state.agentInputError || state.agentInputFlight || !run ||
       !['queued', 'running', 'waiting'].includes(run.status) || this.executionBlockedByRootFinish(run) ||
       (run.delegation?.role === 'worker' && run.delegation.destroy) || this.workerWaiting.has(runId) ||
-      // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+      // phase 3b (#1235): completion gate only
       (this.delegationWait(runId)?.phase === 'registered') ||
       (this.delegationWait(runId)?.phase === 'wake-pending' && !this.workerWakeAdmitted.has(runId))) return false;
-    // A question pending at a turn boundary still takes a wake of resolved-wait results; one
-    // pending mid-turn (a native ask) takes nothing until its turn ends.
+    // A question pending at a turn boundary still takes an admitted wake of resolved-wait results
+    // and messages; one pending mid-turn (a native ask) takes nothing until its turn ends.
     const askPending = state.pendingHumanAsk || this.hasUnansweredHumanAsk(runId);
     if (askPending && state.atTurnBoundary !== state.session) return false;
     // A timer result still owed when the budget is spent is cancelled before its batch is sent; the
@@ -5980,8 +6019,12 @@ export class RunManager {
     const resolved = resolvedWaits(run);
     const owed = new Set(resolved.map(waitInputId));
     // A resolved wait's input is delivered only by its admitted wake, never as ordinary input.
-    const queue = (run.agentInputs ?? []).filter(input => input.id !== state.openingAgentInputId && !owed.has(input.id));
-    if (resolved.length && this.waitWakeAdmitted.has(runId) && state.atTurnBoundary === state.session) {
+    // Beside a pending question only messages go with it (hearsay-tools/cezarion#1235).
+    const beside = new Set(this.pendingConversationWakes(run).map(input => input.id));
+    const queue = (run.agentInputs ?? []).filter(input => input.id !== state.openingAgentInputId && !owed.has(input.id) &&
+      (!askPending || beside.has(input.id)));
+    const admitted = this.waitWakeAdmitted.has(runId) && state.atTurnBoundary === state.session;
+    if (resolved.length && admitted) {
       // One wake turn delivers every resolved wait, oldest first, then the conversation input
       // that would lead the next batch (hearsay-tools/cezarion#1233).
       // Each result speaks the lifecycle of the session that receives it: a wake resolved with no
@@ -5996,16 +6039,18 @@ export class RunManager {
           : `${this.formatAgentInput(runId, input)}\n\n${result}` }];
       });
       if (!results.length) return false;
-      const conversation = askPending ? undefined : agentInputBatch(queue, input => this.formatAgentInput(runId, input, false));
+      const conversation = agentInputBatch(queue, input => this.formatAgentInput(runId, input, false));
       const following = conversation?.inputs.every(input => input.conversation) ? conversation.inputs : [];
       const progressOnly = following.every(input => input.conversation?.kind === 'progress');
       const text = [...results.map(result => result.text),
         ...following.map(input => this.formatAgentInput(runId, input, progressOnly))].join('\n\n');
       return this.submitAgentInput(runId, state, [{ type: 'text', text }], [...results, ...following].map(input => input.id));
     }
-    if (askPending) return false;
-    // An open or owed CI wait holds conversation input for its own admitted wake (#476).
-    if (hasCiWait(run) || (resolved.length && !queue.some(input => !input.deliveredAt))) return false;
+    // Messages beside a pending question go only with an admitted wake (hearsay-tools/cezarion#1235).
+    if (askPending && !admitted) return false;
+    // An open or owed CI wait holds conversation input for its own admitted wake (#476); a message
+    // is a wake of its own, so an admitted one goes beside it (hearsay-tools/cezarion#1235).
+    if (!admitted && (hasCiWait(run) || (resolved.length && !queue.some(input => !input.deliveredAt)))) return false;
     // Select within the byte budget using the longer interruption context, then
     // format the selected snapshot consistently. Do not change durable wait intent
     // merely to format inputs that the provider may refuse.
@@ -6018,7 +6063,7 @@ export class RunManager {
 
   private formatAgentInput(runId: string, input: AgentInput, progressOnly = true): string {
     const attribution = input.conversation;
-    // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+    // phase 3b (#1235): completion gate only
     const wait = this.delegationWait(runId);
     const waitContext = wait?.reason !== 'message' ? '' : progressOnly && this.retainsWorkerWaitOnProgress(runId) && attribution?.kind === 'progress'
       ? `; worker wait ${wait.id} remains active; end your turn to keep waiting`
@@ -6108,7 +6153,8 @@ export class RunManager {
     this.clearIdleTimer(state);
     // A wake command can emit activity before its transport ACK. Keep its park
     // until the durable delivery checkpoint; admission already reserves capacity.
-    if (resolvedWaits(this.store.getRun(runId) ?? {}).length && this.waitWakeAdmitted.has(runId)) return;
+    const owing = this.store.getRun(runId);
+    if (owing && this.owesWake(owing) && this.waitWakeAdmitted.has(runId)) return;
     // Its waits stay open and a pool member keeps its slot: only a turn end or a terminal path
     // changes either (hearsay-tools/cezarion#1233).
     this.waiting.delete(runId);
@@ -6417,7 +6463,7 @@ export class RunManager {
     if (!disconnectedCiWait && !['done', 'failed', 'cancelled', 'review'].includes(run.status) && !(pendingHumanAsk && run.status === 'waiting') &&
       !(run.status === 'waiting' && !this.isActive(runId) && ((!hasRegisteredRunProcess(runId) &&
         (run.delegation === undefined || run.delegation.role === 'root')) ||
-        // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+        // phase 3b (#1235): completion gate only
         (deferForCapacity && run.delegation?.role === 'worker' && (!!this.delegationWait(runId) || !!run.waits?.length || this.ciWorkflowResumeStepIndex(run) >= 0))))) {
       return { ok: false, error: `cannot continue a ${run.status} run` };
     }
@@ -8063,7 +8109,7 @@ export class RunManager {
     let session: AgentSession | undefined;
     const shouldAutoEnd = () => this.active.get(runId) !== state || state.session !== session ||
       (state.atTurnBoundary === session && !state.pendingHumanAsk && !this.hasPendingHumanAsk(runId) &&
-        // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+        // phase 3b (#1235): completion gate only
         !this.delegationWait(runId) && !this.store.getRun(runId)?.waits?.length && !this.parentCompletionPending(runId) &&
         state.workerWakeTurn !== session && state.waitWakeTurn !== session && !state.agentInputFlight &&
         !this.hasQueuedAgentInputs(runId));
@@ -8161,7 +8207,7 @@ export class RunManager {
       if (this.isDisposedDelegatedRun(runId)) return null;
       this.persistWorkerAssistantResult(runId, step.id, result.text);
       const inputOrSessionError = sessionError ?? state.agentInputError ??
-        // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+        // phase 3b (#1235): completion gate only
         (!state.cancelled && this.delegationWait(runId) && !this.parentCompletionPending(runId) ? 'Agent session ended before its accepted worker wait completed' : undefined);
       if (inputOrSessionError) {
         sink.sessionEnded('error', inputOrSessionError);
@@ -8835,7 +8881,7 @@ export class RunManager {
       await this.settleIdleClosedWorker(runId);
       return;
     }
-    // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+    // phase 3b (#1235): completion gate only
     if (!run || !state.autonomousNudgePending || run.waits?.length || this.delegationWait(runId) || this.hasPendingHumanAsk(runId)) return;
     for (const step of run.steps) {
       if (step.status === 'running') this.store.updateStep(runId, step.id, { status: 'waiting' });
@@ -8851,7 +8897,7 @@ export class RunManager {
    * remain durable attention states. */
   private async settleIdleClosedWorker(runId: string): Promise<boolean> {
     const run = this.store.getRun(runId);
-    // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+    // phase 3b (#1235): completion gate only
     if (run?.delegation?.role !== 'worker' || this.hasPendingHumanAsk(runId) || this.delegationWait(runId)) return false;
     const finishedAt = new Date().toISOString();
     if (run.invalidAsk) {
@@ -8962,7 +9008,7 @@ export class RunManager {
     return !!run && !this.disposed && !run.stopping && !state.cancelled && !state.finishRequested &&
       !state.agentInputError && !state.pendingHumanAsk && !this.hasPendingHumanAsk(runId) && !!state.session?.open &&
       !this.workerExecutionStopped(runId) && !this.executionBlockedByRootFinish(run) && !this.parentCompletionPending(runId) &&
-      // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+      // phase 3b (#1235): completion gate only
       !this.delegationWait(runId) && !run.waits?.length && !this.workerWakeAdmitted.has(runId) &&
       !state.agentInputFlight && !this.harnessOwesInput(state) && !this.hasQueuedAgentInputs(runId);
   }
@@ -9035,7 +9081,7 @@ export class RunManager {
   }): TurnEndOutcome {
     const session = state.session;
     if (!session?.open) return 'defer';
-    // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+    // phase 3b (#1235): completion gate only
     if (turn.monitoring && !this.delegationWait(runId) && state.autonomousNudgePending !== session) this.openTimerAlias(runId, state, turn.scheduleWakeup);
     const run = this.store.getRun(runId);
     const question = turn.question || !!state.pendingHumanAsk || this.hasPendingHumanAsk(runId) ||
@@ -9043,7 +9089,7 @@ export class RunManager {
     const decision = decideTurnEnd({
       inputOwed: state.autonomousNudgePending === session,
       done: false,
-      // #1235: completion gate (phase 3b) and message stand-in (3a message-wake rework)
+      // phase 3b (#1235): completion gate only
       waiting: question || !!run?.waits?.length || !!this.delegationWait(runId),
       finalStep: turn.finalStep,
       nudgedLastTurn: turn.nudgedLastTurn,

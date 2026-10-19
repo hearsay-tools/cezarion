@@ -23,7 +23,6 @@ import {
   store, terminal, track, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
 import { blockRunWrites, readPersistedRuns, readPersistedText } from '../runs/run-store.testkit.ts';
-import { monitoringWakeOf } from './waits.testkit.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -105,8 +104,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(semaphore.busy()).toBe(busy); warn.mockRestore();
   });
 
-  it('queued human withdrawal preserves admission, FIFO and attachments without answering an ask on acceptance', async () => {
-    const { p, w } = await queuedWake();
+  // hearsay-tools/cezarion#1235: a human message withdraws no list wait; it is accepted beside it.
+  it('a queued human message preserves admission, FIFO, attachments and the owed wait without answering an ask on acceptance', async () => {
+    const { p, w, wait } = await queuedWake();
     // Earlier human amendments and a current ask must not disappear when the
     // lifecycle opening is superseded. Acceptance alone is not answer delivery.
     store.updateRun(p.id, { queuedMessages: [{ id: randomUUID(), text: 'earlier human update', createdAt: new Date().toISOString() }] });
@@ -117,8 +117,8 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'YQ==' } },
       { type: 'file', mediaType: 'application/pdf', data: 'Yg==' }]);
     expect(queued?.images).toHaveLength(2);
-    expect(waitOf(store.getRun(p.id))).toBeUndefined();
-    expect(store.getRun(p.id)?.agentInputs).toEqual([]);
+    expect(waitOf(store.getRun(p.id))).toMatchObject({ id: wait.id, phase: 'wake-pending' });
+    expect(store.getRun(p.id)?.agentInputs?.map(input => [input.id, input.deliveredAt])).toEqual([[wait.id, undefined]]);
     expect(store.getRun(p.id)?.continuationMessage?.origin).toBe('human');
     expect(store.getRun(p.id)?.status).toBe('queued'); expect(semaphore.busy()).toBe(1);
     expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
@@ -134,7 +134,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toHaveLength(1);
   });
 
-  it('a failed queued human withdrawal publishes no wait, wake, message or admission changes', async () => {
+  it('a failed queued human message checkpoint publishes no wait, wake, message or admission changes', async () => {
     const { p } = await queuedWake(); store.flush();
     const snapshot = JSON.stringify(store.getRun(p.id));
     const release = blockRunWrites(join(root, '.ai/cezar'));
@@ -146,8 +146,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   });
 
   for (const crash of ['before-delivery', 'after-delivery', 'checkpoint-failure'] as const) {
-    it(`startup human withdrawal ${crash}: ${crash === 'checkpoint-failure' ? 'stops delivery and preserves the replay ID' : 'survives restart without double folding or lost input'}`, async () => {
-      const { p, w } = await queuedWake();
+    // hearsay-tools/cezarion#1235: accepted durably beside the owed wait, which it no longer withdraws.
+    it(`startup human message ${crash}: ${crash === 'checkpoint-failure' ? 'stops delivery and preserves the replay ID' : 'survives restart without double folding or lost input'}`, async () => {
+      const { p, w, wait } = await queuedWake();
       const engine = manager as unknown as { agentEnvForStep(id: string, ...args: unknown[]): Promise<unknown> };
       const real = engine.agentEnvForStep.bind(manager);
       let release!: () => void; let entered = false;
@@ -161,7 +162,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       try {
         expect(manager.deferMessage(p.id, [{ type: 'text', text: 'startup human update' },
           { type: 'file', mediaType: 'application/pdf', data: 'YQ==' }])).toBe(true);
-        expect(waitOf(store.getRun(p.id))).toBeUndefined();
+        expect(waitOf(store.getRun(p.id))).toMatchObject({ id: wait.id, phase: 'wake-pending' });
         expect(store.getRun(p.id)?.queuedMessages?.at(-1)?.text).toBe('startup human update');
         store.flush(); checkpoint = readPersistedRuns(join(root, '.ai/cezar'));
         if (crash === 'checkpoint-failure') {
@@ -174,8 +175,10 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       } finally { release(); }
       await until(() => store.readEvents(p.id).some(event => event.type === 'user-message' && String(event.text).includes('startup human update')));
       if (crash === 'checkpoint-failure') {
-        await until(() => store.getRun(p.id)?.status === 'failed');
-        expect(store.getRun(p.id)?.error).toContain('human input delivery checkpoint failed');
+        // hearsay-tools/cezarion#1233/#1235: the result is still owed, so the failed session counts a
+        // failed wake delivery and the run waits for the retry instead of settling `failed`.
+        await until(() => store.getRun(p.id)?.error?.includes('human input delivery checkpoint failed') === true);
+        expect(store.getRun(p.id)).toMatchObject({ status: 'waiting', waitDeliveryFailures: 1 });
         expect(store.getRun(p.id)?.queuedMessages?.at(-1)?.text).toBe('startup human update');
         expect(store.readEvents(p.id).filter(event => event.type === 'user-message' && String(event.text).includes('startup human update'))).toHaveLength(1);
         return;
@@ -191,7 +194,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       const mentions = afterRestart.flatMap(event => String(event.text).match(/startup human update/g) ?? []);
       expect(mentions).toHaveLength(crash === 'before-delivery' ? 1 : 0);
       if (crash === 'before-delivery') expect(afterRestart.find(event => String(event.text).includes('startup human update'))?.images).toHaveLength(1);
+      // The owed result reached the agent: the wait is delivered, not withdrawn.
       expect(waitOf(store.getRun(p.id))).toBeUndefined();
+      expect(lastWaitOf(store.getRun(p.id))).toMatchObject({ id: wait.id });
     });
   }
 
@@ -414,7 +419,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => store.readEvents(p.id).some(e => e.type === 'ask.requested'));
     const delegation = store.getRun(p.id)!.delegation!;
     if (delegation.role !== 'root') throw Error('fixture');
-    const wait: WorkerWait = { id: randomUUID(), workerIds: [w.id], phase: 'parked', deadline: new Date().toISOString(), outcomes: [] };
+    // hearsay-tools/cezarion#1235: upgraded into a list entry, an overdue wait would wake beside the
+    // question; one still running keeps this case about the ask.
+    const wait: WorkerWait = { id: randomUUID(), workerIds: [w.id], phase: 'parked', deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [] };
     store.commitDelegation([{ id: p.id, delegation: { ...delegation, wait } }]);
     await restart(); await manager.recover();
     expect(store.getRun(p.id)?.status).toBe('waiting');
@@ -422,9 +429,10 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(manager.continueRun(p.id).ok).toBe(false);
     expect(store.readEvents(p.id).filter(e => e.type === 'human-input-delivered')).toEqual([]);
     expect(manager.continueRun(p.id, { text: 'Vitest' }).ok).toBe(true);
-    // hearsay-tools/cezarion#1233: with its worker still live the answered turn parks on a monitoring timer.
-    await until(() => store.getRun(p.id)?.status === 'waiting' && !!monitoringWakeOf(store.getRun(p.id)));
-    expect(waitOf(store.getRun(p.id))).toBeUndefined();
+    // hearsay-tools/cezarion#1235: the answer withdraws nothing; the answered turn parks on the wait.
+    await until(() => store.getRun(p.id)?.status === 'waiting' && waitOf(store.getRun(p.id))?.phase === 'parked' &&
+      store.readEvents(p.id).some(e => e.type === 'human-input-delivered'));
+    expect(waitOf(store.getRun(p.id))).toMatchObject({ id: wait.id, workerIds: [w.id] });
     expect(store.readEvents(p.id).filter(e => e.type === 'human-input-delivered')).toHaveLength(1);
   });
   for (const status of ['done', 'failed', 'cancelled'] as const) {

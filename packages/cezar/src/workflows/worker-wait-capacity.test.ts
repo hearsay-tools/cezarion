@@ -254,13 +254,16 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     });
   }
 
-  it('restart preserves a queued human answer when wait withdrawal left a blank lifecycle opening', async () => {
+  // hearsay-tools/cezarion#1235: the message withdraws no wait; it makes the wake's lifecycle
+  // opening the human's, keeping its text.
+  it('restart preserves a queued human answer beside an owed wait that made the lifecycle opening human', async () => {
     const { p } = await queuedWake();
     store.appendEvent(p.id, { type: 'ask.requested', requestId: randomUUID(), questions: [{
       header: 'Choice', question: 'Which option?', options: [{ label: 'One' }, { label: 'Two' }],
     }] });
     manager.enqueueMessage(p.id, [{ type: 'text', text: 'queued human answer mock:hold' }]);
-    expect(store.getRun(p.id)?.continuationMessage).toMatchObject({ text: '', origin: 'human' });
+    expect(store.getRun(p.id)?.continuationMessage).toMatchObject({ origin: 'human',
+      text: 'Resume to receive the queued worker wait result. End this opening turn so Cezar can deliver it.' });
     await restart();
     await until(() => store.readEvents(p.id).some(event => event.type === 'human-input-delivered'));
     expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toHaveLength(1);

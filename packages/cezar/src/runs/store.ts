@@ -2965,6 +2965,18 @@ export class RunStore extends EventEmitter {
     }]]));
   }
 
+  /** A human message beside a run's waits (hearsay-tools/cezarion#1235): accepted durably, as
+   *  `commitWorkerWaitWithdrawal` accepts one, but every wait stays. A lifecycle opening becomes
+   *  the human's and keeps its wake text, so the message opens the continuation (and answers a
+   *  pending question) and the owed results still reach the agent. */
+  commitHumanMessageBesideWaits(id: string, acceptedHumanMessage: QueuedMessage): void {
+    const run = this.peek(id);
+    if (!run) throw new Error('missing queued message target');
+    this.commitIndex(new Map([[id, { ...run, queuedMessages: [...(run.queuedMessages ?? []), queuedMessageSchema.parse(acceptedHumanMessage)],
+      ...(run.continuationMessage ? { continuationMessage: { ...run.continuationMessage, origin: 'human' as const } } : {}),
+    }]]));
+  }
+
   /** Successful deferred human delivery consumes only its persisted queue ID.
    * A crash before this checkpoint may replay that same message on recovery. */
   commitQueuedMessageDelivery(id: string, messageId: string): void {
