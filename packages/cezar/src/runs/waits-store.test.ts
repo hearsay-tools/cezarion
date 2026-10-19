@@ -295,15 +295,17 @@ describe('wait checkpoints', () => {
   // hearsay-tools/cezarion#1235 (PR #1291 review): a resumed delivery moves the run and its
   // waiting step together, so a resumed task never reads active with a waiting step.
   it('commitWaitDelivery resumes the run and its waiting step in the same commit', () => {
-    const resolved = timerEntry({ phase: 'resolved', resolvedAt: iso(0) });
-    store.commitWait(id, resolved, input(resolved.id));
     const stepId = 'main';
-    store.updateRun(id, { steps: [{ id: stepId, name: 'main', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0 }] });
-    store.commitParked(id, stepId);
+    const runId = store.createRun({ title: 'Waits', workflow: 'quick-task', task: 'wait', steps: [{ id: stepId, name: 'main', kind: 'agent' }] }).id;
+    const resolved = timerEntry({ phase: 'resolved', resolvedAt: iso(0) });
+    store.commitWait(runId, resolved, { ...input(resolved.id), parentRunId: runId });
+    store.commitParked(runId, stepId);
     const commits = vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex');
-    store.commitWaitDelivery(id, [resolved.id], {}, true, stepId);
+    store.commitWaitDelivery(runId, [resolved.id], {}, true, stepId);
     expect(commits).toHaveBeenCalledTimes(1);
-    for (const run of [store.getRun(id)!, reopen()]) {
+    const before = store.getRun(runId)!;
+    reopen();
+    for (const run of [before, store.getRun(runId)!]) {
       expect(run.status).toBe('running');
       expect(run.steps.find(step => step.id === stepId)?.status).toBe('running');
     }
