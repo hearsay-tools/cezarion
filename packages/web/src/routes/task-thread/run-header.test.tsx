@@ -216,6 +216,32 @@ describe('open waits', () => {
       .toEqual(['2026-09-22T12:10:00.000Z', '2026-09-22T12:20:00.000Z'])
   })
 
+  it('counts only the targets not yet reported, and hides a resolved worker entry', () => {
+    stubFetch()
+    type WorkerEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'worker' }>
+    const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
+    const base = {
+      kind: 'worker', source: 'agent', via: 'cez-worker-wait', turnId: 'turn-1', timeoutSeconds: 600,
+      registeredAt: '2026-09-22T12:00:00.000Z', deadline: '2026-09-22T12:10:00.000Z', mode: 'all',
+    } as const
+    const partialWorkers = {
+      ...base, id: uuid(71), phase: 'open', workerIds: [uuid(1), uuid(2), uuid(3)],
+      revisions: [uuid(1), uuid(2), uuid(3)].map(workerId => ({ workerId, revision: 0 })),
+      outcomes: [{ workerId: uuid(1), status: 'done' }],
+    } as unknown as WorkerEntry
+    const partialRequests = {
+      ...base, id: uuid(72), phase: 'open', requestIds: [uuid(4), uuid(5)],
+      requestOutcomes: [{ requestId: uuid(4), status: 'replied' }],
+    } as unknown as WorkerEntry
+    const resolved = {
+      ...base, id: uuid(73), phase: 'resolved', resolvedAt: '2026-09-22T12:01:00.000Z', result: { reason: 'outcome' },
+      workerIds: [uuid(6)], revisions: [{ workerId: uuid(6), revision: 0 }], outcomes: [],
+    } as unknown as WorkerEntry
+    renderHeader(run('waiting', { waits: [partialWorkers, partialRequests, resolved] }))
+    const items = [...document.querySelectorAll<HTMLElement>('[data-slot="worker-wait-status"]')]
+    expect(items.map(item => item.querySelector('p')?.textContent)).toEqual(['Waiting on 2 workers', 'Waiting on 1 request reply'])
+  })
+
   it('reads a run with only a timer open as monitoring, without a note line when there is none', () => {
     stubFetch()
     renderHeader(run('waiting', { waits: [timerEntry()] }))
