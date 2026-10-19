@@ -258,7 +258,8 @@ describe('restart repairs on a settled family without a conversation (#779)', ()
   });
 
   // The other repair a settled family's sweep made: a wait left on a finished parent is withdrawn.
-  // The `wait` clause of `isLiveRecord` is what loads the root for it.
+  // Since hearsay-tools/cezarion#1235 the store upgrades the agent's wait into an open list entry,
+  // whose `waits` clause of `isLiveRecord` loads the root, and boot recovery cancels it.
   it('withdraws a wait left on a cancelled root at boot and lets the root go', async () => {
     const waitId = randomUUID();
     const { parentId } = seedCancelledRoot((store, id, workerId) => store.commitDelegation([{ id, delegation: {
@@ -266,9 +267,10 @@ describe('restart repairs on a settled family without a conversation (#779)', ()
       wait: { id: waitId, workerIds: [workerId], outcomes: [], deadline: new Date(Date.now() + 3_600_000).toISOString(), phase: 'parked' },
     } }]));
     await reboot((store) => {
-      const delegation = store.getRun(parentId)?.delegation;
-      expect(delegation).not.toHaveProperty('wait');
-      expect(delegation).toMatchObject({ lastWait: { id: waitId, phase: 'wake-pending' } });
+      const root = store.getRun(parentId);
+      expect(root?.delegation).not.toHaveProperty('wait');
+      expect(root?.waits ?? []).toEqual([]);
+      expect(root?.lastWaits).toEqual([expect.objectContaining({ id: waitId, kind: 'worker', phase: 'cancelled' })]);
       store.flush();
       expect(store.heldIds()).not.toContain(parentId);
     });

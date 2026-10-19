@@ -264,10 +264,9 @@ describe('durable conversations', () => {
     const cancelled = await f.service.cancelRequest(w.caller, { requestId: sent.message.id });
     expect(cancelled.status).toBe('cancelled');
     expect(await f.service.cancelRequest(w.caller, { requestId: sent.message.id })).toEqual(cancelled);
-    const run = f.store.getRun(w.id)!;
-    if (run.delegation?.role !== 'worker') throw Error('fixture');
+    // hearsay-tools/cezarion#1235: a worker's request wait is a wait-list entry.
     const waitId = randomUUID();
-    f.store.commitDelegation([{ id: w.id, delegation: { ...run.delegation, wait: { id: waitId, workerIds: [], requestIds: [sent.message.id], phase: 'registered', outcomes: [], deadline: new Date(Date.now() + 600000).toISOString() } } }]);
+    f.store.commitWait(w.id, { id: waitId, kind: 'worker', source: 'agent', via: 'cez-worker-wait', registeredAt: new Date().toISOString(), phase: 'open', turnId: 'turn', requestIds: [sent.message.id], requestOutcomes: [], timeoutSeconds: 600, deadline: new Date(Date.now() + 600000).toISOString() });
     expect(await f.service.cancelWait(w.caller, { waitId })).toMatchObject({ wait: { id: waitId } });
     await expect(f.service.stop(w.caller, { workerId: w.id })).rejects.toMatchObject({ code: 'denied_scope' });
   });

@@ -3,6 +3,7 @@ import { ArrowUpRightIcon, CircleCheckIcon, CircleIcon, CircleSlashIcon, CircleX
 import { LoaderCircleIcon } from 'lucide-react'
 import { useIsDesktop } from '@/lib/use-desktop'
 import { delegationWaitLabel } from '@/lib/attention'
+import { workerWaitView } from '@open-mercato/cezar-api-client/contract/waits'
 import { runTitle } from '@/lib/task-groups'
 import type { ApiRun, RunRelationships, WorkerDestroyView, WorkerInspection } from '@open-mercato/cezar-api-client'
 
@@ -87,8 +88,10 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
   const parentId = metadata?.role === 'worker' ? metadata.parentRunId : query.data?.parentRunId
   const workers = new Map(query.data?.workers.map(worker => [worker.workerId, worker]))
   const ids = workerIdsOf(metadata, query.data)
-  const wait = metadata && metadata.role !== 'invalid' ? metadata.wait : undefined
-  const dependencyLabel = delegationWaitLabel(metadata)
+  // hearsay-tools/cezarion#1235: an agent's worker wait is a wait-list entry; the completion
+  // gate's stays in `delegation.wait` until phase 3b.
+  const wait = workerWaitView(run)
+  const dependencyLabel = metadata && metadata.role !== 'invalid' && wait ? delegationWaitLabel({ ...metadata, wait }) : undefined
   return (
     <ActivityRow
       slot="workers"

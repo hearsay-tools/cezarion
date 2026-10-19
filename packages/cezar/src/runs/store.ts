@@ -54,6 +54,7 @@ import type { ArchivePullRequestIdentity, MergedPullRequest, RunPullRequest } fr
 import { extractTaskRefs, MAX_REF } from './task-refs.ts';
 // Type-only module (zod + nothing else), so this cannot cycle back into the store.
 import { workflowDefSchema } from '../workflows/types.ts';
+import { waitInputId } from '../workflows/waits.ts';
 
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import {
@@ -484,7 +485,14 @@ export function workerWaitEntry(wait: WorkerWait, now: string): WorkerWaitEntry 
   const deadline = Date.parse(wait.deadline);
   const registeredAt = Number.isFinite(deadline) ? new Date(deadline - 600_000).toISOString() : now;
   const open = wait.phase !== 'wake-pending';
-  const reason = wait.reason === 'outcome' || wait.reason === 'timeout' ? wait.reason : undefined;
+  // A pending wait from before reasons were recorded settled on its persisted observations, as
+  // `reconcileWorkerWait` infers it: satisfied by them is an outcome, anything else its deadline.
+  const satisfied = (ids: readonly string[], reported: readonly string[]) => wait.mode === 'all' ? ids.every((id) => reported.includes(id)) : reported.length > 0;
+  const inferred = wait.phase === 'wake-pending' && wait.reason === undefined
+    ? (wait.requestIds ? satisfied(wait.requestIds, (wait.requestOutcomes ?? []).map((outcome) => outcome.requestId))
+      : satisfied(wait.workerIds, (wait.outcomes ?? []).map((outcome) => outcome.workerId))) ? 'outcome' as const : 'timeout' as const
+    : undefined;
+  const reason = wait.reason === 'outcome' || wait.reason === 'timeout' ? wait.reason : inferred;
   const observed = [...(wait.outcomes ?? []), ...(wait.requestOutcomes ?? [])].map((outcome) => outcome.observedAt).sort().at(-1);
   const resolvedAt = reason === 'outcome' && observed ? observed : wait.deadline;
   return {
@@ -657,10 +665,11 @@ function withWaitsCancelled(run: RunRecord, waitIds: readonly string[]): RunReco
   if (!cancelled.length) return undefined;
   const cancelledAt = new Date().toISOString();
   const retired = new Set(cancelled.map((wait) => wait.id));
+  const inputs = new Set(cancelled.map(waitInputId));
   return { ...run,
     waits: nonEmpty((run.waits ?? []).filter((wait) => !retired.has(wait.id))),
     lastWaits: settleWaits(run.lastWaits, cancelled.map((wait) => ({ ...wait, phase: 'cancelled' as const, cancelledAt }))),
-    ...(run.agentInputs ? { agentInputs: run.agentInputs.filter((input) => !retired.has(input.id) || input.deliveredAt) } : {}),
+    ...(run.agentInputs ? { agentInputs: run.agentInputs.filter((input) => !inputs.has(input.id) || input.deliveredAt) } : {}),
   };
 }
 
@@ -2877,7 +2886,7 @@ export class RunStore extends EventEmitter {
     const run = this.peek(id);
     if (!run) return;
     const ids = new Set(inputIds);
-    const delivered = (run.waits ?? []).filter((wait) => wait.phase === 'resolved' && ids.has(wait.id));
+    const delivered = (run.waits ?? []).filter((wait) => wait.phase === 'resolved' && ids.has(waitInputId(wait)));
     if (!delivered.length && !run.agentInputs?.some((input) => ids.has(input.id) && !input.deliveredAt)) return;
     const deliveredAt = new Date().toISOString();
     const retired = new Set(delivered.map((wait) => wait.id));

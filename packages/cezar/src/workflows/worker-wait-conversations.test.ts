@@ -9,7 +9,7 @@ import { DelegationService } from '../delegation/service.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 import {
   checkpoint, controlledWire, manager, parent, restart, root, semaphore,
-  store, until, useWorkerWaitFixture, waitOf, worker,
+  store, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
 
 describe('parent and worker conversation waits through RunManager', { timeout: 30_000 }, () => {
@@ -65,7 +65,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
         manager.reconcileWorkerWaits(); manager.reconcileWorkerWaits();
         expect(waitOf(store.getRun(f.p.id))).toBeUndefined();
         expect(store.getRun(f.p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
-        expect(store.getRun(f.p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'outcome' } });
+        expect(lastWaitOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, reason: 'outcome' });
       } finally { f.close(); }
     });
   }
@@ -179,8 +179,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       const wait = manager.registerRequestWait(f.w.id, { requestIds: [id], timeoutSeconds: 600 });
       expect(wait.reason).toBe('outcome');
       await until(() => !waitOf(store.getRun(f.w.id)));
-      const metadata = store.getRun(f.w.id)?.delegation;
-      expect(metadata && metadata.role !== 'invalid' && metadata.lastWait?.requestOutcomes).toEqual([expect.objectContaining({ requestId: id, status: 'replied' })]);
+      expect(lastWaitOf(store.getRun(f.w.id))?.requestOutcomes).toEqual([expect.objectContaining({ requestId: id, status: 'replied' })]);
     } finally { f.close(); }
   });
 
@@ -218,7 +217,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
     } finally { f.close(); }
   });
 
-  it('conversation: restart restores a worker request wait, deadline, and one wake receipt', async () => {
+  it('conversation: restart restores a worker request wait and deadline, and cancelling it leaves a receipt and no wake', async () => {
     const f = await conversationPair();
     try {
       const id = randomUUID();
@@ -232,15 +231,18 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       manager.cancelWorkerWait(f.w.id, wait.id);
       checkpoint('conversation-cancel-wait');
       await until(() => !waitOf(store.getRun(f.w.id)));
-      checkpoint('conversation-wake-retired');
-      expect(store.getRun(f.w.id)?.agentInputs?.filter(input => input.id === wait.id && input.deliveredAt)).toHaveLength(1);
+      checkpoint('conversation-wait-cancelled');
+      // hearsay-tools/cezarion#1235: a cancelled wait moves to lastWaits and queues no wake.
+      expect(lastWaitOf(store.getRun(f.w.id))).toMatchObject({ id: wait.id, reason: 'cancelled' });
       manager.reconcileWorkerWaits(); manager.reconcileWorkerWaits();
-      expect(store.getRun(f.w.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
+      expect(store.getRun(f.w.id)?.agentInputs?.filter(input => input.id === wait.id) ?? []).toEqual([]);
     checkpoint('conversation-test-complete');
     } finally { f.close(); }
   });
 
-  it('conversation: parent waits for replies from two workers without treating the first as an interruption', async () => {
+  // hearsay-tools/cezarion#1235: the first reply settles its request in the open entry, which
+  // waits on for the second; the reply itself reaches the parent as a message.
+  it('conversation: parent waits for replies from two workers and the first reply leaves the wait open', async () => {
     const f = await conversationPair(); const credentials = new CredentialRegistry();
     try {
       const secondWorker = await worker(f.p.id);
@@ -253,11 +255,10 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       const wait = manager.registerRequestWait(f.p.id, { requestIds: [first, second], mode: 'all', timeoutSeconds: 600 });
       await until(() => waitOf(store.getRun(f.p.id))?.phase === 'parked');
       await f.service.send(f.workerCaller, { id: randomUUID(), recipientRunId: f.p.id, kind: 'reply', requestId: first, text: 'First result mock:hold', timeoutSeconds: 600 });
-      expect(waitOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: 'parked', requestOutcomes: [expect.objectContaining({ requestId: first, status: 'replied' })] });
+      expect(workerEntryOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: 'open', requestOutcomes: [expect.objectContaining({ requestId: first, status: 'replied' })] });
       await f.service.send(secondCaller, { id: randomUUID(), recipientRunId: f.p.id, kind: 'reply', requestId: second, text: 'Second result mock:hold', timeoutSeconds: 600 });
-      await until(() => !waitOf(store.getRun(f.p.id)));
-      const metadata = store.getRun(f.p.id)?.delegation;
-      expect(metadata?.role === 'root' && metadata.lastWait).toMatchObject({ id: wait.id, reason: 'outcome', requestOutcomes: [expect.objectContaining({ requestId: first }), expect.objectContaining({ requestId: second })] });
+      await until(() => lastWaitOf(store.getRun(f.p.id))?.id === wait.id && !waitOf(store.getRun(f.p.id)));
+      expect(lastWaitOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, reason: 'outcome', requestOutcomes: [expect.objectContaining({ requestId: first }), expect.objectContaining({ requestId: second })] });
       expect(store.getRun(f.p.id)?.agentInputs?.filter(input => input.id === wait.id && input.deliveredAt)).toHaveLength(1);
     } finally { credentials.close(); f.close(); }
   });

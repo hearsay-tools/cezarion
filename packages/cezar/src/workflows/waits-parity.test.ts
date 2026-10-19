@@ -7,7 +7,7 @@ import type { CiWaitResult, HumanWaitEntry, Wait } from '@open-mercato/cezar-con
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
-import { collect, manager, parent, register, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { collect, manager, parent, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
@@ -661,7 +661,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
 
-    it(`${runner} U11 an alias timer survives a later worker park with its deadline, is held while the workers outrank it, and is delivered after the worker wake`, async () => {
+    it(`${runner} U11 an alias timer survives a later completion park with its deadline, is held while the workers outrank it, and is delivered after the worker wake`, async () => {
       nativeWire(runner);
       // Workers run on the Claude wire whatever the parent's runner is.
       process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
@@ -673,17 +673,20 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       const timer = viaOf(p.id, 'monitoring-line')!;
       const w = await worker(p.id);
       turns = turnEnds(p.id);
-      expect(manager.sendMessage(p.id, [{ type: 'text', text: messagesPrompt(runner, ['Waiting on my worker.']) }])).toBe(true);
-      const workerWait = register(p.id, [w.id]);
+      // hearsay-tools/cezarion#1235: an agent's worker wait is a list entry that a resolved timer
+      // wakes beside. The completion gate's park is the one that still holds other results.
+      expect(manager.sendMessage(p.id, [{ type: 'text', text: messagesPrompt(runner, ['All done.\nCEZ:DONE']) }])).toBe(true);
       await until(() => turnEnds(p.id) > turns && waitOf(store.getRun(p.id))?.phase === 'parked');
-      // The worker park cancels nothing: the timer keeps its deadline, and the workers outrank it.
+      const workerWait = waitOf(store.getRun(p.id))!;
+      expect(store.getRun(p.id)?.delegation).toMatchObject({ completion: { phase: 'waiting', waitId: workerWait.id } });
+      // The completion park cancels nothing: the timer keeps its deadline, and the workers outrank it.
       expect(store.getRun(p.id)?.waits).toEqual([expect.objectContaining({ id: timer.id, phase: 'open', deadline: timer.deadline })]);
       expect(deriveAttention(store.getRun(p.id)!).label).toBe('waiting on 1 worker');
       expect(engine().monitoring.has(p.id)).toBe(false);
       fireTimer(timer.id);
       await until(() => store.getRun(p.id)?.waits?.[0]?.phase === 'resolved');
       await flushMicrotasks();
-      // Held behind the worker park: nothing is delivered, and attention still follows the workers.
+      // Held behind the completion park: nothing is delivered, and attention still follows the workers.
       expect(inputsFor(p.id, timer.id).map(input => input.deliveredAt)).toEqual([undefined]);
       const result = inputsFor(p.id, timer.id)[0]!.text;
       expect(prompted(runner, result)).toEqual([]);

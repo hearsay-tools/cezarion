@@ -20,7 +20,7 @@ import { QUICK_TASK_WORKFLOW } from './types.ts';
 import {
   bookkeeping, captureState, checkpoint, collect, controlledWire, executions, fixtureUpdateRun,
   manager, parent, queuedWake, register, reopenRuntime, restart, root, semaphore, setFailureState,
-  store, terminal, track, until, useWorkerWaitFixture, waitOf, worker,
+  store, terminal, track, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
 import { blockRunWrites, readPersistedRuns, readPersistedText } from '../runs/run-store.testkit.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
@@ -45,8 +45,8 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await restart(false, disk);
     await until(() => store.getRun(p.id)?.agentInputs?.some(input => input.id === wait.id && !!input.deliveredAt) === true);
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
-    expect(store.getRun(p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id,
-      outcomes: [{ workerId: w.id, status: 'done' }] } });
+    expect(lastWaitOf(store.getRun(p.id))).toMatchObject({ id: wait.id,
+      outcomes: [{ workerId: w.id, status: 'done' }] });
   });
 
   it('a deadline write failure is contained and retried without losing intent or capacity', async () => {
@@ -226,7 +226,12 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     for (const status of statuses) children.push({ run: await worker(p.id), status });
     const wait = register(p.id, children.map(child => child.run.id));
     expect(wait.phase).toBe('registered');
+    // hearsay-tools/cezarion#1235: the entry resolves at its first observation, mid-turn, so the
+    // statuses land together in one reconciliation for the result to report every one of them.
+    const observe = vi.spyOn(manager, 'reconcileWorkerWaits').mockImplementation(() => {});
     for (const child of children) fixtureUpdateRun(child.run.id, { status: child.status });
+    observe.mockRestore(); manager.reconcileWorkerWaits();
+    expect(store.getRun(p.id)?.waits?.find(entry => entry.id === wait.id)?.phase).toBe('resolved');
     writeFileSync(release, 'release');
     await until(() => !waitOf(store.getRun(p.id)));
     const input = store.getRun(p.id)?.agentInputs?.[0];
@@ -274,19 +279,21 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(store.getRun(p.id)?.agentInputs?.[0]?.text).toContain('waiting');
   });
 
-  it('rejects duplicate sets, excessive deadlines, foreign workers, outstanding waits and pending asks', async () => {
+  // hearsay-tools/cezarion#1235: an identical registration returns the open wait, and a question
+  // neither withdraws it nor refuses one.
+  it('rejects duplicate sets, excessive deadlines and foreign workers; an identical wait stays the open one beside a pending ask', async () => {
     const p = await parent(); const w = await worker(p.id);
     expect(() => register(p.id, [w.id, w.id])).toThrow();
     expect(() => register(p.id, [w.id], 1801)).toThrow();
     expect(() => register(p.id, [randomUUID()])).toThrow();
     const wait = manager.registerWorkerWait(p.id, { workerIds: [w.id] } as never);
     expect(Date.parse(wait.deadline) - Date.now()).toBeGreaterThan(599_000);
-    expect(() => register(p.id, [w.id])).toThrow();
+    expect(register(p.id, [w.id]).id).toBe(wait.id);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
     manager.sendMessage(p.id, [{ type: 'text', text: 'mock:ask' }]);
     await until(() => store.readEvents(p.id).some(e => e.type === 'ask.requested'));
-    expect(waitOf(store.getRun(p.id))).toBeUndefined();
-    expect(() => register(p.id, [w.id])).toThrow();
+    expect(waitOf(store.getRun(p.id))?.id).toBe(wait.id);
+    expect(register(p.id, [w.id]).id).toBe(wait.id);
   });
   it('expires a registered executing parent without freeing its slot or cancelling workers', async () => {
     const p = await parent('mock:slow'); const w = await worker(p.id);
@@ -335,11 +342,12 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   it('retiring a delivered wait durably records the resumed status in the same snapshot', async () => {
     const p = await parent(); const w = await worker(p.id);
     fixtureUpdateRun(w.id, { status: 'done' });
-    const commit = store.commitWorkerWaitWithdrawal.bind(store);
+    // hearsay-tools/cezarion#1235: a worker entry retires through the wait list's delivery checkpoint.
+    const commit = store.commitWaitDelivery.bind(store);
     let retiredStatus: string | undefined;
-    store.commitWorkerWaitWithdrawal = (...args) => {
+    store.commitWaitDelivery = (...args) => {
       commit(...args);
-      if (args[0] === p.id) {
+      if (args[0] === p.id && store.getRun(p.id)?.lastWaits?.some(wait => wait.kind === 'worker' && wait.phase === 'delivered')) {
         const records = readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[];
         retiredStatus = records.find(run => run.id === p.id)?.status;
       }
@@ -448,9 +456,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent(); const w = await worker(p.id, 'mock:slow');
     register(p.id, [w.id], 1);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    const delegation = store.getRun(p.id)!.delegation!;
-    if (delegation.role !== 'root' || !delegation.wait) throw Error('fixture');
-    store.commitDelegation([{ id: p.id, delegation: { ...delegation, wait: { ...delegation.wait, deadline: new Date().toISOString() } } }]);
+    const entry = workerEntryOf(store.getRun(p.id));
+    if (!entry) throw Error('fixture');
+    store.commitWait(p.id, { ...entry, deadline: new Date().toISOString() });
     await restart();
     await until(() => store.getRun(w.id)?.status === 'running' || store.getRun(p.id)?.status === 'running');
     expect(store.getRun(w.id)?.status).toBe('running');

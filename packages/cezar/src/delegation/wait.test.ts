@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { workerWaitRequestSchema, type WorkerOutcome, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
-import { reconcileWorkerWait } from './wait.ts';
+import type { WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import { reconcileWorkerEntry, reconcileWorkerWait } from './wait.ts';
 
 const now = '2026-09-06T12:00:00.000Z';
 const workerId = randomUUID();
@@ -98,5 +99,46 @@ describe('request selections in the shared wait', () => {
     const partial = reconcileWorkerWait(selected, [], wait.deadline, [{ requestId, status: 'replied', observedAt: now }, { requestId: randomUUID(), status: 'failed', observedAt: now }]);
     expect(partial.reason).toBe('timeout');
     expect(partial.requestOutcomes).toEqual([{ requestId, status: 'replied', observedAt: now }]);
+  });
+});
+
+// hearsay-tools/cezarion#1235 phase 3a: the same rules, applied to a `worker` entry in the wait list.
+describe('reconcileWorkerEntry', () => {
+  const entry: WorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'agent', via: 'cezar_wait', registeredAt: now,
+    deadline: wait.deadline, timeoutSeconds: 600, turnId: 'turn', phase: 'open', workerIds: [workerId], revisions: [], outcomes: [] };
+  it('reconcileWorkerEntry keeps first observations and matches revisions', () => {
+    const selected = { ...entry, revisions: [{ workerId, revision: 1 }], outcomes: [outcome('review')] };
+    expect(reconcileWorkerEntry(selected, [outcome('done')], now)).toEqual({ entry: { ...selected, outcomes: [] } });
+    expect(reconcileWorkerEntry(selected, [{ ...outcome('review'), revision: 1 }], now))
+      .toEqual({ entry: { ...selected, outcomes: [{ ...outcome('review'), revision: 1 }] }, reason: 'outcome' });
+    // Unchanged and unexpired: the same object, so the caller writes nothing.
+    expect(reconcileWorkerEntry(entry, [], now)).toEqual({ entry });
+    expect(reconcileWorkerEntry(entry, [], now).entry).toBe(entry);
+    expect(reconcileWorkerEntry(entry, [], entry.deadline)).toEqual({ entry, reason: 'timeout' });
+    // All mode: a partial outcome is kept and does not resolve; the first observation is durable.
+    const other = randomUUID();
+    const all = { ...entry, mode: 'all' as const, workerIds: [workerId, other] };
+    const partial = reconcileWorkerEntry(all, [outcome('review')], now);
+    expect(partial).toEqual({ entry: { ...all, outcomes: [outcome('review')] } });
+    const complete = reconcileWorkerEntry(partial.entry, [outcome('done'), { ...outcome('failed'), workerId: other }], now);
+    expect(complete).toEqual({ entry: { ...all, outcomes: [outcome('review'), { ...outcome('failed'), workerId: other }] }, reason: 'outcome' });
+    // A timed-out all-mode wait keeps its partial outcomes.
+    expect(reconcileWorkerEntry(partial.entry, [], all.deadline)).toEqual({ entry: partial.entry, reason: 'timeout' });
+    // Unrelated workers change nothing.
+    expect(reconcileWorkerEntry(entry, [{ ...outcome('done'), workerId: other }], now).entry).toBe(entry);
+    // A settled entry is never reconciled again.
+    const resolved = { ...entry, phase: 'resolved' as const, result: { reason: 'outcome' as const } };
+    expect(reconcileWorkerEntry(resolved, [outcome('done')], now)).toEqual({ entry: resolved });
+  });
+  it('reconcileWorkerEntry settles request entries by their own outcomes only', () => {
+    const requestId = randomUUID(); const other = randomUUID();
+    const { workerIds: _w, revisions: _r, outcomes: _o, ...base } = entry;
+    const requests: WorkerWaitEntry = { ...base, requestIds: [requestId, other], requestOutcomes: [], mode: 'all' };
+    const reply = { requestId, status: 'replied' as const, observedAt: now, replyId: randomUUID() };
+    const partial = reconcileWorkerEntry(requests, [], now, [reply, { requestId: randomUUID(), status: 'failed', observedAt: now }]);
+    expect(partial).toEqual({ entry: { ...requests, requestOutcomes: [reply] } });
+    const failed = { requestId: other, status: 'failed' as const, observedAt: now };
+    expect(reconcileWorkerEntry(partial.entry, [], now, [reply, failed])).toEqual({ entry: { ...requests, requestOutcomes: [reply, failed] }, reason: 'outcome' });
+    expect(reconcileWorkerEntry(partial.entry, [], wait.deadline, [])).toEqual({ entry: partial.entry, reason: 'timeout' });
   });
 });

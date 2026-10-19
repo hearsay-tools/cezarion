@@ -298,7 +298,8 @@ export type WaitingOnInput = Partial<Pick<RunRecord, 'waits' | 'hasPendingHumanA
 
 /** The completion gate's wait, until phase 3b moves it into the list (hearsay-tools/cezarion#1235). */
 export function completionWorkersOwed(delegation: WaitingOnInput['delegation']): number | undefined {
-  if (!delegation || delegation.role === 'invalid' || !delegation.wait) return undefined;
+  // Only a root has a completion gate; a worker's `delegation.wait` is at most a message's stand-in.
+  if (delegation?.role !== 'root' || !delegation.wait) return undefined;
   const wait = delegation.wait;
   // `wake-pending` means its workers settled and only the wake is left: no longer open.
   if (wait.phase !== 'registered' && wait.phase !== 'parked') return undefined;
@@ -366,6 +367,22 @@ export function resolveWaitingOn(run: { waitingOn?: WaitingOn } & WaitingOnInput
 }
 
 /**
+ * A run's worker wait in the old `WorkerWait` shape, for views that still show one: the
+ * completion gate's `delegation.wait` until phase 3b, else the newest open or owed `worker` entry
+ * (hearsay-tools/cezarion#1235). An open entry reads `parked` once the run waits on it, unless a
+ * pending question holds the run.
+ */
+export function workerWaitView(run: Partial<Pick<RunRecord, 'status' | 'hasPendingHumanAsk' | 'waits' | 'delegation'>>): WorkerWait | undefined {
+  const delegation = run.delegation;
+  if (!delegation || delegation.role === 'invalid') return undefined;
+  if (delegation.wait) return delegation.wait;
+  const entry = (run.waits ?? []).filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker' && (wait.phase === 'open' || wait.phase === 'resolved')).at(-1);
+  if (!entry) return undefined;
+  const legacy = workerWaitEntryToLegacy(entry);
+  return entry.phase === 'open' && run.status === 'waiting' && !run.hasPendingHumanAsk ? { ...legacy, phase: 'parked' } : legacy;
+}
+
+/**
  * A worker wait as `cez worker wait` and `cez worker cancel-wait` answer it: the old
  * `WorkerWait` shape, whose wire stays unchanged (hearsay-tools/cezarion#1235). Open is
  * `registered`; every settled phase is `wake-pending` and the reason says how it ended.
@@ -379,7 +396,8 @@ export function workerWaitEntryToLegacy(entry: WorkerWaitEntry): WorkerWait {
     ...(entry.requestOutcomes === undefined ? {} : { requestOutcomes: entry.requestOutcomes }),
     deadline: entry.deadline,
     ...(entry.mode === undefined ? {} : { mode: entry.mode }),
-    ...(entry.revisions === undefined ? {} : { revisions: entry.revisions }),
+    // An upgraded wait that never recorded revisions carries an empty list; the legacy shape had none.
+    ...(entry.revisions?.length ? { revisions: entry.revisions } : {}),
     ...(reason === undefined ? {} : { reason }),
     phase: entry.phase === 'open' ? 'registered' : 'wake-pending',
     outcomes: entry.outcomes ?? [],

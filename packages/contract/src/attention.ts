@@ -148,7 +148,9 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
     !hasPendingHumanAsk && !run.hasPendingHumanAsk
     && (run.status === 'waiting' || run.status === 'queued')
     && run.delegation?.role !== 'invalid'
-    && run.delegation?.wait?.phase === 'wake-pending'
+    && (run.delegation?.wait?.phase === 'wake-pending'
+      // hearsay-tools/cezarion#1235: an agent's worker wait owes its wake as a resolved list entry.
+      || (Array.isArray(run.waits) && run.waits.some((wait) => wait?.kind === 'worker' && wait.phase === 'resolved')))
   ) {
     // A queued automatic wake is a scheduler/capacity wait, not a human gate (#971).
     // Covers both the parked session still open (`waiting`) and a leftover after restart

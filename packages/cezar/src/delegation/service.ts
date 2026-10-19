@@ -44,8 +44,10 @@ import {
   type WorkerParams,
   type WorkerSpawnRequest,
   type WorkerSteerRequest,
+  type WorkerWait,
   type WorkerWaitRequest,
 } from '@open-mercato/cezar-contract/delegation';
+import { workerWaitEntryToLegacy, type WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import type { RunStore, RunRecord } from '../runs/store.ts';
 import { workerDestroyView, workerOutcome } from '../runs/delegation-state.ts';
 import type { DelegationExecutionSettings, RunManager } from '../workflows/run.ts';
@@ -497,7 +499,7 @@ export class DelegationService {
     for (const id of request.requestIds) this.ownRequest(caller, id);
     const project = this.context(caller);
     const wait = project.manager.registerRequestWait(caller.runId, request);
-    return { wait, instruction: `Wait registered until ${wait.deadline}. End your turn now to release capacity. Cezar resumes you on request settlement, incoming messages, deadline or cancellation; no automatic re-wait.` };
+    return { wait, instruction: `Wait ${wait.id} registered until ${wait.deadline}. End your turn now to release capacity. Cezar resumes you when ${wait.mode === 'all' ? 'every selected request settles' : 'a selected request settles'} or at the deadline. Messages also wake you and keep this wait open; end your turn to keep waiting. Your other waits stay open beside it.` };
   }
   async spawn(caller: Caller, value: WorkerSpawnRequest) {
     const request = workerSpawnRequestSchema.parse(value);
@@ -581,13 +583,22 @@ export class DelegationService {
     if (worker.delegation?.role !== 'worker') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
     project.manager.settleOrphanedWorkerExecution(worker.id); // #469: an orphan that died after recovery settles
     const outcome = workerOutcome(worker, new Date().toISOString());
-    const wait = parent.delegation?.role === 'root' ? parent.delegation.wait : undefined;
+    const wait = this.inspectedWait(parent, worker.id);
     return { workerId: worker.id, parentRunId: parent.id, status: worker.status, workspace: worker.delegation.workspace,
       ...(worker.runner === undefined ? {} : { backend: worker.runner }), ...(worker.model === undefined ? {} : { model: worker.model }),
       ...(worker.delegation.context === undefined ? {} : { inputs: worker.delegation.context.inputs }),
       ...(worker.currentStepId === undefined ? {} : { currentStepId: worker.currentStepId }),
       ...(worker.activity === undefined ? {} : { activity: worker.activity }),
       ...(wait ? { wait } : {}), ...(worker.delegation.destroy ? { destroy: workerDestroyView(worker) } : {}), ...(outcome ? { outcome } : {}) };
+  }
+  /** The wait an inspection shows: the completion gate's (`delegation.wait`, until phase 3b of
+   *  hearsay-tools/cezarion#1235), else the newest open or owed list wait naming the worker, in
+   *  the legacy `WorkerWait` shape. */
+  private inspectedWait(parent: RunRecord, workerId: string): WorkerWait | undefined {
+    if (parent.delegation?.role !== 'root') return undefined;
+    if (parent.delegation.wait) return parent.delegation.wait;
+    const entry = (parent.waits ?? []).filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker' && !!wait.workerIds?.includes(workerId)).at(-1);
+    return entry ? workerWaitEntryToLegacy(entry) : undefined;
   }
   async collect(caller: Caller, params: WorkerParams): Promise<WorkerCollectedResult> {
     const project = this.context(caller);
@@ -640,7 +651,7 @@ export class DelegationService {
     for (const workerId of request.workerIds) this.target(caller, { workerId }, 'wait');
     const project = this.context(caller);
     const wait = project.manager.registerWorkerWait(caller.runId, request);
-    return { wait, instruction: `Wait registered until ${wait.deadline}. End your turn now to release capacity. Cezar will resume you when ${wait.mode === 'all' ? 'all selected workers settle' : 'a selected worker settles'}, or on the deadline/cancellation. Worker progress also wakes you but keeps this wait active; end your turn to keep waiting.` };
+    return { wait, instruction: `Wait ${wait.id} registered until ${wait.deadline}. End your turn now to release capacity. Cezar resumes you when ${wait.mode === 'all' ? 'all selected workers settle' : 'a selected worker settles'} or at the deadline. Messages also wake you and keep this wait open; end your turn to keep waiting. Your other waits stay open beside it.` };
   }
   async cancelWait(caller: Caller, value: WorkerCancelWaitRequest) {
     const { waitId } = workerCancelWaitRequestSchema.parse(value);
@@ -648,8 +659,9 @@ export class DelegationService {
     const sender = project.store.getRun(caller.runId);
     if (sender?.delegation?.role === 'worker') {
       this.conversationPair(caller, sender.delegation.parentRunId);
-      const wait = sender.delegation.wait?.id === waitId ? sender.delegation.wait : sender.delegation.lastWait?.id === waitId ? sender.delegation.lastWait : undefined;
-      if (!wait?.requestIds?.length) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+      // hearsay-tools/cezarion#1235: a worker's request wait is a list entry, open or settled.
+      const wait = [...sender.waits ?? [], ...sender.lastWaits ?? []].find(entry => entry.id === waitId && entry.kind === 'worker');
+      if (wait?.kind !== 'worker' || !wait.requestIds?.length) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
       for (const requestId of wait.requestIds) this.ownRequest(caller, requestId);
     } else authorizeCancelWait(caller, sender, project.id);
     return { wait: project.manager.cancelWorkerWait(caller.runId, waitId) };

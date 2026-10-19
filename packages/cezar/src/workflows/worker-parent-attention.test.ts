@@ -10,7 +10,7 @@ import { attentionFields } from '../task-cli/projections.ts';
 import { ASK_TEXT, MONITORING_TEXT, messagesPrompt, REJECTED_ASK_TEXT } from './monitoring-turn.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
-import { fixtureUpdateRun, manager, parent, queuedWake, register, store, root, terminal, worker, until, semaphore, useWorkerWaitFixture, waitOf } from './worker-wait.testkit.ts';
+import { fixtureUpdateRun, manager, parent, queuedWake, register, store, root, terminal, worker, until, semaphore, useWorkerWaitFixture, waitOf, workerEntryOf } from './worker-wait.testkit.ts';
 
 // Exhaustive transport classification: a new runner must provide either the real
 // delayed-ACK race or an executable wire limitation, never an omitted/skip row.
@@ -188,10 +188,10 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
     manager.enqueueOwnedRun(w.id);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
     await until(() => store.getRun(w.id)?.status === 'running');
-    const delegation = store.getRun(p.id)!.delegation!;
-    if (delegation.role !== 'root' || !delegation.wait) throw Error('fixture');
-    store.commitDelegation([{ id: p.id, delegation: { ...delegation, wait: { ...delegation.wait, deadline: new Date().toISOString() } } }]);
-    expect(waitOf(store.getRun(p.id))?.phase).toBe('parked');
+    // hearsay-tools/cezarion#1235: the agent's wait is a list entry; move its deadline to now.
+    const entry = workerEntryOf(store.getRun(p.id));
+    if (!entry) throw Error('fixture');
+    store.commitWait(p.id, { ...entry, deadline: new Date().toISOString() });
     manager.reconcileWorkerWaits();
     await until(() => waitOf(store.getRun(p.id))?.phase === 'wake-pending');
     expect(waitOf(store.getRun(p.id))?.reason).toBe('timeout');

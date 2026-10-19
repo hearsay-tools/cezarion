@@ -1,4 +1,5 @@
 import type { RequestOutcome, WorkerOutcome, WorkerWait } from '@open-mercato/cezar-contract';
+import type { WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 
 /** First terminal observations are durable: later snapshots cannot erase or rewrite them. */
 export function reconcileWorkerWait(wait: WorkerWait, outcomes: readonly WorkerOutcome[], now: string, requestOutcomes: readonly RequestOutcome[] = []): WorkerWait {
@@ -41,4 +42,25 @@ function reconcileRequestWait(wait: WorkerWait, outcomes: readonly RequestOutcom
   if (!reason) return unchanged ? wait : { ...wait, requestOutcomes: collected };
   if (wait.phase === 'wake-pending' && wait.wakeId && wait.reason === reason && unchanged) return wait;
   return { ...wait, phase: 'wake-pending', reason, requestOutcomes: collected, wakeId: wait.wakeId ?? wait.id };
+}
+
+/**
+ * `reconcileWorkerWait` for a `worker` entry in the wait list (hearsay-tools/cezarion#1235): the
+ * same revision matching, `all`/`any` rule and durable first observations, by running the entry
+ * through it as an open legacy wait. `reason` is set once the entry should resolve; a settled
+ * entry is returned as it is. An unchanged open entry comes back as the same object.
+ */
+export function reconcileWorkerEntry(entry: WorkerWaitEntry, outcomes: readonly WorkerOutcome[], now: string, requestOutcomes: readonly RequestOutcome[] = []): { entry: WorkerWaitEntry; reason?: 'outcome' | 'timeout' } {
+  if (entry.phase !== 'open') return { entry };
+  const legacy: WorkerWait = { id: entry.id, workerIds: entry.workerIds ?? [], deadline: entry.deadline, phase: 'registered', outcomes: entry.outcomes ?? [],
+    ...(entry.mode === undefined ? {} : { mode: entry.mode }),
+    ...(entry.revisions === undefined ? {} : { revisions: entry.revisions }),
+    ...(entry.requestIds === undefined ? {} : { requestIds: entry.requestIds, requestOutcomes: entry.requestOutcomes ?? [] }) };
+  const next = reconcileWorkerWait(legacy, outcomes, now, requestOutcomes);
+  const reason = next.reason === 'outcome' || next.reason === 'timeout' ? next.reason : undefined;
+  const changed = entry.requestIds
+    ? (next.requestOutcomes?.length ?? 0) !== (entry.requestOutcomes?.length ?? 0)
+    : next.outcomes.length !== (entry.outcomes?.length ?? 0) || next.outcomes.some((outcome, index) => outcome !== entry.outcomes?.[index]);
+  const observed = !changed ? entry : entry.requestIds ? { ...entry, requestOutcomes: next.requestOutcomes ?? [] } : { ...entry, outcomes: next.outcomes };
+  return reason ? { entry: observed, reason } : { entry: observed };
 }
