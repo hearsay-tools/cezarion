@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { computeWaitingOn, type WaitingOnInput, type WorkerWaitEntry } from './waits.ts';
 import { ATTENTION_RANK, delegationWaitLabel, deriveAttention, type Attention, type AttentionInput } from './attention.ts';
 import type { RunStatus } from './runs.ts';
 
@@ -259,5 +260,114 @@ describe('open waits', () => {
     expect(deriveAttention({ status: 'failed', waits: [openCi()] }).label).toBe('failed');
     expect(deriveAttention({ status: 'waiting' }).label).toBe('needs you'); // no wait: unchanged fallback
     expect(deriveAttention({ status: 'running', activity: 'monitoring' }).label).toBe('monitoring'); // legacy summary rows
+  });
+});
+
+// hearsay-tools/cezarion#1235 (phase 3a): worker waits are wait-list entries.
+describe('computeWaitingOn and worker entries', () => {
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => `99999999-9999-4999-8999-99999999999${i}`);
+  const workerWait = (id: string, workerIds: string[], reported: string[] = []): WorkerWaitEntry => ({
+    kind: 'worker', id, source: 'agent', via: 'cezar_wait', registeredAt: '2026-10-19T10:00:00.000Z',
+    deadline: '2026-10-19T10:10:00.000Z', phase: 'open', turnId: 'turn-1', timeoutSeconds: 600,
+    workerIds, revisions: [],
+    outcomes: reported.map((workerId) => ({ workerId, status: 'done' as const, observedAt: '2026-10-19T10:03:00.000Z' })),
+  });
+  const ci = {
+    kind: 'ci' as const, id: '11111111-1111-4111-8111-111111111111', source: 'agent' as const, via: 'cezar_wait' as const,
+    registeredAt: '2026-10-19T10:00:00.000Z', deadline: '2026-10-19T10:30:00.000Z', phase: 'open' as const, turnId: 'turn-1',
+    prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40), generation: 'gen-1', timeoutSeconds: 1800,
+  };
+
+  it('computeWaitingOn counts unreported workers across two worker entries', () => {
+    const [a, b, c] = ids(3);
+    const waits = [
+      workerWait('88888888-8888-4888-8888-888888888881', [a!, b!], [b!]),
+      workerWait('88888888-8888-4888-8888-888888888882', [c!]),
+      workerWait('88888888-8888-4888-8888-888888888883', [a!, c!], [a!, c!]),
+    ];
+    // 1 + 1 unreported across the first two; the third has every worker reported.
+    expect(computeWaitingOn({ waits: waits.slice(0, 2) })).toEqual({ kind: 'workers', count: 2 });
+    expect(computeWaitingOn({ waits: [workerWait('88888888-8888-4888-8888-888888888884', [a!, b!]), workerWait('88888888-8888-4888-8888-888888888885', [c!])] }))
+      .toEqual({ kind: 'workers', count: 3 });
+    // Only open entries count.
+    expect(computeWaitingOn({ waits: [{ ...waits[0]!, phase: 'resolved' as const }] })).toBeUndefined();
+  });
+
+  it('a worker entry outranks an open ci wait', () => {
+    const [a] = ids(1);
+    expect(computeWaitingOn({ waits: [ci, workerWait('88888888-8888-4888-8888-888888888881', [a!])] })).toEqual({ kind: 'workers', count: 1 });
+  });
+
+  it('a human wait outranks a worker entry', () => {
+    const [a] = ids(1);
+    const waits = [workerWait('88888888-8888-4888-8888-888888888881', [a!])];
+    expect(computeWaitingOn({ waits, hasPendingHumanAsk: true })).toEqual({ kind: 'human' });
+  });
+
+  // The attention rung for list entries and summaries (previously fell through to "needs you").
+  it('reads a waiting run with only an open worker entry as waiting on its workers', () => {
+    const [a, b] = ids(2);
+    const entry = workerWait('88888888-8888-4888-8888-888888888881', [a!, b!]);
+    const expected = { bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on 2 workers' };
+    expect(deriveAttention({ status: 'waiting', waits: [entry] })).toEqual(expected);
+    // With CI beside it, workers still name the run.
+    expect(deriveAttention({ status: 'waiting', waits: [ci, entry] })).toEqual(expected);
+    expect(deriveAttention({ status: 'waiting', waits: [workerWait('88888888-8888-4888-8888-888888888881', [a!])] }).label).toBe('waiting on 1 worker');
+    // Every worker reported but the wait is still open: no number.
+    expect(deriveAttention({ status: 'waiting', waits: [workerWait('88888888-8888-4888-8888-888888888881', [a!], [a!])] }).label).toBe('waiting on workers');
+  });
+
+  it('reads a summary carrying only waitingOn workers the same way', () => {
+    expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'workers', count: 2 } }))
+      .toEqual({ bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on 2 workers' });
+    expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'workers', count: 0 } }).label).toBe('waiting on workers');
+    expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'workers', count: 1 }, hasPendingHumanAsk: true }).label).toBe('needs you');
+    expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'workers', count: 1 } }, true).label).toBe('needs you');
+    expect(deriveAttention({ status: 'running', waitingOn: { kind: 'workers', count: 1 } }).label).toBe('running');
+  });
+
+  it('keeps the parent-reply and worker-reply wording for request entries', () => {
+    const request: WorkerWaitEntry = {
+      kind: 'worker', id: '88888888-8888-4888-8888-888888888881', source: 'agent', via: 'cezar_wait', registeredAt: '2026-10-19T10:00:00.000Z',
+      deadline: '2026-10-19T10:10:00.000Z', phase: 'open', turnId: 'turn-1', timeoutSeconds: 600,
+      requestIds: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1'], requestOutcomes: [],
+    };
+    expect(deriveAttention({ status: 'waiting', waits: [request], delegation: { role: 'root' } } as unknown as AttentionInput))
+      .toMatchObject({ shape: 'workers', label: 'waiting on worker replies' });
+    expect(deriveAttention({ status: 'waiting', waits: [request], delegation: { role: 'worker' } } as unknown as AttentionInput))
+      .toEqual({ bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting on parent reply' });
+    // A summary has no entries: a worker still reads as waiting on its parent.
+    expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'workers', count: 1 }, delegation: { role: 'worker' } } as unknown as AttentionInput).label)
+      .toBe('waiting on parent reply');
+    // A root's summary says so through `waitingOn.replies`, which only request entries set.
+    const waitingOn = computeWaitingOn({ waits: [request], delegation: { role: 'root' } } as unknown as WaitingOnInput);
+    expect(waitingOn).toEqual({ kind: 'workers', count: 1, replies: true });
+    expect(deriveAttention({ status: 'waiting', waitingOn, delegation: { role: 'root' } } as unknown as AttentionInput).label)
+      .toBe('waiting on worker replies');
+    expect(computeWaitingOn({ waits: [request, workerWait('88888888-8888-4888-8888-888888888882', ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'])] }))
+      .toEqual({ kind: 'workers', count: 2 });
+  });
+
+  it('keeps the legacy delegation.wait path for the completion gate', () => {
+    const parked = { status: 'waiting', delegation: { role: 'root', wait: { phase: 'parked', workerIds: ['a', 'b'], outcomes: [] } } } as unknown as AttentionInput;
+    expect(deriveAttention(parked)).toMatchObject({ shape: 'workers', label: 'waiting on 2 workers' });
+  });
+
+  // A summary omits `waits`: the count above the completion wait's own says a list entry stands behind it.
+  it('reads a summary with a registered completion wait and a worker entry as waiting on workers', () => {
+    const delegation = { role: 'root', wait: { phase: 'registered', workerIds: ['a'], outcomes: [] } };
+    const mixed = { status: 'waiting', delegation, waitingOn: { kind: 'workers', count: 3 } } as unknown as AttentionInput;
+    expect(deriveAttention(mixed)).toEqual({ bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on 3 workers' });
+    expect(deriveAttention({ ...mixed, hasPendingHumanAsk: true }).label).toBe('needs you');
+    expect(deriveAttention(mixed, true).label).toBe('needs you');
+  });
+
+  it('keeps a registered completion wait alone as Needs you on a summary and on a full record', () => {
+    const delegation = { role: 'root', wait: { phase: 'registered', workerIds: ['a'], outcomes: [] } };
+    expect(deriveAttention({ status: 'waiting', delegation, waitingOn: { kind: 'workers', count: 1 } } as unknown as AttentionInput).label).toBe('needs you');
+    expect(deriveAttention({ status: 'waiting', delegation } as unknown as AttentionInput).label).toBe('needs you');
+    // The full record with both reads as workers.
+    const entry = workerWait('88888888-8888-4888-8888-888888888881', ids(1));
+    expect(deriveAttention({ status: 'waiting', delegation, waits: [entry] } as unknown as AttentionInput).label).toBe('waiting on 2 workers');
   });
 });

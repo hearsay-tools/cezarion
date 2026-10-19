@@ -30,7 +30,7 @@ export const RUNS_IMPORT_COMPLETE_KEY = 'import-complete';
 /** `PRAGMA user_version` of a database this build created. A higher number means a newer cezar
  *  wrote it; that is refused rather than read, because a newer schema may store what this one
  *  would silently drop on its next write. */
-export const RUN_DATABASE_SCHEMA_VERSION = 5;
+export const RUN_DATABASE_SCHEMA_VERSION = 6;
 
 /**
  * The oldest `user_version` the READ-ONLY reader can read as it stands (`openReadOnly`). It never
@@ -188,6 +188,19 @@ const MIGRATIONS: readonly string[] = [
   -- unsupported-schema instead; the recovery is to run this version again.
   --
   -- No live recompute: isLiveRecord already calls a row with an open wait live, of any kind.
+  `,
+  `
+  -- Schema 6 changes no table either: records may carry worker waits (kind 'worker') in waits and
+  -- lastWaits, and a record is no longer written with an agent-registered delegation.wait or
+  -- delegation.lastWait (hearsay-tools/cezarion#1235, phase 3a); this build reads those into the
+  -- list (upgradeLegacyWaits, store.ts). Only the completion gate's wait, the one
+  -- delegation.completion.waitId names, stays in delegation.wait until phase 3b. A schema-5 build
+  -- would drop each worker entry as unreadable and recover the run without the wait it parked on,
+  -- so the bump makes it refuse the store as unsupported-schema instead; the recovery is to run
+  -- this version again.
+  --
+  -- No live recompute: isLiveRecord already calls a row with an open wait live, of any kind, and
+  -- every row the old predicate called live through delegation.wait is read up and rewritten by open.
   `,
 ];
 
@@ -644,8 +657,11 @@ export class RunDatabase {
    * connection is closed and no existing data is deleted or rewritten — but a fresh path may be
    * left holding an empty database (and its WAL), which the next open migrates. A reader that must
    * create nothing uses `openReadOnly`.
+   *
+   * `supported` is the newest schema this open accepts. Only a test passes it, to stand in for an
+   * older build's bound and prove that build refuses the store.
    */
-  static open(path: string): RunDatabase {
+  static open(path: string, supported: number = RUN_DATABASE_SCHEMA_VERSION): RunDatabase {
     let db: DatabaseSync | undefined;
     try {
       assertDatabaseHeader(path);
@@ -655,7 +671,7 @@ export class RunDatabase {
       db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
       db.exec('PRAGMA journal_mode = WAL');
       db.exec('PRAGMA synchronous = NORMAL');
-      migrate(db);
+      migrate(db, supported);
       return new RunDatabase(db, path);
     } catch (error) {
       const typed = toRunDatabaseError(error, path);
@@ -678,7 +694,7 @@ export class RunDatabase {
    * cannot, and the open fails as permission denied — deliberately not worked around with
    * `immutable=1`, which would read a stale snapshot without saying so.
    */
-  static openReadOnly(path: string): RunDatabase | null {
+  static openReadOnly(path: string, supported: number = RUN_DATABASE_SCHEMA_VERSION): RunDatabase | null {
     if (!existsSync(path)) return null;
     let db: DatabaseSync | undefined;
     try {
@@ -686,7 +702,7 @@ export class RunDatabase {
       db = new DatabaseSync(path, { readOnly: true });
       db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
       const found = readSchemaVersion(db);
-      if (found > RUN_DATABASE_SCHEMA_VERSION) throw new RunDatabaseUnsupportedSchemaError(found, RUN_DATABASE_SCHEMA_VERSION);
+      if (found > supported) throw new RunDatabaseUnsupportedSchemaError(found, supported);
       if (found < RUN_DATABASE_READABLE_FROM) {
         db.close();
         return null;
@@ -1152,14 +1168,14 @@ function readSchemaVersion(db: DatabaseSync): number {
  * read, never written. The version is re-read inside the write transaction, so two processes
  * opening a fresh file at once cannot both run the same migration.
  */
-function migrate(db: DatabaseSync): void {
+function migrate(db: DatabaseSync, supported: number): void {
   const found = readSchemaVersion(db);
-  if (found > RUN_DATABASE_SCHEMA_VERSION) throw new RunDatabaseUnsupportedSchemaError(found, RUN_DATABASE_SCHEMA_VERSION);
+  if (found > supported) throw new RunDatabaseUnsupportedSchemaError(found, supported);
   if (found === RUN_DATABASE_SCHEMA_VERSION) return;
   db.exec('BEGIN IMMEDIATE');
   try {
     let version = readSchemaVersion(db);
-    if (version > RUN_DATABASE_SCHEMA_VERSION) throw new RunDatabaseUnsupportedSchemaError(version, RUN_DATABASE_SCHEMA_VERSION);
+    if (version > supported) throw new RunDatabaseUnsupportedSchemaError(version, supported);
     for (; version < RUN_DATABASE_SCHEMA_VERSION; version++) db.exec(MIGRATIONS[version]!);
     db.exec(`PRAGMA user_version = ${RUN_DATABASE_SCHEMA_VERSION}`);
     db.exec('COMMIT');

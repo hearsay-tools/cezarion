@@ -38,7 +38,9 @@ describe('request wait during a parent-resumed opening turn', { timeout: 30_000 
       store.commitConversation(p.id, { messages: [request, opening, update], outcomes: [] }, { recipientRunId: w.id,
         input: { ...input, id: update.id, text: update.text, conversation: { ...input.conversation, kind: 'progress' } } });
       manager.reconcileWorkerWaits();
-      expect(waitOf(store.getRun(w.id))).toMatchObject({ id: wait.id, phase: 'wake-pending', reason: 'message', wakeId: update.id });
+      // hearsay-tools/cezarion#1235: a message no longer settles a request wait; the entry stays open.
+      expect(waitOf(store.getRun(w.id))).toMatchObject({ id: wait.id, phase: 'parked' });
+      expect(waitOf(store.getRun(w.id))).not.toHaveProperty('reason');
     } finally { writeFileSync(release, 'go'); }
   });
 });

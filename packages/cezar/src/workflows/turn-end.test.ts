@@ -29,7 +29,7 @@ describe('decideTurnEnd follows the spec\'s three branches (hearsay-tools/cezari
   });
 
   it('the nudges name only tools and kinds that exist in this phase', () => {
-    expect(NO_WAIT_NUDGE).toBe('Your turn ended without a wait or done. Call cezar_ask if you need the user, cezar_wait (ci or timer) if you are waiting on something, or cezar_done if the task is complete. If you owe the user a reply, write it in the same turn.');
+    expect(NO_WAIT_NUDGE).toBe('Your turn ended without a wait or done. Call cezar_ask if you need the user, cezar_wait (ci, worker or timer) if you are waiting on something, or cezar_done if the task is complete. If you owe the user a reply, write it in the same turn.');
     expect(NO_WAIT_NUDGE_MARKERS.startsWith('Your turn ended without a wait or done. ')).toBe(true);
     for (const marker of ['CEZ:ASK', 'CEZ:MONITORING', 'CEZ:DONE']) expect(NO_WAIT_NUDGE_MARKERS).toContain(marker);
     expect(NO_WAIT_NUDGE_MARKERS).not.toContain('cezar_');

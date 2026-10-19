@@ -19,10 +19,16 @@ import {
   waitErrorCodeSchema,
   waitingOnSchema,
   waitSchema,
+  workerWaitEntrySchema,
+  workerWaitEntryToLegacy,
+  openWaitSchema,
+  waitViaSchema,
   type CiWaitEntry,
   type HumanWaitEntry,
   type TimerWaitEntry,
+  type WorkerWaitEntry,
 } from './waits.ts';
+import { workerWaitSchema } from './delegation.ts';
 
 /**
  * The wait list (spec 2026-10-17-unified-waits, phase 1: hearsay-tools/cezarion#1233). The
@@ -338,5 +344,179 @@ describe('cezar_done', () => {
     expect(cezarDoneAnswerSchema.parse(refused)).toEqual(refused);
     expect(cezarDoneAnswerSchema.safeParse({ ok: false, code: 'not_a_code', message: 'm' }).success).toBe(false);
     expect(cezarDoneAnswerSchema.safeParse({ ok: true, finishes: 'now', open_waits: [] }).success).toBe(false);
+  });
+});
+
+// ---- worker waits (hearsay-tools/cezarion#1235, phase 3a) ------------------------------------
+
+const WORKER_WAIT_ID = '88888888-8888-4888-8888-888888888888';
+const W1 = '99999999-9999-4999-8999-999999999991';
+const W2 = '99999999-9999-4999-8999-999999999992';
+const R1 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1';
+const WAKE_INPUT = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+function workerBase(over: Record<string, unknown> = {}) {
+  return {
+    kind: 'worker',
+    id: WORKER_WAIT_ID,
+    source: 'agent',
+    via: 'cezar_wait',
+    registeredAt: '2026-10-19T10:00:00.000Z',
+    deadline: '2026-10-19T10:10:00.000Z',
+    phase: 'open',
+    turnId: 'turn-1',
+    timeoutSeconds: 600,
+    ...over,
+  };
+}
+
+function openWorkerWait(over: Partial<WorkerWaitEntry> = {}): WorkerWaitEntry {
+  return workerWaitEntrySchema.parse(workerBase({ mode: 'all', workerIds: [W1, W2], revisions: [{ workerId: W1, revision: 1 }], outcomes: [], ...over }));
+}
+
+function openRequestWait(over: Record<string, unknown> = {}): WorkerWaitEntry {
+  return workerWaitEntrySchema.parse(workerBase({ requestIds: [R1], requestOutcomes: [], ...over }));
+}
+
+describe('worker wait entry', () => {
+  it('worker entry accepts worker ids or request ids, never both or neither', () => {
+    const byWorker = workerBase({ workerIds: [W1], revisions: [], outcomes: [] });
+    const byRequest = workerBase({ requestIds: [R1], requestOutcomes: [] });
+    expect(waitSchema.safeParse(byWorker).success).toBe(true);
+    expect(waitSchema.safeParse(byRequest).success).toBe(true);
+    expect(waitSchema.safeParse(workerBase()).success).toBe(false);
+    expect(waitSchema.safeParse({ ...byWorker, requestIds: [R1], requestOutcomes: [] }).success).toBe(false);
+    // A half-target is no target: ids without their ledger, or the other kind's ledger.
+    expect(waitSchema.safeParse(workerBase({ workerIds: [W1] })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ workerIds: [W1], revisions: [], outcomes: [], requestOutcomes: [] })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ requestIds: [R1] })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], revisions: [] })).success).toBe(false);
+  });
+
+  it('bounds the ids, the timeout and the result, and refuses unknown keys', () => {
+    expect(waitSchema.safeParse(workerBase({ workerIds: [], revisions: [], outcomes: [] })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ workerIds: [W1, W1], revisions: [], outcomes: [] })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ requestIds: [R1, R1], requestOutcomes: [] })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ requestIds: Array.from({ length: 33 }, (_, i) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(i).padStart(12, '0')}`), requestOutcomes: [] })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], timeoutSeconds: 0 })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], timeoutSeconds: 1801 })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], deadline: undefined })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], stray: true })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], phase: 'resolved', result: { reason: 'outcome' } })).success).toBe(true);
+    // `cancelled` is a phase and `message` is gone: neither is a result.
+    for (const reason of ['cancelled', 'message']) {
+      expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], result: { reason } })).success).toBe(false);
+    }
+    expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], wakeInputId: WAKE_INPUT })).success).toBe(true);
+    expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], wakeInputId: 'nope' })).success).toBe(false);
+  });
+
+  it('a persisted entry with mode one needs exactly one id, of either target', () => {
+    const W3 = '99999999-9999-4999-8999-999999999993';
+    const R2 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2';
+    expect(waitSchema.safeParse(workerBase({ mode: 'one', workerIds: [W1, W2], revisions: [], outcomes: [] })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ mode: 'one', workerIds: [W1, W2, W3], revisions: [], outcomes: [] })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ mode: 'one', requestIds: [R1, R2], requestOutcomes: [] })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ mode: 'one', workerIds: [W1], revisions: [], outcomes: [] })).success).toBe(true);
+    expect(waitSchema.safeParse(workerBase({ mode: 'one', requestIds: [R1], requestOutcomes: [] })).success).toBe(true);
+    expect(waitSchema.safeParse(workerBase({ mode: 'all', workerIds: [W1, W2], revisions: [], outcomes: [] })).success).toBe(true);
+  });
+
+  it('takes the cez-worker-wait origin', () => {
+    expect(waitViaSchema.options).toContain('cez-worker-wait');
+    expect(waitSchema.safeParse(workerBase({ via: 'cez-worker-wait', requestIds: [R1], requestOutcomes: [] })).success).toBe(true);
+  });
+});
+
+describe('cezar_wait worker request', () => {
+  it('cezar_wait worker request: mode one needs one id; timeout defaults to 600; 1801 refused', () => {
+    expect(cezarWaitRequestSchema.parse({ kind: 'worker', worker_ids: [W1] })).toEqual({ kind: 'worker', worker_ids: [W1], timeout_seconds: 600 });
+    expect(cezarWaitRequestSchema.parse({ kind: 'worker', request_ids: [R1, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'], mode: 'all', timeout_seconds: 1800 }))
+      .toMatchObject({ mode: 'all', timeout_seconds: 1800 });
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', worker_ids: [W1], timeout_seconds: 1801 }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', worker_ids: [W1], timeout_seconds: 0 }).success).toBe(false);
+    // mode one: exactly one id, of either list.
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', worker_ids: [W1], mode: 'one' }).success).toBe(true);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', worker_ids: [W1, W2], mode: 'one' }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', request_ids: [R1, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'], mode: 'one' }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', request_ids: [R1], mode: 'one' }).success).toBe(true);
+  });
+
+  it('takes exactly one id list, unique, 1 to 32, and nothing else', () => {
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'worker' }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', worker_ids: [W1], request_ids: [R1] }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', worker_ids: [] }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', worker_ids: [W1, W1] }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', worker_ids: [W1], mode: 'some' }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', worker_ids: [W1], seconds: 60 }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'timer', seconds: 60, worker_ids: [W1] }).success).toBe(false);
+  });
+});
+
+describe('worker waits in the answers', () => {
+  const workerOpen = { wait_id: WORKER_WAIT_ID, kind: 'worker' as const, deadline: '2026-10-19T10:10:00.000Z', summary: 'workers: 2 of 2 pending' };
+
+  it('lists a worker wait with its deadline and answers its registration', () => {
+    expect(openWaitSchema.parse(workerOpen)).toEqual(workerOpen);
+    expect(openWaitSchema.safeParse({ ...workerOpen, deadline: undefined }).success).toBe(false);
+    expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: WORKER_WAIT_ID, kind: 'worker', deadline: workerOpen.deadline, open_waits: [workerOpen] }).ok).toBe(true);
+    expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: WORKER_WAIT_ID, kind: 'worker', open_waits: [] }).success).toBe(false);
+  });
+
+  it('refuses a worker the caller does not own with denied_scope', () => {
+    expect(waitErrorCodeSchema.options).toContain('denied_scope');
+    expect(cezarWaitAnswerSchema.parse({ ok: false, code: 'denied_scope', message: 'not your worker' }).ok).toBe(false);
+  });
+});
+
+describe('workerWaitEntryToLegacy', () => {
+  const outcome = { workerId: W1, status: 'done' as const, observedAt: '2026-10-19T10:03:00.000Z' };
+
+  it('workerWaitEntryToLegacy projects each phase', () => {
+    const table: ReadonlyArray<[string, Partial<WorkerWaitEntry>, { phase: string; reason?: string }]> = [
+      ['open', {}, { phase: 'registered' }],
+      ['resolved by outcome', { phase: 'resolved', result: { reason: 'outcome' } }, { phase: 'wake-pending', reason: 'outcome' }],
+      ['resolved by timeout', { phase: 'resolved', result: { reason: 'timeout' } }, { phase: 'wake-pending', reason: 'timeout' }],
+      ['delivered', { phase: 'delivered', result: { reason: 'outcome' } }, { phase: 'wake-pending', reason: 'outcome' }],
+      ['cancelled', { phase: 'cancelled' }, { phase: 'wake-pending', reason: 'cancelled' }],
+    ];
+    for (const [name, over, expected] of table) {
+      const legacy = workerWaitEntryToLegacy(openWorkerWait(over));
+      expect(legacy, name).toMatchObject({ id: WORKER_WAIT_ID, workerIds: [W1, W2], mode: 'all', deadline: '2026-10-19T10:10:00.000Z', ...expected });
+      if (expected.reason === undefined) expect(legacy.reason, name).toBeUndefined();
+      expect(workerWaitSchema.safeParse(legacy).success, name).toBe(true);
+    }
+  });
+
+  it('carries the ledger and revisions, and wakes with the queued input when an upgrade kept one', () => {
+    const entry = openWorkerWait({ outcomes: [outcome] });
+    expect(workerWaitEntryToLegacy(entry)).toMatchObject({ outcomes: [outcome], revisions: [{ workerId: W1, revision: 1 }], wakeId: WORKER_WAIT_ID });
+    expect(workerWaitEntryToLegacy({ ...entry, wakeInputId: WAKE_INPUT }).wakeId).toBe(WAKE_INPUT);
+  });
+
+  it('projects a request wait with no worker ids', () => {
+    const requestOutcomes = [{ requestId: R1, status: 'replied' as const, observedAt: '2026-10-19T10:02:00.000Z' }];
+    const legacy = workerWaitEntryToLegacy(openRequestWait({ requestOutcomes }));
+    expect(legacy).toMatchObject({ workerIds: [], requestIds: [R1], requestOutcomes, outcomes: [], phase: 'registered' });
+    expect(workerWaitSchema.safeParse(legacy).success).toBe(true);
+  });
+});
+
+describe('computeWaitingOn with worker entries', () => {
+  it('an open worker entry names workers, above CI and timer, below usage limit and human', () => {
+    const waits = [openCi(), openTimer(), openWorkerWait()];
+    expect(computeWaitingOn({ waits })).toEqual({ kind: 'workers', count: 2 });
+    expect(computeWaitingOn({ waits: [openWorkerWait({ phase: 'resolved' })] })).toBeUndefined();
+    expect(computeWaitingOn({ waits, autoResumeAt: '2026-10-19T12:00:00.000Z' })?.kind).toBe('usage-limit');
+    expect(waitingOnSchema.parse(computeWaitingOn({ waits }))).toEqual({ kind: 'workers', count: 2 });
+  });
+
+  it('counts a request wait by the requests without an outcome, and adds the completion wait', () => {
+    const answered = [{ requestId: R1, status: 'replied' as const, observedAt: '2026-10-19T10:02:00.000Z' }];
+    // Only request entries open: `replies` lets a summary say "worker replies" (hearsay-tools/cezarion#1235).
+    expect(computeWaitingOn({ waits: [openRequestWait()] })).toEqual({ kind: 'workers', count: 1, replies: true });
+    expect(computeWaitingOn({ waits: [openRequestWait({ requestOutcomes: answered })] })).toEqual({ kind: 'workers', count: 0, replies: true });
+    // delegation.wait stays for the completion gate until 3b.
+    expect(computeWaitingOn({ waits: [openWorkerWait()], delegation: parkedRootWait() })).toEqual({ kind: 'workers', count: 4 });
   });
 });

@@ -228,7 +228,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
     expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).includes('autonomous — continuing without pausing'))).toBe(true);
   });
 
-  it('fresh M17 genuine accepted-wait session loss still fails', async () => {
+  it('fresh M17 a clean session close with an accepted worker wait open parks the run on it', async () => {
     process.env.CEZ_DRY_RUN = '0';
     process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
     const p = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold', runner: backend });
@@ -240,8 +240,12 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
     manager['active'].get(p.id)!.session!.end();
     await until(() => !manager.isActive(p.id));
-    expect(store.getRun(p.id)).toMatchObject({ status: 'failed', error: 'step "task" failed: Agent session ended before its accepted worker wait completed' });
-    expect(store.getRun(w.id)?.status).toBe('cancelled');
+    // hearsay-tools/cezarion#1235: an agent's worker wait is a list entry, so a clean close parks
+    // on it like any open wait; only the completion gate's wait still fails the session.
+    expect(store.getRun(p.id)?.status).toBe('waiting');
+    expect(store.getRun(p.id)?.error).toBeUndefined();
+    expect(store.getRun(p.id)?.waits?.filter(wait => wait.kind === 'worker')).toEqual([expect.objectContaining({ phase: 'open', workerIds: [w.id] })]);
+    expect(store.getRun(w.id)?.status).toBe('queued');
   });
 
   for (const mode of ['fresh', 'continuation'] as const) for (const rejected of [false, true]) it(`${mode} ${rejected ? 'M28 ordinary rejected ASK keeps the existing autonomous nudge policy' : 'M23 an autonomous ask line followed by acknowledgement is not registered, and the run continues'}`, async () => {

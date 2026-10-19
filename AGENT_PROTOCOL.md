@@ -246,9 +246,12 @@ reuse the existing durable input; changed payloads are rejected. Follow-ups and
 progress cannot discharge obligations. Explicit reply and completed-without-reply
 are distinct outcomes, alongside failed, cancelled, destroyed, timed-out, and
 sender-closed. Late replies remain recorded without replacing a first settlement.
-Both roles can wait on their own requests using the existing bounded scheduler wake
-queue. An incoming message can interrupt that wait with reason `message`, retaining
-unresolved obligations; there is no automatic re-wait for request waits. A worker
+Both roles can wait on their own requests: a request wait is a `worker` entry in the run's
+wait list (`requestIds`; hearsay-tools/cezarion#1235 phase 3a), and a reply resolves only the
+request wait that names it. An incoming message wakes the run with that wait still open and in
+the footer, and the turn end parks on it again; unresolved obligations are retained. Only the
+completion gate's own wait (`delegation.wait`, until phase 3b) is still interrupted by a
+non-progress message with reason `message`. A worker
 progress message wakes a parent waiting for worker completion without retiring
 that wait. After progress delivery the same wait parks again with its original
 ID, selected workers and deadline; terminal outcomes still produce one wake.
@@ -258,7 +261,7 @@ wire using `HARNESS_ADAPTERS` (hearsay-tools/cezarion#1138).
 
 Messages are bounded to 100,000 characters, 32 undelivered inputs per recipient,
 1,024 messages per family, and 32 pending obligations. Requests and waits expire
-in 600 seconds by default (1–1,800 seconds accepted). One active wait per run.
+in 600 seconds by default (1–1,800 seconds accepted). Several waits can be open at once (workers, CI, timers); a message wakes the run and closes none.
 Ordinary sends to review/terminal recipients return `not-delivered` with an
 actionable `message.instruction`; `continuation-required` means no input was
 queued. The CLI exits 1 for these receipts. An active owning parent can explicitly
@@ -881,12 +884,19 @@ as Needs you. An autonomous run whose nudge would fire skips the alias. The ask-
 card opens an `ask-line` human wait with its questions, and a native ask (Codex, OpenCode,
 Cursor ACP) a `native-ask` one. A session started without cezar tools (the controller is
 unavailable) is taught the marker lines instead of the tools, and its monitoring wake keeps
-the marker wording. A worker wait (`cez worker wait`) cancels no wait:
-every open timer and CI wait keeps its deadline through a worker park. Workers outrank
-CI and timers, so the park holds no slot and reads as the workers, and their owed wake
-reads **waiting for capacity**. A wait that resolves while the run is parked on workers
-is held: the worker wake is delivered first and the held result at a later boundary
-(phase-1 interim, until phase 3 puts worker waits in the list).
+the marker wording. `cez worker wait` is an alias too (hearsay-tools/cezarion#1235 phase 3a):
+it opens the same `worker` entry as `cezar_wait({ kind: 'worker' })`, with
+`via: 'cez-worker-wait'`, and answers the legacy `WorkerWait` shape; the same workers (or
+requests) and mode return the open entry, and `cez worker cancel-wait` cancels through the list
+as `cezar_cancel_wait` does. A worker wait sits beside CI, timer and human waits and cancels
+none of them. A park whose top wait is workers holds no slot, reads as the workers and
+idle-closes after `IDLE_TIMEOUT_MS`; a resolution or a message reopens it through the scheduler
+continuation. Messages are not waits: a worker message or reply wakes the run with every wait
+still open and in the footer, and beside a pending portable question it is delivered next to the
+card, which stays answerable; beside a pending native question it waits for the answer's turn end. The completion gate's own worker wait (`delegation.wait`, until
+phase 3b) is the one park that still outranks the list: every open timer and CI wait keeps its
+deadline through it, and a wait that resolves while the run is parked there is held until the
+worker wake is delivered.
 
 The agent ends its turn after registering. At a turn end, in both turn-end handlers:
 a question or a permission gate parks for the human, an accepted `CEZ:DONE` finishes,
@@ -1036,19 +1046,18 @@ aborted registration from a changed turn. Only missing or revoked transport
 capabilities are `unauthorized`; an unknown registration failure is `unavailable`.
 Safe messages never forward request contents or raw provider errors.
 
-A settled worker wait blocks CI registration until its wake is delivered, explicitly
-cancelled by the executing parent, or every selected worker is verifiably destroyed.
-Cancellation and completed destruction retire the obsolete lifecycle input and retain
-`lastWait` outcomes, freeing the slot in the same turn (hearsay-tools/cezarion#1225).
-A parked parent's queued wake remains load-bearing for resumption; cleanup must not
-strand it. R80 in `workflows/ci-wait-refusal.test.ts` holds each `RUNNER_IDS` native
-mock turn open, settles its worker, cancels or records completed destruction, then
-registers a new worker wait and CI wait before releasing the turn. Both paths failed
-before the fix on every runner; there are no wire exemptions.
-`worker_wait_pending` instructs the agent to end its turn and retry after delivery;
-settlement alone must not discard the result or start competing waits. Harness row
-R27 reproduces this sequence through every runner's native mock wire and the real
-private CI controller, then verifies CI registration succeeds after delivery.
+Since hearsay-tools/cezarion#1235 phase 3a an agent-registered worker wait is a `worker`
+entry in the run's wait list, and a settled one no longer blocks CI registration: CI,
+timer, human and worker waits register beside each other up to `WAIT_LIMIT`. Cancellation
+(`cezar_cancel_wait`, `cez worker cancel-wait`) and completed destruction move the entry
+to `lastWaits`; a queued wake stays load-bearing for a parked parent, so cleanup must not
+strand it. R80 in `workflows/ci-wait-refusal.test.ts` holds each `RUNNER_IDS` native mock
+turn open, settles its worker, cancels or records completed destruction, then registers a
+new worker wait and CI wait before releasing the turn; R27 reproduces the delivery
+sequence through the real private CI controller and verifies CI registration succeeds
+beside the worker wait (the old refusal is gone, so these now pin the absence of a block).
+`worker_wait_pending` survives for the completion gate's own wait only, until
+hearsay-tools/cezarion#1235 phase 3b.
 
 Every cezar tool comes from one list (`packages/cezar/src/ci-wait/tools.ts`, hearsay-tools/cezarion#781):
 the adapter's `tools/list` and server instructions, Pi's and OMP's extensions, Claude's
@@ -1109,7 +1118,7 @@ the observation. Later successful settlement must leave that failed attempt inta
 Clean session closure while CI is pending still parks without failure. No runner
 exemptions or normalized-event injection.
 
-**U0–U18** (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234, hearsay-tools/cezarion#1260, with U5a, U5c, U5d, U6s, U7d, U7h, U9c, U9h and U16b) pin the
+**U0–U19** (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234, hearsay-tools/cezarion#1260, hearsay-tools/cezarion#1235, with U2c, U2t, U2w, U3w, U5a, U5c, U5d, U6s, U7d, U7h, U7w, U9c, U9h, U9u, U9w, U14m and U16b) pin the
 wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
 normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`, `cezar_ask`,
 `cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
@@ -1130,7 +1139,7 @@ cancelled with the cap note and wakes nothing. A second U10 case holds the provi
 acknowledgement of a timer batch sent at 39: a timer that comes due meanwhile is
 cancelled, the held batch keeps the fortieth wake, and a CI result still wakes the agent
 uncharged. U11 opens a monitoring-line timer, parks
-the parent on a worker, fires the timer, and checks that the timer kept its deadline, was
+the parent on the completion gate's worker wait (its `CEZ:DONE` with a live worker), fires the timer, and checks that the timer kept its deadline, was
 held while the parent read **waiting on 1 worker**, and was delivered after the worker
 wake. U12 delivers a timer result beside a pending portable question and holds its
 provider acknowledgement: the wait stays `resolved` and its input undelivered until the
@@ -1219,6 +1228,36 @@ U17 sends a prose question
 with no wait, which gets the nudge, then the same question after the monitoring line, which leaves
 the line's timer in place with no gate note. U15 nudges an autonomous run with the autonomous
 wording until the budget, then opens a `budget` human wait.
+
+Phase 3a (hearsay-tools/cezarion#1235) adds nine cells for worker waits, with the workers on the
+Claude wire and the parent on each runner's native wire, and no exemptions. U2w opens a CI wait
+and a worker wait through `cezar_wait`: the worker settling wakes the agent with the CI wait
+still open and in the footer, the turn end re-parks on it, and the later CI result is delivered.
+U2t does the same with a timer: the timer wakes the agent with the worker wait still open and in
+the footer, the turn end re-parks on the same entry with its deadline, and the worker result is
+delivered later. U2c does the same with the CI wait resolving first: its observation wakes the
+agent with the worker wait still open and in the footer, the turn end re-parks on that entry, and
+the worker result is delivered later. U3w sends a worker progress message through the delegation service while the
+parent is parked on a worker wait: it wakes the parent with the wait in the footer, the wait
+stays open with its deadline, and only the worker's own settlement resolves it, once. U7w opens
+one worker wait with `cez worker wait` and another with `cezar_wait`: both are entries of the
+same list (`via: 'cez-worker-wait'` and `'cezar_wait'`), and each resolves on its own worker into
+`lastWaits`. U9w registers a worker wait mid-turn and fails the provider, and separately
+registers one at a boundary and closes the session cleanly. After the provider failure the run
+is not failed and stays recoverable with the wait open; after the clean close it stays `waiting`
+with no error and the wait open (the clean close was an error before 3a). Either way the worker's
+settlement delivers it. U14m wakes a parent whose session has closed beside an open worker wait
+with a worker message alone, and fails every continuation's opening prompt: the third failure
+settles the run `failed` with the message still undelivered and no backoff or retry left, and
+Continue delivers it once. A message-only wake that fails once counts the failure, and the
+delivered message clears the count. A message the agent has not read is not delivered: on
+Claude's wire the failure ends the process before the mock reads the steered message. U9u
+restarts a parked parent from a row an older build wrote, with its worker wait in
+`delegation.wait`: a cancelled receipt's queued wake is delivered as ordinary input and the wait
+stays cancelled in `lastWaits`, and a `reason: 'message'` stand-in whose message a provider took
+before the crash reads as interrupted execution, so recovery resumes the parent. U19 delivers a worker message beside a pending portable question on every runner:
+the message reaches the wire, nothing answers the card, and the human's answer keeps its
+`askSeq`. No runner takes U12's exemption here: U19 pins delivery, not a delayed acknowledgement.
 
 **R74** extends that native-wire matrix to a failed nonfinal workflow agent.
 CI recovery must retain the failed attempt, including across restart and CI
@@ -1915,7 +1954,9 @@ worker's human answer after a restart closed its session and send a parent messa
 `DelegationService.send`. I3: a steer runner reads it before the answer turn ends. I4: delivery
 follows the declared mode while the answer is held: steer runners accept it in the turn, and Cursor
 receives it only after the turn-end `human-input-delivered` checkpoint. I5: a genuinely unanswered
-question, and a newer question raised by the answer, still hold the message until answered. The
+native question, and a newer one raised by the answer, hold the message until answered; beside a
+portable question the message is delivered at once and the card stays answerable
+(hearsay-tools/cezarion#1235 phase 3a). It is never the answer. The
 answer's checkpoint stays at turn-end in every row. Cursor is scenario-unconstructible for I3. R6–R11 exercise durable queued/startup input, before/during/
 after asks, restart with an unanswered ask, continuation asks, delayed native replies,
 DONE/explicit-stop precedence and post-send checkpoint failure. R13 runs a persisted

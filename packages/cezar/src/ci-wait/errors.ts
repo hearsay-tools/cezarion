@@ -46,6 +46,7 @@ const waitMessages: Partial<Record<WaitErrorCode, string>> = {
   timers_disabled: 'Automatic re-checks are turned off for this workspace (Park until resumed). Do not register a timer; end your turn and the user resumes the task.',
   wake_budget_spent: 'This run spent its automatic wakes. Do not register another timer; call cezar_ask if you need the user, or end your turn.',
   capacity: 'Cezar cannot open another wait now: this run has the maximum open waits, or the CI watcher is full. Cancel a wait you no longer need with cezar_cancel_wait, or retry later.',
+  denied_scope: 'This run cannot wait on those workers or requests: wait only on workers you own (a parent with the wait permission), or on requests you sent that are still accepted.',
 };
 
 export function waitErrorMessage(code: WaitErrorCode): string {
@@ -170,14 +171,17 @@ export function previewInvalidInput(error: z.ZodError, input: unknown): PreviewS
 // hearsay-tools/cezarion#1233: `cezar_wait` and `cezar_cancel_wait` refusals name the first
 // failing field and its rule, never the value the agent sent.
 const WAIT_FIELD_RULES: Record<string, string> = {
-  kind: 'must be "ci" or "timer"; ask the user with cezar_ask',
+  kind: 'must be "ci", "worker" or "timer"; ask the user with cezar_ask',
   pr: 'must be an HTTPS GitHub pull request URL (kind "ci")',
-  timeout_seconds: 'must be an integer between 1 and 7200 (kind "ci")',
+  timeout_seconds: 'must be an integer between 1 and 7200 (kind "ci") or between 1 and 1800 (kind "worker")',
+  worker_ids: 'must be 1 to 32 unique worker ids you own (kind "worker"; give worker_ids or request_ids, not both)',
+  request_ids: 'must be 1 to 32 unique ids of requests you sent (kind "worker"; give worker_ids or request_ids, not both)',
+  mode: 'must be "one", "any" or "all"; "one" takes exactly one id (kind "worker")',
   seconds: `must be an integer between ${TIMER_MIN_SECONDS} and ${TIMER_MAX_SECONDS} (kind "timer")`,
   note: 'must be a string of at most 512 characters (kind "timer")',
   wait_id: 'must be a wait_id that cezar_wait answered',
 };
-const WAIT_FIELDS = 'kind "ci" takes pr and timeout_seconds; kind "timer" takes seconds and note';
+const WAIT_FIELDS = 'kind "ci" takes pr and timeout_seconds; kind "worker" takes worker_ids or request_ids, mode and timeout_seconds; kind "timer" takes seconds and note';
 
 export function waitInvalidInput(error?: z.ZodError): string {
   const issue = error?.issues[0];

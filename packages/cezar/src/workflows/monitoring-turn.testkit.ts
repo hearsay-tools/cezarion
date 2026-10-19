@@ -22,7 +22,7 @@ export const MONITORING_TURN_CRITERIA = [
 export const MONITORING_ORDER_CRITERIA = [
   { id: 'M13', scenario: 'turn-messages', name: 'fresh ordinary markerless prose questions keep autonomous nudges' },
   { id: 'M14', scenario: 'turn-messages', name: 'Continue ordinary markerless prose questions keep autonomous nudges' },
-  { id: 'M17', scenario: 'turn-messages', name: 'fresh genuine accepted-wait session loss still fails' },
+  { id: 'M17', scenario: 'turn-messages', name: 'fresh a clean session close with an accepted worker wait open parks the run on it' },
   { id: 'M23', scenario: 'turn-messages', name: 'an autonomous ask line followed by acknowledgement is not registered, and the run continues' },
   { id: 'M28', scenario: 'turn-messages', name: 'an ordinary rejected ASK keeps the existing autonomous nudge policy' },
   { id: 'M29', scenario: 'turn-messages', name: 'ordered channel expansion clears resolved prose but retains structured and rejected ASK gates' },

@@ -55,6 +55,24 @@ describe('cezar-ci MCP server instructions', () => {
     }
   });
 
+  // hearsay-tools/cezarion#1235: the worker kind is advertised through the MCP tool listing, with the contract's bounds.
+  it('lists the worker fields of cezar_wait with their bounds', async () => {
+    const { client, close } = await connect({});
+    try {
+      const wait = (await client.listTools()).tools.find(tool => tool.name === 'cezar_wait')!;
+      const properties = wait.inputSchema.properties as Record<string, any>;
+      expect(properties.kind.enum).toEqual(['ci', 'worker', 'timer']);
+      for (const key of ['worker_ids', 'request_ids']) {
+        expect(properties[key]).toMatchObject({ type: 'array', minItems: 1, maxItems: 32 });
+        expect(properties[key].description).toMatch(/^kind "worker":/);
+      }
+      expect(properties.mode.enum).toEqual(['one', 'any', 'all']);
+      expect(properties.timeout_seconds.description).toMatch(/kind "worker": 1–1800, default 600/);
+      expect(wait.description).toMatch(/worker/);
+      expect((await client.listTools()).tools.find(tool => tool.name === 'cezar_cancel_wait')!.description).toMatch(/worker/);
+    } finally { await close(); }
+  });
+
   it('tells the agent to pin the port and that cezar starts the command', () => {
     const preview = cezarTools({ CEZ_PREVIEW: '1' }).find(tool => tool.definition.name === 'cezar_preview_serve')!;
     expect(preview.definition.description).toContain('pin the port (`vite --strictPort`, `next dev -p`)');

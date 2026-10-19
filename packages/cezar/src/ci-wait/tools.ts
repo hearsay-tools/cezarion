@@ -48,14 +48,21 @@ export async function invokeCiTool(input: unknown) {
  */
 function flatWaitInputSchema() {
   const properties: Record<string, unknown> = {};
-  for (const option of cezarWaitRequestSchema.options) Object.assign(properties, z.toJSONSchema(option, { io: 'input' }).properties);
+  // `timeout_seconds` is in both the ci and worker kinds: the ci schema's bounds (1–7200, default
+  // 1800) are the advertised ones, and the worker's own (1–1800, default 600) ride in the description.
+  for (const option of [...cezarWaitRequestSchema.options].reverse()) {
+    Object.assign(properties, z.toJSONSchema(option, { io: 'input' }).properties);
+  }
   const field = (key: string, description: string) => ({ ...(properties[key] as object), description });
   return {
     type: 'object' as const,
     properties: {
-      kind: { type: 'string', enum: cezarWaitRequestSchema.options.map(option => option.shape.kind.value), description: '"ci" waits for the checks of a GitHub pull request; "timer" wakes you after `seconds`.' },
+      kind: { type: 'string', enum: cezarWaitRequestSchema.options.map(option => option.shape.kind.value), description: '"ci" waits for the checks of a GitHub pull request; "worker" waits for workers or request replies; "timer" wakes you after `seconds`.' },
       pr: field('pr', 'kind "ci": the HTTPS GitHub pull request URL.'),
-      timeout_seconds: field('timeout_seconds', 'kind "ci": the deadline in seconds (1–7200, default 1800).'),
+      worker_ids: field('worker_ids', 'kind "worker": the workers you own to wait for (1–32 unique ids). Give this or request_ids, not both.'),
+      request_ids: field('request_ids', 'kind "worker": the requests you sent to wait for a reply to (1–32 unique ids). Give this or worker_ids, not both.'),
+      mode: field('mode', 'kind "worker": "any" wakes you when one selected id settles (default), "all" when every one has, "one" takes exactly one id.'),
+      timeout_seconds: field('timeout_seconds', 'The deadline in seconds. kind "ci": 1–7200, default 1800. kind "worker": 1–1800, default 600 (the default shown is the ci one).'),
       seconds: field('seconds', 'kind "timer": seconds until the wake (60–7200).'),
       note: field('note', 'kind "timer": what to re-check, handed back to you at the wake.'),
     },
@@ -66,7 +73,7 @@ function flatWaitInputSchema() {
 
 export const waitToolDefinition = {
   name: 'cezar_wait',
-  description: 'Open a wait on something outside this turn: CI on a GitHub pull request (kind "ci") or a timer (kind "timer"). End your turn after it answers; Cezar wakes you when any open wait resolves, with its result. A human message wakes you too and closes no wait. Several waits can be open at once; the answer lists them. To wait for the user, call cezar_ask. A CI observation is not merge approval.',
+  description: 'Open a wait on something outside this turn: CI on a GitHub pull request (kind "ci"), workers or the replies to requests you sent (kind "worker"), or a timer (kind "timer"). End your turn after it answers; Cezar wakes you when any open wait resolves, with its result. A human message wakes you too and closes no wait. Several waits can be open at once; the answer lists them. To wait for the user, call cezar_ask. A CI observation is not merge approval.',
   inputSchema: flatWaitInputSchema(),
 };
 /**
@@ -86,7 +93,7 @@ export async function invokeAskTool(input: unknown) {
 
 export const cancelWaitToolDefinition = {
   name: 'cezar_cancel_wait',
-  description: 'Close a wait you opened with cezar_wait or cezar_ask, by its wait_id, so it never wakes you. A question the user already sees cannot be cancelled; only their answer ends it. A wait that already resolved is delivered with your next wake anyway; the answer says so and lists the waits still open.',
+  description: 'Close a wait you opened with cezar_wait (CI, worker or timer) or cezar_ask, by its wait_id, so it never wakes you. A question the user already sees cannot be cancelled; only their answer ends it. A wait that already resolved is delivered with your next wake anyway; the answer says so and lists the waits still open.',
   inputSchema: { ...z.toJSONSchema(cezarCancelWaitRequestSchema, { io: 'input' }), type: 'object' as const },
 };
 

@@ -8,6 +8,10 @@ import { waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 // R6/R7 already pin native/portable answer routing and queue recovery. This
 // integration adds the conversation-specific seam: durable structured identity
 // survives projections/restart and reaches each real wire as attributed text.
+// Beside a pending portable question the messages are delivered at once and the card stays
+// answerable; a pending native question takes nothing until its answer's turn end, and a restart
+// does not reopen it for them (hearsay-tools/cezarion#1235 phase 3a, § Messages beside a pending
+// question).
 for (const backend of RUNNER_IDS) {
   it(`${backend} conversation correlation survives ask recovery without projection-driven delivery`, async () => {
     await withOwnedInputRun(backend, 'ask', async fixture => {
@@ -36,14 +40,29 @@ for (const backend of RUNNER_IDS) {
         manager.deliverConversationInput(runId);
       };
       replay(); replay();
-      expect(store.getRun(runId)?.agentInputs).toEqual(inputs);
+      const question = () => store.getRun(runId)?.waits?.find(wait => wait.kind === 'human' && wait.phase === 'open');
+      const portable = question()?.via !== 'native-ask';
+      if (portable) {
+        await waitFor(() => store.getRun(runId)?.agentInputs?.every(input => !!input.deliveredAt) === true);
+        // The beside turn ends and parks for the question again before the restart.
+        await waitFor(() => inputs.every(input => store.readEvents(runId).some(event => event.type === 'text' && String(event.text).includes(input.text))));
+        await waitFor(() => store.getRun(runId)?.status === 'waiting');
+      }
+      // Delivered beside a portable question (one submission), held behind a native one.
+      const beforeAnswer = portable ? store.getRun(runId)!.agentInputs! : inputs;
+      expect(beforeAnswer.map(({ deliveredAt: _d, consumedAt: _c, ...input }) => input)).toEqual(inputs);
+      if (portable) expect(new Set(beforeAnswer.map(input => input.deliveredAt)).size).toBe(1);
+      expect(store.getRun(runId)?.agentInputs).toEqual(beforeAnswer);
+      // The card stays answerable either way.
+      expect(question()).toMatchObject({ askSeq: ask.seq });
       expect(store.readEvents(runId).filter(event => event.type === 'human-input-delivered')).toEqual([]);
       expect(store.readEvents(runId).filter(event => event.type === 'user-message')).toEqual([]);
 
       ({ store, manager } = await fixture.restart());
       replay(); replay();
       expect(manager.continueRun(runId).ok).toBe(false);
-      expect(store.getRun(runId)?.agentInputs).toEqual(inputs);
+      expect(store.getRun(runId)?.agentInputs).toEqual(beforeAnswer);
+      expect(question()).toMatchObject({ askSeq: ask.seq });
       expect(store.readEvents(runId).filter(event => event.type === 'ask.requested')).toEqual([ask]);
       expect(store.readEvents(runId).filter(event => event.type === 'human-input-delivered')).toEqual([]);
 

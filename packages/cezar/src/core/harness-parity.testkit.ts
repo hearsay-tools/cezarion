@@ -246,7 +246,7 @@ export const WORKTREE_SETUP_CRITERIA = [
 export const ANSWER_DELIVERY_CRITERIA = [
   { id: 'I3', scenario: 'steer-tool', name: 'steers a conversation message into a running human answer and reports it read before that turn ends' },
   { id: 'I4', scenario: 'hold-gated', name: 'delivers a conversation message to a running human answer as its input delivery declares' },
-  { id: 'I5', scenario: 'ask-snapshot', name: 'holds conversation input behind an unanswered or a newer question' },
+  { id: 'I5', scenario: 'ask-snapshot', name: 'holds conversation input behind a native question and delivers it beside a portable one, never as its answer' },
 ] as const;
 
 /** Native Codex server-request approvals, exercised through the manager and HTTP route. */
@@ -722,6 +722,10 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   {
     criterion: 'I2', backend: 'cursor', kind: 'scenario-unconstructible',
     reason: 'Same wire as I1: Cursor admits no mid-turn agent input, so none can be left unread (#505).',
+  },
+  {
+    criterion: 'I6', backend: 'cursor', kind: 'scenario-unconstructible',
+    reason: 'Same wire as I1: Cursor admits no mid-turn agent input, so none awaits a follow-on run (#505).',
   },
   {
     criterion: 'I3', backend: 'cursor', kind: 'scenario-unconstructible',

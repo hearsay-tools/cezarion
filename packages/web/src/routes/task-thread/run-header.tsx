@@ -921,15 +921,19 @@ function MetaRow({
 
 type CiWait = Extract<Wait, { kind: 'ci' }>
 type TimerWait = Extract<Wait, { kind: 'timer' }>
+type WorkerWait = Extract<Wait, { kind: 'worker' }>
+type ListedWait = CiWait | TimerWait | WorkerWait
 
 /** Only these statuses can have a wait in flight; a finished run's leftovers are history. */
 const IN_FLIGHT_STATUSES: readonly ApiRun['status'][] = ['running', 'queued', 'waiting']
 
-/** The kinds this header renders: CI and timer waits. Streamed records were only checked for `id`.
- *  A human wait shows as Needs you and its question card, and phase 3's worker waits through the
- *  pill, never in this list. */
-function renderableWaits(value: unknown): Array<CiWait | TimerWait> {
-  return Array.isArray(value) ? value.filter((wait): wait is CiWait | TimerWait => wait?.kind === 'ci' || wait?.kind === 'timer') : []
+/** The kinds this header renders: CI, timer and worker waits. Streamed records were only checked
+ *  for `id`. A human wait shows as Needs you and its question card, through the pill, never in
+ *  this list. A worker wait shows only while open: its result is not owed in a line of its own. */
+function renderableWaits(value: unknown): ListedWait[] {
+  return Array.isArray(value)
+    ? value.filter((wait): wait is ListedWait => wait?.kind === 'ci' || wait?.kind === 'timer' || wait?.kind === 'worker')
+    : []
 }
 
 function formatInstant(value: string | undefined) {
@@ -954,7 +958,7 @@ function owedLabel(prefix: string, run: ApiRun) {
 function OpenWaits({ run }: { run: ApiRun }) {
   const listed = renderableWaits(run.waits)
   const open = IN_FLIGHT_STATUSES.includes(run.status)
-    ? listed.filter(wait => wait.phase === 'open' || wait.phase === 'resolved')
+    ? listed.filter(wait => wait.kind === 'worker' ? wait.phase === 'open' : wait.phase === 'open' || wait.phase === 'resolved')
     : []
   const ciOpen = open.some(wait => wait.kind === 'ci')
   // `lastWaits` is newest last; a settled entry still in `waits` is newer than all of them.
@@ -966,7 +970,9 @@ function OpenWaits({ run }: { run: ApiRun }) {
     <div data-slot="open-waits" className="mt-1 flex min-w-0 flex-col gap-1">
       {open.map(wait => wait.kind === 'ci'
         ? <CiWaitStatus key={wait.id} run={run} wait={wait} />
-        : <TimerWaitStatus key={wait.id} run={run} wait={wait} />)}
+        : wait.kind === 'worker'
+          ? <WorkerWaitStatus key={wait.id} wait={wait} />
+          : <TimerWaitStatus key={wait.id} run={run} wait={wait} />)}
       {error ? (
         <div data-slot="ci-wait-status" role="status" aria-live="polite" aria-atomic="true"
           className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
@@ -1012,6 +1018,22 @@ function CiWaitStatus({ run, wait, settled = false }: { run: ApiRun; wait: CiWai
       {dateLabel ? (
         <p>{!settled ? 'Deadline' : cancelled ? 'Cancelled' : 'Observed'}{' '}<time dateTime={timestamp}>{dateLabel}</time></p>
       ) : !settled ? <p>CI deadline unavailable</p> : null}
+    </div>
+  )
+}
+
+/** "Waiting on N workers" / "N request replies": the ids not yet reported, with the deadline. */
+function WorkerWaitStatus({ wait }: { wait: WorkerWait }) {
+  const byWorker = wait.workerIds !== undefined
+  const reported = new Set((byWorker ? wait.outcomes : wait.requestOutcomes)?.map(outcome => 'workerId' in outcome ? outcome.workerId : outcome.requestId))
+  const count = (wait.workerIds ?? wait.requestIds ?? []).filter(id => !reported.has(id)).length
+  const noun = byWorker ? (count === 1 ? 'worker' : 'workers') : (count === 1 ? 'request reply' : 'request replies')
+  const dateLabel = formatInstant(wait.deadline)
+  return (
+    <div data-slot="worker-wait-status" role="status" aria-live="polite" aria-atomic="true"
+      className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+      <p>Waiting on {count} {noun}</p>
+      {dateLabel ? <p>Deadline{' '}<time dateTime={wait.deadline}>{dateLabel}</time></p> : <p>Worker wait deadline unavailable</p>}
     </div>
   )
 }

@@ -756,3 +756,88 @@ on, budget 40, no autonomy. The 2a table above still holds for the states it lis
 | Prose question or rejected ask line beside the monitoring line, live workers or another wait | The turn ends | The runner's turn end | The run parks on its waits (monitoring or waiting on workers) and does not read Needs you; the timer's wake or the worker's message is the next exit |
 | `waiting` on the agent's question (kept from 2a; amends its Finish row) | Finish, with or without a live session | The user | The wait is cancelled into `lastWaits` and `human-ask-closed` closes the question unanswered; no question stays pending, and Continue reopens the run with nothing typed (U18). A root's Finish is refused (U5c) |
 | | Stop | The user | The wait is cancelled; the question stays pending for a human to answer (#505) |
+
+## Phase 3a decisions
+
+Phase 3a of hearsay-tools/cezarion#1235 moves agent-registered worker waits into the wait
+list (hearsay-tools/cezarion#1235). This section and the table below are self-contained.
+
+Calls made by the agent (owner to check):
+
+- **U9 in 3a.** A provider failure or clean close with a worker wait open parks and recovers,
+  as phase 1's path does for CI and timers. The "clean close with a worker wait is an error"
+  branch is removed.
+- **The completion park is unchanged until 3b.** The completion gate's own wait stays in
+  `delegation.wait` with its old engine, including the `reason: 'message'` stand-in and the
+  retirement of that wait by a non-progress message. The routing test is the one predicate
+  "parked on the completion wait". Each kept piece carries a comment naming 3b.
+- **Upgraded queued wake inputs are kept.** An upgraded `wake-pending` wait records its
+  already-queued input as `wakeInputId`; the result is delivered once, and a cancelled
+  receipt's undelivered input is delivered as an ordinary input.
+- **Done is not refused by agent worker waits.** `cezar_done` cancels open waits; only the
+  completion gate's worker blockers refuse it.
+
+Calls made by the owner (2026-10-19):
+
+- **Messages beside a pending question.** A pending portable question no longer holds worker
+  and parent messages back (this changes hearsay-tools/cezarion#505's hold). At a boundary
+  they are delivered beside the card, which stays answerable and keeps its `askSeq`.
+
+Decisions made during execution:
+
+- Delivery beside a question applies to PORTABLE questions (`cezar_ask`). Beside a NATIVE
+  question nothing is delivered mid-turn, and a parent's routed answer to a native worker
+  question is admitted mid-turn.
+- A human message keeps the old guarantees without withdrawing any wait: on a queued
+  lifecycle wake continuation it flips the origin to `human` durably (so it answers a pending
+  ask), and a startup-deferred message is persisted. This holds for every list wait kind.
+- The delivery checkpoint and the resume to `running` are one commit
+  (`commitWaitDelivery(..., resumed)`); upgrade reads the old crash window as `running`.
+- A refused wake continuation notes once per refusal and retries at 1 Hz.
+- The 32-input cap counts conversation inputs; the lifecycle wait-result input is outside it.
+
+### Transitions out (phase 3a)
+
+Required by AGENTS.md for every state 3a adds or keeps. Defaults are the shipped ones:
+`maxParallel: 2`, `maxMonitoringSessions: 2`, re-checks on, budget 40, no autonomy
+(`IDLE_TIMEOUT_MS` is 15 minutes; a failed delivery retries after 15 s, then 30 s, and the third
+failure settles). The earlier tables still hold for the states they list. One row per exit.
+
+| State | Trigger | Who or what fires it | Behavior at shipped defaults |
+| --- | --- | --- | --- |
+| `running`, a worker wait open (registered this turn) | The turn ends | The runner's turn end | `decideTurnEnd` sees an open wait and parks the run `waiting` (worker park) |
+| | The provider fails or the process exits | The failure path | Parks `waiting` with the wait open; recoverable. Replaces the old error. With results owed it counts a failed delivery (retry 15 s, 30 s; the third settles `failed` holding the results) |
+| | The session closes cleanly | The close path | Same as the failure row |
+| | `cezar_done` accepted | The agent | Open worker waits are cancelled into `lastWaits` without a wake and the run finishes at the turn end; an agent worker wait does not refuse done (only live or uncollected workers do) |
+| | Stop, Finish, delete | The user | Worker waits are cancelled into `lastWaits`; no wake; the run settles |
+| `waiting`, top wait workers (worker park, session open, no slot held) | A worker settles (mode satisfied) or a named request is replied | Worker settlement / reply, through `reconcileWorkerFamily` | The wait resolves `outcome`; the wake joins the queue for a regular slot and the wake turn delivers it with the "Still open" footer |
+| | The wait's deadline passes | The per-wait timer | Resolves `timeout`; wakes as above |
+| | A worker message, an unrelated reply or a parent answer | The worker or the parent | Wakes the run; no wait is withdrawn; the footer lists it; the turn end re-parks |
+| | A human message | The user | Delivered; every wait stays open; the budget resets |
+| | Another wait (CI, timer) resolves | The CI watcher or the wait timer | Wakes the run; the worker wait stays open |
+| | 15 minutes idle | The idle timer (`IDLE_TIMEOUT_MS`) | The session closes; the run stays `waiting` with the wait open (idle-closed row) |
+| | `cezar_cancel_wait` / `cez worker cancel-wait` | The agent, in a woken turn | Cancelled into `lastWaits`; no wake |
+| | Stop, Finish, delete, parent terminal | The user, or the parent's terminal path | Cancelled into `lastWaits`; no wake; the run settles |
+| `waiting`, worker park idle-closed (or no session after a failure, clean close or restart) | A resolution, a deadline or a message | As in the worker-park rows | `queueWaitWake` reopens it through a scheduler-owned continuation, which delivers the results and messages |
+| | The continuation is refused | The scheduler | One note per refusal; retried at 1 Hz until admitted (message-only wake row) |
+| | Continue | The user | Reopens; the wait stays open |
+| | Restart | Recovery | Re-arms deadlines, re-observes outcomes, and queues any owed wake |
+| | Stop, Finish, delete | The user | Cancelled into `lastWaits`; the run settles |
+| `waiting`, results or messages owed, refused a slot (message-only wake included) | A regular slot frees | The scheduler | The wake turn starts (or the session takes it at its boundary) and delivers every resolved wait and pending message |
+| | No slot yet, no session | `retryWaitAdmission` | Re-queues the wake every second; a refused continuation notes once |
+| | The delivery fails | Session failure or clean close | Failure count and backoff as in the first table; the third failure settles `failed` holding the results |
+| | An inbox read takes the messages | The agent (`worker inbox`) | Nothing is left to deliver: `retireEmptyWake` frees the reserved slot and the run returns to its park |
+| | Stop, Finish, delete | The user | Cancelled; the run settles |
+| Pending NATIVE question, no session (or mid-turn) | Results (CI, timer, worker) or messages arrive | The watcher, a timer, a worker or the parent | **Not an exit.** `owesWake` is false while a native-ask wait is open, so nothing is delivered and no continuation starts; the provider would ask again |
+| | The answer arrives | A human; or the parent, for a routed worker question | The answer is delivered (a parent's routed answer is admitted mid-turn); owed results and messages follow at that turn's end. **For a human-owned question the only default exit is this human action** |
+| | Stop, Finish, delete | The user | The wait is cancelled; the run settles (Stop leaves the question for a human, as before) |
+| Pending PORTABLE question (`cezar_ask`), results or messages owed | A boundary | The runner's turn end | Delivered beside the card (`besideQuestion`); the card stays answerable and keeps its `askSeq`; a parent's answer goes through the answer seam and withdraws no wait |
+| Completion park (`delegation.wait` named by `completion.waitId`; unchanged until phase 3b) | The wait's workers settle (`mode: all`) | `reconcileWorkerFamily`, the old engine | The completion wake delivers; a list wait that resolved meanwhile is held until it |
+| | The wait's deadline (10 minutes) passes | `workerWaitTimers` | Resolves `timeout`; the completion wake delivers |
+| | A progress message | A worker | The stand-in `reason: 'message'` wakes the run; the completion wait is retained |
+| | Any other message | A worker, the parent or a human | The stand-in wakes the run and delivering it ends the completion wait (old behavior, removed in 3b) |
+| | Stop, delete | The user | Cancelled; the run settles. A root's Finish is refused while it is blocked on workers |
+
+No state's only default exit is a human action except a pending native question for a
+human-owned asker, which is the question's own gate and not a wait: every worker wait has a
+deadline.

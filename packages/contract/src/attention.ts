@@ -1,5 +1,5 @@
 import type { RunIndexEntry, RunRecord, RunSummary } from './runs.ts';
-import { hasResolvedWait, resolveWaitingOn } from './waits.ts';
+import { completionWorkersOwed, hasResolvedWait, resolveWaitingOn } from './waits.ts';
 
 /**
  * The one canonical attention function (cockpit spec, "Design system" → status grammar).
@@ -148,7 +148,9 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
     !hasPendingHumanAsk && !run.hasPendingHumanAsk
     && (run.status === 'waiting' || run.status === 'queued')
     && run.delegation?.role !== 'invalid'
-    && run.delegation?.wait?.phase === 'wake-pending'
+    && (run.delegation?.wait?.phase === 'wake-pending'
+      // hearsay-tools/cezarion#1235: an agent's worker wait owes its wake as a resolved list entry.
+      || (Array.isArray(run.waits) && run.waits.some((wait) => wait?.kind === 'worker' && wait.phase === 'resolved')))
   ) {
     // A queued automatic wake is a scheduler/capacity wait, not a human gate (#971).
     // Covers both the parked session still open (`waiting`) and a leftover after restart
@@ -174,6 +176,31 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
     // Its own workers → the robot; a worker waiting on its parent is waiting on something
     // outside it → a ring. Both violet: still in motion, just not on this turn.
     return { bucket: 'none', tone: 'running', shape: run.delegation.role === 'root' ? 'workers' : 'ring', pulse: false, label: dependencyLabel };
+  }
+  const workerEntries = (Array.isArray(run.waits) ? run.waits : []).filter((wait) => wait?.kind === 'worker' && wait.phase === 'open');
+  // Does a worker-list wait stand behind `waitingOn`? A full record says so by its entries. A
+  // summary omits `waits`, so it says so by a count above what the legacy `delegation.wait`
+  // alone accounts for (`computeWaitingOn` adds both).
+  const listWorkerWait = Array.isArray(run.waits)
+    ? workerEntries.length > 0
+    : waitingOn?.kind === 'workers' && waitingOn.count > (completionWorkersOwed(run.delegation) ?? 0);
+  // A `registered` completion wait (not yet parked) alone reads as Needs you, as it always has.
+  // Phase 3b (hearsay-tools/cezarion#1235) moves it into the list and this exception goes.
+  const legacyRegisteredOnly = !listWorkerWait && run.delegation?.role !== 'invalid' && run.delegation?.wait?.phase === 'registered';
+  if (waitingOn?.kind === 'workers' && !legacyRegisteredOnly && !run.hasPendingHumanAsk) {
+    // Worker waits in the list (hearsay-tools/cezarion#1235): the same wording as the legacy
+    // `delegation.wait` path above, which the completion gate keeps until phase 3b. A worker
+    // can only wait on replies from its parent; a root with only request waits waits on replies.
+    const role = run.delegation?.role;
+    if (role === 'worker') return { bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting on parent reply' };
+    if (waitingOn.replies || (workerEntries.length > 0 && workerEntries.every((wait) => wait.kind === 'worker' && wait.requestIds !== undefined))) {
+      return { bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on worker replies' };
+    }
+    const count = waitingOn.count;
+    return {
+      bucket: 'none', tone: 'running', shape: 'workers', pulse: false,
+      label: count ? `waiting on ${count} worker${count === 1 ? '' : 's'}` : 'waiting on workers',
+    };
   }
   if (!hasPendingHumanAsk && waitingOn === undefined && run.status === 'waiting' && hasResolvedWait(run)) {
     // A resolved CI or timer wait owes the agent a wake that has not started: the same

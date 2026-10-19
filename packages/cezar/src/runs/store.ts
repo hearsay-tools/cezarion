@@ -11,6 +11,7 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { HUMAN_ASK_EVENT_TYPES } from '@open-mercato/cezar-contract/ask';
 import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
+import { workerWaitSchema } from '@open-mercato/cezar-contract/delegation';
 import {
   agentInputSchema,
   inboxClaimSchema,
@@ -35,7 +36,7 @@ import {
   TIMER_MIN_SECONDS,
   WAIT_LIMIT,
 } from '@open-mercato/cezar-contract/waits';
-import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, CiWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry } from '@open-mercato/cezar-contract';
+import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, CiWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry, WorkerWait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { matchesRunQuery, sqlPrefilterTokens } from './run-search.ts';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { HistoryCompressor } from './history-compressor.ts';
@@ -53,6 +54,7 @@ import type { ArchivePullRequestIdentity, MergedPullRequest, RunPullRequest } fr
 import { extractTaskRefs, MAX_REF } from './task-refs.ts';
 // Type-only module (zod + nothing else), so this cannot cycle back into the store.
 import { workflowDefSchema } from '../workflows/types.ts';
+import { waitInputId } from '../workflows/waits.ts';
 
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import {
@@ -431,7 +433,25 @@ const LEGACY_WAIT_KEYS = ['ciWait', 'lastCiWait', 'lastCiWaitError', 'monitoring
 const UNREADABLE_WAIT = 'Wait unavailable — a saved wait is unreadable; register a new wait.';
 
 function hasLegacyWaitFields(row: unknown): boolean {
-  return !!row && typeof row === 'object' && LEGACY_WAIT_KEYS.some((key) => key in row);
+  return !!row && typeof row === 'object' && (LEGACY_WAIT_KEYS.some((key) => key in row) || agentWorkerWaits(row as Record<string, unknown>).length > 0);
+}
+
+/** The agent-registered worker waits a record still holds in `delegation` (store schema 6,
+ *  hearsay-tools/cezarion#1235), in the order they settled: `lastWait`, then `wait`. The completion
+ *  gate's wait is not one: `delegation.completion.waitId` names it, and it stays in `delegation.wait`
+ *  until phase 3b. A value that does not parse is left where it is, for the delegation schema to
+ *  quarantine as it always has. */
+function agentWorkerWaits(row: Record<string, unknown>): Array<{ key: 'wait' | 'lastWait'; wait: WorkerWait }> {
+  const delegation = row.delegation;
+  if (!delegation || typeof delegation !== 'object') return [];
+  const { role, completion } = delegation as { role?: unknown; completion?: { waitId?: unknown } };
+  if (role !== 'root' && role !== 'worker') return [];
+  const found: Array<{ key: 'wait' | 'lastWait'; wait: WorkerWait }> = [];
+  for (const key of ['lastWait', 'wait'] as const) {
+    const parsed = workerWaitSchema.safeParse((delegation as Record<string, unknown>)[key]);
+    if (parsed.success && !(completion && typeof completion === 'object' && completion.waitId === parsed.data.id)) found.push({ key, wait: parsed.data });
+  }
+  return found;
 }
 
 /** A legacy `CiWait` as a wait entry. Its wake input's id was the wait's own (`wakeId`, which
@@ -444,6 +464,57 @@ export function ciWaitEntry(wait: CiWait): CiWaitEntry {
     ...(result ? { result, resolvedAt: result.observedAt } : {}),
     ...(deliveredAt ? { deliveredAt } : {}),
   };
+}
+
+/**
+ * A legacy agent `delegation.wait` as a worker wait entry (store schema 6, hearsay-tools/cezarion#1235),
+ * judged from the wait alone: what became of its wake input is `upgradeLegacyWaits`' to apply.
+ * `registered`/`parked` → open; `wake-pending` → resolved with its `outcome`/`timeout` reason, or
+ * cancelled. Undefined for the `message` stand-in, which was never an agent's wait: a message no
+ * longer resolves a wait, and its input still wakes the run on its own.
+ *
+ * Deterministic, never read from the clock: a row is upgraded on every read until open rewrites
+ * it, and two reads must agree. A `WorkerWait` kept no registration time, so `timeoutSeconds` is
+ * the 600 default, `registeredAt` is 600 s before the original deadline (kept as it was), and the
+ * settled stamps come from the wait itself: `resolvedAt` is the latest observation it holds, else
+ * its deadline, and `cancelledAt` is its deadline. `now` is only the fallback for a deadline that
+ * does not read, which the wait schema never admits.
+ */
+export function workerWaitEntry(wait: WorkerWait, now: string): WorkerWaitEntry | undefined {
+  if (wait.phase === 'wake-pending' && wait.reason === 'message') return undefined;
+  const deadline = Date.parse(wait.deadline);
+  const registeredAt = Number.isFinite(deadline) ? new Date(deadline - 600_000).toISOString() : now;
+  const open = wait.phase !== 'wake-pending';
+  // A pending wait from before reasons were recorded settled on its persisted observations, as
+  // `reconcileWorkerWait` infers it: satisfied by them is an outcome, anything else its deadline.
+  const satisfied = (ids: readonly string[], reported: readonly string[]) => wait.mode === 'all' ? ids.every((id) => reported.includes(id)) : reported.length > 0;
+  const inferred = wait.phase === 'wake-pending' && wait.reason === undefined
+    ? (wait.requestIds ? satisfied(wait.requestIds, (wait.requestOutcomes ?? []).map((outcome) => outcome.requestId))
+      : satisfied(wait.workerIds, (wait.outcomes ?? []).map((outcome) => outcome.workerId))) ? 'outcome' as const : 'timeout' as const
+    : undefined;
+  const reason = wait.reason === 'outcome' || wait.reason === 'timeout' ? wait.reason : inferred;
+  const observed = [...(wait.outcomes ?? []), ...(wait.requestOutcomes ?? [])].map((outcome) => outcome.observedAt).sort().at(-1);
+  const resolvedAt = reason === 'outcome' && observed ? observed : wait.deadline;
+  return {
+    id: wait.id, kind: 'worker', source: 'agent', via: 'cez-worker-wait', registeredAt, deadline: wait.deadline, timeoutSeconds: 600, turnId: 'upgraded',
+    phase: open ? 'open' : reason ? 'resolved' : 'cancelled',
+    ...(wait.mode ? { mode: wait.mode } : {}),
+    ...(wait.requestIds
+      ? { requestIds: wait.requestIds, requestOutcomes: wait.requestOutcomes ?? [] }
+      : { workerIds: wait.workerIds, revisions: wait.revisions ?? [], outcomes: wait.outcomes }),
+    ...(!open && reason ? { result: { reason }, resolvedAt } : {}),
+    ...(!open && !reason ? { cancelledAt: wait.deadline } : {}),
+  };
+}
+
+/** Whether a record is a root still parked on its workers: an open or resolved worker wait in the
+ *  list, or the completion gate's `delegation.wait`, which stays there until hearsay-tools/cezarion#1235
+ *  phase 3b. Such a root has its pending human question re-read from the transcript before a
+ *  manager parks it, so what an agent's worker wait looked like before the upgrade (a bare
+ *  `delegation.wait`) must keep answering true after it. */
+export function holdsWorkerWait(run: Pick<RunRecord, 'delegation' | 'waits'>): boolean {
+  if (run.delegation?.role !== 'root') return false;
+  return run.delegation.wait !== undefined || !!run.waits?.some((wait) => wait.kind === 'worker' && (wait.phase === 'open' || wait.phase === 'resolved'));
 }
 
 /** A stable id for the timer a legacy monitoring park becomes. The row keeps its legacy JSON
@@ -467,10 +538,30 @@ function legacyTimerId(runId: unknown, wakeAt: string): string {
  *   `running` run parks as `waiting`, its running step with it, as every waiting park writes it.
  *   On a finished run the fields are stale and only dropped.
  *
+ * - `delegation.wait`/`lastWait` registered by the agent (store schema 6, hearsay-tools/cezarion#1235)
+ *   → `workerWaitEntry`, then settled by what became of the wake input (`wakeId`, else the wait's own
+ *   id): a wait whose input was delivered reads as delivered, a `wake-pending` one whose input is
+ *   still queued stays resolved and records it as `wakeInputId`, so it is delivered once, and a
+ *   `lastWait` that was never delivered reads as cancelled. The `message` stand-in is dropped. No
+ *   input is added or removed: a cancelled receipt's undelivered wake stays queued and is delivered
+ *   as an ordinary input. The completion gate's wait is left where it is (phase 3b). A current wait
+ *   (the stand-in included) whose wake a provider took on a `waiting` run is the old engine's crash
+ *   between the delivery checkpoint and the resume: the run reads `running`, so recovery resumes
+ *   it. A wake an inbox read acknowledged, or one beside a pending question, resumes nothing.
+ *
  * An unreadable legacy CI wait gets the per-entry salvage `parseRunRecords` gives `waits`: it is
  * dropped, `lastWaitsError` says so, and the status is left alone. A `waiting` run with no open
  * wait reads as Needs you, which a human can resume.
  */
+/** A live run and its live step move from `from` to `to` together, as every park and resume writes them. */
+function setLiveStatus(row: Record<string, unknown>, from: 'running' | 'waiting', to: 'running' | 'waiting'): void {
+  row.status = to;
+  if (Array.isArray(row.steps)) for (const step of row.steps) {
+    if (step && typeof step === 'object' && (step as { status?: unknown }).status === from) (step as { status: string }).status = to;
+  }
+}
+const resumeParked = (row: Record<string, unknown>) => setLiveStatus(row, 'waiting', 'running');
+
 export function upgradeLegacyWaits(row: Record<string, unknown>): void {
   if (!hasLegacyWaitFields(row)) return;
   const opened: Wait[] = [];
@@ -487,6 +578,34 @@ export function upgradeLegacyWaits(row: Record<string, unknown>): void {
   // The previous wait settled before the current one did, so it goes first.
   legacyCi(row.lastCiWait, true);
   legacyCi(row.ciWait, false);
+  const agentWaits = agentWorkerWaits(row);
+  if (agentWaits.length) {
+    // The wait's own stamps decide every time the entry carries (`workerWaitEntry`), not the clock.
+    const now = typeof row.createdAt === 'string' ? row.createdAt : new Date(0).toISOString();
+    const inputs = Array.isArray(row.agentInputs) ? row.agentInputs as Array<{ id?: unknown; deliveredAt?: unknown; inboxClaim?: { acknowledgedAt?: unknown } }> : [];
+    const current = agentWaits.find((found) => found.key === 'wait');
+    // The old engine retired a delivered wake into `lastWait` with the resume: a current wait whose
+    // wake a provider took on a `waiting` run is a crash between the two, and resumed. An inbox
+    // read starts no provider turn, and a pending question still holds the run, as they did then.
+    const interrupted = (key: 'wait' | 'lastWait', input: (typeof inputs)[number] | undefined) => key === 'wait' && row.status === 'waiting' &&
+      typeof input?.deliveredAt === 'string' && !input.inboxClaim?.acknowledgedAt && row.hasPendingHumanAsk !== true;
+    for (const { key, wait } of agentWaits) {
+      // A wait that settles has its copy in `lastWait` too: it is the same wait.
+      if (key === 'lastWait' && current?.wait.id === wait.id) continue;
+      const input = inputs.find((candidate) => candidate.id === (wait.wakeId ?? wait.id));
+      const entry = workerWaitEntry(wait, now);
+      // The `message` stand-in becomes no entry, but its delivered message may be that crash too.
+      if (!entry) { if (interrupted(key, input)) resumeParked(row); continue; }
+      const deliveredAt = typeof input?.deliveredAt === 'string' ? input.deliveredAt : undefined;
+      if (entry.phase !== 'open' && deliveredAt) {
+        Object.assign(entry, { phase: 'delivered', deliveredAt });
+        if (interrupted(key, input)) resumeParked(row);
+      }
+      else if (key === 'lastWait' && entry.phase !== 'cancelled') Object.assign(entry, { phase: 'cancelled', cancelledAt: wait.deadline });
+      else if (entry.phase === 'resolved' && input) entry.wakeInputId = input.id as string;
+      (entry.phase === 'open' || entry.phase === 'resolved' ? opened : settled).push(entry);
+    }
+  }
   const live = row.status === 'running' || row.status === 'queued' || row.status === 'waiting';
   if (row.activity === 'monitoring' && live) {
     const wakeAt = row.monitoringWakeAt;
@@ -499,12 +618,7 @@ export function upgradeLegacyWaits(row: Record<string, unknown>): void {
         registeredAt: new Date(now).toISOString(), deadline: wakeAt, phase: 'open', turnId: 'legacy', seconds,
       });
     }
-    if (row.status === 'running') {
-      row.status = 'waiting';
-      if (Array.isArray(row.steps)) for (const step of row.steps) {
-        if (step && typeof step === 'object' && (step as { status?: unknown }).status === 'running') (step as { status: string }).status = 'waiting';
-      }
-    }
+    if (row.status === 'running') setLiveStatus(row, 'running', 'waiting');
   }
   if (opened.length) {
     const current = Array.isArray(row.waits) ? row.waits as Array<{ id?: unknown }> : [];
@@ -519,6 +633,11 @@ export function upgradeLegacyWaits(row: Record<string, unknown>): void {
   if (typeof row.lastCiWaitError === 'string' && row.lastWaitsError === undefined) row.lastWaitsError = row.lastCiWaitError;
   if (unreadable) row.lastWaitsError = UNREADABLE_WAIT;
   for (const key of LEGACY_WAIT_KEYS) delete row[key];
+  if (agentWaits.length) {
+    const delegation = { ...(row.delegation as Record<string, unknown>) };
+    for (const { key } of agentWaits) delete delegation[key];
+    row.delegation = delegation;
+  }
 }
 
 /** Read legacy wait fields into the wait list and salvage per entry, identically for live stores
@@ -563,10 +682,11 @@ function withWaitsCancelled(run: RunRecord, waitIds: readonly string[]): RunReco
   if (!cancelled.length) return undefined;
   const cancelledAt = new Date().toISOString();
   const retired = new Set(cancelled.map((wait) => wait.id));
+  const inputs = new Set(cancelled.map(waitInputId));
   return { ...run,
     waits: nonEmpty((run.waits ?? []).filter((wait) => !retired.has(wait.id))),
     lastWaits: settleWaits(run.lastWaits, cancelled.map((wait) => ({ ...wait, phase: 'cancelled' as const, cancelledAt }))),
-    ...(run.agentInputs ? { agentInputs: run.agentInputs.filter((input) => !retired.has(input.id) || input.deliveredAt) } : {}),
+    ...(run.agentInputs ? { agentInputs: run.agentInputs.filter((input) => !inputs.has(input.id) || input.deliveredAt) } : {}),
   };
 }
 
@@ -1731,7 +1851,7 @@ export class RunStore extends EventEmitter {
    *  the row's family. */
   private adoptLoadedRun({ run, extras, upgraded }: DecodedRun, opts: { keepLive?: boolean; onlyIfChanged?: boolean; settle?: boolean; stop?: boolean }, row: RunRow): void {
     const before = loadNormalizedFields(run);
-    if (run.delegation?.role === 'root' && (run.status === 'waiting' || run.delegation.wait !== undefined)) {
+    if (run.delegation?.role === 'root' && (run.status === 'waiting' || holdsWorkerWait(run))) {
       let facts = this.facts.peek(run.id);
       if (!facts) {
         // No transcript is a legacy summary, not evidence that an answer is pending.
@@ -2778,20 +2898,34 @@ export class RunStore extends EventEmitter {
    *  already delivered keeps its time), and each resolved wait among them (input id = wait id)
    *  moves to `lastWaits` as `delivered`. Open waits a batch names stay open. `counters` are the
    *  wake counters the delivery spends or clears, in the same commit, so a crash keeps both or
-   *  neither; nothing is written when nothing is delivered. */
-  commitWaitDelivery(id: string, inputIds: readonly string[], counters: WakeCounters = {}): void {
+   *  neither; nothing is written when nothing is delivered. `resumed` writes the run `running` in
+   *  the same commit (hearsay-tools/cezarion#1235): a crash after the provider's acknowledgement
+   *  then recovers a run that resumed, never a parked one that owes nothing. `stepId` names the
+   *  step that resumes with it: a `waiting` step reads `running` in that commit too. */
+  commitWaitDelivery(id: string, inputIds: readonly string[], counters: WakeCounters = {}, resumed = false, stepId?: string): void {
     const run = this.peek(id);
     if (!run) return;
     const ids = new Set(inputIds);
-    const delivered = (run.waits ?? []).filter((wait) => wait.phase === 'resolved' && ids.has(wait.id));
+    const delivered = (run.waits ?? []).filter((wait) => wait.phase === 'resolved' && ids.has(waitInputId(wait)));
     if (!delivered.length && !run.agentInputs?.some((input) => ids.has(input.id) && !input.deliveredAt)) return;
     const deliveredAt = new Date().toISOString();
     const retired = new Set(delivered.map((wait) => wait.id));
-    this.commitIndex(new Map([[id, { ...run, ...counters,
+    this.commitIndex(new Map([[id, { ...run, ...counters, ...(resumed ? { status: 'running' as const, activity: undefined } : {}),
+      ...(resumed && stepId ? { steps: run.steps.map((step) => step.id === stepId && step.status === 'waiting' ? { ...step, status: 'running' as const } : step) } : {}),
       waits: nonEmpty((run.waits ?? []).filter((wait) => !retired.has(wait.id))),
       lastWaits: settleWaits(run.lastWaits, delivered.map((wait) => ({ ...wait, phase: 'delivered' as const, deliveredAt }))),
       ...(run.agentInputs ? { agentInputs: run.agentInputs.map((input) => ids.has(input.id) && !input.deliveredAt ? { ...input, deliveredAt } : input) } : {}),
     }]]));
+  }
+
+  /** A park that gives up its slot (hearsay-tools/cezarion#1235): the run and its step read
+   *  `waiting`, committed at once instead of on the debounced save, so a refused write throws with
+   *  nothing changed and the caller keeps the slot. */
+  commitParked(id: string, stepId?: string): void {
+    const run = this.peek(id);
+    if (!run) return;
+    this.commitIndex(new Map([[id, { ...run, status: 'waiting', activity: undefined,
+      ...(stepId ? { steps: run.steps.map((step) => step.id === stepId ? { ...step, status: 'waiting' as const } : step) } : {}) }]]));
   }
 
   /** The wake counters alone, committed at once instead of on the debounced save: a crash after
@@ -2859,6 +2993,18 @@ export class RunStore extends EventEmitter {
           text: run.continuationMessage.origin === 'lifecycle' ? '' : run.continuationMessage.text,
         } } : {}),
       } : {}),
+    }]]));
+  }
+
+  /** A human message beside a run's waits (hearsay-tools/cezarion#1235): accepted durably, as
+   *  `commitWorkerWaitWithdrawal` accepts one, but every wait stays. A lifecycle opening becomes
+   *  the human's and keeps its wake text, so the message opens the continuation (and answers a
+   *  pending question) and the owed results still reach the agent. */
+  commitHumanMessageBesideWaits(id: string, acceptedHumanMessage: QueuedMessage): void {
+    const run = this.peek(id);
+    if (!run) throw new Error('missing queued message target');
+    this.commitIndex(new Map([[id, { ...run, queuedMessages: [...(run.queuedMessages ?? []), queuedMessageSchema.parse(acceptedHumanMessage)],
+      ...(run.continuationMessage ? { continuationMessage: { ...run.continuationMessage, origin: 'human' as const } } : {}),
     }]]));
   }
 

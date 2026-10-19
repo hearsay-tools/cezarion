@@ -53,6 +53,13 @@ describe('session provisioning', () => {
     expect(instructions).toMatch(/--attach <path> \(repeatable; copies a git-ignored file from your worktree[^)]*commit those instead\)/);
     expect(instructions).toContain('baseline-file, parent-attachment or parent-file references');
   });
+  it('provision text no longer says one active wait', () => {
+    const { instructions } = provision()!;
+    expect(instructions).not.toMatch(/one active wait|no automatic re-wait/i);
+    expect(instructions).toContain('Several waits can be open at once (workers, CI, timers)');
+    expect(instructions).toContain('Messages wake you and close no wait');
+    expect(instructions).toContain('cancel-wait <wait-id> stops one wait');
+  });
   it('provisions no ordinary-run metadata while off and never promotes invalid/worker records to roots', async () => {
     const ordinary = f.store.createRun({ title: 'ordinary', task: 'ordinary', workflow: 'quick-task', steps: [] });
     vi.stubEnv('CEZ_DELEGATION', '0'); expect(provision(ordinary.id)).toBeUndefined(); expect(f.store.getRun(ordinary.id)?.delegation).toBeUndefined();

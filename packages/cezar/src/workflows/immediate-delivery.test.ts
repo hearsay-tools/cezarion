@@ -106,25 +106,38 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
     expect(accepted.flat()).toEqual(inputs.map(input => input.id));
   });
 
-  it('delivers held messages right behind a human answer, in the same submission, never as the answer', async () => {
+  // hearsay-tools/cezarion#1235 phase 3a (design § Messages beside a pending question): a pending
+  // portable question no longer holds conversation input. The messages go beside the card in one
+  // submission, and the human's answer still answers it alone, through the answer seam.
+  it('delivers messages beside a pending portable question in one submission, never as its answer', async () => {
     const p = await parent('mock:ask');
     await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));
     await until(() => store.getRun(p.id)?.status === 'waiting');
+    const askSeq = store.readEvents(p.id).find(event => event.type === 'ask.requested')!.seq;
+    const card = () => store.getRun(p.id)?.waits?.find(wait => wait.kind === 'human' && wait.phase === 'open');
+    expect(card()).toMatchObject({ via: 'ask-line', askSeq });
     const w = await worker(p.id);
     const send = conversation(p.id);
+    const beside = vi.spyOn(sessionOf(p.id), 'sendAgentMessage');
     const held = ['first finding', 'second finding', 'third finding'].map(text => send(w.id, p.id, 'progress', text));
     manager.deliverConversationInput(p.id);
-    await new Promise(resolve => setTimeout(resolve, 150));
-    expect(held.every(input => !inputOf(p.id, input.id)?.deliveredAt)).toBe(true); // the human question holds them
+    await until(() => held.every(input => !!inputOf(p.id, input.id)?.deliveredAt));
+    const accepted = beside.mock.calls.filter((_, i) => beside.mock.results[i]?.value !== false);
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]![1]).toEqual(held.map(input => input.id));
+    expect(accepted[0]![2]).toEqual({ besideQuestion: true });
+    expect(new Set(held.map(input => inputOf(p.id, input.id)?.deliveredAt)).size).toBe(1);
+    // The card stays answerable: nothing answered it.
+    expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
+    await until(() => store.getRun(p.id)?.status === 'waiting' && turnEnds(p.id) >= 2);
+    expect(card()).toMatchObject({ askSeq });
     const write = vi.spyOn(sessionOf(p.id), 'sendMessage');
     expect(manager.sendMessage(p.id, [{ type: 'text', text: 'mock:agent-echo use Vitest' }])).toBe(true);
     expect(write).toHaveBeenCalledTimes(1);
     const content = JSON.stringify(write.mock.calls[0]![0]);
-    const at = (needle: string) => content.indexOf(needle);
-    expect(at('use Vitest')).toBeGreaterThan(-1);
-    for (const input of held) expect(at(input.id)).toBeGreaterThan(at('use Vitest'));
-    expect(new Set(held.map(input => inputOf(p.id, input.id)?.deliveredAt)).size).toBe(1);
-    expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toHaveLength(1);
+    expect(content).toContain('use Vitest');
+    for (const input of held) expect(content).not.toContain(input.id);
+    expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([expect.objectContaining({ askSeq })]);
     await until(() => held.every(input => !!inputOf(p.id, input.id)?.consumedAt));
   });
 

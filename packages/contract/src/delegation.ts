@@ -9,7 +9,8 @@ export type WorkerOperation = z.infer<typeof workerOperationSchema>;
 
 const commitShaSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 const requestHashSchema = z.string().regex(/^[0-9a-f]{64}$/);
-const workerIdsSchema = z.array(z.uuid()).min(1).max(32)
+/** 1–32 unique ids; the worker wait entry and `cezar_wait` reuse it for worker and request ids. */
+export const workerIdsSchema = z.array(z.uuid()).min(1).max(32)
   .refine(ids => new Set(ids).size === ids.length);
 const permissionsSchema = z.array(workerOperationSchema).max(7)
   .refine(operations => new Set(operations).size === operations.length);

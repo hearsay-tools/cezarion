@@ -81,6 +81,17 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     expect(waitHelp).toContain('--mode');
     expect(waitHelp).toContain('--timeout-seconds');
   });
+  // hearsay-tools/cezarion#1235: the help a parent reads says waits coexist and how to stop one.
+  it('documents that several waits coexist, that messages close none, and how cancel-wait stops one', async () => {
+    await runWorkerCommand(['wait', '--help'], {});
+    const waitHelp = String(output.mock.calls.at(-1)?.[0]);
+    expect(waitHelp).toMatch(/several waits can be open at once/i);
+    expect(waitHelp).toMatch(/messages wake you and close no wait/i);
+    await runWorkerCommand(['cancel-wait', '--help'], {});
+    const cancelHelp = String(output.mock.calls.at(-1)?.[0]);
+    expect(cancelHelp).toMatch(/stops one wait/i);
+    expect(cancelHelp).toMatch(/never cancels requests or workers/i);
+  });
   it('prints one inbox snapshot before ACK and rejects positional IDs', async () => {
     const listeners = process.stdout.listenerCount('error');
     const id = randomUUID(), receiptId = randomUUID();

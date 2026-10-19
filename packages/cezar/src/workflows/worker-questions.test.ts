@@ -116,13 +116,15 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       await f.service.send(f.parentCaller, { id: progress, recipientRunId: f.w.id, kind: 'progress', text: 'mock:agent-echo Still thinking', timeoutSeconds: 600 });
       await f.service.send(f.parentCaller, { id: followUp, recipientRunId: f.w.id, kind: 'follow-up', requestId: request, text: 'mock:agent-echo Only src', timeoutSeconds: 600 });
       manager.deliverConversationInput(f.w.id);
-      const held = () => store.getRun(f.w.id)?.agentInputs?.filter(input => [request, progress, followUp].some(id => id === input.id)) ?? [];
-      expect(held().every(input => !input.deliveredAt)).toBe(true);
-      expect(answered(f.w.id)).toEqual([]);
-      expect(store.getRun(f.w.id)?.status).toBe('waiting');
-      await f.reply('mock:agent-echo Use the parser');
-      await until(() => answered(f.w.id).length === 1 && held().every(input => !!input.deliveredAt));
+      // hearsay-tools/cezarion#1235: a pending question no longer holds them; they reach the
+      // worker beside it, and none of them answers it.
+      const beside = () => store.getRun(f.w.id)?.agentInputs?.filter(input => [request, progress, followUp].some(id => id === input.id)) ?? [];
+      await until(() => beside().length === 3 && beside().every(input => !!input.deliveredAt));
       await until(() => said(f.w.id, 'Only src'));
+      expect(answered(f.w.id)).toEqual([]);
+      await until(() => store.getRun(f.w.id)?.status === 'waiting' && store.getRun(f.w.id)?.hasPendingHumanAsk === true);
+      await f.reply('mock:agent-echo Use the parser');
+      await until(() => answered(f.w.id).length === 1);
     } finally { f.close(); }
   });
 
@@ -204,7 +206,9 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
   it('a parent reply answers the worker after a crash left its execution starting (#469)', () => replyAfterRestart(true));
   it('waits for reusable resources when recovery already completed the crashed execution (hearsay-tools/cezarion#732)', () => replyAfterRestart(true, true));
 
-  it('holds a worker question while the parent waits on the human, then delivers it behind the answer', async () => {
+  // hearsay-tools/cezarion#1235: the worker's question reaches the parent beside the parent's own
+  // pending question, which stays the human's to answer.
+  it('delivers a worker question beside the parent\'s own pending question, which stays answerable', async () => {
     process.env.CEZ_DELEGATION = '1';
     const p = await steeringParent('mock:ask'); await until(() => eventsOf(p.id, 'ask.requested').length === 1 && store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
@@ -212,9 +216,11 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     const questionId = String(eventsOf(w.id, 'worker-question-routed')[0]!.messageId);
     const question = () => store.getRun(p.id)?.agentInputs?.find(input => input.id === questionId);
     expect(question()).toBeDefined();
-    expect(question()?.deliveredAt).toBeUndefined();
-    expect(manager.sendMessage(p.id, [{ type: 'text', text: 'Vitest' }])).toBe(true);
     await until(() => !!question()?.deliveredAt);
+    expect(eventsOf(p.id, 'human-input-delivered')).toEqual([]);
+    await until(() => store.getRun(p.id)?.status === 'waiting' && store.getRun(p.id)?.hasPendingHumanAsk === true);
+    expect(manager.sendMessage(p.id, [{ type: 'text', text: 'Vitest' }])).toBe(true);
+    await until(() => eventsOf(p.id, 'human-input-delivered').length === 1);
     const human = eventsOf(p.id, 'human-input-delivered');
     expect(human).toHaveLength(1);
     expect(human[0]!.source).toBeUndefined();
@@ -417,14 +423,13 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     try {
       const request = randomUUID();
       await f.service.send(f.workerCaller, { id: request, recipientRunId: f.p.id, kind: 'request', text: 'Which module? mock:hold', timeoutSeconds: 600 });
-      // The durable wait a turn registered before its ask; prepareHumanAsk keeps it.
-      const delegation = store.getRun(f.w.id)!.delegation!;
-      if (delegation.role !== 'worker') throw Error('missing worker');
-      store.commitDelegation([{ id: f.w.id, delegation: { ...delegation, wait: { id: randomUUID(), workerIds: [], requestIds: [request], outcomes: [],
-        deadline: new Date(Date.now() + 600_000).toISOString(), phase: 'parked' } } }]);
+      // The wait a turn registered before its ask: a list entry since hearsay-tools/cezarion#1235,
+      // which the answer leaves open.
+      const wait = manager.registerRequestWait(f.w.id, { requestIds: [request], timeoutSeconds: 600 });
       await f.reply('mock:agent-echo Use the parser');
       await until(() => answered(f.w.id).length === 1);
       await until(() => said(f.w.id, 'Use the parser'));
+      expect(waitOf(store.getRun(f.w.id))).toMatchObject({ id: wait.id, requestIds: [request] });
     } finally { f.close(); }
   });
 
@@ -502,8 +507,9 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     } finally { f.close(); }
   });
 
-  // Guard: the parked wait adopts the reply as its message wake, and the reopened answer clears it.
-  it('withdraws an earlier wait when the answer reopens a closed worker session', async () => {
+  // hearsay-tools/cezarion#1235: the parked wait is a list entry, and the answer that reopens the
+  // closed session withdraws nothing.
+  it('leaves an earlier wait open when the answer reopens a closed worker session', async () => {
     const f = await askedPair();
     f.close();
     const request = randomUUID();
@@ -525,7 +531,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       await until(() => ['running', 'waiting'].includes(store.getRun(f.p.id)?.status ?? '') && store.getRun(f.w.id)?.status === 'waiting' && !manager.isActive(f.w.id));
       await service.send(parentCaller, { id: randomUUID(), recipientRunId: f.w.id, kind: 'reply', requestId: f.questionId, text: 'mock:agent-echo Use the parser', timeoutSeconds: 600 });
       await until(() => answered(f.w.id).length === 1);
-      expect(waitOf(store.getRun(f.w.id))?.requestIds).toBeUndefined();
+      expect(waitOf(store.getRun(f.w.id))?.requestIds).toEqual([request]);
     } finally { credentials2.close(); }
   });
 
