@@ -14,6 +14,19 @@ test('real Release test failure matches Nightly despite different job and step n
   assert.equal(a[0].stage, 'verification');
   assert.match(a[0].excerpt, /AssertionError/);
 });
+test('a step stopped at the job time limit is one timeout cause per stage and step', () => {
+  const input = release(), timeout = 'The job has exceeded the maximum execution time of 20m0s';
+  const a = causesForStep({...input, job: {...input.job, timeout}});
+  const b = causesForStep({...input, run: {...input.run, id: 999, name: 'Nightly'}, job: {...input.job, name: 'Vitest shard 2/3', timeout}, log: ''});
+  assert.equal(a.length, 1);
+  assert.equal(a[0].kind, 'timeout');
+  assert.equal(a[0].stage, 'verification');
+  assert.equal(a[0].title, 'Run server and cockpit unit suites exceeded the job time limit');
+  assert.equal(a[0].signature, b[0].signature);
+  assert.notEqual(a[0].signature, causesForStep(input)[0].signature);
+  assert.match(a[0].excerpt, /20m0s/);
+  assert.match(b[0].excerpt, /20m0s/);
+});
 test('different tests in one step remain distinct and repeated identical FAIL lines collapse', () => {
   const a = release();
   a.log = 'FAIL src/a.test.ts > handles empty input\nError: bad\nFAIL src/a.test.ts > handles duplicates\nError: bad\nFAIL src/a.test.ts > handles empty input';

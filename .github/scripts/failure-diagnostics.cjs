@@ -50,6 +50,13 @@ function causesForStep({run, job, step, log}) {
   const lines = stepLines(log, step);
   const safeLines = stepLines(redact(log || ''), step);
   const stage = stageFor(step);
+  // `job.timeout` is the check-run annotation of a job Actions stopped at its
+  // `timeout-minutes`. Its log just ends, so the last lines show what was still
+  // running, and the step, not the run or the log, identifies the recurring cause.
+  if (job.timeout) {
+    const title = `${step.name} exceeded the job time limit`;
+    return [{signature:hash(`timeout:${stage}:${normalizeIdentity(step.name)}`),title:sanitize(title).slice(0,180),stage,kind:'timeout',failureIdentity:title,excerpt:sanitize(`${job.timeout}\n\nLast output before the job was stopped:\n${safeLines.slice(-30).join('\n')}`)}];
+  }
   const tests = lines.flatMap((line, index) => {
     const match = line.match(/\bFAIL\s+(?:\S+\s+)?((?:[\w./-]+\.(?:test|spec)\.[cm]?[jt]sx?)(?:\s+>\s+.+)?)/);
     if (!match) return [];
