@@ -196,8 +196,12 @@ rl.on('close', () => queue.then(() => process.exit(0)));
     assert.equal(wait.wait.phase, 'registered'); assert.match(wait.instruction, /End your turn/);
     await writeFile(join(wire, parent.id + '.release'), 'yield');
     await until(() => exists(join(wire, workerId + '.started')), 'worker admitted after parent yields');
-    const parked = store.getRun(parent.id)?.delegation;
-    assert.equal(parked?.role === 'root' && parked.wait?.phase, 'parked'); assert.equal(semaphore.busy(), 1);
+    // Since #1235 phase 3a the agent's worker wait is an entry in the run's wait list, and the
+    // parked parent holds no slot: the one busy slot is the worker's.
+    const parked = store.getRun(parent.id);
+    assert.equal(parked?.status, 'waiting');
+    assert.ok(parked?.waits?.some(entry => entry.kind === 'worker' && entry.phase === 'open' && entry.workerIds?.includes(workerId)), 'an open worker entry names the worker');
+    assert.equal(semaphore.busy(), 1);
     const inspection = await command(['inspect', workerId]);
     assert.equal(inspection.parentRunId, parent.id); assert.equal(inspection.status, 'running');
     const workspace = inspection.workspace;
