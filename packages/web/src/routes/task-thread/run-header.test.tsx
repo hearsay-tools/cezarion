@@ -190,6 +190,32 @@ describe('open waits', () => {
     expect(screen.queryByText(/waiting for capacity/)).toBeNull()
   })
 
+  it('header lists an open worker wait with its deadline', () => {
+    stubFetch()
+    type WorkerEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'worker' }>
+    const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
+    const base = {
+      kind: 'worker', source: 'agent', via: 'cez-worker-wait', turnId: 'turn-1', timeoutSeconds: 600,
+      registeredAt: '2026-09-22T12:00:00.000Z', deadline: '2026-09-22T12:10:00.000Z', mode: 'any',
+    } as const
+    const byWorker = {
+      ...base, id: uuid(61), phase: 'open', workerIds: [uuid(1), uuid(2)],
+      revisions: [{ workerId: uuid(1), revision: 0 }, { workerId: uuid(2), revision: 0 }], outcomes: [],
+    } as WorkerEntry
+    const byRequest = {
+      ...base, id: uuid(62), phase: 'open', deadline: '2026-09-22T12:20:00.000Z', requestIds: [uuid(3)], requestOutcomes: [],
+    } as WorkerEntry
+    const settled = {
+      ...base, id: uuid(63), phase: 'cancelled', cancelledAt: '2026-09-22T12:01:00.000Z', workerIds: [uuid(4)],
+      revisions: [{ workerId: uuid(4), revision: 0 }], outcomes: [],
+    } as WorkerEntry
+    renderHeader(run('waiting', { waits: [byWorker, byRequest, settled] }))
+    const items = [...document.querySelectorAll<HTMLElement>('[data-slot="worker-wait-status"]')]
+    expect(items.map(item => item.querySelector('p')?.textContent)).toEqual(['Waiting on 2 workers', 'Waiting on 1 request reply'])
+    expect(items.map(item => item.querySelector('time')?.getAttribute('datetime')))
+      .toEqual(['2026-09-22T12:10:00.000Z', '2026-09-22T12:20:00.000Z'])
+  })
+
   it('reads a run with only a timer open as monitoring, without a note line when there is none', () => {
     stubFetch()
     renderHeader(run('waiting', { waits: [timerEntry()] }))
