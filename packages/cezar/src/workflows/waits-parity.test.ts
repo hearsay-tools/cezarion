@@ -21,7 +21,7 @@ import { ASK_TEXT, messagesPrompt, MONITORING_TEXT } from './monitoring-turn.tes
 import { blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
 import { withDelayedCommand, withHeldPrintResponse, withRejectedCommand } from '../core/owned-input-delivery.testkit.ts';
-import { ciNativeMessages, gatedProviderFailure, persistentWakeFailure, thenSay, TIMER_WAKE_OPENING, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
+import { ciNativeMessages, gatedProviderFailure, MESSAGE_WAKE_OPENING, persistentWakeFailure, thenSay, TIMER_WAKE_OPENING, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
 
 // hearsay-tools/cezarion#1233: every runner opens, cancels and survives CI and timer waits on its
 // own native wire. The production tool controller, bundled tool, runner, store and scheduler stay
@@ -192,7 +192,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U3w', 'U7w', 'U9w', 'U19']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U3w', 'U7w', 'U9w', 'U14m', 'U19']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -1289,6 +1289,57 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       await until(() => settled(p.id, wait.id)?.phase === 'delivered' && prompted(runner, workerWake(wait)).length > 0);
       expect(inputsFor(p.id, wait.id)).toHaveLength(1);
       await until(() => store.getRun(p.id)?.status === 'waiting');
+    });
+
+    /** A parent parked on a worker wait whose session has closed, so a worker message wakes it
+     *  through a scheduler continuation whose opening prompt the provider fails until lifted. */
+    async function messageWakeWithoutSession() {
+      const f = await conversingParent(runner);
+      const failure = persistentWakeFailure(root, runner, { opening: MESSAGE_WAKE_OPENING, unread: true });
+      await parentTurn(f.p.id, toolCall('cezar_wait', { kind: 'worker', worker_ids: [f.w.id], timeout_seconds: 600 }), () => parkedOn(f.p.id, workerWaits(f.p.id)[0]));
+      engine().active.get(f.p.id)!.session.end();
+      await until(() => !manager.isActive(f.p.id));
+      return { ...f, failure };
+    }
+
+    it(`${runner} U14m a message-only wake beside a worker wait whose sessions persistently fail stops at the delivery bound, the run fails keeping the message, and Continue delivers it once`, async () => {
+      retryAtOnce();
+      const f = await messageWakeWithoutSession();
+      const id = await f.progress('Worker progress u14m');
+      // Without the bound the attempts never stop: one attempt past it is enough to fail on.
+      await until(() => (store.getRun(f.p.id)?.status === 'failed' && !manager.isActive(f.p.id)) ||
+        prompted(runner, MESSAGE_WAKE_OPENING).length > MAX_WAKE_DELIVERY_ATTEMPTS);
+      expect(prompted(runner, MESSAGE_WAKE_OPENING)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS);
+      const run = store.getRun(f.p.id)!;
+      expect(run.status).toBe('failed');
+      expect(run.error).toMatch(/^continue failed: /);
+      expect(delivered(f.p.id, id)).toBe(false);
+      expect(store.readEvents(f.p.id).filter(event => event.type === 'note' && event.message === WAKE_DELIVERY_CAP_NOTE)).toHaveLength(1);
+      expect(engine().wakeBackoffs.has(f.p.id)).toBe(false);
+      expect(engine().wakeRetries.has(f.p.id)).toBe(false);
+      // A steering wire took the message into each failed opening turn; none of them read it.
+      const attempts = prompted(runner, 'Worker progress u14m').length;
+      f.failure.lift();
+      expect(manager.continueRun(f.p.id, { text: 'go on' })).toEqual({ ok: true });
+      await until(() => delivered(f.p.id, id) && prompted(runner, 'Worker progress u14m').length > attempts);
+      expect(store.getRun(f.p.id)?.agentInputs?.filter(input => input.id === id)).toHaveLength(1);
+      await until(() => store.getRun(f.p.id)?.status === 'waiting');
+    });
+
+    it(`${runner} U14m a message-only wake that fails once counts the failure, and the delivered message clears it`, async () => {
+      // The retry waits on its backoff, which the test fires once the provider is lifted.
+      engine().wakeRetryBackoff = { fastMs: 60_000, fastCount: MAX_WAKE_DELIVERY_ATTEMPTS, capMs: 60_000 };
+      const f = await messageWakeWithoutSession();
+      const id = await f.progress('Worker progress u14m once');
+      await until(() => store.getRun(f.p.id)?.waitDeliveryFailures === 1 && engine().wakeBackoffs.has(f.p.id) && !manager.isActive(f.p.id));
+      expect(store.getRun(f.p.id)?.status).toBe('waiting');
+      f.failure.lift();
+      const backoff = engine().wakeBackoffs.get(f.p.id) as NodeJS.Timeout & { _onTimeout(): void };
+      backoff._onTimeout(); clearTimeout(backoff);
+      await until(() => delivered(f.p.id, id) && store.getRun(f.p.id)?.agentInputs?.find(input => input.id === id)?.awaitingRead !== true);
+      expect(store.getRun(f.p.id)?.waitDeliveryFailures).toBeUndefined();
+      await until(() => store.getRun(f.p.id)?.status === 'waiting');
+      expect(store.getRun(f.p.id)?.waitDeliveryFailures).toBeUndefined();
     });
 
     it(`${runner} U19 a worker message beside a pending portable question is delivered and the question stays answerable`, async () => {

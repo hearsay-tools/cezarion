@@ -2379,7 +2379,7 @@ export class RunManager {
    * `MAX_WAKE_DELIVERY_ATTEMPTS`. Every settled run keeps its results.
    */
   private failedWakeDelivery(runId: string, error: string): 'park' | 'settle' | 'capped' {
-    if (!resolvedWaits(this.store.getRun(runId) ?? {}).length) return 'park';
+    if (!this.owesDelivery(runId)) return 'park';
     if (parseUsageLimit(error)) return 'settle';
     const failures = (this.store.getRun(runId)?.waitDeliveryFailures ?? 0) + 1;
     if (failures >= MAX_WAKE_DELIVERY_ATTEMPTS) {
@@ -2399,10 +2399,28 @@ export class RunManager {
     return 'park';
   }
 
+  /** The closing session leaves something undelivered: a resolved wait, or a wake of messages
+   *  alone (`owesWake`), which reopens the run as a resolved wait does and so counts against the
+   *  same bound (hearsay-tools/cezarion#1235). */
+  private owesDelivery(runId: string): boolean {
+    const run = this.store.getRun(runId);
+    return !!run && (resolvedWaits(run).length > 0 || this.owesWake(run));
+  }
+
   /** A delivery, a human or a terminal path ends a run of failed deliveries and its backoff. */
   private resetWakeDelivery(runId: string): void {
     this.clearWakeDeliveryFailures(runId);
     const timer = this.wakeBackoffs.get(runId); if (timer) clearTimeout(timer); this.wakeBackoffs.delete(runId);
+  }
+
+  /** A message the agent received ends a run of failed deliveries, as a delivered wait result does
+   *  (hearsay-tools/cezarion#1235). The opening prompt of a wake continuation is not one: a session
+   *  that reads it and fails has delivered nothing it owed, nor has a read reported for a message
+   *  whose submission was never acknowledged. */
+  private clearFailuresOnMessageRead(runId: string, ids: readonly string[]): void {
+    if (this.store.getRun(runId)?.agentInputs?.some(input => input.conversation && ids.includes(input.id) && input.deliveredAt && !input.awaitingRead)) {
+      this.clearWakeDeliveryFailures(runId);
+    }
   }
 
   /** The failure count is on the run record, so a restart keeps it (hearsay-tools/cezarion#1234). */
@@ -5622,6 +5640,7 @@ export class RunManager {
     try {
       if (!read.length) return;
       this.store.commitAgentInputsConsumed(runId, read, new Date().toISOString());
+      this.clearFailuresOnMessageRead(runId, read);
       this.reconcileWorkerWaits(); // projects the consumed receipt
     } catch (error) { console.warn(`[cez] agent input consumption checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
@@ -5983,11 +6002,14 @@ export class RunManager {
             for (const id of conversationIds) state.retiredInFlight?.delete(id);
             this.store.commitAgentInputs(runId, queue.map(input => accepted.includes(input.id) && (!input.deliveredAt || carried.includes(input.id))
               ? { ...input, deliveredAt, ...awaiting } : input));
+            // An observable harness has delivered a message once it reads it: a steering session
+            // that fails before then requeues it unread and counts a failure (#1235).
+            this.clearFailuresOnMessageRead(runId, accepted);
             if (state.inputDelivery?.consumption === 'observable') {
               const early = accepted.filter(id => state.consumedBeforeAck?.has(id));
               for (const id of accepted) if (!early.includes(id)) state.unreadInputIds?.add(id);
               for (const id of early) state.consumedBeforeAck?.delete(id);
-              if (early.length) this.store.commitAgentInputsConsumed(runId, early, deliveredAt);
+              if (early.length) { this.store.commitAgentInputsConsumed(runId, early, deliveredAt); this.clearFailuresOnMessageRead(runId, early); }
             }
           }
           // phase 3b (#1235): completion gate only
@@ -7318,7 +7340,7 @@ export class RunManager {
       if (this.holdsAgentWaits(runId) && !state.cancelled) {
         sink.sessionEnded('end_turn');
         // A clean close that leaves results undelivered is a failed delivery too.
-        const delivery = resolvedWaits(this.store.getRun(runId) ?? {}).length ? this.failedWakeDelivery(runId, WAKE_SESSION_CLOSED_ERROR) : 'park';
+        const delivery = this.owesDelivery(runId) ? this.failedWakeDelivery(runId, WAKE_SESSION_CLOSED_ERROR) : 'park';
         if (delivery === 'park') {
           // No turn end will show a human wait this session registered (hearsay-tools/cezarion#1234).
           this.surfaceHumanWait(runId, state);
@@ -7769,7 +7791,7 @@ export class RunManager {
           runError = `step "${step.id}" failed: ${failure}`;
         }
         // A clean close that leaves results undelivered is a failed delivery too.
-        const undelivered = failure ?? (resolvedWaits(this.store.getRun(runId) ?? {}).length ? WAKE_SESSION_CLOSED_ERROR : undefined);
+        const undelivered = failure ?? (this.owesDelivery(runId) ? WAKE_SESSION_CLOSED_ERROR : undefined);
         const delivery = this.holdsAgentWaits(runId) && !state.cancelled
           ? undelivered ? this.failedWakeDelivery(runId, undelivered) : 'park' : 'settle';
         if (delivery === 'capped') {
