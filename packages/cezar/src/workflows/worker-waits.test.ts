@@ -97,8 +97,10 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
       expect(store.getRun(p.id)?.waits?.filter(wait => wait.phase === 'open')).toHaveLength(16);
       expect(() => manager.registerWorkerListWait(p.id, { workerIds: subsets[16]!, timeoutSeconds: 600 }, 'cezar_wait'))
         .toThrow(expect.objectContaining({ code: 'capacity_limit' }));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const answer = (await handlers(p.id).registerWait({ kind: 'worker', worker_ids: subsets[17]!, timeout_seconds: 600 }, 'cezar_wait')).answer;
       expect(answer).toMatchObject({ ok: false, code: 'capacity' });
+      expect(warn).toHaveBeenCalledExactlyOnceWith('[cez] wait registration refused: capacity');
       // A repeat of an open wait is not a new one, and is still answered at capacity.
       expect(manager.registerWorkerListWait(p.id, { workerIds: subsets[0]!, timeoutSeconds: 600 }, 'cezar_wait').phase).toBe('open');
     } finally { release(); }
@@ -119,6 +121,24 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
     await until(() => settledOf(p.id, entry.id)?.phase === 'delivered');
     expect(inputOf(p.id, entry.id)?.deliveredAt).toBeDefined();
     expect(store.readEvents(p.id).filter(event => event.type === 'worker-outcome')).toHaveLength(1);
+  });
+
+  it('an outcome whose resolution write fails resolves once storage recovers, with no further family events', async () => {
+    const { run: p, release } = await heldParent();
+    try {
+      const w = await worker(p.id);
+      const entry = manager.registerWorkerListWait(p.id, { workerIds: [w.id], timeoutSeconds: 600 }, 'cezar_wait');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const commit = vi.spyOn(store, 'commitWait').mockImplementationOnce(() => { throw Error('injected: disk full'); });
+      // The unfixed engine lets the failed write escape the observation that triggered it.
+      try { fixtureUpdateRun(w.id, { status: 'done' }); } catch { /* recorded by the assertions below */ }
+      expect(commit).toHaveBeenCalled();
+      expect(entryOf(p.id, entry.id)?.phase).toBe('open');
+      // Storage has recovered (the fault was one write), and nothing else touches the family.
+      await until(() => entryOf(p.id, entry.id)?.phase === 'resolved');
+      expect(entryOf(p.id, entry.id)).toMatchObject({ result: { reason: 'outcome' }, outcomes: [{ workerId: w.id, status: 'done' }] });
+      expect(warn).toHaveBeenCalledExactlyOnceWith('[cez] worker wait checkpoint failed; retrying in 1 second');
+    } finally { release(); }
   });
 
   it('a destroyed worker resolves a parked wait and cancels a live-turn wait', async () => {

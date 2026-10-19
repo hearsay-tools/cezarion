@@ -49,6 +49,37 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       outcomes: [{ workerId: w.id, status: 'done' }] });
   });
 
+  it('a recovered worker wait whose wake input is a queued reply delivers the reply body and the receipt once', async () => {
+    // A legacy full-inbox wait took an accepted reply's id as its wake id; the upgrade keeps it as
+    // `wakeInputId` (hearsay-tools/cezarion#1235). The reply is still the worker's message.
+    const p = await parent();
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id);
+    const wait = register(p.id, [w.id]);
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+    store.flush();
+    const replyId = randomUUID(); const body = 'The parser module, reply body marker';
+    const disk = readPersistedRuns(join(root, '.ai/cezar')).map(row => {
+      if (row.id !== p.id) return row;
+      const entry = row.waits.find((found: { id: string }) => found.id === wait.id);
+      return { ...row, waits: row.waits.filter((found: { id: string }) => found.id !== wait.id),
+        delegation: { ...row.delegation, wait: { id: wait.id, workerIds: [w.id], revisions: entry.revisions, deadline: entry.deadline,
+          phase: 'wake-pending', reason: 'outcome', outcomes: [{ workerId: w.id, status: 'done', observedAt: new Date().toISOString() }], wakeId: replyId } },
+        agentInputs: [...row.agentInputs ?? [], { id: replyId, source: 'agent', parentRunId: p.id, text: body, createdAt: new Date().toISOString(),
+          conversation: { senderRunId: w.id, recipientRunId: p.id, kind: 'reply', requestId: randomUUID() } }] };
+    });
+    const submit = vi.spyOn(RunManager.prototype as unknown as { submitAgentInput(...args: unknown[]): boolean }, 'submitAgentInput');
+    await restart(false, disk);
+    await until(() => store.getRun(p.id)?.lastWaits?.some(found => found.id === wait.id && found.phase === 'delivered') === true);
+    const sent = submit.mock.calls.map(([, , content]) => (content as Array<{ text: string }>).map(part => part.text).join('\n'));
+    const carrying = sent.filter(text => text.includes(body));
+    expect(carrying).toHaveLength(1);
+    expect(carrying[0]!.split(body)).toHaveLength(2);
+    expect(carrying[0]).toContain(`Worker wait ${wait.id} (terminal outcome)`);
+    expect(sent.filter(text => text.includes(`Worker wait ${wait.id}`))).toHaveLength(1);
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === replyId && input.deliveredAt)).toHaveLength(1);
+  });
+
   it('a deadline write failure is contained and retried without losing intent or capacity', async () => {
     // This fault exercises only deadline persistence, never an unrelated live turn.
     const release = join(root, 'release-deadline-turn'); const wire = controlledWire({ firstResultGate: release });
