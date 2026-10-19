@@ -116,6 +116,15 @@ named executable exemptions. Prove the relevant regression fails without the
 fix. See `AGENT_PROTOCOL.md` §7 for the contract and examples. Do not defer this
 coverage to a separate issue.
 
+Before opening a PR that changes `packages/cezar/src/workflows/run.ts`'s wait,
+turn-end, failure or step-settlement paths, verify every suite matching
+`packages/cezar/src/core/*-parity.test.ts` and
+`packages/cezar/src/workflows/*-parity.test.ts`: with Squeal, run
+`squeal status --wait 60000 packages/cezar/src/core/*-parity.test.ts packages/cezar/src/workflows/*-parity.test.ts`
+and require a passing verdict for all selected files (repeat if still pending);
+without Squeal, run
+`npm test -- packages/cezar/src/core/*-parity.test.ts packages/cezar/src/workflows/*-parity.test.ts`.
+
 ## The HTTP API
 
 Four invariants. A feature that breaks any of them compiles on its own branch and stops working
