@@ -69,6 +69,25 @@ pencil's Tab started from the Columns trigger and landed on "New task" (#410).
 both the absence and the returned focus; use it wherever a keyboard step or a focus assertion
 follows a dismissal.
 
+## Diagnosing flake causes
+
+| Cause | How to confirm it |
+| --- | --- |
+| A late mount shifts the layout under a click | Use the [hearsay-tools/cezarion#1255 probe](https://github.com/hearsay-tools/cezarion/issues/1255): gate the request that mounts the late piece, log `pointerdown`, `focusin` and `click` targets together with its mount time, and release the gate in each gap of the click sequence described below. Compare event targets with the intended target and its original centre. |
+
+agent-browser v0.36.0 reads the target's centre once, then sends separate CDP
+`mouseMoved`, `mousePressed` and `mouseReleased` events at that point. It checks for
+interception while resolving the centre, but does not hit-test again before the press. For the probe, hold `/api/v1/projects` while the health-gated Tools trigger
+appears, record its centre, and mount the rail between the centre read and move,
+between move and press, and between press and release in separate trials. Split the
+sequence through `browser.withCdp` so the gate can be released at each boundary;
+observe the rail mount before sending the next event, rather than sleeping. A press
+can focus the theme toggle at the old centre while the intended trigger receives no
+click. Wait for the layout-changing mount before the real click; target existence
+alone cannot close this race. For coordinate probes through `tapAt`, round both
+coordinates to integers: agent-browser's `mouse move` rejects decimals with
+`Missing arguments for: mouse move`.
+
 ## The rules the ratchet enforces
 
 `packages/web/src/test/e2e-wait-discipline.test.ts` scans every `.ts` file here (the seam and

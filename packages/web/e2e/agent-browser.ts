@@ -787,10 +787,11 @@ export class AgentBrowser {
 
   /** operation: interact (`mouse move`/`down`/`up`) — a tap at a viewport coordinate.
    *
-   *  `click` targets an element's center point and, by design, refuses when something covers it.
-   *  A modal backdrop is exactly that case: it spans the viewport, so its center sits under the
-   *  drawer it is dimming, and the only honest way to tap the backdrop *beside* the drawer is by
-   *  coordinate. */
+   *  Coordinates must be integers: agent-browser's `mouse move` rejects decimals with
+   *  "Missing arguments for: mouse move". Round measured coordinates before calling.
+   *  `click` checks for interception when resolving the centre, but does not recheck before
+   *  pressing (see `click` below). A modal backdrop spans the viewport, so its centre sits under the drawer it is dimming; tap
+   *  the backdrop *beside* the drawer by coordinate. */
   tapAt(x: number, y: number): void {
     this.run(['mouse', 'move', String(x), String(y)])
     this.run(['mouse', 'down'])
@@ -1052,7 +1053,13 @@ export class AgentBrowser {
     this.run(['set', 'media', 'reduced-motion'])
   }
 
-  /** operation: interact (`click`). Waits for the target first; see `awaitTarget`. */
+  /** operation: interact (`click`). Waits for the target first; see `awaitTarget`.
+   *  agent-browser v0.36.0 reads the target's centre once, then sends separate CDP
+   *  `mouseMoved`, `mousePressed` and `mouseReleased` events at that same point. It performs
+   *  an interception hit-test while resolving the centre, but no further hit-test before
+   *  the press: a layout shift between the centre read and the press sends the press
+   *  to whatever now occupies that point. Waiting for existence does not prevent this;
+   *  wait for the layout-changing mount before clicking (hearsay-tools/cezarion#1255). */
   click(selector: string): void {
     this.awaitTarget('click', selector)
     this.run(['click', selector])
