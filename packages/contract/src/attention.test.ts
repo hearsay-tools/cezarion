@@ -345,4 +345,22 @@ describe('computeWaitingOn and worker entries', () => {
     const parked = { status: 'waiting', delegation: { role: 'root', wait: { phase: 'parked', workerIds: ['a', 'b'], outcomes: [] } } } as unknown as AttentionInput;
     expect(deriveAttention(parked)).toMatchObject({ shape: 'workers', label: 'waiting on 2 workers' });
   });
+
+  // A summary omits `waits`: the count above the completion wait's own says a list entry stands behind it.
+  it('reads a summary with a registered completion wait and a worker entry as waiting on workers', () => {
+    const delegation = { role: 'root', wait: { phase: 'registered', workerIds: ['a'], outcomes: [] } };
+    const mixed = { status: 'waiting', delegation, waitingOn: { kind: 'workers', count: 3 } } as unknown as AttentionInput;
+    expect(deriveAttention(mixed)).toEqual({ bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on 3 workers' });
+    expect(deriveAttention({ ...mixed, hasPendingHumanAsk: true }).label).toBe('needs you');
+    expect(deriveAttention(mixed, true).label).toBe('needs you');
+  });
+
+  it('keeps a registered completion wait alone as Needs you on a summary and on a full record', () => {
+    const delegation = { role: 'root', wait: { phase: 'registered', workerIds: ['a'], outcomes: [] } };
+    expect(deriveAttention({ status: 'waiting', delegation, waitingOn: { kind: 'workers', count: 1 } } as unknown as AttentionInput).label).toBe('needs you');
+    expect(deriveAttention({ status: 'waiting', delegation } as unknown as AttentionInput).label).toBe('needs you');
+    // The full record with both reads as workers.
+    const entry = workerWait('88888888-8888-4888-8888-888888888881', ids(1));
+    expect(deriveAttention({ status: 'waiting', delegation, waits: [entry] } as unknown as AttentionInput).label).toBe('waiting on 2 workers');
+  });
 });

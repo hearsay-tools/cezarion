@@ -1,5 +1,5 @@
 import type { RunIndexEntry, RunRecord, RunSummary } from './runs.ts';
-import { hasResolvedWait, resolveWaitingOn } from './waits.ts';
+import { completionWorkersOwed, hasResolvedWait, resolveWaitingOn } from './waits.ts';
 
 /**
  * The one canonical attention function (cockpit spec, "Design system" → status grammar).
@@ -176,8 +176,15 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
     return { bucket: 'none', tone: 'running', shape: run.delegation.role === 'root' ? 'workers' : 'ring', pulse: false, label: dependencyLabel };
   }
   const workerEntries = (Array.isArray(run.waits) ? run.waits : []).filter((wait) => wait?.kind === 'worker' && wait.phase === 'open');
-  // A `registered` completion wait (not yet parked) reads as Needs you, as it always has.
-  const legacyRegisteredOnly = workerEntries.length === 0 && run.delegation?.role !== 'invalid' && run.delegation?.wait?.phase === 'registered';
+  // Does a worker-list wait stand behind `waitingOn`? A full record says so by its entries. A
+  // summary omits `waits`, so it says so by a count above what the legacy `delegation.wait`
+  // alone accounts for (`computeWaitingOn` adds both).
+  const listWorkerWait = Array.isArray(run.waits)
+    ? workerEntries.length > 0
+    : waitingOn?.kind === 'workers' && waitingOn.count > (completionWorkersOwed(run.delegation) ?? 0);
+  // A `registered` completion wait (not yet parked) alone reads as Needs you, as it always has.
+  // Phase 3b (hearsay-tools/cezarion#1235) moves it into the list and this exception goes.
+  const legacyRegisteredOnly = !listWorkerWait && run.delegation?.role !== 'invalid' && run.delegation?.wait?.phase === 'registered';
   if (waitingOn?.kind === 'workers' && !legacyRegisteredOnly && !run.hasPendingHumanAsk) {
     // Worker waits in the list (hearsay-tools/cezarion#1235): the same wording as the legacy
     // `delegation.wait` path above, which the completion gate keeps until phase 3b. A worker

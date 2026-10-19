@@ -297,7 +297,7 @@ export type WaitingOnInput = Partial<Pick<RunRecord, 'waits' | 'hasPendingHumanA
 };
 
 /** The completion gate's wait, until phase 3b moves it into the list (hearsay-tools/cezarion#1235). */
-function completionWorkersOwed(delegation: WaitingOnInput['delegation']): number | undefined {
+export function completionWorkersOwed(delegation: WaitingOnInput['delegation']): number | undefined {
   if (!delegation || delegation.role === 'invalid' || !delegation.wait) return undefined;
   const wait = delegation.wait;
   // `wake-pending` means its workers settled and only the wake is left: no longer open.
