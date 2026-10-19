@@ -50,6 +50,10 @@ export const WAIT_CRITERIA = [
   // hearsay-tools/cezarion#1301 phase 3b: a blocked done at the turn end.
   { id: 'U20', scenario: 'baseline', name: 'a done blocked by live workers at the turn end gets one refusal nudge with the will-wait sentence and opens no wait' },
   { id: 'U20u', scenario: 'baseline', name: 'a done blocked by a settled, uncollected worker gets the uncollected refusal nudge without the will-wait sentence' },
+  { id: 'U21', scenario: 'baseline', name: 'an ignored refusal with live workers parks on a Cezar worker wait that settlement wakes' },
+  { id: 'U21m', scenario: 'baseline', name: 'a worker message wakes a parent parked on the completion wait and the wait stays open' },
+  { id: 'U21h', scenario: 'baseline', name: 'an ignored refusal with only uncollected results parks on Cezar\'s human wait' },
+  { id: 'U21a', scenario: 'autonomous-cap', name: 'an autonomous parent\'s ignored refusal is nudged again until the budget' },
 ] as const;
 
 /** The native mocks' `mock:cezar-tool` prompt: one cezar tool call through the runner's own wire.

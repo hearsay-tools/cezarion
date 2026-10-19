@@ -163,6 +163,17 @@ async function parentTurn(id: string, text: string, parked: () => boolean) {
   await until(() => turnEnds(id) > turns && store.getRun(id)?.status === 'waiting' && parked());
 }
 
+/** The parent's done is refused at the turn end, and the nudge's reply turn (the mock's
+ *  `CEZ_MOCK_COMPLETION_REPLY`) ends on done again (hearsay-tools/cezarion#1301): one refusal
+ *  prompt, then `parked`. Returns the parent's open worker entry, if any. */
+async function ignoreRefusal(runner: RunnerId, id: string, refusal: string, parked: () => boolean) {
+  expect(manager.sendMessage(id, [{ type: 'text', text: messagesPrompt(runner, ['All done.\nCEZ:DONE']) }])).toBe(true);
+  await until(() => prompted(runner, refusal).length > 0 && store.getRun(id)?.status === 'waiting' && parked());
+  expect(prompted(runner, refusal)).toHaveLength(1);
+  expect(store.readEvents(id).filter(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE))).toHaveLength(1);
+  return workerWaits(id)[0]!;
+}
+
 /** A steering parent on `runner`'s native wire and a worker running on the Claude wire, parked,
  *  with each one's credential on a delegation service, as `cez worker send` reaches them. */
 async function conversingParent(runner: RunnerId) {
@@ -193,7 +204,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U19', 'U20', 'U20u']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U19', 'U20', 'U20u', 'U21', 'U21m', 'U21h', 'U21a']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -1452,6 +1463,93 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
         expect(workerWaits(p.id)).toEqual([]);
       });
     }
+
+    // hearsay-tools/cezarion#1301: the turn that answers the refusal nudge ends on done again.
+    it(`${runner} U21 an ignored refusal with live workers parks on a Cezar worker wait that settlement wakes`, async () => {
+      process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
+      const { p, w } = await parentWithWorker(runner);
+      const entry = await ignoreRefusal(runner, p.id, `Workers are still live: ${w.id}.`, () => workerWaits(p.id)[0]?.phase === 'open');
+      // Only Cezar's completion wait is open: no implicit live-worker re-check timer beside it.
+      expect(store.getRun(p.id)?.waits).toEqual([entry]);
+      expect(entry).toMatchObject({ kind: 'worker', source: 'cezar', via: 'completion', mode: 'all', workerIds: [w.id], phase: 'open' });
+      expect(entry).not.toHaveProperty('deadline');
+      expect(entry).not.toHaveProperty('timeoutSeconds');
+      expect(engine().waitTimers.has(entry.id)).toBe(false);
+      expect(engine().monitoring.has(p.id)).toBe(false);
+      expect(semaphore.busy()).toBe(0);
+      expect(store.getRun(p.id)?.activity).toBeUndefined();
+      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
+      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
+      expect(toRunSummary(store.getRun(p.id)!).waitingOn).toEqual({ kind: 'workers', count: 1 });
+      fixtureUpdateRun(w.id, { status: 'done' });
+      await until(() => settled(p.id, entry.id)?.phase === 'delivered' && prompted(runner, workerWake(entry)).length > 0);
+      expect(settled(p.id, entry.id)).toMatchObject({ result: { reason: 'outcome' } });
+      expect(inputsFor(p.id, entry.id)).toHaveLength(1);
+      expect(prompted(runner, workerWake(entry))).toHaveLength(1);
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+    });
+
+    it(`${runner} U21m a worker message wakes a parent parked on the completion wait and the wait stays open`, async () => {
+      process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
+      const f = await conversingParent(runner);
+      const entry = await ignoreRefusal(runner, f.p.id, `Workers are still live: ${f.w.id}.`, () => workerWaits(f.p.id)[0]?.phase === 'open');
+      const turns = turnEnds(f.p.id);
+      const id = await f.progress('Worker progress u21m');
+      await until(() => delivered(f.p.id, id) && prompted(runner, 'Worker progress u21m').length > 0);
+      await until(() => turnEnds(f.p.id) > turns && parkedOn(f.p.id, workerWaits(f.p.id)[0]));
+      expect(store.getRun(f.p.id)?.waits).toEqual([expect.objectContaining({ id: entry.id, via: 'completion', phase: 'open' })]);
+      expect(inputsFor(f.p.id, entry.id)).toEqual([]);
+      expect(engine().monitoring.has(f.p.id)).toBe(false);
+      // The wait still ends on its own event, once.
+      expect(manager.finish(f.w.id)).toBe(true);
+      await until(() => settled(f.p.id, entry.id)?.phase === 'delivered' && prompted(runner, workerWake(entry)).length > 0);
+      expect(inputsFor(f.p.id, entry.id)).toHaveLength(1);
+      await until(() => store.getRun(f.p.id)?.status === 'waiting');
+    });
+
+    it(`${runner} U21h an ignored refusal with only uncollected results parks on Cezar's human wait`, async () => {
+      process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
+      const { p, w } = await parentWithWorker(runner);
+      manager.requestWorkerStop(w.id);
+      expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
+      const refusal = `Settled worker results are not collected yet. Collect each (\`worker collect ${w.id}\`), then call cezar_done again.`;
+      await ignoreRefusal(runner, p.id, refusal, () => gated(p.id));
+      expect(humanOpen(p.id)).toEqual([expect.objectContaining({ kind: 'human', source: 'cezar', via: 'completion', phase: 'open' })]);
+      expect(workerWaits(p.id)).toEqual([]);
+      const shown = store.readEvents(p.id).find(event => event.seq === humanOpen(p.id)[0]!.askSeq);
+      expect(shown).toMatchObject({ type: 'note', message: refusal });
+      expect(asks(p.id)).toEqual([]);
+      expect(deriveAttention(store.getRun(p.id)!).label).toBe('needs you');
+      expect(semaphore.busy()).toBe(0);
+    });
+
+    it(`${runner} U21a an autonomous parent's ignored refusal is nudged again until the budget`, async () => {
+      process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
+      nativeWire(runner);
+      process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['autonomous-cap']!, autonomous: true });
+      store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+      // The opening turn spends what is left and parks on the budget; the worker comes after it.
+      store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES });
+      await until(() => gated(run.id));
+      const w = await worker(run.id);
+      const atNudges: Wait[][] = [];
+      const append = store.appendEvent.bind(store);
+      vi.spyOn(store, 'appendEvent').mockImplementation((id, event) => {
+        if (id === run.id && event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE)) atNudges.push(store.getRun(run.id)?.waits ?? []);
+        return append(id, event);
+      });
+      expect(manager.sendMessage(run.id, [{ type: 'text', text: messagesPrompt(runner, ['All done.\nCEZ:DONE']) }])).toBe(true);
+      // The human message restarted the budget; two units are left for the nudges.
+      store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES - 2 });
+      await until(() => humanOpen(run.id)[0]?.via === 'budget' && gated(run.id));
+      expect(prompted(runner, `Workers are still live: ${w.id}.`)).toHaveLength(2);
+      expect(atNudges).toEqual([[], []]);
+      expect(humanOpen(run.id)).toEqual([expect.objectContaining({ kind: 'human', source: 'cezar', via: 'budget', phase: 'open' })]);
+      expect(workerWaits(run.id)).toEqual([]);
+      expect(store.getRun(run.id)?.automaticWakes).toBe(MAX_AUTO_CONTINUES);
+      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
+    });
   }
 
   // hearsay-tools/cezarion#1301: a refused done is not a done and cancels no wait. With a wait open
@@ -1468,5 +1566,49 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
     expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
     expect(agentWaits(p.id)).toEqual([expect.objectContaining({ kind: 'timer', phase: 'open' })]);
+  });
+
+  // hearsay-tools/cezarion#1301: only a done line or an accepted cezar_done in the nudge's reply turn
+  // takes the second step. A cezar_done refused mid-turn is no done: the turn ended with no wait.
+  it('a tool-refused done in the nudge\'s reply turn takes the no-wait rule', async () => {
+    process.env.CEZ_MOCK_COMPLETION_REPLY = `${toolCall('cezar_done', {})} ${thenSay('I will collect it next.')}`;
+    const { p, w } = await parentWithWorker('claude');
+    // Uncollected only: with live workers the ordinary rule would open the implicit re-check timer.
+    manager.requestWorkerStop(w.id);
+    expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
+    expect(manager.sendMessage(p.id, [{ type: 'text', text: messagesPrompt('claude', ['All done.\nCEZ:DONE']) }])).toBe(true);
+    await until(() => prompted('claude', NO_WAIT_NUDGE).length > 0 && humanOpen(p.id)[0]?.via === 'no-wait' && gated(p.id));
+    expect(prompted('claude', `Collect each (\`worker collect ${w.id}\`)`)).toHaveLength(1);
+    expect(workerWaits(p.id)).toEqual([]);
+    expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'no-wait' })]);
+  });
+
+  it('workers settled during the nudge turn let the done finish', async () => {
+    const release = join(root, 'release-u21');
+    process.env.CEZ_MOCK_RELEASE_FILE = release;
+    process.env.CEZ_MOCK_COMPLETION_REPLY = 'mock:hold-done';
+    const { p, w } = await parentWithWorker('claude');
+    expect(manager.sendMessage(p.id, [{ type: 'text', text: messagesPrompt('claude', ['All done.\nCEZ:DONE']) }])).toBe(true);
+    await until(() => prompted('claude', `Workers are still live: ${w.id}.`).length > 0);
+    // While the reply turn is held, the worker settles and its result is collected.
+    manager.requestWorkerStop(w.id);
+    expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
+    await collect(w.id);
+    writeFileSync(release, '');
+    await until(() => terminal.includes(store.getRun(p.id)?.status ?? ''));
+    expect(store.getRun(p.id)?.status).not.toBe('failed');
+    expect(workerWaits(p.id)).toEqual([]);
+    expect([...store.getRun(p.id)?.waits ?? [], ...store.getRun(p.id)?.lastWaits ?? []].filter(wait => wait.via === 'completion')).toEqual([]);
+  });
+
+  it('the completion wait names only live workers', async () => {
+    process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt('claude', ['Still done.\nCEZ:DONE']);
+    const { p, w: live } = await parentWithWorker('claude');
+    const stopped = await worker(p.id);
+    manager.requestWorkerStop(stopped.id);
+    expect(await manager.awaitRunTermination(stopped.id, 15_000)).toBe(true);
+    const entry = await ignoreRefusal('claude', p.id, `Workers are still live: ${live.id}.`, () => workerWaits(p.id)[0]?.phase === 'open');
+    expect(entry.workerIds).toEqual([live.id]);
+    expect(entry.revisions).toEqual([{ workerId: live.id, revision: expect.any(Number) }]);
   });
 });

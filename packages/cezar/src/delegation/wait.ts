@@ -1,5 +1,7 @@
 import type { RequestOutcome, WorkerOutcome, WorkerWait } from '@open-mercato/cezar-contract';
-import type { DeadlinedWorkerWaitEntry, WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import type { WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
+
+const NEVER = '9999-12-31T23:59:59.999Z';
 
 /** First terminal observations are durable: later snapshots cannot erase or rewrite them. */
 export function reconcileWorkerWait(wait: WorkerWait, outcomes: readonly WorkerOutcome[], now: string, requestOutcomes: readonly RequestOutcome[] = []): WorkerWait {
@@ -50,9 +52,11 @@ function reconcileRequestWait(wait: WorkerWait, outcomes: readonly RequestOutcom
  * through it as an open legacy wait. `reason` is set once the entry should resolve; a settled
  * entry is returned as it is. An unchanged open entry comes back as the same object.
  */
-export function reconcileWorkerEntry(entry: DeadlinedWorkerWaitEntry, outcomes: readonly WorkerOutcome[], now: string, requestOutcomes: readonly RequestOutcome[] = []): { entry: DeadlinedWorkerWaitEntry; reason?: 'outcome' | 'timeout' } {
+export function reconcileWorkerEntry<E extends WorkerWaitEntry>(entry: E, outcomes: readonly WorkerOutcome[], now: string, requestOutcomes: readonly RequestOutcome[] = []): { entry: E; reason?: 'outcome' | 'timeout' } {
   if (entry.phase !== 'open') return { entry };
-  const legacy: WorkerWait = { id: entry.id, workerIds: entry.workerIds ?? [], deadline: entry.deadline, phase: 'registered', outcomes: entry.outcomes ?? [],
+  // Cezar's completion wait has no deadline and never times out (hearsay-tools/cezarion#1301); the
+  // legacy shape needs one, which stays inside this call.
+  const legacy: WorkerWait = { id: entry.id, workerIds: entry.workerIds ?? [], deadline: entry.deadline ?? NEVER, phase: 'registered', outcomes: entry.outcomes ?? [],
     ...(entry.mode === undefined ? {} : { mode: entry.mode }),
     ...(entry.revisions === undefined ? {} : { revisions: entry.revisions }),
     ...(entry.requestIds === undefined ? {} : { requestIds: entry.requestIds, requestOutcomes: entry.requestOutcomes ?? [] }) };

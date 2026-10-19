@@ -547,6 +547,9 @@ interface ActiveRun {
   /** Session that received a refusal nudge for a blocked done (hearsay-tools/cezarion#1301); the
    *  next turn end on it reads and clears it. */
   completionNudged?: AgentSession;
+  /** Session whose turn that just ended answered a refusal nudge (hearsay-tools/cezarion#1301): a
+   *  blocked done at this turn end takes the second step. Every turn end sets or clears it. */
+  completionNudgeAnswered?: AgentSession;
   /** The done `deferParentCompletion` just refused in this live session (hearsay-tools/cezarion#1301):
    *  it is not a done. `handled` when the refusal settled the turn end (a nudge or a park); otherwise
    *  the turn end goes on to its waits or its owed input. Read only right after that call. */
@@ -4695,7 +4698,9 @@ export class RunManager {
    * The agent gets the refusal as one automatic turn, charged to the automatic-wake budget and
    * bounded by the no-wait nudge's reply timer; the run stays `running` and no wait opens. The
    * agent's open waits and owed input come first: no nudge, the refusal is a note, and the turn end
-   * parks on the waits or takes the input. Cezar's own human waits are withdrawn instead. A spent
+   * parks on the waits or takes the input. Cezar's own human waits are withdrawn instead. One nudge
+   * per cycle: when the turn that answered it ends on a blocked done again, a run that is not
+   * autonomous parks on Cezar's `completion` wait, on its live workers or else on the user. A spent
    * budget opens Cezar's `budget` human wait. Always true.
    */
   private refuseCompletion(runId: string, state: ActiveRun, refusal: NonNullable<ReturnType<RunManager['completionRefusal']>>): boolean {
@@ -4712,6 +4717,20 @@ export class RunManager {
     }
     state.completionRefused = { session, handled: true };
     this.withdrawCezarHumanWaits(runId);
+    // One nudge per cycle: the turn that answered it ended on a blocked done again. Cezar waits on
+    // the live workers for the agent, else on the user; an autonomous run is nudged again instead.
+    if (state.completionNudgeAnswered === session && !state.autonomous) {
+      note(`Completion blocked: ${refusal.message}`);
+      if (refusal.liveWorkerIds.length) {
+        this.registerCompletionWait(runId, refusal.liveWorkerIds);
+        if (!this.parkOnWaits(runId, state)) this.parkForUser(runId, state, stepId);
+        return true;
+      }
+      const wait = this.openHumanAlias(runId, state, 'completion');
+      if (wait?.source === 'cezar' && wait.askSeq === undefined) this.showCezarHumanWait(runId, state, wait, refusal.message);
+      this.parkForUser(runId, state, stepId);
+      return true;
+    }
     if (this.automaticWakes(runId) >= MAX_AUTO_CONTINUES) {
       note(`Completion blocked: ${refusal.message}`);
       this.openTurnEndHumanWait(runId, state, stepId, 'budget', state.autonomous
@@ -4802,6 +4821,23 @@ export class RunManager {
     const latest = this.store.getRun(runId);
     const recorded = [...latest?.waits ?? [], ...latest?.lastWaits ?? []].find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === entry.id && wait.kind === 'worker' && hasWorkerDeadline(wait));
     return recorded ?? entry;
+  }
+
+  /**
+   * Cezar's own worker wait for a root that ignored its refusal nudge (hearsay-tools/cezarion#1301):
+   * `mode: 'all'` on the live workers that block its done, with no deadline and so no timer. The
+   * family is reconciled at once, so workers already settled resolve it now; their settlement wakes
+   * the parent, and their messages wake it beside the open wait.
+   */
+  private registerCompletionWait(runId: string, workerIds: string[]): WorkerWaitEntry {
+    const state = this.active.get(runId)!;
+    const ids = workerIds.filter(id => { const worker = this.store.getRun(id)?.delegation; return worker?.role === 'worker' && worker.parentRunId === runId; });
+    const entry: WorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'cezar', via: 'completion', registeredAt: new Date().toISOString(),
+      turnId: state.ciTurnId ??= randomUUID(), phase: 'open', mode: 'all', workerIds: ids, outcomes: [],
+      revisions: ids.map(workerId => { const worker = this.store.getRun(workerId)!.delegation; return { workerId, revision: worker?.role === 'worker' ? worker.executionRevision ?? 0 : 0 }; }) };
+    this.store.commitWait(runId, entry);
+    this.reconcileWorkerWaits(familyOf(this.store.getRun(runId)!));
+    return entry;
   }
 
   /** The states no worker wait registers in: refusals throw `incompatible_state`. Waits stand
@@ -5512,8 +5548,6 @@ export class RunManager {
     const retired = entries.filter(entry => entry.phase === 'resolved' && destroyed(entry)).map(entry => entry.id);
     if (retired.length) this.store.commitWaitCancellation(parent.id, retired);
     for (const entry of entries.filter(wait => wait.phase === 'open')) {
-      // A deadline-less (Cezar completion) entry is reconciled by its own path (hearsay-tools/cezarion#1301).
-      if (!hasWorkerDeadline(entry)) continue;
       let selected = entry;
       if (entry.workerIds) {
         const revisions = entry.workerIds.map(workerId => {
@@ -7117,6 +7151,7 @@ export class RunManager {
         // The turn that just ended answered the no-wait nudge (hearsay-tools/cezarion#1234).
         const nudgedLastTurn = state.noWaitNudged === state.session;
         state.noWaitNudged = undefined;
+        state.completionNudgeAnswered = state.completionNudged === state.session ? state.session : undefined;
         state.completionNudged = undefined;
         turnText = '';
         completedAssistantText = '';
@@ -8152,6 +8187,7 @@ export class RunManager {
         // The turn that just ended answered the no-wait nudge (hearsay-tools/cezarion#1234).
         const nudgedLastTurn = state.noWaitNudged === state.session;
         state.noWaitNudged = undefined;
+        state.completionNudgeAnswered = state.completionNudged === state.session ? state.session : undefined;
         state.completionNudged = undefined;
         turnText = '';
         completedAssistantText = '';
@@ -8488,7 +8524,7 @@ export class RunManager {
   private openHumanAlias(runId: string, state: ActiveRun | undefined, via: WaitVia, questions?: AskRequest['questions']): HumanWaitEntry | undefined {
     const run = this.store.getRun(runId);
     if (!run) return undefined;
-    const source = via === 'budget' || via === 'no-wait' ? 'cezar' : 'agent';
+    const source = via === 'budget' || via === 'no-wait' || via === 'completion' ? 'cezar' : 'agent';
     if (source === 'agent') this.withdrawCezarHumanWaits(runId);
     const open = openWaits(this.store.getRun(runId) ?? run).find((wait): wait is HumanWaitEntry => wait.kind === 'human');
     if (open || openWaits(this.store.getRun(runId) ?? run).length >= WAIT_LIMIT) return open;
@@ -8548,7 +8584,8 @@ export class RunManager {
     const run = this.store.getRun(runId);
     const stepId = state?.currentStepId ?? run?.currentStepId ?? run?.steps.at(-1)?.id;
     const shown = this.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}),
-      message: note ?? (wait.via === 'no-wait' ? NO_WAIT_NOTE : `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you`) });
+      message: note ?? (wait.via === 'no-wait' ? NO_WAIT_NOTE : wait.via === 'completion' ? 'completion blocked; waiting for you'
+        : `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you`) });
     const latest = run?.waits?.find((entry): entry is HumanWaitEntry => entry.id === wait.id && entry.kind === 'human');
     if (!latest || latest.phase !== 'open' || latest.askSeq !== undefined) return;
     try { this.store.commitWait(runId, { ...latest, askSeq: shown.seq }); }
