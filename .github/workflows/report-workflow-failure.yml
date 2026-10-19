@@ -16,11 +16,19 @@ concurrency:
 
 jobs:
   report:
-    if: github.event.workflow_run.conclusion == 'failure'
+    # A job stopped at its time limit leaves the run `cancelled`, so cancelled
+    # runs are read too; the script reports only jobs whose check-run annotation
+    # names the time limit (hearsay-tools/cezarion#1272). Keep this list equal to
+    # REPORTED_CONCLUSIONS in report-workflow-failure.cjs.
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' ||
+      github.event.workflow_run.conclusion == 'timed_out' ||
+      github.event.workflow_run.conclusion == 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       actions: read
+      checks: read # check-run annotations: the only record of a time limit
       contents: read
       issues: write
     steps:
