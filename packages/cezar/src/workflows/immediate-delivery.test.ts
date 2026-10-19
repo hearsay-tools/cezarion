@@ -53,7 +53,8 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
   });
 
   it('steers later input into a resumed opening turn', async () => {
-    vi.stubEnv('CEZ_MOCK_STEER_MS', '4000');
+    // Hold the tool call until the later line arrives, not for a fixed window (hearsay-tools/cezarion#1280).
+    vi.stubEnv('CEZ_MOCK_STEER_LINES', '1');
     const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id); manager.enqueueOwnedRun(w.id);
     await until(() => store.getRun(w.id)?.status === 'waiting');
@@ -79,10 +80,12 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
     manager.deliverConversationInput(w.id);
     await until(() => !!inputOf(w.id, laterId)?.consumedAt);
     await until(() => store.readEvents(w.id).some(event => event.seq > seq && event.type === 'turn-end'));
-    // Read inside the opening turn: no later than that turn's end, and in its one turn.
+    // Read inside the opening turn: no later than that turn's end, and answered before it.
+    // The no-wait nudge's turn may follow at once (hearsay-tools/cezarion#1234), so count no turns.
     const openingEnd = store.readEvents(w.id).find(event => event.seq > seq && event.type === 'turn-end')!;
     expect(Date.parse(inputOf(w.id, laterId)!.consumedAt!)).toBeLessThanOrEqual(Date.parse(openingEnd.ts));
-    expect(store.readEvents(w.id).filter(event => event.seq > seq && event.type === 'turn-end')).toHaveLength(1);
+    expect(store.readEvents(w.id).filter(event => event.seq > seq && event.seq < openingEnd.seq && event.type === 'text'
+      && String(event.text).includes('Later scope guidance'))).toHaveLength(1);
     await until(() => store.getRun(w.id)?.continuationMessage === undefined);
     // The opening instruction was handled by that successful turn: its sender sees it read.
     expect(inputOf(w.id, opening.id)?.consumedAt).toBeTruthy();

@@ -62,6 +62,17 @@ async function afterParityPark(prompt) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// `mock:steer-tool` holds its tool call for CEZ_MOCK_STEER_MS, or, with CEZ_MOCK_STEER_LINES=<n>,
+// until it has read n steered lines, so a loaded host cannot close the turn first (hearsay-tools/cezarion#1280).
+async function holdSteerTool() {
+  const lines = Number(process.env.CEZ_MOCK_STEER_LINES ?? 0);
+  if (!lines) { await sleep(Number(process.env.CEZ_MOCK_STEER_MS ?? 600)); return; }
+  const deadline = Date.now() + 15_000;
+  while (steering.length < lines) {
+    if (Date.now() > deadline) throw new Error(`CEZ_MOCK_STEER_LINES: ${steering.length} of ${lines} steered lines arrived`);
+    await sleep(10);
+  }
+}
 const emit = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
 
 // `--help` lists the options cezar feature-detects (#505).
@@ -200,7 +211,7 @@ async function respond(userText, imageCount, uuid) {
   if (userText.includes('mock:steer-tool')) {
     steering = [];
     emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_steer', name: 'Bash', input: { command: 'wait' } }] } });
-    await sleep(Number(process.env.CEZ_MOCK_STEER_MS ?? 600));
+    await holdSteerTool();
     const steered = steering; steering = null;
     emit({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_steer', content: 'waited' }] } });
     for (const s of steered) emitReplay(s.uuid, s.userText);
