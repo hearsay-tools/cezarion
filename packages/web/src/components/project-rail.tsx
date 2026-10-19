@@ -478,6 +478,24 @@ function useRoomToExpand(sidebarWidth: number): boolean {
   return railCanExpand(viewport, sidebarWidth)
 }
 
+/** The rail's column, held empty until the registry answers (#1255). The rail mounts on that
+ *  answer, and the health-gated sidebar footer can mount first: a rail arriving later pushed the
+ *  whole sidebar sideways under a pointer, so a click aimed at the Tools trigger landed on the
+ *  rail's theme toggle. Same width rule as the rail, so the swap moves nothing. */
+export function ProjectRailPlaceholder() {
+  const sidebarWidth = React.useContext(ShellSidebarWidthContext)
+  const roomToExpand = useRoomToExpand(sidebarWidth)
+  const expanded = readStoredRailExpanded() && roomToExpand
+  return (
+    <div
+      aria-hidden="true"
+      data-slot="project-rail-placeholder"
+      style={{ width: expanded ? PROJECT_RAIL_EXPANDED_WIDTH : PROJECT_RAIL_COLLAPSED_WIDTH }}
+      className="hidden shrink-0 border-r border-border bg-background md:block"
+    />
+  )
+}
+
 export type ProjectRailProps = {
   /** Display order: registry order until the user reorders (`lib/project-order.ts`). */
   projects: readonly ProjectListEntry[]

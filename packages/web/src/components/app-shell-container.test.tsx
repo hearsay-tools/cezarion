@@ -815,6 +815,46 @@ describe('project rail wiring', () => {
     expect(within(railMark('cezar')).getByRole('link').getAttribute('aria-label')).toBe('cezar · idle')
   })
 
+  // #1255: the Tools trigger mounts on the health answer, the rail on the registry's. A rail that
+  // arrived later pushed the sidebar 60px right, and a click aimed at the trigger landed on the
+  // rail's theme toggle. The column is held from the first paint instead.
+  it('holds the rail column while the registry is pending, then swaps in the rail', async () => {
+    let answer: (response: Response) => void = () => {}
+    const pending = new Promise<Response>((resolve) => { answer = resolve })
+    serve({
+      '/api/v1/health': HEALTH,
+      '/api/v1/todos': [],
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/run-summaries': [],
+      '/api/v1/p/cezar/run-summaries': [],
+    })
+    const routed = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((input, init) => (String(input) === '/api/v1/projects' ? pending : routed(input, init)))
+    renderShell('/p/cezar/')
+
+    await waitFor(() => expect(document.querySelector('[data-slot="tools-menu-trigger"]')).not.toBeNull())
+    const placeholder = document.querySelector('[data-slot="project-rail-placeholder"]') as HTMLElement
+    expect(placeholder.style.width).toBe('60px')
+    expect(screen.queryByRole('navigation', { name: 'Projects' })).toBeNull()
+
+    answer(new Response(JSON.stringify(TWO_PROJECTS), { status: 200, headers: { 'content-type': 'application/json' } }))
+    await rail()
+    expect(document.querySelector('[data-slot="project-rail-placeholder"]')).toBeNull()
+  })
+
+  it('holds no rail column once the registry request has failed', async () => {
+    serve({
+      '/api/v1/health': HEALTH,
+      '/api/v1/todos': [],
+      '/api/v1/projects': new Response(JSON.stringify({ error: 'boom' }), { status: 500 }),
+      '/api/v1/run-summaries': [],
+    })
+    renderShell('/p/cezar/')
+
+    await waitFor(() => expect(document.querySelector('[data-slot="project-rail-placeholder"]')).toBeNull())
+    expect(screen.queryByRole('navigation', { name: 'Projects' })).toBeNull()
+  })
+
   it('says the activity is unknown, not idle, when the runs index request fails', async () => {
     serve({
       '/api/v1/health': HEALTH,
