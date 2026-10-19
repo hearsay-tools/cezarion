@@ -125,3 +125,21 @@ test('reserves new cohort identities before any PR comment so a close after part
   assert.equal(parseSummary(f.issue.body).records[0].state, 'merged');
   assert.equal(f.comments.length, 1);
 });
+
+test('preview reuses authored judgments exactly as publication and makes no GitHub writes', async () => {
+  const f = fixture(), s = f.s;
+  const args = { ...f, repository: s.repository, summaryNumber: 9, snapshots: [s], primary: [assessment(s)], challenge: [assessment(s)], refresh: async () => s };
+  await publishBatch(args);
+  const before = { writes: f.writes.length, issue: f.issue.body, comment: f.comments[0].body };
+  const reuse = { ...args, primary: [], challenge: [] };
+  const result = await publishBatch({ ...reuse, preview: true });
+  assert.equal(f.writes.length, before.writes, 'preview cannot mutate GitHub');
+  assert.equal(f.issue.body, before.issue);
+  assert.equal(f.comments[0].body, before.comment);
+  assert.equal(readComment(result.reports[0].body).decision, 'recommend');
+  await publishBatch(reuse);
+  assert.equal(result.reports[0].body, f.comments[0].body);
+  const fresh = { ...s, headSha: 'd'.repeat(40) };
+  const changed = await publishBatch({ ...reuse, refresh: async () => fresh, preview: true });
+  assert.equal(readComment(changed.reports[0].body).decision, 'pending');
+});

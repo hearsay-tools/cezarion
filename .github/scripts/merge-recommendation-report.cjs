@@ -72,7 +72,7 @@ function renderSummary({ repository = 'hearsay-tools/cezarion', records, coverag
   }
 }
 
-async function publishBatch({ gh, repository, summaryNumber, actor, snapshots, primary, challenge, refresh, coverage = 'Bounded scan.', warnings = {} }) {
+async function publishBatch({ gh, repository, summaryNumber, actor, snapshots, primary, challenge, refresh, coverage = 'Bounded scan.', warnings = {}, preview = false }) {
   const prefix = `repos/${repository}`;
   const issue = await gh.api('GET', `${prefix}/issues/${summaryNumber}`);
   if (issue.pull_request || issue.user?.id !== actor.id || issue.state !== 'open') throw new Error('Trial summary must be an open issue owned by the authenticated writer.');
@@ -95,9 +95,10 @@ async function publishBatch({ gh, repository, summaryNumber, actor, snapshots, p
   }
   // Persist identities before any PR comment. A final-write failure followed by
   // PR closure must still leave a discoverable cohort member for the next scan.
-  if (reserved) await gh.api('PATCH', `${prefix}/issues/${summaryNumber}`, {
+  if (reserved && !preview) await gh.api('PATCH', `${prefix}/issues/${summaryNumber}`, {
     body: renderSummary({ repository, records: [...records.values()], coverage }),
   });
+  const reports = [];
   for (const old of snapshots) {
     const comments = await gh.pages(`${prefix}/issues/${old.number}/comments`);
     const s = await refresh(old);
@@ -120,12 +121,15 @@ async function publishBatch({ gh, repository, summaryNumber, actor, snapshots, p
       Object.assign(result, { decision: 'pending', reason: 'The PR revision changed during assessment; a fresh assessment is required.' });
     }
     const body = renderComment(s, result, summaryNumber);
+    reports.push({ number: s.number, body });
+    if (preview) continue;
     let comment = own;
     if (!own) comment = await gh.api('POST', `${prefix}/issues/${s.number}/comments`, { body });
     else if (own.body !== body) comment = await gh.api('PATCH', `${prefix}/issues/comments/${own.id}`, { body });
     records.delete(s.number);
     records.set(s.number, { ...cohortRecord(s, result), commentId: comment.id, warnings: warnings[s.number] || [] });
   }
+  if (preview) return { reports };
   const body = renderSummary({ repository, records: [...records.values()], coverage });
   await gh.api('PATCH', `${prefix}/issues/${summaryNumber}`, { body });
   return { published: snapshots.length, summaryUrl: `https://github.com/${repository}/issues/${summaryNumber}` };

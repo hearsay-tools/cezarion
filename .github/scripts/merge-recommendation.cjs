@@ -5,7 +5,7 @@ const path = require('node:path');
 const { parseArgs } = require('node:util');
 const { Gh, git, REPOSITORY, collectSnapshot, observeFollowups } = require('./merge-recommendation-github.cjs');
 const { VERSION, gate, snapshotKey, validateAssessment, decide } = require('./merge-recommendation-policy.cjs');
-const { COMMENT, SUMMARY, readComment, parseSummary, renderComment, renderSummary, publishBatch, withLock } = require('./merge-recommendation-report.cjs');
+const { COMMENT, SUMMARY, readComment, parseSummary, renderSummary, publishBatch, withLock } = require('./merge-recommendation-report.cjs');
 const DIRECTORY = '.ai/tmp/merge-recommendation';
 const COMMAND = 'node .github/scripts/merge-recommendation.cjs';
 
@@ -119,12 +119,12 @@ async function collect(gh, c, summaryNumber) {
   return { snapshots: snapshots.length, candidates: candidates.length, deferred, trusted: c.trusted, coverage };
 }
 
-async function main(argv) {
+async function main(argv, dependencies = {}) {
   const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: { repo: { type: 'string' }, summary: { type: 'string' }, preview: { type: 'boolean', default: false } } });
   const [command] = positionals, repository = values.repo, number = Number(values.summary);
   if (!REPOSITORY.test(repository || '')) throw new Error('Use --repo owner/name.');
   if (command === 'automation') return definition(repository, number);
-  const gh = new Gh(), c = await context(gh, repository);
+  const gh = dependencies.gh || new Gh(), c = await (dependencies.context || context)(gh, repository);
   if (command === 'init') return initialize(gh, c);
   if (!Number.isSafeInteger(number) || number < 1) throw new Error('Use --summary with the trial issue number.');
   if (command === 'collect') return collect(gh, c, number);
@@ -138,15 +138,16 @@ async function main(argv) {
   }
   if (command === 'publish') {
     const challenge = read('challenge.json');
+    const publication = { gh, ...c, summaryNumber: number, snapshots: batch.snapshots,
+      primary, challenge, coverage: batch.coverage, warnings: batch.warnings,
+      refresh: dependencies.refresh || (s => collectSnapshot({ gh, ...c, number: s.number })) };
     if (values.preview) {
-      const reports = batch.snapshots.map(s => ({ number: s.number, body: renderComment(s, decide(s, primary.find(p => p.key === s.key), challenge.find(p => p.key === s.key)), number) }));
+      const { reports } = await publishBatch({ ...publication, preview: true });
       write('preview.json', reports); return { preview: `${DIRECTORY}/preview.json`, reports: reports.length, published: false };
     }
     if (!c.trusted) throw new Error('Publication requires clean policy files at a trusted default-branch commit.');
     const common = path.resolve(git(process.cwd(), ['rev-parse', '--git-common-dir']).trim());
-    return withLock(common, () => publishBatch({ gh, ...c, summaryNumber: number, snapshots: batch.snapshots,
-      primary, challenge, coverage: batch.coverage, warnings: batch.warnings,
-      refresh: s => collectSnapshot({ gh, ...c, number: s.number }) }));
+    return withLock(common, () => publishBatch(publication));
   }
   throw new Error('Commands: init, collect, challenge, publish [--preview], automation.');
 }

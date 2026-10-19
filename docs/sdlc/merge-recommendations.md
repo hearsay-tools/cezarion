@@ -77,7 +77,9 @@ node .github/scripts/merge-recommendation.cjs publish --repo hearsay-tools/cezar
 # Inspect .ai/tmp/merge-recommendation/preview.json before omitting --preview.
 ```
 
-`collect` and `--preview` perform no GitHub writes. Collection remains usable from
+`collect` and `--preview` perform no GitHub writes. Preview uses the publisher's
+refreshed snapshots, authored prior judgments and decision path, then writes only
+the local preview file. Collection remains usable from
 an uninstalled feature branch, but explicitly marks its policy untrusted. Model
 outputs are JSON arrays; see the skill's exact contract. Failed agent/check steps
 stop the workflow. A failed run is not a positive assessment; an older comment
