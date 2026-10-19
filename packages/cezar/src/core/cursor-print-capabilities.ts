@@ -2,19 +2,32 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { AgentRunSpec } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
-import { NATIVE_CURSOR_DELEGATION_TOOLS, SAFE_CURSOR_PRINT_TOOLS } from './cursor-print-tool-catalog.ts';
+import { CORE_CURSOR_PRINT_TOOLS, SAFE_CURSOR_PRINT_TOOLS } from './cursor-print-tool-catalog.ts';
+import { cursorArgs, noteCursorAutoUpdateFlagRejected, rejectsCursorAutoUpdateFlag,
+  usesCursorAutoUpdateFlag } from './cursor-cli-flags.ts';
 import { discoverCursorParameterizedModels, parseCursorModels } from './cursor-model-catalog.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
 
 const execute = promisify(execFile);
-const QUALIFIED_VERSION = '2026.10.01-e373342';
+/** The first build print was qualified on (hearsay-tools/cezarion#923). Newer builds pass the
+ * same pre-inference checks instead of an exact match (hearsay-tools/cezarion#1257). */
+const QUALIFIED_BASELINE = '2026.10.01-e373342';
+const BUILD_VERSION = /^(\d{4})\.(\d{2})\.(\d{2})-[0-9a-z]+$/;
 const INVALID_TOOL = '__cezar_probe_invalid__';
-const EXPECTED_TOOLS = new Set<string>([...SAFE_CURSOR_PRINT_TOOLS, ...NATIVE_CURSOR_DELEGATION_TOOLS]);
 export type CursorPrintCapabilityResult =
-  | { supported: true; models?: readonly ModelOption[]; model?: string; resolvedModel?: string }
+  | { supported: true; models?: readonly ModelOption[]; model?: string; resolvedModel?: string;
+    /** The safe tools this build advertises: a restricted turn's whole allowlist. */
+    allowedTools?: readonly string[] }
   | { supported: false; reason: string };
 
-/** Bounded, pre-inference checks against the exact build and native tool schema qualified for print. */
+/** `YYYYMMDD` of a Cursor build version, or undefined for a format cezar does not know. */
+function buildDate(version: string): number | undefined {
+  const match = BUILD_VERSION.exec(version);
+  return match ? Number(`${match[1]}${match[2]}${match[3]}`) : undefined;
+}
+
+/** Bounded, pre-inference checks that the installed build can run print sessions: a dated
+ * build no older than the baseline, the strict native tool validator, and the core tools. */
 export async function inspectCursorPrintCapabilities(
   bin: string,
   spec: AgentRunSpec,
@@ -28,38 +41,48 @@ export async function inspectCursorPrintCapabilities(
     signal,
   };
   let version: string;
-  try { version = (await execute(bin, ['--version'], options)).stdout.trim(); }
+  try { version = (await execute(bin, cursorArgs(bin, ['--version']), options)).stdout.trim(); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new Error('Cursor CLI is not installed or is unavailable on PATH');
     }
     throw new Error('Cursor print capability preflight could not read CLI version');
   }
-  if (version !== QUALIFIED_VERSION) {
-    return { supported: false, reason: `Cursor print marketplace support is qualified for ${QUALIFIED_VERSION}; installed build is not qualified` };
+  const date = buildDate(version);
+  if (date === undefined || date < buildDate(QUALIFIED_BASELINE)!) {
+    return { supported: false, reason: `Cursor print marketplace support needs a build from ${QUALIFIED_BASELINE} or newer; installed build is not qualified` };
   }
-  let output: string;
-  try {
-    // Match the trusted headless invocation. In a new task worktree Cursor
-    // checks workspace trust before it validates --allowed-tools otherwise.
-    await execute(bin, ['--print', '--force', '--trust', '--allowed-tools', INVALID_TOOL, 'capability validation only'], options);
-    throw new Error('Cursor print capability preflight did not reject an invalid native tool');
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Cursor print capability preflight')) throw error;
-    const failure = error as Error & { stderr?: string; stdout?: string; code?: number };
-    if (failure.code !== 1) throw new Error('Cursor print capability preflight could not inspect native tools');
-    output = `${failure.stderr ?? ''}\n${failure.stdout ?? ''}`;
+  const probe = async (): Promise<string> => {
+    try {
+      // Match the trusted headless invocation. In a new task worktree Cursor
+      // checks workspace trust before it validates --allowed-tools otherwise.
+      await execute(bin, cursorArgs(bin, ['--print', '--force', '--trust', '--allowed-tools', INVALID_TOOL, 'capability validation only']), options);
+      throw new Error('Cursor print capability preflight did not reject an invalid native tool');
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Cursor print capability preflight')) throw error;
+      const failure = error as Error & { stderr?: string; stdout?: string; code?: number };
+      if (failure.code !== 1) throw new Error('Cursor print capability preflight could not inspect native tools');
+      return `${failure.stderr ?? ''}\n${failure.stdout ?? ''}`;
+    }
+  };
+  let output = await probe();
+  if (rejectsCursorAutoUpdateFlag(output) && usesCursorAutoUpdateFlag(bin)) {
+    // This build has no way to stop its own updates; it still runs, without the flag.
+    noteCursorAutoUpdateFlagRejected(bin);
+    output = await probe();
   }
   const match = /Invalid --allowed-tools value\(s\): __cezar_probe_invalid__\. Expected one of: ([a-z_, ]+)/.exec(output);
   if (!match) throw new Error('Cursor print capability preflight returned an unknown native tool response');
-  const names = match[1]!.split(',').map(name => name.trim()).filter(Boolean);
-  if (names.length !== EXPECTED_TOOLS.size || new Set(names).size !== EXPECTED_TOOLS.size ||
-    names.some(name => !EXPECTED_TOOLS.has(name))) {
-    return { supported: false, reason: 'Cursor native tool catalog differs from the qualified print build' };
+  const advertised = new Set(match[1]!.split(',').map(name => name.trim()).filter(Boolean));
+  const missing = CORE_CURSOR_PRINT_TOOLS.filter(name => !advertised.has(name));
+  if (missing.length) {
+    return { supported: false, reason: `Cursor native tool catalog lacks core print tools: ${missing.join(', ')}` };
   }
-  if (!spec.model && !spec.effort) return { supported: true };
+  // An allowlist is fail-closed: an entry this build adds and cezar never listed stays denied.
+  const allowedTools = SAFE_CURSOR_PRINT_TOOLS.filter(name => advertised.has(name));
+  if (!spec.model && !spec.effort) return { supported: true, allowedTools };
   let models: ModelOption[];
-  try { models = parseCursorModels((await execute(bin, ['--list-models'], options)).stdout); }
+  try { models = parseCursorModels((await execute(bin, cursorArgs(bin, ['--list-models']), options)).stdout); }
   catch { throw new Error('Cursor print capability preflight could not read selected-account models'); }
   const model = spec.model ?? models.find(option => option.description === 'Default model')?.id;
   if (!model) throw new Error('Cursor print requested model is not advertised for the selected account');
@@ -98,7 +121,7 @@ export async function inspectCursorPrintCapabilities(
       resolvedModel = `${selection[1]}[${[...embedded].sort(([a], [b]) => a.localeCompare(b))
         .map(([id, value]) => `${id}=${value}`).join(',')}]`;
     }
-    return { supported: true, model, resolvedModel };
+    return { supported: true, model, resolvedModel, allowedTools };
   }
   if (spec.effort) {
     const base = model.replace(/-(?:none|low|medium|high|xhigh|extra-high|max)$/, '');
@@ -107,5 +130,5 @@ export async function inspectCursorPrintCapabilities(
       throw new Error('Cursor print requested effort is not advertised for the selected account');
     }
   }
-  return { supported: true, models, model };
+  return { supported: true, models, model, allowedTools };
 }

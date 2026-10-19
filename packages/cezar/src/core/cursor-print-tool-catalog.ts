@@ -1,7 +1,8 @@
 /** Cursor 2026.10.01-e373342 strict --allowed-tools catalog.
  * Qualified with fresh/resumed read positive and negative controls in
- * __fixtures__/cursor/print-delegation.json. New native entries stay denied
- * until the capability preflight requalifies the installed CLI. */
+ * __fixtures__/cursor/print-delegation.json. A restricted print turn allows the
+ * entries the installed build still advertises (hearsay-tools/cezarion#1257), so
+ * a native entry a newer build adds stays denied until a change lists it here. */
 export const SAFE_CURSOR_PRINT_TOOLS = [
   'shell_tool_call',
   'delete_tool_call',
@@ -75,4 +76,17 @@ export const NATIVE_CURSOR_DELEGATION_TOOLS = [
   'read_agent_transcript_tool_call',
   'start_grind_execution_tool_call',
   'start_grind_planning_tool_call',
+] as const;
+
+/** A build that no longer advertises one of these cannot do the work of a print session,
+ * so the capability preflight keeps it off print (hearsay-tools/cezarion#1257). */
+export const CORE_CURSOR_PRINT_TOOLS = [
+  'shell_tool_call',
+  'read_tool_call',
+  'edit_tool_call',
+  'glob_tool_call',
+  'grep_tool_call',
+  'ls_tool_call',
+  'delete_tool_call',
+  'mcp_tool_call',
 ] as const;

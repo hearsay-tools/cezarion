@@ -12,6 +12,7 @@ import { parseAskMarker } from './ask.ts';
 import { cezarToolEnvNames } from '../ci-wait/tools.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
 import { SAFE_CURSOR_PRINT_TOOLS } from './cursor-print-tool-catalog.ts';
+import { cursorArgs } from './cursor-cli-flags.ts';
 import { sanitizeCursorProviderError } from './cursor-provider-error.ts';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { startCursorPrintProcess, type CursorPrintProcess, type CursorPrintProcessOptions } from './cursor-print-process.ts';
@@ -45,6 +46,9 @@ export interface CursorPrintRunnerOptions {
   models?: readonly ModelOption[];
   /** Exact canonical selection validated by the selected-account preflight. */
   resolvedModel?: string;
+  /** The safe native tools the installed build advertises, from the capability preflight.
+   * A restricted turn allows exactly these; absent, the whole qualified safe catalog. */
+  allowedTools?: readonly string[];
   /** Test override; production retains the shared 30-minute no-progress cap. */
   noProgressTimeoutMs?: number;
   processOptions?: Pick<CursorPrintProcessOptions, 'drainMs' | 'termGraceMs' | 'killGraceMs'>;
@@ -220,10 +224,12 @@ class CursorPrintSession implements AgentSession {
     this.clearAutoEnd();
     this.markerAsk = false;
     this.busy = true;
-    const args = ['-p', '--force', '--trust', '--output-format', 'stream-json'];
+    const args = cursorArgs(this.bin, ['-p', '--force', '--trust', '--output-format', 'stream-json']);
     if (this.model) args.push('--model', this.model);
     if (this.nativeId) args.push('--resume', this.nativeId);
-    if (this.spec.restrictNativeDelegation) args.push('--allowed-tools', SAFE_CURSOR_PRINT_TOOLS.join(','));
+    if (this.spec.restrictNativeDelegation) {
+      args.push('--allowed-tools', (this.options.allowedTools ?? SAFE_CURSOR_PRINT_TOOLS).join(','));
+    }
     for (const dir of this.spec.additionalDirectories ?? []) args.push('--add-dir', dir);
     if (this.pluginDir) args.push('--plugin-dir', this.pluginDir);
     for (const path of imagePaths) args.push('--image', path);

@@ -18,6 +18,8 @@ marketplace Superpowers discovery and a `sessionStart` hook whose context
 survived resume without rerunning the hook.
 `print-errors.json` records an invalid account key rejection and bounded
 process-group cleanup in the opt-in probe harness.
+`print-tools-2026.10.16-e3cb207.txt` is the live native tool catalog of that
+build, which the capability preflight tests read (hearsay-tools/cezarion#1257).
 
 `print-lifecycle.ndjson` and `print-native-question.ndjson` are constructed
 fixtures with synthetic text, IDs and paths. Their frame structure follows
