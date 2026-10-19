@@ -464,7 +464,8 @@ it('keeps queued human input ahead of reentrant worker input at turn end', async
   } finally { session.interrupt(); await session.result; vi.unstubAllEnvs(); }
 });
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { resetCursorAutoUpdateFlagCache } from './cursor-cli-flags.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CursorAcpRunner } from './cursor-acp-runner.ts';
@@ -650,5 +651,46 @@ describe('Cursor ACP spawn retry (#529)', () => {
       expect(rows.filter(row => row.method === 'initialize')).toHaveLength(1);
       expect(rows.filter(row => row.method === 'session/new')).toHaveLength(1);
     } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('Cursor ACP auto-update flag (hearsay-tools/cezarion#1257)', () => {
+  /** The bundled ACP mock behind a wrapper that logs argv and, if asked, rejects the flag. */
+  function wrapper(rejectFlag: boolean): { bin: string; log: string; dir: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-cursor-acp-flag-'));
+    const bin = join(dir, 'agent');
+    const log = join(dir, 'argv.ndjson');
+    writeFileSync(bin, `#!/usr/bin/env node
+const args = process.argv.slice(2);
+require('node:fs').appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
+if (${rejectFlag} && args.includes('--disable-auto-update')) { console.error("error: unknown option '--disable-auto-update'"); process.exit(1); }
+const child = require('node:child_process').spawn(process.execPath, [${JSON.stringify(mock)}, ...args.filter(a => a !== '--disable-auto-update')], { stdio: 'inherit' });
+child.on('exit', code => process.exit(code ?? 1));
+`);
+    chmodSync(bin, 0o700);
+    return { bin, log, dir };
+  }
+  const calls = (log: string) => readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line) as string[]);
+
+  it('starts every ACP process with --disable-auto-update', async () => {
+    const fake = wrapper(false);
+    try {
+      await withSession('inspect', async (_session, v1) => {
+        await waitFor(() => v1.some(e => e.type === 'turn-end'));
+      }, new CursorAcpRunner({ bin: fake.bin }));
+      expect(calls(fake.log).map(args => args[0])).toEqual(['--disable-auto-update']);
+    } finally { rmSync(fake.dir, { recursive: true, force: true }); }
+  });
+
+  it('respawns without the flag on a build that rejects it, without spending a #529 retry', async () => {
+    const fake = wrapper(true);
+    try {
+      await withSession('inspect', async (_session, v1) => {
+        await waitFor(() => v1.some(e => e.type === 'turn-end'));
+        expect(v1.some(e => e.type === 'error')).toBe(false);
+        expect(v1.some(e => e.type === 'note' && e.message.includes('unknown option'))).toBe(false);
+      }, new CursorAcpRunner({ bin: fake.bin }));
+      expect(calls(fake.log).map(args => args.includes('--disable-auto-update'))).toEqual([true, false]);
+    } finally { rmSync(fake.dir, { recursive: true, force: true }); resetCursorAutoUpdateFlagCache(); }
   });
 });

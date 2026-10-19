@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fixture = require('./fixtures/release-failure.json');
 const {reportFailure} = require('./report-workflow-failure.cjs');
-const {harness,nightly}=require('./fixtures/failure-harness.cjs');
+const {harness,nightly,stopped,TIME_LIMIT}=require('./fixtures/failure-harness.cjs');
 test('Release fixture creates actionable issue and durable metadata comment, skipping dependent release',async()=>{
  const h=harness(); await reportFailure(h.options);
  assert.equal(h.state.issues.length,1);assert.equal(h.state.comments.length,1);
@@ -38,10 +38,42 @@ test('missing logs still report metadata, isolate causes and never print API err
  assert.doesNotMatch(h.messages.join('\n'),/secret/);
  h.state.run.id++;h.options.event.workflow_run.id++;await reportFailure(h.options);assert.equal(h.state.issues.length,2);
 });
-test('ignore success, cancellation, skipped, unrelated workflows and foreign repositories without API calls',async()=>{
- for(const patch of [{conclusion:'success'},{conclusion:'cancelled'},{conclusion:'skipped'},{name:'CI'},{path:'.github/workflows/ci.yml'},{head_repository:{full_name:'attacker/repo'}},{head_branch:'feature/not-release'}]) {
+test('ignore success, skipped, unrelated workflows and foreign repositories without API calls',async()=>{
+ for(const patch of [{conclusion:'success'},{conclusion:'skipped'},{name:'CI'},{path:'.github/workflows/ci.yml'},{head_repository:{full_name:'attacker/repo'}},{head_branch:'feature/not-release'}]) {
  const h=harness();Object.assign(h.options.event.workflow_run,patch);await reportFailure(h.options);assert.equal(h.calls.length,0);
  }
+});
+// Actions records a job stopped by `timeout-minutes` as `cancelled`, the same
+// conclusion a person or a concurrency group leaves (hearsay-tools/cezarion#1272).
+test('a job stopped at its time limit reports a timeout with the last output before the stop',async()=>{
+ const h=harness();stopped(h);const result=await reportFailure(h.options);
+ assert.equal(result.reported,1);assert.equal(h.state.issues.length,1);
+ assert.equal(h.state.issues[0].title,'[Task]: Investigate verification timeout');
+ assert.deepEqual(h.state.issues[0].labels,['area-ci']);
+ assert.match(h.state.issues[0].body,/Verify before publishing exceeded the job time limit/);
+ assert.match(h.state.comments[0].body,/exceeded the maximum execution time of 20m0s/);
+ assert.match(h.state.comments[0].body,/keeps the claim across recovery/);
+ assert.match(h.state.comments[0].body,/Failed step: Verify before publishing/);
+});
+test('a run cancelled by a person or by concurrency files nothing',async()=>{
+ for(const annotation of ['The operation was canceled.','Canceling since a higher priority waiting request for nightly exists']) {
+  const h=harness();stopped(h,annotation);const result=await reportFailure(h.options);
+  assert.equal(result.reported,0);assert.equal(h.state.issues.length,0);assert.equal(h.state.comments.length,0);
+  assert.ok(!h.calls.some(([route])=>route.startsWith('POST ')));
+ }
+});
+test('the same timeout on a later night comments on the open issue',async()=>{
+ const h=harness();stopped(h);await reportFailure(h.options);
+ h.state.run.id++;h.options.event.workflow_run.id++;await reportFailure(h.options);
+ assert.equal(h.state.issues.length,1);assert.equal(h.state.comments.length,2);
+});
+test('a timed-out job beside a failed one reports both',async()=>{
+ const h=harness(), failed=h.state.jobs[0];
+ h.state.jobs.push({...structuredClone(failed),id:failed.id+1,name:'Vitest shard 2/3',conclusion:'cancelled',
+  steps:failed.steps.map(step=>step.conclusion==='failure'?{...step,conclusion:'cancelled'}:step)});
+ h.state.annotations={[failed.id+1]:[{annotation_level:'failure',message:TIME_LIMIT}]};
+ await reportFailure(h.options);
+ assert.deepEqual(h.state.issues.map(issue=>issue.title).sort(),['[Task]: Investigate delegation-integration.test.ts failure','[Task]: Investigate verification timeout']);
 });
 test('metadata and issue API failures propagate so workflow can fail visibly',async()=>{
  for(const flag of ['failRead','failCreate']) {const h=harness();h.state[flag]=true;await assert.rejects(reportFailure(h.options));assert.equal(h.state.comments.length,0);}

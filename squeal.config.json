@@ -31,13 +31,6 @@
       "packages/web/src/test/card-2-contrast.baseline.json",
       "packages/web/src/styles/index.css"
     ],
-    "packages/cezar/test/e2e/*.test.ts": [
-      "packages/cezar/dist/**",
-      "packages/cezar/web/dist/**",
-      "packages/cezar/scripts/**",
-      "packages/cezar/package.json",
-      "alias-cezarion/**"
-    ],
     "packages/web/e2e/*.e2e.ts": [
       "packages/contract/src/**",
       "packages/contract/package.json",
@@ -172,18 +165,6 @@
       "name": "root:test:unit",
       "argv": ["--import", "./scripts/test-git-env.mjs"],
       "include": [".github/scripts/*.test.cjs", "scripts/*.test.mjs"]
-    },
-    {
-      "name": "test:package",
-      "cwd": "packages/cezar",
-      "argv": [
-        "--import",
-        "../../scripts/test-git-env.mjs",
-        "--import",
-        "tsx"
-      ],
-      "include": ["test/e2e/*.test.ts"],
-      "slow": true
     }
   ],
   "slow": {

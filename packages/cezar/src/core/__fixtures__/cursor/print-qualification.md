@@ -287,3 +287,32 @@ receipt, identical input and cancellation guards. The initial three recovery
 tests failed against the unchanged runner. These controlled regressions
 reproduce the observed wire failure; they do not claim a forced live metadata
 timeout was reproduced.
+
+## Newer builds and self-updates, 2026-10-19
+
+On 2026-10-18 a research run started the CLI, and it updated itself from
+`2026.10.01-e373342` to `2026.10.16-e3cb207`. The exact-build check above then
+sent every new Cursor task to ACP (hearsay-tools/cezarion#1257). The new build
+drops `adopt_tool_call`, renames the two PR code-tour tools and adds ten tools.
+Its live `Expected one of:` list is
+[`print-tools-2026.10.16-e3cb207.txt`](print-tools-2026.10.16-e3cb207.txt).
+
+The owner chose a cheap pre-inference rule over a per-build probe record.
+A build qualifies for print when its version is a dated build on or after
+`2026.10.01-e373342`, the invalid-tool probe returns its catalog, and the
+catalog lists every core tool (`CORE_CURSOR_PRINT_TOOLS`). Restricted turns
+allow the qualified safe tools the build still advertises, so new entries stay
+denied. Exact resume and the no-fresh-fallback rule are unchanged. The stream
+wire of a newer build is not re-probed. The opt-in probes above remain the
+evidence for widening the safe catalog.
+
+Both installed builds accept the hidden `--disable-auto-update` option. Every
+Cursor process cezar starts now passes it, and the probe script does too.
+A build that rejects it exits 1 with commander's `unknown option` line before
+any work, and cezar reruns the same command once without the option.
+
+Live check on `2026.10.16-e3cb207`: the preflight returned supported with 57
+allowed tools. A restricted `CursorRunner` session in a disposable repository
+selected `cursor-print`, reported the marketplace Superpowers `brainstorming`
+skill as available, and ended without an error. The `agent` link still
+pointed at `2026.10.16-e3cb207` afterwards.

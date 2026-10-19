@@ -299,7 +299,8 @@ described above.
 
 Every night at **03:17 UTC**, [`nightly.yml`](../.github/workflows/nightly.yml)
 verifies `main` (typecheck, unit suites, build, packaged-CLI e2e — the same gate
-a release runs) and publishes it under the `nightly` dist-tag:
+a release runs, split into the same jobs and Vitest shards as `ci.yml`) and
+publishes it under the `nightly` dist-tag:
 
 ```bash
 npx cezarion@nightly              # whatever is on main as of last night

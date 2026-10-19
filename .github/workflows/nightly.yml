@@ -29,16 +29,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  nightly:
-    name: Publish nightly to npm
+  # Nothing merged since yesterday's run means tonight's build is byte-identical
+  # to the one already tagged `nightly` — publishing it again would only add a
+  # version nobody can tell apart. A manual dispatch skips this check by default:
+  # if someone asked for a nightly from the Actions tab, they want one.
+  decide:
+    name: Decide whether to publish
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     # A scheduled run always uses the default branch; this also pins the manual
     # dispatch to main, so a nightly can never be cut from a feature branch.
     if: github.ref == 'refs/heads/main'
-    permissions:
-      contents: read
-      id-token: write # npm provenance attestation
+    outputs:
+      publish: ${{ steps.decide.outputs.publish }}
 
     steps:
       - name: Check out repository
@@ -47,11 +50,8 @@ jobs:
           # Full history: the default shallow clone has no commit dates to compare,
           # so the "did main move?" check below would see an empty log every night.
           fetch-depth: 0
+          persist-credentials: false
 
-      # Nothing merged since yesterday's run means tonight's build is byte-identical
-      # to the one already tagged `nightly` — publishing it again would only add a
-      # version nobody can tell apart. A manual dispatch skips this check by default:
-      # if someone asked for a nightly from the Actions tab, they want one.
       - name: Decide whether to publish
         id: decide
         env:
@@ -71,13 +71,119 @@ jobs:
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # `lts/*` like every other workflow here: a nightly is built and verified on
-      # the Node release line users are actually on that day (see ci.yml).
+      - name: Write workflow summary
+        if: steps.decide.outputs.publish != 'true'
+        run: |
+          {
+            echo "## 🌙 Nightly skipped"
+            echo ""
+            echo "\`main\` has not moved in the last 24 hours — the current \`nightly\` tag is already this build."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # A nightly is an installable build, not a preview of a proposal — it carries
+  # the same gate as a release. main is protected and every commit on it passed
+  # ci.yml already, but the trunk can still go red through the calendar alone (a
+  # dependency's new major, an expired fixture), and a broken `@nightly` is worse
+  # than a missing one.
+  #
+  # The gate is split the way ci.yml splits it, on ci.yml's runner and bounds: the
+  # whole suite in one 20-minute job outgrew that job on 2026-10-06, and every
+  # nightly after it was stopped at the time limit (hearsay-tools/cezarion#1272).
+  # nightly.workflow.test.cjs keeps the Vitest shards equal to ci.yml's.
+  # `lts/*` like every other workflow here: a nightly is built and verified on
+  # the Node release line users are actually on that day (see ci.yml).
+  checks:
+    name: Typecheck, unit, build, and package
+    needs: decide
+    if: needs.decide.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Set up pnpm
-        if: steps.decide.outputs.publish == 'true'
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - name: Set up Node.js
-        if: steps.decide.outputs.publish == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Build application
+        run: npm run build
+
+      - name: Run packaged CLI E2E tests
+        run: npm run test:package
+
+  vitest:
+    name: Vitest shard ${{ matrix.shard }}/3
+    needs: decide
+    if: needs.decide.outputs.publish == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # TypeScript test imports resolve through the server build, as in ci.yml.
+      - name: Build server dependencies
+        run: npm run build:server
+
+      - name: Run server and cockpit unit suites
+        run: npm test -- --shard=${{ matrix.shard }}/3 --maxWorkers=4
+
+  # Publishing stays on a GitHub-hosted runner: `--provenance` is refused from
+  # any other kind.
+  nightly:
+    name: Publish nightly to npm
+    needs: [checks, vitest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write # npm provenance attestation
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: lts/*
@@ -86,32 +192,13 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
-        if: steps.decide.outputs.publish == 'true'
         run: pnpm install --frozen-lockfile
 
-      # A nightly is an installable build, not a preview of a proposal — it carries
-      # the same gate as a release. main is protected and every commit on it passed
-      # ci.yml already, but the trunk can still go red through the calendar alone (a
-      # dependency's new major, an expired fixture), and a broken `@nightly` is worse
-      # than a missing one.
-      - name: Verify before publishing
-        if: steps.decide.outputs.publish == 'true'
-        run: |
-          npm run typecheck
-          npm run test:unit
-          npm test
-
       - name: Build application
-        if: steps.decide.outputs.publish == 'true'
         run: npm run build
-
-      - name: Run packaged CLI E2E tests
-        if: steps.decide.outputs.publish == 'true'
-        run: npm run test:package
 
       - name: Publish nightly
         id: nightly
-        if: steps.decide.outputs.publish == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           # The channel is requested BY NAME, never inferred from the event — that is
@@ -119,23 +206,14 @@ jobs:
           CEZ_RELEASE_CHANNEL: nightly
         run: node scripts/release-snapshot.mjs
 
-      # `always()` so a skipped night still explains itself, but only once the
-      # decision actually ran — a job that died before it has nothing to report.
+      # `always()` so a failed publish still explains itself. A failed gate skips
+      # this whole job; its own job and the failure reporter say why.
       - name: Write workflow summary
-        if: always() && steps.decide.outputs.publish != ''
+        if: always()
         env:
-          PUBLISH: ${{ steps.decide.outputs.publish }}
           ATTEMPTED: ${{ steps.nightly.outputs.attempted }}
           RESULT: ${{ steps.nightly.outputs.result }}
         run: |
-          if [ "$PUBLISH" != "true" ]; then
-            {
-              echo "## 🌙 Nightly skipped"
-              echo ""
-              echo "\`main\` has not moved in the last 24 hours — the current \`nightly\` tag is already this build."
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
           if [ "$ATTEMPTED" != "true" ]; then
             echo "## 🌙 Nightly did not publish (see the job log)" >> "$GITHUB_STEP_SUMMARY"
             exit 0

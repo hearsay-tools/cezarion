@@ -247,6 +247,26 @@ browser specs for affected UI flows, e.g.
 `npm run test:e2e -- smoke.e2e.ts -t 'test name'` (see `packages/web/e2e/README.md`).
 Do not run the entire Vitest or browser suite after each edit or each review round.
 
+Before opening a PR that changes dry-run turn-end behavior — the
+`packages/cezar/scripts/mock-*.mjs` mocks, the turn-end rule, attention, or the
+human-ask summary — select the browser and packaged fixtures that drive a dry-run
+task to a park, from the repo root:
+
+```bash
+P="waitForStatus\([^)]*'waiting'|hasPendingHumanAsk|attentionLabel|'mock:"
+grep -lE "$P" packages/web/e2e/*.e2e.ts packages/cezar/test/e2e/*.test.ts
+```
+
+Require passing results for these matches alongside the unit parity suites in
+[Runner regressions ship with shared coverage](#runner-regressions-ship-with-shared-coverage)
+(hearsay-tools/cezarion#1251). With Squeal validating, read and wait for the
+selected files through `squeal status --wait 60000 <files>`; if slow results are
+not current, use `squeal run --slow --wait 60000`. Without Squeal, run the browser
+matches with `npm run test:e2e -- <specs>` from the repo root. Packaged matches
+require `npm run build` from the repo root first; then, from `packages/cezar`, run
+`node --import ../../scripts/test-git-env.mjs --import tsx --test <files>` with
+those packaged paths relative to that directory (e.g. `test/e2e/task-cli.test.ts`).
+
 No tool maps a cockpit source change to the browser specs it affects, with or
 without Squeal: `npm run test:changed` runs `npm test`, whose four unit projects
 hold no browser spec, and Squeal's browser-spec inputs include all of

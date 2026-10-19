@@ -9,7 +9,7 @@ import { CommandPalette } from '@/components/command-palette'
 import { ListViewProvider } from '@/components/list-view'
 import { ProviderBannerContainer } from '@/components/provider-banner-container'
 import { SidebarProjectHeader } from '@/components/sidebar-project-header'
-import { ProjectRail } from '@/components/project-rail'
+import { ProjectRail, ProjectRailPlaceholder } from '@/components/project-rail'
 import { useProjectSwitch } from '@/components/use-project-switch'
 import { useWorkspaceSignals } from '@/components/use-workspace-signals'
 import { TaskQuickListContainer } from '@/components/task-quick-list'
@@ -79,7 +79,8 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
   const skillsUpdateAvailable = skillsUpdateMarkerOf(skillsUpdate.data)
   // Unread done items (#unread-done-items) for the Tasks badge. Reads the same active-scope run
   // list the sidebar quick-list and Tasks table already hold — one cache entry, no extra fetch.
-  const registry = useProjects().data
+  const projectsQuery = useProjects()
+  const registry = projectsQuery.data
   // The registry and every project's counts, read once: the rail (md+) and the phone's menu button
   // and drawer paint from this one result.
   const workspace = useWorkspaceSignals()
@@ -168,7 +169,7 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         needsYou={listCounts(runs.data ?? []).waiting > 0}
         toolsMenu={<ToolsMenu health={health.data} />}
         toolsStatus={health.data ? { blocked: toolsBlocker(health.data) !== null, note: forgeNote(health.data) } : null}
-        projectRail={workspace ? <ProjectRail {...workspace} projectTarget={projectSwitch.target} onSwitchProject={(id) => void projectSwitch.go(id)} version={shellHealth?.version ?? null} /> : null}
+        projectRail={workspace ? <ProjectRail {...workspace} projectTarget={projectSwitch.target} onSwitchProject={(id) => void projectSwitch.go(id)} version={shellHealth?.version ?? null} /> : projectsQuery.isPending ? <ProjectRailPlaceholder /> : null}
       >
         {children}
       </AppShell>
