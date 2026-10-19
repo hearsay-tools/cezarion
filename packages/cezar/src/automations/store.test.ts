@@ -684,3 +684,17 @@ describe('AutomationStore cross-process write lock', () => {
     expect(Object.keys(JSON.parse(readFileSync(join(dir, 'automation-state.json'), 'utf8')).states)).toEqual(['a']);
   });
 });
+
+it('a released receipt cannot evict the durable issue claim during compaction', async () => {
+  const store = AutomationStore.open(await directory(), { now: () => new Date('2026-10-19T00:00:00Z') });
+  const candidate = { eventId: 'old', event: 'issue.opened' as const, timestamp: '2026-01-01T00:00:00Z',
+    tieBreaker: 'I', repo: 'acme/demo', nodeId: 'I', number: 7, title: 'Issue',
+    url: 'https://github.com/acme/demo/issues/7', author: 'alice', assignees: [], labels: [] };
+  const skipped = store.reserveReceipt({ automationId: 'one', revision: 1, eventId: 'old', candidate })!;
+  store.appendReceipt({ ...skipped, status: 'released', updatedAt: '2026-01-01T00:00:00Z' });
+  const launched = store.reserveReceipt({ automationId: 'one', revision: 1, eventId: 'later', candidate })!;
+  store.appendReceipt({ ...launched, status: 'launched', runId: 'kept', updatedAt: '2026-01-01T00:00:00Z' });
+  await store.compact();
+  const retained = [...AutomationStore.open(store.dataDir).latestReceipts().values()];
+  expect(retained).toEqual([expect.objectContaining({ status: 'launched', runId: 'kept' })]);
+});

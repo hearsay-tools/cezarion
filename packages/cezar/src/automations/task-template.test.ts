@@ -394,3 +394,44 @@ it('a current-label opt-in rechecks immediately before run creation, including r
     expect(store.findNonArchivedRunByIssue(candidate.repo, 7)).toBeUndefined();
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+it.each(['same', 'new'])('releases a late stale-route receipt so a %s event can launch after restart', async (next) => {
+  const root = await mkdtemp(join(tmpdir(), 'cezar-late-route-'));
+  const dataDir = join(root, '.ai/cezar');
+  const store = RunStore.open(dataDir);
+  try {
+    const automations = AutomationStore.open(dataDir);
+    const rule = automations.create({ ...definition, filters: { ...definition.filters, includeExisting: true,
+      requireCurrentLabels: true, allLabels: ['friction-auto'],
+    } }) as GithubAutomationDefinition;
+    let reads = 0;
+    let changeDuringLaunch = true;
+    const poller = new GithubPoller({ run: async () => JSON.stringify({ state: 'open',
+      labels: [{ name: changeDuringLaunch && ++reads > 1 ? 'friction-design' : 'friction-auto' }],
+    }) });
+    let event = { ...candidate, labels: ['friction-auto'], timestamp: new Date(Date.now() - 60_000).toISOString() };
+    vi.spyOn(poller, 'poll').mockImplementation(async () => ({ candidates: [event], truncated: false, pages: 1 }));
+    const scheduler = (storage: AutomationStore) => new ProjectAutomationScheduler({ projectId: 'p', store: storage, timeZone: 'UTC',
+      github: { owner: 'acme', repo: 'demo', poller },
+      launch: (definition, candidate, receiptId) => launchAutomationRun({ root, store, manager: fakeManager(store), definition, candidate, receiptId, poller }),
+    });
+    await scheduler(automations).check(rule).catch(() => undefined);
+    expect(store.findNonArchivedRunByIssue(candidate.repo, 7)).toBeUndefined();
+    const released = [...automations.latestReceipts().values()][0]!;
+    expect(released).toMatchObject({ status: 'released' });
+    expect(automations.isReservationInFlight(released.receiptId)).toBe(false);
+    expect(automations.logs({ automationId: rule.id })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ result: 'skipped', receiptId: released.receiptId }),
+    ]));
+    expect(automations.state(rule.id)?.backoffUntil).toBeUndefined();
+    changeDuringLaunch = false;
+    if (next === 'new') event = { ...event, eventId: 'later-event' };
+    const restarted = AutomationStore.open(dataDir);
+    await scheduler(restarted).check(rule);
+    const runId = store.findNonArchivedRunByIssue(candidate.repo, 7);
+    expect(runId).toBeTruthy();
+    const launched = restarted.latestReceipts().get(`${rule.id}:${event.eventId}`)!;
+    expect(launched).toMatchObject({ status: 'launched', runId });
+    expect(launched.receiptId).not.toBe(released.receiptId);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});

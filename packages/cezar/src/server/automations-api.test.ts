@@ -623,6 +623,27 @@ describe('GitHub automation API', () => {
     gone.mockRestore();
   });
 
+  it('a stale-route retry releases the issue receipt without creating a run', async () => {
+    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const rule = automationStore.create({ ...input, enabled: false,
+      filters: { ...input.filters, requireCurrentLabels: true, allLabels: ['friction-auto'] },
+    });
+    const candidate = { eventId: 'e', event: 'issue.opened' as const, timestamp: '2026-10-19T00:00:00.000Z',
+      tieBreaker: 'I', repo: 'acme/demo', nodeId: 'I_one', number: 7, title: 'Issue',
+      url: 'https://github.com/acme/demo/issues/7', author: 'alice', assignees: [], labels: ['friction-auto'] };
+    const receipt = automationStore.reserveReceipt({ automationId: rule.id, revision: rule.revision, eventId: 'e', candidate })!;
+    automationStore.appendReceipt({ ...receipt, status: 'launch-error', error: 'offline' });
+    const live = vi.spyOn(GithubPoller.prototype, 'matchesCurrentLabels').mockResolvedValue(false);
+    try {
+      const server = app({ automationStore, manager: recordingManager() });
+      const response = await apiRequest(server, `/api/v1/automation-log/${receipt.receiptId}/retry`, { method: 'POST' });
+      expect(response.status).toBe(409);
+      expect(automationStore.latestReceipts().get(receipt.receiptKey)).toMatchObject({ status: 'released' });
+      expect(store.findNonArchivedRunByIssue('acme/demo', 7)).toBeUndefined();
+      expect(automationStore.reserveReceipt({ automationId: rule.id, revision: rule.revision, eventId: 'e', candidate })).toBeDefined();
+    } finally { live.mockRestore(); }
+  });
+
   it('retry fires a launch-error schedule receipt', async () => {
     const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
     const manager = recordingManager();

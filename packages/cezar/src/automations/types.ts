@@ -178,7 +178,7 @@ export const automationReceiptSchema = z
     eventId: z.string().min(1),
     automationId: z.string().min(1),
     revision: z.number().int().positive(),
-    status: z.enum(['reserved', 'launched', 'launch-error']),
+    status: z.enum(['reserved', 'launched', 'launch-error', 'released']),
     runId: z.string().optional(),
     observedAt: z.string().datetime(),
     updatedAt: z.string().datetime(),

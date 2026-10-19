@@ -104,7 +104,21 @@ a 300-second interval, a seven-day bounded lookback and at most 25 records.
 All three opt into `filters.requireCurrentLabels:true`: label filters are checked
 against a fresh GitHub read before reserving a receipt and again before creating
 a task. Historical label events cannot let an obsolete handler consume the
-issue task slot. Manual receipt retries use the same launch check. The default
+issue task slot. Manual receipt retries use the same launch check. If the final read rejects a
+candidate after reservation, the receipt becomes `released`: it remains an audit
+record but cannot block the same event or a later event for that issue. Ordinary
+launch errors retain their receipt and explicit retry behavior.
+
+| Receipt state | Exit trigger and owner | Behavior at shipped defaults |
+| --- | --- | --- |
+| `reserved` | Launcher creates a run | `launched`; retains the issue claim |
+| `reserved` | Scheduler/retry catches a fresh eligibility rejection | `released`; audit only, no issue or event claim |
+| `reserved` | Ordinary exception or startup recovery | `launch-error`; retains the claim |
+| `released` | Scheduler observes an eligible event | A new reservation is allowed |
+| `launch-error` | Human explicitly retries through the API | Returns to `reserved`; no automatic retry |
+| `launched` | Scheduler sees later observations | Remains claimed; no automatic exit |
+
+The default
 for other automations is unchanged: historical event labels still match. Preview
 counts describe historical matches; execution can skip a superseded route.
 

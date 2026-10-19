@@ -29,7 +29,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { AutomationStore } from '../automations/store.ts';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
-import { GithubPoller } from '../automations/github-poller.ts';
+import { AutomationCandidateChangedError, GithubPoller } from '../automations/github-poller.ts';
 import { githubBaselineState } from '../automations/github-baseline.ts';
 import { ProjectAutomationScheduler, WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
 import { AutomationProjectUnavailableError, SCHEDULE_LEASE_HELD_REASON, ScheduleRunner, type ScheduleRunnerHandle } from '../automations/schedule-runner.ts';
@@ -3940,7 +3940,7 @@ export function createApp(deps: ServerDeps) {
         emitAutomationChange(project, definition.id, definition.revision);
         return c.json({ receiptId: receipt.receiptId, runId: launched.runId }, 202);
       } catch (error) {
-        store.appendReceipt({ ...reserved, status: 'launch-error', error: error instanceof Error ? error.message : String(error), updatedAt: new Date().toISOString() });
+        store.appendReceipt({ ...reserved, status: error instanceof AutomationCandidateChangedError ? 'released' : 'launch-error', error: error instanceof Error ? error.message : String(error), updatedAt: new Date().toISOString() });
         return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
       } finally {
         lease.release();

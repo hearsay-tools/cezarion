@@ -69,6 +69,11 @@ export interface GithubPollOptions {
   historyScan?: AutomationRuntimeState['historyScan'];
 }
 
+/** A fresh eligibility read rejected the candidate before any task was created. */
+export class AutomationCandidateChangedError extends Error {
+  constructor() { super('Automation no longer matches current labels; no task was created.'); }
+}
+
 export class GithubPoller {
   private readonly run: NonNullable<GithubPollerOptions['run']>;
 
