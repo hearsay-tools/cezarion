@@ -31,7 +31,8 @@ function git(args) {
 
 function runAgent(args, cwd, timeoutMs, env = process.env) {
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(bin, args, { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+    // Keep the probed build installed while it is probed (hearsay-tools/cezarion#1257).
+    const child = spawn(bin, ['--disable-auto-update', ...args], { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     let truncated = false;

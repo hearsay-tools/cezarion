@@ -37,7 +37,8 @@ function fixture(rows = catalog) {
   const log = join(cwd, 'turns.ndjson');
   const printMock = fileURLToPath(new URL('../../scripts/mock-cursor-print.mjs', import.meta.url));
   writeFileSync(bin, String.raw`#!/usr/bin/env node
-const a = process.argv.slice(2);
+// Like both qualified builds, accept the hidden auto-update option ahead of the command.
+const a = process.argv.slice(2).filter(arg => arg !== '--disable-auto-update');
 if (a[0] === 'acp') {
   const { createInterface } = await import('node:readline');
   createInterface({ input: process.stdin }).on('line', line => {
