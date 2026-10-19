@@ -122,3 +122,28 @@ test('invalidates evidence if the head, live base or draft state changes during 
     assert.match(actual.error, /changed/i);
   }
 });
+
+test('invalidates readiness evidence changed while review pages are being collected', async () => {
+  for (const change of ['checks', 'rules', 'thread', 'review']) {
+    const f = collectorFixture(); let page = 0;
+    f.gh.graphql = async () => {
+      page++;
+      if (page === 1) return { repository: { pullRequest: { reviewDecision: null,
+        reviewThreads: { nodes: Array.from({ length: 100 }, () => ({ isResolved: true })),
+          pageInfo: { hasNextPage: true, endCursor: 'earlier-threads' } } } } };
+      if (page === 2) {
+        if (change === 'checks') f.s.checks[0].conclusion = 'failure';
+        if (change === 'rules') f.s.requiredChecks.push({ name: 'New required check', appId: 15368 });
+        // A new thread can be inserted into an earlier page after we read it.
+        return { repository: { pullRequest: { reviewDecision: null,
+          reviewThreads: { nodes: [], pageInfo: { hasNextPage: false } } } } };
+      }
+      return { repository: { pullRequest: { reviewDecision: change === 'review' ? 'CHANGES_REQUESTED' : null,
+        reviewThreads: { nodes: change === 'thread' ? [{ isResolved: false }] : [],
+          pageInfo: { hasNextPage: false } } } } };
+    };
+    const actual = await collectSnapshot(f.args);
+    assert.equal(actual.complete, false, change);
+    assert.match(actual.error, /changed/i, change);
+  }
+});

@@ -52,9 +52,10 @@ Each isolated task runs these steps:
    all deterministic checks still run again. Deferred cases stay pending.
 3. Give positive candidates to a fresh challenger session, without the first rationale.
 4. Publish after another head/base and readiness check. Resolve the live target
-   branch ref instead of historical PR base metadata, and re-read revisions and
-   readiness after all evidence pages. Update an existing comment
-   instead of adding a comment on each run. Ignore markers written by other authors.
+   branch ref instead of historical PR base metadata, require two matching complete
+   reads of required rules, check runs and review state, then re-read revisions and
+   readiness after all evidence pages. A change invalidates the snapshot. Update an
+   existing comment instead of adding one on each run. Ignore markers written by other authors.
    Draft PRs receive no new comment, but an earlier ready verdict is revoked.
 
 The automation performs no merge, review approval, thread resolution, labeling,

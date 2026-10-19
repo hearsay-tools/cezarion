@@ -1,6 +1,7 @@
 'use strict';
 
 const { execFileSync } = require('node:child_process');
+const { isDeepStrictEqual } = require('node:util');
 const { VERSION } = require('./merge-recommendation-policy.cjs');
 const SHA = /^[a-f0-9]{40}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -102,23 +103,31 @@ async function collectSnapshot({ gh, repository, number, defaultBranch, policyCo
     const complete = files.length === pr.changed_files && files.every(f => Number.isSafeInteger(f.additions) && Number.isSafeInteger(f.deletions))
       && files.reduce((n, f) => n + f.additions, 0) === pr.additions
       && files.reduce((n, f) => n + f.deletions, 0) === pr.deletions && s.body.length <= 12000;
-    const rules = await gh.pages(`${prefix}/rules/branches/${encodeURIComponent(defaultBranch)}`);
-    s.requiredChecks = rules.filter(r => r.type === 'required_status_checks')
-      .flatMap(r => r.parameters?.required_status_checks || []).map(c => ({ name: c.context, appId: c.integration_id }));
-    const checks = await gh.pages(`${prefix}/commits/${s.headSha}/check-runs`, 'check_runs');
-    s.checks = checks.map(c => ({ id: c.id, name: c.name, headSha: c.head_sha, appId: c.app?.id, status: c.status, conclusion: c.conclusion }));
-    let cursor = null, open = 0;
-    for (let page = 0; page < 20; page++) {
-      const data = await gh.graphql(`query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewDecision reviewThreads(first:100,after:$cursor){nodes{isResolved}pageInfo{hasNextPage endCursor}}}}}`,
-        { owner: repository.split('/')[0], repo: repository.split('/')[1], number, cursor });
-      const pull = data?.repository?.pullRequest, threads = pull?.reviewThreads;
-      if (!Array.isArray(threads?.nodes) || threads.nodes.some(n => typeof n.isResolved !== 'boolean')) throw new Error('Review evidence incomplete.');
-      open += threads.nodes.filter(n => !n.isResolved).length;
-      s.reviewDecision = pull.reviewDecision;
-      if (threads.pageInfo?.hasNextPage === false) { s.openThreads = open; break; }
-      if (!threads.pageInfo?.endCursor || threads.pageInfo.endCursor === cursor) throw new Error('Review pagination incomplete.');
-      cursor = threads.pageInfo.endCursor;
-    }
+    const readiness = async () => {
+      const rules = await gh.pages(`${prefix}/rules/branches/${encodeURIComponent(defaultBranch)}`);
+      const requiredChecks = rules.filter(r => r.type === 'required_status_checks')
+        .flatMap(r => r.parameters?.required_status_checks || []).map(c => ({ name: c.context, appId: c.integration_id }));
+      const rows = await gh.pages(`${prefix}/commits/${s.headSha}/check-runs`, 'check_runs');
+      const checks = rows.map(c => ({ id: c.id, name: c.name, headSha: c.head_sha, appId: c.app?.id, status: c.status, conclusion: c.conclusion }));
+      let cursor = null, openThreads = 0;
+      for (let page = 0; page < 20; page++) {
+        const data = await gh.graphql(`query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewDecision reviewThreads(first:100,after:$cursor){nodes{isResolved}pageInfo{hasNextPage endCursor}}}}}`,
+          { owner: repository.split('/')[0], repo: repository.split('/')[1], number, cursor });
+        const pull = data?.repository?.pullRequest, threads = pull?.reviewThreads;
+        if (!Array.isArray(threads?.nodes) || threads.nodes.some(n => typeof n.isResolved !== 'boolean')) throw new Error('Review evidence incomplete.');
+        openThreads += threads.nodes.filter(n => !n.isResolved).length;
+        if (threads.pageInfo?.hasNextPage === false) return { requiredChecks, checks, openThreads, reviewDecision: pull.reviewDecision };
+        if (!threads.pageInfo?.endCursor || threads.pageInfo.endCursor === cursor) throw new Error('Review pagination incomplete.');
+        cursor = threads.pageInfo.endCursor;
+      }
+      throw new Error('Review pagination limit reached; evidence incomplete.');
+    };
+    const initialReadiness = await readiness();
+    Object.assign(s, initialReadiness);
+    // Pagination can race a new review thread, check rerun or rule change while
+    // the head stays fixed. Require a second matching complete readiness read.
+    const finalReadiness = await readiness();
+    Object.assign(s, finalReadiness);
     // PR metadata's base.sha is historical. Re-read the live target and PR only
     // after all potentially slow evidence pages, immediately before returning.
     const finalPr = await gh.api('GET', `${prefix}/pulls/${number}`);
@@ -127,7 +136,8 @@ async function collectSnapshot({ gh, repository, number, defaultBranch, policyCo
       sameRepository: finalPr.head?.repo?.full_name === repository,
       targetDefault: finalPr.base?.ref === defaultBranch,
       mergeable: finalPr.mergeable, mergeState: finalPr.mergeable_state };
-    if (Object.entries(final).some(([key, value]) => s[key] !== value)) {
+    if (!isDeepStrictEqual(initialReadiness, finalReadiness)
+      || Object.entries(final).some(([key, value]) => s[key] !== value)) {
       Object.assign(s, final);
       s.error = 'The PR revision or readiness changed during evidence collection.';
     } else s.complete = complete && s.openThreads !== null;
