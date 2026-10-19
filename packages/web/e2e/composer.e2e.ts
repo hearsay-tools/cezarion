@@ -54,11 +54,8 @@ beforeAll(async () => {
     'utf8',
   )
 
-  // The mock answers the no-wait nudge in plain text (hearsay-tools/cezarion#1234), so the run
-  // parks on Cezar's own wait with no card, as it parked on its prose question before. A card
-  // would stay pending after Finish and hide the one-click Continue this file pins.
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
-    { env: fixtureServeEnv(dataRoot, { CEZ_MOCK_NUDGE_REPLY: 'plain' }), stdio: 'ignore' },
+    { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
   )
   baseUrl = await waitForFixtureServer(server)
 
@@ -218,6 +215,13 @@ describe('the thread composer against a live waiting session', () => {
     browser.waitForFunction(
       `document.querySelector('[data-slot="composer"] textarea')?.disabled === false`,
     )
+    // The mock answered the no-wait nudge with a question card. Finish closed it unanswered
+    // (hearsay-tools/cezarion#1260), so no question is left open to block Continue.
+    browser.waitForFunction(
+      `[...document.querySelectorAll('[data-slot="ask-card"][data-resolved="true"]')].some((c) =>
+        c.textContent.includes('Closed when the task finished'))`,
+    )
+    expect(browser.count('[data-slot="ask-card"][data-resolved="false"]')).toBe(0)
     expect(
       browser.evaluate(`document.querySelector('[data-slot="composer"] textarea').placeholder`),
     ).toBe('Continue — add a prompt, or send to just reopen the session…')
