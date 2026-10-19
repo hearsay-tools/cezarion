@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { fixtureUpdateRun, manager, parent, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { fixtureUpdateRun, lastWaitOf, manager, parent, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 
 /**
  * Recovery for one adopted family (#779, plan step 3) runs while the rest of the project is live.
@@ -34,6 +34,7 @@ describe('a recovery scoped to one family', { timeout: 30_000 }, () => {
 
     await until(() => !waitOf(store.getRun(p.id)));
     expect(store.getRun(p.id)?.agentInputs?.filter((input) => input.id === wait.id)).toHaveLength(1);
-    expect(store.getRun(p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'outcome' } });
+    // hearsay-tools/cezarion#1235: an agent worker wait's receipt is in `lastWaits`.
+    expect(lastWaitOf(store.getRun(p.id))).toMatchObject({ id: wait.id, reason: 'outcome' });
   });
 });
