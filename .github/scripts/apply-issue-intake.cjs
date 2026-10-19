@@ -37,7 +37,7 @@ function loadIntake(input) {
 }
 
 function labelMutations(intake, issueNumber, knownLabels) {
-  const labels = intake.labels.filter((label) => knownLabels.has(label));
+  const labels = intake.labels.filter((label) => knownLabels.has(label) && !label.startsWith('friction-'));
   if (labels.length === 0) return [];
   return [['issue', 'edit', String(issueNumber), '--add-label', labels.join(',')]];
 }

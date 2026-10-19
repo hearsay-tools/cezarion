@@ -1,0 +1,120 @@
+name: Friction Intake
+
+on:
+  issues:
+    types: [opened, edited, labeled, unlabeled, closed, reopened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue to classify
+        required: true
+        type: string
+      dry_run:
+        description: Preview without changing issue labels
+        type: boolean
+        default: true
+
+permissions: {}
+
+# Classification creates no cezar task. Handling-label events are consumed by
+# cezar's three polls; this preserves its one-task-per-issue deduplication.
+concurrency:
+  group: friction-intake-${{ github.event.issue.number || inputs.issue_number }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  classify:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      ((github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name == 'friction') ||
+      (github.event.action != 'labeled' && github.event.action != 'unlabeled' && contains(github.event.issue.labels.*.name, 'friction'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - name: Checkout classifier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Classify friction with Jev
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          ISSUE_INTAKE_JEV_MODEL: ${{ vars.ISSUE_INTAKE_JEV_MODEL }}
+          FRICTION_OUTPUT: friction-output/friction.json
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const { classify } = require('./.github/scripts/jev-friction-intake.cjs');
+            const number = Number(process.env.ISSUE_NUMBER);
+            if (!Number.isSafeInteger(number) || number <= 0) throw new Error('Invalid issue number.');
+            const { data: issue } = await github.rest.issues.get({ ...context.repo, issue_number: number });
+            const eligible = !issue.pull_request && issue.state === 'open' && issue.labels.some(label => label.name === 'friction');
+            let classification = null;
+            if (eligible) {
+              try {
+                classification = await classify({
+                  issue, apiKey: process.env.TYPESAFE_API_KEY,
+                  model: process.env.ISSUE_INTAKE_JEV_MODEL || undefined,
+                });
+              } catch {
+                // No transport error bodies in logs: they may contain secrets.
+                core.warning('Jev classification unavailable or invalid; revoking prior routing labels. Rerun after resolving the failure.');
+              }
+            }
+            const output = { issue: { number, title: issue.title, body: issue.body ?? '' }, classification };
+            fs.mkdirSync(path.dirname(process.env.FRICTION_OUTPUT), { recursive: true });
+            fs.writeFileSync(process.env.FRICTION_OUTPUT, JSON.stringify(output));
+            core.summary.addRaw(classification
+              ? `Friction category: ${classification.category}; handling: ${classification.handling}.\n`
+              : 'No classification available; clear managed labels. Closed or no-longer-friction issues do not call Jev.\n');
+            await core.summary.write();
+
+      - name: Upload classification
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: friction-classification
+          path: friction-output/friction.json
+          if-no-files-found: error
+          retention-days: 7
+
+  apply:
+    needs: classify
+    if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout trusted applicator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download classification
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: friction-classification
+          path: friction-output
+
+      - name: Apply current classification
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+          FRICTION_OUTPUT: friction-output/friction.json
+        with:
+          script: |
+            const fs = require('node:fs');
+            const { applyClassification } = require('./.github/scripts/apply-friction-intake.cjs');
+            const input = JSON.parse(fs.readFileSync(process.env.FRICTION_OUTPUT, 'utf8'));
+            const result = await applyClassification({ github, repo: context.repo, issueNumber: Number(process.env.ISSUE_NUMBER), input });
+            core.info(`Friction classification: ${result.status}`);
+            core.summary.addRaw(`Friction labels: ${result.status}.\n`);
+            await core.summary.write();
