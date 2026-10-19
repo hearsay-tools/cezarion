@@ -56,7 +56,7 @@ function summary(wait: Wait): string {
     const first = wait.questions?.[0]?.question;
     return first === undefined ? 'human question' : clip(`human: ${first}`);
   }
-  if (wait.kind === 'worker') return clip(wait.requestIds ? `replies to ${wait.requestIds.length} request(s)` : `${wait.workerIds?.length ?? 0} worker(s)`);
+  if (wait.kind === 'worker') return clip(`worker wait on ${workerTargetPhrase(wait)}`);
   return clip(wait.note === undefined ? 'timer' : `timer: ${wait.note}`);
 }
 
@@ -142,7 +142,7 @@ function workerTargetPhrase(wait: WorkerWaitEntry): string {
 
 /** The footer a delivered turn ends with: every wait still open, or undefined when none is. The
  *  user's reply settles a question and a question the user saw cannot be cancelled, so cancel is
- *  offered only for CI waits and timers (hearsay-tools/cezarion#1234). */
+ *  offered only for CI waits, worker waits and timers (hearsay-tools/cezarion#1234). */
 export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
   const open = waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait));
   if (!open.length) return undefined;
@@ -155,7 +155,7 @@ export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
   const asked = open.some((wait) => wait.kind === 'human');
   const cancellable = open.some((wait) => wait.kind !== 'human');
   const close = !asked ? 'Call cezar_cancel_wait for any you no longer need.'
-    : cancellable ? "The user's reply answers your question; call cezar_cancel_wait for any CI wait or timer you no longer need."
+    : cancellable ? "The user's reply answers your question; call cezar_cancel_wait for any CI wait, worker wait or timer you no longer need."
     : "The user's reply answers it.";
   return `Still open: ${items.join('; ')}. ${close}`;
 }
