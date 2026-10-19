@@ -775,7 +775,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const response = await fetch(`${controller.url}/wait`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ workerIds: [child.workerId] }) });
     expect(response.status).toBe(200);
     const wait = workerWaitResultSchema.parse(await response.json());
-    expect(Date.parse(wait.wait.deadline) - Date.now()).toBeGreaterThan(599000);
+    expect(Date.parse(wait.wait.deadline!) - Date.now()).toBeGreaterThan(599000);
     expect(wait.wait.phase).toBe('registered'); expect(wait.instruction).toContain('End your turn');
     const status = f.store.getRun(run.id)?.status;
     const url = controller.url;

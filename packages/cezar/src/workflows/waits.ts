@@ -60,11 +60,12 @@ function summary(wait: Wait): string {
   return clip(wait.note === undefined ? 'timer' : `timer: ${wait.note}`);
 }
 
-/** The open waits as both tools list them back to the agent. A human wait has no deadline. */
+/** The open waits as both tools list them back to the agent. A human wait has no deadline, and
+ *  Cezar's own deadline-less worker wait is not the agent's to list (hearsay-tools/cezarion#1301). */
 export function openWaitList(waits: readonly Wait[]): OpenWait[] {
-  return waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait)).map((wait): OpenWait => wait.kind === 'human'
+  return waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait) && !(wait.kind === 'worker' && wait.deadline === undefined)).map((wait): OpenWait => wait.kind === 'human'
     ? { wait_id: wait.id, kind: wait.kind, summary: summary(wait) }
-    : { wait_id: wait.id, kind: wait.kind, deadline: wait.deadline, summary: summary(wait) });
+    : { wait_id: wait.id, kind: wait.kind, deadline: wait.deadline!, summary: summary(wait) });
 }
 
 /**

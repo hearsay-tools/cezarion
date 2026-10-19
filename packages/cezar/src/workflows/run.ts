@@ -1877,6 +1877,8 @@ export class RunManager {
       registerWait: async (request, via, signal) => {
         try {
           const wait = await this.registerWait(runId, request, via, generation, signal);
+          // The tools only open agent waits, which always carry a deadline.
+          if (wait.deadline === undefined) throw new Error('registered wait has no deadline');
           return { answer: { ok: true, wait_id: wait.id, kind: wait.kind, deadline: wait.deadline, open_waits: listOpen() }, wait };
         } catch (error) {
           const code = waitErrorCodeSchema.safeParse(thrownCode(error));
@@ -2241,7 +2243,9 @@ export class RunManager {
    * retried every second while the wait is still open, never dropped as an uncaught error. An
    * outcome whose resolution failed to commit arms the same retry with `firstDelay` 1 second.
    */
-  private armWorkerDeadline(runId: string, wait: WorkerWaitEntry, firstDelay = Date.parse(wait.deadline) - Date.now()): void {
+  private armWorkerDeadline(runId: string, wait: WorkerWaitEntry, firstDelay?: number): void {
+    // A deadline-less (Cezar completion) wait ends only when its workers settle (hearsay-tools/cezarion#1301).
+    if (firstDelay === undefined && wait.deadline === undefined) return;
     const run = this.store.getRun(runId);
     if (!run) return;
     const family = familyOf(run);
@@ -2260,7 +2264,7 @@ export class RunManager {
       timer.unref?.();
       this.waitTimers.set(wait.id, { runId, timer });
     };
-    arm(Math.max(0, firstDelay));
+    arm(Math.max(0, firstDelay ?? Date.parse(wait.deadline!) - Date.now()));
   }
 
   /** Stop everything that could still resolve this wait. */
@@ -5368,7 +5372,7 @@ export class RunManager {
             const timer = setTimeout(reconcileDeadline, delay);
             timer.unref?.(); this.workerWaitTimers.set(parent.id, timer);
           };
-          arm(Math.max(0, Date.parse(next.deadline) - Date.now()));
+          if (next.deadline !== undefined) arm(Math.max(0, Date.parse(next.deadline) - Date.now()));
         }
       }
     } finally { this.reconcilingWorkers = false; this.reconcilingFamily = undefined; }

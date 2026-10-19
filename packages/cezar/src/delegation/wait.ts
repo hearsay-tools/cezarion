@@ -19,7 +19,7 @@ export function reconcileWorkerWait(wait: WorkerWait, outcomes: readonly WorkerO
   // before adding new outcomes, so later wall time cannot change why it woke.
   const reason = wait.reason ?? (wait.phase === 'wake-pending'
     ? satisfies(wait.outcomes) ? 'outcome' : 'timeout'
-    : satisfies(collected) ? 'outcome' : Date.parse(now) >= Date.parse(wait.deadline) ? 'timeout' : undefined);
+    : satisfies(collected) ? 'outcome' : wait.deadline !== undefined && Date.parse(now) >= Date.parse(wait.deadline) ? 'timeout' : undefined);
   const unchanged = collected.length === wait.outcomes.length && collected.every((entry, index) => entry === wait.outcomes[index]);
   if (!reason) return unchanged ? wait : { ...wait, outcomes: collected };
   if (wait.phase === 'wake-pending' && wait.wakeId && wait.reason === reason && unchanged) return wait;
@@ -37,7 +37,7 @@ function reconcileRequestWait(wait: WorkerWait, outcomes: readonly RequestOutcom
     ? selected.every(id => entries.some(outcome => outcome.requestId === id)) : entries.length > 0;
   const reason = wait.reason ?? (wait.phase === 'wake-pending'
     ? satisfies(wait.requestOutcomes ?? []) ? 'outcome' : 'timeout'
-    : satisfies(collected) ? 'outcome' : Date.parse(now) >= Date.parse(wait.deadline) ? 'timeout' : undefined);
+    : satisfies(collected) ? 'outcome' : wait.deadline !== undefined && Date.parse(now) >= Date.parse(wait.deadline) ? 'timeout' : undefined);
   const unchanged = collected.length === (wait.requestOutcomes?.length ?? 0);
   if (!reason) return unchanged ? wait : { ...wait, requestOutcomes: collected };
   if (wait.phase === 'wake-pending' && wait.wakeId && wait.reason === reason && unchanged) return wait;

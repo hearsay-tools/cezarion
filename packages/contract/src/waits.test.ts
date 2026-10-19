@@ -502,6 +502,36 @@ describe('workerWaitEntryToLegacy', () => {
   });
 });
 
+describe('deadline-less cezar worker entries (hearsay-tools/cezarion#1301)', () => {
+  const targets = { workerIds: [W1], revisions: [], outcomes: [] };
+
+  it('a cezar worker entry may omit deadline and timeoutSeconds', () => {
+    const entry = { ...workerBase(targets), source: 'cezar', via: 'completion', deadline: undefined, timeoutSeconds: undefined };
+    expect(workerWaitEntrySchema.safeParse(entry).success).toBe(true);
+  });
+
+  it('an agent worker entry still requires deadline and timeoutSeconds', () => {
+    const result = workerWaitEntrySchema.safeParse({ ...workerBase(targets), source: 'agent', deadline: undefined, timeoutSeconds: undefined });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((issue) => issue.path[0])).toContain('deadline');
+  });
+
+  it('a cezar entry with only one of deadline and timeoutSeconds is refused', () => {
+    const cezar = { ...workerBase(targets), source: 'cezar', via: 'completion' };
+    expect(workerWaitEntrySchema.safeParse({ ...cezar, timeoutSeconds: undefined }).success).toBe(false);
+    expect(workerWaitEntrySchema.safeParse({ ...cezar, deadline: undefined }).success).toBe(false);
+    expect(workerWaitEntrySchema.safeParse(cezar).success).toBe(true);
+  });
+
+  it('resolveWaitingOn and the earliest-deadline pick ignore a deadline-less entry', () => {
+    const bare = workerWaitEntrySchema.parse({ ...workerBase(targets), source: 'cezar', via: 'completion', deadline: undefined, timeoutSeconds: undefined });
+    const ci = openCi();
+    expect(resolveWaitingOn({ waits: [bare] })).toEqual({ kind: 'workers', count: 1 });
+    expect(resolveWaitingOn({ waits: [bare, ci], status: 'waiting' } as never)).toEqual({ kind: 'workers', count: 1 });
+    expect(computeWaitingOn({ waits: [ci] })).toMatchObject({ kind: 'ci', deadline: ci.deadline });
+  });
+});
+
 describe('computeWaitingOn with worker entries', () => {
   it('an open worker entry names workers, above CI and timer, below usage limit and human', () => {
     const waits = [openCi(), openTimer(), openWorkerWait()];

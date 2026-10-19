@@ -32,10 +32,11 @@ export type WaitPhase = z.infer<typeof waitPhaseSchema>;
 /** What opened the wait: the tool itself, or one of the aliases that map into the same list.
  *  `no-wait` is the human wait cezar opens when a nudged turn still ends without one; `budget`
  *  is the one it opens when the automatic-wake budget is spent; `cez-worker-wait` is
- *  `cez worker wait`, the alias that opens a `worker` wait. */
+ *  `cez worker wait`, the alias that opens a `worker` wait; `completion` is the worker wait
+ *  cezar opens for a root whose done is refused twice (hearsay-tools/cezarion#1301). */
 export const waitViaSchema = z.enum([
   'cezar_wait', 'cezar_wait_for_ci', 'cezar_ask', 'monitoring-line', 'schedule-wakeup', 'ask-line', 'native-ask', 'no-wait', 'budget',
-  'cez-worker-wait',
+  'cez-worker-wait', 'completion',
 ]);
 export type WaitVia = z.infer<typeof waitViaSchema>;
 
@@ -94,8 +95,9 @@ export type HumanWaitEntry = z.infer<typeof humanWaitEntrySchema>;
 export const workerWaitEntrySchema = z.object({
   ...waitBaseShape,
   kind: z.literal('worker'),
-  deadline: z.iso.datetime(),
-  timeoutSeconds: z.number().int().min(1).max(1800),
+  // Cezar's completion wait has neither: it ends when its workers settle (hearsay-tools/cezarion#1301).
+  deadline: z.iso.datetime().optional(),
+  timeoutSeconds: z.number().int().min(1).max(1800).optional(),
   mode: workerWaitModeSchema.optional(),
   workerIds: workerIdsSchema.optional(),
   revisions: z.array(z.object({ workerId: z.uuid(), revision: z.number().int().nonnegative() }).strict()).max(32).optional(),
@@ -105,6 +107,14 @@ export const workerWaitEntrySchema = z.object({
   result: z.object({ reason: z.enum(['outcome', 'timeout']) }).strict().optional(),
   wakeInputId: z.uuid().optional(),
 }).strict().superRefine((wait, ctx) => {
+  const hasDeadline = wait.deadline !== undefined;
+  const hasTimeout = wait.timeoutSeconds !== undefined;
+  if (wait.source === 'agent') {
+    if (!hasDeadline) ctx.addIssue({ code: 'custom', message: 'an agent worker wait requires a deadline', path: ['deadline'] });
+    if (!hasTimeout) ctx.addIssue({ code: 'custom', message: 'an agent worker wait requires timeoutSeconds', path: ['timeoutSeconds'] });
+  } else if (hasDeadline !== hasTimeout) {
+    ctx.addIssue({ code: 'custom', message: 'a cezar worker wait takes deadline and timeoutSeconds together or neither', path: [hasDeadline ? 'timeoutSeconds' : 'deadline'] });
+  }
   const byWorker = wait.workerIds !== undefined;
   const byRequest = wait.requestIds !== undefined;
   if (byWorker === byRequest) {

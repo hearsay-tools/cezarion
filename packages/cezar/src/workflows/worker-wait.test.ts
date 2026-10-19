@@ -183,7 +183,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }]);
     await until(() => !!waitOf(store.getRun(p.id)) || terminal.includes(store.getRun(p.id)?.status ?? ''));
     const wait = waitOf(store.getRun(p.id)); expect(wait).toBeDefined();
-    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(wait!.deadline);
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(wait!.deadline!);
     manager.reconcileWorkerWaits(); vi.useRealTimers();
     await until(() => !waitOf(store.getRun(p.id)));
     await until(() => monitors(p.id));
@@ -211,7 +211,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }]);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
     const wait = waitOf(store.getRun(p.id))!;
-    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime(wait.deadline);
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime(wait.deadline!);
     manager.reconcileWorkerWaits();
     await until(() => !waitOf(store.getRun(p.id)) && monitors(p.id));
     const session = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!.session;
@@ -342,7 +342,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           const wait = waitOf(store.getRun(p.id))!;
           const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
           vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
-          vi.setSystemTime(wait.deadline); manager.reconcileWorkerWaits();
+          vi.setSystemTime(wait.deadline!); manager.reconcileWorkerWaits();
           expect.soft(store.getRun(p.id)?.delegation).toMatchObject({ completion: { phase: 'attention' } });
           const persisted = (readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[]).find(run => run.id === p.id);
           expect.soft(persisted?.delegation).toMatchObject({ completion: { phase: 'attention' }, wait: { id: wait.id, reason: 'timeout' } });

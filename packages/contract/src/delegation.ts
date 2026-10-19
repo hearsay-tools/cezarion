@@ -45,7 +45,8 @@ export const workerWaitSchema = z.object({
   workerIds: z.array(z.uuid()).max(32).refine(ids => new Set(ids).size === ids.length),
   requestIds: z.array(z.uuid()).min(1).max(32).optional(),
   requestOutcomes: z.array(requestOutcomeSchema).max(32).optional(),
-  deadline: z.iso.datetime(),
+  // Absent on Cezar's completion wait, which ends only when its workers settle (hearsay-tools/cezarion#1301).
+  deadline: z.iso.datetime().optional(),
   mode: workerWaitModeSchema.optional(),
   revisions: z.array(z.object({ workerId: z.uuid(), revision: z.number().int().nonnegative() }).strict()).max(32).optional(),
   reason: z.enum(['outcome', 'timeout', 'cancelled', 'message']).optional(),
