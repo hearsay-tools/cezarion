@@ -175,6 +175,24 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
     // outside it → a ring. Both violet: still in motion, just not on this turn.
     return { bucket: 'none', tone: 'running', shape: run.delegation.role === 'root' ? 'workers' : 'ring', pulse: false, label: dependencyLabel };
   }
+  const workerEntries = (Array.isArray(run.waits) ? run.waits : []).filter((wait) => wait?.kind === 'worker' && wait.phase === 'open');
+  // A `registered` completion wait (not yet parked) reads as Needs you, as it always has.
+  const legacyRegisteredOnly = workerEntries.length === 0 && run.delegation?.role !== 'invalid' && run.delegation?.wait?.phase === 'registered';
+  if (waitingOn?.kind === 'workers' && !legacyRegisteredOnly && !run.hasPendingHumanAsk) {
+    // Worker waits in the list (hearsay-tools/cezarion#1235): the same wording as the legacy
+    // `delegation.wait` path above, which the completion gate keeps until phase 3b. A worker
+    // can only wait on replies from its parent; a root with only request waits waits on replies.
+    const role = run.delegation?.role;
+    if (role === 'worker') return { bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting on parent reply' };
+    if (workerEntries.length > 0 && workerEntries.every((wait) => wait.kind === 'worker' && wait.requestIds !== undefined)) {
+      return { bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on worker replies' };
+    }
+    const count = waitingOn.count;
+    return {
+      bucket: 'none', tone: 'running', shape: 'workers', pulse: false,
+      label: count ? `waiting on ${count} worker${count === 1 ? '' : 's'}` : 'waiting on workers',
+    };
+  }
   if (!hasPendingHumanAsk && waitingOn === undefined && run.status === 'waiting' && hasResolvedWait(run)) {
     // A resolved CI or timer wait owes the agent a wake that has not started: the same
     // scheduler wait as the worker wake above, never a human gate (spec rung 10).

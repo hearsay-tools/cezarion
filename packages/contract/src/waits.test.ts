@@ -411,6 +411,17 @@ describe('worker wait entry', () => {
     expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], wakeInputId: 'nope' })).success).toBe(false);
   });
 
+  it('a persisted entry with mode one needs exactly one id, of either target', () => {
+    const W3 = '99999999-9999-4999-8999-999999999993';
+    const R2 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2';
+    expect(waitSchema.safeParse(workerBase({ mode: 'one', workerIds: [W1, W2], revisions: [], outcomes: [] })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ mode: 'one', workerIds: [W1, W2, W3], revisions: [], outcomes: [] })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ mode: 'one', requestIds: [R1, R2], requestOutcomes: [] })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ mode: 'one', workerIds: [W1], revisions: [], outcomes: [] })).success).toBe(true);
+    expect(waitSchema.safeParse(workerBase({ mode: 'one', requestIds: [R1], requestOutcomes: [] })).success).toBe(true);
+    expect(waitSchema.safeParse(workerBase({ mode: 'all', workerIds: [W1, W2], revisions: [], outcomes: [] })).success).toBe(true);
+  });
+
   it('takes the cez-worker-wait origin', () => {
     expect(waitViaSchema.options).toContain('cez-worker-wait');
     expect(waitSchema.safeParse(workerBase({ via: 'cez-worker-wait', requestIds: [R1], requestOutcomes: [] })).success).toBe(true);

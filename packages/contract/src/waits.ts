@@ -111,6 +111,9 @@ export const workerWaitEntrySchema = z.object({
     ctx.addIssue({ code: 'custom', message: 'a worker wait names workerIds or requestIds, exactly one', path: [byWorker ? 'requestIds' : 'workerIds'] });
     return;
   }
+  if (wait.mode === 'one' && (wait.workerIds ?? wait.requestIds)?.length !== 1) {
+    ctx.addIssue({ code: 'custom', message: 'one mode requires exactly one id', path: ['mode'] });
+  }
   const own = byWorker ? ['revisions', 'outcomes'] as const : ['requestOutcomes'] as const;
   const other = byWorker ? ['requestOutcomes'] as const : ['revisions', 'outcomes'] as const;
   for (const key of own) {
