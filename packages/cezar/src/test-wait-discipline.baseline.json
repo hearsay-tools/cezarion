@@ -1106,12 +1106,6 @@
       "count": 1
     },
     {
-      "file": "workflows/immediate-delivery.test.ts",
-      "rule": "sleep",
-      "site": "await new Promise(resolve => setTimeout(resolve, 150));",
-      "count": 1
-    },
-    {
       "file": "workflows/pi-teardown.test.ts",
       "rule": "short-bound",
       "site": "await vi.waitFor(() => expect(manager.isActive(id)).toBe(false));",
