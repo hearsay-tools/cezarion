@@ -1296,11 +1296,20 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(manager.sendMessage(f.p.id, [{ type: 'text', text: messagesPrompt(runner, [ASK_TEXT]) }])).toBe(true);
       await until(() => pendingQuestion(f.p.id) && asks(f.p.id).length === 1);
       const askSeq = asks(f.p.id)[0]!.seq;
+      const turns = turnEnds(f.p.id);
       const id = await f.progress('Worker progress u19');
       await until(() => delivered(f.p.id, id) && prompted(runner, 'Worker progress u19').length > 0);
-      // Delivered beside the card, which no message answers.
+      // Delivered beside the card, which no message answers or replaces: after the beside turn the
+      // pending question is still the original one, with its askSeq.
+      await until(() => turnEnds(f.p.id) > turns && pendingQuestion(f.p.id));
       expect(answered(f.p.id, askSeq)).toBe(false);
-      await answerQuestion(f.p.id, askSeq);
+      expect(asks(f.p.id).map(event => event.seq)).toEqual([askSeq]);
+      expect(humanOpen(f.p.id)).toEqual([expect.objectContaining({ phase: 'open', askSeq })]);
+      expect(store.transcriptFacts(f.p.id).pendingAsk?.seq).toBe(askSeq);
+      expect(deriveAttention(store.getRun(f.p.id)!).label).toBe('needs you');
+      // The human's answer checkpoints that same question.
+      expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'Parser' }])).toBe(true);
+      await until(() => answered(f.p.id, askSeq));
     });
   }
 });

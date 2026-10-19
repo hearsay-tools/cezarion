@@ -882,7 +882,8 @@ as `cezar_cancel_wait` does. A worker wait sits beside CI, timer and human waits
 none of them. A park whose top wait is workers holds no slot, reads as the workers and
 idle-closes after `IDLE_TIMEOUT_MS`; a resolution or a message reopens it through the scheduler
 continuation. Messages are not waits: a worker message or reply wakes the run with every wait
-still open and in the footer. The completion gate's own worker wait (`delegation.wait`, until
+still open and in the footer, and beside a pending portable question it is delivered next to the
+card, which stays answerable; beside a pending native question it waits for the answer's turn end. The completion gate's own worker wait (`delegation.wait`, until
 phase 3b) is the one park that still outranks the list: every open timer and CI wait keeps its
 deadline through it, and a wait that resolves while the run is parked there is held until the
 worker wake is delivered.
@@ -1230,9 +1231,10 @@ stays open with its deadline, and only the worker's own settlement resolves it, 
 one worker wait with `cez worker wait` and another with `cezar_wait`: both are entries of the
 same list (`via: 'cez-worker-wait'` and `'cezar_wait'`), and each resolves on its own worker into
 `lastWaits`. U9w registers a worker wait mid-turn and fails the provider, and separately
-registers one at a boundary and closes the session cleanly: the run stays `waiting` with no
-error and the wait open, and the worker's settlement delivers it (the clean close was an error
-before 3a). U19 delivers a worker message beside a pending portable question on every runner:
+registers one at a boundary and closes the session cleanly. After the provider failure the run
+is not failed and stays recoverable with the wait open; after the clean close it stays `waiting`
+with no error and the wait open (the clean close was an error before 3a). Either way the worker's
+settlement delivers it. U19 delivers a worker message beside a pending portable question on every runner:
 the message reaches the wire, nothing answers the card, and the human's answer keeps its
 `askSeq`. No runner takes U12's exemption here: U19 pins delivery, not a delayed acknowledgement.
 
