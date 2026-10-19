@@ -225,6 +225,9 @@ with the answered `askSeq`. Live sends checkpoint only on true; continuation ope
 answers checkpoint at their first successful, open-session turn boundary (never
 a fatal, cancelled or shutdown boundary). A checkpoint for an older
 ask cannot clear a newer question; absent checkpoints retain the ask conservatively.
+An accepted Finish records `human-ask-closed` (`reason: 'finish'`) with the open
+`askSeq`, which retires the question as a checkpoint does without answering it
+(hearsay-tools/cezarion#1260). Stop keeps the question for a human to answer.
 While that exact opening answer is executing, it does not block registering a
 worker or request wait. A newer question still does. Wait refusals explain the
 condition and remedy; registration releases capacity only when the turn ends.
@@ -1099,7 +1102,7 @@ the observation. Later successful settlement must leave that failed attempt inta
 Clean session closure while CI is pending still parks without failure. No runner
 exemptions or normalized-event injection.
 
-**U0–U17** (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234, with U5a, U5c, U5d, U6s, U7d, U7h, U9c, U9h and U16b) pin the
+**U0–U18** (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234, hearsay-tools/cezarion#1260, with U5a, U5c, U5d, U6s, U7d, U7h, U9c, U9h and U16b) pin the
 wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
 normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`, `cezar_ask`,
 `cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
@@ -1202,7 +1205,10 @@ reply, which restarts the budget. U5a answers the nudge with `cezar_ask` and par
 after one extra turn, the default dry-run path. U5c finishes a root parked on Cezar's no-wait wait,
 and pins that an agent question still blocks Finish. U5d pins that the no-wait wait raises no
 question (its `askSeq` is its note, and no gate fact is pending), and that a timer the agent
-registers cancels it into `lastWaits` and parks the run as monitoring. U17 sends a prose question
+registers cancels it into `lastWaits` and parks the run as monitoring. U18 finishes a run parked
+on the agent's `cezar_ask` card, with its session open and with it closed: Finish records
+`human-ask-closed` for that question and no `human-input-delivered`, so no question stays pending.
+U17 sends a prose question
 with no wait, which gets the nudge, then the same question after the monitoring line, which leaves
 the line's timer in place with no gate note. U15 nudges an autonomous run with the autonomous
 wording until the budget, then opens a `budget` human wait.

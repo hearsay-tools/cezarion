@@ -566,6 +566,12 @@ rule" and "Phase 2b decisions".
   Both are answered the same way, so no record migrates.
 - **Dry run.** The native mocks answer the nudge with a `cezar_ask` card, so a dry-run task parks
   on a question after one extra turn. `CEZ_MOCK_NUDGE_REPLY=plain` makes them answer in plain text.
+- **Finish closes an open question (hearsay-tools/cezarion#1260, additive).** An accepted Finish
+  appends a new event, `human-ask-closed`, with the closed question's `askSeq` and
+  `reason: 'finish'`. It retires the question as `human-input-delivered` does, but nobody answered
+  it, so no delivery is recorded. A reader that skips event types it does not know sees the
+  question still open on a finished run, as before this change. Stop appends nothing and keeps
+  the question.
 
 ## When in doubt
 

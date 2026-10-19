@@ -718,8 +718,15 @@ Calls made while building 2b (hearsay-tools/cezarion#1234), within "Left to the 
   answers the nudge with a `cezar_ask` card (the ask line in a session taught the markers), so a
   dry-run task parks on a question after one extra turn. With `plain` the mocks answer in plain
   text, and the run reaches Cezar's no-wait wait. The unit fixtures default to `plain`, the
-  closest to the plain park they were written for, and so do `composer.e2e.ts` and the packaged
-  `task-cli.test.ts`. The cells that need the card opt out.
+  closest to the plain park they were written for, and so does the packaged `task-cli.test.ts`.
+  The cells that need the card opt out. `composer.e2e.ts` runs on the card, which Finish closes.
+- **Finish closes an open question; Stop keeps it** (hearsay-tools/cezarion#1260). On the default
+  dry-run path a task parks on the card, and a card that stayed answerable after Finish hid the
+  one-click Continue. An accepted Finish now records `human-ask-closed` (`reason: 'finish'`) with
+  the question's `askSeq`. The question is retired as an answer would retire it, but no
+  `human-input-delivered` is written, and the card reads "Closed when the task finished". Stop
+  records nothing, so a stopped run's question stays for a human to answer (#505). A root's Finish
+  is still refused while its question is open (U5c).
 - **The compare column keeps the agent's summary.** The nudge's extra turn writes another
   `turn complete — …` heartbeat at the top of the Progress log. The variants compare column reads
   the log's first lines, so `handoffProgressExcerpt` now shows the agent's own lines and falls back
@@ -747,3 +754,5 @@ on, budget 40, no autonomy. The 2a table above still holds for the states it lis
 | Autonomous run, ask line before the budget | The turn ends | The runner's turn end | The line is not registered; the note and the autonomous nudge; this repeats until the budget |
 | | The budget is spent | The runner's turn end | The nudge is refused with the cap note and the line is registered as an `ask-line` human wait (Needs you) |
 | Prose question or rejected ask line beside the monitoring line, live workers or another wait | The turn ends | The runner's turn end | The run parks on its waits (monitoring or waiting on workers) and does not read Needs you; the timer's wake or the worker's message is the next exit |
+| `waiting` on the agent's question (kept from 2a; amends its Finish row) | Finish, with or without a live session | The user | The wait is cancelled into `lastWaits` and `human-ask-closed` closes the question unanswered; no question stays pending, and Continue reopens the run with nothing typed (U18). A root's Finish is refused (U5c) |
+| | Stop | The user | The wait is cancelled; the question stays pending for a human to answer (#505) |
