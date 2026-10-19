@@ -48,12 +48,16 @@ export async function invokeCiTool(input: unknown) {
  */
 function flatWaitInputSchema() {
   const properties: Record<string, unknown> = {};
-  for (const option of cezarWaitRequestSchema.options) Object.assign(properties, z.toJSONSchema(option, { io: 'input' }).properties);
+  // The `worker` kind is not advertised yet: its `timeout_seconds` (1–1800, default 600) would
+  // override the CI bounds below. hearsay-tools/cezarion#1235 phase 3a adds its fields here.
+  for (const option of cezarWaitRequestSchema.options.filter(option => option.shape.kind.value !== 'worker')) {
+    Object.assign(properties, z.toJSONSchema(option, { io: 'input' }).properties);
+  }
   const field = (key: string, description: string) => ({ ...(properties[key] as object), description });
   return {
     type: 'object' as const,
     properties: {
-      kind: { type: 'string', enum: cezarWaitRequestSchema.options.map(option => option.shape.kind.value), description: '"ci" waits for the checks of a GitHub pull request; "timer" wakes you after `seconds`.' },
+      kind: { type: 'string', enum: cezarWaitRequestSchema.options.map(option => option.shape.kind.value).filter(kind => kind !== 'worker'), description: '"ci" waits for the checks of a GitHub pull request; "timer" wakes you after `seconds`.' },
       pr: field('pr', 'kind "ci": the HTTPS GitHub pull request URL.'),
       timeout_seconds: field('timeout_seconds', 'kind "ci": the deadline in seconds (1–7200, default 1800).'),
       seconds: field('seconds', 'kind "timer": seconds until the wake (60–7200).'),

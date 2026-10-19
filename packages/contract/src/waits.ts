@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import { askRequestSchema } from './ask-schema.ts';
 import { ciPrIdentitySchema, ciPrUrlSchema, ciWaitErrorCodeSchema, ciWaitRequestSchema, ciWaitResultSchema } from './ci-wait.ts';
-import type { DelegationState, RunDelegationSummary } from './delegation.ts';
+import { workerIdsSchema, workerOutcomeSchema, workerWaitModeSchema } from './delegation.ts';
+import type { DelegationState, RunDelegationSummary, WorkerWait } from './delegation.ts';
+import { requestOutcomeSchema } from './conversations.ts';
 import type { RunRecord } from './runs.ts';
 
 /**
@@ -12,8 +14,10 @@ import type { RunRecord } from './runs.ts';
  * cancels it. Phase 1 carries the `ci` and `timer` kinds; phase 2 (hearsay-tools/cezarion#1234)
  * adds `human`, which the agent opens with `cezar_ask` and which has no deadline: it ends when
  * the user answers or the agent cancels it.
- * Worker waits keep `delegation.wait` until phase 3, and `computeWaitingOn` reads it here so
- * `waitingOn` already follows the spec's order.
+ * Phase 3a (hearsay-tools/cezarion#1235) adds `worker`, which waits on workers' outcomes or on
+ * replies to requests and has a deadline. The completion gate's own wait stays in
+ * `delegation.wait` until phase 3b, and `computeWaitingOn` reads it beside the list so
+ * `waitingOn` follows the spec's order.
  */
 
 export const WAIT_LIMIT = 16;
@@ -27,9 +31,11 @@ export const waitPhaseSchema = z.enum(['open', 'resolved', 'delivered', 'cancell
 export type WaitPhase = z.infer<typeof waitPhaseSchema>;
 /** What opened the wait: the tool itself, or one of the aliases that map into the same list.
  *  `no-wait` is the human wait cezar opens when a nudged turn still ends without one; `budget`
- *  is the one it opens when the automatic-wake budget is spent. */
+ *  is the one it opens when the automatic-wake budget is spent; `cez-worker-wait` is
+ *  `cez worker wait`, the alias that opens a `worker` wait. */
 export const waitViaSchema = z.enum([
   'cezar_wait', 'cezar_wait_for_ci', 'cezar_ask', 'monitoring-line', 'schedule-wakeup', 'ask-line', 'native-ask', 'no-wait', 'budget',
+  'cez-worker-wait',
 ]);
 export type WaitVia = z.infer<typeof waitViaSchema>;
 
@@ -76,7 +82,47 @@ export const humanWaitEntrySchema = z.object({
 }).strict();
 export type HumanWaitEntry = z.infer<typeof humanWaitEntrySchema>;
 
-export const waitSchema = z.discriminatedUnion('kind', [ciWaitEntrySchema, timerWaitEntrySchema, humanWaitEntrySchema]);
+/**
+ * Workers' outcomes, or replies to requests the run sent (hearsay-tools/cezarion#1235). The
+ * target is exactly one of `workerIds` (with `revisions` and `outcomes`) and `requestIds` (with
+ * `requestOutcomes`); every outcome is the first observation, durable once recorded. Unlike a
+ * CI wait it has no `generation`: a worker's identity is its id. `result.reason` is why it
+ * resolved; `cancelled` is a phase, and a message no longer ends a wait.
+ * `wakeInputId` is an upgraded row's already-queued wake input, delivered once instead of the
+ * list's `input.id === wait.id` convention.
+ */
+export const workerWaitEntrySchema = z.object({
+  ...waitBaseShape,
+  kind: z.literal('worker'),
+  deadline: z.iso.datetime(),
+  timeoutSeconds: z.number().int().min(1).max(1800),
+  mode: workerWaitModeSchema.optional(),
+  workerIds: workerIdsSchema.optional(),
+  revisions: z.array(z.object({ workerId: z.uuid(), revision: z.number().int().nonnegative() }).strict()).max(32).optional(),
+  outcomes: z.array(workerOutcomeSchema).max(32).optional(),
+  requestIds: workerIdsSchema.optional(),
+  requestOutcomes: z.array(requestOutcomeSchema).max(32).optional(),
+  result: z.object({ reason: z.enum(['outcome', 'timeout']) }).strict().optional(),
+  wakeInputId: z.uuid().optional(),
+}).strict().superRefine((wait, ctx) => {
+  const byWorker = wait.workerIds !== undefined;
+  const byRequest = wait.requestIds !== undefined;
+  if (byWorker === byRequest) {
+    ctx.addIssue({ code: 'custom', message: 'a worker wait names workerIds or requestIds, exactly one', path: [byWorker ? 'requestIds' : 'workerIds'] });
+    return;
+  }
+  const own = byWorker ? ['revisions', 'outcomes'] as const : ['requestOutcomes'] as const;
+  const other = byWorker ? ['requestOutcomes'] as const : ['revisions', 'outcomes'] as const;
+  for (const key of own) {
+    if (wait[key] === undefined) ctx.addIssue({ code: 'custom', message: `${key} is required with ${byWorker ? 'workerIds' : 'requestIds'}`, path: [key] });
+  }
+  for (const key of other) {
+    if (wait[key] !== undefined) ctx.addIssue({ code: 'custom', message: `${key} does not go with ${byWorker ? 'workerIds' : 'requestIds'}`, path: [key] });
+  }
+});
+export type WorkerWaitEntry = z.infer<typeof workerWaitEntrySchema>;
+
+export const waitSchema = z.discriminatedUnion('kind', [ciWaitEntrySchema, timerWaitEntrySchema, humanWaitEntrySchema, workerWaitEntrySchema]);
 export type Wait = z.infer<typeof waitSchema>;
 
 // ---- the tools ----------------------------------------------------------------------------
@@ -84,6 +130,20 @@ export type Wait = z.infer<typeof waitSchema>;
 /** `cezar_wait`. The `ci` branch keeps `cezar_wait_for_ci`'s bounds and default. */
 export const cezarWaitRequestSchema = z.discriminatedUnion('kind', [
   ciWaitRequestSchema.extend({ kind: z.literal('ci') }).strict(),
+  z.object({
+    kind: z.literal('worker'),
+    worker_ids: workerIdsSchema.optional(),
+    request_ids: workerIdsSchema.optional(),
+    mode: workerWaitModeSchema.optional(),
+    timeout_seconds: z.number().int().min(1).max(1800).default(600),
+  }).strict().superRefine((request, ctx) => {
+    const ids = request.worker_ids ?? request.request_ids;
+    if ((request.worker_ids === undefined) === (request.request_ids === undefined)) {
+      ctx.addIssue({ code: 'custom', message: 'name worker_ids or request_ids, exactly one', path: ['worker_ids'] });
+    } else if (request.mode === 'one' && ids?.length !== 1) {
+      ctx.addIssue({ code: 'custom', message: 'one mode requires exactly one id', path: ['mode'] });
+    }
+  }),
   z.object({
     kind: z.literal('timer'),
     seconds: z.number().int().min(TIMER_MIN_SECONDS).max(TIMER_MAX_SECONDS),
@@ -95,16 +155,16 @@ export type CezarWaitRequest = z.infer<typeof cezarWaitRequestSchema>;
 export const cezarCancelWaitRequestSchema = z.object({ wait_id: z.uuid() }).strict();
 export type CezarCancelWaitRequest = z.infer<typeof cezarCancelWaitRequestSchema>;
 
-/** One still-open wait as both tools list it back to the agent. A CI or timer wait carries its
- *  deadline; a human wait has none. */
+/** One still-open wait as both tools list it back to the agent. A CI, timer or worker wait
+ *  carries its deadline; a human wait has none. */
 const openWaitFields = { wait_id: z.uuid(), summary: z.string().max(256) };
 export const openWaitSchema = z.discriminatedUnion('kind', [
-  z.object({ ...openWaitFields, kind: z.enum(['ci', 'timer']), deadline: z.iso.datetime() }).strict(),
+  z.object({ ...openWaitFields, kind: z.enum(['ci', 'timer', 'worker']), deadline: z.iso.datetime() }).strict(),
   z.object({ ...openWaitFields, kind: z.literal('human') }).strict(),
 ]);
 export type OpenWait = z.infer<typeof openWaitSchema>;
 
-export const waitErrorCodeSchema = z.enum([...ciWaitErrorCodeSchema.options, 'timers_disabled', 'wake_budget_spent']);
+export const waitErrorCodeSchema = z.enum([...ciWaitErrorCodeSchema.options, 'timers_disabled', 'wake_budget_spent', 'denied_scope']);
 export type WaitErrorCode = z.infer<typeof waitErrorCodeSchema>;
 
 /** The bound on every wait and done refusal's `message`; the run manager fits its own to it. */
@@ -115,7 +175,7 @@ export const cezarWaitAnswerSchema = z.discriminatedUnion('ok', [
   z.object({
     ok: z.literal(true),
     wait_id: z.uuid(),
-    kind: z.enum(['ci', 'timer']),
+    kind: z.enum(['ci', 'timer', 'worker']),
     deadline: z.iso.datetime(),
     open_waits: z.array(openWaitSchema).max(WAIT_LIMIT),
   }).strict(),
@@ -233,7 +293,8 @@ export type WaitingOnInput = Partial<Pick<RunRecord, 'waits' | 'hasPendingHumanA
   delegation?: DelegationState | RunDelegationSummary;
 };
 
-function workersOwed(delegation: WaitingOnInput['delegation']): number | undefined {
+/** The completion gate's wait, until phase 3b moves it into the list (hearsay-tools/cezarion#1235). */
+function completionWorkersOwed(delegation: WaitingOnInput['delegation']): number | undefined {
   if (!delegation || delegation.role === 'invalid' || !delegation.wait) return undefined;
   const wait = delegation.wait;
   // `wake-pending` means its workers settled and only the wake is left: no longer open.
@@ -243,6 +304,24 @@ function workersOwed(delegation: WaitingOnInput['delegation']): number | undefin
   const outcomes = 'outcomes' in wait ? wait.outcomes : undefined;
   const reported = new Set(outcomes?.map((outcome) => outcome.workerId));
   return workerIds?.filter((id) => !reported.has(id)).length ?? 0;
+}
+
+/** Ids a worker entry has not heard about yet, or requests without an outcome. */
+function workerEntryOwed(wait: WorkerWaitEntry): number {
+  if (wait.requestIds) {
+    const answered = new Set(wait.requestOutcomes?.map((outcome) => outcome.requestId));
+    return wait.requestIds.filter((id) => !answered.has(id)).length;
+  }
+  const reported = new Set(wait.outcomes?.map((outcome) => outcome.workerId));
+  return wait.workerIds?.filter((id) => !reported.has(id)).length ?? 0;
+}
+
+/** The count over every open worker entry plus the completion wait; undefined when there is neither. */
+function workersOwed(open: readonly Wait[], delegation: WaitingOnInput['delegation']): number | undefined {
+  const entries = open.filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker');
+  const completion = completionWorkersOwed(delegation);
+  if (!entries.length && completion === undefined) return undefined;
+  return entries.reduce((sum, wait) => sum + workerEntryOwed(wait), completion ?? 0);
 }
 
 function earliest<T extends CiWaitEntry | TimerWaitEntry>(waits: readonly T[]): T | undefined {
@@ -259,7 +338,7 @@ export function computeWaitingOn(run: WaitingOnInput): WaitingOn | undefined {
   const open = (Array.isArray(run.waits) ? run.waits : []).filter((wait) => wait?.phase === 'open');
   if (run.hasPendingHumanAsk || open.some((wait) => wait.kind === 'human')) return { kind: 'human' };
   if (run.autoResumeAt) return { kind: 'usage-limit', at: run.autoResumeAt };
-  const workers = workersOwed(run.delegation);
+  const workers = workersOwed(open, run.delegation);
   if (workers !== undefined) return { kind: 'workers', count: workers };
   const ci = earliest(open.filter((wait): wait is CiWaitEntry => wait.kind === 'ci'));
   if (ci) {
@@ -281,4 +360,26 @@ export function hasResolvedWait(run: { waitWakePending?: true } & Pick<WaitingOn
 /** A summary's `waitingOn` when it has one; a full or stream-patched record computes it. */
 export function resolveWaitingOn(run: { waitingOn?: WaitingOn } & WaitingOnInput): WaitingOn | undefined {
   return run.waitingOn ?? computeWaitingOn(run);
+}
+
+/**
+ * A worker wait as `cez worker wait` and `cez worker cancel-wait` answer it: the old
+ * `WorkerWait` shape, whose wire stays unchanged (hearsay-tools/cezarion#1235). Open is
+ * `registered`; every settled phase is `wake-pending` and the reason says how it ended.
+ */
+export function workerWaitEntryToLegacy(entry: WorkerWaitEntry): WorkerWait {
+  const reason = entry.phase === 'cancelled' ? 'cancelled' : entry.phase === 'open' ? undefined : entry.result?.reason;
+  return {
+    id: entry.id,
+    workerIds: entry.workerIds ?? [],
+    ...(entry.requestIds === undefined ? {} : { requestIds: entry.requestIds }),
+    ...(entry.requestOutcomes === undefined ? {} : { requestOutcomes: entry.requestOutcomes }),
+    deadline: entry.deadline,
+    ...(entry.mode === undefined ? {} : { mode: entry.mode }),
+    ...(entry.revisions === undefined ? {} : { revisions: entry.revisions }),
+    ...(reason === undefined ? {} : { reason }),
+    phase: entry.phase === 'open' ? 'registered' : 'wake-pending',
+    outcomes: entry.outcomes ?? [],
+    wakeId: entry.wakeInputId ?? entry.id,
+  };
 }

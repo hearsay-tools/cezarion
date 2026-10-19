@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { computeWaitingOn, type WorkerWaitEntry } from './waits.ts';
 import { ATTENTION_RANK, delegationWaitLabel, deriveAttention, type Attention, type AttentionInput } from './attention.ts';
 import type { RunStatus } from './runs.ts';
 
@@ -259,5 +260,47 @@ describe('open waits', () => {
     expect(deriveAttention({ status: 'failed', waits: [openCi()] }).label).toBe('failed');
     expect(deriveAttention({ status: 'waiting' }).label).toBe('needs you'); // no wait: unchanged fallback
     expect(deriveAttention({ status: 'running', activity: 'monitoring' }).label).toBe('monitoring'); // legacy summary rows
+  });
+});
+
+// hearsay-tools/cezarion#1235 (phase 3a): worker waits are wait-list entries.
+describe('computeWaitingOn and worker entries', () => {
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => `99999999-9999-4999-8999-99999999999${i}`);
+  const workerWait = (id: string, workerIds: string[], reported: string[] = []): WorkerWaitEntry => ({
+    kind: 'worker', id, source: 'agent', via: 'cezar_wait', registeredAt: '2026-10-19T10:00:00.000Z',
+    deadline: '2026-10-19T10:10:00.000Z', phase: 'open', turnId: 'turn-1', timeoutSeconds: 600,
+    workerIds, revisions: [],
+    outcomes: reported.map((workerId) => ({ workerId, status: 'done' as const, observedAt: '2026-10-19T10:03:00.000Z' })),
+  });
+  const ci = {
+    kind: 'ci' as const, id: '11111111-1111-4111-8111-111111111111', source: 'agent' as const, via: 'cezar_wait' as const,
+    registeredAt: '2026-10-19T10:00:00.000Z', deadline: '2026-10-19T10:30:00.000Z', phase: 'open' as const, turnId: 'turn-1',
+    prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40), generation: 'gen-1', timeoutSeconds: 1800,
+  };
+
+  it('computeWaitingOn counts unreported workers across two worker entries', () => {
+    const [a, b, c] = ids(3);
+    const waits = [
+      workerWait('88888888-8888-4888-8888-888888888881', [a!, b!], [b!]),
+      workerWait('88888888-8888-4888-8888-888888888882', [c!]),
+      workerWait('88888888-8888-4888-8888-888888888883', [a!, c!], [a!, c!]),
+    ];
+    // 1 + 1 unreported across the first two; the third has every worker reported.
+    expect(computeWaitingOn({ waits: waits.slice(0, 2) })).toEqual({ kind: 'workers', count: 2 });
+    expect(computeWaitingOn({ waits: [workerWait('88888888-8888-4888-8888-888888888884', [a!, b!]), workerWait('88888888-8888-4888-8888-888888888885', [c!])] }))
+      .toEqual({ kind: 'workers', count: 3 });
+    // Only open entries count.
+    expect(computeWaitingOn({ waits: [{ ...waits[0]!, phase: 'resolved' as const }] })).toBeUndefined();
+  });
+
+  it('a worker entry outranks an open ci wait', () => {
+    const [a] = ids(1);
+    expect(computeWaitingOn({ waits: [ci, workerWait('88888888-8888-4888-8888-888888888881', [a!])] })).toEqual({ kind: 'workers', count: 1 });
+  });
+
+  it('a human wait outranks a worker entry', () => {
+    const [a] = ids(1);
+    const waits = [workerWait('88888888-8888-4888-8888-888888888881', [a!])];
+    expect(computeWaitingOn({ waits, hasPendingHumanAsk: true })).toEqual({ kind: 'human' });
   });
 });

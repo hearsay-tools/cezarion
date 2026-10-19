@@ -2111,6 +2111,8 @@ export class RunManager {
     if (existing) return existing;
     // Counted as the store counts them, so a registration accepted here is never refused there.
     if (openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
+    // Worker waits open here from hearsay-tools/cezarion#1235 phase 3a (a later task); until then refused.
+    if (parsed.kind === 'worker') return refuse('invalid_request');
     if (parsed.kind === 'timer') {
       if (this.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
       if (this.automaticWakes(runId) >= MAX_AUTO_CONTINUES) refuse('wake_budget_spent');

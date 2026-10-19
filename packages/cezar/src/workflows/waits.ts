@@ -56,6 +56,8 @@ function summary(wait: Wait): string {
     const first = wait.questions?.[0]?.question;
     return first === undefined ? 'human question' : clip(`human: ${first}`);
   }
+  // The engine that opens worker waits is hearsay-tools/cezarion#1235 phase 3a, later tasks.
+  if (wait.kind === 'worker') return clip(wait.requestIds ? `replies to ${wait.requestIds.length} request(s)` : `${wait.workerIds?.length ?? 0} worker(s)`);
   return clip(wait.note === undefined ? 'timer' : `timer: ${wait.note}`);
 }
 
@@ -72,7 +74,7 @@ export function openWaitList(waits: readonly Wait[]): OpenWait[] {
  */
 export function identicalWait(waits: readonly Wait[], request: CezarWaitRequest, turnId: string): CiWaitEntry | TimerWaitEntry | undefined {
   return waits.find((wait): wait is CiWaitEntry | TimerWaitEntry => {
-    if (wait.phase !== 'open') return false;
+    if (wait.phase !== 'open' || request.kind === 'worker') return false; // worker waits: phase 3a, a later task
     if (request.kind === 'ci') return wait.kind === 'ci' && normalizePrUrl(wait.prUrl) === normalizePrUrl(request.pr);
     return wait.kind === 'timer' && wait.seconds === request.seconds && wait.note === request.note && wait.turnId === turnId;
   });
@@ -92,6 +94,8 @@ export function waitResultText(wait: Wait, { tools }: { tools: boolean } = { too
   if (isMonitoringTimer(wait)) return tools ? MONITORING_WAKE_NUDGE : MONITORING_WAKE_NUDGE_MARKERS;
   // The user's own message is a human wait's result; this text is never its delivery.
   if (wait.kind === 'human') return `Human wait ${wait.id} ended.`;
+  // Placeholder until the worker-wait engine lands (hearsay-tools/cezarion#1235 phase 3a).
+  if (wait.kind === 'worker') return `Worker wait ${wait.id} ended: ${JSON.stringify(wait.result ?? {})}.`;
   const fired = `Timer ${wait.id} fired${wait.note === undefined ? '' : `: ${wait.note}`}.`;
   // A session without cezar tools cannot register another wait; it was taught the marker.
   return tools
@@ -108,6 +112,7 @@ export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
   const items = open.map((wait) => {
     if (wait.kind === 'ci') return `CI wait ${wait.id} for ${wait.repository}#${wait.prNumber}, deadline ${wait.deadline}`;
     if (wait.kind === 'human') return `your question ${wait.id} to the user`;
+    if (wait.kind === 'worker') return `worker wait ${wait.id}, deadline ${wait.deadline}`;
     return `timer ${wait.id} at ${wait.deadline}${wait.note === undefined ? '' : ` (${wait.note})`}`;
   });
   const asked = open.some((wait) => wait.kind === 'human');
