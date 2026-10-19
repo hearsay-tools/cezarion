@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { workerWaitRequestSchema, type WorkerOutcome, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
-import type { WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import type { DeadlinedWorkerWaitEntry, WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { reconcileWorkerEntry, reconcileWorkerWait } from './wait.ts';
 
 const now = '2026-09-06T12:00:00.000Z';
@@ -104,7 +104,7 @@ describe('request selections in the shared wait', () => {
 
 // hearsay-tools/cezarion#1235 phase 3a: the same rules, applied to a `worker` entry in the wait list.
 describe('reconcileWorkerEntry', () => {
-  const entry: WorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'agent', via: 'cezar_wait', registeredAt: now,
+  const entry: DeadlinedWorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'agent', via: 'cezar_wait', registeredAt: now,
     deadline: wait.deadline, timeoutSeconds: 600, turnId: 'turn', phase: 'open', workerIds: [workerId], revisions: [], outcomes: [] };
   it('reconcileWorkerEntry keeps first observations and matches revisions', () => {
     const selected = { ...entry, revisions: [{ workerId, revision: 1 }], outcomes: [outcome('review')] };
@@ -133,7 +133,7 @@ describe('reconcileWorkerEntry', () => {
   it('reconcileWorkerEntry settles request entries by their own outcomes only', () => {
     const requestId = randomUUID(); const other = randomUUID();
     const { workerIds: _w, revisions: _r, outcomes: _o, ...base } = entry;
-    const requests: WorkerWaitEntry = { ...base, requestIds: [requestId, other], requestOutcomes: [], mode: 'all' };
+    const requests: DeadlinedWorkerWaitEntry = { ...base, requestIds: [requestId, other], requestOutcomes: [], mode: 'all' };
     const reply = { requestId, status: 'replied' as const, observedAt: now, replyId: randomUUID() };
     const partial = reconcileWorkerEntry(requests, [], now, [reply, { requestId: randomUUID(), status: 'failed', observedAt: now }]);
     expect(partial).toEqual({ entry: { ...requests, requestOutcomes: [reply] } });

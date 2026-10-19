@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, onTestFinished, vi } from 'vitest';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
-import { workerWaitEntryToLegacy, workerWaitView, type WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import { hasWorkerDeadline, workerWaitEntryToLegacy, workerWaitView, type DeadlinedWorkerWaitEntry, type WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
@@ -28,7 +28,7 @@ export async function until(predicate: () => boolean) { await vi.waitFor(() => e
 export const waitOf = (run: RunRecord | undefined): WorkerWait | undefined => run ? workerWaitView(run) : undefined;
 /** The newest settled worker wait (`lastWaits`), in the legacy shape: what `delegation.lastWait` was. */
 export const lastWaitOf = (run: RunRecord | undefined): WorkerWait | undefined => {
-  const entry = (run?.lastWaits ?? []).filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker').at(-1);
+  const entry = (run?.lastWaits ?? []).filter((wait): wait is DeadlinedWorkerWaitEntry => wait.kind === 'worker' && hasWorkerDeadline(wait)).at(-1);
   return entry ? workerWaitEntryToLegacy(entry) : undefined;
 };
 /** The open worker entry of a run, for fixtures that move its deadline. */

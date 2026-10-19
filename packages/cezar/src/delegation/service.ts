@@ -47,7 +47,7 @@ import {
   type WorkerWait,
   type WorkerWaitRequest,
 } from '@open-mercato/cezar-contract/delegation';
-import { workerWaitEntryToLegacy, type WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import { hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import type { RunStore, RunRecord } from '../runs/store.ts';
 import { workerDestroyView, workerOutcome } from '../runs/delegation-state.ts';
 import type { DelegationExecutionSettings, RunManager } from '../workflows/run.ts';
@@ -597,7 +597,7 @@ export class DelegationService {
   private inspectedWait(parent: RunRecord, workerId: string): WorkerWait | undefined {
     if (parent.delegation?.role !== 'root') return undefined;
     if (parent.delegation.wait) return parent.delegation.wait;
-    const entry = (parent.waits ?? []).filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker' && !!wait.workerIds?.includes(workerId)).at(-1);
+    const entry = (parent.waits ?? []).filter((wait): wait is DeadlinedWorkerWaitEntry => wait.kind === 'worker' && hasWorkerDeadline(wait) && !!wait.workerIds?.includes(workerId)).at(-1);
     return entry ? workerWaitEntryToLegacy(entry) : undefined;
   }
   async collect(caller: Caller, params: WorkerParams): Promise<WorkerCollectedResult> {

@@ -1,7 +1,7 @@
 import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { askErrorMessage, doneErrorMessage, waitErrorMessage } from '../ci-wait/errors.ts';
-import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type DoneErrorCode, type CiWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, workerWaitEntryToLegacy, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
+import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type DoneErrorCode, type CiWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
 import { ciWaitResultSchema, type CiWaitRequest, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { AUTONOMOUS_NUDGE, decideTurnEnd } from './turn-end.ts';
@@ -4673,7 +4673,7 @@ export class RunManager {
    * `capacity_limit`.
    */
   registerWorkerListWait(runId: string, request: { workerIds?: string[]; requestIds?: string[]; mode?: WorkerWaitRequest['mode']; timeoutSeconds: number },
-    via: 'cezar_wait' | 'cez-worker-wait'): WorkerWaitEntry {
+    via: 'cezar_wait' | 'cez-worker-wait'): DeadlinedWorkerWaitEntry {
     this.reconcileWorkerWaits();
     this.assertCanRegisterWorkerWait(runId);
     const run = this.store.getRun(runId)!;
@@ -4697,7 +4697,7 @@ export class RunManager {
       }
     }
     const repeated = identicalWorkerWait(run.waits ?? [], request);
-    if (repeated) return repeated;
+    if (repeated && hasWorkerDeadline(repeated)) return repeated;
     if (openWaits(run).length >= WAIT_LIMIT) throw new DelegationPolicyError('capacity_limit', `This run already has ${WAIT_LIMIT} open waits; cancel one first`);
     const now = Date.now();
     const target = request.workerIds
@@ -4706,7 +4706,7 @@ export class RunManager {
         return { workerId, revision: metadata?.role === 'worker' ? metadata.executionRevision ?? 0 : 0 };
       }) }
       : { requestIds: request.requestIds!, requestOutcomes: [] };
-    const entry: WorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'agent', via, registeredAt: new Date(now).toISOString(),
+    const entry: DeadlinedWorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'agent', via, registeredAt: new Date(now).toISOString(),
       deadline: new Date(now + request.timeoutSeconds * 1000).toISOString(), timeoutSeconds: request.timeoutSeconds,
       turnId: state.ciTurnId ??= randomUUID(), phase: 'open', ...(request.mode === undefined ? {} : { mode: request.mode }), ...target };
     this.withdrawCezarHumanWaits(runId);
@@ -4716,7 +4716,7 @@ export class RunManager {
     const current = this.store.getRun(runId);
     if (current?.waits?.some(wait => wait.id === entry.id) && (state.atTurnBoundary === state.session || this.waiting.has(runId))) this.parkOnWaits(runId, state);
     const latest = this.store.getRun(runId);
-    const recorded = [...latest?.waits ?? [], ...latest?.lastWaits ?? []].find((wait): wait is WorkerWaitEntry => wait.id === entry.id && wait.kind === 'worker');
+    const recorded = [...latest?.waits ?? [], ...latest?.lastWaits ?? []].find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === entry.id && wait.kind === 'worker' && hasWorkerDeadline(wait));
     return recorded ?? entry;
   }
 
@@ -5030,9 +5030,9 @@ export class RunManager {
     if (!run?.delegation || run.delegation.role === 'invalid') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
     // phase 3b (#1235): completion gate only. Its wait and receipt stay in `delegation.wait`/`lastWait`.
     if (run.delegation.wait?.id === waitId || run.delegation.lastWait?.id === waitId) return this.cancelCompletionWait(parentId, waitId);
-    const entry = run.waits?.find((wait): wait is WorkerWaitEntry => wait.id === waitId && wait.kind === 'worker');
+    const entry = run.waits?.find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === waitId && wait.kind === 'worker' && hasWorkerDeadline(wait));
     if (!entry) {
-      const settled = run.lastWaits?.filter((wait): wait is WorkerWaitEntry => wait.id === waitId && wait.kind === 'worker').at(-1);
+      const settled = run.lastWaits?.filter((wait): wait is DeadlinedWorkerWaitEntry => wait.id === waitId && wait.kind === 'worker' && hasWorkerDeadline(wait)).at(-1);
       if (settled) return workerWaitEntryToLegacy(settled);
       throw new DelegationPolicyError('incompatible_state', 'Worker wait is no longer current');
     }
@@ -5042,7 +5042,7 @@ export class RunManager {
     }
     this.store.commitWaitCancellation(parentId, [waitId]);
     this.disarmWait(waitId);
-    const cancelled = this.store.getRun(parentId)?.lastWaits?.filter((wait): wait is WorkerWaitEntry => wait.id === waitId && wait.kind === 'worker').at(-1);
+    const cancelled = this.store.getRun(parentId)?.lastWaits?.filter((wait): wait is DeadlinedWorkerWaitEntry => wait.id === waitId && wait.kind === 'worker' && hasWorkerDeadline(wait)).at(-1);
     return workerWaitEntryToLegacy(cancelled ?? { ...entry, phase: 'cancelled', cancelledAt: new Date().toISOString() });
   }
 
@@ -5428,6 +5428,8 @@ export class RunManager {
     const retired = entries.filter(entry => entry.phase === 'resolved' && destroyed(entry)).map(entry => entry.id);
     if (retired.length) this.store.commitWaitCancellation(parent.id, retired);
     for (const entry of entries.filter(wait => wait.phase === 'open')) {
+      // A deadline-less (Cezar completion) entry is reconciled by its own path (hearsay-tools/cezarion#1301).
+      if (!hasWorkerDeadline(entry)) continue;
       let selected = entry;
       if (entry.workerIds) {
         const revisions = entry.workerIds.map(workerId => {

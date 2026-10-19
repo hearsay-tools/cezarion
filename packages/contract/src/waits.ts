@@ -134,6 +134,10 @@ export const workerWaitEntrySchema = z.object({
   }
 });
 export type WorkerWaitEntry = z.infer<typeof workerWaitEntrySchema>;
+/** An entry the legacy `WorkerWait` shape can render: its deadline is required there. Cezar's
+ *  deadline-less completion wait is not one (hearsay-tools/cezarion#1301). */
+export type DeadlinedWorkerWaitEntry = WorkerWaitEntry & { deadline: string };
+export const hasWorkerDeadline = (entry: WorkerWaitEntry): entry is DeadlinedWorkerWaitEntry => entry.deadline !== undefined;
 
 export const waitSchema = z.discriminatedUnion('kind', [ciWaitEntrySchema, timerWaitEntrySchema, humanWaitEntrySchema, workerWaitEntrySchema]);
 export type Wait = z.infer<typeof waitSchema>;
@@ -392,7 +396,7 @@ export function workerWaitView(run: Partial<Pick<RunRecord, 'status' | 'hasPendi
   const delegation = run.delegation;
   if (!delegation || delegation.role === 'invalid') return undefined;
   if (delegation.wait) return delegation.wait;
-  const entry = (run.waits ?? []).filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker' && (wait.phase === 'open' || wait.phase === 'resolved')).at(-1);
+  const entry = (run.waits ?? []).filter((wait): wait is DeadlinedWorkerWaitEntry => wait.kind === 'worker' && hasWorkerDeadline(wait) && (wait.phase === 'open' || wait.phase === 'resolved')).at(-1);
   if (!entry) return undefined;
   const legacy = workerWaitEntryToLegacy(entry);
   return entry.phase === 'open' && run.status === 'waiting' && !run.hasPendingHumanAsk ? { ...legacy, phase: 'parked' } : legacy;
@@ -403,7 +407,7 @@ export function workerWaitView(run: Partial<Pick<RunRecord, 'status' | 'hasPendi
  * `WorkerWait` shape, whose wire stays unchanged (hearsay-tools/cezarion#1235). Open is
  * `registered`; every settled phase is `wake-pending` and the reason says how it ended.
  */
-export function workerWaitEntryToLegacy(entry: WorkerWaitEntry): WorkerWait {
+export function workerWaitEntryToLegacy(entry: DeadlinedWorkerWaitEntry): WorkerWait {
   const reason = entry.phase === 'cancelled' ? 'cancelled' : entry.phase === 'open' ? undefined : entry.result?.reason;
   return {
     id: entry.id,

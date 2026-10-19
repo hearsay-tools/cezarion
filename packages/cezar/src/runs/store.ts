@@ -482,7 +482,7 @@ export function ciWaitEntry(wait: CiWait): CiWaitEntry {
  */
 export function workerWaitEntry(wait: WorkerWait, now: string): WorkerWaitEntry | undefined {
   if (wait.phase === 'wake-pending' && wait.reason === 'message') return undefined;
-  const deadline = wait.deadline === undefined ? Number.NaN : Date.parse(wait.deadline);
+  const deadline = Date.parse(wait.deadline);
   const registeredAt = Number.isFinite(deadline) ? new Date(deadline - 600_000).toISOString() : now;
   const open = wait.phase !== 'wake-pending';
   // A pending wait from before reasons were recorded settled on its persisted observations, as

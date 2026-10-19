@@ -11,6 +11,7 @@ import {
   cezarWaitAnswerSchema,
   cezarWaitRequestSchema,
   computeWaitingOn,
+  hasWorkerDeadline,
   LAST_WAITS_LIMIT,
   resolveWaitingOn,
   TIMER_MAX_SECONDS,
@@ -19,6 +20,7 @@ import {
   waitErrorCodeSchema,
   waitingOnSchema,
   waitSchema,
+  workerWaitView,
   workerWaitEntrySchema,
   workerWaitEntryToLegacy,
   openWaitSchema,
@@ -523,12 +525,22 @@ describe('deadline-less cezar worker entries (hearsay-tools/cezarion#1301)', () 
     expect(workerWaitEntrySchema.safeParse(cezar).success).toBe(true);
   });
 
-  it('resolveWaitingOn and the earliest-deadline pick ignore a deadline-less entry', () => {
+  it('a deadline-less worker entry is reported without a deadline, and the CI deadline stands alone', () => {
     const bare = workerWaitEntrySchema.parse({ ...workerBase(targets), source: 'cezar', via: 'completion', deadline: undefined, timeoutSeconds: undefined });
     const ci = openCi();
+    // Workers keep their priority over CI: the bare entry wins and carries no deadline.
+    expect(resolveWaitingOn({ waits: [bare, ci] })).toEqual({ kind: 'workers', count: 1 });
     expect(resolveWaitingOn({ waits: [bare] })).toEqual({ kind: 'workers', count: 1 });
-    expect(resolveWaitingOn({ waits: [bare, ci], status: 'waiting' } as never)).toEqual({ kind: 'workers', count: 1 });
     expect(computeWaitingOn({ waits: [ci] })).toMatchObject({ kind: 'ci', deadline: ci.deadline });
+  });
+
+  it('the legacy WorkerWait shape still requires a deadline, and renders only deadlined entries', () => {
+    const legacy = { id: WORKER_WAIT_ID, workerIds: [W1], phase: 'registered', outcomes: [] };
+    expect(workerWaitSchema.safeParse({ ...legacy, deadline: '2026-10-19T10:10:00.000Z' }).success).toBe(true);
+    expect(workerWaitSchema.safeParse(legacy).success).toBe(false);
+    const bare = workerWaitEntrySchema.parse({ ...workerBase(targets), source: 'cezar', via: 'completion', deadline: undefined, timeoutSeconds: undefined });
+    expect(hasWorkerDeadline(bare)).toBe(false);
+    expect(workerWaitView({ waits: [bare], delegation: { role: 'root' } as never })).toBeUndefined();
   });
 });
 
