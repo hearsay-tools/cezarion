@@ -21,8 +21,8 @@ describe('wait tool definitions', () => {
     expect(schema.type).toBe('object');
     // The Anthropic tool API refuses a top-level union; the kinds validate on the server.
     for (const key of ['oneOf', 'anyOf', 'allOf']) expect(schema).not.toHaveProperty(key);
-    expect(schema.properties).toMatchObject({ kind: { enum: ['ci', 'timer'] } });
-    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['kind', 'note', 'pr', 'seconds', 'timeout_seconds']);
+    expect(schema.properties).toMatchObject({ kind: { enum: ['ci', 'worker', 'timer'] } });
+    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['kind', 'mode', 'note', 'pr', 'request_ids', 'seconds', 'timeout_seconds', 'worker_ids']);
     // hearsay-tools/cezarion#1234: the user is asked with cezar_ask, so no field here is one kind's card.
     expect(JSON.stringify(schema)).not.toContain('human');
     expect(waitToolDefinition.description).toContain('To wait for the user, call cezar_ask.');

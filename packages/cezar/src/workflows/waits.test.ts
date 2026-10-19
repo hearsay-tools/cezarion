@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
-import type { CiWaitEntry, HumanWaitEntry, TimerWaitEntry, Wait } from '@open-mercato/cezar-contract';
+import type { CiWaitEntry, HumanWaitEntry, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { ciWatchRequest, identicalWait, isCezarHumanWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, MONITORING_WAKE_NUDGE_MARKERS, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 
 // hearsay-tools/cezarion#1233: the wait list's pure helpers. RunManager behaviour lives in
@@ -78,6 +78,16 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     expect(openWaitsFooter([ci(), timer({ note: 'deploy' }), timer({ id: '33333333-3333-4333-8333-333333333333' })])).toBe(
       `Still open: CI wait ${ci().id} for Acme/Repo#12, deadline ${ci().deadline}; timer ${timer().id} at ${timer().deadline} (deploy); ` +
       `timer 33333333-3333-4333-8333-333333333333 at ${timer().deadline}. Call cezar_cancel_wait for any you no longer need.`);
+  });
+
+  it('footer lists an open worker wait', () => {
+    const base = { id: '77777777-7777-4777-8777-777777777777', kind: 'worker', source: 'agent', via: 'cez-worker-wait', turnId: 'turn-1', timeoutSeconds: 600, mode: 'any',
+      registeredAt: '2026-10-17T10:00:00.000Z', deadline: '2026-10-17T10:10:00.000Z', phase: 'open' } as const;
+    const w = '88888888-8888-4888-8888-888888888888', x = '99999999-9999-4999-8999-999999999999';
+    const byWorker: WorkerWaitEntry = { ...base, workerIds: [w, x], revisions: [], outcomes: [] };
+    const byRequest: WorkerWaitEntry = { ...base, id: '77777777-7777-4777-8777-777777777778', requestIds: [w], requestOutcomes: [] };
+    expect(openWaitsFooter([byWorker])).toBe(`Still open: worker wait ${byWorker.id} on 2 workers, deadline ${base.deadline}. Call cezar_cancel_wait for any you no longer need.`);
+    expect(openWaitsFooter([byRequest])).toContain(`worker wait ${byRequest.id} on 1 request reply, deadline`);
   });
 
   // hearsay-tools/cezarion#1234: the user's reply settles a question, and a question the user saw

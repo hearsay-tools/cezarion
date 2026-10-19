@@ -248,7 +248,7 @@ are distinct outcomes, alongside failed, cancelled, destroyed, timed-out, and
 sender-closed. Late replies remain recorded without replacing a first settlement.
 Both roles can wait on their own requests using the existing bounded scheduler wake
 queue. An incoming message can interrupt that wait with reason `message`, retaining
-unresolved obligations; there is no automatic re-wait for request waits. A worker
+unresolved obligations. A worker
 progress message wakes a parent waiting for worker completion without retiring
 that wait. After progress delivery the same wait parks again with its original
 ID, selected workers and deadline; terminal outcomes still produce one wake.
@@ -258,7 +258,7 @@ wire using `HARNESS_ADAPTERS` (hearsay-tools/cezarion#1138).
 
 Messages are bounded to 100,000 characters, 32 undelivered inputs per recipient,
 1,024 messages per family, and 32 pending obligations. Requests and waits expire
-in 600 seconds by default (1–1,800 seconds accepted). One active wait per run.
+in 600 seconds by default (1–1,800 seconds accepted). Several waits can be open at once (workers, CI, timers); a message wakes the run and closes none.
 Ordinary sends to review/terminal recipients return `not-delivered` with an
 actionable `message.instruction`; `continuation-required` means no input was
 queued. The CLI exits 1 for these receipts. An active owning parent can explicitly

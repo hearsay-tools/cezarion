@@ -135,6 +135,11 @@ function workerWaitResultText(wait: WorkerWaitEntry, workerStatus: (workerId: st
     })))}. Outcomes (summaries abbreviated): ${JSON.stringify(outcomes)}`;
 }
 
+function workerTargetPhrase(wait: WorkerWaitEntry): string {
+  const n = (wait.requestIds ?? wait.workerIds)?.length ?? 0;
+  return wait.requestIds ? `${n} request ${n === 1 ? 'reply' : 'replies'}` : `${n} ${n === 1 ? 'worker' : 'workers'}`;
+}
+
 /** The footer a delivered turn ends with: every wait still open, or undefined when none is. The
  *  user's reply settles a question and a question the user saw cannot be cancelled, so cancel is
  *  offered only for CI waits and timers (hearsay-tools/cezarion#1234). */
@@ -144,7 +149,7 @@ export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
   const items = open.map((wait) => {
     if (wait.kind === 'ci') return `CI wait ${wait.id} for ${wait.repository}#${wait.prNumber}, deadline ${wait.deadline}`;
     if (wait.kind === 'human') return `your question ${wait.id} to the user`;
-    if (wait.kind === 'worker') return `worker wait ${wait.id}, deadline ${wait.deadline}`;
+    if (wait.kind === 'worker') return `worker wait ${wait.id} on ${workerTargetPhrase(wait)}, deadline ${wait.deadline}`;
     return `timer ${wait.id} at ${wait.deadline}${wait.note === undefined ? '' : ` (${wait.note})`}`;
   });
   const asked = open.some((wait) => wait.kind === 'human');

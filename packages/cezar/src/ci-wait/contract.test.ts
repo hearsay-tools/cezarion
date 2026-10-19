@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { request } from 'node:http';
 import { ciWaitRequestSchema, ciWaitSchema, ciWaitResultSchema, ciWaitReceiptSchema } from '@open-mercato/cezar-contract/ci-wait';
 import { previewServeResultSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
-import { cezarServerInstructions, cezarTools, doneToolDefinition } from './tools.ts';
+import { cezarServerInstructions, cezarTools, doneToolDefinition, waitToolDefinition } from './tools.ts';
 
 describe('CI wait contract', () => {
   it('defaults timeout and rejects model-supplied authority and malformed PR URLs', () => {
@@ -171,4 +171,21 @@ describe('private preview-serve route', () => {
     expect(unavailable.isError).toBe(true);
     expect(JSON.parse(unavailable.content[0]!.text.split('\n')[0]!)).toMatchObject({ code: 'unavailable', hint: expect.stringMatching(/Retry once/) });
   });
+});
+
+it('cezar_wait advertises worker fields with their bounds', () => {
+  const schema = waitToolDefinition.inputSchema as { properties: Record<string, any> };
+  expect(schema.properties.kind.enum).toEqual(['ci', 'worker', 'timer']);
+  expect(schema.properties.kind.description).toMatch(/worker/);
+  for (const key of ['worker_ids', 'request_ids']) {
+    expect(schema.properties[key]).toMatchObject({ type: 'array', minItems: 1, maxItems: 32 });
+    expect(schema.properties[key].description).toMatch(/^kind "worker":/);
+  }
+  expect(schema.properties.mode.enum).toEqual(['one', 'any', 'all']);
+  expect(schema.properties.mode.description).toMatch(/^kind "worker":/);
+  // One flat field serves both kinds: it advertises ci's bounds and names the worker's in the description.
+  expect(schema.properties.timeout_seconds).toMatchObject({ minimum: 1, maximum: 7200 });
+  expect(schema.properties.timeout_seconds.description).toMatch(/kind "worker".*1800.*600/);
+  expect(waitToolDefinition.description).toMatch(/worker/);
+  expect(cezarTools().find(tool => tool.definition.name === 'cezar_cancel_wait')!.definition.description).toMatch(/worker/);
 });
