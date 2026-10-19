@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { workerWaitRequestSchema } from '@open-mercato/cezar-contract/delegation';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
+import { repointMockImports } from '../core/mock-patch.testkit.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { CiToolController } from '../ci-wait/controller.ts';
 import { callCiWait } from '../ci-wait/client.ts';
@@ -29,7 +30,7 @@ function holdNativeTurn(runner: RunnerId) {
     expect(source.split(anchor)).toHaveLength(2);
     source = source.replace(anchor, runner === 'cursor' ? `if (prompt.includes('mock:hold')) { ${gate} }` : `${gate}\n${anchor}`);
   }
-  if (runner === 'cursor') source = source.replaceAll("import('./", `import('${join(adapter.mockBin, '..')}/`);
+  source = repointMockImports(adapter.mockBin, source);
   const mock = join(root, 'gated-native.mjs');
   writeFileSync(mock, `#!/usr/bin/env node\nimport * as ciGateFs from 'node:fs';
 async function ciRefusalGate() {

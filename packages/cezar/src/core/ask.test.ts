@@ -61,6 +61,15 @@ describe('parseAskRequest', () => {
         questions: [{ header: 'H', question: 'Q?', options: [{ label: 'only' }] }],
       }),
     ).toBeNull();
+    expect(parseAskRequest({ questions: [{ header: 'H', question: 'Q?', options: [] }] })).toBeNull();
+  });
+
+  // hearsay-tools/cezarion#1234: options omitted, the user types the answer.
+  it('accepts an open question, alone or beside one with options', () => {
+    const open = { header: 'Name', question: 'What should the command be called?' };
+    expect(parseAskRequest({ questions: [open] })).toEqual({ questions: [open] });
+    expect(parseAskRequest({ questions: [open, valid.questions[0]] })).toEqual({ questions: [open, valid.questions[0]] });
+    expect(parseAskMarker(`Need a name.\nCEZ:ASK ${JSON.stringify({ questions: [open] })}`)).toEqual({ questions: [open] });
   });
 
   it('rejects a question with more than 4 options', () => {
@@ -262,7 +271,7 @@ describe('parseAskMarkerResult — bounded closer repair (#936)', () => {
     if (result.kind !== 'valid') return;
     expect(result.request.questions).toHaveLength(1);
     expect(result.request.questions[0]!.header).toBe('Lint scope');
-    expect(result.request.questions[0]!.options.map((o) => o.label)).toEqual([
+    expect(result.request.questions[0]!.options!.map((o) => o.label)).toEqual([
       'First slice only',
       'Rule by rule',
       'Whole backlog',
@@ -326,7 +335,7 @@ describe('parseAskMarkerResult — bounded closer repair (#936)', () => {
     );
     expect(result).toMatchObject({ kind: 'valid', repaired: true });
     if (result.kind === 'valid')
-      expect(result.request.questions[0]!.options.map((o) => o.label)).toEqual(['{a: 1}', '"b"']);
+      expect(result.request.questions[0]!.options!.map((o) => o.label)).toEqual(['{a: 1}', '"b"']);
   });
 
   // The repair fixes syntax only. The schema stays exactly as strict as it was:

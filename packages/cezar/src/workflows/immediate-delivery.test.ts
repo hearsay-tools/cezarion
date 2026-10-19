@@ -34,7 +34,8 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
     expect(inputOf(w.id, input.id)?.consumedAt).toBeUndefined();
     expect(turnEnds(w.id)).toBe(0); // still the first turn
     await until(() => !!inputOf(w.id, input.id)?.consumedAt);
-    await until(() => turnEnds(w.id) === 1);
+    // The first turn ends; the no-wait nudge's turn may follow at once (hearsay-tools/cezarion#1234).
+    await until(() => turnEnds(w.id) >= 1);
     expect(store.readEvents(w.id).filter(event => event.type === 'text' && String(event.text).includes('API correction'))).toHaveLength(1);
   });
 

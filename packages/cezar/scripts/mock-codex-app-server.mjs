@@ -43,6 +43,8 @@ function watchdogStall(prompt) {
 // and handles SIGTERM itself, exiting 143 rather than dying from the signal.
 import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
+// Dynamic, like every sibling import here, so a test's copy of this mock can repoint it.
+const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
 
 import * as parityGateFs from 'node:fs';
 
@@ -240,9 +242,9 @@ rl.on('line', async (line) => {
     if (process.env.CEZ_MOCK_CODEX_LATE_START_ACK === '1' && startSerial++ > 0) lateStartAck = msg.id; else {
     emit({ id: msg.id, result: { turn: { id: 'turn_mock_1' } } });
     }
-    const turnText = msg.params?.input?.map?.((part) => part.text ?? '').join('\n') ?? '';
+    const turnText = answerNudge(msg.params?.input?.map?.((part) => part.text ?? '').join('\n') ?? '');
     let silent;
-    if (turnText.includes('mock:silent-tail') || turnText.includes('Your last turn ended without a message to the user.')) {
+    if (turnText.includes('mock:silent-tail') || silentNudge(turnText)) {
       silent = await import('./mock-silent-tail.mjs');
       silent.noteSilentTailPrompt(turnText);
       if (silent.isAckOnlyNudge(turnText)) return;
@@ -273,7 +275,7 @@ rl.on('line', async (line) => {
       emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
       return;
     }
-    if (turnText.includes('mock:silent-tail') || turnText.includes('mock:tool-tail') || turnText.includes('Your last turn ended without a message to the user.')) {
+    if (turnText.includes('mock:silent-tail') || turnText.includes('mock:tool-tail') || silentNudge(turnText)) {
       const silent = await import('./mock-silent-tail.mjs');
       silent.noteSilentTailPrompt(turnText);
       if (silent.isFinalMessageNudge(turnText)) {

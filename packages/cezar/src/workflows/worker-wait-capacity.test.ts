@@ -105,7 +105,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     },
   );
 
-  it('interactive markerless wake persists run and step waiting immediately after its held HTTP ACK', async () => {
+  // The wake turn ends with no wait or done, so its boundary sends the no-wait nudge
+  // (hearsay-tools/cezarion#1234) where it parked before; the nudge's charge is the decision on disk.
+  it('interactive markerless wake persists its turn-end decision immediately after its held HTTP ACK', async () => {
     await withDelayedCommand('opencode', async release => {
       process.env.CEZ_DRY_RUN = '0';
       process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
@@ -128,11 +130,12 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         expect(settled).toBeInstanceOf(Promise);
         const wake = store.getRun(p.id)?.agentInputs?.find(input => input.source === 'lifecycle');
         expect(wake?.deliveredAt).toBeUndefined();
+        const charged = store.getRun(p.id)?.automaticWakes ?? 0; // the first turn's nudge
         release(); await settled;
         // Read synchronously at settlement, before the store's 300ms debounce.
         const disk = (readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[]).find(run => run.id === p.id)!;
-        expect.soft(disk.status).toBe('waiting');
-        expect.soft(disk.steps.find(step => step.id === 'task')?.status).toBe('waiting');
+        expect.soft(disk.automaticWakes).toBe(charged + 1);
+        expect.soft(disk.status).toBe('running');
         expect(waitOf(disk)).toBeUndefined();
         expect(disk.agentInputs?.find(input => input.id === wake?.id)?.deliveredAt).toEqual(expect.any(String));
       } finally {
@@ -442,7 +445,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     manager.enqueueOwnedRun(w.id);
     await until(() => !!monitoringWakeOf(store.getRun(w.id)));
     const engine = manager as unknown as {
-      active: Map<string, { monitoringWakeups?: number; session: { sendAgentMessage(...args: unknown[]): false | Promise<void> } }>;
+      active: Map<string, { session: { sendAgentMessage(...args: unknown[]): false | Promise<void> } }>;
       monitoring: Set<string>;
       settleSuccess(id: string, durable?: boolean): Promise<void>;
       deliverMessage(id: string, content: { type: 'text'; text: string }[], human: boolean): boolean;
@@ -459,7 +462,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       await vi.advanceTimersByTimeAsync(Date.parse(deadline) - Date.now() + 1);
       if (pending) {
         expect(send).not.toHaveBeenCalled();
-        expect(state.monitoringWakeups ?? 0).toBe(0);
+        expect(manager['automaticWakes'](w.id)).toBe(0);
         expect({ ...store.getRun(w.id), monitoringWakeAt: monitoringWakeOf(store.getRun(w.id)) }).toMatchObject({ status: 'waiting', activity: undefined, monitoringWakeAt: deadline });
         expect(engine.monitoring.has(w.id)).toBe(true);
         expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
@@ -467,7 +470,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         expect(send).not.toHaveBeenCalled();
       } else {
         expect(send).toHaveBeenCalledTimes(1);
-        expect(state.monitoringWakeups).toBe(1);
+        expect(manager['automaticWakes'](w.id)).toBe(1);
         // hearsay-tools/cezarion#1233: the wake turn keeps its pool slot until its own turn end.
         expect(engine.monitoring.has(w.id)).toBe(true);
         expect(store.getRun(w.id)?.activity).toBeUndefined();

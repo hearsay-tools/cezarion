@@ -9,6 +9,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
+import { HUMAN_ASK_EVENT_TYPES } from '@open-mercato/cezar-contract/ask';
 import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
 import {
   agentInputSchema,
@@ -200,7 +201,7 @@ export const runRecordSchema = z.object({
   delegation: storedDelegationStateSchema,
   /** Non-human input must retain attribution through restart, separately from human answers. */
   agentInputs: z.array(agentInputSchema).optional(),
-  /** Open and resolved waits (spec 2026-10-17-unified-waits): CI waits and timers in phase 1.
+  /** Open and resolved waits (spec 2026-10-17-unified-waits): CI waits, timers and human waits.
    *  Read from the legacy `ciWait` and monitoring fields by `upgradeLegacyWaits`, and salvaged per
    *  entry, so one unreadable wait never evicts the run. */
   waits: contractRunRecordSchema.shape.waits,
@@ -208,6 +209,10 @@ export const runRecordSchema = z.object({
   lastWaits: contractRunRecordSchema.shape.lastWaits,
   /** Retained recovery observation when a saved wait could not be read. */
   lastWaitsError: contractRunRecordSchema.shape.lastWaitsError.catch(undefined),
+  /** The automatic-wake budget and the wake delivery failures (hearsay-tools/cezarion#1234). An
+   *  unreadable count reads as none, which restarts that bound rather than evicting the run. */
+  automaticWakes: contractRunRecordSchema.shape.automaticWakes.catch(undefined),
+  waitDeliveryFailures: contractRunRecordSchema.shape.waitDeliveryFailures.catch(undefined),
   /** Dev servers the agent registered with `cezar_preview_serve` (#781). Optional so old files parse. */
   previewServers: z.array(previewServerSchema).optional(),
   /** URLs of images attached to the initial task prompt, for the thread's first bubble
@@ -625,6 +630,9 @@ export { LEGACY_INDEX_BACKUP_FILE, LEGACY_INDEX_FILE } from './legacy-index.ts';
 export type StepState = z.infer<typeof stepStateSchema>;
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
 export type RunRecord = z.infer<typeof runRecordSchema>;
+/** The automatic-wake budget and the failed wake-delivery count (hearsay-tools/cezarion#1234). A
+ *  key present as `undefined` clears that counter. */
+export type WakeCounters = Partial<Pick<RunRecord, 'automaticWakes' | 'waitDeliveryFailures'>>;
 
 /** One persisted event line; `type` mirrors AgentEvent plus engine lifecycle. */
 export interface RunEvent {
@@ -2768,8 +2776,10 @@ export class RunStore extends EventEmitter {
 
   /** One delivery checkpoint for a wake batch: every named agent input is marked delivered (one
    *  already delivered keeps its time), and each resolved wait among them (input id = wait id)
-   *  moves to `lastWaits` as `delivered`. Open waits a batch names stay open. */
-  commitWaitDelivery(id: string, inputIds: readonly string[]): void {
+   *  moves to `lastWaits` as `delivered`. Open waits a batch names stay open. `counters` are the
+   *  wake counters the delivery spends or clears, in the same commit, so a crash keeps both or
+   *  neither; nothing is written when nothing is delivered. */
+  commitWaitDelivery(id: string, inputIds: readonly string[], counters: WakeCounters = {}): void {
     const run = this.peek(id);
     if (!run) return;
     const ids = new Set(inputIds);
@@ -2777,11 +2787,33 @@ export class RunStore extends EventEmitter {
     if (!delivered.length && !run.agentInputs?.some((input) => ids.has(input.id) && !input.deliveredAt)) return;
     const deliveredAt = new Date().toISOString();
     const retired = new Set(delivered.map((wait) => wait.id));
-    this.commitIndex(new Map([[id, { ...run,
+    this.commitIndex(new Map([[id, { ...run, ...counters,
       waits: nonEmpty((run.waits ?? []).filter((wait) => !retired.has(wait.id))),
       lastWaits: settleWaits(run.lastWaits, delivered.map((wait) => ({ ...wait, phase: 'delivered' as const, deliveredAt }))),
       ...(run.agentInputs ? { agentInputs: run.agentInputs.map((input) => ids.has(input.id) && !input.deliveredAt ? { ...input, deliveredAt } : input) } : {}),
     }]]));
+  }
+
+  /** The wake counters alone, committed at once instead of on the debounced save: a crash after
+   *  an autonomous nudge or a failed delivery keeps what it spent or counted. */
+  commitWakeCounters(id: string, counters: WakeCounters): void {
+    const run = this.peek(id);
+    if (run) this.commitIndex(new Map([[id, { ...run, ...counters }]]));
+  }
+
+  /** The user answered: every open human wait moves to `lastWaits` as `delivered` in one commit
+   *  (hearsay-tools/cezarion#1234). Returns their ids, empty when none was open. */
+  commitHumanWaitsAnswered(id: string, only?: readonly string[]): string[] {
+    const run = this.peek(id);
+    const answered = (run?.waits ?? []).filter((wait) => wait.kind === 'human' && wait.phase === 'open' && (!only || only.includes(wait.id)));
+    if (!run || !answered.length) return [];
+    const deliveredAt = new Date().toISOString();
+    const ids = new Set(answered.map((wait) => wait.id));
+    this.commitIndex(new Map([[id, { ...run,
+      waits: nonEmpty((run.waits ?? []).filter((wait) => !ids.has(wait.id))),
+      lastWaits: settleWaits(run.lastWaits, answered.map((wait) => ({ ...wait, phase: 'delivered' as const, deliveredAt }))),
+    }]]));
+    return [...ids];
   }
 
   /** Legacy CI checkpoint over `commitWait`, kept until its callers move (unified waits, Task 4). */
@@ -3635,8 +3667,7 @@ export class RunStore extends EventEmitter {
     appendFileSync(this.eventsPath(runId), line, 'utf8');
     this.facts.append(runId, full, Buffer.byteLength(line));
     this.maybeEnqueueHistoryCompress(run);
-    if ((full.type === 'ask.requested' || full.type === 'human-input-delivered') &&
-      this.syncHumanAskSummary(run)) this.touch(run);
+    if (HUMAN_ASK_EVENT_TYPES.has(full.type) && this.syncHumanAskSummary(run)) this.touch(run);
     this.liveItems.observe(runId, full, false);
     this.emit('event', { runId, event: full });
 

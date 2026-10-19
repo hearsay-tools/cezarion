@@ -17,6 +17,7 @@ import { currentUsage } from '../core/process-usage.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { withDelayedCommand } from '../core/owned-input-delivery.testkit.ts';
+import { repointMockImports } from '../core/mock-patch.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 import {
@@ -199,9 +200,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
 
   it.each([false, true])('spent completion budget stops monitoring after workers settle (repeated DONE=%s)', async repeated => {
     const mock = join(root, 'settled-monitor.mjs');
-    const source = readFileSync(HARNESS_ADAPTERS.claude.mockBin, 'utf8').replace(
+    const source = repointMockImports(HARNESS_ADAPTERS.claude.mockBin, readFileSync(HARNESS_ADAPTERS.claude.mockBin, 'utf8').replace(
       "userText.includes('mock:monitoring')",
-      "(userText.includes('mock:monitoring') || userText.includes('Re-check the downstream work'))");
+      "(userText.includes('mock:monitoring') || userText.includes('Re-check the downstream work'))"));
     writeFileSync(mock, source, { mode: 0o755 });
     process.env.CEZ_DRY_RUN = '0'; process.env.CEZ_CLAUDE_BIN = mock;
     const p = await parent();
@@ -325,7 +326,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
             "text: JSON.parse(body).parts.map(part => part.text ?? '').join('\\n') + '\\nCEZ:MONITORING',");
           else source = source.replace("userText.includes('mock:monitoring')", "(userText.includes('mock:monitoring') || userText.includes('Worker wait'))");
           expect(source).not.toBe(readFileSync(original, 'utf8'));
-          writeFileSync(mock, source, { mode: 0o755 });
+          writeFileSync(mock, repointMockImports(original, source), { mode: 0o755 });
           process.env.CEZ_DRY_RUN = '0'; process.env[HARNESS_ADAPTERS[backend].binEnv] = mock;
           const p = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold', runner: backend });
           store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);

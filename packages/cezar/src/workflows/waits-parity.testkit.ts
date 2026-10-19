@@ -20,12 +20,33 @@ export const WAIT_CRITERIA = [
   { id: 'U12', scenario: 'turn-messages', name: 'a wait result beside a pending portable question is checkpointed only on its delayed provider acknowledgement, and the question stays answerable' },
   { id: 'U13', scenario: 'turn-messages', name: 'a wait result beside a pending portable question whose acknowledgement is rejected stays resolved, is retried, and the question stays answerable' },
   { id: 'U14', scenario: 'provider-error', name: 'a wait-result delivery whose sessions persistently fail or close cleanly stops at the delivery bound, the run fails keeping its result, Continue delivers it once, and Stop discards it' },
+  { id: 'U16', scenario: 'baseline', name: 'a scheduler continuation keeps the automatic-wake budget and a human Continue resets it' },
+  { id: 'U16b', scenario: 'baseline', name: 'timers due at the spent budget with no live session are cancelled, and the last one opens a budget human wait the user answers' },
+  { id: 'U9c', scenario: 'baseline', name: 'with a delivery-failure count on the record and the store refusing writes, Finish still stops the run' },
+  // hearsay-tools/cezarion#1234: human waits.
+  { id: 'U7h', scenario: 'ask', name: 'the ask line, cezar_ask (an open question included) and a native ask land in the same wait list' },
+  { id: 'U9h', scenario: 'provider-error', name: 'provider failure and clean close with a human wait open leave the run recoverable' },
+  { id: 'U6', scenario: 'baseline', name: 'cezar_done is refused with live workers and with settled but uncollected workers, accepted once collected, and open waits are cancelled' },
+  { id: 'U7d', scenario: 'baseline', name: 'the done line and cezar_done finish through the same path' },
+  { id: 'U6s', scenario: 'baseline', name: 'cezar_done in a workflow step that is not the last is refused with not_final_step, and the next step runs' },
+  // hearsay-tools/cezarion#1234 phase 2b: the turn-end rule.
+  { id: 'U5', scenario: 'baseline', name: 'a turn end with no wait gets one nudge, then a second no-wait turn end opens a no-wait human wait and reads needs you' },
+  { id: 'U5a', scenario: 'baseline', name: 'a nudge the agent answers with cezar_ask parks on that question after one extra turn' },
+  { id: 'U5c', scenario: 'baseline', name: 'a root parked on its no-wait human wait is finished by the user, and an agent question still blocks it' },
+  { id: 'U5d', scenario: 'baseline', name: 'the no-wait human wait raises no question, and the agent\'s own wait replaces it' },
+  { id: 'U18', scenario: 'baseline', name: 'Finish on a run parked on an agent question closes the question without answering it' },
+  { id: 'U17', scenario: 'turn-messages', name: 'a question in prose without a wait no longer parks the run by itself' },
+  { id: 'U15', scenario: 'autonomous-cap', name: 'an autonomous run is nudged with the autonomous wording until the budget, then opens a budget human wait' },
 ] as const;
 
 /** The native mocks' `mock:cezar-tool` prompt: one cezar tool call through the runner's own wire.
  *  Several in one prompt run in order; `wait_id: 'last'` names the previous answer's wait. */
-export function toolCall(name: 'cezar_wait' | 'cezar_wait_for_ci' | 'cezar_cancel_wait', args: Record<string, unknown>): string {
+export function toolCall(name: 'cezar_wait' | 'cezar_wait_for_ci' | 'cezar_ask' | 'cezar_cancel_wait' | 'cezar_done', args: Record<string, unknown>): string {
   return `mock:cezar-tool ${name} ${Buffer.from(JSON.stringify(args)).toString('base64url')}`;
+}
+/** After the `toolCall`s in the same prompt, the turn ends with `text`. */
+export function thenSay(text: string): string {
+  return `mock:then ${Buffer.from(text).toString('base64url')}`;
 }
 
 // Hold the existing native provider-error fixture until CI intent is durable.

@@ -60,7 +60,7 @@ beforeAll(async () => {
   baseUrl = await waitForFixtureServer(server)
 
   // Boot the run the composer will talk to. The mock's reply has no CEZ:DONE marker, so after
-  // its first turn the session stays open and the run parks at `waiting`.
+  // its first turn and the no-wait nudge the session stays open and the run parks at `waiting`.
   const created = (await (
     await fetch(`${baseUrl}/api/v1/runs`, {
       method: 'POST',
@@ -215,6 +215,13 @@ describe('the thread composer against a live waiting session', () => {
     browser.waitForFunction(
       `document.querySelector('[data-slot="composer"] textarea')?.disabled === false`,
     )
+    // The mock answered the no-wait nudge with a question card. Finish closed it unanswered
+    // (hearsay-tools/cezarion#1260), so no question is left open to block Continue.
+    browser.waitForFunction(
+      `[...document.querySelectorAll('[data-slot="ask-card"][data-resolved="true"]')].some((c) =>
+        c.textContent.includes('Closed when the task finished'))`,
+    )
+    expect(browser.count('[data-slot="ask-card"][data-resolved="false"]')).toBe(0)
     expect(
       browser.evaluate(`document.querySelector('[data-slot="composer"] textarea').placeholder`),
     ).toBe('Continue — add a prompt, or send to just reopen the session…')

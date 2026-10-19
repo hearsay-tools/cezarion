@@ -1738,9 +1738,13 @@ describe('OpenCode durable input acknowledgements', () => {
       // so it may carry a delivery receipt; the input itself is unchanged and never lost.
       const withoutReceipts = (inputs: AgentInput[] | undefined) => inputs?.map(({ deliveredAt: _d, consumedAt: _c, awaitingRead: _a, ...rest }) => rest);
       expect(withoutReceipts(store.getRun(runId)?.agentInputs)).toEqual([input]);
+      // hearsay-tools/cezarion#1260: Finish closes the question it never saw answered, without a
+      // delivery; a rejected answer or a Stop leaves it for an explicit answer.
+      const askSeq = store.readEvents(runId).find(e => e.type === 'ask.requested')!.seq;
+      expect(events.filter(e => e.type === 'human-ask-closed')).toEqual(outcome === 'finished' ? [expect.objectContaining({ askSeq, reason: 'finish' })] : []);
       const recovered = await fixture.restart();
-      expect((recovered.manager as unknown as { hasPendingHumanAsk(id: string): boolean }).hasPendingHumanAsk(runId)).toBe(true);
-      expect(recovered.manager.continueRun(runId).ok).toBe(false);
+      expect((recovered.manager as unknown as { hasPendingHumanAsk(id: string): boolean }).hasPendingHumanAsk(runId)).toBe(outcome !== 'finished');
+      if (outcome !== 'finished') expect(recovered.manager.continueRun(runId).ok).toBe(false);
       expect(withoutReceipts(recovered.store.getRun(runId)?.agentInputs)).toEqual([input]);
     });
   }, 60_000);
@@ -2262,10 +2266,10 @@ describe('harness parity — cezarTools list behind CEZ_PREVIEW', () => {
       const controller = await CiToolController.start();
       const dir = mkdtempSync(join(tmpdir(), 'cez-tools-list-'));
       try {
-        const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'ci', source: 'agent', via: 'cezar_wait_for_ci', phase: 'open' } }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }) });
+        const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'ci', source: 'agent', via: 'cezar_wait_for_ci', phase: 'open' } }), ask: async () => ({ ok: false, code: 'unavailable', message: 'none' }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', open_waits: [] }) });
         const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, allowedTools: ['Read'], env: { ...session.env, CEZ_MOCK_ARGS_FILE: join(dir, 'wire'), CEZ_MOCK_CI_PR: wait.prUrl, CEZ_MOCK_CI_RESULT: join(dir, 'result'), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
         expect(obs.v1.filter((event) => event.type === 'error')).toEqual([]);
-        const waits = ['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait'];
+        const waits = ['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'];
         const expected = enabled ? [...waits, 'cezar_preview_serve', 'cezar_preview_stop'] : waits;
         expect(JSON.parse(readFileSync(join(dir, 'result'), 'utf8')).names).toEqual(expected);
         const argv: string[] = JSON.parse(readFileSync(join(dir, 'wire'), 'utf8').trim().split('\n')[0]!);
@@ -2564,10 +2568,17 @@ describe('harness parity — live task scratch', () => {
 // #399 incident: issue Agent context, run 3a3c1ffa (original history unavailable).
 // Prompt delivery is the contract under test; these offline wires cannot prove
 // that a live model follows the instruction. Markerless output must still wait.
+// hearsay-tools/cezarion#1234: every runner honors cezarTools, so every session here is taught
+// the lifecycle tools instead of the markers (the toolless form is in human-waits.test.ts).
 describe('harness parity — monitoring wrap-up contract (#399)', () => {
-  const finishedRule = 'When the watched work is finished and the task goal is complete, end your final message with CEZ:DONE.';
-  const pendingRule = 'If the watched work is still pending, end with CEZ:MONITORING.';
-  const markerlessRule = 'Never yield markerless for a monitoring wrap-up.';
+  const promptRules = [
+    'When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn.',
+    'call cezar_wait with kind "ci" for a pull request\'s checks or kind "timer" to re-check later, then end your turn.',
+  ];
+  const wakeRules = [
+    'When the goal is complete and verified, call cezar_done.',
+    'If the watched work is still pending, call cezar_wait again.',
+  ];
   type Wire = {
     userText?: string; method?: string; url?: string; prompt?: string;
     params?: { input?: { text?: string }[]; prompt?: { text?: string }[] };
@@ -2599,10 +2610,9 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
     expect(index).toBeGreaterThanOrEqual(0);
     return argv[index + 1] ?? '';
   };
-  const assertRules = (text: string) => {
-    expect(text).toContain(finishedRule);
-    expect(text).toContain(pendingRule);
-    expect(text).toContain(markerlessRule);
+  const assertRules = (text: string, rules: readonly string[]) => {
+    for (const rule of rules) expect(text).toContain(rule);
+    expect(text).not.toContain('CEZ:MONITORING');
   };
   const recording = async (body: (dir: string) => Promise<void>) => {
     const dir = mkdtempSync(join(tmpdir(), 'cez-monitoring-prompt-'));
@@ -2631,8 +2641,8 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
                 expect(manager.continueRun(runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
                 await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
               }
-              assertRules(systemPrompt(backend, dir));
-              expect(systemPrompt(backend, dir)).toContain('end plainly (no marker) only when you are genuinely waiting on the user');
+              assertRules(systemPrompt(backend, dir), promptRules);
+              expect(systemPrompt(backend, dir)).toContain('When you need the user — a decision only they can make, or missing input — call cezar_ask');
             });
         });
       }, 60_000);
@@ -2650,12 +2660,12 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
           await waitFor(() => !!monitoringTimerOf(manager, fixture.runId));
           monitoringTimerOf(manager, fixture.runId)!._onTimeout();
           await waitFor(() => manager.isActive(fixture.runId) && messages(backend, dir).length > 0);
-          assertRules(systemPrompt(backend, dir));
+          assertRules(systemPrompt(backend, dir), promptRules);
         });
       });
     }, 60_000);
 
-    it(`${backend} R39 monitoring wake delivers DONE and MONITORING instructions on the native message channel`, async () => {
+    it(`${backend} R39 monitoring wake delivers the cezar_done and cezar_wait instructions on the native message channel`, async () => {
       await recording(async dir => {
         await driveRun(backend, 'split-text', record => record?.status === 'waiting' && !!monitoringWakeOf(record), 30_000,
           async ({ store, manager, runId }) => {
@@ -2663,7 +2673,7 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
             expect(timer).toBeDefined();
             timer._onTimeout();
             await waitFor(() => messages(backend, dir).length > 1);
-            assertRules(messages(backend, dir)[1]!);
+            assertRules(messages(backend, dir)[1]!, wakeRules);
             expect(store.readEvents(runId).some(event => event.type === 'user-message')).toBe(false);
           });
       });

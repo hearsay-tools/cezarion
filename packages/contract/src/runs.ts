@@ -223,12 +223,18 @@ export const runRecordSchema = z.object({
   delegation: delegationStateSchema.optional(),
   /** Durable non-human input, kept separate from human prompt/answer queues. */
   agentInputs: z.array(agentInputSchema).optional(),
-  /** Open and recently resolved waits (spec 2026-10-17-unified-waits): CI and timers in phase 1. */
+  /** Open and recently resolved waits (spec 2026-10-17-unified-waits): CI, timers and the user. */
   waits: z.array(waitSchema).optional(),
   /** Settled waits, newest last, capped at `LAST_WAITS_LIMIT`. */
   lastWaits: z.array(waitSchema).optional(),
   /** Retained recovery observation when previous wait metadata cannot be trusted. */
   lastWaitsError: z.string().max(256).optional(),
+  /** Automatic wakes (timers and nudges) spent since the user last wrote; the budget survives
+   *  a restart and a scheduler continuation (hearsay-tools/cezarion#1234). */
+  automaticWakes: z.number().int().nonnegative().optional(),
+  /** Consecutive wake deliveries that failed; at the bound the run settles `failed` and keeps
+   *  its results (hearsay-tools/cezarion#1234). */
+  waitDeliveryFailures: z.number().int().nonnegative().optional(),
   /** Dev servers the agent registered with `cezar_preview_serve` (#781). Salvaged per entry on load. */
   previewServers: z.array(previewServerSchema).optional(),
   /** URLs of images and document attachments on the initial task prompt; branch on isImageAttachmentName. */

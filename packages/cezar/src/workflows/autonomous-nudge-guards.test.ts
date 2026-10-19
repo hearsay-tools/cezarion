@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { RunStore } from '../runs/store.ts';
-import { AUTONOMOUS_NUDGE, RunManager } from './run.ts';
+import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { AUTONOMOUS_NUDGE, NO_WAIT_NO_REPLY_NOTE, NO_WAIT_NUDGE_NOTE, RunManager } from './run.ts';
 
 // Focused policy guards complement workflow-autonomous-parity's actual native
 // wires. A refused nudge must never touch either transport or consume its budget.
@@ -34,7 +35,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
       sendMessage: vi.fn(() => true), sendAgentMessage: vi.fn(() => Promise.resolve()),
       end: vi.fn(), interrupt: vi.fn(), discardQueuedMessages: vi.fn(), holdsHumanInput: () => false,
     };
-    state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, autonomous: true, autoContinues: 0, session };
+    state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, autonomous: true, session };
   });
   afterEach(() => { manager['clearIdleTimer'](state); manager.dispose(); vi.useRealTimers(); store.close(); rmSync(root, { recursive: true, force: true }); });
 
@@ -69,14 +70,30 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(manager['tryAutonomousNudge'](id, state, 'task', portable ? ask : null)).toBe(false);
     expect(session.sendMessage).not.toHaveBeenCalled();
     expect(session.sendAgentMessage).not.toHaveBeenCalled();
-    expect(state.autoContinues).toBe(0);
+    expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
     expect(store.readEvents(id).some(e => e.type === 'note' && String(e.message).includes('autonomous'))).toBe(false);
   });
 
-  it('a refused portable override leaves the question and budget untouched', () => {
+  // hearsay-tools/cezarion#1234: one budget of automatic wakes on the record, for nudges and timers.
+  it('autonomous nudges and timer wakes share one budget of 40', async () => {
+    store.updateRun(id, { automaticWakes: 39 });
+    expect(manager['tryAutonomousNudge'](id, state, 'task', null)).toBe(true);
+    expect(store.getRun(id)?.automaticWakes).toBe(40);
+    // The charge is committed at once, so a crash before the debounced save cannot lose it.
+    expect(readPersistedRuns(join(root, '.ai/cezar')).find(record => record.id === id)?.automaticWakes).toBe(40);
+    expect(store.readEvents(id).some(e => e.type === 'note' && e.message === 'autonomous — continuing without pausing (40/40)')).toBe(true);
+    // The nudge's input was acknowledged; only the budget stands in the way of the next one.
+    await state.agentInputFlight?.settled;
+    state.agentInputFlight = undefined;
+    expect(manager['tryAutonomousNudge'](id, state, 'task', null)).toBe(false);
+    expect(store.getRun(id)?.automaticWakes).toBe(40);
+    expect(store.readEvents(id).some(e => e.type === 'note' && String(e.message).startsWith('autonomous — safety cap reached (40)'))).toBe(true);
+  });
+
+  it('a nudge the wire refuses after an ask line leaves the question and budget untouched', () => {
     vi.mocked(session.sendMessage).mockReturnValue(false);
     expect(manager['tryAutonomousNudge'](id, state, 'task', ask)).toBe(false);
-    expect(state.autoContinues).toBe(0);
+    expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
     expect(store.readEvents(id).filter(e => e.type === 'note' || e.type === 'human-input-delivered')).toEqual([]);
   });
 
@@ -92,7 +109,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     applyGuard(guard);
     manager['handleAgentInputReady'](id, state, session);
     expect(session.sendMessage).not.toHaveBeenCalled();
-    expect(state.autoContinues).toBe(0);
+    expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
     if (guard === 'queued-input') {
       expect(session.sendAgentMessage).toHaveBeenCalledOnce();
       expect(session.sendAgentMessage).not.toHaveBeenCalledWith([{ type: 'text', text: AUTONOMOUS_NUDGE }], []);
@@ -115,7 +132,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
       manager['handleAgentInputReady'](id, state, session);
       expect(session.sendMessage).not.toHaveBeenCalled();
       expect(session.sendAgentMessage).not.toHaveBeenCalled();
-      expect(state.autoContinues).toBe(0);
+      expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
     },
   );
 
@@ -125,14 +142,14 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(manager['tryAutonomousNudge'](id, state, 'task', null)).toBe(false);
     expect(state.autonomousNudgePending).toBe(session);
     expect(state.idleTimer).toBeDefined();
-    expect(state.autoContinues).toBe(0);
+    expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
     expect(store.getRun(id)?.status).toBe('running');
     expect(manager['waiting'].has(id)).toBe(false);
     manager['handleAgentInputReady'](id, state, session);
     expect(session.sendAgentMessage).toHaveBeenLastCalledWith([{ type: 'text', text: AUTONOMOUS_NUDGE }], []);
     expect(state.autonomousNudgePending).toBeUndefined();
     expect(state.idleTimer).toBeUndefined();
-    expect(state.autoContinues).toBe(1);
+    expect(store.getRun(id)?.automaticWakes).toBe(1);
     expect(session.sendMessage).not.toHaveBeenCalled();
   });
 
@@ -146,7 +163,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(state.idleClosed).toBe(true);
     manager['handleAgentInputReady'](id, state, session);
     expect(session.sendAgentMessage).toHaveBeenCalledOnce();
-    expect(state.autoContinues).toBe(0);
+    expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
   });
 
   it('parent activity invalidates the refused boundary and its timer', () => {
@@ -161,70 +178,73 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(session.sendAgentMessage).toHaveBeenCalledOnce();
   });
 
-  it('a pending autonomous retry is not replaced by the final-message nudge', () => {
+  it('a pending autonomous retry is not replaced by the no-wait nudge', () => {
     pendingBoundary();
-    expect(manager['maybeFinalMessageNudge'](id, state, 'task', {
-      ask: false, humanGate: false, monitoring: false, silentTail: true, alreadyNudged: false,
-    })).toBe(false);
+    expect(manager['applyTurnEnd'](id, state, 'task', {
+      finalStep: true, monitoring: false, question: false, nudgedLastTurn: false,
+    })).toBe('defer');
     expect(session.sendAgentMessage).not.toHaveBeenCalled();
     expect(session.sendMessage).not.toHaveBeenCalled();
-    expect(store.readEvents(id).some(e => e.type === 'note' && String(e.message).includes('no final message'))).toBe(false);
+    expect(store.readEvents(id).some(e => e.type === 'note' && String(e.message).startsWith(NO_WAIT_NUDGE_NOTE))).toBe(false);
   });
 
-  it('nested subagent items do not clear the final-message nudge reply bound', () => {
-    state.finalMessageNudged = session;
+  it('nested subagent items do not clear the no-wait nudge reply bound', () => {
+    state.noWaitNudged = session;
     manager['active'].set(id, state);
-    manager['armFinalMessageNudgeReplyTimer'](id, state);
-    expect(state.finalMessageNudgeReplyTimer).toBeDefined();
-    manager['noteFinalMessageNudgeContent'](id, state, {
+    manager['armNoWaitNudgeReplyTimer'](id, state);
+    expect(state.noWaitNudgeReplyTimer).toBeDefined();
+    manager['noteNoWaitNudgeContent'](id, state, {
       type: 'item.started',
       item: { parentItemId: 'parent' },
     });
-    expect(state.finalMessageNudgeReplyTimer).toBeDefined();
-    manager['noteFinalMessageNudgeContent'](id, state, { type: 'item.delta' });
-    expect(state.finalMessageNudgeReplyTimer).toBeDefined();
-    manager['noteFinalMessageNudgeContent'](id, state, {
+    expect(state.noWaitNudgeReplyTimer).toBeDefined();
+    manager['noteNoWaitNudgeContent'](id, state, { type: 'item.delta' });
+    expect(state.noWaitNudgeReplyTimer).toBeDefined();
+    manager['noteNoWaitNudgeContent'](id, state, {
       type: 'item.started',
       item: {},
     });
-    expect(state.finalMessageNudgeReplyTimer).toBeUndefined();
+    expect(state.noWaitNudgeReplyTimer).toBeUndefined();
   });
 
-  it('text before the reply timer is armed still prevents parking', () => {
-    state.finalMessageNudged = session;
+  it('text before the reply timer is armed means the nudge was answered', () => {
+    state.noWaitNudged = session;
     manager['active'].set(id, state);
-    manager['noteFinalMessageNudgeContent'](id, state, { type: 'text' });
-    manager['armFinalMessageNudgeReplyTimer'](id, state);
-    expect(state.finalMessageNudgeReplyTimer).toBeUndefined();
+    manager['noteNoWaitNudgeContent'](id, state, { type: 'text' });
+    manager['armNoWaitNudgeReplyTimer'](id, state);
+    expect(state.noWaitNudgeReplyTimer).toBeUndefined();
   });
 
   it('turn.started before the reply timer is armed does not count as a nudge reply', () => {
-    state.finalMessageNudged = session;
+    state.noWaitNudged = session;
     manager['active'].set(id, state);
-    manager['noteFinalMessageNudgeContent'](id, state, { type: 'turn.started' });
-    manager['armFinalMessageNudgeReplyTimer'](id, state);
-    expect(state.finalMessageNudgeReplyTimer).toBeDefined();
-    manager['noteFinalMessageNudgeContent'](id, state, { type: 'turn.started' });
-    expect(state.finalMessageNudgeReplyTimer).toBeUndefined();
+    manager['noteNoWaitNudgeContent'](id, state, { type: 'turn.started' });
+    manager['armNoWaitNudgeReplyTimer'](id, state);
+    expect(state.noWaitNudgeReplyTimer).toBeDefined();
+    manager['noteNoWaitNudgeContent'](id, state, { type: 'turn.started' });
+    expect(state.noWaitNudgeReplyTimer).toBeUndefined();
   });
 
-  it('user-authored delivery resets the final-message nudge latch', () => {
-    state.finalMessageNudged = session;
+  it('user-authored delivery resets the no-wait nudge latch', () => {
+    state.noWaitNudged = session;
     manager['active'].set(id, state);
     expect(manager['deliverMessage'](id, [{ type: 'text', text: 'please continue' }], true)).toBe(true);
-    expect(state.finalMessageNudged).toBeUndefined();
+    expect(state.noWaitNudged).toBeUndefined();
   });
 
-  it('expiry parks without resetting the final-message nudge latch', async () => {
+  // hearsay-tools/cezarion#1234: an unanswered nudge opens Cezar's no-wait human wait, so the run
+  // waits on the user and a late reply stays on that question.
+  it('expiry opens the no-wait human wait and the run waits for the user', async () => {
     vi.useFakeTimers();
-    state.finalMessageNudged = session;
+    state.currentStepId = 'task';
+    state.noWaitNudged = session;
     manager['active'].set(id, state);
-    (manager as unknown as { finalMessageNudgeReplyMs: number }).finalMessageNudgeReplyMs = 300;
-    manager['armFinalMessageNudgeReplyTimer'](id, state);
+    (manager as unknown as { noWaitNudgeReplyMs: number }).noWaitNudgeReplyMs = 300;
+    manager['armNoWaitNudgeReplyTimer'](id, state);
     await vi.advanceTimersByTimeAsync(300);
-    expect(state.finalMessageNudged).toBe(session);
-    expect(state.finalMessageNudgeParked).toBe(session);
     expect(store.getRun(id)?.status).toBe('waiting');
+    expect(store.getRun(id)?.waits).toMatchObject([{ kind: 'human', via: 'no-wait', source: 'cezar', phase: 'open', askSeq: expect.any(Number) }]);
+    expect(store.readEvents(id).filter(e => e.type === 'note' && e.message === NO_WAIT_NO_REPLY_NOTE)).toHaveLength(1);
   });
 
   it('a transport exception fails without retaining a readiness retry', () => {

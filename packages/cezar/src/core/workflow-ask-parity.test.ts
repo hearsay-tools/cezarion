@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { driveRun, promptFor, waitFor, WORKFLOW_ASK_CRITERIA } from './harness-parity.testkit.ts';
 import { RunStore } from '../runs/store.ts';
+import { AUTONOMOUS_ASK_NOTE } from '../workflows/run.ts';
 import { workflowDefSchema } from '../workflows/types.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
@@ -34,7 +35,7 @@ describe('intermediate workflow ASK parity — #427', () => {
             expect(events().filter(e => e.type === 'ask.requested')).toHaveLength(0);
             expect(events().some(e => e.type === 'note' && (row.id === 'Q2'
               ? e.stepId === 'implement' && e.tone === 'danger' && /CEZ:ASK.*JSON/.test(String(e.message))
-              : String(e.message).includes('question overridden')))).toBe(true);
+              : String(e.message).startsWith(AUTONOMOUS_ASK_NOTE)))).toBe(true);
             return;
           }
           expect(run().status).toBe('waiting');

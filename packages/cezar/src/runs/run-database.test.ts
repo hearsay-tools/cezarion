@@ -506,13 +506,15 @@ describe('RunDatabase', () => {
 
     // Schema 4 (spec 2026-10-17-unified-waits): records stop carrying the legacy CI and
     // monitoring fields, so a build that still reads them must refuse the store, not misread it.
-    it('creates a fresh database at schema 4, migrates a v3 one keeping its rows, and refuses version 5', () => {
-      expect(RUN_DATABASE_SCHEMA_VERSION).toBe(4);
+    // Schema 5 (hearsay-tools/cezarion#1234): records carry human waits, which a schema-4 build
+    // would drop as unreadable.
+    it('creates a fresh database at schema 5, migrates a v3 one keeping its rows, and refuses version 6', () => {
+      expect(RUN_DATABASE_SCHEMA_VERSION).toBe(5);
       openDb().close();
       open.length = 0;
       const fresh = new DatabaseSync(path, { readOnly: true });
       try {
-        expect(fresh.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+        expect(fresh.prepare('PRAGMA user_version').get()).toEqual({ user_version: 5 });
       } finally {
         fresh.close();
       }
@@ -527,8 +529,8 @@ describe('RunDatabase', () => {
       for (const db of open.splice(0)) db.close();
       const migrated = new DatabaseSync(path);
       try {
-        expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
-        migrated.exec('PRAGMA user_version = 5');
+        expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 5 });
+        migrated.exec('PRAGMA user_version = 6');
       } finally {
         migrated.close();
       }

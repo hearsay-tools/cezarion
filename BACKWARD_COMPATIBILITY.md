@@ -78,6 +78,7 @@ What is protected now: **the shape of each route under `/api/v1`**, the three-wa
     - **Status.** `waiting` now also covers a run parked on an open CI or timer wait, which was `running` with `activity: 'monitoring'`. `activity: 'monitoring'` is no longer written for new parks; `activity` stays in the schema so older rows and summaries parse. One writer is left until phase 3, because worker waits keep their old machinery until then: a root parent whose completion is blocked on live workers while its session is open (completion `attention`) is still written `running` with `activity: 'monitoring'`, opens no timer, and keeps a monitoring slot for its workers' wakes. A store read of that row (a restart, the read-only runs index) upgrades it like a legacy row (see §3): `waiting`, no timer, `activity` dropped. A webhook consumer gets one `task.status` change to `waiting` per park and reads `task.attention` to learn whether a human is needed; `task.activity` events stop for new parks.
     - **`waitingOn` (additive).** `RunSummary`, and so the `run-summaries` rows and runs-index rows, adds an optional `waitingOn`: the run's top open wait in the order human > usage limit > workers > CI > timer (`{ kind: 'human' }`, `{ kind: 'usage-limit', at }`, `{ kind: 'workers', count }`, `{ kind: 'ci', waitId, prUrl, repository, prNumber, deadline }` or `{ kind: 'timer', waitId, at, note? }`). The full record does not carry it; `computeWaitingOn` in `packages/contract` derives it from `waits`. A `waiting` run whose top wait is CI or a timer keeps the running bucket and a ring in `deriveAttention` (labels `waiting for CI` and `monitoring`); it does not read as Needs you. A summary also adds an optional `waitWakePending: true` when a wait has resolved and its wake turn has not started; with no other wait open, such a `waiting` run reads `waiting for capacity` (bucket none, a ring), not Needs you.
     - **A failed run can keep its waits.** A session that keeps failing, or closing cleanly, while the run owes resolved results stops after 3 consecutive failed delivery attempts and settles the run `failed` with the note `could not deliver wait results after 3 attempts — continue this task to retry`. That `failed` record keeps its `waits`: the resolved entries stay `resolved` and their inputs undelivered, and open entries stay open and may still resolve, until Continue delivers them (moving them to `lastWaits`) or Stop cancels them. `POST /runs/:id/cancel` on that record answers `{ cancelled: true }`, moves every wait to `lastWaits` as `cancelled`, writes the note `Stop discarded the waits this task held and their results; the task stays failed`, and leaves the run `failed`; on a `failed` run with no `waits` it still answers `{ cancelled: false }`. Every other terminal record still has no `waits`. A reader must not assume a `failed` run's `waits` is empty.
+    - **Human waits and durable counters (hearsay-tools/cezarion#1234, phase 2, additive).** `waits` and `lastWaits` may hold `kind: 'human'` entries: the base fields without `deadline`, plus an optional `questions` (the ask card) and `askSeq` (the `ask.requested` event it was shown as). `via` gains `cezar_ask`, `ask-line`, `native-ask`, `no-wait` and `budget`, and `source` is `'cezar'` for the waits Cezar opens itself. A human wait goes from `open` straight to `delivered` when any human message answers it, or to `cancelled`; it is never `resolved`. A run holds at most one. The record adds optional `automaticWakes` (automatic wakes spent since the user last wrote) and `waitDeliveryFailures` (consecutive failed wake deliveries); both survive a restart. A reader that skips kinds it does not know, as phase 1 asked, needs no change. The store moves to schema 5 (section 3).
 - Worktrees: `GET /api/v1/worktrees`, `POST /api/v1/worktrees/reclaim`, `POST /api/v1/worktrees/:runId/reclaim` (issue 08 §B4: one finished run's worktree DIRECTORY, by retention's rule and helper — the branch is kept; answers `{runId, worktreeReclaimedAt}`, 404 for an unknown id, 409 + `{error}` when the run is live, at `review`, an owned worker mid-destroy, or already reclaimed. Breaking: deleting the branch from this route, or reclaiming a run retention would not)
 - Open-in: `GET /api/v1/open-targets`, `POST /api/v1/open-in` — the latter opens the SCOPED PROJECT'S root in an `open-targets` id (Settings → "Project folder"). It takes `{target}` and no path at all: the folder is the registry's own root, so there is nothing for a client to point elsewhere. `cli:<runner>` targets are refused with a 400 (an agent CLI belongs in a task worktree), as is an app this machine does not have; localHandoff-gated like the rest of the family.
 - Variants: `GET /api/v1/groups/:groupId`, `POST /api/v1/groups/:groupId/pick`
@@ -198,6 +199,32 @@ now points to `cezar_wait`, and the server instructions no longer suggest it. Ph
 (hearsay-tools/cezarion#1236) removes the tool and its route, and records the break and
 its migration (call `cezar_wait` with `kind: "ci"`) here.
 
+Additive for hearsay-tools/cezarion#1234 (unified waits, phase 2): `POST /api/v1/tools/ask` joins
+the private family, behind the same bearer capability and a 16 KiB body limit. Middleware
+validates the strict `CezarAskRequest` (`{ questions }`, the ask card: 1–4 questions, each with a
+header of at most 12 characters, the question, and 2–4 options or none for an open question).
+Every answer except a missing or revoked capability (`401`) is `200` with the typed
+`CezarAskAnswer`: `{ ok: true, wait_id, open_waits }` or `{ ok: false, code, message, open_waits? }`,
+where `code` includes `autonomous_run`. `CezarWaitRequest` and `CezarWaitAnswer` are unchanged:
+`cezar_wait` refuses `kind: "human"` with `invalid_request`, and its message names `cezar_ask`.
+Each `open_waits` entry's `kind` gains `human`, which carries no `deadline`, and
+`CezarCancelWaitAnswer` refusals gain `human_question` (the user already saw the question).
+The ask format (`askQuestionSchema`) makes `options` optional: a question without them is open,
+and the user answers it in words. The ask line, the `ask.requested` event, a native-ask card and a
+worker question routed to its parent may therefore carry a question without `options`; a question
+with options keeps the 2–4 bound. `POST /api/v1/tools/done` joins the same private family, behind the same bearer capability and
+a 16 KiB body limit. Middleware validates the strict `CezarDoneRequest` (`{ summary? }`, at
+most 2,000 characters). Every answer except a missing or revoked capability (`401`) is `200`
+with the typed `CezarDoneAnswer`: `{ ok: true, finishes: 'at_turn_end', open_waits }` or
+`{ ok: false, code, message, workers?, open_waits? }`, where `code` includes `not_final_step` for a
+workflow step that is not the last, and `workers` lists up to 64
+`{ worker_id, reason }` with `reason` one of `outstanding`, `uncollected` or `question`. The MCP
+tools `cezar_ask` and `cezar_done` are listed and admitted on every runner. Their names,
+`cezar_ask`'s card bounds (open questions included) and `cezar_done`'s `summary` bound are
+model-facing compatibility surfaces. A session with cezar
+tools is taught these tools in place of the `CEZ:DONE`, `CEZ:MONITORING` and ask-marker lines;
+the lines keep working as aliases that open the same waits and close through the same path.
+
 - Task file links and published output (#418, additive): `GET /api/v1/runs/:id/file-link`, `GET /api/v1/runs/:id/artifacts`, `GET /api/v1/runs/:id/artifacts/:artifactId`, `GET /api/v1/runs/:id/artifacts/:artifactId/download`, `GET /api/v1/runs/:id/artifacts/:artifactId/image`. All have the normal project aliases. The resolver accepts a bounded `path` and optional `raw=1` (raster images only); external paths match published metadata only and never authorize a source-file read. Artifact routes address validated IDs, not host paths. Download uses attachment disposition and `nosniff`; active documents are never served inline. Existing `/files` and pasted-attachment behavior is unchanged. Files-page query selectors `path` and `artifact` are mutually exclusive.
 
 ## 3. `.ai/cezar/` state files (`packages/cezar/src/runs/store.ts` and friends)
@@ -205,8 +232,9 @@ its migration (call `cezar_wait` with `kind: "ci"`) here.
 Written by one version, read by the next, and hand-editable by design:
 
 - **`runs.db`** (hearsay-tools/cezarion#779) — the run store: a SQLite database (`node:sqlite`, WAL), one per project, authoritative for run state from the first start that imports `runs.json`. One row per run: `data` is the complete `RunRecord` JSON (zod schema in `packages/cezar/src/runs/store.ts`), `summary` is its `RunSummary` JSON, and a few more columns are copies of record fields kept for queries. Every `RunRecord` rule below still holds; it now describes the JSON in `data`, and the entries named `runs.json → …` are fields of that record. New fields MUST be optional or defaulted (`archived` uses `.default(false)`); a required new field makes every pre-existing run fail the schema on read (the store skips such a row with one warning and leaves it in the database: a finished one is still listed from its stored summary until something reads it, then drops out of the list, and `GET /runs/:id` answers 404 saying it could not be read; before hearsay-tools/cezarion#779 the loader `safeParse`d the whole `runs.json` array and one failure dropped every run). The `runner` and `backend` enums keep the legacy id `claude-cli` **parseable and self-normalizing** — `storedRunnerSchema` accepts it and folds it to `claude`, so an old or hand-edited record loads instead of dropping every run in the file, and no consumer, wire type or contract schema ever sees a fourth runner (open-mercato/cezar#547). Follow that precedent for any id this project renames: widen the READ, fold to the current spelling, and leave the authored surfaces (request bodies, settings, workflow step defs) narrow. The runner id `omp` (Oh My Pi, hearsay-tools/cezarion#595, design `.ai/specs/2026-10-02-omp-runner.md`) is **additive**: it joins `RUNNER_IDS` and every enum derived from it, `pi` keeps its id and behavior, and old run records (rows in `runs.db` or a legacy `runs.json`), configs and workflow files parse unchanged. Per-runner `GET /health` checks gain an `omp` entry, `GET /models?runner=omp` and the Settings → Agent config catalog gain OMP entries (including a `yaml` config format), and `CEZ_OMP_BIN` is a new optional override; a host without `omp` boots as before and shows it unavailable.
-  - The schema version is `PRAGMA user_version` (4). Version 2 (hearsay-tools/cezarion#864) added the run lists' two window indexes, `runs_unarchived` and `runs_archived_roots`, and version 3 the archive-on-merge index, `runs_archive_on_merge`. Version 4 (hearsay-tools/cezarion#1233) changes no table: it changes the record JSON in `data` (the wait list, at the end of this section). A database with a higher version is refused, never read or written, because a newer layout may hold what this one would drop on its next write. Opening a project migrates a lower version forward. The read-only cold reader never migrates, and reads any version from `RUN_DATABASE_READABLE_FROM` (1) up as it stands, so a project this build has not opened yet still answers the runs index and the workspace search.
+  - The schema version is `PRAGMA user_version` (5). Version 2 (hearsay-tools/cezarion#864) added the run lists' two window indexes, `runs_unarchived` and `runs_archived_roots`, and version 3 the archive-on-merge index, `runs_archive_on_merge`. Version 4 (hearsay-tools/cezarion#1233) changes no table: it changes the record JSON in `data` (the wait list, at the end of this section). Version 5 (hearsay-tools/cezarion#1234) changes no table either: records may carry human waits and the `automaticWakes` and `waitDeliveryFailures` counters. A database with a higher version is refused, never read or written, because a newer layout may hold what this one would drop on its next write. Opening a project migrates a lower version forward. The read-only cold reader never migrates, and reads any version from `RUN_DATABASE_READABLE_FROM` (1) up as it stands, so a project this build has not opened yet still answers the runs index and the workspace search.
   - **Downgrade below schema 4 is refused, loudly.** A cezar from before hearsay-tools/cezarion#1233 opens a version-4 `runs.db` as `unsupported-schema` (table below) and reads nothing. Without the bump it would read records that no longer carry `ciWait`, recover a parked run as a plain waiting one, and settle an owned worker as successful. The recovery is to run this version, or a newer one, again. Exporting for an older cezar (step 4) still works, but that cezar strips `waits` and `lastWaits`, so a run parked on CI or a timer reads there as a plain waiting run.
+  - **Downgrade below schema 5 is refused the same way.** A cezar from before hearsay-tools/cezarion#1234 opens a version-5 `runs.db` as `unsupported-schema`. Without the bump it would drop every human wait as unreadable and recover the run without the question it parked on. The recovery is to run this version, or a newer one, again.
   - Fields this cezar does not know survive a write: a row keeps the unknown keys it was stored with (a newer cezar's additions), apart from fields the runtime removes.
   - The `meta`, `run_claims` and `run_conflicts` tables are private to cezar and may change in any release. Nothing else may read or write them.
   - Unlike `runs.json`, `runs.db` is not hand-editable. Use the export in "Recovering run history" to read it or to give runs to an older cezar.
@@ -294,12 +322,14 @@ A boot project that failed to open skips worktree pruning, scratch cleanup and r
 
 Breaking: any change that makes an existing file unparseable, silently discarded, or rewritten into a new shape without reading the old one. Required path: read old + new shapes for at least one minor release (a lazy upgrade-on-read is fine since writes go through the schema), or ship an explicit migration; never require the user to delete `.ai/cezar/`.
 
-Waits (store schema 4, hearsay-tools/cezarion#1233, spec
+Waits (store schema 4, hearsay-tools/cezarion#1233; human waits store schema 5, hearsay-tools/cezarion#1234; spec
 `.ai/specs/2026-10-17-unified-waits.md`) live in one list on the run record:
 optional `waits` (open and resolved waits; at most 16 open) and `lastWaits`
 (settled waits, newest last, capped at 16), both arrays of the contract's `Wait`
-(`ci` or `timer` in phase 1), plus `lastWaitsError` when a saved wait could not be
-read. They replace the CI fields `ciWait`, `lastCiWait` and `lastCiWaitError`
+(`ci`, `timer`, or `human` with no deadline), plus `lastWaitsError` when a saved wait
+could not be read. The run also keeps `automaticWakes` (timer wakes and nudges spent since
+the user last wrote) and `waitDeliveryFailures` (consecutive failed wake deliveries); an
+unreadable count reads as absent. They replace the CI fields `ciWait`, `lastCiWait` and `lastCiWaitError`
 (#474) and the monitoring fields `monitoringWakeAt`, `monitoringWakeCapReached` and
 `activity: 'monitoring'`, which are never written again. The one exception, until phase 3,
 is a root parent in worker-completion attention with live workers and an open session (§2). Older rows are upgraded
@@ -506,6 +536,42 @@ instruction rather than silently.
 - **No deprecation alias**: the flag *is* the migration path — one env var restores the previous
   behavior wholesale, which is what the "keep the old spelling for a minor release" rule exists to
   provide.
+
+## One turn-end rule (hearsay-tools/cezarion#1234, phase 2b) — deliberate, 2026-10-19
+
+The markers keep their meaning (section 8). What changed is what a turn end does when it carries
+no wait, no question and no done. Spec: `.ai/specs/2026-10-17-unified-waits.md`, "The turn-end
+rule" and "Phase 2b decisions".
+
+- **A turn end with no wait costs one more turn.** Cezar sends the no-wait nudge, which spends one
+  unit of the automatic-wake budget. If that turn also ends with no wait, or no reply comes within
+  5 minutes, Cezar opens its own `no-wait` human wait and the run reads Needs you. Before, the run
+  parked `waiting` at once, so a webhook or `cez task watch` now sees `waiting` one turn later. An
+  owned worker still parks plain after its nudge.
+- **Prose no longer raises Needs you.** A question or review request in prose, beside the
+  monitoring line, live workers or another wait, used to raise the prose gate. Now the run parks
+  on those waits. With no wait, it gets the nudge. An agent asks with `cezar_ask` or the ask line.
+- **A rejected ask line registers nothing.** Its diagnostic note and raw text stay, and the turn is
+  one with no wait, so it gets the nudge. A worker whose nudge reply also registers nothing now
+  settles `done`, not `failed` with `invalid structured question`.
+- **An autonomous run's ask line before the budget is not registered.** Its note changes from
+  `autonomous — question overridden by the auto-continue nudge: …` to
+  `autonomous — question not registered; continuing: …`.
+- **The final-message nudge is the no-wait nudge.** Its notes and heartbeat change to the no-wait
+  nudge's: `no wait or done — reminding the agent once (n/40)`,
+  `no reply to the no-wait nudge — waiting for you`, and `status=running (no-wait nudge)` in the
+  handoff journal. A consumer that matched the old note text must match the new text.
+- **The `unstructured-human-gate` note code** now marks the gate that a human wait without a card
+  raises (the monitoring line with re-checks off). Older transcripts carry it for the prose gate.
+  Both are answered the same way, so no record migrates.
+- **Dry run.** The native mocks answer the nudge with a `cezar_ask` card, so a dry-run task parks
+  on a question after one extra turn. `CEZ_MOCK_NUDGE_REPLY=plain` makes them answer in plain text.
+- **Finish closes an open question (hearsay-tools/cezarion#1260, additive).** An accepted Finish
+  appends a new event, `human-ask-closed`, with the closed question's `askSeq` and
+  `reason: 'finish'`. It retires the question as `human-input-delivered` does, but nobody answered
+  it, so no delivery is recorded. A reader that skips event types it does not know sees the
+  question still open on a finished run, as before this change. Stop appends nothing and keeps
+  the question.
 
 ## When in doubt
 

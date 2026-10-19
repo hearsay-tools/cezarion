@@ -6,6 +6,8 @@
 import readline from 'node:readline';
 import { spawn } from 'node:child_process';
 import { appendFileSync, closeSync, existsSync, renameSync, writeFileSync } from 'node:fs';
+// Dynamic, like every sibling import here, so a test's copy of this mock can repoint it.
+const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
 // Publish a pid atomically (temporary sibling, then rename): a test reading it sees no
 // file or a whole pid, never the empty file whose Number() is 0 (hearsay-tools/cezarion#953).
 function watchdogWritePid(file, pid) { const tmp = `${file}.${process.pid}.tmp`; writeFileSync(tmp, pid); renameSync(tmp, file); }
@@ -57,7 +59,7 @@ if (typeof flags.get('--tools') === 'string') {
   const disabled = (process.env.CEZ_MOCK_OMP_DISABLED_TOOLS ?? '').split(',').filter(Boolean);
   const registered = (name) => (BUILTIN_TOOLS.includes(name) && !GATED_TOOLS.has(name) && !disabled.includes(name))
     || mcpTools.includes(name)
-    || (extensions.length > 0 && (['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait'].includes(name) || ((name === 'cezar_preview_serve' || name === 'cezar_preview_stop') && process.env.CEZ_PREVIEW === '1')));
+    || (extensions.length > 0 && (['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'].includes(name) || ((name === 'cezar_preview_serve' || name === 'cezar_preview_stop') && process.env.CEZ_PREVIEW === '1')));
   // Mirrors v18.4.11 `emt()`: every missing name in ONE error, unknown names first, then the
   // built-ins this session lacks, each line singular for one name.
   const missing = tools.filter((name) => !registered(name));
@@ -341,6 +343,7 @@ async function handle(command) {
       return;
     case 'prompt':
       record({ userText: command.message, imageCount: (command.images ?? []).length });
+      command.message = answerNudge(command.message);
       return prompt(command);
     default:
       write({ ...(command.id ? { id: command.id } : {}), type: 'response', command: command.type, success: false, error: `Unknown command: ${command.type}` });
@@ -400,7 +403,7 @@ async function prompt(command) {
     if (crashWithStderr(message, '{"type":"tool_execution_update","toolCallId":"truncated')) return;
   }
 
-  if (message.includes('mock:silent-tail') || message.includes('Your last turn ended without a message to the user.')) {
+  if (message.includes('mock:silent-tail') || silentNudge(message)) {
     const silentEarly = await import('./mock-silent-tail.mjs');
     silentEarly.noteSilentTailPrompt(message);
     if (silentEarly.isAckOnlyNudge(message)) { respond(command); return; }
@@ -450,7 +453,7 @@ async function prompt(command) {
     endTurn();
     return;
   }
-  if (message.includes('mock:silent-tail') || message.includes('mock:tool-tail') || message.includes('Your last turn ended without a message to the user.')) {
+  if (message.includes('mock:silent-tail') || message.includes('mock:tool-tail') || silentNudge(message)) {
     const silent = await import('./mock-silent-tail.mjs');
     silent.noteSilentTailPrompt(message);
     if (silent.isFinalMessageNudge(message)) {

@@ -241,12 +241,13 @@ export interface UiAskOption {
   description?: string
 }
 
-/** One structured multiple-choice question (modeled on `AskUserQuestion`). */
+/** One structured multiple-choice question (modeled on `AskUserQuestion`). Without options it is
+ *  an open question: the user types the answer (hearsay-tools/cezarion#1234). */
 export interface UiAskQuestion {
   id?: string
   header: string
   question: string
-  options: UiAskOption[]
+  options?: UiAskOption[]
   multiSelect?: boolean
 }
 

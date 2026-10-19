@@ -16,14 +16,14 @@ function formatAnswer(question: UiAskQuestion, labels: string[], otherAnswer?: s
 }
 
 /**
- * The AskUser card (#473): the agent asked one or more structured multiple-choice
- * questions via `CEZ:ASK`; render each with clickable option chips. A single
- * single-select question resolves on one tap; any other shape (multiple
- * questions, or a multi-select question) collects every answer and resolves on
- * one **Send** that posts a single combined message — the reducer resolves the
- * whole card on that one user message, so partial answers can never leak. Each
- * question also offers an optional Other answer that can be mixed with chip answers
- * from the other questions. Either
+ * The AskUser card (#473): the agent asked one or more structured questions (`cezar_ask`, the
+ * ask line or a native ask); render each with clickable option chips. A question without
+ * options is open (hearsay-tools/cezarion#1234): it shows only the answer field. A single
+ * single-select question resolves on one tap; any other shape (multiple questions, a
+ * multi-select question, or an open one) collects every answer and resolves on one **Send**
+ * that posts a single combined message — the reducer resolves the whole card on that one user
+ * message, so partial answers can never leak. Each question with options also offers an
+ * optional Other answer that can be mixed with chip answers from the other questions. Either
  * way the answer rides `useAskAnswer`, which picks the seam the run's state
  * allows: the live reply while the engine owns a session, and a resume once it
  * has closed — a question outlives its session, so answering one that the agent
@@ -43,7 +43,9 @@ export function AskCard({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
         data-resolved="true"
         className="rounded-lg border border-border bg-card px-3.5 py-2.5 text-xs text-muted-foreground"
       >
-        <span className="text-soft-foreground">{ask.answeredBy === 'parent' ? 'Answered by parent' : 'Answered'}</span>
+        <span className="text-soft-foreground">
+          {ask.closed === 'finish' ? 'Closed when the task finished' : ask.answeredBy === 'parent' ? 'Answered by parent' : 'Answered'}
+        </span>
         {ask.answer ? (
           <span className="ml-1.5 break-words whitespace-pre-line text-foreground">{ask.answer}</span>
         ) : null}
@@ -76,14 +78,20 @@ function RoutedAsk({ ask }: { ask: ThreadAsk }) {
               </span>
             </div>
             <p className="mb-1.5 break-words text-sm font-semibold text-foreground">{question.question}</p>
-            <ul className="flex list-disc flex-col gap-0.5 pl-5 text-[13px] text-muted-foreground">
-              {question.options.map((option) => (
-                <li key={option.label} className="break-words">
-                  <span className="text-foreground">{option.label}</span>
-                  {option.description ? <span>: {option.description}</span> : null}
-                </li>
-              ))}
-            </ul>
+            {question.options ? (
+              <ul className="flex list-disc flex-col gap-0.5 pl-5 text-[13px] text-muted-foreground">
+                {question.options.map((option) => (
+                  <li key={option.label} className="break-words">
+                    <span className="text-foreground">{option.label}</span>
+                    {option.description ? <span>: {option.description}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p data-slot="ask-open-routed" className="text-[13px] text-muted-foreground">
+                Open question: answered in words, with no options.
+              </p>
+            )}
           </div>
         ))}
       </div>
@@ -107,9 +115,9 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
   const delivery = useAskAnswer(run)
   const blocked = delivery.blockedBy !== undefined
   const questions = ask.questions
-  // One-tap only when there is a single single-select question; every other
-  // shape needs a combined Send so no question's answer is dropped.
-  const oneTap = questions.length === 1 && questions[0]?.multiSelect !== true
+  // One-tap only when there is a single single-select question with options; every
+  // other shape needs a combined Send so no question's answer is dropped.
+  const oneTap = questions.length === 1 && questions[0]?.options !== undefined && questions[0]?.multiSelect !== true
   const [selections, setSelections] = useState<Record<number, string[]>>({})
   const [otherAnswers, setOtherAnswers] = useState<Record<number, string>>({})
 
@@ -129,7 +137,8 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
     setOtherAnswers((prev) => ({ ...prev, [index]: prev[index] ?? '' }))
   }
 
-  const hasOtherAnswer = questions.some((_, index) => otherAnswers[index] !== undefined)
+  // An open question is typed, like an Other answer.
+  const hasOtherAnswer = questions.some((question, index) => !question.options || otherAnswers[index] !== undefined)
   const allAnswered = questions.every(
     (_, index) => (selections[index]?.length ?? 0) > 0 || Boolean(otherAnswers[index]?.trim()),
   )
@@ -254,7 +263,8 @@ function AskQuestionBlock({
   onOtherChange: (answer: string) => void
 }) {
   const answerId = useId()
-  const multiSelect = question.multiSelect === true
+  const options = question.options
+  const multiSelect = options !== undefined && question.multiSelect === true
 
   const pick = (label: string) => {
     if (!multiSelect) {
@@ -277,79 +287,97 @@ function AskQuestionBlock({
         ) : null}
       </div>
       <p className="mb-2.5 break-words text-sm font-semibold text-foreground">{question.question}</p>
-      <div className="flex flex-col gap-2">
-        {question.options.map((option) => {
-          const isSelected = selected.includes(option.label)
-          return (
-            <button
-              key={option.label}
+      {options ? (
+        <>
+          <div className="flex flex-col gap-2">
+            {options.map((option) => {
+              const isSelected = selected.includes(option.label)
+              return (
+                <button
+                  key={option.label}
+                  type="button"
+                  disabled={disabled}
+                  aria-pressed={isSelected}
+                  onClick={() => pick(option.label)}
+                  className={cn(
+                    'flex min-h-11 w-full flex-col gap-0.5 rounded-md border px-3.5 py-2.5 text-left transition-colors',
+                    'hover:border-accent-strong/50 hover:bg-accent-strong/[0.06] disabled:pointer-events-none disabled:opacity-50',
+                    isSelected ? 'border-accent-strong/60 bg-accent-strong/[0.06]' : 'border-border bg-card',
+                  )}
+                >
+                  <span className="flex min-w-0 items-start gap-2 text-[14px] font-semibold text-foreground">
+                    {multiSelect ? (
+                      <span
+                        aria-hidden
+                        className={cn(
+                          'flex size-4 shrink-0 items-center justify-center rounded border text-[12px]',
+                          isSelected
+                            ? 'border-accent-strong bg-accent-strong text-accent-strong-foreground'
+                            : 'border-soft-foreground',
+                        )}
+                      >
+                        {isSelected ? '✓' : ''}
+                      </span>
+                    ) : null}
+                    <span className="min-w-0 break-words">{option.label}</span>
+                  </span>
+                  {option.description ? (
+                    <span className="min-w-0 break-words text-xs text-muted-foreground">
+                      {option.description}
+                    </span>
+                  ) : null}
+                </button>
+              )
+            })}
+          </div>
+          <div className="mt-2">
+            <Button
               type="button"
+              variant="outline"
+              aria-pressed={isOther}
+              aria-expanded={isOther}
+              aria-controls={isOther ? answerId : undefined}
               disabled={disabled}
-              aria-pressed={isSelected}
-              onClick={() => pick(option.label)}
+              onClick={onOtherToggle}
               className={cn(
-                'flex min-h-11 w-full flex-col gap-0.5 rounded-md border px-3.5 py-2.5 text-left transition-colors',
-                'hover:border-accent-strong/50 hover:bg-accent-strong/[0.06] disabled:pointer-events-none disabled:opacity-50',
-                isSelected ? 'border-accent-strong/60 bg-accent-strong/[0.06]' : 'border-border bg-card',
+                'w-full justify-start text-left',
+                isOther && 'border-accent-strong/60 bg-accent-strong/[0.06]',
               )}
             >
-              <span className="flex min-w-0 items-start gap-2 text-[14px] font-semibold text-foreground">
-                {multiSelect ? (
-                  <span
-                    aria-hidden
-                    className={cn(
-                      'flex size-4 shrink-0 items-center justify-center rounded border text-[12px]',
-                      isSelected
-                        ? 'border-accent-strong bg-accent-strong text-accent-strong-foreground'
-                        : 'border-soft-foreground',
-                    )}
-                  >
-                    {isSelected ? '✓' : ''}
-                  </span>
-                ) : null}
-                <span className="min-w-0 break-words">{option.label}</span>
-              </span>
-              {option.description ? (
-                <span className="min-w-0 break-words text-xs text-muted-foreground">
-                  {option.description}
-                </span>
-              ) : null}
-            </button>
-          )
-        })}
-      </div>
-      <div className="mt-2">
-        <Button
-          type="button"
-          variant="outline"
-          aria-pressed={isOther}
-          aria-expanded={isOther}
-          aria-controls={isOther ? answerId : undefined}
-          disabled={disabled}
-          onClick={onOtherToggle}
-          className={cn(
-            'w-full justify-start text-left',
-            isOther && 'border-accent-strong/60 bg-accent-strong/[0.06]',
-          )}
-        >
-          Other
-        </Button>
-        {isOther ? (
-          <div className="mt-2.5">
-            <label htmlFor={answerId} className="mb-1.5 block text-xs font-medium text-foreground">
-              Your answer
-            </label>
-            <Textarea
-              id={answerId}
-              rows={2}
-              value={otherAnswer}
-              disabled={disabled}
-              onChange={(event) => onOtherChange(event.target.value)}
-              className="bg-card"
-            />
+              Other
+            </Button>
+            {isOther ? (
+              <div className="mt-2.5">
+                <label htmlFor={answerId} className="mb-1.5 block text-xs font-medium text-foreground">
+                  Your answer
+                </label>
+                <Textarea
+                  id={answerId}
+                  rows={2}
+                  value={otherAnswer}
+                  disabled={disabled}
+                  onChange={(event) => onOtherChange(event.target.value)}
+                  className="bg-card"
+                />
+              </div>
+            ) : null}
           </div>
-        ) : null}
-      </div>
+        </>
+      ) : (
+        <div>
+          <label htmlFor={answerId} className="mb-1.5 block text-xs font-medium text-foreground">
+            Your answer
+          </label>
+          <Textarea
+            id={answerId}
+            rows={2}
+            value={otherAnswer}
+            disabled={disabled}
+            onChange={(event) => onOtherChange(event.target.value)}
+            className="bg-card"
+          />
+        </div>
+      )}
     </div>
   )
 }

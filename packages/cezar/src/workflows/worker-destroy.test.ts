@@ -39,6 +39,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   beforeEach(() => {
     scopeFixtureProcesses();
     vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
+    // Workers ignore the no-wait nudge and reach their plain park (hearsay-tools/cezarion#1234).
+    vi.stubEnv('CEZ_MOCK_NUDGE_REPLY', 'plain');
     root = mkdtempSync(join(tmpdir(), 'cez-worker-destroy-'));
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
     execFileSync('git', ['config', 'gc.auto', '0'], { cwd: root });
@@ -552,10 +554,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); releases.push(() => vi.useRealTimers());
     manager.enqueueOwnedRun(w.id); await until(() => !!monitoringWakeOf(store.getRun(w.id)));
     const deadline = monitoringWakeOf(store.getRun(w.id))!;
-    const engine = manager as unknown as { active: Map<string, { monitoringWakeups?: number }> };
-    const state = engine.active.get(w.id)!;
     destroy(w); await vi.advanceTimersByTimeAsync(Date.parse(deadline) - Date.now() + 1);
-    expect(state.monitoringWakeups ?? 0).toBe(0);
+    expect(manager['automaticWakes'](w.id)).toBe(0);
     expect(monitoringWakeOf(store.getRun(w.id))).toBe(deadline);
     expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
     vi.useRealTimers();

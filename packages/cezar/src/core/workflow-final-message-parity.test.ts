@@ -7,15 +7,18 @@ import { RUNNER_IDS } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
 import { FINAL_MESSAGE_CRITERIA, HARNESS_ADAPTERS, driveSeam, exemptionFor, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 import { handoffPath } from '../handoff.ts';
+import { NO_WAIT_NO_REPLY_NOTE, NO_WAIT_NUDGE_NOTE } from '../workflows/run.ts';
 
+// The no-wait nudge absorbed the final-message nudge (hearsay-tools/cezarion#1234): these rows pin
+// its reply bound, #544's liveness. A worker's fallback stays the plain park.
 const nudgeNotes = (events: readonly Record<string, unknown>[]) =>
-  events.filter(e => e.type === 'note' && String(e.message).includes('no final message'));
+  events.filter(e => e.type === 'note' && String(e.message).startsWith(NO_WAIT_NUDGE_NOTE));
 const noReplyNotes = (events: readonly Record<string, unknown>[]) =>
-  events.filter(e => e.type === 'note' && String(e.message).includes('no reply to the final-message nudge'));
+  events.filter(e => e.type === 'note' && e.message === NO_WAIT_NO_REPLY_NOTE);
 const autonomousNotes = (events: readonly Record<string, unknown>[]) =>
   events.filter(e => e.type === 'note' && String(e.message).includes('continuing without pausing'));
-const shortenNudgeBound = (manager: { finalMessageNudgeReplyMs?: number }) => {
-  manager.finalMessageNudgeReplyMs = 300;
+const shortenNudgeBound = (manager: { noWaitNudgeReplyMs?: number }) => {
+  manager.noWaitNudgeReplyMs = 300;
 };
 const lateDoneContent = (events: readonly Record<string, unknown>[]) =>
   events.some(e => {
@@ -47,7 +50,7 @@ describe('silent-tail seam — mapper emits reasoning/tool with no later message
   }
 });
 
-describe('final-message nudge parity — #544', () => {
+describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
   for (const backend of RUNNER_IDS) {
     for (const row of FINAL_MESSAGE_CRITERIA) {
       if (row.id === 'F7') {
@@ -73,7 +76,7 @@ describe('final-message nudge parity — #544', () => {
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
             await waitFor(() => nudgeNotes(store.readEvents(runId).slice(startSeq)).length === 1);
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
-            expect(readFileSync(handoff, 'utf8')).toContain('status=running (final message nudge)');
+            expect(readFileSync(handoff, 'utf8')).toContain('status=running (no-wait nudge)');
           });
         }, 30_000);
         continue;
@@ -95,7 +98,7 @@ describe('final-message nudge parity — #544', () => {
         }
         it(`${backend} ${row.id} ${row.name}`, async () => {
           await withOwnedInputRun(backend, 'silent-tail-no-reply', async ({ store, manager, runId, repoRoot }) => {
-            shortenNudgeBound(manager as unknown as { finalMessageNudgeReplyMs?: number });
+            shortenNudgeBound(manager as unknown as { noWaitNudgeReplyMs?: number });
             const handoff = handoffPath(join(repoRoot, '.ai/cezar'), runId);
             const startSeq = store.readEvents(runId).length;
             manager.enqueueOwnedRun(runId);
@@ -127,7 +130,7 @@ describe('final-message nudge parity — #544', () => {
         }
         it(`${backend} ${row.id} ${row.name}`, async () => {
           await withOwnedInputRun(backend, 'silent-tail-late-reply', async ({ store, manager, runId }) => {
-            shortenNudgeBound(manager as unknown as { finalMessageNudgeReplyMs?: number });
+            shortenNudgeBound(manager as unknown as { noWaitNudgeReplyMs?: number });
             const startSeq = store.readEvents(runId).length;
             manager.enqueueOwnedRun(runId);
             await waitFor(() => noReplyNotes(store.readEvents(runId).slice(startSeq)).length === 1);
@@ -155,7 +158,7 @@ describe('final-message nudge parity — #544', () => {
           const release = join(gateRoot, 'release');
           try {
             await withOwnedInputRun(backend, 'silent-tail-late-turn-start', async ({ store, manager, runId }) => {
-              shortenNudgeBound(manager as unknown as { finalMessageNudgeReplyMs?: number });
+              shortenNudgeBound(manager as unknown as { noWaitNudgeReplyMs?: number });
               const startSeq = store.readEvents(runId).length;
               manager.enqueueOwnedRun(runId);
               await waitFor(() => noReplyNotes(store.readEvents(runId).slice(startSeq)).length === 1);
@@ -179,7 +182,7 @@ describe('final-message nudge parity — #544', () => {
       if (row.id === 'F10') {
         it(`${backend} ${row.id} ${row.name}`, async () => {
           await withOwnedInputRun(backend, 'silent-tail-slow-done', async ({ store, manager, runId, repoRoot }) => {
-            shortenNudgeBound(manager as unknown as { finalMessageNudgeReplyMs?: number });
+            shortenNudgeBound(manager as unknown as { noWaitNudgeReplyMs?: number });
             const handoff = handoffPath(join(repoRoot, '.ai/cezar'), runId);
             const startSeq = store.readEvents(runId).length;
             manager.enqueueOwnedRun(runId);
@@ -187,7 +190,7 @@ describe('final-message nudge parity — #544', () => {
             expect(store.getRun(runId)?.status).toBe('done');
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
             expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
-            expect(readFileSync(handoff, 'utf8')).toContain('status=running (final message nudge)');
+            expect(readFileSync(handoff, 'utf8')).toContain('status=running (no-wait nudge)');
           });
         }, 30_000);
         continue;
@@ -222,7 +225,7 @@ describe('final-message nudge parity — #544', () => {
               expect(status).toBe('done');
               expect(notes).toHaveLength(1);
               expect(autonomousNotes(events)).toHaveLength(0);
-              expect(readFileSync(handoff, 'utf8')).toContain('status=running (final message nudge)');
+              expect(readFileSync(handoff, 'utf8')).toContain('status=running (no-wait nudge)');
             } else if (row.id === 'F2') {
               expect(status).toBe('waiting');
               expect(status).not.toBe('done');

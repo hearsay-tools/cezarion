@@ -1,8 +1,8 @@
-import { cezarCancelWaitRequestSchema, cezarWaitRequestSchema } from '@open-mercato/cezar-contract/waits';
+import { cezarAskRequestSchema, cezarCancelWaitRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema } from '@open-mercato/cezar-contract/waits';
 import { ciWaitRequestSchema } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, previewServeRequestSchema } from '@open-mercato/cezar-contract/preview';
 import { z } from 'zod';
-import { callCezarCancelWait, callCezarWait, callCiWait, callPreviewServe, callPreviewStop } from './client.ts';
+import { callCezarAsk, callCezarCancelWait, callCezarDone, callCezarWait, callCiWait, callPreviewServe, callPreviewStop } from './client.ts';
 
 /**
  * The one list of cezar tools (#781). The MCP adapter lists it, Pi's extension registers it, and
@@ -66,12 +66,27 @@ function flatWaitInputSchema() {
 
 export const waitToolDefinition = {
   name: 'cezar_wait',
-  description: 'Open a wait on something outside this turn: CI on a GitHub pull request (kind "ci") or a timer (kind "timer"). End your turn after it answers; Cezar wakes you when any open wait resolves, with its result, and a human message wakes you too without closing the wait. Several waits can be open at once; the answer lists them. A CI observation is not merge approval.',
+  description: 'Open a wait on something outside this turn: CI on a GitHub pull request (kind "ci") or a timer (kind "timer"). End your turn after it answers; Cezar wakes you when any open wait resolves, with its result. A human message wakes you too and closes no wait. Several waits can be open at once; the answer lists them. To wait for the user, call cezar_ask. A CI observation is not merge approval.',
   inputSchema: flatWaitInputSchema(),
 };
+/**
+ * hearsay-tools/cezarion#1234: the user's answer gets its own tool, so its card is required and
+ * `cezar_wait` never has to explain a field only one kind takes.
+ */
+export const askToolDefinition = {
+  name: 'cezar_ask',
+  description: 'Ask the user, then end your turn: Cezar shows your questions as a card, the run waits for the answer, and the user\'s reply wakes you. Ask only for a decision that is the user\'s to make or input you cannot find. Each question takes a header of at most 12 characters, the question, and 2–4 options shown as choices; leave the options out to let the user type the answer. The user can always type a reply of their own. Other open waits keep running while you wait.',
+  inputSchema: { ...z.toJSONSchema(cezarAskRequestSchema, { io: 'input' }), type: 'object' as const },
+};
+export async function invokeAskTool(input: unknown) {
+  const answer = await callCezarAsk(input);
+  const hint = answer.ok ? 'Asked. End your turn; the user\'s answer wakes you.' : 'Not asked. Fix the call from the message, or continue without asking.';
+  return { content: [{ type: 'text' as const, text: `${JSON.stringify(answer)}\n${hint}` }], isError: !answer.ok, details: answer };
+}
+
 export const cancelWaitToolDefinition = {
   name: 'cezar_cancel_wait',
-  description: 'Close a wait you opened with cezar_wait, by its wait_id, so it never wakes you. A wait that already resolved is delivered with your next wake anyway; the answer says so and lists the waits still open.',
+  description: 'Close a wait you opened with cezar_wait or cezar_ask, by its wait_id, so it never wakes you. A question the user already sees cannot be cancelled; only their answer ends it. A wait that already resolved is delivered with your next wake anyway; the answer says so and lists the waits still open.',
   inputSchema: { ...z.toJSONSchema(cezarCancelWaitRequestSchema, { io: 'input' }), type: 'object' as const },
 };
 
@@ -85,6 +100,18 @@ export async function invokeCancelWaitTool(input: unknown) {
   const answer = await callCezarCancelWait(input);
   const hint = answer.cancelled ? 'Cancelled. The waits in open_waits stay open.' : 'Not cancelled. Check the message and the waits in open_waits.';
   return { content: [{ type: 'text' as const, text: `${JSON.stringify(answer)}\n${hint}` }], isError: !answer.cancelled, details: answer };
+}
+
+/** hearsay-tools/cezarion#1234: the explicit form of the done line. */
+export const doneToolDefinition = {
+  name: 'cezar_done',
+  description: 'Finish the task. Call it when the goal is fully achieved and verified and you have no question for the user; end your turn after it answers. Cezar closes the session at the end of this turn and cancels every open wait. It refuses, naming what to do first, while owned workers are live or uncollected, a worker question is unanswered, or your question to the user is still pending.',
+  inputSchema: { ...z.toJSONSchema(cezarDoneRequestSchema, { io: 'input' }), type: 'object' as const },
+};
+export async function invokeDoneTool(input: unknown) {
+  const answer = await callCezarDone(input);
+  const hint = answer.ok ? 'Accepted. End your turn; Cezar finishes the task at its end.' : 'Not finished. Do what the message says, then call cezar_done again.';
+  return { content: [{ type: 'text' as const, text: `${JSON.stringify(answer)}\n${hint}` }], isError: !answer.ok, details: answer };
 }
 
 export const previewToolDefinition = {
@@ -112,12 +139,14 @@ const PREVIEW_STOP_TOOL: CezarTool = { definition: previewStopToolDefinition, tr
 
 // Deprecated: still listed, so every runner keeps admitting it, but with no trigger line.
 const CI_TOOL: CezarTool = { definition: ciToolDefinition, label: 'Wait for CI', invoke: invokeCiTool };
-const WAIT_TOOL: CezarTool = { definition: waitToolDefinition, trigger: 'load when you are waiting on CI for a PR or want to re-check something later; end your turn after it answers.', label: 'Wait', invoke: invokeWaitTool };
+const WAIT_TOOL: CezarTool = { definition: waitToolDefinition, trigger: 'load when you are waiting on CI for a PR, or want to re-check something later; end your turn after it answers.', label: 'Wait', invoke: invokeWaitTool };
+const ASK_TOOL: CezarTool = { definition: askToolDefinition, trigger: 'load when you need the user: a decision only they can make, or missing input; end your turn after it answers.', label: 'Ask the user', invoke: invokeAskTool };
 const CANCEL_WAIT_TOOL: CezarTool = { definition: cancelWaitToolDefinition, trigger: 'load when a wait you registered is no longer needed.', label: 'Cancel wait', invoke: invokeCancelWaitTool };
+const DONE_TOOL: CezarTool = { definition: doneToolDefinition, trigger: 'load when the task is complete and verified.', label: 'Done', invoke: invokeDoneTool };
 const PREVIEW_TOOL: CezarTool = { definition: previewToolDefinition, trigger: 'load when you have started, or are about to start, a web server the user should click through.', label: 'Live preview', invoke: invokePreviewTool };
 
 export function cezarTools(env: NodeJS.ProcessEnv = process.env): CezarTool[] {
-  const waits = [CI_TOOL, WAIT_TOOL, CANCEL_WAIT_TOOL];
+  const waits = [CI_TOOL, WAIT_TOOL, ASK_TOOL, CANCEL_WAIT_TOOL, DONE_TOOL];
   return previewToolEnabled(env) ? [...waits, PREVIEW_TOOL, PREVIEW_STOP_TOOL] : waits;
 }
 export function cezarToolNames(env: NodeJS.ProcessEnv = process.env): string[] {

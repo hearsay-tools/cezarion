@@ -50,10 +50,15 @@ type UsageAccountingHarness = {
   ): void;
 };
 
-// Naming has its own suite; no background LLM call may outlive these fixtures.
+// Naming has its own suite; no background LLM call may outlive these fixtures. The mocks answer
+// Cezar's no-wait nudge in plain text (hearsay-tools/cezarion#1234), so a turn end with no wait
+// reaches Cezar's own wait, not a question the mock made up.
 const fixtureAutoname = process.env.CEZ_AUTONAME;
-beforeEach(() => { process.env.CEZ_AUTONAME = '0'; });
+const fixtureNudgeReply = process.env.CEZ_MOCK_NUDGE_REPLY;
+beforeEach(() => { process.env.CEZ_AUTONAME = '0'; process.env.CEZ_MOCK_NUDGE_REPLY = 'plain'; });
 afterAll(() => {
+  if (fixtureNudgeReply === undefined) delete process.env.CEZ_MOCK_NUDGE_REPLY;
+  else process.env.CEZ_MOCK_NUDGE_REPLY = fixtureNudgeReply;
   if (fixtureAutoname === undefined) delete process.env.CEZ_AUTONAME;
   else process.env.CEZ_AUTONAME = fixtureAutoname;
 });
@@ -1381,11 +1386,11 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     });
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
     currentId = record.id;
-    // hearsay-tools/cezarion#1233: with re-checks off nothing is registered; the run parks as a
-    // plain wait and says why.
+    // hearsay-tools/cezarion#1233: with re-checks off no timer is registered; the run parks and
+    // says why. hearsay-tools/cezarion#1234: it parks on a human wait, not a plain one.
     await waitFor(record.id, (r) => r?.status === 'waiting');
     await waitFor(record.id, () => readFileSync(join(repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8').includes('automatic re-checks are off; waiting for you'));
-    expect(store.getRun(record.id)?.waits ?? []).toEqual([]);
+    expect(store.getRun(record.id)?.waits ?? []).toMatchObject([{ kind: 'human', via: 'monitoring-line', source: 'agent', phase: 'open' }]);
     expect(monitoringWakeOf(store.getRun(record.id))).toBeUndefined();
     expect(monitoringTimerOf(manager, record.id)).toBeUndefined();
   }, 30_000);
