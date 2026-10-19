@@ -1738,9 +1738,13 @@ describe('OpenCode durable input acknowledgements', () => {
       // so it may carry a delivery receipt; the input itself is unchanged and never lost.
       const withoutReceipts = (inputs: AgentInput[] | undefined) => inputs?.map(({ deliveredAt: _d, consumedAt: _c, awaitingRead: _a, ...rest }) => rest);
       expect(withoutReceipts(store.getRun(runId)?.agentInputs)).toEqual([input]);
+      // hearsay-tools/cezarion#1260: Finish closes the question it never saw answered, without a
+      // delivery; a rejected answer or a Stop leaves it for an explicit answer.
+      const askSeq = store.readEvents(runId).find(e => e.type === 'ask.requested')!.seq;
+      expect(events.filter(e => e.type === 'human-ask-closed')).toEqual(outcome === 'finished' ? [expect.objectContaining({ askSeq, reason: 'finish' })] : []);
       const recovered = await fixture.restart();
-      expect((recovered.manager as unknown as { hasPendingHumanAsk(id: string): boolean }).hasPendingHumanAsk(runId)).toBe(true);
-      expect(recovered.manager.continueRun(runId).ok).toBe(false);
+      expect((recovered.manager as unknown as { hasPendingHumanAsk(id: string): boolean }).hasPendingHumanAsk(runId)).toBe(outcome !== 'finished');
+      if (outcome !== 'finished') expect(recovered.manager.continueRun(runId).ok).toBe(false);
       expect(withoutReceipts(recovered.store.getRun(runId)?.agentInputs)).toEqual([input]);
     });
   }, 60_000);
