@@ -544,6 +544,13 @@ interface ActiveRun {
   /** Session that received the no-wait nudge (hearsay-tools/cezarion#1234): its next no-wait
    *  turn end opens a human wait instead of nudging again. */
   noWaitNudged?: AgentSession;
+  /** Session that received a refusal nudge for a blocked done (hearsay-tools/cezarion#1301); the
+   *  next turn end on it reads and clears it. */
+  completionNudged?: AgentSession;
+  /** The done `deferParentCompletion` just refused in this live session (hearsay-tools/cezarion#1301):
+   *  it is not a done. `handled` when the refusal settled the turn end (a nudge or a park); otherwise
+   *  the turn end goes on to its waits or its owed input. Read only right after that call. */
+  completionRefused?: { session: AgentSession; handled: boolean };
   /** Registry snapshot used to expand `/skill` follow-ups before a backend can
    *  mistake them for its own slash commands (#676). */
   skills?: Skill[];
@@ -579,6 +586,11 @@ export const NO_WAIT_NUDGE_REPLY_MS = 5 * 60_000;
 export const NO_WAIT_NUDGE_NOTE = 'no wait or done — reminding the agent once';
 export const NO_WAIT_NOTE = 'waiting for you: the agent ended its turn without a wait or done';
 export const NO_WAIT_NO_REPLY_NOTE = 'no reply to the no-wait nudge — waiting for you';
+/** A root's done blocked at a turn end is answered with the refusal `cezar_done` gives, as one
+ *  automatic turn (hearsay-tools/cezarion#1301). The nudge adds this sentence when live workers block
+ *  it; the mid-turn answer never does. */
+export const COMPLETION_WILL_WAIT = 'If you end your turn with done again while these workers are live, Cezar will wait on them for you and wake you when they have all settled.';
+export const COMPLETION_NUDGE_NOTE = 'completion blocked — refusal sent to the agent';
 /** An autonomous run's ask line before the budget, which `cezar_ask` would refuse: its questions follow. */
 export const AUTONOMOUS_ASK_NOTE = 'autonomous — question not registered; continuing';
 type TurnEndOutcome = 'defer' | 'done' | 'park' | 'complete-step' | 'nudge' | 'human-wait';
@@ -1951,32 +1963,46 @@ export class RunManager {
     if (this.executionBlockedByRootFinish(run)) return refuse('root_finish_pending', doneErrorMessage('root_finish_pending'));
     // The answer a continuation opened with is not a pending question while its turn runs.
     if (state.pendingHumanAsk || this.hasUnansweredHumanAsk(runId)) return refuse('human_question_pending', doneErrorMessage('human_question_pending'));
-    if (run.delegation?.role === 'root') {
-      // Every command spelled out while it fits the contract's bound, else the general form:
-      // `workers` still lists each worker.
-      const fit = (full: string, general: string) => full.length <= WAIT_MESSAGE_MAX ? full : general;
-      const questions = this.unansweredQuestions(runId);
-      if (questions.length) {
-        return refuse('worker_questions', fit(`Your workers asked questions you have not answered. Answer each (${questions.map(q => `\`worker reply ${q.workerId} '<answer>' --id <new-UUID> --request-id ${q.messageId}\``).join(', ')}), then call cezar_done again.`,
-          `Your workers asked ${questions.length} questions you have not answered; \`workers\` lists the workers and \`worker inbox\` shows each question. Answer each (\`worker reply <worker-id> '<answer>' --id <new-UUID> --request-id <question-id>\`), then call cezar_done again.`),
-          questions.map(q => ({ worker_id: q.workerId, reason: 'question' })));
-      }
-      const blockers = this.parentCompletionBlockers(runId);
-      const live = blockers.filter(b => b.reason === 'outstanding').map(b => b.workerId);
-      if (live.length) {
-        return refuse('workers_outstanding', fit(`Workers are still live: ${live.join(', ')}. Wait for them (\`worker wait ${live.join(' ')}\`, then end your turn) or stop them (${live.map(id => `\`worker stop ${id}\``).join(', ')}), collect their results, then call cezar_done again.`,
-          `${live.length} workers are still live; \`workers\` lists them. Wait for them (\`worker wait <worker-id>...\`, then end your turn) or stop them (\`worker stop <worker-id>\`), collect their results, then call cezar_done again.`),
-          live.map(worker_id => ({ worker_id, reason: 'outstanding' })));
-      }
-      const uncollected = blockers.filter(b => b.reason === 'uncollected').map(b => b.workerId);
-      if (uncollected.length) {
-        return refuse('workers_uncollected', fit(`Settled worker results are not collected yet. Collect each (${uncollected.map(id => `\`worker collect ${id}\``).join(', ')}), then call cezar_done again.`,
-          `${uncollected.length} settled worker results are not collected yet; \`workers\` lists them. Collect each (\`worker collect <worker-id>\`), then call cezar_done again.`),
-          uncollected.map(worker_id => ({ worker_id, reason: 'uncollected' })));
-      }
-    }
+    const refusal = this.completionRefusal(runId);
+    if (refusal) return refuse(refusal.code, refusal.message, refusal.workers);
     state.doneRequested = { session: state.session, ...(parsed.summary === undefined ? {} : { summary: parsed.summary }) };
     return { ok: true, finishes: 'at_turn_end', open_waits };
+  }
+
+  /**
+   * The root checks `cezar_done` makes after the session, root-finish and human-question ones, in
+   * order: its workers' questions, live workers, then uncollected settled results. One text source
+   * for the mid-turn answer and the turn end's refusal nudge (hearsay-tools/cezarion#1301).
+   * `liveWorkerIds` names the live workers that block it, empty when questions block it first.
+   */
+  private completionRefusal(runId: string): {
+    code: 'worker_questions' | 'workers_outstanding' | 'workers_uncollected'; message: string;
+    workers: { worker_id: string; reason: 'outstanding' | 'uncollected' | 'question' }[]; liveWorkerIds: string[];
+  } | undefined {
+    if (this.store.getRun(runId)?.delegation?.role !== 'root') return undefined;
+    // Every command spelled out while it fits the contract's bound, else the general form:
+    // `workers` still lists each worker.
+    const fit = (full: string, general: string) => full.length <= WAIT_MESSAGE_MAX ? full : general;
+    const questions = this.unansweredQuestions(runId);
+    if (questions.length) {
+      return { code: 'worker_questions', message: fit(`Your workers asked questions you have not answered. Answer each (${questions.map(q => `\`worker reply ${q.workerId} '<answer>' --id <new-UUID> --request-id ${q.messageId}\``).join(', ')}), then call cezar_done again.`,
+        `Your workers asked ${questions.length} questions you have not answered; \`workers\` lists the workers and \`worker inbox\` shows each question. Answer each (\`worker reply <worker-id> '<answer>' --id <new-UUID> --request-id <question-id>\`), then call cezar_done again.`),
+      workers: questions.map(q => ({ worker_id: q.workerId, reason: 'question' })), liveWorkerIds: [] };
+    }
+    const blockers = this.parentCompletionBlockers(runId);
+    const live = blockers.filter(b => b.reason === 'outstanding').map(b => b.workerId);
+    if (live.length) {
+      return { code: 'workers_outstanding', message: fit(`Workers are still live: ${live.join(', ')}. Wait for them (\`worker wait ${live.join(' ')}\`, then end your turn) or stop them (${live.map(id => `\`worker stop ${id}\``).join(', ')}), collect their results, then call cezar_done again.`,
+        `${live.length} workers are still live; \`workers\` lists them. Wait for them (\`worker wait <worker-id>...\`, then end your turn) or stop them (\`worker stop <worker-id>\`), collect their results, then call cezar_done again.`),
+      workers: live.map(worker_id => ({ worker_id, reason: 'outstanding' })), liveWorkerIds: live };
+    }
+    const uncollected = blockers.filter(b => b.reason === 'uncollected').map(b => b.workerId);
+    if (uncollected.length) {
+      return { code: 'workers_uncollected', message: fit(`Settled worker results are not collected yet. Collect each (${uncollected.map(id => `\`worker collect ${id}\``).join(', ')}), then call cezar_done again.`,
+        `${uncollected.length} settled worker results are not collected yet; \`workers\` lists them. Collect each (\`worker collect <worker-id>\`), then call cezar_done again.`),
+      workers: uncollected.map(worker_id => ({ worker_id, reason: 'uncollected' })), liveWorkerIds: [] };
+    }
+    return undefined;
   }
 
   /** The `cezar_done` this session accepted since its last turn end, taken by this turn end: a
@@ -4598,15 +4624,19 @@ export class RunManager {
     return 'reason' in decision ? decision.reason : undefined;
   }
 
-  /** One durable automatic worker wait per cycle. Further premature DONEs with
-   * live workers use the existing capped monitoring wakes; settled uncollected
-   * results retain attention. Human input starts a fresh completion cycle. */
+  /** A root's done blocked by its workers. In a live session the agent gets the refusal
+   * `cezar_done` gives, as one automatic turn (`refuseCompletion`, hearsay-tools/cezarion#1301).
+   * A pending human question keeps its park, with no completion record. A closed session still
+   * takes the old engine, which hearsay-tools/cezarion#1301 replaces with a queued refusal wake: one
+   * durable automatic worker wait per cycle, then the capped monitoring wakes; settled uncollected
+   * results retain attention. */
   private deferParentCompletion(runId: string): boolean {
     let parent = this.store.getRun(runId);
     if (parent?.delegation?.role !== 'root') return false;
     // A late success callback has no authority to reopen a stopped/reviewing root.
     if (['done', 'review', 'failed', 'cancelled'].includes(parent.status)) return true;
     const state = this.active.get(runId);
+    if (state) state.completionRefused = undefined;
     const blockers = this.parentCompletionBlockers(runId);
     const pendingAsk = this.hasPendingHumanAsk(runId) || state?.pendingHumanAsk;
     // A worker waiting on this parent's answer (#505): waiting on that worker would deadlock.
@@ -4625,6 +4655,8 @@ export class RunManager {
       this.store.flush();
       return true;
     }
+    const refusal = pendingAsk ? undefined : this.completionRefusal(runId);
+    if (refusal && state?.session?.open) return this.refuseCompletion(runId, state, refusal);
     const message = pendingAsk ? 'Completion blocked: answer the pending human question.' : questions.length
       ? `Completion blocked: answer your workers' questions first: ${questions.map(q => `${q.workerId} (request ${q.messageId})`).join(', ')}.` :
       `Completion blocked: finish or explicitly stop outstanding workers, then collect their latest settled results: ${blockers.map(b => `${b.workerId} (${b.reason})`).join(', ')}.`;
@@ -4641,7 +4673,8 @@ export class RunManager {
       else this.reconcileWorkerWaits();
     } else {
       const monitoring = !pendingAsk && !questions.length && !!state?.session?.open && this.hasLiveWorkers(runId);
-      this.store.commitDelegation([{ id: runId, delegation: { ...parent.delegation, completion: { ...parent.delegation.completion, phase: 'attention' } } }]);
+      // The pending human question's park writes no completion record (hearsay-tools/cezarion#1301).
+      if (!pendingAsk) this.store.commitDelegation([{ id: runId, delegation: { ...parent.delegation, completion: { ...parent.delegation.completion, phase: 'attention' } } }]);
       this.store.updateRun(runId, { status: monitoring ? 'running' : 'waiting', activity: monitoring ? 'monitoring' : undefined, finishedAt: undefined });
       this.store.flush();
       if (state) {
@@ -4655,6 +4688,57 @@ export class RunManager {
       }
     }
     return true;
+  }
+
+  /**
+   * A blocked done in a live session (hearsay-tools/cezarion#1301): a refused done is not a done.
+   * The agent gets the refusal as one automatic turn, charged to the automatic-wake budget and
+   * bounded by the no-wait nudge's reply timer; the run stays `running` and no wait opens. The
+   * agent's open waits and owed input come first: no nudge, the refusal is a note, and the turn end
+   * parks on the waits or takes the input. Cezar's own human waits are withdrawn instead. A spent
+   * budget opens Cezar's `budget` human wait. Always true.
+   */
+  private refuseCompletion(runId: string, state: ActiveRun, refusal: NonNullable<ReturnType<RunManager['completionRefusal']>>): boolean {
+    const session = state.session!;
+    const stepId = state.currentStepId;
+    const note = (message: string) => this.store.appendEvent(runId, { type: 'note', tone: 'warning', ...(stepId ? { stepId } : {}), message });
+    // A stale completion record from an earlier cycle would hold every automatic continuation.
+    this.resetParentCompletion(runId);
+    // Cezar's own human wait is not owed: the nudge replaces it, as the agent's own wait would.
+    if (this.holdsAgentWaits(runId) || state.agentInputFlight || this.harnessOwesInput(state) || this.hasQueuedAgentInputs(runId) || this.workerWakeAdmitted.has(runId)) {
+      note(`Completion blocked: ${refusal.message}`);
+      state.completionRefused = { session, handled: false };
+      return true;
+    }
+    state.completionRefused = { session, handled: true };
+    this.withdrawCezarHumanWaits(runId);
+    if (this.automaticWakes(runId) >= MAX_AUTO_CONTINUES) {
+      note(`Completion blocked: ${refusal.message}`);
+      this.openTurnEndHumanWait(runId, state, stepId, 'budget', state.autonomous
+        ? `autonomous — safety cap reached (${MAX_AUTO_CONTINUES}); automatic continuation paused`
+        : `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you`);
+      return true;
+    }
+    const text = refusal.liveWorkerIds.length ? `${refusal.message} ${COMPLETION_WILL_WAIT}` : refusal.message;
+    state.noWaitNudgeSawContent = false;
+    if (!this.canAutoContinue(runId, state) || !this.submitAgentInput(runId, state, [{ type: 'text', text }])) {
+      note(`Completion blocked: ${refusal.message}`);
+      this.parkForUser(runId, state, stepId);
+      return true;
+    }
+    state.completionNudged = session;
+    this.clearIdleTimer(state);
+    this.armNoWaitNudgeReplyTimer(runId, state);
+    const spent = this.chargeAutomaticWake(runId);
+    this.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), message: `${COMPLETION_NUDGE_NOTE} (${spent}/${MAX_AUTO_CONTINUES}): ${refusal.code}` });
+    return true;
+  }
+
+  /** The refusal `deferParentCompletion` just made in this session, taken once. */
+  private takeCompletionRefusal(state: ActiveRun): ActiveRun['completionRefused'] {
+    const refused = state.completionRefused?.session === state.session ? state.completionRefused : undefined;
+    state.completionRefused = undefined;
+    return refused;
   }
 
   /** `cez worker wait`: an alias into the wait list, answered in the legacy `WorkerWait` shape
@@ -5760,7 +5844,15 @@ export class RunManager {
     // phase 3b (#1235): completion gate only
     if (state.atTurnBoundary !== session || (state.pendingHumanAsk && !proseGate) || this.delegationWait(runId) || (!proseGate && this.hasQueuedAgentInputs(runId))) return;
     if (state.doneAtBoundary === session) {
-      if (this.deferParentCompletion(runId)) return;
+      if (this.deferParentCompletion(runId)) {
+        // A refused done is not a done (hearsay-tools/cezarion#1301): a nudge settled the boundary,
+        // and otherwise it parks on the waits still open; owed input runs on its own.
+        const refused = this.takeCompletionRefusal(state);
+        if (refused) state.doneAtBoundary = undefined;
+        if (state.completionNudged === session) appendHandoffHeartbeat(this.dataDir, runId, `turn complete — status=${this.nudgeHeartbeat(state)}`);
+        else if (refused && !refused.handled && !this.waiting.has(runId) && this.holdsAgentWaits(runId)) this.parkOnWaits(runId, state);
+        return;
+      }
       this.closeAsDone(runId, state, session);
     } else if (!proseGate && !this.waiting.has(runId) && this.holdsAgentWaits(runId)) {
       // A wake acknowledged after its turn ended (OpenCode HTTP/SSE): park on what is still owed.
@@ -7019,12 +7111,13 @@ export class RunManager {
           liveWorkers: this.monitorsLiveWorkers(runId),
           humanWait, doneRequested: !!doneRequest,
         });
-        const { done, monitoring, humanGate, ask, notes: askNotes, waitCard } = turn;
+        const { monitoring, humanGate, ask, notes: askNotes, waitCard } = turn;
         this.latchAskLineCard(runId, humanWait, turn);
         discardQueuedMessagesOnAsk(state.session, turn);
         // The turn that just ended answered the no-wait nudge (hearsay-tools/cezarion#1234).
         const nudgedLastTurn = state.noWaitNudged === state.session;
         state.noWaitNudged = undefined;
+        state.completionNudged = undefined;
         turnText = '';
         completedAssistantText = '';
         turnTail = 'none';
@@ -7039,7 +7132,7 @@ export class RunManager {
         if (ask && !autoContinued) this.prepareHumanAsk(runId, state);
         if (humanGate && !ask && !state.pendingHumanAsk) this.raiseHumanGate(runId, state);
         if (humanGate && !ask) this.recordTurnEndQuestion(runId, state, humanWait, null);
-        const workerWaitParked = this.parkAtTurnEnd(runId, state, { done, humanGate, sessionOpen: !!sessionOpen });
+        const { parked: workerWaitParked, done } = this.parkAtTurnEnd(runId, state, { done: turn.done, humanGate, sessionOpen: !!sessionOpen });
         this.recordDoneAtBoundary(state, done, doneRequest);
         state.parkAfterAck = sessionOpen && state.session ? { session: state.session, monitoring, humanGate, nudgedLastTurn, scheduleWakeup: turnWakeDelay } : undefined;
         // #505: input the harness accepted but has not read yet runs as its next turn.
@@ -7072,7 +7165,7 @@ export class RunManager {
         appendHandoffHeartbeat(
           this.dataDir,
           runId,
-          `turn complete — status=${autoContinued ? 'running (autonomous nudge)' : outcome === 'nudge' ? this.nudgeHeartbeat(state) : state.autonomousNudgePending && state.autonomousNudgePending === state.session ? 'running (awaiting input readiness)' : agentInputDelivered ? 'running' : monitoring ? 'monitoring' : sessionOpen ? 'waiting' : 'running'}`,
+          `turn complete — status=${autoContinued ? 'running (autonomous nudge)' : outcome === 'nudge' || state.completionNudged === state.session ? this.nudgeHeartbeat(state) : state.autonomousNudgePending && state.autonomousNudgePending === state.session ? 'running (awaiting input readiness)' : agentInputDelivered ? 'running' : monitoring ? 'monitoring' : sessionOpen ? 'waiting' : 'running'}`,
         );
       }
     };
@@ -8053,12 +8146,13 @@ export class RunManager {
           liveWorkers: this.monitorsLiveWorkers(runId),
           humanWait, doneRequested: !!doneRequest,
         });
-        const { done, monitoring, humanGate, ask, notes: askNotes, waitCard } = turn;
+        const { monitoring, humanGate, ask, notes: askNotes, waitCard } = turn;
         this.latchAskLineCard(runId, humanWait, turn);
         discardQueuedMessagesOnAsk(state.session, turn);
         // The turn that just ended answered the no-wait nudge (hearsay-tools/cezarion#1234).
         const nudgedLastTurn = state.noWaitNudged === state.session;
         state.noWaitNudged = undefined;
+        state.completionNudged = undefined;
         turnText = '';
         completedAssistantText = '';
         turnTail = 'none';
@@ -8073,7 +8167,7 @@ export class RunManager {
         if (ask && !autoContinued) this.prepareHumanAsk(runId, state);
         if (humanGate && !ask && !state.pendingHumanAsk) this.raiseHumanGate(runId, state);
         if (humanGate && !ask) this.recordTurnEndQuestion(runId, state, humanWait, null);
-        const workerWaitParked = this.parkAtTurnEnd(runId, state, { done, humanGate, sessionOpen: !!sessionOpen });
+        const { parked: workerWaitParked, done } = this.parkAtTurnEnd(runId, state, { done: turn.done, humanGate, sessionOpen: !!sessionOpen });
         this.recordDoneAtBoundary(state, done, doneRequest);
         state.parkAfterAck = (interactive || humanGate) && sessionOpen && state.session ? { session: state.session, monitoring, humanGate, nudgedLastTurn, scheduleWakeup: turnWakeDelay } : undefined;
         // #505: input the harness accepted but has not read yet runs as its next turn.
@@ -8106,7 +8200,7 @@ export class RunManager {
         appendHandoffHeartbeat(
           this.dataDir,
           runId,
-          `turn complete — status=${autoContinued ? 'running (autonomous nudge)' : outcome === 'nudge' ? this.nudgeHeartbeat(state) : state.autonomousNudgePending && state.autonomousNudgePending === state.session ? 'running (awaiting input readiness)' : agentInputDelivered ? 'running' : monitoring ? 'monitoring' : outcome === 'park' || outcome === 'human-wait' ? 'waiting' : 'running'}`,
+          `turn complete — status=${autoContinued ? 'running (autonomous nudge)' : outcome === 'nudge' || state.completionNudged === state.session ? this.nudgeHeartbeat(state) : state.autonomousNudgePending && state.autonomousNudgePending === state.session ? 'running (awaiting input readiness)' : agentInputDelivered ? 'running' : monitoring ? 'monitoring' : outcome === 'park' || outcome === 'human-wait' ? 'waiting' : 'running'}`,
         );
       }
     };
@@ -9208,6 +9302,7 @@ export class RunManager {
   }
 
   private nudgeHeartbeat(state: ActiveRun): string {
+    if (state.completionNudged && state.completionNudged === state.session) return 'running (completion nudge)';
     return state.autonomous ? 'running (autonomous nudge)' : 'running (no-wait nudge)';
   }
 
@@ -9302,12 +9397,19 @@ export class RunManager {
    * The turn end's park decision, shared by both turn-end handlers (hearsay-tools/cezarion#1233).
    * A human question or gate parks for the user and leaves every wait alone; DONE completes unless
    * parent completion holds it; otherwise the monitoring line or `ScheduleWakeup` opens its timer,
-   * the run parks on its waits, and then on a worker wait. True skips the turn-end tail.
+   * the run parks on its waits, and then on a worker wait. `parked` skips the turn-end tail; `done`
+   * is false for a done the completion gate refused (hearsay-tools/cezarion#1301), so the turn end
+   * neither closes nor records it.
    */
-  private parkAtTurnEnd(runId: string, state: ActiveRun, turn: { done: boolean; humanGate: boolean; sessionOpen: boolean }): boolean {
-    if (turn.done && this.deferParentCompletion(runId)) return true;
-    if (!turn.sessionOpen || turn.humanGate) return false;
-    return this.parkWorkerWait(runId, state);
+  private parkAtTurnEnd(runId: string, state: ActiveRun, turn: { done: boolean; humanGate: boolean; sessionOpen: boolean }): { parked: boolean; done: boolean } {
+    if (turn.done && this.deferParentCompletion(runId)) {
+      // A refused done is not a done (hearsay-tools/cezarion#1301): unless the refusal settled the
+      // turn end, it goes on to its waits or its owed input.
+      const refused = this.takeCompletionRefusal(state);
+      if (!refused || refused.handled) return { parked: true, done: !refused };
+      return { parked: !turn.humanGate && this.parkWorkerWait(runId, state), done: false };
+    }
+    return { parked: turn.sessionOpen && !turn.humanGate && this.parkWorkerWait(runId, state), done: turn.done };
   }
 
   /** The turn-end tail's park for the user: `waiting` with the idle timer, no slot. A result

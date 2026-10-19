@@ -11,7 +11,7 @@ import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
-import { IDLE_TIMEOUT_MS } from './run.ts';
+import { COMPLETION_NUDGE_NOTE, IDLE_TIMEOUT_MS } from './run.ts';
 import { gatedProviderFailure } from './waits-parity.testkit.ts';
 import {
   collect, controlledWire, fixtureUpdateRun, manager, parent, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker,
@@ -440,20 +440,20 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
     expect(written()).toEqual([]);
   });
 
-  // Guard (passes before and after): the completion gate keeps today's engine until phase 3b.
-  it('a completion-parked parent: a non-progress message still ends the completion wait', async () => {
+  // hearsay-tools/cezarion#1301: a blocked done opens no completion wait, so a worker's request to
+  // the nudged parent is ordinary input: delivered, with no wait to end.
+  it('a parent nudged at a blocked done: a worker request is delivered with no completion wait to end', async () => {
     const f = await conversing();
     manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:done' }]);
-    await until(() => waitOf(store.getRun(f.p.id))?.phase === 'parked');
-    const completion = waitOf(store.getRun(f.p.id))!;
+    await until(() => store.readEvents(f.p.id).some(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE)) &&
+      store.getRun(f.p.id)?.status === 'waiting');
+    expect(waitOf(store.getRun(f.p.id))).toBeUndefined();
     const id = await say(f, 'worker', f.p.id, 'request', 'Need a decision mock:hold');
     await until(() => delivered(f.p.id, id));
-    await until(() => {
-      const delegation = store.getRun(f.p.id)?.delegation;
-      return delegation?.role === 'root' && delegation.wait?.id !== completion.id && delegation.lastWait?.id === completion.id;
-    });
     const delegation = store.getRun(f.p.id)?.delegation;
-    expect(delegation?.role === 'root' ? delegation.lastWait : undefined).toMatchObject({ id: completion.id, reason: 'message', wakeId: id });
+    expect(delegation).not.toHaveProperty('wait');
+    expect(delegation).not.toHaveProperty('lastWait');
+    expect(delegation).not.toHaveProperty('completion');
   });
 });
 

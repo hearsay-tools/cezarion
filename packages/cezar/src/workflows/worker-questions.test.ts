@@ -10,6 +10,8 @@ import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
+import { COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES } from './run.ts';
+import type { AgentSession } from '../core/agent-runner.ts';
 import { bookkeeping, eventCheckpoint, fixtureUpdateRun, manager, parent, register, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
@@ -264,16 +266,42 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
   });
 
-  it('holds parent completion on an unanswered worker question without waiting on that worker', async () => {
+  // hearsay-tools/cezarion#1301: the question's delivery turn ended with a live worker, so its
+  // re-check timer is open and a blocked done parks on it with the refusal as a note. With no wait
+  // open, the blocked done gets the questions refusal as a nudge, without the will-wait sentence:
+  // waiting on the worker would deadlock, as the worker waits on this parent.
+  it('holds parent completion on an unanswered worker question: a note beside an open wait, else the questions refusal nudge, never a wait on that worker', async () => {
     const f = await askedPair();
     try {
-      await until(() => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === f.questionId)?.deliveredAt);
-      const engine = manager as unknown as { deferParentCompletion(id: string): boolean };
-      expect(engine.deferParentCompletion(f.p.id)).toBe(true);
-      const notes = eventsOf(f.p.id, 'note').map(event => String(event.message));
-      expect(notes.at(-1)).toBe(`Completion blocked: answer your workers' questions first: ${f.w.id} (request ${f.questionId}).`);
-      // Waiting on the worker would deadlock: the worker waits on this parent.
+      await until(() => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === f.questionId)?.deliveredAt && store.getRun(f.p.id)?.status === 'waiting');
+      const engine = manager as unknown as { active: Map<string, { session: AgentSession; ciGeneration: string }> };
+      const session = engine.active.get(f.p.id)!.session;
+      const sent: string[] = [];
+      const real = session.sendAgentMessage.bind(session);
+      session.sendAgentMessage = ((content, ...rest) => {
+        sent.push(content.map(block => block.type === 'text' ? block.text : '').join('\n'));
+        return real(content, ...rest);
+      }) as AgentSession['sendAgentMessage'];
+      const refusal = `worker reply ${f.w.id} '<answer>' --id <new-UUID> --request-id ${f.questionId}`;
+      const refusedNotes = () => eventsOf(f.p.id, 'note').filter(event => String(event.message).startsWith('Completion blocked: ') && String(event.message).includes(refusal));
+      const nudges = () => eventsOf(f.p.id, 'note').filter(event => String(event.message).startsWith(COMPLETION_NUDGE_NOTE));
+      const [timer] = store.getRun(f.p.id)?.waits ?? [];
+      expect(timer).toMatchObject({ kind: 'timer', via: 'monitoring-line', phase: 'open' });
+      expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:done' }])).toBe(true);
+      await until(() => refusedNotes().length === 1 && store.getRun(f.p.id)?.status === 'waiting');
+      expect(nudges()).toEqual([]);
+      expect(sent.filter(text => text.includes(refusal))).toEqual([]);
+      const cancelled = await manager.cezarToolHandlers(f.p.id, engine.active.get(f.p.id)!.ciGeneration).cancelWait({ wait_id: timer!.id }, new AbortController().signal);
+      expect(cancelled).toMatchObject({ cancelled: true });
+      expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:done' }])).toBe(true);
+      await until(() => nudges().length === 1);
+      expect(nudges().map(event => event.message)).toEqual([`${COMPLETION_NUDGE_NOTE} (1/${MAX_AUTO_CONTINUES}): worker_questions`]);
+      const nudge = sent.filter(text => text.includes(refusal));
+      expect(nudge).toHaveLength(1);
+      expect(nudge[0]).not.toContain(COMPLETION_WILL_WAIT);
       expect(waitOf(store.getRun(f.p.id))).toBeUndefined();
+      expect(store.getRun(f.p.id)?.waits?.filter(wait => wait.kind === 'worker') ?? []).toEqual([]);
+      expect(store.getRun(f.p.id)?.delegation).not.toHaveProperty('completion');
       expect(manager.finishBlockedReason(f.p.id)).toContain(f.w.id);
     } finally { f.close(); }
   });

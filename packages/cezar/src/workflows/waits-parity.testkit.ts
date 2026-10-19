@@ -16,7 +16,7 @@ export const WAIT_CRITERIA = [
   { id: 'U7', scenario: 'turn-messages', name: 'cezar_wait_for_ci, the monitoring line and ScheduleWakeup land in the same wait list' },
   { id: 'U8', scenario: 'baseline', name: 'a ci or timer park keeps its slot and wakes without queueing at maxParallel 1' },
   { id: 'U10', scenario: 'hold-gated', name: 'timer wakes stop at the automatic-wake budget; one admitted turn is charged once' },
-  { id: 'U11', scenario: 'turn-messages', name: 'an alias timer survives a later completion park with its deadline, is held while the workers outrank it, and is delivered after the worker wake' },
+  { id: 'U11', scenario: 'turn-messages', name: 'an alias timer open at a blocked done keeps its deadline, the run parks on it with the refusal as a note and no nudge, and its result is delivered' },
   { id: 'U12', scenario: 'turn-messages', name: 'a wait result beside a pending portable question is checkpointed only on its delayed provider acknowledgement, and the question stays answerable' },
   { id: 'U13', scenario: 'turn-messages', name: 'a wait result beside a pending portable question whose acknowledgement is rejected stays resolved, is retried, and the question stays answerable' },
   { id: 'U14', scenario: 'provider-error', name: 'a wait-result delivery whose sessions persistently fail or close cleanly stops at the delivery bound, the run fails keeping its result, Continue delivers it once, and Stop discards it' },
@@ -47,6 +47,9 @@ export const WAIT_CRITERIA = [
   { id: 'U14m', scenario: 'provider-error', name: 'a message-only wake beside a worker wait whose sessions persistently fail stops at the delivery bound keeping the message, Continue delivers it once, and a delivered message clears the failure count' },
   { id: 'U9u', scenario: 'baseline', name: 'after an upgrade, a cancelled worker wait\'s queued wake is delivered as ordinary input, and a parent whose message stand-in a provider took before the crash resumes' },
   { id: 'U19', scenario: 'turn-messages', name: 'a worker message beside a pending portable question is delivered and the question stays answerable' },
+  // hearsay-tools/cezarion#1301 phase 3b: a blocked done at the turn end.
+  { id: 'U20', scenario: 'baseline', name: 'a done blocked by live workers at the turn end gets one refusal nudge with the will-wait sentence and opens no wait' },
+  { id: 'U20u', scenario: 'baseline', name: 'a done blocked by a settled, uncollected worker gets the uncollected refusal nudge without the will-wait sentence' },
 ] as const;
 
 /** The native mocks' `mock:cezar-tool` prompt: one cezar tool call through the runner's own wire.
