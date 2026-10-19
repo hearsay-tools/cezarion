@@ -117,6 +117,8 @@ export interface ThreadAsk {
   routedToParent?: boolean
   parentRunId?: string
   answeredBy?: 'human' | 'parent'
+  /** Finish ended the task with the question unanswered (hearsay-tools/cezarion#1260). */
+  closed?: 'finish'
 }
 
 /** Native approvals belong to the live request that offered the choices, never a later turn. */
@@ -997,6 +999,14 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
       }
       case 'worker-question-fallback': {
         if (pendingAsk && !pendingAsk.resolved && pendingAsk.askSeq === event.askSeq) pendingAsk.routedToParent = false
+        break
+      }
+      case 'human-ask-closed': {
+        if (event.reason === 'finish' && pendingAsk && !pendingAsk.resolved && pendingAsk.askSeq === event.askSeq) {
+          pendingAsk.resolved = true
+          pendingAsk.closed = 'finish'
+          pendingAsk = undefined
+        }
         break
       }
       case 'human-input-delivered': {

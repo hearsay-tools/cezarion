@@ -947,6 +947,21 @@ describe('reduceThread — AskUser cards (#473)', () => {
     expect((ask as { routedToParent?: boolean }).routedToParent).toBeUndefined()
   })
 
+  // hearsay-tools/cezarion#1260: Finish closes an unanswered question; the card stops asking.
+  it('a Finish that closes the question resolves its card as closed, not answered', () => {
+    const closed = allItems([
+      line(2, 'ask.requested', ASK),
+      line(3, 'human-ask-closed', { askSeq: 2, reason: 'finish' }),
+    ]).find((i) => i.kind === 'ask')
+    expect(closed).toMatchObject({ resolved: true, closed: 'finish' })
+    expect((closed as { answeredBy?: string }).answeredBy).toBeUndefined()
+    const other = allItems([
+      line(2, 'ask.requested', ASK),
+      line(3, 'human-ask-closed', { askSeq: 1, reason: 'finish' }),
+    ]).find((i) => i.kind === 'ask')
+    expect(other).toMatchObject({ resolved: false })
+  })
+
   it('drops an ask.requested with no valid questions', () => {
     expect(
       allItems([line(1, 'ask.requested', { requestId: 'x', questions: [] })]).some(

@@ -45,6 +45,11 @@
   is a 400, matching `POST /api/v1/runs`. Spec: `.ai/specs/2026-07-29-agent-profiles.md`.
 
 ## 🐛 Fixes
+- 🐛 **Finish closes the task's open question.** A task that ended its turn on a question kept the
+  question open after you finished it, so the card still asked for an answer and the one-click
+  Continue was hidden. Finish now closes the question, the card reads "Closed when the task
+  finished", and Continue works with nothing typed. Stop still keeps the question for you to
+  answer. (hearsay-tools/cezarion#1260)
 - 🐛 **Loading earlier history keeps your place when the page starts inside a turn.** A history
   page that began inside a turn carried the turn's `turn.started` without the user message
   before it, so the cockpit keyed the turn's rows differently until the older page arrived. The

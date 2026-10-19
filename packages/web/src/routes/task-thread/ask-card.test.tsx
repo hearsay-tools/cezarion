@@ -461,4 +461,11 @@ describe('AskCard for a worker question routed to its parent (#505)', () => {
     renderAsk({ ...singleAsk, resolved: true, answeredBy: 'parent' })
     expect(screen.getByText('Answered by parent')).toBeTruthy()
   })
+
+  // hearsay-tools/cezarion#1260: a question Finish closed was never answered.
+  it('says Finish closed a question nobody answered', () => {
+    renderAsk({ ...singleAsk, resolved: true, closed: 'finish' })
+    expect(screen.getByText('Closed when the task finished')).toBeTruthy()
+    expect(screen.queryByText('Answered')).toBeNull()
+  })
 })
