@@ -336,22 +336,72 @@ Shard output, boot logs, descriptors, app logs, and failure bundles remain under
 `TEST_E2E_STATUS=failed`; an unavailable browser prints `TEST_E2E_STATUS=skipped`.
 Both statuses exit nonzero for this final local gate.
 
-To force a race that CI hits and your machine does not, slow the server down behind an
-environment variable rather than editing the spec. The shared env and the specs that boot
-their own cezar (`cezarCli`) both run the E2E build in `.ai/qa/build/cezar`, so patch the
-built route in `.ai/qa/build/cezar/dist/server/server.js`:
+To force a race that CI hits and your machine does not, delay the built route that the
+spec races. The shared env and specs that boot their own cezar (`cezarCli`) both run
+`.ai/qa/build/cezar`. Use the shared env in this order, from the repository root:
+
+1. Boot once so the build exists:
+
+   ```bash
+   sh .ai/scripts/test-env-up.sh
+   ```
+
+2. Patch the handler in `.ai/qa/build/cezar/dist/server/server.js`, before it answers
+   (make the handler `async` if needed):
+
+   ```js
+   if (process.env.CEZ_E2E_DELAY_MS) {
+     await new Promise((r) => setTimeout(r, Number(process.env.CEZ_E2E_DELAY_MS)))
+   }
+   ```
+
+3. Restart the shared server with the explicit variable, then run the focused test:
+
+   ```bash
+   sh .ai/scripts/test-env-up.sh --force --server-env=CEZ_E2E_DELAY_MS=1500
+   npm run test:e2e -- <spec>.e2e.ts -t '<test name>'
+   ```
+
+   `--force` restarts the server and preserves the cached build when its source inputs
+   have not changed. Do not use `--force-rebuild` here: it erases the patch. The first
+   boot also builds when needed, which is why it must precede patching. Editing a loaded
+   module does not change the running server. Setting the variable only on the test
+   command does not change that server's environment; ambient `CEZ_*` variables are
+   scrubbed at boot, so pass the value through `--server-env`.
+
+4. Watch the test fail at the intended race, fix its wait, then rerun it against the
+   delayed route. When finished, rebuild and restart without the variable:
+
+   ```bash
+   sh .ai/scripts/test-env-up.sh --force --force-rebuild
+   ```
+
+   This removes the patch and the explicit server variable. The build is ignored, so
+   `git checkout` cannot restore it. Source edits that invalidate the build cache also
+   remove the patch on the next boot; reapply it after rebuilding if needed.
+
+For a chosen release moment instead of a fixed delay, use a file gate as in
+hearsay-tools/cezarion#1255. Remove the gate file before boot, then replace the delay
+snippet with this bounded wait in the handler:
 
 ```js
-// inside the handler the spec is racing, before it answers
-if (process.env.E2E_DELAY_MS) await new Promise((r) => setTimeout(r, Number(process.env.E2E_DELAY_MS)))
+if (process.env.CEZ_E2E_GATE_FILE) {
+  const { access } = await import('node:fs/promises')
+  const deadline = Date.now() + 30_000
+  while (true) {
+    try { await access(process.env.CEZ_E2E_GATE_FILE); break } catch {}
+    if (Date.now() >= deadline) throw new Error('E2E file gate timed out')
+    await new Promise((r) => setTimeout(r, 25))
+  }
+}
 ```
 
-Run the single test with `E2E_DELAY_MS=1500` and watch it go red the way CI did, fix the
-wait, watch it go green, then restore the build (`--force-rebuild`, or
-`sh .ai/scripts/build-e2e.sh`; `git checkout` is no help because it is not tracked). Boot the
-env before patching: the first `test-env-up.sh` in a fresh worktree runs
-`pnpm install --frozen-lockfile && sh .ai/scripts/build-e2e.sh` and would erase the patch.
-The shared env's own server is not restarted by a patch; `--force-rebuild` is.
+Restart with `--force --server-env=CEZ_E2E_GATE_FILE=/tmp/cez-e2e-1276.ready`
+(use a unique absolute path for your run). Trigger the request, observe or capture the
+loading state, then `touch /tmp/cez-e2e-1276.ready` from another shell to release the
+response and mount the late UI piece. Choose a route other than health so bootstrap can
+finish before release. Remove the file afterwards and use step 4's rebuild to drop the
+patch. This variable is temporary instrumentation in the ignored build, not a cezar setting.
 
 ## Observable completion and budgets (#764)
 
