@@ -584,8 +584,13 @@ messages" tests).
 ### Cursor print (hearsay-tools/cezarion#590)
 
 `CursorRunner` selects print for new sessions only after the installed binary
-matches `2026.10.01-e373342` and rejects an invalid native tool with the
-qualified catalog. Each turn launches `agent -p --force --trust --output-format
+passes a pre-inference check (hearsay-tools/cezarion#1257): its version is a
+dated build from `2026.10.01-e373342` or newer, it rejects an invalid native
+tool with its `Expected one of:` catalog, and that catalog still lists the core
+print tools (`CORE_CURSOR_PRINT_TOOLS`). Every Cursor process cezar starts
+passes the hidden `--disable-auto-update` option, so a session never updates
+the CLI under itself; a build that rejects the option runs without it. Each
+turn launches `agent --disable-auto-update -p --force --trust --output-format
 stream-json`; subsequent turns use `--resume` with the exact recorded native
 session ID. A mismatch fails the run. Transport identity is persisted with the
 native ID and account, so Continue and recovery retain the original transport.
@@ -594,9 +599,11 @@ to ACP with a visible note that marketplace plugins are unavailable.
 
 The print invocation supplies the run's Cezar tools through a private temporary
 plugin directory and accepts the user's existing Cursor marketplace plugins.
-Governed runs use the qualified strict `--allowed-tools` catalog with native
-delegation tools omitted. The allowlist is checked afresh against each CLI
-build before a new print session. `CEZ:ASK` is parsed by Cezar and remains
+Governed runs pass a strict `--allowed-tools` list: the qualified safe catalog,
+narrowed to the entries the installed build still advertises. Native delegation
+tools are never in it, and an entry a newer build adds stays denied until a
+change adds it to the catalog. The list is computed afresh against each CLI
+build before every print session, Continue included. `CEZ:ASK` is parsed by Cezar and remains
 answerable; this Cursor build auto-skips native questions from plugins, which
 is a visible limitation. Print mode has no child-session transcript or
 qualified token usage. Project-local Claude settings do not reliably disable

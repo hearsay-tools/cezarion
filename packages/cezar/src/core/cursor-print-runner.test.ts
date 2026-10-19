@@ -302,6 +302,28 @@ describe('Cursor print logical session', () => {
     await session.result;
   });
 
+  it('starts every turn with --disable-auto-update and the preflight allowlist (hearsay-tools/cezarion#1257)', async () => {
+    const { spec, log } = fixture();
+    spec.restrictNativeDelegation = true;
+    const allowedTools = ['read_tool_call', 'shell_tool_call', 'mcp_tool_call'];
+    let turnEnded!: () => void;
+    let ended = new Promise<void>(resolve => { turnEnded = resolve; });
+    const session = new CursorPrintRunner({ bin: mock, allowedTools, processOptions: { drainMs: 20 } })
+      .startSession(spec, event => { if (event.type === 'turn-end') turnEnded(); });
+    await ended;
+    ended = new Promise<void>(resolve => { turnEnded = resolve; });
+    session.sendMessage([{ type: 'text', text: 'followup' }]);
+    await ended;
+    session.end();
+    await session.result;
+    const turns = logs(log);
+    expect(turns).toHaveLength(2);
+    for (const turn of turns) {
+      expect(turn.args[0]).toBe('--disable-auto-update');
+      expect(turn.args[turn.args.indexOf('--allowed-tools') + 1]).toBe(allowedTools.join(','));
+    }
+  });
+
   it('passes qualified delegation, MCP, image, root and advertised effort fields on each turn', async () => {
     const { spec, log } = fixture();
     const extraRoot = mkdtempSync(join(tmpdir(), 'cez-print-extra-root-'));

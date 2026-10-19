@@ -1090,11 +1090,13 @@ the backends it found — install any one of the six and you're operational.
 
 Install [Cursor CLI](https://cursor.com/docs/cli/installation) and run `agent login`,
 or set `CURSOR_API_KEY`. Cezar discovers `agent` on PATH; `CEZ_CURSOR_BIN` overrides
-its location. Select **Cursor** in the runner picker. On the qualified
-`2026.10.01-e373342` build, new sessions use print mode so marketplace plugins
+its location. Select **Cursor** in the runner picker. On build
+`2026.10.01-e373342` or newer, new sessions use print mode so marketplace plugins
 are available. Cezar checks `agent --version` and the native tool catalog before
 the first turn; `agent --version` is also the quick way to check your installation.
-Other builds use ACP, which may not see marketplace plugins. Existing ACP
+Cezar starts the CLI with `--disable-auto-update`, so a task never updates it;
+update it yourself with `agent update`. Older builds, and a build missing a core
+tool, use ACP, which may not see marketplace plugins. Existing ACP
 sessions continue on ACP so their conversation history is preserved.
 A missing CLI leaves the other backends available. `CEZ_DRY_RUN=1` uses the mock.
 Cursor questions from a plugin may be automatically skipped by print mode. Cezar's

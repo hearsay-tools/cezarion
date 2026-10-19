@@ -29,7 +29,18 @@ function git(args) {
   return result.stdout.trim();
 }
 
-function runAgent(args, cwd, timeoutMs, env = process.env) {
+// Keep the probed build installed while it is probed (hearsay-tools/cezarion#1257). A build
+// that rejects the hidden option exits 1 with commander's unknown-option line before any work,
+// so the probe reruns that call without it and leaves it out from then on.
+let disableAutoUpdate = true;
+async function runAgent(args, cwd, timeoutMs, env = process.env) {
+  const run = await runAgentOnce(disableAutoUpdate ? ['--disable-auto-update', ...args] : args, cwd, timeoutMs, env);
+  if (!disableAutoUpdate || run.code !== 1 || !run.stderr.includes("unknown option '--disable-auto-update'")) return run;
+  disableAutoUpdate = false;
+  return runAgentOnce(args, cwd, timeoutMs, env);
+}
+
+function runAgentOnce(args, cwd, timeoutMs, env) {
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn(bin, args, { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
