@@ -69,9 +69,9 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
     try {
       const w = await worker(p.id);
       const tools = handlers(p.id);
-      const ci = await tools.registerWait({ kind: 'ci', pr, timeout_seconds: 600 }, 'cezar_wait');
+      const ci = await tools.registerWait({ kind: 'ci', pr, timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal);
       expect(ci.answer).toMatchObject({ ok: true, kind: 'ci' });
-      const answer = (await tools.registerWait({ kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait')).answer;
+      const answer = (await tools.registerWait({ kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
       expect(answer).toMatchObject({ ok: true, kind: 'worker' });
       if (!answer.ok) throw Error('refused');
       expect(answer.open_waits.map(wait => wait.kind).sort()).toEqual(['ci', 'worker']);
@@ -106,7 +106,7 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
       expect(() => manager.registerWorkerListWait(p.id, { workerIds: subsets[16]!, timeoutSeconds: 600 }, 'cezar_wait'))
         .toThrow(expect.objectContaining({ code: 'capacity_limit' }));
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const answer = (await handlers(p.id).registerWait({ kind: 'worker', worker_ids: subsets[17]!, timeout_seconds: 600 }, 'cezar_wait')).answer;
+      const answer = (await handlers(p.id).registerWait({ kind: 'worker', worker_ids: subsets[17]!, timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
       expect(answer).toMatchObject({ ok: false, code: 'capacity' });
       expect(warn).toHaveBeenCalledExactlyOnceWith('[cez] wait registration refused: capacity');
       // A repeat of an open wait is not a new one, and is still answered at capacity.
@@ -240,8 +240,8 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
     const { run: p, release } = await heldParent();
     const w = await worker(p.id);
     const tools = handlers(p.id);
-    const workers = (await tools.registerWait({ kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait')).answer;
-    const timer = (await tools.registerWait({ kind: 'timer', seconds: 60, note: 'beside workers' }, 'cezar_wait')).answer;
+    const workers = (await tools.registerWait({ kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
+    const timer = (await tools.registerWait({ kind: 'timer', seconds: 60, note: 'beside workers' }, 'cezar_wait', new AbortController().signal)).answer;
     if (!workers.ok || !timer.ok) throw Error('refused');
     release();
     await until(() => store.getRun(p.id)?.status === 'waiting');
@@ -265,7 +265,7 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
     store.commitConversation(p.id, { messages: [request], outcomes: [] });
     const entry = manager.registerWorkerListWait(p.id, { requestIds: [request.id], timeoutSeconds: 600 }, 'cezar_wait');
     expect(entryOf(p.id, entry.id)?.phase).toBe('open');
-    expect(await handlers(p.id).finishTurn({})).toMatchObject({ ok: true, finishes: 'at_turn_end' });
+    expect(await handlers(p.id).finishTurn({}, new AbortController().signal)).toMatchObject({ ok: true, finishes: 'at_turn_end' });
     release();
     await until(() => !manager.isActive(p.id));
     expect(store.getRun(p.id)?.waits ?? []).toEqual([]);
@@ -471,9 +471,10 @@ describe('human messages beside an owed timer wait', { timeout: 45_000 }, () => 
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const blocker = await worker(p.id, 'mock:slow');
-    const answer = (await handlers(p.id).registerWait({ kind: 'timer', seconds: 60, note: 'owed' }, 'cezar_wait')).answer;
+    const answer = (await handlers(p.id).registerWait({ kind: 'timer', seconds: 60, note: 'owed' }, 'cezar_wait', new AbortController().signal)).answer;
     if (!answer.ok) throw Error('refused');
     const timer = entryOf(p.id, answer.wait_id)!;
+    if (timer.kind === 'human') throw Error('unexpected human wait');
     store.commitWait(p.id, { ...timer, deadline: new Date().toISOString() });
     await restart();
     await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(blocker.id)?.sessionEverOpened === true);
@@ -636,7 +637,7 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     // The other wait's deadline is a few seconds out: only a re-armed timer can resolve it.
     const due = new Date(Date.now() + 3_000).toISOString();
     const disk = before.map(record => record.id === settles.id ? after.find(next => next.id === settles.id)!
-      : record.id === p.id ? { ...record, waits: (record as { waits: Wait[] }).waits.map(wait => wait.id === deadline.id ? { ...wait, deadline: due } : wait) } : record);
+      : record.id === p.id ? { ...record, waits: (record as unknown as { waits: Wait[] }).waits.map(wait => wait.id === deadline.id ? { ...wait, deadline: due } : wait) } : record);
     expect(disk.find(record => record.id === p.id)).toMatchObject({ waits: expect.arrayContaining([expect.objectContaining({ id: observed.id, phase: 'open' })]) });
     await restart(false, disk);
     await until(() => settledOf(p.id, observed.id)?.phase === 'delivered');
@@ -654,8 +655,8 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     const { run: p, release } = await heldParent();
     const w = await worker(p.id);
     const tools = handlers(p.id);
-    const ci = (await tools.registerWait({ kind: 'ci', pr, timeout_seconds: 600 }, 'cezar_wait')).answer;
-    const workers = (await tools.registerWait({ kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait')).answer;
+    const ci = (await tools.registerWait({ kind: 'ci', pr, timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
+    const workers = (await tools.registerWait({ kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
     if (!ci.ok || !workers.ok) throw Error('refused');
     release();
     await until(() => parkedOn(p.id, workers.wait_id));

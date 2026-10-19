@@ -51,12 +51,12 @@ function parseOne(row: Record<string, unknown>): RunRecord {
   return parsed.data![0]!;
 }
 
-function ciEntry(overrides: Partial<Extract<Wait, { kind: 'ci' }>> = {}): Wait {
+function ciEntry(overrides: Partial<Extract<Wait, { kind: 'ci' }>> = {}): Extract<Wait, { kind: 'ci' }> {
   return {
     id: randomUUID(), kind: 'ci', source: 'agent', via: 'cezar_wait', registeredAt: iso(0), deadline: iso(1_800_000), phase: 'open',
     turnId: 'turn-1', prUrl: legacyCi.prUrl, repository: legacyCi.repository, prNumber: legacyCi.prNumber, headSha: legacyCi.headSha,
     generation: 'session', timeoutSeconds: 1800, ...overrides,
-  } as Wait;
+  } as Extract<Wait, { kind: 'ci' }>;
 }
 
 function humanEntry(overrides: Partial<Extract<Wait, { kind: 'human' }>> = {}): Wait {

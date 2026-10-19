@@ -373,7 +373,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           const deliberate = register(p.id, [w.id]);
           expect(deliberate.id).not.toBe(wait.id);
           expect(manager.sendMessage(p.id, [{ type: 'text', text: delayedAck ? 'mock:agent-echo' : 'mock:monitoring' }])).toBe(true);
-          await until(() => store.getRun(p.id)?.status === 'waiting' && !store.getRun(p.id)?.delegation?.completion && monitoringWakeOf(store.getRun(p.id)) !== undefined);
+          await until(() => store.getRun(p.id)?.status === 'waiting' && !(store.getRun(p.id)?.delegation as { completion?: unknown } | undefined)?.completion && monitoringWakeOf(store.getRun(p.id)) !== undefined);
           expect(workerEntryOf(store.getRun(p.id))?.id).toBe(deliberate.id);
         };
         try {
