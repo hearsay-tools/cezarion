@@ -16,11 +16,19 @@ async function execute(h) {
 }
 test('completion consumer scopes trigger, credentials and checkout to trusted code',()=>{
  const w=workflow();assert.deepEqual(w.on.workflow_run,{workflows:['Release','Nightly'],types:['completed']});
- assert.deepEqual(w.permissions,{});assert.deepEqual(w.jobs.report.permissions,{actions:'read',contents:'read',issues:'write'});
+ assert.deepEqual(w.permissions,{});assert.deepEqual(w.jobs.report.permissions,{actions:'read',checks:'read',contents:'read',issues:'write'});
  const checkout=w.jobs.report.steps.find(s=>s.uses?.startsWith('actions/checkout@'));
  assert.equal(checkout.with.ref,'${{ github.sha }}');assert.equal(checkout.with['persist-credentials'],false);
  assert.equal(w.concurrency['cancel-in-progress'],false);assert.equal(w.concurrency.queue,'max');
  assert.doesNotMatch(w.concurrency.group,/\$\{\{/,'every reporter must share one lock across workflows and causes');
+});
+test('the job starts for exactly the run conclusions the reporter inspects',()=>{
+ // A timed-out job leaves its run `cancelled` (hearsay-tools/cezarion#1272): gating
+ // on `failure` alone skipped 14 timed-out Nightly runs without a report.
+ const {REPORTED_CONCLUSIONS}=require('./report-workflow-failure.cjs');
+ const gated=[...workflow().jobs.report.if.matchAll(/github\.event\.workflow_run\.conclusion == '(\w+)'/g)].map(match=>match[1]);
+ assert.deepEqual(gated.sort(),[...REPORTED_CONCLUSIONS].sort());
+ assert.ok(REPORTED_CONCLUSIONS.includes('cancelled'));
 });
 test('workflow entrypoint reports API errors without echoing response or credentials',async()=>{
  const h=harness();h.state.failCreate=true;const result=await execute(h);

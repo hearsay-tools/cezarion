@@ -2,7 +2,7 @@
 
 `Report Release and Nightly Failures` creates `area-ci` issues after failed Release or Nightly attempts. It starts working when `.github/workflows/report-workflow-failure.yml` reaches the default branch. It does not retry publishing or change the original run's conclusion.
 
-Release runs on `main` and `release/*` qualify; Nightly runs on `main` qualify. Both workflow name and file path must match, and the source repository must match. Success, cancellation, intentional skips, and other workflows produce no reports. The reporter fetches the event's exact attempt, including when a later attempt has already started. Failed or timed-out jobs within a failed run contribute reports; skipped dependent jobs do not. A failed job with no recorded failing step still produces a metadata report.
+Release runs on `main` and `release/*` qualify; Nightly runs on `main` qualify. Both workflow name and file path must match, and the source repository must match. Success, intentional skips, and other workflows produce no reports. The reporter fetches the event's exact attempt, including when a later attempt has already started. Failed or timed-out jobs contribute reports; skipped dependent jobs do not. A job that Actions stops at its `timeout-minutes` ends `cancelled`, and so does its run, exactly like a job a person or a concurrency group cancelled. The reporter therefore also reads cancelled runs and reports a cancelled job only when its check-run annotation says it exceeded the maximum execution time. A run cancelled any other way produces no report (hearsay-tools/cezarion#1272). A failed job with no recorded failing step still produces a metadata report.
 
 ## What an issue contains
 
@@ -17,6 +17,7 @@ The versioned matching rule lives in `.github/scripts/failure-diagnostics.cjs`:
 - Recognizable Vitest `FAIL` records use test file, test name, and the error diagnostic when present. The same identifiable test can collect occurrences from Release and Nightly despite their different job names
 - Other recognizable errors use stage, failed step name, and normalized diagnostic text. Generic exit-code messages alone cannot identify a cause
 - Timestamps, durations, and memory addresses do not identify causes. Different test names remain separate, even in the same failed step
+- A job stopped at its time limit uses stage and the running step's name, so the same slow step collects occurrences across nights, shards and workflows. Its excerpt is the time-limit annotation plus the last output before the stop, and its issue title says timeout instead of failure
 - Missing or unrecognizable logs use run, attempt, job, and step identity. Uncertain failures remain separate across runs; available unrecognized diagnostics still appear as a bounded excerpt
 
 A SHA-256 signature marker in the issue body identifies a cause. An occurrence marker in the comment identifies run, attempt, job, step, and signature. The issue body reserves its first occurrence before its comment is written. A retry can repair that comment without creating another issue. Changed log availability preserves existing occurrence identities; a later successful download does not turn a previously reported unknown failure into a duplicate issue.
@@ -27,7 +28,7 @@ All reporter jobs share the `release-nightly-failure-reports` Actions concurrenc
 
 ## Logs, permissions, and failures
 
-The workflow checks out the default-branch event SHA with persisted credentials disabled. It uses only `contents: read`, `actions: read`, and `issues: write`. It never checks out source-run code, downloads executable artifacts, invokes an agent, or receives npm/publishing credentials. Signed log downloads carry no reporting token and stop above 2 MiB or after 30 seconds. Each excerpt retains at most 4,000 characters. Oversized or expired logs fall back to metadata rather than publishing an arbitrary truncated tail.
+The workflow checks out the default-branch event SHA with persisted credentials disabled. It uses only `contents: read`, `actions: read`, `checks: read` (the check-run annotations that record a time limit), and `issues: write`. It never checks out source-run code, downloads executable artifacts, invokes an agent, or receives npm/publishing credentials. Signed log downloads carry no reporting token and stop above 2 MiB or after 30 seconds. Each excerpt retains at most 4,000 characters. Oversized or expired logs fall back to metadata rather than publishing an arbitrary truncated tail.
 
 Sanitization removes recognizable credentials, sensitive assignment lines, private keys, URL credentials/query strings, and long token-like values. It neutralizes mentions, HTML, Markdown fences, control characters, and Actions command delimiters. Diagnostic text appears as indented, explicitly untrusted evidence. Sanitization is defense in depth, not permission to print secrets in CI: source jobs must continue masking credentials, and arbitrary short secrets without a recognizable form cannot be inferred from text. Only numeric run/job/issue references and fixed messages enter reporter logs and summaries.
 

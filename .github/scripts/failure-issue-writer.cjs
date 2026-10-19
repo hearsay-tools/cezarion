@@ -4,7 +4,7 @@ const marker = (kind,value) => `<!-- cez-failure-${kind}:v1:${value} -->`;
 const code = text => sanitize(text).split('\n').map(line=>`    ${line}`).join('\n');
 
 function defaultBodyFor({cause,runUrl,previous,signature,occurrence}) {
-  return `${signature}\n${occurrence}\n\n## Context / Why\n\nA ${cause.stage} failure interrupted a Release or Nightly run. Investigate the recorded cause and restore the affected workflow.\n\n${code(cause.title)}\n\n## What needs to be done\n\nDiagnose the failure using the occurrence evidence below. Fix the cause and add regression coverage where applicable. Check related occurrences before treating a test as flaky.\n\n## Acceptance Criteria\n\nVerify these outcomes:\n\n- [ ] Identify the cause using the linked run evidence\n- [ ] Ship a fix with regression coverage or documented verification\n- [ ] Verify the affected workflow succeeds after the fix\n\n## Related links\n\n- [First failing run](${runUrl})${previous ? `\n- [Previous closed report](${previous})` : ''}\n\n## Out of scope\n\n- Automatic retries, release policy changes, and unrelated failures\n`;
+  return `${signature}\n${occurrence}\n\n## Context / Why\n\nA ${cause.stage} ${cause.kind==='timeout'?'timeout':'failure'} interrupted a Release or Nightly run. Investigate the recorded cause and restore the affected workflow.\n\n${code(cause.title)}\n\n## What needs to be done\n\nDiagnose the failure using the occurrence evidence below. Fix the cause and add regression coverage where applicable. Check related occurrences before treating a test as flaky.\n\n## Acceptance Criteria\n\nVerify these outcomes:\n\n- [ ] Identify the cause using the linked run evidence\n- [ ] Ship a fix with regression coverage or documented verification\n- [ ] Verify the affected workflow succeeds after the fix\n\n## Related links\n\n- [First failing run](${runUrl})${previous ? `\n- [Previous closed report](${previous})` : ''}\n\n## Out of scope\n\n- Automatic retries, release policy changes, and unrelated failures\n`;
 }
 
 function commentFor({cause,run,job,step,runUrl,jobUrl,occurrence}) {
@@ -68,7 +68,7 @@ async function createFailureWriter({github,owner,repo,log=()=>{},maxIssues=Infin
         const previous=matches.find(issue=>issue.state==='closed');
         const subject=cause.title.match(/([a-z0-9_.-]+\.(?:test|spec)\.[cm]?[jt]sx?)/i)?.[1]||cause.stage;
         const body=bodyFor({cause,runUrl,signature,occurrence,previous:previous?`https://github.com/${owner}/${repo}/issues/${previous.number}`:undefined});
-        const {data:created}=await github.request('POST /repos/{owner}/{repo}/issues',{...base,title:`[Task]: Investigate ${subject} failure`,labels,body});
+        const {data:created}=await github.request('POST /repos/{owner}/{repo}/issues',{...base,title:`[Task]: Investigate ${subject} ${cause.kind==='timeout'?'timeout':'failure'}`,labels,body});
         createdIssues++;target=created;issues.push(created);failureIssues.push(created);comments.set(created.number,[]);
       }
       const comment=commentFor({cause,run,job,step,runUrl,jobUrl:`https://github.com/${owner}/${repo}/actions/runs/${run.id}/job/${job.id}`,occurrence});
