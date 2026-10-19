@@ -513,8 +513,9 @@ describe('computeWaitingOn with worker entries', () => {
 
   it('counts a request wait by the requests without an outcome, and adds the completion wait', () => {
     const answered = [{ requestId: R1, status: 'replied' as const, observedAt: '2026-10-19T10:02:00.000Z' }];
-    expect(computeWaitingOn({ waits: [openRequestWait()] })).toEqual({ kind: 'workers', count: 1 });
-    expect(computeWaitingOn({ waits: [openRequestWait({ requestOutcomes: answered })] })).toEqual({ kind: 'workers', count: 0 });
+    // Only request entries open: `replies` lets a summary say "worker replies" (hearsay-tools/cezarion#1235).
+    expect(computeWaitingOn({ waits: [openRequestWait()] })).toEqual({ kind: 'workers', count: 1, replies: true });
+    expect(computeWaitingOn({ waits: [openRequestWait({ requestOutcomes: answered })] })).toEqual({ kind: 'workers', count: 0, replies: true });
     // delegation.wait stays for the completion gate until 3b.
     expect(computeWaitingOn({ waits: [openWorkerWait()], delegation: parkedRootWait() })).toEqual({ kind: 'workers', count: 4 });
   });

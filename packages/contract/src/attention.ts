@@ -193,7 +193,7 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
     // can only wait on replies from its parent; a root with only request waits waits on replies.
     const role = run.delegation?.role;
     if (role === 'worker') return { bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting on parent reply' };
-    if (workerEntries.length > 0 && workerEntries.every((wait) => wait.kind === 'worker' && wait.requestIds !== undefined)) {
+    if (waitingOn.replies || (workerEntries.length > 0 && workerEntries.every((wait) => wait.kind === 'worker' && wait.requestIds !== undefined))) {
       return { bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on worker replies' };
     }
     const count = waitingOn.count;

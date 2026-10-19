@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeWaitingOn, type WorkerWaitEntry } from './waits.ts';
+import { computeWaitingOn, type WaitingOnInput, type WorkerWaitEntry } from './waits.ts';
 import { ATTENTION_RANK, delegationWaitLabel, deriveAttention, type Attention, type AttentionInput } from './attention.ts';
 import type { RunStatus } from './runs.ts';
 
@@ -339,6 +339,13 @@ describe('computeWaitingOn and worker entries', () => {
     // A summary has no entries: a worker still reads as waiting on its parent.
     expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'workers', count: 1 }, delegation: { role: 'worker' } } as unknown as AttentionInput).label)
       .toBe('waiting on parent reply');
+    // A root's summary says so through `waitingOn.replies`, which only request entries set.
+    const waitingOn = computeWaitingOn({ waits: [request], delegation: { role: 'root' } } as unknown as WaitingOnInput);
+    expect(waitingOn).toEqual({ kind: 'workers', count: 1, replies: true });
+    expect(deriveAttention({ status: 'waiting', waitingOn, delegation: { role: 'root' } } as unknown as AttentionInput).label)
+      .toBe('waiting on worker replies');
+    expect(computeWaitingOn({ waits: [request, workerWait('88888888-8888-4888-8888-888888888882', ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'])] }))
+      .toEqual({ kind: 'workers', count: 2 });
   });
 
   it('keeps the legacy delegation.wait path for the completion gate', () => {

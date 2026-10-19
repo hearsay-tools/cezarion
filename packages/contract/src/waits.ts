@@ -277,8 +277,10 @@ export const waitingOnSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('human') }),
   // `autoResumeAt` is free text on the record, so the instant it carries is too.
   z.object({ kind: z.literal('usage-limit'), at: z.string() }),
-  /** The workers still owed an outcome, or the replies awaited; 0 when the row cannot count. */
-  z.object({ kind: z.literal('workers'), count: z.number().int().nonnegative() }),
+  /** The workers still owed an outcome, or the replies awaited; 0 when the row cannot count.
+   *  `replies` when every open worker entry waits on request replies, so a summary, which carries
+   *  no `waits`, can still say so (hearsay-tools/cezarion#1235). */
+  z.object({ kind: z.literal('workers'), count: z.number().int().nonnegative(), replies: z.literal(true).optional() }),
   z.object({
     kind: z.literal('ci'),
     waitId: z.uuid(),
@@ -343,7 +345,11 @@ export function computeWaitingOn(run: WaitingOnInput): WaitingOn | undefined {
   if (run.hasPendingHumanAsk || open.some((wait) => wait.kind === 'human')) return { kind: 'human' };
   if (run.autoResumeAt) return { kind: 'usage-limit', at: run.autoResumeAt };
   const workers = workersOwed(open, run.delegation);
-  if (workers !== undefined) return { kind: 'workers', count: workers };
+  if (workers !== undefined) {
+    const entries = open.filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker');
+    const replies = entries.length > 0 && completionWorkersOwed(run.delegation) === undefined && entries.every((wait) => wait.requestIds !== undefined);
+    return { kind: 'workers', count: workers, ...(replies ? { replies: true as const } : {}) };
+  }
   const ci = earliest(open.filter((wait): wait is CiWaitEntry => wait.kind === 'ci'));
   if (ci) {
     return { kind: 'ci', waitId: ci.id, prUrl: ci.prUrl, repository: ci.repository, prNumber: ci.prNumber, deadline: ci.deadline };
