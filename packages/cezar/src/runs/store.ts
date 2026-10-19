@@ -11,6 +11,7 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { HUMAN_ASK_EVENT_TYPES } from '@open-mercato/cezar-contract/ask';
 import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
+import { workerWaitSchema } from '@open-mercato/cezar-contract/delegation';
 import {
   agentInputSchema,
   inboxClaimSchema,
@@ -35,7 +36,7 @@ import {
   TIMER_MIN_SECONDS,
   WAIT_LIMIT,
 } from '@open-mercato/cezar-contract/waits';
-import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, CiWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry } from '@open-mercato/cezar-contract';
+import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, CiWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry, WorkerWait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { matchesRunQuery, sqlPrefilterTokens } from './run-search.ts';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { HistoryCompressor } from './history-compressor.ts';
@@ -431,7 +432,25 @@ const LEGACY_WAIT_KEYS = ['ciWait', 'lastCiWait', 'lastCiWaitError', 'monitoring
 const UNREADABLE_WAIT = 'Wait unavailable — a saved wait is unreadable; register a new wait.';
 
 function hasLegacyWaitFields(row: unknown): boolean {
-  return !!row && typeof row === 'object' && LEGACY_WAIT_KEYS.some((key) => key in row);
+  return !!row && typeof row === 'object' && (LEGACY_WAIT_KEYS.some((key) => key in row) || agentWorkerWaits(row as Record<string, unknown>).length > 0);
+}
+
+/** The agent-registered worker waits a record still holds in `delegation` (store schema 6,
+ *  hearsay-tools/cezarion#1235), in the order they settled: `lastWait`, then `wait`. The completion
+ *  gate's wait is not one: `delegation.completion.waitId` names it, and it stays in `delegation.wait`
+ *  until phase 3b. A value that does not parse is left where it is, for the delegation schema to
+ *  quarantine as it always has. */
+function agentWorkerWaits(row: Record<string, unknown>): Array<{ key: 'wait' | 'lastWait'; wait: WorkerWait }> {
+  const delegation = row.delegation;
+  if (!delegation || typeof delegation !== 'object') return [];
+  const { role, completion } = delegation as { role?: unknown; completion?: { waitId?: unknown } };
+  if (role !== 'root' && role !== 'worker') return [];
+  const found: Array<{ key: 'wait' | 'lastWait'; wait: WorkerWait }> = [];
+  for (const key of ['lastWait', 'wait'] as const) {
+    const parsed = workerWaitSchema.safeParse((delegation as Record<string, unknown>)[key]);
+    if (parsed.success && !(completion && typeof completion === 'object' && completion.waitId === parsed.data.id)) found.push({ key, wait: parsed.data });
+  }
+  return found;
 }
 
 /** A legacy `CiWait` as a wait entry. Its wake input's id was the wait's own (`wakeId`, which
@@ -443,6 +462,37 @@ export function ciWaitEntry(wait: CiWait): CiWaitEntry {
     phase: phase === 'registered' || phase === 'parked' ? 'open' : phase === 'wake-pending' ? 'resolved' : phase === 'delivered' ? 'delivered' : 'cancelled',
     ...(result ? { result, resolvedAt: result.observedAt } : {}),
     ...(deliveredAt ? { deliveredAt } : {}),
+  };
+}
+
+/**
+ * A legacy agent `delegation.wait` as a worker wait entry (store schema 6, hearsay-tools/cezarion#1235),
+ * judged from the wait alone: what became of its wake input is `upgradeLegacyWaits`' to apply.
+ * `registered`/`parked` → open; `wake-pending` → resolved with its `outcome`/`timeout` reason, or
+ * cancelled. Undefined for the `message` stand-in, which was never an agent's wait: a message no
+ * longer resolves a wait, and its input still wakes the run on its own.
+ *
+ * A `WorkerWait` kept no registration time, so the entry registers at `now` and its
+ * `timeoutSeconds` is the time left to the deadline, clamped to a wait's 1-1800 (600 when the
+ * deadline does not read).
+ */
+export function workerWaitEntry(wait: WorkerWait, now: string): WorkerWaitEntry | undefined {
+  if (wait.phase === 'wake-pending' && wait.reason === 'message') return undefined;
+  const left = Math.round((Date.parse(wait.deadline) - Date.parse(now)) / 1000);
+  const timeoutSeconds = Number.isFinite(left) ? Math.min(1800, Math.max(1, left)) : 600;
+  const open = wait.phase !== 'wake-pending';
+  const reason = wait.reason === 'outcome' || wait.reason === 'timeout' ? wait.reason : undefined;
+  const observed = [...(wait.outcomes ?? []), ...(wait.requestOutcomes ?? [])].map((outcome) => outcome.observedAt).sort().at(-1);
+  const resolvedAt = reason === 'timeout' ? (wait.deadline < now ? wait.deadline : now) : observed ?? now;
+  return {
+    id: wait.id, kind: 'worker', source: 'agent', via: 'cez-worker-wait', registeredAt: now, deadline: wait.deadline, timeoutSeconds, turnId: 'upgraded',
+    phase: open ? 'open' : reason ? 'resolved' : 'cancelled',
+    ...(wait.mode ? { mode: wait.mode } : {}),
+    ...(wait.requestIds
+      ? { requestIds: wait.requestIds, requestOutcomes: wait.requestOutcomes ?? [] }
+      : { workerIds: wait.workerIds, revisions: wait.revisions ?? [], outcomes: wait.outcomes }),
+    ...(!open && reason ? { result: { reason }, resolvedAt } : {}),
+    ...(!open && !reason ? { cancelledAt: now } : {}),
   };
 }
 
@@ -467,6 +517,13 @@ function legacyTimerId(runId: unknown, wakeAt: string): string {
  *   `running` run parks as `waiting`, its running step with it, as every waiting park writes it.
  *   On a finished run the fields are stale and only dropped.
  *
+ * - `delegation.wait`/`lastWait` registered by the agent (store schema 6, hearsay-tools/cezarion#1235)
+ *   → `workerWaitEntry`, then settled by what became of the wake input (`wakeId`, else the wait's own
+ *   id): a wait whose input was delivered reads as delivered, a `wake-pending` one whose input is
+ *   still queued stays resolved and records it as `wakeInputId`, so it is delivered once, and a
+ *   `lastWait` that was never delivered reads as cancelled. The `message` stand-in is dropped. No
+ *   input is added or removed. The completion gate's wait is left where it is (phase 3b).
+ *
  * An unreadable legacy CI wait gets the per-entry salvage `parseRunRecords` gives `waits`: it is
  * dropped, `lastWaitsError` says so, and the status is left alone. A `waiting` run with no open
  * wait reads as Needs you, which a human can resume.
@@ -487,6 +544,24 @@ export function upgradeLegacyWaits(row: Record<string, unknown>): void {
   // The previous wait settled before the current one did, so it goes first.
   legacyCi(row.lastCiWait, true);
   legacyCi(row.ciWait, false);
+  const agentWaits = agentWorkerWaits(row);
+  if (agentWaits.length) {
+    const now = new Date().toISOString();
+    const inputs = Array.isArray(row.agentInputs) ? row.agentInputs as Array<{ id?: unknown; deliveredAt?: unknown }> : [];
+    const current = agentWaits.find((found) => found.key === 'wait');
+    for (const { key, wait } of agentWaits) {
+      // A wait that settles has its copy in `lastWait` too: it is the same wait.
+      if (key === 'lastWait' && current?.wait.id === wait.id) continue;
+      const entry = workerWaitEntry(wait, now);
+      if (!entry) continue;
+      const input = inputs.find((candidate) => candidate.id === (wait.wakeId ?? wait.id));
+      const deliveredAt = typeof input?.deliveredAt === 'string' ? input.deliveredAt : undefined;
+      if (entry.phase !== 'open' && deliveredAt) Object.assign(entry, { phase: 'delivered', deliveredAt });
+      else if (key === 'lastWait' && entry.phase !== 'cancelled') Object.assign(entry, { phase: 'cancelled', cancelledAt: now });
+      else if (entry.phase === 'resolved' && input) entry.wakeInputId = input.id as string;
+      (entry.phase === 'open' || entry.phase === 'resolved' ? opened : settled).push(entry);
+    }
+  }
   const live = row.status === 'running' || row.status === 'queued' || row.status === 'waiting';
   if (row.activity === 'monitoring' && live) {
     const wakeAt = row.monitoringWakeAt;
@@ -519,6 +594,11 @@ export function upgradeLegacyWaits(row: Record<string, unknown>): void {
   if (typeof row.lastCiWaitError === 'string' && row.lastWaitsError === undefined) row.lastWaitsError = row.lastCiWaitError;
   if (unreadable) row.lastWaitsError = UNREADABLE_WAIT;
   for (const key of LEGACY_WAIT_KEYS) delete row[key];
+  if (agentWaits.length) {
+    const delegation = { ...(row.delegation as Record<string, unknown>) };
+    for (const { key } of agentWaits) delete delegation[key];
+    row.delegation = delegation;
+  }
 }
 
 /** Read legacy wait fields into the wait list and salvage per entry, identically for live stores

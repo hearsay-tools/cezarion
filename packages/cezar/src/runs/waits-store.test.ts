@@ -2,13 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LAST_WAITS_LIMIT, WAIT_LIMIT, type Wait } from '@open-mercato/cezar-contract/waits';
 import type { AgentInput, CiWaitResult } from '@open-mercato/cezar-contract';
 
-import { RunDatabase, RUNS_DB_FILE } from './run-database.ts';
+import { RunDatabase, RUN_DATABASE_SCHEMA_VERSION, RUNS_DB_FILE } from './run-database.ts';
 import { isLiveRecord } from './run-row.ts';
-import { parseRunRecords, RunStore, type RunRecord } from './store.ts';
+import { parseRunRecords, RunStore, workerWaitEntry, type RunRecord } from './store.ts';
 import { readPersistedRuns, seedRuns } from './run-store.testkit.ts';
 
 /**
@@ -392,6 +393,184 @@ describe('opening a v3 store', () => {
       expect(again.getRun(RUN_ID)?.agentInputs).toHaveLength(1);
     } finally {
       again.close();
+    }
+  });
+});
+
+// Phase 3a of hearsay-tools/cezarion#1235: an agent-registered `delegation.wait` reads up into
+// the wait list. The completion gate's own wait stays in `delegation.wait` until phase 3b.
+describe('upgrade-on-read of agent worker waits', () => {
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(NOW); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  const WORKER = '22222222-2222-4222-8222-222222222222';
+  const WAIT_ID = '33333333-3333-4333-8333-333333333333';
+  const WAKE_ID = '44444444-4444-4444-8444-444444444444';
+  const REQUEST = '55555555-5555-4555-8555-555555555555';
+
+  const legacyWait = (overrides: Record<string, unknown> = {}) => ({
+    id: WAIT_ID, workerIds: [WORKER], deadline: iso(540_000), phase: 'parked', outcomes: [], mode: 'any',
+    revisions: [{ workerId: WORKER, revision: 2 }], ...overrides,
+  });
+  const outcome = { workerId: WORKER, status: 'review', observedAt: iso(-5_000), revision: 2 };
+  const rootRow = (delegation: Record<string, unknown>, overrides: Record<string, unknown> = {}) => legacyRow({
+    status: 'waiting', delegation: { role: 'root', permissions: ['wait'], receipts: [], ...delegation }, ...overrides,
+  });
+  const wakeInput = (id: string, overrides: Partial<AgentInput> = {}): AgentInput => ({
+    id, parentRunId: RUN_ID, source: 'lifecycle', text: 'Worker wait', createdAt: iso(-1_000), ...overrides,
+  });
+
+  it('upgrades a registered or parked wait into an open worker entry', () => {
+    for (const phase of ['registered', 'parked']) {
+      const run = parseOne(rootRow({ wait: legacyWait({ phase }) }));
+      expect(run.waits).toEqual([{
+        id: WAIT_ID, kind: 'worker', source: 'agent', via: 'cez-worker-wait', phase: 'open', turnId: 'upgraded',
+        registeredAt: iso(0), deadline: iso(540_000), timeoutSeconds: 540, mode: 'any',
+        workerIds: [WORKER], revisions: [{ workerId: WORKER, revision: 2 }], outcomes: [],
+      }]);
+      expect(run.delegation).not.toHaveProperty('wait');
+      expect(run.status).toBe('waiting');
+    }
+  });
+
+  it('upgrades a request wait into a requestIds entry', () => {
+    const requestOutcomes = [{ requestId: REQUEST, status: 'replied', observedAt: iso(-1_000) }];
+    const run = parseOne(rootRow({ wait: legacyWait({ workerIds: [], requestIds: [REQUEST], requestOutcomes, revisions: undefined }) }));
+    expect(run.waits).toEqual([expect.objectContaining({ kind: 'worker', phase: 'open', requestIds: [REQUEST], requestOutcomes })]);
+    expect(run.waits![0]).not.toHaveProperty('workerIds');
+    expect(run.waits![0]).not.toHaveProperty('revisions');
+    expect(run.lastWaitsError).toBeUndefined();
+  });
+
+  it('derives timeoutSeconds from the deadline, clamped to 1-1800', () => {
+    expect(parseOne(rootRow({ wait: legacyWait({ deadline: iso(7_200_000) }) })).waits![0]).toMatchObject({ timeoutSeconds: 1800 });
+    expect(parseOne(rootRow({ wait: legacyWait({ deadline: iso(-60_000) }) })).waits![0]).toMatchObject({ timeoutSeconds: 1 });
+    expect(workerWaitEntry(legacyWait({ deadline: 'not a time' }) as never, new Date(NOW).toISOString())).toMatchObject({ timeoutSeconds: 600 });
+  });
+
+  it('upgrades wake-pending outcome and timeout into a resolved entry keeping its queued wake input', () => {
+    for (const reason of ['outcome', 'timeout'] as const) {
+      const run = parseOne(rootRow({ wait: legacyWait({ phase: 'wake-pending', reason, wakeId: WAKE_ID, outcomes: reason === 'outcome' ? [outcome] : [] }) },
+        { agentInputs: [wakeInput(WAKE_ID)] }));
+      expect(run.waits).toEqual([expect.objectContaining({ id: WAIT_ID, kind: 'worker', phase: 'resolved', result: { reason }, wakeInputId: WAKE_ID })]);
+      expect(run.waits![0]!.resolvedAt).toBeDefined();
+      expect(run.agentInputs).toEqual([wakeInput(WAKE_ID)]);
+    }
+  });
+
+  it('upgraded wake-pending keeps its queued input', () => {
+    const run = parseOne(rootRow(
+      { wait: legacyWait({ phase: 'wake-pending', reason: 'outcome', wakeId: WAIT_ID, outcomes: [outcome] }), lastWait: legacyWait({ phase: 'wake-pending', reason: 'outcome', wakeId: WAIT_ID, outcomes: [outcome] }) },
+      { agentInputs: [wakeInput(WAIT_ID)] },
+    ));
+    expect(run.waits).toEqual([expect.objectContaining({ id: WAIT_ID, phase: 'resolved', wakeInputId: WAIT_ID })]);
+    // The settled copy that rode in lastWait is the same wait: it is not listed twice.
+    expect(run.lastWaits).toBeUndefined();
+    expect(run.agentInputs).toHaveLength(1);
+    expect(run.agentInputs![0]).toEqual(wakeInput(WAIT_ID));
+  });
+
+  it('upgrades a wake-pending wait whose wake input was delivered as delivered', () => {
+    const deliveredAt = iso(-500);
+    const run = parseOne(rootRow({ wait: legacyWait({ phase: 'wake-pending', reason: 'outcome', wakeId: WAKE_ID, outcomes: [outcome] }) },
+      { agentInputs: [wakeInput(WAKE_ID, { deliveredAt })] }));
+    expect(run.waits).toBeUndefined();
+    expect(run.lastWaits).toEqual([expect.objectContaining({ id: WAIT_ID, kind: 'worker', phase: 'delivered', deliveredAt, result: { reason: 'outcome' } })]);
+  });
+
+  it('upgrades wake-pending cancelled into lastWaits as cancelled and leaves its undelivered wake input queued', () => {
+    const run = parseOne(rootRow({ wait: legacyWait({ phase: 'wake-pending', reason: 'cancelled', wakeId: WAKE_ID }) },
+      { agentInputs: [wakeInput(WAKE_ID)] }));
+    expect(run.waits).toBeUndefined();
+    expect(run.lastWaits).toEqual([expect.objectContaining({ id: WAIT_ID, kind: 'worker', phase: 'cancelled', cancelledAt: iso(0) })]);
+    expect(run.lastWaits![0]).not.toHaveProperty('result');
+    expect(run.agentInputs).toEqual([wakeInput(WAKE_ID)]);
+  });
+
+  it('upgrades the message stand-in by dropping it and leaving its input queued', () => {
+    const run = parseOne(rootRow({ wait: legacyWait({ phase: 'wake-pending', reason: 'message', wakeId: WAKE_ID }) },
+      { agentInputs: [wakeInput(WAKE_ID, { source: 'agent' })] }));
+    expect(run.waits).toBeUndefined();
+    expect(run.lastWaits).toBeUndefined();
+    expect(run.delegation).not.toHaveProperty('wait');
+    expect(run.agentInputs).toEqual([wakeInput(WAKE_ID, { source: 'agent' })]);
+  });
+
+  it('upgrades lastWait into lastWaits, delivered when its wake input was delivered and cancelled otherwise', () => {
+    const deliveredAt = iso(-500);
+    const delivered = parseOne(rootRow({ lastWait: legacyWait({ phase: 'wake-pending', reason: 'outcome', wakeId: WAKE_ID, outcomes: [outcome] }) },
+      { status: 'done', agentInputs: [wakeInput(WAKE_ID, { deliveredAt })] }));
+    expect(delivered.lastWaits).toEqual([expect.objectContaining({ id: WAIT_ID, kind: 'worker', phase: 'delivered', deliveredAt })]);
+    expect(delivered.delegation).not.toHaveProperty('lastWait');
+    for (const agentInputs of [[wakeInput(WAKE_ID)], undefined]) {
+      const run = parseOne(rootRow({ lastWait: legacyWait({ phase: 'wake-pending', reason: 'timeout', wakeId: WAKE_ID }) }, { status: 'done', ...(agentInputs ? { agentInputs } : {}) }));
+      expect(run.lastWaits).toEqual([expect.objectContaining({ id: WAIT_ID, phase: 'cancelled' })]);
+    }
+  });
+
+  it('leaves the completion gate wait in delegation.wait', () => {
+    const wait = legacyWait({ mode: 'all', deadline: iso(600_000) });
+    const run = parseOne(rootRow({ wait, completion: { phase: 'waiting', waitId: WAIT_ID } }));
+    expect(run.waits).toBeUndefined();
+    expect(run.delegation).toMatchObject({ wait: expect.objectContaining({ id: WAIT_ID }), completion: { waitId: WAIT_ID } });
+    // The agent's own wait beside it is the one that moves.
+    const other = '66666666-6666-4666-8666-666666666666';
+    const both = parseOne(rootRow({ wait, lastWait: legacyWait({ id: other, phase: 'wake-pending', reason: 'outcome', wakeId: other, outcomes: [outcome] }), completion: { phase: 'waiting', waitId: WAIT_ID } }));
+    expect(both.delegation).toMatchObject({ wait: expect.objectContaining({ id: WAIT_ID }) });
+    expect(both.lastWaits).toEqual([expect.objectContaining({ id: other, kind: 'worker' })]);
+  });
+
+  it('upgrades a worker run\'s own wait on its requests', () => {
+    const run = parseOne(legacyRow({
+      status: 'waiting',
+      delegation: {
+        role: 'worker', permissions: ['wait'], parentRunId: '77777777-7777-4777-8777-777777777777',
+        workspace: { path: '/tmp/w', branch: 'cez/w', baselineSha: 'a'.repeat(40) },
+        wait: legacyWait({ workerIds: [], requestIds: [REQUEST], requestOutcomes: [], revisions: undefined }),
+      },
+    }));
+    expect(run.waits).toEqual([expect.objectContaining({ kind: 'worker', requestIds: [REQUEST], phase: 'open' })]);
+    expect(run.delegation).not.toHaveProperty('wait');
+  });
+
+  it('marks an upgraded row so open rewrites it, and the rewrite is stable', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'cez-waits-worker-'));
+    try {
+      seedRuns(directory, [rootRow({ wait: legacyWait() })]);
+      const store = RunStore.open(directory, { keepLive: true });
+      try {
+        expect(store.getRun(RUN_ID)!.waits).toEqual([expect.objectContaining({ id: WAIT_ID, kind: 'worker', phase: 'open' })]);
+        store.flush();
+      } finally {
+        store.close();
+      }
+      const [stored] = readPersistedRuns(directory);
+      expect((stored.delegation as Record<string, unknown>)).not.toHaveProperty('wait');
+      expect(stored.waits).toEqual([expect.objectContaining({ id: WAIT_ID, kind: 'worker' })]);
+      const again = RunStore.open(directory, { keepLive: true });
+      try {
+        expect(again.getRun(RUN_ID)!.waits).toEqual([expect.objectContaining({ id: WAIT_ID })]);
+      } finally {
+        again.close();
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('a store at schema 6 is refused by a schema-5 reader', () => {
+    expect(RUN_DATABASE_SCHEMA_VERSION).toBe(6);
+    const directory = mkdtempSync(join(tmpdir(), 'cez-waits-schema6-'));
+    try {
+      RunStore.open(directory, { keepLive: true }).close();
+      const raw = new DatabaseSync(join(directory, RUNS_DB_FILE));
+      try {
+        expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 6 });
+      } finally {
+        raw.close();
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 });

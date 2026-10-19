@@ -30,7 +30,7 @@ export const RUNS_IMPORT_COMPLETE_KEY = 'import-complete';
 /** `PRAGMA user_version` of a database this build created. A higher number means a newer cezar
  *  wrote it; that is refused rather than read, because a newer schema may store what this one
  *  would silently drop on its next write. */
-export const RUN_DATABASE_SCHEMA_VERSION = 5;
+export const RUN_DATABASE_SCHEMA_VERSION = 6;
 
 /**
  * The oldest `user_version` the READ-ONLY reader can read as it stands (`openReadOnly`). It never
@@ -188,6 +188,19 @@ const MIGRATIONS: readonly string[] = [
   -- unsupported-schema instead; the recovery is to run this version again.
   --
   -- No live recompute: isLiveRecord already calls a row with an open wait live, of any kind.
+  `,
+  `
+  -- Schema 6 changes no table either: records may carry worker waits (kind 'worker') in waits and
+  -- lastWaits, and a record is no longer written with an agent-registered delegation.wait or
+  -- delegation.lastWait (hearsay-tools/cezarion#1235, phase 3a); this build reads those into the
+  -- list (upgradeLegacyWaits, store.ts). Only the completion gate's wait, the one
+  -- delegation.completion.waitId names, stays in delegation.wait until phase 3b. A schema-5 build
+  -- would drop each worker entry as unreadable and recover the run without the wait it parked on,
+  -- so the bump makes it refuse the store as unsupported-schema instead; the recovery is to run
+  -- this version again.
+  --
+  -- No live recompute: isLiveRecord already calls a row with an open wait live, of any kind, and
+  -- every row the old predicate called live through delegation.wait is read up and rewritten by open.
   `,
 ];
 

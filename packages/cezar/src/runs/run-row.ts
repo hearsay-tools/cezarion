@@ -16,7 +16,7 @@ export function isLiveStatus(status: string): boolean {
  * row in the `live` column, so `RunStore.open` loads and recovers it, and what keeps a record in
  * the store's memory. True when any of these holds:
  * - its status is queued, running or waiting;
- * - a wait is open or resolved and not yet delivered (`waits`: a CI wait or a timer), or a
+ * - a wait is open or resolved and not yet delivered (`waits`: a CI wait, a timer, a human question or a worker wait), or a
  *   usage-limit resume is pending (`autoResumeAt`);
  * - it waits on its delegation family: a parent on its workers, or a worker on its parent;
  * - an owned worker's destroy has not completed (its retry is pending);

@@ -508,13 +508,15 @@ describe('RunDatabase', () => {
     // monitoring fields, so a build that still reads them must refuse the store, not misread it.
     // Schema 5 (hearsay-tools/cezarion#1234): records carry human waits, which a schema-4 build
     // would drop as unreadable.
-    it('creates a fresh database at schema 5, migrates a v3 one keeping its rows, and refuses version 6', () => {
-      expect(RUN_DATABASE_SCHEMA_VERSION).toBe(5);
+    // Schema 6 (hearsay-tools/cezarion#1235): records carry worker waits, which a schema-5 build
+    // would drop as unreadable.
+    it('creates a fresh database at schema 6, migrates a v3 one keeping its rows, and refuses version 7', () => {
+      expect(RUN_DATABASE_SCHEMA_VERSION).toBe(6);
       openDb().close();
       open.length = 0;
       const fresh = new DatabaseSync(path, { readOnly: true });
       try {
-        expect(fresh.prepare('PRAGMA user_version').get()).toEqual({ user_version: 5 });
+        expect(fresh.prepare('PRAGMA user_version').get()).toEqual({ user_version: 6 });
       } finally {
         fresh.close();
       }
@@ -529,8 +531,8 @@ describe('RunDatabase', () => {
       for (const db of open.splice(0)) db.close();
       const migrated = new DatabaseSync(path);
       try {
-        expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 5 });
-        migrated.exec('PRAGMA user_version = 6');
+        expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 6 });
+        migrated.exec('PRAGMA user_version = 7');
       } finally {
         migrated.close();
       }
