@@ -8,6 +8,8 @@ const { VERSION, gate, snapshotKey, validateAssessment, decide } = require('./me
 const { COMMENT, SUMMARY, readComment, parseSummary, renderSummary, publishBatch, withLock } = require('./merge-recommendation-report.cjs');
 const DIRECTORY = '.ai/tmp/merge-recommendation';
 const COMMAND = 'node .github/scripts/merge-recommendation.cjs';
+// bound: every successfully written trial file must fit the reader's memory limit.
+const LOCAL_INPUT_BYTES = 40 * 1024 * 1024;
 
 function definition(repository, summaryNumber) {
   if (!REPOSITORY.test(repository) || !Number.isSafeInteger(summaryNumber) || summaryNumber < 1) throw new Error('Invalid automation target.');
@@ -67,10 +69,14 @@ async function context(gh, repository) {
   return { repository, defaultBranch: repo.default_branch, actor, policyCommit, trusted };
 }
 
-function write(name, value) { fs.mkdirSync(DIRECTORY, { recursive: true }); fs.writeFileSync(path.join(DIRECTORY, name), `${JSON.stringify(value, null, 2)}\n`); }
+function write(name, value) {
+  const serialized = `${JSON.stringify(value, null, 2)}\n`;
+  if (Buffer.byteLength(serialized) > LOCAL_INPUT_BYTES) throw new Error(`Local trial ${name} exceeds its byte limit.`);
+  fs.mkdirSync(DIRECTORY, { recursive: true }); fs.writeFileSync(path.join(DIRECTORY, name), serialized);
+}
 function read(name) {
   const file = path.join(DIRECTORY, name);
-  if (fs.statSync(file).size > 40 * 1024 * 1024) throw new Error('Local trial input exceeds its byte limit.');
+  if (fs.statSync(file).size > LOCAL_INPUT_BYTES) throw new Error('Local trial input exceeds its byte limit.');
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
@@ -83,7 +89,7 @@ async function initialize(gh, c) {
   return { number: issue.number, url: issue.html_url, created: true };
 }
 
-async function collect(gh, c, summaryNumber) {
+async function collect(gh, c, summaryNumber, snapshotReader = collectSnapshot) {
   const issue = await gh.api('GET', `repos/${c.repository}/issues/${summaryNumber}`);
   if (issue.user?.id !== c.actor.id || issue.pull_request || issue.state !== 'open') throw new Error('Trial summary is not an open issue owned by this writer.');
   const state = parseSummary(issue.body);
@@ -93,7 +99,7 @@ async function collect(gh, c, summaryNumber) {
   for (const r of state.records) numbers.add(r.number);
   const snapshots = [], warnings = {}, previous = {};
   for (const number of numbers) {
-    const s = await collectSnapshot({ gh, ...c, number });
+    const s = await snapshotReader({ gh, ...c, number });
     if (s.state === 'merged' || s.state === 'closed') {
       try { warnings[number] = await observeFollowups(gh, c.repository, number); }
       catch { warnings[number] = ['Follow-up evidence unavailable.']; }
@@ -127,7 +133,7 @@ async function main(argv, dependencies = {}) {
   const gh = dependencies.gh || new Gh(), c = await (dependencies.context || context)(gh, repository);
   if (command === 'init') return initialize(gh, c);
   if (!Number.isSafeInteger(number) || number < 1) throw new Error('Use --summary with the trial issue number.');
-  if (command === 'collect') return collect(gh, c, number);
+  if (command === 'collect') return collect(gh, c, number, dependencies.collectSnapshot);
   const batch = read('batch.json');
   if (batch.repository !== repository || batch.summaryNumber !== number || batch.policyCommit !== c.policyCommit || batch.actor?.id !== c.actor.id) throw new Error('Stale or foreign trial batch.');
   if (fs.readFileSync(path.join(DIRECTORY, 'evaluator-instructions.md'), 'utf8') !== evaluatorInstructions(c)) throw new Error('Evaluator instructions differ from the batch policy commit.');

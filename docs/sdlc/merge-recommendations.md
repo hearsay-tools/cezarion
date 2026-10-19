@@ -65,6 +65,10 @@ These are cooperative controls, not a sandbox: an unrestricted same-user shell c
 reach ambient credentials. Use a dedicated identity without contents-write authority
 for stronger enforcement; the trial itself grants no additional credentials.
 
+Local trial JSON files have a shared 40 MiB serialized UTF-8 limit. Collection
+rejects an oversized cohort before replacing the prior batch, rather than reporting
+success with a batch that later steps cannot read. A failed collection stops the run.
+
 ## Manual operation
 
 From a clean installed default-branch checkout:

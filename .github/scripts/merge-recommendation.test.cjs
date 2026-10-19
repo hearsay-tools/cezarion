@@ -89,3 +89,40 @@ test('CLI preview shows the same reused recommendation the publisher would post'
     assert.equal(reports[0].body, body);
   } finally { process.chdir(previousCwd); }
 });
+
+test('collection rejects an oversized serialized cohort before replacing the previous readable batch', async t => {
+  const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+  const { execFileSync } = require('node:child_process');
+  const { renderSummary } = require('./merge-recommendation-report.cjs');
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'cez-batch-limit-')), previousCwd = process.cwd();
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  fs.mkdirSync(path.join(cwd, '.ai/skills/recommending-pr-merges'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, '.ai/skills/recommending-pr-merges/SKILL.md'), 'committed skill');
+  git('init', '-q'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');
+  git('add', '.'); git('commit', '-qm', 'policy'); const policyCommit = git('rev-parse', 'HEAD');
+  const actor = { id: 42, login: 'writer' }, repository = snapshot().repository;
+  const c = { repository, actor, policyCommit, trusted: true, defaultBranch: 'main' };
+  // Each raw diff fits the 1 MiB evidence bound; JSON escaping makes the cohort exceed 40 MiB.
+  const diff = 'diff --git a/README.md b/README.md\n+' + '"'.repeat(900000);
+  const open = Array.from({ length: 25 }, (_, i) => ({ number: i + 1 }));
+  const gh = {
+    api: async (method, route) => {
+      assert.equal(method, 'GET');
+      if (route.endsWith('/issues/9')) return { user: actor, state: 'open', body: renderSummary({ records: [] }) };
+      assert.match(route, /pulls\?state=open/); return open;
+    },
+    pages: async () => [],
+  };
+  const directory = path.join(cwd, '.ai/tmp/merge-recommendation'); fs.mkdirSync(directory, { recursive: true });
+  const previousBatch = JSON.stringify({ ...c, summaryNumber: 9, snapshots: [] });
+  fs.writeFileSync(path.join(directory, 'batch.json'), previousBatch);
+  try {
+    process.chdir(cwd);
+    await assert.rejects(main(['collect', '--repo', repository, '--summary', '9'], {
+      gh, context: async () => c,
+      collectSnapshot: async ({ number }) => snapshot({ number, policyCommit, diff }),
+    }), /byte limit/i);
+    assert.equal(fs.readFileSync(path.join(directory, 'batch.json'), 'utf8'), previousBatch);
+  } finally { process.chdir(previousCwd); }
+});
