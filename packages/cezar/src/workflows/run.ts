@@ -1331,6 +1331,9 @@ export class RunManager {
   private readonly workerResolveRetries = new Set<string>();
   /** A wake that could not be admitted yet, retried by run id. */
   private readonly wakeRetries = new Map<string, NodeJS.Timeout>();
+  /** The last "retained; continuation unavailable" note per run: the 1 Hz admission retry writes
+   *  it on the transition into refusal or when the reason changes, never once per retry. */
+  private readonly retainedNotes = new Map<string, string>();
   /** The wait before the next automatic delivery attempt after a failed one, by run id. */
   private readonly wakeBackoffs = new Map<string, NodeJS.Timeout>();
   // Private and overridable so tests need not wait out production cadence.
@@ -2531,9 +2534,14 @@ export class RunManager {
             : 'Resume to receive queued messages. End this opening turn so Cezar can deliver them.';
       const resumed = this.continueRun(runId, { text, waitWake: true }, true);
       if (!resumed.ok) {
-        this.store.appendEvent(runId, { type: 'note', message: `${resolved.length ? 'Wait result' : 'Messages'} retained; continuation unavailable: ${resumed.error ?? 'unknown'}` });
+        const message = `${resolved.length ? 'Wait result' : 'Messages'} retained; continuation unavailable: ${resumed.error ?? 'unknown'}`;
+        if (this.retainedNotes.get(runId) !== message) {
+          this.retainedNotes.set(runId, message);
+          this.store.appendEvent(runId, { type: 'note', message });
+        }
         return;
       }
+      this.retainedNotes.delete(runId);
       this.waitWakeQueuedAt.set(runId, Date.now());
     }
     this.releaseSlot();
@@ -2624,6 +2632,7 @@ export class RunManager {
     for (const [id, entry] of this.waitTimers) if (entry.runId === runId) this.disarmWait(id);
     for (const [id, retry] of this.ciRetries) if (retry.runId === runId) this.disarmWait(id);
     const timer = this.wakeRetries.get(runId); if (timer) clearTimeout(timer); this.wakeRetries.delete(runId);
+    this.retainedNotes.delete(runId);
     this.resetWakeDelivery(runId);
     if (this.waitWakeQueuedAt.delete(runId) && this.active.has(runId)) {
       const index = this.queue.indexOf(runId); if (index >= 0) this.queue.splice(index, 1);

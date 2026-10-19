@@ -369,6 +369,30 @@ it.each(['live', 'expired'] as const)('restart recovers a %s receipt and expiry 
 });
 
 
+// hearsay-tools/cezarion#1235 review: the 1 Hz admission retry keeps trying a refused
+// continuation, but the retained note is written once per refusal, not once per retry.
+it('a continuation refused across several admission retries writes the retained note once', async () => {
+  await withInboxRun(async ({ store, manager, dir, runId, enqueue }) => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    enqueue('owed message');
+    store.updateRun(runId, { status: 'waiting' }); store.close(); manager.dispose();
+    const reopened = RunStore.open(dir, { keepLive: true }), recovered = new RunManager(reopened, dir);
+    const pump = vi.spyOn(recovered as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
+    const resume = vi.spyOn(recovered, 'continueRun');
+    const notes = () => reopened.readEvents(runId).filter(event => event.type === 'note' && String(event.message).startsWith('Messages retained; continuation unavailable: '));
+    try {
+      await recovered.recover();
+      const tries = resume.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(5_000);
+      // Still retried every second, still refused, and noted once.
+      expect(resume.mock.calls.length).toBeGreaterThanOrEqual(tries + 4);
+      expect(resume.mock.results.every(result => result.type === 'return' && !result.value.ok)).toBe(true);
+      expect(notes()).toHaveLength(1);
+    } finally { recovered.dispose(); reopened.flush(); pump.mockRestore(); }
+  });
+});
+
+
 it.each([1, 32])('a full reply queue with %i claimed inputs defers lifecycle admission without losing messages', async count => {
   await withInboxRun(({ store, manager, runId, enqueue }) => {
     const requestId = randomUUID(), waitId = randomUUID(), generation = randomUUID();
