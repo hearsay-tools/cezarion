@@ -181,8 +181,32 @@ let turnActive = false;
 let turnLate = false;
 let steers = [];
 let steerSerial = 0;
+// CEZ_MOCK_OPENCODE_FOLLOW_ON_MS: the server reads steers in a follow-on run that starts that long
+// after the idle, and a prompt posted in between waits behind that run.
+const followOnMs = Number(process.env.CEZ_MOCK_OPENCODE_FOLLOW_ON_MS ?? 0);
+let followOn = null;
+const runFollowOn = (held) => {
+  followOn = sleep(followOnMs).then(() => {
+    turnActive = true;
+    for (const steer of held) {
+      const id = `msg_steer_reply_${++steerSerial}`;
+      write({ type: 'message.updated', properties: { info: { ...info({}), id, parentID: steer.userId } } });
+      write({ type: 'message.part.updated', properties: { part: { id: `prt_${id}`, messageID: id, sessionID: SESSION_ID, type: 'text', text: steer.text, time: { start: 1, end: 2 } } } });
+    }
+    turnActive = false;
+    followOn = null;
+    write({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+  });
+};
 const send = (event) => {
   const ownIdle = event?.type === 'session.idle' && (!event.properties?.sessionID || event.properties.sessionID === SESSION_ID);
+  if (ownIdle && followOnMs > 0 && steers.length && !turnLate) {
+    const held = steers;
+    steers = []; turnActive = false;
+    write(event);
+    runFollowOn(held);
+    return;
+  }
   if (ownIdle) {
     if (!turnLate) for (const steer of steers) {
       const id = `msg_steer_reply_${++steerSerial}`;
@@ -352,6 +376,8 @@ const server = createServer((req, res) => {
         steers.push({ userId, text });
         return;
       }
+      // A prompt posted while a follow-on run is due runs after it.
+      if (followOn) await followOn;
       turnActive = true;
       // `prompt_async` semantics: acknowledge now, stream the turn over SSE.
       res.writeHead(200, { 'content-type': 'application/json' });

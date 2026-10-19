@@ -758,6 +758,55 @@ const INPUT_CRITERIA: readonly SeamCriterion<InputObservation>[] = [
     },
   },
 ];
+// hearsay-tools/cezarion#1235 (PR #1291 CI): OpenCode can answer steered input in a follow-on run
+// that starts after the turn's idle. Input posted in that gap opened its own turn, the follow-on
+// run's idle closed it, and the input's own run then surfaced nothing. Every wire answers input
+// posted right after a turn that took a steer in a turn of its own.
+interface FollowOnObservation {
+  readonly obs: SeamObservation;
+  readonly consumed: readonly string[];
+  readonly observable: boolean;
+}
+const FOLLOW_ON_STEERED = 'parity-I6-steered';
+const FOLLOW_ON_NEXT = 'parity-I6-next';
+/** The echo of `id` reached the run, and a turn end followed it. */
+const answeredInItsTurn = (v1: readonly AgentEvent[], id: string) => {
+  const at = v1.findIndex(e => e.type === 'text' && e.text.includes(`parity ${id}`));
+  return at >= 0 && v1.slice(at).some(e => e.type === 'turn-end');
+};
+async function observeFollowOn(backend: RunnerId): Promise<FollowOnObservation> {
+  const consumed: string[] = [];
+  const obs = await driveSeam(backend, 'steer-tool', {
+    // The OpenCode mock answers steers in a follow-on run 300 ms after the idle; other mocks ignore it.
+    spec: { env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_ARGS_FILE: '', CEZ_MOCK_OPENCODE_FOLLOW_ON_MS: '300' } },
+    sessionOptions: { onAgentInputConsumed: ids => { consumed.push(...ids); } },
+    whileOpen: async (session, { v1 }) => {
+      const turnEnded = () => v1.some(e => e.type === 'turn-end');
+      const submit = async (id: string) => {
+        let ack: false | Promise<void> = false;
+        await waitFor(() => (ack = session.sendAgentMessage([{ type: 'text', text: `mock:agent-echo parity ${id}` }], [id])) !== false);
+        if (ack) await ack;
+      };
+      await waitFor(() => v1.some(e => e.type === 'tool-call') || turnEnded());
+      await submit(FOLLOW_ON_STEERED);
+      await waitFor(turnEnded);
+      await submit(FOLLOW_ON_NEXT);
+      // bound: the red case never answers; the assertion below reports what arrived instead.
+      await waitFor(() => answeredInItsTurn(v1, FOLLOW_ON_NEXT), 10_000).catch(() => undefined);
+    },
+  });
+  return { obs, consumed, observable: inputDeliveryOf(createRunner(backend)).consumption === 'observable' };
+}
+const FOLLOW_ON_CRITERION: SeamCriterion<FollowOnObservation> = {
+  id: 'I6',
+  name: 'I6 answers input posted right after a turn that took a steer in a turn of its own',
+  scenario: 'steer-tool',
+  assert: ({ obs, consumed, observable }) => {
+    expect(obs.failure).toBeUndefined();
+    expect(answeredInItsTurn(obs.v1, FOLLOW_ON_NEXT)).toBe(true);
+    if (observable) expect([...consumed].sort()).toEqual([FOLLOW_ON_NEXT, FOLLOW_ON_STEERED]);
+  },
+};
 describe('harness parity — input delivery (#505)', () => {
   for (const backend of RUNNER_IDS) {
     it(`${backend} I0 declares its input delivery`, () => {
@@ -766,6 +815,7 @@ describe('harness parity — input delivery (#505)', () => {
     for (const criterion of INPUT_CRITERIA) {
       parityRow(backend, criterion, () => observeInput(backend, criterion.scenario, `parity-${criterion.id}`));
     }
+    parityRow(backend, FOLLOW_ON_CRITERION, () => observeFollowOn(backend));
   }
 });
 
@@ -1827,6 +1877,7 @@ describe('harness parity — the matrix itself', () => {
     ...WORKFLOW_TIMEOUT_CRITERIA.map((c) => c.id),
     ...SEAM_CRITERIA.map((c) => c.id),
     ...INPUT_CRITERIA.map((c) => c.id),
+    FOLLOW_ON_CRITERION.id,
     ...CONTROL_CRITERIA.map((c) => c.id),
     ...RUN_CRITERIA.map((c) => c.id),
   ];
@@ -1859,7 +1910,7 @@ describe('harness parity — the matrix itself', () => {
     if (inactivity) return inactivity.scenario;
     const timeout = WORKFLOW_TIMEOUT_CRITERIA.find(c => c.id === id);
     if (timeout) return timeout.scenario;
-    const seam = SEAM_CRITERIA.find((c) => c.id === id) ?? INPUT_CRITERIA.find((c) => c.id === id);
+    const seam = SEAM_CRITERIA.find((c) => c.id === id) ?? INPUT_CRITERIA.find((c) => c.id === id) ?? (id === FOLLOW_ON_CRITERION.id ? FOLLOW_ON_CRITERION : undefined);
     if (seam) return seam.scenario;
     const control = CONTROL_CRITERIA.find((c) => c.id === id);
     if (control) return control.scenario;

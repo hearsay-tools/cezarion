@@ -724,6 +724,10 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     reason: 'Same wire as I1: Cursor admits no mid-turn agent input, so none can be left unread (#505).',
   },
   {
+    criterion: 'I6', backend: 'cursor', kind: 'scenario-unconstructible',
+    reason: 'Same wire as I1: Cursor admits no mid-turn agent input, so none awaits a follow-on run (#505).',
+  },
+  {
     criterion: 'I3', backend: 'cursor', kind: 'scenario-unconstructible',
     reason: 'Same wire as I1: a second Cursor ACP session/prompt cancels the running answer turn, so a conversation message cannot steer it. I4 pins its boundary delivery after that turn (hearsay-tools/cezarion#935).',
   },
