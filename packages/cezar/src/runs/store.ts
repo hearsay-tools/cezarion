@@ -2900,8 +2900,9 @@ export class RunStore extends EventEmitter {
    *  wake counters the delivery spends or clears, in the same commit, so a crash keeps both or
    *  neither; nothing is written when nothing is delivered. `resumed` writes the run `running` in
    *  the same commit (hearsay-tools/cezarion#1235): a crash after the provider's acknowledgement
-   *  then recovers a run that resumed, never a parked one that owes nothing. */
-  commitWaitDelivery(id: string, inputIds: readonly string[], counters: WakeCounters = {}, resumed = false): void {
+   *  then recovers a run that resumed, never a parked one that owes nothing. `stepId` names the
+   *  step that resumes with it: a `waiting` step reads `running` in that commit too. */
+  commitWaitDelivery(id: string, inputIds: readonly string[], counters: WakeCounters = {}, resumed = false, stepId?: string): void {
     const run = this.peek(id);
     if (!run) return;
     const ids = new Set(inputIds);
@@ -2910,6 +2911,7 @@ export class RunStore extends EventEmitter {
     const deliveredAt = new Date().toISOString();
     const retired = new Set(delivered.map((wait) => wait.id));
     this.commitIndex(new Map([[id, { ...run, ...counters, ...(resumed ? { status: 'running' as const, activity: undefined } : {}),
+      ...(resumed && stepId ? { steps: run.steps.map((step) => step.id === stepId && step.status === 'waiting' ? { ...step, status: 'running' as const } : step) } : {}),
       waits: nonEmpty((run.waits ?? []).filter((wait) => !retired.has(wait.id))),
       lastWaits: settleWaits(run.lastWaits, delivered.map((wait) => ({ ...wait, phase: 'delivered' as const, deliveredAt }))),
       ...(run.agentInputs ? { agentInputs: run.agentInputs.map((input) => ids.has(input.id) && !input.deliveredAt ? { ...input, deliveredAt } : input) } : {}),

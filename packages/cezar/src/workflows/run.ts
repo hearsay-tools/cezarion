@@ -5973,7 +5973,7 @@ export class RunManager {
             const timers = batch.filter(wait => wait.kind === 'timer');
             const spent = timers.length && flight.wakeReserved ? (this.store.getRun(runId)?.automaticWakes ?? 0) + 1 : undefined;
             // The delivery and the resume are one commit (hearsay-tools/cezarion#1235).
-            this.store.commitWaitDelivery(runId, resolvedIds, { waitDeliveryFailures: undefined, ...(spent === undefined ? {} : { automaticWakes: spent }) }, true);
+            this.store.commitWaitDelivery(runId, resolvedIds, { waitDeliveryFailures: undefined, ...(spent === undefined ? {} : { automaticWakes: spent }) }, true, state.currentStepId);
             if (spent !== undefined) {
               flight.wakeReserved = false;
               this.store.appendEvent(runId, { type: 'note', message: `automatic ${timers.some(isMonitoringTimer) ? 'monitoring' : 'timer'} wake-up (${spent}/${MAX_AUTO_CONTINUES})` });

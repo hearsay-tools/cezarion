@@ -292,6 +292,23 @@ describe('wait checkpoints', () => {
     }
   });
 
+  // hearsay-tools/cezarion#1235 (PR #1291 review): a resumed delivery moves the run and its
+  // waiting step together, so a resumed task never reads active with a waiting step.
+  it('commitWaitDelivery resumes the run and its waiting step in the same commit', () => {
+    const resolved = timerEntry({ phase: 'resolved', resolvedAt: iso(0) });
+    store.commitWait(id, resolved, input(resolved.id));
+    const stepId = 'main';
+    store.updateRun(id, { steps: [{ id: stepId, name: 'main', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0 }] });
+    store.commitParked(id, stepId);
+    const commits = vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex');
+    store.commitWaitDelivery(id, [resolved.id], {}, true, stepId);
+    expect(commits).toHaveBeenCalledTimes(1);
+    for (const run of [store.getRun(id)!, reopen()]) {
+      expect(run.status).toBe('running');
+      expect(run.steps.find(step => step.id === stepId)?.status).toBe('running');
+    }
+  });
+
   it('commitWakeCounters writes the counters durably, not on the debounced save', () => {
     store.commitWakeCounters(id, { automaticWakes: 3 });
     expect(readPersistedRuns(directory).find((record) => record.id === id)?.automaticWakes).toBe(3);
