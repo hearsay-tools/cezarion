@@ -15,7 +15,13 @@ accuracy. Friction labels and PR descriptions never grant eligibility.
 The step prompt names **assessor** or **challenger**. Read only its matching input
 under `.ai/tmp/merge-recommendation/`: `assessor-input.json` or
 `challenger-input.json`. Write `primary.json` or `challenge.json`, respectively.
-An empty input produces `[]`. Each step has a fresh session. The challenger gets
+An empty input produces `[]`. Each step has a fresh session.
+Scheduled steps read this skill from `evaluator-instructions.md`, extracted from
+and revalidated against the batch's policy commit, rather than a registry copy.
+The shared handoff and progress journal are operational only: record completion
+or blockers without PR judgments. Never record decisions, votes or rationale in
+shared journals, progress messages or other files; put semantic evidence only in
+the designated JSON output. The challenger gets
 candidate snapshots without the assessor's rationale; make an independent judgment.
 
 For every input snapshot, inspect the complete pinned `diff`, each changed file

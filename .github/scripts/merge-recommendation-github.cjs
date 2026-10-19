@@ -81,7 +81,7 @@ async function collectSnapshot({ gh, repository, number, defaultBranch, policyCo
   const prefix = `repos/${repository}`;
   const pr = await gh.api('GET', `${prefix}/pulls/${number}`);
   const s = { repository, number, policyVersion: VERSION, policyCommit, trusted, complete: false,
-    title: pr.title, body: pr.body || '', headSha: pr.head?.sha, baseSha: pr.base?.sha,
+    title: pr.title, body: pr.body || '', headSha: pr.head?.sha, baseSha: null,
     state: pr.merged_at ? 'merged' : pr.state, draft: pr.draft, sameRepository: pr.head?.repo?.full_name === repository,
     targetDefault: pr.base?.ref === defaultBranch, mergeable: pr.mergeable, mergeState: pr.mergeable_state,
     files: [], diff: '', requiredChecks: [], checks: [], openThreads: null, reviewDecision: 'UNKNOWN' };
@@ -91,6 +91,12 @@ async function collectSnapshot({ gh, repository, number, defaultBranch, policyCo
   }
   if (s.state === 'closed' || s.state === 'merged') return s;
   try {
+    const liveBase = async () => {
+      const ref = await gh.api('GET', `${prefix}/git/ref/heads/${encodeURIComponent(defaultBranch)}`);
+      if (!SHA.test(ref?.object?.sha || '')) throw new Error('Live target ref unavailable.');
+      return ref.object.sha;
+    };
+    s.baseSha = await liveBase();
     const { files, diff } = diffReader({ cwd, repository, baseSha: s.baseSha, headSha: s.headSha, fetch: true });
     s.files = files; s.diff = diff;
     const complete = files.length === pr.changed_files && files.every(f => Number.isSafeInteger(f.additions) && Number.isSafeInteger(f.deletions))
@@ -109,11 +115,23 @@ async function collectSnapshot({ gh, repository, number, defaultBranch, policyCo
       if (!Array.isArray(threads?.nodes) || threads.nodes.some(n => typeof n.isResolved !== 'boolean')) throw new Error('Review evidence incomplete.');
       open += threads.nodes.filter(n => !n.isResolved).length;
       s.reviewDecision = pull.reviewDecision;
-      if (threads.pageInfo?.hasNextPage === false) { s.openThreads = open; s.complete = complete; break; }
+      if (threads.pageInfo?.hasNextPage === false) { s.openThreads = open; break; }
       if (!threads.pageInfo?.endCursor || threads.pageInfo.endCursor === cursor) throw new Error('Review pagination incomplete.');
       cursor = threads.pageInfo.endCursor;
     }
-  } catch { s.error = 'Required GitHub or pinned Git evidence is unavailable.'; }
+    // PR metadata's base.sha is historical. Re-read the live target and PR only
+    // after all potentially slow evidence pages, immediately before returning.
+    const finalPr = await gh.api('GET', `${prefix}/pulls/${number}`);
+    const final = { headSha: finalPr.head?.sha, baseSha: await liveBase(),
+      state: finalPr.merged_at ? 'merged' : finalPr.state, draft: finalPr.draft,
+      sameRepository: finalPr.head?.repo?.full_name === repository,
+      targetDefault: finalPr.base?.ref === defaultBranch,
+      mergeable: finalPr.mergeable, mergeState: finalPr.mergeable_state };
+    if (Object.entries(final).some(([key, value]) => s[key] !== value)) {
+      Object.assign(s, final);
+      s.error = 'The PR revision or readiness changed during evidence collection.';
+    } else s.complete = complete && s.openThreads !== null;
+  } catch { s.complete = false; s.error = 'Required GitHub or pinned Git evidence is unavailable.'; }
   return s;
 }
 

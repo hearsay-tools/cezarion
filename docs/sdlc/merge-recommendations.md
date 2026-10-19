@@ -30,7 +30,10 @@ judgments for the exact repository, head, base, diff and policy commit.
 Both agents inspect the complete pinned diff and relevant surrounding code. They
 must name the existing source of intent and evidence for every file. Friction
 labels, PR text, claimed approvals and model confidence grant no eligibility.
-The independent challenger sees no assessor rationale. It only evaluates positive
+The independent challenger sees no assessor rationale. Scheduled evaluators read a
+copy of the skill extracted from the batch policy commit, revalidated before
+challenge preparation and publication. The shared handoff/progress journal carries
+only operational completion or blockers; judgments stay in the role-specific JSON. It only evaluates positive
 candidates; the final publisher recomputes the hard gates against fresh GitHub state.
 
 ## Scheduled execution
@@ -48,7 +51,9 @@ Each isolated task runs these steps:
    Previously valid positive semantic evidence can be reused for the same revision;
    all deterministic checks still run again. Deferred cases stay pending.
 3. Give positive candidates to a fresh challenger session, without the first rationale.
-4. Publish after another head/base and readiness check. Update an existing comment
+4. Publish after another head/base and readiness check. Resolve the live target
+   branch ref instead of historical PR base metadata, and re-read revisions and
+   readiness after all evidence pages. Update an existing comment
    instead of adding a comment on each run. Ignore markers written by other authors.
    Draft PRs receive no new comment, but an earlier ready verdict is revoked.
 
@@ -101,6 +106,10 @@ is treated as ground truth. There is no automatic promotion from this trial to m
 
 Local publishers share a SQLite mutex in the common Git directory; a crashed
 process releases it through the OS. It stores no application state. GitHub writes
-are not transactional: a failure after a comment succeeds may leave the summary
-behind. The next scan reuses the authored comment and reconciles the summary.
+are not transactional. The publisher first reserves new cohort identities in the
+summary; if that write fails, it posts no comments. A later failure can leave the
+summary behind, but the next scan can rediscover even a subsequently closed PR
+and recover its assessment from the authored comment. The final metadata read
+cannot make GitHub reads and comment writes atomic: every comment names the
+assessed revision, and a later scan invalidates any change after that read.
 An overlapping publisher exits; the next scheduled task retries normally.

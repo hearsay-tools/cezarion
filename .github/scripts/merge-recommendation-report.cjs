@@ -24,8 +24,15 @@ function parseSummary(body) {
   return value;
 }
 
+function cohortRecord(s, result) {
+  const reason = result.reason || result.rules?.filter(r => !r.passed).map(r => r.id).join(', ') || 'Both evaluators and all deterministic gates agree.';
+  return { number: s.number, head: s.headSha, base: s.baseSha, policy: VERSION,
+    decision: result.decision, reason: reason.slice(0, 160), state: s.state,
+    disagreement: result.disagreement === true };
+}
+
 function renderComment(s, result, summaryNumber) {
-  const record = { key: snapshotKey(s), decision: result.decision, assessor: result.assessor || null, challenger: result.challenger || null };
+  const record = { cohort: cohortRecord(s, result), key: snapshotKey(s), decision: result.decision, assessor: result.assessor || null, challenger: result.challenger || null };
   const lines = [COMMENT, '', `**Merge recommendation trial: ${LABELS[result.decision]}**`, '',
     result.reason ? escape(result.reason) : 'The deterministic criteria below determine this result.', '',
     `Head: \`${s.headSha || 'unknown'}\` · Base: \`${s.baseSha || 'unknown'}\``,
@@ -80,19 +87,33 @@ async function publishBatch({ gh, repository, summaryNumber, actor, snapshots, p
     return map;
   };
   const first = assess(primary), second = assess(challenge);
+  let reserved = false;
+  for (const s of snapshots) {
+    if (records.has(s.number) || s.draft || s.state !== 'open') continue;
+    records.set(s.number, cohortRecord(s, { decision: 'pending', reason: 'Publication not yet confirmed; the next scan will reconcile.' }));
+    reserved = true;
+  }
+  // Persist identities before any PR comment. A final-write failure followed by
+  // PR closure must still leave a discoverable cohort member for the next scan.
+  if (reserved) await gh.api('PATCH', `${prefix}/issues/${summaryNumber}`, {
+    body: renderSummary({ repository, records: [...records.values()], coverage }),
+  });
   for (const old of snapshots) {
     const comments = await gh.pages(`${prefix}/issues/${old.number}/comments`);
     const s = await refresh(old);
     const own = comments.filter(c => c.user?.id === actor.id && c.body?.startsWith(`${COMMENT}\n`)).sort((a, b) => b.id - a.id)[0];
     const previousRecord = records.get(s.number);
+    let previous = null;
+    try { if (own) previous = readComment(own.body); } catch { /* never reuse malformed evidence */ }
     if (['merged', 'closed'].includes(s.state) && previousRecord) {
-      records.set(s.number, { ...previousRecord, state: s.state, warnings: warnings[s.number] || previousRecord.warnings });
+      const recovered = previous?.cohort;
+      const record = recovered?.number === s.number && LABELS[recovered.decision]
+        ? { ...recovered, commentId: own.id } : previousRecord;
+      records.set(s.number, { ...record, state: s.state, warnings: warnings[s.number] || previousRecord.warnings });
       continue;
     }
     // Do not create noise on unfinished drafts; do revoke an earlier ready verdict.
     if (s.draft && !own) continue;
-    let previous = null;
-    try { if (own) previous = readComment(own.body); } catch { /* never reuse malformed evidence */ }
     const key = snapshotKey(s);
     const result = decide(s, first.get(key) || previous?.assessor, second.get(key) || previous?.challenger);
     if (s.headSha !== old.headSha || s.baseSha !== old.baseSha || s.policyCommit !== old.policyCommit) {
@@ -102,11 +123,8 @@ async function publishBatch({ gh, repository, summaryNumber, actor, snapshots, p
     let comment = own;
     if (!own) comment = await gh.api('POST', `${prefix}/issues/${s.number}/comments`, { body });
     else if (own.body !== body) comment = await gh.api('PATCH', `${prefix}/issues/comments/${own.id}`, { body });
-    const reason = result.reason || result.rules.filter(r => !r.passed).map(r => r.id).join(', ') || 'Both evaluators and all deterministic gates agree.';
     records.delete(s.number);
-    records.set(s.number, { number: s.number, head: s.headSha, base: s.baseSha, policy: VERSION,
-      decision: result.decision, reason: reason.slice(0, 160), state: s.state,
-      disagreement: result.disagreement === true, commentId: comment.id, warnings: warnings[s.number] || [] });
+    records.set(s.number, { ...cohortRecord(s, result), commentId: comment.id, warnings: warnings[s.number] || [] });
   }
   const body = renderSummary({ repository, records: [...records.values()], coverage });
   await gh.api('PATCH', `${prefix}/issues/${summaryNumber}`, { body });

@@ -58,7 +58,7 @@ test('ignores forged PR markers and refuses a summary owned by a different write
   const f = fixture();
   f.comments.push({ id: 99, user: { id: 666 }, body: renderComment(f.s, { decision: 'recommend', rules: [] }, 9) });
   await publishBatch({ ...f, repository: f.s.repository, summaryNumber: 9, snapshots: [f.s], primary: [], challenge: [], refresh: async () => f.s });
-  assert.equal(f.writes[0].method, 'POST');
+  assert.equal(f.writes.find(w => w.route.endsWith('/comments')).method, 'POST');
   const g = fixture(); g.issue.user = { id: 666 };
   await assert.rejects(publishBatch({ ...g, repository: g.s.repository, summaryNumber: 9, snapshots: [g.s], primary: [], challenge: [], refresh: async () => g.s }), /summary/i);
   assert.equal(g.writes.length, 0);
@@ -78,7 +78,7 @@ test('keeps comment publication durable after a summary failure so the next scan
   const f = fixture(), api = f.gh.api;
   let fail = true;
   f.gh.api = async (method, route, data) => {
-    if (fail && method === 'PATCH' && route.endsWith('/issues/9')) throw new Error('write failed');
+    if (fail && f.comments.length && method === 'PATCH' && route.endsWith('/issues/9')) throw new Error('write failed');
     return api(method, route, data);
   };
   const args = { ...f, repository: f.s.repository, summaryNumber: 9, snapshots: [f.s], primary: [assessment(f.s)], challenge: [assessment(f.s)], refresh: async () => f.s };
@@ -105,4 +105,23 @@ test('bounds the digest and reports a retained cohort without claiming accuracy 
   const result = parseSummary(body);
   assert.ok(result.records.length <= 100); assert.ok(Buffer.byteLength(body) < 60000);
   assert.match(body, /retained/i); assert.match(body, /not.*accuracy/i); assert.match(body, /more may exist/);
+});
+
+test('reserves new cohort identities before any PR comment so a close after partial publication is recoverable', async () => {
+  const f = fixture(), api = f.gh.api;
+  f.gh.api = async (method, route, data) => {
+    if (method === 'POST') assert.ok(parseSummary(f.issue.body).records.some(r => r.number === f.s.number), 'cohort identity must be durable before commenting');
+    if (method === 'PATCH' && route.endsWith('/issues/9') && f.comments.length) throw new Error('final summary write failed');
+    return api(method, route, data);
+  };
+  const args = { ...f, repository: f.s.repository, summaryNumber: 9, snapshots: [f.s], primary: [assessment(f.s)], challenge: [assessment(f.s)], refresh: async () => f.s };
+  await assert.rejects(publishBatch(args), /final summary write failed/);
+  const retained = parseSummary(f.issue.body).records;
+  assert.deepEqual(retained.map(r => r.number), [f.s.number]);
+  f.gh.api = api;
+  const closed = { ...f.s, state: 'merged' };
+  await publishBatch({ ...args, snapshots: retained.map(() => closed), primary: [], challenge: [], refresh: async () => closed });
+  assert.equal(parseSummary(f.issue.body).records[0].decision, 'recommend');
+  assert.equal(parseSummary(f.issue.body).records[0].state, 'merged');
+  assert.equal(f.comments.length, 1);
 });

@@ -31,7 +31,7 @@ test('collects rule provenance and review state, and rejects mismatched full dif
   const pr = { number: 1, title: 'Typo', body: '', state: 'open', draft: false, mergeable: true, mergeable_state: 'clean', additions: 1, deletions: 1, changed_files: 1,
     head: { sha: s.headSha, repo: { full_name: s.repository } }, base: { sha: s.baseSha, ref: 'main' } };
   const gh = {
-    api: async (_method, route) => { assert.match(route, /pulls\/1$/); return pr; },
+    api: async (_method, route) => { if (route.includes('/git/ref/')) return { object: { sha: s.baseSha } }; assert.match(route, /pulls\/1$/); return pr; },
     pages: async route => {
       if (route.includes('/rules/branches/')) return [{ type: 'required_status_checks', parameters: { required_status_checks: s.requiredChecks.map(c => ({ context: c.name, integration_id: c.appId })) } }];
       if (route.includes('/check-runs')) return s.checks.map(c => ({ id: c.id, name: c.name, head_sha: c.headSha, status: c.status, conclusion: c.conclusion, app: { id: c.appId } }));
@@ -79,4 +79,46 @@ test('every Git read in a pinned report uses the named attribute source, includi
   const calls = fs.readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
   assert.ok(calls.length >= 6);
   for (const args of calls) assert.equal(args[0], `--attr-source=${headSha}`, JSON.stringify(args));
+});
+
+function collectorFixture() {
+  const s = snapshot(), pr = { title: 'Typo', body: '', state: 'open', draft: false,
+    mergeable: true, mergeable_state: 'clean', additions: 1, deletions: 1, changed_files: 1,
+    head: { sha: s.headSha, repo: { full_name: s.repository } }, base: { sha: 'e'.repeat(40), ref: 'main' } };
+  let liveBase = s.baseSha;
+  const gh = {
+    api: async (_method, route) => route.includes('/git/ref/') ? { object: { sha: liveBase } } : structuredClone(pr),
+    pages: async route => route.includes('/rules/')
+      ? [{ type: 'required_status_checks', parameters: { required_status_checks: s.requiredChecks.map(c => ({ context: c.name, integration_id: c.appId })) } }]
+      : s.checks.map(c => ({ id: c.id, name: c.name, head_sha: c.headSha, status: c.status, conclusion: c.conclusion, app: { id: c.appId } })),
+    graphql: async () => ({ repository: { pullRequest: { reviewDecision: null, reviewThreads: { nodes: [], pageInfo: { hasNextPage: false } } } } }),
+  };
+  return { s, pr, gh, setBase: value => { liveBase = value; }, args: { gh, repository: s.repository, number: 1, defaultBranch: 'main', policyCommit: s.policyCommit, trusted: true,
+    diffReader: () => ({ files: s.files, diff: s.diff }) } };
+}
+
+test('pins the live target branch rather than GitHub stale pull-request base metadata', async () => {
+  const f = collectorFixture(); let readBase;
+  f.args.diffReader = args => { readBase = args.baseSha; return { files: f.s.files, diff: f.s.diff }; };
+  const actual = await collectSnapshot(f.args);
+  assert.equal(actual.baseSha, f.s.baseSha);
+  assert.equal(readBase, f.s.baseSha);
+  assert.equal(actual.complete, true);
+});
+
+test('invalidates evidence if the head, live base or draft state changes during collection', async () => {
+  for (const change of ['head', 'base', 'draft']) {
+    const f = collectorFixture(), pages = f.gh.pages;
+    f.gh.pages = async route => {
+      if (route.includes('/check-runs')) {
+        if (change === 'head') f.pr.head.sha = 'd'.repeat(40);
+        if (change === 'base') f.setBase('d'.repeat(40));
+        if (change === 'draft') f.pr.draft = true;
+      }
+      return pages(route);
+    };
+    const actual = await collectSnapshot(f.args);
+    assert.equal(actual.complete, false, change);
+    assert.match(actual.error, /changed/i);
+  }
 });

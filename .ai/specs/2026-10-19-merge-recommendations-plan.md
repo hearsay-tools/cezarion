@@ -76,3 +76,9 @@ restoring them (revision 15). Attribute-pinning and push-during-comment-paginati
 tests also observed red before their fixes. Nine live PR reports previewed with no
 GitHub PR writes; policy explicitly untrusted before installation. No full local
 suite run; 78 slow files were not current.
+
+Independent review corrections: five regression cases failed at Squeal revision 17;
+live-base and evidence-race cases passed at revision 18, committed-skill and shared
+journal contract at revision 19, partial-publication recovery at revision 21.
+All four focused suites are current and passing at revision 21. Paused automation
+revision 2 loads the pinned skill copy rather than the cockpit registry.

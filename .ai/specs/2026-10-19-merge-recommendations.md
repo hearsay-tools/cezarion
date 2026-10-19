@@ -52,3 +52,15 @@ Use Squeal for covered node:test files; do not run a full local suite. Pressure
 test the skill before and after authoring with governed cezar workers. Create a
 draft PR and leave CI as the full gate. Publish no recommendations on unrelated
 PRs before installation; demonstrate a read-only live snapshot and report preview.
+
+## Review corrections
+
+- Resolve the current target branch ref; GitHub PR `base.sha` can be historical.
+  Re-read head, live base and readiness after collecting all evidence pages.
+- Scheduled evaluators load the skill extracted from the pinned policy commit,
+  not the cockpit skill registry. Verify the copied instructions before challenge
+  preparation and publication. Keep shared journals operational and rationale-free.
+- Reserve new cohort identities in the summary before PR comments. Recover a
+  partially published assessment from its authored record even after PR closure.
+  GitHub has no atomic read-and-comment transaction; comments identify their exact
+  assessed revision, and later scans reconcile changes after the final read.
