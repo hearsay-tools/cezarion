@@ -74,7 +74,7 @@ test('the real workflow entrypoints turn a Jev classification into only the expe
     runtime_change: { type: 'noul', noul: 0.01 },
   } }) });
   const core = { info() {}, summary: { addRaw() { return this; }, async write() {} } };
-  const context = { repo: { owner: 'hearsay-tools', repo: 'cezarion' } };
+  const context = { repo: { owner: 'hearsay-tools', repo: 'cezarion' }, eventName: 'issues', payload: { issue: structuredClone(current) } };
   const fakeProcess = { env: { ISSUE_NUMBER: '12', TYPESAFE_API_KEY: 'test-only', FRICTION_OUTPUT: '/output/friction.json' } };
   const resolve = name => {
     if (name === 'node:fs') return { mkdirSync() {}, writeFileSync(_p, value) { artifact = value; }, readFileSync() { return artifact; } };
@@ -106,4 +106,53 @@ test('Jev failure produces an unavailable artifact so apply can revoke a previou
   await new AsyncFunction('require', 'github', 'context', 'core', 'process', step.with.script)(resolve, github, { repo: {} }, core, process);
   assert.equal(artifact.classification, null);
   assert.equal(artifact.issue.number, 12);
+});
+
+test('superseded issue events spend no Jev call and leave no classification to apply', async () => {
+  const w = workflow();
+  const step = w.jobs.classify.steps.find(s => s.uses?.startsWith('actions/github-script@'));
+  const evaluate = (expression, variables) => new Function(...Object.keys(variables),
+    `return (${expression.replace(/^\$\{\{([\s\S]*)\}\}$/, '$1')});`)(...Object.values(variables));
+  const current = { number: 12, title: 'Current title', body: 'Current body', state: 'open', labels: [{ name: 'friction' }] };
+  for (const { eventName = 'issues', snapshot = current, live = current, expectedCalls, expectedSkip = false } of [
+    { snapshot: { ...current, title: 'Earlier title' }, expectedCalls: 0, expectedSkip: true },
+    { snapshot: { ...current, body: 'Earlier body' }, expectedCalls: 0, expectedSkip: true },
+    { snapshot: { ...current, state: 'closed' }, expectedCalls: 0, expectedSkip: true },
+    { snapshot: { ...current, labels: [] }, expectedCalls: 0, expectedSkip: true },
+    { expectedCalls: 1 },
+    { eventName: 'workflow_dispatch', expectedCalls: 1 },
+    { snapshot: { ...current, title: 'Earlier title' }, live: { ...current, state: 'closed' }, expectedCalls: 0 },
+    { snapshot: { ...current, body: 'Earlier body' }, live: { ...current, labels: [] }, expectedCalls: 0 },
+  ]) {
+    let calls = 0;
+    let artifact;
+    const outputs = {};
+    const resolve = name => {
+      if (name === 'node:fs') return { mkdirSync() {}, writeFileSync(_p, value) { artifact = JSON.parse(value); } };
+      if (name === 'node:path') return path;
+      if (name.endsWith('/jev-friction-intake.cjs')) return { classify: async ({ issue }) => {
+        assert.deepEqual(issue, live);
+        calls++;
+        return { category: 'diagnostics', handling: 'automatic' };
+      } };
+      return require(path.resolve(__dirname, '../..', name));
+    };
+    const github = { rest: { issues: { get: async () => ({ data: structuredClone(live) }) } } };
+    const core = { info() {}, setOutput(name, value) { outputs[name] = value; }, summary: { addRaw() {}, async write() {} } };
+    const process = { env: { ISSUE_NUMBER: '12', FRICTION_OUTPUT: '/output/friction.json' } };
+    await new AsyncFunction('require', 'github', 'context', 'core', 'process', step.with.script)(
+      resolve, github, { repo: {}, eventName, payload: { issue: snapshot } }, core, process,
+    );
+    assert.equal(calls, expectedCalls, `${eventName}: ${snapshot?.title}/${snapshot?.body}`);
+    assert.equal(artifact === undefined, expectedSkip);
+    assert.equal(outputs.superseded === 'true', expectedSkip);
+    if (!expectedSkip && expectedCalls === 0) assert.equal(artifact.classification, null, 'closing and friction removal still revoke old routes');
+    const steps = { [step.id]: { outputs } };
+    const superseded = evaluate(w.jobs.classify.outputs?.superseded ?? 'undefined', { steps });
+    assert.equal(evaluate(w.jobs.apply.if, {
+      needs: { classify: { outputs: { superseded } } }, github: { event_name: eventName }, inputs: { dry_run: false },
+    }), !expectedSkip, 'superseded work must not start a label-writing job');
+    const upload = w.jobs.classify.steps.find(s => s.uses?.startsWith('actions/upload-artifact@'));
+    assert.equal(evaluate(upload.if ?? 'true', { steps }), !expectedSkip, 'superseded work has no artifact to upload');
+  }
 });

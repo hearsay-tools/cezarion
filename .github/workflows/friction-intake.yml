@@ -35,6 +35,8 @@ jobs:
     permissions:
       contents: read
       issues: read
+    outputs:
+      superseded: ${{ steps.classification.outputs.superseded }}
     steps:
       - name: Checkout classifier
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,6 +46,7 @@ jobs:
           persist-credentials: false
 
       - name: Classify friction with Jev
+        id: classification
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
@@ -60,6 +63,14 @@ jobs:
             if (!Number.isSafeInteger(number) || number <= 0) throw new Error('Invalid issue number.');
             const { data: issue } = await github.rest.issues.get({ ...context.repo, issue_number: number });
             const eligible = !issue.pull_request && issue.state === 'open' && issue.labels.some(label => label.name === 'friction');
+            const snapshot = context.payload?.issue;
+            if (eligible && context.eventName === 'issues' &&
+                (!snapshot || snapshot.title !== issue.title || (snapshot.body ?? '') !== (issue.body ?? '') ||
+                 snapshot.state !== issue.state || !snapshot.labels.some(label => label.name === 'friction'))) {
+              core.info('Superseded issue event; skip Jev and label application.');
+              core.setOutput('superseded', 'true');
+              return;
+            }
             let classification = null;
             if (eligible) {
               try {
@@ -82,6 +93,7 @@ jobs:
             await core.summary.write();
 
       - name: Upload classification
+        if: steps.classification.outputs.superseded != 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: friction-classification
@@ -91,7 +103,7 @@ jobs:
 
   apply:
     needs: classify
-    if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+    if: needs.classify.outputs.superseded != 'true' && (github.event_name != 'workflow_dispatch' || !inputs.dry_run)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

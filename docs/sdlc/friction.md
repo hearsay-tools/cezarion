@@ -78,6 +78,10 @@ Classification runs on friction issue opening, editing and reopening, and when
 `friction` is added. Closing an issue or removing `friction` clears managed labels
 without paying for Jev. Category/handling label changes do not invoke Jev again.
 Per-issue concurrency queues runs instead of interrupting label application.
+Before a paid call, an issue event's title, body, open state and friction provenance
+must still match the fetched issue. Superseded events skip Jev, artifact upload and
+the label-writing job; the latest eligible event handles the current report.
+Manual runs deliberately classify the current issue.
 
 After the workflow lands on the default branch, preview one issue with:
 
