@@ -1111,7 +1111,7 @@ the observation. Later successful settlement must leave that failed attempt inta
 Clean session closure while CI is pending still parks without failure. No runner
 exemptions or normalized-event injection.
 
-**U0–U19** (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234, hearsay-tools/cezarion#1260, hearsay-tools/cezarion#1235, with U2t, U2w, U3w, U5a, U5c, U5d, U6s, U7d, U7h, U7w, U9c, U9h, U9u, U9w, U14m and U16b) pin the
+**U0–U19** (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234, hearsay-tools/cezarion#1260, hearsay-tools/cezarion#1235, with U2c, U2t, U2w, U3w, U5a, U5c, U5d, U6s, U7d, U7h, U7w, U9c, U9h, U9u, U9w, U14m and U16b) pin the
 wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
 normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`, `cezar_ask`,
 `cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
@@ -1222,13 +1222,15 @@ with no wait, which gets the nudge, then the same question after the monitoring 
 the line's timer in place with no gate note. U15 nudges an autonomous run with the autonomous
 wording until the budget, then opens a `budget` human wait.
 
-Phase 3a (hearsay-tools/cezarion#1235) adds eight cells for worker waits, with the workers on the
+Phase 3a (hearsay-tools/cezarion#1235) adds nine cells for worker waits, with the workers on the
 Claude wire and the parent on each runner's native wire, and no exemptions. U2w opens a CI wait
 and a worker wait through `cezar_wait`: the worker settling wakes the agent with the CI wait
 still open and in the footer, the turn end re-parks on it, and the later CI result is delivered.
 U2t does the same with a timer: the timer wakes the agent with the worker wait still open and in
 the footer, the turn end re-parks on the same entry with its deadline, and the worker result is
-delivered later. U3w sends a worker progress message through the delegation service while the
+delivered later. U2c does the same with the CI wait resolving first: its observation wakes the
+agent with the worker wait still open and in the footer, the turn end re-parks on that entry, and
+the worker result is delivered later. U3w sends a worker progress message through the delegation service while the
 parent is parked on a worker wait: it wakes the parent with the wait in the footer, the wait
 stays open with its deadline, and only the worker's own settlement resolves it, once. U7w opens
 one worker wait with `cez worker wait` and another with `cezar_wait`: both are entries of the

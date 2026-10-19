@@ -40,6 +40,7 @@ export const WAIT_CRITERIA = [
   // hearsay-tools/cezarion#1235 phase 3a: worker waits.
   { id: 'U2w', scenario: 'baseline', name: 'ci and worker open: the worker resolving wakes the agent with ci still open and in the footer, and the later ci result is delivered' },
   { id: 'U2t', scenario: 'baseline', name: 'timer and worker open: the timer resolving wakes the agent with the worker wait still open and in the footer, and the later worker result is delivered' },
+  { id: 'U2c', scenario: 'baseline', name: 'ci and worker open: the ci result wakes the agent with the worker wait still open and in the footer, and the later worker result is delivered' },
   { id: 'U3w', scenario: 'baseline', name: 'a worker message during a worker wait wakes the parent and the worker wait stays open' },
   { id: 'U7w', scenario: 'baseline', name: 'cez worker wait and cezar_wait kind worker land in the same wait list' },
   { id: 'U9w', scenario: 'provider-error', name: 'provider failure and clean close with a worker wait open leave the run recoverable and the next resolution delivers' },

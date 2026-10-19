@@ -192,7 +192,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U19']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U19']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -1207,6 +1207,27 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       fixtureUpdateRun(w.id, { status: 'done' });
       await until(() => settled(p.id, workers.id)?.phase === 'delivered' && prompted(runner, workerWake(workers)).length > 0);
       expect(prompted(runner, workerWake(workers)).at(-1)).not.toContain('Still open');
+      await until(() => store.getRun(p.id)?.status === 'waiting' && !agentWaits(p.id).length);
+    });
+
+    it(`${runner} U2c ci and worker open: the ci result wakes the agent with the worker wait still open and in the footer, and the later worker result is delivered`, async () => {
+      const external = github();
+      const { p, w } = await parentWithWorker(runner);
+      const opened = `${toolCall('cezar_wait', { kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 })} ${toolCall('cezar_wait', { kind: 'ci', pr })}`;
+      await parentTurn(p.id, opened, () => waitOfKind(p.id, 'ci')?.phase === 'open' && workerWaits(p.id)[0]?.phase === 'open');
+      const ci = waitOfKind(p.id, 'ci')!, workers = workerWaits(p.id)[0]!;
+      const turns = turnEnds(p.id);
+      external.settle();
+      await until(() => settled(p.id, ci.id)?.phase === 'delivered' && prompted(runner, `CI wait observation ${ci.id}`).length > 0);
+      expect(prompted(runner, `CI wait observation ${ci.id}`).at(-1)).toContain(`Still open: worker wait ${workers.id} on 1 worker`);
+      await until(() => turnEnds(p.id) > turns && parkedOn(p.id, workerWaits(p.id)[0]));
+      // The turn end re-parks on the same entry: nothing re-registered it, nothing delivered it.
+      expect(agentWaits(p.id)).toEqual([expect.objectContaining({ id: workers.id, phase: 'open', deadline: workers.deadline })]);
+      expect(inputsFor(p.id, workers.id)).toEqual([]);
+      fixtureUpdateRun(w.id, { status: 'done' });
+      await until(() => settled(p.id, workers.id)?.phase === 'delivered' && prompted(runner, workerWake(workers)).length > 0);
+      expect(prompted(runner, workerWake(workers)).at(-1)).not.toContain('Still open');
+      expect(inputsFor(p.id, ci.id)).toHaveLength(1);
       await until(() => store.getRun(p.id)?.status === 'waiting' && !agentWaits(p.id).length);
     });
 
