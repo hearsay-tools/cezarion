@@ -1,8 +1,5 @@
-import {
-  ATTENTION_RANK,
-  deriveAttention,
-  type RunSummary,
-} from '@open-mercato/cezar-api-client'
+import { ATTENTION_RANK, deriveAttention } from '@open-mercato/cezar-api-client/contract/attention'
+import type { RunSummary } from '@open-mercato/cezar-api-client'
 
 /**
  * The one canonical attention function (spec, "Design system" → status grammar).
@@ -23,7 +20,7 @@ export {
   type AttentionInput,
   type AttentionShape,
   type AttentionTone,
-} from '@open-mercato/cezar-api-client'
+} from '@open-mercato/cezar-api-client/contract/attention'
 
 /**
  * True when a run is asking for a human: a permission prompt, an error, or a waiting/review gate.

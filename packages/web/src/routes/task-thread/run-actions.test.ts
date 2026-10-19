@@ -2,7 +2,8 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { runnerSchema, type ApiRun, type RunRecord, type RunStatus, type Runner, type StepState } from '@open-mercato/cezar-api-client'
+import { runnerSchema, type Runner } from '@open-mercato/cezar-api-client/contract/health'
+import type { ApiRun, RunRecord, RunStatus, StepState } from '@open-mercato/cezar-api-client'
 
 import { isUnread } from '@/lib/read-state'
 

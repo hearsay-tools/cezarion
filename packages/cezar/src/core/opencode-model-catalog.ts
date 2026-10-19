@@ -1,5 +1,5 @@
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { effortLevelSchema, type EffortLevel } from '@open-mercato/cezar-contract';
+import { effortLevelSchema, type EffortLevel } from '@open-mercato/cezar-contract/effort';
 import { trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
 import type { ModelOption } from './runner-model-catalog.ts';

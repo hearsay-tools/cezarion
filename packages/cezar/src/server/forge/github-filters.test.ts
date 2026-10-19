@@ -5,7 +5,7 @@ vi.mock('node:child_process', async (original) => ({
   execFile: (...args: unknown[]) => run(...args),
 }));
 import { evictGithubProjectCaches, fetchGithub, fetchGithubProjects } from './github.ts';
-import { githubDataSchema } from '@open-mercato/cezar-contract';
+import { githubDataSchema } from '@open-mercato/cezar-contract/github';
 const pageInfo = { hasNextPage: false, endCursor: null };
 const board = { id: 'P1', title: 'Delivery', url: 'https://github.com/users/o/projects/1' };
 function mockGh(projectsFail = false, viewerFail = false) {

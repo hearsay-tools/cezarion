@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { setApiScope } from '@open-mercato/cezar-api-client'
+import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { ApiError, decidePermission } from './client'
 afterEach(() => { vi.unstubAllGlobals(); setApiScope(null) })
 

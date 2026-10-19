@@ -5,7 +5,7 @@ import { createQueryClient } from '@/api/query-client'
 import { ArchiveOnMergeField, TasksSection } from './archive-on-merge-field'
 import { useConfig, useWorkspaceConfig } from '@/api/queries'
 import { putConfig, putWorkspaceConfig } from '@/api/client'
-import { setApiScope } from '@open-mercato/cezar-api-client'
+import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { queryKeys } from '@/api/queries'
 
 vi.mock('@/api/queries', async importOriginal => ({ ...await importOriginal<object>(), useConfig: vi.fn(), useWorkspaceConfig: vi.fn() }))

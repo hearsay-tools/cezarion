@@ -1,7 +1,7 @@
 import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { execFileSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { parseEffort } from '@open-mercato/cezar-contract';
+import { parseEffort } from '@open-mercato/cezar-contract/effort';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { parseAskMarker } from './ask.ts';

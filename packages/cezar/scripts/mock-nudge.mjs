@@ -1,0 +1,32 @@
+// Cezar's no-wait nudge (hearsay-tools/cezarion#1234). Every native mock answers it the way an agent
+// should, by rewriting it into the mocks' own scenario prompts after the prompt is recorded: a
+// session with cezar tools calls cezar_ask with a card (`mock:cezar-tool`), and one taught the
+// markers ends with the ask line. CEZ_MOCK_NUDGE_REPLY=plain answers in plain text instead, so a
+// test can reach the no-wait fallback.
+import { FINAL_MESSAGE_NUDGE_PREFIX as NUDGE, silentTailOpened } from './mock-silent-tail.mjs';
+
+export const NO_WAIT_NUDGE_PREFIX = NUDGE;
+const QUESTIONS = [{ header: 'Next step', question: 'How should I continue?', options: [{ label: 'Keep going' }, { label: 'Stop here' }] }];
+
+const messages = (texts) => `mock:turn-messages:${Buffer.from(JSON.stringify(texts)).toString('base64')}`;
+const base64url = (text) => Buffer.from(text).toString('base64url');
+
+/** A session that opened a silent-tail or tool-tail scenario answers the nudge in that scenario. */
+export function silentNudge(prompt) {
+  return typeof prompt === 'string' && prompt.includes(NUDGE) && silentTailOpened();
+}
+
+export function answerNudge(prompt) {
+  if (typeof prompt !== 'string' || !prompt.includes(NUDGE) || silentTailOpened()) return prompt;
+  if (process.env.CEZ_MOCK_NUDGE_REPLY === 'plain') return messages(['Nothing more to add.']);
+  if (prompt.includes('CEZ:ASK')) return messages([`I need your call on the next step.\n\nCEZ:ASK ${JSON.stringify({ questions: QUESTIONS })}`]);
+  return `mock:cezar-tool cezar_ask ${base64url(JSON.stringify({ questions: QUESTIONS }))} mock:then ${base64url('I asked how to continue.')}`;
+}
+
+/** OpenCode's prompt body: its text parts, joined, are the prompt. */
+export function answerNudgeBody(body) {
+  if (!body || !body.includes(NUDGE) || silentTailOpened()) return body;
+  const parsed = JSON.parse(body);
+  const text = (parsed.parts ?? []).map((part) => part.text ?? '').join('\n');
+  return JSON.stringify({ ...parsed, parts: [{ type: 'text', text: answerNudge(text) }] });
+}

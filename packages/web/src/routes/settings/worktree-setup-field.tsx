@@ -10,7 +10,7 @@ import {
   WORKTREE_SETUP_MAX_TIMEOUT_SECONDS,
   type ConfigResponse,
   type SetConfigInput,
-} from '@open-mercato/cezar-api-client'
+} from '@open-mercato/cezar-api-client/contract/workspace'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toaster'
 import { SettingsField } from './settings-field'

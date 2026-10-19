@@ -1,4 +1,5 @@
-import { pendingHumanAsk, type RunEvent } from '@open-mercato/cezar-contract';
+import { HUMAN_ASK_EVENT_TYPES, pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
+import type { RunEvent } from '@open-mercato/cezar-contract';
 import { readHistoryText } from './history-file.ts';
 
 type AttentionSummary = { id: string; hasPendingHumanAsk?: boolean };
@@ -19,7 +20,7 @@ export function refreshHumanAskSummary(run: AttentionSummary, dataDir: string): 
         try {
           const event: unknown = JSON.parse(line);
           if (event !== null && typeof event === 'object' && 'type' in event &&
-            (event.type === 'ask.requested' || event.type === 'human-input-delivered')) events.push(event as RunEvent);
+            typeof event.type === 'string' && HUMAN_ASK_EVENT_TYPES.has(event.type)) events.push(event as RunEvent);
         } catch { /* Match readEvents: a damaged line does not hide later valid receipts. */ }
       }
       next = pendingHumanAsk(events) !== undefined;

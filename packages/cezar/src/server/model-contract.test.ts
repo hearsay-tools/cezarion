@@ -1,4 +1,4 @@
-import { runnerModelOptionSchema } from '@open-mercato/cezar-contract';
+import { runnerModelOptionSchema } from '@open-mercato/cezar-contract/workspace';
 import { describe, expect, it } from 'vitest';
 
 describe('runnerModelOptionSchema effort metadata (#55)', () => {

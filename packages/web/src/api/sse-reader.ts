@@ -1,4 +1,4 @@
-import { LIVE_BYTE_LIMIT } from '@open-mercato/cezar-api-client'
+import { LIVE_BYTE_LIMIT } from '@open-mercato/cezar-api-client/contract/live-limits'
 
 /** Fetch-based SSE, usable in SharedWorker and with POST subscription bodies. */
 export interface SseFrame { event: string; data: string; id: string }

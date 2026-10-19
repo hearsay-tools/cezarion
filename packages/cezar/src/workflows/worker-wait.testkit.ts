@@ -5,7 +5,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, onTestFinished, vi } from 'vitest';
-import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract';
+import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
@@ -53,13 +53,20 @@ export function track() {
   const real = internals.recordTurnEnd.bind(manager);
   internals.recordTurnEnd = (...args) => { const result = real(...args); bookkeeping.push(result); return result; };
 }
-export function useWorkerWaitFixture(options: { processScope?: false } = {}): void {
+/**
+ * `nudgeReply` is how the native mocks answer Cezar's no-wait nudge (hearsay-tools/cezarion#1234).
+ * By default they ignore it in plain text: a run then reaches Cezar's no-wait human wait (the gate
+ * a markerless question raised before) and a worker its plain park, so a suite about delegation or
+ * CI decides what it tests. `card` keeps the mocks' own answer, a `cezar_ask` card.
+ */
+export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply?: 'card' | 'plain' } = {}): void {
   beforeEach(() => {
     // Native mock children belong to this fixture; specialized holder tests supply their own scope.
     if (options.processScope !== false) onTestFinished(scopeFixtureProcesses());
     saved = { ...process.env }; began = performance.now(); checkpoints = []; failureState = undefined; checkpoint('setup');
     onTestFailed(() => console.error('WORKER_WAIT_FAILURE_STATE', JSON.stringify(failureState ?? captureState())));
     process.env.CEZ_DRY_RUN = '1'; process.env.CEZ_AUTONAME = '0';
+    if (options.nudgeReply === 'card') delete process.env.CEZ_MOCK_NUDGE_REPLY; else process.env.CEZ_MOCK_NUDGE_REPLY = 'plain';
     root = mkdtempSync(join(tmpdir(), 'cez-worker-wait-'));
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
     execFileSync('git', ['config', 'gc.auto', '0'], { cwd: root });

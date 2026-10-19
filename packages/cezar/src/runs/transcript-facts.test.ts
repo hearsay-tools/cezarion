@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { brotliCompressSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { advancePendingHumanAsk, pendingHumanAsk, type RunEvent } from '@open-mercato/cezar-contract';
+import { advancePendingHumanAsk, pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
+import type { RunEvent } from '@open-mercato/cezar-contract';
 import { historyPaths } from './history-file.ts';
 import { emptyFacts, foldEvent, foldText, PROSE_HUMAN_GATE, TranscriptFactsIndex, workerOutcomeKey } from './transcript-facts.ts';
 import { countTranscriptReads, restoreTranscriptReads } from './transcript-reads.testkit.ts';
@@ -65,6 +66,24 @@ describe('transcript facts fold', () => {
     expect(facts.pendingGateSeq).toBe(gate.seq);
     expect(facts.pendingAsk).toBeUndefined();
     expect(foldEvent(facts, ev('human-input-delivered', { askSeq: gate.seq }))).toBe(true);
+    expect(facts.pendingGateSeq).toBeUndefined();
+  });
+
+  // hearsay-tools/cezarion#1260: an accepted Finish closes the question without answering it.
+  it('retires the pending ask and gate when Finish closes that question, and only that one', () => {
+    const facts = emptyFacts();
+    const asked = ask();
+    foldEvent(facts, asked);
+    expect(foldEvent(facts, ev('human-ask-closed', { askSeq: asked.seq - 1, reason: 'finish' }))).toBe(false);
+    expect(facts.pendingAsk?.seq).toBe(asked.seq);
+    const closed = ev('human-ask-closed', { askSeq: asked.seq, reason: 'finish' });
+    expect(foldEvent(facts, closed)).toBe(true);
+    expect(facts.pendingAsk).toBeUndefined();
+    expect(facts.pendingGateSeq).toBeUndefined();
+    expect(pendingHumanAsk([asked, closed])).toBeUndefined();
+    const gate = ev('note', { code: PROSE_HUMAN_GATE, message: 'need a human' });
+    foldEvent(facts, gate);
+    expect(foldEvent(facts, ev('human-ask-closed', { askSeq: gate.seq, reason: 'finish' }))).toBe(true);
     expect(facts.pendingGateSeq).toBeUndefined();
   });
 

@@ -5,7 +5,7 @@ import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import fs, { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { delegationStateSchema, workerSpawnRequestSchema } from '@open-mercato/cezar-contract';
+import { delegationStateSchema, workerSpawnRequestSchema } from '@open-mercato/cezar-contract/delegation';
 import { DelegationPolicyError } from './policy.ts';
 import { workerWorkflowHash } from './execution-identity.ts';
 import { QUICK_TASK_WORKFLOW, skillTaskSteps } from '../workflows/types.ts';

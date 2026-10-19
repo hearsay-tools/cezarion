@@ -154,7 +154,7 @@ export const WORKFLOW_ASK_CRITERIA = [
   { id: 'Q6', scenario: 'ask-snapshot', name: 'cancel leaves later steps pending' },
   { id: 'Q7', scenario: 'ask-snapshot', name: 'Finish stops at the parked step on fresh and Continue sessions' },
   { id: 'Q8', scenario: 'ask-snapshot', name: 'an authored timeout fails without running later steps' },
-  { id: 'Q9', scenario: 'ask-snapshot', name: 'autonomous intermediate asks use the bounded override before the tail' },
+  { id: 'Q9', scenario: 'ask-snapshot', name: 'autonomous intermediate ask lines are not registered before the tail' },
   { id: 'Q10', scenario: 'ask-snapshot', name: 'an unanswered clean session close stays resumable without success' },
 ] as const;
 
@@ -193,16 +193,16 @@ export const FOLLOWUP_CRITERIA = [
 export const AUTONOMOUS_CRITERIA = [
   { id: 'A1', scenario: 'autonomous', name: 'nudges fresh markerless turns to completion' },
   { id: 'A2', scenario: 'autonomous', name: 'hydrates autonomous Continue sessions' },
-  { id: 'A3', scenario: 'ask-snapshot', name: 'records overridden portable questions on fresh turns' },
-  { id: 'A4', scenario: 'ask-snapshot', name: 'records overridden portable questions on Continue' },
+  { id: 'A3', scenario: 'ask-snapshot', name: 'records an unregistered ask line on fresh turns' },
+  { id: 'A4', scenario: 'ask-snapshot', name: 'records an unregistered ask line on Continue' },
   { id: 'A5', scenario: 'autonomous-cap', name: 'parks at the cap with an explicit note' },
   { id: 'A6', scenario: 'autonomous', name: 'keeps non-autonomous parking reachable' },
   { id: 'A7', scenario: 'split-text', name: 'nudges monitoring without a false waiting heartbeat' },
   { id: 'A8', scenario: 'done', name: 'honors DONE without a nudge' },
   { id: 'A9', scenario: 'ask', name: 'preserves native mid-turn questions' },
-  { id: 'A10', scenario: 'ask-snapshot', name: 'never overrides a persisted unanswered question' },
-  { id: 'A11', scenario: 'autonomous-ask-cap', name: 'continues after a portable override and delayed readiness' },
-  { id: 'A12', scenario: 'autonomous-ask-cap', name: 'continues a resumed portable override after delayed readiness' },
+  { id: 'A10', scenario: 'ask-snapshot', name: 'never continues past a persisted unanswered question' },
+  { id: 'A11', scenario: 'autonomous-ask-cap', name: 'continues after an unregistered ask line and delayed readiness' },
+  { id: 'A12', scenario: 'autonomous-ask-cap', name: 'continues a resumed unregistered ask line after delayed readiness' },
   { id: 'A13', scenario: 'autonomous-readiness-idle', name: 'settles a root readiness timeout after process exit' },
   { id: 'A14', scenario: 'autonomous-readiness-idle', name: 'settles a continued root readiness timeout after process exit' },
 ] as const;
@@ -213,8 +213,8 @@ export const FINAL_MESSAGE_CRITERIA = [
   { id: 'F2', scenario: 'silent-tail-again', name: 'parks waiting after one still-silent nudge' },
   { id: 'F3', scenario: 'silent-tail-again', name: 'never completes from reasoning that names CEZ:DONE' },
   { id: 'F4', scenario: 'tool-tail', name: 'nudges a markerless message-then-tool tail once' },
-  { id: 'F5', scenario: 'done', name: 'honors DONE without a final-message nudge' },
-  { id: 'F6', scenario: 'tool-tail', name: 'keeps an autonomous silent tail running without a final-message nudge' },
+  { id: 'F5', scenario: 'done', name: 'honors DONE without a nudge' },
+  { id: 'F6', scenario: 'tool-tail', name: 'keeps an autonomous silent tail running without the no-wait nudge' },
   { id: 'F7', scenario: 'silent-tail-ack-delay', name: 'nudges a silent tail after a delayed ACK' },
   { id: 'F8', scenario: 'silent-tail-no-reply', name: 'parks waiting when a nudge is ACKed without a turn' },
   { id: 'F9', scenario: 'silent-tail-late-reply', name: 'resumes when a nudge reply arrives after the bound' },
@@ -768,6 +768,12 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'U7', backend, kind: 'capability-absent' as const,
     reason: 'native scheduler tool exists only on the Claude wire',
   })),
+  // U7h (hearsay-tools/cezarion#1234): the ask scenario on these wires prints the portable ask
+  // line, so its human wait opens through the ask-line alias; the cell asserts that instead.
+  ...(['claude', 'pi', 'cursor', 'omp'] as const).map(backend => ({
+    criterion: 'U7h', backend, kind: 'capability-absent' as const,
+    reason: 'native ask arrives as the portable marker on this wire',
+  })),
   // U12/U13: an agent-input acknowledgement the provider can delay or reject.
   {
     criterion: 'U12', backend: 'claude', kind: 'capability-absent',
@@ -966,12 +972,16 @@ export async function driveRun(
     mockBin?: string;
   } = {},
 ): Promise<RunObservation> {
-  const { beforeStart, during, env, mockBin, worktree, ...runOptions } = options;
+  const { beforeStart, during, env: extraEnv, mockBin, worktree, ...runOptions } = options;
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
   const savedDry = process.env.CEZ_DRY_RUN;
   const savedAutoName = process.env.CEZ_AUTONAME;
-  const savedEnv = Object.keys(env ?? {}).map(name => [name, process.env[name]] as const);
+  // The mock answers Cezar's no-wait nudge in plain text (hearsay-tools/cezarion#1234), so a row
+  // that ends a turn with no wait reaches Cezar's own wait rather than a question the mock made
+  // up. `options.env` may opt back in to the card.
+  const env = { CEZ_MOCK_NUDGE_REPLY: 'plain', ...extraEnv };
+  const savedEnv = Object.keys(env).map(name => [name, process.env[name]] as const);
   Object.assign(process.env, env);
   process.env.CEZ_AUTONAME = '0';
   process.env[adapter.binEnv] = mockBin ?? adapter.mockBin;
@@ -1105,8 +1115,11 @@ export async function withOwnedInputRun(
   for (const extra of options.extraBackends ?? []) process.env[HARNESS_ADAPTERS[extra].binEnv] = HARNESS_ADAPTERS[extra].mockBin;
   const savedDry = process.env.CEZ_DRY_RUN;
   const savedAutoName = process.env.CEZ_AUTONAME;
-  const savedEnv = Object.keys(options.env ?? {}).map(name => [name, process.env[name]] as const);
-  Object.assign(process.env, options.env);
+  // The worker ignores Cezar's no-wait nudge (hearsay-tools/cezarion#1234) and reaches its plain
+  // park, so input delivery is what these fixtures decide. `options.env` may opt back in.
+  const env = { CEZ_MOCK_NUDGE_REPLY: 'plain', ...options.env };
+  const savedEnv = Object.keys(env).map(name => [name, process.env[name]] as const);
+  Object.assign(process.env, env);
   // Naming is a separate auxiliary invocation, not part of input delivery.
   process.env.CEZ_AUTONAME = '0';
   process.env[adapter.binEnv] = options.mockBin ?? adapter.mockBin;

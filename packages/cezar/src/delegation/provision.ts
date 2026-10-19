@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { workerOperationSchema } from '@open-mercato/cezar-contract';
+import { workerOperationSchema } from '@open-mercato/cezar-contract/delegation';
 import type { RunStore } from '../runs/store.ts';
 import { CredentialRegistry } from './credentials.ts';
 import { DelegationService, delegationEnabled, type DelegationProject } from './service.ts';
@@ -55,7 +55,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         `You are an owned cezar worker. Your parent run ID is ${run.delegation.parentRunId}.`,
         conversationGuidance,
         `You cannot delegate, control peers, merge automatically, or accept your own review.`,
-        `Follow your assigned task and selected input context. Your questions, native or CEZ:ASK, go to your parent, which answers or asks the human; do not wait for a human.`,
+        `Follow your assigned task and selected input context. Your questions — cezar_ask, or a native question — go to your parent, which answers or asks the human; do not wait for a human.`,
         `Native workers are not tracked by cezar: do not spawn them.`,
         `Per-run controls suppress verified native entry points only; custom extensions and same-user unrestricted shell are not hard isolation.`,
         `Commit reviewed work before your parent deliberately integrates it; report the summary, commits, tests and remaining concerns.`,
@@ -70,7 +70,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         `Discovery lists host default-account runner status, enablement, model IDs and advertised per-model effortLevels; absent effort metadata means unknown. It uses your controller automatically.`,
         `A fresh nonempty default-account catalog rejects unknown explicit default-account model pins before creating a worker and reports available models and alternative runners; unavailable, empty or stale discovery does not invent choices. Inherited defaults and accepted retries stay unchanged.`,
         conversationGuidance,
-        `Worker questions arrive as requests carrying a question; answer with worker reply <worker-id> '<answer>' --id <new-message-UUID> --request-id <question-id>, one '<header>: <option>' line per question, which the worker reads verbatim as its answer. If you cannot decide, ask the human with your own question, then reply. Progress and follow-ups never answer it, and you cannot finish while it is unanswered.`,
+        `Worker questions arrive as requests carrying a question; answer with worker reply <worker-id> '<answer>' --id <new-message-UUID> --request-id <question-id>, one '<header>: <answer>' line per question (an option's label, or your own words for a question without options), which the worker reads verbatim as its answer. If you cannot decide, ask the human with your own question, then reply. Progress and follow-ups never answer it, and you cannot finish while it is unanswered.`,
         `Use ${invocation} spawn --baseline parent-head --request-id <UUID> '<task>' (or an explicit committed ref).`,
         `Reuse the request ID only for the exact same task/baseline/context/runner/model/effort/workflow/skill on a retry.`,
         `Optional spawn flags: --workflow <name> or --skill <name> (mutually exclusive), --context '<selected text>' or --context-file <local-UTF-8-file> (mutually exclusive), --attach <path> (repeatable; copies a git-ignored file from your worktree into the worker's worktree at the same relative path before it starts; tracked or unignored files and .gitignore are refused, commit those instead), --runner <claude|codex|opencode|pi|cursor|omp>, --model <model>, --effort <low|medium|high|xhigh|max>.`,

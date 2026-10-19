@@ -26,10 +26,12 @@ import {
   agentAccountRouteId,
   type AgentProfile,
   type AgentProfilesResponse,
-  type BackendCheck,
-  type ProviderId,
-  type Runner,
-  type SetWorkspaceConfigInput,
+} from '@open-mercato/cezar-api-client/contract/agent-profiles'
+import type {
+  BackendCheck,
+  ProviderId,
+  Runner,
+  SetWorkspaceConfigInput,
 } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import {

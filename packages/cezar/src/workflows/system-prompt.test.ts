@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { HANDOFF_INSTRUCTIONS as BASE_HANDOFF, HANDOFF_ONLY_INSTRUCTIONS as BASE_HANDOFF_ONLY } from '../handoff.ts';
+import { HANDOFF_INSTRUCTIONS as BASE_HANDOFF, HANDOFF_ONLY_INSTRUCTIONS as BASE_HANDOFF_ONLY, handoffInstructions } from '../handoff.ts';
 import { artifactInstructions } from '../artifacts/lifecycle.ts';
 import { RunStore } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -22,6 +22,9 @@ import {
 // full prompt assertions below must still pin the unchanged handoff contract.
 const HANDOFF_INSTRUCTIONS = composeSystemPrompt(artifactInstructions('available'), BASE_HANDOFF);
 const HANDOFF_ONLY_INSTRUCTIONS = composeSystemPrompt(artifactInstructions('available'), BASE_HANDOFF_ONLY);
+// hearsay-tools/cezarion#1234: the sessions below have cezar's tools, so they are taught the tools.
+const SESSION_HANDOFF = composeSystemPrompt(artifactInstructions('available'), handoffInstructions({ tools: true, followups: true }));
+const SESSION_HANDOFF_ONLY = composeSystemPrompt(artifactInstructions('available'), handoffInstructions({ tools: true, followups: false }));
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 
@@ -227,7 +230,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
     expect(record?.systemPrompt).toBe(CONFIG_PROMPT);
     const prompt = capturedSystemPrompt();
     // Composition: extra prompt first (no skill on this step), contract last.
-    expect(prompt).toBe(composeSystemPrompt(CONFIG_PROMPT, HANDOFF_INSTRUCTIONS));
+    expect(prompt).toBe(composeSystemPrompt(CONFIG_PROMPT, SESSION_HANDOFF));
   }, 30_000);
 
 
@@ -376,7 +379,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
     const record = store.getRun(id);
     expect(record?.systemPrompt).toBe(OVERRIDE_PROMPT);
     const prompt = capturedSystemPrompt();
-    expect(prompt).toBe(composeSystemPrompt(OVERRIDE_PROMPT, HANDOFF_INSTRUCTIONS));
+    expect(prompt).toBe(composeSystemPrompt(OVERRIDE_PROMPT, SESSION_HANDOFF));
     expect(prompt).not.toContain(CONFIG_PROMPT);
   }, 30_000);
 
@@ -409,7 +412,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
       source: 'ai',
     });
     expect(capturedSystemPrompt()).toBe(
-      composeSystemPrompt(skillPrompt, CONFIG_PROMPT, HANDOFF_INSTRUCTIONS),
+      composeSystemPrompt(skillPrompt, CONFIG_PROMPT, SESSION_HANDOFF),
     );
 
     // The mock writes the actual first user message it received into the run
@@ -440,7 +443,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
     const id = await runToEnd({ task: 'do the thing quietly', generateFollowups: false });
     const record = store.getRun(id);
     expect(record?.generateFollowups).toBe(false);
-    expect(capturedSystemPrompt()).toBe(composeSystemPrompt(CONFIG_PROMPT, HANDOFF_ONLY_INSTRUCTIONS));
+    expect(capturedSystemPrompt()).toBe(composeSystemPrompt(CONFIG_PROMPT, SESSION_HANDOFF_ONLY));
     expect(capturedSystemPrompt()).not.toContain('CEZ_TODOS_FILE');
     expect(existsSync(todosFile)).toBe(false);
     // The opt-out must survive an inherited CEZ_TODOS_FILE (nested cezar):
@@ -459,7 +462,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     expect(capturedSystemPrompt(1)).toBe(
-      composeSystemPrompt(CONFIG_PROMPT, HANDOFF_ONLY_INSTRUCTIONS),
+      composeSystemPrompt(CONFIG_PROMPT, SESSION_HANDOFF_ONLY),
     );
     expect(capturedSystemPrompt(1)).not.toContain('CEZ_TODOS_FILE');
     expect(existsSync(todosFile)).toBe(false);
@@ -558,7 +561,7 @@ describe('the global follow-up gate (dry run)', () => {
 
     const id = await runToEnd({ task: 'do the thing mock:done' });
 
-    expect(capturedSystemPrompt()).toBe(composeSystemPrompt(CONFIG_PROMPT, HANDOFF_ONLY_INSTRUCTIONS));
+    expect(capturedSystemPrompt()).toBe(composeSystemPrompt(CONFIG_PROMPT, SESSION_HANDOFF_ONLY));
     expect(capturedSystemPrompt()).not.toContain('CEZ_TODOS_FILE');
     expect(existsSync(todosFile)).toBe(false);
     // …and nothing leaked into the parent cezar's inbox either.
@@ -570,9 +573,9 @@ describe('the global follow-up gate (dry run)', () => {
   it('keeps the per-task handoff journal — #471 turns off the inbox, not the notes', async () => {
     const id = await runToEnd({ task: 'do the thing mock:done' });
     expect(capturedSystemPrompt()).toContain('CEZ_HANDOFF_FILE');
-    expect(capturedSystemPrompt()).toContain('CEZ:DONE');
-    // The still-working marker rides in the same handoff contract (#490).
-    expect(capturedSystemPrompt()).toContain('CEZ:MONITORING');
+    // hearsay-tools/cezarion#1234: the lifecycle rides in the same contract, as cezar tool calls.
+    expect(capturedSystemPrompt()).toContain('call cezar_done');
+    expect(capturedSystemPrompt()).toContain('kind "timer" to re-check later');
     // The task-reference markers too (spec 2026-07-18-task-ref-markers).
     expect(capturedSystemPrompt()).toContain('CEZ:PR=<number>');
     expect(capturedSystemPrompt()).toContain('Declare each PR this task opens, even when it opens several.');

@@ -1,4 +1,4 @@
-import { nextOccurrence, occurrencesBetween } from '@open-mercato/cezar-contract';
+import { nextOccurrence, occurrencesBetween } from '@open-mercato/cezar-contract/automation-schedule';
 import type { AutomationLease, AutomationStore } from './store.ts';
 import { isScheduleAutomation, type AutomationReceipt, type ScheduleAutomationDefinition } from './types.ts';
 

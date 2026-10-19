@@ -1,4 +1,5 @@
-import { basename } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 /** Replace the one literal `anchor` in a mock script's `source`, or throw an
  * error naming the patcher, the mock and the anchor. A bare
@@ -16,4 +17,11 @@ export function patchMockOnce(
   if (found !== 1) throw new Error(`${patcher}: anchor not found exactly once in ${basename(mockBin)} (found ${found}): ${JSON.stringify(anchor)}`);
   const at = source.indexOf(anchor);
   return source.slice(0, at) + (typeof replacement === 'string' ? replacement : replacement(anchor)) + source.slice(at + anchor.length);
+}
+
+/** A patched copy runs from another directory: point the mock's sibling `import('./…')` calls back
+ *  at the originals. Every mock loads `mock-nudge.mjs` that way when it starts
+ *  (hearsay-tools/cezarion#1234), so a copy without this fails before its first prompt. */
+export function repointMockImports(mockBin: string, source: string): string {
+  return source.replace(/import\('(\.\/[^']+)'\)/g, (_match, path: string) => `import(${JSON.stringify(pathToFileURL(join(dirname(mockBin), path)).href)})`);
 }

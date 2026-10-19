@@ -1,4 +1,4 @@
-import { liveRunFrameSchema } from '@open-mercato/cezar-api-client'
+import { liveRunFrameSchema } from '@open-mercato/cezar-api-client/contract/live'
 import { createLiveOwner, type LivePort } from './live-owner'
 import { createTopicSocket } from './topic-socket'
 import { readSse } from './sse-reader'

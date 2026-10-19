@@ -45,6 +45,8 @@ import { createHash } from 'node:crypto';
 // and a second import of the same name is a SyntaxError.
 import { appendFileSync, existsSync as sessionStoreExists, mkdirSync, readFileSync, writeFileSync as sessionStoreWrite } from 'node:fs';
 import { createServer } from 'node:http';
+// Dynamic, like every sibling import here, so a test's copy of this mock can repoint it.
+const { answerNudgeBody, silentNudge } = await import('./mock-nudge.mjs');
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -257,6 +259,7 @@ const server = createServer((req, res) => {
   req.on('data', (chunk) => (body += chunk));
   req.on('end', async () => {
     if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify({ method: req.method, url, body: body ? JSON.parse(body) : undefined })}\n`);
+    if (req.method === 'POST' && /\/(prompt_async|message)$/.test(url)) body = answerNudgeBody(body);
     if (req.method === 'POST' && /^\/question\/[^/]+\/(reply|reject)$/.test(url)) {
       // Native question reply resumes the held turn, then its own session.idle
       // ends it (same SSE lifecycle shape as the baseline; never the HTTP ack).
@@ -367,7 +370,7 @@ const server = createServer((req, res) => {
       }
       if (body.includes('mock:autonomous-readiness-idle')) autonomousReadinessIdle = true;
       if (body.includes('mock:autonomous-cap') || body.includes('mock:autonomous-ask-cap')) autonomousCap = true;
-      if (body.includes('mock:silent-tail') || body.includes('Your last turn ended without a message to the user.')) {
+      if (body.includes('mock:silent-tail') || silentNudge(body)) {
         const silent = await import('./mock-silent-tail.mjs');
         const prompt = (() => { try { return JSON.parse(body).parts.map(part => part.text ?? '').join('\n'); } catch { return body; } })();
         silent.noteSilentTailPrompt(prompt);
@@ -412,7 +415,10 @@ const server = createServer((req, res) => {
       if (body.includes('mock:cezar-tool')) {
         const { toolPrompt } = await import('./mock-ci-tool.mjs');
         const text = await toolPrompt('opencode', JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}'), body);
-        send({ type: 'message.part.updated', properties: { part: { id: 'tool-result', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text } } });
+        // A completed assistant message, as on the other runners' wires, so its text (an ask line
+        // after the calls, say) reaches the turn end.
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        send({ type: 'message.part.updated', properties: { part: { id: 'tool-result', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text, time: { start: 1, end: 2 } } } });
         send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
         return;
       }
@@ -585,7 +591,7 @@ const server = createServer((req, res) => {
         send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
         return;
       }
-      if (body.includes('mock:silent-tail') || body.includes('mock:tool-tail') || body.includes('Your last turn ended without a message to the user.')) {
+      if (body.includes('mock:silent-tail') || body.includes('mock:tool-tail') || silentNudge(body)) {
         const silent = await import('./mock-silent-tail.mjs');
         const prompt = (() => { try { return JSON.parse(body).parts.map(part => part.text ?? '').join('\n'); } catch { return body; } })();
         silent.noteSilentTailPrompt(prompt);

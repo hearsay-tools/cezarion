@@ -1,4 +1,4 @@
-import { automationEventSchema, type AutomationEvent, type AutomationFilters } from '@open-mercato/cezar-api-client'
+import { automationEventSchema, type AutomationEvent, type AutomationFilters } from '@open-mercato/cezar-api-client/contract/automations'
 
 import { ChevronDownIcon } from '@/components/design-icons'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ImgHTMLAttributes } from 'react'
 import { createPortal } from 'react-dom'
 
-import { resolveApiUrl } from '@open-mercato/cezar-api-client'
+import { resolveApiUrl } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { cn } from '@/lib/utils'
 
 /**

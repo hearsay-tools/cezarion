@@ -21,10 +21,12 @@ export function questionMessage(input: {
 export function formatQuestionText(workerRunId: string, messageId: string, request: AskRequest): string {
   const lines = [`Your worker ${workerRunId} is waiting for your answer:`];
   request.questions.forEach((question, index) => {
-    lines.push(`${index + 1}. [${question.header}] ${question.question}${question.multiSelect ? ' (choose one or more)' : ''}`);
-    for (const option of question.options) lines.push(`   - ${option.label}${option.description ? `: ${option.description}` : ''}`);
+    // hearsay-tools/cezarion#1234: a question without options is open; multiSelect needs options.
+    const hint = !question.options ? ' (open question: answer in your own words)' : question.multiSelect ? ' (choose one or more)' : '';
+    lines.push(`${index + 1}. [${question.header}] ${question.question}${hint}`);
+    for (const option of question.options ?? []) lines.push(`   - ${option.label}${option.description ? `: ${option.description}` : ''}`);
   });
-  const format = request.questions.map(question => `${question.header}: <option>`).join('\n');
+  const format = request.questions.map(question => `${question.header}: ${question.options ? '<option>' : '<your answer>'}`).join('\n');
   lines.push(`Answer with one line per question, exactly as the worker reads a human answer:\n${format}`);
   lines.push(`Send it with: worker reply ${workerRunId} '<answer>' --id <new-message-UUID> --request-id ${messageId}`);
   lines.push('If you cannot decide, ask the human with your own question, then reply with their answer.');

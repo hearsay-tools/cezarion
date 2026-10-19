@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { PROJECT_NAME_PATTERN, type GithubOwner, type GithubOwnersResponse } from '@open-mercato/cezar-contract';
+import { PROJECT_NAME_PATTERN } from '@open-mercato/cezar-contract/project-limits';
+import type { GithubOwner, GithubOwnersResponse } from '@open-mercato/cezar-contract';
 import { GH_CREDENTIAL_HELPER_CONFIG, cleanupCheckout, isValidCheckoutName, parseRepoRef, type CheckoutProgressEvent } from './checkout.ts';
 
 /**

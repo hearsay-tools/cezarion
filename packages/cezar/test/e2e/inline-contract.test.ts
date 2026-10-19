@@ -56,6 +56,27 @@ test('the build repointed something — otherwise every assertion below is vacuo
   );
 });
 
+test('no emitted file names the contract package by any specifier', async () => {
+  // The service imports contract values through module subpaths (hearsay-tools/cezarion#1237).
+  // npm cannot resolve `@open-mercato/cezar-contract/<module>` any more than the bare name, so
+  // every spelling must be repointed at the bundle.
+  const unresolved: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    for (const item of await readdir(dir, { withFileTypes: true })) {
+      const path = join(dir, item.name);
+      if (item.isDirectory()) {
+        if (path !== join(dist, 'contract')) await walk(path);
+      } else if (/\.(js|d\.ts)$/.test(item.name)) {
+        for (const match of (await readFile(path, 'utf8')).matchAll(/(['"])(@open-mercato\/cezar-contract(?:\/[^'"]*)?)\1/g)) {
+          unresolved.push(`${relative(packageRoot, path)}: ${match[2]}`);
+        }
+      }
+    }
+  };
+  await walk(dist);
+  assert.deepEqual(unresolved, []);
+});
+
 test('the bundled contract ships declarations, not just JavaScript', async () => {
   const found = await referrers();
   if (found.length === 0) return; // the guard above owns that failure

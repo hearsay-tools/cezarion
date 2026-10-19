@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { githubProjectSchema, type GithubProject } from '@open-mercato/cezar-contract';
+import { githubProjectSchema, type GithubProject } from '@open-mercato/cezar-contract/github';
 import type { GraphqlRunner } from './github.ts';
 
 const pageInfoSchema = z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() });

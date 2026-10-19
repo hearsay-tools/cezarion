@@ -5,7 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { parseEffort } from '@open-mercato/cezar-contract';
+import { parseEffort } from '@open-mercato/cezar-contract/effort';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
 import type {
   AgentEvent,

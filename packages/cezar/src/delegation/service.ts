@@ -7,13 +7,47 @@ import { prepareWorkerContext, workerContextTask } from './context.ts';
 import { acceptedWorkerIdentitySchema, workerContextHash, workerWorkflowHash } from './execution-identity.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  discoveryRequestSchema, type DiscoveryRequest, type DiscoveryResponse,
-  conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReceiptRequestSchema, requestWaitRequestSchema,
-  type ConversationSendRequest, type ConversationSendResult, type ConversationInspectRequest, type ConversationInspectResult, type ConversationCancelRequest, type ConversationState, type InboxReserveResult, type InboxReceiptRequest, type InboxReceiptResult, type RequestWaitRequest, type RequestOutcome,
-  workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerCancelWaitRequestSchema, type WorkerCancelWaitRequest,
-  type WorkerListPage, type WorkerListQuery, type WorkerCollectedResult, type WorkerDestroy, type WorkerDestroyResult, type WorkerInspection, type WorkerOperation,
-  type WorkerParams, type WorkerSpawnRequest, type WorkerSteerRequest, type WorkerWaitRequest,
-} from '@open-mercato/cezar-contract';
+  discoveryRequestSchema,
+  type DiscoveryRequest,
+  type DiscoveryResponse,
+} from '@open-mercato/cezar-contract/discovery';
+import {
+  conversationSendRequestSchema,
+  conversationInspectRequestSchema,
+  conversationCancelRequestSchema,
+  inboxReceiptRequestSchema,
+  requestWaitRequestSchema,
+  type ConversationSendRequest,
+  type ConversationSendResult,
+  type ConversationInspectRequest,
+  type ConversationInspectResult,
+  type ConversationCancelRequest,
+  type ConversationState,
+  type InboxReserveResult,
+  type InboxReceiptRequest,
+  type InboxReceiptResult,
+  type RequestWaitRequest,
+  type RequestOutcome,
+} from '@open-mercato/cezar-contract/conversations';
+import {
+  workerSpawnRequestSchema,
+  workerSteerRequestSchema,
+  workerWaitRequestSchema,
+  workerParamsSchema,
+  workerCancelWaitRequestSchema,
+  type WorkerCancelWaitRequest,
+  type WorkerListPage,
+  type WorkerListQuery,
+  type WorkerCollectedResult,
+  type WorkerDestroy,
+  type WorkerDestroyResult,
+  type WorkerInspection,
+  type WorkerOperation,
+  type WorkerParams,
+  type WorkerSpawnRequest,
+  type WorkerSteerRequest,
+  type WorkerWaitRequest,
+} from '@open-mercato/cezar-contract/delegation';
 import type { RunStore, RunRecord } from '../runs/store.ts';
 import { workerDestroyView, workerOutcome } from '../runs/delegation-state.ts';
 import type { DelegationExecutionSettings, RunManager } from '../workflows/run.ts';

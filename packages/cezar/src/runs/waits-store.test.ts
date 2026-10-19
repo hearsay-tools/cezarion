@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LAST_WAITS_LIMIT, WAIT_LIMIT, type AgentInput, type CiWaitResult, type Wait } from '@open-mercato/cezar-contract';
+import { LAST_WAITS_LIMIT, WAIT_LIMIT, type Wait } from '@open-mercato/cezar-contract/waits';
+import type { AgentInput, CiWaitResult } from '@open-mercato/cezar-contract';
 
 import { RunDatabase, RUNS_DB_FILE } from './run-database.ts';
 import { isLiveRecord } from './run-row.ts';
@@ -54,6 +55,10 @@ function ciEntry(overrides: Partial<Extract<Wait, { kind: 'ci' }>> = {}): Wait {
     turnId: 'turn-1', prUrl: legacyCi.prUrl, repository: legacyCi.repository, prNumber: legacyCi.prNumber, headSha: legacyCi.headSha,
     generation: 'session', timeoutSeconds: 1800, ...overrides,
   } as Wait;
+}
+
+function humanEntry(overrides: Partial<Extract<Wait, { kind: 'human' }>> = {}): Wait {
+  return { id: randomUUID(), kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: iso(0), phase: 'open', turnId: 'turn-1', ...overrides } as Wait;
 }
 
 function timerEntry(overrides: Partial<Extract<Wait, { kind: 'timer' }>> = {}): Wait {
@@ -268,6 +273,67 @@ describe('wait checkpoints', () => {
       expect(delivered.deliveredAt).toBe(run.lastWaits![0]!.deliveredAt);
       expect(run.agentInputs!.find((entry) => entry.id === second.id)!.deliveredAt).toBeUndefined();
     }
+  });
+
+  // hearsay-tools/cezarion#1234: a wake's charge and its cleared failure count commit with it.
+  it('commitWaitDelivery commits the wake counters in the same commit', () => {
+    const resolved = timerEntry({ phase: 'resolved', resolvedAt: iso(0) });
+    store.commitWait(id, resolved, input(resolved.id));
+    store.updateRun(id, { automaticWakes: 6, waitDeliveryFailures: 2 });
+    const commits = vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex');
+    store.commitWaitDelivery(id, [resolved.id], { automaticWakes: 7, waitDeliveryFailures: undefined });
+    expect(commits).toHaveBeenCalledTimes(1);
+    for (const run of [store.getRun(id)!, reopen()]) {
+      expect(run.lastWaits).toEqual([{ ...resolved, phase: 'delivered', deliveredAt: expect.any(String) }]);
+      expect(run.automaticWakes).toBe(7);
+      expect(run.waitDeliveryFailures).toBeUndefined();
+    }
+  });
+
+  it('commitWakeCounters writes the counters durably, not on the debounced save', () => {
+    store.commitWakeCounters(id, { automaticWakes: 3 });
+    expect(readPersistedRuns(directory).find((record) => record.id === id)?.automaticWakes).toBe(3);
+    store.commitWakeCounters(id, { waitDeliveryFailures: 4 });
+    store.commitWakeCounters(id, { waitDeliveryFailures: undefined });
+    const row = readPersistedRuns(directory).find((record) => record.id === id);
+    expect(row).toMatchObject({ automaticWakes: 3 });
+    expect(row).not.toHaveProperty('waitDeliveryFailures');
+  });
+
+  // hearsay-tools/cezarion#1234: the user's answer ends every open human wait at once.
+  it('commitHumanWaitsAnswered settles every open human wait as delivered and leaves ci open', () => {
+    const human = humanEntry({ questions: [{ header: 'Pick', question: 'Which one?', options: [{ label: 'A' }, { label: 'B' }] }], askSeq: 3 });
+    const ci = ciEntry();
+    store.commitWait(id, human);
+    store.commitWait(id, ci);
+    expect(store.commitHumanWaitsAnswered(id)).toEqual([human.id]);
+    for (const run of [store.getRun(id)!, reopen()]) {
+      expect(run.waits).toEqual([ci]);
+      expect(run.lastWaits).toEqual([{ ...human, phase: 'delivered', deliveredAt: expect.any(String) }]);
+    }
+    expect(store.commitHumanWaitsAnswered(id)).toEqual([]);
+  });
+
+  it('a human wait round-trips through close and reopen with its askSeq', () => {
+    const human = humanEntry();
+    store.commitWait(id, human);
+    store.commitWait(id, { ...human, askSeq: 12 } as Wait);
+    expect(reopen().waits).toEqual([{ ...human, askSeq: 12 }]);
+  });
+
+  it('an unreadable automaticWakes reads as absent', () => {
+    store.updateRun(id, { automaticWakes: 4, waitDeliveryFailures: 2 });
+    expect(reopen()).toMatchObject({ automaticWakes: 4, waitDeliveryFailures: 2 });
+    store.close();
+    const records = readPersistedRuns(directory);
+    records[0].automaticWakes = 'many';
+    records[0].waitDeliveryFailures = -1;
+    seedRuns(directory, records);
+    store = RunStore.open(directory, { keepLive: true });
+    const run = store.getRun(id)!;
+    expect(run.status).toBe('waiting');
+    expect(run.automaticWakes).toBeUndefined();
+    expect(run.waitDeliveryFailures).toBeUndefined();
   });
 
   it('caps lastWaits at 16, oldest dropped', () => {

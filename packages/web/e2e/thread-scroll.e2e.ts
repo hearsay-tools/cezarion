@@ -1,4 +1,4 @@
-import { LIVE_PROTOCOL } from '@open-mercato/cezar-api-client'
+import { LIVE_PROTOCOL } from '@open-mercato/cezar-api-client/contract/live-coordination'
 import type { ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'

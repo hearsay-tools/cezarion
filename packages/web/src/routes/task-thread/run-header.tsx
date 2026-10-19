@@ -21,7 +21,8 @@ import {
   useRunHandoff,
   useRuns,
 } from '@/api/queries'
-import { DEFAULT_AGENT_ACCOUNT_ID, type ApiRun, type OpenTarget, type Wait } from '@open-mercato/cezar-api-client'
+import { DEFAULT_AGENT_ACCOUNT_ID } from '@open-mercato/cezar-api-client/contract/agent-profiles'
+import type { ApiRun, OpenTarget, Wait } from '@open-mercato/cezar-api-client'
 import { hasAccountChoice, useAgentAccounts } from '@/api/agent-accounts'
 import { DiffStatLabel } from '@/components/diff-stat'
 import { TitleEditInput, useTitleEditor } from '@/components/editable-title'
@@ -924,10 +925,11 @@ type TimerWait = Extract<Wait, { kind: 'timer' }>
 /** Only these statuses can have a wait in flight; a finished run's leftovers are history. */
 const IN_FLIGHT_STATUSES: readonly ApiRun['status'][] = ['running', 'queued', 'waiting']
 
-/** The kinds this header renders. Streamed records were only checked for `id`, and a later phase
- *  of the wait list adds human and worker waits, which the pill already reports. */
-function renderableWaits(value: unknown): Wait[] {
-  return Array.isArray(value) ? value.filter((wait): wait is Wait => wait?.kind === 'ci' || wait?.kind === 'timer') : []
+/** The kinds this header renders: CI and timer waits. Streamed records were only checked for `id`.
+ *  A human wait shows as Needs you and its question card, and phase 3's worker waits through the
+ *  pill, never in this list. */
+function renderableWaits(value: unknown): Array<CiWait | TimerWait> {
+  return Array.isArray(value) ? value.filter((wait): wait is CiWait | TimerWait => wait?.kind === 'ci' || wait?.kind === 'timer') : []
 }
 
 function formatInstant(value: string | undefined) {

@@ -1,10 +1,10 @@
-import { mergedPullRequestSchema, type ArchivePullRequestIdentity, type MergedPullRequest } from '@open-mercato/cezar-contract';
+import { mergedPullRequestSchema, type ArchivePullRequestIdentity, type MergedPullRequest } from '@open-mercato/cezar-contract/runs';
 import { archivePullRequests, pullRequestKey } from '../../runs/pull-requests.ts';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import { GITHUB_COMMENT_COUNTS_MAX, GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, type GithubCommentCountsData, type GithubItemResponse, type GithubProject, type GithubProjectsData } from '@open-mercato/cezar-contract';
+import { GITHUB_COMMENT_COUNTS_MAX, GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, type GithubCommentCountsData, type GithubItemResponse, type GithubProject, type GithubProjectsData } from '@open-mercato/cezar-contract/github';
 import { fetchIssueProjects, fetchRepositoryProjects, fetchViewerLogin } from './github-filters.ts';
 import { fetchGithubMergeRequirements, type GithubMergeRequirements } from './github-merge-requirements.ts';
 import { autosaveCommit } from '../../git-worktree.ts';

@@ -7,8 +7,10 @@ import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
-import { WAIT_LIMIT, type CiWait, type CiWaitResult, type Wait } from '@open-mercato/cezar-contract';
+import { WAIT_LIMIT, type Wait } from '@open-mercato/cezar-contract/waits';
+import type { CiWait, CiWaitResult } from '@open-mercato/cezar-contract';
 import { controlledWire, manager, parent, root, restart, semaphore, store, until, worker, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { timed, type TimedWait } from './waits.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { ciWatchRequest, waitResultText } from './waits.ts';
 
@@ -39,9 +41,9 @@ function github() {
   return { settle, aborted: () => signal?.aborted };
 }
 
-function register(id: string) {
+async function register(id: string) {
   const state = (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(id)!;
-  return manager.registerCiWait(id, { pr, timeout_seconds: 30 }, state.ciGeneration);
+  return timed(await manager.registerCiWait(id, { pr, timeout_seconds: 30 }, state.ciGeneration));
 }
 
 describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () => {
@@ -220,11 +222,14 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     await until(() => store.getRun(run.id)?.status === 'waiting');
     await register(run.id);
     const engine = manager as unknown as { active: Map<string, { session: AgentSession }> };
+    // Counted from here: the no-wait nudge's turn came before the park (hearsay-tools/cezarion#1234).
+    const started = () => store.readEvents(run.id).filter(event => event.type === 'turn.started').length;
+    const before = started();
     // Resume the backend itself, bypassing the manager's human-input path.
     // Native frames resume the run; it works in the monitoring slot its park kept
     // (hearsay-tools/cezarion#1233), so no regular slot is charged.
     expect(engine.active.get(run.id)!.session.sendMessage([{ type: 'text', text: adapter.scenarios.hold! }])).toBe(true);
-    await until(() => store.readEvents(run.id).filter(event => event.type === 'turn.started').length >= 2);
+    await until(() => started() > before);
     expect(store.getRun(run.id)?.status).toBe('running');
     expect(semaphore.busy()).toBe(0);
     expect(ciWaitOf(run.id)?.phase).toBe('open');
@@ -451,15 +456,19 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
 // resolves, is cancelled or is recovered on its own.
 const generationOf = (id: string) => (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(id)!.ciGeneration;
 const prUrl = (n: number) => `https://github.com/acme/repo/pull/${n}`;
-const registerPr = (id: string, n: number, timeout = 30) =>
-  manager.registerWait(id, { kind: 'ci', pr: prUrl(n), timeout_seconds: timeout }, 'cezar_wait', generationOf(id));
-const registerTimer = (id: string, seconds = 60, note?: string) =>
-  manager.registerWait(id, { kind: 'timer', seconds, ...(note === undefined ? {} : { note }) }, 'cezar_wait', generationOf(id));
-const waitById = (id: string, waitId: string) => store.getRun(id)?.waits?.find(entry => entry.id === waitId);
+const registerPr = async (id: string, n: number, timeout = 30) =>
+  timed(await manager.registerWait(id, { kind: 'ci', pr: prUrl(n), timeout_seconds: timeout }, 'cezar_wait', generationOf(id)));
+const registerTimer = async (id: string, seconds = 60, note?: string) =>
+  timed(await manager.registerWait(id, { kind: 'timer', seconds, ...(note === undefined ? {} : { note }) }, 'cezar_wait', generationOf(id)));
+const waitById = (id: string, waitId: string) => store.getRun(id)?.waits?.find((entry): entry is TimedWait => entry.id === waitId && entry.kind !== 'human');
 const settledById = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(entry => entry.id === waitId);
 const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
 const armed = () => manager as unknown as { waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>; ciWatches: Map<string, unknown>; ciRegistrations: Map<string, unknown> };
 const fireTimer = (waitId: string) => armed().waitTimers.get(waitId)!.timer._onTimeout();
+/** This suite's sessions have no cezar tool controller (`controller: async () => undefined`), so a
+ *  timer wakes them in the marker wording (hearsay-tools/cezarion#1234). */
+const timerFired = (waitId: string, note: string) =>
+  `Timer ${waitId} fired: ${note}. Continue toward the task goal. If the watched work is still pending, end your final message with CEZ:MONITORING.`;
 const flushMicrotasks = async () => { for (let n = 0; n < 5; n++) await Promise.resolve(); };
 
 /** External GitHub per PR number: each watch settles on its own; a gate holds every lookup. */
@@ -475,6 +484,8 @@ function githubByPr(lookupGate?: Promise<void>) {
   return { settle: (n: number) => watches.get(n)!.settle(success()), aborted: (n: number) => watches.get(n)?.signal.aborted };
 }
 
+/** A root parked on Cezar's no-wait human wait: its turn took the no-wait nudge and answered it in
+ *  plain text, one automatic wake (hearsay-tools/cezarion#1234). The agent's first wait replaces it. */
 async function waitingParent() {
   const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
   return run;
@@ -498,8 +509,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     expect([waitById(run.id, first.id)?.phase, waitById(run.id, timer.id)?.phase]).toEqual(['open', 'open']);
     fireTimer(timer.id);
     await until(() => settledById(run.id, timer.id)?.phase === 'delivered');
-    expect(inputsFor(run.id, timer.id).map(input => input.text)).toEqual([
-      `Timer ${timer.id} fired: check the deploy. Continue toward the task goal; register another wait if you are still waiting.`]);
+    expect(inputsFor(run.id, timer.id).map(input => input.text)).toEqual([timerFired(timer.id, 'check the deploy')]);
     expect(waitById(run.id, first.id)?.phase).toBe('open');
     external.settle(12);
     await until(() => settledById(run.id, first.id)?.phase === 'delivered');
@@ -521,6 +531,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
 
   it('a timer registered with seconds=120 resolves at +120s with its note and enqueues one lifecycle input with the wait id', async () => {
     const run = await waitingParent();
+    const charged = store.getRun(run.id)?.automaticWakes ?? 0;
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     try {
       const wait = await registerTimer(run.id, 120, 'check the deploy');
@@ -529,12 +540,11 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
       expect(waitById(run.id, wait.id)?.phase).toBe('open');
       expect(inputsFor(run.id, wait.id)).toEqual([]);
       await vi.advanceTimersByTimeAsync(1_000);
-      expect(inputsFor(run.id, wait.id)).toMatchObject([{ source: 'lifecycle',
-        text: `Timer ${wait.id} fired: check the deploy. Continue toward the task goal; register another wait if you are still waiting.` }]);
+      expect(inputsFor(run.id, wait.id)).toMatchObject([{ source: 'lifecycle', text: timerFired(wait.id, 'check the deploy') }]);
       await until(() => settledById(run.id, wait.id)?.phase === 'delivered');
       expect(inputsFor(run.id, wait.id)).toHaveLength(1);
       // A timer expiry is a self-generated wake: its admitted turn counts against the session's budget.
-      expect(store.readEvents(run.id).filter(event => event.type === 'note' && event.message === 'automatic timer wake-up (1/40)')).toHaveLength(1);
+      expect(store.readEvents(run.id).filter(event => event.type === 'note' && event.message === `automatic timer wake-up (${charged + 1}/40)`)).toHaveLength(1);
     } finally { vi.useRealTimers(); }
   });
 
@@ -591,7 +601,8 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     await expect(registerTimer(run.id)).rejects.toMatchObject({ code: 'timers_disabled' });
     const answer = await manager.cezarToolHandlers(run.id, generationOf(run.id)).registerWait({ kind: 'timer', seconds: 60 }, 'cezar_wait', new AbortController().signal);
     expect(answer.answer).toMatchObject({ ok: false, code: 'timers_disabled', open_waits: [] });
-    expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
+    // A refused registration registers nothing, so Cezar's own wait stays.
+    expect(store.getRun(run.id)?.waits?.map(wait => wait.via)).toEqual(['no-wait']);
     // CI is an external event: Park until resumed does not refuse it.
     await expect(registerPr(run.id, 12)).resolves.toMatchObject({ kind: 'ci' });
     interval.mockReturnValue(5);
@@ -605,10 +616,10 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     expect(armed().waitTimers.has(wait.id)).toBe(true);
   });
 
-  it('timer refuses wake_budget_spent once the session spent its automatic wakes', async () => {
+  it('timer refuses wake_budget_spent once the run spent its automatic wakes', async () => {
     githubByPr();
     const run = await waitingParent();
-    (manager as unknown as { active: Map<string, { monitoringWakeups?: number }> }).active.get(run.id)!.monitoringWakeups = 40;
+    store.updateRun(run.id, { automaticWakes: 40 });
     await expect(registerTimer(run.id)).rejects.toMatchObject({ code: 'wake_budget_spent' });
     await expect(registerPr(run.id, 12)).resolves.toMatchObject({ kind: 'ci' });
   });
@@ -740,10 +751,10 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     const session = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(run.id)!.session;
     const send = vi.spyOn(session, 'sendAgentMessage');
     writeFileSync(gate, 'end');
-    await until(() => (store.getRun(run.id)?.waits ?? []).length === 0);
     const ids = [first.id, timer.id, second.id];
-    expect(ids.map(id => settledById(run.id, id)?.phase)).toEqual(['delivered', 'delivered', 'delivered']);
-    const accepted = send.mock.calls.filter((_, i) => send.mock.results[i]?.value !== false);
+    await until(() => ids.every(id => settledById(run.id, id)?.phase === 'delivered'));
+    // The no-wait nudge after the batch's turn is a send of its own (hearsay-tools/cezarion#1234).
+    const accepted = send.mock.calls.filter((call, i) => send.mock.results[i]?.value !== false && ids.some(id => JSON.stringify(call).includes(id)));
     expect(accepted).toHaveLength(1);
     const batch = JSON.stringify(accepted[0]);
     // Oldest resolution first.

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { LIVE_BYTE_LIMIT, type RunEvent } from '@open-mercato/cezar-contract';
+import { LIVE_BYTE_LIMIT } from '@open-mercato/cezar-contract/live-limits';
+import type { RunEvent } from '@open-mercato/cezar-contract';
 import { LiveItemSnapshots } from './live-item-snapshots.ts';
 
 const started = (id = 'item', text = '', stepId = 'step'): RunEvent => ({
