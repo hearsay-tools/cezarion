@@ -402,6 +402,29 @@ from this worktree before checking web sources; direct `tsc --noEmit` does not.
 The full root typecheck runs web first, preparing declarations once for all four
 workspace checks.
 
+To typecheck without rebuilding `packages/cezar/dist`, for example while Squeal
+is validating, run both server configs from `packages/cezar`. The root
+`npm run typecheck` rebuilds `dist` first, and Squeal then marks dozens of
+passing checks UNKNOWN (hearsay-tools/squeal#33).
+
+```bash
+./node_modules/.bin/tsc --noEmit -p tsconfig.json       # shipped sources only
+./node_modules/.bin/tsc --noEmit -p tsconfig.test.json  # adds every test file
+```
+
+`tsconfig.json` leaves out every test file: on hearsay-tools/cezarion#1291 a
+TS2353 in `src/runs/waits-store.test.ts` passed it and failed CI.
+`tsconfig.test.json` sets `rootDir` to `.`, so only `tsconfig.json` reports a
+shipped file that imports from outside `src/`. `tsconfig.test.json` also
+compiles the `test/e2e/` imports of `../../dist/`, so in a worktree that was
+never built it fails with TS2307: run `npm run build -w @wjarka/cezarion` once
+first. For contract edits, also run `npm run typecheck:contract` from the repo
+root. It checks `packages/contract/tsconfig.test.json`, because that package's
+`tsconfig.json` leaves out its tests too. Run the root `npm run typecheck` once
+before a PR when declarations matter: a cockpit edit, or a server change that
+the cockpit reads through `AppType` or that a `test/e2e/` file imports from
+`dist`. Expect the UNKNOWN burst then.
+
 `npm test` and `npm run test:unit` are the fast unit gate: no server, no browser. They must stay that way. `npm run test:package` needs a completed `npm run build` (it packs the tarball). Pull request CI runs packaged CLI E2E and cockpit browser E2E as separate checks; the required aggregate fails if the cockpit suite is skipped or failed.
 
 **When a manual Vitest run is needed, use npm, never `npx vitest`.** It is a devDependency of this repo, so `npm test`
