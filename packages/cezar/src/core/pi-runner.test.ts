@@ -863,10 +863,20 @@ describe('pi tool selection (hearsay-tools/cezarion#1305)', () => {
     expect(existsSync(extensions(args).at(-1)!)).toBe(true);
   });
 
-  it('keeps extra names that are not mcp__ tools on the default path', () => {
-    const args = buildPiArgs({ ...base, allowedTools: [...stepDefault, 'ls', 'WebFetch'] });
-    expect(args).not.toContain('--tools');
-    expect(args[args.indexOf('--cezar-builtin-tools') + 1]).toBe('read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait,ls,webfetch');
+  it('keeps the default path for the six base tools alone, the list a worker inherits from a Claude parent', () => {
+    expect(buildPiArgs({ ...base, allowedTools: allowedToolsForStep(undefined, 'claude') })).toEqual([
+      '--mode', 'rpc', ...cezarExtensionArgs, ...defaultToolArgs('read,edit,write,grep,find,bash'),
+    ]);
+  });
+
+  it('narrows to the --tools allowlist when the list names a tool outside the pi default, so the grant stays limited to it', () => {
+    const named = 'read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait,ls,webfetch';
+    expect(buildPiArgs({ ...base, allowedTools: [...stepDefault, 'ls', 'WebFetch'] })).toEqual([
+      '--mode', 'rpc', ...cezarExtensionArgs, '--tools', named,
+    ]);
+    expect(buildPiArgs({ ...base, allowedTools: [...allowedToolsForStep(undefined, 'claude'), 'review_tool'] })).toEqual([
+      '--mode', 'rpc', ...cezarExtensionArgs, '--tools', 'read,edit,write,grep,find,bash,review_tool',
+    ]);
   });
 
   it('narrows to the --tools allowlist when the list names an mcp__ tool, so the grant stays limited to it', () => {
