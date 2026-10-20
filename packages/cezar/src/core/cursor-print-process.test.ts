@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -44,10 +44,13 @@ describe('Cursor print process ownership', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'cez-cursor-ws-'));
     const otherWorkspace = mkdtempSync(join(tmpdir(), 'cez-cursor-other-'));
     const pidFile = join(workspace, 'daemon.pids');
-    // The language server ignores TERM, so only the SIGKILL escalation ends it; it reports ready
-    // once its handler is in place, and the daemon publishes both pids only then.
+    const termFile = join(workspace, 'daemon.term');
+    // The daemon records the graceful TERM and exits; the language server ignores TERM, so only
+    // the SIGKILL escalation ends it. It reports ready once its handler is in place, and the
+    // daemon, whose own handler comes first, publishes both pids only then.
     const lsp = `process.on('SIGTERM',()=>{}); process.stdout.write('ready\\n'); setInterval(()=>{},1000);`;
     const daemon = `const {spawn}=require('node:child_process'); const fs=require('node:fs');
+      process.on('SIGTERM',()=>{ const tmp=${JSON.stringify(termFile)}+'.tmp'; fs.writeFileSync(tmp,'TERM'); fs.renameSync(tmp,${JSON.stringify(termFile)}); process.exit(0); });
       const c=spawn(process.execPath,['-e',${JSON.stringify(lsp)}],{detached:false,stdio:'pipe'});
       c.stdout.once('data',()=>{ const tmp=${JSON.stringify(pidFile)}+'.tmp'; fs.writeFileSync(tmp,process.pid+'\\n'+c.pid+'\\n'); fs.renameSync(tmp,${JSON.stringify(pidFile)}); });
       setInterval(()=>{},1000);`;
@@ -65,7 +68,8 @@ describe('Cursor print process ownership', () => {
     try {
       const proc = startCursorPrintProcess({
         bin: process.execPath, args: ['-e', leader],
-        cwd: workspace, env, drainMs: 50, termGraceMs: 30, killGraceMs: 50,
+        // bound: the TERM-to-KILL window the daemon's handler must write its receipt in; settling waits it out in full, as the language server ignores TERM.
+        cwd: workspace, env, drainMs: 5_000, termGraceMs: 30, killGraceMs: 50,
       }, { onStdout: () => {}, onStderr: () => {} });
       expect((await proc.exit).code).toBe(0);
       await proc.settled;
@@ -73,6 +77,8 @@ describe('Cursor print process ownership', () => {
       expect(pids).toHaveLength(2);
       // bound: signal delivery and reaping by the subreaper have no product signal to wait on.
       await expect.poll(() => pids.filter(alive), { timeout: 15_000 }).toEqual([]);
+      // Written before the daemon exits, so present once its pid is gone: TERM came first.
+      expect(existsSync(termFile)).toBe(true);
       expect(other.pid !== undefined && alive(other.pid)).toBe(true);
       expect(outsider.pid !== undefined && alive(outsider.pid)).toBe(true);
     } finally {
