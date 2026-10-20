@@ -6,6 +6,7 @@ import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunDatabaseChanges, type RunDatabaseCommit } from './run-database.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
+import { encodeRunRow } from './run-row.ts';
 import { blockRunWrites, readPersistedRuns, runIds, seedRuns } from './run-store.testkit.ts';
 import { LEGACY_INDEX_BACKUP_FILE, RunStore, type RunRecord } from './store.ts';
 
@@ -417,6 +418,45 @@ describe('loading normalizes and saves exactly the rows it changed', () => {
     store.flush();
     expect(seen).toEqual([{ upserts: ['root'], deletes: [] }]);
     expect(readPersistedRuns(dataDir).find((run) => run.id === 'root')?.hasPendingHumanAsk).toBe(true);
+  });
+
+  it('a summary stored before it carried automation origin (#1332)', () => {
+    const github = record('gh', { automation: { automationId: 'auto-gh', automationRevision: 1, receiptId: 'r1', event: 'issue.opened', githubUrl: 'https://github.com/o/r/issues/1' } });
+    const scheduled = record('sched', { automationTrigger: { automationId: 'auto-s', automationRevision: 1, receiptId: 'r2', trigger: 'manual', occurrenceAt: '2026-10-05T00:00:00.000Z' } });
+    seedRuns(dataDir, [github, scheduled, record('control', { autonomous: true })]);
+    // What an older cezar wrote: the same record, its summary projected without the field.
+    const db = RunDatabase.open(join(dataDir, RUNS_DB_FILE));
+    try {
+      db.transaction({
+        upserts: [github, scheduled].map((run) => {
+          const { automationId: _, ...stale } = toRunSummary(run);
+          return { ...encodeRunRow(run), summary: JSON.stringify(stale) };
+        }),
+        deletes: [],
+      });
+    } finally {
+      db.close();
+    }
+    const revisions = { gh: row('gh')!.revision, sched: row('sched')!.revision, control: row('control')!.revision };
+
+    const store = open();
+    const seen = writes(store);
+    store.flush();
+    expect(seen.flatMap((change) => change.upserts).sort()).toEqual(['gh', 'sched']);
+    // The committed rows, which every cold list read serves.
+    expect(JSON.parse(row('gh')!.summary)).toHaveProperty('automationId', 'auto-gh');
+    expect(JSON.parse(row('sched')!.summary)).toHaveProperty('automationId', 'auto-s');
+    expect(row('control')?.revision).toBe(revisions.control);
+    store.close();
+
+    // Healed once: the next open finds nothing to rewrite.
+    const healed = { gh: row('gh')!.revision, sched: row('sched')!.revision };
+    expect(healed.gh).toBeGreaterThan(revisions.gh);
+    const again = open();
+    const later = writes(again);
+    again.flush();
+    expect(later).toEqual([]);
+    expect(again.listRunSummaries().runs.find((run) => run.id === 'sched')).toHaveProperty('automationId', 'auto-s');
   });
 
   it('a store with nothing to normalize writes nothing', () => {

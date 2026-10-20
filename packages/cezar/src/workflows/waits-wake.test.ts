@@ -171,7 +171,9 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     fireTimer(first.id); fireTimer(second.id);
     await until(() => waitById(run.id, first.id)?.phase === 'resolved' && waitById(run.id, second.id)?.phase === 'resolved');
     writeFileSync(release, '');
-    await until(() => settled(run.id, first.id)?.phase === 'delivered' && settled(run.id, second.id)?.phase === 'delivered');
+    // The store marks the wake delivered before the mock records the prompt it read; wait for both.
+    await until(() => settled(run.id, first.id)?.phase === 'delivered' && settled(run.id, second.id)?.phase === 'delivered'
+      && prompted('claude', `Timer ${first.id} fired`).length > 0);
     const wakes = prompted('claude', `Timer ${first.id} fired`);
     expect(wakes).toHaveLength(1);
     expect(wakes[0]).toContain(`Timer ${second.id} fired`);
@@ -222,7 +224,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     // The budget runs out between the timer's resolution and the boundary that would send it.
     store.updateRun(run.id, { automaticWakes: 40 });
     writeFileSync(release, '');
-    await until(() => settled(run.id, ci.id)?.phase === 'delivered');
+    await until(() => settled(run.id, ci.id)?.phase === 'delivered' && prompted('claude', `CI wait observation ${ci.id}`).length > 0);
     expect(settled(run.id, timer.id)?.phase).toBe('cancelled');
     expect(notes(run.id, 'cap reached').map(event => event.message)).toEqual([`automatic timer wake-up cap reached (40); timer ${timer.id} cancelled`]);
     const wake = prompted('claude', `CI wait observation ${ci.id}`);
@@ -336,7 +338,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     expect(manager.continueRun(run.id, { text: 'go on' }).ok).toBe(true);
     expect(engine().wakeBackoffs.has(run.id)).toBe(false);
     expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
-    await until(() => settled(run.id, timer.id)?.phase === 'delivered');
+    await until(() => settled(run.id, timer.id)?.phase === 'delivered' && prompted('claude', TIMER_WAKE_OPENING).length >= 2);
     expect(prompted('claude', TIMER_WAKE_OPENING)).toHaveLength(2);
   });
 

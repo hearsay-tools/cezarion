@@ -122,6 +122,14 @@ describe('applyRunEvent', () => {
     expect(row?.workflowLabel).toBe('Fix bug')
   })
 
+  it('carries a streamed automation task\'s origin, so the sidebar files it under Automations (#1332)', () => {
+    const next = applyRunEvent([summary('manual')], run('nightly', {
+      automationTrigger: { automationId: 'auto-1', automationRevision: 1, receiptId: 'r', trigger: 'schedule', occurrenceAt: '2026-07-14T09:00:00.000Z' },
+    }))
+    expect(next?.find((row) => row.id === 'nightly')).toHaveProperty('automationId', 'auto-1')
+    expect(next?.find((row) => row.id === 'manual')).not.toHaveProperty('automationId')
+  })
+
   it('keeps the cached live usage when the streamed record carries none', () => {
     const next = applyRunEvent([{ ...summary('r1'), usage: SAMPLE }], run('r1', { status: 'review' }))
     expect(next?.[0]?.usage).toEqual(SAMPLE)

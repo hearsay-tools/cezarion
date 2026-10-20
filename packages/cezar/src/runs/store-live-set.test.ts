@@ -355,6 +355,21 @@ describe('indexed queries reach runs not in memory', () => {
     expect(store.listRunIds()).toHaveLength(4);
   });
 
+  it('let archive-finished narrow to automation tasks or to the rest, held or not (#1332)', () => {
+    const origin = { automationId: 'auto-1', automationRevision: 1, receiptId: 'r', trigger: 'schedule' as const, occurrenceAt: '2026-10-05T00:00:00.000Z' };
+    const manual = record({ status: 'done' });
+    const nightly = record({ status: 'done', automationTrigger: origin });
+    const github = record({ status: 'done', automation: { automationId: 'auto-2', automationRevision: 1, receiptId: 'g', event: 'issue.opened', githubUrl: 'https://github.com/o/r/issues/1' } });
+    seedRuns(dataDir, [manual, nightly, github]);
+    const store = open();
+    // One of each side in memory, so the held branch and the stored-summary branch both decide.
+    store.setPinned(nightly.id, false);
+    store.setPinned(manual.id, false);
+    expect(store.archiveFinished(undefined, true).ids.sort()).toEqual(ids([nightly, github]).sort());
+    expect(store.getRun(manual.id)?.archived).toBe(false);
+    expect(store.archiveFinished(undefined, false).ids).toEqual([manual.id]);
+  });
+
   it('let archive-finished and mark-all-read reach every finished run', () => {
     const unread = record({ status: 'done' });
     const read = record({ status: 'done', seenAt: '2099-01-01T00:00:00.000Z' });

@@ -17,7 +17,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import type { Caller } from './credentials.ts';
 
-import { fixture, scheduledDestroyAttempts } from './service.testkit.ts';
+import { fixture, scheduledDestroyAttempts, seedWorkerWait } from './service.testkit.ts';
 import { ensureOwnedWorkspace, gitCommonDir, WORKTREE_LOCK_BUSY_ERROR } from './workspace.ts';
 import { DelegationService } from './service.ts';
 import { withWorktreeMutation } from '../git-worktree-lock.ts';
@@ -574,14 +574,10 @@ describe('delegation service durable authority', () => {
       await expect(f.service.wait(f.caller, { workerIds: [workerId], timeoutSeconds: 600 })).rejects.toMatchObject({ code: 'denied_scope' });
     }
   });
+  /** A worker wait in the list (hearsay-tools/cezarion#1235, #1301), registered as `cez worker wait` does. */
   async function cancellableWait() {
     const { workerId } = await f.service.spawn(f.caller, input());
-    const waitId = randomUUID(); const parent = f.store.getRun(f.parent.id)!;
-    if (parent.delegation?.role !== 'root') throw Error('fixture');
-    f.store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, wait: {
-      id: waitId, workerIds: [workerId], phase: 'registered', deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [],
-    } } }]);
-    return { workerId, waitId };
+    return { workerId, waitId: seedWorkerWait(f.store, f.parent.id, [workerId]) };
   }
   it('cancels a queued parent wait without stopping its worker or authorizing new work', async () => {
     const { workerId, waitId } = await cancellableWait(); f.store.updateRun(f.parent.id, { status: 'queued' });
@@ -593,7 +589,7 @@ describe('delegation service durable authority', () => {
   it.each(['done', 'review', 'failed', 'cancelled'] as const)('reads the retained cancel receipt after the parent becomes %s', async status => {
     const { waitId } = await cancellableWait();
     const settled = await f.service.cancelWait(f.caller, { waitId });
-    f.store.commitWorkerWaitWithdrawal(f.parent.id, waitId); f.store.updateRun(f.parent.id, { status });
+    f.store.updateRun(f.parent.id, { status });
     const before = structuredClone(f.store.getRun(f.parent.id));
     expect(await f.service.cancelWait(f.caller, { waitId })).toEqual(settled);
     expect(f.store.getRun(f.parent.id)).toEqual(before);
@@ -620,14 +616,11 @@ describe('delegation service durable authority', () => {
   });
   it('returns only the retained old cancellation while a queued parent has a newer wait', async () => {
     const { workerId, waitId } = await cancellableWait(); const old = await f.service.cancelWait(f.caller, { waitId });
-    f.store.commitWorkerWaitWithdrawal(f.parent.id, waitId);
-    const parent = f.store.getRun(f.parent.id)!; if (parent.delegation?.role !== 'root') throw Error('fixture');
-    const next = { id: randomUUID(), workerIds: [workerId], phase: 'registered' as const, deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [] };
-    f.store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, wait: next } }]);
-    f.store.updateRun(parent.id, { status: 'queued' });
+    const next = { id: seedWorkerWait(f.store, f.parent.id, [workerId]) };
+    f.store.updateRun(f.parent.id, { status: 'queued' });
     expect(await f.service.cancelWait(f.caller, { waitId })).toEqual(old);
     await expect(f.service.cancelWait(f.caller, { waitId: randomUUID() })).rejects.toMatchObject({ code: 'incompatible_state' });
-    expect(f.store.getRun(parent.id)?.delegation).toMatchObject({ wait: next });
+    expect(f.store.getRun(f.parent.id)?.waits).toEqual([expect.objectContaining({ id: next.id, kind: 'worker', phase: 'open' })]);
   });
 
 });
