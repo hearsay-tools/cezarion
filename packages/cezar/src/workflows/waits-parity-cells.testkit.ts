@@ -1902,54 +1902,67 @@ export function describeWaitParity(scope: RunnerId | 'once'): void {
         });
 
         it(`${runner} U22r after a restart, a refusal queued for a closed session is delivered ${how}`, async () => {
-          if (variant === 'silent' && exemptionFor('U22s', runner)) {
-            expect(exemptionFor('U22s', runner)?.kind).toBe('capability-absent');
-            return;
-          }
-          if (variant === 'silent') silenceRefusals();
-          else process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
-          const { p, w } = await parentWithWorker(runner);
-          const refusal = `Workers are still live: ${w.id}.`;
-          const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
-          // The disk as the refusal was queued and charged, before any session took it: a crash there.
-          let disk: ReturnType<typeof readPersistedRuns> | undefined, events: Map<string, string> | undefined;
-          const capture = ({ runId, event }: { runId: string; event: { type: string; message?: unknown } }) => {
-            if (runId !== p.id || disk || event.type !== 'note' || !String(event.message).startsWith(COMPLETION_NUDGE_NOTE)) return;
-            events = eventCheckpoint();
-            disk = readPersistedRuns(join(root, '.ai/cezar'));
+          const exercise = async (releaseAck: () => void) => {
+            if (variant === 'silent' && exemptionFor('U22s', runner)) {
+              expect(exemptionFor('U22s', runner)?.kind).toBe('capability-absent');
+              return;
+            }
+            if (variant === 'silent') silenceRefusals();
+            else process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
+            const { p, w } = await parentWithWorker(runner);
+            const refusal = `Workers are still live: ${w.id}.`;
+            const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
+            // The disk as the refusal was queued and charged, before any session took it: a crash there.
+            let disk: ReturnType<typeof readPersistedRuns> | undefined, events: Map<string, string> | undefined;
+            const capture = ({ runId, event }: { runId: string; event: { type: string; message?: unknown } }) => {
+              if (runId !== p.id || disk || event.type !== 'note' || !String(event.message).startsWith(COMPLETION_NUDGE_NOTE)) return;
+              events = eventCheckpoint();
+              disk = readPersistedRuns(join(root, '.ai/cezar'));
+            };
+            store.on('event', capture);
+            engine().active.get(p.id)!.session.end();
+            await until(() => disk !== undefined);
+            store.off('event', capture);
+            let closes = variant === 'closing' ? 1 : 0;
+            const closeOnce = ({ runId, event }: { runId: string; event: { type: string } }) => {
+              if (runId !== p.id || event.type !== 'turn-end' || !closes || !refusals().some(input => !input.deliveredAt)) return;
+              closes--;
+              engine().active.get(p.id)?.session.end();
+            };
+            await restart(false, disk, events);
+            // The old manager may have reached a mock before it stopped: count from here.
+            const before = prompted(runner, refusal).length;
+            // Recovery reopens the run through the scheduler; its first turn end is a mock round trip away.
+            store.on('event', closeOnce);
+            onTestFinished(() => { store.off('event', closeOnce); });
+            if (variant === 'silent') silenceRefusals();
+            else retryAtOnce();
+            expect(refusals()).toEqual([expect.objectContaining({ source: 'lifecycle' })]);
+            if (variant === 'silent') {
+              await until(() => noReplyNotes(p.id).length === 1 && gated(p.id));
+              if (runner === 'opencode') expect(refusals()[0]!.deliveredAt).toBeUndefined();
+              expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'no-wait' })]);
+              expect(semaphore.busy()).toBe(0);
+              releaseAck();
+              // The reply bound can beat the native ACK. Its human gate alone does not prove
+              // delivery committed; the late ACK resumes wake bookkeeping and re-arms that bound.
+              checkpoint('u22r-refusal-delivered-and-reparked');
+              await until(() => refusals().some(input => !!input.deliveredAt) && gated(p.id));
+              expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'no-wait' })]);
+              expect(semaphore.busy()).toBe(0);
+            } else {
+              await until(() => prompted(runner, refusal).length > before && store.getRun(p.id)?.status === 'waiting' &&
+                (workerWaits(p.id)[0]?.phase === 'open' || humanOpen(p.id).some(wait => wait.via === 'completion')));
+              expect(closes).toBe(0);
+              expect(store.getRun(p.id)?.waitDeliveryFailures).toBeUndefined();
+            }
+            expect(prompted(runner, refusal).length - before).toBe(1);
+            expect(refusals()).toEqual([expect.objectContaining({ deliveredAt: expect.any(String) })]);
+            expect(nudgeNotes(p.id)).toHaveLength(1);
           };
-          store.on('event', capture);
-          engine().active.get(p.id)!.session.end();
-          await until(() => disk !== undefined);
-          store.off('event', capture);
-          let closes = variant === 'closing' ? 1 : 0;
-          const closeOnce = ({ runId, event }: { runId: string; event: { type: string } }) => {
-            if (runId !== p.id || event.type !== 'turn-end' || !closes || !refusals().some(input => !input.deliveredAt)) return;
-            closes--;
-            engine().active.get(p.id)?.session.end();
-          };
-          await restart(false, disk, events);
-          // The old manager may have reached a mock before it stopped: count from here.
-          const before = prompted(runner, refusal).length;
-          // Recovery reopens the run through the scheduler; its first turn end is a mock round trip away.
-          store.on('event', closeOnce);
-          onTestFinished(() => { store.off('event', closeOnce); });
-          if (variant === 'silent') silenceRefusals();
-          else retryAtOnce();
-          expect(refusals()).toEqual([expect.objectContaining({ source: 'lifecycle' })]);
-          if (variant === 'silent') {
-            await until(() => noReplyNotes(p.id).length === 1 && gated(p.id));
-            expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'no-wait' })]);
-            expect(semaphore.busy()).toBe(0);
-          } else {
-            await until(() => prompted(runner, refusal).length > before && store.getRun(p.id)?.status === 'waiting' &&
-              (workerWaits(p.id)[0]?.phase === 'open' || humanOpen(p.id).some(wait => wait.via === 'completion')));
-            expect(closes).toBe(0);
-            expect(store.getRun(p.id)?.waitDeliveryFailures).toBeUndefined();
-          }
-          expect(prompted(runner, refusal).length - before).toBe(1);
-          expect(refusals()).toEqual([expect.objectContaining({ deliveredAt: expect.any(String) })]);
-          expect(nudgeNotes(p.id)).toHaveLength(1);
+          if (runner === 'opencode' && variant === 'silent') {
+            await withDelayedCommand('opencode', exercise, 'mock:ack-only');
+          } else await exercise(() => {});
         });
       }
 
