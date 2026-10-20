@@ -424,6 +424,17 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
     expect(document.querySelectorAll('[data-slot="run-activity-status"]')).toHaveLength(1)
   })
 
+  it('gives the next check its own wrapping line, outside the truncating meter', () => {
+    renderDock(waiting(), [])
+    ensureOpen()
+    const next = section('status-row')!.querySelector<HTMLElement>('[data-slot="run-activity-next-check"]')
+    expect(next?.textContent).toMatch(/^Next check /)
+    // A meter truncates to one line; the appointment must be readable at 320px without opening details.
+    expect(next?.closest('[data-slot="run-activity-meta"]')).toBeNull()
+    expect(next?.className).toContain('whitespace-normal')
+    expect(metaOf('status-row')).toBeUndefined()
+  })
+
   it('renders for a run with no workflow, agents, workers or plan', () => {
     renderDock(fresh({ steps: [], status: 'queued' }), [])
     ensureOpen()

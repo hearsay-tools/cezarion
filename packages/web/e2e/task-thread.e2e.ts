@@ -933,17 +933,21 @@ describe('task thread', () => {
       const box = (sel) => { const r = document.querySelector(sel)?.getBoundingClientRect(); return r ? { left: Math.round(r.left), width: Math.round(r.width) } : null }
       const small = [...card.querySelectorAll('button, a')].filter(el => el.getClientRects().length && el.getBoundingClientRect().height < 44)
         .map(el => (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 40))
-      return { state: card.dataset.state, overflow: document.documentElement.scrollWidth - innerWidth,
+      // The folded status must be painted whole, not squeezed to an ellipsis or clipped by the card.
+      const status = card.querySelector(':scope > button [data-slot="run-activity-status"] .truncate')
+      const statusCut = status ? status.scrollWidth > status.clientWidth + 1 || status.getBoundingClientRect().right > card.getBoundingClientRect().right : null
+      return { state: card.dataset.state, overflow: document.documentElement.scrollWidth - innerWidth, statusCut,
         summaryHeight: Math.round(summary.getBoundingClientRect().height), small,
         composer: box('[data-slot="composer"]'), transcript: box('[data-slot="thread-rows"]') }
     })()`
-    type Sample = { state: string; overflow: number; summaryHeight: number; small: string[]; composer: { left: number; width: number }; transcript: { left: number; width: number } | null }
+    type Sample = { state: string; overflow: number; statusCut: boolean | null; summaryHeight: number; small: string[]; composer: { left: number; width: number }; transcript: { left: number; width: number } | null }
     browser.evaluate(`document.querySelector('${SESSION_ACTIVITY_SUMMARY}[aria-expanded="true"]')?.click()`)
     const folded = waitForSettledSample<Sample>(browser, `(${sample}).state === 'collapsed' ? ${sample} : null`)
     expect(folded.overflow).toBeLessThanOrEqual(0)
-    // One row: the 44px summary, with no second status line wrapped under it.
+    expect(folded.statusCut).toBe(false)
+    // One 44px summary; on a narrow phone its status may take a second line inside it.
     expect(folded.summaryHeight).toBeGreaterThanOrEqual(44)
-    expect(folded.summaryHeight).toBeLessThan(60)
+    if (width >= 768) expect(folded.summaryHeight).toBeLessThan(60)
     if (width < 768) expect(folded.small).toEqual([])
     openSessionActivityRow(browser, 'workspace')
     openSessionActivityRow(browser, 'usage')

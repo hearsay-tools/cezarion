@@ -181,29 +181,34 @@ function SessionActivityCard({
           openByRun.set(run.id, !open)
           setOpen(!open)
         }}
-        className="flex min-h-11 w-full min-w-0 items-center gap-2.5 px-3.5 py-2 text-left text-[14px] hover:bg-muted/40"
+        className="flex min-h-11 w-full min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 px-3.5 py-2 text-left text-[14px] hover:bg-muted/40"
       >
         <LayersIcon aria-hidden className="size-4 shrink-0 text-accent-text" />
         <span className="shrink-0 font-semibold">Session activity</span>
-        {/* Folded only: once open, the first row carries the status (and its next check). */}
+        {/* Folded only: once open, the first row carries the status (and its next check). The
+            status and a conflict travel together; `flex-auto` sizes the group to its whole text, so
+            on a phone row without room for it the group wraps under the label instead of being
+            squeezed to an ellipsis or clipped. */}
         {open ? null : (
-          <span
-            data-slot="run-activity-status"
-            className={cn(
-              'flex min-w-0 shrink items-center gap-1.5 text-[13px]',
-              allComplete ? 'text-success' : failed ? 'text-danger' : 'text-muted-foreground',
-            )}
-          >
-            {glyph}
-            <span className="truncate">{statusText}</span>
+          <span className="flex min-w-0 flex-auto items-center gap-2.5">
+            <span
+              data-slot="run-activity-status"
+              className={cn(
+                'flex min-w-0 shrink items-center gap-1.5 text-[13px]',
+                allComplete ? 'text-success' : failed ? 'text-danger' : 'text-muted-foreground',
+              )}
+            >
+              {glyph}
+              <span className="truncate">{statusText}</span>
+            </span>
+            {conflicts.length > 0 ? (
+              <span data-slot="run-activity-conflict" className="flex shrink-0 items-center gap-1 text-[13px] font-medium text-conflict">
+                <TriangleAlertIcon aria-hidden className="size-3.5" />
+                Conflicts
+              </span>
+            ) : null}
           </span>
         )}
-        {conflicts.length > 0 && !open ? (
-          <span data-slot="run-activity-conflict" className="flex shrink-0 items-center gap-1 text-[13px] font-medium text-conflict">
-            <TriangleAlertIcon aria-hidden className="size-3.5" />
-            Conflicts
-          </span>
-        ) : null}
         {cost ? <span data-slot="run-activity-cost" className="ml-auto shrink-0 text-[13px] text-muted-foreground tabular-nums">{cost}</span> : null}
         <ChevronDownIcon
           aria-hidden
@@ -216,8 +221,18 @@ function SessionActivityCard({
             slot="status-row"
             icon={glyph}
             // The same slot the folded summary used: the status text moves here, it is not a second copy.
-            title={<span data-slot="run-activity-status" className={cn(allComplete ? 'text-success' : failed && 'text-danger')}>{statusText}</span>}
-            meta={line.nextCheck ? <>Next check <time dateTime={line.nextCheck.at}>{line.nextCheck.text}</time></> : undefined}
+            // The next check is its own line, never a truncating meter: at 320px a one-line row
+            // cut the appointment off, and the phone has no other place that shows it.
+            title={
+              <span className="flex min-w-0 flex-col">
+                <span data-slot="run-activity-status" className={cn('truncate', allComplete ? 'text-success' : failed && 'text-danger')}>{statusText}</span>
+                {line.nextCheck ? (
+                  <span data-slot="run-activity-next-check" className="whitespace-normal text-[13px] font-normal text-muted-foreground">
+                    Next check <time dateTime={line.nextCheck.at}>{line.nextCheck.text}</time>
+                  </span>
+                ) : null}
+              </span>
+            }
             open={isOpen('status')}
             onToggle={hasWaitDetails(run) ? () => toggle('status') : undefined}
           >
