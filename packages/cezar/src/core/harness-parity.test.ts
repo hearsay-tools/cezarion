@@ -2899,6 +2899,7 @@ for (const { id, scenario, text } of RETIREMENTS) {
       it(`${backend} ${id} retires the card, its capability and the run's pending permission`, async () => {
         await withRelease(async (release) => {
           let requestId = '';
+          // bound: hang guard for the live mock run; the predicate waits on the run settling, and a stuck card fails here instead of at the test timeout.
           const observation = await driveRun(backend, scenario, run => !!run && ['done', 'review'].includes(run.status), 30_000, undefined, {
             env: { CEZ_MOCK_RELEASE_FILE: release },
             during: async ({ store, manager, runId }) => {
@@ -2920,6 +2921,7 @@ for (const { id, scenario, text } of RETIREMENTS) {
           expect(joinedText(observation.events)).toContain(text);
           expect(observation.events).toContainEqual(expect.objectContaining({ type: 'turn.completed' }));
         });
+      // bound: per-cell hang guard above driveRun's own 30 s settle bound, sized for a parity cell under host load.
       }, 45_000);
     }
   });
@@ -2932,6 +2934,7 @@ describe(`P5 ${PERMISSION_CRITERIA.find(c => c.id === 'P5')!.name} (hearsay-tool
       let repoRoot = '';
       const { pick, echo } = HARNESS_ADAPTERS[backend].approvalDecisions![0]!;
       let freshId = '';
+      // bound: hang guard for the live mock run; the predicate waits on the run settling, and a stuck card fails here instead of at the test timeout.
       const observation = await driveRun(backend, 'approval-reply-fails', run => !!run && ['done', 'review'].includes(run.status), 30_000, undefined, {
         beforeStart: context => { repoRoot = context.repoRoot; },
         during: async ({ store, manager, runId }) => {
@@ -2973,6 +2976,7 @@ describe(`P5 ${PERMISSION_CRITERIA.find(c => c.id === 'P5')!.name} (hearsay-tool
       expect(observation.record?.hasPendingPermission).toBe(false);
       expect(joinedText(observation.events)).toContain(echo);
       expect(observation.events).toContainEqual(expect.objectContaining({ type: 'turn.completed' }));
+    // bound: per-cell hang guard above driveRun's own 30 s settle bound, sized for a parity cell under host load.
     }, 45_000);
   }
 });
@@ -2981,12 +2985,14 @@ describe(`P6 ${PERMISSION_CRITERIA.find(c => c.id === 'P6')!.name} (hearsay-tool
   for (const backend of RUNNER_IDS) {
     if (permissionExemption('P6', backend, 'approval-malformed')) continue;
     it(`${backend} P6 refuses the malformed request natively and the turn goes on`, async () => {
+      // bound: hang guard for the live mock run; the predicate waits on the run settling, and a stuck card fails here instead of at the test timeout.
       const observation = await driveRun(backend, 'approval-malformed', run => !!run && ['done', 'review'].includes(run.status), 30_000);
       expect(observation.events.some(event => event.type === 'permission.requested')).toBe(false);
       expect(observation.record?.hasPendingPermission).toBeFalsy();
       expect(observation.statuses).not.toContain('waiting');
       expect(joinedText(observation.events)).toContain(HARNESS_ADAPTERS[backend].malformedApprovalEcho!);
       expect(observation.events).toContainEqual(expect.objectContaining({ type: 'turn.completed' }));
+    // bound: per-cell hang guard above driveRun's own 30 s settle bound, sized for a parity cell under host load.
     }, 45_000);
   }
 });
@@ -3025,6 +3031,7 @@ describe(`P7 ${PERMISSION_CRITERIA.find(c => c.id === 'P7')!.name} (hearsay-tool
         expect(urls).not.toContain('/permission/per_mock_classify/reply');
         expect(urls).toContain('/permission/per_mock_marker/reply');
       });
+    // bound: per-cell hang guard above driveRun's own 30 s settle bound, sized for a parity cell under host load.
     }, 45_000);
   }
 });
@@ -3057,6 +3064,7 @@ describe(`P8 ${PERMISSION_CRITERIA.find(c => c.id === 'P8')!.name} (hearsay-tool
         .toEqual([expect.objectContaining({ optionId: expect.any(String) })]);
       expect(observation.v2.filter(event => event.type === 'turn.completed')).toHaveLength(2);
       expect(textEvents(observation.v1).join('\n')).toContain('Approval response: {"reply":"once"}');
+    // bound: per-cell hang guard above driveRun's own 30 s settle bound, sized for a parity cell under host load.
     }, 45_000);
 
     // Through RunManager only a non-final step closes on its own; the second step proves it did.
@@ -3067,6 +3075,7 @@ describe(`P8 ${PERMISSION_CRITERIA.find(c => c.id === 'P8')!.name} (hearsay-tool
         name: 'permission-late', source: 'built-in',
         steps: [{ id: 'first', name: 'First', prompt: '{{task}}' }, { id: 'second', name: 'Second', prompt: promptFor(backend, 'done') }],
       };
+      // bound: hang guard for the live mock run; the predicate waits on the run settling, and a stuck card fails here instead of at the test timeout.
       const observation = await driveRun(backend, 'permission-late', run => !!run && ['done', 'review'].includes(run.status), 30_000, undefined, {
         workflowDef,
         beforeStart: context => { repoRoot = context.repoRoot; },
@@ -3081,6 +3090,7 @@ describe(`P8 ${PERMISSION_CRITERIA.find(c => c.id === 'P8')!.name} (hearsay-tool
       expect(permissionResolutionsOf(observation.events)).toEqual([expect.objectContaining({ optionId: expect.any(String) })]);
       expect(observation.record?.hasPendingPermission).toBe(false);
       expect(observation.record?.steps.map(step => [step.id, step.status])).toEqual([['first', 'done'], ['second', 'done']]);
+    // bound: per-cell hang guard above driveRun's own 30 s settle bound, sized for a parity cell under host load.
     }, 45_000);
   }
 });

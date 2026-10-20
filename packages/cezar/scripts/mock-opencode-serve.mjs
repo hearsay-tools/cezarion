@@ -251,9 +251,11 @@ const pendingPermissionAsks = new Set();
 let failPermissionReplies = 0;
 let classifyPending = false;
 async function waitForMockFile(file) {
+  // bound: hang guard for a test that never creates its gate file; the wait itself is the file.
   const deadline = Date.now() + 15_000;
   while (!parityGateFs.existsSync(file)) {
     if (Date.now() > deadline) throw new Error(`${file} was not created`);
+    // bound: poll interval; the gate file is written by another process, with no event to await.
     await new Promise(r => setTimeout(r, 10));
   }
 }
