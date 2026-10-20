@@ -46,7 +46,10 @@ describe('automations on the shared environment', () => {
     skip(automationsAvailable, 'the shared environment explicitly enabled automations')
     browser.goto(`${baseUrl}/p/${bootProject}/`)
     browser.waitForFunction(`document.querySelector('[data-slot="sidebar"]') !== null`)
-    expect(browser.text('[data-slot="sidebar"]')).not.toContain('Automations')
+    // No way into the feature: no nav entry links to its route. The task list's Automations tab
+    // (#1332) is a filter over tasks, shown either way, so the sidebar's text may name it.
+    expect(browser.count('[data-slot="sidebar"] a[href$="/automations"]')).toBe(0)
+    expect(browser.text('[data-slot="sidebar"] [data-slot="view-tabs"]')).not.toContain('Automations')
 
     // The deep link still resolves — the route map is unchanged — but says the feature is off.
     browser.goto(`${baseUrl}/p/${bootProject}/automations`)
