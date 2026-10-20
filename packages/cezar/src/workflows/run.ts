@@ -6447,6 +6447,9 @@ export class RunManager {
       this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: ROUTED_QUESTION_REFUSAL });
       return false;
     }
+    // Cezar's fallback question on a worker never holds what the plain park it replaced let
+    // through: an automatic message supersedes it, as a parent's input does (hearsay-tools/cezarion#1301).
+    if (!userAuthored) this.supersedeWorkerFallback(runId);
     const text = content
       .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
       .map((b) => b.text)
