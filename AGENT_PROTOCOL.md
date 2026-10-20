@@ -907,7 +907,8 @@ you and wake you when they have all settled.* The mid-turn `cezar_done` answer n
 An open agent wait or owed input comes first: no nudge, the refusal is a note, and the run parks
 on its waits. A block found after the session closed (or a legacy accepted Finish) queues the
 refusal as one lifecycle input that the scheduler continuation reopens the session to deliver.
-One nudge per cycle: when the turn that answers it ends on a blocked done again, Cezar registers
+One nudge per cycle: a human message or a wake starts a fresh one. When the turn that answers it
+ends on a blocked done again, Cezar registers
 a list `worker` wait on the live workers (`source: 'cezar'`, `via: 'completion'`, `mode: 'all'`,
 no deadline, no slot; it idle-closes like any worker park), or with only uncollected results or
 unanswered worker questions opens its own human wait (`via: 'completion'`), which parks for the
@@ -1286,7 +1287,9 @@ the message reaches the wire, nothing answers the card, and the human's answer k
 `askSeq`. No runner takes U12's exemption here: U19 pins delivery, not a delayed acknowledgement.
 Phase 3b (hearsay-tools/cezarion#1301) adds, on every runner: U20 and U20u (a blocked done at the
 turn end gets one refusal nudge, with the will-wait sentence for live workers and without it for a
-settled, uncollected one, and opens no wait), U21 (an ignored refusal parks on Cezar's completion
+settled, uncollected one, and opens no wait), U20h (a human message, in the opening session or a
+continuation, or a worker message after a refusal nudge the harness never answered starts a fresh
+cycle: its blocked done gets a fresh nudge, not the park), U21 (an ignored refusal parks on Cezar's completion
 worker wait, which settlement wakes), U21r (that deadline-less wait restarted and settled), U21m (a
 worker message wakes the parent beside it), U21t (an agent timer beside it keeps its deadline),
 U21h (only uncollected results: Cezar's human wait), U21a (an autonomous parent is nudged again

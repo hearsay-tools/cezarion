@@ -4692,6 +4692,13 @@ export class RunManager {
     return !!this.store.getRun(runId)?.agentInputs?.some(input => !input.deliveredAt && this.completionRefusalInputs.has(input.id));
   }
 
+  /** A human message or a wake (hearsay-tools/cezarion#1301): the turn it opens or steers no longer
+   *  answers a refusal nudge, so its blocked done gets a fresh nudge rather than the second step. */
+  private startCompletionCycle(state: ActiveRun): void {
+    state.completionNudged = undefined;
+    state.completionNudgeAnswered = undefined;
+  }
+
   /** The refusal `deferParentCompletion` just made in this session, taken once. */
   private takeCompletionRefusal(state: ActiveRun): ActiveRun['completionRefused'] {
     const refused = state.completionRefused?.session === state.session ? state.completionRefused : undefined;
@@ -5804,8 +5811,10 @@ export class RunManager {
     void flight.settled.then(() => deliveries?.delete(flight.settled!));
     this.resumeParkedRun(runId, state);
     if (flight.admittedWake || resolvedWaits(this.store.getRun(runId) ?? {}).some(wait => inputIds.includes(waitInputId(wait)))) state.waitWakeTurn = session;
-    // A refusal queued while the session was gone makes this the nudge's turn (hearsay-tools/cezarion#1301).
+    // A refusal queued while the session was gone makes this the nudge's turn; any other input is a
+    // wake, which starts a fresh cycle (hearsay-tools/cezarion#1301). A live nudge carries no input.
     if (inputIds.filter(id => this.completionRefusalInputs.delete(id)).length) state.completionNudged = session;
+    else if (inputIds.length) this.startCompletionCycle(state);
     return true;
   }
 
@@ -6035,6 +6044,8 @@ export class RunManager {
         state.noWaitNudged = undefined;
         state.noWaitNudgeParked = undefined;
         state.noWaitNudgeSawContent = undefined;
+        // A human message starts a fresh completion cycle (hearsay-tools/cezarion#1301).
+        this.startCompletionCycle(state);
         if (answeringAskSeq !== undefined) {
           this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: answeringAskSeq });
         }

@@ -15,7 +15,7 @@ import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
 import { handoffPath } from '../handoff.ts';
-import { claudeScheduleWakeupDelay, COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
+import { claudeScheduleWakeupDelay, COMPLETION_NO_REPLY_NOTE, COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
 import { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE } from './turn-end.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt, MONITORING_TEXT } from './monitoring-turn.testkit.ts';
@@ -174,6 +174,28 @@ async function ignoreRefusal(runner: RunnerId, id: string, refusal: string, park
   return workerWaits(id)[0]!;
 }
 
+const nudgeNotes = (id: string) => store.readEvents(id).filter(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE));
+const noReplyNotes = (id: string) => store.readEvents(id).filter(event => event.type === 'note' && event.message === COMPLETION_NO_REPLY_NOTE);
+
+/** A harness that acknowledges `refusal` and never answers it (hearsay-tools/cezarion#1301): the
+ *  input Cezar submits with that text reaches no wire, so no turn starts, as an OpenCode heartbeat
+ *  keeps a session alive without one. Every other input goes through. The nudge's reply bound is
+ *  shortened so its no-reply park comes at once. */
+function silenceRefusals(id: string, refusal: string) {
+  (manager as unknown as { noWaitNudgeReplyMs: number }).noWaitNudgeReplyMs = 300;
+  type Submit = (runId: string, state: { session?: AgentSession }, content: Array<{ type: string; text?: string }>, inputIds?: readonly string[]) => boolean;
+  const internal = manager as unknown as { submitAgentInput: Submit };
+  const submit = internal.submitAgentInput.bind(manager);
+  vi.spyOn(internal, 'submitAgentInput').mockImplementation((runId, state, content, inputIds) => {
+    const session = state.session;
+    if (runId === id && session && content.some(block => block.text?.includes(refusal))) {
+      const send = session.sendAgentMessage;
+      session.sendAgentMessage = () => { session.sendAgentMessage = send; return Promise.resolve(); };
+    }
+    return submit(runId, state, content, inputIds);
+  });
+}
+
 /** A steering parent on `runner`'s native wire and a worker running on the Claude wire, parked,
  *  with each one's credential on a delegation service, as `cez worker send` reaches them. */
 async function conversingParent(runner: RunnerId) {
@@ -208,7 +230,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U24', 'U25']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U24', 'U25']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -1479,6 +1501,43 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
         // The nudge turn's own end follows the ordinary rule; the run still finishes nothing.
         await until(() => store.getRun(p.id)?.status === 'waiting');
         expect(waitOf(store.getRun(p.id))).toBeUndefined();
+        expect(workerWaits(p.id)).toEqual([]);
+      });
+    }
+
+    // hearsay-tools/cezarion#1301: a human message starts a fresh cycle. A refusal nudge the harness
+    // never answers parks on Cezar's human wait; the human's message then ends on done again, and
+    // that done gets a fresh nudge rather than the second step. Each turn-end handler: the opening
+    // session's and a continuation's.
+    for (const path of ['opening session', 'continuation', 'worker message'] as const) {
+      it(`${runner} U20h a ${path === 'worker message' ? 'worker message' : 'human message'} after an unanswered refusal nudge starts a fresh cycle (${path})`, async () => {
+        const f = path === 'worker message' ? await conversingParent(runner) : { ...await parentWithWorker(runner), progress: undefined };
+        const { p, w } = f;
+        const refusal = `Workers are still live: ${w.id}.`;
+        if (path === 'continuation') {
+          // An idle close leaves the run waiting; the human's Continue reopens it as a continuation.
+          (engine().active.get(p.id) as unknown as { idleTimer: NodeJS.Timeout & { _onTimeout(): void } }).idleTimer._onTimeout();
+          await until(() => !manager.isActive(p.id) && store.getRun(p.id)?.status === 'waiting');
+        }
+        silenceRefusals(p.id, refusal);
+        const done = messagesPrompt(runner, ['All done.\nCEZ:DONE']);
+        if (path === 'continuation') expect(manager.continueRun(p.id, { text: done }).ok).toBe(true);
+        else expect(manager.sendMessage(p.id, [{ type: 'text', text: done }])).toBe(true);
+        await until(() => noReplyNotes(p.id).length === 1 && gated(p.id));
+        if (path === 'continuation') expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
+        expect(nudgeNotes(p.id)).toHaveLength(1);
+        expect(prompted(runner, refusal)).toEqual([]);
+        expect(workerWaits(p.id)).toEqual([]);
+        expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'no-wait' })]);
+        // The next turn ends on a blocked done: a fresh cycle, so a second nudge and no wait.
+        const turns = turnEnds(p.id);
+        const again = messagesPrompt(runner, ['Done now.\nCEZ:DONE']);
+        if (f.progress) await f.progress(again);
+        else expect(manager.sendMessage(p.id, [{ type: 'text', text: again }])).toBe(true);
+        await until(() => turnEnds(p.id) > turns && (nudgeNotes(p.id).length === 2 || workerWaits(p.id).length > 0 || humanOpen(p.id).some(wait => wait.via === 'completion')));
+        expect(workerWaits(p.id)).toEqual([]);
+        expect(nudgeNotes(p.id)).toHaveLength(2);
+        await until(() => noReplyNotes(p.id).length === 2 && gated(p.id));
         expect(workerWaits(p.id)).toEqual([]);
       });
     }

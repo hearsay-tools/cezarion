@@ -903,7 +903,9 @@ Calls made by the agent (owner to check):
   next done. Cezar's own human waits are withdrawn by the nudge instead.
 - **One cycle.** A cycle is consecutive turns: the turn that answers a refusal nudge is the only
   one whose blocked done takes the second step; any other turn end, a human message, a wake or
-  the agent's own wait starts a fresh cycle.
+  the agent's own wait starts a fresh cycle. A human message or a wake clears the cycle even when
+  it arrives before the nudge's turn ends (a harness that never answered the nudge); only the
+  delivery of the queued refusal itself marks its turn as the nudge's.
 - **Bounds.** The nudge and every parent reply that resumes a worker from its fallback question
   are charged to the automatic-wake budget (`MAX_AUTO_CONTINUES`, 40) through
   `chargeAutomaticWake`, so neither an agent that keeps declaring done nor a parent and worker
@@ -955,7 +957,9 @@ Decisions made during execution:
   request.
 - **Coverage.** `RUNNER_IDS` cells in `workflows/waits-parity.test.ts`, each on every runner's
   native mock wire through `HARNESS_ADAPTERS`: U20 and U20u (the nudge, with and without the
-  will-wait sentence), U11 (an open timer at a blocked done: no nudge, the refusal is a note), U21
+  will-wait sentence), U20h (a human message, in the opening session or a continuation, or a worker
+  message after an unanswered nudge starts a fresh cycle), U11 (an open timer at a blocked done: no
+  nudge, the refusal is a note), U21
   (an ignored refusal parks on the completion worker wait, which settlement wakes), U21r (that
   wait restarted and settled), U21m (a worker message wakes it beside the open wait), U21t (an
   agent timer beside it keeps its deadline), U21h (only uncollected results: Cezar's human wait),
