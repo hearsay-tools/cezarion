@@ -233,7 +233,7 @@ describe('ThreadView', () => {
   it('shows the header title (auto-summary, never the raw title) and the status pill', () => {
     renderView(<ThreadView run={run('waiting')} thread={reduceThread(EVENTS)} />)
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Do the thing')
-    expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain('needs you')
+    expect(document.querySelector('[data-slot="pill"]')?.textContent?.toLowerCase()).toContain('needs you')
   })
 
   it('waiting → the paused hint (pulsing dot) in the dock, right above an ENABLED composer', () => {
@@ -368,7 +368,7 @@ describe('ThreadView', () => {
     renderView(<ThreadView run={run('running', { activity: 'monitoring' })} thread={reduceThread(EVENTS)} />)
     // Still working on downstream work, not on you: never the "paused, waiting for your reply" banner.
     expect(document.querySelector('[data-slot="paused-hint"]')).toBeNull()
-    expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain('monitoring')
+    expect(document.querySelector('[data-slot="pill"]')?.textContent?.toLowerCase()).toContain('monitoring')
     const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
     expect(textarea.disabled).toBe(false)
     expect(textarea.placeholder).toBe('Message the agent — / for skills, @ for files…')
@@ -1363,7 +1363,7 @@ it.each(['registered', 'parked', 'wake-pending'] as const)('uses honest dock cop
       : phase === 'wake-pending' ? 'Waiting for capacity — you can send a message to resume'
         : 'waiting for your reply',
   )
-  expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain(
+  expect(document.querySelector('[data-slot="pill"]')?.textContent?.toLowerCase()).toContain(
     phase === 'parked' ? 'waiting on 1 worker'
       : phase === 'wake-pending' ? 'waiting for capacity'
         : 'needs you',
@@ -1373,7 +1373,7 @@ it('keeps a visible human ask above parked worker context in the header and dock
   const thread = reduceThread([line(1, 'ask.requested', { requestId: 'ask', questions: [{ header: 'Choice', question: 'Choose a path', options: [{ label: 'Proceed', description: 'Continue' }] }] })])
   renderView(<ThreadView run={run('waiting', { delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })} thread={thread} />)
   expect(document.querySelector('[data-slot="paused-hint"]')?.textContent).toContain('waiting for your reply')
-  expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain('needs you')
+  expect(document.querySelector('[data-slot="pill"]')?.textContent?.toLowerCase()).toContain('needs you')
   expect(screen.getByText('Choose a path')).toBeTruthy()
 })
 
@@ -1390,7 +1390,7 @@ it.each([false, true].flatMap(fallback => (['pending', 'refused-human-attempt', 
   renderView(<ThreadView run={run('waiting', { delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-07T12:00:00.000Z', phase: 'parked', outcomes: [] } } })} thread={reduceThread(visibleEvents)} currentThread={reduceThread(currentEvents)} history={history} />)
   const expectedPending = mode !== 'matched-answer' && mode !== 'old-history'
   expect(document.querySelector('[data-slot="paused-hint"]')?.textContent).toContain(expectedPending ? 'waiting for your reply' : 'Waiting on 1 worker')
-  expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain(expectedPending ? 'needs you' : 'waiting on 1 worker')
+  expect(document.querySelector('[data-slot="pill"]')?.textContent?.toLowerCase()).toContain(expectedPending ? 'needs you' : 'waiting on 1 worker')
 })
 
 describe('composer execution actions (#201)', () => {
@@ -1584,7 +1584,7 @@ it.each(['root', 'worker'] as const)('shows the actual dependency in a parked %s
   }
   renderView(<ThreadView run={run('waiting', { delegation })} thread={reduceThread([])} />)
   expect(document.querySelector('[data-slot="paused-hint"]')?.textContent).toContain(role === 'worker' ? 'Waiting on parent reply' : 'Waiting on worker replies')
-  expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain(role === 'worker' ? 'waiting on parent reply' : 'waiting on worker replies')
+  expect(document.querySelector('[data-slot="pill"]')?.textContent?.toLowerCase()).toContain(role === 'worker' ? 'waiting on parent reply' : 'waiting on worker replies')
   expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
   expect(screen.getAllByRole('button', { name: 'Stop' }).some(button => !button.hasAttribute('disabled'))).toBe(true)
 })

@@ -11,7 +11,7 @@ import { RunActivityDock } from './run-activity-dock'
 import { reduceThread } from './thread-state'
 
 /**
- * The unified Run activity accordion (#402, mockups `pasted-1..3.png`): ONE card above the
+ * The unified Session activity accordion (#402, mockups `pasted-1..3.png`): ONE card above the
  * composer whose rows are the sections — workflow, subagents, workers, plan — each an
  * icon + bold title + muted meta + chevron, with the section's own list nested under it.
  */
