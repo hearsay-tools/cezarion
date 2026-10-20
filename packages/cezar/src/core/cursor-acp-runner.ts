@@ -6,6 +6,8 @@ import type { AgentEvent, AgentInputOptions, AgentRunResult, AgentRunner, AgentR
 import { prependSystemPrompt, trackChildExit } from './agent-runner.ts';
 import { signalSession, spawnSessionLeader } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
+import { cursorArgs, noteCursorAutoUpdateFlagRejected, rejectsCursorAutoUpdateFlag,
+  usesCursorAutoUpdateFlag } from './cursor-cli-flags.ts';
 import { cezarToolEnvNames } from '../ci-wait/tools.ts';
 import { parseAskMarker, parseAskRequest, type AskQuestion } from './ask.ts';
 import { readNdjson } from './ndjson.ts';
@@ -149,7 +151,7 @@ class CursorSession implements AgentSession {
     this.stderrBuf = '';
     this.stderrTruncated = false;
     const spec = this.spec;
-    this.attachChild(spawnSessionLeader(this.bin, ['--force', ...(spec.model ? ['--model', spec.model] : []), ...(spec.additionalDirectories ?? []).flatMap(path => ['--add-dir', path]), 'acp'], {
+    this.attachChild(spawnSessionLeader(this.bin, cursorArgs(this.bin, ['--force', ...(spec.model ? ['--model', spec.model] : []), ...(spec.additionalDirectories ?? []).flatMap(path => ['--add-dir', path]), 'acp']), {
       cwd: spec.cwd, env: buildChildEnv({ backend: 'cursor', extraEnv: spec.env }),
     }));
   }
@@ -177,6 +179,13 @@ class CursorSession implements AgentSession {
     child.once('close', (code, signal) => {
       if (this.child !== child) return;
       if (this.closing) { this.finish(); return; }
+      if (!this.ready && rejectsCursorAutoUpdateFlag(this.stderrBuf) && usesCursorAutoUpdateFlag(this.bin)) {
+        // A build without the flag still runs; this respawn is not a #529 retry.
+        noteCursorAutoUpdateFlagRejected(this.bin);
+        this.spawnAttempts -= 1;
+        this.respawn();
+        return;
+      }
       if (this.stderrBuf.trim()) this.emit({ type: 'note', message:
         `Cursor ACP stderr${this.stderrTruncated ? ' (truncated to last 65536 characters)' : ''}:\n${this.stderrBuf}` });
       if (!this.ready && this.spawnAttempts <= CURSOR_ACP_SPAWN_MAX_RETRIES) {

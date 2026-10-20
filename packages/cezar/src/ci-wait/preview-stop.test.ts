@@ -3,7 +3,7 @@ import type { PreviewStopRequest, PreviewStopResult } from '@open-mercato/cezar-
 import type { CezarToolHandlers, CiToolApp } from './controller.ts';
 import { request } from 'node:http';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
-import { previewStopRequestSchema, previewStopResultSchema } from '@open-mercato/cezar-contract';
+import { previewStopRequestSchema, previewStopResultSchema } from '@open-mercato/cezar-contract/preview';
 import { CiToolController } from './controller.ts';
 import { callPreviewStop } from './client.ts';
 import { invokePreviewStopTool } from './tools.ts';
@@ -14,7 +14,7 @@ afterEach(async () => { await Promise.all(controllers.map(controller => controll
 async function session(stop?: CezarToolHandlers['stopPreview']) {
   const controller = await CiToolController.start(); controllers.push(controller);
   const notWait = async (): Promise<never> => { throw new Error('Not a CI test'); };
-  return controller.provision({ registerWait: notWait, cancelWait: notWait, stopPreview: stop });
+  return controller.provision({ registerWait: notWait, ask: notWait, cancelWait: notWait, finishTurn: notWait, stopPreview: stop });
 }
 function post(env: Record<string, string>, body: string, token = env.CEZ_TOOL_TOKEN!) {
   return new Promise<{ status: number; body: string }>((resolve, reject) => {

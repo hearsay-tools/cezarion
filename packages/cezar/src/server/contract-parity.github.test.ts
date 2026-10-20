@@ -29,7 +29,7 @@ import type {
   worktreeEntrySchema,
   worktreesResponseSchema,
 } from '@open-mercato/cezar-contract';
-import { githubItemResponseSchema, githubProjectsDataSchema } from '@open-mercato/cezar-contract';
+import { githubItemResponseSchema, githubProjectsDataSchema } from '@open-mercato/cezar-contract/github';
 import type { AppType } from './app-type.ts';
 
 /**

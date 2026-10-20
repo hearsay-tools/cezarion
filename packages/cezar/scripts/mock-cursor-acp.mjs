@@ -30,6 +30,8 @@ function watchdogStall(prompt) {
 // Offline Cursor ACP wire. Shapes: cursor.com/docs/cli/acp; ACP v1 schema.
 import { createInterface } from 'node:readline';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+// Dynamic, like every sibling import here, so a test's copy of this mock can repoint it.
+const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
 import * as parityGateFs from 'node:fs';
 if (process.argv.includes('--version')) { process.stdout.write('2026.09.15-mock-acp\n'); process.exit(0); }
 
@@ -84,13 +86,13 @@ const text = value => update({ sessionUpdate: 'agent_message_chunk', content: { 
 const complete = id => reply(id, { stopReason: 'end_turn' });
 const question = { id: 'tests', prompt: 'Which test runner?', options: [{ id: 'vitest', label: 'Vitest' }, { id: 'jest', label: 'Jest' }], allowMultiple: false };
 async function prompt(id, content) {
-  const input = content.filter(b => b.type === 'text').map(b => b.text).join('\n');
+  const input = answerNudge(content.filter(b => b.type === 'text').map(b => b.text).join('\n'));
   prompts += 1;
   if (input.includes('mock:autonomous') || input.startsWith('Continue working autonomously until the task is fully complete.')) {
     const { autonomousReply } = await import('./mock-autonomous.mjs');
     text(autonomousReply(input)); complete(id); return;
   }
-  if (input.includes('mock:silent-tail') || input.includes('mock:tool-tail') || input.includes('Your last turn ended without a message to the user.')) {
+  if (input.includes('mock:silent-tail') || input.includes('mock:tool-tail') || silentNudge(input)) {
     const silent = await import('./mock-silent-tail.mjs');
     silent.noteSilentTailPrompt(input);
     if (silent.isFinalMessageNudge(input)) {

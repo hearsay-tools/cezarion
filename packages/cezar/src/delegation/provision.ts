@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { workerOperationSchema } from '@open-mercato/cezar-contract';
+import { workerOperationSchema } from '@open-mercato/cezar-contract/delegation';
 import type { RunStore } from '../runs/store.ts';
 import { CredentialRegistry } from './credentials.ts';
 import { DelegationService, delegationEnabled, type DelegationProject } from './service.ts';
@@ -31,8 +31,8 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
     `A request's ID is its message ID. Reuse a message ID only for an exact retry, including timeout; changed payloads are rejected.`,
     `Messages reach the recipient's live session as soon as they are accepted, including mid-turn; they are read at its next model step. ${invocation} inbox remains a fallback read during an active turn; it acknowledges only the messages it returns. Use conversation <recipient-run-id> for history or investigation; it does not acknowledge messages.`,
     `Use conversation <recipient-run-id> to inspect messages/outcomes, cancel-request <request-UUID> to cancel your obligation, and wait --request <request-UUID> [--request <another-UUID>] --mode <one|any|all> --timeout-seconds <1-1800> to register a request wait.`,
-    `Request and wait deadlines default to 600 seconds. One active wait per run; cancel-wait <wait-id> stops waiting without cancelling requests or work.`,
-    `Wait returns immediately: end your turn to release capacity; progress wakes a parent without cancelling its worker-completion wait; end the progress turn to keep waiting. Other incoming messages may interrupt waiting without resolving pending requests. No automatic re-wait after interruption.`,
+    `Request and wait deadlines default to 600 seconds. Several waits can be open at once (workers, CI, timers); messages wake you and close no wait; cancel-wait <wait-id> stops one wait without cancelling requests or work.`,
+    `Wait returns immediately: end your turn to release capacity; Messages wake you and close no wait; end the turn again to keep waiting. A message does not resolve a pending request: only its reply does.`,
     `Acceptance, provider delivery, explicit reply, and task completion are distinct. Only reply resolves a request as replied; a reply after deadline expiry amends timed-out to replied-late without reopening the obligation; other settled outcomes stay unchanged.`,
     `Parents can resume their settled done/review/failed worker by sending a new instruction with ${invocation} send <worker-id> '<instruction>' --id <new-message-UUID> --kind request --resume --timeout-seconds <1-86400>. A resume request stays pending until reply, lifecycle settlement or its deadline (default 600 seconds, maximum 86400 seconds / 24 hours); set e.g. --timeout-seconds 7200 for a two-hour review round. Extended deadlines require actually resuming a settled worker; active workers still accept at most 1800 seconds. A worker wait has its own deadline and never extends the request. Exact retries never create another continuation.`,
     `Without --resume, review/terminal sends return not-delivered with a reason and next command, and exit 1. Changing a rejected send requires a new message ID. Workers cannot resume parents; stopped/destroyed workers need a new worker. Messages never answer a human's question; a parent's reply answers only its worker's routed question.`,
@@ -55,22 +55,22 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         `You are an owned cezar worker. Your parent run ID is ${run.delegation.parentRunId}.`,
         conversationGuidance,
         `You cannot delegate, control peers, merge automatically, or accept your own review.`,
-        `Follow your assigned task and selected input context. Your questions, native or CEZ:ASK, go to your parent, which answers or asks the human; do not wait for a human.`,
+        `Follow your assigned task and selected input context. Your questions — cezar_ask, or a native question — go to your parent, which answers or asks the human; do not wait for a human.`,
         `Native workers are not tracked by cezar: do not spawn them.`,
-        `Per-run controls suppress verified native entry points only; custom extensions and same-user unrestricted shell are not hard isolation.`,
+        `Per-run controls suppress verified native entry points only; custom extensions, Claude forked skills (context: fork) and same-user unrestricted shell are not hard isolation.`,
         `Commit reviewed work before your parent deliberately integrates it; report the summary, commits, tests and remaining concerns.`,
       ].join(' ')
       : [
         `Prefer governed cezar workers for delegation.`,
         `Native workers are not tracked by cezar; do not spawn them.`,
-        `Per-run controls suppress verified native entry points only; custom extensions and same-user unrestricted shell are not hard isolation.`,
+        `Per-run controls suppress verified native entry points only; custom extensions, Claude forked skills (context: fork) and same-user unrestricted shell are not hard isolation.`,
         `Owned workers are available through the bundled command ${invocation}.`,
         `Commands return JSON.`,
         `Before choosing a runner or model, use ${bundledWorkerInvocation('discover')} runners, then ${bundledWorkerInvocation('discover')} models --runner=<name>.`,
         `Discovery lists host default-account runner status, enablement, model IDs and advertised per-model effortLevels; absent effort metadata means unknown. It uses your controller automatically.`,
         `A fresh nonempty default-account catalog rejects unknown explicit default-account model pins before creating a worker and reports available models and alternative runners; unavailable, empty or stale discovery does not invent choices. Inherited defaults and accepted retries stay unchanged.`,
         conversationGuidance,
-        `Worker questions arrive as requests carrying a question; answer with worker reply <worker-id> '<answer>' --id <new-message-UUID> --request-id <question-id>, one '<header>: <option>' line per question, which the worker reads verbatim as its answer. If you cannot decide, ask the human with your own question, then reply. Progress and follow-ups never answer it, and you cannot finish while it is unanswered.`,
+        `Worker questions arrive as requests carrying a question; answer with worker reply <worker-id> '<answer>' --id <new-message-UUID> --request-id <question-id>, one '<header>: <answer>' line per question (an option's label, or your own words for a question without options), which the worker reads verbatim as its answer. If you cannot decide, ask the human with your own question, then reply. Progress and follow-ups never answer it, and you cannot finish while it is unanswered.`,
         `Use ${invocation} spawn --baseline parent-head --request-id <UUID> '<task>' (or an explicit committed ref).`,
         `Reuse the request ID only for the exact same task/baseline/context/runner/model/effort/workflow/skill on a retry.`,
         `Optional spawn flags: --workflow <name> or --skill <name> (mutually exclusive), --context '<selected text>' or --context-file <local-UTF-8-file> (mutually exclusive), --attach <path> (repeatable; copies a git-ignored file from your worktree into the worker's worktree at the same relative path before it starts; tracked or unignored files and .gitignore are refused, commit those instead), --runner <claude|codex|opencode|pi|cursor|omp>, --model <model>, --effort <low|medium|high|xhigh|max>.`,
@@ -83,11 +83,11 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         `Inspect reports worker-local input paths.`,
         `Omitted --runner inherits the active parent's runner; same-runner workers inherit omitted model/account/effort, while mixed-runner workers use that runner's project/default account and model.`,
         `Accepted identity and grants remain fixed.`,
-        `Use inspect <worker-id>, collect <worker-id>, steer <worker-id> '<text>', stop <worker-id>, destroy <worker-id>, diff <worker-id>, or wait <worker-id>... --mode <one|any|all> --timeout-seconds <1-1800>.`,
+        `Use list to find every worker you own, including incomplete cleanup with remaining resources. Use inspect <worker-id>, collect <worker-id>, steer <worker-id> '<text>', stop <worker-id>, destroy <worker-id>, diff <worker-id>, or wait <worker-id>... --mode <one|any|all> --timeout-seconds <1-1800>.`,
         `Mode defaults to any; one requires one worker, all requires every selected worker to settle.`,
-        `cancel-wait <wait-id> cancels only waiting and is safe to retry, never workers.`,
+        `cancel-wait <wait-id> stops one wait, is safe to retry, and never touches workers.`,
         `Wait registers and returns immediately: end your turn to release capacity, then Cezar resumes you on a selected terminal outcome or deadline (default 600 seconds).`,
-        `No automatic re-wait; timeout/cancellation reports partial outcomes and unresolved workers.`,
+        `Your other waits stay open beside it; timeout/cancellation reports partial outcomes and unresolved workers. The same wait is open to you as cezar_wait with kind "worker".`,
         `collect returns revision/status/settled plus typed summary/head/diff/artifacts availability and records the latest evidence under the parent.`,
         `An available diff.path points to a JSON result file: read its diffSnapshot field for the bounded patch, not the file as a raw patch.`,
         `Running output is partial.`,

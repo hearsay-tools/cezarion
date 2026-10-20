@@ -5,11 +5,36 @@ import { readBoundedContextFile } from './context.ts';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import {
-  conversationSendRequestSchema, conversationSendResultSchema, conversationInspectResultSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReserveResultSchema, inboxReceiptResultSchema, requestOutcomeSchema, requestWaitRequestSchema,
-  workerCollectedResultSchema, workerCancelWaitRequestSchema, workerCancelWaitResultSchema, workerOperationSchema, workerParamsSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema,
-  workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema,
-  workerDiffSchema, workerWaitResultSchema, delegationErrorResponseSchema,
-} from '@open-mercato/cezar-contract';
+  conversationSendRequestSchema,
+  conversationSendResultSchema,
+  conversationInspectResultSchema,
+  conversationInspectRequestSchema,
+  conversationCancelRequestSchema,
+  inboxReserveResultSchema,
+  inboxReceiptResultSchema,
+  requestOutcomeSchema,
+  requestWaitRequestSchema,
+} from '@open-mercato/cezar-contract/conversations';
+import {
+  workerListPageSchema,
+  workerListResultSchema,
+  workerCollectedResultSchema,
+  workerCancelWaitRequestSchema,
+  workerCancelWaitResultSchema,
+  workerOperationSchema,
+  workerParamsSchema,
+  workerSpawnRequestSchema,
+  workerSteerRequestSchema,
+  workerWaitRequestSchema,
+  workerSpawnResultSchema,
+  workerInspectionSchema,
+  workerSteerResultSchema,
+  workerStopResultSchema,
+  workerDestroyResultSchema,
+  workerDiffSchema,
+  workerWaitResultSchema,
+  delegationErrorResponseSchema,
+} from '@open-mercato/cezar-contract/delegation';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { runnerFlag, skillFlagIssue } from '../workflows/types.ts';
 import { DelegationPolicyError } from './policy.ts';
@@ -23,8 +48,8 @@ export function delegationEndpoint(value: string | undefined): URL {
   return url;
 }
 
-const conversationOperationSchema = z.enum(['send', 'progress', 'follow-up', 'reply', 'conversation', 'inbox', 'cancel-request', 'wait-requests']);
-const responseSchemas = { send: conversationSendResultSchema, progress: conversationSendResultSchema, 'follow-up': conversationSendResultSchema, reply: conversationSendResultSchema, conversation: conversationInspectResultSchema, 'cancel-request': requestOutcomeSchema, 'wait-requests': workerWaitResultSchema, collect: workerCollectedResultSchema, spawn: workerSpawnResultSchema, inspect: workerInspectionSchema, steer: workerSteerResultSchema,
+const conversationOperationSchema = z.enum(['list', 'send', 'progress', 'follow-up', 'reply', 'conversation', 'inbox', 'cancel-request', 'wait-requests']);
+const responseSchemas = { list: workerListResultSchema, send: conversationSendResultSchema, progress: conversationSendResultSchema, 'follow-up': conversationSendResultSchema, reply: conversationSendResultSchema, conversation: conversationInspectResultSchema, 'cancel-request': requestOutcomeSchema, 'wait-requests': workerWaitResultSchema, collect: workerCollectedResultSchema, spawn: workerSpawnResultSchema, inspect: workerInspectionSchema, steer: workerSteerResultSchema,
   stop: workerStopResultSchema, destroy: workerDestroyResultSchema, diff: workerDiffSchema, wait: workerWaitResultSchema, 'cancel-wait': workerCancelWaitResultSchema };
 const RESPONSE_BYTES = 3_145_728;
 const CLI_FLAG: Record<string, string> = {
@@ -49,6 +74,7 @@ function attachIssue(error: z.ZodError, operation: string, typed: string[]): str
 }
 const WORKER_USAGE = { operations: [
   { name: 'spawn', positionals: 1, required: ['--baseline', '--request-id'], optional: ['--workflow', '--skill', '--runner', '--backend', '--model', '--effort', '--context', '--context-file', '--attach'] },
+  { name: 'list', positionals: 0 },
   { name: 'inspect', positionals: 1 },
   { name: 'steer', positionals: 2 },
   { name: 'stop', positionals: 1 },
@@ -69,14 +95,15 @@ const WORKER_USAGE = { operations: [
 ] };
 const WORKER_HELP: Record<string, { args: string; description: string }> = {
   spawn: { args: '"<task>" --baseline <ref> --request-id <UUID>', description: 'Create an owned worker from a committed baseline.' },
+  list: { args: '', description: 'List your owned workers, execution revisions and remaining cleanup resources.' },
   inspect: { args: '<worker-id>', description: 'Show worker state and input locations.' },
   steer: { args: '<worker-id> "<text>"', description: 'Send instructions to a running worker.' },
   stop: { args: '<worker-id>', description: 'Stop a worker.' },
   destroy: { args: '<worker-id>', description: 'Remove owned worker resources after collecting results.' },
   diff: { args: '<worker-id>', description: 'Show the bounded worker diff.' },
   collect: { args: '<worker-id>', description: 'Collect the latest worker results; does not merge changes.' },
-  wait: { args: '<worker-id>... | --request <UUID> [--request <UUID>...]', description: 'Register a wait for workers or message requests, then end your turn.' },
-  'cancel-wait': { args: '<wait-id>', description: 'Cancel a wait without cancelling requests or workers.' },
+  wait: { args: '<worker-id>... | --request <UUID> [--request <UUID>...]', description: 'Register a wait for workers or message requests, then end your turn. Several waits can be open at once (workers, CI, timers); messages wake you and close no wait.' },
+  'cancel-wait': { args: '<wait-id>', description: 'Stops one wait by its id; never cancels requests or workers, and your other waits stay open.' },
   send: { args: '<recipient-run-id> "<text>" --id <UUID> --kind <request|progress>', description: 'Send a request requiring a reply, or a progress update.' },
   progress: { args: '<recipient-run-id> "<text>" --id <UUID>', description: 'Send an update without a reply obligation.' },
   'follow-up': { args: '<recipient-run-id> "<text>" --id <UUID> --request-id <UUID>', description: 'Clarify an existing request.' },
@@ -261,6 +288,8 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
         ...(values.resume === undefined ? {} : { resume: values.resume }),
         ...(values['request-id'] === undefined ? {} : { requestId: values['request-id'] }), ...(timeout === undefined ? {} : { timeoutSeconds: Number(timeout) }) });
       if (operation === 'progress') path = 'send';
+    } else if (operation === 'list') {
+      expectCount(operation, positionals, 0);
     } else if (operation === 'inbox') {
       expectCount(operation, positionals, 0);
       body = {};
@@ -316,6 +345,25 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
       token = z.string().regex(/^[A-Za-z0-9_-]{43}$/).parse(env.CEZ_DELEGATION_TOKEN);
     } catch { throw new DelegationPolicyError('unavailable_transport', 'Delegation session is unavailable'); }
     try {
+      if (operation === 'list') {
+        const workers: z.infer<typeof workerListResultSchema>['workers'] = [];
+        let offset = 0;
+        for (;;) {
+          const response = await fetch(`${endpoint.href}/list${offset ? `?offset=${offset}` : ''}`, {
+            method: 'GET', redirect: 'error', headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(45_000),
+          });
+          const data = await boundedJson(response);
+          if (!response.ok) { print(delegationErrorResponseSchema.parse(data)); return 1; }
+          const page = workerListPageSchema.parse(data);
+          workers.push(...page.workers);
+          if (workers.length > 1_024) throw Error('Worker list too large');
+          if (page.nextOffset === undefined) break;
+          if (page.nextOffset <= offset) throw Error('Worker list did not advance');
+          offset = page.nextOffset;
+        }
+        print(workerListResultSchema.parse({ workers }));
+        return 0;
+      }
       if (operation === 'inbox') {
         const postInbox = async (action: '' | '/ack' | '/release', payload: object) => {
           const response = await fetch(`${endpoint.href}/inbox${action}`, { method: 'POST', redirect: 'error',

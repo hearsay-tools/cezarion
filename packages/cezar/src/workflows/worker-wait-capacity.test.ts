@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
-import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract';
+import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
 import { collectWorkerEvidence } from '../delegation/results.ts';
@@ -20,10 +20,16 @@ import { QUICK_TASK_WORKFLOW } from './types.ts';
 import {
   bookkeeping, captureState, checkpoint, collect, controlledWire, executions, fixtureUpdateRun,
   manager, parent, queuedWake, register, reopenRuntime, restart, root, semaphore, setFailureState,
-  store, terminal, track, until, useWorkerWaitFixture, waitOf, worker,
+  store, terminal, track, until, useWorkerWaitFixture, waitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
+import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 import { blockRunWrites, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
+
+/** Parked on an agent worker wait in the wait list (hearsay-tools/cezarion#1235): the run waits and
+ *  its worker entry reads `parked`. */
+const parkedOnWorkers = (runId: string) =>
+  (manager as unknown as { waiting: Set<string> }).waiting.has(runId) && waitOf(store.getRun(runId))?.phase === 'parked';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -35,13 +41,14 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       next === 'agent' ? { id: 'next', prompt: 'mock:hold' } : { id: 'next', command: 'echo checked' },
     ] }, { task: 'parent', runner: 'claude' });
     store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
-    const engine = manager as unknown as { workerWaiting: Set<string>; active: Map<string, { sessionEverOpened?: boolean; session?: { open: boolean } }> };
+    // hearsay-tools/cezarion#1235: an agent worker wait parks through the wait list, not `workerWaiting`.
+    const engine = manager as unknown as { active: Map<string, { sessionEverOpened?: boolean; session?: { open: boolean } }> };
     await until(() => !!engine.active.get(run.id)?.sessionEverOpened);
     const first = engine.active.get(run.id)!.session;
     const w = await worker(run.id, 'mock:slow');
     if (timing === 'late') await until(() => store.readEvents(run.id).some(event => event.type === 'turn-end'));
     register(run.id, [w.id]); manager.enqueueOwnedRun(w.id);
-    await until(() => engine.workerWaiting.has(run.id) && !!engine.active.get(w.id)?.sessionEverOpened);
+    await until(() => parkedOnWorkers(run.id) && !!engine.active.get(w.id)?.sessionEverOpened);
     await new Promise(resolve => setTimeout(resolve, 400)); // Observe past the real 250ms runner auto-end timer.
     expect.soft(engine.active.get(run.id)?.session).toBe(first);
     expect.soft(first?.open).toBe(true);
@@ -49,10 +56,10 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect.soft(semaphore.busy()).toBe(1);
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
     await until(() => !!store.getRun(run.id)?.agentInputs?.some(input => input.source === 'lifecycle' && input.deliveredAt));
-    expect(engine.workerWaiting.has(run.id)).toBe(false); expect(semaphore.busy()).toBe(1);
+    expect(parkedOnWorkers(run.id)).toBe(false); expect(semaphore.busy()).toBe(1);
     await until(() => store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status !== 'pending');
     expect(store.getRun(run.id)?.steps.find(step => step.id === 'first')?.status).toBe('done');
-    expect(engine.workerWaiting.has(run.id)).toBe(false);
+    expect(parkedOnWorkers(run.id)).toBe(false);
   });
 
   it.each(['codex', 'opencode', 'pi', 'omp'].flatMap(backend => ['agent', 'check'].map(next => ({ backend: backend as 'codex' | 'opencode' | 'pi' | 'omp', next }))))(
@@ -66,14 +73,15 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           next === 'agent' ? { id: 'next', prompt: 'mock:done' } : { id: 'next', command: 'echo checked' },
         ] }, { task: 'parent', runner: backend });
         store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
-        const engine = manager as unknown as { workerWaiting: Set<string>; workerWakeAdmitted: Set<string>;
+        // hearsay-tools/cezarion#1235: the list's park and admission, not `workerWaiting`/`workerWakeAdmitted`.
+        const engine = manager as unknown as { waitWakeAdmitted: Set<string>;
           active: Map<string, { sessionEverOpened?: boolean; session?: AgentSession }> };
         await until(() => !!engine.active.get(run.id)?.sessionEverOpened);
         const session = engine.active.get(run.id)!.session!;
         const w = await worker(run.id, 'mock:slow');
         register(run.id, [w.id]); manager.enqueueOwnedRun(w.id);
         try {
-          await until(() => engine.workerWaiting.has(run.id) && !!engine.active.get(w.id)?.sessionEverOpened);
+          await until(() => parkedOnWorkers(run.id) && !!engine.active.get(w.id)?.sessionEverOpened);
           expect(semaphore.busy()).toBe(1);
           manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
           await until(() => store.readEvents(run.id).some(event => event.type === 'text' && String(event.text).includes('Worker wait')));
@@ -81,8 +89,8 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           const wake = store.getRun(run.id)?.agentInputs?.find(input => input.source === 'lifecycle');
           expect(wake).toBeDefined(); expect(wake?.deliveredAt).toBeUndefined();
           expect(waitOf(store.getRun(run.id))?.wakeId).toBe(wake?.id);
-          expect(engine.workerWaiting.has(run.id)).toBe(false);
-          expect(engine.workerWakeAdmitted.has(run.id)).toBe(true);
+          expect(parkedOnWorkers(run.id)).toBe(false);
+          expect(engine.waitWakeAdmitted.has(run.id)).toBe(true);
           expect(engine.active.get(run.id)?.session).toBe(session); expect(session.open).toBe(true);
           expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
           expect(semaphore.busy()).toBe(1);
@@ -105,7 +113,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     },
   );
 
-  it('interactive markerless wake persists run and step waiting immediately after its held HTTP ACK', async () => {
+  // The wake turn ends with no wait or done, so its boundary sends the no-wait nudge
+  // (hearsay-tools/cezarion#1234) where it parked before; the nudge's charge is the decision on disk.
+  it('interactive markerless wake persists its turn-end decision immediately after its held HTTP ACK', async () => {
     await withDelayedCommand('opencode', async release => {
       process.env.CEZ_DRY_RUN = '0';
       process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
@@ -128,11 +138,12 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         expect(settled).toBeInstanceOf(Promise);
         const wake = store.getRun(p.id)?.agentInputs?.find(input => input.source === 'lifecycle');
         expect(wake?.deliveredAt).toBeUndefined();
+        const charged = store.getRun(p.id)?.automaticWakes ?? 0; // the first turn's nudge
         release(); await settled;
         // Read synchronously at settlement, before the store's 300ms debounce.
         const disk = (readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[]).find(run => run.id === p.id)!;
-        expect.soft(disk.status).toBe('waiting');
-        expect.soft(disk.steps.find(step => step.id === 'task')?.status).toBe('waiting');
+        expect.soft(disk.automaticWakes).toBe(charged + 1);
+        expect.soft(disk.status).toBe('running');
         expect(waitOf(disk)).toBeUndefined();
         expect(disk.agentInputs?.find(input => input.id === wake?.id)?.deliveredAt).toEqual(expect.any(String));
       } finally {
@@ -146,27 +157,38 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   it('an actual session close during a nonfinal wait cannot advance a check or retain a capacity exemption', async () => {
     const run = manager.startRun({ name: 'closed chain', source: 'built-in', steps: [{ id: 'first', prompt: 'mock:hold' }, { id: 'next', command: 'echo checked' }] }, { task: 'parent', runner: 'claude' });
     store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
-    const engine = manager as unknown as { workerWaiting: Set<string>; active: Map<string, { sessionEverOpened?: boolean; session?: { end(): void } }> };
+    const engine = manager as unknown as { active: Map<string, { sessionEverOpened?: boolean; session?: { end(): void } }> };
     await until(() => !!engine.active.get(run.id)?.sessionEverOpened);
     const w = await worker(run.id, 'mock:slow'); register(run.id, [w.id]); manager.enqueueOwnedRun(w.id);
-    await until(() => engine.workerWaiting.has(run.id));
+    await until(() => parkedOnWorkers(run.id));
     engine.active.get(run.id)!.session!.end();
-    await until(() => terminal.includes(store.getRun(run.id)!.status));
-    expect(store.getRun(run.id)).toMatchObject({ status: 'failed', error: expect.stringContaining('worker wait') });
+    // hearsay-tools/cezarion#1235: a clean close with a worker wait open parks, recoverably (spec
+    // "Session failure and close"); it used to fail the run.
+    await until(() => !manager.isActive(run.id));
+    expect(store.getRun(run.id)).toMatchObject({ status: 'waiting' });
+    expect(store.getRun(run.id)?.error).toBeUndefined();
     expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
-    expect(engine.workerWaiting.has(run.id)).toBe(false);
-    await until(() => !manager.isActive(w.id)); expect(semaphore.busy()).toBe(0);
+    expect(waitOf(store.getRun(run.id))?.phase).toBe('parked');
+    // The parked parent holds no slot: the one slot is its running worker's, and nothing more.
+    await until(() => !!(manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(w.id)?.sessionEverOpened);
+    expect(semaphore.busy()).toBe(1);
+    manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
+    expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
   });
 
   it('a portable human ask still takes precedence over an accepted nonfinal worker wait', async () => {
     const run = manager.startRun({ name: 'ask chain', source: 'built-in', steps: [{ id: 'first', prompt: 'mock:ask' }, { id: 'next', command: 'echo checked' }] }, { task: 'parent', runner: 'claude' });
     store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
-    const engine = manager as unknown as { workerWaiting: Set<string>; active: Map<string, { sessionEverOpened?: boolean }> };
+    const engine = manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> };
     await until(() => !!engine.active.get(run.id)?.sessionEverOpened);
     const w = await worker(run.id); register(run.id, [w.id]);
     await until(() => store.getRun(run.id)?.status === 'waiting');
     expect(store.readEvents(run.id).some(event => event.type === 'ask.requested')).toBe(true);
-    expect(engine.workerWaiting.has(run.id)).toBe(false);
+    // hearsay-tools/cezarion#1235 phase 3a: the worker wait is an open list entry beside the
+    // question, and the question's park, like a worker park, holds no slot.
+    expect(workerEntryOf(store.getRun(run.id))).toMatchObject({ phase: 'open', workerIds: [w.id] });
+    expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human' });
+    expect(semaphore.busy()).toBe(0);
     manager.requestWorkerStop(w.id); await manager.awaitRunTermination(w.id, 15000);
     expect(store.getRun(run.id)?.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
     expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
@@ -192,24 +214,32 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         expect(manager.continueRun(p.id, { text: 'mock:hold' }).ok).toBe(true);
         await until(() => store.getRun(p.id)?.status === 'waiting');
       }
-      const engine = manager as unknown as { workerWakeAdmitted: Set<string>; active: Map<string, {
+      // hearsay-tools/cezarion#1235: the list's admission, not `workerWakeAdmitted`.
+      const engine = manager as unknown as { waitWakeAdmitted: Set<string>; active: Map<string, {
         session: { sendAgentMessage(content: unknown[]): false | Promise<void>; sendMessage(content: unknown[]): boolean }
       }> };
       const session = engine.active.get(p.id)!.session;
+      const accept = session.sendAgentMessage.bind(session);
       // A backend opening/ack window legitimately refuses non-human input.
       session.sendAgentMessage = () => false;
       const w = await worker(p.id); const wait = register(p.id, [w.id]);
       await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
       fixtureUpdateRun(w.id, { status: 'done' });
-      await until(() => engine.workerWakeAdmitted.has(p.id));
+      await until(() => engine.waitWakeAdmitted.has(p.id));
       const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
       session.sendMessage([{ type: 'text', text: 'mock:ask' }]);
       await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
       expect(store.readEvents(p.id).some(event => event.type === 'ask.requested')).toBe(true);
-      expect(engine.workerWakeAdmitted.has(p.id)).toBe(false);
-      expect(semaphore.busy()).toBe(0);
       expect(waitOf(store.getRun(p.id))?.id).toBe(wait.id);
       expect(store.getRun(p.id)?.agentInputs?.[0]?.deliveredAt).toBeUndefined();
+      expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
+      // hearsay-tools/cezarion#1235 ("Messages beside a pending question"): the question no longer
+      // holds the wake back. Once the backend takes input, the result is delivered beside the card,
+      // which stays pending and answerable; it used to release the admission and wait for the answer.
+      session.sendAgentMessage = accept;
+      await until(() => !!store.getRun(p.id)?.agentInputs?.[0]?.deliveredAt);
+      expect(store.getRun(p.id)?.hasPendingHumanAsk).toBe(true);
+      expect(waitOf(store.getRun(p.id))).toBeUndefined();
       expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
     });
   }
@@ -251,13 +281,16 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     });
   }
 
-  it('restart preserves a queued human answer when wait withdrawal left a blank lifecycle opening', async () => {
+  // hearsay-tools/cezarion#1235: the message withdraws no wait; it makes the wake's lifecycle
+  // opening the human's, keeping its text.
+  it('restart preserves a queued human answer beside an owed wait that made the lifecycle opening human', async () => {
     const { p } = await queuedWake();
     store.appendEvent(p.id, { type: 'ask.requested', requestId: randomUUID(), questions: [{
       header: 'Choice', question: 'Which option?', options: [{ label: 'One' }, { label: 'Two' }],
     }] });
     manager.enqueueMessage(p.id, [{ type: 'text', text: 'queued human answer mock:hold' }]);
-    expect(store.getRun(p.id)?.continuationMessage).toMatchObject({ text: '', origin: 'human' });
+    expect(store.getRun(p.id)?.continuationMessage).toMatchObject({ origin: 'human',
+      text: 'Resume to receive the queued worker wait result. End this opening turn so Cezar can deliver it.' });
     await restart();
     await until(() => store.readEvents(p.id).some(event => event.type === 'human-input-delivered'));
     expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toHaveLength(1);
@@ -442,7 +475,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     manager.enqueueOwnedRun(w.id);
     await until(() => !!monitoringWakeOf(store.getRun(w.id)));
     const engine = manager as unknown as {
-      active: Map<string, { monitoringWakeups?: number; session: { sendAgentMessage(...args: unknown[]): false | Promise<void> } }>;
+      active: Map<string, { session: { sendAgentMessage(...args: unknown[]): false | Promise<void> } }>;
       monitoring: Set<string>;
       settleSuccess(id: string, durable?: boolean): Promise<void>;
       deliverMessage(id: string, content: { type: 'text'; text: string }[], human: boolean): boolean;
@@ -459,7 +492,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       await vi.advanceTimersByTimeAsync(Date.parse(deadline) - Date.now() + 1);
       if (pending) {
         expect(send).not.toHaveBeenCalled();
-        expect(state.monitoringWakeups ?? 0).toBe(0);
+        expect(manager['automaticWakes'](w.id)).toBe(0);
         expect({ ...store.getRun(w.id), monitoringWakeAt: monitoringWakeOf(store.getRun(w.id)) }).toMatchObject({ status: 'waiting', activity: undefined, monitoringWakeAt: deadline });
         expect(engine.monitoring.has(w.id)).toBe(true);
         expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
@@ -467,7 +500,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         expect(send).not.toHaveBeenCalled();
       } else {
         expect(send).toHaveBeenCalledTimes(1);
-        expect(state.monitoringWakeups).toBe(1);
+        expect(manager['automaticWakes'](w.id)).toBe(1);
         // hearsay-tools/cezarion#1233: the wake turn keeps its pool slot until its own turn end.
         expect(engine.monitoring.has(w.id)).toBe(true);
         expect(store.getRun(w.id)?.activity).toBeUndefined();

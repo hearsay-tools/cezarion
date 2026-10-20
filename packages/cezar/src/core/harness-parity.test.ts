@@ -29,7 +29,9 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { agentInputEventSchema, deriveAttention, type AgentInput } from '@open-mercato/cezar-contract';
+import { agentInputEventSchema } from '@open-mercato/cezar-contract/events';
+import { deriveAttention } from '@open-mercato/cezar-contract/attention';
+import type { AgentInput } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -561,6 +563,8 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
 /** Criteria driven through `whileOpen` rather than one settled observation. */
 const CONTROL_CRITERIA = [
   { id: 'D1', scenario: 'baseline' },
+  // hearsay-tools/cezarion#1284: a forked skill starts no native subagent in a restricted session.
+  { id: 'D2', scenario: 'forked-skill' },
   { id: 'S5', scenario: 'baseline' },
   { id: 'S6', scenario: 'baseline' },
   { id: 'S11', scenario: 'ask' },
@@ -756,6 +760,55 @@ const INPUT_CRITERIA: readonly SeamCriterion<InputObservation>[] = [
     },
   },
 ];
+// hearsay-tools/cezarion#1235 (PR #1291 CI): OpenCode can answer steered input in a follow-on run
+// that starts after the turn's idle. Input posted in that gap opened its own turn, the follow-on
+// run's idle closed it, and the input's own run then surfaced nothing. Every wire answers input
+// posted right after a turn that took a steer in a turn of its own.
+interface FollowOnObservation {
+  readonly obs: SeamObservation;
+  readonly consumed: readonly string[];
+  readonly observable: boolean;
+}
+const FOLLOW_ON_STEERED = 'parity-I6-steered';
+const FOLLOW_ON_NEXT = 'parity-I6-next';
+/** The echo of `id` reached the run, and a turn end followed it. */
+const answeredInItsTurn = (v1: readonly AgentEvent[], id: string) => {
+  const at = v1.findIndex(e => e.type === 'text' && e.text.includes(`parity ${id}`));
+  return at >= 0 && v1.slice(at).some(e => e.type === 'turn-end');
+};
+async function observeFollowOn(backend: RunnerId): Promise<FollowOnObservation> {
+  const consumed: string[] = [];
+  const obs = await driveSeam(backend, 'steer-tool', {
+    // The OpenCode mock answers steers in a follow-on run 300 ms after the idle; other mocks ignore it.
+    spec: { env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_ARGS_FILE: '', CEZ_MOCK_OPENCODE_FOLLOW_ON_MS: '300' } },
+    sessionOptions: { onAgentInputConsumed: ids => { consumed.push(...ids); } },
+    whileOpen: async (session, { v1 }) => {
+      const turnEnded = () => v1.some(e => e.type === 'turn-end');
+      const submit = async (id: string) => {
+        let ack: false | Promise<void> = false;
+        await waitFor(() => (ack = session.sendAgentMessage([{ type: 'text', text: `mock:agent-echo parity ${id}` }], [id])) !== false);
+        if (ack) await ack;
+      };
+      await waitFor(() => v1.some(e => e.type === 'tool-call') || turnEnded());
+      await submit(FOLLOW_ON_STEERED);
+      await waitFor(turnEnded);
+      await submit(FOLLOW_ON_NEXT);
+      // bound: the red case never answers; the assertion below reports what arrived instead.
+      await waitFor(() => answeredInItsTurn(v1, FOLLOW_ON_NEXT), 10_000).catch(() => undefined);
+    },
+  });
+  return { obs, consumed, observable: inputDeliveryOf(createRunner(backend)).consumption === 'observable' };
+}
+const FOLLOW_ON_CRITERION: SeamCriterion<FollowOnObservation> = {
+  id: 'I6',
+  name: 'I6 answers input posted right after a turn that took a steer in a turn of its own',
+  scenario: 'steer-tool',
+  assert: ({ obs, consumed, observable }) => {
+    expect(obs.failure).toBeUndefined();
+    expect(answeredInItsTurn(obs.v1, FOLLOW_ON_NEXT)).toBe(true);
+    if (observable) expect([...consumed].sort()).toEqual([FOLLOW_ON_NEXT, FOLLOW_ON_STEERED]);
+  },
+};
 describe('harness parity — input delivery (#505)', () => {
   for (const backend of RUNNER_IDS) {
     it(`${backend} I0 declares its input delivery`, () => {
@@ -764,6 +817,7 @@ describe('harness parity — input delivery (#505)', () => {
     for (const criterion of INPUT_CRITERIA) {
       parityRow(backend, criterion, () => observeInput(backend, criterion.scenario, `parity-${criterion.id}`));
     }
+    parityRow(backend, FOLLOW_ON_CRITERION, () => observeFollowOn(backend));
   }
 });
 
@@ -781,7 +835,7 @@ async function continueDiagnosticRun(backend: RunnerId, prompt: string): Promise
     });
 }
 
-describe('harness parity — recoverable skill diagnostics (#723)', () => {
+describe('harness parity — recoverable skill diagnostics (hearsay-tools/cezarion#723, hearsay-tools/cezarion#1265)', () => {
   for (const backend of RUNNER_IDS) {
     for (const continuation of [false, true]) {
       const id = continuation ? 'R45' : 'R44';
@@ -796,6 +850,9 @@ describe('harness parity — recoverable skill diagnostics (#723)', () => {
               message: `opencode: optional skill skipped: Failed to parse skill /home/agent/${root}/skills/pen-design/SKILL.md. Check that the skill file and any symlink target are readable; repair or reinstall the skill.`,
             }));
           }
+          expect(obs.events).toContainEqual(expect.objectContaining({ type: 'note',
+            message: 'opencode: optional skill skipped: /home/agent/.agents/skills/bad4/SKILL.md has invalid YAML frontmatter (unexpected end of the stream within a double quoted scalar at line 6, column 1: ^). Fix the frontmatter between the --- lines, for example by quoting values that contain a colon or a quote, or remove the skill.',
+          }));
           expect(obs.events.filter(e => e.type === 'turn.completed').every(e => e.stopReason === 'end_turn')).toBe(true);
           expect(obs.events.some(e => e.type === 'turn.completed')).toBe(true);
         },
@@ -809,14 +866,19 @@ describe('harness parity — recoverable skill diagnostics (#723)', () => {
       expect(obs.events).toContainEqual(expect.objectContaining({ type: 'error' }));
     }, 45_000);
   }
-  for (const continuation of [false, true]) for (const scenario of ['unscoped-provider-failure', 'scoped-skill-failure']) {
+  const fatalDetail: Record<string, string> = {
+    'unscoped-provider-failure': 'restoring service',
+    'scoped-skill-failure': '/skills/required/SKILL.md',
+    'scoped-frontmatter-failure': '/skills/bad4/SKILL.md: Failed to parse YAML frontmatter',
+  };
+  for (const continuation of [false, true]) for (const [scenario, detail] of Object.entries(fatalDetail)) {
     it(`opencode ${continuation ? 'continued' : 'fresh'} ${scenario} remains fatal`, async () => {
       const prompt = `mock:${scenario}`;
       const obs = continuation ? await continueDiagnosticRun('opencode', prompt)
         : await driveRun('opencode', { prompt }, record => TERMINAL.includes(record?.status ?? ''));
       expect(obs.record?.status).toBe('failed');
       expect(obs.record?.error).toContain('provider');
-      expect(obs.record?.error).toContain(scenario === 'scoped-skill-failure' ? '/skills/required/SKILL.md' : 'restoring service');
+      expect(obs.record?.error).toContain(detail);
     }, 45_000);
   }
 });
@@ -1736,9 +1798,13 @@ describe('OpenCode durable input acknowledgements', () => {
       // so it may carry a delivery receipt; the input itself is unchanged and never lost.
       const withoutReceipts = (inputs: AgentInput[] | undefined) => inputs?.map(({ deliveredAt: _d, consumedAt: _c, awaitingRead: _a, ...rest }) => rest);
       expect(withoutReceipts(store.getRun(runId)?.agentInputs)).toEqual([input]);
+      // hearsay-tools/cezarion#1260: Finish closes the question it never saw answered, without a
+      // delivery; a rejected answer or a Stop leaves it for an explicit answer.
+      const askSeq = store.readEvents(runId).find(e => e.type === 'ask.requested')!.seq;
+      expect(events.filter(e => e.type === 'human-ask-closed')).toEqual(outcome === 'finished' ? [expect.objectContaining({ askSeq, reason: 'finish' })] : []);
       const recovered = await fixture.restart();
-      expect((recovered.manager as unknown as { hasPendingHumanAsk(id: string): boolean }).hasPendingHumanAsk(runId)).toBe(true);
-      expect(recovered.manager.continueRun(runId).ok).toBe(false);
+      expect((recovered.manager as unknown as { hasPendingHumanAsk(id: string): boolean }).hasPendingHumanAsk(runId)).toBe(outcome !== 'finished');
+      if (outcome !== 'finished') expect(recovered.manager.continueRun(runId).ok).toBe(false);
       expect(withoutReceipts(recovered.store.getRun(runId)?.agentInputs)).toEqual([input]);
     });
   }, 60_000);
@@ -1821,6 +1887,7 @@ describe('harness parity — the matrix itself', () => {
     ...WORKFLOW_TIMEOUT_CRITERIA.map((c) => c.id),
     ...SEAM_CRITERIA.map((c) => c.id),
     ...INPUT_CRITERIA.map((c) => c.id),
+    FOLLOW_ON_CRITERION.id,
     ...CONTROL_CRITERIA.map((c) => c.id),
     ...RUN_CRITERIA.map((c) => c.id),
   ];
@@ -1853,7 +1920,7 @@ describe('harness parity — the matrix itself', () => {
     if (inactivity) return inactivity.scenario;
     const timeout = WORKFLOW_TIMEOUT_CRITERIA.find(c => c.id === id);
     if (timeout) return timeout.scenario;
-    const seam = SEAM_CRITERIA.find((c) => c.id === id) ?? INPUT_CRITERIA.find((c) => c.id === id);
+    const seam = SEAM_CRITERIA.find((c) => c.id === id) ?? INPUT_CRITERIA.find((c) => c.id === id) ?? (id === FOLLOW_ON_CRITERION.id ? FOLLOW_ON_CRITERION : undefined);
     if (seam) return seam.scenario;
     const control = CONTROL_CRITERIA.find((c) => c.id === id);
     if (control) return control.scenario;
@@ -1973,7 +2040,7 @@ describe('harness parity — D1 governed native delegation', () => {
           const [ordinary, restricted] = launches;
           if (backend === 'claude' || backend === 'pi') {
             const flag = backend === 'claude' ? '--disallowedTools' : '--exclude-tools';
-            const names = backend === 'claude' ? 'Agent,Task' : 'subagent';
+            const names = backend === 'claude' ? 'Agent,Task,Workflow' : 'subagent';
             const args = restricted![0] as string[];
             const index = args.indexOf(flag);
             expect(index).toBeGreaterThanOrEqual(0);
@@ -2071,6 +2138,50 @@ describe('harness parity — D1 governed native delegation', () => {
       expect(rows.filter(row => row.method === 'PATCH')).toEqual([]);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }, 45000);
+});
+
+// D2 (hearsay-tools/cezarion#1284): a restricted session's forked skill starts no native
+// subagent. Only Claude's wire constructs the scenario, and Claude 2.1.303 starts the fork
+// whatever its deny rules say (AGENT_PROTOCOL.md, Claude forked-skill gap), so its row is
+// pinned the other way round: the day Claude can block forks, it fails and must go live.
+describe('harness parity — D2 forked skill in a restricted session', () => {
+  for (const backend of RUNNER_IDS) {
+    const exempt = exemptionFor('D2', backend);
+    if (exempt?.kind === 'scenario-unconstructible') {
+      it(`${backend} is exempt from D2 — ${exempt.reason}`, () => {
+        expect(HARNESS_ADAPTERS[backend].scenarios['forked-skill']).toBeUndefined();
+      });
+      continue;
+    }
+    it(exempt ? `${backend} is exempt from D2 — ${exempt.reason}` : `${backend} D2 starts no native subagent from a forked skill in a restricted session`, async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'cez-forked-skill-'));
+      const argsFile = join(dir, 'args.ndjson');
+      try {
+        const obs = await driveSeam(backend, 'forked-skill', { spec: {
+          restrictNativeDelegation: true,
+          env: { CEZ_MOCK_ARGS_FILE: argsFile, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' },
+        } });
+        expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
+        expect(obs.v1.at(-1)?.type).toBe('done');
+        const items = obs.v2.flatMap(event => event.type === 'item.started' || event.type === 'item.completed' ? [event.item] : []);
+        const nested = items.filter(item => item.parentItemId !== undefined);
+        if (!exempt) {
+          expect(nested).toEqual([]);
+          return;
+        }
+        // The exact absent capability, not "some assertion threw": the session was
+        // restricted, and the forked child still ran nested under the Skill call.
+        expect(exempt.kind).toBe('capability-absent');
+        const args = JSON.parse(readFileSync(argsFile, 'utf8').trim().split('\n')[0]!) as string[];
+        expect(args).toContain('--disallowedTools');
+        expect(args[args.indexOf('--disallowedTools') + 1]).toBe('Agent,Task,Workflow');
+        const skill = items.find(item => item.kind === 'tool' && item.name === 'Skill');
+        expect(skill).toBeDefined();
+        expect(new Set(nested.map(item => item.parentItemId))).toEqual(new Set([skill!.id]));
+        expect(nested.some(item => item.kind === 'tool' && item.name === 'Bash' && item.status === 'completed')).toBe(true);
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }, 45_000);
+  }
 });
 
 // ---- AgentRunSpec support declarations (#284) ------------------------------
@@ -2260,10 +2371,10 @@ describe('harness parity — cezarTools list behind CEZ_PREVIEW', () => {
       const controller = await CiToolController.start();
       const dir = mkdtempSync(join(tmpdir(), 'cez-tools-list-'));
       try {
-        const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'ci', source: 'agent', via: 'cezar_wait_for_ci', phase: 'open' } }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }) });
+        const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'ci', source: 'agent', via: 'cezar_wait_for_ci', phase: 'open' } }), ask: async () => ({ ok: false, code: 'unavailable', message: 'none' }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', open_waits: [] }) });
         const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, allowedTools: ['Read'], env: { ...session.env, CEZ_MOCK_ARGS_FILE: join(dir, 'wire'), CEZ_MOCK_CI_PR: wait.prUrl, CEZ_MOCK_CI_RESULT: join(dir, 'result'), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
         expect(obs.v1.filter((event) => event.type === 'error')).toEqual([]);
-        const waits = ['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait'];
+        const waits = ['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'];
         const expected = enabled ? [...waits, 'cezar_preview_serve', 'cezar_preview_stop'] : waits;
         expect(JSON.parse(readFileSync(join(dir, 'result'), 'utf8')).names).toEqual(expected);
         const argv: string[] = JSON.parse(readFileSync(join(dir, 'wire'), 'utf8').trim().split('\n')[0]!);
@@ -2562,10 +2673,17 @@ describe('harness parity — live task scratch', () => {
 // #399 incident: issue Agent context, run 3a3c1ffa (original history unavailable).
 // Prompt delivery is the contract under test; these offline wires cannot prove
 // that a live model follows the instruction. Markerless output must still wait.
+// hearsay-tools/cezarion#1234: every runner honors cezarTools, so every session here is taught
+// the lifecycle tools instead of the markers (the toolless form is in human-waits.test.ts).
 describe('harness parity — monitoring wrap-up contract (#399)', () => {
-  const finishedRule = 'When the watched work is finished and the task goal is complete, end your final message with CEZ:DONE.';
-  const pendingRule = 'If the watched work is still pending, end with CEZ:MONITORING.';
-  const markerlessRule = 'Never yield markerless for a monitoring wrap-up.';
+  const promptRules = [
+    'When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn.',
+    'call cezar_wait with kind "ci" for a pull request\'s checks or kind "timer" to re-check later, then end your turn.',
+  ];
+  const wakeRules = [
+    'When the goal is complete and verified, call cezar_done.',
+    'If the watched work is still pending, call cezar_wait again.',
+  ];
   type Wire = {
     userText?: string; method?: string; url?: string; prompt?: string;
     params?: { input?: { text?: string }[]; prompt?: { text?: string }[] };
@@ -2597,10 +2715,9 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
     expect(index).toBeGreaterThanOrEqual(0);
     return argv[index + 1] ?? '';
   };
-  const assertRules = (text: string) => {
-    expect(text).toContain(finishedRule);
-    expect(text).toContain(pendingRule);
-    expect(text).toContain(markerlessRule);
+  const assertRules = (text: string, rules: readonly string[]) => {
+    for (const rule of rules) expect(text).toContain(rule);
+    expect(text).not.toContain('CEZ:MONITORING');
   };
   const recording = async (body: (dir: string) => Promise<void>) => {
     const dir = mkdtempSync(join(tmpdir(), 'cez-monitoring-prompt-'));
@@ -2629,8 +2746,8 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
                 expect(manager.continueRun(runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
                 await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
               }
-              assertRules(systemPrompt(backend, dir));
-              expect(systemPrompt(backend, dir)).toContain('end plainly (no marker) only when you are genuinely waiting on the user');
+              assertRules(systemPrompt(backend, dir), promptRules);
+              expect(systemPrompt(backend, dir)).toContain('When you need the user — a decision only they can make, or missing input — call cezar_ask');
             });
         });
       }, 60_000);
@@ -2648,12 +2765,12 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
           await waitFor(() => !!monitoringTimerOf(manager, fixture.runId));
           monitoringTimerOf(manager, fixture.runId)!._onTimeout();
           await waitFor(() => manager.isActive(fixture.runId) && messages(backend, dir).length > 0);
-          assertRules(systemPrompt(backend, dir));
+          assertRules(systemPrompt(backend, dir), promptRules);
         });
       });
     }, 60_000);
 
-    it(`${backend} R39 monitoring wake delivers DONE and MONITORING instructions on the native message channel`, async () => {
+    it(`${backend} R39 monitoring wake delivers the cezar_done and cezar_wait instructions on the native message channel`, async () => {
       await recording(async dir => {
         await driveRun(backend, 'split-text', record => record?.status === 'waiting' && !!monitoringWakeOf(record), 30_000,
           async ({ store, manager, runId }) => {
@@ -2661,7 +2778,7 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
             expect(timer).toBeDefined();
             timer._onTimeout();
             await waitFor(() => messages(backend, dir).length > 1);
-            assertRules(messages(backend, dir)[1]!);
+            assertRules(messages(backend, dir)[1]!, wakeRules);
             expect(store.readEvents(runId).some(event => event.type === 'user-message')).toBe(false);
           });
       });

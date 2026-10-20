@@ -25,6 +25,26 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
   });
   afterEach(async () => { await transport?.close(); await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   const json = () => JSON.parse(String(output.mock.calls.at(-1)?.[0]));
+  it('lists owned workers through the private transport and rejects extra arguments', async () => {
+    expect(await runWorkerCommand(['list'], env)).toBe(0);
+    expect(json()).toEqual({ workers: [] });
+    expect(await runWorkerCommand(['list', 'extra'], env)).toBe(1);
+    expect(json()).toMatchObject({ code: 'invalid_input' });
+    expect(await runWorkerCommand(['list', '--help'], {})).toBe(0);
+    expect(output.mock.calls.at(-1)?.[0]).toContain('cez worker list');
+  });
+  it('follows every list page and emits one complete worker list', async () => {
+    const spawned = await f.service.spawn(f.caller, { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
+    const inspection = await f.service.inspect(f.caller, { workerId: spawned.workerId });
+    const entry = { workerId: inspection.workerId, parentRunId: inspection.parentRunId,
+      status: inspection.status, workspace: inspection.workspace, revision: 0, settled: false, destroyed: false };
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ workers: [entry], nextOffset: 32 })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ workers: [{ ...entry, workerId: randomUUID() }] })));
+    expect(await runWorkerCommand(['list'], env)).toBe(0);
+    expect(json().workers).toHaveLength(2);
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual([`${transport.url}/list`, `${transport.url}/list?offset=32`]);
+  });
   it('preserves JSON usage for no args', async () => {
     expect(await runWorkerCommand([], env)).toBe(1);
     const help = json();
@@ -97,6 +117,17 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     expect(await runWorkerCommand([...args, '--resume'], env)).toBe(0);
     const sent = json();
     expect(Date.parse(sent.message.deadline) - Date.parse(sent.message.createdAt)).toBe(7_200_000);
+  });
+  // hearsay-tools/cezarion#1235: the help a parent reads says waits coexist and how to stop one.
+  it('documents that several waits coexist, that messages close none, and how cancel-wait stops one', async () => {
+    await runWorkerCommand(['wait', '--help'], {});
+    const waitHelp = String(output.mock.calls.at(-1)?.[0]);
+    expect(waitHelp).toMatch(/several waits can be open at once/i);
+    expect(waitHelp).toMatch(/messages wake you and close no wait/i);
+    await runWorkerCommand(['cancel-wait', '--help'], {});
+    const cancelHelp = String(output.mock.calls.at(-1)?.[0]);
+    expect(cancelHelp).toMatch(/stops one wait/i);
+    expect(cancelHelp).toMatch(/never cancels requests or workers/i);
   });
   it('prints one inbox snapshot before ACK and rejects positional IDs', async () => {
     const listeners = process.stdout.listenerCount('error');

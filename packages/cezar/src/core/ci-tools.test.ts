@@ -8,7 +8,7 @@ import { buildChildEnv } from './agent-env.ts';
 import { buildClaudeArgs } from './claude-cli-runner.ts';
 import { buildPiArgs } from './pi-runner.ts';
 import { ciOpenCodeEnv } from '../ci-wait/injection.ts';
-import { cancelWaitToolDefinition, ciToolDefinition, cezarServerInstructions, cezarTools, waitToolDefinition } from '../ci-wait/tools.ts';
+import { askToolDefinition, cancelWaitToolDefinition, ciToolDefinition, cezarServerInstructions, cezarTools, waitToolDefinition } from '../ci-wait/tools.ts';
 
 const descriptor = { name: 'cezar_ci_test', command: process.execPath, args: ['/installed/dist/ci-wait/mcp.js'] };
 const spec = { cwd: '/tmp', userPrompt: 'task', cezarTools: descriptor };
@@ -21,8 +21,11 @@ describe('wait tool definitions', () => {
     expect(schema.type).toBe('object');
     // The Anthropic tool API refuses a top-level union; the kinds validate on the server.
     for (const key of ['oneOf', 'anyOf', 'allOf']) expect(schema).not.toHaveProperty(key);
-    expect(schema.properties).toMatchObject({ kind: { enum: ['ci', 'timer'] } });
-    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['kind', 'note', 'pr', 'seconds', 'timeout_seconds']);
+    expect(schema.properties).toMatchObject({ kind: { enum: ['ci', 'worker', 'timer'] } });
+    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['kind', 'mode', 'note', 'pr', 'request_ids', 'seconds', 'timeout_seconds', 'worker_ids']);
+    // hearsay-tools/cezarion#1234: the user is asked with cezar_ask, so no field here is one kind's card.
+    expect(JSON.stringify(schema)).not.toContain('human');
+    expect(waitToolDefinition.description).toContain('To wait for the user, call cezar_ask.');
     expect(schema).toMatchObject({ required: ['kind'], additionalProperties: false });
     expect(schema.properties).toMatchObject({ seconds: { minimum: 60, maximum: 7200 }, timeout_seconds: { minimum: 1, maximum: 7200, default: 1800 }, note: { maxLength: 512 } });
     expect(JSON.stringify(schema)).not.toMatch(/"(?:oneOf|anyOf|allOf)"/);
@@ -30,12 +33,24 @@ describe('wait tool definitions', () => {
     expect(Object.keys(cancelWaitToolDefinition.inputSchema.properties ?? {})).toEqual(['wait_id']);
   });
 
+  // hearsay-tools/cezarion#1234: the user's answer has its own tool, and its card is required.
+  it('advertises cezar_ask with a required card, whose questions take options only when they offer choices', () => {
+    const schema = askToolDefinition.inputSchema;
+    expect(schema).toMatchObject({ type: 'object', required: ['questions'], additionalProperties: false });
+    expect(Object.keys(schema.properties ?? {})).toEqual(['questions']);
+    expect(schema.properties).toMatchObject({ questions: { type: 'array', minItems: 1, maxItems: 4, items: { required: ['header', 'question'], properties: { header: { maxLength: 12 }, options: { minItems: 2, maxItems: 4 } } } } });
+    expect(JSON.stringify(schema)).not.toMatch(/"(?:oneOf|anyOf|allOf)"/);
+    expect(askToolDefinition.description).toContain('leave the options out to let the user type the answer');
+    expect(cezarServerInstructions()).toContain('- cezar_ask: load when you need the user: a decision only they can make, or missing input; end your turn after it answers.');
+  });
+
   it('marks cezar_wait_for_ci deprecated: still listed and admitted, description points to cezar_wait, no trigger line in the server instructions', () => {
     for (const env of [{}, { CEZ_PREVIEW: '1' }]) {
-      expect(cezarTools(env).map(tool => tool.definition.name).slice(0, 3)).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait']);
+      expect(cezarTools(env).map(tool => tool.definition.name).slice(0, 5)).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
       const instructions = cezarServerInstructions(env);
       expect(instructions).not.toContain('- cezar_wait_for_ci:');
-      expect(instructions).toContain('- cezar_wait: load when you are waiting on CI for a PR or want to re-check something later; end your turn after it answers.');
+      expect(instructions).toContain('- cezar_wait: load when you are waiting on CI for a PR, or want to re-check something later; end your turn after it answers.');
+      expect(instructions).toContain('- cezar_ask: load when you need the user: a decision only they can make, or missing input; end your turn after it answers.');
       expect(instructions).toContain('- cezar_cancel_wait: load when a wait you registered is no longer needed.');
     }
     expect(ciToolDefinition.description.startsWith('Deprecated: use cezar_wait with kind "ci".')).toBe(true);
@@ -60,14 +75,14 @@ describe('CI tool injection', () => {
   it('Claude admits only the generated tool and preserves user settings', () => {
     const args = buildClaudeArgs({ ...spec, allowedTools: ['Read'] });
     expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!)).toEqual({ mcpServers: { [descriptor.name]: { command: descriptor.command, args: descriptor.args, env: { CEZ_TOOL_TOKEN: '${CEZ_TOOL_TOKEN}', CEZ_TOOL_SOCKET: '${CEZ_TOOL_SOCKET}' } } } });
-    expect(args[args.indexOf('--allowedTools') + 1]).toBe('Read,mcp__cezar_ci_test__cezar_wait_for_ci,mcp__cezar_ci_test__cezar_wait,mcp__cezar_ci_test__cezar_cancel_wait');
+    expect(args[args.indexOf('--allowedTools') + 1]).toBe('Read,mcp__cezar_ci_test__cezar_wait_for_ci,mcp__cezar_ci_test__cezar_wait,mcp__cezar_ci_test__cezar_ask,mcp__cezar_ci_test__cezar_cancel_wait,mcp__cezar_ci_test__cezar_done');
     expect(args).not.toContain('--strict-mcp-config');
   });
-  it('Pi preserves discovered extensions, retry extension and selected tools', () => {
+  it('Pi preserves discovered extensions, retry and project-skills extensions and selected tools', () => {
     const args = buildPiArgs({ ...spec, allowedTools: ['Read'] });
-    expect(args.filter(value => value === '--extension')).toHaveLength(2);
+    expect(args.filter(value => value === '--extension')).toHaveLength(3);
     expect(args).not.toContain('--no-extensions');
-    expect(args[args.indexOf('--tools') + 1]).toBe('read,cezar_wait_for_ci,cezar_wait,cezar_cancel_wait');
+    expect(args[args.indexOf('--tools') + 1]).toBe('read,cezar_wait_for_ci,cezar_wait,cezar_ask,cezar_cancel_wait,cezar_done');
   });
   it('OpenCode merges runtime config without overwriting servers or permissions', () => {
     const supplied = { mcp: { existing: { type: 'remote', url: 'https://example.org/mcp' } }, permission: { '*': 'deny' } };
@@ -99,7 +114,7 @@ describe('CI tool injection', () => {
         expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
         const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
         if (backend === 'claude') expect(rows[0]).toContain('--mcp-config');
-        if (backend === 'pi') expect(rows[0].filter((item: string) => item === '--extension')).toHaveLength(2);
+        if (backend === 'pi') expect(rows[0].filter((item: string) => item === '--extension')).toHaveLength(3);
         if (backend === 'omp') expect(rows[0].filter((item: string) => item === '--extension')).toHaveLength(1);
         if (backend === 'codex') {
           const config = rows.find(row => row.method === (resume ? 'thread/resume' : 'thread/start')).params.config;
@@ -134,6 +149,8 @@ describe('CI H1 executable harness parity', () => {
       const session = controller.provision({
         registerWait: async () => { registrations++; return { answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'ci', source: 'agent', via: 'cezar_wait_for_ci', phase: 'open' } }; },
         cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }),
+        ask: async () => { throw new Error('not an ask test'); },
+        finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', open_waits: [] }),
       });
       try {
         const resultFile = join(dir, 'result');
@@ -143,7 +160,7 @@ describe('CI H1 executable harness parity', () => {
         expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
         expect(registrations).toBe(valid ? 1 : 0);
         const result = JSON.parse(readFileSync(resultFile, 'utf8'));
-        expect(result.names).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait']);
+        expect(result.names).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
         if (valid) {
           expect(result.response.isError).not.toBe(true);
           expect(JSON.stringify(result.response)).toContain(wait.id);
@@ -166,10 +183,19 @@ describe('U0 wait tools on every native wire', () => {
   const wait = { id: '11111111-1111-4111-8111-111111111111', kind: 'ci' as const, source: 'agent' as const, via: 'cezar_wait' as const, generation: 'gen', turnId: 'turn', timeoutSeconds: 1800, prUrl: 'https://github.com/owner/repo/pull/1', repository: 'owner/repo', prNumber: 1, headSha: 'a'.repeat(40), registeredAt: '2026-09-22T00:00:00.000Z', deadline: '2026-09-22T00:30:00.000Z', phase: 'open' as const };
   const openWaits = [{ wait_id: wait.id, kind: 'ci' as const, deadline: wait.deadline, summary: 'CI for owner/repo#1' }];
   const call = (name: string, args: unknown) => `mock:cezar-tool ${name} ${Buffer.from(JSON.stringify(args)).toString('base64url')}`;
+  const questions = [{ header: 'Area', question: 'Which area should I start with?', multiSelect: false, options: [{ label: 'Parser' }, { label: 'Lexer' }] }];
+  const humanId = '22222222-2222-4222-8222-222222222222';
+  const humanOpen = [{ wait_id: humanId, kind: 'human' as const, summary: 'human: Which area should I start with?' }];
   const cases = [
     { tool: 'cezar_wait', args: { kind: 'ci', pr: wait.prUrl }, resume: false },
     { tool: 'cezar_wait', args: { kind: 'ci', pr: wait.prUrl }, resume: true },
     { tool: 'cezar_cancel_wait', args: { wait_id: wait.id }, resume: false },
+    // hearsay-tools/cezarion#1234: the user is asked through cezar_ask, with its card.
+    { tool: 'cezar_ask', args: { questions }, resume: false },
+    { tool: 'cezar_ask', args: { questions }, resume: true },
+    // hearsay-tools/cezarion#1234: cezar_done reaches the session's finishTurn.
+    { tool: 'cezar_done', args: {}, resume: false },
+    { tool: 'cezar_done', args: {}, resume: true },
   ];
   for (const backend of RUNNER_IDS) for (const { tool, args, resume } of cases) {
     it(`${backend} U0 calls ${tool} through its native wire on ${resume ? 'resume' : 'fresh'}`, async () => {
@@ -178,8 +204,13 @@ describe('U0 wait tools on every native wire', () => {
       const dir = mkdtempSync(join(tmpdir(), 'cez-wait-call-'));
       const calls: unknown[][] = [];
       const session = controller.provision({
-        registerWait: async (request, via) => { calls.push(['wait', request, via]); return { answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: openWaits }, wait }; },
+        registerWait: async (request, via) => {
+          calls.push(['wait', request, via]);
+          return { answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: openWaits }, wait };
+        },
+        ask: async request => { calls.push(['ask', request]); return { ok: true, wait_id: humanId, open_waits: humanOpen }; },
         cancelWait: async request => { calls.push(['cancel', request]); return { cancelled: true, wait_id: wait.id, open_waits: [] }; },
+        finishTurn: async request => { calls.push(['done', request]); return { ok: true, finishes: 'at_turn_end', open_waits: openWaits }; },
       });
       try {
         const resultFile = join(dir, 'result');
@@ -188,13 +219,21 @@ describe('U0 wait tools on every native wire', () => {
         const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, resume, allowedTools: ['Read'], restrictNativeDelegation: true, userPrompt: call(tool, args), env: { ...session.env, CEZ_MOCK_ARGS_FILE: file, CEZ_MOCK_CI_RESULT: resultFile, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
         expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
         const result = JSON.parse(readFileSync(resultFile, 'utf8'));
-        expect(result.names).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait']);
+        expect(result.names).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
         expect(result.response.isError).not.toBe(true);
         const [json, hint] = result.response.content[0].text.split('\n');
-        if (tool === 'cezar_wait') {
+        if (tool === 'cezar_ask') {
+          expect(calls).toEqual([['ask', { questions }]]);
+          expect(JSON.parse(json)).toEqual({ ok: true, wait_id: humanId, open_waits: humanOpen });
+          expect(hint).toBe('Asked. End your turn; the user\'s answer wakes you.');
+        } else if (tool === 'cezar_wait') {
           expect(calls).toEqual([['wait', { ...args, timeout_seconds: 1800 }, 'cezar_wait']]);
           expect(JSON.parse(json)).toEqual({ ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: openWaits });
           expect(hint).toBe('Registered. End your turn to wait; any open wait wakes you when it resolves.');
+        } else if (tool === 'cezar_done') {
+          expect(calls).toEqual([['done', {}]]);
+          expect(JSON.parse(json)).toEqual({ ok: true, finishes: 'at_turn_end', open_waits: openWaits });
+          expect(hint).toBe('Accepted. End your turn; Cezar finishes the task at its end.');
         } else {
           expect(calls).toEqual([['cancel', args]]);
           expect(JSON.parse(json)).toEqual({ cancelled: true, wait_id: wait.id, open_waits: [] });
@@ -202,8 +241,8 @@ describe('U0 wait tools on every native wire', () => {
         // Each allow-listing wire names both tools; the others admit the whole server.
         const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
         const argv: string[] | undefined = Array.isArray(rows[0]) ? rows[0] : undefined;
-        if (backend === 'claude') expect(argv![argv!.indexOf('--allowedTools') + 1]!.split(',')).toEqual(expect.arrayContaining(['cezar_wait', 'cezar_cancel_wait'].map(name => `mcp__${session.descriptor.name}__${name}`)));
-        if (backend === 'pi' || backend === 'omp') expect(argv![argv!.indexOf('--tools') + 1]!.split(',')).toEqual(expect.arrayContaining(['cezar_wait', 'cezar_cancel_wait']));
+        if (backend === 'claude') expect(argv![argv!.indexOf('--allowedTools') + 1]!.split(',')).toEqual(expect.arrayContaining(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'].map(name => `mcp__${session.descriptor.name}__${name}`)));
+        if (backend === 'pi' || backend === 'omp') expect(argv![argv!.indexOf('--tools') + 1]!.split(',')).toEqual(expect.arrayContaining(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']));
         if (backend === 'cursor') expect(argv![argv!.indexOf('--allowed-tools') + 1]!.split(',')).toContain('mcp_tool_call');
         expect(readFileSync(file, 'utf8')).not.toContain(session.env.CEZ_TOOL_TOKEN);
       } finally { await controller.close(); rmSync(dir, { recursive: true, force: true }); }

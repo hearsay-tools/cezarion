@@ -9,7 +9,7 @@ import {
   useRetryProviderAuth,
   workspaceQueryKeys,
 } from '@/api/queries'
-import { runnerDiscoversModels, type ProviderId, type ProviderStatusResponse } from '@open-mercato/cezar-api-client'
+import { runnerDiscoversModels, type ProviderId, type ProviderStatusResponse } from '@open-mercato/cezar-api-client/contract/workspace'
 import { StatusDot, type StatusDotTone } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'

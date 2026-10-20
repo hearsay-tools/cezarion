@@ -7,13 +7,13 @@ import {
   conversationMessageEventSchema,
   requestOutcomeEventSchema,
   agentInputEventSchema,
-  advancePendingHumanAsk,
-  permissionRequestedSchema,
   type RunEvent,
   type RunHistoryContext,
   type RunHistoryEvent,
   type RunHistoryPage,
-} from '@open-mercato/cezar-contract';
+} from '@open-mercato/cezar-contract/events';
+import { advancePendingHumanAsk } from '@open-mercato/cezar-contract/ask';
+import { permissionRequestedSchema } from '@open-mercato/cezar-contract/permissions';
 
 import { emptyHistorySource, openHistorySource, type HistorySource } from './history-file.ts';
 
@@ -369,7 +369,8 @@ async function forwardEventsUntil(
   wantedItems: number,
 ): Promise<{ events: RunHistoryEvent[]; reachedEnd: boolean; bytesRead: number }> {
   const events: RunHistoryEvent[] = [];
-  let previousBoundary: RunHistoryEvent | undefined;
+  let previousOpening: RunHistoryEvent[] = [];
+  let previous: RunHistoryEvent | undefined;
   let reachedEnd = true;
   let input: Readable | undefined;
   try {
@@ -379,10 +380,11 @@ async function forwardEventsUntil(
       const event = parseLine(line);
       if (!event) continue;
       if (event.seq <= afterSeq) {
-        if (event.type === 'user-message' || event.type === 'turn.started') previousBoundary = event;
+        if (event.type === 'user-message' || event.type === 'turn.started') previousOpening = turnOpening(previous, event);
+        previous = event;
         continue;
       }
-      if (events.length === 0 && previousBoundary) events.push(previousBoundary);
+      if (events.length === 0) events.push(...previousOpening);
       events.push(event);
       if (canonicalSessionItems(events).length >= wantedItems + 1) {
         reachedEnd = false;
@@ -397,21 +399,30 @@ async function forwardEventsUntil(
   return { events, reachedEnd, bytesRead: input ? streamBytesRead(input) : 0 };
 }
 
+/**
+ * The events that open the turn a page starts inside: its boundary, plus the v1 `user-message`
+ * right before a v2 `turn.started`. The cockpit opens the turn at that message and attaches the
+ * `turn.started` to it, so a page without the message keys the turn by another seq, and its rows
+ * change keys when the older page arrives.
+ */
+function turnOpening(previous: RunHistoryEvent | undefined, boundary: RunHistoryEvent): RunHistoryEvent[] {
+  return boundary.type === 'turn.started' && previous?.type === 'user-message' ? [previous, boundary] : [boundary];
+}
+
 function pageEventSlice(events: RunHistoryEvent[], selected: CanonicalItem[]): RunHistoryEvent[] {
   const firstSeq = selected[0]?.firstSeq;
   if (firstSeq === undefined) return [];
   const start = events.findIndex((event) => event.seq >= firstSeq);
   if (start < 0) return [];
-  let boundary: RunHistoryEvent | undefined;
+  let opening: RunHistoryEvent[] = [];
   for (let index = start - 1; index >= 0; index -= 1) {
     const event = events[index]!;
     if (event.type === 'user-message' || event.type === 'turn.started') {
-      boundary = event;
+      opening = turnOpening(events[index - 1], event);
       break;
     }
   }
-  const pageEvents = events.slice(start);
-  return boundary === undefined ? pageEvents : [boundary, ...pageEvents];
+  return [...opening, ...events.slice(start)];
 }
 
 function forwardPageEventSlice(events: RunHistoryEvent[], selected: CanonicalItem[]): RunHistoryEvent[] {

@@ -2,6 +2,7 @@ import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:ch
 import { z } from 'zod';
 import { trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
+import { CursorAutoUpdateFlagRejected, cursorArgs, watchCursorAutoUpdateRejection, withCursorAutoUpdateFallback } from './cursor-cli-flags.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
 
 export interface CursorModelDiscoveryOptions {
@@ -76,11 +77,21 @@ export async function discoverCursorModels(options: CursorModelDiscoveryOptions)
 export function discoverCursorParameterizedModels(
   options: CursorModelDiscoveryOptions & { env?: Record<string, string>; signal?: AbortSignal },
 ): Promise<CursorParameterizedModel[]> {
+  const bin = resolveCursorExecutable(options.bin);
+  return withCursorAutoUpdateFallback(bin, () => probeCursorParameterizedModels(bin, options));
+}
+
+function probeCursorParameterizedModels(
+  bin: string,
+  options: CursorModelDiscoveryOptions & { env?: Record<string, string>; signal?: AbortSignal },
+): Promise<CursorParameterizedModel[]> {
   if (options.signal?.aborted) return Promise.reject(new Error('Cursor model discovery cancelled'));
   const spawn = options.spawn ?? ((bin: string, args: readonly string[], cwd: string) =>
     nodeSpawn(bin, [...args], { cwd, env: buildChildEnv({ backend: 'cursor', extraEnv: options.env }) }));
-  const child = spawn(resolveCursorExecutable(options.bin), ['acp'], options.cwd);
+  const child = spawn(bin, cursorArgs(bin, ['acp']), options.cwd);
   const hasExited = trackChildExit(child);
+  // Drain diagnostics without retaining or surfacing potentially private output.
+  const rejectedFlag = watchCursorAutoUpdateRejection(child.stderr);
   return new Promise((resolve, reject) => {
     let settled = false;
     let pending = '';
@@ -157,11 +168,10 @@ export function discoverCursorParameterizedModels(
         finish(undefined, models);
       }
     });
-    // Drain diagnostics without retaining or surfacing potentially private output.
-    child.stderr.resume();
     child.stdin.once('error', () => fail('stdin failed'));
     child.once('error', () => fail('child failed'));
-    child.once('close', () => fail('child closed before discovery completed'));
+    child.once('close', () => rejectedFlag()
+      ? finish(new CursorAutoUpdateFlagRejected()) : fail('child closed before discovery completed'));
     options.signal?.addEventListener('abort', abort, { once: true });
     if (options.signal?.aborted) { abort(); return; }
     send(1, 'initialize', { protocolVersion: 1, clientCapabilities: { _meta: { parameterizedModelPicker: true } } });
@@ -177,8 +187,15 @@ export async function discoverCursorVariantModels(options: CursorModelDiscoveryO
   if (options.bin === undefined && process.env.CEZ_CURSOR_BIN === undefined && process.env.CEZ_DRY_RUN === '1') {
     return [];
   }
-  const child = (options.spawn ?? spawnCursor)(resolveCursorExecutable(options.bin), ['--list-models'], options.cwd);
+  const bin = resolveCursorExecutable(options.bin);
+  return withCursorAutoUpdateFallback(bin, () => listCursorVariantModels(bin, options));
+}
+
+async function listCursorVariantModels(bin: string, options: CursorModelDiscoveryOptions): Promise<ModelOption[]> {
+  const child = (options.spawn ?? spawnCursor)(bin, cursorArgs(bin, ['--list-models']), options.cwd);
   const hasExited = trackChildExit(child);
+  // Diagnostics are drained, never surfaced in an error.
+  const rejectedFlag = watchCursorAutoUpdateRejection(child.stderr);
   let signalled = false;
   const kill = () => {
     if (signalled || hasExited()) return;
@@ -209,12 +226,15 @@ export async function discoverCursorVariantModels(options: CursorModelDiscoveryO
         output += chunk;
         if (output.length > MAX_OUTPUT_CHARS) fail('exceeded the output limit');
       });
-      // Drain diagnostics, but never surface raw CLI output in an error.
-      child.stderr.resume();
       child.stdin.once('error', () => fail('stdin failed'));
       child.once('error', () => fail('child failed'));
       child.once('close', (code) => {
         if (settled) return;
+        if (code !== 0 && rejectedFlag()) {
+          settled = true;
+          reject(new CursorAutoUpdateFlagRejected());
+          return;
+        }
         if (code !== 0) {
           fail(`child exited (${code ?? 'unknown'})`);
           return;

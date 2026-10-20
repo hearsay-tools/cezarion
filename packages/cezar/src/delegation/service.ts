@@ -7,13 +7,50 @@ import { prepareWorkerContext, workerContextTask } from './context.ts';
 import { acceptedWorkerIdentitySchema, workerContextHash, workerWorkflowHash } from './execution-identity.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  discoveryRequestSchema, type DiscoveryRequest, type DiscoveryResponse,
-  MAX_CONVERSATION_REQUEST_SECONDS, conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReceiptRequestSchema, requestWaitRequestSchema,
-  type ConversationSendRequest, type ConversationSendResult, type ConversationInspectRequest, type ConversationInspectResult, type ConversationCancelRequest, type ConversationState, type InboxReserveResult, type InboxReceiptRequest, type InboxReceiptResult, type RequestWaitRequest, type RequestOutcome,
-  workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerCancelWaitRequestSchema, type WorkerCancelWaitRequest,
-  type WorkerCollectedResult, type WorkerDestroy, type WorkerDestroyResult, type WorkerInspection, type WorkerOperation,
-  type WorkerParams, type WorkerSpawnRequest, type WorkerSteerRequest, type WorkerWaitRequest,
-} from '@open-mercato/cezar-contract';
+  discoveryRequestSchema,
+  type DiscoveryRequest,
+  type DiscoveryResponse,
+} from '@open-mercato/cezar-contract/discovery';
+import {
+  MAX_CONVERSATION_REQUEST_SECONDS,
+  conversationSendRequestSchema,
+  conversationInspectRequestSchema,
+  conversationCancelRequestSchema,
+  inboxReceiptRequestSchema,
+  requestWaitRequestSchema,
+  type ConversationSendRequest,
+  type ConversationSendResult,
+  type ConversationInspectRequest,
+  type ConversationInspectResult,
+  type ConversationCancelRequest,
+  type ConversationState,
+  type InboxReserveResult,
+  type InboxReceiptRequest,
+  type InboxReceiptResult,
+  type RequestWaitRequest,
+  type RequestOutcome,
+} from '@open-mercato/cezar-contract/conversations';
+import {
+  workerSpawnRequestSchema,
+  workerSteerRequestSchema,
+  workerWaitRequestSchema,
+  workerParamsSchema,
+  workerCancelWaitRequestSchema,
+  type WorkerCancelWaitRequest,
+  type WorkerListPage,
+  type WorkerListQuery,
+  type WorkerCollectedResult,
+  type WorkerDestroy,
+  type WorkerDestroyResult,
+  type WorkerInspection,
+  type WorkerOperation,
+  type WorkerParams,
+  type WorkerSpawnRequest,
+  type WorkerSteerRequest,
+  type WorkerWait,
+  type WorkerWaitRequest,
+} from '@open-mercato/cezar-contract/delegation';
+import { workerWaitEntryToLegacy, type WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import type { RunStore, RunRecord } from '../runs/store.ts';
 import { workerDestroyView, workerOutcome } from '../runs/delegation-state.ts';
 import type { DelegationExecutionSettings, RunManager } from '../workflows/run.ts';
@@ -24,7 +61,7 @@ import type { RunnerId } from '../core/agent-runner.ts';
 import type { Caller } from './credentials.ts';
 import { isAuthenticatedCaller } from './credentials.ts';
 import { parseDelegationEffort } from './effort.ts';
-import { authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError } from './policy.ts';
+import { authorizeWorkerList, authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError } from './policy.ts';
 import { releaseThenRemoveOwnedWorkspace } from '../git-worktree-release.ts';
 import { gitCommonDir, planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline, WorkspaceHeldError } from './workspace.ts';
 import { holdersStillHold, observeDestroy, recordHolders, type DestroyObservation } from './destroy-observation.ts';
@@ -476,7 +513,7 @@ export class DelegationService {
     for (const id of request.requestIds) this.ownRequest(caller, id);
     const project = this.context(caller);
     const wait = project.manager.registerRequestWait(caller.runId, request);
-    return { wait, instruction: `Wait registered until ${wait.deadline}. End your turn now to release capacity. Cezar resumes you on request settlement, incoming messages, deadline or cancellation; no automatic re-wait.` };
+    return { wait, instruction: `Wait ${wait.id} registered until ${wait.deadline}. End your turn now to release capacity. Cezar resumes you when ${wait.mode === 'all' ? 'every selected request settles' : 'a selected request settles'} or at the deadline. Messages also wake you and keep this wait open; end your turn to keep waiting. Your other waits stay open beside it.` };
   }
   async spawn(caller: Caller, value: WorkerSpawnRequest) {
     const request = workerSpawnRequestSchema.parse(value);
@@ -555,18 +592,49 @@ export class DelegationService {
       } finally { if (!accepted) await prepared?.discard(); }
     });
   }
+  async list(caller: Caller, query: WorkerListQuery = {}): Promise<WorkerListPage> {
+    const project = this.context(caller);
+    const parent = project.store.getRun(caller.runId);
+    authorizeWorkerList(caller, parent, project.id);
+    if (parent?.delegation?.role !== 'root') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    const workers: WorkerListPage['workers'] = [];
+    const offset = Number(query.offset ?? 0);
+    const end = Math.min(offset + 32, parent.delegation.receipts.length);
+    for (const receipt of parent.delegation.receipts.slice(offset, end)) {
+      const worker = project.store.getRun(receipt.workerId);
+      // Deleted histories have no resources to supervise. Never expose an unrelated receipt target.
+      if (worker?.delegation?.role !== 'worker' || worker.delegation.parentRunId !== parent.id ||
+          worker.delegation.workspace.ownerRunId !== worker.id) continue;
+      const inspection = await this.inspect(caller, { workerId: worker.id });
+      workers.push({ workerId: inspection.workerId, parentRunId: inspection.parentRunId,
+        status: inspection.status, workspace: inspection.workspace,
+        ...(inspection.destroy ? { destroy: inspection.destroy } : {}), revision: workerRevision(worker),
+        settled: inspection.outcome !== undefined && project.store.readWorkerExecution(worker.id)?.phase === 'complete',
+        destroyed: worker.delegation.destroy?.phase === 'complete' });
+    }
+    return { workers, ...(end < parent.delegation.receipts.length ? { nextOffset: end } : {}) };
+  }
   async inspect(caller: Caller, params: WorkerParams): Promise<WorkerInspection> {
     const { project, worker, parent } = this.target(caller, params, 'inspect');
     if (worker.delegation?.role !== 'worker') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
     project.manager.settleOrphanedWorkerExecution(worker.id); // #469: an orphan that died after recovery settles
     const outcome = workerOutcome(worker, new Date().toISOString());
-    const wait = parent.delegation?.role === 'root' ? parent.delegation.wait : undefined;
+    const wait = this.inspectedWait(parent, worker.id);
     return { workerId: worker.id, parentRunId: parent.id, status: worker.status, workspace: worker.delegation.workspace,
       ...(worker.runner === undefined ? {} : { backend: worker.runner }), ...(worker.model === undefined ? {} : { model: worker.model }),
       ...(worker.delegation.context === undefined ? {} : { inputs: worker.delegation.context.inputs }),
       ...(worker.currentStepId === undefined ? {} : { currentStepId: worker.currentStepId }),
       ...(worker.activity === undefined ? {} : { activity: worker.activity }),
       ...(wait ? { wait } : {}), ...(worker.delegation.destroy ? { destroy: workerDestroyView(worker) } : {}), ...(outcome ? { outcome } : {}) };
+  }
+  /** The wait an inspection shows: the completion gate's (`delegation.wait`, until phase 3b of
+   *  hearsay-tools/cezarion#1235), else the newest open or owed list wait naming the worker, in
+   *  the legacy `WorkerWait` shape. */
+  private inspectedWait(parent: RunRecord, workerId: string): WorkerWait | undefined {
+    if (parent.delegation?.role !== 'root') return undefined;
+    if (parent.delegation.wait) return parent.delegation.wait;
+    const entry = (parent.waits ?? []).filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker' && !!wait.workerIds?.includes(workerId)).at(-1);
+    return entry ? workerWaitEntryToLegacy(entry) : undefined;
   }
   async collect(caller: Caller, params: WorkerParams): Promise<WorkerCollectedResult> {
     const project = this.context(caller);
@@ -619,7 +687,7 @@ export class DelegationService {
     for (const workerId of request.workerIds) this.target(caller, { workerId }, 'wait');
     const project = this.context(caller);
     const wait = project.manager.registerWorkerWait(caller.runId, request);
-    return { wait, instruction: `Wait registered until ${wait.deadline}. End your turn now to release capacity. Cezar will resume you when ${wait.mode === 'all' ? 'all selected workers settle' : 'a selected worker settles'}, or on the deadline/cancellation. Worker progress also wakes you but keeps this wait active; end your turn to keep waiting.` };
+    return { wait, instruction: `Wait ${wait.id} registered until ${wait.deadline}. End your turn now to release capacity. Cezar resumes you when ${wait.mode === 'all' ? 'all selected workers settle' : 'a selected worker settles'} or at the deadline. Messages also wake you and keep this wait open; end your turn to keep waiting. Your other waits stay open beside it.` };
   }
   async cancelWait(caller: Caller, value: WorkerCancelWaitRequest) {
     const { waitId } = workerCancelWaitRequestSchema.parse(value);
@@ -627,8 +695,9 @@ export class DelegationService {
     const sender = project.store.getRun(caller.runId);
     if (sender?.delegation?.role === 'worker') {
       this.conversationPair(caller, sender.delegation.parentRunId);
-      const wait = sender.delegation.wait?.id === waitId ? sender.delegation.wait : sender.delegation.lastWait?.id === waitId ? sender.delegation.lastWait : undefined;
-      if (!wait?.requestIds?.length) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+      // hearsay-tools/cezarion#1235: a worker's request wait is a list entry, open or settled.
+      const wait = [...sender.waits ?? [], ...sender.lastWaits ?? []].find(entry => entry.id === waitId && entry.kind === 'worker');
+      if (wait?.kind !== 'worker' || !wait.requestIds?.length) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
       for (const requestId of wait.requestIds) this.ownRequest(caller, requestId);
     } else authorizeCancelWait(caller, sender, project.id);
     return { wait: project.manager.cancelWorkerWait(caller.runId, waitId) };

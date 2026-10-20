@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
-import { ProjectRail, type ProjectRailProps } from '@/components/project-rail'
+import { ProjectRail, ProjectRailPlaceholder, type ProjectRailProps } from '@/components/project-rail'
 import { ThemeProvider } from '@/components/theme-provider'
 import { PROJECT_RAIL_EXPANDED_STORAGE_KEY } from '@/lib/project-rail-expanded'
 import type { ProjectSignal } from '@/lib/project-signal'
@@ -298,6 +298,35 @@ describe('ProjectRail expand toggle (#711)', () => {
     expect(nav().className).toContain('transition-[width]')
     expect(nav().className).toContain('duration-[160ms]')
     expect(nav().className).toContain('motion-reduce:transition-none')
+  })
+})
+
+// #1255: the rail mounts once the registry answers, after the health-gated sidebar footer. Until
+// then the placeholder holds the rail's column, so nothing in the sidebar moves under a pointer.
+describe('ProjectRailPlaceholder', () => {
+  const placeholder = () => document.querySelector('[data-slot="project-rail-placeholder"]') as HTMLElement
+
+  it('holds the collapsed rail width, hidden from assistive tech and below md', () => {
+    setViewport(1440)
+    render(<ProjectRailPlaceholder />)
+    expect(placeholder().style.width).toBe('60px')
+    expect(placeholder().getAttribute('aria-hidden')).toBe('true')
+    expect(placeholder().className).toContain('hidden')
+    expect(placeholder().className).toContain('md:block')
+  })
+
+  it('holds the expanded width when that is the stored choice and the window has room', () => {
+    setViewport(1440)
+    localStorage.setItem(PROJECT_RAIL_EXPANDED_STORAGE_KEY, '1')
+    render(<ProjectRailPlaceholder />)
+    expect(placeholder().style.width).toBe('232px')
+  })
+
+  it('holds the collapsed width when the window is too narrow to expand, as the rail does', () => {
+    setViewport(1024)
+    localStorage.setItem(PROJECT_RAIL_EXPANDED_STORAGE_KEY, '1')
+    render(<ProjectRailPlaceholder />)
+    expect(placeholder().style.width).toBe('60px')
   })
 })
 

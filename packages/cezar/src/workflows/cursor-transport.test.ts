@@ -58,14 +58,17 @@ describe('Cursor print workflow transport', () => {
     const first = store.getRun(run.id)!.steps[0]!;
     expect(first.sessionId).toMatch(/^[0-9a-f-]{36}$/);
     await expect.poll(() => store.getRun(run.id)?.status, { timeout: 15_000 }).toBe('waiting');
+    // Every turn here ends with no wait, so Cezar's no-wait nudge is a second print call on the
+    // same session (hearsay-tools/cezarion#1234): two log lines per turn.
+    const calls = () => readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { resumeId?: string });
+    expect(calls()).toHaveLength(2);
+    expect(calls()[1]?.resumeId).toBe(first.sessionId);
     expect(manager.finish(run.id)).toBe(true);
     await expect.poll(() => manager.isActive(run.id), { timeout: 15_000 }).toBe(false);
     expect(manager.continueRun(run.id, { text: 'second turn' })).toEqual({ ok: true });
     await expect.poll(() => store.getRun(run.id)?.steps.at(-1)?.sessionTransport, { timeout: 15_000 }).toBe('cursor-print');
-    await expect.poll(() => readFileSync(log, 'utf8').trim().split('\n').length, { timeout: 15_000 }).toBe(2);
-    const lines = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { resumeId?: string });
-    expect(lines).toHaveLength(2);
-    expect(lines[1]?.resumeId).toBe(first.sessionId);
+    await expect.poll(() => calls().length, { timeout: 15_000 }).toBeGreaterThanOrEqual(3);
+    expect(calls()[2]?.resumeId).toBe(first.sessionId);
     const last = store.getRun(run.id)!.steps.at(-1)!;
     expect(last.sessionId).toBe(first.sessionId);
     expect(last.profileId).toBe(first.profileId);
@@ -73,7 +76,7 @@ describe('Cursor print workflow transport', () => {
     expect(manager.finish(run.id)).toBe(true);
     await expect.poll(() => manager.isActive(run.id), { timeout: 15_000 }).toBe(false);
     expect(manager.continueRun(run.id, { text: 'third turn' })).toEqual({ ok: true });
-    await expect.poll(() => readFileSync(log, 'utf8').trim().split('\n').length, { timeout: 15_000 }).toBe(3);
+    await expect.poll(() => calls().length, { timeout: 15_000 }).toBe(6);
   }, 20_000);
 
   it('leaves a portable ASK pending until an explicit human reply', async () => {

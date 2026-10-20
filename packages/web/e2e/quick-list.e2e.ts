@@ -885,19 +885,23 @@ describe('the tasks table under worst-case row content', () => {
 
   it('serves the worst case as data the real store parsed', async () => {
     // If a record here were wrong, zod would have dropped the index and every measurement below
-    // would be measuring an empty table that "passes" nothing. The parked delegation is the one
-    // worth reading back: it is the only field a serve boot could have rewritten.
+    // would be measuring an empty table that "passes" nothing. The parked wait is the one worth
+    // reading back: it is the only field a serve boot could have rewritten. Since
+    // hearsay-tools/cezarion#1235 the store reads the seeded `delegation.wait` as an open
+    // `worker` entry in the wait list.
     const runs = (await fetch(`${worstUrl}/api/v1/runs`).then((r) => r.json())) as Array<{
       id: string
       status: string
       workflow: string
       delegation?: { role: string; wait?: { phase: string } }
+      waits?: Array<{ kind: string; phase: string }>
     }>
     expect(runs.map((r) => r.id).sort()).toEqual(['worst-unbroken', 'worst-wrapping'])
     const parked = runs.find((r) => r.id === 'worst-wrapping')
     expect(parked?.status).toBe('waiting')
     expect(parked?.delegation?.role).toBe('root')
-    expect(parked?.delegation?.wait?.phase).toBe('parked')
+    expect(parked?.delegation?.wait).toBeUndefined()
+    expect(parked?.waits).toEqual([expect.objectContaining({ kind: 'worker', phase: 'open' })])
     expect(parked?.workflow).toBe('workflow-name-that-is-deliberately-too-long-for-its-column')
   })
 

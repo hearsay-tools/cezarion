@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EFFORT_LEVELS, parseEffort } from '@open-mercato/cezar-contract';
+import { EFFORT_LEVELS, parseEffort } from '@open-mercato/cezar-contract/effort';
 
 describe('parseEffort', () => {
   it('accepts every canonical level, including xhigh', () => {

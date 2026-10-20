@@ -14,7 +14,7 @@ import {
   type PointerEvent,
 } from 'react'
 import { useParams, useSearchParams } from 'react-router'
-import { queryScope } from '@open-mercato/cezar-api-client'
+import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 
 import { Link, Navigate } from '@/lib/project-router'
 

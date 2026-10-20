@@ -10,8 +10,8 @@ import {
   PROJECT_TAGS_MAX,
   PROJECT_TAG_MAX_LENGTH,
   PROJECT_WEBHOOK_TOKEN_MAX_LENGTH,
-  projectWebhookUrlSchema,
-} from '@open-mercato/cezar-contract';
+} from '@open-mercato/cezar-contract/project-limits';
+import { projectWebhookUrlSchema } from '@open-mercato/cezar-contract/projects';
 import { PROVIDER_IDS, type ProviderId } from '../core/provider-auth.ts';
 import { assertCezarHomeWriteIsSandboxed, workspaceConfigPath } from '../paths.ts';
 

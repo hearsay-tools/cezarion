@@ -1,7 +1,7 @@
 import {
   WORKTREE_SETUP_DEFAULT_TIMEOUT_SECONDS,
   worktreeSetupConfigSchema,
-} from '@open-mercato/cezar-contract';
+} from '@open-mercato/cezar-contract/workspace';
 import { buildCommandEnv } from './core/agent-env.ts';
 import { runGroupedCommand } from './workflows/grouped-command.ts';
 

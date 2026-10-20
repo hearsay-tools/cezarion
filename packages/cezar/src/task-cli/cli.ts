@@ -6,17 +6,17 @@ import {
   apiRunSchema,
   archiveFinishedResponseSchema,
   cancelResponseSchema,
-  changesPayloadSchema,
   finishResponseSchema,
   messageResponseSchema,
-  runHistoryContextSchema,
   runRecordSchema,
   runStatusSchema,
   type RunRecord,
-  skillSchema,
   type ApiRun,
   type RunSummary,
-} from '@open-mercato/cezar-contract';
+} from '@open-mercato/cezar-contract/runs';
+import { changesPayloadSchema } from '@open-mercato/cezar-contract/repo';
+import { runHistoryContextSchema } from '@open-mercato/cezar-contract/events';
+import { skillSchema } from '@open-mercato/cezar-contract/skills';
 import { openUrl } from '../open-url.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { runnerFlag, skillFlagIssue, skillTaskSteps } from '../workflows/types.ts';

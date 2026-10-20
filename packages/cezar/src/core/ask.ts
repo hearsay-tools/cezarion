@@ -14,8 +14,8 @@
  * it is never an explicit option.
  */
 import type { z } from 'zod';
-import { askRequestSchema, type AskRequest } from '@open-mercato/cezar-contract';
-export { askOptionSchema, askQuestionSchema, askRequestSchema, type AskOption, type AskQuestion, type AskRequest } from '@open-mercato/cezar-contract';
+import { askRequestSchema, type AskRequest } from '@open-mercato/cezar-contract/ask-schema';
+export { askOptionSchema, askQuestionSchema, askRequestSchema, type AskOption, type AskQuestion, type AskRequest } from '@open-mercato/cezar-contract/ask-schema';
 
 export interface AskParseIssue {
   code: string;

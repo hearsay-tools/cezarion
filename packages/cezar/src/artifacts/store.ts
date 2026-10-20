@@ -5,7 +5,7 @@ import { basename, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { hostname } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
-import { publishedArtifactSchema, type PublishedArtifact } from '@open-mercato/cezar-contract';
+import { publishedArtifactSchema, type PublishedArtifact } from '@open-mercato/cezar-contract/artifacts';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_METADATA_BYTES = 32 * 1024;

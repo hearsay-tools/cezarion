@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { automationKindSchema, automationScheduleSchema, type AutomationSchedule } from '@open-mercato/cezar-contract';
+import { automationKindSchema } from '@open-mercato/cezar-contract/automations';
+import { automationScheduleSchema, type AutomationSchedule } from '@open-mercato/cezar-contract/automation-schedule';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { workflowStepSchema } from '../workflows/types.ts';
 
@@ -16,6 +17,8 @@ const stringList = z.array(boundedString).max(100).optional();
 export const automationFiltersSchema = z
   .object({
     includeExisting: z.boolean().optional(),
+    /** Require an open item and matching live labels before reservation and launch. */
+    requireCurrentLabels: z.boolean().optional(),
     authors: stringList,
     assignees: stringList,
     allLabels: stringList,
@@ -176,7 +179,7 @@ export const automationReceiptSchema = z
     eventId: z.string().min(1),
     automationId: z.string().min(1),
     revision: z.number().int().positive(),
-    status: z.enum(['reserved', 'launched', 'launch-error']),
+    status: z.enum(['reserved', 'launched', 'launch-error', 'released']),
     runId: z.string().optional(),
     observedAt: z.string().datetime(),
     updatedAt: z.string().datetime(),

@@ -45,6 +45,8 @@ import { createHash } from 'node:crypto';
 // and a second import of the same name is a SyntaxError.
 import { appendFileSync, existsSync as sessionStoreExists, mkdirSync, readFileSync, writeFileSync as sessionStoreWrite } from 'node:fs';
 import { createServer } from 'node:http';
+// Dynamic, like every sibling import here, so a test's copy of this mock can repoint it.
+const { answerNudgeBody, silentNudge } = await import('./mock-nudge.mjs');
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -95,6 +97,9 @@ const hostname = arg('--hostname', '127.0.0.1');
 const DEFAULT_SESSION_ID = 'ses_mock_1';
 let SESSION_ID = DEFAULT_SESSION_ID;
 const MESSAGE_ID = 'msg_mock_1';
+// hearsay-tools/cezarion#1265: the captured FrontmatterError text, verbatim,
+// for a skill whose frontmatter holds `foo: "unterminated`.
+const FRONTMATTER_ERROR = '/home/agent/.agents/skills/bad4/SKILL.md: Failed to parse YAML frontmatter: unexpected end of the stream within a double quoted scalar at line 6, column 1:\n    \n    ^';
 
 function sessionStorePath() {
   if (process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE) return process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE;
@@ -179,8 +184,32 @@ let turnActive = false;
 let turnLate = false;
 let steers = [];
 let steerSerial = 0;
+// CEZ_MOCK_OPENCODE_FOLLOW_ON_MS: the server reads steers in a follow-on run that starts that long
+// after the idle, and a prompt posted in between waits behind that run.
+const followOnMs = Number(process.env.CEZ_MOCK_OPENCODE_FOLLOW_ON_MS ?? 0);
+let followOn = null;
+const runFollowOn = (held) => {
+  followOn = sleep(followOnMs).then(() => {
+    turnActive = true;
+    for (const steer of held) {
+      const id = `msg_steer_reply_${++steerSerial}`;
+      write({ type: 'message.updated', properties: { info: { ...info({}), id, parentID: steer.userId } } });
+      write({ type: 'message.part.updated', properties: { part: { id: `prt_${id}`, messageID: id, sessionID: SESSION_ID, type: 'text', text: steer.text, time: { start: 1, end: 2 } } } });
+    }
+    turnActive = false;
+    followOn = null;
+    write({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+  });
+};
 const send = (event) => {
   const ownIdle = event?.type === 'session.idle' && (!event.properties?.sessionID || event.properties.sessionID === SESSION_ID);
+  if (ownIdle && followOnMs > 0 && steers.length && !turnLate) {
+    const held = steers;
+    steers = []; turnActive = false;
+    write(event);
+    runFollowOn(held);
+    return;
+  }
   if (ownIdle) {
     if (!turnLate) for (const steer of steers) {
       const id = `msg_steer_reply_${++steerSerial}`;
@@ -257,6 +286,7 @@ const server = createServer((req, res) => {
   req.on('data', (chunk) => (body += chunk));
   req.on('end', async () => {
     if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify({ method: req.method, url, body: body ? JSON.parse(body) : undefined })}\n`);
+    if (req.method === 'POST' && /\/(prompt_async|message)$/.test(url)) body = answerNudgeBody(body);
     if (req.method === 'POST' && /^\/question\/[^/]+\/(reply|reject)$/.test(url)) {
       // Native question reply resumes the held turn, then its own session.idle
       // ends it (same SSE lifecycle shape as the baseline; never the HTTP ack).
@@ -349,6 +379,8 @@ const server = createServer((req, res) => {
         steers.push({ userId, text });
         return;
       }
+      // A prompt posted while a follow-on run is due runs after it.
+      if (followOn) await followOn;
       turnActive = true;
       // `prompt_async` semantics: acknowledge now, stream the turn over SSE.
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -367,7 +399,7 @@ const server = createServer((req, res) => {
       }
       if (body.includes('mock:autonomous-readiness-idle')) autonomousReadinessIdle = true;
       if (body.includes('mock:autonomous-cap') || body.includes('mock:autonomous-ask-cap')) autonomousCap = true;
-      if (body.includes('mock:silent-tail') || body.includes('Your last turn ended without a message to the user.')) {
+      if (body.includes('mock:silent-tail') || silentNudge(body)) {
         const silent = await import('./mock-silent-tail.mjs');
         const prompt = (() => { try { return JSON.parse(body).parts.map(part => part.text ?? '').join('\n'); } catch { return body; } })();
         silent.noteSilentTailPrompt(prompt);
@@ -412,7 +444,10 @@ const server = createServer((req, res) => {
       if (body.includes('mock:cezar-tool')) {
         const { toolPrompt } = await import('./mock-ci-tool.mjs');
         const text = await toolPrompt('opencode', JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}'), body);
-        send({ type: 'message.part.updated', properties: { part: { id: 'tool-result', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text } } });
+        // A completed assistant message, as on the other runners' wires, so its text (an ask line
+        // after the calls, say) reaches the turn end.
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        send({ type: 'message.part.updated', properties: { part: { id: 'tool-result', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text, time: { start: 1, end: 2 } } } });
         send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
         return;
       }
@@ -525,12 +560,20 @@ const server = createServer((req, res) => {
         for (const root of ['.claude', '.agents']) send({ type: 'session.error', properties: {
           error: { name: 'UnknownError', data: { message: `Failed to parse skill /home/agent/${root}/skills/pen-design/SKILL.md` } },
         } });
+        // hearsay-tools/cezarion#1265: unscoped FrontmatterError frame captured
+        // from `opencode serve` 1.18.35 on 2026-10-18; upstream
+        // skill/index.ts:105-116 skips the skill.
+        send({ type: 'session.error', properties: { error: { name: 'UnknownError', data: { message: FRONTMATTER_ERROR } } } });
       }
-      if (body.includes('mock:unscoped-provider-failure') || body.includes('mock:scoped-skill-failure')) {
+      const fatalControl = Object.entries({
+        'mock:scoped-skill-failure': { sessionID: SESSION_ID, message: 'Failed to parse skill /skills/required/SKILL.md' },
+        'mock:scoped-frontmatter-failure': { sessionID: SESSION_ID, message: FRONTMATTER_ERROR },
+        'mock:unscoped-provider-failure': { message: 'provider unavailable — retry after restoring service' },
+      }).find(([marker]) => body.includes(marker))?.[1];
+      if (fatalControl) {
         send({ type: 'session.error', properties: {
-          ...(body.includes('mock:scoped-skill-failure') ? { sessionID: SESSION_ID } : {}),
-          error: { name: 'UnknownError', data: { message: body.includes('mock:scoped-skill-failure')
-            ? 'Failed to parse skill /skills/required/SKILL.md' : 'provider unavailable — retry after restoring service' } },
+          ...(fatalControl.sessionID ? { sessionID: fatalControl.sessionID } : {}),
+          error: { name: 'UnknownError', data: { message: fatalControl.message } },
         } });
         setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
         return;
@@ -585,7 +628,7 @@ const server = createServer((req, res) => {
         send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
         return;
       }
-      if (body.includes('mock:silent-tail') || body.includes('mock:tool-tail') || body.includes('Your last turn ended without a message to the user.')) {
+      if (body.includes('mock:silent-tail') || body.includes('mock:tool-tail') || silentNudge(body)) {
         const silent = await import('./mock-silent-tail.mjs');
         const prompt = (() => { try { return JSON.parse(body).parts.map(part => part.text ?? '').join('\n'); } catch { return body; } })();
         silent.noteSilentTailPrompt(prompt);

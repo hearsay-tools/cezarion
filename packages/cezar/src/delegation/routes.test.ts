@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 import { createDelegationRoutes } from './routes.ts';
 import { fixture } from './service.testkit.ts';
-import { conversationSendResultSchema, conversationInspectResultSchema, inboxReserveResultSchema, inboxReceiptResultSchema, requestOutcomeSchema, delegationErrorResponseSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema } from '@open-mercato/cezar-contract';
+import { conversationSendResultSchema, conversationInspectResultSchema, inboxReserveResultSchema, inboxReceiptResultSchema, requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
+import { workerListResultSchema, delegationErrorResponseSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema } from '@open-mercato/cezar-contract/delegation';
 import { seedRuns } from '../runs/run-store.testkit.ts';
 
 describe('authenticated delegation HTTP family', () => {
@@ -20,6 +21,85 @@ describe('authenticated delegation HTTP family', () => {
     const response = await request('/spawn', { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
     expect(response.status).toBe(201); return workerSpawnResultSchema.parse(await response.json());
   }
+  it('lists only the parent’s workers, including incomplete cleanup and destroyed resources', async () => {
+    expect(await (await request('/list')).json()).toEqual({ workers: [] });
+    const { workerId } = await spawn();
+    const other = f.store.createRun({ title: 'unrelated', task: 'unrelated', workflow: 'quick-task', steps: [] });
+    const worker = f.store.getRun(workerId)!;
+    if (worker.delegation?.role !== 'worker') throw Error('worker');
+    f.store.updateRun(workerId, { delegation: { ...worker.delegation, executionRevision: 3,
+      destroy: { phase: 'incomplete', requestedAt: new Date().toISOString(), remaining: ['worktree', 'branch'] } } });
+    const response = await request('/list');
+    expect(response.status).toBe(200);
+    const result = workerListResultSchema.parse(await response.json());
+    expect(result.workers).toHaveLength(1);
+    expect(result.workers[0]).toMatchObject({ workerId, parentRunId: f.parent.id, status: 'queued', revision: 3,
+      settled: false, destroyed: false, workspace: { path: worker.delegation.workspace.path }, destroy: { remaining: ['worktree', 'branch'] } });
+    expect(JSON.stringify(result)).not.toContain(other.id);
+    // A second root's worker is neither listed nor leaked, even through a stale receipt.
+    const foreign = f.store.createRun({ title: 'foreign worker', task: 'foreign', workflow: 'quick-task', steps: [] });
+    f.store.updateRun(foreign.id, { delegation: { ...worker.delegation, parentRunId: other.id,
+      workspace: { ...worker.delegation.workspace, ownerRunId: foreign.id } } });
+    const parent = f.store.getRun(f.parent.id)!;
+    if (parent.delegation?.role !== 'root') throw Error('parent');
+    f.store.updateRun(parent.id, { delegation: { ...parent.delegation, receipts: [...parent.delegation.receipts,
+      { requestId: randomUUID(), workerId: foreign.id, requestHash: 'a'.repeat(64) }] } });
+    expect(workerListResultSchema.parse(await (await request('/list')).json()).workers.map((entry: { workerId: string }) => entry.workerId)).toEqual([workerId]);
+    const token = f.credentials.issue('project', workerId, randomUUID());
+    expect((await request('/list', undefined, { authorization: `Bearer ${token}` })).status).toBe(403);
+    const current = f.store.getRun(workerId)!;
+    if (current.delegation?.role !== 'worker') throw Error('worker');
+    f.store.updateRun(workerId, { delegation: { ...current.delegation,
+      destroy: { phase: 'complete', requestedAt: new Date().toISOString(), remaining: [] } } });
+    expect(workerListResultSchema.parse(await (await request('/list')).json()).workers[0]).toMatchObject({ workerId, destroyed: true, destroy: { remaining: [] } });
+    expect((await request('/list?parentRunId=' + other.id)).status).toBe(400);
+  });
+  it('reports each execution revision and waits for durable settlement', async () => {
+    const first = await spawn();
+    const second = await spawn();
+    const generation = f.store.commitWorkerExecutionStart(first.workerId);
+    f.store.updateRun(first.workerId, { status: 'done' });
+    expect(workerListResultSchema.parse(await (await request('/list')).json()).workers[0]).toMatchObject({ workerId: first.workerId, settled: false });
+    expect(f.store.commitWorkerExecutionComplete(first.workerId, generation)).toBe(true);
+    const result = workerListResultSchema.parse(await (await request('/list')).json());
+    expect(result.workers).toHaveLength(2);
+    expect(result.workers[0]).toMatchObject({ workerId: first.workerId, status: 'done', settled: true, revision: 0 });
+    expect(result.workers[1]).toMatchObject({ workerId: second.workerId, status: 'queued', settled: false, revision: 0 });
+    const parent = f.store.getRun(f.parent.id)!;
+    if (parent.delegation?.role !== 'root') throw Error('parent');
+    f.store.updateRun(parent.id, { delegation: { ...parent.delegation, permissions: ['spawn'] } });
+    expect((await request('/list')).status).toBe(403);
+  });
+  it('pages worker summaries without repeating inspection inputs or outcomes', async () => {
+    const { workerId } = await spawn();
+    const original = f.store.getRun(workerId)!;
+    if (original.delegation?.role !== 'worker') throw Error('worker');
+    const parent = f.store.getRun(f.parent.id)!;
+    if (parent.delegation?.role !== 'root') throw Error('parent');
+    const receipts = [...parent.delegation.receipts];
+    for (let i = 0; i < 34; i++) {
+      const worker = f.store.createRun({ title: 'worker', task: 'work', workflow: 'quick-task', steps: [] });
+      f.store.updateRun(worker.id, { delegation: { ...original.delegation,
+        workspace: { ...original.delegation.workspace, ownerRunId: worker.id, resourceId: randomUUID() } } });
+      receipts.push({ requestId: randomUUID(), workerId: worker.id, requestHash: 'a'.repeat(64) });
+    }
+    f.store.updateRun(parent.id, { delegation: { ...parent.delegation, receipts } });
+    const first = await (await request('/list')).json() as { workers: unknown[]; nextOffset?: number };
+    expect(first.workers).toHaveLength(32);
+    expect(first.nextOffset).toBe(32);
+    const second = await (await request('/list?offset=32')).json() as { workers: { workerId: string }[]; nextOffset?: number };
+    expect(second.workers.map(worker => worker.workerId)).toEqual(receipts.slice(32).map(receipt => receipt.workerId));
+    expect(second.nextOffset).toBeUndefined();
+    expect((await request('/list?offset=-1')).status).toBe(400);
+    expect((await request('/list?offset=1025')).status).toBe(400);
+    expect((await request(`/${workerId}?offset=1`)).status).toBe(400);
+    const inspection = await f.service.inspect(f.caller, { workerId });
+    vi.spyOn(f.service, 'inspect').mockResolvedValue({ ...inspection, inputs: [],
+      outcome: { workerId, status: 'done', observedAt: new Date().toISOString(), summary: 'x'.repeat(4_000) } });
+    const result = await (await request('/list')).json() as { workers: Record<string, unknown>[] };
+    expect(result.workers[0]).not.toHaveProperty('inputs');
+    expect(result.workers[0]).not.toHaveProperty('outcome');
+  });
   it('accepts a catalog workflow on spawn and rejects a malformed one before the service (#451)', async () => {
     const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'review.yaml'), 'name: review\nsteps:\n  - id: inspect\n    prompt: "{{task}}"\n  - id: verify\n    command: \"true\"\n');

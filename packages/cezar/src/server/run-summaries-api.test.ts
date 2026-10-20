@@ -2,7 +2,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { apiRunSchema, archivedRunsResponseSchema, runSummarySchema } from '@open-mercato/cezar-contract';
+import { apiRunSchema, archivedRunsResponseSchema, runSummarySchema } from '@open-mercato/cezar-contract/runs';
 import { seedRuns } from '../runs/run-store.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';

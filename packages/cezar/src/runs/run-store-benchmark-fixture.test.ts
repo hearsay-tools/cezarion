@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { delegationStateSchema } from '@open-mercato/cezar-contract';
+import { delegationStateSchema } from '@open-mercato/cezar-contract/delegation';
 import { generateRunFixture, isLiveRun, liveRunCount, pickSaveTarget } from '../../scripts/benchmark-run-store-fixture.ts';
 import { parseRunRecords, reconcileLoadedRun, upgradeLegacyWaits } from './store.ts';
 

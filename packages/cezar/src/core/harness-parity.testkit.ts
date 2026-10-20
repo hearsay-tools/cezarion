@@ -62,6 +62,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `ask-reply-late` | native ask whose reply acknowledgement can lag the resumed turn |
  * | `ask-bad` | a malformed ask, and then still end the turn |
  * | `subagent` | child work and terminal signal, then parent monitoring text followed by late child text |
+ * | `forked-skill` | a skill call that runs as a native forked subagent: child work nested under the call, then its result and final text |
  * | `hook-after-park` | a mid-turn hook with context, a monitoring park, then a late hook (#961) |
  * | `steer-tool` | one slow tool; agent input sent while it runs is read before the turn ends (#505) |
  * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
@@ -126,6 +127,7 @@ export const SCENARIOS = [
   'ask-reply-late',
   'subagent',
   'subagent-after-park',
+  'forked-skill',
   'hook-after-park',
   'steer-tool',
   'steer-late',
@@ -154,7 +156,7 @@ export const WORKFLOW_ASK_CRITERIA = [
   { id: 'Q6', scenario: 'ask-snapshot', name: 'cancel leaves later steps pending' },
   { id: 'Q7', scenario: 'ask-snapshot', name: 'Finish stops at the parked step on fresh and Continue sessions' },
   { id: 'Q8', scenario: 'ask-snapshot', name: 'an authored timeout fails without running later steps' },
-  { id: 'Q9', scenario: 'ask-snapshot', name: 'autonomous intermediate asks use the bounded override before the tail' },
+  { id: 'Q9', scenario: 'ask-snapshot', name: 'autonomous intermediate ask lines are not registered before the tail' },
   { id: 'Q10', scenario: 'ask-snapshot', name: 'an unanswered clean session close stays resumable without success' },
 ] as const;
 
@@ -193,16 +195,16 @@ export const FOLLOWUP_CRITERIA = [
 export const AUTONOMOUS_CRITERIA = [
   { id: 'A1', scenario: 'autonomous', name: 'nudges fresh markerless turns to completion' },
   { id: 'A2', scenario: 'autonomous', name: 'hydrates autonomous Continue sessions' },
-  { id: 'A3', scenario: 'ask-snapshot', name: 'records overridden portable questions on fresh turns' },
-  { id: 'A4', scenario: 'ask-snapshot', name: 'records overridden portable questions on Continue' },
+  { id: 'A3', scenario: 'ask-snapshot', name: 'records an unregistered ask line on fresh turns' },
+  { id: 'A4', scenario: 'ask-snapshot', name: 'records an unregistered ask line on Continue' },
   { id: 'A5', scenario: 'autonomous-cap', name: 'parks at the cap with an explicit note' },
   { id: 'A6', scenario: 'autonomous', name: 'keeps non-autonomous parking reachable' },
   { id: 'A7', scenario: 'split-text', name: 'nudges monitoring without a false waiting heartbeat' },
   { id: 'A8', scenario: 'done', name: 'honors DONE without a nudge' },
   { id: 'A9', scenario: 'ask', name: 'preserves native mid-turn questions' },
-  { id: 'A10', scenario: 'ask-snapshot', name: 'never overrides a persisted unanswered question' },
-  { id: 'A11', scenario: 'autonomous-ask-cap', name: 'continues after a portable override and delayed readiness' },
-  { id: 'A12', scenario: 'autonomous-ask-cap', name: 'continues a resumed portable override after delayed readiness' },
+  { id: 'A10', scenario: 'ask-snapshot', name: 'never continues past a persisted unanswered question' },
+  { id: 'A11', scenario: 'autonomous-ask-cap', name: 'continues after an unregistered ask line and delayed readiness' },
+  { id: 'A12', scenario: 'autonomous-ask-cap', name: 'continues a resumed unregistered ask line after delayed readiness' },
   { id: 'A13', scenario: 'autonomous-readiness-idle', name: 'settles a root readiness timeout after process exit' },
   { id: 'A14', scenario: 'autonomous-readiness-idle', name: 'settles a continued root readiness timeout after process exit' },
 ] as const;
@@ -213,8 +215,8 @@ export const FINAL_MESSAGE_CRITERIA = [
   { id: 'F2', scenario: 'silent-tail-again', name: 'parks waiting after one still-silent nudge' },
   { id: 'F3', scenario: 'silent-tail-again', name: 'never completes from reasoning that names CEZ:DONE' },
   { id: 'F4', scenario: 'tool-tail', name: 'nudges a markerless message-then-tool tail once' },
-  { id: 'F5', scenario: 'done', name: 'honors DONE without a final-message nudge' },
-  { id: 'F6', scenario: 'tool-tail', name: 'keeps an autonomous silent tail running without a final-message nudge' },
+  { id: 'F5', scenario: 'done', name: 'honors DONE without a nudge' },
+  { id: 'F6', scenario: 'tool-tail', name: 'keeps an autonomous silent tail running without the no-wait nudge' },
   { id: 'F7', scenario: 'silent-tail-ack-delay', name: 'nudges a silent tail after a delayed ACK' },
   { id: 'F8', scenario: 'silent-tail-no-reply', name: 'parks waiting when a nudge is ACKed without a turn' },
   { id: 'F9', scenario: 'silent-tail-late-reply', name: 'resumes when a nudge reply arrives after the bound' },
@@ -247,7 +249,7 @@ export const WORKTREE_SETUP_CRITERIA = [
 export const ANSWER_DELIVERY_CRITERIA = [
   { id: 'I3', scenario: 'steer-tool', name: 'steers a conversation message into a running human answer and reports it read before that turn ends' },
   { id: 'I4', scenario: 'hold-gated', name: 'delivers a conversation message to a running human answer as its input delivery declares' },
-  { id: 'I5', scenario: 'ask-snapshot', name: 'holds conversation input behind an unanswered or a newer question' },
+  { id: 'I5', scenario: 'ask-snapshot', name: 'holds conversation input behind a native question and delivers it beside a portable one, never as its answer' },
 ] as const;
 
 /** Native Codex server-request approvals, exercised through the manager and HTTP route. */
@@ -345,6 +347,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-bad': 'mock:ask-bad',
       subagent: 'mock:subagents',
       'subagent-after-park': 'mock:subagent-after-park',
+      'forked-skill': 'mock:forked-skill',
       'hook-after-park': 'mock:hook-after-park',
       'steer-tool': 'mock:steer-tool',
       // A line written after the last model call runs as the CLI's next queued turn.
@@ -637,7 +640,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   })),
   ...(['R44', 'R45'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion, backend, kind: 'scenario-unconstructible' as const,
-    reason: 'The OpenCode server-wide unscoped session.error UnknownError skill-discovery diagnostic has no equivalent on this native wire. R2/R46 retain native provider failure coverage.',
+    reason: 'The OpenCode server-wide unscoped session.error UnknownError skill diagnostics (an unreadable skill file, or a skill with malformed YAML frontmatter) have no equivalent on this native wire. R2/R46 retain native provider failure coverage.',
   }))),
   ...(['H2'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'omp'] as const).map(backend => ({
     criterion, backend, kind: 'capability-absent' as const,
@@ -725,6 +728,10 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     reason: 'Same wire as I1: Cursor admits no mid-turn agent input, so none can be left unread (#505).',
   },
   {
+    criterion: 'I6', backend: 'cursor', kind: 'scenario-unconstructible',
+    reason: 'Same wire as I1: Cursor admits no mid-turn agent input, so none awaits a follow-on run (#505).',
+  },
+  {
     criterion: 'I3', backend: 'cursor', kind: 'scenario-unconstructible',
     reason: 'Same wire as I1: a second Cursor ACP session/prompt cancels the running answer turn, so a conversation message cannot steer it. I4 pins its boundary delivery after that turn (hearsay-tools/cezarion#935).',
   },
@@ -769,6 +776,12 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'U7', backend, kind: 'capability-absent' as const,
     reason: 'native scheduler tool exists only on the Claude wire',
   })),
+  // U7h (hearsay-tools/cezarion#1234): the ask scenario on these wires prints the portable ask
+  // line, so its human wait opens through the ask-line alias; the cell asserts that instead.
+  ...(['claude', 'pi', 'cursor', 'omp'] as const).map(backend => ({
+    criterion: 'U7h', backend, kind: 'capability-absent' as const,
+    reason: 'native ask arrives as the portable marker on this wire',
+  })),
   // U12/U13: an agent-input acknowledgement the provider can delay or reject.
   {
     criterion: 'U12', backend: 'claude', kind: 'capability-absent',
@@ -782,6 +795,21 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'U13', backend: 'cursor', kind: 'capability-absent',
     reason: 'Cursor print acknowledges agent input on the first model work of the process it spawns; the print wire has no rejection of an admitted prompt.',
   },
+  // D2 (hearsay-tools/cezarion#1284): a forked skill starts no native subagent in a
+  // restricted session. Each reason was checked against the installed CLI on 2026-10-20.
+  {
+    criterion: 'D2', backend: 'claude', kind: 'capability-absent',
+    reason: 'Claude Code 2.1.303 starts a `context: fork` skill\'s subagent from the Skill tool or a typed /name without consulting the Agent/Task deny rules; no Skill(...) rule, setting or hook can stop it while ordinary skills keep working (AGENT_PROTOCOL.md D1 forked-skill gap).',
+  },
+  ...([
+    ['codex', 'Codex 0.160.1 injects a selected skill into the same thread; its SKILL.md frontmatter (name, description, metadata) and agents/openai.yaml (interface, dependencies, policy) have no fork field. Native subagents start only through the multi-agent tools D1 disables.'],
+    ['opencode', 'OpenCode 1.18.35 skips the task permission only for a subtask part, which only POST /session/{id}/command creates, or after a user agent part. cezar posts text parts through prompt_async and never calls /command; the skill tool returns the skill\'s content in the same session.'],
+    ['pi', 'pi 1.0.4 reads skill frontmatter name, description and disable-model-invocation, and prompt-template description and argument-hint; both expand to text in the same session. pi has no native subagent primitive (D1 excludes the subagent extension), and /fork forks the conversation.'],
+    ['cursor', 'Cursor 2026.10.16-e3cb207 turns skill frontmatter (name, description, alwaysApply, disable-model-invocation, environments) into a rule the agent reads in the same conversation; no field forks. Native subagents start only through task_tool_call, which D1 leaves out of --allowed-tools.'],
+    ['omp', 'OMP 18.8.0 renders an invoked skill\'s SKILL.md body into a message in the same session, and slash-command frontmatter reads only description and argument-hint. Native subagents start only through task and eval, which D1 denies and drops from --tools.'],
+  ] as const).map(([backend, reason]) => ({
+    criterion: 'D2', backend, kind: 'scenario-unconstructible' as const, reason,
+  })),
 ];
 
 export function exemptionFor(criterion: string, backend: RunnerId): ParityExemption | undefined {
@@ -967,12 +995,16 @@ export async function driveRun(
     mockBin?: string;
   } = {},
 ): Promise<RunObservation> {
-  const { beforeStart, during, env, mockBin, worktree, ...runOptions } = options;
+  const { beforeStart, during, env: extraEnv, mockBin, worktree, ...runOptions } = options;
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
   const savedDry = process.env.CEZ_DRY_RUN;
   const savedAutoName = process.env.CEZ_AUTONAME;
-  const savedEnv = Object.keys(env ?? {}).map(name => [name, process.env[name]] as const);
+  // The mock answers Cezar's no-wait nudge in plain text (hearsay-tools/cezarion#1234), so a row
+  // that ends a turn with no wait reaches Cezar's own wait rather than a question the mock made
+  // up. `options.env` may opt back in to the card.
+  const env = { CEZ_MOCK_NUDGE_REPLY: 'plain', ...extraEnv };
+  const savedEnv = Object.keys(env).map(name => [name, process.env[name]] as const);
   Object.assign(process.env, env);
   process.env.CEZ_AUTONAME = '0';
   process.env[adapter.binEnv] = mockBin ?? adapter.mockBin;
@@ -1106,8 +1138,11 @@ export async function withOwnedInputRun(
   for (const extra of options.extraBackends ?? []) process.env[HARNESS_ADAPTERS[extra].binEnv] = HARNESS_ADAPTERS[extra].mockBin;
   const savedDry = process.env.CEZ_DRY_RUN;
   const savedAutoName = process.env.CEZ_AUTONAME;
-  const savedEnv = Object.keys(options.env ?? {}).map(name => [name, process.env[name]] as const);
-  Object.assign(process.env, options.env);
+  // The worker ignores Cezar's no-wait nudge (hearsay-tools/cezarion#1234) and reaches its plain
+  // park, so input delivery is what these fixtures decide. `options.env` may opt back in.
+  const env = { CEZ_MOCK_NUDGE_REPLY: 'plain', ...options.env };
+  const savedEnv = Object.keys(env).map(name => [name, process.env[name]] as const);
+  Object.assign(process.env, env);
   // Naming is a separate auxiliary invocation, not part of input delivery.
   process.env.CEZ_AUTONAME = '0';
   process.env[adapter.binEnv] = options.mockBin ?? adapter.mockBin;

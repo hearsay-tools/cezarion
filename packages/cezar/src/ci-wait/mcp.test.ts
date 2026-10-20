@@ -29,6 +29,7 @@ describe('cezar-ci MCP server instructions', () => {
       for (const tool of suggested) expect(lines.some(line => line.startsWith(`- ${tool.name}:`))).toBe(true);
       expect(lines.some(line => line.startsWith(`- ${ciToolDefinition.name}:`))).toBe(false);
       expect(lines.find(line => line.startsWith('- cezar_wait:'))).toMatch(/waiting on CI for a PR/);
+      expect(lines.find(line => line.startsWith('- cezar_ask:'))).toMatch(/you need the user/);
       // A trigger line names a situation, never the schema.
       for (const { definition } of cezarTools({ CEZ_PREVIEW: '1' })) {
         for (const key of Object.keys(definition.inputSchema.properties ?? {})) expect(instructions).not.toMatch(new RegExp(`\\b${key}\\b`));
@@ -40,18 +41,36 @@ describe('cezar-ci MCP server instructions', () => {
   it('lists cezar_preview_serve with its trigger line only when CEZ_PREVIEW=1', async () => {
     const on = await connect({ CEZ_PREVIEW: '1' });
     try {
-      expect((await on.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait', 'cezar_preview_serve', 'cezar_preview_stop']);
+      expect((await on.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_preview_serve', 'cezar_preview_stop']);
       const instructions = on.client.getInstructions()!;
-      expect(instructions).toContain('- cezar_wait: load when you are waiting on CI for a PR or want to re-check something later; end your turn after it answers.');
+      expect(instructions).toContain('- cezar_wait: load when you are waiting on CI for a PR, or want to re-check something later; end your turn after it answers.');
       expect(instructions).toContain('- cezar_preview_serve: load when you have started, or are about to start, a web server the user should click through.');
     } finally { await on.close(); }
     for (const value of [undefined, '0', 'true']) {
       const off = await connect(value === undefined ? {} : { CEZ_PREVIEW: value });
       try {
-        expect((await off.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_cancel_wait']);
+        expect((await off.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
         expect(off.client.getInstructions()).not.toContain('cezar_preview_serve');
       } finally { await off.close(); }
     }
+  });
+
+  // hearsay-tools/cezarion#1235: the worker kind is advertised through the MCP tool listing, with the contract's bounds.
+  it('lists the worker fields of cezar_wait with their bounds', async () => {
+    const { client, close } = await connect({});
+    try {
+      const wait = (await client.listTools()).tools.find(tool => tool.name === 'cezar_wait')!;
+      const properties = wait.inputSchema.properties as Record<string, any>;
+      expect(properties.kind.enum).toEqual(['ci', 'worker', 'timer']);
+      for (const key of ['worker_ids', 'request_ids']) {
+        expect(properties[key]).toMatchObject({ type: 'array', minItems: 1, maxItems: 32 });
+        expect(properties[key].description).toMatch(/^kind "worker":/);
+      }
+      expect(properties.mode.enum).toEqual(['one', 'any', 'all']);
+      expect(properties.timeout_seconds.description).toMatch(/kind "worker": 1–1800, default 600/);
+      expect(wait.description).toMatch(/worker/);
+      expect((await client.listTools()).tools.find(tool => tool.name === 'cezar_cancel_wait')!.description).toMatch(/worker/);
+    } finally { await close(); }
   });
 
   it('tells the agent to pin the port and that cezar starts the command', () => {

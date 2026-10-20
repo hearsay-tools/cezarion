@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { onTestFinished, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from './server.ts';
 import { fixture } from '../delegation/service.testkit.ts';
-import { workerDestroyResultSchema } from '@open-mercato/cezar-contract';
+import { workerDestroyResultSchema } from '@open-mercato/cezar-contract/delegation';
 
 describe('human owned-worker cleanup', () => {
   let f: ReturnType<typeof fixture>;

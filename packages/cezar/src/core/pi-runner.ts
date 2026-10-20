@@ -1,6 +1,6 @@
 import { summarizeRunnerStderr } from './runner-stderr.ts';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { parseEffort } from '@open-mercato/cezar-contract';
+import { parseEffort } from '@open-mercato/cezar-contract/effort';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { parseAskMarker } from './ask.ts';
@@ -609,7 +609,9 @@ export class PiRunner implements AgentRunner {
 }
 
 export function buildPiArgs(spec: AgentRunSpec): string[] {
-  const args = ['--mode', 'rpc', '--extension', piDegradedServiceRetryExtensionPath()];
+  // pi loads a repo's .pi/skills and .agents/skills only for a trusted folder; the project-skills
+  // extension offers them to an untrusted one without trusting it (hearsay-tools/cezarion#1295).
+  const args = ['--mode', 'rpc', '--extension', piDegradedServiceRetryExtensionPath(), '--extension', piProjectSkillsExtensionPath()];
   if (spec.cezarTools) args.push('--extension', fileURLToPath(new URL('../../scripts/pi-ci-wait.mjs', import.meta.url)));
   if (spec.sessionId) args.push(spec.resume ? '--session' : '--session-id', spec.sessionId);
   if (spec.systemPrompt) args.push('--append-system-prompt', spec.systemPrompt);
@@ -629,6 +631,10 @@ export function buildPiArgs(spec: AgentRunSpec): string[] {
 
 function piDegradedServiceRetryExtensionPath(): string {
   return fileURLToPath(new URL('../../scripts/pi-retry-degraded-service.mjs', import.meta.url));
+}
+
+function piProjectSkillsExtensionPath(): string {
+  return fileURLToPath(new URL('../../scripts/pi-project-skills.mjs', import.meta.url));
 }
 
 function restorePiDegradedServiceError(errorMessage: string): string {

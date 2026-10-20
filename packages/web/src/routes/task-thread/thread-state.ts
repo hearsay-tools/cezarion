@@ -1,23 +1,28 @@
-import type { RunEvent, RunStatus } from '@open-mercato/cezar-api-client'
+import type {
+  RunEvent,
+  RunStatus,
+  ConversationMessage,
+  PlanEntry,
+  PlanStatus,
+  RequestOutcome,
+  StopReason,
+  UiAskQuestion,
+  UiItem,
+  UiPermissionRequestedEvent,
+  UiToolItem,
+} from '@open-mercato/cezar-api-client'
+import { toolDisplay } from '@open-mercato/cezar-api-client/protocol/tool-display'
 import {
-  toolDisplay,
   agentInputEventSchema,
   conversationMessageEventSchema,
+  requestOutcomeEventSchema,
+} from '@open-mercato/cezar-api-client/contract/events'
+import {
   previewServerSchema,
   previewServerStateSchema,
-  requestOutcomeEventSchema,
-  type ConversationMessage,
-  type PlanEntry,
-  type PlanStatus,
   type PreviewServer,
   type PreviewServerState,
-  type RequestOutcome,
-  type StopReason,
-  type UiAskQuestion,
-  type UiItem,
-  type UiPermissionRequestedEvent,
-  type UiToolItem,
-} from '@open-mercato/cezar-api-client'
+} from '@open-mercato/cezar-api-client/contract/preview'
 
 /**
  * The thread reducer: folds one run's ordered event list (`useRunEvents` — v1 lines and
@@ -112,6 +117,8 @@ export interface ThreadAsk {
   routedToParent?: boolean
   parentRunId?: string
   answeredBy?: 'human' | 'parent'
+  /** Finish ended the task with the question unanswered (hearsay-tools/cezarion#1260). */
+  closed?: 'finish'
 }
 
 /** Native approvals belong to the live request that offered the choices, never a later turn. */
@@ -968,12 +975,13 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
       }
       case 'ask.requested': {
         // A structured question (#473) — render it as an ask card in the current
-        // turn. Guard the payload (a bad line costs one event, never a throw).
+        // turn. Guard the payload (a bad line costs one event, never a throw). A question
+        // without options is open (hearsay-tools/cezarion#1234): the user types its answer.
         const requestId = str(event.requestId)
         if (requestId === undefined || !Array.isArray(event.questions)) break
         const questions = (event.questions as unknown[]).filter(
           (q): q is UiAskQuestion =>
-            isRecord(q) && typeof q.header === 'string' && Array.isArray(q.options),
+            isRecord(q) && typeof q.header === 'string' && (q.options === undefined || Array.isArray(q.options)),
         )
         if (questions.length === 0) break
         const ask: ThreadAsk = { kind: 'ask', id: requestId, questions, resolved: false, askSeq: event.seq }
@@ -993,6 +1001,14 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
       }
       case 'worker-question-fallback': {
         if (pendingAsk && !pendingAsk.resolved && pendingAsk.askSeq === event.askSeq) pendingAsk.routedToParent = false
+        break
+      }
+      case 'human-ask-closed': {
+        if (event.reason === 'finish' && pendingAsk && !pendingAsk.resolved && pendingAsk.askSeq === event.askSeq) {
+          pendingAsk.resolved = true
+          pendingAsk.closed = 'finish'
+          pendingAsk = undefined
+        }
         break
       }
       case 'human-input-delivered': {

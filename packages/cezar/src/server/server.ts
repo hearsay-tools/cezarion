@@ -1,29 +1,35 @@
 import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
 import { discoverRepoHandle, lookupMergedPullRequests } from './forge/github.ts';
 import { resolveArchiveOnMerge, resolveGlobalArchiveOnMerge } from '../archive-on-merge-setting.ts';
-import type { WorkspaceConfigResponse } from '@open-mercato/cezar-contract';
+import type { WorkspaceConfigResponse, TestProjectWebhookResponse } from '@open-mercato/cezar-contract';
 export type { WorkspaceConfigResponse } from '@open-mercato/cezar-contract';
-import { permissionDecisionSchema, runIdParamSchema as permissionRunIdParamSchema } from '@open-mercato/cezar-contract';
+import { permissionDecisionSchema } from '@open-mercato/cezar-contract/permissions';
+import { runIdParamSchema as permissionRunIdParamSchema } from '@open-mercato/cezar-contract/events';
 import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
 import { CheckoutProgressCache } from './checkout-progress.ts';
-import { checkoutProgressParamsSchema, createProjectInputSchema, type CreateProjectResponse, type GithubOwnersResponse } from '@open-mercato/cezar-contract';
+import { checkoutProgressParamsSchema, createProjectInputSchema, type CreateProjectResponse, type GithubOwnersResponse } from '@open-mercato/cezar-contract/projects';
 import { createLiveRoutes } from './live-routes.ts';
 import { subscribeRunFeed } from './run-event-feed.ts';
-import { sidebarLimitsSchema } from '@open-mercato/cezar-contract';
-import { worktreeSetupConfigSchema } from '@open-mercato/cezar-contract';
+import { sidebarLimitsSchema } from '@open-mercato/cezar-contract/workspace';
+import { worktreeSetupConfigSchema } from '@open-mercato/cezar-contract/workspace';
 import type { ApiRun, ArchivedRunsResponse, RunSummary, RunsSearchResponse } from '@open-mercato/cezar-contract';
-import { ARCHIVED_RUNS_PAGE_DEFAULT, RUNS_SEARCH_PER_PROJECT_MAX, archivedRunsQuerySchema, runSummariesQuerySchema, runsSearchQuerySchema } from '@open-mercato/cezar-contract';
-import { automationKindSchema, automationScheduleSchema, localTimeZone, nextOccurrence, type AutomationKind } from '@open-mercato/cezar-contract';
+import { ARCHIVED_RUNS_PAGE_DEFAULT } from '@open-mercato/cezar-contract/run-limits';
+import { RUNS_SEARCH_PER_PROJECT_MAX, archivedRunsQuerySchema, runSummariesQuerySchema, runsSearchQuerySchema } from '@open-mercato/cezar-contract/runs';
+import { automationKindSchema, type AutomationKind } from '@open-mercato/cezar-contract/automations';
+import { automationScheduleSchema, nextOccurrence } from '@open-mercato/cezar-contract/automation-schedule';
+import { localTimeZone } from '@open-mercato/cezar-contract/zoned-time';
 import { DelegationService } from '../delegation/service.ts';
 import { workerCapacity } from '../delegation/capacity.ts';
 import type { DelegationController } from '../delegation/provision.ts';
 import { delegationFailure } from '../delegation/routes.ts';
-import { githubItemParamsSchema, CLIENT_REQUEST_VARIANTS_ERROR, workerEmptyRequestSchema, runRelationshipsSchema, toRunSummary } from '@open-mercato/cezar-contract';
+import { githubItemParamsSchema } from '@open-mercato/cezar-contract/github';
+import { CLIENT_REQUEST_VARIANTS_ERROR, toRunSummary } from '@open-mercato/cezar-contract/runs';
+import { workerEmptyRequestSchema, runRelationshipsSchema } from '@open-mercato/cezar-contract/delegation';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { AutomationStore } from '../automations/store.ts';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
-import { GithubPoller } from '../automations/github-poller.ts';
+import { AutomationCandidateChangedError, GithubPoller } from '../automations/github-poller.ts';
 import { githubBaselineState } from '../automations/github-baseline.ts';
 import { ProjectAutomationScheduler, WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
 import { AutomationProjectUnavailableError, SCHEDULE_LEASE_HELD_REASON, ScheduleRunner, type ScheduleRunnerHandle } from '../automations/schedule-runner.ts';
@@ -58,35 +64,37 @@ import { jsonZodValidator, paramZodValidator, queryZodValidator } from './valida
 import { deliverOnce, TaskWebhooks } from '../runs/webhook.ts';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { z } from 'zod';
+import { repoPullInputSchema, deleteBranchesInputSchema } from '@open-mercato/cezar-contract/repo';
 import {
-  repoPullInputSchema,
-  deleteBranchesInputSchema,
   pinRunInputSchema,
   archiveFinishedRequestSchema,
   notifyRunInputSchema,
-  type TestProjectWebhookResponse,
-  githubSearchQuerySchema,
-  githubProjectsQuerySchema,
-  githubListQuerySchema,
-  githubCommentCountsQuerySchema,
-  setWorkspaceUiStateInputSchema,
   type GroupResponse,
   type GroupVariant,
   type PickVariantResponse,
   type RunIndexEntry,
   type RunsIndexResponse,
-} from '@open-mercato/cezar-contract';
+} from '@open-mercato/cezar-contract/runs';
+import {
+  githubSearchQuerySchema,
+  githubProjectsQuerySchema,
+  githubListQuerySchema,
+  githubCommentCountsQuerySchema,
+} from '@open-mercato/cezar-contract/github';
+import { setWorkspaceUiStateInputSchema } from '@open-mercato/cezar-contract/workspace';
 // A contract VALUE, like `workspaceUiStateSchema` in workspace/migrations.ts — the request
 // schema this route validates with is the same one the client compiles against.
 import {
   MODEL_DISCOVERY_RUNNERS,
-  attachmentInputSchema,
-  attachmentFileParamSchema,
   modelDiscoveryRunnerSchema,
   openProjectInSchema,
   runnerDiscoversModels,
-  updateProjectInputSchema,
-} from '@open-mercato/cezar-contract';
+} from '@open-mercato/cezar-contract/workspace';
+import {
+  attachmentInputSchema,
+  attachmentFileParamSchema,
+} from '@open-mercato/cezar-contract/runs';
+import { updateProjectInputSchema } from '@open-mercato/cezar-contract/projects';
 import { detectEnvironment } from '../core/backend-detect.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import type { ContentBlock } from '../core/agent-runner.ts';
@@ -138,9 +146,9 @@ import {
   runEventsQuerySchema,
   runHistoryQuerySchema,
   runIdParamSchema,
-} from '@open-mercato/cezar-contract';
+} from '@open-mercato/cezar-contract/events';
 import { resolveAttachmentPath } from '../workflows/attachment-path.ts';
-import { artifactParamsSchema, fileLinkQuerySchema } from '@open-mercato/cezar-contract';
+import { artifactParamsSchema, fileLinkQuerySchema } from '@open-mercato/cezar-contract/artifacts';
 import { artifactDirectory, listArtifacts, readArtifact } from '../artifacts/store.ts';
 import { artifactPreview, loadFileLink, rasterMime } from '../artifacts/resolve.ts';
 import { isUntouchedCancelledRun, toPastedContent, type PastedContent, type RunManager } from '../workflows/run.ts';
@@ -222,7 +230,7 @@ import { reviewGateEnabled } from '../runs/review-gate.ts';
 import { readUiState, uiStatePath } from '../ui-state.ts';
 import { agentHomePaths, expandTilde } from '../paths.ts';
 import { isLoopbackHostHeader, normalizeHostname, resolveCapabilities } from './capabilities.ts';
-import { applicationUpdateInputSchema, type ApplicationUpdateState } from '@open-mercato/cezar-contract';
+import { applicationUpdateInputSchema, type ApplicationUpdateState } from '@open-mercato/cezar-contract/application-update';
 import { ApplicationUpdateConflictError, ApplicationUpdateFailureError, type ApplicationUpdateServiceLike } from '../application-update/service.ts';
 import { createSocketHub, socketHubRoute, type SocketHub, type WsUpgradeVerdict } from './ws.ts';
 import { attachUpgradeRouter } from './upgrade-router.ts';
@@ -3932,7 +3940,7 @@ export function createApp(deps: ServerDeps) {
         emitAutomationChange(project, definition.id, definition.revision);
         return c.json({ receiptId: receipt.receiptId, runId: launched.runId }, 202);
       } catch (error) {
-        store.appendReceipt({ ...reserved, status: 'launch-error', error: error instanceof Error ? error.message : String(error), updatedAt: new Date().toISOString() });
+        store.appendReceipt({ ...reserved, status: error instanceof AutomationCandidateChangedError ? 'released' : 'launch-error', error: error instanceof Error ? error.message : String(error), updatedAt: new Date().toISOString() });
         return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
       } finally {
         lease.release();

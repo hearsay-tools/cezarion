@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { ciWaitSchema, type CiWaitEntry, type TimerWaitEntry, type Wait } from '@open-mercato/cezar-contract';
-import { ciWatchRequest, identicalWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
+import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
+import type { CiWaitEntry, HumanWaitEntry, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
+import { ciWatchRequest, identicalWait, isCezarHumanWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, MONITORING_WAKE_NUDGE_MARKERS, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 
 // hearsay-tools/cezarion#1233: the wait list's pure helpers. RunManager behaviour lives in
 // the ci-wait*.test.ts files and the U-cells in waits-parity.test.ts.
@@ -61,6 +62,12 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     expect(waitResultText(timer())).toBe(`Timer ${timer().id} fired. Continue toward the task goal; register another wait if you are still waiting.`);
     expect(waitResultText(timer({ via: 'monitoring-line' }))).toBe(MONITORING_WAKE_NUDGE);
     expect(waitResultText(timer({ via: 'schedule-wakeup' }))).toBe(MONITORING_WAKE_NUDGE);
+    // hearsay-tools/cezarion#1234: a session without cezar tools was taught the markers instead.
+    expect(waitResultText(timer({ via: 'monitoring-line' }), { tools: false })).toBe(MONITORING_WAKE_NUDGE_MARKERS);
+    expect(MONITORING_WAKE_NUDGE_MARKERS).toContain('end with CEZ:MONITORING');
+    // A session without cezar tools cannot register another wait, so its timer wake names the marker.
+    expect(waitResultText(timer({ note: 'check the deploy' }), { tools: false })).toBe(`Timer ${timer().id} fired: check the deploy. Continue toward the task goal. If the watched work is still pending, end your final message with CEZ:MONITORING.`);
+    expect(MONITORING_WAKE_NUDGE).not.toContain('CEZ:');
     expect(isMonitoringTimer(timer())).toBe(false);
     expect(isMonitoringTimer(ci())).toBe(false);
   });
@@ -71,6 +78,46 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     expect(openWaitsFooter([ci(), timer({ note: 'deploy' }), timer({ id: '33333333-3333-4333-8333-333333333333' })])).toBe(
       `Still open: CI wait ${ci().id} for Acme/Repo#12, deadline ${ci().deadline}; timer ${timer().id} at ${timer().deadline} (deploy); ` +
       `timer 33333333-3333-4333-8333-333333333333 at ${timer().deadline}. Call cezar_cancel_wait for any you no longer need.`);
+  });
+
+  it('footer lists an open worker wait', () => {
+    const base = { id: '77777777-7777-4777-8777-777777777777', kind: 'worker', source: 'agent', via: 'cez-worker-wait', turnId: 'turn-1', timeoutSeconds: 600, mode: 'any',
+      registeredAt: '2026-10-17T10:00:00.000Z', deadline: '2026-10-17T10:10:00.000Z', phase: 'open' } as const;
+    const w = '88888888-8888-4888-8888-888888888888', x = '99999999-9999-4999-8999-999999999999';
+    const byWorker: WorkerWaitEntry = { ...base, workerIds: [w, x], revisions: [], outcomes: [] };
+    const byRequest: WorkerWaitEntry = { ...base, id: '77777777-7777-4777-8777-777777777778', requestIds: [w], requestOutcomes: [] };
+    expect(openWaitsFooter([byWorker])).toBe(`Still open: worker wait ${byWorker.id} on 2 workers, deadline ${base.deadline}. Call cezar_cancel_wait for any you no longer need.`);
+    expect(openWaitsFooter([byRequest])).toContain(`worker wait ${byRequest.id} on 1 request reply, deadline`);
+    // The cezar_wait answer's open_waits summary reads the same.
+    expect(openWaitList([byWorker, byRequest]).map(open => open.summary)).toEqual(['worker wait on 2 workers', 'worker wait on 1 request reply']);
+    // Beside a question, the cancel guidance covers worker waits too.
+    const human: HumanWaitEntry = { id: '55555555-5555-4555-8555-555555555555', kind: 'human', source: 'agent', via: 'cezar_ask',
+      registeredAt: '2026-10-17T10:00:00.000Z', phase: 'open', turnId: 'turn-1', askSeq: 4 };
+    expect(openWaitsFooter([human, byWorker])).toContain('call cezar_cancel_wait for any CI wait, worker wait or timer you no longer need.');
+  });
+
+  // hearsay-tools/cezarion#1234: the user's reply settles a question, and a question the user saw
+  // cannot be cancelled, so the footer offers cezar_cancel_wait only for CI waits and timers.
+  it('the footer says the reply answers an open question and offers cancel only for the rest', () => {
+    const human: HumanWaitEntry = { id: '55555555-5555-4555-8555-555555555555', kind: 'human', source: 'agent', via: 'cezar_ask',
+      registeredAt: '2026-10-17T10:00:00.000Z', phase: 'open', turnId: 'turn-1', askSeq: 4 };
+    expect(openWaitsFooter([human])).toBe(`Still open: your question ${human.id} to the user. The user's reply answers it.`);
+    expect(openWaitsFooter([human, ci()])).toBe(
+      `Still open: your question ${human.id} to the user; CI wait ${ci().id} for Acme/Repo#12, deadline ${ci().deadline}. ` +
+      `The user's reply answers your question; call cezar_cancel_wait for any CI wait, worker wait or timer you no longer need.`);
+  });
+
+  // Cezar's own wait stands in for a wait the agent never registered (hearsay-tools/cezarion#1234):
+  // listing it back would tell the agent it asked the user something.
+  it('leaves Cezar\'s own human wait out of the list and the footer the agent reads', () => {
+    const noWait: HumanWaitEntry = { id: '66666666-6666-4666-8666-666666666666', kind: 'human', source: 'cezar', via: 'no-wait',
+      registeredAt: '2026-10-17T10:00:00.000Z', phase: 'open', turnId: 'no-wait', askSeq: 7 };
+    expect(isCezarHumanWait(noWait)).toBe(true);
+    expect(isCezarHumanWait({ ...noWait, source: 'agent', via: 'cezar_ask' })).toBe(false);
+    expect(openWaitList([noWait])).toEqual([]);
+    expect(openWaitsFooter([noWait])).toBeUndefined();
+    expect(openWaitsFooter([noWait, ci()])).toBe(
+      `Still open: CI wait ${ci().id} for Acme/Repo#12, deadline ${ci().deadline}. Call cezar_cancel_wait for any you no longer need.`);
   });
 
   it('hands the CI watcher a valid schema-3 wait', () => {

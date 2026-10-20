@@ -348,3 +348,10 @@ describe('GithubPoller', () => {
     expect(rows[0]?.eventId).toContain('issue.unlabeled:9');
   });
 });
+
+it.each([undefined, 'unknown'])('a fresh launch read cannot authorize an item with state %s', async (state) => {
+  const poller = new GithubPoller({ run: async () => JSON.stringify({ state, labels: [{ name: 'bug' }] }) });
+  const candidate = { eventId: 'e', event: 'issue.opened' as const, timestamp: item.created_at, tieBreaker: 'I',
+    repo: 'acme/demo', nodeId: 'I', number: 7, title: 'x', url: item.html_url, author: 'alice', assignees: [], labels: ['bug'] };
+  await expect(poller.matchesCurrentLabels(candidate, definition)).rejects.toThrow();
+});

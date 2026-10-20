@@ -22,10 +22,7 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { PREVIEW_RECONNECTS } from '@/api/preview-socket'
-import {
-  type PreviewServer,
-  type PreviewStateMessage,
-} from '@open-mercato/cezar-api-client'
+import type { PreviewServer, PreviewStateMessage } from '@open-mercato/cezar-api-client'
 import { StatusDot } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'

@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { scheduleLabel, type AutomationListEntry, type AutomationsResponse } from '@open-mercato/cezar-api-client'
+import { scheduleLabel } from '@open-mercato/cezar-api-client/contract/automation-schedule'
+import type { AutomationListEntry, AutomationsResponse } from '@open-mercato/cezar-api-client'
 
 import { checkAutomation, getAutomationCheck, runAutomationNow, setAutomationEnabled } from '@/api/client'
 import { CenteredState } from '@/components/centered-state'

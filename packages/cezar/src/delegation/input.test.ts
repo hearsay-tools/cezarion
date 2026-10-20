@@ -357,9 +357,37 @@ it.each(['live', 'expired'] as const)('restart recovers a %s receipt and expiry 
         await vi.advanceTimersByTimeAsync(60_000);
       }
       expect(reopened.getRun(runId)?.agentInputs?.[0]?.inboxClaim).toBeUndefined();
-      expect(reopened.getRun(runId)?.delegation).toMatchObject({ wait: { reason: 'message', wakeId: first.id } });
+      // hearsay-tools/cezarion#1235: the message is a wake of its own, not a `delegation.wait`
+      // stand-in: it asks for a scheduler continuation, which this stepless fixture cannot open, so
+      // the message stays queued for the next wake.
+      expect(reopened.getRun(runId)?.delegation).not.toHaveProperty('wait');
+      expect(reopened.readEvents(runId).filter(event => event.type === 'note' && String(event.message).startsWith('Messages retained; continuation unavailable: '))).toHaveLength(1);
       expect(reopened.getRun(runId)?.agentInputs?.[0]?.deliveredAt).toBeUndefined();
       expect(() => recovered.acknowledgeInbox(runId, generation, receipt.receiptId)).toThrow();
+    } finally { recovered.dispose(); reopened.flush(); pump.mockRestore(); }
+  });
+});
+
+
+// hearsay-tools/cezarion#1235 review: the 1 Hz admission retry keeps trying a refused
+// continuation, but the retained note is written once per refusal, not once per retry.
+it('a continuation refused across several admission retries writes the retained note once', async () => {
+  await withInboxRun(async ({ store, manager, dir, runId, enqueue }) => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    enqueue('owed message');
+    store.updateRun(runId, { status: 'waiting' }); store.close(); manager.dispose();
+    const reopened = RunStore.open(dir, { keepLive: true }), recovered = new RunManager(reopened, dir);
+    const pump = vi.spyOn(recovered as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
+    const resume = vi.spyOn(recovered, 'continueRun');
+    const notes = () => reopened.readEvents(runId).filter(event => event.type === 'note' && String(event.message).startsWith('Messages retained; continuation unavailable: '));
+    try {
+      await recovered.recover();
+      const tries = resume.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(5_000);
+      // Still retried every second, still refused, and noted once.
+      expect(resume.mock.calls.length).toBeGreaterThanOrEqual(tries + 4);
+      expect(resume.mock.results.every(result => result.type === 'return' && !result.value.ok)).toBe(true);
+      expect(notes()).toHaveLength(1);
     } finally { recovered.dispose(); reopened.flush(); pump.mockRestore(); }
   });
 });

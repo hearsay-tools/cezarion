@@ -5,7 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { parseEffort } from '@open-mercato/cezar-contract';
+import { parseEffort } from '@open-mercato/cezar-contract/effort';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
 import type {
   AgentEvent,
@@ -220,6 +220,11 @@ class OpencodeSession implements AgentSession {
   private refusedBeforeOpening = false;
   private turnErrored = false;
   private lostWakeTimer: NodeJS.Timeout | undefined;
+  /** Steered input an idle left unanswered: the server may still start a follow-on run for it.
+   *  Settles when that run starts, or when the lost-wake grace or a teardown ends the wait. */
+  private followOn: Promise<void> | undefined;
+  private followOnResolve: () => void = () => {};
+  private refusedForFollowOn = false;
   private tokensUsed = 0;
   /** OpenCode reports a cumulative cost for each message, not the session. */
   private readonly costByMessage = new Map<string, number>();
@@ -306,6 +311,7 @@ class OpencodeSession implements AgentSession {
         if (this.autoEndTimer) clearTimeout(this.autoEndTimer);
         this.sse.abort();
         this.serverOpen = false;
+        this.clearLostWakeTimer();
         this.agentRequest?.abort();
         this.terminate();
       }
@@ -390,6 +396,9 @@ class OpencodeSession implements AgentSession {
     // then hint once so the refused input steers the opening turn.
     if (this.serverOpen && this.turnSerial === 0) { this.refusedBeforeOpening = true; return false; }
     if (!this.serverOpen || !this.sessionId || this.pendingQuestion || this.questionReply || this.pendingPromptRequests > 0 || this.agentRequest) return false;
+    // A prompt posted before a due follow-on run would have that run's idle close its turn, and
+    // its own run would then surface nothing (PR #1291 CI): it waits for that run, as for a turn.
+    if (this.followOn) { this.refusedForFollowOn = true; return false; }
     this.agentInputReady = false;
     const request = new AbortController();
     this.agentRequest = request;
@@ -496,6 +505,7 @@ class OpencodeSession implements AgentSession {
   end(): void {
     if (!this.serverOpen) return;
     this.serverOpen = false;
+    this.clearLostWakeTimer();
     this.agentRequest?.abort();
     this.sse.abort();
     this.terminate();
@@ -503,6 +513,7 @@ class OpencodeSession implements AgentSession {
 
   interrupt(): void {
     this.serverOpen = false;
+    this.clearLostWakeTimer();
     this.agentRequest?.abort();
     if (this.baseUrl && this.sessionId) {
       void this.http('POST', `/session/${this.sessionId}/abort`, undefined).catch(() => undefined);
@@ -759,7 +770,7 @@ class OpencodeSession implements AgentSession {
     const generation = this.queuedPromptGeneration;
     const humanWaiter = origin === 'human';
     if (humanWaiter) this.humanPromptWaiters += 1;
-    while (this.turnActive) await this.turnFinished;
+    while (this.turnActive || this.followOn) await (this.turnActive ? this.turnFinished : this.followOn);
     if (humanWaiter && generation === this.queuedPromptGeneration) {
       this.humanPromptWaiters = Math.max(0, this.humanPromptWaiters - 1);
     }
@@ -856,6 +867,18 @@ class OpencodeSession implements AgentSession {
   private clearLostWakeTimer(): void {
     if (this.lostWakeTimer) clearTimeout(this.lostWakeTimer);
     this.lostWakeTimer = undefined;
+    this.settleFollowOn();
+  }
+
+  /** The follow-on wait is over. Input it refused is offered again unless a turn took over. */
+  private settleFollowOn(): void {
+    if (!this.followOn) return;
+    this.followOn = undefined;
+    this.followOnResolve();
+    if (!this.refusedForFollowOn) return;
+    this.refusedForFollowOn = false;
+    if (this.turnActive) return;
+    queueMicrotask(() => this.notifyAgentInputReady());
   }
 
   private finishTurn(): void {
@@ -885,12 +908,14 @@ class OpencodeSession implements AgentSession {
     // them apart; then report it so cezar submits it as a new prompt.
     if (this.submissions.pending > 0) {
       this.clearLostWakeTimer();
+      this.followOn = new Promise((resolve) => { this.followOnResolve = resolve; });
       this.lostWakeTimer = setTimeout(() => {
         this.lostWakeTimer = undefined;
-        if (!this.serverOpen || this.turnActive) return;
+        if (!this.serverOpen || this.turnActive) { this.settleFollowOn(); return; }
         const inputIds = this.submissions.takeUnconsumed();
         this.userMessageSubmission.clear();
         if (inputIds.length) this.emit({ type: 'input-unconsumed', inputIds });
+        this.settleFollowOn();
       }, OPENCODE_LOST_WAKE_GRACE_MS);
       this.lostWakeTimer.unref?.();
     }

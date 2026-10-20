@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
-import { previewClientMessageSchema, type PreviewServerMessage } from '@open-mercato/cezar-contract';
+import { previewClientMessageSchema, type PreviewServerMessage } from '@open-mercato/cezar-contract/preview';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import type { PreviewHost, RunContext } from '../preview/host.ts';

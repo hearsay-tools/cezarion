@@ -3,7 +3,8 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { localTimeZone, nextOccurrence } from '@open-mercato/cezar-contract';
+import { localTimeZone } from '@open-mercato/cezar-contract/zoned-time';
+import { nextOccurrence } from '@open-mercato/cezar-contract/automation-schedule';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { GithubPoller } from '../automations/github-poller.ts';
 import { ScheduleRunner } from '../automations/schedule-runner.ts';
@@ -620,6 +621,27 @@ describe('GitHub automation API', () => {
     const gone = vi.spyOn(automationStore, 'update').mockImplementationOnce(() => { throw new Error('automation not found'); });
     expect((await apiRequest(server, `/api/v1/automations/${created.id}/pause`, { method: 'POST' })).status).toBe(404);
     gone.mockRestore();
+  });
+
+  it('a stale-route retry releases the issue receipt without creating a run', async () => {
+    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const rule = automationStore.create({ ...input, enabled: false,
+      filters: { ...input.filters, requireCurrentLabels: true, allLabels: ['friction-auto'] },
+    });
+    const candidate = { eventId: 'e', event: 'issue.opened' as const, timestamp: '2026-10-19T00:00:00.000Z',
+      tieBreaker: 'I', repo: 'acme/demo', nodeId: 'I_one', number: 7, title: 'Issue',
+      url: 'https://github.com/acme/demo/issues/7', author: 'alice', assignees: [], labels: ['friction-auto'] };
+    const receipt = automationStore.reserveReceipt({ automationId: rule.id, revision: rule.revision, eventId: 'e', candidate })!;
+    automationStore.appendReceipt({ ...receipt, status: 'launch-error', error: 'offline' });
+    const live = vi.spyOn(GithubPoller.prototype, 'matchesCurrentLabels').mockResolvedValue(false);
+    try {
+      const server = app({ automationStore, manager: recordingManager() });
+      const response = await apiRequest(server, `/api/v1/automation-log/${receipt.receiptId}/retry`, { method: 'POST' });
+      expect(response.status).toBe(409);
+      expect(automationStore.latestReceipts().get(receipt.receiptKey)).toMatchObject({ status: 'released' });
+      expect(store.findNonArchivedRunByIssue('acme/demo', 7)).toBeUndefined();
+      expect(automationStore.reserveReceipt({ automationId: rule.id, revision: rule.revision, eventId: 'e', candidate })).toBeDefined();
+    } finally { live.mockRestore(); }
   });
 
   it('retry fires a launch-error schedule receipt', async () => {

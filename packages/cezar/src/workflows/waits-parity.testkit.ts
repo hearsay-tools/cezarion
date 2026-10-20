@@ -16,16 +16,47 @@ export const WAIT_CRITERIA = [
   { id: 'U7', scenario: 'turn-messages', name: 'cezar_wait_for_ci, the monitoring line and ScheduleWakeup land in the same wait list' },
   { id: 'U8', scenario: 'baseline', name: 'a ci or timer park keeps its slot and wakes without queueing at maxParallel 1' },
   { id: 'U10', scenario: 'hold-gated', name: 'timer wakes stop at the automatic-wake budget; one admitted turn is charged once' },
-  { id: 'U11', scenario: 'turn-messages', name: 'an alias timer survives a later worker park with its deadline, is held while the workers outrank it, and is delivered after the worker wake' },
+  { id: 'U11', scenario: 'turn-messages', name: 'an alias timer survives a later completion park with its deadline, is held while the workers outrank it, and is delivered after the worker wake' },
   { id: 'U12', scenario: 'turn-messages', name: 'a wait result beside a pending portable question is checkpointed only on its delayed provider acknowledgement, and the question stays answerable' },
   { id: 'U13', scenario: 'turn-messages', name: 'a wait result beside a pending portable question whose acknowledgement is rejected stays resolved, is retried, and the question stays answerable' },
   { id: 'U14', scenario: 'provider-error', name: 'a wait-result delivery whose sessions persistently fail or close cleanly stops at the delivery bound, the run fails keeping its result, Continue delivers it once, and Stop discards it' },
+  { id: 'U16', scenario: 'baseline', name: 'a scheduler continuation keeps the automatic-wake budget and a human Continue resets it' },
+  { id: 'U16b', scenario: 'baseline', name: 'timers due at the spent budget with no live session are cancelled, and the last one opens a budget human wait the user answers' },
+  { id: 'U9c', scenario: 'baseline', name: 'with a delivery-failure count on the record and the store refusing writes, Finish still stops the run' },
+  // hearsay-tools/cezarion#1234: human waits.
+  { id: 'U7h', scenario: 'ask', name: 'the ask line, cezar_ask (an open question included) and a native ask land in the same wait list' },
+  { id: 'U9h', scenario: 'provider-error', name: 'provider failure and clean close with a human wait open leave the run recoverable' },
+  { id: 'U6', scenario: 'baseline', name: 'cezar_done is refused with live workers and with settled but uncollected workers, accepted once collected, and open waits are cancelled' },
+  { id: 'U7d', scenario: 'baseline', name: 'the done line and cezar_done finish through the same path' },
+  { id: 'U6s', scenario: 'baseline', name: 'cezar_done in a workflow step that is not the last is refused with not_final_step, and the next step runs' },
+  // hearsay-tools/cezarion#1234 phase 2b: the turn-end rule.
+  { id: 'U5', scenario: 'baseline', name: 'a turn end with no wait gets one nudge, then a second no-wait turn end opens a no-wait human wait and reads needs you' },
+  { id: 'U5a', scenario: 'baseline', name: 'a nudge the agent answers with cezar_ask parks on that question after one extra turn' },
+  { id: 'U5c', scenario: 'baseline', name: 'a root parked on its no-wait human wait is finished by the user, and an agent question still blocks it' },
+  { id: 'U5d', scenario: 'baseline', name: 'the no-wait human wait raises no question, and the agent\'s own wait replaces it' },
+  { id: 'U18', scenario: 'baseline', name: 'Finish on a run parked on an agent question closes the question without answering it' },
+  { id: 'U17', scenario: 'turn-messages', name: 'a question in prose without a wait no longer parks the run by itself' },
+  { id: 'U15', scenario: 'autonomous-cap', name: 'an autonomous run is nudged with the autonomous wording until the budget, then opens a budget human wait' },
+  // hearsay-tools/cezarion#1235 phase 3a: worker waits.
+  { id: 'U2w', scenario: 'baseline', name: 'ci and worker open: the worker resolving wakes the agent with ci still open and in the footer, and the later ci result is delivered' },
+  { id: 'U2t', scenario: 'baseline', name: 'timer and worker open: the timer resolving wakes the agent with the worker wait still open and in the footer, and the later worker result is delivered' },
+  { id: 'U2c', scenario: 'baseline', name: 'ci and worker open: the ci result wakes the agent with the worker wait still open and in the footer, and the later worker result is delivered' },
+  { id: 'U3w', scenario: 'baseline', name: 'a worker message during a worker wait wakes the parent and the worker wait stays open' },
+  { id: 'U7w', scenario: 'baseline', name: 'cez worker wait and cezar_wait kind worker land in the same wait list' },
+  { id: 'U9w', scenario: 'provider-error', name: 'provider failure and clean close with a worker wait open leave the run recoverable and the next resolution delivers' },
+  { id: 'U14m', scenario: 'provider-error', name: 'a message-only wake beside a worker wait whose sessions persistently fail stops at the delivery bound keeping the message, Continue delivers it once, and a delivered message clears the failure count' },
+  { id: 'U9u', scenario: 'baseline', name: 'after an upgrade, a cancelled worker wait\'s queued wake is delivered as ordinary input, and a parent whose message stand-in a provider took before the crash resumes' },
+  { id: 'U19', scenario: 'turn-messages', name: 'a worker message beside a pending portable question is delivered and the question stays answerable' },
 ] as const;
 
 /** The native mocks' `mock:cezar-tool` prompt: one cezar tool call through the runner's own wire.
  *  Several in one prompt run in order; `wait_id: 'last'` names the previous answer's wait. */
-export function toolCall(name: 'cezar_wait' | 'cezar_wait_for_ci' | 'cezar_cancel_wait', args: Record<string, unknown>): string {
+export function toolCall(name: 'cezar_wait' | 'cezar_wait_for_ci' | 'cezar_ask' | 'cezar_cancel_wait' | 'cezar_done', args: Record<string, unknown>): string {
   return `mock:cezar-tool ${name} ${Buffer.from(JSON.stringify(args)).toString('base64url')}`;
+}
+/** After the `toolCall`s in the same prompt, the turn ends with `text`. */
+export function thenSay(text: string): string {
+  return `mock:then ${Buffer.from(text).toString('base64url')}`;
 }
 
 // Hold the existing native provider-error fixture until CI intent is durable.
@@ -66,11 +97,16 @@ ${source}`;
 
 /** The opening prompt of the scheduler continuation that delivers a timer result. */
 export const TIMER_WAKE_OPENING = 'Resume to receive the queued timer result.';
+/** The opening prompt of the scheduler continuation that delivers messages alone. */
+export const MESSAGE_WAKE_OPENING = 'Resume to receive queued messages.';
 
 // Fail every timer-wake continuation's opening prompt through the runner's own provider-error
 // branch (Claude's auth-error branch, as `gatedProviderFailure` uses), or with `usageLimit`
-// through Claude's usage-limit envelope, until the test lifts it. Every other prompt is unchanged.
-export function persistentWakeFailure(root: string, runner: RunnerId, { usageLimit = false } = {}) {
+// through Claude's usage-limit envelope, until the test lifts it. `opening` names another wake
+// continuation's prompt instead. Claude's mock reads every line it is sent after a failed turn, so
+// a message steered behind the opening would be read; `unread` makes Claude's failure end the
+// process instead, as a crash would, before it reads one. Every other prompt is unchanged.
+export function persistentWakeFailure(root: string, runner: RunnerId, { usageLimit = false, opening = TIMER_WAKE_OPENING, unread = false } = {}) {
   const adapter = HARNESS_ADAPTERS[runner];
   const lifted = join(root, 'wake-failure-lifted');
   const anchor: Record<RunnerId, string> = {
@@ -85,12 +121,13 @@ export function persistentWakeFailure(root: string, runner: RunnerId, { usageLim
   const text: Record<RunnerId, string> = { claude: 'userText', codex: 'turnText', opencode: 'body', pi: 'command.message', cursor: 'prompt', omp: 'message' };
   let source = readFileSync(adapter.mockBin, 'utf8').replace(/^#!.*\n/, '');
   expect(source.split(anchor[runner])).toHaveLength(2);
-  source = source.replace(anchor[runner], `if (wakeFailurePrompt(${text[runner]})) {`);
+  source = source.replace(anchor[runner], unread && runner === 'claude'
+    ? `if (wakeFailurePrompt(userText)) process.exit(1);\n  ${anchor[runner]}` : `if (wakeFailurePrompt(${text[runner]})) {`);
   if (runner === 'cursor') source = source.replace("prompt.includes('mock:provider-error')", 'wakeFailurePrompt(prompt)');
   source = source.replace(/import\('(\.\/[^']+)'\)/g, (_match, path: string) => `import(${JSON.stringify(pathToFileURL(join(dirname(adapter.mockBin), path)).href)})`);
   source = `import * as wakeFailureFs from 'node:fs';
 function wakeFailurePrompt(text) {
-  return typeof text === 'string' && text.includes(${JSON.stringify(TIMER_WAKE_OPENING)}) && !wakeFailureFs.existsSync(${JSON.stringify(lifted)});
+  return typeof text === 'string' && text.includes(${JSON.stringify(opening)}) && !wakeFailureFs.existsSync(${JSON.stringify(lifted)});
 }
 ${source}`;
   const mock = join(root, 'wake-failure-native.mjs');

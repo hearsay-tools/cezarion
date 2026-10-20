@@ -8,6 +8,7 @@ import {
   HANDOFF_ONLY_INSTRUCTIONS,
   appendHandoffAutosaveReport,
   appendHandoffHeartbeat,
+  handoffInstructions,
   handoffPath,
   handoffProgressExcerpt,
   recordHandoffPeriodicAutosave,
@@ -135,6 +136,30 @@ describe('appendHandoffAutosaveReport', () => {
 
     expect(HANDOFF_ONLY_INSTRUCTIONS).toContain(`"${header}"`);
     expect(HANDOFF_ONLY_INSTRUCTIONS).toMatch(/"## Autosave \(cezar\)" section[^\n]*leave it in place/);
+  });
+});
+
+describe('handoffProgressExcerpt', () => {
+  const log = (...lines: string[]) => `# Handoff\n\n## Progress log\n\n${lines.join('\n')}\n\n## Resume notes\n`;
+  const agentLine = '- 2026-10-19T00:00:00.000Z — mock: implemented the change (dry run)';
+
+  // The no-wait nudge adds a turn, and every turn end writes a lifecycle line at the top
+  // (hearsay-tools/cezarion#1234): they must not push the agent's own summary out.
+  it("shows the agent's own lines ahead of Cezar's lifecycle heartbeats", () => {
+    const text = log(
+      '- 2026-10-19T00:00:04.000Z — step "task" complete — status=done',
+      '- 2026-10-19T00:00:03.000Z — turn complete — status=waiting',
+      '- 2026-10-19T00:00:02.000Z — turn complete — status=running (no-wait nudge)',
+      '- 2026-10-19T00:00:01.000Z — session idle-closed — status=waiting; Continue to resume',
+      agentLine,
+      '- 2026-10-18T23:59:00.000Z — picked from 2 variants',
+    );
+    expect(handoffProgressExcerpt(text)).toBe(`${agentLine}\n- 2026-10-18T23:59:00.000Z — picked from 2 variants`);
+  });
+
+  it('falls back to the heartbeats when the agent wrote nothing', () => {
+    const lines = ['- 2026-10-19T00:00:02.000Z — turn complete — status=waiting', '- 2026-10-19T00:00:01.000Z — turn complete — status=running (no-wait nudge)'];
+    expect(handoffProgressExcerpt(log(...lines))).toBe(lines.join('\n'));
   });
 });
 
@@ -294,5 +319,32 @@ describe('recordHandoffPeriodicAutosave', () => {
   it('is a no-op on a missing file', () => {
     expect(() => recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'aaa1111', branch: BRANCH })).not.toThrow();
     expect(() => readFileSync(file())).toThrow();
+  });
+});
+
+// hearsay-tools/cezarion#1234: a session with cezar tools is taught the tools, not the lifecycle
+// markers; a session without them keeps today's prompt.
+describe('handoffInstructions', () => {
+  it('the tool variant teaches cezar_done, cezar_ask and cezar_wait and no lifecycle marker', () => {
+    for (const followups of [false, true]) {
+      const text = handoffInstructions({ tools: true, followups });
+      expect(text).toContain('Lifecycle tools (cezar): End every turn with a cezar tool call that says what happens next. When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn.');
+      expect(text).toContain('When you need the user — a decision only they can make, or missing input — call cezar_ask with up to four questions, then end your turn. Give a question 2–4 options to show them as choices, or leave its options out and the user types the answer.');
+      expect(text).toContain('call cezar_wait with kind "ci" for a pull request\'s checks or kind "timer" to re-check later');
+      expect(text).not.toContain('kind "human"');
+      // A reply settles the question; only CI waits and timers wait for a result or a cancel.
+      expect(text).toContain("A human message or any resolved wait wakes you. The user's reply answers your question; CI waits and timers stay open until they resolve or you cancel them with cezar_cancel_wait.");
+      expect(text).toContain('Never call cezar_done while anything is unfinished or unverified.');
+      for (const marker of ['CEZ:DONE', 'CEZ:MONITORING', 'CEZ:ASK']) expect(text).not.toContain(marker);
+      expect(text).toContain('CEZ:PR=');
+      expect(text).toContain('## Pasted attachments');
+      expect(text).toMatch(/"## Autosave \(cezar\)" section[^\n]*leave it in place/);
+      expect(text.includes('## Follow-ups (cezar)')).toBe(followups);
+    }
+  });
+
+  it('the marker variant is unchanged', () => {
+    expect(handoffInstructions({ tools: false, followups: false })).toBe(HANDOFF_ONLY_INSTRUCTIONS);
+    expect(handoffInstructions({ tools: false, followups: true })).toBe(HANDOFF_INSTRUCTIONS);
   });
 });

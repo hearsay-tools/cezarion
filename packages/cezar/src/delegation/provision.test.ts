@@ -53,6 +53,13 @@ describe('session provisioning', () => {
     expect(instructions).toMatch(/--attach <path> \(repeatable; copies a git-ignored file from your worktree[^)]*commit those instead\)/);
     expect(instructions).toContain('baseline-file, parent-attachment or parent-file references');
   });
+  it('provision text no longer says one active wait', () => {
+    const { instructions } = provision()!;
+    expect(instructions).not.toMatch(/one active wait|no automatic re-wait/i);
+    expect(instructions).toContain('Several waits can be open at once (workers, CI, timers)');
+    expect(instructions).toContain('Messages wake you and close no wait');
+    expect(instructions).toContain('cancel-wait <wait-id> stops one wait');
+  });
   it('provisions no ordinary-run metadata while off and never promotes invalid/worker records to roots', async () => {
     const ordinary = f.store.createRun({ title: 'ordinary', task: 'ordinary', workflow: 'quick-task', steps: [] });
     vi.stubEnv('CEZ_DELEGATION', '0'); expect(provision(ordinary.id)).toBeUndefined(); expect(f.store.getRun(ordinary.id)?.delegation).toBeUndefined();
@@ -61,12 +68,14 @@ describe('session provisioning', () => {
     const { workerId } = await f.service.spawn(f.caller, { task: 'worker', baseline: 'HEAD', requestId: randomUUID() });
     const worker = provision(workerId)!; expect(worker.instructions).toContain('cannot delegate'); expect(worker.instructions).toContain('wait --request'); expect(worker.instructions).toContain(f.parent.id); expect(worker.instructions).toContain('worker reply');
     // #505: a worker's questions go to its parent, which replies or asks the human.
-    expect(worker.instructions).toContain('Your questions, native or CEZ:ASK, go to your parent');
+    expect(worker.instructions).toContain('Your questions — cezar_ask, or a native question — go to your parent');
     expect(worker.instructions).not.toContain('only a human can answer');
     expect(worker.instructions).not.toContain('Messages never answer human questions');
     const root = provision()!;
     expect(root.instructions).toContain('Worker questions arrive as requests carrying a question');
     expect(root.instructions).toContain('--request-id <question-id>');
+    // hearsay-tools/cezarion#1234: an open question takes the parent's own words.
+    expect(root.instructions).toContain("one '<header>: <answer>' line per question (an option's label, or your own words for a question without options)");
     expect(f.store.getRun(workerId)?.delegation).toMatchObject({ role: 'worker', permissions: [] });
     await expect(f.service.spawn(f.credentials.authenticate(worker.env.CEZ_DELEGATION_TOKEN!)!, { task: 'no', baseline: 'HEAD', requestId: randomUUID() })).rejects.toMatchObject({ code: 'denied_scope' });
   });

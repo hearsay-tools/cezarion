@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { copyGitIndex } from '../git-index-copy.ts';
-import { delegationStateSchema, workerWorkspaceSchema } from '@open-mercato/cezar-contract';
+import { delegationStateSchema, workerWorkspaceSchema } from '@open-mercato/cezar-contract/delegation';
 import type { WorkerDestroyResult, WorkerDiff, WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { branchFor, createWorktree, DIFF_CAP, worktreePathFor } from '../git-worktree.ts';
 import { withWorktreeMutation, WorktreeMutationLockTimeout } from '../git-worktree-lock.ts';

@@ -19,7 +19,8 @@ import {
   useSendMessage,
 } from '@/api/queries'
 import { useRunHistory, type RunHistoryState } from '@/api/run-history'
-import { pendingHumanAsk, type ApiRun } from '@open-mercato/cezar-api-client'
+import { pendingHumanAsk } from '@open-mercato/cezar-api-client/contract/ask'
+import type { ApiRun } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { Composer } from '@/components/composer/composer'
 import { StatusDot } from '@/components/status-dot'

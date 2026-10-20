@@ -22,7 +22,7 @@ import type {
   saveWorkflowResponseSchema,
   workflowsResponseSchema,
 } from '@open-mercato/cezar-contract';
-import { workflowStepDefSchema } from '@open-mercato/cezar-contract';
+import { workflowStepDefSchema } from '@open-mercato/cezar-contract/workflows';
 import type { AppType } from './app-type.ts';
 import { workflowStepSchema } from '../workflows/types.ts';
 

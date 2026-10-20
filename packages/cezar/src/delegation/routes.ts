@@ -2,7 +2,9 @@ import { Hono, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { ZodError } from 'zod';
 import { z } from 'zod';
-import { discoveryRequestSchema, conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReceiptRequestSchema, requestWaitRequestSchema, workerCancelWaitRequestSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerEmptyRequestSchema } from '@open-mercato/cezar-contract';
+import { discoveryRequestSchema } from '@open-mercato/cezar-contract/discovery';
+import { conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReceiptRequestSchema, requestWaitRequestSchema } from '@open-mercato/cezar-contract/conversations';
+import { workerListQuerySchema, workerCancelWaitRequestSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerEmptyRequestSchema } from '@open-mercato/cezar-contract/delegation';
 import { jsonZodValidator, paramZodValidator, queryZodValidator } from '../server/validators.ts';
 import { isLoopbackHostHeader } from '../server/capabilities.ts';
 import { CredentialRegistry, type Caller } from './credentials.ts';
@@ -43,6 +45,7 @@ export function createDelegationRoutes(service: DelegationService, credentials: 
     .onError((error, c) => { const failure = delegationFailure(error); return c.json(failure.body, failure.status); })
     .use('*', authenticateDelegation)
     .use('*', bodyLimit({ maxSize: 1_048_576, onError: c => c.json({ code: 'invalid_input' as const, error: 'Delegation request too large' }, 400) }))
+    .get('/list', queryZodValidator(workerListQuerySchema, invalid), async c => c.json(await service.list(c.get('caller'), c.req.valid('query')), 200))
     .use('*', queryZodValidator(workerEmptyRequestSchema, invalid))
     .post('/discover', jsonZodValidator(discoveryRequestSchema, invalid), async c => c.json(await service.discover(c.get('caller'), c.req.valid('json')), 200))
     .post('/spawn', jsonZodValidator(workerSpawnRequestSchema, invalid), async c => c.json(await service.spawn(c.get('caller'), c.req.valid('json')), 201))

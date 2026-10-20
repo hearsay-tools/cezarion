@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest'
-import { healthResponseSchema, type HealthResponse } from '@open-mercato/cezar-api-client'
+import { healthResponseSchema, type HealthResponse } from '@open-mercato/cezar-api-client/contract/health'
 
 /**
  * The `sync-contract` pipeline, end to end.

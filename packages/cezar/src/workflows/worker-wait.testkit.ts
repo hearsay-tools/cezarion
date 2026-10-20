@@ -5,7 +5,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, onTestFinished, vi } from 'vitest';
-import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract';
+import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
+import { workerWaitEntryToLegacy, workerWaitView, type WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
@@ -22,7 +23,17 @@ import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 
 export const terminal = ['review', 'done', 'failed', 'cancelled'];
 export async function until(predicate: () => boolean) { await vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 }); }
-export const waitOf = (run: RunRecord | undefined) => run?.delegation && run.delegation.role !== 'invalid' ? run.delegation.wait : undefined;
+/** The run's worker wait in the legacy `WorkerWait` shape (`workerWaitView`): since
+ *  hearsay-tools/cezarion#1235 phase 3a an agent's worker wait is a `worker` entry in the list. */
+export const waitOf = (run: RunRecord | undefined): WorkerWait | undefined => run ? workerWaitView(run) : undefined;
+/** The newest settled worker wait (`lastWaits`), in the legacy shape: what `delegation.lastWait` was. */
+export const lastWaitOf = (run: RunRecord | undefined): WorkerWait | undefined => {
+  const entry = (run?.lastWaits ?? []).filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker').at(-1);
+  return entry ? workerWaitEntryToLegacy(entry) : undefined;
+};
+/** The open worker entry of a run, for fixtures that move its deadline. */
+export const workerEntryOf = (run: RunRecord | undefined): WorkerWaitEntry | undefined =>
+  (run?.waits ?? []).filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker' && wait.phase === 'open').at(-1);
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -53,13 +64,20 @@ export function track() {
   const real = internals.recordTurnEnd.bind(manager);
   internals.recordTurnEnd = (...args) => { const result = real(...args); bookkeeping.push(result); return result; };
 }
-export function useWorkerWaitFixture(options: { processScope?: false } = {}): void {
+/**
+ * `nudgeReply` is how the native mocks answer Cezar's no-wait nudge (hearsay-tools/cezarion#1234).
+ * By default they ignore it in plain text: a run then reaches Cezar's no-wait human wait (the gate
+ * a markerless question raised before) and a worker its plain park, so a suite about delegation or
+ * CI decides what it tests. `card` keeps the mocks' own answer, a `cezar_ask` card.
+ */
+export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply?: 'card' | 'plain' } = {}): void {
   beforeEach(() => {
     // Native mock children belong to this fixture; specialized holder tests supply their own scope.
     if (options.processScope !== false) onTestFinished(scopeFixtureProcesses());
     saved = { ...process.env }; began = performance.now(); checkpoints = []; failureState = undefined; checkpoint('setup');
     onTestFailed(() => console.error('WORKER_WAIT_FAILURE_STATE', JSON.stringify(failureState ?? captureState())));
     process.env.CEZ_DRY_RUN = '1'; process.env.CEZ_AUTONAME = '0';
+    if (options.nudgeReply === 'card') delete process.env.CEZ_MOCK_NUDGE_REPLY; else process.env.CEZ_MOCK_NUDGE_REPLY = 'plain';
     root = mkdtempSync(join(tmpdir(), 'cez-worker-wait-'));
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
     execFileSync('git', ['config', 'gc.auto', '0'], { cwd: root });
@@ -176,9 +194,10 @@ export async function queuedWake(runner: RunnerId = 'claude') {
   const p = await parent('mock:hold', runner); const w = await worker(p.id, 'mock:slow');
   const wait = register(p.id, [w.id]); checkpoint('queued-wake-registered');
   await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-  const delegation = store.getRun(p.id)!.delegation!;
-  if (delegation.role !== 'root' || !delegation.wait) throw Error('fixture');
-  store.commitDelegation([{ id: p.id, delegation: { ...delegation, wait: { ...delegation.wait, deadline: new Date().toISOString() } } }]);
+  const entry = workerEntryOf(store.getRun(p.id));
+  if (!entry) throw Error('fixture');
+  // Overdue on disk: recovery resolves it with `timeout` (hearsay-tools/cezarion#1235).
+  store.commitWait(p.id, { ...entry, deadline: new Date().toISOString() });
   await restart(); checkpoint('queued-wake-restarted');
   await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(w.id)?.sessionEverOpened === true); checkpoint('queued-wake-child-open');
   expect(store.getRun(p.id)?.status).toBe('queued');

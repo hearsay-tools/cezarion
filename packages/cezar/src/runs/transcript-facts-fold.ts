@@ -1,9 +1,12 @@
 /** Pure transcript folding and version-1 sidecar validation. */
 import { type Stats } from 'node:fs';
 import { z } from 'zod';
-import { advancePendingHumanAsk, type RunEvent } from '@open-mercato/cezar-contract';
+import { advancePendingHumanAsk } from '@open-mercato/cezar-contract/ask';
+import type { RunEvent } from '@open-mercato/cezar-contract';
 
-/** A prose gate a turn ended on without a structured ask; answered like one. */
+/** The human gate a human wait without a card raises; answered like a structured ask. The code
+ *  keeps the name of the prose gate it replaced (hearsay-tools/cezarion#1234), which older
+ *  transcripts still carry. */
 export const PROSE_HUMAN_GATE = 'unstructured-human-gate';
 
 export interface PendingAskFacts {

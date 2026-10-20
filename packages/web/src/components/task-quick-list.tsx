@@ -2,7 +2,7 @@ import { ArchiveIcon, ChevronDownIcon, ChevronRightIcon } from '@/components/des
 import { ScaleIcon, SendIcon } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
 import * as React from 'react'
-import { queryScope } from '@open-mercato/cezar-api-client'
+import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { useSidebarArchive } from '@/components/sidebar-archive'
 import { useSidebarNavigate } from '@/components/app-shell'
 import { useSwipeToArchive } from '@/components/use-swipe-to-archive'

@@ -572,8 +572,24 @@ host; GitHub Enterprise hosts must already be recognized by the forge/auth
 configuration. Tool startup itself makes no GitHub request. With **Monitoring
 wake-up** turned off in **Settings → Resources**, `cezar_wait` refuses a timer
 (`timers_disabled`); once the automatic-wake budget of 40 is spent, it refuses one
-with `wake_budget_spent`. The budget counts automatic wakes in one live session: a
-message from you, a Continue or a cockpit restart starts it again.
+with `wake_budget_spent`, and a run with nothing else to wait on waits for you. The
+budget is kept on the task, so a cockpit restart keeps it; a message from you or a
+Continue starts it again.
+
+The agent asks you with `cezar_ask`, a card of one to four questions in the ask
+format. A question with two to four options shows them as choices; a question without
+options is open, and the card shows a text box for your answer. The task reads Needs
+you once the turn ends, and your next message answers it. `cezar_wait` takes CI and
+timers only, and points an agent that asks it for a human wait to `cezar_ask`. A run
+has one question to you at a time, and the agent cannot cancel it once you have seen
+it. The ask-marker card, a native question and `CEZ:MONITORING` with re-checks off
+open the same kind of wait. When the work is
+done and verified, the agent calls `cezar_done` (an optional `summary`), and the task
+finishes at the end of that turn: its open waits are cancelled and the summary is
+written as a note. `cezar_done` refuses while owned workers are live or uncollected,
+a worker question is unanswered, a question to you is still pending, or the step is not
+the workflow's last, and says what to do first. The `CEZ:DONE` line keeps working and finishes the same way. An
+autonomous task does not wait for you until its automatic-wake budget is spent.
 
 A run can have several waits open at once, up to 16. Each answer carries the
 wait's id, its absolute deadline and the list of waits still open, and
@@ -642,6 +658,7 @@ The provisioned command has these forms (the session instructions supply the abs
 cez worker spawn --baseline parent-head --request-id <UUID> 'Implement the assigned change'
 cez worker spawn --baseline parent-head --request-id <UUID> --runner codex --effort high --context-file ./selected-context.txt 'Review the parser'
 cez worker spawn --baseline parent-head --request-id <UUID> --workflow review 'Review the parser change'
+cez worker list                         # All own workers, revisions and cleanup resources (fetches pages automatically)
 cez worker inspect <worker-id>
 cez worker steer <worker-id> 'Consider this additional constraint'
 cez worker diff <worker-id>
@@ -690,7 +707,7 @@ Parent completion requires collection of every worker's latest settled execution
 
 Stop requests cancellation; `stopping` does not prove termination. Destroy checkpoints obtainable results, waits up to 30 seconds for proven termination, and removes only verified owned resources. An `incomplete` response lists remaining resources; resolve the cause and retry explicitly. Cleanup order is: collect/integrate desired results, destroy owned resources, explicitly delete child histories through the cockpit/API, then delete parent history. Parent-owned summaries and bounded diff snapshots remain until parent deletion, including after child-history deletion; general artifact bytes are not archived. Branch/path strings and SHAs become historical descriptors after removal, not promises of available Git objects or files. The human cleanup endpoint `POST /api/v1/p/<projectId>/runs/<worker-id>/worker-destroy` stays available when delegation is disabled. The CLI bounds each HTTP request to 45 seconds and rejects endpoint/auth/origin overrides and redirects.
 
-Provisioned sessions prefer cezar workers and suppress verified native delegation entry points through per-run adapter controls: Claude `Agent`/legacy `Task` denies, Codex multi-agent feature overrides, OpenCode session `task` denies, and pi's known `subagent` extension exclusion. See [the backend capability table](AGENT_PROTOCOL.md#governed-delegation-controls-d1) for tested versions and exemptions. Native workers are not tracked by cezar. Pi has no native delegation primitive or universal identifier for arbitrary custom delegation extensions; guidance does not enforce those cases. With delegation disabled or unavailable, ordinary tools/settings stay unchanged. The listener binds to `127.0.0.1`, including hosted cockpit mode. Its credentials authorize only the parent's own workers through that listener. This is cooperative local-agent supervision; same-user unrestricted shell and custom tools are not hard isolation. Workers cannot delegate or message peers through cezar. Review remains a human gate with no automatic acceptance. Never read, echo, forward, or persist the generated token.
+Provisioned sessions prefer cezar workers and suppress verified native delegation entry points through per-run adapter controls: Claude `Agent`, legacy `Task` and `Workflow` denies, Codex multi-agent feature overrides, OpenCode session `task` denies, and pi's known `subagent` extension exclusion. Claude skills and commands with `context: fork` are not blocked: Claude starts their subagent without checking those denies, and no setting turns forking off. See [the backend capability table](AGENT_PROTOCOL.md#governed-delegation-controls-d1) for tested versions and exemptions. Native workers are not tracked by cezar. Pi has no native delegation primitive or universal identifier for arbitrary custom delegation extensions; guidance does not enforce those cases. With delegation disabled or unavailable, ordinary tools/settings stay unchanged. The listener binds to `127.0.0.1`, including hosted cockpit mode. Its credentials authorize only the parent's own workers through that listener. This is cooperative local-agent supervision; same-user unrestricted shell and custom tools are not hard isolation. Workers cannot delegate or message peers through cezar. Review remains a human gate with no automatic acceptance. Never read, echo, forward, or persist the generated token.
 
 
 ## From the terminal: `cez task`
@@ -1074,11 +1091,13 @@ the backends it found — install any one of the six and you're operational.
 
 Install [Cursor CLI](https://cursor.com/docs/cli/installation) and run `agent login`,
 or set `CURSOR_API_KEY`. Cezar discovers `agent` on PATH; `CEZ_CURSOR_BIN` overrides
-its location. Select **Cursor** in the runner picker. On the qualified
-`2026.10.01-e373342` build, new sessions use print mode so marketplace plugins
+its location. Select **Cursor** in the runner picker. On build
+`2026.10.01-e373342` or newer, new sessions use print mode so marketplace plugins
 are available. Cezar checks `agent --version` and the native tool catalog before
 the first turn; `agent --version` is also the quick way to check your installation.
-Other builds use ACP, which may not see marketplace plugins. Existing ACP
+Cezar starts the CLI with `--disable-auto-update`, so a task never updates it;
+update it yourself with `agent update`. Older builds, and a build missing a core
+tool, use ACP, which may not see marketplace plugins. Existing ACP
 sessions continue on ACP so their conversation history is preserved.
 A missing CLI leaves the other backends available. `CEZ_DRY_RUN=1` uses the mock.
 Cursor questions from a plugin may be automatically skipped by print mode. Cezar's

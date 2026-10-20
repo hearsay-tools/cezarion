@@ -4,7 +4,7 @@ import type { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 import type { DelegationApp } from '../delegation/transport.ts';
 import type { AppType } from './app-type.ts';
-import type { discoveryRequestSchema, discoveryResponseSchema, conversationSendRequestSchema, conversationSendResultSchema, conversationInspectRequestSchema, conversationInspectResultSchema, conversationCancelRequestSchema, inboxReserveResultSchema, inboxReceiptRequestSchema, inboxReceiptResultSchema, requestOutcomeSchema, requestWaitRequestSchema, workerCollectedResultSchema, workerCancelWaitRequestSchema, workerCancelWaitResultSchema, runRelationshipsSchema, runIdParamSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema, workerDiffSchema, workerWaitResultSchema, workerSpawnRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerSteerRequestSchema, workerEmptyRequestSchema } from '@open-mercato/cezar-contract';
+import type { workerListPageSchema, workerListQuerySchema, discoveryRequestSchema, discoveryResponseSchema, conversationSendRequestSchema, conversationSendResultSchema, conversationInspectRequestSchema, conversationInspectResultSchema, conversationCancelRequestSchema, inboxReserveResultSchema, inboxReceiptRequestSchema, inboxReceiptResultSchema, requestOutcomeSchema, requestWaitRequestSchema, workerCollectedResultSchema, workerCancelWaitRequestSchema, workerCancelWaitResultSchema, runRelationshipsSchema, runIdParamSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema, workerDiffSchema, workerWaitResultSchema, workerSpawnRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerSteerRequestSchema, workerEmptyRequestSchema } from '@open-mercato/cezar-contract';
 
 describe('delegation contract and chained type surface', () => {
   const client = hc<DelegationApp>('http://127.0.0.1');
@@ -15,6 +15,8 @@ describe('delegation contract and chained type surface', () => {
   type Schema = ExtractSchema<DelegationApp>;
   type HumanSchema = ExtractSchema<AppType>;
   type _Checks = [
+    Assert<Mutual<z.input<typeof workerListQuerySchema>, Schema['/api/v1/delegation/list']['$get']['input']['query']>>,
+    Assert<Mutual<z.infer<typeof workerListPageSchema>, InferResponseType<typeof family.list.$get, 200>>>,
     Assert<Mutual<z.infer<typeof discoveryResponseSchema>, InferResponseType<typeof family.discover.$post, 200>>>,
     Assert<Mutual<z.input<typeof discoveryRequestSchema>, Schema['/api/v1/delegation/discover']['$post']['input']['json']>>,
     Assert<Mutual<z.infer<typeof conversationSendResultSchema>, InferResponseType<typeof family.send.$post, 200>>>,

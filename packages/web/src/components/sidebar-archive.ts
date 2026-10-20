@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import * as React from 'react'
 
-import { queryScope } from '@open-mercato/cezar-api-client'
+import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import type { ArchiveFinishedScope, RunSummary } from '@open-mercato/cezar-api-client'
 import { archiveProjectFinished, archiveProjectRun, archiveRun, archiveFinished, pinProjectRun, pinRun } from '@/api/client'
 import { toast } from '@/components/ui/toaster'

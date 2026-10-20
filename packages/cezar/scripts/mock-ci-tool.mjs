@@ -83,6 +83,9 @@ export async function toolPrompt(backend, wire, text) {
     try { last = JSON.parse(result.response.content[0].text.split('\n')[0]).wait_id ?? last; } catch { /* a refusal names no wait */ }
     responses.push(JSON.stringify(result.response));
   }
+  // `mock:then <base64 text>` ends the turn with that text after the calls (an ask line, say).
+  const then = /mock:then\s+([A-Za-z0-9+/=_-]+)/.exec(text);
+  if (then) responses.push(Buffer.from(then[1], 'base64').toString('utf8'));
   return responses.join('\n');
 }
 

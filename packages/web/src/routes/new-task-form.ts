@@ -1,4 +1,4 @@
-import { runnerDiscoversModels } from '@open-mercato/cezar-api-client'
+import { runnerDiscoversModels } from '@open-mercato/cezar-api-client/contract/workspace'
 import type {
   BackendCheck,
   CreateRunInput,

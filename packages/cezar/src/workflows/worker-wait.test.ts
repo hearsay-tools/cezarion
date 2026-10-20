@@ -4,7 +4,8 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
-import { deriveAttention, workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract';
+import { deriveAttention } from '@open-mercato/cezar-contract/attention';
+import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
@@ -16,12 +17,13 @@ import { currentUsage } from '../core/process-usage.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { withDelayedCommand } from '../core/owned-input-delivery.testkit.ts';
+import { repointMockImports } from '../core/mock-patch.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 import {
   bookkeeping, captureState, checkpoint, collect, controlledWire, executions, fixtureUpdateRun,
   manager, parent, queuedWake, register, reopenRuntime, restart, root, semaphore, setFailureState,
-  store, terminal, track, until, useWorkerWaitFixture, waitOf, worker,
+  store, terminal, track, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
 import { blockRunWrites, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
@@ -198,9 +200,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
 
   it.each([false, true])('spent completion budget stops monitoring after workers settle (repeated DONE=%s)', async repeated => {
     const mock = join(root, 'settled-monitor.mjs');
-    const source = readFileSync(HARNESS_ADAPTERS.claude.mockBin, 'utf8').replace(
+    const source = repointMockImports(HARNESS_ADAPTERS.claude.mockBin, readFileSync(HARNESS_ADAPTERS.claude.mockBin, 'utf8').replace(
       "userText.includes('mock:monitoring')",
-      "(userText.includes('mock:monitoring') || userText.includes('Re-check the downstream work'))");
+      "(userText.includes('mock:monitoring') || userText.includes('Re-check the downstream work'))"));
     writeFileSync(mock, source, { mode: 0o755 });
     process.env.CEZ_DRY_RUN = '0'; process.env.CEZ_CLAUDE_BIN = mock;
     const p = await parent();
@@ -324,7 +326,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
             "text: JSON.parse(body).parts.map(part => part.text ?? '').join('\\n') + '\\nCEZ:MONITORING',");
           else source = source.replace("userText.includes('mock:monitoring')", "(userText.includes('mock:monitoring') || userText.includes('Worker wait'))");
           expect(source).not.toBe(readFileSync(original, 'utf8'));
-          writeFileSync(mock, source, { mode: 0o755 });
+          writeFileSync(mock, repointMockImports(original, source), { mode: 0o755 });
           process.env.CEZ_DRY_RUN = '0'; process.env[HARNESS_ADAPTERS[backend].binEnv] = mock;
           const p = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold', runner: backend });
           store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
@@ -366,13 +368,13 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           expect(store.getRun(w.id)?.status).toBe('queued');
           const receipt = store.getRun(p.id)?.delegation;
           expect(receipt).toMatchObject({ completion: { phase: 'attention' }, lastWait: { id: wait.id, reason: 'timeout' } });
-          // Monitoring still admits a deliberate wait; a human can then reset the cycle.
+          // Monitoring still admits a deliberate wait; a human can then reset the cycle. Since
+          // hearsay-tools/cezarion#1235 the deliberate wait is a list entry the message leaves open.
           const deliberate = register(p.id, [w.id]);
           expect(deliberate.id).not.toBe(wait.id);
           expect(manager.sendMessage(p.id, [{ type: 'text', text: delayedAck ? 'mock:agent-echo' : 'mock:monitoring' }])).toBe(true);
-          await until(() => monitors(p.id));
-          expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
-          expect(monitoringWakeOf(store.getRun(p.id))).toBeDefined();
+          await until(() => store.getRun(p.id)?.status === 'waiting' && !(store.getRun(p.id)?.delegation as { completion?: unknown } | undefined)?.completion && monitoringWakeOf(store.getRun(p.id)) !== undefined);
+          expect(workerEntryOf(store.getRun(p.id))?.id).toBe(deliberate.id);
         };
         try {
           if (delayedAck) await withDelayedCommand('opencode', exercise, 'Worker wait');
@@ -401,7 +403,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(waitOf(store.getRun(p.id))?.revisions).toContainEqual({ workerId: first.id, revision: 1 });
     fixtureUpdateRun(first.id, { status: 'review' }); manager.reconcileWorkerWaits();
     await until(() => !waitOf(store.getRun(p.id)));
-    expect(store.getRun(p.id)?.delegation).toMatchObject({ lastWait: { outcomes: expect.arrayContaining([{ workerId: first.id, revision: 1, status: 'review', observedAt: expect.any(String) }]) } });
+    expect(lastWaitOf(store.getRun(p.id))).toMatchObject({ outcomes: expect.arrayContaining([{ workerId: first.id, revision: 1, status: 'review', observedAt: expect.any(String) }]) });
     expect(store.readEvents(p.id)).toContainEqual(expect.objectContaining({ type: 'worker-outcome', outcome: expect.objectContaining({ workerId: first.id, revision: 1 }) }));
   });
 
@@ -415,7 +417,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     fixtureUpdateRun(second.id, { status: 'done' }); manager.reconcileWorkerWaits();
     await until(() => !waitOf(store.getRun(p.id)));
     expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
-    expect(store.getRun(p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'outcome' } });
+    expect(lastWaitOf(store.getRun(p.id))).toMatchObject({ id: wait.id, reason: 'outcome' });
   });
 
   it('cancels before park durably without releasing an executing parent slot', async () => {
@@ -426,22 +428,24 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(cancelled).toMatchObject({ id: wait.id, phase: 'wake-pending', reason: 'cancelled', wakeId: wait.id });
     expect(semaphore.busy()).toBe(1); expect(store.getRun(w.id)?.status).toBe('queued');
     const disk = readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[];
-    expect(disk.find(run => run.id === p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'cancelled' } });
+    // hearsay-tools/cezarion#1235: a cancelled wait moves to lastWaits and queues no wake.
+    expect(lastWaitOf(disk.find(run => run.id === p.id))).toMatchObject({ id: wait.id, reason: 'cancelled' });
     expect(store.getRun(p.id)?.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
     writeFileSync(release, 'release');
     await until(() => !waitOf(store.getRun(p.id)));
     expect(manager.cancelWorkerWait(p.id, wait.id).reason).toBe('cancelled');
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
-    expect(store.getRun(p.id)?.agentInputs?.[0]?.text).toContain('cancelled');
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id) ?? []).toEqual([]);
   });
 
-  it('cancelled parked wait queues one wake behind a running worker and stale IDs cannot cancel a later wait', async () => {
+  it('cancelled parked wait queues no wake behind a running worker and stale IDs cannot cancel a later wait', async () => {
     const p = await parent(); const w = await worker(p.id, 'mock:slow');
     const wait = register(p.id, [w.id]); manager.enqueueOwnedRun(w.id);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked' && store.getRun(w.id)?.status === 'running');
     manager.cancelWorkerWait(p.id, wait.id); manager.cancelWorkerWait(p.id, wait.id); manager.reconcileWorkerWaits();
     expect(store.getRun(w.id)?.status).toBe('running'); expect(semaphore.busy()).toBe(1);
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
+    // hearsay-tools/cezarion#1235: the cancelled entry moves to lastWaits; nothing wakes the parent.
+    expect(lastWaitOf(store.getRun(p.id))).toMatchObject({ id: wait.id, reason: 'cancelled' });
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id) ?? []).toEqual([]);
     manager.requestWorkerStop(w.id); await manager.awaitRunTermination(w.id, 15_000);
     await until(() => !waitOf(store.getRun(p.id)));
     const nextWorker = await worker(p.id); const next = register(p.id, [nextWorker.id]);
@@ -449,10 +453,10 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(waitOf(store.getRun(p.id))?.id).toBe(next.id);
     expect(() => manager.cancelWorkerWait(p.id, randomUUID())).toThrow();
     expect(waitOf(store.getRun(p.id))?.reason).toBeUndefined();
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id && input.deliveredAt)).toHaveLength(1);
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id) ?? []).toEqual([]);
   });
 
-  it('restarts cancelled settlement and retains its receipt after delivery and another restart', async () => {
+  it('restarts a cancelled wait and retains its receipt across restarts without a wake', async () => {
     const release = join(root, 'release-recovered-turn'); const wire = controlledWire({ firstResultGate: release });
     const p = await parent(); await until(wire.initialReceived); const w = await worker(p.id);
     const wait = register(p.id, [w.id]); manager.cancelWorkerWait(p.id, wait.id);
@@ -461,11 +465,11 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await restart(false, disk);
     await until(() => !waitOf(store.getRun(p.id)));
     expect(manager.cancelWorkerWait(p.id, wait.id).reason).toBe('cancelled');
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id) ?? []).toEqual([]);
     expect(store.getRun(w.id)?.status).not.toBe('cancelled');
     await restart();
     expect(manager.cancelWorkerWait(p.id, wait.id).reason).toBe('cancelled');
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id) ?? []).toEqual([]);
   });
 
   it('failed cancellation checkpoint publishes no wake and keeps the original wait retryable', async () => {
@@ -475,7 +479,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       expect(() => manager.cancelWorkerWait(p.id, wait.id)).toThrow();
       expect(waitOf(store.getRun(p.id))).toEqual(wait);
       expect(store.getRun(p.id)?.agentInputs).toBeUndefined();
-      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('lastWait');
+      expect(lastWaitOf(store.getRun(p.id))).toBeUndefined();
       expect(semaphore.busy()).toBe(1);
     } finally { release(); }
     expect(manager.cancelWorkerWait(p.id, wait.id).reason).toBe('cancelled');
@@ -486,7 +490,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
     manager.cancel(p.id);
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
-    expect(store.getRun(p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'cancelled' } });
+    expect(lastWaitOf(store.getRun(p.id))).toMatchObject({ id: wait.id, reason: 'cancelled' });
     await until(() => store.getRun(w.id)?.status === 'cancelled');
     expect(store.getRun(p.id)?.agentInputs).toBeUndefined();
   });

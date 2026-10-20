@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { resetCursorAutoUpdateFlagCache } from './cursor-cli-flags.ts';
 import { discoverCursorModels, discoverCursorParameterizedModels, discoverCursorVariantModels, parseCursorModels, resolveCursorExecutable, spawnCursor } from './cursor-model-catalog.ts';
 
 // Shape observed from the installed `agent --list-models`, including its footer.
@@ -31,7 +32,7 @@ function fakeChild() {
   };
 }
 
-afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
+afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); resetCursorAutoUpdateFlagCache(); });
 
 describe('Cursor model listing', () => {
   it('preserves exact IDs, display labels and order without guessing effort metadata', () => {
@@ -68,7 +69,7 @@ describe('Cursor discovery child', () => {
     fake.stdout.write(LIST);
     fake.close();
     await expect(result).resolves.toEqual(MODELS);
-    expect(spawn).toHaveBeenCalledExactlyOnceWith('/cursor-agent', ['--list-models'], '/repo');
+    expect(spawn).toHaveBeenCalledExactlyOnceWith('/cursor-agent', ['--disable-auto-update', '--list-models'], '/repo');
     expect(fake.child.stdin.writableEnded).toBe(true);
     expect(fake.kill).not.toHaveBeenCalled();
   });
@@ -98,7 +99,7 @@ describe('Cursor discovery child', () => {
     fake.stdout.write(LIST);
     fake.close();
     await expect(result).resolves.toEqual(MODELS);
-    expect(spawn).toHaveBeenCalledExactlyOnceWith('/custom-agent', ['--list-models'], '/repo');
+    expect(spawn).toHaveBeenCalledExactlyOnceWith('/custom-agent', ['--disable-auto-update', '--list-models'], '/repo');
   });
 
   it.each(['exit', 'error', 'stdin'])('rejects %s failure without including private output', async (kind) => {
@@ -152,6 +153,15 @@ describe('Cursor discovery child', () => {
   });
 });
 
+/** Resolves once the second child is spawned and its listeners are attached. */
+function spawnTwice(first: ReturnType<typeof fakeChild>, second: ReturnType<typeof fakeChild>) {
+  let markRespawned!: () => void;
+  const respawned = new Promise<void>(resolve => { markRespawned = resolve; });
+  const spawn = vi.fn().mockReturnValueOnce(first.child)
+    .mockImplementationOnce(() => { markRespawned(); return second.child; });
+  return { spawn, respawned };
+}
+
 function rpcReply(fake: ReturnType<typeof fakeChild>, id: number, result: unknown) {
   fake.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\n');
 }
@@ -191,7 +201,7 @@ describe('Cursor parameterized discovery', () => {
       { id: 'thinking-only', label: 'Thinking', description: '', effortLevels: [] },
       { id: 'absent', label: 'Absent', description: '', effortLevels: [] },
     ]);
-    expect(spawn).toHaveBeenCalledExactlyOnceWith('/cursor', ['acp'], '/repo');
+    expect(spawn).toHaveBeenCalledExactlyOnceWith('/cursor', ['--disable-auto-update', 'acp'], '/repo');
     expect(requests).toEqual([
       { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1, clientCapabilities: { _meta: { parameterizedModelPicker: true } } } },
       { jsonrpc: '2.0', id: 2, method: 'cursor/list_available_models', params: {} },
@@ -226,6 +236,45 @@ describe('Cursor parameterized discovery', () => {
     fake.close();
   });
 
+  it('reruns ACP discovery without --disable-auto-update on a build that rejects it (hearsay-tools/cezarion#1257)', async () => {
+    const rejected = fakeChild();
+    const retried = fakeChild();
+    const { spawn, respawned } = spawnTwice(rejected, retried);
+    const result = discoverCursorParameterizedModels({ cwd: '/repo', bin: '/old-cursor', spawn });
+    rejected.stderr.write("error: unknown option '--disable-auto-update'\n");
+    rejected.close(1);
+    await respawned;
+    rpcReply(retried, 1, { protocolVersion: 1 });
+    rpcReply(retried, 2, { models: [] });
+    await expect(result).resolves.toEqual([]);
+    expect(spawn.mock.calls.map(call => call[1])).toEqual([['--disable-auto-update', 'acp'], ['acp']]);
+    retried.close();
+  });
+
+  it('reruns --list-models without --disable-auto-update on a build that rejects it', async () => {
+    const rejected = fakeChild();
+    const retried = fakeChild();
+    const { spawn, respawned } = spawnTwice(rejected, retried);
+    const result = discoverCursorVariantModels({ cwd: '/repo', bin: '/old-cursor', spawn });
+    rejected.stderr.write("error: unknown option '--disable-auto-update'\n");
+    rejected.close(1);
+    await respawned;
+    retried.stdout.write(LIST);
+    retried.close();
+    await expect(result).resolves.toEqual(MODELS);
+    expect(spawn.mock.calls.map(call => call[1])).toEqual([['--disable-auto-update', '--list-models'], ['--list-models']]);
+  });
+
+  it('does not retry an unrelated nonzero exit', async () => {
+    const failed = fakeChild();
+    const spawn = vi.fn().mockReturnValueOnce(failed.child);
+    const result = discoverCursorVariantModels({ cwd: '/repo', bin: '/cursor', spawn });
+    failed.stderr.write("error: unknown option '--other'\n");
+    failed.close(1);
+    await expect(result).rejects.toThrow('child exited (1)');
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
   it('falls back to the variant list only when the extension is unsupported', async () => {
     const first = fakeChild();
     const legacy = fakeChild();
@@ -238,7 +287,7 @@ describe('Cursor parameterized discovery', () => {
     legacy.close();
     first.close();
     await expect(result).resolves.toEqual(MODELS);
-    expect(spawn.mock.calls[1]).toEqual(['/cursor', ['--list-models'], '/repo']);
+    expect(spawn.mock.calls[1]).toEqual(['/cursor', ['--disable-auto-update', '--list-models'], '/repo']);
   });
 
   it.each(['timeout', 'cap', 'close', 'malformed', 'error', 'stdin', 'rpc'])('bounds %s failures without fallback or raw diagnostics', async kind => {

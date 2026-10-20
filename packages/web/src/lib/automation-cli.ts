@@ -1,4 +1,5 @@
-import { cronOf, type CreateAutomationInput } from '@open-mercato/cezar-api-client'
+import { cronOf } from '@open-mercato/cezar-api-client/contract/automation-schedule'
+import type { CreateAutomationInput } from '@open-mercato/cezar-api-client'
 
 import { toCreateBody, type AutomationDraft } from '@/routes/automations/editor-draft'
 

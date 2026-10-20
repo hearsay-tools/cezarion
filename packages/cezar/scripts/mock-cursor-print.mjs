@@ -5,6 +5,8 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeF
 function watchdogWritePid(file, pid) { const tmp = `${file}.${process.pid}.tmp`; writeFileSync(tmp, pid); renameSync(tmp, file); }
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
+// Dynamic, like every sibling import here, so a test's copy of this mock can repoint it.
+const { answerNudge, NO_WAIT_NUDGE_PREFIX } = await import('./mock-nudge.mjs');
 import { randomUUID } from 'node:crypto';
 
 const args = process.argv.slice(2);
@@ -32,7 +34,7 @@ if (!positionalPrompt) for await (const chunk of process.stdin) stdinChunks.push
 const stdinPrompt = Buffer.concat(stdinChunks).toString('utf8');
 const promptArg = stdinPrompt || positionalPrompt;
 const promptBoundary = promptArg.lastIndexOf('\n\n---\n\n');
-const prompt = promptBoundary < 0 ? promptArg : promptArg.slice(promptBoundary + '\n\n---\n\n'.length);
+const rawPrompt = promptBoundary < 0 ? promptArg : promptArg.slice(promptBoundary + '\n\n---\n\n'.length);
 const taggedScenarios = [
   ['resume-done', 'a0000001'], ['autonomous-ask-cap', 'a0000002'],
   ['autonomous-cap', 'a0000003'], ['silent-tail-late-turn-start', 'a0000004'],
@@ -40,7 +42,7 @@ const taggedScenarios = [
   ['silent-tail-slow-done', 'a0000007'], ['silent-tail-again', 'a0000008'],
   ['silent-tail', 'a0000009'], ['tool-tail', 'a000000a'],
 ];
-const freshTag = taggedScenarios.find(([name]) => prompt.includes(`mock:${name}`))?.[1];
+const freshTag = taggedScenarios.find(([name]) => rawPrompt.includes(`mock:${name}`))?.[1];
 const id = resumeId && mode !== 'mismatch-on-resume' ? resumeId
   : (freshTag ? freshTag + randomUUID().slice(8) : randomUUID());
 const stateFile = join(process.cwd(), '.ai', 'cezar', 'mock-cursor-print', `${id}.json`);
@@ -53,6 +55,9 @@ if (freshTag) {
   mkdirSync(join(process.cwd(), '.ai', 'cezar', 'mock-cursor-print'), { recursive: true });
   writeFileSync(stateFile, JSON.stringify({ origin }));
 }
+// One process per turn: the session's opening scenario comes from its tag, not a latch.
+const silentOrigin = /^(silent-tail|tool-tail)/.test(origin ?? '');
+const prompt = silentOrigin ? rawPrompt : answerNudge(rawPrompt);
 const frame = value => process.stdout.write(`${JSON.stringify(value)}\n`);
 const assistant = text => frame({ type: 'assistant', session_id: id,
   message: { role: 'assistant', content: [{ type: 'text', text }] } });
@@ -142,9 +147,9 @@ if (prompt.includes('mock:autonomous') || prompt.startsWith('Continue working au
   finish(autonomousReply(tagged)); process.exit(0);
 }
 if (prompt.includes('mock:silent-tail') || prompt.includes('mock:tool-tail') ||
-    prompt.includes('Your last turn ended without a message to the user.')) {
+    (silentOrigin && prompt.includes(NO_WAIT_NUDGE_PREFIX))) {
   const silent = await import('./mock-silent-tail.mjs');
-  if (prompt.includes('Your last turn ended without a message to the user.')) {
+  if (silentOrigin && prompt.includes(NO_WAIT_NUDGE_PREFIX)) {
     if (origin === 'silent-tail-no-reply') { setInterval(() => {}, 1000); await new Promise(() => {}); }
     if (origin === 'silent-tail-late-reply') await new Promise(resolve => setTimeout(resolve, silent.LATE_REPLY_MS));
     if (origin === 'silent-tail-slow-done') {

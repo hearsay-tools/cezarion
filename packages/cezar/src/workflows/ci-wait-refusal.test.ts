@@ -1,14 +1,15 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { workerWaitRequestSchema } from '@open-mercato/cezar-contract';
+import { workerWaitRequestSchema } from '@open-mercato/cezar-contract/delegation';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
+import { repointMockImports } from '../core/mock-patch.testkit.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { CiToolController } from '../ci-wait/controller.ts';
 import { callCiWait } from '../ci-wait/client.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
-import { manager, store, root, worker, fixtureUpdateRun, until, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { manager, store, root, worker, fixtureUpdateRun, lastWaitOf, until, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 // Delay only native mock output. The runner, lifecycle, IPC and persistence stay real.
@@ -29,7 +30,7 @@ function holdNativeTurn(runner: RunnerId) {
     expect(source.split(anchor)).toHaveLength(2);
     source = source.replace(anchor, runner === 'cursor' ? `if (prompt.includes('mock:hold')) { ${gate} }` : `${gate}\n${anchor}`);
   }
-  if (runner === 'cursor') source = source.replaceAll("import('./", `import('${join(adapter.mockBin, '..')}/`);
+  source = repointMockImports(adapter.mockBin, source);
   const mock = join(root, 'gated-native.mjs');
   writeFileSync(mock, `#!/usr/bin/env node\nimport * as ciGateFs from 'node:fs';
 async function ciRefusalGate() {
@@ -45,11 +46,15 @@ const pr = 'https://github.com/acme/repo/pull/12';
 const identity = { prUrl: pr, repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40) };
 const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'ci');
 
-describe('R27 CI registration refusal after worker settlement — #713', { timeout: 30_000 }, () => {
+// hearsay-tools/cezarion#1235 phase 3a: worker waits are entries in the wait list beside CI, so the
+// R27 refusal (#713: no CI wait while a worker wait is pending or owed) is gone. These cells pin
+// the replacement on every runner's native wire: CI registers beside a pending and a settled
+// worker wait, and the worker result is still delivered once.
+describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezarion#1235', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
   afterEach(() => vi.restoreAllMocks());
 
-  it.each(RUNNER_IDS)('%s names a settled but undelivered worker wait, then registers after delivery', async runner => {
+  it.each(RUNNER_IDS)('%s registers CI beside a pending and a settled worker wait, and delivers the worker result once', async runner => {
     const wire = holdNativeTurn(runner);
     vi.spyOn(CiWatcherSupervisor.prototype, 'resolve').mockResolvedValue(identity);
     vi.spyOn(CiWatcherSupervisor.prototype, 'watch').mockReturnValue(new Promise(() => {}));
@@ -62,26 +67,26 @@ describe('R27 CI registration refusal after worker settlement — #713', { timeo
       const tools = controller.provision(manager.cezarToolHandlers(run.id, state.ciGeneration));
       const child = await worker(run.id);
       const wait = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
-      // Pending and settled-but-undelivered waits must both identify their blocker.
-      await expect.soft(callCiWait({ pr }, tools.env)).rejects.toThrow(/worker_wait_pending:.*worker wait.*[Ee]nd your turn/);
+      await expect(callCiWait({ pr }, tools.env)).resolves.toMatchObject({ prUrl: pr });
+      const ci = ciWaitOf(run.id);
+      expect(ci).toMatchObject({ phase: 'open' });
       fixtureUpdateRun(child.id, { status: 'done' });
       manager.reconcileWorkerWaits();
       await until(() => waitOf(store.getRun(run.id))?.phase === 'wake-pending');
       const queued = () => store.getRun(run.id)?.agentInputs?.find(input => input.id === wait.id);
       expect(queued()?.deliveredAt).toBeUndefined();
       expect(store.readEvents(run.id).filter(e => e.type === 'turn-end')).toHaveLength(0);
-      await expect(callCiWait({ pr }, tools.env)).rejects.toThrow(/worker_wait_pending:.*worker wait.*[Ee]nd your turn/);
-      expect(ciWaitOf(run.id)).toBeUndefined();
-      expect(waitOf(store.getRun(run.id))?.id).toBe(wait.id);
+      // The same CI registration is answered again while the worker result is owed.
+      await expect(callCiWait({ pr }, tools.env)).resolves.toMatchObject({ prUrl: pr });
+      expect(ciWaitOf(run.id)?.id).toBe(ci!.id);
       wire.release();
       await until(() => !!queued()?.deliveredAt && !waitOf(store.getRun(run.id)));
-      await expect(callCiWait({ pr }, tools.env)).resolves.toMatchObject({ prUrl: pr });
-      expect(ciWaitOf(run.id)).toBeDefined();
+      expect(ciWaitOf(run.id)).toMatchObject({ id: ci!.id, phase: 'open' });
       expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
     } finally { wire.release(); await controller.close(); }
   });
   for (const action of ['cancel', 'destroy'] as const) {
-    it.each(RUNNER_IDS)(`%s R80 ${action} frees a settled wait during the same native turn`, async runner => {
+    it.each(RUNNER_IDS)(`%s R80 ${action} of a settled wait during the same native turn leaves CI registration open`, async runner => {
       const wire = holdNativeTurn(runner);
       vi.spyOn(CiWatcherSupervisor.prototype, 'resolve').mockResolvedValue(identity);
       vi.spyOn(CiWatcherSupervisor.prototype, 'watch').mockReturnValue(new Promise(() => {}));
@@ -97,18 +102,25 @@ describe('R27 CI registration refusal after worker settlement — #713', { timeo
         fixtureUpdateRun(child.id, { status: 'done' });
         manager.reconcileWorkerWaits();
         expect(waitOf(store.getRun(run.id))?.phase).toBe('wake-pending');
-        if (action === 'cancel') manager.cancelWorkerWait(run.id, wait.id);
-        else {
+        if (action === 'cancel') {
+          // hearsay-tools/cezarion#1235: a resolved wait is past cancelling. The cancel answers its
+          // `wake-pending` receipt and the result stays owed to the turn's end.
+          expect(manager.cancelWorkerWait(run.id, wait.id)).toMatchObject({ id: wait.id, phase: 'wake-pending', reason: 'outcome' });
+          expect(waitOf(store.getRun(run.id))).toMatchObject({ id: wait.id, phase: 'wake-pending' });
+          expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === wait.id && !input.deliveredAt)).toHaveLength(1);
+        } else {
           const service = new DelegationService();
           const unregister = service.registerProject({ id: 'project', root, store, manager });
           try {
             expect(await service.destroyForHuman('project', child.id)).toMatchObject({ state: 'complete', remaining: [] });
           } finally { unregister(); }
+          expect(waitOf(store.getRun(run.id))).toBeUndefined();
+          // hearsay-tools/cezarion#1235: the receipt is in `lastWaits`, and a destroy during the live
+          // turn cancels the wait it settled: nothing is left to await or deliver.
+          expect(lastWaitOf(store.getRun(run.id))).toMatchObject({ id: wait.id, reason: 'cancelled',
+            outcomes: [{ workerId: child.id, status: 'done' }] });
+          expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === wait.id && !input.deliveredAt)).toEqual([]);
         }
-        expect(waitOf(store.getRun(run.id))).toBeUndefined();
-        expect(store.getRun(run.id)?.delegation).toMatchObject({ lastWait: { id: wait.id,
-          reason: action === 'cancel' ? 'cancelled' : 'outcome', outcomes: [{ workerId: child.id, status: 'done' }] } });
-        expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === wait.id && !input.deliveredAt)).toEqual([]);
         expect(store.readEvents(run.id).filter(event => event.type === 'turn-end')).toHaveLength(0);
         // A new worker wait and then CI can both register before releasing the held turn.
         const next = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
