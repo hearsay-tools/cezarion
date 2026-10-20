@@ -4,7 +4,7 @@ import type { CiWaitEntry, HumanWaitEntry, TimerWaitEntry, Wait, WorkerWaitEntry
 import { ciWatchRequest, identicalWait, isCezarHumanWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, MONITORING_WAKE_NUDGE_MARKERS, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 
 // hearsay-tools/cezarion#1233: the wait list's pure helpers. RunManager behaviour lives in
-// the ci-wait*.test.ts files and the U-cells in waits-parity.test.ts.
+// the ci-wait*.test.ts files and the U-cells in waits-parity-cells.testkit.ts.
 const ci = (over: Partial<CiWaitEntry> = {}): CiWaitEntry => ({
   id: '11111111-1111-4111-8111-111111111111', kind: 'ci', source: 'agent', via: 'cezar_wait', generation: 'gen', turnId: 'turn-1',
   timeoutSeconds: 1800, prUrl: 'https://github.com/Acme/Repo/pull/12', repository: 'Acme/Repo', prNumber: 12, headSha: 'a'.repeat(40),

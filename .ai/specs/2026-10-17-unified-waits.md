@@ -969,7 +969,7 @@ Decisions made during execution:
   wait reads as Cezar's own human wait (note `completion blocked; waiting for you` or the refusal).
   A routed fallback reads on the worker as a routed question and on the parent as an incoming
   request.
-- **Coverage.** `RUNNER_IDS` cells in `workflows/waits-parity.test.ts`, each on every runner's
+- **Coverage.** `RUNNER_IDS` cells in `workflows/waits-parity-cells.testkit.ts`, each on every runner's
   native mock wire through `HARNESS_ADAPTERS`: U20 and U20u (the nudge, with and without the
   will-wait sentence), U20h and U20m (a human message, in the opening session or a continuation, or
   a worker message after a nudge the harness acknowledged on its native wire and never answered
