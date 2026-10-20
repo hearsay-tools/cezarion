@@ -131,7 +131,7 @@ needs a rerun; no background retry task is created outside the bounded transport
 | --- | --- |
 | `friction-auto` | Verify established intent, implement a bounded remedy, verify, open a draft PR |
 | `friction-guarded` | Name the approved guarantee, reproduce the violation, prove regression red/green, verify neighboring and boundary-specific guarantees, open a draft PR |
-| `friction-design` | Investigate, propose behavior and alternatives with acceptance criteria and a verification plan, then stop before product implementation |
+| `friction-design` | Run `/dev-flow` on its Design Track, prefer a bounded design in chat, ask for approval in the same task, then implement and verify before a draft implementation PR |
 
 All three require an open issue by `wjarka`, `friction`, their own handling label,
 no other handling label, exactly one recognized category, and no existing claim,
@@ -159,14 +159,31 @@ for other automations is unchanged: historical event labels still match. Preview
 counts describe historical matches; execution can skip a superseded route.
 
 Tasks use Codex, one isolated worktree, no generated follow-ups, and human review;
-none may merge or enable automation. Implementation routes can escalate to a
-design proposal whenever investigation exposes an unresolved decision.
+none may merge or enable automation. Automatic and guarded tasks run autonomously.
+The design route selects the `dev-flow` skill in an agent step and sets
+`autonomous:false`, so its human design-approval gate can ask questions and pause.
+Implementation routes can escalate to a design proposal whenever investigation
+exposes an unresolved decision.
 
-A design proposal records current load-bearing guarantees, alternatives and
-trade-offs, defaults, cost/authority boundaries, persistence/compatibility,
-acceptance criteria and verification. Run-state changes include a **Transitions
-out** table covering failure and no-session recovery. Approve the proposal and
-**Continue the same task** to implement it. Relabeling is not a new-stage handoff:
+Design tasks explicitly select `/dev-flow`'s **Design Track**, even when a Direct
+or Micro track might otherwise apply. Prefer a bounded design in chat when the
+investigated remedy is small and clear: state behavior, scope, files, acceptance
+criteria and verification, then request explicit human approval through
+`cezar_ask`. Architectural changes follow the skill's spec-and-plan path, with
+working files left untracked. Neither path opens a design-only or plan-only PR,
+commits planning files, or posts a standalone Plan handoff to the issue. A missing
+`dev-flow` skill is a blocker, not permission to substitute a documentation PR.
+
+The design records current load-bearing guarantees, alternatives and trade-offs,
+defaults, cost/authority boundaries, persistence/compatibility, acceptance criteria
+and verification. Run-state changes include a **Transitions out** table covering
+failure and no-session recovery. Automatic launch and labels never grant design
+approval. The task pauses for questions and explicit approval before product
+implementation; after approval, **Continue the same task** through `/dev-flow`'s
+implementation, verification and draft implementation PR. The approved design
+stays in the session, with the handoff maintained for resumption. Recheck
+eligibility on Continue while recognizing the same task's own assignment and
+claim; competing work still blocks it. Relabeling is not a new-stage handoff:
 cezar's existing issue deduplication can block a second task for that issue.
 
 The Jev action itself creates no cezar task, leaving issue deduplication available
@@ -188,3 +205,7 @@ prompts. Running `node .github/scripts/friction-policy.cjs` emits the definition
 for review. Create each with `cez automation create --file <definition.json>`
 without `--enable`, then use `cez automation check <id>` without `--execute`.
 Compare existing definitions before updating them; do not create duplicate polls.
+When updating an existing design poll, remove its `task.workflow` key (the CLI
+accepts `null` to remove a task key), set its `task.steps` to the `dev-flow` agent
+step, and set `task.autonomous:false`. Preview the updated filter without
+`--execute`; preserve its existing enablement and backlog settings.
