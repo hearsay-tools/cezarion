@@ -564,7 +564,9 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
     /** Continue delivers every held result once, and the run parks and finishes as usual. */
     async function continueDelivers(id: string, timer: Wait, later: Wait) {
       expect(manager.continueRun(id, { text: 'go on' })).toEqual({ ok: true });
-      await until(() => settled(id, timer.id)?.phase === 'delivered' && settled(id, later.id)?.phase === 'delivered');
+      // The store marks a wake delivered before the mock records the prompt it read; wait for both.
+      await until(() => settled(id, timer.id)?.phase === 'delivered' && settled(id, later.id)?.phase === 'delivered'
+        && prompted(runner, `Timer ${timer.id} fired`).length > 0 && prompted(runner, `Timer ${later.id} fired`).length > 0);
       expect(prompted(runner, `Timer ${timer.id} fired`)).toHaveLength(1);
       expect(prompted(runner, `Timer ${later.id} fired`)).toHaveLength(1);
       expect(inputsFor(id, timer.id)).toHaveLength(1);
@@ -764,7 +766,8 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       // A timer park keeps its slot, and the timer's result wakes the agent.
       expect(engine().monitoring.has(p.id)).toBe(true);
       fireTimer(timer.id);
-      await until(() => settled(p.id, timer.id)?.phase === 'delivered');
+      await until(() => settled(p.id, timer.id)?.phase === 'delivered' && inputsFor(p.id, timer.id).length > 0
+        && prompted(runner, inputsFor(p.id, timer.id)[0]!.text).length > 0);
       expect(inputsFor(p.id, timer.id)).toHaveLength(1);
       expect(prompted(runner, inputsFor(p.id, timer.id)[0]!.text)).toHaveLength(1);
       await until(() => store.getRun(p.id)?.status === 'waiting');
@@ -1783,16 +1786,22 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
         closes--;
         engine().active.get(p.id)?.session.end();
       };
+      // With no backoff the retry delivers at once and clears the count, so a poll can miss it: the
+      // store's own writes record that it was counted.
+      let counted = false;
+      const countOnce = (run: RunRecord) => { if (run.id === p.id && run.waitDeliveryFailures === 1) counted = true; };
       store.on('event', closeOnce);
+      store.on('run', countOnce);
       try {
         engine().active.get(p.id)!.session.end();
-        await until(() => store.getRun(p.id)?.waitDeliveryFailures === 1);
+        await until(() => counted);
         await until(() => prompted(runner, refusal).length > 0 && workerWaits(p.id)[0]?.phase === 'open' && store.getRun(p.id)?.status === 'waiting');
         expect(refusals()).toEqual([expect.objectContaining({ deliveredAt: expect.any(String) })]);
         expect(prompted(runner, MESSAGE_WAKE_OPENING)).toHaveLength(2);
         expect(store.getRun(p.id)?.waitDeliveryFailures).toBeUndefined();
       } finally {
         store.off('event', closeOnce);
+        store.off('run', countOnce);
       }
     });
 
