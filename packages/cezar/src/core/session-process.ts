@@ -135,12 +135,24 @@ function prune(): void {
   for (const [pgid, leader] of leaders) if (stale(pgid, leader)) drop(pgid, leader);
 }
 
-/** The follow-up SIGKILL for a group that got SIGTERM, while it is still ours. */
+/** How often a group that got SIGTERM is checked for members left. */
+const GROUP_POLL_MS = 50;
+
+/** The follow-up SIGKILL for a group that got SIGTERM, while it is still ours. The timer is
+ * referenced so a host with nothing else to do (a headless `cez run`) stays up to send it, and it
+ * stops as soon as the group is empty, so that host exits as soon as the group is gone
+ * (hearsay-tools/cezarion#1286). Each check is one `kill(-pgid, 0)`; only the SIGKILL reads the
+ * members, which on darwin spawns `ps` once each. */
 function scheduleKill(pgid: number, leader: Leader, signalledAt: number): void {
-  const timer = setTimeout(() => {
-    if (leaders.get(pgid) === leader && !stale(pgid, leader)) signalProcessGroup(pgid, 'SIGKILL');
-  }, Math.max(0, signalledAt + KILL_GRACE_MS - Date.now()));
-  timer.unref?.();
+  const deadline = signalledAt + KILL_GRACE_MS;
+  const check = (): void => {
+    if (leaders.get(pgid) !== leader) return;
+    if (!processGroupAlive(pgid)) { drop(pgid, leader); return; }
+    const left = deadline - Date.now();
+    if (left > 0) setTimeout(check, Math.min(GROUP_POLL_MS, left));
+    else if (!stale(pgid, leader)) signalProcessGroup(pgid, 'SIGKILL');
+  };
+  setTimeout(check, Math.max(0, Math.min(GROUP_POLL_MS, deadline - Date.now())));
 }
 
 /** End what a leader that exited on its own left in its group, once (hearsay-tools/cezarion#1286).
@@ -176,12 +188,13 @@ export function spawnSessionLeader(
   // Runners clear their own SIGKILL timers when the leader exits. A member that ignored the
   // SIGTERM cezar sent outlives it, so the follow-up SIGKILL for the group lives here. A leader
   // cezar never signalled is reaped after the exit drain, so a descendant's final crash
-  // diagnostic still lands first (harness row S19).
+  // diagnostic still lands first (harness row S19). The drain is referenced, and bounded by
+  // EXIT_DRAIN_CAP_MS, so a host with nothing else to do stays up to reap.
   child.once('exit', (code) => {
     if (leaders.get(pid) !== leader) return;
     leader.members = processGroupAlive(pid) ? groupMembers(pid) : [];
     if (stale(pid, leader)) { drop(pid, leader); return; }
-    if (leader.signalledAt === undefined) afterExitDrain(() => reap(pid, leader), exitDrainBudget(code));
+    if (leader.signalledAt === undefined) afterExitDrain(() => reap(pid, leader), exitDrainBudget(code), true);
     else scheduleKill(pid, leader, leader.signalledAt);
   });
   return child;
