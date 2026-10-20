@@ -483,6 +483,33 @@ describe('mapOpencodeEvent edge cases', () => {
       .toContainEqual({ type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn' });
   });
 
+  it('keeps a skipped skill with malformed YAML frontmatter a repairable warning (hearsay-tools/cezarion#1265)', () => {
+    let state = opencodeTurnStarted(opencodeSessionStarted(SESSION_ID, createOpencodeUiState()).state).state;
+    // OpenCode 1.18.35 `opencode serve` capture, 2026-10-18 (hearsay-tools/cezarion#1265).
+    const mapped = mapOpencodeEvent({ type: 'session.error', properties: { error: { name: 'UnknownError', data: {
+      message: '/home/agent/.agents/skills/bad4/SKILL.md: Failed to parse YAML frontmatter: unexpected end of the stream within a double quoted scalar at line 6, column 1:\n    \n    ^',
+    } } } }, state);
+    expect(mapped.events).toEqual([{ type: 'session.error', fatal: false,
+      message: 'opencode: optional skill skipped: /home/agent/.agents/skills/bad4/SKILL.md has invalid YAML frontmatter (unexpected end of the stream within a double quoted scalar at line 6, column 1: ^). Fix the frontmatter between the --- lines, for example by quoting values that contain a colon or a quote, or remove the skill.',
+    }]);
+    expect(mapped.state.turnErrored).toBe(false);
+    state = mapped.state;
+    expect(mapOpencodeEvent({ type: 'session.idle', properties: { sessionID: SESSION_ID } }, state).events)
+      .toContainEqual({ type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn' });
+  });
+
+  it.each([
+    ['C:\\Users\\a\\.claude\\skills\\x\\SKILL.md: Failed to parse YAML frontmatter: bad indentation',
+      'opencode: optional skill skipped: C:\\Users\\a\\.claude\\skills\\x\\SKILL.md has invalid YAML frontmatter (bad indentation). Fix the frontmatter between the --- lines, for example by quoting values that contain a colon or a quote, or remove the skill.'],
+    ['/skills/x/SKILL.md: Failed to parse YAML frontmatter: ',
+      'opencode: optional skill skipped: /skills/x/SKILL.md has invalid YAML frontmatter. Fix the frontmatter between the --- lines, for example by quoting values that contain a colon or a quote, or remove the skill.'],
+  ])('words the frontmatter warning for %j', (message, warning) => {
+    const state = opencodeTurnStarted(opencodeSessionStarted(SESSION_ID, createOpencodeUiState()).state).state;
+    const mapped = mapOpencodeEvent({ type: 'session.error', properties: { error: { name: 'UnknownError', data: { message } } } }, state);
+    expect(mapped.events).toEqual([{ type: 'session.error', fatal: false, message: warning }]);
+    expect(mapped.state.turnErrored).toBe(false);
+  });
+
   it.each([
     { sessionID: SESSION_ID, error: { name: 'UnknownError', data: { message: 'Failed to parse skill /skills/test/SKILL.md' } } },
     { error: { name: 'UnknownError', data: { message: 'provider unavailable' } } },
@@ -490,6 +517,12 @@ describe('mapOpencodeEvent edge cases', () => {
     { error: { name: 'UnknownError', message: 'Failed to parse skill /skills/test/SKILL.md' } },
     { error: { name: 'UnknownError', data: { message: 'Failed to parse skill ' } } },
     { sessionID: null, error: { name: 'UnknownError', data: { message: 'Failed to parse skill /skills/test/SKILL.md' } } },
+    { sessionID: SESSION_ID, error: { name: 'UnknownError', data: { message: '/skills/bad4/SKILL.md: Failed to parse YAML frontmatter: bad' } } },
+    { sessionID: null, error: { name: 'UnknownError', data: { message: '/skills/bad4/SKILL.md: Failed to parse YAML frontmatter: bad' } } },
+    { error: { name: 'ProviderAuthError', data: { message: '/skills/bad4/SKILL.md: Failed to parse YAML frontmatter: bad' } } },
+    { error: { name: 'UnknownError', data: { message: '/x/.opencode/agent/a.md: Failed to parse YAML frontmatter: bad' } } },
+    { error: { name: 'UnknownError', data: { message: 'config failed\n/skills/bad4/SKILL.md: Failed to parse YAML frontmatter: bad' } } },
+    { error: { name: 'UnknownError', data: { message: 'Failed to parse YAML frontmatter: bad' } } },
   ])('retains failure semantics outside the proven skill diagnostic: %j', properties => {
     const state = opencodeTurnStarted(opencodeSessionStarted(SESSION_ID, createOpencodeUiState()).state).state;
     const mapped = mapOpencodeEvent({ type: 'session.error', properties }, state);

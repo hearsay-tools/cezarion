@@ -630,7 +630,11 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     });
   });
 
-  it('skill diagnostics bypass the agent ACK barrier and leave subsequent input usable (#723)', async () => {
+  for (const { issue, path, message } of [
+    { issue: 'hearsay-tools/cezarion#723', path: '/skills/pen-design/SKILL.md', message: 'Failed to parse skill /skills/pen-design/SKILL.md' },
+    { issue: 'hearsay-tools/cezarion#1265', path: '/skills/bad4/SKILL.md',
+      message: '/skills/bad4/SKILL.md: Failed to parse YAML frontmatter: unexpected end of the stream within a double quoted scalar at line 6, column 1:\n    \n    ^' },
+  ]) it(`skill diagnostics bypass the agent ACK barrier and leave subsequent input usable (${issue})`, async () => {
     await withSession({ holdFollowupPrompt: true }, async ({ events, uiEvents, mock, session }) => {
       await waitFor(() => mock.promptPosts.length === 1);
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
@@ -641,14 +645,12 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       if (!ack) return;
       void ack.then(() => { acknowledged = true; }, () => undefined);
       await waitFor(() => mock.promptPosts.length === 2);
-      mock.send({ type: 'session.error', properties: {
-        error: { name: 'UnknownError', data: { message: 'Failed to parse skill /skills/pen-design/SKILL.md' } },
-      } });
+      mock.send({ type: 'session.error', properties: { error: { name: 'UnknownError', data: { message } } } });
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
       await waitFor(() => count(events, 'turn-end') === 2);
       expect(acknowledged).toBe(false);
       expect(events.filter(e => e.type === 'error')).toEqual([]);
-      expect(events).toContainEqual(expect.objectContaining({ type: 'note', message: expect.stringContaining('/skills/pen-design/SKILL.md') }));
+      expect(events).toContainEqual(expect.objectContaining({ type: 'note', message: expect.stringContaining(path) }));
       expect(uiEvents.filter(e => e.type === 'turn.completed').map(e => e.stopReason)).toEqual(['end_turn', 'end_turn']);
       mock.acknowledgeFollowups();
       await ack;
