@@ -1,3 +1,10 @@
+/**
+ * The delegation fixture the worker-wait suites share: a real `RunManager` over a scratch Git repo
+ * and native mocks (`useWorkerWaitFixture`), with builders for parents, workers, waits and restarts.
+ * Pass `timeline(runId, afterSeq)` as the message of an assertion on a run's turns or events, to
+ * `expect` or as `until`'s second argument: a failure then lists every event with its turn, step and
+ * text, which is how a no-wait nudge's extra turn shows up (hearsay-tools/cezarion#1292).
+ */
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
@@ -7,7 +14,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, onTestFinished, vi } from 'vitest';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { hasWorkerDeadline, workerWaitEntryToLegacy, workerWaitView, type DeadlinedWorkerWaitEntry, type WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
-import { RunStore, type RunRecord } from '../runs/store.ts';
+import { RunStore, type RunEvent, type RunRecord } from '../runs/store.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
 import { collectWorkerEvidence } from '../delegation/results.ts';
@@ -22,7 +29,35 @@ import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 
 export const terminal = ['review', 'done', 'failed', 'cancelled'];
-export async function until(predicate: () => boolean) { await vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 }); }
+/** `explain` builds a failure's message, such as `() => timeline(id)`, only once the wait has failed. */
+export async function until(predicate: () => boolean, explain?: () => string) {
+  await vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 }).catch((error: unknown) => {
+    if (explain && error instanceof Error) error.message = `${explain()}: ${error.message}`;
+    throw error;
+  });
+}
+/** A run's events after `afterSeq`, one line each: seq, type, turn, step and the first characters of
+ *  its text, note or message. An event without a `turnId` takes the one its `turn.started` opened, until the
+ *  `turn-end`; events between turns show `turn=-`. The last line, `assertion`, takes the
+ *  `: expected …` that Vitest appends to a message. */
+export function formatTimeline(runId: string, events: readonly RunEvent[], afterSeq = 0): string {
+  const lines: string[] = []; let turn: string | undefined;
+  for (const event of events) {
+    const own = typeof event.turnId === 'string' ? event.turnId : undefined;
+    if (event.type === 'turn.started') turn = own;
+    if (event.seq > afterSeq) {
+      // A note's `message` is a string; a conversation message's is an object with its `text`.
+      const message = typeof event.message === 'object' && event.message !== null ? (event.message as { text?: unknown }).text : event.message;
+      const said = typeof event.text === 'string' ? event.text : typeof message === 'string' ? message : '';
+      const excerpt = said.replace(/\s+/g, ' ').trim();
+      lines.push(`  ${event.seq} ${event.type} turn=${own ?? turn ?? '-'} step=${event.stepId ?? '-'}`
+        + (excerpt ? ` ${JSON.stringify(excerpt.length > 80 ? `${excerpt.slice(0, 80)}…` : excerpt)}` : ''));
+    }
+    if (event.type === 'turn-end') turn = undefined;
+  }
+  return [`events of run ${runId} after seq ${afterSeq}:`, ...(lines.length ? lines : ['  (none)']), 'assertion'].join('\n');
+}
+export const timeline = (runId: string, afterSeq = 0) => formatTimeline(runId, store.readEvents(runId), afterSeq);
 /** The run's worker wait in the legacy `WorkerWait` shape (`workerWaitView`): since
  *  hearsay-tools/cezarion#1235 phase 3a an agent's worker wait is a `worker` entry in the list. */
 export const waitOf = (run: RunRecord | undefined): WorkerWait | undefined => run ? workerWaitView(run) : undefined;
