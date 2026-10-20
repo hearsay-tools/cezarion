@@ -46,6 +46,7 @@ export const WAIT_CRITERIA = [
   { id: 'U9w', scenario: 'provider-error', name: 'provider failure and clean close with a worker wait open leave the run recoverable and the next resolution delivers' },
   { id: 'U14m', scenario: 'provider-error', name: 'a message-only wake beside a worker wait whose sessions persistently fail stops at the delivery bound keeping the message, Continue delivers it once, and a delivered message clears the failure count' },
   { id: 'U9u', scenario: 'baseline', name: 'after an upgrade, a cancelled worker wait\'s queued wake is delivered as ordinary input, and a parent whose message stand-in a provider took before the crash resumes' },
+  { id: 'U9v', scenario: 'baseline', name: 'an upgraded completion wait wakes once through the list' },
   { id: 'U19', scenario: 'turn-messages', name: 'a worker message beside a pending portable question is delivered and the question stays answerable' },
   // hearsay-tools/cezarion#1301 phase 3b: a blocked done at the turn end.
   { id: 'U20', scenario: 'baseline', name: 'a done blocked by live workers at the turn end gets one refusal nudge with the will-wait sentence and opens no wait' },

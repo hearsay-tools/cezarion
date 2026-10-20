@@ -206,7 +206,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U19', 'U20', 'U20u', 'U21', 'U21m', 'U21h', 'U21a', 'U22', 'U24']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U21', 'U21m', 'U21h', 'U21a', 'U22', 'U24']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -1368,7 +1368,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
     /** A parent on `runner`'s wire parked on a worker wait, written back to disk as an older build
      *  left it (the wait in `delegation.wait`, the list empty, `inputs` its only agent inputs), and
      *  restarted: upgrade-on-read and recovery decide what wakes it. */
-    async function restartLegacyParked(legacy: (wait: WorkerWaitEntry) => Record<string, unknown>, inputs: (parentId: string, workerId: string, wait: WorkerWaitEntry) => unknown[]) {
+    async function restartLegacyParked(legacy: (wait: WorkerWaitEntry) => Record<string, unknown>, inputs: (parentId: string, workerId: string, wait: WorkerWaitEntry) => unknown[], completion = false) {
       const { p, w } = await parentWithWorker(runner);
       await parentTurn(p.id, toolCall('cezar_wait', { kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }), () => parkedOn(p.id, workerWaits(p.id)[0]));
       const wait = workerWaits(p.id)[0]!;
@@ -1376,7 +1376,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       const disk = readPersistedRuns(join(root, '.ai/cezar')).map(row => {
         if (row.id !== p.id) return row;
         const { waits: _waits, ...rest } = row;
-        return { ...rest, delegation: { ...row.delegation, wait: legacy(wait) }, agentInputs: inputs(p.id, w.id, wait) };
+        return { ...rest, delegation: { ...row.delegation, wait: legacy(wait), ...(completion ? { completion: { phase: 'waiting', waitId: wait.id } } : {}) }, agentInputs: inputs(p.id, w.id, wait) };
       });
       await restart(false, disk);
       return { p, wait };
@@ -1401,6 +1401,21 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       await until(() => store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true || terminal.includes(store.getRun(p.id)?.status ?? ''));
       expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
       expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === messageId)).toEqual([expect.objectContaining({ deliveredAt: now })]);
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+    });
+
+    it(`${runner} U9v an upgraded completion wait wakes once through the list`, async () => {
+      // The queued wake is the list engine's to deliver, in its own words for the entry.
+      let text = '';
+      const { p, wait } = await restartLegacyParked(wait => ({ ...legacyOf(wait), mode: 'all', phase: 'wake-pending', reason: 'outcome', wakeId: wait.id }),
+        (parentId, _workerId, wait) => [{ id: wait.id, parentRunId: parentId, source: 'lifecycle', text: (text = workerWake(wait)), createdAt: new Date().toISOString() }], true);
+      await until(() => delivered(p.id, wait.id) && prompted(runner, text).length > 0);
+      expect(settled(p.id, wait.id)).toMatchObject({ kind: 'worker', source: 'cezar', via: 'completion', phase: 'delivered' });
+      expect(workerWaits(p.id)).toEqual([]);
+      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
+      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
+      expect(inputsFor(p.id, wait.id)).toHaveLength(1);
+      expect(prompted(runner, text)).toHaveLength(1);
       await until(() => store.getRun(p.id)?.status === 'waiting');
     });
 
