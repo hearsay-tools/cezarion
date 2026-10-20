@@ -1007,11 +1007,11 @@ list, except phase 3a's completion park rows, which this table replaces. One row
 | | Stop, delete | The user | Settles |
 | `running`, worker turn with its budget spent | The turn ends with no wait | The runner's turn end | Plain park, not routed; a human message or a parent message continues it. **Its only default exits are a human or the parent** |
 
-Two states 3b adds or keeps have a human as their only default exit, and the table says so: the
-completion human wait once every worker has settled and only uncollected results remain (nothing
-is left to come from the workers, and only the parent itself could collect, which needs a turn
-the user starts), and the budget-spent worker park, which keeps phase 2b's plain park (a parent
-message also ends it). Otherwise no state 3b adds waits only on a human: the completion worker
+Two states 3b adds or keeps have no automatic exit, and the table says so. The completion human
+wait, once every worker has settled and only uncollected results remain, has a human as its only
+default exit: nothing is left to come from the workers, and only the parent itself could collect,
+which needs a turn the user starts. The budget-spent worker park keeps phase 2b's plain park and
+ends only on a human or a parent message. Otherwise no state 3b adds waits only on a human: the completion worker
 wait ends on its workers' settlement, the completion human wait with workers still live on a
 worker's next settlement, message or question, and the fallback question on the parent's reply.
 Finish never ends a completion park early: the readiness check refuses it while any blocker
