@@ -223,6 +223,11 @@ async function handle(command) {
     }
   }
   if (command.type === 'prompt') command.message = answerNudge(command.message);
+  // `mock:ack-only` → the prompt is accepted and no agent run starts (hearsay-tools/cezarion#1301).
+  if (command.type === 'prompt' && command.message.includes('mock:ack-only')) {
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    return;
+  }
   if (command.type === 'get_state') {
     send({
       id: command.id,

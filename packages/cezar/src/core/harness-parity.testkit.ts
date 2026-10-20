@@ -791,6 +791,15 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'U13', backend: 'cursor', kind: 'capability-absent',
     reason: 'Cursor print acknowledges agent input on the first model work of the process it spawns; the print wire has no rejection of an admitted prompt.',
   },
+  // U20h/U20m/U22s (hearsay-tools/cezarion#1301): a refusal the harness acknowledges and never answers.
+  ...(['U20h', 'U20m', 'U22s'] as const).map(criterion => ({
+    criterion, backend: 'cursor' as const, kind: 'capability-absent' as const,
+    reason: 'Cursor print has no acknowledgement before native model work: each prompt spawns a process whose init frame is turn.started, which answers the nudge, so a refusal cannot be acknowledged and left unanswered (as F8).',
+  })),
+  {
+    criterion: 'U20h', backend: 'opencode', kind: 'capability-absent',
+    reason: 'OpenCode runs one prompt per turn: a human prompt waits for the busy turn to go idle, and a refusal acknowledged without a turn never goes idle, so the human message the cell sends after the bound is never posted. U20m delivers a worker message, which steers the busy turn.',
+  },
 ];
 
 export function exemptionFor(criterion: string, backend: RunnerId): ParityExemption | undefined {

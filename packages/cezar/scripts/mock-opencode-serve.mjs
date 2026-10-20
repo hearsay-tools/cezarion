@@ -178,6 +178,8 @@ const write = (event) => {
 // assistant message names it as parentID. Steers are read just before the turn's
 // idle, unless the turn is `late` (the upstream lost wake: never read).
 let turnActive = false;
+// The heartbeats of a held `mock:ack-only` turn (hearsay-tools/cezarion#1301).
+let heldBeats;
 let turnLate = false;
 let steers = [];
 let steerSerial = 0;
@@ -364,6 +366,7 @@ const server = createServer((req, res) => {
         res.end(JSON.stringify({ error: 'agent prompt rejected' }));
         return;
       }
+      if (heldBeats && url.endsWith('/prompt_async')) { clearInterval(heldBeats); heldBeats = undefined; turnActive = false; }
       if (turnActive && url.endsWith('/prompt_async')) {
         const text = JSON.parse(body).parts.map(part => part.text ?? '').join('\n');
         const userId = `msg_steer_user_${++steerSerial}`;
@@ -393,6 +396,13 @@ const server = createServer((req, res) => {
       } else {
       // owned-input-delivery.testkit.ts patches the exact line below to hold the ACK; keep it verbatim.
       res.end(JSON.stringify({ info: info({}), parts: [] }));
+      }
+      // `mock:ack-only` → prompt_async is acknowledged and the session stays busy on heartbeats
+      // with no turn until the next prompt, which it then runs (hearsay-tools/cezarion#1301).
+      if (body.includes('mock:ack-only')) {
+        heldBeats = setInterval(() => { if (sse) sse.write(': heartbeat\n\n'); }, 50);
+        heldBeats.unref?.();
+        return;
       }
       if (body.includes('mock:autonomous-readiness-idle')) autonomousReadinessIdle = true;
       if (body.includes('mock:autonomous-cap') || body.includes('mock:autonomous-ask-cap')) autonomousCap = true;

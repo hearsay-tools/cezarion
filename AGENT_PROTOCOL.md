@@ -1290,9 +1290,9 @@ the message reaches the wire, nothing answers the card, and the human's answer k
 `askSeq`. No runner takes U12's exemption here: U19 pins delivery, not a delayed acknowledgement.
 Phase 3b (hearsay-tools/cezarion#1301) adds, on every runner: U20 and U20u (a blocked done at the
 turn end gets one refusal nudge, with the will-wait sentence for live workers and without it for a
-settled, uncollected one, and opens no wait), U20h (a human message, in the opening session or a
-continuation, or a worker message after a refusal nudge the harness never answered starts a fresh
-cycle: its blocked done gets a fresh nudge, not the park), U21 (an ignored refusal parks on Cezar's completion
+settled, uncollected one, and opens no wait), U20h and U20m (a human message, in the opening session
+or a continuation, or a worker message after a refusal nudge the harness never answered starts a
+fresh cycle: its blocked done gets a fresh nudge, not the park), U21 (an ignored refusal parks on Cezar's completion
 worker wait, which settlement wakes), U21r (that deadline-less wait restarted and settled), U21m (a
 worker message wakes the parent beside it), U21t (an agent timer beside it keeps its deadline),
 U21h (only uncollected results: Cezar's human wait), U21a (an autonomous parent is nudged again
@@ -1301,7 +1301,12 @@ refusal), U22s (a reopened session that acknowledges the refusal and never answe
 nudge's reply bound), U22c (reopened sessions that keep closing first: one copy, the delivery bound,
 and Continue delivers it once; a legacy Finish too), U22f (one such close counts a failure, and the
 delivery clears it), U24 (a worker's second no-wait turn end asks its parent, whose reply resumes it) and U25
-(an automatic message supersedes that question).
+(an automatic message supersedes that question). The harness that never answers is each native
+mock's `mock:ack-only` reply (`CEZ_MOCK_COMPLETION_REPLY`): it acknowledges the refusal on its own
+wire and opens no turn until more input arrives. Cursor print is exempt from U20h, U20m and U22s
+(each prompt spawns a process whose init frame is `turn.started`, as F8), and OpenCode from U20h (a
+human prompt waits for the busy turn to go idle, and that turn never does; U20m's worker message
+steers it).
 
 **R74** extends that native-wire matrix to a failed nonfinal workflow agent.
 CI recovery must retain the failed attempt, including across restart and CI

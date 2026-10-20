@@ -964,19 +964,23 @@ Decisions made during execution:
   request.
 - **Coverage.** `RUNNER_IDS` cells in `workflows/waits-parity.test.ts`, each on every runner's
   native mock wire through `HARNESS_ADAPTERS`: U20 and U20u (the nudge, with and without the
-  will-wait sentence), U20h (a human message, in the opening session or a continuation, or a worker
-  message after an unanswered nudge starts a fresh cycle), U11 (an open timer at a blocked done: no
+  will-wait sentence), U20h and U20m (a human message, in the opening session or a continuation, or
+  a worker message after a nudge the harness acknowledged on its native wire and never answered
+  starts a fresh cycle), U11 (an open timer at a blocked done: no
   nudge, the refusal is a note), U21
   (an ignored refusal parks on the completion worker wait, which settlement wakes), U21r (that
   wait restarted and settled), U21m (a worker message wakes it beside the open wait), U21t (an
   agent timer beside it keeps its deadline), U21h (only uncollected results: Cezar's human wait),
   U21a (autonomous: nudged again until the budget), U22 (a closed session reopened to deliver the
-  refusal), U22s (a reopened session that acknowledges it and never answers: the reply bound
-  parks it), U22c (reopened sessions that keep closing first: one copy, the delivery bound, the
+  refusal), U22s (a reopened session that acknowledges it on its native wire and never answers:
+  the reply bound parks it), U22c (reopened sessions that keep closing first: one copy, the delivery bound, the
   run fails keeping it and Continue delivers it once; a legacy Finish too), U22f (one such close
   counts a failure and the delivery clears it), U24 (a worker's fallback routed to its parent, whose reply resumes it), U25 (an
   automatic message supersedes it) and U9v (an upgraded completion wait wakes once through the
-  list). `workflows/old-engine-removed.test.ts` guards that no source writes `delegation.wait` or
+  list). The silent harness is each native mock's `mock:ack-only` reply
+  (`CEZ_MOCK_COMPLETION_REPLY`). Cursor print takes named exemptions from U20h, U20m and U22s (no
+  acknowledgement before native model work, as F8), and OpenCode from U20h (one prompt per turn: a
+  human prompt waits for a turn that never goes idle). `workflows/old-engine-removed.test.ts` guards that no source writes `delegation.wait` or
   `activity: 'monitoring'`.
 
 ### Transitions out (phase 3b)
