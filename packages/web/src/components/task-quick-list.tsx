@@ -44,7 +44,7 @@ import { useSidebarSections } from '@/lib/use-sidebar-sections'
 import { cn } from '@/lib/utils'
 
 /**
- * The sidebar's task quick-list (spec, "App shell & navigation"): Active/Archived tabs, then the
+ * The sidebar's task quick-list (spec, "App shell & navigation"): Active/Automations tabs, then the
  * runs grouped Needs you / Finished / Working, with variant groups collapsed into one tile.
  *
  * Presentational — every decision it paints (which bucket, which order, which dot, whether a
@@ -158,7 +158,7 @@ export function sweepCountsOf(runs: readonly RunSummary[]): { unpinned: number; 
 
 /**
  * The bucketed rows alone — the piece the multi-project sidebar reuses per project group
- * (step 3.3), without the Active/Archived tabs that belong to the boot list's framing.
+ * (step 3.3), without the Active/Automations tabs that belong to the boot list's framing.
  *
  * `scope` prefixes every row target with an EXPLICIT `/p/<id>` (a non-active project's rows
  * must land in that project); `null` keeps the wrapper-Link default — the active scope.
@@ -1269,7 +1269,7 @@ function GroupSweepButton({
 
 /**
  * The quick-list wired to live data: `useRuns()` for the list (kept fresh by the global SSE
- * stream, Step 3.2), the router for which row is open, and the sidebar Active/Archived context —
+ * stream, Step 3.2), the router for which row is open, and the sidebar Active/Automations context —
  * independent of the Tasks table's own tabs.
  */
 export function TaskQuickListContainer({ showViewControls = true, projectId: explicitProjectId, boot = false }: { showViewControls?: boolean; projectId?: string; boot?: boolean }) {
