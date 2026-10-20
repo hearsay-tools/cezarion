@@ -215,7 +215,9 @@ void _statuses
 it('notifies once when a parked worker wait gains a human ask without changing status', () => {
   const constructed = stubNotification('granted')
   hideTab()
-  const parked = run({ status: 'waiting', hasPendingHumanAsk: false, delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })
+  const parked = run({ status: 'waiting', hasPendingHumanAsk: false, delegation: { role: 'root', permissions: [], receipts: [] },
+    // A worker wait is a wait-list entry (hearsay-tools/cezarion#1301).
+    waits: [{ kind: 'worker', id: '10000000-0000-4000-8000-000000000003', source: 'agent', via: 'cez-worker-wait', registeredAt: '2026-09-05T00:00:00.000Z', deadline: '2026-09-06T00:00:00.000Z', phase: 'open', turnId: 'turn-1', timeoutSeconds: 600, workerIds: ['child'], revisions: [], outcomes: [] }] } as Partial<RunRecord>)
   const { patch } = mount({ notifications: { enabled: true } }, [parked])
   patch([{ ...parked, tokensUsed: 10 }])
   expect(constructed).toHaveLength(0)
