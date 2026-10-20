@@ -53,6 +53,14 @@ const commandParams = common.extend({
 });
 const fileParams = common.extend({ grantRoot: nullableText, availableDecisions: z.array(simpleDecision).min(1).optional() });
 const permissionsParams = common.extend({ cwd: z.string(), permissions: permissionProfile });
+// hearsay-tools/cezarion#1294: Codex asks before an MCP tool call with an elicitation
+// (codex-rs/core/src/mcp_tool_call.rs). Like Codex's own TUI, read one as a tool approval
+// only when its kind says so and its form asks for nothing; elicitations carry no item id.
+const messageOnlySchema = z.object({ type: z.literal('object'), properties: z.object({}).strict() }).passthrough().nullish();
+const mcpToolParams = z.object({
+  threadId: text, turnId: text, serverName: text, mode: z.literal('form'), message: z.string(), requestedSchema: messageOnlySchema,
+  _meta: z.object({ codex_approval_kind: z.literal('mcp_tool_call'), persist: z.union([z.string(), z.array(z.string())]).optional() }).passthrough(),
+}).passthrough();
 
 export interface CodexApproval {
   rpcId: number | string;
@@ -62,23 +70,40 @@ export interface CodexApproval {
   responses: Map<string, Record<string, unknown>>;
 }
 
-export const CODEX_APPROVAL_METHODS = new Set([
+const CODEX_APPROVAL_METHODS = new Set([
   'item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'item/permissions/requestApproval',
 ]);
+const MCP_ELICITATION_METHOD = 'mcpServer/elicitation/request';
 
-export function codexApproval(method: string, rpcId: number | string, raw: unknown): CodexApproval | undefined {
-  const schema = method === 'item/commandExecution/requestApproval' ? commandParams
-    : method === 'item/fileChange/requestApproval' ? fileParams : permissionsParams;
-  const parsed = schema.safeParse(raw);
-  if (!parsed.success) return undefined;
-  const params = parsed.data;
-  const requestId = randomUUID();
+/** True for a request cezar answers as an approval; every other elicitation stays unsupported. */
+export function isCodexApprovalRequest(method: string, raw: unknown): boolean {
+  if (CODEX_APPROVAL_METHODS.has(method)) return true;
+  if (method !== MCP_ELICITATION_METHOD || !raw || typeof raw !== 'object') return false;
+  const { mode, _meta: meta, requestedSchema } = raw as Record<string, unknown>;
+  return mode === 'form' && !!meta && typeof meta === 'object' && (meta as Record<string, unknown>).codex_approval_kind === 'mcp_tool_call'
+    && messageOnlySchema.safeParse(requestedSchema).success;
+}
+
+function offer() {
   const options: PermissionOption[] = [];
   const responses = new Map<string, Record<string, unknown>>();
   const add = (label: string, kind: PermissionOption['kind'], result: Record<string, unknown>) => {
     const id = randomUUID();
     options.push({ id, label, kind }); responses.set(id, result);
   };
+  return { options, responses, add };
+}
+
+/** `cezarServer` is the run's own MCP server, which is never worth a saved rule. */
+export function codexApproval(method: string, rpcId: number | string, raw: unknown, cezarServer?: string): CodexApproval | undefined {
+  if (method === MCP_ELICITATION_METHOD) return mcpToolApproval(rpcId, raw, cezarServer);
+  const schema = method === 'item/commandExecution/requestApproval' ? commandParams
+    : method === 'item/fileChange/requestApproval' ? fileParams : permissionsParams;
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) return undefined;
+  const params = parsed.data;
+  const requestId = randomUUID();
+  const { options, responses, add } = offer();
   if (method === 'item/permissions/requestApproval') {
     add('Allow requested permissions for this turn', 'allow_once', { permissions: params.permissions, scope: 'turn' });
     add('Allow requested permissions for this session', 'allow_always', { permissions: params.permissions, scope: 'session' });
@@ -111,5 +136,27 @@ export function codexApproval(method: string, rpcId: number | string, raw: unkno
       // Retain action context, including exact proposed rules and permission
       // paths. Never abbreviate an amendment into an ambiguous "always allow".
       details: JSON.stringify({ ...details, ...(scopedDecisions.length ? { availableDecisions: scopedDecisions } : {}) }, null, 2), options },
+  };
+}
+
+function mcpToolApproval(rpcId: number | string, raw: unknown, cezarServer: string | undefined): CodexApproval | undefined {
+  const parsed = mcpToolParams.safeParse(raw);
+  if (!parsed.success) return undefined;
+  const { serverName, message, turnId, _meta: { codex_approval_kind: _kind, persist, tool_params_display: _display, ...meta } } = parsed.data;
+  const remembers = new Set(typeof persist === 'string' ? [persist] : persist ?? []);
+  const { options, responses, add } = offer();
+  // The reply shapes Codex's own TUI sends; a remembered scope rides in `_meta.persist`.
+  add('Allow once', 'allow_once', { action: 'accept', content: null, _meta: null });
+  if (remembers.has('session')) add('Allow this tool for this session', 'allow_always', { action: 'accept', content: null, _meta: { persist: 'session' } });
+  // `always` saves an approve rule in the user's Codex config. cezar's server name is per run.
+  if (remembers.has('always') && serverName !== cezarServer) {
+    add('Always allow this tool (saved in your Codex config)', 'allow_always', { action: 'accept', content: null, _meta: { persist: 'always' } });
+  }
+  // Codex reads `cancel` as the same skipped call, so one refusal is enough.
+  add('Decline and continue', 'reject_once', { action: 'decline', content: null, _meta: null });
+  return {
+    rpcId, turnId, responses,
+    event: { type: 'permission.requested', requestId: randomUUID(), title: 'Codex requests an MCP tool call',
+      details: JSON.stringify({ server: serverName, message, ...meta }, null, 2), options },
   };
 }

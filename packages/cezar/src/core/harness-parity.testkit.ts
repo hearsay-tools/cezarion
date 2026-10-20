@@ -50,6 +50,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | --- | --- |
  * | `baseline` | one text, one tool call and result, a later visible assistant message, usage, then its terminal turn signal |
  * | `tool-tail` | visible assistant text, a tool call/result, then turn end with no later message |
+ * | `mcp-approval` | ask the native client before another MCP server's tool call, then echo the exact answer and end the turn |
  * | `done` | the same, with a trailing `CEZ:DONE` so the run reaches its review gate |
  * | `hold` | delay the terminal turn signal after the last content event |
  * | `hold-done` | like `hold`, then end with `CEZ:DONE` so a mid-turn follow-up can race the close (#486) |
@@ -76,6 +77,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  */
 export const SCENARIOS = [
   'approval',
+  'mcp-approval',
   'multi-pr-refs',
   'auto-resumed',
   'turn-messages',
@@ -250,7 +252,10 @@ export const ANSWER_DELIVERY_CRITERIA = [
 ] as const;
 
 /** Native Codex server-request approvals, exercised through the manager and HTTP route. */
-export const PERMISSION_CRITERIA = [{ id: 'P1', scenario: 'approval', name: 'routes explicit native approval decisions and settles the turn' }] as const;
+export const PERMISSION_CRITERIA = [
+  { id: 'P1', scenario: 'approval', name: 'routes explicit native approval decisions and settles the turn' },
+  { id: 'P2', scenario: 'mcp-approval', name: 'routes an MCP tool approval for another server and settles the turn (hearsay-tools/cezarion#1294)' },
+] as const;
 
 export interface HarnessAdapter {
   readonly backend: RunnerId;
@@ -357,6 +362,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: CODEX_MOCK,
     scenarios: {
       approval: 'mock:approval',
+      'mcp-approval': 'mock:mcp-approval',
       'input-closed-live': 'mock:no-progress-input-closed',
       'multi-pr-refs': 'mock:multi-pr-refs',
       'turn-messages': 'mock:turn-messages',
@@ -618,6 +624,13 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'P1', backend, kind: 'scenario-unconstructible' as const,
     reason: `${backend}'s native wire does not carry Codex app-server JSON-RPC approval requests or its availableDecisions union. This cell checks that native request/response protocol; ordinary human questions remain covered by R26.`,
   })),
+  ...([
+    ['claude', 'Claude print mode settles every tool permission inside Claude under its headless --permission-mode and sends cezar no MCP tool approval request; cezar\'s own tools are pre-authorized through generated --allowedTools entries (R35).'],
+    ['opencode', 'OpenCode serve auto-approves permissions server-side and sends cezar no MCP tool approval request; cezar\'s own tools are a local mcp entry in its runtime config.'],
+    ['pi', 'Pi\'s RPC wire carries no tool approval request for cezar to answer; cezar\'s tools reach Pi as an --extension admitted through --tools (R35), not as an MCP server.'],
+    ['cursor', 'Cursor print runs with --force and its stream-json wire carries no MCP tool approval request; cezar\'s own tools load from a private --plugin-dir.'],
+    ['omp', 'OMP\'s RPC wire carries no tool approval request for cezar to answer: tool admission is its --tools list and --config overlay; cezar\'s tools reach OMP as an --extension admitted through --tools (R35), not as an MCP server.'],
+  ] as const).map(([backend, reason]) => ({ criterion: 'P2', backend, kind: 'scenario-unconstructible' as const, reason })),
   {
     criterion: 'S29', backend: 'cursor', kind: 'scenario-unconstructible',
     reason: 'Cursor print writes the prompt to stdin once per turn and then closes stdin. It refuses agent input while busy and queues human follow-ups for a new per-turn child, so this admitted-turn/live-followup cell has no writable input transport to close. ACP stdin behavior is a separate legacy transport, not the HARNESS_ADAPTERS cursor-print wire.',
