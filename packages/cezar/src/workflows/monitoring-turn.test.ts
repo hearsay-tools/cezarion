@@ -54,10 +54,9 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
         afterDelivery?.();
         await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && semaphore.busy() === 0);
       };
-      if (row.id === 'M3' || row.id === 'M8') {
-        store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [],
-          ...(row.id === 'M8' ? { completion: { phase: 'attention' } } : {}) } }]);
-        if (row.id === 'M3') await worker(p.id);
+      if (row.id === 'M3') {
+        store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+        await worker(p.id);
       }
       const calls: TaskWebhookPayload[] = [];
       const hook = new TaskWebhook(store, { dataDir: join(root, '.ai/cezar'), dryRun: false,
@@ -198,11 +197,6 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
             await send([example]);
             attention('needs you', true);
           }
-        } else {
-          await send([MONITORING_TEXT, ACK_TEXT], () => {
-            store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: [], receipts: [], completion: { phase: 'attention' } } }]);
-          });
-          attention('needs you', true);
         }
         await hook.idle();
         const final = calls.at(-1)!;

@@ -73,7 +73,15 @@ async function holdSteerTool() {
     await sleep(10);
   }
 }
-const emit = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
+// Lines a `mock:ack-only` reply read and never answered (hearsay-tools/cezarion#1301): the turn they
+// opened is still running, so the next turn's result settles them with its own, as Claude settles
+// every line one turn consumed (#505).
+let heldUuids = [];
+let respondingUuid;
+const emit = (obj) => {
+  if (obj?.type === 'result' && heldUuids.length) obj = { ...obj, user_message_uuids: [...heldUuids.splice(0), ...(obj.user_message_uuids ?? [respondingUuid].filter(Boolean))] };
+  process.stdout.write(`${JSON.stringify(obj)}\n`);
+};
 
 // `--help` lists the options cezar feature-detects (#505).
 if (process.argv.includes('--help')) {
@@ -155,6 +163,7 @@ function writeHandoffAndTodo() {
 }
 
 async function respond(userText, imageCount, uuid) {
+  respondingUuid = uuid;
   if (userText.includes('mock:crash-stderr')) {
     const { crashWithStderr } = await import('./mock-runner-crash.mjs');
     if (crashWithStderr(userText, '{"type":"assistant","message":')) return;
@@ -162,6 +171,9 @@ async function respond(userText, imageCount, uuid) {
   // hearsay-tools/cezarion#1112: the line waits in the pipe before the model reads it.
   if (userText.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
   emitReplay(uuid, userText);
+  // `mock:ack-only` → the line is read (replayed) and its turn says nothing until more input
+  // arrives (hearsay-tools/cezarion#1301).
+  if (userText.includes('mock:ack-only')) { if (uuid) heldUuids.push(uuid); return; }
   if (userText.includes('mock:autonomous') || userText.startsWith('Continue working autonomously until the task is fully complete.')) {
     const { autonomousReply } = await import('./mock-autonomous.mjs');
     const text = autonomousReply(userText);

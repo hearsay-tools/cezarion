@@ -61,6 +61,7 @@ const write = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
 // a userMessage item (echoing clientUserMessageId as clientId) and an echo reply.
 let autonomousTurn = 0;
 let activeTurnId = null;
+let heldTurn = false;
 let pendingSteers = [];
 let steerEchoSerial = 0;
 const emit = (obj) => {
@@ -76,7 +77,7 @@ const emit = (obj) => {
       write({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId, item: { type: 'agentMessage', id: `item_steer_echo_${steerEchoSerial}`, text: entry.text } } });
     }
   }
-  if (ending) { activeTurnId = null; pendingSteers = []; }
+  if (ending) { activeTurnId = null; pendingSteers = []; heldTurn = false; }
   write(obj);
   // #505 review: CEZ_MOCK_CODEX_LATE_START_ACK=1 answers turn/start after the turn completed.
   if (ending && lateStartAck !== undefined) { const id = lateStartAck; lateStartAck = undefined; write({ id, result: { turn: { id: 'turn_mock_1' } } }); }
@@ -161,6 +162,13 @@ rl.on('line', async (line) => {
     // #505 ambiguity: the transport dies with the steer unanswered.
     if (process.env.CEZ_MOCK_CODEX_EXIT_ON_STEER === '1') process.exit(1);
     const turn = steerTurn;
+    // A held `mock:ack-only` turn runs the steered input as its own (hearsay-tools/cezarion#1301).
+    if (heldTurn && activeTurnId && msg.params?.expectedTurnId === activeTurnId) {
+      heldTurn = false;
+      emit({ id: msg.id, result: {} });
+      rl.emit('line', JSON.stringify({ ...msg, method: 'turn/start', mockHeldSteer: true }));
+      return;
+    }
     if (!turn && activeTurnId && msg.params?.expectedTurnId === activeTurnId) {
       pendingSteers.push({ clientId: msg.params?.clientUserMessageId ?? null, text: msg.params?.input?.map?.((part) => part.text ?? '').join('\n') ?? '' });
       emit({ id: msg.id, result: {} });
@@ -239,10 +247,13 @@ rl.on('line', async (line) => {
     if (rejectedPermissionOverride) permissionWarning();
     activeTurnId = 'turn_mock_1';
     // owned-input-delivery.testkit.ts patches the exact `emit(...)` line below; keep it verbatim.
-    if (process.env.CEZ_MOCK_CODEX_LATE_START_ACK === '1' && startSerial++ > 0) lateStartAck = msg.id; else {
+    if (msg.mockHeldSteer) { /* the steer was acknowledged */ } else if (process.env.CEZ_MOCK_CODEX_LATE_START_ACK === '1' && startSerial++ > 0) lateStartAck = msg.id; else {
     emit({ id: msg.id, result: { turn: { id: 'turn_mock_1' } } });
     }
     const turnText = answerNudge(msg.params?.input?.map?.((part) => part.text ?? '').join('\n') ?? '');
+    // `mock:ack-only` → turn/start is acknowledged and the turn does not start until a steer arrives
+    // (hearsay-tools/cezarion#1301).
+    if (turnText.includes('mock:ack-only')) { heldTurn = true; return; }
     let silent;
     if (turnText.includes('mock:silent-tail') || silentNudge(turnText)) {
       silent = await import('./mock-silent-tail.mjs');

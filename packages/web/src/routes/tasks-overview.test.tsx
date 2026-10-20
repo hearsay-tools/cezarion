@@ -1246,10 +1246,17 @@ describe('TasksOverviewRoute — wired to the app', () => {
     expect(screen.queryByRole('button', { name: 'Show older archived' })).toBeNull()
   })
 
-  it('keeps the sidebar and table Active/Archived tabs independent', async () => {
-    renderApp([run({ id: 'act', status: 'running' }), run({ id: 'arc', status: 'done', archived: true })])
+  it('keeps the sidebar Active/Automations tabs and the table Active/Archived tabs independent (#1332)', async () => {
+    renderApp([
+      run({ id: 'act', status: 'running' }),
+      run({ id: 'arc', status: 'done', archived: true }),
+      { ...run({ id: 'auto', status: 'done' }), automationId: 'auto-1' },
+    ])
     await waitFor(() => expect(tableRow('act')).not.toBeNull())
     expect(sidebarRow('act')).not.toBeNull()
+    expect(sidebarRow('auto')).toBeNull()
+    // The table's Active is every unarchived task, automation-created ones included.
+    expect(tableRow('auto')).not.toBeNull()
     expect(overviewTab('active').getAttribute('aria-pressed')).toBe('true')
     expect(sidebarTab('active').getAttribute('aria-pressed')).toBe('true')
 
@@ -1261,21 +1268,21 @@ describe('TasksOverviewRoute — wired to the app', () => {
     expect(sidebarRow('act')).not.toBeNull()
     expect(sidebarRow('arc')).toBeNull()
 
-    fireEvent.click(sidebarTab('archived'))
-    expect(sidebarTab('archived').getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(sidebarTab('automations'))
+    expect(sidebarTab('automations').getAttribute('aria-pressed')).toBe('true')
     expect(overviewTab('archived').getAttribute('aria-pressed')).toBe('true')
     expect(tableRow('arc')).not.toBeNull()
     expect(tableRow('act')).toBeNull()
-    expect(sidebarRow('arc')).not.toBeNull()
+    expect(sidebarRow('auto')).not.toBeNull()
     expect(sidebarRow('act')).toBeNull()
+    expect(sidebarRow('arc')).toBeNull()
 
     fireEvent.click(sidebarTab('active'))
     expect(sidebarTab('active').getAttribute('aria-pressed')).toBe('true')
     expect(overviewTab('archived').getAttribute('aria-pressed')).toBe('true')
     expect(tableRow('arc')).not.toBeNull()
-    expect(tableRow('act')).toBeNull()
     expect(sidebarRow('act')).not.toBeNull()
-    expect(sidebarRow('arc')).toBeNull()
+    expect(sidebarRow('auto')).toBeNull()
   })
 
   it('adopts persisted workspace choices, updates optimistically, and reloads the server answer', async () => {

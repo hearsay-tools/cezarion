@@ -40,6 +40,26 @@ describe('authoritative finishability (#449)', () => {
     await until(() => !manager.isActive(p.id));
   });
 
+  // The verdict reads the manager's live registries, which a session leaves only after its final
+  // autosave, so the cockpit's refetch on the settling `review` event saw "no open session" and
+  // hid Accept (review-gate.e2e.ts). The run is published again once it leaves them
+  // (hearsay-tools/cezarion#1301).
+  it('the last run event of a settled review permits Accept, opening session and Continue alike', async () => {
+    process.env.CEZ_REVIEW_GATE = '1';
+    let id = '';
+    const verdicts: string[] = [];
+    store.on('run', run => { if (run.id === id && run.status === 'review') verdicts.push(manager.finishBlockedReason(id) ?? 'none'); });
+    id = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'Improve the project notes.', runner: 'claude' }).id;
+    for (const sendBack of [false, true]) {
+      if (sendBack) expect(manager.continueRun(id, { text: 'Review feedback: mention the port.' }).ok).toBe(true);
+      await until(() => store.getRun(id)?.status === 'waiting');
+      verdicts.length = 0;
+      expect(manager.finish(id)).toBe(true);
+      await until(() => verdicts.at(-1) === 'none');
+      expect((await detail(id)).finishBlocked).toBeNull();
+    }
+  });
+
   it.each([false, true])('pending human ask, delegation root=%s: the verdict agrees with POST', async isRoot => {
     const p = isRoot ? await parent('mock:ask') : manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:ask', runner: 'claude' });
     await until(() => store.getRun(p.id)?.hasPendingHumanAsk === true);

@@ -52,12 +52,14 @@ export const humanInputDeliveredEventSchema = runEventSchema.extend({
 });
 export type HumanInputDeliveredEvent = z.infer<typeof humanInputDeliveredEventSchema>;
 
-/** An accepted Finish ended the task with this question unanswered (hearsay-tools/cezarion#1260).
- * It retires the question like a delivery does, but nobody answered it. */
+/** The question was retired unanswered: an accepted Finish ended the task (`finish`,
+ * hearsay-tools/cezarion#1260), or new input went to a worker whose only question was Cezar's own
+ * fallback question (`superseded`, hearsay-tools/cezarion#1301). It retires the question like a
+ * delivery does, but nobody answered it. */
 export const humanAskClosedEventSchema = runEventSchema.extend({
   type: z.literal('human-ask-closed'),
   askSeq: z.number().int().nonnegative(),
-  reason: z.literal('finish'),
+  reason: z.enum(['finish', 'superseded']),
 });
 export type HumanAskClosedEvent = z.infer<typeof humanAskClosedEventSchema>;
 

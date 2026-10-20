@@ -223,6 +223,11 @@ async function handle(command) {
     }
   }
   if (command.type === 'prompt') command.message = answerNudge(command.message);
+  // `mock:ack-only` → the prompt is accepted and no agent run starts (hearsay-tools/cezarion#1301).
+  if (command.type === 'prompt' && command.message.includes('mock:ack-only')) {
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    return;
+  }
   if (command.type === 'get_state') {
     send({
       id: command.id,
@@ -279,6 +284,7 @@ async function handle(command) {
     sendText([text.slice(0, 5), text.slice(5)]);
     sendTurnEnd();
   } else if (command.type === 'prompt' && command.message.includes('mock:turn-messages:')) {
+    // owned-input-delivery.testkit.ts patches the two lines below; keep them verbatim.
     const { turnMessages } = await import('./mock-turn-messages.mjs');
     send({ id: command.id, type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' }); send({ type: 'turn_start' });
