@@ -9,8 +9,11 @@ import { agentHomePaths, claudeStateFilePath } from '../paths.ts';
 import { workflowDefSchema, type WorkflowDef } from '../workflows/types.ts';
 
 /**
- * Providers that gained accounts after workers were accepted with a bare default binding
- * (hearsay-tools/cezarion#1283). That evidence still loads, and still spawns with nothing added.
+ * Providers whose DEFAULT account binds no home: it spawns bare and follows the host env, as it did
+ * before pi and omp carried accounts (hearsay-tools/cezarion#1283). Pinning a home requires the
+ * folder to exist at launch, and a machine where the agent has never run has none, so pinning would
+ * turn a working zero-config worker into "identity is unavailable". Evidence accepted before #1283
+ * has this same shape. Named accounts always pin their folder.
  */
 const HOMELESS_DEFAULT_PROVIDERS: ReadonlySet<string> = new Set(['pi', 'omp']);
 
@@ -84,7 +87,9 @@ export type WorkerExecutionIdentity = z.infer<typeof workerExecutionIdentitySche
 export class WorkerIdentityError extends Error {}
 
 export function captureWorkerAccount(profile: ResolvedAgentProfile, env: NodeJS.ProcessEnv = process.env): WorkerAccountBinding | undefined {
-  if (!supportsProfiles(profile.provider)) return { provider: profile.provider, profileId: 'default' };
+  if (!supportsProfiles(profile.provider) || (profile.isDefault && HOMELESS_DEFAULT_PROVIDERS.has(profile.provider))) {
+    return { provider: profile.provider, profileId: 'default' };
+  }
   // Bind an existing symlink to its actual home. A native first-run home may not exist yet.
   const claudeHome = agentHomePaths(env).claude;
   let homePath = profile.provider === 'claude' ? claudeHome : profile.path;

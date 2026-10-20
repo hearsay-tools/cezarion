@@ -64,11 +64,14 @@ describe('pi and omp worker accounts (hearsay-tools/cezarion#1283)', () => {
     expect(boundWorkerAccountEnv(binding)).toEqual({ OMP_PROFILE: 'work' });
   });
 
-  it('spawns the discovered omp account bare, like every default', () => {
-    const agent = join(root, 'home', '.omp', 'agent'); mkdirSync(agent, { recursive: true });
-    const binding = captureWorkerAccount(profile('omp', 'default', agent))!;
-    expect(binding.homePath).toBe(agent);
-    expect(boundWorkerAccountEnv(binding)).toEqual({});
+  it('binds the discovered pi and omp account with no home, so it launches where the agent never ran', () => {
+    // Pinning a home requires it to exist at launch, and a machine where pi or omp has never run
+    // has none; their default workers spawned bare before they carried accounts and still do.
+    for (const provider of ['pi', 'omp'] as const) {
+      const binding = captureWorkerAccount(profile(provider, 'default', join(root, 'never-created', provider)))!;
+      expect(binding, provider).toEqual({ provider, profileId: 'default' });
+      expect(boundWorkerAccountEnv(binding), provider).toEqual({});
+    }
   });
 
   it('refuses a named omp binding that names no profile rather than running it on the default', () => {

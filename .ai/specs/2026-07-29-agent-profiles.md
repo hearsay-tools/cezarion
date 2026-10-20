@@ -179,10 +179,11 @@ variable is applied after the allowlist and replaces the host value for its sess
 default's own folder or profile as a named account is refused. `PI_CONFIG_DIR` moves omp's root,
 and with it the profiles dir that named omp folders must be in.
 
-**Owned workers** pin a pi or omp account's folder like any other. A named omp account pins its
-profile entry with only the parent resolved: the entry's realpath would name no profile and run the
-worker on the default. The discovered omp account is spawned bare. Worker evidence accepted before
-pi and omp carried accounts (default, no folder) still loads and still spawns bare.
+**Owned workers** pin a named pi or omp account's folder like any other. A named omp account pins
+its profile entry with only the parent resolved: the entry's realpath would name no profile and run
+the worker on the default. The discovered pi or omp account binds no folder and spawns bare, as it
+did before they carried accounts: pinning requires the folder to exist at launch, and a machine
+where the agent has never run has none. Evidence accepted before this change has the same shape.
 
 **Downgrade.** A cezar from before this change drops pi and omp rows when it parses
 `agent-accounts.json`, and its next write of the file persists the drop.
