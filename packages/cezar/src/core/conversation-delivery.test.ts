@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, it } from 'vitest';
 import type { AgentInput, ConversationMessage } from '@open-mercato/cezar-contract';
 import { projectConversationEvents } from '../delegation/conversations.ts';
+import { WORKER_FALLBACK_HEADER } from '../workflows/run.ts';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 
@@ -91,14 +92,21 @@ for (const backend of RUNNER_IDS) {
       const projections = store.readEvents(runId).filter(event => event.type === 'conversation-message' &&
         inputs.some(input => input.id === (event.message as ConversationMessage).id));
       // The worker's own ask is routed to its parent or left with the human (#505); a routed
-      // question projects here too, so only the parent's two messages are counted.
-      expect(store.readEvents(runId).filter(event => event.type === 'worker-question-routed' || event.type === 'worker-question-fallback')).toHaveLength(1);
+      // question projects here too, so only the parent's two messages are counted. The echo turns
+      // end with no wait or done, so after their nudge Cezar asks the parent too: every other
+      // routed question is that fallback (hearsay-tools/cezarion#1301, § A worker's no-wait fallback).
+      const routing = store.readEvents(runId).filter(event => event.type === 'worker-question-routed' || event.type === 'worker-question-fallback');
+      const fallbackAsks = new Set(store.readEvents(runId).filter(event => event.type === 'ask.requested' &&
+        (event.questions as { header?: string }[])[0]?.header === WORKER_FALLBACK_HEADER).map(event => event.seq));
+      expect(routing.filter(event => event.askSeq === ask.seq)).toHaveLength(1);
+      expect(routing.every(event => event.askSeq === ask.seq || fallbackAsks.has(event.askSeq as number))).toBe(true);
       // One queued and one delivered projection per message; an observable harness adds
       // at most one consumed projection per message (#505).
       expect(projections.filter(event => event.delivery !== 'consumed')).toHaveLength(4);
       expect(projections.filter(event => event.delivery === 'consumed').length).toBeLessThanOrEqual(2);
       expect(new Set(projections.map(event => event.projectionId)).size).toBe(projections.length);
-      expect(store.readEvents(runId).filter(event => event.type === 'human-input-delivered')).toHaveLength(1);
+      // 'Vitest' answers the worker's own question; the barrier answers Cezar's fallback one.
+      expect(store.readEvents(runId).filter(event => event.type === 'human-input-delivered' && event.askSeq === ask.seq)).toHaveLength(1);
       expect(store.readEvents(runId).filter(event => event.type === 'user-message').map(event => event.text))
         .toEqual(['Vitest', 'mock:agent-echo human barrier']);
     });
