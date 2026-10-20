@@ -863,10 +863,21 @@ describe('pi tool selection (hearsay-tools/cezarion#1305)', () => {
     expect(existsSync(extensions(args).at(-1)!)).toBe(true);
   });
 
-  it('keeps extra names on the default path, leaving mcp__ names to their configured exposure', () => {
-    const args = buildPiArgs({ ...base, allowedTools: [...stepDefault, 'mcp__plug__word', 'ls', 'WebFetch'] });
+  it('keeps extra names that are not mcp__ tools on the default path', () => {
+    const args = buildPiArgs({ ...base, allowedTools: [...stepDefault, 'ls', 'WebFetch'] });
     expect(args).not.toContain('--tools');
     expect(args[args.indexOf('--cezar-builtin-tools') + 1]).toBe('read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait,ls,webfetch');
+  });
+
+  it('narrows to the --tools allowlist when the list names an mcp__ tool, so the grant stays limited to it', () => {
+    const named = 'read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait,mcp__plug__word';
+    expect(buildPiArgs({ ...base, allowedTools: [...stepDefault, 'mcp__plug__word'] })).toEqual([
+      '--mode', 'rpc', ...cezarExtensionArgs, '--tools', named,
+    ]);
+    expect(buildPiArgs({ ...base, allowedTools: [...stepDefault, 'mcp__plug__word'], cezarTools: ci })).toEqual([
+      '--mode', 'rpc', ...cezarExtensionArgs, '--extension', expect.stringMatching(/scripts\/pi-ci-wait\.mjs$/),
+      '--tools', [named, ...cezarToolNames({})].join(','),
+    ]);
   });
 
   it('admits the cezar tools through the CI extension on the default path, not through a list', () => {
