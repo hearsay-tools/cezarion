@@ -340,8 +340,12 @@ Notable fields (full doc-comments in the source):
   unrestricted `Bash`, and Codex/OpenCode do not honor `allowedTools` at all.
   Treat the default `auto` permission mode as full shell access, not a
   sandbox: Codex uses `danger-full-access` with `approvalPolicy: never`, and
-  OpenCode auto-approves every permission. Configurable restrictive modes are
-  specified by `2026-07-17-permission-modes` (open-mercato/cezar#475).
+  OpenCode's own permission config governs. cezar answers OpenCode's built-in
+  asks (outside-worktree reads, `.env` reads, the repeated-call guard) with a
+  once reply unless the user's config has a rule for that permission, and shows
+  any other ask as a cockpit permission card (hearsay-tools/cezarion#1266).
+  Configurable restrictive modes are specified by
+  `2026-07-17-permission-modes` (open-mercato/cezar#475).
 - `restrictNativeDelegation?` — optional per-invocation intent, mapped only inside
   adapters; absent preserves ordinary settings. Governed session provisioning
   supplies it on initial steps, Continue and recovery. See D1 below for precise
@@ -1100,13 +1104,23 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
-**P1** (hearsay-tools/cezarion#1049) routes an approval from the native Codex
-mock through `RunManager`, the cockpit HTTP decision route, and the exact
-JSON-RPC reply. Decline and cancel both reach `turn/completed`, including in
-an autonomous run; ordinary user/agent text cannot grant permission. The
-exhaustive `RUNNER_IDS` / `HARNESS_ADAPTERS` row registers named executable
-exemptions for native wires that cannot carry Codex app-server approval
-requests and their `availableDecisions` union.
+**P1** (hearsay-tools/cezarion#1049, hearsay-tools/cezarion#1266) routes an
+approval from each native mock that carries one through `RunManager`, the
+cockpit HTTP decision route, and the exact native reply: the Codex JSON-RPC
+response, or OpenCode's `POST /permission/{id}/reply` for an ask the user's
+own permission config makes. Each adapter's `approvalDecisions` names the
+options P1 picks and the reply its mock echoes; every pick reaches the turn
+end, including in an autonomous run, and ordinary user/agent text cannot grant
+permission. The exhaustive `RUNNER_IDS` / `HARNESS_ADAPTERS` row registers
+named executable exemptions for native wires that carry no permission request
+cezar answers through the cockpit.
+
+**P2** (hearsay-tools/cezarion#1266) pins a backend's own built-in permission
+ask: OpenCode's `external_directory` ask, which no user rule names, is answered
+with a once reply and the run never parks. OpenCode reads the user's rules once
+per session from `GET /config`; an unreadable config sends every ask to the
+cockpit, and no reply is ever `always`. Wires with no built-in ask that cezar
+answers carry named exemptions.
 
 
 **R72/R73** (hearsay-tools/cezarion#994), in `workflows/ci-wait-failure-parity.test.ts`,
