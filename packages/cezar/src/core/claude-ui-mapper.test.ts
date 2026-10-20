@@ -62,6 +62,10 @@ const GOLDEN_FIXTURES = [
   'bash-and-screenshot',
   'thinking-edit-write-todo',
   'subagent-task',
+  // A `context: fork` skill called through the Skill tool under cezar's restricted
+  // argv (CLI 2.1.303, hearsay-tools/cezarion#1284): the forked subagent's items carry
+  // the Skill call as their parent, as a Task call's do.
+  'forked-skill',
   'failed-and-denied',
   // Wire shapes transcribed from a real `claude --output-format stream-json`
   // capture (CLI 2.1.211) — the task tools' result text is the mapper's only
