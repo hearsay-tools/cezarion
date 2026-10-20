@@ -170,7 +170,9 @@
   "slow": {
     "include": ["packages/web/e2e/*.e2e.ts"],
     "maxWorkers": 1,
-    "maxParallel": 1
+    "maxParallel": 1,
+    "maxLoadPerCpu": 1.5,
+    "maxDeferMs": 120000
   },
   "daemon": {
     "idleExitMinutes": 60
