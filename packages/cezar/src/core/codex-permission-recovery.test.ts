@@ -15,7 +15,7 @@ describe('native permission recovery (hearsay-tools/cezarion#1049)', () => {
     }
     it(`${backend} P1 recovers an owned permission wait without reporting unfinished work as done`, async () => {
       await withOwnedInputRun(backend, 'approval', async fixture => {
-        // Codex receives this prompt on resume too, so its native mock requests
+        // The backend receives this prompt on resume too, so its native mock requests
         // a fresh approval instead of treating recovery as the baseline scenario.
         fixture.store.updateRun(fixture.runId, { systemPrompt: 'mock:approval' });
         fixture.manager.enqueueOwnedRun(fixture.runId);
@@ -32,7 +32,8 @@ describe('native permission recovery (hearsay-tools/cezarion#1049)', () => {
         const next = recovered.store.readEvents(fixture.runId).filter(event => event.type === 'permission.requested')[1]!;
         expect(next.requestId).not.toBe(original.requestId);
         expect(recovered.store.getRun(fixture.runId)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
-        const decline = (next.options as Array<{ id: string; label: string }>).find(option => option.label === 'Decline and continue')!;
+        const { pick } = HARNESS_ADAPTERS[backend].approvalDecisions![0]!;
+        const decline = (next.options as Array<{ id: string; label: string }>).find(option => option.label.toLowerCase().includes(pick))!;
         expect(recovered.manager.respondPermission(fixture.runId, next.requestId as string, decline.id)).toBe(true);
         await waitFor(() => !recovered.manager.isActive(fixture.runId));
         expect(recovered.store.getRun(fixture.runId)?.status).toBe('done');

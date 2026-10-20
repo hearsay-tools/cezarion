@@ -56,6 +56,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `hold-ask` | like `hold`, then end with a portable `CEZ:ASK` so a mid-turn follow-up can race the park (#486) |
  * | `split-text` | stream the reply in pieces, ending with a trailing `CEZ:MONITORING` |
  * | `provider-error` | a runtime provider rejection in its native error shape |
+ * | `approval` | a native permission request cezar routes to the cockpit; no turn end until it is answered |
+ * | `permission-default` | a native built-in default permission ask cezar answers itself, then end with `CEZ:DONE` (#1266) |
  * | `ask` | an ask — native where the wire has one, a `CEZ:ASK` marker otherwise |
  * | `ask-resume` | accept one human answer, then finish with `CEZ:DONE` without another prompt |
  * | `plan-resume` | Legacy Cursor ACP `cursor/create_plan` variant (direct ACP tests) |
@@ -76,6 +78,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  */
 export const SCENARIOS = [
   'approval',
+  'permission-default',
   'multi-pr-refs',
   'auto-resumed',
   'turn-messages',
@@ -249,8 +252,12 @@ export const ANSWER_DELIVERY_CRITERIA = [
   { id: 'I5', scenario: 'ask-snapshot', name: 'holds conversation input behind a native question and delivers it beside a portable one, never as its answer' },
 ] as const;
 
-/** Native Codex server-request approvals, exercised through the manager and HTTP route. */
-export const PERMISSION_CRITERIA = [{ id: 'P1', scenario: 'approval', name: 'routes explicit native approval decisions and settles the turn' }] as const;
+/** Native approvals, exercised through the manager and HTTP route (P1), and a backend's own
+ *  built-in permission asks, which cezar answers without parking (P2, hearsay-tools/cezarion#1266). */
+export const PERMISSION_CRITERIA = [
+  { id: 'P1', scenario: 'approval', name: 'routes explicit native approval decisions and settles the turn' },
+  { id: 'P2', scenario: 'permission-default', name: "answers a backend's built-in default permission ask without parking" },
+] as const;
 
 export interface HarnessAdapter {
   readonly backend: RunnerId;
@@ -266,6 +273,9 @@ export interface HarnessAdapter {
   readonly mockBin: string;
   /** Scenario name -> the prompt text this backend's mock answers it with. */
   readonly scenarios: Readonly<Partial<Record<ScenarioName, string>>>;
+  /** P1: the option to pick (matched case-insensitively against its label) and the text the
+   *  mock echoes once that native reply arrives. Required with `scenarios.approval`. */
+  readonly approvalDecisions?: readonly { pick: string; echo: string }[];
 }
 
 /** Resolved from this file, not the cwd, so the paths hold wherever vitest runs. */
@@ -355,6 +365,10 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     askResumeCases: [{ kind: 'item/tool/requestUserInput', scenario: 'ask-resume', answer: 'Library: Vitest' }],
     binEnv: 'CEZ_CODEX_BIN',
     mockBin: CODEX_MOCK,
+    approvalDecisions: [
+      { pick: 'decline', echo: 'Approval response: {"decision":"decline"}' },
+      { pick: 'cancel', echo: 'Approval response: {"decision":"cancel"}' },
+    ],
     scenarios: {
       approval: 'mock:approval',
       'input-closed-live': 'mock:no-progress-input-closed',
@@ -404,7 +418,13 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     askResumeCases: [{ kind: 'question.asked', scenario: 'ask-resume', answer: 'Library: Vitest' }],
     binEnv: 'CEZ_OPENCODE_BIN',
     mockBin: OPENCODE_MOCK,
+    approvalDecisions: [
+      { pick: 'reject', echo: 'Approval response: {"reply":"reject"}' },
+      { pick: 'allow once', echo: 'Approval response: {"reply":"once"}' },
+    ],
     scenarios: {
+      approval: 'mock:approval',
+      'permission-default': 'mock:permission-default',
       'input-closed-live': 'mock:no-progress-input-closed',
       'skill-warning': 'mock:skill-warning mock:done',
       'multi-pr-refs': 'mock:multi-pr-refs', 'turn-messages': 'mock:turn-messages',
@@ -614,9 +634,21 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
-  ...(['claude', 'opencode', 'pi', 'cursor', 'omp'] as const).map(backend => ({
+  ...(['claude', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion: 'P1', backend, kind: 'scenario-unconstructible' as const,
-    reason: `${backend}'s native wire does not carry Codex app-server JSON-RPC approval requests or its availableDecisions union. This cell checks that native request/response protocol; ordinary human questions remain covered by R26.`,
+    reason: `${backend}'s native wire does not carry a native permission request that cezar answers through the cockpit permission card. This cell checks that native request/response protocol; ordinary human questions remain covered by R26.`,
+  })),
+  {
+    criterion: 'P2', backend: 'claude', kind: 'scenario-unconstructible',
+    reason: "dontAsk (the default) denies unapproved tools without emitting a permission request, so no built-in default ask reaches cezar to answer.",
+  },
+  {
+    criterion: 'P2', backend: 'codex', kind: 'scenario-unconstructible',
+    reason: "every app-server approval request comes from Codex's own approval policy, which cezar leaves to Codex and P1 routes to the human; the wire has no built-in ask that cezar answers.",
+  },
+  ...(['pi', 'cursor', 'omp'] as const).map(backend => ({
+    criterion: 'P2', backend, kind: 'scenario-unconstructible' as const,
+    reason: `${backend}'s native wire carries no permission request at all, so there is no built-in default ask for cezar to answer.`,
   })),
   {
     criterion: 'S29', backend: 'cursor', kind: 'scenario-unconstructible',

@@ -244,6 +244,16 @@ const sendQuestionPart = (input) =>
       },
     },
   });
+/** hearsay-tools/cezarion#1266: OpenCode 1.18.35 `permission.asked`. No `session.idle`
+ *  follows: the asking tool waits until `POST /permission/{id}/reply` answers it. */
+const pendingPermissionAsks = new Set();
+const sendPermissionAsk = (id, permission, patterns, always) => {
+  pendingPermissionAsks.add(id);
+  send({ type: 'permission.asked', properties: {
+    id, sessionID: SESSION_ID, permission, patterns, metadata: {}, always,
+    tool: { messageID: MESSAGE_ID, callID: 'call_mock_bash' },
+  } });
+};
 // The user message of the prompt being answered: opencode 1.18.32 creates it at the
 // POST and names it as the assistant's parentID (#505 probe).
 let currentUserId;
@@ -273,6 +283,13 @@ const server = createServer((req, res) => {
     res.end(JSON.stringify(pendingQuestions));
     return;
   }
+  // Only user-written config, as the real server returns it: this user configured `bash: ask`,
+  // so `mock:approval` reaches the cockpit and the built-in `mock:permission-default` ask does not.
+  if (req.method === 'GET' && url === '/config') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ permission: { bash: 'ask' } }));
+    return;
+  }
   if (req.method === 'GET' && url.startsWith('/event')) {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
     sse = res;
@@ -299,6 +316,23 @@ const server = createServer((req, res) => {
       const acknowledge = () => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); };
       if (lateQuestionReply) setTimeout(acknowledge, 250);
       else acknowledge();
+      return;
+    }
+    const permissionReply = req.method === 'POST' && /^\/permission\/([^/]+)\/reply$/.exec(url);
+    if (permissionReply) {
+      // The reply resumes the held turn, then its own session.idle ends it, as a question reply does.
+      const id = decodeURIComponent(permissionReply[1]);
+      const reply = body ? JSON.parse(body).reply : undefined;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('true');
+      if (pendingPermissionAsks.delete(id)) setTimeout(() => {
+        send({ type: 'permission.replied', properties: { sessionID: SESSION_ID, requestID: id, reply } });
+        send({ type: 'message.part.updated', properties: { part: {
+          id: `prt_permission_${id}`, messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text',
+          text: `Approval response: ${JSON.stringify({ reply })}\n\nCEZ:DONE`, time: { start: 1, end: 2 },
+        } } });
+        send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+      }, 30);
       return;
     }
     const sessionGet = req.method === 'GET' && /^\/session\/([^/]+)$/.exec(url);
@@ -652,6 +686,16 @@ const server = createServer((req, res) => {
           send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
           return;
         }
+      }
+      if (body.includes('mock:permission-default')) {
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        sendPermissionAsk('per_mock_default', 'external_directory', ['/outside/*'], ['/outside/*']);
+        return;
+      }
+      if (body.includes('mock:approval')) {
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        sendPermissionAsk('per_mock_1', 'bash', ['git status --short'], ['git status *']);
+        return;
       }
       // #401: one completed text snapshot, without an earlier streaming part.
       if (body.includes('mock:ask-snapshot')) {

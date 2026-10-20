@@ -2781,7 +2781,7 @@ describe('native permission routing (hearsay-tools/cezarion#1049)', () => {
       });
       continue;
     }
-    for (const decision of ['decline', 'cancel'] as const) {
+    for (const { pick: decision, echo } of HARNESS_ADAPTERS[backend].approvalDecisions!) {
       it(`${backend} P1 ${decision} answers the native request through the cockpit API`, async () => {
         let repoRoot = '';
         const observation = await driveRun(backend, 'approval', run => !!run && ['done', 'review'].includes(run.status), 30_000, async ({ store, manager, runId }) => {
@@ -2823,10 +2823,30 @@ describe('native permission routing (hearsay-tools/cezarion#1049)', () => {
         });
         expect(observation.events).toContainEqual(expect.objectContaining({ type: 'permission.resolved', optionId: expect.any(String) }));
         expect(observation.events).toContainEqual(expect.objectContaining({ type: 'turn.completed' }));
-        expect(observation.events.filter(event => event.type === 'text').map(event => event.text).join('')).toContain(`Approval response: {"decision":"${decision}"}`);
+        expect(observation.events.filter(event => event.type === 'text').map(event => event.text).join('')).toContain(echo);
         expect(observation.record?.hasPendingPermission).toBe(false);
         expect(observation.events.some(event => event.type === 'ask.requested')).toBe(false);
       }, 45_000);
     }
+  }
+});
+
+describe('default permission asks (hearsay-tools/cezarion#1266)', () => {
+  for (const backend of RUNNER_IDS) {
+    const exemption = exemptionFor('P2', backend);
+    if (exemption) {
+      it(`${backend} P2 exemption — ${exemption.reason}`, () => {
+        expect(exemption.kind).toBe('scenario-unconstructible');
+        expect(HARNESS_ADAPTERS[backend].scenarios['permission-default']).toBeUndefined();
+      });
+      continue;
+    }
+    it(`${backend} P2 answers its built-in default permission ask without parking`, async () => {
+      const observation = await driveRun(backend, 'permission-default', run => !!run && ['done', 'review'].includes(run.status), 30_000);
+      expect(observation.events.some(event => event.type === 'permission.requested')).toBe(false);
+      expect(observation.record?.hasPendingPermission).toBeFalsy();
+      expect(observation.events.filter(event => event.type === 'text').map(event => event.text).join('')).toContain('Approval response: {"reply":"once"}');
+      expect(observation.events).toContainEqual(expect.objectContaining({ type: 'turn.completed' }));
+    }, 45_000);
   }
 });
