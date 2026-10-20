@@ -985,11 +985,14 @@ list, except phase 3a's completion park rows, which this table replaces. One row
 | | 15 minutes idle | The idle timer | Session closes; the run stays `waiting`; a wake reopens it through the scheduler continuation |
 | | Restart | Recovery | Re-observes outcomes; a settlement meanwhile resolves it and wakes the parent once |
 | | `cezar_cancel_wait` | The agent, in a woken turn | Cancelled into `lastWaits`; no wake |
-| | Stop, Finish, delete | The user | Cancelled; the run settles |
+| | Finish | The user | Refused while workers are live or uncollected or a worker question is unanswered (`delegationFinishBlockedReason`, the readiness check every Finish action runs first); the wait stays open. Accepted once readiness holds |
+| | Stop, delete | The user | Cancelled; the run settles |
 | `waiting`, root on Cezar's completion human wait (no slot) | A worker settles, messages or asks | The worker | Wakes the run (Cezar's own wait does not hold worker input); a fresh cycle |
+| | Every worker already settled, with results uncollected and nothing owed (no message, no question) | Nothing | **No default exit: only a human action ends it.** No settlement or message is left to come, so the parent waits for the user (Needs you, the refusal as its note) |
 | | A human message | The user | Delivered; the wait settles; a fresh cycle; the budget resets |
-| | 15 minutes idle | The idle timer | The session closes; the run stays `waiting`; a worker wake reopens it through the scheduler continuation |
-| | Stop, Finish, delete | The user | Settles |
+| | 15 minutes idle | The idle timer | The session closes; the run stays `waiting`; a worker wake, if one remains, reopens it through the scheduler continuation |
+| | Finish | The user | Refused while results are uncollected or a worker question is unanswered (`delegationFinishBlockedReason`); the run stays parked. Accepted once readiness holds |
+| | Stop, delete | The user | Settles |
 | `waiting`, root with an upgraded completion wait (schema 7) | Its workers settle, or its stored deadline passes | `reconcileWorkerFamily` / the per-wait timer | Resolves once through the list; the woken turn's done takes the 3b path |
 | `running`, worker turn ending with no wait (first) | The turn ends | The runner's turn end | No-wait nudge, unchanged |
 | `running`, worker no-wait nudge turn | The turn ends with no wait and no done | The runner's turn end | A human wait with an open card; `ask.requested`; routed to the parent; the worker parks `waiting` (no slot) |
@@ -1004,7 +1007,12 @@ list, except phase 3a's completion park rows, which this table replaces. One row
 | | Stop, delete | The user | Settles |
 | `running`, worker turn with its budget spent | The turn ends with no wait | The runner's turn end | Plain park, not routed; a human message or a parent message continues it. **Its only default exits are a human or the parent** |
 
-No state 3b adds has a human as its only default exit when the parent could answer: the
-completion worker wait ends on its workers' settlement, the completion human wait on a worker's
-next settlement, message or question, and the fallback question on the parent's reply. The
-budget-spent worker park keeps phase 2b's plain park, which a parent message also ends.
+Two states 3b adds or keeps have a human as their only default exit, and the table says so: the
+completion human wait once every worker has settled and only uncollected results remain (nothing
+is left to come from the workers, and only the parent itself could collect, which needs a turn
+the user starts), and the budget-spent worker park, which keeps phase 2b's plain park (a parent
+message also ends it). Otherwise no state 3b adds waits only on a human: the completion worker
+wait ends on its workers' settlement, the completion human wait with workers still live on a
+worker's next settlement, message or question, and the fallback question on the parent's reply.
+Finish never ends a completion park early: the readiness check refuses it while any blocker
+remains.

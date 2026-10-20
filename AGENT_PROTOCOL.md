@@ -910,8 +910,10 @@ refusal as one lifecycle input that the scheduler continuation reopens the sessi
 One nudge per cycle: when the turn that answers it ends on a blocked done again, Cezar registers
 a list `worker` wait on the live workers (`source: 'cezar'`, `via: 'completion'`, `mode: 'all'`,
 no deadline, no slot; it idle-closes like any worker park), or with only uncollected results or
-unanswered worker questions opens its own human wait (`via: 'completion'`); an autonomous run is
-nudged again until the budget. Settlement resolves the worker wait; worker messages wake the
+unanswered worker questions opens its own human wait (`via: 'completion'`), which parks for the
+user; once every worker has settled and only uncollected results remain, only a human action ends
+it. An autonomous run is nudged again until the budget. Finish refuses either park while any
+blocker remains (`delegationFinishBlockedReason`); Stop and delete settle it. Settlement resolves the worker wait; worker messages wake the
 parent beside it. `delegation.wait`, `delegation.completion` and `activity: 'monitoring'` are no
 longer written; store schema 7 reads a stored completion wait into the list
 (`upgradeLegacyWaits`), keeping an already-queued wake input as `wakeInputId`.
