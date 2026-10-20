@@ -63,6 +63,8 @@ export const WAIT_CRITERIA = [
   { id: 'U22s', scenario: 'baseline', name: 'a refusal reopened into a session that acknowledges it and never answers parks on Cezar\'s human wait at the nudge\'s reply bound' },
   { id: 'U22c', scenario: 'baseline', name: 'a refusal whose reopened sessions keep closing cleanly is queued once, stops at the delivery bound, and Continue delivers it once' },
   { id: 'U22f', scenario: 'baseline', name: 'a refusal whose reopened session closes once counts the failure, and its delivery clears it' },
+  { id: 'U22k', scenario: 'baseline', name: 'after a refusal failed at the delivery bound, Continue delivers it within the nudge\'s reply bound and the closing sessions\' delivery retry' },
+  { id: 'U22r', scenario: 'baseline', name: 'after a restart, a refusal queued for a closed session is delivered within the nudge\'s reply bound and the closing sessions\' delivery retry' },
   { id: 'U24', scenario: 'baseline', name: 'a worker\'s second no-wait turn end asks its parent, and the reply resumes it' },
   { id: 'U25', scenario: 'baseline', name: 'an automatic message supersedes a worker\'s fallback question' },
 ] as const;

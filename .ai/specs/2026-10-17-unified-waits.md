@@ -912,7 +912,10 @@ Calls made by the agent (owner to check):
   one whose blocked done takes the second step; any other turn end, a human message, a wake or
   the agent's own wait starts a fresh cycle. A human message or a wake clears the cycle even when
   it arrives before the nudge's turn ends (a harness that never answered the nudge); only the
-  delivery of the queued refusal itself marks its turn as the nudge's.
+  delivery of the queued refusal itself marks its turn as the nudge's. The queued refusal is known
+  by `purpose: 'completion-refusal'` on its persisted `AgentInput`, never by process memory, so a
+  Continue after a run that failed at the delivery bound, and a restart, deliver it as the nudge:
+  under the nudge's reply bound, and holding a closing session as a wait does.
 - **Bounds.** The nudge and every parent reply that resumes a worker from its fallback question
   are charged to the automatic-wake budget (`MAX_AUTO_CONTINUES`, 40) through
   `chargeAutomaticWake`, so neither an agent that keeps declaring done nor a parent and worker

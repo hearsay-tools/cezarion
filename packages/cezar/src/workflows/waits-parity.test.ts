@@ -10,7 +10,7 @@ import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.t
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
-import { collect, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { collect, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
@@ -221,7 +221,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U24', 'U25']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U24', 'U25']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -1795,6 +1795,110 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
         store.off('event', closeOnce);
       }
     });
+
+    // hearsay-tools/cezarion#1301: a refusal is known by its persisted input, so both bounds that
+    // hold it, the nudge's reply bound and the delivery retry of sessions that close before it, last
+    // past a run that failed at the delivery bound (U22k: Continue delivers it) and a restart (U22r).
+    // The silent harness is not constructible on Cursor print (U22s's exemption).
+    for (const variant of ['silent', 'closing'] as const) {
+      const how = variant === 'silent' ? 'as the nudge: a harness that never answers parks at the reply bound'
+        : 'with the delivery retry: a session that closes before it counts a failure, and one copy is delivered';
+      it(`${runner} U22k after a refusal failed at the delivery bound, Continue delivers it ${how}`, async () => {
+        if (variant === 'silent' && exemptionFor('U22s', runner)) {
+          expect(exemptionFor('U22s', runner)?.kind).toBe('capability-absent');
+          return;
+        }
+        retryAtOnce();
+        if (variant === 'silent') silenceRefusals();
+        else process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
+        const { p, w } = await parentWithWorker(runner);
+        const refusal = `Workers are still live: ${w.id}.`;
+        const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
+        let closes = MAX_WAKE_DELIVERY_ATTEMPTS;
+        const closeAtTurnEnd = ({ runId, event }: { runId: string; event: { type: string } }) => {
+          if (runId !== p.id || event.type !== 'turn-end' || !closes || !refusals().some(input => !input.deliveredAt)) return;
+          closes--;
+          engine().active.get(p.id)?.session.end();
+        };
+        store.on('event', closeAtTurnEnd);
+        onTestFinished(() => { store.off('event', closeAtTurnEnd); });
+        engine().active.get(p.id)!.session.end();
+        await until(() => store.getRun(p.id)?.status === 'failed' && !manager.isActive(p.id));
+        expect(prompted(runner, MESSAGE_WAKE_OPENING)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS);
+        expect(refusals()).toHaveLength(1);
+        expect(refusals()[0]!.deliveredAt).toBeUndefined();
+        if (variant === 'closing') closes = 1;
+        expect(manager.continueRun(p.id, { text: 'go on' })).toEqual({ ok: true });
+        if (variant === 'silent') {
+          await until(() => noReplyNotes(p.id).length === 1 && gated(p.id));
+          expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'no-wait' })]);
+          expect(semaphore.busy()).toBe(0);
+        } else {
+          // The reply ends on done again, and the second step parks on the workers or, once they
+          // settled, on Cezar's completion human wait.
+          await until(() => prompted(runner, refusal).length > 0 && store.getRun(p.id)?.status === 'waiting' &&
+            (workerWaits(p.id)[0]?.phase === 'open' || humanOpen(p.id).some(wait => wait.via === 'completion')));
+          expect(closes).toBe(0);
+          // The Continue's session closed first: one more scheduler continuation delivered it.
+          expect(prompted(runner, MESSAGE_WAKE_OPENING)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS + 1);
+          expect(store.getRun(p.id)?.waitDeliveryFailures).toBeUndefined();
+        }
+        expect(prompted(runner, refusal)).toHaveLength(1);
+        expect(refusals()).toEqual([expect.objectContaining({ deliveredAt: expect.any(String) })]);
+        expect(nudgeNotes(p.id)).toHaveLength(1);
+      });
+
+      it(`${runner} U22r after a restart, a refusal queued for a closed session is delivered ${how}`, async () => {
+        if (variant === 'silent' && exemptionFor('U22s', runner)) {
+          expect(exemptionFor('U22s', runner)?.kind).toBe('capability-absent');
+          return;
+        }
+        if (variant === 'silent') silenceRefusals();
+        else process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
+        const { p, w } = await parentWithWorker(runner);
+        const refusal = `Workers are still live: ${w.id}.`;
+        const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
+        // The disk as the refusal was queued and charged, before any session took it: a crash there.
+        let disk: ReturnType<typeof readPersistedRuns> | undefined, events: Map<string, string> | undefined;
+        const capture = ({ runId, event }: { runId: string; event: { type: string; message?: unknown } }) => {
+          if (runId !== p.id || disk || event.type !== 'note' || !String(event.message).startsWith(COMPLETION_NUDGE_NOTE)) return;
+          events = eventCheckpoint();
+          disk = readPersistedRuns(join(root, '.ai/cezar'));
+        };
+        store.on('event', capture);
+        engine().active.get(p.id)!.session.end();
+        await until(() => disk !== undefined);
+        store.off('event', capture);
+        let closes = variant === 'closing' ? 1 : 0;
+        const closeOnce = ({ runId, event }: { runId: string; event: { type: string } }) => {
+          if (runId !== p.id || event.type !== 'turn-end' || !closes || !refusals().some(input => !input.deliveredAt)) return;
+          closes--;
+          engine().active.get(p.id)?.session.end();
+        };
+        await restart(false, disk, events);
+        // The old manager may have reached a mock before it stopped: count from here.
+        const before = prompted(runner, refusal).length;
+        // Recovery reopens the run through the scheduler; its first turn end is a mock round trip away.
+        store.on('event', closeOnce);
+        onTestFinished(() => { store.off('event', closeOnce); });
+        if (variant === 'silent') silenceRefusals();
+        else retryAtOnce();
+        expect(refusals()).toEqual([expect.objectContaining({ source: 'lifecycle' })]);
+        if (variant === 'silent') {
+          await until(() => noReplyNotes(p.id).length === 1 && gated(p.id));
+          expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'no-wait' })]);
+          expect(semaphore.busy()).toBe(0);
+        } else {
+          await until(() => prompted(runner, refusal).length > before && store.getRun(p.id)?.status === 'waiting' &&
+            (workerWaits(p.id)[0]?.phase === 'open' || humanOpen(p.id).some(wait => wait.via === 'completion')));
+          expect(closes).toBe(0);
+          expect(store.getRun(p.id)?.waitDeliveryFailures).toBeUndefined();
+        }
+        expect(prompted(runner, refusal).length - before).toBe(1);
+        expect(refusals()).toEqual([expect.objectContaining({ deliveredAt: expect.any(String) })]);
+        expect(nudgeNotes(p.id)).toHaveLength(1);
+      });
+    }
 
     // hearsay-tools/cezarion#1301: a worker keeps its one no-wait nudge; the next turn end with no
     // wait or done asks its parent, and the parent's reply resumes it, charged to its budget.

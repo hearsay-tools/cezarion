@@ -290,6 +290,10 @@ export const agentInputSchema = z.object({
    * such input; records written before #505 never carry it, so nothing historical replays. */
   awaitingRead: z.literal(true).optional(),
   inboxClaim: inboxClaimSchema.optional(),
+  /** A completion refusal Cezar queued for a closed session (hearsay-tools/cezarion#1301): its
+   * delivery is the nudge's turn, bounded by the nudge's reply bound, and a session that closes
+   * before it is a failed delivery. Absent on every other input and on records written before. */
+  purpose: z.literal('completion-refusal').optional(),
 }).strict();
 export type AgentInput = z.infer<typeof agentInputSchema>;
 

@@ -909,7 +909,9 @@ on its waits. A block found after the session closed (or a legacy accepted Finis
 refusal as one lifecycle input that the scheduler continuation reopens the session to deliver.
 Its reply is bounded like the live nudge's, a run owes one refusal at a time, and the owed refusal
 holds a closing session like a wait: a reopened session that closes or fails before the refusal is
-submitted is a failed delivery, bounded by `MAX_WAKE_DELIVERY_ATTEMPTS`.
+submitted is a failed delivery, bounded by `MAX_WAKE_DELIVERY_ATTEMPTS`. The input carries
+`purpose: 'completion-refusal'` on the run record, so a Continue after the run failed at that bound
+and a restart deliver it under the same two bounds.
 One nudge per cycle: a human message or a wake starts a fresh one. When the turn that answers it
 ends on a blocked done again, Cezar registers
 a list `worker` wait on the live workers (`source: 'cezar'`, `via: 'completion'`, `mode: 'all'`,
