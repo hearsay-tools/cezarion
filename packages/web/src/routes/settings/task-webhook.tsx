@@ -1,7 +1,8 @@
 import { useId, useState, type FormEvent } from 'react'
 
 import { useTestProjectWebhook, useUpdateProject } from '@/api/queries'
-import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
+import type { ProjectListEntry, WebhookTrigger } from '@open-mercato/cezar-api-client'
+import { DEFAULT_WEBHOOK_TRIGGERS, WEBHOOK_TRIGGERS } from '@open-mercato/cezar-api-client/contract/attention'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
@@ -15,7 +16,27 @@ import { SettingsField } from './settings-field'
  * empty and says "Token set" instead; leaving it empty on Save keeps the stored token, and
  * "Clear token" is the one way to remove it. "Send test" posts one `task.test` delivery to the
  * STORED webhook, so an unsaved edit is saved first rather than tested against what is on disk.
+ *
+ * The state checkboxes (hearsay-tools/cezarion#1356) start from the stored `triggers`, or the
+ * default when none is stored. Save sends `triggers` only when the selection changed, so a URL
+ * or token edit leaves a webhook without a stored list on the default.
  */
+/** The cockpit's name for each state and when a run is in it, in `WEBHOOK_TRIGGERS` order. */
+const TRIGGER_LABELS: Record<WebhookTrigger, { label: string; hint: string }> = {
+  'needs-you': { label: 'Needs you', hint: 'Asks a question, asks for permission, or waits for review' },
+  failed: { label: 'Failed', hint: 'Failed, with no scheduled resume' },
+  done: { label: 'Done', hint: 'Finished' },
+  cancelled: { label: 'Cancelled', hint: 'Was cancelled' },
+  running: { label: 'Running', hint: 'Runs an agent turn' },
+  'waiting-workers': { label: 'Waiting for agents', hint: 'Waits on its workers or their replies' },
+  'waiting-ci': { label: 'Waiting on CI', hint: "Waits on a pull request's checks" },
+  'waiting-timer': { label: 'Waiting', hint: 'Waits on a timer' },
+  'waiting-other': { label: 'Any other wait', hint: 'Waits on anything else, including wait types added later' },
+}
+
+const sameTriggers = (a: readonly WebhookTrigger[], b: readonly WebhookTrigger[]) =>
+  a.length === b.length && a.every((trigger) => b.includes(trigger))
+
 export function TaskWebhookField({ project }: { project: ProjectListEntry }) {
   const update = useUpdateProject()
   const test = useTestProjectWebhook()
@@ -24,17 +45,28 @@ export function TaskWebhookField({ project }: { project: ProjectListEntry }) {
   const hintId = useId()
   const [url, setUrl] = useState(project.webhook?.url ?? '')
   const [token, setToken] = useState('')
+  const storedTriggers = project.webhook?.triggers ?? DEFAULT_WEBHOOK_TRIGGERS
+  const [triggers, setTriggers] = useState<readonly WebhookTrigger[]>(storedTriggers)
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null)
 
   const saved = project.webhook
   const trimmed = url.trim()
-  const dirty = trimmed !== (saved?.url ?? '') || token !== ''
+  const triggersChanged = !sameTriggers(triggers, storedTriggers)
+  const dirty = trimmed !== (saved?.url ?? '') || token !== '' || triggersChanged
   const busy = update.isPending || test.isPending
 
   const save = (onSaved?: () => void) => {
     if (!trimmed) return
     update.mutate(
-      { id: project.id, webhook: { url: trimmed, ...(token ? { token } : {}) } },
+      {
+        id: project.id,
+        webhook: {
+          url: trimmed,
+          ...(token ? { token } : {}),
+          // In `WEBHOOK_TRIGGERS` order, whatever order the boxes were ticked in.
+          ...(triggersChanged ? { triggers: WEBHOOK_TRIGGERS.filter((trigger) => triggers.includes(trigger)) } : {}),
+        },
+      },
       {
         onSuccess: () => {
           setToken('')
@@ -106,6 +138,31 @@ export function TaskWebhookField({ project }: { project: ProjectListEntry }) {
             ? 'The token is stored in ~/.cezar and never shown again. Leave it empty to keep it.'
             : 'The token is stored in ~/.cezar, never in the repo.'}
         </p>
+        <fieldset data-slot="task-webhook-triggers" className="flex flex-col gap-1">
+          <legend className="pbe-1 text-[11px] text-muted-foreground">Send a delivery when a task enters</legend>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,15rem),1fr))] gap-x-3">
+            {WEBHOOK_TRIGGERS.map((trigger) => (
+              <label key={trigger} className="flex min-h-11 items-start gap-2.5 pbs-2 text-[13px]">
+                <input
+                  type="checkbox"
+                  data-trigger={trigger}
+                  checked={triggers.includes(trigger)}
+                  onChange={(event) =>
+                    setTriggers((current) =>
+                      event.target.checked ? [...current, trigger] : current.filter((value) => value !== trigger),
+                    )
+                  }
+                  className="mbs-0.5 size-[18px] shrink-0"
+                />
+                <span className="flex min-w-0 flex-col">
+                  <span className="font-medium">{TRIGGER_LABELS[trigger].label}</span>
+                  <span className="text-[11px] text-soft-foreground">{TRIGGER_LABELS[trigger].hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="text-[11px] text-soft-foreground">Handing a task off and Send test always deliver.</p>
+        </fieldset>
         <div className="flex flex-wrap items-center gap-2">
           <Button type="submit" size="sm" className="max-sm:h-11" data-action="task-webhook-save" disabled={busy || !trimmed || !dirty}>
             Save
@@ -155,6 +212,7 @@ export function TaskWebhookField({ project }: { project: ProjectListEntry }) {
                     onSuccess: () => {
                       setUrl('')
                       setToken('')
+                      setTriggers(DEFAULT_WEBHOOK_TRIGGERS)
                       setResult(null)
                       toast('Task webhook removed')
                     },
