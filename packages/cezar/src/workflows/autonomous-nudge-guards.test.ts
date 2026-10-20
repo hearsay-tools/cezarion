@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { RunStore } from '../runs/store.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
-import { AUTONOMOUS_NUDGE, NO_WAIT_NO_REPLY_NOTE, NO_WAIT_NUDGE_NOTE, RunManager } from './run.ts';
+import { AUTONOMOUS_NUDGE, COMPLETION_NO_REPLY_NOTE, NO_WAIT_NO_REPLY_NOTE, NO_WAIT_NUDGE_NOTE, RunManager } from './run.ts';
 
 // Focused policy guards complement workflow-autonomous-parity's actual native
 // wires. A refused nudge must never touch either transport or consume its budget.
@@ -245,6 +245,21 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(store.getRun(id)?.status).toBe('waiting');
     expect(store.getRun(id)?.waits).toMatchObject([{ kind: 'human', via: 'no-wait', source: 'cezar', phase: 'open', askSeq: expect.any(Number) }]);
     expect(store.readEvents(id).filter(e => e.type === 'note' && e.message === NO_WAIT_NO_REPLY_NOTE)).toHaveLength(1);
+  });
+
+  // hearsay-tools/cezarion#1301: an unanswered completion refusal nudge says so, not "no-wait".
+  it('expiry after a completion nudge names the completion nudge', async () => {
+    vi.useFakeTimers();
+    state.currentStepId = 'task';
+    state.completionNudged = session;
+    manager['active'].set(id, state);
+    (manager as unknown as { noWaitNudgeReplyMs: number }).noWaitNudgeReplyMs = 300;
+    manager['armNoWaitNudgeReplyTimer'](id, state);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(store.getRun(id)?.status).toBe('waiting');
+    const notes = store.readEvents(id).filter(e => e.type === 'note').map(e => e.message);
+    expect(notes.filter(message => message === COMPLETION_NO_REPLY_NOTE)).toHaveLength(1);
+    expect(notes).not.toContain(NO_WAIT_NO_REPLY_NOTE);
   });
 
   it('a transport exception fails without retaining a readiness retry', () => {

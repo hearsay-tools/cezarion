@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
-import type { CiWaitResult, HumanWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
+import type { AgentInput, CiWaitResult, HumanWaitEntry, RunRecord, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
@@ -204,7 +204,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U19', 'U20', 'U20u', 'U21', 'U21m', 'U21h', 'U21a']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U19', 'U20', 'U20u', 'U21', 'U21m', 'U21h', 'U21a', 'U22']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -1550,7 +1550,46 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(store.getRun(run.id)?.automaticWakes).toBe(MAX_AUTO_CONTINUES);
       expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
     });
+
+    // hearsay-tools/cezarion#1301: a blocked done found after the session closed is queued as a
+    // lifecycle wake; the scheduler continuation reopens the session and delivers it as the nudge.
+    it(`${runner} U22 a done blocked after the session closed reopens it and delivers the refusal`, async () => {
+      // The reply turn ends on done again: the refusal's turn is the nudge's, so it takes the second step.
+      process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
+      const { p, w } = await parentWithWorker(runner);
+      const wakes = store.getRun(p.id)?.automaticWakes ?? 0;
+      engine().active.get(p.id)!.session.end();
+      const refusal = `Workers are still live: ${w.id}.`;
+      await until(() => prompted(runner, refusal).length > 0 && workerWaits(p.id)[0]?.phase === 'open' && store.getRun(p.id)?.status === 'waiting');
+      expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
+      expect(prompted(runner, refusal)).toEqual([expect.stringContaining(COMPLETION_WILL_WAIT)]);
+      const inputs = store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
+      expect(inputs).toEqual([expect.objectContaining({ source: 'lifecycle', deliveredAt: expect.any(String) })]);
+      expect(store.getRun(p.id)?.automaticWakes).toBe(wakes + 1);
+      expect(store.readEvents(p.id).filter(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE)))
+        .toEqual([expect.objectContaining({ message: `${COMPLETION_NUDGE_NOTE} (${wakes + 1}/${MAX_AUTO_CONTINUES}): workers_outstanding` })]);
+      expect(workerWaits(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'completion', workerIds: [w.id] })]);
+      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
+      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
+    });
   }
+
+  // hearsay-tools/cezarion#1301: a wait's lifecycle input is that wait's. Once the wait is
+  // delivered, the same input undelivered again (a replay) is not a fresh wake.
+  it('a delivered wait\'s lifecycle input is never owed again', async () => {
+    nativeWire('claude');
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'timer', seconds: 60, note: 'reowed' }), runner: 'claude' });
+    await until(() => parkedOn(run.id, waitOfKind(run.id, 'timer')));
+    const timer = waitOfKind(run.id, 'timer')!;
+    fireTimer(timer.id);
+    await until(() => settled(run.id, timer.id)?.phase === 'delivered' && store.getRun(run.id)?.status === 'waiting');
+    const owes = (record: RunRecord) => (manager as unknown as { owesWake(run: RunRecord): boolean }).owesWake(record);
+    const replayed = { ...store.getRun(run.id)!, agentInputs: store.getRun(run.id)!.agentInputs!.map(input => input.id === timer.id ? { ...input, deliveredAt: undefined } : input) };
+    expect(owes(replayed)).toBe(false);
+    // A lifecycle input no wait names is still owed.
+    const orphan: AgentInput = { id: randomUUID(), parentRunId: run.id, source: 'lifecycle', text: 'orphan', createdAt: new Date().toISOString() };
+    expect(owes({ ...replayed, agentInputs: [...replayed.agentInputs, orphan] })).toBe(true);
+  });
 
   // hearsay-tools/cezarion#1301: a refused done is not a done and cancels no wait. With a wait open
   // at that turn end there is no nudge: the run parks on the wait, and the refusal is a note.

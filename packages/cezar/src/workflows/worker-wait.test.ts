@@ -70,13 +70,20 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     });
   }
 
-  it('readiness closed session defers successful done with outstanding workers', async () => {
+  // hearsay-tools/cezarion#1301: a closed session's blocked done is queued as the refusal, and the
+  // scheduler continuation reopens the session to deliver it; Cezar opens no wait.
+  it('readiness closed session reopens to refuse a successful done with outstanding workers', async () => {
     const p = await parent(); const w = await worker(p.id);
     const state = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!;
     state.session.end();
-    await until(() => !manager.isActive(p.id));
-    expect(store.getRun(p.id)?.status).toBe('waiting');
-    expect(waitOf(store.getRun(p.id))).toMatchObject({ mode: 'all', workerIds: [w.id] });
+    const refusal = (run: RunRecord | undefined) => run?.agentInputs?.find(input => input.source === 'lifecycle' && input.text.includes(`Workers are still live: ${w.id}.`));
+    await until(() => !!refusal(store.getRun(p.id))?.deliveredAt && store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true);
+    expect(refusal(store.getRun(p.id))?.text).toContain(COMPLETION_WILL_WAIT);
+    expect(completionNudges(p.id)).toHaveLength(1);
+    expect(store.getRun(p.id)?.status).not.toBe('done');
+    expect(waitOf(store.getRun(p.id))).toBeUndefined();
+    expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
+    expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
     expect(store.getRun(w.id)?.status).toBe('queued');
   });
 
@@ -269,18 +276,20 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => !manager.isActive(p.id));
   });
 
-  it('readiness closed-session wait resumes on a later proof after restart and preserves its cycle', async () => {
+  // hearsay-tools/cezarion#1301: which input is a refusal is in memory only; one still queued at a
+  // crash is a lifecycle input no wait names, which recovery delivers as ordinary input.
+  it('readiness closed-session refusal still queued at a crash is delivered after recovery', async () => {
     const p = await parent(); const w = await worker(p.id);
-    (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!.session.end();
-    await until(() => !manager.isActive(p.id));
-    const wait = waitOf(store.getRun(p.id)); expect(wait).toBeDefined();
-    await restart();
-    expect(waitOf(store.getRun(p.id))?.id).toBe(wait!.id);
-    await until(() => store.getRun(w.id)?.status === 'waiting');
-    manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
-    await until(() => store.getRun(p.id)?.agentInputs?.some(input => input.id === wait!.id && !!input.deliveredAt) === true);
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const events = new Map();
+    const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<RunRecord>;
+    const text = `Workers are still live: ${w.id}. u-crash`;
+    const input = { id: randomUUID(), parentRunId: p.id, source: 'lifecycle' as const, text, createdAt: new Date().toISOString() };
+    for (const run of disk) if (run.id === p.id) Object.assign(run, { agentInputs: [...run.agentInputs ?? [], input] });
+    await restart(false, disk, events);
+    await until(() => !!store.getRun(p.id)?.agentInputs?.find(entry => entry.id === input.id)?.deliveredAt);
     expect(store.getRun(p.id)?.status).not.toBe('done');
-    expect(store.getRun(p.id)?.delegation).toHaveProperty('completion');
+    expect(waitOf(store.getRun(p.id))).toBeUndefined();
   });
 
   it('readiness ready human Finish retires an accepted wait before closing its session', async () => {
