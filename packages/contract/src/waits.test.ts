@@ -27,6 +27,7 @@ import {
   openWaitSchema,
   waitViaSchema,
   type CiWaitEntry,
+  type DeadlinedWorkerWaitEntry,
   type HumanWaitEntry,
   type TimerWaitEntry,
   type WorkerWaitEntry,
@@ -382,12 +383,17 @@ function workerBase(over: Record<string, unknown> = {}) {
   };
 }
 
-function openWorkerWait(over: Partial<WorkerWaitEntry> = {}): WorkerWaitEntry {
-  return workerWaitEntrySchema.parse(workerBase({ mode: 'all', workerIds: [W1, W2], revisions: [{ workerId: W1, revision: 1 }], outcomes: [], ...over }));
+function deadlined(entry: WorkerWaitEntry): DeadlinedWorkerWaitEntry {
+  if (!hasWorkerDeadline(entry)) throw new Error('worker wait fixture lost its deadline');
+  return entry;
 }
 
-function openRequestWait(over: Record<string, unknown> = {}): WorkerWaitEntry {
-  return workerWaitEntrySchema.parse(workerBase({ requestIds: [R1], requestOutcomes: [], ...over }));
+function openWorkerWait(over: Partial<WorkerWaitEntry> = {}): DeadlinedWorkerWaitEntry {
+  return deadlined(workerWaitEntrySchema.parse(workerBase({ mode: 'all', workerIds: [W1, W2], revisions: [{ workerId: W1, revision: 1 }], outcomes: [], ...over })));
+}
+
+function openRequestWait(over: Record<string, unknown> = {}): DeadlinedWorkerWaitEntry {
+  return deadlined(workerWaitEntrySchema.parse(workerBase({ requestIds: [R1], requestOutcomes: [], ...over })));
 }
 
 describe('worker wait entry', () => {
