@@ -1528,6 +1528,8 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       const turns = turnEnds(f.p.id);
       const id = await f.progress('Worker progress u21m');
       await until(() => delivered(f.p.id, id) && prompted(runner, 'Worker progress u21m').length > 0);
+      // The wake's footer names the open completion wait, which has no deadline.
+      expect(prompted(runner, 'Worker progress u21m')).toEqual([expect.stringContaining(`Still open: worker wait ${entry.id} on 1 worker, no deadline.`)]);
       await until(() => turnEnds(f.p.id) > turns && parkedOn(f.p.id, workerWaits(f.p.id)[0]));
       expect(store.getRun(f.p.id)?.waits).toEqual([expect.objectContaining({ id: entry.id, via: 'completion', phase: 'open' })]);
       expect(inputsFor(f.p.id, entry.id)).toEqual([]);
@@ -1561,7 +1563,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       await until(() => settled(f.p.id, timer.id)?.phase === 'delivered' && turnEnds(f.p.id) > turns &&
         parkedOn(f.p.id, workerWaits(f.p.id)[0]));
       expect(inputsFor(f.p.id, timer.id)).toHaveLength(1);
-      expect(prompted(runner, inputsFor(f.p.id, timer.id)[0]!.text)).toHaveLength(1);
+      expect(prompted(runner, inputsFor(f.p.id, timer.id)[0]!.text)).toEqual([expect.stringContaining(`Still open: worker wait ${entry.id} on 1 worker, no deadline.`)]);
       expect(store.getRun(f.p.id)?.waits).toEqual([expect.objectContaining({ id: entry.id, via: 'completion', phase: 'open' })]);
       expect(workerWaits(f.p.id)[0]).not.toHaveProperty('deadline');
       expect(inputsFor(f.p.id, entry.id)).toEqual([]);

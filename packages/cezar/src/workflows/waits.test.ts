@@ -94,6 +94,10 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     const human: HumanWaitEntry = { id: '55555555-5555-4555-8555-555555555555', kind: 'human', source: 'agent', via: 'cezar_ask',
       registeredAt: '2026-10-17T10:00:00.000Z', phase: 'open', turnId: 'turn-1', askSeq: 4 };
     expect(openWaitsFooter([human, byWorker])).toContain('call cezar_cancel_wait for any CI wait, worker wait or timer you no longer need.');
+    // Cezar's completion wait has no deadline (hearsay-tools/cezarion#1301).
+    const { deadline: _deadline, timeoutSeconds: _timeout, ...undated } = byWorker;
+    const completion: WorkerWaitEntry = { ...undated, source: 'cezar', via: 'completion', mode: 'all' };
+    expect(openWaitsFooter([completion])).toBe(`Still open: worker wait ${completion.id} on 2 workers, no deadline. Call cezar_cancel_wait for any you no longer need.`);
   });
 
   // hearsay-tools/cezarion#1234: the user's reply settles a question, and a question the user saw
