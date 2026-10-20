@@ -37,6 +37,33 @@ const pinSandboxHome = (): void => {
   if (!process.env.CEZ_HOME) process.env.CEZ_HOME = sandboxHome
 }
 
+// Nor may a test resolve the developer's own agent folders (hearsay-tools/cezarion#1361).
+// `agentHomePaths()` and the default agent account read `HOME` and each agent's own
+// variable, so two tests passed locally only because `~/.pi/agent` and `~/.omp/agent`
+// existed, and failed on a fresh CI runner. Every worker gets an empty user home, the
+// variables that move an agent home are cleared, and both are restored around every test.
+// A test that needs a populated home sets its own in its `beforeEach` (see the omp block
+// in `src/server/agent-profiles-api.test.ts`): this hook runs before theirs.
+const sandboxUserHome = mkdtempSync(join(realpathSync(tmpdir()), 'cez-vitest-user-home-'))
+
+const AGENT_HOME_KEYS = [
+  'CLAUDE_CONFIG_DIR', // Claude Code's home.
+  'CODEX_HOME', // Codex's home.
+  'PI_CODING_AGENT_DIR', // Pi's agent folder, and omp's when no profile is selected.
+  'PI_CONFIG_DIR', // omp's root folder under HOME.
+  'OMP_PROFILE', // Selects an omp profile, which moves the default omp account.
+  'PI_PROFILE', // omp reads it when OMP_PROFILE is unset.
+  'XDG_CONFIG_HOME', // OpenCode's config, and Cursor's on Linux.
+  'XDG_DATA_HOME', // OpenCode's credentials.
+  'CURSOR_CONFIG_DIR', // Cursor's config.
+] as const
+
+const pinSandboxUserHome = (): void => {
+  process.env.HOME = sandboxUserHome
+  process.env.USERPROFILE = sandboxUserHome // `os.homedir()` reads this one on Windows.
+  for (const key of AGENT_HOME_KEYS) delete process.env[key]
+}
+
 // Cezar tasks inherit host wrappers, deployment mode and feature flags. Suites
 // assume default executables, local mode and opt-in features off — clear the
 // host values so a suite run inside a task worktree matches CI. Cases that set
@@ -92,11 +119,13 @@ const pinGitEnvironment = (): void => {
 
 pinSandboxTemp()
 pinSandboxHome()
+pinSandboxUserHome()
 pinGitEnvironment()
 clearHostBinAndModeOverrides()
 beforeEach(() => {
   pinSandboxTemp()
   pinSandboxHome()
+  pinSandboxUserHome()
   pinGitEnvironment()
   clearHostBinAndModeOverrides()
 })
@@ -105,10 +134,12 @@ beforeEach(() => {
 afterEach(() => {
   pinSandboxTemp()
   pinSandboxHome()
+  pinSandboxUserHome()
   pinGitEnvironment()
   clearHostBinAndModeOverrides()
 })
 afterAll(() => {
   rmSync(sandboxHome, { recursive: true, force: true })
+  rmSync(sandboxUserHome, { recursive: true, force: true })
   rmSync(sandboxTemp, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
 })
