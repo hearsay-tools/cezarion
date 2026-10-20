@@ -817,21 +817,20 @@ describe('ThreadView', () => {
     expect(document.querySelector('[data-slot="plan-mirror"]')).toBeNull()
     expect(document.querySelector('[data-slot="run-header"] [data-slot="workflow-steps"]')).toBeNull()
     const dock = document.querySelector('[data-slot="run-activity-dock"]')!
-    expect(dock.textContent).toContain('Run activity')
-    // Only the workflow has anything to show in this fixture — the count is honest about it.
-    expect(dock.textContent).toContain('1 section')
-    expect(dock.textContent).toContain('Working')
-    // The workflow row is titled by the step the run is on, not by the word "Workflow".
+    expect(dock.textContent).toContain('Session activity')
+    // The status is the same line the header pill reads (hearsay-tools/cezarion#1333).
+    expect(dock.textContent).toContain('Running')
+    // The workflow row names the workflow and the step the run is on.
+    expect(document.querySelector('[data-slot="run-activity-workflow"]')?.textContent).toContain('quick-task')
     expect(document.querySelector('[data-slot="run-activity-workflow"]')?.textContent).toContain('Do the task')
   })
 
-  it('quarantined delegation metadata adds no workers section — and no dock of its own', () => {
+  it('quarantined delegation metadata adds no workers section', () => {
     // `{ role: 'invalid' }` is what the contract parks unreadable metadata as, and
     // carries no usable worker links. Counting it as a section would inflate the
     // dock's tally and leave an empty bordered panel behind.
     renderView(<ThreadView run={run('done', { delegation: { role: 'invalid' } } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
     expect(document.querySelector('[data-slot="run-activity-workers"]')).toBeNull()
-    expect(document.querySelector('[data-slot="run-activity-dock"]')).toBeNull()
   })
 
   it('a live run is never reported as All complete, however quiet its rows are', () => {
@@ -841,7 +840,8 @@ describe('ThreadView', () => {
     renderView(<ThreadView run={run('waiting', { id: 'dock-waiting', delegation } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
     const status = document.querySelector('[data-slot="run-activity-status"]')?.textContent
     expect(status).not.toContain('All complete')
-    expect(status).toContain('In progress')
+    // The run's own attention label, the one its header pill shows (hearsay-tools/cezarion#1333).
+    expect(status).toContain('Needs you')
   })
 
   it.each(['failed', 'cancelled'] as const)('a %s workflow step never reads All complete', (status) => {
@@ -887,7 +887,7 @@ describe('ThreadView', () => {
     const { rerender } = renderView(
       <ThreadView run={run('running', { id: 'dock-run-a', steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />,
     )
-    fireEvent.click(screen.getByRole('button', { name: /Run activity/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Session activity/ }))
     expect(document.querySelector('[data-slot="run-activity-dock"]')?.getAttribute('data-state')).toBe('collapsed')
 
     // The route does not remount between tasks: only the run prop changes.

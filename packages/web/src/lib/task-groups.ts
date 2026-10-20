@@ -251,7 +251,7 @@ export function sortRuns(runs: readonly RunSummary[], view: ListView): RunSummar
     })
 }
 
-/** Owned workers are not task-list rows — they live on the parent’s Run activity dock (#312).
+/** Owned workers are not task-list rows — they live on the parent’s Session activity card (#312).
  *  The argument is role-only so a full `RunSummary` and a slim index row both type-check. */
 export function isOwnedWorker(run: { delegation?: { role?: string } | null }): boolean {
   return run.delegation?.role === 'worker'

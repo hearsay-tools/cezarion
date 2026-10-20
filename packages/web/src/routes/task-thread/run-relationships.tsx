@@ -72,7 +72,7 @@ export function useWorkersVerdict(run: ApiRun): WorkersVerdict {
 }
 
 /**
- * The **Workers** row of the Run activity accordion (#402, mockups `pasted-2/3.png`): relationships
+ * The **Workers** row of the Session activity accordion (#402, mockups `pasted-2/3.png`): relationships
  * rendered as one accordion section — `Workers · 2 linked · 1 done · 1 cancelled`, opening
  * to a row per worker with its status and a jump control to the worker task.
  *
