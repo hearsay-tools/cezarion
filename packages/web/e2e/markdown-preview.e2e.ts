@@ -155,6 +155,12 @@ describe('the Markdown preview in the Changes views', () => {
     )
     expect(before.toggleHeight).toBeGreaterThanOrEqual(44)
 
+    // hearsay-tools/cezarion#1333 put the phone's Archive in a row under the top bar, which moves
+    // this switch below the 640px fold. CI run 39460793218 shard 4 and a local run both failed here
+    // with the preview never opening (bundle markdown-preview/task-Changes-at-360px-…-1: the
+    // screenshot shows the tree, and the guide card is below the viewport). Where the click landed
+    // was not traced; centring the switch before the coordinate click passed locally (11/11).
+    browser.evaluate(`document.querySelector(${JSON.stringify(`${guideCard} [data-slot="diff-file-preview-toggle"]`)}).scrollIntoView({ block: 'center', behavior: 'instant' })`)
     browser.click(`${guideCard} [data-slot="diff-file-preview-toggle"]`)
     const after = browser.waitForValue<{ switchHeight: number; overflow: number; wide: string[] }>(
       `(() => {

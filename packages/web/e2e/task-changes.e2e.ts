@@ -117,12 +117,13 @@ describe('the Changes tab against a live dry run', () => {
     }
     expect(browser.url()).toBe(`${baseUrl}${scoped(`/tasks/${runId}/changes`)}`)
 
-    // The Changes tab is the active one now.
+    // The Changes tab is the active one now, with its changed-file count at every width
+    // (hearsay-tools/cezarion#1333): the mock changes one file.
     expect(
       browser.evaluate(
         `document.querySelector('[data-slot="run-tabs"] a[aria-current="page"]').textContent`,
       ),
-    ).toBe('Changes')
+    ).toBe('Changes1')
 
     // The tree shows the mock's real change: notes.md, one added line.
     browser.waitForFunction(`document.querySelector('[data-slot="changes-tree"]') !== null`)
