@@ -100,7 +100,7 @@ export function TaskWebhookField({ project }: { project: ProjectListEntry }) {
   return (
     <SettingsField
       title="Task webhook"
-      hint="Tasks you hand off, or start with notify on, POST their status changes here with the token as a Bearer header."
+      hint="Tasks you hand off, or start with notify on, POST here when they enter a state you select below, with the token as a Bearer header."
     >
       <form data-slot="task-webhook" className="flex flex-col gap-3" onSubmit={onSubmit}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
