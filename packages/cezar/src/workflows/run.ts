@@ -6866,7 +6866,6 @@ export class RunManager {
 
     try { this.beginWorkerExecution(runId, !deferForCapacity); }
     catch (error) { return { ok: false, error: admissionError(error, 'worker execution checkpoint unavailable') }; }
-    if (supersedes) this.supersedeWorkerFallback(runId);
     // Everything that could refuse this continuation has now passed, so a pending usage-limit
     // resume is superseded either way: this IS that resume (it re-stamps its own counter), or a
     // human got there first — and then the counter starts over, because the cap only exists to
@@ -6914,6 +6913,8 @@ export class RunManager {
       }
     }
     else { this.store.updateRun(runId, acceptedPatch); this.store.flush(); }
+    // The continuation is admitted: only now does it supersede Cezar's fallback question.
+    if (supersedes) this.supersedeWorkerFallback(runId);
     // After the continuation checkpoint: a row that records the wait delivered also holds the answer.
     if (!deferForCapacity) this.settleHumanWaits(runId);
     this.continuationGenerations.set(runId, Symbol());

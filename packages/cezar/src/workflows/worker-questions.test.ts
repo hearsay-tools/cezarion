@@ -150,6 +150,19 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     expectFallbackIntact(f, waits, outcomes);
   });
 
+  // hearsay-tools/cezarion#1301: a Continue whose checkpoint fails is refused, so it supersedes nothing.
+  it('a Continue refused at its checkpoint leaves the fallback question, its wait and its routed request intact', async () => {
+    const f = await idleWorker();
+    manager.requestWorkerStop(f.w.id); expect(await manager.awaitRunTermination(f.w.id, 15_000)).toBe(true);
+    const waits = structuredClone(store.getRun(f.w.id)?.waits);
+    const outcomes = conversationOf(f.p.id)?.outcomes.filter(outcome => outcome.requestId === f.requestId);
+    const fail = vi.spyOn(store, 'commitWorkerContinuation').mockImplementationOnce(() => { throw Error('disk full'); });
+    expect(manager.continueRun(f.w.id, { text: 'mock:hold' }, true)).toEqual({ ok: false, error: 'worker execution checkpoint unavailable' });
+    expect(fail).toHaveBeenCalledTimes(1);
+    expectFallbackIntact(f, waits, outcomes);
+    await until(() => !manager.isActive(f.w.id));
+  });
+
   // hearsay-tools/cezarion#1301: the routed request's outcome and the parent's unread copy are
   // settled before the worker's question closes, so a failed write leaves it all for a retry, and
   // recovery finishes it.
