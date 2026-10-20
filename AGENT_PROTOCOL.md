@@ -1428,6 +1428,16 @@ same outcome. Every runner spawns and signals through `core/session-process.ts`,
 sends the group its SIGKILL when a member outlives a leader cezar stopped. win32 has no process
 groups and skips these rows; it ends the tree with `taskkill /T /F`. No wire exemptions.
 
+**S30–S31** (hearsay-tools/cezarion#1286), in the same file, use the same scenario for a leader
+cezar did not signal. S30: `end()` with no SIGSTOP; the native mock exits on EOF by itself, and once
+the session settles the in-group child is gone and the `setsid` child keeps running. OpenCode's
+runner and Cursor print end by a cezar signal on `end()`, so their S30 cells take S27/S28's path.
+S31: the leader alone is SIGKILLed from outside, with the same outcome. `core/session-process.ts`
+reaps the group of a leader that exited on its own after the exit drain (SIGTERM, then SIGKILL
+after the grace), under the same reuse guard, and keeps its host up until the group is empty or
+the SIGKILL is sent. Cursor print reaches the same reap when it ends its group after each turn.
+win32 skips both rows. No wire exemptions.
+
 **R43** (hearsay-tools/cezarion#738), in `workflows/worker-reboot-parity.test.ts` and
 `workflows/worker-location-evidence.test.ts`, drives every `RUNNER_IDS`
 backend's `HARNESS_ADAPTERS` native wire through worker cancellation and a successful twin.
