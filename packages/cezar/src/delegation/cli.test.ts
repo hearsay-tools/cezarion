@@ -101,6 +101,23 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     expect(waitHelp).toContain('--mode');
     expect(waitHelp).toContain('--timeout-seconds');
   });
+  it('sends a long resume deadline through the HTTP boundary and rejects it for an ordinary request', async () => {
+    const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
+    const args = ['send', workerId, 'Fix review', '--id', randomUUID(), '--kind', 'request', '--timeout-seconds', '7200'];
+    expect(await runWorkerCommand(args, env)).toBe(1);
+    expect(json().code).toBe('invalid_input');
+    expect(await runWorkerCommand([...args, '--resume'], env)).toBe(1);
+    expect(json().code).toBe('incompatible_state');
+    f.manager.cancel(workerId);
+    await f.manager.awaitRunTermination(workerId, 10_000);
+    f.store.updateStep(workerId, 'task', { status: 'done', sessionId: 'previous-session', backend: 'claude' });
+    const generation = f.store.commitWorkerExecutionStart(workerId);
+    f.store.updateRun(workerId, { status: 'done' });
+    f.store.commitWorkerExecutionComplete(workerId, generation);
+    expect(await runWorkerCommand([...args, '--resume'], env)).toBe(0);
+    const sent = json();
+    expect(Date.parse(sent.message.deadline) - Date.parse(sent.message.createdAt)).toBe(7_200_000);
+  });
   // hearsay-tools/cezarion#1235: the help a parent reads says waits coexist and how to stop one.
   it('documents that several waits coexist, that messages close none, and how cancel-wait stops one', async () => {
     await runWorkerCommand(['wait', '--help'], {});

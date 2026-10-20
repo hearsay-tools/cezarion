@@ -611,3 +611,12 @@ alias) awaits that list generation's bounded lookup and returns `{generation, st
 projects?, membership?, reason?}`. Expired generations return unavailable without
 starting another lookup. Clients apply only matching generations and preserve filter
 selection until authoritative metadata arrives.
+
+### Resume request deadlines (hearsay-tools/cezarion#1241)
+
+Resume requests accept an explicit `timeoutSeconds` up to 86,400 seconds. The
+600-second default and the 1,800-second cap for ordinary requests and waits
+remain unchanged. A first explicit reply after deadline expiry changes the
+recorded `timed-out` outcome to `replied-late`; other settlements stay final.
+Transcript consumers accept a separate outcome amendment projection, replacing
+only `timed-out` with `replied-late`. Existing timeout projections remain valid.

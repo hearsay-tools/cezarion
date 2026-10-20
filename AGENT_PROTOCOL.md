@@ -245,7 +245,10 @@ its obligation ID; follow-ups and replies name `requestId`. Exact message retrie
 reuse the existing durable input; changed payloads are rejected. Follow-ups and
 progress cannot discharge obligations. Explicit reply and completed-without-reply
 are distinct outcomes, alongside failed, cancelled, destroyed, timed-out, and
-sender-closed. Late replies remain recorded without replacing a first settlement.
+sender-closed. A first reply after deadline expiry amends `timed-out` to
+`replied-late`, retaining its reply ID and observation time. Other settlements
+remain unchanged. The amendment emits a separate idempotent outcome projection;
+it never reopens a settled wait or request.
 Both roles can wait on their own requests: a request wait is a `worker` entry in the run's
 wait list (`requestIds`; hearsay-tools/cezarion#1235 phase 3a), and a reply resolves only the
 request wait that names it. An incoming message wakes the run with that wait still open and in
@@ -257,11 +260,16 @@ that wait. After progress delivery the same wait parks again with its original
 ID, selected workers and deadline; terminal outcomes still produce one wake.
 Harness row **WP1** in `workflows/worker-wait-conversations.test.ts` exercises
 repeated progress and one terminal wake through every `RUNNER_IDS` native mock
-wire using `HARNESS_ADAPTERS` (hearsay-tools/cezarion#1138).
+wire using `HARNESS_ADAPTERS` (hearsay-tools/cezarion#1138). Row **WP2** pins a
+resumed request pending after 45 minutes within a one-hour bound and delivery of
+a reply after expiry as `replied-late` on those native wires (hearsay-tools/cezarion#1241).
 
 Messages are bounded to 100,000 characters, 32 undelivered inputs per recipient,
 1,024 messages per family, and 32 pending obligations. Requests and waits expire
-in 600 seconds by default (1–1,800 seconds accepted). Several waits can be open at once (workers, CI, timers); a message wakes the run and closes none.
+in 600 seconds by default (1–1,800 seconds accepted). Requests sent with
+`--resume` accept `--timeout-seconds 1–86400` (24 hours maximum); their default
+remains 600 seconds. Set the request bound explicitly for a long review round:
+a worker wait has its own deadline and does not extend the request. Several waits can be open at once (workers, CI, timers); a message wakes the run and closes none.
 Ordinary sends to review/terminal recipients return `not-delivered` with an
 actionable `message.instruction`; `continuation-required` means no input was
 queued. The CLI exits 1 for these receipts. An active owning parent can explicitly
