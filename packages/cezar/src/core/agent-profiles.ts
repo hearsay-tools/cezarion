@@ -69,7 +69,8 @@ import type { ProviderId } from './provider-auth.ts';
  * - the default's own folder cannot also be added as a named account (`conflictingProfile`).
  *
  * A host `PI_CONFIG_DIR` moves omp's root, so it also decides where named omp profiles must live
- * (`ompProfilesDir`).
+ * (`ompProfilesDir`). omp reads the root at spawn, so a root that moved after an account was added
+ * would select another profile under the same name; `namedAccountUnavailable` refuses that spawn.
  */
 export const PROFILE_ENV_VAR: Record<ProviderId, string | null> = {
   claude: 'CLAUDE_CONFIG_DIR',

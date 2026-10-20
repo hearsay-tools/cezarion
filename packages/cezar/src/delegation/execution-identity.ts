@@ -4,7 +4,7 @@ import { basename, dirname, isAbsolute, join } from 'node:path';
 import { realpathSync, statSync } from 'node:fs';
 import { z } from 'zod';
 import { profileEnv, supportsProfiles } from '../core/agent-profiles.ts';
-import type { ResolvedAgentProfile } from '../workspace/agent-profiles.ts';
+import { namedAccountUnavailable, type ResolvedAgentProfile } from '../workspace/agent-profiles.ts';
 import { agentHomePaths, claudeStateFilePath } from '../paths.ts';
 import { workflowDefSchema, type WorkflowDef } from '../workflows/types.ts';
 
@@ -120,6 +120,10 @@ export function boundWorkerAccountEnv(binding: WorkerAccountBinding, env: NodeJS
     if (!ompProfile) return {};
     const selected = profileEnv('omp', binding.homePath);
     if (Object.keys(selected).length === 0) throw new WorkerIdentityError('Accepted omp account names no omp profile');
+    // omp resolves the name under the root it computes from the CHILD's HOME and PI_CONFIG_DIR,
+    // which may have changed since acceptance; a moved root would select another profile.
+    const unavailable = namedAccountUnavailable('omp', binding.homePath, env);
+    if (unavailable !== null) throw new WorkerIdentityError(unavailable);
     return selected;
   }
   if (binding.claudeLayout?.kind === 'native') {

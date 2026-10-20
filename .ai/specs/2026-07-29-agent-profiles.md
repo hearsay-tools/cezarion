@@ -179,6 +179,25 @@ variable is applied after the allowlist and replaces the host value for its sess
 default's own folder or profile as a named account is refused. `PI_CONFIG_DIR` moves omp's root,
 and with it the profiles dir that named omp folders must be in.
 
+**omp's root can move after an account is added.** omp resolves the name under the root it computes
+at spawn from `HOME` and `PI_CONFIG_DIR`. Once either changes, `OMP_PROFILE=<name>` would open
+`<new root>/profiles/<name>`, another login or a fresh empty one, while Settings still shows the
+stored folder. So every spawn of a named omp account re-checks the folder against the root the child
+will use (`namedAccountUnavailable`) and refuses rather than spawning bare:
+
+| Path | At a moved root |
+| --- | --- |
+| Step and Continue | `resolveProfileEnvForRoot` throws `AgentAccountUnavailableError`; the step fails before spawning with the message |
+| Owned worker launch | `boundWorkerAccountEnv` checks the child env and throws `WorkerIdentityError` |
+| Worker selection | the error becomes a `DelegationPolicyError` for the spawning parent |
+| Planner | takes its one-step fallback with no model call; the auto-namer keeps its heuristic title |
+| Terminal handoff, Connect | 409 with the message |
+| Account status | an `unknown` row whose hint says why, with no probe; the boot warm-up skips the account |
+
+Pinning `PI_CONFIG_DIR` per spawn instead was rejected: omp also uses that value as the name of the
+project-local folder (`<project>/<PI_CONFIG_DIR>/plugins/installed_plugins.json`), so a pin would
+change what a session reads in the project.
+
 **Owned workers** pin a named pi or omp account's folder like any other. A named omp account pins
 its profile entry with only the parent resolved: the entry's realpath would name no profile and run
 the worker on the default. The discovered pi or omp account binds no folder and spawns bare, as it
@@ -194,7 +213,7 @@ where the agent has never run has none. Evidence accepted before this change has
 | --- | --- |
 | `packages/cezar/src/core/agent-profiles.ts` | `PROFILE_ENV_VAR`, `profileEnv`, `looksLikeProfileDir` — the vendor knowledge, pure. Sibling of `agent-config/catalog.ts`, which owns config-FILE knowledge. |
 | `packages/cezar/src/core/shell-env.ts` | Rendering the variable into a shell command, per platform, refusing rather than guessing. |
-| `packages/cezar/src/workspace/agent-profiles.ts` | Resolution against the workspace config. |
+| `packages/cezar/src/workspace/agent-profiles.ts` | Resolution against the workspace config, and `namedAccountUnavailable`, the spawn-time check that omp would still open a named account's profile. |
 | `packages/cezar/src/workspace/agent-accounts.ts` | `~/.cezar/agent-accounts.json` — the store, its house rules, and the one-time import from `config.json`. `config.json`'s own schema is untouched by this feature. |
 | `packages/contract/src/agent-profiles.ts` | The wire shapes. |
 | `GET/POST /api/v1/workspace/agent-profiles`, `PATCH/DELETE …/:id` | Workspace-level, single-mount, `localHandoff`-gated. |

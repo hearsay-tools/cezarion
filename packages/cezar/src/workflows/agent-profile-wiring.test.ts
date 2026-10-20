@@ -9,6 +9,7 @@ import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import { registerProject } from '../workspace/projects.ts';
 import type { RunManager } from './run.ts';
 import { buildChildEnv } from '../core/agent-env.ts';
+import { AgentAccountUnavailableError } from '../workspace/agent-profiles.ts';
 
 /**
  * Which agent account a STEP spawns under (spec 2026-07-29-agent-profiles).
@@ -166,6 +167,25 @@ describe('RunManager agent-profile resolution', () => {
     expect((await seam().agentEnvForStep(run.id, 'claude')).profileId).toBe('default');
   });
 
+  /**
+   * omp resolves a profile NAME under `$HOME/<PI_CONFIG_DIR or .omp>`, read from the env the child
+   * inherits, which is this process's. The pi and omp rows own those variables.
+   */
+  const agentVars = ['HOME', 'PI_CONFIG_DIR', 'OMP_PROFILE', 'PI_PROFILE', 'PI_CODING_AGENT_DIR'] as const;
+  const ownAgentHome = () => {
+    const saved = Object.fromEntries(agentVars.map((key) => [key, process.env[key]]));
+    beforeEach(() => {
+      for (const key of agentVars) delete process.env[key];
+      process.env.HOME = home;
+    });
+    afterEach(() => {
+      for (const key of agentVars) {
+        if (saved[key] === undefined) delete process.env[key];
+        else process.env[key] = saved[key];
+      }
+    });
+  };
+
   /** pi and omp accounts (hearsay-tools/cezarion#1283): one row per runner, same four rules. */
   const runners = [
     { provider: 'pi' as const, variable: 'PI_CODING_AGENT_DIR', folder: () => join(home, 'pi-work', 'agent'),
@@ -176,6 +196,8 @@ describe('RunManager agent-profile resolution', () => {
   ];
   for (const { provider, variable, folder, spawnedWith, hostValue } of runners) {
     describe(`${provider} accounts`, () => {
+      ownAgentHome();
+
       it('adds NOTHING for the default account', async () => {
         const { env, profileId } = await seam().agentEnvForStep(newRun().id, provider);
         expect(profileId).toBe('default');
@@ -212,4 +234,21 @@ describe('RunManager agent-profile resolution', () => {
       });
     });
   }
+
+  describe('an omp account after omp\'s root moved', () => {
+    ownAgentHome();
+
+    it('fails the step before spawning rather than letting OMP_PROFILE open another profile', async () => {
+      // Added under `~/.omp`. With PI_CONFIG_DIR set now, `OMP_PROFILE=work` would open
+      // `~/.omp-alt/profiles/work`: another login, or a fresh empty one, under the name Settings shows.
+      await addAccount('work', 'omp', join(home, '.omp', 'profiles', 'work'));
+      await selectAccount('omp', 'work');
+      process.env.PI_CONFIG_DIR = '.omp-alt';
+      const run = newRun();
+      await expect(seam().agentEnvForStep(run.id, 'omp')).rejects.toBeInstanceOf(AgentAccountUnavailableError);
+      // Continue resolves the step's recorded account and is refused the same way.
+      await expect(seam().agentEnvForStep(run.id, 'omp', { recordedProfileId: 'work' }))
+        .rejects.toThrow(join(home, '.omp-alt', 'profiles'));
+    });
+  });
 });

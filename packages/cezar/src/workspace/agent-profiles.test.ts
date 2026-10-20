@@ -4,8 +4,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { agentAccountsPath } from '../paths.ts';
 import {
+  AgentAccountUnavailableError,
   defaultAgentProfile,
   listAgentProfiles,
+  namedAccountUnavailable,
   ompProfileDirError,
   profileDirState,
   profilesForProvider,
@@ -178,7 +180,7 @@ describe('agent profile resolution', () => {
         selections: { '/tmp/projects/a': { pi: 'pi-work', omp: 'omp-work' } },
       });
       expect((await resolveProfileEnvForRoot('/tmp/projects/a', 'pi')).env).toEqual({ PI_CODING_AGENT_DIR: '/opt/pi-work/agent' });
-      expect((await resolveProfileEnvForRoot('/tmp/projects/a', 'omp')).env).toEqual({ OMP_PROFILE: 'work' });
+      expect((await resolveProfileEnvForRoot('/tmp/projects/a', 'omp', undefined, env)).env).toEqual({ OMP_PROFILE: 'work' });
       // The default account of either still adds nothing.
       expect((await resolveProfileEnvForRoot('/tmp/projects/b', 'pi')).env).toEqual({});
       expect((await resolveProfileEnvForRoot('/tmp/projects/b', 'omp')).env).toEqual({});
@@ -188,6 +190,40 @@ describe('agent profile resolution', () => {
       writeFileSync(agentAccountsPath(), '{ not json', 'utf8');
       const resolved = await resolveProfileEnvForRoot('/tmp/projects/a', 'claude');
       expect(resolved.env).toEqual({});
+    });
+
+    it('refuses an omp account whose root moved, rather than letting OMP_PROFILE open another profile', async () => {
+      // Added while omp's root was `~/.omp`; PI_CONFIG_DIR now moves it, and `OMP_PROFILE=work`
+      // would open `~/.omp-alt/profiles/work` while Settings still shows the stored folder.
+      write({
+        accounts: [{ ...klaudiuszProfile, id: 'omp-work', provider: 'omp', configDir: '/home/u/.omp/profiles/work' }],
+        selections: { '/tmp/projects/a': { omp: 'omp-work' } },
+      });
+      const moved = { ...env, PI_CONFIG_DIR: '.omp-alt' } as NodeJS.ProcessEnv;
+      const refused = resolveProfileEnvForRoot('/tmp/projects/a', 'omp', undefined, moved);
+      await expect(refused).rejects.toBeInstanceOf(AgentAccountUnavailableError);
+      await expect(refused).rejects.toThrow('/home/u/.omp-alt/profiles');
+      // A recorded profile on Continue is refused the same way; the default is never substituted.
+      await expect(resolveProfileEnvForRoot('/tmp/projects/b', 'omp', 'omp-work', moved)).rejects.toThrow(AgentAccountUnavailableError);
+    });
+  });
+
+  describe('namedAccountUnavailable', () => {
+    it('lets an omp account through while omp would open its folder', () => {
+      expect(namedAccountUnavailable('omp', '/home/u/.omp/profiles/work', env)).toBeNull();
+    });
+
+    it('names the profiles dir omp would read after HOME or PI_CONFIG_DIR changed', () => {
+      expect(namedAccountUnavailable('omp', '/home/u/.omp/profiles/work', { ...env, PI_CONFIG_DIR: '.omp-alt' }))
+        .toContain('/home/u/.omp-alt/profiles');
+      expect(namedAccountUnavailable('omp', '/home/u/.omp/profiles/work', { HOME: '/home/v' }))
+        .toContain('/home/v/.omp/profiles');
+    });
+
+    it('never refuses a provider that is handed its folder itself', () => {
+      for (const provider of ['claude', 'codex', 'pi'] as const) {
+        expect(namedAccountUnavailable(provider, '/anywhere/at/all', { ...env, PI_CONFIG_DIR: '.omp-alt' }), provider).toBeNull();
+      }
     });
   });
 

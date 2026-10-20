@@ -292,6 +292,25 @@ describe('agent profiles API', () => {
         expect(status).toBe(400);
       });
 
+      it('neither connects nor probes an account once omp\'s root moved away from it (#1283)', async () => {
+        const dir = join(userHome, '.omp', 'profiles', 'work');
+        const { body: created } = await send('POST', '/api/v1/workspace/agent-profiles', { provider: 'omp', configDir: dir });
+        // `OMP_PROFILE=work` would now open `~/.omp-alt/profiles/work`, not the folder Settings shows.
+        process.env.PI_CONFIG_DIR = '.omp-alt';
+        const connect = await apiRequest(makeApp(), '/api/v1/providers/connect', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ provider: 'omp', profileId: created.profile.id }),
+        });
+        expect(connect.status).toBe(409);
+        expect(((await connect.json()) as { error: string }).error).toContain(join(userHome, '.omp-alt', 'profiles'));
+        const status = await apiRequest(makeApp(), `/api/v1/workspace/agent-profiles/${created.profile.id}/status`);
+        expect(status.status).toBe(200);
+        expect(await status.json()).toEqual({
+          status: { provider: 'omp', status: 'unknown', hint: expect.stringContaining('PI_CONFIG_DIR'), profileId: created.profile.id },
+        });
+      });
+
       it('lists the profile\'s own config files, from its `agent/` folder', async () => {
         const dir = join(userHome, '.omp', 'profiles', 'work');
         const { body } = await send('POST', '/api/v1/workspace/agent-profiles', { provider: 'omp', configDir: dir });

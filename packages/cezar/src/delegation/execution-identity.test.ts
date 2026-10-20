@@ -61,7 +61,18 @@ describe('pi and omp worker accounts (hearsay-tools/cezarion#1283)', () => {
     symlinkSync(target, join(profiles, 'work'));
     const binding = captureWorkerAccount(profile('omp', 'work', join(profiles, 'work')))!;
     expect(binding).toEqual({ provider: 'omp', profileId: 'work', homePath: join(profiles, 'work') });
-    expect(boundWorkerAccountEnv(binding)).toEqual({ OMP_PROFILE: 'work' });
+    // The child env: omp resolves the name under `$HOME/.omp`, so the launch checks that root.
+    expect(boundWorkerAccountEnv(binding, { HOME: join(root, 'home') })).toEqual({ OMP_PROFILE: 'work' });
+  });
+
+  it('refuses a named omp binding once the child\'s omp root moved away from its profile', () => {
+    // Accepted under `~/.omp`; a PI_CONFIG_DIR (or HOME) the child inherits now would make
+    // `OMP_PROFILE=work` open `~/.omp-alt/profiles/work`, a different account than the one pinned.
+    const profiles = join(root, 'home', '.omp', 'profiles'); mkdirSync(join(profiles, 'work'), { recursive: true });
+    const binding = captureWorkerAccount(profile('omp', 'work', join(profiles, 'work')))!;
+    expect(() => boundWorkerAccountEnv(binding, { HOME: join(root, 'home'), PI_CONFIG_DIR: '.omp-alt' }))
+      .toThrow(/\.omp-alt\/profiles/);
+    expect(() => boundWorkerAccountEnv(binding, { HOME: join(root, 'other-home') })).toThrow(WorkerIdentityError);
   });
 
   it('binds the discovered pi and omp account with no home, so it launches where the agent never ran', () => {

@@ -198,8 +198,10 @@ import {
   type AgentAccountStore,
 } from '../workspace/agent-accounts.ts';
 import {
+  AgentAccountUnavailableError,
   defaultAgentProfile,
   listAgentProfiles,
+  namedAccountUnavailable,
   ompProfileDirError,
   profileDirState,
   resolveProfileEnvForRoot,
@@ -1884,6 +1886,8 @@ export function createApp(deps: ServerDeps) {
     const store = await loadAgentAccounts().catch(() => defaultAgentAccountStore());
     for (const account of listAgentProfiles(store, PROVIDER_IDS)) {
       if (account.isDefault) continue; // covered by `status()` above
+      // Probing it would sign in or report on another folder (#1283); its status route says why.
+      if (namedAccountUnavailable(account.provider, account.path) !== null) continue;
       await providerAuth
         .profileStatus(account.provider, { id: account.id, configDir: account.path })
         .catch(() => {});
@@ -1950,7 +1954,9 @@ export function createApp(deps: ServerDeps) {
       return { error: `this session belongs to an account that no longer exists (${profileId})` };
     }
     const { profile } = resolved;
-    return { env: profile.isDefault ? {} : profileEnv(provider, profile.path) };
+    if (profile.isDefault) return { env: {} };
+    const unavailable = namedAccountUnavailable(provider, profile.path);
+    return unavailable !== null ? { error: unavailable } : { env: profileEnv(provider, profile.path) };
   };
 
   /** The copy-paste fallback shown when no terminal could be opened — same account, spelled for
@@ -2052,6 +2058,9 @@ export function createApp(deps: ServerDeps) {
       const resolved = await resolveWorkspaceProfile(provider, body.data.profileId);
       if ('error' in resolved) return c.json({ error: resolved.error }, 400);
       const { profile } = resolved;
+      // A login aimed at a folder the agent would not open signs in another account (#1283).
+      const unavailable = profile.isDefault ? null : namedAccountUnavailable(provider, profile.path);
+      if (unavailable !== null) return c.json({ error: unavailable }, 409);
       const command = providerAuth.loginCommand(provider, profile.isDefault ? null : profile.path);
       // Fail closed: a config dir that cannot be embedded safely in this platform's shell has no
       // safe degradation. Running the bare command would sign the user into a DIFFERENT account
@@ -2402,6 +2411,12 @@ export function createApp(deps: ServerDeps) {
           const all = await providerStatus(refresh ? { refresh: true } : undefined);
           const row = all.providers.find((candidate) => candidate.provider === account.provider);
           return c.json({ status: row ?? { provider: account.provider, status: 'unknown' as const } });
+        }
+        // A probe of an account the agent would not open reports on another folder (#1283), so the
+        // row says why instead, without a spawn.
+        const unavailable = namedAccountUnavailable(account.provider, account.path);
+        if (unavailable !== null) {
+          return c.json({ status: { provider: account.provider, status: 'unknown' as const, hint: unavailable, profileId: account.id } });
         }
         // "Check again" re-probes THIS account only — the other accounts' warm answers are not
         // invalidated by asking about this one.
@@ -4721,7 +4736,10 @@ export function createApp(deps: ServerDeps) {
         // hands the user a different subscription than every task in the same project uses.
         const account = resume
           ? await handoffEnv(cliRunner, sessionStep?.profileId)
-          : { env: (await resolveProfileEnvForRoot(repoRoot, cliRunner)).env };
+          : await resolveProfileEnvForRoot(repoRoot, cliRunner).then(({ env }) => ({ env }), (err: unknown) => {
+            if (err instanceof AgentAccountUnavailableError) return { error: err.message };
+            throw err;
+          });
         if ('error' in account) return c.json({ error: account.error }, 409);
         const fallback = handoffFallbackCommand(dir, command, account.env);
         if (fallback === null) {
