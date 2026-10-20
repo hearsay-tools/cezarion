@@ -55,6 +55,13 @@ export const workerWaitSchema = z.object({
 }).strict();
 export type WorkerWait = z.infer<typeof workerWaitSchema>;
 
+/** Cezar's completion wait as inspection and the relationships view show it: the `WorkerWait`
+ *  projection without a deadline, which that wait does not have, and the `via` that names it.
+ *  `WorkerWait` keeps requiring a deadline (hearsay-tools/cezarion#1301). */
+export const workerCompletionWaitSchema = workerWaitSchema.omit({ deadline: true, requestIds: true, requestOutcomes: true })
+  .extend({ via: z.literal('completion') }).strict();
+export type WorkerCompletionWait = z.infer<typeof workerCompletionWaitSchema>;
+
 /** Automatic retries of a pending destroy (hearsay-tools/cezarion#879): how many scheduled
  * attempts ran since the last explicit request, when the next one is due, and whether they
  * reached the hourly cap with nothing changing, which the cockpit shows as needing attention.
@@ -297,6 +304,8 @@ export const workerInspectionSchema = z.object({
   model: z.string().max(512).optional(),
   inputs: z.array(workerInputSchema).max(32).optional(),
   wait: workerWaitSchema.optional(),
+  /** The parent's deadline-less completion wait on this worker (hearsay-tools/cezarion#1301). */
+  completionWait: workerCompletionWaitSchema.optional(),
   destroy: workerDestroyViewSchema.optional(),
   outcome: workerOutcomeSchema.optional(),
 });

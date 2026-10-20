@@ -20,6 +20,7 @@ import {
   waitErrorCodeSchema,
   waitingOnSchema,
   waitSchema,
+  completionWaitView,
   workerWaitView,
   workerWaitEntrySchema,
   workerWaitEntryToLegacy,
@@ -30,7 +31,7 @@ import {
   type TimerWaitEntry,
   type WorkerWaitEntry,
 } from './waits.ts';
-import { workerWaitSchema } from './delegation.ts';
+import { workerCompletionWaitSchema, workerInspectionSchema, workerWaitSchema } from './delegation.ts';
 
 /**
  * The wait list (spec 2026-10-17-unified-waits, phase 1: hearsay-tools/cezarion#1233). The
@@ -550,6 +551,28 @@ describe('deadline-less cezar worker entries (hearsay-tools/cezarion#1301)', () 
     const bare = workerWaitEntrySchema.parse({ ...workerBase(targets), source: 'cezar', via: 'completion', deadline: undefined, timeoutSeconds: undefined });
     expect(hasWorkerDeadline(bare)).toBe(false);
     expect(workerWaitView({ waits: [bare], delegation: { role: 'root' } as never })).toBeUndefined();
+  });
+
+  // Inspection and the relationships view still show the parent's wait while it parks on Cezar's
+  // completion wait, which has no deadline (hearsay-tools/cezarion#1301).
+  it('projects a deadline-less completion entry for inspection and the relationships view', () => {
+    const bare = workerWaitEntrySchema.parse({ ...workerBase(targets), source: 'cezar', via: 'completion', mode: 'all', deadline: undefined, timeoutSeconds: undefined });
+    const root = { role: 'root' } as never;
+    const view = completionWaitView({ waits: [bare], delegation: root });
+    expect(view).toEqual({ id: bare.id, via: 'completion', workerIds: [W1], mode: 'all', phase: 'registered', outcomes: [], wakeId: bare.id });
+    expect(workerCompletionWaitSchema.safeParse(view).success).toBe(true);
+    expect(completionWaitView({ status: 'waiting', waits: [bare], delegation: root })?.phase).toBe('parked');
+    expect(completionWaitView({ status: 'waiting', hasPendingHumanAsk: true, waits: [bare], delegation: root })?.phase).toBe('registered');
+    expect(completionWaitView({ waits: [{ ...bare, phase: 'resolved', result: { reason: 'outcome' } }], delegation: root })).toMatchObject({ phase: 'wake-pending', reason: 'outcome' });
+    // A deadlined entry, an upgraded completion wait included, is the legacy view's.
+    expect(completionWaitView({ waits: [workerWaitEntrySchema.parse(workerBase(targets))], delegation: root })).toBeUndefined();
+    expect(completionWaitView({ waits: [bare] })).toBeUndefined();
+    // The projection carries no deadline, and the legacy shape keeps requiring one.
+    expect(workerCompletionWaitSchema.safeParse({ ...view, deadline: '2026-10-19T10:10:00.000Z' }).success).toBe(false);
+    const inspection = { workerId: W1, parentRunId: WORKER_WAIT_ID, status: 'running',
+      workspace: { ownerRunId: W1, resourceId: W1, kind: 'owned-isolated', path: '/w', branch: 'cez/w', baselineSha: 'a'.repeat(40) } };
+    expect(workerInspectionSchema.safeParse({ ...inspection, completionWait: view }).success).toBe(true);
+    expect(workerInspectionSchema.safeParse({ ...inspection, wait: view }).success).toBe(false);
   });
 });
 

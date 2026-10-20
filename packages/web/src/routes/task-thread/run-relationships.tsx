@@ -3,9 +3,9 @@ import { ArrowUpRightIcon, CircleCheckIcon, CircleIcon, CircleSlashIcon, CircleX
 import { LoaderCircleIcon } from 'lucide-react'
 import { useIsDesktop } from '@/lib/use-desktop'
 import { workerWaitLabel } from '@/lib/attention'
-import { workerWaitView } from '@open-mercato/cezar-api-client/contract/waits'
+import { completionWaitView, workerWaitView } from '@open-mercato/cezar-api-client/contract/waits'
 import { runTitle } from '@/lib/task-groups'
-import type { ApiRun, RunRelationships, WorkerDestroyView, WorkerInspection } from '@open-mercato/cezar-api-client'
+import type { ApiRun, RunRelationships, WorkerCompletionWait, WorkerDestroyView, WorkerInspection } from '@open-mercato/cezar-api-client'
 
 import { useDestroyWorker, useRun, useRunRelationships, useRuns } from '@/api/queries'
 import { Button } from '@/components/ui/button'
@@ -19,7 +19,7 @@ import { ActivityRow } from './run-activity-row'
 /** The run's own delegation metadata, and the wait note's half of it — read off `ApiRun` so the
  *  Workers section and dock header never drift from whichever schema the record actually carries. */
 type Delegation = NonNullable<ApiRun['delegation']>
-type DelegationWait = NonNullable<Exclude<Delegation, { role: 'invalid' }>['wait']>
+type DelegationWait = NonNullable<Exclude<Delegation, { role: 'invalid' }>['wait']> | WorkerCompletionWait
 
 const linkClass = 'flex min-h-11 min-w-0 items-center rounded-md px-2 text-sm text-foreground hover:bg-muted break-words focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
 
@@ -88,8 +88,9 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
   const parentId = metadata?.role === 'worker' ? metadata.parentRunId : query.data?.parentRunId
   const workers = new Map(query.data?.workers.map(worker => [worker.workerId, worker]))
   const ids = workerIdsOf(metadata, query.data)
-  // An agent's worker wait is a wait-list entry (hearsay-tools/cezarion#1235, #1301).
-  const wait = workerWaitView(run)
+  // A worker wait is a wait-list entry (hearsay-tools/cezarion#1235). Cezar's completion wait, which
+  // has no deadline, comes first, as it did from `delegation.wait` (hearsay-tools/cezarion#1301).
+  const wait = completionWaitView(run) ?? workerWaitView(run)
   const dependencyLabel = metadata && metadata.role !== 'invalid' && wait ? workerWaitLabel(metadata.role, wait) : undefined
   return (
     <ActivityRow
@@ -207,11 +208,12 @@ function statusTone(status?: WorkerInspection['status']): string {
 function WaitNote({ wait, dependencyLabel }: { wait: DelegationWait; dependencyLabel: string | undefined }) {
   return <p className="px-2 break-words">
     {wait.phase === 'parked' && dependencyLabel ? `${dependencyLabel.charAt(0).toUpperCase()}${dependencyLabel.slice(1)}`
-      : wait.requestIds ? (wait.phase === 'parked' ? 'Waiting on request replies' : wait.phase === 'wake-pending'
+      : 'requestIds' in wait && wait.requestIds ? (wait.phase === 'parked' ? 'Waiting on request replies' : wait.phase === 'wake-pending'
       ? 'Conversation update queued for this task' : 'Request wait registered — the agent is finishing its turn')
       : wait.phase === 'parked' ? 'Waiting on workers' : wait.phase === 'wake-pending'
       ? 'Worker update queued for the parent' : 'Worker wait registered — the agent is finishing its turn'}.
-    {' '}Deadline: <time dateTime={wait.deadline}>{wait.deadline}</time>
+    {'deadline' in wait ? <>{' '}Deadline: <time dateTime={wait.deadline}>{wait.deadline}</time></>
+      : ' No deadline: Cezar wakes this task when they have all settled.'}
   </p>
 }
 

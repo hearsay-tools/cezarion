@@ -160,6 +160,16 @@ it.each([root, child])('shows request waiting for either participant ($id)', run
   expect(screen.getByText(run.delegation.role === 'worker' ? /Waiting on parent reply/ : /Waiting on worker replies/)).toBeTruthy();
 });
 
+// Cezar's completion wait has no deadline (hearsay-tools/cezarion#1301): the parent still reads as
+// waiting on its workers, and the note says nothing ends the wait but their settlement.
+it('shows a parent parked on Cezar\'s completion wait, which has no deadline', () => {
+  setup({ ...root, status: 'waiting', waits: [{
+    kind: 'worker', id: '10000000-0000-4000-8000-000000000003', source: 'cezar', via: 'completion', registeredAt: at,
+    phase: 'open', turnId: 'turn-1', mode: 'all', workerIds: [workerId], revisions: [], outcomes: [],
+  }] });
+  expect(screen.getByText('Waiting on 1 worker. No deadline: Cezar wakes this task when they have all settled.')).toBeTruthy();
+  expect(screen.queryByText(/Deadline:/)).toBeNull();
+});
 
 it('collapses worker navigation on phones and preserves its scoped links when reopened', async () => {
   vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener() {}, removeEventListener() {} })))

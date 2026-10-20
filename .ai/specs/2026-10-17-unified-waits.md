@@ -941,6 +941,13 @@ Decisions made during execution:
   `via: 'completion'`, its workers, mode, deadline and phase; an already-queued wake input kept as
   `wakeInputId`), and `delegation.wait`/`completion` are dropped. Its promised wake happens once,
   through the list engine. A schema-6 build refuses a schema-7 store as `unsupported-schema`.
+- **Inspection.** The legacy `WorkerWait` shape keeps its required deadline, so worker
+  inspection's `wait` never carries the completion wait. Inspection adds an optional
+  `completionWait` (`workerCompletionWaitSchema` in `packages/contract`: that shape without
+  `deadline` or request fields, plus `via: 'completion'`), present while the parent holds an open
+  or owed completion wait on the worker; the cockpit's Workers section reads the same projection
+  (`completionWaitView`) and says the wait has no deadline. The open-waits footer names it
+  `worker wait <id> on N workers, no deadline`.
 - **Display.** A refusal nudge reads like the no-wait nudge: a `running (completion nudge)`
   heartbeat and a note naming the refusal code (`COMPLETION_NUDGE_NOTE`). The completion human
   wait reads as Cezar's own human wait (note `completion blocked; waiting for you` or the refusal).

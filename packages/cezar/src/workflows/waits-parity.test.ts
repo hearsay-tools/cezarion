@@ -181,7 +181,7 @@ async function conversingParent(runner: RunnerId) {
   const { p, w } = await parentWithWorker(runner);
   const delegation = store.getRun(p.id)!.delegation!;
   if (delegation.role !== 'root') throw Error('root fixture');
-  store.commitDelegation([{ id: p.id, delegation: { ...delegation, permissions: [...delegation.permissions, 'steer'] } }]);
+  store.commitDelegation([{ id: p.id, delegation: { ...delegation, permissions: [...delegation.permissions, 'steer', 'inspect'] } }]);
   // An idle worker that only talks: it plain-parks rather than ask its parent (hearsay-tools/cezarion#1301).
   spendWorkerBudget(w.id);
   manager.enqueueOwnedRun(w.id);
@@ -189,14 +189,16 @@ async function conversingParent(runner: RunnerId) {
   const credentials = new CredentialRegistry();
   onTestFinished(() => credentials.close());
   const workerCaller = credentials.authenticate(credentials.issue('project', w.id, randomUUID()))!;
+  const parentCaller = credentials.authenticate(credentials.issue('project', p.id, randomUUID()))!;
   const service = new DelegationService();
   service.registerProject({ id: 'project', root, store, manager });
+  const inspect = () => service.inspect(parentCaller, { workerId: w.id });
   const progress = async (text: string) => {
     const id = randomUUID();
     await service.send(workerCaller, { id, recipientRunId: p.id, kind: 'progress', text, timeoutSeconds: 600 });
     return id;
   };
-  return { p, w, progress };
+  return { p, w, progress, inspect };
 }
 
 const timerText = (wait: Wait, note: string) => `Timer ${wait.id} fired: ${note}. Continue toward the task goal; register another wait if you are still waiting.`;
@@ -1525,6 +1527,11 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
       const f = await conversingParent(runner);
       const entry = await ignoreRefusal(runner, f.p.id, `Workers are still live: ${f.w.id}.`, () => workerWaits(f.p.id)[0]?.phase === 'open');
+      // Inspection shows the parked parent's completion wait, without a deadline (hearsay-tools/cezarion#1301).
+      const inspected = await f.inspect();
+      expect(inspected).not.toHaveProperty('wait');
+      expect(inspected.completionWait).toEqual({ id: entry.id, via: 'completion', workerIds: [f.w.id], mode: 'all', phase: 'parked',
+        outcomes: [], revisions: entry.revisions, wakeId: entry.id });
       const turns = turnEnds(f.p.id);
       const id = await f.progress('Worker progress u21m');
       await until(() => delivered(f.p.id, id) && prompted(runner, 'Worker progress u21m').length > 0);

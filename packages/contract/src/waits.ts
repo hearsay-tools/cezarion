@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { askRequestSchema } from './ask-schema.ts';
 import { ciPrIdentitySchema, ciPrUrlSchema, ciWaitErrorCodeSchema, ciWaitRequestSchema, ciWaitResultSchema } from './ci-wait.ts';
 import { workerIdsSchema, workerOutcomeSchema, workerWaitModeSchema } from './delegation.ts';
-import type { DelegationState, RunDelegationSummary, WorkerWait } from './delegation.ts';
+import type { DelegationState, RunDelegationSummary, WorkerCompletionWait, WorkerWait } from './delegation.ts';
 import { requestOutcomeSchema } from './conversations.ts';
 import type { RunRecord } from './runs.ts';
 
@@ -387,6 +387,39 @@ export function workerWaitView(run: Partial<Pick<RunRecord, 'status' | 'hasPendi
   if (!entry) return undefined;
   const legacy = workerWaitEntryToLegacy(entry);
   return entry.phase === 'open' && run.status === 'waiting' && !run.hasPendingHumanAsk ? { ...legacy, phase: 'parked' } : legacy;
+}
+
+/** The newest open or owed deadline-less completion entry, which `workerWaitView` leaves out. */
+export function completionWaitEntry(waits: readonly Wait[] | undefined, workerId?: string): WorkerWaitEntry | undefined {
+  return (waits ?? []).filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker' && wait.via === 'completion' && !hasWorkerDeadline(wait) &&
+    (wait.phase === 'open' || wait.phase === 'resolved') && (workerId === undefined || !!wait.workerIds?.includes(workerId))).at(-1);
+}
+
+/**
+ * Cezar's completion wait as inspection and the relationships view show it, read from the list
+ * like `workerWaitView` (hearsay-tools/cezarion#1301): its phases map as the legacy shape's do.
+ */
+export function workerCompletionWaitProjection(entry: WorkerWaitEntry, run: Partial<Pick<RunRecord, 'status' | 'hasPendingHumanAsk'>>): WorkerCompletionWait {
+  const reason = entry.phase === 'cancelled' ? 'cancelled' : entry.phase === 'open' ? undefined : entry.result?.reason;
+  const parked = entry.phase === 'open' && run.status === 'waiting' && !run.hasPendingHumanAsk;
+  return {
+    id: entry.id,
+    via: 'completion',
+    workerIds: entry.workerIds ?? [],
+    ...(entry.mode === undefined ? {} : { mode: entry.mode }),
+    ...(entry.revisions?.length ? { revisions: entry.revisions } : {}),
+    ...(reason === undefined ? {} : { reason }),
+    phase: parked ? 'parked' : entry.phase === 'open' ? 'registered' : 'wake-pending',
+    outcomes: entry.outcomes ?? [],
+    wakeId: entry.wakeInputId ?? entry.id,
+  };
+}
+
+/** A run's deadline-less completion wait in its projection, for the relationships view. */
+export function completionWaitView(run: Partial<Pick<RunRecord, 'status' | 'hasPendingHumanAsk' | 'waits' | 'delegation'>>): WorkerCompletionWait | undefined {
+  if (run.delegation?.role !== 'root') return undefined;
+  const entry = completionWaitEntry(run.waits);
+  return entry ? workerCompletionWaitProjection(entry, run) : undefined;
 }
 
 /**
