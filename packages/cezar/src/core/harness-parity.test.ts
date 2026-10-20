@@ -2030,7 +2030,7 @@ describe('harness parity — D1 governed native delegation', () => {
           const [ordinary, restricted] = launches;
           if (backend === 'claude' || backend === 'pi') {
             const flag = backend === 'claude' ? '--disallowedTools' : '--exclude-tools';
-            const names = backend === 'claude' ? 'Agent,Task' : 'subagent';
+            const names = backend === 'claude' ? 'Agent,Task,Workflow' : 'subagent';
             const args = restricted![0] as string[];
             const index = args.indexOf(flag);
             expect(index).toBeGreaterThanOrEqual(0);
