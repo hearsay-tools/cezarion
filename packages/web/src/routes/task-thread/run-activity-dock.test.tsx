@@ -7,7 +7,7 @@ import { ProjectScopeProvider } from '@/api/project-scope-context'
 import { createQueryClient } from '@/api/query-client'
 import type { ApiRun, RunEvent, StepState, WorkerInspection } from '@open-mercato/cezar-api-client'
 
-import { RunActivityDock } from './run-activity-dock'
+import { RunActivityDock, resetActivityDisclosureForTests } from './run-activity-dock'
 import { reduceThread } from './thread-state'
 
 /**
@@ -19,6 +19,7 @@ import { reduceThread } from './thread-state'
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  resetActivityDisclosureForTests()
 })
 
 const at = '2026-09-06T00:00:00.000Z'
@@ -167,6 +168,28 @@ describe('RunActivityDock — one card, one row per section', () => {
   })
 })
 
+// The card remembers per run id which rows a reader opened, in module-level Maps that outlive a
+// test (hearsay-tools/cezarion#1358). Vitest runs these two cases in order on the shared fixture
+// id: without the reset in this file's afterEach, the first one's clicks set the second one's
+// starting state.
+describe('RunActivityDock — open rows never leak into the next test', () => {
+  const dockState = () => document.querySelector('[data-slot="run-activity-dock"]')?.getAttribute('data-state')
+
+  it('opens the workflow row, then closes the card', () => {
+    renderDock(run())
+    fireEvent.click(sectionHead('workflow'))
+    expect(sectionHead('workflow').getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: /^Session activity/ }))
+    expect(dockState()).toBe('collapsed')
+  })
+
+  it('starts the next test with the card open and the workflow row closed', () => {
+    renderDock(run())
+    expect(dockState()).toBe('open')
+    expect(sectionHead('workflow').getAttribute('aria-expanded')).toBe('false')
+  })
+})
+
 describe('RunActivityDock — the workers section', () => {
   const root = run({ delegation: { role: 'root', permissions: [], receipts: [] } } as Partial<ApiRun>)
 
@@ -240,7 +263,7 @@ describe('RunActivityDock — narrow viewports', () => {
 
   it('keeps the step meter whole and lets the step name drop when the row runs out of room', () => {
     narrow()
-    renderDock(run({ id: 'narrow-fit-meta' }))
+    renderDock(run())
     fireEvent.click(screen.getByRole('button', { name: /^Session activity/ }))
     const meta = section('workflow')!.querySelector('[data-slot="run-activity-meta"]')!
     expect(meta.querySelector('[data-slot="run-activity-meta-keep"]')?.textContent).toBe('1 / 2')
@@ -274,11 +297,8 @@ describe('RunActivityDock — the workflow glyph', () => {
 
 describe('RunActivityDock — workers and the All complete claim', () => {
   const settled: StepState[] = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }]
-  // Its own run id: the dock's collapse memory is module-level and per run, so sharing `parentId`
-  // with the test that clicks the Workers section shut would render this block's rows closed.
-  const rootId = '10000000-0000-4000-8000-000000000004'
   const root = (extra: Partial<ApiRun> = {}) =>
-    run({ id: rootId, status: 'done', steps: settled, delegation: { role: 'root', permissions: [], receipts: [] }, ...extra } as Partial<ApiRun>)
+    run({ status: 'done', steps: settled, delegation: { role: 'root', permissions: [], receipts: [] }, ...extra } as Partial<ApiRun>)
   const statusText = () => document.querySelector('[data-slot="run-activity-status"]')?.textContent
   const allDone: WorkerInspection[] = [{ workerId: doneWorkerId, parentRunId: parentId, status: 'done', workspace }]
   /** A spawn receipt outlives a failed lookup, so the dock must judge its worker too. */

@@ -326,6 +326,21 @@ the repo root, lists that spec:
 grep -lE 'link-safety|data-streamdown|thread-markdown' packages/web/e2e/*.e2e.ts
 ```
 
+Specs also assert on visible text, and the attribute grep does not find those
+assertions. When a cockpit change adds, renames or removes visible copy (a label,
+a tab, a heading, a button, an empty state), also grep the specs for that copy.
+Grep both the new and the old string: a spec can assert that text is present,
+and a spec can assert that it is absent. In hearsay-tools/cezarion#1335 the
+sidebar got a new tab labelled "Automations". The attribute grep found
+`quick-list.e2e.ts` and `mobile-task-controls.e2e.ts`, and both passed locally.
+`automations.e2e.ts` asserts that the sidebar does not show "Automations" while
+the feature is off, and it failed only in CI. This grep, run from the repo root,
+lists that spec:
+
+```bash
+grep -lF 'Automations' packages/web/e2e/*.e2e.ts
+```
+
 **In a unit test, a timeout is a hang guard, never the thing the test waits on.**
 Wait for the product's own signal: an event, a callback, a store write, a file
 the fixture publishes. A test that proves something did NOT happen moves past
@@ -398,6 +413,29 @@ For web-only verification, use `npm run typecheck:web` or
 from this worktree before checking web sources; direct `tsc --noEmit` does not.
 The full root typecheck runs web first, preparing declarations once for all four
 workspace checks.
+
+To typecheck without rebuilding `packages/cezar/dist`, for example while Squeal
+is validating, run both server configs from `packages/cezar`. The root
+`npm run typecheck` rebuilds `dist` first, and Squeal then marks dozens of
+passing checks UNKNOWN (hearsay-tools/squeal#33).
+
+```bash
+./node_modules/.bin/tsc --noEmit -p tsconfig.json       # shipped sources only
+./node_modules/.bin/tsc --noEmit -p tsconfig.test.json  # adds every test file
+```
+
+`tsconfig.json` leaves out every test file: on hearsay-tools/cezarion#1291 a
+TS2353 in `src/runs/waits-store.test.ts` passed it and failed CI.
+`tsconfig.test.json` sets `rootDir` to `.`, so only `tsconfig.json` reports a
+shipped file that imports from outside `src/`. `tsconfig.test.json` also
+compiles the `test/e2e/` imports of `../../dist/`, so in a worktree that was
+never built it fails with TS2307: run `npm run build -w @wjarka/cezarion` once
+first. For contract edits, also run `npm run typecheck:contract` from the repo
+root. It checks `packages/contract/tsconfig.test.json`, because that package's
+`tsconfig.json` leaves out its tests too. Run the root `npm run typecheck` once
+before a PR when declarations matter: a cockpit edit, or a server change that
+the cockpit reads through `AppType` or that a `test/e2e/` file imports from
+`dist`. Expect the UNKNOWN burst then.
 
 `npm test` and `npm run test:unit` are the fast unit gate: no server, no browser. They must stay that way. `npm run test:package` needs a completed `npm run build` (it packs the tarball). Pull request CI runs packaged CLI E2E and cockpit browser E2E as separate checks; the required aggregate fails if the cockpit suite is skipped or failed.
 
