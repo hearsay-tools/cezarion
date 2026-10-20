@@ -1502,8 +1502,9 @@ interface ListOrder {
 
 /** Newest first, runs created in the same millisecond in insertion order: the order `runs.db`
  *  lists in, and the order every list had while it was a stable sort of the in-memory map. */
-/** Why a `run` event fired, when a delegation checkpoint caused it (in-process only). */
-export type CommitSource = 'delegation-checkpoint' | 'delegation-destroy-progress';
+/** Why a `run` event fired, when a delegation checkpoint caused it or nothing durable changed
+ *  (`republish`) (in-process only). */
+export type CommitSource = 'delegation-checkpoint' | 'delegation-destroy-progress' | 'live-release';
 
 /**
  * A worker's destroy moving between two unfinished phases, and nothing else changing: nothing the
@@ -2187,6 +2188,14 @@ export class RunStore extends EventEmitter {
     if (!holders) this.pins.set(id, holders = new Set());
     holders.add(holder);
     return run;
+  }
+
+  /** Publish a run's current record again without a write: something read beside the record
+   *  changed, such as the run leaving the manager's live registries, which a detail's finish
+   *  verdict reads (hearsay-tools/cezarion#1301). */
+  republish(id: string): void {
+    const run = this.peek(id);
+    if (run) this.emit('run', run, 'live-release');
   }
 
   /** Release `holder`'s pin. The run leaves memory at the next sweep once nothing else holds it. */

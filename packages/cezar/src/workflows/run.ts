@@ -1418,6 +1418,8 @@ export class RunManager {
 
   private readonly onDelegationRun = (run: RunRecord, source?: CommitSource): void => {
     // Delegation metadata checkpoints do not change task status.
+    // A republish changed nothing durable: there is nothing to reap, cancel or reconcile.
+    if (source === 'live-release') return;
     if (!this.disposed && source === undefined) this.reapTerminalScratch(run.id);
     if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status) && !holdsOwedResults(run)) this.cancelOpenWaits(run.id);
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.active.get(run.id)?.revokeDelegation?.();
@@ -3603,6 +3605,16 @@ export class RunManager {
     this.store.pin(runId, 'active');
   }
 
+  /** A detail's finish verdict reads the live registries, and a session leaves them after its
+   *  last write (the final autosave), so the cockpit's refetch on that write still saw "no open
+   *  session" and hid Accept. Publish a resting run again once it is out of them
+   *  (hearsay-tools/cezarion#1301). */
+  private republishFinishVerdict(runId: string): void {
+    if (this.disposed || this.isActive(runId)) return;
+    const status = this.store.getRun(runId)?.status;
+    if (status === 'waiting' || status === 'review') this.store.republish(runId);
+  }
+
   /** Remove a run from the live registries — keeps `waiting ⊆ active`. */
   private dropActive(runId: string): void {
     const state = this.active.get(runId);
@@ -3628,6 +3640,7 @@ export class RunManager {
     // refusal queued for the closing session reopens it now (hearsay-tools/cezarion#1301).
     if (!this.disposed && (this.store.getRun(runId)?.waits?.length || this.owesCompletionRefusal(runId))) this.queueWaitWake(runId);
     if (!this.executions.has(runId) && this.store.getRun(runId)?.stopping) this.store.updateRun(runId, { stopping: undefined });
+    this.republishFinishVerdict(runId);
     this.memoryPausing.delete(runId);
     this.lastNamerKey.delete(runId);
     this.forceStarted.delete(runId);
