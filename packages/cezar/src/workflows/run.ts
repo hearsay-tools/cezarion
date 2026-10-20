@@ -550,8 +550,10 @@ interface ActiveRun {
   completionNudgeAnswered?: AgentSession;
   /** The done `deferParentCompletion` just refused in this live session (hearsay-tools/cezarion#1301):
    *  it is not a done. `handled` when the refusal settled the turn end (a nudge or a park); otherwise
-   *  the turn end goes on to its waits or its owed input. Read only right after that call. */
-  completionRefused?: { session: AgentSession; handled: boolean };
+   *  the turn end goes on to its waits or its owed input. `deferred` when only an input in flight
+   *  stood in the way: the done stays at the boundary, and the acknowledgement's settlement decides
+   *  it again. Read only right after that call. */
+  completionRefused?: { session: AgentSession; handled: boolean; deferred?: true };
   /** Registry snapshot used to expand `/skill` follow-ups before a backend can
    *  mistake them for its own slash commands (#676). */
   skills?: Skill[];
@@ -4636,7 +4638,15 @@ export class RunManager {
     const stepId = state.currentStepId;
     const note = (message: string) => this.store.appendEvent(runId, { type: 'note', tone: 'warning', ...(stepId ? { stepId } : {}), message });
     // Cezar's own human wait is not owed: the nudge replaces it, as the agent's own wait would.
-    if (this.holdsAgentWaits(runId) || state.agentInputFlight || this.harnessOwesInput(state) || this.hasQueuedAgentInputs(runId)) {
+    const owesInput = this.hasQueuedAgentInputs(runId, state.agentInputFlight?.inputIds);
+    if (state.agentInputFlight && !owesInput && !this.holdsAgentWaits(runId)) {
+      // An input still in flight may be the one this turn answered, acknowledged after the turn end
+      // (OpenCode HTTP/SSE): the done stays at the boundary, and `settleIdleBoundary` decides the
+      // refusal once the acknowledgement lands, as a nudge or behind the input still owed.
+      state.completionRefused = { session, handled: false, deferred: true };
+      return true;
+    }
+    if (this.holdsAgentWaits(runId) || state.agentInputFlight || this.hasQueuedAgentInputs(runId)) {
       note(`Completion blocked: ${refusal.message}`);
       state.completionRefused = { session, handled: false };
       return true;
@@ -5453,12 +5463,13 @@ export class RunManager {
   }
 
   /** Accepted input may be temporarily refused while a backend HTTP ack is
-   * outstanding. That is not an empty queue and must not trigger automatic DONE. */
-  private hasQueuedAgentInputs(runId: string): boolean {
+   * outstanding. That is not an empty queue and must not trigger automatic DONE. `except` leaves
+   * out inputs already submitted, such as an acknowledgement still in flight. */
+  private hasQueuedAgentInputs(runId: string, except: readonly string[] = []): boolean {
     const run = this.store.getRun(runId);
     return !!run && ['queued', 'running', 'waiting'].includes(run.status) &&
       !(run.delegation?.role === 'worker' && run.delegation.destroy) &&
-      (!!run.agentInputs?.some(input => !input.deliveredAt) || this.harnessOwesInput(this.active.get(runId)));
+      (!!run.agentInputs?.some(input => !input.deliveredAt && !except.includes(input.id)) || this.harnessOwesInput(this.active.get(runId)));
   }
 
   /** Only the current session's observation writes consumedAt (#505). An ID reported
@@ -9212,7 +9223,7 @@ export class RunManager {
       // A refused done is not a done (hearsay-tools/cezarion#1301): unless the refusal settled the
       // turn end, it goes on to its waits or its owed input.
       const refused = this.takeCompletionRefusal(state);
-      return { parked: !refused || refused.handled, done: !refused };
+      return { parked: !refused || refused.handled, done: !refused || !!refused.deferred };
     }
     return { parked: false, done };
   }

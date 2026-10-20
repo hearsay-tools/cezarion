@@ -1295,7 +1295,9 @@ Phase 3b (hearsay-tools/cezarion#1301) adds, on every runner: U20 and U20u (a bl
 turn end gets one refusal nudge, with the will-wait sentence for live workers and without it for a
 settled, uncollected one, and opens no wait), U20h and U20m (a human message, in the opening session
 or a continuation, or a worker message after a refusal nudge the harness never answered starts a
-fresh cycle: its blocked done gets a fresh nudge, not the park), U21 (an ignored refusal parks on Cezar's completion
+fresh cycle: its blocked done gets a fresh nudge, not the park), U20a (a done in the turn that answers
+an input acknowledged only after that turn ended still gets the nudge once the acknowledgement
+lands, never an implicit re-check timer), U21 (an ignored refusal parks on Cezar's completion
 worker wait, which settlement wakes), U21r (that deadline-less wait restarted and settled), U21m (a
 worker message wakes the parent beside it), U21t (an agent timer beside it keeps its deadline),
 U21h (only uncollected results: Cezar's human wait), U21a (an autonomous parent is nudged again
@@ -1310,7 +1312,8 @@ mock's `mock:ack-only` reply (`CEZ_MOCK_COMPLETION_REPLY`): it acknowledges the 
 wire and opens no turn until more input arrives. Cursor print is exempt from U20h, U20m and U22s
 (each prompt spawns a process whose init frame is `turn.started`, as F8), and OpenCode from U20h (a
 human prompt waits for the busy turn to go idle, and that turn never does; U20m's worker message
-steers it).
+steers it). Claude and Cursor print are exempt from U20a: neither can end a turn before its input is
+acknowledged (the stdin write; the first model work of the spawned process).
 
 **R74** extends that native-wire matrix to a failed nonfinal workflow agent.
 CI recovery must retain the failed attempt, including across restart and CI

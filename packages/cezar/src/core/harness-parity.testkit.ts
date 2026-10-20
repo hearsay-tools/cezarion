@@ -794,6 +794,15 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'U13', backend: 'cursor', kind: 'capability-absent',
     reason: 'Cursor print acknowledges agent input on the first model work of the process it spawns; the print wire has no rejection of an admitted prompt.',
   },
+  // U20a (hearsay-tools/cezarion#1301): a turn that ends before its input is acknowledged.
+  {
+    criterion: 'U20a', backend: 'claude', kind: 'capability-absent',
+    reason: 'Claude acknowledges agent input with the local stdin pipe write, so no turn can end before its input is acknowledged.',
+  },
+  {
+    criterion: 'U20a', backend: 'cursor', kind: 'capability-absent',
+    reason: 'Cursor print acknowledges agent input on the first model work of the process it spawns, so no turn can end before its input is acknowledged.',
+  },
   // U20h/U20m/U22s (hearsay-tools/cezarion#1301): a refusal the harness acknowledges and never answers.
   ...(['U20h', 'U20m', 'U22s'] as const).map(criterion => ({
     criterion, backend: 'cursor' as const, kind: 'capability-absent' as const,

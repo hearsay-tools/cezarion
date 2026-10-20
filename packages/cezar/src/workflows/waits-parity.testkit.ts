@@ -53,6 +53,7 @@ export const WAIT_CRITERIA = [
   { id: 'U20u', scenario: 'baseline', name: 'a done blocked by a settled, uncollected worker gets the uncollected refusal nudge without the will-wait sentence' },
   { id: 'U20h', scenario: 'baseline', name: 'a human message, in the opening session or a continuation, after an unanswered refusal nudge starts a fresh cycle' },
   { id: 'U20m', scenario: 'baseline', name: 'a worker message after an unanswered refusal nudge starts a fresh cycle' },
+  { id: 'U20a', scenario: 'baseline', name: 'a done blocked in the turn that answers a worker message acknowledged after that turn ended still gets the refusal nudge' },
   { id: 'U21', scenario: 'baseline', name: 'an ignored refusal with live workers parks on a Cezar worker wait that settlement wakes' },
   { id: 'U21r', scenario: 'baseline', name: 'after a restart, a deadline-less completion wait resolves on the worker\'s settlement and wakes the parent once' },
   { id: 'U21m', scenario: 'baseline', name: 'a worker message wakes a parent parked on the completion wait and the wait stays open' },

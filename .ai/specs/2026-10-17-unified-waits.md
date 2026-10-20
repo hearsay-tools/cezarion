@@ -973,7 +973,9 @@ Decisions made during execution:
   native mock wire through `HARNESS_ADAPTERS`: U20 and U20u (the nudge, with and without the
   will-wait sentence), U20h and U20m (a human message, in the opening session or a continuation, or
   a worker message after a nudge the harness acknowledged on its native wire and never answered
-  starts a fresh cycle), U11 (an open timer at a blocked done: no
+  starts a fresh cycle), U20a (a done in the turn that answers an input acknowledged after that
+  turn ended: the done waits at the boundary and the acknowledgement's settlement gives the nudge;
+  Claude and Cursor print are exempt, as neither ends a turn before its acknowledgement), U11 (an open timer at a blocked done: no
   nudge, the refusal is a note), U21
   (an ignored refusal parks on the completion worker wait, which settlement wakes), U21r (that
   wait restarted and settled), U21m (a worker message wakes it beside the open wait), U21t (an

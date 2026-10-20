@@ -231,7 +231,7 @@ export function describeWaitParity(scope: RunnerId | 'once'): void {
       });
 
       it('registers every criterion', () => {
-        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U25']);
+        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U25']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
     }
@@ -1551,6 +1551,29 @@ export function describeWaitParity(scope: RunnerId | 'once'): void {
           expect(workerWaits(p.id)).toEqual([]);
         });
       }
+
+      // hearsay-tools/cezarion#1301: OpenCode can end the turn that answers an input before its
+      // HTTP acknowledgement lands. A done in that turn is still refused with the nudge once the
+      // acknowledgement settles, never parked on an implicit re-check timer.
+      it(`${runner} U20a a done blocked in the turn that answers a worker message acknowledged after that turn ended still gets the refusal nudge`, async () => {
+        if (exemptionFor('U20a', runner)) {
+          expect(exemptionFor('U20a', runner)?.kind).toBe('capability-absent');
+          return;
+        }
+        await withDelayedCommand(runner as 'codex' | 'opencode' | 'pi' | 'omp', async release => {
+          const { p, w, progress } = await conversingParent(runner);
+          const refusal = `Workers are still live: ${w.id}.`;
+          const turns = turnEnds(p.id);
+          const id = await progress(`${messagesPrompt(runner, ['All done.\nCEZ:DONE'])} delay-owned-ack`);
+          await until(() => turnEnds(p.id) > turns);
+          await flushMicrotasks();
+          // On the wire, acknowledgement withheld: the turn ended on done, and nothing is decided yet.
+          expect(delivered(p.id, id)).toBe(false);
+          expect(nudgeNotes(p.id)).toEqual([]);
+          release();
+          await until(() => delivered(p.id, id) && nudgeNotes(p.id).length === 1 && prompted(runner, refusal).length === 1);
+        });
+      });
 
       // hearsay-tools/cezarion#1301: the turn that answers the refusal nudge ends on done again.
       it(`${runner} U21 an ignored refusal with live workers parks on a Cezar worker wait that settlement wakes`, async () => {
