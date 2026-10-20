@@ -1,29 +1,23 @@
 import './run-header.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { AppWindowIcon, FileTextIcon, MailIcon, PencilIcon, PinOffIcon, SquareTerminalIcon } from 'lucide-react'
+import { AppWindowIcon, FileTextIcon, MailIcon, PencilIcon, PinOffIcon } from 'lucide-react'
 import { BotIcon, ChevronDownIcon, CircleDotIcon, CopyIcon, EllipsisIcon, GitPullRequestIcon, PinIcon, Trash2Icon, XIcon } from '@/components/design-icons'
 import { Fragment, useEffect, useId, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { Link, useActiveProjectId, useNavigate } from '@/lib/project-router'
 
-import { ApiError, deleteRun, openRunIn, openRunInCli } from '@/api/client'
+import { deleteRun } from '@/api/client'
 import {
   queryKeys,
-  useAgentProfiles,
-  useConfig,
   useHealth,
   useMarkRunUnseen,
-  useOpenTargets,
   usePatchRun,
   usePinRun,
   useProjectRepoBase,
   useReferenceProjectId,
-  useProviderStatus,
   useRunHandoff,
   useRuns,
 } from '@/api/queries'
-import { DEFAULT_AGENT_ACCOUNT_ID } from '@open-mercato/cezar-api-client/contract/agent-profiles'
-import type { ApiRun, OpenTarget, Wait } from '@open-mercato/cezar-api-client'
-import { hasAccountChoice, useAgentAccounts } from '@/api/agent-accounts'
+import type { ApiRun } from '@open-mercato/cezar-api-client'
 import { DiffStatLabel } from '@/components/diff-stat'
 import { TitleEditInput, useTitleEditor } from '@/components/editable-title'
 import { Pill } from '@/components/pill'
@@ -55,12 +49,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { openInIcon, type OpenInChoice } from '@/components/open-in-menu'
 import { toast } from '@/components/ui/toaster'
 import { DirectionalUsage } from '@/components/directional-usage'
 import { deriveAttention } from '@/lib/attention'
 import { queuePositions, runTitle } from '@/lib/task-groups'
-import { usableRunners } from '@/lib/provider-status'
 import {
   formatCost,
   prNumber,
@@ -78,10 +70,13 @@ import { usageMetricVisibility } from '@/lib/token-metrics'
 import { cn, isHttpUrl } from '@/lib/utils'
 
 import { ArchiveButton } from './archive-action'
+import { useAgentIdentity } from './run-agent-identity'
+import { RunWaitDetails } from './run-waits'
+import { BranchCopy, OpenInMenuForRun, copyToClipboard, useResumeInTerminal } from './run-workspace'
 import { HandoffAction } from './handoff-action'
 import { Markdown } from './markdown'
 import { TaskFileScope } from './task-file-scope'
-import { archiveInComposer, cliTargetResumes, cliTargetRunner, lastSessionBackend, resumeHint, runActionFlags } from './run-actions'
+import { archiveInComposer, resumeHint, runActionFlags } from './run-actions'
 
 /**
  * The run header (spec §"Task thread" → Header): editable title + status pill, the meta line,
@@ -383,7 +378,7 @@ export function RunHeader({
         </div>
         {/* Outside the disclosure on purpose: "this run wakes itself up at 14:20" is status, not
             metadata — it belongs with the pill above, not behind a tap with the diff stats. */}
-        <OpenWaits run={run} />
+        <RunWaitDetails run={run} />
 
         {/* Below md (#621): 13.5px labels and quiet counts, tabs spread across the row. The 44px
             floor stays — the touch-target sweep measures these links — so the design's 40px is the
@@ -454,93 +449,6 @@ export function RunHeader({
   )
 }
 
-/**
- * "Open in…" session takeover (#open-in): resume the session in a real terminal, open the run's
- * worktree in a local editor / Finder / terminal / agent CLI, or copy its path.
- *
- * The menu itself is the shared `OpenInMenu` (components/open-in-menu.tsx); what lives here is
- * everything run-SPECIFIC — the resume item, which agent handoffs are currently usable, the
- * `(resume)` labelling, and the copy-path row. Renders when the session can be resumed OR the
- * machine offers worktree targets (both empty in hosted mode → nothing to show).
- */
-function OpenInMenuForRun({
-  run,
-  canResume,
-  onResume,
-  onOpen,
-  onClose,
-}: {
-  run: ApiRun
-  canResume: boolean
-  onResume: () => void
-  onOpen?: () => void
-  onClose?: () => void
-}) {
-  const targets = useOpenTargets()
-  const providers = useProviderStatus()
-  const open = useMutation({
-    mutationFn: (target: string) => openRunIn(run.id, target),
-    onError: (error: Error) => toast(error.message, { tone: 'danger' }),
-  })
-  const availableRunners = usableRunners(providers.data)
-  // The action routes remain authoritative for a stale browser. Once the complete status has
-  // arrived, hide only unavailable *agent* handoffs; editors, Finder, and file tools stay
-  // available because they do not launch a provider.
-  const agentAvailable = (runner: ApiRun['runner']) =>
-    !providers.isSuccess || availableRunners.includes(runner ?? 'claude')
-  const canResumeHere = canResume && agentAvailable(lastSessionBackend(run))
-  const choices: OpenInChoice[] = run.worktreePath
-    ? (targets.data?.targets ?? [])
-        .filter((target) => {
-          const runner = cliTargetRunner(target.id)
-          return runner === undefined || agentAvailable(runner)
-        })
-        // Agent-CLI targets (#402): the one matching this run's own runner resumes THIS run's
-        // session when one exists — label that explicitly so it reads as different from just
-        // opening the editor/file-manager entries. Every other CLI (wrong backend, or no session
-        // yet) still opens, just starts clean — no silent cross-backend resume attempt.
-        .map((target) => {
-          const resumes = cliTargetResumes(run, target.id)
-          return {
-            target,
-            ...(resumes ? { suffix: ' (resume)', title: "Resume this run's session" } : {}),
-          }
-        })
-    : []
-  if (!canResumeHere && choices.length === 0) return null
-
-  const copyPath = () => {
-    const path = run.worktreePath
-    if (!path) return
-    void navigator.clipboard
-      .writeText(path)
-      .then(() => toast('Worktree path copied'))
-      .catch(() => toast(`Path: ${path}`))
-  }
-
-  if (onOpen) return <DropdownMenuItem onSelect={onOpen}>Open in…</DropdownMenuItem>
-  const hint = resumeHint(run)
-  return (
-    <section aria-label="Open task worktree in…" className="task-action-panel my-5 rounded-xl border border-border bg-card p-6">
-      <div className="flex items-center justify-between gap-3"><h2 className="text-lg font-medium">Open task worktree in…</h2><Button variant="ghost" size="icon" aria-label="Close worktree chooser" onClick={onClose}><XIcon /></Button></div>
-      {run.worktreePath ? <p className="my-4 break-all text-xs text-muted-foreground">{run.worktreePath}</p> : null}
-      <div className="task-open-targets mt-4 flex flex-wrap gap-3">
-        {canResumeHere ? <Button variant="outline" data-target="terminal-resume" onClick={onResume}><SquareTerminalIcon />Terminal (resume session)</Button> : null}
-        {choices.map(({ target, suffix, title }) => {
-          const Icon = openInIcon(target)
-          return <Button variant="outline" key={target.id} data-target={target.id} title={title} disabled={open.isPending} onClick={() => open.mutate(target.id)}><Icon aria-hidden="true" />{target.label}{suffix ?? ''}</Button>
-        })}
-        {run.worktreePath ? <Button variant="outline" onClick={copyPath}><CopyIcon />Copy worktree path</Button> : null}
-      </div>
-      {hint ? <div className="mt-5 border-t border-border pt-5">
-        <h3 className="text-base font-medium">Resume in a terminal</h3>
-        <pre className="my-4 whitespace-pre-wrap break-all rounded-lg border border-border bg-background p-4 text-xs">{hint}</pre>
-        <Button variant="outline" onClick={() => void copyToClipboard(hint, 'Command copied to clipboard.')}><CopyIcon />Copy resume command</Button>
-      </div> : null}
-    </section>
-  )
-}
-
 /** The mutations + confirm state, bundled so the desktop bar and the mobile kebab drive the
  *  exact same behavior. Every failure surfaces the server's own words as a danger toast. */
 function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
@@ -582,18 +490,7 @@ function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
     },
     onError,
   })
-  const terminal = useMutation({
-    mutationFn: () => openRunInCli(run.id),
-    onError: (error: Error) => {
-      // The legacy 409 fallback: no terminal emulator → the server sends the manual command;
-      // put it on the clipboard so "no terminal" still ends with the user one paste away.
-      if (error instanceof ApiError && error.command) {
-        void copyToClipboard(error.command, 'No terminal found — command copied to clipboard.')
-        return
-      }
-      onError(error)
-    },
-  })
+  const terminal = useResumeInTerminal(run)
 
   return {
     pin,
@@ -606,16 +503,6 @@ function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
 }
 
 type RunActions = ReturnType<typeof useRunActions>
-
-async function copyToClipboard(text: string, doneMessage: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast(doneMessage)
-  } catch {
-    // No clipboard access (permissions, http) — show the command itself; it is the payload.
-    toast(`Run manually: ${text}`)
-  }
-}
 
 /** The rename machine bound to a run, shared by the desktop h1 and the phone top bar. */
 function useRunTitleEditor(run: ApiRun) {
@@ -698,48 +585,6 @@ function MobileRunTitle({ run, children }: { run: ApiRun; children: ReactNode })
         <TitleEditInput editor={editor} className="text-[16px] font-semibold" />
       </PopoverContent>
     </Popover>
-  )
-}
-
-function BranchCopy({ branch }: { branch: string }) {
-  const [copiedBranch, setCopiedBranch] = useState<string | null>(null)
-  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => () => {
-    if (resetTimer.current !== null) clearTimeout(resetTimer.current)
-  }, [])
-
-  const copied = copiedBranch === branch
-  const copy = async () => {
-    if (resetTimer.current !== null) clearTimeout(resetTimer.current)
-    setCopiedBranch(null)
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
-      await navigator.clipboard.writeText(branch)
-      setCopiedBranch(branch)
-      resetTimer.current = setTimeout(() => setCopiedBranch(null), 2000)
-    } catch {
-      toast(`Could not copy branch. Select and copy: ${branch}`)
-    }
-  }
-
-  return (
-    <span className="inline-flex min-w-0 max-w-full items-center gap-1">
-      <span
-        data-slot="branch-chip"
-        className="min-w-0 rounded-sm border border-border bg-card px-1.5 py-px font-mono text-[11px] font-medium break-all"
-      >
-        {branch}
-      </span>
-      <button
-        type="button"
-        aria-label={copied ? 'Copied branch name' : 'Copy branch name'}
-        onClick={() => void copy()}
-        className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm px-2 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground md:min-h-8"
-      >
-        <CopyIcon className="size-3.5" aria-hidden="true" />
-        <span aria-live="polite">{copied ? 'Copied' : 'Copy'}</span>
-      </button>
-    </span>
   )
 }
 
@@ -919,142 +764,6 @@ function MetaRow({
   )
 }
 
-type CiWait = Extract<Wait, { kind: 'ci' }>
-type TimerWait = Extract<Wait, { kind: 'timer' }>
-type WorkerWait = Extract<Wait, { kind: 'worker' }>
-type ListedWait = CiWait | TimerWait | WorkerWait
-
-/** Only these statuses can have a wait in flight; a finished run's leftovers are history. */
-const IN_FLIGHT_STATUSES: readonly ApiRun['status'][] = ['running', 'queued', 'waiting']
-
-/** The kinds this header renders: CI, timer and worker waits. Streamed records were only checked
- *  for `id`. A human wait shows as Needs you and its question card, through the pill, never in
- *  this list. A worker wait shows only while open: its result is not owed in a line of its own. */
-function renderableWaits(value: unknown): ListedWait[] {
-  return Array.isArray(value)
-    ? value.filter((wait): wait is ListedWait => wait?.kind === 'ci' || wait?.kind === 'timer' || wait?.kind === 'worker')
-    : []
-}
-
-function formatInstant(value: string | undefined) {
-  const date = value ? new Date(value) : undefined
-  return date && Number.isFinite(date.getTime())
-    ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'long' }).format(date)
-    : undefined
-}
-
-/** A resolved wait's result is owed to the agent: mid-turn it waits for the turn end, otherwise
- *  for the wake turn to be admitted. */
-function owedLabel(prefix: string, run: ApiRun) {
-  return `${prefix} — ${run.status === 'running' ? 'current turn still working' : 'waiting for capacity'}`
-}
-
-/**
- * Every open wait on the run (spec 2026-10-17-unified-waits), then the last settled CI
- * observation. Snapshot-only status: none of it starts a browser watcher, and the pill reads
- * `waitingOn` through `deriveAttention`, not this list. The settled observation (or the retained
- * recovery error) stays beside an open timer, and gives way only to a CI wait of its own.
- */
-function OpenWaits({ run }: { run: ApiRun }) {
-  const listed = renderableWaits(run.waits)
-  const open = IN_FLIGHT_STATUSES.includes(run.status)
-    ? listed.filter(wait => wait.kind === 'worker' ? wait.phase === 'open' : wait.phase === 'open' || wait.phase === 'resolved')
-    : []
-  const ciOpen = open.some(wait => wait.kind === 'ci')
-  // `lastWaits` is newest last; a settled entry still in `waits` is newer than all of them.
-  const settled = [...renderableWaits(run.lastWaits), ...listed.filter(wait => !open.includes(wait) && wait.phase !== 'open')]
-  const lastCi = ciOpen ? undefined : settled.filter((wait): wait is CiWait => wait.kind === 'ci').at(-1)
-  const error = ciOpen ? undefined : run.lastWaitsError
-  if (!open.length && !lastCi && !error) return null
-  return (
-    <div data-slot="open-waits" className="mt-1 flex min-w-0 flex-col gap-1">
-      {open.map(wait => wait.kind === 'ci'
-        ? <CiWaitStatus key={wait.id} run={run} wait={wait} />
-        : wait.kind === 'worker'
-          ? <WorkerWaitStatus key={wait.id} wait={wait} />
-          : <TimerWaitStatus key={wait.id} run={run} wait={wait} />)}
-      {error ? (
-        <div data-slot="ci-wait-status" role="status" aria-live="polite" aria-atomic="true"
-          className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
-          {error}
-        </div>
-      ) : lastCi ? <CiWaitStatus run={run} wait={lastCi} settled /> : null}
-    </div>
-  )
-}
-
-function CiWaitStatus({ run, wait, settled = false }: { run: ApiRun; wait: CiWait; settled?: boolean }) {
-  const result = wait.result
-  const outcomes = {
-    passed: 'CI checks passed — observed checks only; not merge approval',
-    failed: 'CI checks failed — inspect the PR checks',
-    cancelled: 'CI wait cancelled',
-    skipped: 'CI checks skipped — inspect the PR checks',
-    no_checks: 'No CI checks found — inspect the PR workflows',
-    deadline: 'CI wait timed out — inspect the PR checks',
-    error: 'CI wait unavailable — inspect access and the PR checks',
-    head_changed: `CI head changed — ${result?.headSha.slice(0, 7)} → ${result?.observedHeadSha?.slice(0, 7) ?? 'unknown'}`,
-  }
-  const cancelled = settled && wait.phase === 'cancelled'
-  const label = !settled
-    ? wait.phase === 'resolved' ? owedLabel('CI result ready', run) : 'Waiting for CI'
-    : cancelled ? 'CI wait cancelled' : result ? outcomes[result.outcome] : 'CI wait unavailable'
-  const timestamp = !settled ? wait.deadline : cancelled ? wait.cancelledAt : result?.observedAt
-  const dateLabel = formatInstant(timestamp)
-  const prLabel = `${wait.repository}#${wait.prNumber}`
-  return (
-    <div data-slot="ci-wait-status" role="status" aria-live="polite" aria-atomic="true"
-      className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-1">
-        <span>{label}</span>
-        <span aria-hidden="true">—</span>
-        {isHttpUrl(wait.prUrl) ? (
-          <a href={wait.prUrl} target="_blank" rel="noopener noreferrer"
-            className="inline-flex min-h-11 min-w-11 max-w-full items-center rounded-sm px-1 font-medium text-foreground underline underline-offset-2 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none">
-            {prLabel}
-          </a>
-        ) : <span>{prLabel}</span>}
-      </div>
-      {dateLabel ? (
-        <p>{!settled ? 'Deadline' : cancelled ? 'Cancelled' : 'Observed'}{' '}<time dateTime={timestamp}>{dateLabel}</time></p>
-      ) : !settled ? <p>CI deadline unavailable</p> : null}
-    </div>
-  )
-}
-
-/** "Waiting on N workers" / "N request replies": the ids not yet reported, with the deadline. */
-function WorkerWaitStatus({ wait }: { wait: WorkerWait }) {
-  const byWorker = wait.workerIds !== undefined
-  const reported = new Set((byWorker ? wait.outcomes : wait.requestOutcomes)?.map(outcome => 'workerId' in outcome ? outcome.workerId : outcome.requestId))
-  const count = (wait.workerIds ?? wait.requestIds ?? []).filter(id => !reported.has(id)).length
-  const noun = byWorker ? (count === 1 ? 'worker' : 'workers') : (count === 1 ? 'request reply' : 'request replies')
-  const dateLabel = formatInstant(wait.deadline)
-  return (
-    <div data-slot="worker-wait-status" role="status" aria-live="polite" aria-atomic="true"
-      className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
-      <p>Waiting on {count} {noun}</p>
-      {dateLabel ? <p>Deadline{' '}<time dateTime={wait.deadline}>{dateLabel}</time></p> : <p>Worker wait deadline unavailable</p>}
-    </div>
-  )
-}
-
-function TimerWaitStatus({ run, wait }: { run: ApiRun; wait: TimerWait }) {
-  const dateLabel = formatInstant(wait.deadline)
-  return (
-    <div data-slot="monitoring-schedule" role="status" aria-live="polite" aria-atomic="true"
-      className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
-      {wait.phase === 'resolved' ? <p>{owedLabel('Automatic check due', run)}</p> : dateLabel ? (
-        <p>
-          Next automatic check{' '}
-          <time dateTime={wait.deadline} className="font-medium text-foreground">
-            {dateLabel}
-          </time>
-        </p>
-      ) : <p>Automatic check time unavailable</p>}
-      {wait.note ? <p>{wait.note}</p> : null}
-    </div>
-  )
-}
 
 /** The agent icon by the token counter (#416): hover/focus reveals the runner, account, model and
  *  canonical model identity — the answer to "what am I actually running here?" — without turning
@@ -1071,72 +780,7 @@ function TimerWaitStatus({ run, wait }: { run: ApiRun; wait: TimerWait }) {
  *  account itself follows the composer's rule (#251): shown only when the chosen runner has a
  *  choice of login, because one defined account is not worth a word of the summary. */
 function AgentBadge({ run }: { run: ApiRun }) {
-  // The record keeps only what the caller ASKED for: `POST /api/runs` persists the raw optional
-  // `runner` (`src/runs/store.ts`), while the run actually executes as
-  // `input.runner ?? config.defaultRunner` (`src/workflows/run.ts`). Mirror that resolution —
-  // hardcoding 'claude' would name the wrong agent on a repo whose `defaultRunner` is
-  // codex/opencode, and "which agent produced this?" is the one question #416 exists to answer.
-  // 'claude' stays the last resort only while the active project's config is in flight.
-  // `/api/health` describes the boot project and can name the wrong runner on scoped routes.
-  const config = useConfig()
-  const profiles = useAgentProfiles()
-  const { accounts } = useAgentAccounts()
-  const runner = run.runner ?? config.data?.defaultRunner ?? 'claude'
-  const model = run.model ?? 'auto'
-  // Unset effort means the harness default, the same way unset model reads `auto` (#411):
-  // the badge answers "what am I running here?" and names the default instead of pretending
-  // the question was never asked (#52's omit decision, superseded for the unpinned case).
-  const effort = run.effort || 'auto'
-  // The account is read from the STEP that actually spawned, never from the run's composer
-  // override or the project's current selection (spec 2026-07-29-agent-profiles): the override is
-  // absent whenever the run just followed the project, and the project's selection can have been
-  // changed since — both would name an account this run may never have touched. The last step that
-  // recorded one is what ran; `sessionId` and `profileId` are a pair for exactly this reason.
-  const profileStep = [...run.steps].reverse().find((step) => step.profileId)
-  const accountId = profileStep?.profileId
-  // The choice count is judged against the backend that RECORDED the account, not the run's
-  // `runner`: spec 2026-07-29-agent-profiles puts the account on the spawning step, and a step
-  // may run a different backend than the run label — counting Claude's logins for a Codex
-  // account both hides Codex accounts on a lone-Claude host and shows lone Codex logins on a
-  // multi-Claude one. Steps from before the field existed fall back to the run runner.
-  const accountBackend = profileStep?.backend ?? runner
-  // One login is not a choice (#251, spec 2026-07-29-agent-profiles): a KNOWN account is named
-  // only when its backend has two or more defined accounts — the same `hasAccountChoice`
-  // count the composer pill applies — and the badge stays silent while the profiles query is in
-  // flight, so a lone `default` never paints the summary just to vanish a moment later. A REMOVED
-  // account is the exception to the count: the id is the only remaining pointer to the folder its
-  // sessions live in, so `<id> (removed)` shows regardless of how many logins are left — deleting
-  // an account must not retroactively erase which one a historical run ran under. A FAILED query
-  // never settles, so silence there would be permanent; the recorded id shows verbatim, without
-  // a `(removed)` claim the unreadable catalog cannot back.
-  // The row must match on id AND backend: ids are unique per provider only, so a same-id
-  // account on another backend is a different login (#411) — matching it would let the badge
-  // claim "not removed" for a folder that is gone.
-  const known = profiles.data?.profiles.find(
-    (p) => p.id === accountId && p.provider === accountBackend,
-  )
-  const account = accountId === undefined || profiles.isPending
-    ? undefined
-    : profiles.isError
-      ? accountId
-      : accountId === DEFAULT_AGENT_ACCOUNT_ID
-        // The recorded `default` is the backend's own home: discovered, never deletable — so an
-        // empty or failed catalog cannot make it "(removed)" (#411), and a lone default stays
-        // omitted exactly as the count rule above intends.
-        ? hasAccountChoice(accounts, accountBackend) ? 'default' : undefined
-        : known
-          ? hasAccountChoice(accounts, accountBackend)
-            ? known.label
-            : undefined
-          : `${accountId} (removed)`
-  // The canonical `provider/model` the run actually resolved to (#405), shown only when it says
-  // something `model` does not (#546). `model` is the free-text the caller ASKED for — `opus`,
-  // `auto`, a gateway id — so on a repo whose Claude runner points at a custom endpoint the two
-  // genuinely differ, and "which provider served this?" is a question only this field answers.
-  // Absent on pre-#405 records and skipped when it merely repeats `model`, following the same
-  // omitted-not-guessed rule as the account line below: an identity nothing wrote down is not
-  // one this header may invent.
-  const identity = run.modelIdentity && run.modelIdentity !== model ? run.modelIdentity : undefined
+  const { runner, account, model, effort, identity } = useAgentIdentity(run)
   const summary = [runner, account, model, effort].filter(Boolean).join(' · ')
   return (
     <DropdownMenu>
