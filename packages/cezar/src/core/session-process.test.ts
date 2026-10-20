@@ -1,5 +1,5 @@
 import { execFileSync, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -24,6 +24,8 @@ function alive(pid: number): boolean {
 
 const IGNORES_TERM = "process.on('SIGTERM',()=>{}); setTimeout(()=>{},20000)";
 const DEFAULT_TERM = 'setTimeout(()=>{},20000)';
+/** Ignores SIGTERM, leaving a receipt in its cwd that it got one. */
+const TERM_RECEIPT = "process.on('SIGTERM',()=>{require('fs').writeFileSync('member.term','')}); setTimeout(()=>{},20000)";
 
 /** A leader that starts one member in its cwd, writes the member's pid, then stays or exits. */
 function leaderScript(member: string, opts: { detached?: boolean; exit?: boolean } = {}): string {
@@ -93,23 +95,80 @@ describe.skipIf(process.platform === 'win32')('session process groups (hearsay-t
     expect(alive(member)).toBe(true);
   });
 
-  it('a leader that exits on its own signals nothing', async () => {
+  // hearsay-tools/cezarion#1286: a leader that exits on its own ended its session, so what it left
+  // in its group (an MCP server that ignores EOF, a background job) ends with it.
+  it('a leader that exits on its own ends a member that handles SIGTERM', async () => {
     const { leader, member } = await start(leaderScript(DEFAULT_TERM, { exit: true }));
     await exited(leader);
-    await new Promise(resolve => setTimeout(resolve, 300));
-    expect(alive(member)).toBe(true);
     expect(sessionGroupOf(leader.pid!)).toBeUndefined();
+    // bound: the exit drain, then signal delivery and reaping by the subreaper.
+    await vi.waitFor(() => expect(alive(member)).toBe(false), { timeout: 5000 });
   });
 
-  it('signalling a session whose leader already exited on its own signals nothing', async () => {
+  it('a member that ignores SIGTERM is killed after the grace once its leader exits on its own', async () => {
+    const { leader, member, cwd } = await start(leaderScript(TERM_RECEIPT, { exit: true }));
+    await exited(leader);
+    // bound: the exit drain, the grace, then signal delivery and reaping by the subreaper.
+    await vi.waitFor(() => expect(alive(member)).toBe(false), { timeout: 5000 });
+    // Written by the member's SIGTERM handler, which does not exit: SIGKILL ended it.
+    expect(existsSync(join(cwd, 'member.term'))).toBe(true);
+  });
+
+  it('a setsid member survives a leader that exits on its own', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'cez-session-group-'));
+    dirs.push(cwd);
+    const leader = spawnSessionLeader(process.execPath, ['-e', `const { spawn } = require('child_process'); const fs = require('fs');
+const g = spawn(process.execPath, ['-e', ${JSON.stringify(IGNORES_TERM)}], { stdio: 'ignore' });
+const s = spawn(process.execPath, ['-e', ${JSON.stringify(IGNORES_TERM)}], { stdio: 'ignore', detached: true });
+fs.writeFileSync('pids.tmp', g.pid + ' ' + s.pid); fs.renameSync('pids.tmp', 'pids');
+g.unref(); s.unref(); process.exit(0);`], { cwd, env: process.env });
+    pids.push(leader.pid!);
+    // bound: three node processes starting on a loaded host.
+    const [group, setsid] = await vi.waitFor(() => {
+      const found = readFileSync(join(cwd, 'pids'), 'utf8').split(' ').map(Number);
+      expect(found).toHaveLength(2);
+      return found as [number, number];
+    }, { timeout: 5000 });
+    pids.push(group, setsid);
+    await exited(leader);
+    // The group member's SIGKILL is the last signal the reap sends.
+    // bound: the exit drain, the grace, then signal delivery and reaping by the subreaper.
+    await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 5000 });
+    expect(alive(setsid)).toBe(true);
+  });
+
+  it('a child spawned in the group after its leader exits on its own is still ended', async () => {
+    // The member starts the late child once the leader's exit closes its stdin pipe.
+    const member = `const { spawn } = require('child_process'); const fs = require('fs'); process.on('SIGTERM', () => {});
+process.stdin.on('end', () => { const c = spawn(process.execPath, ['-e', ${JSON.stringify(IGNORES_TERM)}], { stdio: 'ignore' });
+  fs.writeFileSync('late.pid.tmp', String(c.pid)); fs.renameSync('late.pid.tmp', 'late.pid'); });
+process.stdin.resume(); setTimeout(() => {}, 20000);`;
+    const cwd = mkdtempSync(join(tmpdir(), 'cez-session-group-'));
+    dirs.push(cwd);
+    const leader = spawnSessionLeader(process.execPath, ['-e', `const { spawn } = require('child_process');
+const m = spawn(process.execPath, ['-e', ${JSON.stringify(member)}], { stdio: ['pipe', 'ignore', 'ignore'] });
+require('fs').writeFileSync('member.pid.tmp', String(m.pid)); require('fs').renameSync('member.pid.tmp', 'member.pid');
+setTimeout(() => process.exit(0), 50);`], { cwd, env: process.env });
+    pids.push(leader.pid!);
+    // bound: two node processes starting on a loaded host.
+    pids.push(await vi.waitFor(() => requirePid(join(cwd, 'member.pid')), { timeout: 5000 }));
+    await exited(leader);
+    // bound: the member's stdin EOF and one spawn.
+    const late = await vi.waitFor(() => requirePid(join(cwd, 'late.pid')), { timeout: 5000 });
+    pids.push(late);
+    // bound: the exit drain, the grace, then signal delivery and reaping by the subreaper.
+    await vi.waitFor(() => expect(alive(late)).toBe(false), { timeout: 5000 });
+  });
+
+  it('signalling a session after its leader exited on its own leaves the ending to the reap', async () => {
     const { leader, member } = await start(leaderScript(IGNORES_TERM, { exit: true }));
     await exited(leader);
     const kill = vi.spyOn(process, 'kill');
     signalSession(leader, 'SIGTERM');
     signalSession(leader, 'SIGKILL');
     expect(kill.mock.calls.filter(([pid, signal]) => pid === -leader.pid! && signal !== 0)).toEqual([]);
-    await new Promise(resolve => setTimeout(resolve, 300));
-    expect(alive(member)).toBe(true);
+    // bound: the exit drain, the grace, then signal delivery and reaping by the subreaper.
+    await vi.waitFor(() => expect(alive(member)).toBe(false), { timeout: 5000 });
   });
 
   it('never group-signals a fake child', () => {

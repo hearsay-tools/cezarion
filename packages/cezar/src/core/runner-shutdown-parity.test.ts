@@ -38,10 +38,12 @@ vi.mock('node:child_process', async (original) => {
     return child;
   }) as typeof actual.spawn };
 });
+const eofGrace = vi.hoisted(() => ({ termMs: 100 }));
 vi.mock('./runner-runtime.ts', async (original) => ({
   ...await original<typeof import('./runner-runtime.ts')>(),
   KILL_GRACE_MS: 100,
-  EOF_TERM_GRACE_MS: 100,
+  // Read at each use, so S30 can leave a leader that exits on EOF time to do so on its own.
+  get EOF_TERM_GRACE_MS() { return eofGrace.termMs; },
   EOF_KILL_GRACE_MS: 100,
 }));
 
@@ -105,7 +107,7 @@ async function withChild(backend: RunnerId, check: (session: AgentSession, child
 }
 
 describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
-  const [outsideSignal, endEscalation, outputFailure, ownGroup, stopGroup, endGroup] = SHUTDOWN_CRITERIA;
+  const [outsideSignal, endEscalation, outputFailure, ownGroup, stopGroup, endGroup, /* S29: omp-input-pipe.test.ts */, ownExit] = SHUTDOWN_CRITERIA;
   for (const backend of RUNNER_IDS) {
     it(`${backend} ${outsideSignal.id} ${outsideSignal.name}`, async () => {
       // Process exit must classify the failure even when HTTP stream closure
@@ -192,6 +194,29 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
         await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 6000 });
         expect(alive(setsid)).toBe(true);
       }, 'no-progress-leftover');
+    }, 15_000);
+
+    // hearsay-tools/cezarion#1286: cezar signals nothing when the agent exits on EOF, so the stdio MCP
+    // servers and background jobs it left in its group are ended by the reap after its exit.
+    // OpenCode's runner and Cursor print's signal their process on end, so the group is cezar's
+    // to end either way.
+    it.skipIf(process.platform === 'win32')(`${backend} ${ownExit.id} ${ownExit.name}`, async () => {
+      const signalsOnEnd = backend === 'opencode' || backend === 'cursor';
+      // Past any EOF exit and short of the test timeout: only the leader's own exit settles it.
+      if (!signalsOnEnd) eofGrace.termMs = 10_000;
+      try {
+        await withChild(backend, async (session, child, _events, settled, cwd) => {
+          const { group, session: setsid } = await leftovers(cwd);
+          session.end();
+          await settled;
+          if (!signalsOnEnd) expect(child.signalCode).toBeNull();
+          // bound: the exit drain, the grace, then signal delivery and reaping by the subreaper.
+          await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 6000 });
+          expect(alive(setsid)).toBe(true);
+        }, 'no-progress-leftover');
+      } finally {
+        eofGrace.termMs = 100;
+      }
     }, 15_000);
 
     if (backend === 'pi' || backend === 'claude') {
