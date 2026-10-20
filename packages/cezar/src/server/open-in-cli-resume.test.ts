@@ -381,5 +381,38 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
       await openIn(run.id, 'cli:claude');
       expect(mockOpenInTerminal).toHaveBeenCalledWith(expect.any(String), 'claude --resume sess-1', {});
     });
+
+    it('refuses an omp terminal once omp\'s root moved away from the account\'s profile (#1283)', async () => {
+      // omp resolves `OMP_PROFILE=work` under `$HOME/<PI_CONFIG_DIR or .omp>`, read at spawn.
+      const userHome = join(home, 'user');
+      for (const key of ['OMP_PROFILE', 'PI_PROFILE', 'PI_CONFIG_DIR', 'PI_CODING_AGENT_DIR']) vi.stubEnv(key, undefined);
+      vi.stubEnv('HOME', userHome);
+      try {
+        const profile = join(userHome, '.omp', 'profiles', 'work');
+        mkdirSync(profile, { recursive: true });
+        await mergeWriteAgentAccounts((store) => {
+          store.accounts.push({ id: 'work', provider: 'omp', configDir: profile, label: 'work', addedAt: '' });
+          store.selections[realpathSync(repoRoot)] = { omp: 'work' };
+        });
+        const resumed = makeRun('omp', 'sess-1');
+        store.updateStep(resumed.id, 'work', { profileId: 'work' });
+        const fresh = makeRun('claude'); // a foreign runner: `cli:omp` launches fresh on the project's account
+
+        expect((await openIn(resumed.id, 'cli:omp')).status).toBe(200);
+        expect(mockOpenInTerminal).toHaveBeenLastCalledWith(expect.any(String), expect.any(String), { OMP_PROFILE: 'work' });
+
+        // The root moves: `OMP_PROFILE=work` would now open `~/.omp-alt/profiles/work`.
+        vi.stubEnv('PI_CONFIG_DIR', '.omp-alt');
+        mockOpenInTerminal.mockClear();
+        for (const runId of [resumed.id, fresh.id]) {
+          const res = await openIn(runId, 'cli:omp');
+          expect(res.status).toBe(409);
+          expect(((await res.json()) as { error: string }).error).toContain(join(userHome, '.omp-alt', 'profiles'));
+        }
+        expect(mockOpenInTerminal).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
   });
 });
