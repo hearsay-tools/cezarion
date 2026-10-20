@@ -62,6 +62,18 @@ interface PendingOpencodeQuestion {
   questions: AskQuestion[];
 }
 
+/** One native OpenCode ask, live from its `permission.asked` until OpenCode settles it
+ *  (hearsay-tools/cezarion#1266). `classifying` waits on the config read or an earlier ask;
+ *  `card` is shown in the cockpit; `answering` holds the human's reply POST. */
+interface PendingOpencodePermission {
+  nativeId: string;
+  /** Absent for a malformed ask, which is only ever rejected. */
+  ask?: OpencodePermissionAsk;
+  phase: 'classifying' | 'auto-replying' | 'card' | 'answering' | 'rejecting';
+  bridge?: OpencodePermissionBridge;
+  answer?: { optionId: string; reply: OpencodeReply };
+}
+
 const SERVER_START_TIMEOUT_MS = 30_000;
 
 /**
@@ -276,10 +288,10 @@ class OpencodeSession implements AgentSession {
   private queuedPromptGeneration = 0;
   /** Human `prompt()` waiters in the current generation that have not posted yet (#486). */
   private humanPromptWaiters = 0;
-  /** Cockpit requestId → the native OpenCode ask it stands for (hearsay-tools/cezarion#1266).
-   * A pending permission holds agent input, like a pending question. */
-  private readonly pendingPermissions = new Map<string, OpencodePermissionBridge>();
-  /** Native ask ids already taken, so a replayed or duplicated frame is handled once. */
+  /** Native ask id → its live state, entered on receipt (hearsay-tools/cezarion#1266). Any
+   * entry holds agent input and auto-end, like a pending question, until OpenCode settles it. */
+  private readonly pendingPermissions = new Map<string, PendingOpencodePermission>();
+  /** Native ask ids already taken. Outlives retirement, so a duplicated frame is handled once. */
   private readonly handledPermissionIds = new Set<string>();
   /** Asks are classified one at a time, in arrival order, after the one config read. */
   private permissionQueue: Promise<void> = Promise.resolve();
@@ -412,8 +424,8 @@ class OpencodeSession implements AgentSession {
   }
 
   sendAgentMessage(content: ContentBlock[], inputIds: readonly string[] = []): false | Promise<void> {
-    // #505: a busy session is steered with prompt_async; only a pending native question,
-    // a queued human prompt or an in-flight agent POST refuses.
+    // #505: a busy session is steered with prompt_async; only a pending native question or
+    // permission ask, a queued human prompt or an in-flight agent POST refuses.
     // Nothing may run ahead of the task: refuse until the opening prompt has started,
     // then hint once so the refused input steers the opening turn.
     if (this.serverOpen && this.turnSerial === 0) { this.refusedBeforeOpening = true; return false; }
@@ -1103,13 +1115,14 @@ class OpencodeSession implements AgentSession {
     } else if (type === 'permission.asked') {
       this.handlePermissionAsked(props);
     } else if (type === 'permission.replied') {
-      // Another client answered, or OpenCode settled the request itself.
+      // OpenCode settled the request, in any phase: our own reply, another client's, or its own.
       const nativeId = stringField(props, 'requestID');
-      for (const [requestId, bridge] of this.pendingPermissions) {
-        if (bridge.nativeId !== nativeId) continue;
-        this.pendingPermissions.delete(requestId);
-        this.emitPermissionResolved(requestId, { reason: 'resolved by OpenCode' });
-        this.notifyAgentInputReady();
+      const pending = nativeId === undefined ? undefined : this.pendingPermissions.get(nativeId);
+      // OpenCode publishes this before it answers the reply route, so a human reply in flight
+      // that it echoes is that human's answer.
+      if (pending) {
+        const answered = pending.phase === 'answering' && pending.answer?.reply === stringField(props, 'reply');
+        this.settlePermission(pending, answered ? { optionId: pending.answer!.optionId } : { reason: 'resolved by OpenCode' });
       }
     } else if (type === 'session.idle') {
       // THE turn-end signal. The SSE bus is server-wide, so a child session's
@@ -1335,36 +1348,64 @@ class OpencodeSession implements AgentSession {
 
   // ---- permissions (hearsay-tools/cezarion#1266) --------------------------
 
-  /** Any session on this private server may ask, child sessions included. */
+  /** Any session on this private server may ask, child sessions included. The ask holds agent
+   *  input and auto-end from receipt until OpenCode settles it, the turn ends or the session does. */
   private handlePermissionAsked(props: Record<string, unknown>): void {
+    if (!this.serverOpen) return;
     const parsed = opencodePermissionAskSchema.safeParse(props);
-    if (!parsed.success || !this.serverOpen || this.handledPermissionIds.has(parsed.data.id)) return;
-    const ask = parsed.data;
-    this.handledPermissionIds.add(ask.id);
-    this.permissionQueue = this.permissionQueue.then(() => this.answerPermission(ask)).catch(() => undefined);
+    const nativeId = parsed.success ? parsed.data.id : typeof props.id === 'string' && props.id ? props.id : undefined;
+    if (nativeId === undefined) {
+      // OpenCode blocks the asking tool until a reply names this request: fail closed.
+      this.emit({ type: 'error', message: 'opencode: unsupported permission request could not be rejected: no request id' });
+      this.finishTurn();
+      this.end();
+      return;
+    }
+    if (this.handledPermissionIds.has(nativeId)) return;
+    this.handledPermissionIds.add(nativeId);
+    const pending: PendingOpencodePermission = parsed.success
+      ? { nativeId, ask: parsed.data, phase: 'classifying' }
+      : { nativeId, phase: 'rejecting' };
+    this.pendingPermissions.set(nativeId, pending);
+    this.agentInputReady = false;
+    this.cancelAutoEnd();
+    if (!parsed.success) {
+      this.emit({ type: 'note', message: 'opencode: rejected an OpenCode permission request cezar could not read' });
+      void this.rejectPermission(pending, 'cezar could not read this permission request');
+      return;
+    }
+    this.permissionQueue = this.permissionQueue.then(() => this.answerPermission(pending)).catch(() => undefined);
   }
 
-  private async answerPermission(ask: OpencodePermissionAsk): Promise<void> {
+  /** Still the ask OpenCode is waiting on: not settled, expired or torn down since an await. */
+  private permissionLive(pending: PendingOpencodePermission): boolean {
+    return this.serverOpen && this.pendingPermissions.get(pending.nativeId) === pending;
+  }
+
+  private async answerPermission(pending: PendingOpencodePermission): Promise<void> {
     const rules = await this.userPermissionRules();
-    if (!this.serverOpen) return;
-    if (isOpencodeDefaultAsk(ask, rules)) {
+    if (!this.permissionLive(pending)) return;
+    if (isOpencodeDefaultAsk(pending.ask!, rules)) {
+      pending.phase = 'auto-replying';
       try {
         // Never `always`: that can persist an approval beyond this run.
-        await this.replyPermission(ask.id, { reply: 'once' });
-        if (!this.answeredDefaultAsk) {
-          this.answeredDefaultAsk = true;
-          this.emit({
-            type: 'note',
-            message: "opencode: answered OpenCode's built-in permission asks (outside-worktree reads, .env reads, repeated-call guard) with allow-once; your own OpenCode permission rules still ask",
-          });
-        }
-        return;
+        await this.replyPermission(pending.nativeId, { reply: 'once' });
       } catch {
         // OpenCode is still waiting: a failed automatic reply asks the human instead.
-        if (!this.serverOpen) return;
+        if (this.permissionLive(pending)) this.bridgePermission(pending);
+        return;
       }
+      if (this.serverOpen && !this.answeredDefaultAsk) {
+        this.answeredDefaultAsk = true;
+        this.emit({
+          type: 'note',
+          message: "opencode: answered OpenCode's built-in permission asks (outside-worktree reads, .env reads, repeated-call guard) with allow-once; your own OpenCode permission rules still ask",
+        });
+      }
+      this.settlePermission(pending);
+      return;
     }
-    this.bridgePermission(ask);
+    this.bridgePermission(pending);
   }
 
   /** One lazy `GET /config` per session. An unreadable config is unknown provenance: every ask goes to the cockpit. */
@@ -1384,37 +1425,67 @@ class OpencodeSession implements AgentSession {
     return JSON.parse(await res.text()) as unknown;
   }
 
-  private bridgePermission(ask: OpencodePermissionAsk): void {
+  private bridgePermission(pending: PendingOpencodePermission): void {
     if (!this.opts.onUiEvent) {
       const message = 'no permission UI is attached to this cezar session';
-      this.emit({ type: 'note', message: `opencode: rejected the OpenCode ${ask.permission} permission prompt: ${message}` });
-      void this.replyPermission(ask.id, { reply: 'reject', message }).catch(() => undefined);
+      this.emit({ type: 'note', message: `opencode: rejected the OpenCode ${pending.ask!.permission} permission prompt: ${message}` });
+      void this.rejectPermission(pending, message);
       return;
     }
-    const bridge = opencodePermissionBridge(ask);
-    this.pendingPermissions.set(bridge.event.requestId, bridge);
-    this.agentInputReady = false;
-    this.cancelAutoEnd();
+    if (!this.showPermissionCard(pending)) void this.rejectPermission(pending, 'permission UI unavailable');
+  }
+
+  /** Emits a fresh cockpit card, with new ids, for the ask. False when the UI threw: that card is resolved again. */
+  private showPermissionCard(pending: PendingOpencodePermission): boolean {
+    const bridge = opencodePermissionBridge(pending.ask!);
+    pending.bridge = bridge;
+    pending.phase = 'card';
+    pending.answer = undefined;
     try {
-      this.opts.onUiEvent(bridge.event);
+      this.opts.onUiEvent!(bridge.event);
+      return true;
     } catch {
       // A throwing consumer cannot leave OpenCode waiting on a card nobody sees.
-      this.pendingPermissions.delete(bridge.event.requestId);
-      void this.replyPermission(ask.id, { reply: 'reject', message: 'permission UI unavailable' }).catch(() => undefined);
+      pending.bridge = undefined;
       this.emitPermissionResolved(bridge.event.requestId, { reason: 'permission UI unavailable' });
+      return false;
     }
   }
 
+  /** A reject OpenCode never receives leaves the asking tool blocked: fail closed. */
+  private async rejectPermission(pending: PendingOpencodePermission, message: string): Promise<void> {
+    pending.phase = 'rejecting';
+    try {
+      await this.replyPermission(pending.nativeId, { reply: 'reject', message });
+    } catch (err) {
+      if (!this.permissionLive(pending)) return;
+      this.emit({ type: 'error', message: `opencode: permission rejection failed: ${err instanceof Error ? err.message : String(err)}` });
+      this.finishTurn();
+      this.end();
+      return;
+    }
+    this.settlePermission(pending);
+  }
+
+  /** The card and the input barrier stay until OpenCode accepts the reply; a failed reply shows a fresh card. */
   respondPermission(requestId: string, optionId: string): boolean {
-    const bridge = this.pendingPermissions.get(requestId);
-    const reply = bridge?.replies.get(optionId);
-    if (!this.serverOpen || !bridge || !reply) return false;
-    this.pendingPermissions.delete(requestId);
-    void this.replyPermission(bridge.nativeId, { reply }).catch((err: unknown) => {
+    if (!this.serverOpen) return false;
+    const pending = [...this.pendingPermissions.values()].find((entry) => entry.bridge?.event.requestId === requestId);
+    const reply = pending?.bridge?.replies.get(optionId);
+    if (!pending || pending.phase !== 'card' || !reply) return false;
+    const bridge = pending.bridge!;
+    pending.phase = 'answering';
+    pending.answer = { optionId, reply };
+    void this.replyPermission(pending.nativeId, { reply }).then(() => {
+      if (this.permissionLive(pending) && pending.bridge === bridge) this.settlePermission(pending, { optionId });
+    }, (err: unknown) => {
+      if (!this.permissionLive(pending) || pending.bridge !== bridge) return;
       this.emit({ type: 'note', message: `opencode: permission reply failed: ${err instanceof Error ? err.message : String(err)}` });
+      // The fresh card first, so the run's pending set never empties and it stays parked.
+      const shown = this.showPermissionCard(pending);
+      this.emitPermissionResolved(bridge.event.requestId, { reason: 'permission reply failed' });
+      if (!shown) void this.rejectPermission(pending, 'permission UI unavailable');
     });
-    this.emitPermissionResolved(requestId, { optionId });
-    this.notifyAgentInputReady();
     return true;
   }
 
@@ -1422,11 +1493,23 @@ class OpencodeSession implements AgentSession {
     await this.http('POST', `/permission/${encodeURIComponent(nativeId)}/reply`, body);
   }
 
-  /** Retires every card without HTTP: OpenCode settles its own request on idle or abort. */
+  /** OpenCode no longer waits on the ask: retire it, resolve its card, and release the barrier. */
+  private settlePermission(pending: PendingOpencodePermission, resolution: { optionId?: string; reason?: string } = {}): void {
+    if (this.pendingPermissions.get(pending.nativeId) !== pending) return;
+    this.pendingPermissions.delete(pending.nativeId);
+    if (pending.bridge) this.emitPermissionResolved(pending.bridge.event.requestId, resolution);
+    if (this.pendingPermissions.size) return;
+    this.notifyAgentInputReady();
+    // A card that arrived after the turn ended cancelled its auto-end: re-arm it.
+    if (this.turnEnded && !this.turnActive && !this.questionReply) this.scheduleAutoEnd();
+  }
+
+  /** Retires every ask without HTTP: OpenCode settles its own request on idle or abort. The
+   *  caller owns what follows (turn end or teardown), so the barrier release is not run here. */
   private expirePermissions(reason: string): void {
-    for (const requestId of [...this.pendingPermissions.keys()]) {
-      this.pendingPermissions.delete(requestId);
-      this.emitPermissionResolved(requestId, { reason });
+    for (const pending of [...this.pendingPermissions.values()]) {
+      this.pendingPermissions.delete(pending.nativeId);
+      if (pending.bridge) this.emitPermissionResolved(pending.bridge.event.requestId, { reason });
     }
   }
 
