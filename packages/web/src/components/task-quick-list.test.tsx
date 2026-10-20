@@ -14,6 +14,7 @@ import { ReferenceStatusProvider, ReferenceStatusRegistry } from '@/components/r
 import { QuickListBuckets, SidebarSessionScope, TaskQuickList, TaskQuickListContainer } from '@/components/task-quick-list'
 import { resetSwipeStore } from '@/components/use-swipe-to-archive'
 import { groupRuns } from '@/lib/task-groups'
+import { timerWait, workerWait } from '@/test/wait-fixtures'
 
 const NOW = Date.parse('2026-07-14T12:00:00.000Z')
 const ago = (ms: number) => new Date(NOW - ms).toISOString()
@@ -1337,10 +1338,8 @@ describe('the calmer row (#617)', () => {
     id,
     title: 'Assessing reviewer agent',
     status: 'waiting',
-    delegation: {
-      role: 'root', permissions: [], receipts: [],
-      wait: { id: 'wait', workerIds: Array.from({ length: workers }, (_, i) => `00000000-0000-4000-8000-00000000000${i + 1}`), deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] },
-    },
+    delegation: { role: 'root', permissions: [], receipts: [] },
+    waits: [workerWait({ workerIds: Array.from({ length: workers }, (_, i) => `00000000-0000-4000-8000-00000000000${i + 1}`) })],
   } as Partial<RunRecord>)
 
   it('is two fixed lines — a truncated title and a truncated meta line — whatever the reference count', () => {
@@ -1457,7 +1456,7 @@ describe('the calmer row (#617)', () => {
 
   it('paints the monitoring ring and the queued ring apart from running and cancelled', () => {
     renderList({ runs: [
-      run({ id: 'm', status: 'running', activity: 'monitoring' }),
+      run({ id: 'm', status: 'waiting', waits: [timerWait()] } as Partial<RunRecord>),
       run({ id: 'q', status: 'queued' }),
       run({ id: 'c', status: 'cancelled' }),
     ] })
@@ -1515,17 +1514,17 @@ describe('meta-line state words (#617, the issue\'s list exactly)', () => {
   })
 
   it('says it for every state the issue lists', () => {
-    const workers = { role: 'root', permissions: [], receipts: [], wait: { id: 'w', workerIds: ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } }
+    const workers = { role: 'root', permissions: [], receipts: [] }
     renderList({ runs: [
-      run({ id: 'mon', status: 'running', activity: 'monitoring' }),
+      run({ id: 'mon', status: 'waiting', waits: [timerWait()] } as Partial<RunRecord>),
       run({ id: 'run', status: 'running' }),
       run({ id: 'rev', status: 'review' }),
       run({ id: 'fail', status: 'failed' }),
       // Already due: no time left to name, so the word falls back to `scheduled`.
       run({ id: 'sched', status: 'failed', autoResumeAt: ago(60_000) }),
       run({ id: 'q', status: 'queued' }),
-      run({ id: 'wk', status: 'waiting', delegation: workers } as Partial<RunRecord>),
-      run({ id: 'rep', status: 'waiting', delegation: { ...workers, wait: { ...workers.wait, requestIds: ['00000000-0000-4000-8000-000000000009'] } } } as Partial<RunRecord>),
+      run({ id: 'wk', status: 'waiting', delegation: workers, waits: [workerWait({ workerIds: ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'] })] } as Partial<RunRecord>),
+      run({ id: 'rep', status: 'waiting', delegation: workers, waits: [workerWait({ workerIds: [], requestIds: ['00000000-0000-4000-8000-000000000009'] })] } as Partial<RunRecord>),
     ] })
     expect(stateOf('mon')).toBe('monitoring')
     expect(stateOf('run')).toBeNull()
@@ -2500,7 +2499,7 @@ describe('complete compact sidebar references', () => {
     const working = run({ title: 'Working task', status: 'running' })
     const pinned = run({ title: 'Running variant', status: 'running', groupId: 'mixed', variant: 'A' })
     const waiting = run({ status: 'waiting', groupId: 'mixed', variant: 'B' })
-    const monitoring = run({ title: 'Monitoring task', status: 'running', activity: 'monitoring' })
+    const monitoring = run({ title: 'Monitoring task', status: 'waiting', waits: [timerWait()] } as Partial<RunRecord>)
     const { container } = renderList({ runs: [working, pinned, waiting, monitoring] })
     const row = (id: string) => container.querySelector(`[data-run-id="${id}"]`)!
     expect(row(working.id).querySelector('[data-slot="task-row-state"]')).toBeNull()

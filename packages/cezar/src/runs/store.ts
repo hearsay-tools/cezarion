@@ -46,7 +46,6 @@ import { LiveItemSnapshots } from './live-item-snapshots.ts';
 import { emptyFacts, stampOf, TranscriptFactsIndex, type TranscriptFacts } from './transcript-facts.ts';
 import { hasPlainHistory, historyStat, historyPaths, readHistoryText, readHistoryTextAsync, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
-import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
 import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, sharedCwdScan, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
@@ -435,23 +434,33 @@ const LEGACY_WAIT_KEYS = ['ciWait', 'lastCiWait', 'lastCiWaitError', 'monitoring
 const UNREADABLE_WAIT = 'Wait unavailable — a saved wait is unreadable; register a new wait.';
 
 function hasLegacyWaitFields(row: unknown): boolean {
-  return !!row && typeof row === 'object' && (LEGACY_WAIT_KEYS.some((key) => key in row) || agentWorkerWaits(row as Record<string, unknown>).length > 0);
+  return !!row && typeof row === 'object' && (LEGACY_WAIT_KEYS.some((key) => key in row) || agentWorkerWaits(row as Record<string, unknown>).length > 0 || rootCompletion(row as Record<string, unknown>) !== undefined);
 }
 
-/** The agent-registered worker waits a record still holds in `delegation` (store schema 6,
- *  hearsay-tools/cezarion#1235), in the order they settled: `lastWait`, then `wait`. The completion
- *  gate's wait is not one: `delegation.completion.waitId` names it, and it stays in `delegation.wait`
- *  until phase 3b. A value that does not parse is left where it is, for the delegation schema to
- *  quarantine as it always has. */
-function agentWorkerWaits(row: Record<string, unknown>): Array<{ key: 'wait' | 'lastWait'; wait: WorkerWait }> {
+/** A root's stored `delegation.completion` (the old completion gate's marker), which schema 7 reads
+ *  into the list and drops (hearsay-tools/cezarion#1301). */
+function rootCompletion(row: Record<string, unknown>): { waitId?: unknown } | undefined {
+  const delegation = row.delegation;
+  if (!delegation || typeof delegation !== 'object' || (delegation as { role?: unknown }).role !== 'root') return undefined;
+  const { completion } = delegation as { completion?: unknown };
+  return completion && typeof completion === 'object' ? completion : undefined;
+}
+
+/** The worker waits a record still holds in `delegation` (store schemas 6 and 7,
+ *  hearsay-tools/cezarion#1235, #1301), in the order they settled: `lastWait`, then `wait`. The
+ *  completion gate's wait, the one `delegation.completion.waitId` names, is flagged `completion`: it
+ *  was Cezar's own, not the agent's. A value that does not parse is left where it is, for the
+ *  delegation schema to quarantine as it always has. */
+function agentWorkerWaits(row: Record<string, unknown>): Array<{ key: 'wait' | 'lastWait'; wait: WorkerWait; completion: boolean }> {
   const delegation = row.delegation;
   if (!delegation || typeof delegation !== 'object') return [];
-  const { role, completion } = delegation as { role?: unknown; completion?: { waitId?: unknown } };
+  const { role } = delegation as { role?: unknown };
   if (role !== 'root' && role !== 'worker') return [];
-  const found: Array<{ key: 'wait' | 'lastWait'; wait: WorkerWait }> = [];
+  const waitId = rootCompletion(row)?.waitId;
+  const found: Array<{ key: 'wait' | 'lastWait'; wait: WorkerWait; completion: boolean }> = [];
   for (const key of ['lastWait', 'wait'] as const) {
     const parsed = workerWaitSchema.safeParse((delegation as Record<string, unknown>)[key]);
-    if (parsed.success && !(completion && typeof completion === 'object' && completion.waitId === parsed.data.id)) found.push({ key, wait: parsed.data });
+    if (parsed.success) found.push({ key, wait: parsed.data, completion: waitId === parsed.data.id });
   }
   return found;
 }
@@ -510,13 +519,12 @@ export function workerWaitEntry(wait: WorkerWait, now: string): WorkerWaitEntry 
 }
 
 /** Whether a record is a root still parked on its workers: an open or resolved worker wait in the
- *  list, or the completion gate's `delegation.wait`, which stays there until hearsay-tools/cezarion#1235
- *  phase 3b. Such a root has its pending human question re-read from the transcript before a
- *  manager parks it, so what an agent's worker wait looked like before the upgrade (a bare
- *  `delegation.wait`) must keep answering true after it. */
+ *  list. Such a root has its pending human question re-read from the transcript before a manager
+ *  parks it. Every stored `delegation.wait`, the completion gate's included, is read into the list
+ *  on open (store schema 7, hearsay-tools/cezarion#1301), so the list is the only place to look. */
 export function holdsWorkerWait(run: Pick<RunRecord, 'delegation' | 'waits'>): boolean {
   if (run.delegation?.role !== 'root') return false;
-  return run.delegation.wait !== undefined || !!run.waits?.some((wait) => wait.kind === 'worker' && (wait.phase === 'open' || wait.phase === 'resolved'));
+  return !!run.waits?.some((wait) => wait.kind === 'worker' && (wait.phase === 'open' || wait.phase === 'resolved'));
 }
 
 /** A stable id for the timer a legacy monitoring park becomes. The row keeps its legacy JSON
@@ -546,7 +554,8 @@ function legacyTimerId(runId: unknown, wakeAt: string): string {
  *   still queued stays resolved and records it as `wakeInputId`, so it is delivered once, and a
  *   `lastWait` that was never delivered reads as cancelled. The `message` stand-in is dropped. No
  *   input is added or removed: a cancelled receipt's undelivered wake stays queued and is delivered
- *   as an ordinary input. The completion gate's wait is left where it is (phase 3b). A current wait
+ *   as an ordinary input. The completion gate's wait (store schema 7, hearsay-tools/cezarion#1301) becomes a
+ *   `source: 'cezar'`, `via: 'completion'` entry the same way, and `delegation.completion` is dropped. A current wait
  *   (the stand-in included) whose wake a provider took on a `waiting` run is the old engine's crash
  *   between the delivery checkpoint and the resume: the run reads `running`, so recovery resumes
  *   it. A wake an inbox read acknowledged, or one beside a pending question, resumes nothing.
@@ -591,11 +600,14 @@ export function upgradeLegacyWaits(row: Record<string, unknown>): void {
     // read starts no provider turn, and a pending question still holds the run, as they did then.
     const interrupted = (key: 'wait' | 'lastWait', input: (typeof inputs)[number] | undefined) => key === 'wait' && row.status === 'waiting' &&
       typeof input?.deliveredAt === 'string' && !input.inboxClaim?.acknowledgedAt && row.hasPendingHumanAsk !== true;
-    for (const { key, wait } of agentWaits) {
+    for (const { key, wait, completion } of agentWaits) {
       // A wait that settles has its copy in `lastWait` too: it is the same wait.
       if (key === 'lastWait' && current?.wait.id === wait.id) continue;
       const input = inputs.find((candidate) => candidate.id === (wait.wakeId ?? wait.id));
       const entry = workerWaitEntry(wait, now);
+      // Cezar's completion gate wait is its own: no agent registered it (hearsay-tools/cezarion#1301).
+      // It keeps the deadline it always carried, with the 600 s default registration.
+      if (entry && completion) Object.assign(entry, { source: 'cezar', via: 'completion', mode: 'all' });
       // The `message` stand-in becomes no entry, but its delivered message may be that crash too.
       if (!entry) { if (interrupted(key, input)) resumeParked(row); continue; }
       const deliveredAt = typeof input?.deliveredAt === 'string' ? input.deliveredAt : undefined;
@@ -635,9 +647,10 @@ export function upgradeLegacyWaits(row: Record<string, unknown>): void {
   if (typeof row.lastCiWaitError === 'string' && row.lastWaitsError === undefined) row.lastWaitsError = row.lastCiWaitError;
   if (unreadable) row.lastWaitsError = UNREADABLE_WAIT;
   for (const key of LEGACY_WAIT_KEYS) delete row[key];
-  if (agentWaits.length) {
+  if (agentWaits.length || rootCompletion(row)) {
     const delegation = { ...(row.delegation as Record<string, unknown>) };
     for (const { key } of agentWaits) delete delegation[key];
+    delete delegation.completion;
     row.delegation = delegation;
   }
 }
@@ -1502,8 +1515,9 @@ interface ListOrder {
 
 /** Newest first, runs created in the same millisecond in insertion order: the order `runs.db`
  *  lists in, and the order every list had while it was a stable sort of the in-memory map. */
-/** Why a `run` event fired, when a delegation checkpoint caused it (in-process only). */
-export type CommitSource = 'delegation-checkpoint' | 'delegation-destroy-progress';
+/** Why a `run` event fired, when a delegation checkpoint caused it or nothing durable changed
+ *  (`republish`) (in-process only). */
+export type CommitSource = 'delegation-checkpoint' | 'delegation-destroy-progress' | 'live-release';
 
 /**
  * A worker's destroy moving between two unfinished phases, and nothing else changing: nothing the
@@ -2200,6 +2214,14 @@ export class RunStore extends EventEmitter {
     if (!holders) this.pins.set(id, holders = new Set());
     holders.add(holder);
     return run;
+  }
+
+  /** Publish a run's current record again without a write: something read beside the record
+   *  changed, such as the run leaving the manager's live registries, which a detail's finish
+   *  verdict reads (hearsay-tools/cezarion#1301). */
+  republish(id: string): void {
+    const run = this.peek(id);
+    if (run) this.emit('run', run, 'live-release');
   }
 
   /** Release `holder`'s pin. The run leaves memory at the next sweep once nothing else holds it. */
@@ -2999,31 +3021,8 @@ export class RunStore extends EventEmitter {
     this.commitWaitDelivery(id, [inputId]);
   }
 
-  /** Retain the settled receipt and retire exactly one wait together with any human message that superseded it. */
-  commitWorkerWaitWithdrawal(id: string, waitId: string, acceptedHumanMessage?: QueuedMessage, reason?: 'cancelled'): void {
-    const run = this.peek(id);
-    if (!run?.delegation || run.delegation.role === 'invalid' || run.delegation.wait?.id !== waitId) {
-      throw new Error('worker wait changed before withdrawal');
-    }
-    const { wait, ...delegation } = run.delegation;
-    const message = acceptedHumanMessage ? queuedMessageSchema.parse(acceptedHumanMessage) : undefined;
-    this.commitIndex(new Map([[id, { ...run, delegation: { ...delegation, lastWait: reason ? { ...wait, phase: 'wake-pending', reason, wakeId: wait.wakeId ?? wait.id } : wait.phase === 'wake-pending'
-      ? reconcileWorkerWait(wait, [], new Date().toISOString())
-      : { ...wait, phase: 'wake-pending', reason: wait.reason ?? 'cancelled', wakeId: wait.wakeId ?? wait.id } },
-      // An adopted agent input belongs to its sender, even when it carries the wait receipt.
-      ...(run.agentInputs ? { agentInputs: run.agentInputs.filter(input => input.id !== wait.wakeId || input.deliveredAt || input.source === 'agent') } : {}),
-      ...(message ? {
-        queuedMessages: [...(run.queuedMessages ?? []), message],
-        ...(run.continuationMessage ? { continuationMessage: {
-          ...run.continuationMessage, origin: 'human' as const,
-          text: run.continuationMessage.origin === 'lifecycle' ? '' : run.continuationMessage.text,
-        } } : {}),
-      } : {}),
-    }]]));
-  }
-
-  /** A human message beside a run's waits (hearsay-tools/cezarion#1235): accepted durably, as
-   *  `commitWorkerWaitWithdrawal` accepts one, but every wait stays. A lifecycle opening becomes
+  /** A human message beside a run's waits (hearsay-tools/cezarion#1235): accepted durably, and
+   *  every wait stays. A lifecycle opening becomes
    *  the human's and keeps its wake text, so the message opens the continuation (and answers a
    *  pending question) and the owed results still reach the agent. */
   commitHumanMessageBesideWaits(id: string, acceptedHumanMessage: QueuedMessage): void {

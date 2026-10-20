@@ -353,6 +353,8 @@ async function handle(command) {
 // owned-input-delivery.testkit.ts patches the two lines below to reject one prompt; keep them verbatim.
 async function prompt(command) {
   const message = command.message;
+  // `mock:ack-only` → the prompt is accepted and no agent run starts (hearsay-tools/cezarion#1301).
+  if (message.includes('mock:ack-only')) { respond(command); return; }
   const gated = message.includes('mock:gate-prompt-ack');
   if (gated) {
     watchdogStall(message);

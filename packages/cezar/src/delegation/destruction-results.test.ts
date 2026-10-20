@@ -248,27 +248,28 @@ describe('verified destruction retains results through explicit history deletion
     const generation = f.store.commitWorkerExecutionStart(workerId); f.store.commitWorkerExecutionComplete(workerId, generation);
     const other = await f.service.spawn(f.caller, { task: 'other', baseline: 'HEAD', requestId: randomUUID() });
     const parent = f.store.getRun(f.parent.id)!;
-    if (parent.delegation?.role !== 'root') throw Error('fixture');
-    f.store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, wait: { id: randomUUID(),
-      workerIds: [workerId, other.workerId], revisions: [{ workerId, revision: 1 }, { workerId: other.workerId, revision: 0 }],
-      mode: 'all', phase: 'parked', outcomes: [], deadline: new Date(Date.now() + 600_000).toISOString(),
-    } } }]);
+    // A worker wait in the list (hearsay-tools/cezarion#1235, #1301).
+    const waitId = randomUUID();
+    f.store.commitWait(parent.id, { kind: 'worker', id: waitId, source: 'agent', via: 'cez-worker-wait', registeredAt: new Date().toISOString(),
+      deadline: new Date(Date.now() + 600_000).toISOString(), timeoutSeconds: 600, phase: 'open', turnId: 'turn-1', mode: 'all',
+      workerIds: [workerId, other.workerId], revisions: [{ workerId, revision: 1 }, { workerId: other.workerId, revision: 0 }], outcomes: [] });
+    const entry = () => f.store.getRun(parent.id)?.waits?.find(wait => wait.id === waitId);
     await f.service.destroy(f.caller, { workerId }); expect(f.store.deleteRun(workerId)).toBe(true);
     f.manager.reconcileWorkerWaits();
-    expect(f.store.getRun(parent.id)?.delegation).toMatchObject({ wait: { phase: 'parked', outcomes: [{ workerId, revision: 1, status: 'review' }] } });
+    expect(entry()).toMatchObject({ phase: 'open', outcomes: [{ workerId, revision: 1, status: 'review' }] });
     const retained = f.store.readWorkerResult(f.parent.id, workerId)!;
     if (retained.diff.state !== 'available') throw Error('fixture diff');
     const bytes = readFileSync(retained.diff.path, 'utf8');
     writeFileSync(retained.diff.path, '{}');
     f.manager.reconcileWorkerWaits();
-    expect(f.store.getRun(parent.id)?.delegation).toMatchObject({ wait: { phase: 'parked', outcomes: [] } });
+    expect(entry()).toMatchObject({ phase: 'open', outcomes: [] });
     writeFileSync(retained.diff.path, bytes);
     f.manager.requestWorkerStop(other.workerId);
     f.manager.reconcileWorkerWaits();
-    expect(f.store.getRun(parent.id)?.delegation).toMatchObject({ wait: { phase: 'wake-pending', reason: 'outcome',
+    expect(entry()).toMatchObject({ phase: 'resolved', result: { reason: 'outcome' },
       outcomes: expect.arrayContaining([{ workerId, revision: 1, status: 'review', observedAt: expect.any(String) },
         { workerId: other.workerId, revision: 0, status: 'cancelled', observedAt: expect.any(String) }]),
-    } });
+    });
   });
 
   it('denies replacement evidence whose retained workspace names a different owner', async () => {

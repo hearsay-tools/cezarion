@@ -17,7 +17,6 @@ export const MONITORING_TURN_CRITERIA = [
   { id: 'M21', scenario: 'turn-messages', name: 'a later DONE supersedes an earlier portable ASK before acknowledgement' },
   { id: 'M22', scenario: 'turn-messages', name: 'a trailing malformed ASK keeps its diagnostic and raw fallback over an earlier valid ASK' },
   { id: 'M24', scenario: 'turn-messages', name: 'a rejected active ASK keeps its diagnostic and leaves monitoring in place' },
-  { id: 'M8', scenario: 'turn-messages', name: 'spent parent completion remains actionable' },
 ] as const;
 export const MONITORING_ORDER_CRITERIA = [
   { id: 'M13', scenario: 'turn-messages', name: 'fresh ordinary markerless prose questions keep autonomous nudges' },

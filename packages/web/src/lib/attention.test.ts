@@ -7,7 +7,7 @@ import type { RunRecord, RunSummary, RunStatus } from '@open-mercato/cezar-api-c
 import type { StatusDotTone } from '@/components/status-dot'
 import {
   ATTENTION_RANK,
-  delegationWaitLabel,
+  workerWaitLabel,
   deriveAttention,
   wantsAttention,
   type Attention,
@@ -180,26 +180,12 @@ describe('wantsAttention', () => {
   })
 })
 
-describe("running activity: 'monitoring' (#490)", () => {
-  it('is a distinct, non-attention sub-state of running', () => {
-    expect(deriveAttention(run({ status: 'running', activity: 'monitoring' }))).toEqual({
-      bucket: 'running',
-      tone: 'running',
-      shape: 'ring',
-      pulse: true,
-      label: 'monitoring',
-    })
-  })
-
-  it('does not want attention — no notification, not "Needs you"', () => {
-    expect(wantsAttention(run({ status: 'running', activity: 'monitoring' }))).toBe(false)
-  })
-
-  it('leaves plain running untouched and is inert on non-running statuses', () => {
-    expect(deriveAttention(run({ status: 'running' })).label).toBe('running')
-    // `activity` is only read while running — a stale value on a terminal record is ignored.
-    expect(deriveAttention(run({ status: 'done', activity: 'monitoring' })).label).toBe('done')
-  })
+// The monitoring activity is no longer a park (hearsay-tools/cezarion#1301): CI and timer parks are
+// open waits, so an old row's leftover activity reads as the status it carries.
+it("reads an old row's activity: 'monitoring' as its plain status", () => {
+  expect(deriveAttention(run({ status: 'running', activity: 'monitoring' })).label).toBe('running')
+  expect(wantsAttention(run({ status: 'running', activity: 'monitoring' }))).toBe(false)
+  expect(deriveAttention(run({ status: 'done', activity: 'monitoring' })).label).toBe('done')
 })
 
 describe('tone vocabulary', () => {
@@ -218,52 +204,66 @@ describe('tone vocabulary', () => {
   })
 })
 
-it.each(['registered', 'parked', 'wake-pending'] as const)('distinguishes worker wait %s without masking human attention', phase => {
-  const record = run({ status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase, outcomes: [] } } })
-  if (phase === 'parked') {
+/** A worker wait in the list (hearsay-tools/cezarion#1301): an agent's registered wait, or Cezar's
+ *  deadline-less completion wait. */
+const workerEntry = (over: Record<string, unknown> = {}) => ({
+  kind: 'worker' as const, id: '00000000-0000-4000-8000-0000000000e1', source: 'agent' as const, via: 'cezar_wait' as const,
+  registeredAt: '2026-09-05T00:00:00.000Z', deadline: '2026-09-06T00:00:00.000Z', phase: 'open' as const, turnId: 'turn-1',
+  timeoutSeconds: 600, workerIds: ['child'], revisions: [], outcomes: [],
+  ...over,
+})
+const completionEntry = (over: Record<string, unknown> = {}) => {
+  const { deadline: _deadline, timeoutSeconds: _timeout, ...entry } = workerEntry({ source: 'cezar', via: 'completion', ...over })
+  return { ...entry, mode: 'all' as const }
+}
+const onWaits = (status: RunStatus, waits: unknown[], over: Partial<RunRecord> = {}) =>
+  run({ status, waits, delegation: { role: 'root', permissions: [], receipts: [] }, ...over } as Partial<RunRecord>)
+
+it.each(['open', 'resolved'] as const)('distinguishes a %s worker wait without masking human attention', phase => {
+  const record = onWaits('waiting', [workerEntry({ phase })])
+  if (phase === 'open') {
     expect(deriveAttention(record).label).toBe('waiting on 1 worker')
     expect(wantsAttention(record)).toBe(false)
     expect(deriveAttention(record).pulse).toBe(false)
-  } else if (phase === 'wake-pending') {
+  } else {
     expect(deriveAttention(record)).toEqual({
       bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity',
     })
     expect(wantsAttention(record)).toBe(false)
-  } else {
-    expect(deriveAttention(record).label).toBe('needs you')
-    expect(wantsAttention(record)).toBe(true)
   }
 })
 
-it('keeps a parked parent with a pending human ask in list attention without transcript context', () => {
-  const record = run({ status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })
-  expect(deriveAttention(record)).toEqual({ bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' })
-  expect(wantsAttention(record)).toBe(true)
-})
-
-it('keeps a wake-pending parent with a pending human ask in list attention', () => {
-  const record = run({ status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'wake-pending', outcomes: [] } } })
-  expect(deriveAttention(record)).toEqual({ bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' })
-  expect(wantsAttention(record)).toBe(true)
-})
-
-it('treats a queued leftover wake-pending parent as waiting for capacity, not queued', () => {
-  const record = run({ status: 'queued', delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'wake-pending', outcomes: [] } } })
-  expect(deriveAttention(record)).toEqual({
-    bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity',
+it("reads Cezar's completion wait as waiting on its workers", () => {
+  expect(deriveAttention(onWaits('waiting', [completionEntry({ workerIds: ['a', 'b'] })]))).toMatchObject({
+    bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on 2 workers',
   })
-  expect(wantsAttention(record)).toBe(false)
 })
 
-it('keeps a running leftover wake-pending parent as running', () => {
-  const record = run({ status: 'running', delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'wake-pending', outcomes: [] } } })
-  expect(deriveAttention(record)).toEqual({
+it("never reads an old row's delegation.wait", () => {
+  const record = run({ status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } } as Partial<RunRecord>)
+  expect(deriveAttention(record).label).toBe('needs you')
+})
+
+it('keeps a parked parent with a pending human ask in list attention without transcript context', () => {
+  const record = onWaits('waiting', [workerEntry()], { hasPendingHumanAsk: true })
+  expect(deriveAttention(record)).toEqual({ bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' })
+  expect(wantsAttention(record)).toBe(true)
+})
+
+it('keeps a resolved worker wait with a pending human ask in list attention', () => {
+  const record = onWaits('waiting', [workerEntry({ phase: 'resolved' })], { hasPendingHumanAsk: true })
+  expect(deriveAttention(record)).toEqual({ bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' })
+  expect(wantsAttention(record)).toBe(true)
+})
+
+it('keeps a running parent with a resolved worker wait as running', () => {
+  expect(deriveAttention(onWaits('running', [workerEntry({ phase: 'resolved' })]))).toEqual({
     bucket: 'running', tone: 'running', shape: 'filled', pulse: true, label: 'running',
   })
 })
 
-it('keeps a queued leftover wake-pending parent with a pending ask as queued', () => {
-  const record = run({ status: 'queued', hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'wake-pending', outcomes: [] } } })
+it('keeps a queued parent with a resolved worker wait and a pending ask as queued', () => {
+  const record = onWaits('queued', [workerEntry({ phase: 'resolved' })], { hasPendingHumanAsk: true })
   expect(deriveAttention(record)).toEqual({
     bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'queued',
   })
@@ -305,19 +305,17 @@ describe('a run parked on an open wait', () => {
 /** The status key (#617): hue says the family, shape says whether it is waiting. One row per
  *  state in the issue's table, so a regression in any rung is named by the row it broke. */
 describe('status key (#617)', () => {
-  const parkedRoot = (wait: Record<string, unknown> = {}) => run({
-    status: 'waiting',
-    delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [], ...wait } },
-  } as Partial<RunRecord>)
+  const parkedRoot = (wait: Record<string, unknown> = {}) => onWaits('waiting', [
+    workerEntry({ workerIds: ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'], ...wait }),
+  ])
   const rows: ReadonlyArray<[string, RunSummary, Pick<Attention, 'tone' | 'shape' | 'pulse' | 'label'>]> = [
     ['needs you', run({ status: 'waiting' }), { tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' }],
     ['needs review', run({ status: 'review' }), { tone: 'info', shape: 'filled', pulse: true, label: 'needs review' }],
     ['running', run({ status: 'running' }), { tone: 'running', shape: 'filled', pulse: true, label: 'running' }],
-    ['monitoring', run({ status: 'running', activity: 'monitoring' }), { tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' }],
     ['waiting for CI', run({ status: 'waiting', waits: [openCi()] }), { tone: 'running', shape: 'ring', pulse: true, label: 'waiting for CI' }],
     ['timer', run({ status: 'waiting', waits: [openTimer()] }), { tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' }],
     ['waiting on workers', parkedRoot(), { tone: 'running', shape: 'workers', pulse: false, label: 'waiting on 2 workers' }],
-    ['waiting for capacity', parkedRoot({ phase: 'wake-pending' }), { tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' }],
+    ['waiting for capacity', parkedRoot({ phase: 'resolved' }), { tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' }],
     ['wait result owed', run({ status: 'waiting', waits: [{ ...openCi(), phase: 'resolved', resolvedAt: '2026-10-17T15:20:00.000Z' }] }), { tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' }],
     ['queued', run({ status: 'queued' }), { tone: 'neutral', shape: 'ring', pulse: false, label: 'queued' }],
     ['scheduled', run({ status: 'failed', autoResumeAt: '2026-08-03T19:33:53.000Z' }), { tone: 'neutral', shape: 'ring', pulse: false, label: 'scheduled' }],
@@ -332,7 +330,7 @@ describe('status key (#617)', () => {
 
   const look = (record: RunSummary) => { const { tone, shape } = deriveAttention(record); return `${tone}/${shape}` }
   it('separates the pairs that used to collide', () => {
-    expect(look(run({ status: 'running' }))).not.toBe(look(run({ status: 'running', activity: 'monitoring' })))
+    expect(look(run({ status: 'running' }))).not.toBe(look(run({ status: 'waiting', waits: [openTimer()] })))
     expect(look(parkedRoot())).not.toBe(look(run({ status: 'done' })))
     expect(look(run({ status: 'queued' }))).not.toBe(look(run({ status: 'cancelled' })))
   })
@@ -343,18 +341,18 @@ describe('status key (#617)', () => {
 
   it('counts one worker in the singular, and says no number when the list row carries none', () => {
     expect(deriveAttention(parkedRoot({ workerIds: ['00000000-0000-4000-8000-000000000001'] })).label).toBe('waiting on 1 worker')
-    // The slim index projection (global Tasks, palette) has only the phase: no count to claim.
-    const slim = run({ status: 'waiting', delegation: { role: 'root', wait: { phase: 'parked' } } } as unknown as Partial<RunRecord>)
+    // A summary without a count (`waitingOn.count` 0) claims no number.
+    const slim = run({ status: 'waiting', waitingOn: { kind: 'workers', count: 0 } } as unknown as Partial<RunRecord>)
     expect(deriveAttention(slim)).toMatchObject({ shape: 'workers', label: 'waiting on workers' })
   })
 
   // Review round 5: a parked wait-for-all stays `parked` after one worker has reported, so the
   // count is the workers still owed an outcome, not every id the wait names.
   it('counts only the workers that have not reported yet', () => {
-    const outcome = (workerId: string) => ({ workerId, status: 'done', observedAt: '2026-09-05T00:00:00.000Z' })
+    const outcome = (workerId: string) => ({ workerId, status: 'done' as const, observedAt: '2026-09-05T00:00:00.000Z' })
     const one = parkedRoot({ mode: 'all', outcomes: [outcome('00000000-0000-4000-8000-000000000001')] })
     expect(deriveAttention(one).label).toBe('waiting on 1 worker')
-    expect(delegationWaitLabel(one.delegation)).toBe('waiting on 1 worker')
+    expect(workerWaitLabel('root', { workerIds: ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'], outcomes: [outcome('00000000-0000-4000-8000-000000000001')] })).toBe('waiting on 1 worker')
     const all = parkedRoot({ mode: 'all', outcomes: [outcome('00000000-0000-4000-8000-000000000001'), outcome('00000000-0000-4000-8000-000000000002')] })
     expect(deriveAttention(all).label).toBe('waiting on workers')
     // An outcome for an id the wait does not name resolves nothing.
@@ -363,7 +361,7 @@ describe('status key (#617)', () => {
 
   it('a root waiting on worker replies is still its own workers; a worker waiting on its parent is a ring', () => {
     expect(deriveAttention(parkedRoot({ requestIds: ['00000000-0000-4000-8000-000000000009'] }))).toMatchObject({ shape: 'workers', label: 'waiting on worker replies' })
-    const worker = run({ status: 'waiting', delegation: { role: 'worker', wait: { phase: 'parked', requestIds: ['00000000-0000-4000-8000-000000000009'] } } } as unknown as Partial<RunRecord>)
+    const worker = run({ status: 'waiting', waits: [workerEntry({ workerIds: ['00000000-0000-4000-8000-000000000001'], requestIds: ['00000000-0000-4000-8000-000000000009'] })], delegation: { role: 'worker', parentRunId: '00000000-0000-4000-8000-000000000001', permissions: [] } } as unknown as Partial<RunRecord>)
     expect(deriveAttention(worker)).toMatchObject({ tone: 'running', shape: 'ring', pulse: false, label: 'waiting on parent reply' })
   })
 })
