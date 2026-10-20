@@ -3,6 +3,13 @@
 // the same folders through resources_discover for an untrusted folder only: a trusted one already
 // loads them under its own settings filters. Extensions, MCP servers and the trust decision itself
 // stay untouched.
+//
+// The skill list matches a trusted session's for the portable <name>/SKILL.md layout only, and
+// two differences remain (pi 1.0.4). pi scans a skillPaths folder in its "pi" mode, not the
+// "agents" mode of its trusted .agents/skills scan, so a loose .md file directly in .agents/skills
+// loads here and a loose .md in one of its subfolders does not. And pi appends these paths after
+// the user's own skills, so on a name collision the user's copy wins where a trusted session
+// keeps the project's. An extension cannot change either.
 import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
