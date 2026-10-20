@@ -10,7 +10,7 @@ import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.t
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
-import { collect, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { checkpoint, collect, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
@@ -365,23 +365,33 @@ export function describeWaitParity(scope: RunnerId | 'once'): void {
           nativeWire(runner);
           expect(semaphore.maxParallel()).toBe(1);
           const request = kind === 'ci' ? { kind, pr } : { kind, seconds: 60, note: 'u8' };
+          // These live mock servers must not overwrite each other's session JSON. U8 never
+          // restarts either server; keep their shared args file for native prompt assertions.
+          if (runner === 'opencode') process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = join(root, 'u8-parked-sessions.json');
           const parked = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', request), runner });
+          checkpoint(`u8-parked-waiting:${parked.id}`);
           await until(() => parkedOn(parked.id, waitOfKind(parked.id, kind)));
           const wait = waitOfKind(parked.id, kind)!;
           // The only regular slot goes to a turn held open until this test releases it.
           const release = join(root, 'u8-release');
           process.env.CEZ_MOCK_RELEASE_FILE = release;
+          // parkedOn above proves the first child already inherited its own store path.
+          if (runner === 'opencode') process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = join(root, 'u8-blocker-sessions.json');
           const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-gated']!, runner });
           try {
+            checkpoint(`u8-blocker-started:${blocker.id}`);
             await until(() => store.readEvents(blocker.id).some(event => event.type === 'turn.started'));
             const queue = (manager as unknown as { queue: string[] }).queue;
             const push = vi.spyOn(queue, 'push');
+            checkpoint('u8-wake-delivered');
             if (kind === 'ci') external.settle(); else fireTimer(wait.id);
             await until(() => settled(parked.id, wait.id)?.phase === 'delivered');
             expect(store.getRun(blocker.id)?.status).toBe('running');
             expect(push.mock.calls.flat()).not.toContain(parked.id);
           } finally { writeFileSync(release, ''); }
+          checkpoint('u8-blocker-waiting');
           await until(() => store.getRun(blocker.id)?.status === 'waiting');
+          checkpoint('u8-parked-waiting-after-wake');
           await until(() => store.getRun(parked.id)?.status === 'waiting' && !agentWaits(parked.id).length);
         });
       }
