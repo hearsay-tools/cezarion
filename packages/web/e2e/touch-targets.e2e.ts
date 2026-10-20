@@ -388,9 +388,6 @@ describe('references on a device that cannot hover (#617 01b)', () => {
       // The matrix above leaves its last density and theme on the root; start from the defaults.
       appearance('comfortable', 'dark')
       // The chips live in the Session activity card's Workspace row (hearsay-tools/cezarion#1333).
-      // The helper toggles with programmatic clicks: the thread scrolls to its latest message on
-      // arrival, so a coordinate click can miss (the reason the former header flow used focus +
-      // Enter at 360px).
       openSessionActivityRow(browser, 'workspace')
       type Header = { noHover: boolean; chips: Array<{ w: number; h: number; top: number; right: number }>; inner: number; scroll: number }
       const header = waitForSettledSample(browser, `(() => {
