@@ -833,7 +833,7 @@ async function continueDiagnosticRun(backend: RunnerId, prompt: string): Promise
     });
 }
 
-describe('harness parity — recoverable skill diagnostics (#723)', () => {
+describe('harness parity — recoverable skill diagnostics (#723, #1265)', () => {
   for (const backend of RUNNER_IDS) {
     for (const continuation of [false, true]) {
       const id = continuation ? 'R45' : 'R44';
@@ -848,6 +848,9 @@ describe('harness parity — recoverable skill diagnostics (#723)', () => {
               message: `opencode: optional skill skipped: Failed to parse skill /home/agent/${root}/skills/pen-design/SKILL.md. Check that the skill file and any symlink target are readable; repair or reinstall the skill.`,
             }));
           }
+          expect(obs.events).toContainEqual(expect.objectContaining({ type: 'note',
+            message: 'opencode: optional skill skipped: /home/agent/.agents/skills/bad4/SKILL.md has invalid YAML frontmatter (unexpected end of the stream within a double quoted scalar at line 6, column 1: ^). Fix the frontmatter between the --- lines, for example by quoting values that contain a colon or a quote, or remove the skill.',
+          }));
           expect(obs.events.filter(e => e.type === 'turn.completed').every(e => e.stopReason === 'end_turn')).toBe(true);
           expect(obs.events.some(e => e.type === 'turn.completed')).toBe(true);
         },
@@ -861,14 +864,19 @@ describe('harness parity — recoverable skill diagnostics (#723)', () => {
       expect(obs.events).toContainEqual(expect.objectContaining({ type: 'error' }));
     }, 45_000);
   }
-  for (const continuation of [false, true]) for (const scenario of ['unscoped-provider-failure', 'scoped-skill-failure']) {
+  const fatalDetail: Record<string, string> = {
+    'unscoped-provider-failure': 'restoring service',
+    'scoped-skill-failure': '/skills/required/SKILL.md',
+    'scoped-frontmatter-failure': '/skills/bad4/SKILL.md: Failed to parse YAML frontmatter',
+  };
+  for (const continuation of [false, true]) for (const [scenario, detail] of Object.entries(fatalDetail)) {
     it(`opencode ${continuation ? 'continued' : 'fresh'} ${scenario} remains fatal`, async () => {
       const prompt = `mock:${scenario}`;
       const obs = continuation ? await continueDiagnosticRun('opencode', prompt)
         : await driveRun('opencode', { prompt }, record => TERMINAL.includes(record?.status ?? ''));
       expect(obs.record?.status).toBe('failed');
       expect(obs.record?.error).toContain('provider');
-      expect(obs.record?.error).toContain(scenario === 'scoped-skill-failure' ? '/skills/required/SKILL.md' : 'restoring service');
+      expect(obs.record?.error).toContain(detail);
     }, 45_000);
   }
 });
