@@ -36,6 +36,8 @@ import {
   workerParamsSchema,
   workerCancelWaitRequestSchema,
   type WorkerCancelWaitRequest,
+  type WorkerListPage,
+  type WorkerListQuery,
   type WorkerCollectedResult,
   type WorkerDestroy,
   type WorkerDestroyResult,
@@ -58,7 +60,7 @@ import type { RunnerId } from '../core/agent-runner.ts';
 import type { Caller } from './credentials.ts';
 import { isAuthenticatedCaller } from './credentials.ts';
 import { parseDelegationEffort } from './effort.ts';
-import { authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError } from './policy.ts';
+import { authorizeWorkerList, authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError } from './policy.ts';
 import { releaseThenRemoveOwnedWorkspace } from '../git-worktree-release.ts';
 import { gitCommonDir, planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline, WorkspaceHeldError } from './workspace.ts';
 import { holdersStillHold, observeDestroy, recordHolders, type DestroyObservation } from './destroy-observation.ts';
@@ -577,6 +579,28 @@ export class DelegationService {
         return { workerId: worker.id, baselineSha };
       } finally { if (!accepted) await prepared?.discard(); }
     });
+  }
+  async list(caller: Caller, query: WorkerListQuery = {}): Promise<WorkerListPage> {
+    const project = this.context(caller);
+    const parent = project.store.getRun(caller.runId);
+    authorizeWorkerList(caller, parent, project.id);
+    if (parent?.delegation?.role !== 'root') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    const workers: WorkerListPage['workers'] = [];
+    const offset = Number(query.offset ?? 0);
+    const end = Math.min(offset + 32, parent.delegation.receipts.length);
+    for (const receipt of parent.delegation.receipts.slice(offset, end)) {
+      const worker = project.store.getRun(receipt.workerId);
+      // Deleted histories have no resources to supervise. Never expose an unrelated receipt target.
+      if (worker?.delegation?.role !== 'worker' || worker.delegation.parentRunId !== parent.id ||
+          worker.delegation.workspace.ownerRunId !== worker.id) continue;
+      const inspection = await this.inspect(caller, { workerId: worker.id });
+      workers.push({ workerId: inspection.workerId, parentRunId: inspection.parentRunId,
+        status: inspection.status, workspace: inspection.workspace,
+        ...(inspection.destroy ? { destroy: inspection.destroy } : {}), revision: workerRevision(worker),
+        settled: inspection.outcome !== undefined && project.store.readWorkerExecution(worker.id)?.phase === 'complete',
+        destroyed: worker.delegation.destroy?.phase === 'complete' });
+    }
+    return { workers, ...(end < parent.delegation.receipts.length ? { nextOffset: end } : {}) };
   }
   async inspect(caller: Caller, params: WorkerParams): Promise<WorkerInspection> {
     const { project, worker, parent } = this.target(caller, params, 'inspect');
