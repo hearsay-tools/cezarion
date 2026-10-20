@@ -4,7 +4,7 @@ import type { CiWaitEntry, HumanWaitEntry, TimerWaitEntry, Wait, WorkerWaitEntry
 import { ciWatchRequest, identicalWait, isCezarHumanWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, MONITORING_WAKE_NUDGE_MARKERS, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 
 // hearsay-tools/cezarion#1233: the wait list's pure helpers. RunManager behaviour lives in
-// the ci-wait*.test.ts files and the U-cells in waits-parity.test.ts.
+// the ci-wait*.test.ts files and the U-cells in waits-parity-cells.testkit.ts.
 const ci = (over: Partial<CiWaitEntry> = {}): CiWaitEntry => ({
   id: '11111111-1111-4111-8111-111111111111', kind: 'ci', source: 'agent', via: 'cezar_wait', generation: 'gen', turnId: 'turn-1',
   timeoutSeconds: 1800, prUrl: 'https://github.com/Acme/Repo/pull/12', repository: 'Acme/Repo', prNumber: 12, headSha: 'a'.repeat(40),
@@ -94,6 +94,10 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     const human: HumanWaitEntry = { id: '55555555-5555-4555-8555-555555555555', kind: 'human', source: 'agent', via: 'cezar_ask',
       registeredAt: '2026-10-17T10:00:00.000Z', phase: 'open', turnId: 'turn-1', askSeq: 4 };
     expect(openWaitsFooter([human, byWorker])).toContain('call cezar_cancel_wait for any CI wait, worker wait or timer you no longer need.');
+    // Cezar's completion wait has no deadline (hearsay-tools/cezarion#1301).
+    const { deadline: _deadline, timeoutSeconds: _timeout, ...undated } = byWorker;
+    const completion: WorkerWaitEntry = { ...undated, source: 'cezar', via: 'completion', mode: 'all' };
+    expect(openWaitsFooter([completion])).toBe(`Still open: worker wait ${completion.id} on 2 workers, no deadline. Call cezar_cancel_wait for any you no longer need.`);
   });
 
   // hearsay-tools/cezarion#1234: the user's reply settles a question, and a question the user saw

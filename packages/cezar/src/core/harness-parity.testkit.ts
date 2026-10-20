@@ -159,6 +159,9 @@ export const SHUTDOWN_CRITERIA = [
   { id: 'S27', scenario: 'no-progress-leftover', name: "stop ends the leader's process group but not a setsid child" },
   { id: 'S28', scenario: 'no-progress-leftover', name: 'end escalation reaches the whole process group' },
   { id: 'S29', scenario: 'input-closed-live', name: 'settles a live native input transport failure without false success' },
+  // hearsay-tools/cezarion#1286: a session that ends without a signal from cezar.
+  { id: 'S30', scenario: 'no-progress-leftover', name: 'a leader that exits on its own leaves nothing in its process group' },
+  { id: 'S31', scenario: 'no-progress-leftover', name: 'a leader killed from outside leaves nothing in its process group' },
 ] as const;
 
 /** #427: portable intermediate asks, through every native message wire. */

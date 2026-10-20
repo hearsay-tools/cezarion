@@ -6,14 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { RunStore } from '../runs/store.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
-import { AUTONOMOUS_NUDGE, NO_WAIT_NO_REPLY_NOTE, NO_WAIT_NUDGE_NOTE, RunManager } from './run.ts';
+import { AUTONOMOUS_NUDGE, COMPLETION_NO_REPLY_NOTE, NO_WAIT_NO_REPLY_NOTE, NO_WAIT_NUDGE_NOTE, RunManager } from './run.ts';
 
 // Focused policy guards complement workflow-autonomous-parity's actual native
 // wires. A refused nudge must never touch either transport or consume its budget.
 type State = Parameters<RunManager['tryAutonomousNudge']>[1];
 const ask = { questions: [{ header: 'Choice', question: 'Which framework?', options: [{ label: 'Vitest' }, { label: 'Node' }] }] };
 const guards = ['disabled', 'cancelled', 'finish', 'disposed', 'stopping', 'input-error', 'native-ask', 'persisted-ask',
-  'closed', 'queued-input', 'unread-input', 'input-flight', 'worker-wait', 'ci-wait', 'worker-wake', 'root-finish'] as const;
+  'closed', 'queued-input', 'unread-input', 'input-flight', 'worker-wait', 'ci-wait', 'root-finish'] as const;
 
 describe('autonomous nudge priority and lifecycle guards', () => {
   let root: string;
@@ -53,14 +53,14 @@ describe('autonomous nudge priority and lifecycle guards', () => {
       case 'queued-input': store.commitAgentInputs(id, [{ id: randomUUID(), source: 'agent', parentRunId: randomUUID(), text: 'Read this first', createdAt: new Date().toISOString() }]); break;
       case 'unread-input': state.unreadInputIds = new Set([randomUUID()]); break;
       case 'input-flight': state.agentInputFlight = { session, inputIds: [randomUUID()] }; break;
-      case 'worker-wait': store.commitDelegation([{ id, delegation: { role: 'root', permissions: ['wait'], receipts: [], wait: {
-        id: randomUUID(), workerIds: [randomUUID()], deadline: new Date(Date.now() + 60_000).toISOString(), phase: 'registered', outcomes: [],
-      } } }]); break;
+      // A worker wait is a list entry (hearsay-tools/cezarion#1235, #1301).
+      case 'worker-wait': store.commitWait(id, { kind: 'worker', id: randomUUID(), source: 'agent', via: 'cezar_wait', registeredAt: new Date().toISOString(),
+        deadline: new Date(Date.now() + 60_000).toISOString(), timeoutSeconds: 60, phase: 'open', turnId: 'turn', mode: 'all',
+        workerIds: [randomUUID()], revisions: [], outcomes: [] }); break;
       case 'ci-wait': store.commitCiWait(id, {
         id: randomUUID(), prUrl: 'https://github.com/acme/repo/pull/1', repository: 'acme/repo', prNumber: 1, headSha: 'a'.repeat(40),
         generation: 'generation', turnId: 'turn', timeoutSeconds: 60, registeredAt: new Date().toISOString(), deadline: new Date(Date.now() + 60_000).toISOString(), phase: 'registered',
       }); break;
-      case 'worker-wake': manager['workerWakeAdmitted'].add(id); break;
       case 'root-finish': store.commitDelegation([{ id, delegation: { role: 'root', permissions: [], receipts: [], finishRequestedAt: new Date().toISOString() } }]); break;
     }
   }
@@ -245,6 +245,21 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(store.getRun(id)?.status).toBe('waiting');
     expect(store.getRun(id)?.waits).toMatchObject([{ kind: 'human', via: 'no-wait', source: 'cezar', phase: 'open', askSeq: expect.any(Number) }]);
     expect(store.readEvents(id).filter(e => e.type === 'note' && e.message === NO_WAIT_NO_REPLY_NOTE)).toHaveLength(1);
+  });
+
+  // hearsay-tools/cezarion#1301: an unanswered completion refusal nudge says so, not "no-wait".
+  it('expiry after a completion nudge names the completion nudge', async () => {
+    vi.useFakeTimers();
+    state.currentStepId = 'task';
+    state.completionNudged = session;
+    manager['active'].set(id, state);
+    (manager as unknown as { noWaitNudgeReplyMs: number }).noWaitNudgeReplyMs = 300;
+    manager['armNoWaitNudgeReplyTimer'](id, state);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(store.getRun(id)?.status).toBe('waiting');
+    const notes = store.readEvents(id).filter(e => e.type === 'note').map(e => e.message);
+    expect(notes.filter(message => message === COMPLETION_NO_REPLY_NOTE)).toHaveLength(1);
+    expect(notes).not.toContain(NO_WAIT_NO_REPLY_NOTE);
   });
 
   it('a transport exception fails without retaining a readiness retry', () => {

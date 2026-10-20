@@ -962,6 +962,16 @@ describe('reduceThread — AskUser cards (#473)', () => {
     expect(other).toMatchObject({ resolved: false })
   })
 
+  // hearsay-tools/cezarion#1301: new input supersedes a worker's fallback question.
+  it('a superseded question resolves its card as closed, not answered', () => {
+    const closed = allItems([
+      line(2, 'ask.requested', ASK),
+      line(3, 'human-ask-closed', { askSeq: 2, reason: 'superseded' }),
+    ]).find((i) => i.kind === 'ask')
+    expect(closed).toMatchObject({ resolved: true, closed: 'superseded' })
+    expect((closed as { answeredBy?: string }).answeredBy).toBeUndefined()
+  })
+
   it('drops an ask.requested with no valid questions', () => {
     expect(
       allItems([line(1, 'ask.requested', { requestId: 'x', questions: [] })]).some(

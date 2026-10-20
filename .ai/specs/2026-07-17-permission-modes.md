@@ -84,6 +84,17 @@ Verified against the installed CLIs (2026-07-17) and vendor docs.
 - Headless approval channel: a `permission.updated` SSE event carrying the
   pending request; the client replies via the session permissions endpoint
   with `once` | `always` | `reject`.
+- **Note, 2026-10-20 (hearsay-tools/cezarion#1266):** OpenCode 1.18.35 emits
+  `permission.asked` (`id`, `sessionID`, `permission`, `patterns`, `metadata`,
+  `always`, `tool`) and `permission.replied`, and takes
+  `POST /permission/{id}/reply` with `{ reply: "once" | "always" | "reject",
+  message? }`. cezar reads the user's own rules once per session from
+  `GET /config`, answers OpenCode's built-in asks (`external_directory`,
+  `doom_loop`, `read` of `.env` files) with `once` when no user rule names that
+  permission, never sends `always` on its own, and routes every other ask to
+  the cockpit permission card. Without a permission UI it rejects the ask; an
+  unreadable config sends every ask to the cockpit. The text above is kept as
+  written.
 
 **Takeaways adopted:** a small set of *capability-named* presets is the only
 model that maps onto all three backends (claude is a superset, codex is

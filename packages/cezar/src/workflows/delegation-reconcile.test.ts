@@ -2,14 +2,16 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { historyPaths } from '../runs/history-file.ts';
 import { TranscriptFactsQueue } from '../runs/transcript-facts-queue.ts';
 import { RunStore } from '../runs/store.ts';
+import { RUNS_DB_FILE } from '../runs/run-database.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
-import { RunManager } from './run.ts';
+import { COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, RunManager } from './run.ts';
 import { cleanupCheckpoint, seedSettledFamily } from './delegation-reconcile.testkit.ts';
 
 describe('terminal delegation checkpoint reconciliation (#661)', () => {
@@ -257,6 +259,36 @@ describe('restart repairs on a settled family without a conversation (#779)', ()
     });
   });
 
+  // hearsay-tools/cezarion#1301: an older build accepted a root's Finish behind its live workers and
+  // stored the intent. With the old engine's completion park gone, recovery settles that Finish
+  // as a done blocked by its workers: the intent is cleared and the root is owed the refusal a
+  // closed session gets, the queued lifecycle input its next session takes.
+  it('routes a stored Finish intent behind a live worker to the completion refusal at boot', async () => {
+    const seed = RunStore.open(dataDir);
+    const parent = seed.createRun({ title: 'legacy parent', task: 'history', workflow: 'quick-task', steps: [{ id: 'work', name: 'Work', kind: 'agent' }] });
+    seed.updateStep(parent.id, 'work', { status: 'waiting', sessionId: 'previous-session', backend: 'claude' });
+    seed.updateRun(parent.id, { status: 'waiting', runner: 'claude', delegation: { role: 'root', permissions: [], receipts: [] } });
+    const workerId = randomUUID();
+    seed.createOwnedRun({ title: 'live worker', task: 'history', workflow: 'quick-task', steps: [] }, parent.id, randomUUID(), {
+      role: 'worker', parentRunId: parent.id, permissions: [], workspace: {
+        ownerRunId: workerId, resourceId: randomUUID(), kind: 'owned-isolated',
+        path: join(root, 'workers', workerId), branch: `cez/${workerId.slice(0, 8)}`, baselineSha: '0'.repeat(40),
+      },
+    }, 'a'.repeat(64));
+    seed.commitRootFinishIntent(parent.id);
+    seed.close();
+    await reboot(async (store) => {
+      await vi.waitFor(() => expect(store.getRun(parent.id)?.agentInputs?.some(input => input.source === 'lifecycle')).toBe(true), { timeout: 15_000 }); // bound: recovery settles the Finish asynchronously
+      const run = store.getRun(parent.id)!;
+      expect(run.delegation).not.toHaveProperty('finishRequestedAt');
+      expect(['done', 'review']).not.toContain(run.status);
+      expect(run.agentInputs).toEqual([expect.objectContaining({ source: 'lifecycle', text: expect.stringContaining(`Workers are still live: ${workerId}.`) })]);
+      expect(run.agentInputs?.[0]?.text).toContain(COMPLETION_WILL_WAIT);
+      expect(run.waits ?? []).toEqual([]);
+      expect(store.readEvents(parent.id).some(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE))).toBe(true);
+    });
+  });
+
   // The other repair a settled family's sweep made: a wait left on a finished parent is withdrawn.
   // Since hearsay-tools/cezarion#1235 the store upgrades the agent's wait into an open list entry,
   // whose `waits` clause of `isLiveRecord` loads the root, and boot recovery cancels it.
@@ -266,6 +298,11 @@ describe('restart repairs on a settled family without a conversation (#779)', ()
       role: 'root', permissions: [], receipts: [],
       wait: { id: waitId, workerIds: [workerId], outcomes: [], deadline: new Date(Date.now() + 3_600_000).toISOString(), phase: 'parked' },
     } }]));
+    // Only builds before hearsay-tools/cezarion#1301 wrote `delegation.wait`, and their live predicate
+    // stored such a row as live; this build's predicate no longer reads the field.
+    const db = new DatabaseSync(join(dataDir, RUNS_DB_FILE));
+    db.prepare('UPDATE runs SET live = 1 WHERE id = ?').run(parentId);
+    db.close();
     await reboot((store) => {
       const root = store.getRun(parentId);
       expect(root?.delegation).not.toHaveProperty('wait');

@@ -1,8 +1,8 @@
-import { spawn } from 'node:child_process';
 import { finished } from 'node:stream/promises';
 import {
   afterExitDrain, CRASH_EXIT_DRAIN_MS, EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS, isCrashExit,
 } from './runner-runtime.ts';
+import { signalExitedSession, signalSession, spawnSessionLeader } from './session-process.ts';
 
 export interface CursorPrintProcessOptions {
   bin: string;
@@ -36,27 +36,15 @@ export function startCursorPrintProcess(
   const isNodeScript = /\.[cm]?js$/.test(options.bin);
   const command = isNodeScript ? process.execPath : options.bin;
   const args = isNodeScript ? [options.bin, ...options.args] : [...options.args];
-  const child = spawn(command, args, {
-    cwd: options.cwd,
-    env: options.env,
-    detached: process.platform !== 'win32',
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  // A registered session leader (hearsay-tools/cezarion#1286): cezar's own SIGINT/SIGTERM and the
+  // worker ledger reach its group, and every signal after its exit keeps the reuse guard.
+  const child = spawnSessionLeader(command, args, { cwd: options.cwd, env: options.env });
   const pid = child.pid;
   let closed = false;
   let inputClosed = false;
   let termTimer: NodeJS.Timeout | undefined;
   let killTimer: NodeJS.Timeout | undefined;
   let drainTimer: NodeJS.Timeout | undefined;
-  const useGroup = process.platform !== 'win32';
-  const groupAlive = (): boolean => {
-    if (!pid) return false;
-    try { process.kill(useGroup ? -pid : pid, 0); return true; } catch { return false; }
-  };
-  const signal = (name: NodeJS.Signals): void => {
-    if (!pid) return;
-    try { process.kill(useGroup ? -pid : pid, name); } catch { /* already gone */ }
-  };
 
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
@@ -94,10 +82,10 @@ export function startCursorPrintProcess(
     // This ends Cursor's `worker-server` and its `typescript-language-server`: Cursor spawns
     // them `detached: false`, so they stay in this group after the leader exits, and nothing
     // else ends them before Cursor's own 300 s idle exit (hearsay-tools/cezarion#1285).
-    signal('SIGTERM');
+    signalExitedSession(child, 'SIGTERM');
     const drainMs = options.drainMs ?? 250;
     await new Promise<void>(resolve => { drainTimer = setTimeout(resolve, drainMs); });
-    if (groupAlive()) signal('SIGKILL');
+    signalExitedSession(child, 'SIGKILL');
     child.stdout.destroy();
     child.stderr.destroy();
     if (drainTimer) clearTimeout(drainTimer);
@@ -116,9 +104,9 @@ export function startCursorPrintProcess(
     if (killTimer) clearTimeout(killTimer);
     const termGrace = mode === 'interrupt' ? 0 : options.termGraceMs ?? EOF_TERM_GRACE_MS;
     const killGrace = options.killGraceMs ?? EOF_KILL_GRACE_MS;
-    if (termGrace === 0) signal('SIGTERM');
-    else termTimer = setTimeout(() => signal('SIGTERM'), termGrace);
-    killTimer = setTimeout(() => { if (groupAlive()) signal('SIGKILL'); }, termGrace + killGrace);
+    if (termGrace === 0) signalSession(child, 'SIGTERM');
+    else termTimer = setTimeout(() => signalSession(child, 'SIGTERM'), termGrace);
+    killTimer = setTimeout(() => signalSession(child, 'SIGKILL'), termGrace + killGrace);
     await settled;
   };
   return {

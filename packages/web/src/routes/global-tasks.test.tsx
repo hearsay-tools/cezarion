@@ -1122,24 +1122,22 @@ describe('global tasks page', () => {
 it('hides indexed workers while preserving parked-parent waiting phases', async () => {
   const runs = [
     { ...RUNS[0]!, id: 'worker', delegation: { role: 'worker' as const, parentRunId: 'parent' } },
-    ...(['registered', 'parked', 'wake-pending'] as const).map(phase => ({ ...RUNS[0]!, id: phase, status: 'waiting' as const, delegation: { role: 'root' as const, wait: { phase } } })),
+    // An index row carries its summary's `waitingOn` and `waitWakePending` (hearsay-tools/cezarion#1301).
+    { ...RUNS[0]!, id: 'parked', status: 'waiting' as const, delegation: { role: 'root' as const }, waitingOn: { kind: 'workers' as const, count: 0 } },
+    { ...RUNS[0]!, id: 'wake-pending', status: 'waiting' as const, delegation: { role: 'root' as const }, waitWakePending: true as const },
   ]
   stubFetch({ runs }); renderPage()
   await waitFor(() => expect(document.querySelector('[data-slot="global-task-row"][data-run-id="parked"]')).not.toBeNull())
   expect(document.querySelector('[data-slot="global-task-row"][data-run-id="worker"]')).toBeNull()
   expect(screen.queryByText('Worker')).toBeNull()
-  for (const phase of ['registered', 'parked', 'wake-pending']) {
+  for (const phase of ['parked', 'wake-pending']) {
     const row = document.querySelector(`[data-slot="global-task-row"][data-run-id="${phase}"]`)
-    expect(row?.textContent).toContain(
-      phase === 'parked' ? 'waiting on workers'
-        : phase === 'wake-pending' ? 'waiting for capacity'
-          : 'needs you',
-    )
+    expect(row?.textContent).toContain(phase === 'parked' ? 'waiting on workers' : 'waiting for capacity')
   }
 })
 
 it('shows a parked parent human question from the slim workspace index', async () => {
-  stubFetch({ runs: [{ ...RUNS[0]!, id: 'asking-parent', status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', wait: { phase: 'parked' } } }] })
+  stubFetch({ runs: [{ ...RUNS[0]!, id: 'asking-parent', status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root' }, waitingOn: { kind: 'human' } }] })
   renderPage()
   await waitFor(() => expect(document.querySelector('[data-slot="global-task-row"][data-run-id="asking-parent"]')).not.toBeNull())
   const row = document.querySelector('[data-slot="global-task-row"][data-run-id="asking-parent"]')
@@ -1164,14 +1162,16 @@ it('renders a parent request-wait as a global-task-row and hides the worker', as
         id: 'parent-wait',
         title: 'Parent wait',
         status: 'waiting',
-        delegation: { role: 'root', wait: { phase: 'parked', requestIds: ['10000000-0000-4000-8000-000000000001'] } },
+        delegation: { role: 'root' },
+        waitingOn: { kind: 'workers', count: 0, replies: true },
       },
       {
         ...RUNS[0]!,
         id: 'request-wait',
         title: 'Worker wait',
         status: 'waiting',
-        delegation: { role: 'worker', parentRunId: 'parent', wait: { phase: 'parked', requestIds: ['10000000-0000-4000-8000-000000000001'] } },
+        delegation: { role: 'worker', parentRunId: 'parent' },
+        waitingOn: { kind: 'workers', count: 0, replies: true },
       },
     ],
   })

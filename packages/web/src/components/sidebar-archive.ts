@@ -154,7 +154,8 @@ export function useSidebarArchive(projectId: string | undefined, cacheScope: str
     return request
   }
 
-  const sweep = (scopeOfSweep: ArchiveFinishedScope) => {
+  /** `automation` narrows the sweep to the sidebar tab it was pressed on (#1332). */
+  const sweep = (scopeOfSweep: ArchiveFinishedScope, automation?: boolean) => {
     const scope = cacheScope ?? queryScope()
     setSweeping(scopeOfSweep)
     const active = document.activeElement
@@ -164,7 +165,7 @@ export function useSidebarArchive(projectId: string | undefined, cacheScope: str
       (el) => linkOf(el.closest('[data-slot="quick-list-bucket"]')?.nextElementSibling?.querySelector('[data-slot="task-row"]') ?? undefined),
       button?.closest('[data-slot="quick-list-bucket"]')?.parentElement ?? null,
     )
-    void (projectId === undefined ? archiveFinished(scopeOfSweep) : archiveProjectFinished(projectId, scopeOfSweep))
+    void (projectId === undefined ? archiveFinished(scopeOfSweep, automation) : archiveProjectFinished(projectId, scopeOfSweep, automation))
       .then(
         ({ ids, pinnedIds }) => {
           void refresh(scope)

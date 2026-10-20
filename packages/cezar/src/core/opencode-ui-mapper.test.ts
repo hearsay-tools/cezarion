@@ -119,7 +119,7 @@ describe('mapOpencodeEvent edge cases', () => {
       { type: 'server.connected' },
       { type: 'session.updated', properties: { info: { id: SESSION_ID } } },
       { type: 'message.part.removed', properties: { part: { id: 'prt_x' } } },
-      { type: 'permission.updated', properties: { id: 'perm_1' } }, // reserved for permission.*
+      { type: 'permission.updated', properties: { id: 'perm_1' } }, // permission.* belongs to the runner, which owns the reply
       { type: 'message.part.updated' }, // no properties
       { type: 'message.part.updated', properties: { part: 'oops' } },
       { type: 'message.part.updated', properties: { part: { type: 'text' } } }, // no id

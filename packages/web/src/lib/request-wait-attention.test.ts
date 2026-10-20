@@ -8,16 +8,23 @@ import { bucketOf, listCounts } from './task-groups'
 import { diffRunTransitions } from './notifications'
 
 const requestId = '10000000-0000-4000-8000-000000000001'
-function waiting(role: 'root' | 'worker'): RunRecord {
-  const wait = { id: requestId, workerIds: [], requestIds: [requestId], deadline: '2026-09-17T00:00:00.000Z', phase: 'parked' as const, outcomes: [] }
+/** A request wait is a worker entry in the wait list naming the requests (hearsay-tools/cezarion#1301). */
+const requestWait = (over: Record<string, unknown> = {}) => ({
+  kind: 'worker' as const, id: requestId, source: 'agent' as const, via: 'cez-worker-wait' as const,
+  registeredAt: '2026-09-16T00:00:00.000Z', deadline: '2026-09-17T00:00:00.000Z', phase: 'open' as const, turnId: 'turn-1',
+  timeoutSeconds: 600, workerIds: [], requestIds: [requestId], revisions: [], outcomes: [],
+  ...over,
+})
+function waiting(role: 'root' | 'worker', wait: Record<string, unknown> = {}): RunRecord {
   return {
     id: 'run', title: 'Verify integration', task: 'Verify integration', workflow: 'quick-task', status: 'waiting',
     createdAt: '2026-09-16T00:00:00.000Z', tokensUsed: 0, archived: false, steps: [],
-    delegation: role === 'root' ? { role, permissions: [], receipts: [], wait } : {
-      role, permissions: [], parentRunId: requestId, wait,
+    waits: [requestWait(wait)],
+    delegation: role === 'root' ? { role, permissions: [], receipts: [] } : {
+      role, permissions: [], parentRunId: requestId,
       workspace: { kind: 'owned-isolated', ownerRunId: requestId, resourceId: requestId, path: '/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) },
     },
-  }
+  } as RunRecord
 }
 
 it.each([
@@ -49,53 +56,50 @@ it.each([
 
 it.each(['root', 'worker'] as const)('follows %s lifecycle after reply, timeout, and cancellation', role => {
   const record = waiting(role)
-  if (!record.delegation || record.delegation.role === 'invalid' || !record.delegation.wait) throw Error('fixture')
-  for (const reason of ['outcome', 'timeout', 'cancelled'] as const) {
-    const resumed = summaryOf({ ...record, delegation: { ...record.delegation, wait: { ...record.delegation.wait, phase: 'wake-pending' as const, reason } } })
-    expect(deriveAttention(resumed).label).toBe('waiting for capacity')
-    expect(wantsAttention(resumed)).toBe(false)
-    expect(deriveAttention({ ...resumed, status: 'running' }).label).toBe('running')
-  }
+  const resumed = summaryOf(waiting(role, { phase: 'resolved', resolvedAt: '2026-09-16T00:05:00.000Z' }))
+  expect(deriveAttention(resumed).label).toBe('waiting for capacity')
+  expect(wantsAttention(resumed)).toBe(false)
+  expect(deriveAttention({ ...resumed, status: 'running' }).label).toBe('running')
   expect(deriveAttention({ ...record, status: 'done' }).label).toBe('done')
   expect(deriveAttention({ ...record, status: 'cancelled' }).label).toBe('cancelled')
-  expect(deriveAttention({ ...record, delegation: undefined }).label).toBe('needs you')
+  expect(deriveAttention({ ...record, waits: undefined }).label).toBe('needs you')
 })
 
-it('keeps a wake-pending parent with a pending human ask as Needs you', () => {
-  const record = waiting('root')
-  if (!record.delegation || record.delegation.role === 'invalid' || !record.delegation.wait) throw Error('fixture')
-  const asking = summaryOf({
-    ...record,
-    hasPendingHumanAsk: true,
-    delegation: { ...record.delegation, wait: { ...record.delegation.wait, phase: 'wake-pending' as const, reason: 'outcome' as const } },
-  })
+it('keeps a resolved parent wait with a pending human ask as Needs you', () => {
+  const asking = summaryOf({ ...waiting('root', { phase: 'resolved', resolvedAt: '2026-09-16T00:05:00.000Z' }), hasPendingHumanAsk: true })
   expect(deriveAttention(asking).label).toBe('needs you')
   expect(wantsAttention(asking)).toBe(true)
   expect(bucketOf(asking, 'active')).toBe('Needs you')
 })
 
-
-it('keeps absent or invalid delegation and workers without a request wait visible to humans', () => {
+// The wait lives in the list, not the delegation: an unreadable delegation hides no wait, and
+// a run without one is a human gate again.
+it('keeps a waiting run without a request wait visible to humans', () => {
   const record = waiting('worker')
-  if (record.delegation?.role !== 'worker' || !record.delegation.wait) throw Error('fixture')
-  expect(deriveAttention({ ...record, delegation: { role: 'invalid' } }).label).toBe('needs you')
-  expect(deriveAttention({ ...record, delegation: { ...record.delegation, wait: { ...record.delegation.wait, requestIds: undefined } } }).label).toBe('needs you')
+  expect(deriveAttention({ ...record, delegation: { role: 'invalid' } }).label).not.toBe('needs you')
+  expect(deriveAttention({ ...record, waits: undefined }).label).toBe('needs you')
+  expect(deriveAttention({ ...record, waits: undefined, delegation: { role: 'invalid' } }).label).toBe('needs you')
 })
 
+// The monitoring activity is no longer a park (hearsay-tools/cezarion#1301): a timer wait is.
 it('keeps monitoring quiet and notifies for later human and completion gates (fork #772)', () => {
-  const base = summaryOf({ ...waiting('root'), delegation: undefined, status: 'running', hasPendingHumanAsk: false })
+  const base = summaryOf({ ...waiting('root'), waits: undefined, delegation: undefined, status: 'running', hasPendingHumanAsk: false })
   const previous = diffRunTransitions(new Map(), [base]).statuses
-  const monitor = { ...base, activity: 'monitoring' as const }
+  const timer = {
+    kind: 'timer' as const, id: '00000000-0000-4000-8000-0000000000d1', source: 'agent' as const, via: 'cezar_wait' as const,
+    registeredAt: '2026-10-17T15:00:00.000Z', deadline: '2026-10-17T15:05:00.000Z', phase: 'open' as const, turnId: 'turn-1', seconds: 300,
+  }
+  const monitor = { ...base, status: 'waiting' as const, waits: [timer] } as typeof base
   const monitoring = diffRunTransitions(previous, [monitor])
   expect(deriveAttention(monitor).label).toBe('monitoring')
   expect(bucketOf(monitor, 'active')).toBe('Working')
   expect(wantsAttention(monitor)).toBe(false)
   expect(monitoring.entering).toEqual([])
   for (const gate of [
-    { ...monitor, status: 'waiting' as const, activity: undefined }, // explicit prose gate, no ASK
-    { ...monitor, status: 'waiting' as const, activity: undefined, hasPendingHumanAsk: true },
-    { ...monitor, status: 'review' as const, activity: undefined },
-    { ...monitor, status: 'failed' as const, activity: undefined },
+    { ...monitor, waits: undefined }, // explicit prose gate, no ASK
+    { ...monitor, waits: undefined, hasPendingHumanAsk: true },
+    { ...monitor, status: 'review' as const, waits: undefined },
+    { ...monitor, status: 'failed' as const, waits: undefined },
   ]) {
     expect(wantsAttention(gate)).toBe(true)
     expect(diffRunTransitions(monitoring.statuses, [gate]).entering).toEqual([gate])
