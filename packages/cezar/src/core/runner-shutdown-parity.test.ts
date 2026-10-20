@@ -107,7 +107,7 @@ async function withChild(backend: RunnerId, check: (session: AgentSession, child
 }
 
 describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
-  const [outsideSignal, endEscalation, outputFailure, ownGroup, stopGroup, endGroup, /* S29: omp-input-pipe.test.ts */, ownExit] = SHUTDOWN_CRITERIA;
+  const [outsideSignal, endEscalation, outputFailure, ownGroup, stopGroup, endGroup, /* S29: omp-input-pipe.test.ts */, ownExit, outsideKill] = SHUTDOWN_CRITERIA;
   for (const backend of RUNNER_IDS) {
     it(`${backend} ${outsideSignal.id} ${outsideSignal.name}`, async () => {
       // Process exit must classify the failure even when HTTP stream closure
@@ -198,8 +198,8 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
 
     // hearsay-tools/cezarion#1286: cezar signals nothing when the agent exits on EOF, so the stdio MCP
     // servers and background jobs it left in its group are ended by the reap after its exit.
-    // OpenCode's runner and Cursor print's signal their process on end, so the group is cezar's
-    // to end either way.
+    // OpenCode's runner and Cursor print end by a cezar signal on end (S27/S28's path), so their
+    // cells do not reach the reap; S31 does.
     it.skipIf(process.platform === 'win32')(`${backend} ${ownExit.id} ${ownExit.name}`, async () => {
       const signalsOnEnd = backend === 'opencode' || backend === 'cursor';
       // Past any EOF exit and short of the test timeout: only the leader's own exit settles it.
@@ -217,6 +217,19 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
       } finally {
         eofGrace.termMs = 100;
       }
+    }, 15_000);
+
+    // hearsay-tools/cezarion#1286: a leader killed from outside (a crash, the OOM killer) gets no
+    // signal from cezar, so only what cezar does after its exit ends what it left in its group.
+    it.skipIf(process.platform === 'win32')(`${backend} ${outsideKill.id} ${outsideKill.name}`, async () => {
+      await withChild(backend, async (_session, child, _events, settled, cwd) => {
+        const { group, session: setsid } = await leftovers(cwd);
+        child.kill('SIGKILL');
+        await settled;
+        // bound: the exit drain, the grace, then signal delivery and reaping by the subreaper.
+        await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 6000 });
+        expect(alive(setsid)).toBe(true);
+      }, 'no-progress-leftover');
     }, 15_000);
 
     if (backend === 'pi' || backend === 'claude') {

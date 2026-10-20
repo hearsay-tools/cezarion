@@ -1,7 +1,9 @@
-import { execFileSync, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFile, execFileSync, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./runner-runtime.ts', async (original) => ({
@@ -27,12 +29,15 @@ const DEFAULT_TERM = 'setTimeout(()=>{},20000)';
 /** Ignores SIGTERM, leaving a receipt in its cwd that it got one. */
 const TERM_RECEIPT = "process.on('SIGTERM',()=>{require('fs').writeFileSync('member.term','')}); setTimeout(()=>{},20000)";
 
-/** A leader that starts one member in its cwd, writes the member's pid, then stays or exits. */
+/** A leader that starts one member in its cwd, then stays or exits. The member publishes its pid
+ * once its signal handlers are in place, and an exiting leader waits for that, so no signal the
+ * leader's exit sets off can reach the member first. */
 function leaderScript(member: string, opts: { detached?: boolean; exit?: boolean } = {}): string {
+  const published = `${member}; const fs = require('fs'); fs.writeFileSync('member.pid.tmp', String(process.pid)); fs.renameSync('member.pid.tmp', 'member.pid');`;
+  // The exiting leader's hang guard: it exits 3 if the member never reports.
   return `const { spawn } = require('child_process');
-const m = spawn(process.execPath, ['-e', ${JSON.stringify(member)}], { stdio: 'ignore', detached: ${!!opts.detached} });
-require('fs').writeFileSync('member.pid.tmp', String(m.pid)); require('fs').renameSync('member.pid.tmp', 'member.pid');
-${opts.exit ? 'm.unref(); process.exit(0);' : "console.log('ready'); setTimeout(()=>{},20000);"}`;
+const m = spawn(process.execPath, ['-e', ${JSON.stringify(published)}], { stdio: 'ignore', detached: ${!!opts.detached} });
+${opts.exit ? "m.unref(); setTimeout(() => process.exit(3), 15000); setInterval(() => { if (require('fs').existsSync('member.pid')) process.exit(0); }, 10);" : "console.log('ready'); setTimeout(()=>{},20000);"}`;
 }
 
 // A crashed leader closes its sockets inside do_exit(), before it is a zombie: the runner can
@@ -169,6 +174,36 @@ setTimeout(() => process.exit(0), 50);`], { cwd, env: process.env });
     expect(kill.mock.calls.filter(([pid, signal]) => pid === -leader.pid! && signal !== 0)).toEqual([]);
     // bound: the exit drain, the grace, then signal delivery and reaping by the subreaper.
     await vi.waitFor(() => expect(alive(member)).toBe(false), { timeout: 5000 });
+  });
+
+  // hearsay-tools/cezarion#1286 review: a headless `cez run` ends by letting its event loop drain,
+  // so what the reap waits on must keep such a host up until the group it ends is empty.
+  describe('a host with nothing else to wait for', () => {
+    const sessionProcess = fileURLToPath(new URL('./session-process.ts', import.meta.url));
+    /** Start one leader from a fresh host that holds no handle of its own; settle when the host exits. */
+    async function host(leader: string): Promise<{ member: number; cwd: string }> {
+      const cwd = mkdtempSync(join(tmpdir(), 'cez-session-host-'));
+      dirs.push(cwd);
+      await promisify(execFile)(process.execPath, ['--import', 'tsx', '--input-type=module', '-e',
+        `import { spawnSessionLeader } from ${JSON.stringify(sessionProcess)};
+spawnSessionLeader(process.execPath, ['-e', ${JSON.stringify(leader)}], { cwd: ${JSON.stringify(cwd)}, env: process.env });`]);
+      const member = requirePid(join(cwd, 'member.pid'));
+      pids.push(member);
+      return { member, cwd };
+    }
+
+    it('stays up until the group a leader left behind is empty', async () => {
+      const { member } = await host(leaderScript(DEFAULT_TERM, { exit: true }));
+      expect(alive(member)).toBe(false);
+    });
+
+    // The real KILL_GRACE_MS (10 s) runs in the host, so the host lives for about that long.
+    it('stays up to SIGKILL a member that ignores SIGTERM', async () => {
+      const { member, cwd } = await host(leaderScript(TERM_RECEIPT, { exit: true }));
+      // bound: SIGKILL delivery and reaping by the subreaper, after the host sent it and exited.
+      await vi.waitFor(() => expect(alive(member)).toBe(false), { timeout: 5000 });
+      expect(existsSync(join(cwd, 'member.term'))).toBe(true);
+    }, 30_000);
   });
 
   it('never group-signals a fake child', () => {
