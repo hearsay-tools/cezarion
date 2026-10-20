@@ -915,7 +915,11 @@ Calls made by the agent (owner to check):
   delivery of the queued refusal itself marks its turn as the nudge's. The queued refusal is known
   by `purpose: 'completion-refusal'` on its persisted `AgentInput`, never by process memory, so a
   Continue after a run that failed at the delivery bound, and a restart, deliver it as the nudge:
-  under the nudge's reply bound, and holding a closing session as a wait does.
+  under the nudge's reply bound, and holding a closing session as a wait does. Stop retires an
+  undelivered refusal, as it discards the run's waits, so no later Continue delivers a stale one;
+  on a `failed` run that owed only the refusal it answers `{ cancelled: true }`, the run stays
+  `failed`, and the note is `Stop discarded the completion refusal this task still owed; the task
+  stays failed` (`REFUSAL_DISCARDED_NOTE`). Deletion drops it with the row.
 - **Bounds.** The nudge and every parent reply that resumes a worker from its fallback question
   are charged to the automatic-wake budget (`MAX_AUTO_CONTINUES`, 40) through
   `chargeAutomaticWake`, so neither an agent that keeps declaring done nor a parent and worker

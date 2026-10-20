@@ -15,7 +15,7 @@ import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
 import { handoffPath } from '../handoff.ts';
-import { claudeScheduleWakeupDelay, COMPLETION_NO_REPLY_NOTE, COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
+import { claudeScheduleWakeupDelay, COMPLETION_NO_REPLY_NOTE, COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE, REFUSAL_DISCARDED_NOTE, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
 import { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE } from './turn-end.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt, MONITORING_TEXT } from './monitoring-turn.testkit.ts';
@@ -221,7 +221,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U24', 'U25']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U25']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -1899,6 +1899,35 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
         expect(nudgeNotes(p.id)).toHaveLength(1);
       });
     }
+
+    // hearsay-tools/cezarion#1301: Stop discards a refusal a closed session still owes, as it
+    // discards the run's waits, so a Continue after it never delivers a stale refusal.
+    it(`${runner} U22x Stop retires a refusal a closed session still owes, and Continue does not deliver it`, async () => {
+      retryAtOnce();
+      const { p, w } = await parentWithWorker(runner);
+      const refusal = `Workers are still live: ${w.id}.`;
+      const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
+      let closes = MAX_WAKE_DELIVERY_ATTEMPTS;
+      const closeAtTurnEnd = ({ runId, event }: { runId: string; event: { type: string } }) => {
+        if (runId !== p.id || event.type !== 'turn-end' || !closes || !refusals().some(input => !input.deliveredAt)) return;
+        closes--;
+        engine().active.get(p.id)?.session.end();
+      };
+      store.on('event', closeAtTurnEnd);
+      onTestFinished(() => { store.off('event', closeAtTurnEnd); });
+      engine().active.get(p.id)!.session.end();
+      await until(() => store.getRun(p.id)?.status === 'failed' && !manager.isActive(p.id));
+      expect(refusals()).toEqual([expect.objectContaining({ purpose: 'completion-refusal' })]);
+      expect(refusals()[0]!.deliveredAt).toBeUndefined();
+      expect(manager.cancel(p.id)).toBe(true);
+      expect(refusals()).toEqual([]);
+      expect(store.getRun(p.id)?.status).toBe('failed');
+      expect(store.readEvents(p.id).filter(event => event.type === 'note' && event.message === REFUSAL_DISCARDED_NOTE)).toHaveLength(1);
+      expect(manager.continueRun(p.id, { text: 'go on' })).toEqual({ ok: true });
+      await until(() => prompted(runner, 'go on').length > 0 && store.getRun(p.id)?.status === 'waiting');
+      expect(prompted(runner, refusal)).toHaveLength(0);
+      expect(nudgeNotes(p.id)).toHaveLength(1);
+    });
 
     // hearsay-tools/cezarion#1301: a worker keeps its one no-wait nudge; the next turn end with no
     // wait or done asks its parent, and the parent's reply resumes it, charged to its budget.

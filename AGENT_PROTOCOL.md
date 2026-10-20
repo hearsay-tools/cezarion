@@ -911,7 +911,8 @@ Its reply is bounded like the live nudge's, a run owes one refusal at a time, an
 holds a closing session like a wait: a reopened session that closes or fails before the refusal is
 submitted is a failed delivery, bounded by `MAX_WAKE_DELIVERY_ATTEMPTS`. The input carries
 `purpose: 'completion-refusal'` on the run record, so a Continue after the run failed at that bound
-and a restart deliver it under the same two bounds.
+and a restart deliver it under the same two bounds. Stop retires it while undelivered, so no later
+Continue delivers a stale refusal (U22x).
 One nudge per cycle: a human message or a wake starts a fresh one. When the turn that answers it
 ends on a blocked done again, Cezar registers
 a list `worker` wait on the live workers (`source: 'cezar'`, `via: 'completion'`, `mode: 'all'`,
@@ -1302,7 +1303,8 @@ until the budget), U22 (a done blocked after the session closed reopens it and d
 refusal), U22s (a reopened session that acknowledges the refusal and never answers parks at the
 nudge's reply bound), U22c (reopened sessions that keep closing first: one copy, the delivery bound,
 and Continue delivers it once; a legacy Finish too), U22f (one such close counts a failure, and the
-delivery clears it), U24 (a worker's second no-wait turn end asks its parent, whose reply resumes it) and U25
+delivery clears it), U22x (Stop retires a refusal a closed session still owes, and a Continue after
+it does not deliver it), U24 (a worker's second no-wait turn end asks its parent, whose reply resumes it) and U25
 (an automatic message supersedes that question). The harness that never answers is each native
 mock's `mock:ack-only` reply (`CEZ_MOCK_COMPLETION_REPLY`): it acknowledges the refusal on its own
 wire and opens no turn until more input arrives. Cursor print is exempt from U20h, U20m and U22s

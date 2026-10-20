@@ -644,6 +644,8 @@ export const WAKE_DELIVERY_CAP_NOTE = `could not deliver wait results after ${MA
 export const WAKE_SESSION_CLOSED_ERROR = 'the session closed before the wait results were delivered';
 /** Stop on a failed run that held wait results: the results and the open waits are gone. */
 export const WAITS_DISCARDED_NOTE = 'Stop discarded the waits this task held and their results; the task stays failed';
+/** Stop on a failed run that only owed a completion refusal (hearsay-tools/cezarion#1301). */
+export const REFUSAL_DISCARDED_NOTE = 'Stop discarded the completion refusal this task still owed; the task stays failed';
 
 /** A run that failed while it still owed wait results keeps them, and its open waits, until a human
  *  acts: Continue delivers them, Stop discards them (hearsay-tools/cezarion#1233). */
@@ -4112,6 +4114,7 @@ export class RunManager {
     }
     const hadWaits = !!this.store.getRun(runId)?.waits?.length;
     this.cancelOpenWaits(runId);
+    const retiredRefusal = this.retireCompletionRefusal(runId);
     const cancelledFinish = this.store.commitRootFinishCancellation(runId);
     // Still waiting in the queue: just drop it there.
     const queuedAt = this.queue.indexOf(runId);
@@ -4136,8 +4139,8 @@ export class RunManager {
       const run = this.store.getRun(runId);
       // Stop on a failed run that held wait results discards them, and the automatic resume that
       // would start a session on it later; the run stays failed.
-      if (hadWaits && run?.status === 'failed') {
-        this.store.appendEvent(runId, { type: 'note', message: WAITS_DISCARDED_NOTE });
+      if ((hadWaits || retiredRefusal) && run?.status === 'failed') {
+        this.store.appendEvent(runId, { type: 'note', message: hadWaits ? WAITS_DISCARDED_NOTE : REFUSAL_DISCARDED_NOTE });
         this.cancelAutoResume(runId);
         this.store.flush();
         return true;
@@ -4720,6 +4723,20 @@ export class RunManager {
     const spent = this.chargeAutomaticWake(runId);
     this.store.appendEvent(runId, { type: 'note', message: `${COMPLETION_NUDGE_NOTE} (${spent}/${MAX_AUTO_CONTINUES}): ${refusal.code}` });
     try { this.queueWaitWake(runId); } catch { this.retryWaitAdmission(runId); }
+    return true;
+  }
+
+  /** Stop discards a refusal the run still owes, as it discards its waits: a later Continue must not
+   *  deliver a stale one (hearsay-tools/cezarion#1301). One an inbox read holds is left to it. */
+  private retireCompletionRefusal(runId: string): boolean {
+    const inputs = this.store.getRun(runId)?.agentInputs ?? [];
+    const kept = inputs.filter(input => input.deliveredAt || input.purpose !== 'completion-refusal' || hasLiveInboxClaim(input));
+    if (kept.length === inputs.length) return false;
+    try { this.store.commitAgentInputs(runId, kept); }
+    catch (error) {
+      console.warn(`[cez] completion refusal not retired: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
     return true;
   }
 
