@@ -57,6 +57,13 @@ const openByRun = new Map<string, boolean>()
 /** The same memory, one level down: `${runId}:${section}`. */
 const openSections = new Map<string, boolean>()
 
+/** Test seam (hearsay-tools/cezarion#1358): both maps outlive a test, so a toggle in one case
+ *  would set the next case's starting state for the same run id. */
+export function resetActivityDisclosureForTests(): void {
+  openByRun.clear()
+  openSections.clear()
+}
+
 type SectionKey = 'status' | 'workflow' | 'subagents' | 'workers' | 'plan' | 'usage' | 'workspace'
 
 export function RunActivityDock(props: {
