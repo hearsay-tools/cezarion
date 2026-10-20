@@ -59,6 +59,9 @@ export const WAIT_CRITERIA = [
   { id: 'U21h', scenario: 'baseline', name: 'an ignored refusal with only uncollected results parks on Cezar\'s human wait' },
   { id: 'U21a', scenario: 'autonomous-cap', name: 'an autonomous parent\'s ignored refusal is nudged again until the budget' },
   { id: 'U22', scenario: 'baseline', name: 'a done blocked after the session closed reopens it and delivers the refusal' },
+  { id: 'U22s', scenario: 'baseline', name: 'a refusal reopened into a session that acknowledges it and never answers parks on Cezar\'s human wait at the nudge\'s reply bound' },
+  { id: 'U22c', scenario: 'baseline', name: 'a refusal whose reopened sessions keep closing cleanly is queued once, stops at the delivery bound, and Continue delivers it once' },
+  { id: 'U22f', scenario: 'baseline', name: 'a refusal whose reopened session closes once counts the failure, and its delivery clears it' },
   { id: 'U24', scenario: 'baseline', name: 'a worker\'s second no-wait turn end asks its parent, and the reply resumes it' },
   { id: 'U25', scenario: 'baseline', name: 'an automatic message supersedes a worker\'s fallback question' },
 ] as const;

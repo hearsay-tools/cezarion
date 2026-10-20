@@ -878,7 +878,14 @@ Calls made by the owner (2026-10-19):
 - **A closed session gets the nudge too.** A block found after the session closed
   (`settleSuccess` after its async work, a restart, a legacy accepted Finish) queues the refusal as
   one lifecycle input, charged as the live nudge is; `queueWaitWake`'s scheduler continuation
-  reopens the session and delivers it, and that turn counts as the nudge's.
+  reopens the session and delivers it, and that turn counts as the nudge's. Its reply is bounded
+  like the live nudge's (`awaitCompletionNudgeReply`: the reply timer, armed again after the wake's
+  checkpoint). A run owes one refusal at a time: a done blocked again while it is owed queues no
+  second copy and charges nothing. The owed refusal holds the closing session like a wait does
+  (`holdsClosingWakes`): a reopened session that closes or fails before Cezar submits it is a failed
+  delivery, with the backoff and the bound of `MAX_WAKE_DELIVERY_ATTEMPTS`, after which the run
+  fails keeping the refusal for Continue to deliver once. Its delivery clears the failure count, as
+  a message's does.
 - **An ignored refusal parks on the workers.** One nudge per cycle. If the turn that answers it
   ends on a blocked done again with workers still live, Cezar registers a list `worker` wait on
   them for the agent: `source: 'cezar'`, `via: 'completion'`, `mode: 'all'`, the live blocking
@@ -964,7 +971,10 @@ Decisions made during execution:
   wait restarted and settled), U21m (a worker message wakes it beside the open wait), U21t (an
   agent timer beside it keeps its deadline), U21h (only uncollected results: Cezar's human wait),
   U21a (autonomous: nudged again until the budget), U22 (a closed session reopened to deliver the
-  refusal), U24 (a worker's fallback routed to its parent, whose reply resumes it), U25 (an
+  refusal), U22s (a reopened session that acknowledges it and never answers: the reply bound
+  parks it), U22c (reopened sessions that keep closing first: one copy, the delivery bound, the
+  run fails keeping it and Continue delivers it once; a legacy Finish too), U22f (one such close
+  counts a failure and the delivery clears it), U24 (a worker's fallback routed to its parent, whose reply resumes it), U25 (an
   automatic message supersedes it) and U9v (an upgraded completion wait wakes once through the
   list). `workflows/old-engine-removed.test.ts` guards that no source writes `delegation.wait` or
   `activity: 'monitoring'`.
@@ -981,6 +991,8 @@ list, except phase 3a's completion park rows, which this table replaces. One row
 | `running`, root turn ending on a blocked done (first in the cycle) | The turn ends | The runner's turn end | Refusal nudge submitted (one automatic turn, charged); the run stays `running` |
 | | An open wait or owed input | `canAutoContinue` | No nudge; parks on its waits or takes the input; the refusal is a note |
 | | The session is gone | `settleSuccess` / recovery | The refusal is queued as a lifecycle wake; the scheduler continuation reopens the session and delivers it |
+| | The session is gone and a refusal is already owed | `settleSuccess` / recovery | No second copy and no charge; the owed copy's wake reopens the session |
+| | The reopened session closes or fails before the refusal is submitted | The close/failure path (`holdsClosingWakes`) | A failed delivery: `waiting`, retried after the backoff; at `MAX_WAKE_DELIVERY_ATTEMPTS` (3) the run fails keeping the refusal (`WAKE_DELIVERY_CAP_NOTE`), and Continue delivers it once |
 | | The budget is spent | The budget | Cezar's `budget` human wait; parks for the user |
 | `running`, refusal nudge turn | The turn ends with a wait | The runner's turn end | Parks on that wait (earlier tables) |
 | | The turn ends on a blocked done again, workers live | The runner's turn end | Cezar registers a list worker wait on them (no deadline); parks `waiting`, no slot |
@@ -988,7 +1000,7 @@ list, except phase 3a's completion park rows, which this table replaces. One row
 | | The turn ends on a blocked done again, autonomous run | The runner's turn end | Nudged again, charged, until the budget; then Cezar's `budget` human wait |
 | | The turn ends with no wait and no done | The runner's turn end | The ordinary turn-end rule: the no-wait nudge (if unspent this session), else Cezar's `no-wait` human wait |
 | | The done is no longer blocked | The runner's turn end | Finishes |
-| | No reply within the nudge reply bound | The reply timer | Cezar's own human wait; parks for the user; a late reply resumes it |
+| | No reply within the nudge reply bound (a live nudge, or a queued one delivered to the reopened session) | The reply timer | Cezar's own human wait; parks for the user; a late reply resumes it |
 | | Provider failure or clean close | The failure/close path | As phase 2b's no-wait nudge rows |
 | `waiting`, root on Cezar's completion worker wait (no slot, no deadline) | Every worker on it settles | Worker settlement, `reconcileWorkerFamily` | Resolves `outcome`; wakes the parent; its next blocked done starts a fresh cycle |
 | | A worker message or routed question | The worker | Wakes the parent; the wait stays open |

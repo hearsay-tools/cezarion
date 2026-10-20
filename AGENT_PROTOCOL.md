@@ -907,6 +907,9 @@ you and wake you when they have all settled.* The mid-turn `cezar_done` answer n
 An open agent wait or owed input comes first: no nudge, the refusal is a note, and the run parks
 on its waits. A block found after the session closed (or a legacy accepted Finish) queues the
 refusal as one lifecycle input that the scheduler continuation reopens the session to deliver.
+Its reply is bounded like the live nudge's, a run owes one refusal at a time, and the owed refusal
+holds a closing session like a wait: a reopened session that closes or fails before the refusal is
+submitted is a failed delivery, bounded by `MAX_WAKE_DELIVERY_ATTEMPTS`.
 One nudge per cycle: a human message or a wake starts a fresh one. When the turn that answers it
 ends on a blocked done again, Cezar registers
 a list `worker` wait on the live workers (`source: 'cezar'`, `via: 'completion'`, `mode: 'all'`,
@@ -1294,7 +1297,10 @@ worker wait, which settlement wakes), U21r (that deadline-less wait restarted an
 worker message wakes the parent beside it), U21t (an agent timer beside it keeps its deadline),
 U21h (only uncollected results: Cezar's human wait), U21a (an autonomous parent is nudged again
 until the budget), U22 (a done blocked after the session closed reopens it and delivers the
-refusal), U24 (a worker's second no-wait turn end asks its parent, whose reply resumes it) and U25
+refusal), U22s (a reopened session that acknowledges the refusal and never answers parks at the
+nudge's reply bound), U22c (reopened sessions that keep closing first: one copy, the delivery bound,
+and Continue delivers it once; a legacy Finish too), U22f (one such close counts a failure, and the
+delivery clears it), U24 (a worker's second no-wait turn end asks its parent, whose reply resumes it) and U25
 (an automatic message supersedes that question).
 
 **R74** extends that native-wire matrix to a failed nonfinal workflow agent.

@@ -179,18 +179,24 @@ const noReplyNotes = (id: string) => store.readEvents(id).filter(event => event.
 
 /** A harness that acknowledges `refusal` and never answers it (hearsay-tools/cezarion#1301): the
  *  input Cezar submits with that text reaches no wire, so no turn starts, as an OpenCode heartbeat
- *  keeps a session alive without one. Every other input goes through. The nudge's reply bound is
- *  shortened so its no-reply park comes at once. */
+ *  keeps a session alive without one; a harness that reports consumption reports it read. Every
+ *  other input goes through. The nudge's reply bound is shortened so its no-reply park comes at once. */
 function silenceRefusals(id: string, refusal: string) {
   (manager as unknown as { noWaitNudgeReplyMs: number }).noWaitNudgeReplyMs = 300;
-  type Submit = (runId: string, state: { session?: AgentSession }, content: Array<{ type: string; text?: string }>, inputIds?: readonly string[]) => boolean;
-  const internal = manager as unknown as { submitAgentInput: Submit };
+  type State = { session?: AgentSession; inputDelivery?: { consumption: string } };
+  type Submit = (runId: string, state: State, content: Array<{ type: string; text?: string }>, inputIds?: readonly string[]) => boolean;
+  const internal = manager as unknown as { submitAgentInput: Submit;
+    handleAgentInputConsumed(runId: string, state: State, session: AgentSession, ids: readonly string[]): void };
   const submit = internal.submitAgentInput.bind(manager);
-  vi.spyOn(internal, 'submitAgentInput').mockImplementation((runId, state, content, inputIds) => {
+  vi.spyOn(internal, 'submitAgentInput').mockImplementation((runId, state, content, inputIds = []) => {
     const session = state.session;
     if (runId === id && session && content.some(block => block.text?.includes(refusal))) {
       const send = session.sendAgentMessage;
-      session.sendAgentMessage = () => { session.sendAgentMessage = send; return Promise.resolve(); };
+      session.sendAgentMessage = () => {
+        session.sendAgentMessage = send;
+        if (state.inputDelivery?.consumption === 'observable' && inputIds.length) setTimeout(() => internal.handleAgentInputConsumed(runId, state, session, inputIds), 0);
+        return Promise.resolve();
+      };
     }
     return submit(runId, state, content, inputIds);
   });
@@ -230,7 +236,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U24', 'U25']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U24', 'U25']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -1707,6 +1713,96 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
     });
 
+    // hearsay-tools/cezarion#1301: a reopened session that acknowledges the refusal and never answers
+    // it is bounded as the live nudge is: at the reply bound the run parks on Cezar's human wait and
+    // gives up its slot, whether or not its harness reports the input read.
+    it(`${runner} U22s a refusal reopened into a session that acknowledges it and never answers parks on Cezar's human wait at the nudge's reply bound`, async () => {
+      const { p, w } = await parentWithWorker(runner);
+      const refusal = `Workers are still live: ${w.id}.`;
+      silenceRefusals(p.id, refusal);
+      const observable = (engine().active.get(p.id) as unknown as { inputDelivery?: { consumption: string } }).inputDelivery?.consumption === 'observable';
+      engine().active.get(p.id)!.session.end();
+      await until(() => noReplyNotes(p.id).length === 1 && gated(p.id));
+      expect(prompted(runner, refusal)).toEqual([]);
+      expect(store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)))
+        .toEqual([expect.objectContaining({ source: 'lifecycle', deliveredAt: expect.any(String), ...(observable ? { consumedAt: expect.any(String) } : {}) })]);
+      expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'no-wait' })]);
+      expect(nudgeNotes(p.id)).toHaveLength(1);
+      expect(workerWaits(p.id)).toEqual([]);
+      expect(semaphore.busy()).toBe(0);
+    });
+
+    // hearsay-tools/cezarion#1301: a queued refusal is owed input, and a reopened session that closes
+    // before Cezar submits it is a failed delivery, as U14's: one copy, the delivery bound, and the
+    // run fails keeping it. A legacy accepted Finish takes the same path.
+    for (const legacy of [false, true]) {
+      it(`${runner} U22c a refusal whose reopened sessions keep closing cleanly is queued once, stops at the delivery bound, and Continue delivers it once${legacy ? ' (legacy Finish)' : ''}`, async () => {
+        retryAtOnce();
+        const { p, w } = await parentWithWorker(runner);
+        const refusal = `Workers are still live: ${w.id}.`;
+        const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
+        const wakes = store.getRun(p.id)?.automaticWakes ?? 0;
+        if (legacy) {
+          const delegation = store.getRun(p.id)!.delegation!;
+          if (delegation.role !== 'root') throw Error('root fixture');
+          store.commitDelegation([{ id: p.id, delegation: { ...delegation, finishRequestedAt: new Date().toISOString() } }]);
+        }
+        let closing = true;
+        const closeAtTurnEnd = ({ runId, event }: { runId: string; event: { type: string } }) => {
+          if (runId === p.id && event.type === 'turn-end' && closing && refusals().some(input => !input.deliveredAt)) engine().active.get(p.id)?.session.end();
+        };
+        store.on('event', closeAtTurnEnd);
+        try {
+          engine().active.get(p.id)!.session.end();
+          await until(() => store.getRun(p.id)?.status === 'failed' && !manager.isActive(p.id));
+          // Each attempt is a scheduler continuation that closed before the refusal reached it.
+          expect(prompted(runner, MESSAGE_WAKE_OPENING)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS);
+          expect(prompted(runner, refusal)).toEqual([]);
+          expect(refusals()).toEqual([expect.objectContaining({ source: 'lifecycle' })]);
+          expect(refusals()[0]!.deliveredAt).toBeUndefined();
+          expect(nudgeNotes(p.id)).toHaveLength(1);
+          expect(store.getRun(p.id)?.automaticWakes).toBe(wakes + 1);
+          expect(store.getRun(p.id)?.error).toBe(`continue failed: ${WAKE_SESSION_CLOSED_ERROR}`);
+          expect(store.readEvents(p.id).filter(event => event.type === 'note' && event.message === WAKE_DELIVERY_CAP_NOTE)).toHaveLength(1);
+          expect(engine().wakeBackoffs.has(p.id)).toBe(false);
+          expect(store.getRun(p.id)?.delegation).not.toHaveProperty('finishRequestedAt');
+          closing = false;
+          expect(manager.continueRun(p.id, { text: 'go on' })).toEqual({ ok: true });
+          await until(() => refusals()[0]?.deliveredAt !== undefined && prompted(runner, refusal).length > 0);
+          expect(prompted(runner, refusal)).toHaveLength(1);
+          expect(refusals()).toHaveLength(1);
+          await until(() => store.getRun(p.id)?.status === 'waiting');
+        } finally {
+          store.off('event', closeAtTurnEnd);
+        }
+      });
+    }
+
+    it(`${runner} U22f a refusal whose reopened session closes once counts the failure, and its delivery clears it`, async () => {
+      retryAtOnce();
+      process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
+      const { p, w } = await parentWithWorker(runner);
+      const refusal = `Workers are still live: ${w.id}.`;
+      const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
+      let closes = 1;
+      const closeOnce = ({ runId, event }: { runId: string; event: { type: string } }) => {
+        if (runId !== p.id || event.type !== 'turn-end' || !closes || !refusals().some(input => !input.deliveredAt)) return;
+        closes--;
+        engine().active.get(p.id)?.session.end();
+      };
+      store.on('event', closeOnce);
+      try {
+        engine().active.get(p.id)!.session.end();
+        await until(() => store.getRun(p.id)?.waitDeliveryFailures === 1);
+        await until(() => prompted(runner, refusal).length > 0 && workerWaits(p.id)[0]?.phase === 'open' && store.getRun(p.id)?.status === 'waiting');
+        expect(refusals()).toEqual([expect.objectContaining({ deliveredAt: expect.any(String) })]);
+        expect(prompted(runner, MESSAGE_WAKE_OPENING)).toHaveLength(2);
+        expect(store.getRun(p.id)?.waitDeliveryFailures).toBeUndefined();
+      } finally {
+        store.off('event', closeOnce);
+      }
+    });
+
     // hearsay-tools/cezarion#1301: a worker keeps its one no-wait nudge; the next turn end with no
     // wait or done asks its parent, and the parent's reply resumes it, charged to its budget.
     it(`${runner} U24 a worker's second no-wait turn end asks its parent, and the reply resumes it`, async () => {
@@ -1777,6 +1873,32 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(humanOpen(w.id).filter(wait => wait.askSeq === askSeq)).toEqual([]);
     });
   }
+
+  // hearsay-tools/cezarion#1301: a run owes at most one refusal. A gate that refuses the done again
+  // while the queued copy waits out a failed delivery's backoff adds no second copy and no charge.
+  it('a done blocked again while its queued refusal is owed queues no second copy', async () => {
+    const { p, w } = await parentWithWorker('claude');
+    const refusal = `Workers are still live: ${w.id}.`;
+    const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
+    let closing = true;
+    const closeAtTurnEnd = ({ runId, event }: { runId: string; event: { type: string } }) => {
+      if (runId === p.id && event.type === 'turn-end' && closing && refusals().some(input => !input.deliveredAt)) engine().active.get(p.id)?.session.end();
+    };
+    store.on('event', closeAtTurnEnd);
+    try {
+      engine().active.get(p.id)!.session.end();
+      await until(() => store.getRun(p.id)?.waitDeliveryFailures === 1 && !manager.isActive(p.id) && engine().wakeBackoffs.has(p.id));
+      closing = false;
+      const wakes = store.getRun(p.id)?.automaticWakes;
+      expect((manager as unknown as { deferParentCompletion(id: string): boolean }).deferParentCompletion(p.id)).toBe(true);
+      expect(refusals()).toHaveLength(1);
+      expect(refusals()[0]!.deliveredAt).toBeUndefined();
+      expect(nudgeNotes(p.id)).toHaveLength(1);
+      expect(store.getRun(p.id)?.automaticWakes).toBe(wakes);
+    } finally {
+      store.off('event', closeAtTurnEnd);
+    }
+  });
 
   // hearsay-tools/cezarion#1301: a wait's lifecycle input is that wait's. Once the wait is
   // delivered, the same input undelivered again (a replay) is not a fresh wake.

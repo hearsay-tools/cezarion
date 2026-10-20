@@ -962,6 +962,12 @@ function familyOf(run: RunRecord): string {
   return run.delegation?.role === 'worker' ? run.delegation.parentRunId : run.id;
 }
 
+/** The inputs a listed wait, or a delivered one, names: that wait's own, never a wake of their own
+ *  (hearsay-tools/cezarion#1301). */
+function waitNamedInputIds(run: RunRecord): Set<string> {
+  return new Set([...run.waits ?? [], ...(run.lastWaits ?? []).filter(wait => wait.phase === 'delivered')].flatMap(wait => [wait.id, waitInputId(wait)]));
+}
+
 /**
  * The mini workflow engine: executes a `WorkflowDef` against a repo, one step
  * at a time, persisting every event to the RunStore (which the SSE endpoints
@@ -2446,9 +2452,17 @@ export class RunManager {
    *  that reads it and fails has delivered nothing it owed, nor has a read reported for a message
    *  whose submission was never acknowledged. */
   private clearFailuresOnMessageRead(runId: string, ids: readonly string[]): void {
-    if (this.store.getRun(runId)?.agentInputs?.some(input => input.conversation && ids.includes(input.id) && input.deliveredAt && !input.awaitingRead)) {
+    const run = this.store.getRun(runId);
+    if (run?.agentInputs?.some(input => (input.conversation || this.isUnnamedLifecycleInput(run, input)) && ids.includes(input.id) && input.deliveredAt && !input.awaitingRead)) {
       this.clearWakeDeliveryFailures(runId);
     }
+  }
+
+  /** A lifecycle input no wait names is a wake of its own, a queued refusal among them
+   *  (hearsay-tools/cezarion#1301): `owesDelivery` counts it as owed, so its delivery ends the run
+   *  of failed deliveries, as a message's does. */
+  private isUnnamedLifecycleInput(run: RunRecord, input: AgentInput): boolean {
+    return input.source === 'lifecycle' && !waitNamedInputIds(run).has(input.id);
   }
 
   /** The failure count is on the run record, so a restart keeps it (hearsay-tools/cezarion#1234). */
@@ -2631,7 +2645,7 @@ export class RunManager {
    */
   private pendingConversationWakes(run: RunRecord): AgentInput[] {
     const owed = new Set(resolvedWaits(run).map(waitInputId));
-    const named = new Set([...run.waits ?? [], ...(run.lastWaits ?? []).filter(wait => wait.phase === 'delivered')].flatMap(wait => [wait.id, waitInputId(wait)]));
+    const named = waitNamedInputIds(run);
     const answer = this.routedAnswer(run.id);
     return (run.agentInputs ?? []).filter(input => (input.conversation || (input.source === 'lifecycle' && !named.has(input.id))) &&
       !input.deliveredAt && !hasLiveInboxClaim(input) &&
@@ -4646,12 +4660,20 @@ export class RunManager {
       this.parkForUser(runId, state, stepId);
       return true;
     }
-    state.completionNudged = session;
-    this.clearIdleTimer(state);
-    this.armNoWaitNudgeReplyTimer(runId, state);
+    this.awaitCompletionNudgeReply(runId, state, session);
     const spent = this.chargeAutomaticWake(runId);
     this.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), message: `${COMPLETION_NUDGE_NOTE} (${spent}/${MAX_AUTO_CONTINUES}): ${refusal.code}` });
     return true;
+  }
+
+  /** The session just took a refusal nudge, live or queued (hearsay-tools/cezarion#1301): its turn is
+   *  the nudge's, and its reply is bounded by the no-wait nudge's reply timer, so a harness that
+   *  reads the refusal and says nothing parks on Cezar's human wait instead of holding the slot. */
+  private awaitCompletionNudgeReply(runId: string, state: ActiveRun, session: AgentSession): void {
+    state.completionNudged = session;
+    state.noWaitNudgeSawContent = false;
+    this.clearIdleTimer(state);
+    this.armNoWaitNudgeReplyTimer(runId, state);
   }
 
   /**
@@ -4668,6 +4690,11 @@ export class RunManager {
     this.store.updateRun(runId, { status: 'waiting', activity: undefined, finishedAt: undefined });
     this.store.flush();
     if (this.holdsAgentWaits(runId)) return true;
+    // One refusal owed at a time: the copy already queued reopens the run (hearsay-tools/cezarion#1301).
+    if (this.owesCompletionRefusal(runId)) {
+      try { this.queueWaitWake(runId); } catch { this.retryWaitAdmission(runId); }
+      return true;
+    }
     if (this.automaticWakes(runId) >= MAX_AUTO_CONTINUES) {
       this.surfaceHumanWait(runId, state, this.openHumanAlias(runId, state, 'budget'));
       return true;
@@ -4690,6 +4717,14 @@ export class RunManager {
   /** A refusal `queueCompletionRefusal` queued and the run has not received yet. */
   private owesCompletionRefusal(runId: string): boolean {
     return !!this.store.getRun(runId)?.agentInputs?.some(input => !input.deliveredAt && this.completionRefusalInputs.has(input.id));
+  }
+
+  /** A closing session leaves the run something to reopen for: an agent wait, or a refusal queued
+   *  for it (hearsay-tools/cezarion#1301). A refusal takes a wait's bounded delivery retry, so a
+   *  session that keeps closing before it is submitted stops at `MAX_WAKE_DELIVERY_ATTEMPTS`
+   *  instead of reaching the success path, which would queue the refusal again. */
+  private holdsClosingWakes(runId: string): boolean {
+    return this.holdsAgentWaits(runId) || this.owesCompletionRefusal(runId);
   }
 
   /** A human message or a wake (hearsay-tools/cezarion#1301): the turn it opens or steers no longer
@@ -5687,6 +5722,8 @@ export class RunManager {
     // Every delivered turn ends with the waits still open.
     const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? []);
     if (footer) content = [...content, { type: 'text', text: footer }];
+    // A refusal queued for a closed session (hearsay-tools/cezarion#1301): this turn is the nudge's.
+    const refusal = inputIds.some(id => this.completionRefusalInputs.has(id));
     const flight: NonNullable<ActiveRun['agentInputFlight']> = { session, inputIds,
       ...(this.waitWakeAdmitted.has(runId) && state.atTurnBoundary === session ? { admittedWake: true } : {}) };
     // A batch with timer results is an automatic wake: it reserves one unit of the budget now, so a
@@ -5767,6 +5804,9 @@ export class RunManager {
             this.waiting.delete(runId); this.clearIdleTimer(state);
             this.store.updateRun(runId, { status: 'running', activity: undefined });
           }
+          // The wake's checkpoint clears the park's timers, the nudge's reply bound with them: a
+          // refusal's bound belongs to its turn (hearsay-tools/cezarion#1301).
+          if (refusal && state.completionNudged === session) this.armNoWaitNudgeReplyTimer(runId, state);
           if (conversationIds.length) {
             const queue = this.store.getRun(runId)?.agentInputs ?? [];
             const deliveredAt = new Date().toISOString();
@@ -5813,8 +5853,10 @@ export class RunManager {
     if (flight.admittedWake || resolvedWaits(this.store.getRun(runId) ?? {}).some(wait => inputIds.includes(waitInputId(wait)))) state.waitWakeTurn = session;
     // A refusal queued while the session was gone makes this the nudge's turn; any other input is a
     // wake, which starts a fresh cycle (hearsay-tools/cezarion#1301). A live nudge carries no input.
-    if (inputIds.filter(id => this.completionRefusalInputs.delete(id)).length) state.completionNudged = session;
-    else if (inputIds.length) this.startCompletionCycle(state);
+    if (refusal) {
+      for (const id of inputIds) this.completionRefusalInputs.delete(id);
+      this.awaitCompletionNudgeReply(runId, state, session);
+    } else if (inputIds.length) this.startCompletionCycle(state);
     return true;
   }
 
@@ -7107,7 +7149,7 @@ export class RunManager {
       this.persistWorkerAssistantResult(runId, stepId, result.text);
       // A durable CI wait keeps recovery live, not this failed attempt successful.
       if (sessionError || state.agentInputError) throw new Error(sessionError ?? state.agentInputError);
-      if (this.holdsAgentWaits(runId) && !state.cancelled) {
+      if (this.holdsClosingWakes(runId) && !state.cancelled) {
         sink.sessionEnded('end_turn');
         // A clean close that leaves results undelivered is a failed delivery too.
         const delivery = this.owesDelivery(runId) ? this.failedWakeDelivery(runId, WAKE_SESSION_CLOSED_ERROR) : 'park';
@@ -7195,7 +7237,7 @@ export class RunManager {
       this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt: finishedAt() });
       appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
       this.withdrawCezarHumanWaits(runId);
-      const delivery = this.holdsAgentWaits(runId) && !state.cancelled ? this.failedWakeDelivery(runId, message) : 'settle';
+      const delivery = this.holdsClosingWakes(runId) && !state.cancelled ? this.failedWakeDelivery(runId, message) : 'settle';
       if (delivery === 'park') {
         // Retain the wait and scheduler wake source while closing this attempt.
         // settleSuccess only completes running/waiting steps, so its failure is durable.
@@ -7556,13 +7598,13 @@ export class RunManager {
         // runAgentStep already emitted session.ended(error). Record the failed
         // attempt before parking so later successful CI recovery cannot erase it.
         if (failure) {
-          if (this.holdsAgentWaits(runId)) this.store.updateRun(runId, { workflowResumeStepId: step.id });
+          if (this.holdsClosingWakes(runId)) this.store.updateRun(runId, { workflowResumeStepId: step.id });
           this.finishStep(runId, step.id, 'failed', failure, emit);
           runError = `step "${step.id}" failed: ${failure}`;
         }
         // A clean close that leaves results undelivered is a failed delivery too.
         const undelivered = failure ?? (this.owesDelivery(runId) ? WAKE_SESSION_CLOSED_ERROR : undefined);
-        const delivery = this.holdsAgentWaits(runId) && !state.cancelled
+        const delivery = this.holdsClosingWakes(runId) && !state.cancelled
           ? undelivered ? this.failedWakeDelivery(runId, undelivered) : 'park' : 'settle';
         if (delivery === 'capped') {
           deliveryCapped = true;
