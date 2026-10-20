@@ -367,6 +367,16 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => store.getRun(p.id)?.status === 'waiting');
   });
 
+  /** hearsay-tools/cezarion#1301: a legacy accepted Finish behind live workers settles as a blocked
+   *  done. Its intent is cleared and the root owes the refusal a closed session gets, which the
+   *  scheduler's continuation delivers; it neither finishes nor parks on a completion deadline. */
+  const expectLegacyFinishRefused = (parentId: string) => {
+    const run = store.getRun(parentId)!;
+    expect(['queued', 'waiting', 'running']).toContain(run.status);
+    expect(run.delegation).not.toHaveProperty('finishRequestedAt');
+    expect(run.agentInputs?.some(input => input.source === 'lifecycle' && input.text.startsWith('Workers are still live:'))).toBe(true);
+  };
+
   it.each(['queued', 'continued'])('legacy pending inactive Finish holds %s children while unrelated work progresses', async mode => {
     const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
     const w = await worker(p.id); manager.enqueueOwnedRun(w.id);
@@ -394,7 +404,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       expect(semaphore.busy()).toBe(0);
     } finally { release(); await completion; }
     expect(store.getRun(queued.id)?.status).not.toBe('cancelled');
-    expect(store.getRun(p.id)?.status).toBe('waiting');
+    expectLegacyFinishRefused(p.id);
   });
 
   it.each(['fresh', 'continuation'])('legacy pending inactive Finish rechecks a %s child at the pre-spawn boundary', async mode => {
@@ -426,7 +436,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       expect(semaphore.busy()).toBe(0);
     } finally { start(); finish(); await completion; }
     expect(store.getRun(w.id)?.status).not.toBe('cancelled');
-    expect(store.getRun(p.id)?.status).toBe('waiting');
+    expectLegacyFinishRefused(p.id);
   });
 
   for (const failure of ['diff', 'checkpoint'] as const) {

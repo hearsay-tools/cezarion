@@ -1527,23 +1527,25 @@ export async function cancelAutoResume(id: string): Promise<CancelAutoResumeResp
 /** Sweep finished runs into the archive in one call — the Tasks header's "Archive finished"
  *  button (no scope) or one sidebar group (`unpinned` / `pinned`). What it takes is
  *  `isSweepable` (`lib/tasks-table.ts`): scheduled resumes and owned workers are skipped. */
-export async function archiveFinished(scope?: ArchiveFinishedScope): Promise<ArchiveFinishedResponse> {
-  return archiveProjectFinished(queryScope(), scope)
+export async function archiveFinished(scope?: ArchiveFinishedScope, automation?: boolean): Promise<ArchiveFinishedResponse> {
+  return archiveProjectFinished(queryScope(), scope, automation)
 }
 
 /**
  * The same sweep by EXPLICIT project — the twin of `pinProjectRun`, for the sidebar rail that
  * archives in a row's own project rather than the one `queryScope()` names. Without a scope the
- * body stays `{}`, which is the Tasks page's sweep.
+ * body stays `{}`, which is the Tasks page's sweep. `automation` is the sidebar tab's filter
+ * (hearsay-tools/cezarion#1332): `true` on Automations, `false` on Active.
  */
 export async function archiveProjectFinished(
   projectId: string,
   scope?: ArchiveFinishedScope,
+  automation?: boolean,
 ): Promise<ArchiveFinishedResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId'].runs['archive-finished'].$post({
       param: { projectId },
-      json: scope ? { scope } : {},
+      json: { ...(scope ? { scope } : {}), ...(automation !== undefined ? { automation } : {}) },
     }),
     '/runs/archive-finished',
   )

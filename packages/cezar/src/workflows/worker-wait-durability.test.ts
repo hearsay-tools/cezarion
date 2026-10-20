@@ -214,7 +214,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => terminal.includes(store.getRun(w.id)?.status ?? ''));
     const wake = waitOf(store.getRun(p.id)); expect(wake?.phase).toBe('wake-pending');
     expect(store.getRun(p.id)?.agentInputs?.some(i => i.deliveredAt)).not.toBe(true);
-    manager.reconcileWorkerWaits(); manager.queueWorkerWake(p.id); manager.queueWorkerWake(p.id);
+    manager.reconcileWorkerWaits(); manager.reconcileWorkerWaits();
     manager.cancel(blocker.id);
     await until(() => !waitOf(store.getRun(p.id)));
     expect(store.getRun(p.id)?.agentInputs).toHaveLength(1);
@@ -307,7 +307,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent(); const w = await worker(p.id, 'mock:ask');
     const wait = register(p.id, [w.id]); manager.enqueueOwnedRun(w.id);
     await until(() => store.readEvents(w.id).some(event => event.type === 'ask.requested'));
-    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(wait.deadline);
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(wait.deadline!);
     manager.reconcileWorkerWaits(); vi.useRealTimers();
     await until(() => !waitOf(store.getRun(p.id)));
     expect(store.getRun(w.id)?.status).toBe('waiting');
@@ -323,7 +323,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(() => register(p.id, [w.id], 1801)).toThrow();
     expect(() => register(p.id, [randomUUID()])).toThrow();
     const wait = manager.registerWorkerWait(p.id, { workerIds: [w.id] } as never);
-    expect(Date.parse(wait.deadline) - Date.now()).toBeGreaterThan(599_000);
+    expect(Date.parse(wait.deadline!) - Date.now()).toBeGreaterThan(599_000);
     expect(register(p.id, [w.id]).id).toBe(wait.id);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
     manager.sendMessage(p.id, [{ type: 'text', text: 'mock:ask' }]);
@@ -335,7 +335,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent('mock:slow'); const w = await worker(p.id);
     const wait = register(p.id, [w.id], 1);
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
-    vi.setSystemTime(wait.deadline); manager.reconcileWorkerWaits();
+    vi.setSystemTime(wait.deadline!); manager.reconcileWorkerWaits();
     expect(waitOf(store.getRun(p.id))?.phase).toBe('wake-pending');
     expect(semaphore.busy()).toBe(1); expect(store.getRun(w.id)?.status).toBe('queued');
     expect(store.getRun(p.id)?.agentInputs?.some(i => i.deliveredAt)).not.toBe(true);

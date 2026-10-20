@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { summaryOf } from '@/test/run-summary-fixture'
+import { timerWait, workerWait } from '@/test/wait-fixtures'
 import { describe, expect, it } from 'vitest'
 
 import type { RunRecord, RunSummary, RunStatus } from '@open-mercato/cezar-api-client'
@@ -15,6 +16,8 @@ import {
   refPrefixMatches,
   runTitle,
   sidebarActiveRunId,
+  sidebarCounts,
+  sidebarRuns,
   sortRuns,
   splitRefPrefix,
   type QuickListBucket,
@@ -83,8 +86,9 @@ describe('bucketOf', () => {
     expect(bucketOf(run({ status, archived: true }), 'archived')).toBe('Archived')
   })
 
+  // The monitoring park is the agent's open timer since hearsay-tools/cezarion#1301.
   it("a monitoring run stays in Working, not Needs you (#490)", () => {
-    expect(bucketOf(run({ status: 'running', activity: 'monitoring' }), 'active')).toBe('Working')
+    expect(bucketOf(run({ status: 'waiting', waits: [timerWait()] } as Partial<RunRecord>), 'active')).toBe('Working')
   })
 
   it('a run waiting out a usage limit is Working, not Finished', () => {
@@ -655,14 +659,14 @@ describe('pin promotion preserves visible variant membership (#93)', () => {
   })
 })
 
-it.each(['registered', 'parked', 'wake-pending'] as const)('keeps %s worker waits in the appropriate existing group/count', phase => {
-  const record = run({ status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase, outcomes: [] } } })
-  expect(bucketOf(record, 'active')).toBe(phase === 'registered' ? 'Needs you' : 'Working')
-  expect(listCounts([record, run({ status: 'waiting' })])).toEqual({ active: 2, archived: 0, waiting: phase === 'registered' ? 2 : 1 })
+it.each(['open', 'resolved'] as const)('keeps %s worker waits in the appropriate existing group/count', phase => {
+  const record = run({ status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [] }, waits: [workerWait({ workerIds: ['worker'], phase })] } as Partial<RunRecord>)
+  expect(bucketOf(record, 'active')).toBe('Working')
+  expect(listCounts([record, run({ status: 'waiting' })])).toEqual({ active: 2, archived: 0, waiting: 1 })
 })
 
 it('counts a parked parent question as Needs you from the run summary', () => {
-  const record = run({ status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })
+  const record = run({ status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [] }, waits: [workerWait({ workerIds: ['worker'] })] } as Partial<RunRecord>)
   expect(bucketOf(record, 'active')).toBe('Needs you')
   expect(listCounts([record])).toEqual({ active: 1, archived: 0, waiting: 1 })
   expect(bucketOf({ ...record, hasPendingHumanAsk: false }, 'active')).toBe('Working')
@@ -793,7 +797,7 @@ it('keeps attentive pins after the cap is exhausted without spending ordinary ro
 
 it('does not bury an attentive variant behind a non-attentive waiting parent', () => {
   const parked = run({ id: 'parked', status: 'waiting', groupId: 'g', variant: 'A',
-    delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })
+    delegation: { role: 'root', permissions: [], receipts: [] }, waits: [workerWait({ workerIds: ['worker'] })] } as Partial<RunRecord>)
   expect(shape(groupRuns([parked, run({ status: 'review', groupId: 'g', variant: 'B' })], 'active'))).toEqual(['Needs you: [AB]'])
 })
 
@@ -837,4 +841,34 @@ describe('project sidebar combined limits (#810)', () => {
 it.each([null, [], 'broken', { overall: -1 }, { overall: 'unlimited' }].map(value => [value]))('applies shipped defaults to malformed stored limits %j', limits => {
   const buckets = groupRuns(Array.from({ length: 12 }, (_, i) => run({ id: `malformed-${i}` })), 'active')
   expect(capBuckets(buckets, limits as never).flatMap(bucket => bucket.rows)).toHaveLength(10)
+})
+
+describe('sidebar Active and Automations (#1332)', () => {
+  const auto = (over: Partial<RunRecord> = {}): RunSummary => ({ ...run(over), automationId: 'auto-1' })
+  const fixture = () => [
+    run({ id: 'manual', status: 'running' }),
+    run({ id: 'autonomous', autonomous: true }),
+    auto({ id: 'scheduled' }),
+    auto({ id: 'asks', status: 'waiting' }),
+    auto({ id: 'gone', archived: true }),
+    run({ id: 'archived', archived: true }),
+    { ...ownedWorker({ id: 'worker', status: 'waiting' }), automationId: 'auto-1' },
+    auto({ id: 'va', groupId: 'g1', variant: 'A', title: 'Nightly (A)' }),
+    auto({ id: 'vb', groupId: 'g1', variant: 'B', title: 'Nightly (B)' }),
+  ]
+
+  it('splits unarchived tasks by recorded origin, never by autonomy', () => {
+    expect(sidebarRuns(fixture(), 'active').map((r) => r.id)).toEqual(['manual', 'autonomous'])
+    expect(sidebarRuns(fixture(), 'automations').map((r) => r.id)).toEqual(['scheduled', 'asks', 'worker', 'va', 'vb'])
+  })
+
+  it('keeps an automation variant group as one tile in its status section', () => {
+    expect(shape(groupRuns(sidebarRuns(fixture(), 'automations'), 'active'))).toEqual(['Needs you: asks', 'Finished: scheduled, [AB]'])
+  })
+
+  it('counts each tab and its own attention, without workers or archived tasks', () => {
+    // Variants count one per run, as the Tasks table counts them.
+    expect(sidebarCounts(fixture())).toEqual({ active: 2, automations: 4, activeWaiting: 0, automationsWaiting: 1 })
+    expect(sidebarCounts([])).toEqual({ active: 0, automations: 0, activeWaiting: 0, automationsWaiting: 0 })
+  })
 })

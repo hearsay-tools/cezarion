@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runIndexEntrySchema, runSummarySchema, toRunSummary, type RunRecord } from './runs.ts';
+import { isAutomationTask, runIndexEntrySchema, runSummarySchema, toRunSummary, type RunRecord } from './runs.ts';
 
 /**
  * The slim list row (#817). `toRunSummary` is the ONE projection the list route, the workspace
@@ -34,6 +34,24 @@ describe('toRunSummary', () => {
     expect(runIndexEntrySchema.parse({ projectId: 'p1', ...summary })).toHaveProperty('pullRequests', entries);
     expect('pullRequests' in toRunSummary(record())).toBe(false);
     expect(toRunSummary(record({ pullRequests: [] } as Partial<RunRecord>))).toHaveProperty('pullRequests', []);
+  });
+
+  it('carries automation origin from either origin field, and only from those (#1332)', () => {
+    const github = toRunSummary(record({
+      automation: { automationId: 'gh-1', automationRevision: 2, receiptId: 'r1', event: 'issue.opened', githubUrl: 'https://github.com/o/r/issues/1' },
+    }));
+    expect(github).toHaveProperty('automationId', 'gh-1');
+    for (const trigger of ['schedule', 'catch-up', 'manual'] as const) {
+      const scheduled = toRunSummary(record({
+        automationTrigger: { automationId: 'sched-1', automationRevision: 1, receiptId: 'r2', trigger, occurrenceAt: '2026-10-04T09:00:00.000Z' },
+      }));
+      expect(scheduled).toHaveProperty('automationId', 'sched-1');
+      expect(isAutomationTask(scheduled)).toBe(true);
+    }
+    expect(runSummarySchema.parse(github)).toHaveProperty('automationId', 'gh-1');
+    const manual = toRunSummary(record({ autonomous: true }));
+    expect('automationId' in manual).toBe(false);
+    expect(isAutomationTask(manual)).toBe(false);
   });
 
   it('omits detail-only fields', () => {

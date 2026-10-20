@@ -427,20 +427,22 @@ describe('task quick-list', () => {
     browser.screenshot(`${artifactsDir}/quick-list-active-row.png`)
   })
 
-  it('switches to the archived view, and back', () => {
+  it('switches to the automations view, and back (#1332)', () => {
     browser.goto(`${baseUrl}${scoped('/')}`)
     browser.waitForFunction(`document.querySelector('[data-slot="quick-list-bucket"]') !== null`)
     browser.waitForFunction(`document.querySelector('[data-slot="quick-list"] [data-slot="view-tab"]') !== null`)
     expect(textOf('[data-slot="view-tab"][data-view="active"]')).toBe('Active5')
-    expect(textOf('[data-slot="view-tab"][data-view="archived"]')).toBe('Archived1')
+    // No fixture task came from an automation, and archived history is the Tasks table's.
+    expect(textOf('[data-slot="view-tab"][data-view="automations"]')).toBe('Automations')
+    expect(browser.count('[data-slot="view-tab"][data-view="archived"]')).toBe(0)
 
-    browser.click('[data-slot="view-tab"][data-view="archived"]')
-    browser.waitForFunction(`document.querySelector('[data-bucket="Archived"]') !== null`)
-    expect(browser.text('[data-slot="quick-list-bucket"][data-bucket="Archived"]')).toContain('Sync merged PR issues')
-    // The active runs are gone, not merely restyled.
+    browser.click('[data-slot="view-tab"][data-view="automations"]')
+    expect(browser.waitForValue(`document.querySelector('[data-slot="quick-list"] p')?.textContent ?? null`)).toBe('No automation tasks.')
+    // The active runs are gone, not merely restyled, and the archived one never shows.
     expect(browser.count(`${ROW}[data-run-id="fix-review-pr"]`)).toBe(0)
+    expect(browser.count(`${ROW}[data-run-id="fix-archived"]`)).toBe(0)
 
-    browser.screenshot(`${artifactsDir}/quick-list-archived.png`)
+    browser.screenshot(`${artifactsDir}/quick-list-automations.png`)
 
     browser.click('[data-slot="view-tab"][data-view="active"]')
     browser.waitForFunction(`document.querySelector('[data-run-id="fix-review-pr"]') !== null`)
@@ -586,7 +588,7 @@ describe('tasks table overview', () => {
     ).toBe(scoped('/compare/fix-group-1'))
   })
 
-  it('keeps the table and sidebar archive filters independent', () => {
+  it('keeps the table archive filter and the sidebar tabs independent', () => {
     browser.click('[data-slot="overview-tab"][data-view="archived"]')
     browser.waitForFunction(`document.querySelector('${TABLE_ROW}[data-run-id="fix-archived"]') !== null`)
     expect(browser.count(TABLE_ROW)).toBe(1)
@@ -599,7 +601,8 @@ describe('tasks table overview', () => {
     ).toBe('true')
     expect(browser.count('[data-slot="task-row"][data-run-id="fix-review-pr"]')).toBe(1)
 
-    browser.click('[data-slot="view-tab"][data-view="archived"]')
+    browser.click('[data-slot="view-tab"][data-view="automations"]')
+    browser.waitForFunction(`document.querySelector('[data-slot="view-tab"][data-view="automations"]').getAttribute('aria-pressed') === 'true'`)
     expect(
       browser.evaluate(
         `document.querySelector('[data-slot="overview-tab"][data-view="archived"]').getAttribute('aria-pressed')`
@@ -766,7 +769,7 @@ describe('the tasks table under worst-case row content', () => {
   /**
    * One record carrying every column's worst case at once, because the question is whether they
    * fit BESIDE each other. `status: 'waiting'` plus a root delegation parked on a worker is the
-   * longest status label the cockpit can print (`delegationWaitLabel` → "waiting on workers"),
+   * longest status label the cockpit can print (`deriveAttention` → "waiting on workers"),
    * and a serve boot keeps it: `RunManager.recover()` re-parks a run that owns a worker wait
    * rather than settling it, which is what makes a non-terminal status reachable from a fixture
    * at all.

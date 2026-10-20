@@ -117,8 +117,9 @@ export interface ThreadAsk {
   routedToParent?: boolean
   parentRunId?: string
   answeredBy?: 'human' | 'parent'
-  /** Finish ended the task with the question unanswered (hearsay-tools/cezarion#1260). */
-  closed?: 'finish'
+  /** Finish ended the task with the question unanswered (hearsay-tools/cezarion#1260), or new input
+   *  superseded a worker's fallback question (hearsay-tools/cezarion#1301). */
+  closed?: 'finish' | 'superseded'
 }
 
 /** Native approvals belong to the live request that offered the choices, never a later turn. */
@@ -1004,9 +1005,9 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
         break
       }
       case 'human-ask-closed': {
-        if (event.reason === 'finish' && pendingAsk && !pendingAsk.resolved && pendingAsk.askSeq === event.askSeq) {
+        if ((event.reason === 'finish' || event.reason === 'superseded') && pendingAsk && !pendingAsk.resolved && pendingAsk.askSeq === event.askSeq) {
           pendingAsk.resolved = true
-          pendingAsk.closed = 'finish'
+          pendingAsk.closed = event.reason
           pendingAsk = undefined
         }
         break

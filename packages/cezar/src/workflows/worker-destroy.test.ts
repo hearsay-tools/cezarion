@@ -859,18 +859,19 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       const cadence = other as unknown as { orphanBackoff: Backoff };
       // After the fast window a slow probe remains the wake source; it never gives up.
       cadence.orphanBackoff = window === 'inside' ? { fastMs: 100, fastCount: 60, capMs: 3_600_000 } : { fastMs: 600_000, fastCount: 0, capMs: 100 };
-      const owner = reopened.getRun(parent.id)!;
-      if (owner.delegation?.role !== 'root') throw Error('fixture');
-      reopened.commitDelegation([{ id: parent.id, delegation: { ...owner.delegation, wait: { id: randomUUID(), workerIds: [w.id],
-        revisions: [{ workerId: w.id, revision: 0 }], deadline: new Date(Date.now() + 600_000).toISOString(), phase: 'parked', outcomes: [] } } }]);
-      const wait = () => { const run = reopened.getRun(parent.id); return run?.delegation?.role === 'root' ? run.delegation.wait ?? run.delegation.lastWait : undefined; };
+      // The parent's worker wait is a wait-list entry (hearsay-tools/cezarion#1301).
+      const waitId = randomUUID(); const now = Date.now();
+      reopened.commitWait(parent.id, { kind: 'worker', id: waitId, source: 'agent', via: 'cez-worker-wait', registeredAt: new Date(now).toISOString(),
+        deadline: new Date(now + 600_000).toISOString(), timeoutSeconds: 600, phase: 'open', turnId: 'turn-1', mode: 'all',
+        workerIds: [w.id], revisions: [{ workerId: w.id, revision: 0 }], outcomes: [] });
+      const wait = () => { const run = reopened.getRun(parent.id); return [...(run?.waits ?? []), ...(run?.lastWaits ?? [])].find((entry): entry is Extract<typeof entry, { kind: 'worker' }> => entry.id === waitId && entry.kind === 'worker'); };
       try {
         await other.recover();
         expect(reopened.readWorkerExecution(w.id)?.phase).toBe('starting');
         expect(wait()?.outcomes).toEqual([]);
         child.proc.kill('SIGKILL'); await child.exited;
         await until(() => reopened.readWorkerExecution(w.id)?.phase === 'complete');
-        await until(() => !!wait()?.outcomes.some(outcome => outcome.workerId === w.id));
+        await until(() => !!wait()?.outcomes?.some(outcome => outcome.workerId === w.id));
         expect(wait()!.outcomes).toEqual([expect.objectContaining({ workerId: w.id, revision: 0, status: 'failed' })]);
       } finally { other.dispose(); reopened.flush(); }
     });

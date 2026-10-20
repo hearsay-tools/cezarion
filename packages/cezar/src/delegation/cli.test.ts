@@ -7,7 +7,7 @@ import { Writable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runWorkerCommand } from './cli.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
-import { fixture } from './service.testkit.ts';
+import { fixture, seedWorkerWait } from './service.testkit.ts';
 import { createDelegationRoutes } from './routes.ts';
 import { createDelegationApp, startDelegationTransport } from './transport.ts';
 
@@ -468,11 +468,10 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
       expect(await runWorkerCommand(['wait', workerId, '--mode', mode], env)).toBe(1);
       expect(json().code).toBe('incompatible_state');
     }
-    const waitId = randomUUID(); const delegation = f.store.getRun(f.parent.id)!.delegation!;
+    const delegation = f.store.getRun(f.parent.id)!.delegation!;
     if (delegation.role !== 'root') throw Error('fixture');
-    f.store.commitDelegation([{ id: f.parent.id, delegation: { ...delegation, permissions: ['wait'], wait: {
-      id: waitId, workerIds: [workerId], phase: 'registered', deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [],
-    } } }]);
+    f.store.commitDelegation([{ id: f.parent.id, delegation: { ...delegation, permissions: ['wait'] } }]);
+    const waitId = seedWorkerWait(f.store, f.parent.id, [workerId]);
     expect(await runWorkerCommand(['cancel-wait', waitId], env)).toBe(0);
     expect(json()).toMatchObject({ wait: { id: waitId, reason: 'cancelled' } });
     expect(f.store.getRun(workerId)?.status).toBe('queued');

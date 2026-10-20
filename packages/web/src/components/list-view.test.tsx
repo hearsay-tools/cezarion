@@ -9,7 +9,7 @@ afterEach(cleanup)
 function Consumer({ name }: { name: string }) {
   const [view, setView] = useListView()
   return (
-    <button type="button" onClick={() => setView(view === 'active' ? 'archived' : 'active')}>
+    <button type="button" onClick={() => setView(view === 'active' ? 'automations' : 'active')}>
       {name}:{view}
     </button>
   )
@@ -38,11 +38,11 @@ describe('ListViewProvider', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'sidebar:active' }))
-    expect(screen.getByRole('button', { name: 'sidebar:archived' })).not.toBeNull()
-    expect(screen.getByRole('button', { name: 'table:archived' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'sidebar:automations' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'table:automations' })).not.toBeNull()
 
     // …and back, from the other one.
-    fireEvent.click(screen.getByRole('button', { name: 'table:archived' }))
+    fireEvent.click(screen.getByRole('button', { name: 'table:automations' }))
     expect(screen.getByRole('button', { name: 'sidebar:active' })).not.toBeNull()
   })
 

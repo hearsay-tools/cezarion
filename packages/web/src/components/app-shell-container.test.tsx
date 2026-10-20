@@ -436,9 +436,9 @@ describe('sidebar wiring', () => {
     await waitFor(() => expect(inSidebar().queryByRole('button', { name: 'More views' })).toBeNull())
   })
 
-  it('keeps the archive filter beside the current project tasks', async () => {
+  it('keeps the automations filter beside the current project tasks (#1332)', async () => {
     const active = run({ id: 'active-session', titleSummary: 'Current session' })
-    const archived = run({ id: 'archived-session', titleSummary: 'Archived session', status: 'done', archived: true })
+    const archived = { ...run({ id: 'archived-session', titleSummary: 'Nightly sweep', status: 'done' }), automationId: 'auto-1' }
     serve({
       '/api/v1/health': { ...HEALTH, bootProject: 'cezar' },
       '/api/v1/todos': [],
@@ -452,7 +452,7 @@ describe('sidebar wiring', () => {
     })
     renderShell('/p/cezar/new')
     await screen.findByRole('link', { name: /Current session/ })
-    const archivedTab = await screen.findByRole('button', { name: /^Archived/ })
+    const archivedTab = await screen.findByRole('button', { name: /^Automations/ })
     const tree = document.querySelector('[data-slot="project-task-navigation"]')!
     expect(tree.contains(archivedTab)).toBe(true)
     fireEvent.click(archivedTab)
@@ -462,7 +462,7 @@ describe('sidebar wiring', () => {
     await waitFor(() => expect(document.querySelector('[data-run-id="active-session"]')).not.toBeNull())
   })
 
-  it('counts only current-project sessions in Active/Archived', async () => {
+  it('counts only current-project sessions in Active/Automations', async () => {
     localStorage.setItem('cez-sidebar-collapsed', JSON.stringify({ shop: false }))
     const bootActive = run({ id: 'boot-active', titleSummary: 'Boot active' })
     const shopWaiting = run({ id: 'shop-wait', titleSummary: 'Shop waiting', status: 'waiting' })
@@ -484,7 +484,7 @@ describe('sidebar wiring', () => {
     expect(screen.queryByRole('link', { name: /Shop waiting/ })).toBeNull()
     const list = within(document.querySelector('[data-slot="quick-list"]') as HTMLElement)
     expect(list.getByRole('button', { name: /^Active/ }).textContent).toContain('1')
-    expect(list.getByRole('button', { name: /^Archived/ }).textContent).toBe('Archived')
+    expect(list.getByRole('button', { name: /^Automations/ }).textContent).toBe('Automations')
     localStorage.removeItem('cez-sidebar-collapsed')
   })
 

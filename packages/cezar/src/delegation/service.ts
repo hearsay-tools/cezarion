@@ -50,7 +50,7 @@ import {
   type WorkerWait,
   type WorkerWaitRequest,
 } from '@open-mercato/cezar-contract/delegation';
-import { workerWaitEntryToLegacy, type WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import { completionWaitEntry, hasWorkerDeadline, workerCompletionWaitProjection, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import type { RunStore, RunRecord } from '../runs/store.ts';
 import { workerDestroyView, workerOutcome } from '../runs/delegation-state.ts';
 import type { DelegationExecutionSettings, RunManager } from '../workflows/run.ts';
@@ -620,20 +620,22 @@ export class DelegationService {
     project.manager.settleOrphanedWorkerExecution(worker.id); // #469: an orphan that died after recovery settles
     const outcome = workerOutcome(worker, new Date().toISOString());
     const wait = this.inspectedWait(parent, worker.id);
+    const completion = parent.delegation?.role === 'root' ? completionWaitEntry(parent.waits, worker.id) : undefined;
+    const completionWait = completion ? workerCompletionWaitProjection(completion, parent) : undefined;
     return { workerId: worker.id, parentRunId: parent.id, status: worker.status, workspace: worker.delegation.workspace,
       ...(worker.runner === undefined ? {} : { backend: worker.runner }), ...(worker.model === undefined ? {} : { model: worker.model }),
       ...(worker.delegation.context === undefined ? {} : { inputs: worker.delegation.context.inputs }),
       ...(worker.currentStepId === undefined ? {} : { currentStepId: worker.currentStepId }),
       ...(worker.activity === undefined ? {} : { activity: worker.activity }),
-      ...(wait ? { wait } : {}), ...(worker.delegation.destroy ? { destroy: workerDestroyView(worker) } : {}), ...(outcome ? { outcome } : {}) };
+      ...(wait ? { wait } : {}), ...(completionWait ? { completionWait } : {}), ...(worker.delegation.destroy ? { destroy: workerDestroyView(worker) } : {}), ...(outcome ? { outcome } : {}) };
   }
-  /** The wait an inspection shows: the completion gate's (`delegation.wait`, until phase 3b of
-   *  hearsay-tools/cezarion#1235), else the newest open or owed list wait naming the worker, in
-   *  the legacy `WorkerWait` shape. */
+  /** The wait an inspection shows: the newest open or owed list wait naming the worker, in the
+   *  legacy `WorkerWait` shape (hearsay-tools/cezarion#1235). Cezar's completion wait carries no
+   *  deadline, which that shape requires, so inspection shows it as `completionWait`
+   *  (hearsay-tools/cezarion#1301). */
   private inspectedWait(parent: RunRecord, workerId: string): WorkerWait | undefined {
     if (parent.delegation?.role !== 'root') return undefined;
-    if (parent.delegation.wait) return parent.delegation.wait;
-    const entry = (parent.waits ?? []).filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker' && !!wait.workerIds?.includes(workerId)).at(-1);
+    const entry = (parent.waits ?? []).filter((wait): wait is DeadlinedWorkerWaitEntry => wait.kind === 'worker' && hasWorkerDeadline(wait) && !!wait.workerIds?.includes(workerId)).at(-1);
     return entry ? workerWaitEntryToLegacy(entry) : undefined;
   }
   async collect(caller: Caller, params: WorkerParams): Promise<WorkerCollectedResult> {

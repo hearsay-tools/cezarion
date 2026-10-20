@@ -9,7 +9,7 @@ import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 import {
-  checkpoint, controlledWire, manager, parent, restart, root, semaphore,
+  checkpoint, controlledWire, manager, parent, restart, root, semaphore, spendWorkerBudget,
   store, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
 
@@ -23,6 +23,8 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
     store.commitDelegation([{ id: p.id, delegation: { ...metadata, permissions: [...metadata.permissions, 'steer'] } }]);
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id, 'mock:hold', runner);
+    // An idle worker that only talks: it plain-parks rather than ask its parent (hearsay-tools/cezarion#1301).
+    spendWorkerBudget(w.id);
     manager.enqueueOwnedRun(w.id);
     await until(() => store.getRun(w.id)?.status === 'waiting');
     const credentials = new CredentialRegistry();

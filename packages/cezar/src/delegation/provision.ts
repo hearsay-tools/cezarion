@@ -92,7 +92,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         `An available diff.path points to a JSON result file: read its diffSnapshot field for the bounded patch, not the file as a raw patch.`,
         `Running output is partial.`,
         `Collect the latest settled revision of every worker before completing; Continue invalidates older readiness.`,
-        `Automatic completion waits for workers then wakes you to inspect and collect, never silently finishes; a finite timeout needs explicit attention.`,
+        `A done while workers are live or uncollected is refused once with what to do first; done again while workers are live makes Cezar wait on them for you and wake you when they have all settled, never silently finishing.`,
         `If a parent is already under review, Continue the parent first, then the worker.`,
         `Review changes and deliberately integrate desired worker commits with Git before cleanup; no automatic merge or review acceptance.`,
         `Collect/integrate desired results, destroy owned resources, explicitly delete child histories through the cockpit/API, then delete parent history.`,
