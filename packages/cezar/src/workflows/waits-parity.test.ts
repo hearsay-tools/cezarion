@@ -1659,7 +1659,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       await until(() => routed() !== undefined && store.getRun(w.id)?.status === 'waiting');
       const askSeq = asks(w.id)[0]!.seq;
       const requestId = String(routed()!.messageId);
-      const unanswered = () => (manager as unknown as { unansweredQuestions(id: string): { workerId: string }[] }).unansweredQuestions(p.id);
+      const unanswered = () => (manager as unknown as { unansweredQuestions(id: string): { workerId: string; messageId: string }[] }).unansweredQuestions(p.id);
       expect(unanswered()).toEqual([expect.objectContaining({ workerId: w.id })]);
       const text = 'automatic steer U25';
       expect((manager as unknown as { deliverMessage(id: string, content: unknown[], userAuthored: boolean): boolean })
@@ -1669,8 +1669,10 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
         .toEqual([expect.objectContaining({ askSeq, reason: 'superseded' })]);
       const conversation = (store.getRun(p.id)!.delegation as { conversation?: { outcomes: Array<{ requestId: string }> } }).conversation;
       expect(conversation?.outcomes.filter(outcome => outcome.requestId === requestId)).toHaveLength(1);
-      expect(unanswered()).toEqual([]);
-      expect(humanOpen(w.id)).toEqual([]);
+      // The steer's own turn may end without a wait and route a fresh fallback question before
+      // these reads: only the superseded question is checked (hearsay-tools/cezarion#1301).
+      expect(unanswered().filter(question => question.messageId === requestId)).toEqual([]);
+      expect(humanOpen(w.id).filter(wait => wait.askSeq === askSeq)).toEqual([]);
     });
   }
 
