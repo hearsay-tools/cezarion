@@ -136,13 +136,25 @@ named executable exemptions. Prove the relevant regression fails without the
 fix. See `AGENT_PROTOCOL.md` §7 for the contract and examples. Do not defer this
 coverage to a separate issue.
 
+Keep each parity test file under about 300 s on an idle host, so that it stays
+inside Squeal's 600 s per-file cap on a loaded host. When a parity suite grows
+past that, run its `RUNNER_IDS` cells from one file per runner, defined once in
+a `*-cells.testkit.ts`, and add a guard that every runner has its file. Split a
+runner's file again by row group when one runner alone is too slow.
+`core/harness-parity-cells.testkit.ts` and
+`workflows/waits-parity-cells.testkit.ts` are the examples
+(hearsay-tools/cezarion#1288).
+
 Before opening a PR that changes `packages/cezar/src/workflows/run.ts`'s wait,
 turn-end, failure or step-settlement paths, verify every suite matching
 `packages/cezar/src/core/*-parity.test.ts` and
 `packages/cezar/src/workflows/*-parity.test.ts`: with Squeal, run
 `squeal status --wait 60000 packages/cezar/src/core/*-parity.test.ts packages/cezar/src/workflows/*-parity.test.ts`
-and require a passing verdict for all selected files (repeat if still pending);
-without Squeal, run
+and require a passing verdict for all selected files. Repeat the wait only for
+files that are still pending. A file that Squeal reports as unknown (it timed out
+at its per-file cap, or was never queued) does not become pending if you wait
+again. Run it with `npm test -- <file>`, and record that command and its result
+next to the Squeal verdict for the other files. Without Squeal, run
 `npm test -- packages/cezar/src/core/*-parity.test.ts packages/cezar/src/workflows/*-parity.test.ts`.
 
 ## The HTTP API
