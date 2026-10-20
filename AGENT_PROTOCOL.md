@@ -347,13 +347,13 @@ Notable fields (full doc-comments in the source):
   **Caveat (open-mercato/cezar#430):** the zero-config default (`DEFAULT_ALLOWED_TOOLS`) includes
   unrestricted `Bash`, and Codex/OpenCode do not honor `allowedTools` at all.
   Treat the default `auto` permission mode as full shell access, not a
-  sandbox: Codex uses `danger-full-access` with `approvalPolicy: never`, and
-  OpenCode's own permission config governs. cezar answers OpenCode's built-in
-  asks (outside-worktree reads, `.env` reads, the repeated-call guard) with a
-  once reply unless the user's config has a rule for that permission, and shows
-  any other ask as a cockpit permission card (hearsay-tools/cezarion#1266).
-  Configurable restrictive modes are specified by
-  `2026-07-17-permission-modes` (open-mercato/cezar#475).
+  sandbox: unmanaged Codex uses `danger-full-access` and keeps the user's approval
+  policy (approvals reach Needs you), and OpenCode's own permission config
+  governs. cezar answers OpenCode's built-in asks (outside-worktree reads, `.env`
+  reads, the repeated-call guard) with a once reply unless the user's config has
+  a rule for that permission, and shows any other ask as a cockpit permission
+  card (hearsay-tools/cezarion#1266). Configurable restrictive modes are
+  specified by `2026-07-17-permission-modes` (open-mercato/cezar#475).
 - `restrictNativeDelegation?` — optional per-invocation intent, mapped only inside
   adapters; absent preserves ordinary settings. Governed session provisioning
   supplies it on initial steps, Continue and recovery. See D1 below for precise
@@ -1120,7 +1120,7 @@ extensions and permissions when adding a collision-resistant per-session tool na
 | Harness | Injection and evidence required before shipping |
 | --- | --- |
 | Claude / `claude-cli` | Add `--mcp-config` without `--strict-mcp-config`; admit only the added tool when tools are restricted; exercise fresh and resumed argv. |
-| Codex | Merge `mcp_servers` for both `thread/start` and `thread/resume`; forward internal environment names with `env_vars`; verify discovery and invocation on both paths. |
+| Codex | Merge `mcp_servers` for both `thread/start` and `thread/resume`; forward internal environment names with `env_vars`; set `default_tools_approval_mode = "approve"` on that entry so Codex never asks before a cezar tool (hearsay-tools/cezarion#1294); verify discovery and invocation on both paths. |
 | OpenCode | Merge the local MCP entry into parsed runtime configuration without discarding supplied config or replacing unrelated servers; malformed configuration fails explicitly. |
 | Cursor | Supply the supported ACP descriptor and environment on `session/new` and `session/load`; verify invocation and existing permission routing. |
 | Pi | Add an explicit CI extension alongside the retry extension; exercise actual tool registration and calls without replacing discovered extensions or tool settings. |
@@ -1181,6 +1181,12 @@ could refuse it), P7 (its request is shown on receipt, with nothing to read
 first) and P8 (a request arrives only inside the turn it names). Wires with no
 native permission request carry P1's exemption for each row.
 
+**P9** (hearsay-tools/cezarion#1294) routes another MCP server's tool approval
+from the native Codex mock through `RunManager` and the cockpit HTTP decision
+route; accept and decline each reach Codex as the exact elicitation reply. The
+mock models Codex's MCP tool gate, so Codex rows of `ci-wait-parity`,
+`ci-tools` H1 and U0 fail if cezar's own server loses `approve`. Runners whose
+wires carry no MCP tool approval request have named exemptions.
 
 **R72/R73** (hearsay-tools/cezarion#994), in `workflows/ci-wait-failure-parity.test.ts`,
 drive every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native provider-error
@@ -2559,11 +2565,42 @@ and mid-turn steering. Removing the startup selection must fail the managed cell
 
 A JSON-RPC message with a method and a numeric or string ID is a server
 request, never a notification. Cezar handles modern command execution, file
-change and permission approval requests as well as `item/tool/requestUserInput`.
-Every other server request receives `-32601` (method not supported); a malformed
-supported request receives `-32602`. Unsupported legacy approvals, dynamic tools,
-MCP elicitation, token refresh and attestation therefore cannot silently stall
-the transport. Notifications have no reply.
+change and permission approval requests, MCP tool approvals and
+`item/tool/requestUserInput`. Every other server request receives `-32601`
+(method not supported); a malformed supported request receives `-32602`.
+Unsupported legacy approvals, dynamic tools, other MCP elicitations (forms, URLs),
+token refresh and attestation therefore cannot silently stall the transport.
+Notifications have no reply.
+
+#### MCP tool approvals (hearsay-tools/cezarion#1294)
+
+Codex gates every MCP tool call by the server's or tool's approval mode
+(`mcp_servers.<name>.default_tools_approval_mode`, `…tools.<tool>.approval_mode`:
+`auto | prompt | writes | approve`), separately from `approval_policy`. Unless the
+mode is `approve`, it asks the client first with `mcpServer/elicitation/request`.
+Cezar sets `approve` on its own server's per-thread entry, so its tools never wait
+on a prompt, and never sets `approval_policy`.
+
+An elicitation is a tool approval when its `mode` is `form`,
+`_meta.codex_approval_kind` is `mcp_tool_call` and `requestedSchema` asks for
+nothing (absent, null or no properties), the test Codex's own TUI applies. It
+routes like the other approvals: the same thread and turn checks, a
+`permission.requested` titled "Codex requests an MCP tool call" with the server,
+message, tool description and arguments, and these options, each answered with
+the exact native reply:
+
+| Option | Offered when | Reply |
+| --- | --- | --- |
+| Allow once | always | `{ action: "accept", content: null, _meta: null }` |
+| Allow this tool for this session | `_meta.persist` names `session` | `{ action: "accept", content: null, _meta: { persist: "session" } }` |
+| Always allow this tool (saved in your Codex config) | `_meta.persist` names `always`, and the server is not cezar's own | `{ action: "accept", content: null, _meta: { persist: "always" } }` |
+| Decline and continue | always | `{ action: "decline", content: null, _meta: null }` |
+
+Codex saves `always` as an approve rule in the user's Codex config, so it is never
+offered for cezar's per-run server. Codex reads `cancel` as the same skipped call
+as `decline`, so it is not offered. If Codex still asks before a cezar tool (an
+older Codex that ignores the key, say), the request reaches Needs you like any
+other; it is never answered silently. Elicitations carry no item ID.
 
 Approvals emit the `permission.requested` event with an opaque, fresh
 request ID, item ID when present, a title, full action/scope details and offered
