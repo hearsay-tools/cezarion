@@ -234,7 +234,9 @@ const BACKEND_ALLOW_PREFIXES: Record<AgentBackend, readonly string[]> = {
   // same multi-provider set. Not `CLAUDE_`, for pi's reason above. `OMP_` is its own config and
   // `PI_` is kept because OMP still reads `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR`
   // (OMP v18.4.11; `can1357/oh-my-pi` `docs/environment-variables.md` at main @ 7318a70cf4ed).
-  // The reverse does not hold: pi gets no `OMP_`.
+  // The reverse does not hold: pi gets no `OMP_`. Both prefixes also carry a host-exported
+  // `PI_CODING_AGENT_DIR` / `OMP_PROFILE` to every default-account session, which is how a host
+  // value moves the default account (`PROFILE_ENV_VAR` in `agent-profiles.ts`).
   omp: ['OMP_', 'PI_', ...MULTI_PROVIDER_PREFIXES],
 };
 
