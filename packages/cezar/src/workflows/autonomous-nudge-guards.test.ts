@@ -13,7 +13,7 @@ import { AUTONOMOUS_NUDGE, COMPLETION_NO_REPLY_NOTE, NO_WAIT_NO_REPLY_NOTE, NO_W
 type State = Parameters<RunManager['tryAutonomousNudge']>[1];
 const ask = { questions: [{ header: 'Choice', question: 'Which framework?', options: [{ label: 'Vitest' }, { label: 'Node' }] }] };
 const guards = ['disabled', 'cancelled', 'finish', 'disposed', 'stopping', 'input-error', 'native-ask', 'persisted-ask',
-  'closed', 'queued-input', 'unread-input', 'input-flight', 'worker-wait', 'ci-wait', 'worker-wake', 'root-finish'] as const;
+  'closed', 'queued-input', 'unread-input', 'input-flight', 'worker-wait', 'ci-wait', 'root-finish'] as const;
 
 describe('autonomous nudge priority and lifecycle guards', () => {
   let root: string;
@@ -53,14 +53,14 @@ describe('autonomous nudge priority and lifecycle guards', () => {
       case 'queued-input': store.commitAgentInputs(id, [{ id: randomUUID(), source: 'agent', parentRunId: randomUUID(), text: 'Read this first', createdAt: new Date().toISOString() }]); break;
       case 'unread-input': state.unreadInputIds = new Set([randomUUID()]); break;
       case 'input-flight': state.agentInputFlight = { session, inputIds: [randomUUID()] }; break;
-      case 'worker-wait': store.commitDelegation([{ id, delegation: { role: 'root', permissions: ['wait'], receipts: [], wait: {
-        id: randomUUID(), workerIds: [randomUUID()], deadline: new Date(Date.now() + 60_000).toISOString(), phase: 'registered', outcomes: [],
-      } } }]); break;
+      // A worker wait is a list entry (hearsay-tools/cezarion#1235, #1301).
+      case 'worker-wait': store.commitWait(id, { kind: 'worker', id: randomUUID(), source: 'agent', via: 'cezar_wait', registeredAt: new Date().toISOString(),
+        deadline: new Date(Date.now() + 60_000).toISOString(), timeoutSeconds: 60, phase: 'open', turnId: 'turn', mode: 'all',
+        workerIds: [randomUUID()], revisions: [], outcomes: [] }); break;
       case 'ci-wait': store.commitCiWait(id, {
         id: randomUUID(), prUrl: 'https://github.com/acme/repo/pull/1', repository: 'acme/repo', prNumber: 1, headSha: 'a'.repeat(40),
         generation: 'generation', turnId: 'turn', timeoutSeconds: 60, registeredAt: new Date().toISOString(), deadline: new Date(Date.now() + 60_000).toISOString(), phase: 'registered',
       }); break;
-      case 'worker-wake': manager['workerWakeAdmitted'].add(id); break;
       case 'root-finish': store.commitDelegation([{ id, delegation: { role: 'root', permissions: [], receipts: [], finishRequestedAt: new Date().toISOString() } }]); break;
     }
   }

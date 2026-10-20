@@ -188,6 +188,9 @@ export const delegationStateSchema = z.discriminatedUnion('role', [
     receipts: z.array(workerCreationReceiptSchema).max(1_024).refine(receipts =>
       new Set(receipts.map(receipt => receipt.requestId)).size === receipts.length &&
       new Set(receipts.map(receipt => receipt.workerId)).size === receipts.length),
+    // `wait`, `lastWait` and `completion` are the old worker-wait engine's, never written since
+    // hearsay-tools/cezarion#1301: every worker wait is a list entry. Kept optional so old rows
+    // parse; the store reads them into the list on open (store schemas 6 and 7).
     wait: workerWaitSchema.optional(),
     lastWait: workerWaitSchema.optional(),
     results: z.array(workerResultReferenceSchema).max(1_024).refine(results => new Set(results.map(result => result.workerId)).size === results.length).optional(),
@@ -197,6 +200,7 @@ export const delegationStateSchema = z.discriminatedUnion('role', [
   }).strict(),
   z.object({
     role: z.literal('worker'),
+    // Never written since hearsay-tools/cezarion#1301, as for a root; kept so old rows parse.
     wait: workerWaitSchema.optional(),
     lastWait: workerWaitSchema.optional(),
     permissions: permissionsSchema,

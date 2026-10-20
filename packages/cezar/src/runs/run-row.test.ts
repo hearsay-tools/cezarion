@@ -45,8 +45,6 @@ describe('isLiveRecord', () => {
     ['an open wait', { waits: [{ id: 'w', phase: 'open' }] }],
     ['a resolved wait not yet delivered', { waits: [{ id: 'w', phase: 'resolved' }] }],
     ['a pending usage-limit resume', { status: 'failed', autoResumeAt: '2026-10-06T00:00:00.000Z' }],
-    ['a parent waiting on workers', { delegation: { role: 'root', wait: { id: 'wait' } } }],
-    ['a worker waiting on its parent', { delegation: worker({ wait: { id: 'wait' } }) }],
     ['a worker whose destroy is still owed', { delegation: worker({ destroy: { phase: 'requested' } }) }],
     ['a root whose Finish has not settled', { status: 'cancelled', delegation: { role: 'root', finishRequestedAt: '2026-10-05T00:00:00.000Z' } }],
     ['an accepted Stop not yet settled', { stopping: { requestedAt: '2026-10-05T00:00:00.000Z' } }],
@@ -61,6 +59,13 @@ describe('isLiveRecord', () => {
 
   it('lets a worker go once its destroy completed', () => {
     expect(isLiveRecord(record({ delegation: worker({ destroy: { phase: 'complete' } }) }))).toBe(false);
+  });
+
+  // Every worker wait is a list entry, covered by the open-wait case above: store schema 7 reads the
+  // old engine's `delegation.wait` into the list on open (hearsay-tools/cezarion#1301).
+  it('does not read the old engine\'s delegation.wait', () => {
+    expect(isLiveRecord(record({ delegation: { role: 'root', wait: { id: 'wait' } } } as unknown as Partial<RunRecord>))).toBe(false);
+    expect(isLiveRecord(record({ delegation: worker({ wait: { id: 'wait' } }) }))).toBe(false);
   });
 
   it('does not read a wait off a quarantined delegation', () => {

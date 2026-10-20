@@ -190,10 +190,10 @@ function needsRecord(summary: RunSummary, handle?: RepoHandle | null): boolean {
   if (summary.markerRefs?.issue !== undefined) return true;
   // A foreign reference the prompt does not corroborate is dropped; the prompt is in the record.
   if (handle && (summary.referencedPullRequestUrl !== undefined || summary.referencedIssueUrl !== undefined)) return true;
-  // A root waiting on workers has its pending human question re-read from the transcript. After
-  // the schema-6 upgrade an agent's worker wait is a list entry, which a summary shows as
-  // `waitingOn: workers`; a summary stored before it, and the completion gate's wait (in
-  // `delegation.wait` until hearsay-tools/cezarion#1235 phase 3b), still show `delegation.wait`.
+  // A root waiting on workers has its pending human question re-read from the transcript. Every
+  // worker wait, Cezar's completion wait included, is a list entry (hearsay-tools/cezarion#1301),
+  // which a summary shows as `waitingOn: workers`. A summary an older build stored may still show
+  // the old engine's `delegation.wait`: it is re-derived, so the upgraded record speaks instead.
   return summary.delegation?.role === 'root' && (summary.delegation.wait !== undefined || summary.waitingOn?.kind === 'workers');
 }
 

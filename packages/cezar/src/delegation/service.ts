@@ -591,12 +591,11 @@ export class DelegationService {
       ...(worker.activity === undefined ? {} : { activity: worker.activity }),
       ...(wait ? { wait } : {}), ...(worker.delegation.destroy ? { destroy: workerDestroyView(worker) } : {}), ...(outcome ? { outcome } : {}) };
   }
-  /** The wait an inspection shows: the completion gate's (`delegation.wait`, until phase 3b of
-   *  hearsay-tools/cezarion#1235), else the newest open or owed list wait naming the worker, in
-   *  the legacy `WorkerWait` shape. */
+  /** The wait an inspection shows: the newest open or owed list wait naming the worker, in the
+   *  legacy `WorkerWait` shape (hearsay-tools/cezarion#1235). Cezar's completion wait carries no
+   *  deadline, which that shape requires, so it is not one (hearsay-tools/cezarion#1301). */
   private inspectedWait(parent: RunRecord, workerId: string): WorkerWait | undefined {
     if (parent.delegation?.role !== 'root') return undefined;
-    if (parent.delegation.wait) return parent.delegation.wait;
     const entry = (parent.waits ?? []).filter((wait): wait is DeadlinedWorkerWaitEntry => wait.kind === 'worker' && hasWorkerDeadline(wait) && !!wait.workerIds?.includes(workerId)).at(-1);
     return entry ? workerWaitEntryToLegacy(entry) : undefined;
   }

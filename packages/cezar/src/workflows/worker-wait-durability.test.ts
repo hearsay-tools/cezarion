@@ -214,7 +214,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => terminal.includes(store.getRun(w.id)?.status ?? ''));
     const wake = waitOf(store.getRun(p.id)); expect(wake?.phase).toBe('wake-pending');
     expect(store.getRun(p.id)?.agentInputs?.some(i => i.deliveredAt)).not.toBe(true);
-    manager.reconcileWorkerWaits(); manager.queueWorkerWake(p.id); manager.queueWorkerWake(p.id);
+    manager.reconcileWorkerWaits(); manager.reconcileWorkerWaits();
     manager.cancel(blocker.id);
     await until(() => !waitOf(store.getRun(p.id)));
     expect(store.getRun(p.id)?.agentInputs).toHaveLength(1);

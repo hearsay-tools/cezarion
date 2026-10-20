@@ -306,12 +306,12 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent(); const first = await worker(p.id); const second = await worker(p.id);
     const generation = store.commitWorkerExecutionStart(first.id);
     store.updateRun(first.id, { status: 'cancelled' });
-    const metadata = store.getRun(p.id)!.delegation;
-    if (metadata?.role !== 'root') throw Error('fixture');
-    const wait: WorkerWait = { id: randomUUID(), mode: 'all', workerIds: [first.id, second.id], phase: 'parked',
-      deadline: new Date(Date.now() + 600000).toISOString(),
-      outcomes: [{ workerId: first.id, revision: 0, status: 'cancelled', observedAt: new Date().toISOString() }] };
-    store.commitDelegation([{ id: p.id, delegation: { ...metadata, wait } }]);
+    // An agent's worker wait is a list entry (hearsay-tools/cezarion#1301).
+    const now = Date.now();
+    store.commitWait(p.id, { kind: 'worker', id: randomUUID(), source: 'agent', via: 'cez-worker-wait', registeredAt: new Date(now).toISOString(),
+      deadline: new Date(now + 600000).toISOString(), timeoutSeconds: 600, phase: 'open', turnId: 'turn-1', mode: 'all',
+      workerIds: [first.id, second.id], revisions: [{ workerId: first.id, revision: 0 }, { workerId: second.id, revision: 0 }],
+      outcomes: [{ workerId: first.id, revision: 0, status: 'cancelled', observedAt: new Date(now).toISOString() }] });
     manager.reconcileWorkerWaits();
     expect(waitOf(store.getRun(p.id))?.outcomes).toEqual([]);
     expect(store.commitWorkerExecutionComplete(first.id, generation)).toBe(true);

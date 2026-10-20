@@ -15,9 +15,9 @@ import type { RunRecord } from './runs.ts';
  * adds `human`, which the agent opens with `cezar_ask` and which has no deadline: it ends when
  * the user answers or the agent cancels it.
  * Phase 3a (hearsay-tools/cezarion#1235) adds `worker`, which waits on workers' outcomes or on
- * replies to requests and has a deadline. The completion gate's own wait stays in
- * `delegation.wait` until phase 3b, and `computeWaitingOn` reads it beside the list so
- * `waitingOn` follows the spec's order.
+ * replies to requests and has a deadline. Phase 3b (hearsay-tools/cezarion#1301) moves the
+ * completion gate's own wait into the list as a `source: 'cezar'`, `via: 'completion'` worker
+ * entry with no deadline, so the list is all `computeWaitingOn` reads.
  */
 
 export const WAIT_LIMIT = 16;
@@ -253,6 +253,8 @@ export type CezarCancelWaitAnswer = z.infer<typeof cezarCancelWaitAnswerSchema>;
 export const cezarDoneRequestSchema = z.object({ summary: z.string().max(2000).optional() }).strict();
 export type CezarDoneRequest = z.infer<typeof cezarDoneRequestSchema>;
 
+// `worker_wait_pending` (here and in the ask and CI wait codes) was the old completion wait's
+// refusal; it is kept for old clients and never returned since hearsay-tools/cezarion#1301.
 export const doneErrorCodeSchema = z.enum([
   'workers_outstanding', 'workers_uncollected', 'worker_questions', 'human_question_pending', 'worker_wait_pending',
   'root_finish_pending', 'not_final_step', 'manager_disposed', 'capability_revoked', 'run_missing', 'run_not_running', 'run_stopping',
@@ -312,20 +314,6 @@ export type WaitingOnInput = Partial<Pick<RunRecord, 'waits' | 'hasPendingHumanA
   delegation?: DelegationState | RunDelegationSummary;
 };
 
-/** The completion gate's wait, until phase 3b moves it into the list (hearsay-tools/cezarion#1235). */
-export function completionWorkersOwed(delegation: WaitingOnInput['delegation']): number | undefined {
-  // Only a root has a completion gate; a worker's `delegation.wait` is at most a message's stand-in.
-  if (delegation?.role !== 'root' || !delegation.wait) return undefined;
-  const wait = delegation.wait;
-  // `wake-pending` means its workers settled and only the wake is left: no longer open.
-  if (wait.phase !== 'registered' && wait.phase !== 'parked') return undefined;
-  if (wait.requestIds?.length) return wait.requestIds.length;
-  const workerIds = 'workerIds' in wait ? wait.workerIds : undefined;
-  const outcomes = 'outcomes' in wait ? wait.outcomes : undefined;
-  const reported = new Set(outcomes?.map((outcome) => outcome.workerId));
-  return workerIds?.filter((id) => !reported.has(id)).length ?? 0;
-}
-
 /** Ids a worker entry has not heard about yet, or requests without an outcome. */
 function workerEntryOwed(wait: WorkerWaitEntry): number {
   if (wait.requestIds) {
@@ -336,12 +324,11 @@ function workerEntryOwed(wait: WorkerWaitEntry): number {
   return wait.workerIds?.filter((id) => !reported.has(id)).length ?? 0;
 }
 
-/** The count over every open worker entry plus the completion wait; undefined when there is neither. */
-function workersOwed(open: readonly Wait[], delegation: WaitingOnInput['delegation']): number | undefined {
+/** The count over every open worker entry; undefined when there is none. */
+function workersOwed(open: readonly Wait[]): number | undefined {
   const entries = open.filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker');
-  const completion = completionWorkersOwed(delegation);
-  if (!entries.length && completion === undefined) return undefined;
-  return entries.reduce((sum, wait) => sum + workerEntryOwed(wait), completion ?? 0);
+  if (!entries.length) return undefined;
+  return entries.reduce((sum, wait) => sum + workerEntryOwed(wait), 0);
 }
 
 function earliest<T extends CiWaitEntry | TimerWaitEntry>(waits: readonly T[]): T | undefined {
@@ -358,10 +345,10 @@ export function computeWaitingOn(run: WaitingOnInput): WaitingOn | undefined {
   const open = (Array.isArray(run.waits) ? run.waits : []).filter((wait) => wait?.phase === 'open');
   if (run.hasPendingHumanAsk || open.some((wait) => wait.kind === 'human')) return { kind: 'human' };
   if (run.autoResumeAt) return { kind: 'usage-limit', at: run.autoResumeAt };
-  const workers = workersOwed(open, run.delegation);
+  const workers = workersOwed(open);
   if (workers !== undefined) {
     const entries = open.filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker');
-    const replies = entries.length > 0 && completionWorkersOwed(run.delegation) === undefined && entries.every((wait) => wait.requestIds !== undefined);
+    const replies = entries.every((wait) => wait.requestIds !== undefined);
     return { kind: 'workers', count: workers, ...(replies ? { replies: true as const } : {}) };
   }
   const ci = earliest(open.filter((wait): wait is CiWaitEntry => wait.kind === 'ci'));
@@ -387,15 +374,15 @@ export function resolveWaitingOn(run: { waitingOn?: WaitingOn } & WaitingOnInput
 }
 
 /**
- * A run's worker wait in the old `WorkerWait` shape, for views that still show one: the
- * completion gate's `delegation.wait` until phase 3b, else the newest open or owed `worker` entry
- * (hearsay-tools/cezarion#1235). An open entry reads `parked` once the run waits on it, unless a
+ * A run's worker wait in the old `WorkerWait` shape, for views that still show one: the newest
+ * open or owed `worker` entry the agent registered (hearsay-tools/cezarion#1235). Cezar's
+ * completion wait has no deadline, which that shape requires, so it is not one
+ * (hearsay-tools/cezarion#1301). An open entry reads `parked` once the run waits on it, unless a
  * pending question holds the run.
  */
 export function workerWaitView(run: Partial<Pick<RunRecord, 'status' | 'hasPendingHumanAsk' | 'waits' | 'delegation'>>): WorkerWait | undefined {
   const delegation = run.delegation;
   if (!delegation || delegation.role === 'invalid') return undefined;
-  if (delegation.wait) return delegation.wait;
   const entry = (run.waits ?? []).filter((wait): wait is DeadlinedWorkerWaitEntry => wait.kind === 'worker' && hasWorkerDeadline(wait) && (wait.phase === 'open' || wait.phase === 'resolved')).at(-1);
   if (!entry) return undefined;
   const legacy = workerWaitEntryToLegacy(entry);

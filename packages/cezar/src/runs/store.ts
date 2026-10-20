@@ -44,7 +44,6 @@ import { LiveItemSnapshots } from './live-item-snapshots.ts';
 import { emptyFacts, stampOf, TranscriptFactsIndex, type TranscriptFacts } from './transcript-facts.ts';
 import { hasPlainHistory, historyStat, historyPaths, readHistoryText, readHistoryTextAsync, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
-import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
 import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, sharedCwdScan, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
@@ -2987,31 +2986,8 @@ export class RunStore extends EventEmitter {
     this.commitWaitDelivery(id, [inputId]);
   }
 
-  /** Retain the settled receipt and retire exactly one wait together with any human message that superseded it. */
-  commitWorkerWaitWithdrawal(id: string, waitId: string, acceptedHumanMessage?: QueuedMessage, reason?: 'cancelled'): void {
-    const run = this.peek(id);
-    if (!run?.delegation || run.delegation.role === 'invalid' || run.delegation.wait?.id !== waitId) {
-      throw new Error('worker wait changed before withdrawal');
-    }
-    const { wait, ...delegation } = run.delegation;
-    const message = acceptedHumanMessage ? queuedMessageSchema.parse(acceptedHumanMessage) : undefined;
-    this.commitIndex(new Map([[id, { ...run, delegation: { ...delegation, lastWait: reason ? { ...wait, phase: 'wake-pending', reason, wakeId: wait.wakeId ?? wait.id } : wait.phase === 'wake-pending'
-      ? reconcileWorkerWait(wait, [], new Date().toISOString())
-      : { ...wait, phase: 'wake-pending', reason: wait.reason ?? 'cancelled', wakeId: wait.wakeId ?? wait.id } },
-      // An adopted agent input belongs to its sender, even when it carries the wait receipt.
-      ...(run.agentInputs ? { agentInputs: run.agentInputs.filter(input => input.id !== wait.wakeId || input.deliveredAt || input.source === 'agent') } : {}),
-      ...(message ? {
-        queuedMessages: [...(run.queuedMessages ?? []), message],
-        ...(run.continuationMessage ? { continuationMessage: {
-          ...run.continuationMessage, origin: 'human' as const,
-          text: run.continuationMessage.origin === 'lifecycle' ? '' : run.continuationMessage.text,
-        } } : {}),
-      } : {}),
-    }]]));
-  }
-
-  /** A human message beside a run's waits (hearsay-tools/cezarion#1235): accepted durably, as
-   *  `commitWorkerWaitWithdrawal` accepts one, but every wait stays. A lifecycle opening becomes
+  /** A human message beside a run's waits (hearsay-tools/cezarion#1235): accepted durably, and
+   *  every wait stays. A lifecycle opening becomes
    *  the human's and keeps its wake text, so the message opens the continuation (and answers a
    *  pending question) and the owed results still reach the agent. */
   commitHumanMessageBesideWaits(id: string, acceptedHumanMessage: QueuedMessage): void {

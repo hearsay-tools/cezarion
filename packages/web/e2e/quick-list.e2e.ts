@@ -766,7 +766,7 @@ describe('the tasks table under worst-case row content', () => {
   /**
    * One record carrying every column's worst case at once, because the question is whether they
    * fit BESIDE each other. `status: 'waiting'` plus a root delegation parked on a worker is the
-   * longest status label the cockpit can print (`delegationWaitLabel` → "waiting on workers"),
+   * longest status label the cockpit can print (`deriveAttention` → "waiting on workers"),
    * and a serve boot keeps it: `RunManager.recover()` re-parks a run that owns a worker wait
    * rather than settling it, which is what makes a non-terminal status reachable from a fixture
    * at all.
