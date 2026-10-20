@@ -527,6 +527,10 @@ export const runSummarySchema = z.object({
   groupId: z.string().optional(),
   variant: z.string().optional(),
   pinned: z.boolean().optional(),
+  /** The automation that launched this task (hearsay-tools/cezarion#1332), from `automation`
+   *  (GitHub-triggered) or `automationTrigger` (scheduled, catch-up or Run now). Absent on every
+   *  task no automation launched; the sidebar files the task under Automations when present. */
+  automationId: z.string().optional(),
   runner: runRecordSchema.shape.runner,
   model: z.string().optional(),
   notify: z.boolean().optional(),
@@ -598,7 +602,22 @@ export function toRunSummary(run: RunRecord & { usage?: ProcessUsage }): RunSumm
   if (waitingOn) summary.waitingOn = waitingOn;
   if (hasResolvedWait(run)) summary.waitWakePending = true;
   if (run.usage) summary.usage = run.usage;
+  const automationId = automationIdOf(run);
+  if (automationId !== undefined) summary.automationId = automationId;
   return summary as RunSummary;
+}
+
+/** The automation that launched a run, from either origin field (hearsay-tools/cezarion#1332).
+ *  Only the recorded origin counts: `autonomous`, the title and whether the definition still
+ *  exists say nothing about who started a task. */
+export function automationIdOf(run: Pick<RunRecord, 'automation' | 'automationTrigger'>): string | undefined {
+  return run.automation?.automationId ?? run.automationTrigger?.automationId;
+}
+
+/** Whether a list row is an automation-created task: the sidebar's Automations tab and its
+ *  scoped "Archive all" read this, on the cockpit and in the store. */
+export function isAutomationTask(run: { automationId?: string }): boolean {
+  return run.automationId !== undefined;
 }
 
 /**
