@@ -14,8 +14,17 @@ import { describe, expect, it } from 'vitest';
 const repo = join(import.meta.dirname, '../../../..');
 const SCANNED = ['packages/cezar/src', 'packages/contract/src'];
 
-const FORBIDDEN: Array<{ name: string; pattern: RegExp; exempt?: readonly string[] }> = [
-  { name: "activity: 'monitoring'", pattern: /activity: 'monitoring'/, exempt: ['packages/cezar/src/runs/store.ts'] },
+/** Lines `from` through the next line matching `to`, inclusive, in `file`. */
+interface Region { file: string; from: RegExp; to: RegExp }
+
+/** The schema 4 upgrade reads the old monitoring park into a timer: its doc comment and its body. */
+const MONITORING_UPGRADE: readonly Region[] = [
+  { file: 'packages/cezar/src/runs/store.ts', from: /^ \* Upgrade-on-read \(store schema 4/, to: /^ \*\/$/ },
+  { file: 'packages/cezar/src/runs/store.ts', from: /^export function upgradeLegacyWaits\(/, to: /^}$/ },
+];
+
+const FORBIDDEN: Array<{ name: string; pattern: RegExp; exempt?: readonly string[]; exemptRegions?: readonly Region[] }> = [
+  { name: "activity: 'monitoring'", pattern: /activity: 'monitoring'/, exemptRegions: MONITORING_UPGRADE },
   { name: 'the phase 3b tag', pattern: /phase 3b \(#1235\)/ },
   { name: 'workerWaiting', pattern: /\bworkerWaiting\b/ },
   { name: 'parkWorkerWait', pattern: /\bparkWorkerWait\b/ },
@@ -37,17 +46,33 @@ function sources(dir: string): string[] {
   });
 }
 
+/** The line indexes each region covers in `lines`; a region whose markers are missing covers none. */
+function regionLines(lines: readonly string[], region: Region): number[] {
+  const start = lines.findIndex((line) => region.from.test(line));
+  if (start < 0) return [];
+  const end = lines.findIndex((line, index) => index > start && region.to.test(line));
+  return end < 0 ? [] : Array.from({ length: end - start + 1 }, (_, offset) => start + offset);
+}
+
 describe('the old worker-wait engine (hearsay-tools/cezarion#1301)', () => {
   it('is not named, written or read by any source', () => {
     const hits: string[] = [];
     for (const file of SCANNED.flatMap(sources)) {
       const rel = relative(repo, join(repo, file));
-      readFileSync(join(repo, file), 'utf8').split('\n').forEach((line, index) => {
-        for (const { name, pattern, exempt } of FORBIDDEN) {
-          if (!exempt?.includes(rel) && pattern.test(line)) hits.push(`${rel}:${index + 1}: ${name}`);
-        }
-      });
+      const lines = readFileSync(join(repo, file), 'utf8').split('\n');
+      for (const { name, pattern, exempt, exemptRegions } of FORBIDDEN) {
+        if (exempt?.includes(rel)) continue;
+        const allowed = new Set((exemptRegions ?? []).filter((region) => region.file === rel).flatMap((region) => regionLines(lines, region)));
+        lines.forEach((line, index) => { if (!allowed.has(index) && pattern.test(line)) hits.push(`${rel}:${index + 1}: ${name}`); });
+      }
     }
     expect(hits).toEqual([]);
+  });
+
+  // An exemption is a region, not a file: one whose markers moved would silently cover nothing.
+  it('finds every exempt region it names', () => {
+    for (const region of FORBIDDEN.flatMap((entry) => entry.exemptRegions ?? [])) {
+      expect(regionLines(readFileSync(join(repo, region.file), 'utf8').split('\n'), region), `${region.file} ${region.from}`).not.toEqual([]);
+    }
   });
 });
