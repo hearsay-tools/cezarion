@@ -12,7 +12,7 @@ import { DelegationController } from '../delegation/provision.ts';
 import { RunStore } from '../runs/store.ts';
 import { createApp } from '../server/server.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
-import { COMPLETION_WILL_WAIT, RunManager } from './run.ts';
+import { COMPLETION_WILL_WAIT, RunManager, WORKER_FALLBACK_QUESTION } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 
@@ -148,7 +148,11 @@ describe('public delegation completion integration', () => {
     const wait = await command<WorkerWaitResult>(p.id, ['wait', a, b, '--mode', 'any']);
     expect(wait.wait.mode).toBe('any');
     await finishWorker(p.id, a, 'alpha');
-    await input(p.id, 3); reply(p.id, 3);
+    // hearsay-tools/cezarion#1301: worker a ended its first turn idle, so after its no-wait nudge its
+    // fallback question woke the parent before the steer superseded it; the wait-any wake follows.
+    const question = await input(p.id, 3); reply(p.id, 3);
+    expect(question.text).toContain(WORKER_FALLBACK_QUESTION(a));
+    if (!question.text.includes(`Worker wait ${wait.wait.id}`)) { await input(p.id, 4); reply(p.id, 4); }
     await until(() => monitoringPark(p.id), 'parent observes wait-any wake');
     expect(store.getRun(p.id)?.agentInputs?.filter(item => item.id === wait.wait.id && item.deliveredAt)).toHaveLength(1);
     expect(store.getRun(b)?.status).toBe('running');

@@ -1471,6 +1471,7 @@ describe('harness parity — owned input run tier', () => {
         expect(store.getRun(runId)?.agentInputs).toEqual([first]);
         manager.enqueueOwnedRun(runId);
         await waitFor(() => store.readEvents(runId).some(e => e.type === 'ask.requested'));
+        const askSeq = store.readEvents(runId).find(e => e.type === 'ask.requested')!.seq;
         expect(manager.steerWorker(runId, second)).toBe('queued');
         await new Promise(resolve => setTimeout(resolve, 150));
         expect(store.getRun(runId)?.status).toBe('waiting');
@@ -1489,7 +1490,9 @@ describe('harness parity — owned input run tier', () => {
         expect(texts).toContain(first.text);
         expect(texts).not.toContain('EXPANDED HUMAN SKILL');
         expect(store.readEvents(runId).filter(e => e.type === 'user-message').map(e => e.text)).toEqual(['Vitest']);
-        expect((manager as unknown as { hasPendingHumanAsk(id: string): boolean }).hasPendingHumanAsk(runId)).toBe(false);
+        // The answer retired this ask; the answered turn's end may raise Cezar's fallback question
+        // on the idle worker (hearsay-tools/cezarion#1301), which is a new one.
+        expect(store.transcriptFacts(runId).pendingAsk?.seq).not.toBe(askSeq);
         expect(store.readEvents(runId).filter(e => e.type === 'human-input-delivered')).toHaveLength(1);
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
         const afterAsk = agentInput(parentRunId, 'mock:agent-echo after ask');
@@ -1531,6 +1534,7 @@ describe('harness parity — owned input run tier', () => {
         const { manager, store, runId, parentRunId } = fixture;
         manager.enqueueOwnedRun(runId);
         await waitFor(() => store.readEvents(runId).some(e => e.type === 'ask.requested'));
+        const askSeq = store.readEvents(runId).find(e => e.type === 'ask.requested')!.seq;
         const internal = manager as unknown as {
           active: Map<string, { pendingHumanAsk: boolean; session: import('./agent-runner.ts').AgentSession }>;
           hasPendingHumanAsk(id: string): boolean;
@@ -1555,8 +1559,9 @@ describe('harness parity — owned input run tier', () => {
         // #505: input can land mid-turn, so delivery no longer implies the answering turn
         // ended; the answer's durable checkpoint is still that turn's end.
         await waitFor(() => recovered.store.readEvents(runId).some(e => e.type === 'human-input-delivered'));
-        const replay = recovered.manager as unknown as { hasPendingHumanAsk(id: string): boolean };
-        expect(replay.hasPendingHumanAsk(runId)).toBe(false);
+        // The answer retired this ask; the answered turn's end may raise Cezar's fallback question
+        // on the idle worker (hearsay-tools/cezarion#1301), which is a new one.
+        expect(recovered.store.transcriptFacts(runId).pendingAsk?.seq).not.toBe(askSeq);
       });
     }, 60_000);
 
@@ -1722,8 +1727,11 @@ describe('harness parity — owned input run tier', () => {
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
         manager.finish(runId);
         await waitFor(() => !manager.isActive(runId));
+        // The idle worker's park may already be Cezar's fallback question (hearsay-tools/cezarion#1301):
+        // wait for the continuation's own ask.
+        const asked = store.readEvents(runId).filter(e => e.type === 'ask.requested').length;
         expect(manager.continueRun(runId, { text: promptFor(backend, 'ask-reply-late') }).ok).toBe(true);
-        await waitFor(() => store.readEvents(runId).some(e => e.type === 'ask.requested'));
+        await waitFor(() => store.readEvents(runId).filter(e => e.type === 'ask.requested').length > asked);
         const input = agentInput(parentRunId);
         expect(manager.steerWorker(runId, input)).toBe('queued');
         expect(manager.sendMessage(runId, [{ type: 'text', text: 'Vitest' }])).toBe(true);
@@ -1804,13 +1812,16 @@ describe('OpenCode durable input acknowledgements', () => {
       const prompt = 'mock:ask-reply-late-done';
       if (mode === 'fresh') store.updateRun(runId, { task: prompt });
       manager.enqueueOwnedRun(runId);
+      let asked = 0;
       if (mode === 'continuation') {
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
         manager.finish(runId);
         await waitFor(() => !manager.isActive(runId));
+        // The idle worker's park may already be Cezar's fallback question (hearsay-tools/cezarion#1301).
+        asked = store.readEvents(runId).filter(e => e.type === 'ask.requested').length;
         expect(manager.continueRun(runId, { text: prompt }).ok).toBe(true);
       }
-      await waitFor(() => store.readEvents(runId).some(e => e.type === 'ask.requested'));
+      await waitFor(() => store.readEvents(runId).filter(e => e.type === 'ask.requested').length > asked);
       const input = agentInput(parentRunId);
       expect(manager.steerWorker(runId, input)).toBe('queued');
       expect(manager.sendMessage(runId, [{ type: 'text', text: 'Vitest' }])).toBe(true);

@@ -10,9 +10,9 @@ import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES } from './run.ts';
+import { COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
-import { bookkeeping, eventCheckpoint, fixtureUpdateRun, manager, parent, register, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { bookkeeping, eventCheckpoint, fixtureUpdateRun, manager, parent, register, restart, root, semaphore, spendWorkerBudget, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 
@@ -58,6 +58,80 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
     expect(conversationOf(p.id)?.messages.some(m => m.question) ?? false).toBe(false);
     await until(() => store.getRun(w.id)?.status === 'waiting');
+  });
+
+  // hearsay-tools/cezarion#1301: a worker's second turn end with no wait or done asks its parent; a
+  // parent that cannot receive leaves the question with the human, as for a worker's own question.
+  it("a reviewing parent's worker fallback goes to the human", async () => {
+    const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
+    fixtureUpdateRun(p.id, { status: 'review' });
+    const inputs = store.getRun(p.id)?.agentInputs?.length ?? 0;
+    const w = await worker(p.id); manager.enqueueOwnedRun(w.id);
+    await until(() => eventsOf(w.id, 'worker-question-fallback').length === 1 && store.getRun(w.id)?.status === 'waiting');
+    const ask = eventsOf(w.id, 'ask.requested');
+    expect(ask).toEqual([expect.objectContaining({ questions: [{ header: WORKER_FALLBACK_HEADER, question: WORKER_FALLBACK_QUESTION(w.id) }] })]);
+    expect(eventsOf(w.id, 'worker-question-fallback')[0]).toMatchObject({ askSeq: ask[0]!.seq });
+    expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
+    expect(conversationOf(p.id)?.messages.some(m => m.question) ?? false).toBe(false);
+    expect(store.getRun(p.id)?.agentInputs?.length ?? 0).toBe(inputs);
+    expect(store.getRun(w.id)?.hasPendingHumanAsk).toBe(true);
+  });
+
+  it('a budget-spent worker plain-parks without routing', async () => {
+    const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id); spendWorkerBudget(w.id); manager.enqueueOwnedRun(w.id);
+    await until(() => eventsOf(w.id, 'turn-end').length > 0 && store.getRun(w.id)?.status === 'waiting');
+    expect(eventsOf(w.id, 'ask.requested')).toEqual([]);
+    expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
+    expect(conversationOf(p.id)?.messages ?? []).toEqual([]);
+    expect(store.getRun(w.id)?.waits ?? []).toEqual([]);
+  });
+
+  /** A worker whose second no-wait turn end routed Cezar's fallback question to its parent. */
+  async function idleWorker() {
+    const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id); manager.enqueueOwnedRun(w.id);
+    await until(() => eventsOf(w.id, 'worker-question-routed').length === 1 && store.getRun(w.id)?.status === 'waiting');
+    return { p, w, askSeq: eventsOf(w.id, 'ask.requested')[0]!.seq, requestId: String(eventsOf(w.id, 'worker-question-routed')[0]!.messageId) };
+  }
+  const steer = (workerId: string, parentRunId: string, text: string) => {
+    const id = randomUUID();
+    return { id, result: manager.steerWorker(workerId, { id, source: 'agent', parentRunId, text, createdAt: new Date().toISOString() }) };
+  };
+
+  // hearsay-tools/cezarion#1301: Cezar's fallback question does not hold what the plain park let
+  // through. A parent's steer supersedes it and is charged as its reply would be.
+  it("a parent's steer supersedes the worker's fallback question and resolves its routed request", async () => {
+    const f = await idleWorker();
+    const wakes = store.getRun(f.w.id)?.automaticWakes ?? 0;
+    const sent = steer(f.w.id, f.p.id, 'mock:agent-echo Also lint');
+    await until(() => !!store.getRun(f.w.id)?.agentInputs?.find(input => input.id === sent.id)?.deliveredAt);
+    expect(eventsOf(f.w.id, 'human-ask-closed')[0]).toMatchObject({ askSeq: f.askSeq, reason: 'superseded' });
+    expect(conversationOf(f.p.id)?.outcomes).toContainEqual(expect.objectContaining({ requestId: f.requestId, status: 'completed-without-reply' }));
+    expect(store.readEvents(f.w.id).filter(event => event.type === 'note' && String(event.message).startsWith(WORKER_FALLBACK_REPLY_NOTE))[0])
+      .toMatchObject({ message: `${WORKER_FALLBACK_REPLY_NOTE} (${wakes + 1}/${MAX_AUTO_CONTINUES})` });
+    expect(answered(f.w.id)).toEqual([]);
+    await until(() => said(f.w.id, 'Also lint'));
+  });
+
+  it('a Continue on a stopped worker supersedes its fallback question and proceeds', async () => {
+    const f = await idleWorker();
+    manager.requestWorkerStop(f.w.id); expect(await manager.awaitRunTermination(f.w.id, 15_000)).toBe(true);
+    expect(manager.continueRun(f.w.id, { text: 'mock:hold' }, true)).toEqual({ ok: true });
+    expect(eventsOf(f.w.id, 'human-ask-closed')).toEqual([expect.objectContaining({ askSeq: f.askSeq, reason: 'superseded' })]);
+    await until(() => store.getRun(f.w.id)?.status === 'waiting');
+  });
+
+  it("a worker's own question still holds a parent's steer", async () => {
+    const f = await askedPair();
+    try {
+      const sent = steer(f.w.id, f.p.id, 'mock:agent-echo Also lint');
+      expect(sent.result).toBe('queued');
+      // Nothing was submitted: the steer waits for the answer, and the question stands.
+      expect((manager as unknown as { active: Map<string, { agentInputFlight?: unknown }> }).active.get(f.w.id)?.agentInputFlight).toBeUndefined();
+      expect(eventsOf(f.w.id, 'human-ask-closed')).toEqual([]);
+      expect(store.getRun(f.w.id)?.hasPendingHumanAsk).toBe(true);
+    } finally { f.close(); }
   });
 
   it('leaves the question with the human when the parent may not message its workers', async () => {

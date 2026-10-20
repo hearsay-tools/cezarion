@@ -10,12 +10,12 @@ import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.t
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
-import { collect, fixtureUpdateRun, manager, parent, restart, root, semaphore, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { collect, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
 import { handoffPath } from '../handoff.ts';
-import { claudeScheduleWakeupDelay, COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR } from './run.ts';
+import { claudeScheduleWakeupDelay, COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
 import { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE } from './turn-end.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt, MONITORING_TEXT } from './monitoring-turn.testkit.ts';
@@ -182,6 +182,8 @@ async function conversingParent(runner: RunnerId) {
   const delegation = store.getRun(p.id)!.delegation!;
   if (delegation.role !== 'root') throw Error('root fixture');
   store.commitDelegation([{ id: p.id, delegation: { ...delegation, permissions: [...delegation.permissions, 'steer'] } }]);
+  // An idle worker that only talks: it plain-parks rather than ask its parent (hearsay-tools/cezarion#1301).
+  spendWorkerBudget(w.id);
   manager.enqueueOwnedRun(w.id);
   await until(() => store.getRun(w.id)?.status === 'waiting');
   const credentials = new CredentialRegistry();
@@ -204,7 +206,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U19', 'U20', 'U20u', 'U21', 'U21m', 'U21h', 'U21a', 'U22']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U19', 'U20', 'U20u', 'U21', 'U21m', 'U21h', 'U21a', 'U22', 'U24']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -1571,6 +1573,43 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(workerWaits(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'completion', workerIds: [w.id] })]);
       expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
       expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
+    });
+
+    // hearsay-tools/cezarion#1301: a worker keeps its one no-wait nudge; the next turn end with no
+    // wait or done asks its parent, and the parent's reply resumes it, charged to its budget.
+    it(`${runner} U24 a worker's second no-wait turn end asks its parent, and the reply resumes it`, async () => {
+      process.env.CEZ_DELEGATION = '1';
+      nativeWire(runner);
+      const p = await parent(HARNESS_ADAPTERS[runner].scenarios.baseline!, runner);
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+      const delegation = store.getRun(p.id)!.delegation!;
+      if (delegation.role !== 'root') throw Error('root fixture');
+      store.commitDelegation([{ id: p.id, delegation: { ...delegation, permissions: [...delegation.permissions, 'steer'] } }]);
+      const w = await worker(p.id, HARNESS_ADAPTERS[runner].scenarios.baseline!, runner);
+      manager.enqueueOwnedRun(w.id);
+      const routed = () => store.readEvents(w.id).find(event => event.type === 'worker-question-routed');
+      await until(() => routed() !== undefined && store.getRun(w.id)?.status === 'waiting');
+      const question = WORKER_FALLBACK_QUESTION(w.id);
+      expect(store.readEvents(w.id).filter(event => event.type === 'note' && String(event.message).startsWith(NO_WAIT_NUDGE_NOTE))).toHaveLength(1);
+      expect(asks(w.id)).toEqual([expect.objectContaining({ questions: [{ header: WORKER_FALLBACK_HEADER, question }] })]);
+      expect(humanOpen(w.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'no-wait', askSeq: asks(w.id)[0]!.seq })]);
+      expect(routed()).toMatchObject({ askSeq: asks(w.id)[0]!.seq, parentRunId: p.id });
+      // The request is in the parent's conversation, and it wakes the parent.
+      const requestId = String(routed()!.messageId);
+      const conversation = store.getRun(p.id)?.delegation?.role === 'root' ? (store.getRun(p.id)!.delegation as { conversation?: { messages: Array<{ id: string; kind: string; senderRunId: string }> } }).conversation : undefined;
+      expect(conversation?.messages.find(message => message.id === requestId)).toMatchObject({ kind: 'request', senderRunId: w.id });
+      await until(() => delivered(p.id, requestId) && prompted(runner, question).length > 0);
+      const wakes = store.getRun(w.id)?.automaticWakes ?? 0;
+      const credentials = new CredentialRegistry();
+      onTestFinished(() => credentials.close());
+      const service = new DelegationService();
+      service.registerProject({ id: 'project', root, store, manager });
+      const parentCaller = credentials.authenticate(credentials.issue('project', p.id, randomUUID()))!;
+      await service.send(parentCaller, { id: randomUUID(), recipientRunId: w.id, kind: 'reply', requestId, text: `${WORKER_FALLBACK_HEADER}: cez-dev`, timeoutSeconds: 600 });
+      await until(() => store.readEvents(w.id).some(event => event.type === 'human-input-delivered' && event.source === 'parent' && event.askSeq === asks(w.id)[0]!.seq));
+      expect(store.readEvents(w.id).filter(event => event.type === 'note' && String(event.message).startsWith(WORKER_FALLBACK_REPLY_NOTE)))
+        .toEqual([expect.objectContaining({ message: `${WORKER_FALLBACK_REPLY_NOTE} (${wakes + 1}/${MAX_AUTO_CONTINUES})` })]);
+      await until(() => prompted(runner, `${WORKER_FALLBACK_HEADER}: cez-dev`).length > 0);
     });
   }
 

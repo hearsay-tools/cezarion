@@ -590,6 +590,12 @@ export const NO_WAIT_NUDGE_NOTE = 'no wait or done — reminding the agent once'
 export const NO_WAIT_NOTE = 'waiting for you: the agent ended its turn without a wait or done';
 export const NO_WAIT_NO_REPLY_NOTE = 'no reply to the no-wait nudge — waiting for you';
 export const COMPLETION_NO_REPLY_NOTE = 'no reply to the completion nudge — waiting for you';
+/** A worker's second turn end with no wait or done asks its parent, as a routed open question
+ *  (hearsay-tools/cezarion#1301). */
+export const WORKER_FALLBACK_QUESTION = (workerId: string) => `Worker ${workerId} ended its turn without waiting on anything or finishing. Reply with what it should do next.`;
+export const WORKER_FALLBACK_HEADER = 'Worker idle';
+export const WORKER_FALLBACK_NOTE = 'no wait or done after the nudge — asking the parent';
+export const WORKER_FALLBACK_REPLY_NOTE = 'parent answered the idle worker';
 /** A root's done blocked at a turn end is answered with the refusal `cezar_done` gives, as one
  *  automatic turn (hearsay-tools/cezarion#1301). The nudge adds this sentence when live workers block
  *  it; the mid-turn answer never does. */
@@ -3389,7 +3395,7 @@ export class RunManager {
     // adopted family only schedules its own members: the sweep belongs to restart.
     if (familyRootId === undefined) this.workerScratchCleanup.recover();
     else for (const run of this.familyMembers(familyRootId)) this.workerScratchCleanup.schedule(run.id);
-    for (const run of live) {
+    for (let run of live) {
       if (this.isActive(run.id)) continue;
       if (this.workerExecutionStopped(run.id)) continue;
       if (run.delegation?.role === 'worker') {
@@ -3404,6 +3410,9 @@ export class RunManager {
         await this.settleRequestedRootFinish(run.id);
         continue;
       }
+      // A worker no process survived for is a closed session: Cezar's fallback question goes as at an
+      // idle close, and the worker recovers as its plain park did (hearsay-tools/cezarion#1301).
+      if (run.delegation?.role === 'worker' && run.status === 'waiting' && this.supersedeWorkerFallback(run.id)) run = this.store.getRun(run.id)!;
       // hearsay-tools/cezarion#1234: a crash after a human wait's registration and before its turn
       // end shows the question now. The run waits on the user, its other waits re-armed.
       if (this.unsurfacedHumanWait(run.id)) {
@@ -5098,12 +5107,14 @@ export class RunManager {
     // Verbatim: a native answer seam parses `Header: label` lines, exactly as a human's.
     const text = reply.text;
     const state = this.active.get(runId);
+    const fallback = this.isWorkerFallbackAsk(runId, routed.askSeq);
     if (!state) {
       // An automated answer is not a human override: the reopened session waits for capacity.
       // It withdraws no wait (hearsay-tools/cezarion#1235).
       if (this.isActive(runId)) return;
       const result = this.continueRun(runId, { text, answerInputId: reply.id }, true);
       if (!result.ok) this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: `parent answer not delivered: ${result.error}` });
+      else if (fallback) this.chargeWorkerFallbackReply(runId);
       return;
     }
     if (!state.session?.open || state.cancelled || state.openingAgentInputId === reply.id) return;
@@ -5119,6 +5130,7 @@ export class RunManager {
     const bundle = state.atTurnBoundary === state.session ? this.pendingConversationBatch(runId, state, reply.id) : undefined;
     if (!state.session.sendMessage([{ type: 'text', text }, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : [])])) return;
     this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: routed.askSeq, source: 'parent' });
+    if (fallback) this.chargeWorkerFallbackReply(runId);
     this.settleHumanWaits(runId);
     const delivered = [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])];
     this.commitBundledDelivery(runId, state, delivered);
@@ -6247,6 +6259,14 @@ export class RunManager {
       // phase 3b (#1235): completion gate only
       (this.delegationWait(runId)?.phase === 'registered') ||
       (this.delegationWait(runId)?.phase === 'wake-pending' && !this.workerWakeAdmitted.has(runId))) return false;
+    // A parent's input to a worker supersedes Cezar's fallback question, charged as its reply would
+    // be (hearsay-tools/cezarion#1301); the parent's reply to it goes through the answer seam.
+    const answer = this.routedAnswer(runId)?.id;
+    if (run.agentInputs?.some(input => !input.deliveredAt && input.source === 'agent' && input.id !== answer && input.id !== state.openingAgentInputId) &&
+      this.supersedeWorkerFallback(runId)) {
+      this.chargeWorkerFallbackReply(runId);
+      run = this.store.getRun(runId)!;
+    }
     // A question pending at a turn boundary still takes an admitted wake of resolved-wait results
     // and messages; one pending mid-turn (a native ask) takes nothing until its turn ends.
     const askPending = state.pendingHumanAsk || this.hasUnansweredHumanAsk(runId);
@@ -6562,8 +6582,11 @@ export class RunManager {
   }
 
   /** A clean process exit cannot complete a workflow still blocked on a question.
-   * Keep its existing durable waiting step so Continue can resume the tail. */
+   * Keep its existing durable waiting step so Continue can resume the tail. Cezar's fallback
+   * question on a worker is not one: the clean exit supersedes it, so the workflow goes on as the
+   * plain park it replaced did (hearsay-tools/cezarion#1301). */
   private unansweredWorkflowAsk(runId: string, state: ActiveRun): boolean {
+    if (!state.finishRequested) this.supersedeWorkerFallback(runId);
     const run = this.store.getRun(runId);
     return !state.finishRequested && !!run && this.hasPendingHumanAsk(runId) &&
       this.waitingBeforeFinalWorkflowStep(run);
@@ -6696,6 +6719,8 @@ export class RunManager {
       this.waitingBeforeFinalWorkflowStep(run) && (!run.workflowDef || this.waitingWorkflowStepIndex(run) < 0)) {
       return { ok: false, error: 'cannot continue a waiting run before its final workflow step' };
     }
+    // A Continue supersedes Cezar's fallback question on a worker (hearsay-tools/cezarion#1301).
+    if (!opts.answerInputId) this.supersedeWorkerFallback(runId);
     const pendingHumanAsk = run.delegation?.role !== 'invalid' && this.hasPendingHumanAsk(runId);
     if (run.status === 'waiting' && hasRegisteredRunProcess(runId)) {
       return { ok: false, error: 'cannot continue a waiting run' };
@@ -9154,6 +9179,9 @@ export class RunManager {
    * would produce so its parent can collect it. Explicit asks and worker waits
    * remain durable attention states. */
   private async settleIdleClosedWorker(runId: string): Promise<boolean> {
+    // An idle close supersedes Cezar's fallback question, so the worker settles as its plain park
+    // did (hearsay-tools/cezarion#1301).
+    this.supersedeWorkerFallback(runId);
     const run = this.store.getRun(runId);
     // phase 3b (#1235): completion gate only
     if (run?.delegation?.role !== 'worker' || this.hasPendingHumanAsk(runId) || this.delegationWait(runId)) return false;
@@ -9373,7 +9401,7 @@ export class RunManager {
     const via = decision.kind === 'human-wait' ? decision.via : 'no-wait';
     this.openTurnEndHumanWait(runId, state, stepId, via, via === 'no-wait' ? NO_WAIT_NOTE
       : state.autonomous ? `autonomous — safety cap reached (${MAX_AUTO_CONTINUES}); automatic continuation paused`
-      : `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you`);
+      : `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you`, true);
     return 'human-wait';
   }
 
@@ -9399,16 +9427,95 @@ export class RunManager {
   }
 
   /** Cezar's own human wait at a turn end (hearsay-tools/cezarion#1234): the cause as a note, the
-   *  wait shown as Needs you, and the run parked for the user. A worker's fallback stays a plain
-   *  park until phase 3 routes it to the parent. */
-  private openTurnEndHumanWait(runId: string, state: ActiveRun, stepId: string | undefined, via: 'no-wait' | 'budget', note: string): void {
-    const wait = this.store.getRun(runId)?.delegation?.role === 'worker' ? undefined : this.openHumanAlias(runId, state, via);
+   *  wait shown as Needs you, and the run parked for the user. A worker's `no-wait` fallback at its
+   *  turn end (`turnEnd`) asks its parent instead (`askParentForWorker`, hearsay-tools/cezarion#1301);
+   *  any other worker fallback stays a plain park. */
+  private openTurnEndHumanWait(runId: string, state: ActiveRun, stepId: string | undefined, via: 'no-wait' | 'budget', note: string, turnEnd = false): void {
+    const worker = this.store.getRun(runId)?.delegation?.role === 'worker';
+    if (worker && via === 'no-wait' && turnEnd) { this.askParentForWorker(runId, state, stepId); return; }
+    const wait = worker ? undefined : this.openHumanAlias(runId, state, via);
     if (wait?.source === 'cezar' && wait.askSeq === undefined) this.showCezarHumanWait(runId, state, wait, note);
     else {
       this.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), message: note });
       if (wait) this.surfaceHumanWait(runId, state, wait);
     }
     this.parkForUser(runId, state, stepId);
+  }
+
+  /**
+   * A worker that ended a second turn with no wait or done after its no-wait nudge
+   * (hearsay-tools/cezarion#1301): Cezar's `no-wait` human wait carries one open question, raised
+   * as `ask.requested` so `routeWorkerQuestion` takes it to the parent as a request. The parent's
+   * reply resumes the worker through the answer seam, charged to the worker's budget; a parent that
+   * cannot receive leaves it with the human (`worker-question-fallback`). A full wait list opens
+   * none and the worker parks as before.
+   */
+  private askParentForWorker(runId: string, state: ActiveRun, stepId: string | undefined): void {
+    const questions = [{ header: WORKER_FALLBACK_HEADER, question: WORKER_FALLBACK_QUESTION(runId) }];
+    this.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), message: WORKER_FALLBACK_NOTE });
+    const wait = this.openHumanAlias(runId, state, 'no-wait', questions);
+    if (wait && wait.askSeq === undefined && this.pendingHumanAskSeq(runId) === undefined) {
+      this.store.appendEvent(runId, { type: 'ask.requested', requestId: randomUUID(), questions, ...(stepId ? { stepId } : {}) });
+      this.prepareHumanAsk(runId, state);
+      this.markHumanWaitSurfaced(runId, wait, questions);
+      this.routeWorkerQuestion(runId);
+    }
+    this.parkForUser(runId, state, stepId);
+  }
+
+  /** The worker's pending question is the one `askParentForWorker` raised. */
+  private isWorkerFallbackAsk(runId: string, askSeq: number): boolean {
+    const ask = this.store.transcriptFacts(runId).pendingAsk;
+    const questions = ask?.seq === askSeq ? askRequestSchema.safeParse({ questions: ask.questions }).data?.questions : undefined;
+    return questions?.length === 1 && questions[0]!.header === WORKER_FALLBACK_HEADER && questions[0]!.question === WORKER_FALLBACK_QUESTION(runId);
+  }
+
+  /** The parent's reply to a worker's fallback question resumed it: one automatic wake, so a
+   *  parent and worker cannot go back and forth past the budget (hearsay-tools/cezarion#1301). */
+  private chargeWorkerFallbackReply(runId: string): void {
+    const spent = this.chargeAutomaticWake(runId);
+    this.store.appendEvent(runId, { type: 'note', message: `${WORKER_FALLBACK_REPLY_NOTE} (${spent}/${MAX_AUTO_CONTINUES})` });
+  }
+
+  /**
+   * Cezar's fallback question is Cezar's, not the worker's (hearsay-tools/cezarion#1301): what the
+   * plain park it replaced let through still goes through. A parent's input, a Continue or an idle
+   * close supersedes it: the question closes unanswered (`human-ask-closed`, `superseded`), Cezar's
+   * wait goes, and its routed request gets an outcome, so it no longer holds the parent's done. A
+   * question the worker asked itself is never superseded. True when one closed.
+   */
+  private supersedeWorkerFallback(runId: string): boolean {
+    const run = this.store.getRun(runId);
+    const ask = this.store.transcriptFacts(runId).pendingAsk;
+    if (run?.delegation?.role !== 'worker' || !ask || !this.isWorkerFallbackAsk(runId, ask.seq)) return false;
+    this.store.appendEvent(runId, { type: 'human-ask-closed', askSeq: ask.seq, reason: 'superseded' });
+    this.withdrawCezarHumanWaits(runId);
+    const state = this.active.get(runId);
+    if (state) state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
+    const root = this.store.getRun(run.delegation.parentRunId);
+    const conversation = root?.delegation?.role === 'root' ? root.delegation.conversation : undefined;
+    const requestId = ask.routedMessageId;
+    if (root && conversation && requestId !== undefined && conversation.messages.some(message => message.id === requestId) &&
+      !conversation.outcomes.some(outcome => outcome.requestId === requestId)) {
+      try {
+        this.store.commitConversation(root.id, { ...conversation, outcomes: [...conversation.outcomes,
+          { requestId, status: 'completed-without-reply', observedAt: new Date().toISOString() }] });
+        projectConversationEvents(this.store, this.store.getRun(root.id)!);
+        this.retireUnreadParentQuestion(root.id, requestId);
+      } catch (error) { console.warn(`[cez] fallback question outcome failed: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+    return true;
+  }
+
+  /** The parent no longer owes an answer to a superseded fallback question: one it has not read is
+   *  retired, so neither a wake nor a restart's replay of unread input delivers it. One a provider
+   *  or an inbox read already holds is left to them. */
+  private retireUnreadParentQuestion(parentId: string, requestId: string): void {
+    const input = this.store.getRun(parentId)?.agentInputs?.find(entry => entry.id === requestId);
+    if (!input || input.consumedAt || hasLiveInboxClaim(input) || this.providerOwnsInboxInput(parentId, requestId)) return;
+    this.active.get(parentId)?.unreadInputIds?.delete(requestId);
+    if (input.deliveredAt) this.store.commitAgentInputsUnconfirmed(parentId, [requestId]);
+    else this.store.commitAgentInputs(parentId, (this.store.getRun(parentId)?.agentInputs ?? []).filter(entry => entry.id !== requestId));
   }
 
   /** Heartbeats and nested subagent items are not a reply. A `turn.started` counts only while the

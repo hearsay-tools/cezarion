@@ -13,7 +13,7 @@ import * as runnerFactory from '../core/runner-factory.ts';
 import { collectWorkerEvidence } from '../delegation/results.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
-import { RunManager } from './run.ts';
+import { MAX_AUTO_CONTINUES, RunManager } from './run.ts';
 import { currentUsage } from '../core/process-usage.ts';
 import type { AgentSession, RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
@@ -138,16 +138,22 @@ export async function parent(task = 'mock:hold', runner: RunnerId = 'claude') {
   await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(run.id)?.sessionEverOpened === true);
   checkpoint('parent-session-open'); return run;
 }
-export async function worker(parentId: string, task = 'mock:hold') {
+export async function worker(parentId: string, task = 'mock:hold', runner: RunnerId = 'claude') {
   checkpoint('worker-plan-start');
   const id = randomUUID();
   const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const workspace = await planOwnedWorkspace(root, id, sha);
   checkpoint('worker-planned');
-  const run = store.createOwnedRun({ title: 'worker', task, workflow: 'quick-task', runner: 'claude', steps: [{ id: 'task', kind: 'agent', name: 'Task' }] }, parentId, randomUUID(), {
+  const run = store.createOwnedRun({ title: 'worker', task, workflow: 'quick-task', runner, steps: [{ id: 'task', kind: 'agent', name: 'Task' }] }, parentId, randomUUID(), {
     role: 'worker', permissions: [], parentRunId: parentId, workspace,
   }, 'a'.repeat(64));
   checkpoint('worker-created'); return run;
+}
+/** Spend a worker's automatic-wake budget before it starts: its turn ends with no wait or done then
+ *  plain-park, as every worker's did before hearsay-tools/cezarion#1301. With budget left, the
+ *  second such turn end (after the no-wait nudge) asks its parent instead. */
+export function spendWorkerBudget(id: string) {
+  store.updateRun(id, { automaticWakes: MAX_AUTO_CONTINUES });
 }
 export function register(parentId: string, ids: string[], seconds = 600) {
   return manager.registerWorkerWait(parentId, workerWaitRequestSchema.parse({ workerIds: ids, timeoutSeconds: seconds }));
