@@ -24,6 +24,7 @@ import type {
   RunStatus,
 } from '@open-mercato/cezar-api-client'
 
+import { resetActivityDisclosureForTests } from './run-activity-dock'
 import { TaskThreadRoute, ThreadView } from './task-thread'
 import { buildTranscriptRows, mainTranscriptSections } from './session-transcript'
 import { reduceThread } from './thread-state'
@@ -31,6 +32,7 @@ import { reduceThread } from './thread-state'
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  resetActivityDisclosureForTests()
 })
 
 /** ThreadView now hosts the run header, whose hooks need a query client (mutations, the runs

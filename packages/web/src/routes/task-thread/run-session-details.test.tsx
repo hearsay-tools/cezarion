@@ -7,7 +7,7 @@ import { createQueryClient } from '@/api/query-client'
 import type { ApiRun, RunStatus, StepState } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 
-import { RunActivityDock } from './run-activity-dock'
+import { RunActivityDock, resetActivityDisclosureForTests } from './run-activity-dock'
 import { resolveConflictsPrompt } from './run-actions'
 import { reduceThread } from './thread-state'
 
@@ -23,6 +23,7 @@ afterEach(() => {
   act(() => resetToasts())
   cleanup()
   vi.unstubAllGlobals()
+  resetActivityDisclosureForTests()
 })
 
 const step = (extra: Partial<StepState> = {}): StepState => ({
