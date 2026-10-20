@@ -526,12 +526,6 @@
     {
       "file": "core/session-process.test.ts",
       "rule": "sleep",
-      "site": "await new Promise(resolve => setTimeout(resolve, 300));",
-      "count": 2
-    },
-    {
-      "file": "core/session-process.test.ts",
-      "rule": "sleep",
       "site": "await new Promise(resolve => setTimeout(resolve, 400));",
       "count": 1
     },

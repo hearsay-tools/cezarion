@@ -89,8 +89,8 @@ describe('agent profiles API', () => {
       expect(body.profiles.every((p) => p.id === 'default')).toBe(true);
     });
 
-    it('names the providers that can carry an account at all — OpenCode cannot', async () => {
-      expect((await list()).profileCapableProviders).toEqual(['claude', 'codex']);
+    it('names the providers that can carry an account at all — OpenCode and Cursor cannot', async () => {
+      expect((await list()).profileCapableProviders).toEqual(['claude', 'codex', 'pi', 'omp']);
     });
 
     it('reports each account\'s folder state, and does not refuse one that is missing', async () => {
@@ -218,6 +218,106 @@ describe('agent profiles API', () => {
         configDir: claudeDir('codex-klaudiusz'),
       })).status).toBe(201);
       expect((await loadAgentAccounts()).accounts).toHaveLength(2);
+    });
+
+    it('adds a pi account at any absolute folder, like Claude and Codex', async () => {
+      const dir = join(home, 'pi-work', 'agent');
+      const { status, body } = await send('POST', '/api/v1/workspace/agent-profiles', { provider: 'pi', configDir: dir });
+      expect(status).toBe(201);
+      expect(body.profile).toMatchObject({ provider: 'pi', path: dir, isDefault: false });
+    });
+
+    describe('omp, whose accounts are omp profiles', () => {
+      const savedEnv = { HOME: process.env.HOME, OMP_PROFILE: process.env.OMP_PROFILE, PI_PROFILE: process.env.PI_PROFILE,
+        PI_CONFIG_DIR: process.env.PI_CONFIG_DIR, PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR };
+      let userHome: string;
+      beforeEach(() => {
+        // omp resolves a profile name under `$HOME/.omp/profiles`, so the test owns HOME.
+        userHome = join(home, 'user');
+        mkdirSync(userHome);
+        process.env.HOME = userHome;
+        for (const key of ['OMP_PROFILE', 'PI_PROFILE', 'PI_CONFIG_DIR', 'PI_CODING_AGENT_DIR'] as const) delete process.env[key];
+      });
+      afterEach(() => {
+        for (const [key, value] of Object.entries(savedEnv)) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      });
+
+      it('adds a folder in omp\'s profiles dir, which need not exist yet', async () => {
+        const dir = join(userHome, '.omp', 'profiles', 'work');
+        const { status, body } = await send('POST', '/api/v1/workspace/agent-profiles', { provider: 'omp', label: 'Work', configDir: dir });
+        expect(status).toBe(201);
+        expect(body.profile).toMatchObject({ provider: 'omp', path: dir, exists: false });
+      });
+
+      it('refuses a folder outside omp\'s profiles dir — OMP_PROFILE could only select a different one', async () => {
+        const { status, body } = await send('POST', '/api/v1/workspace/agent-profiles', {
+          provider: 'omp',
+          configDir: join(home, 'profiles', 'work'),
+        });
+        expect(status).toBe(400);
+        expect(body.error).toContain(join(userHome, '.omp', 'profiles'));
+        expect((await loadAgentAccounts()).accounts).toEqual([]);
+      });
+
+      it('refuses a profile name omp would refuse', async () => {
+        const { status, body } = await send('POST', '/api/v1/workspace/agent-profiles', {
+          provider: 'omp',
+          configDir: join(userHome, '.omp', 'profiles', 'Work'),
+        });
+        expect(status).toBe(400);
+        expect(body.error).toContain('lowercase');
+      });
+
+      it('refuses the profile a host OMP_PROFILE already makes the default', async () => {
+        process.env.OMP_PROFILE = 'work';
+        const { status, body } = await send('POST', '/api/v1/workspace/agent-profiles', {
+          provider: 'omp',
+          configDir: join(userHome, '.omp', 'profiles', 'work'),
+        });
+        expect(status).toBe(409);
+        expect(body.error).toContain('default folder');
+      });
+
+      it('refuses repointing an omp account outside the profiles dir', async () => {
+        const { body: created } = await send('POST', '/api/v1/workspace/agent-profiles', {
+          provider: 'omp',
+          configDir: join(userHome, '.omp', 'profiles', 'work'),
+        });
+        const { status } = await send('PATCH', `/api/v1/workspace/agent-profiles/${created.profile.id}`, {
+          configDir: join(home, 'omp-work'),
+        });
+        expect(status).toBe(400);
+      });
+
+      it('neither connects nor probes an account once omp\'s root moved away from it (#1283)', async () => {
+        const dir = join(userHome, '.omp', 'profiles', 'work');
+        const { body: created } = await send('POST', '/api/v1/workspace/agent-profiles', { provider: 'omp', configDir: dir });
+        // `OMP_PROFILE=work` would now open `~/.omp-alt/profiles/work`, not the folder Settings shows.
+        process.env.PI_CONFIG_DIR = '.omp-alt';
+        const connect = await apiRequest(makeApp(), '/api/v1/providers/connect', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ provider: 'omp', profileId: created.profile.id }),
+        });
+        expect(connect.status).toBe(409);
+        expect(((await connect.json()) as { error: string }).error).toContain(join(userHome, '.omp-alt', 'profiles'));
+        const status = await apiRequest(makeApp(), `/api/v1/workspace/agent-profiles/${created.profile.id}/status`);
+        expect(status.status).toBe(200);
+        expect(await status.json()).toEqual({
+          status: { provider: 'omp', status: 'unknown', hint: expect.stringContaining('PI_CONFIG_DIR'), profileId: created.profile.id },
+        });
+      });
+
+      it('lists the profile\'s own config files, from its `agent/` folder', async () => {
+        const dir = join(userHome, '.omp', 'profiles', 'work');
+        const { body } = await send('POST', '/api/v1/workspace/agent-profiles', { provider: 'omp', configDir: dir });
+        const row = (await list()).profiles.find((p) => p.id === body.profile.id)!;
+        expect(row.files.length).toBeGreaterThan(0);
+        expect(row.files.every((f) => f.path.startsWith(join(dir, 'agent')))).toBe(true);
+      });
     });
 
     it('400s an unknown key rather than dropping it silently', async () => {
@@ -593,6 +693,13 @@ describe('agent profiles API', () => {
       expect(settings?.exists).toBe(true);
       // A file the agent has not written yet is listed honestly rather than omitted.
       expect(row.files.find((f) => f.label === 'CLAUDE.md')?.exists).toBe(false);
+    });
+
+    it('lists a pi account\'s config files from its own folder', async () => {
+      const dir = join(home, 'pi-work', 'agent');
+      const { body } = await send('POST', '/api/v1/workspace/agent-profiles', { provider: 'pi', configDir: dir });
+      const row = (await list()).profiles.find((p) => p.id === body.profile.id)!;
+      expect(row.files.find((f) => f.label === 'settings.json')?.path).toBe(join(dir, 'settings.json'));
     });
 
     it('answers the identity on demand, and only the named fields', async () => {

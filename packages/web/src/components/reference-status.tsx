@@ -162,6 +162,16 @@ export function useReferenceStatus(
   return context.lookup({ projectId: owner, kind, number })
 }
 
+/** Which of these PR numbers the surrounding provider knows to be conflicting — the roll-up a
+ *  summary row paints without rendering every chip (hearsay-tools/cezarion#1333). Empty outside a
+ *  provider, like every other read here. */
+export function useConflictingPullRequests(numbers: readonly number[], projectId?: string): number[] {
+  const context = useContext(ReferenceStatusContext)
+  const owner = projectId ?? context?.projectId
+  if (!context || !owner) return []
+  return numbers.filter((number) => context.lookup({ projectId: owner, kind: 'PR', number }).conflicting === true)
+}
+
 /** Outside a provider (a bare render, a test, a surface that never mounted one) nothing has been
  *  asked and nothing is claimed — the pre-status chip, exactly. Frozen and shared so it is a
  *  stable identity rather than a new object per render. */

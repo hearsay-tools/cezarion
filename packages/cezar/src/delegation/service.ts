@@ -12,6 +12,7 @@ import {
   type DiscoveryResponse,
 } from '@open-mercato/cezar-contract/discovery';
 import {
+  MAX_CONVERSATION_REQUEST_SECONDS,
   conversationSendRequestSchema,
   conversationInspectRequestSchema,
   conversationCancelRequestSchema,
@@ -358,6 +359,11 @@ export class DelegationService {
       const destroyed = recipient.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete';
       const resumable = !['queued', 'running', 'waiting'].includes(recipient.status) || !!recipient.stopping || (recipient.delegation?.role === 'worker' && !!recipient.delegation.destroy);
       const resume = !!request.resume && resumable;
+      // The extended bound belongs to a new continuation, not merely the flag.
+      // Exact retries have already returned above, even if that continuation is now active.
+      if (request.timeoutSeconds > MAX_CONVERSATION_REQUEST_SECONDS && !resume) {
+        throw new DelegationPolicyError('incompatible_state', 'Extended request deadlines require resuming a settled worker; active workers accept at most 1800 seconds');
+      }
       if (resume && (destroyed || recipient.delegation?.role !== 'worker' || recipient.delegation.destroy ||
         recipient.status === 'cancelled' || recipient.stopping)) throw new DelegationPolicyError('incompatible_state',
           `Worker is ${destroyed ? 'destroyed' : 'stopped or being destroyed'}; --resume cannot restart it. Spawn a new worker with the follow-up instruction`);
@@ -386,7 +392,13 @@ export class DelegationService {
       if (state.messages.length + reservedMessages >= 1024 || (enqueue && request.kind === 'request' && state.messages.filter(message => message.kind === 'request' && message.state === 'accepted' && !state.outcomes.some(outcome => outcome.requestId === message.id)).length >= 32) ||
         (enqueue && !answering && (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');
       const outcomes = [...state.outcomes];
-      if (request.kind === 'reply' && !settled) outcomes.push({ requestId: request.requestId!, status: 'replied', observedAt: now, replyId: request.id });
+      // Only deadline expiry can be amended. Cancellation, lifecycle settlement and an
+      // earlier reply still win; the request never becomes pending again.
+      if (request.kind === 'reply' && (!settled || settled.status === 'timed-out')) {
+        const outcome = { requestId: request.requestId!, status: settled ? 'replied-late' as const : 'replied' as const, observedAt: now, replyId: request.id };
+        if (settled) outcomes[outcomes.indexOf(settled)] = outcome;
+        else outcomes.push(outcome);
+      }
       const input = { id: message.id, source: 'agent' as const, parentRunId: root.id, text: message.text, createdAt: now,
         conversation: { senderRunId: sender.id, recipientRunId: recipient.id, kind: message.kind, ...(message.requestId ? { requestId: message.requestId } : {}) } };
       const next = { messages: [...state.messages, message], outcomes };

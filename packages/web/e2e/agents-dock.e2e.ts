@@ -107,7 +107,7 @@ afterAll(async () => {
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
 
-/** Since #402 the fan-out is a SECTION of the one Run activity card, not a dock of its own:
+/** Since #402 the fan-out is a SECTION of the one Session activity card, not a dock of its own:
  *  the card owns the outer collapse, the section owns its rows and its odometer. */
 const CARD = '[data-slot="run-activity-dock"]'
 const DOCK = '[data-slot="run-activity-subagents"]'

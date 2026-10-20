@@ -1,11 +1,14 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { agentAccountsPath } from '../paths.ts';
 import {
+  AgentAccountUnavailableError,
   defaultAgentProfile,
   listAgentProfiles,
+  namedAccountUnavailable,
+  ompProfileDirError,
   profileDirState,
   profilesForProvider,
   resolveProfileEnvForRoot,
@@ -54,6 +57,14 @@ describe('agent profile resolution', () => {
     it('follows the vendor env vars, so setting one moves the DEFAULT profile', () => {
       const relocated = { HOME: '/home/u', CLAUDE_CONFIG_DIR: '/opt/claude' } as NodeJS.ProcessEnv;
       expect(defaultAgentProfile('claude', relocated).path).toBe('/opt/claude');
+    });
+
+    it('follows a host-exported OMP_PROFILE, so the profile the host selects is the default', () => {
+      // The default is spawned with nothing added and inherits the host's OMP_PROFILE through
+      // `agent-env.ts`'s `OMP_` prefix; discovery has to name the folder that session really uses.
+      expect(defaultAgentProfile('omp', env).path).toBe('/home/u/.omp/agent');
+      expect(defaultAgentProfile('omp', { ...env, OMP_PROFILE: 'work' }).path).toBe('/home/u/.omp/profiles/work/agent');
+      expect(defaultAgentProfile('pi', { ...env, PI_CODING_AGENT_DIR: '/opt/pi' }).path).toBe('/opt/pi');
     });
 
     it('is marked default so the UI can refuse to edit or delete it', () => {
@@ -160,10 +171,59 @@ describe('agent profile resolution', () => {
       expect(resolved.env).toEqual({ CODEX_HOME: '/opt/codex-klaudiusz' });
     });
 
+    it('uses PI_CODING_AGENT_DIR for a pi account and OMP_PROFILE for an omp one', async () => {
+      write({
+        accounts: [
+          { ...klaudiuszProfile, id: 'pi-work', provider: 'pi', configDir: '/opt/pi-work/agent' },
+          { ...klaudiuszProfile, id: 'omp-work', provider: 'omp', configDir: '/home/u/.omp/profiles/work' },
+        ],
+        selections: { '/tmp/projects/a': { pi: 'pi-work', omp: 'omp-work' } },
+      });
+      expect((await resolveProfileEnvForRoot('/tmp/projects/a', 'pi')).env).toEqual({ PI_CODING_AGENT_DIR: '/opt/pi-work/agent' });
+      expect((await resolveProfileEnvForRoot('/tmp/projects/a', 'omp', undefined, env)).env).toEqual({ OMP_PROFILE: 'work' });
+      // The default account of either still adds nothing.
+      expect((await resolveProfileEnvForRoot('/tmp/projects/b', 'pi')).env).toEqual({});
+      expect((await resolveProfileEnvForRoot('/tmp/projects/b', 'omp')).env).toEqual({});
+    });
+
     it('degrades to the default when the accounts file is unreadable', async () => {
       writeFileSync(agentAccountsPath(), '{ not json', 'utf8');
       const resolved = await resolveProfileEnvForRoot('/tmp/projects/a', 'claude');
       expect(resolved.env).toEqual({});
+    });
+
+    it('refuses an omp account whose root moved, rather than letting OMP_PROFILE open another profile', async () => {
+      // Added while omp's root was `~/.omp`; PI_CONFIG_DIR now moves it, and `OMP_PROFILE=work`
+      // would open `~/.omp-alt/profiles/work` while Settings still shows the stored folder.
+      write({
+        accounts: [{ ...klaudiuszProfile, id: 'omp-work', provider: 'omp', configDir: '/home/u/.omp/profiles/work' }],
+        selections: { '/tmp/projects/a': { omp: 'omp-work' } },
+      });
+      const moved = { ...env, PI_CONFIG_DIR: '.omp-alt' } as NodeJS.ProcessEnv;
+      const refused = resolveProfileEnvForRoot('/tmp/projects/a', 'omp', undefined, moved);
+      await expect(refused).rejects.toBeInstanceOf(AgentAccountUnavailableError);
+      await expect(refused).rejects.toThrow('/home/u/.omp-alt/profiles');
+      // A recorded profile on Continue is refused the same way; the default is never substituted.
+      await expect(resolveProfileEnvForRoot('/tmp/projects/b', 'omp', 'omp-work', moved)).rejects.toThrow(AgentAccountUnavailableError);
+    });
+  });
+
+  describe('namedAccountUnavailable', () => {
+    it('lets an omp account through while omp would open its folder', () => {
+      expect(namedAccountUnavailable('omp', '/home/u/.omp/profiles/work', env)).toBeNull();
+    });
+
+    it('names the profiles dir omp would read after HOME or PI_CONFIG_DIR changed', () => {
+      expect(namedAccountUnavailable('omp', '/home/u/.omp/profiles/work', { ...env, PI_CONFIG_DIR: '.omp-alt' }))
+        .toContain('/home/u/.omp-alt/profiles');
+      expect(namedAccountUnavailable('omp', '/home/u/.omp/profiles/work', { HOME: '/home/v' }))
+        .toContain('/home/v/.omp/profiles');
+    });
+
+    it('never refuses a provider that is handed its folder itself', () => {
+      for (const provider of ['claude', 'codex', 'pi'] as const) {
+        expect(namedAccountUnavailable(provider, '/anywhere/at/all', { ...env, PI_CONFIG_DIR: '.omp-alt' }), provider).toBeNull();
+      }
     });
   });
 
@@ -186,6 +246,39 @@ describe('agent profile resolution', () => {
       const dir = join(home, 'random');
       mkdirSync(dir);
       expect(await profileDirState('claude', dir)).toEqual({ exists: true, looksValid: false });
+    });
+  });
+
+  describe('ompProfileDirError', () => {
+    it('accepts a folder in omp\'s profiles dir whose name omp accepts', async () => {
+      expect(await ompProfileDirError('/home/u/.omp/profiles/work', env)).toBeNull();
+      expect(await ompProfileDirError('/home/u/.omp/profiles/work/', env)).toBeNull();
+    });
+
+    it('refuses a folder anywhere else, naming where an omp profile has to live', async () => {
+      // OMP_PROFILE takes a NAME: omp would open `~/.omp/profiles/omp-work`, not this folder.
+      expect(await ompProfileDirError('/data/profiles/omp-work', env)).toContain('/home/u/.omp/profiles/');
+      expect(await ompProfileDirError('/home/u/.omp/agent', env)).toContain('/home/u/.omp/profiles/');
+    });
+
+    it('refuses a name omp would refuse, `default` included', async () => {
+      for (const name of ['Work', 'default', 'work.', 'con']) {
+        expect(await ompProfileDirError(`/home/u/.omp/profiles/${name}`, env), name).toContain('lowercase');
+      }
+    });
+
+    it('follows a host PI_CONFIG_DIR, which moves omp\'s root', async () => {
+      const alt = { ...env, PI_CONFIG_DIR: '.omp-alt' } as NodeJS.ProcessEnv;
+      expect(await ompProfileDirError('/home/u/.omp-alt/profiles/work', alt)).toBeNull();
+      expect(await ompProfileDirError('/home/u/.omp/profiles/work', alt)).toContain('/home/u/.omp-alt/profiles/');
+    });
+
+    it('accepts the real spelling of a profiles dir reached through a symlinked home', async () => {
+      const real = realpathSync(home);
+      mkdirSync(join(real, 'real-home', '.omp', 'profiles'), { recursive: true });
+      symlinkSync(join(real, 'real-home'), join(real, 'linked-home'));
+      const linked = { HOME: join(real, 'linked-home') } as NodeJS.ProcessEnv;
+      expect(await ompProfileDirError(join(real, 'real-home', '.omp', 'profiles', 'work'), linked)).toBeNull();
     });
   });
 

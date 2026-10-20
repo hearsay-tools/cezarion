@@ -34,6 +34,34 @@ and five independent Noul questions in one request: established intended behavio
 policy changes, authority changes, verification changes, and runtime changes.
 Code combines them; Jev does not select an executable workflow or use tools.
 
+Jev has no repository context beyond the supplied title and body. The
+established-behavior question asks whether the report describes an existing
+requirement enforced by code, tests or documentation and a bounded way to restore
+or explain it. It does not ask Jev to verify the source or infer project approval.
+A filename, citation or assertion that something is a bug is insufficient on its
+own. The implementation worker must verify the reported requirement before acting.
+
+The established-behavior, policy-change and verification-change questions each
+carry explicit true/false criteria. Explaining an existing command or guard, or
+finding the assertions for tests already required, preserves the requirement.
+Introducing an obligation, exemption, threshold, permission or behavioral
+guarantee changes policy even when delivered as documentation. Changing what must
+pass, what may be skipped or which results count as accepted changes verification.
+Missing evidence remains uncertain; it does not establish permission to act.
+
+These reports illustrate the intended boundary for calibration:
+
+| Report | Intended handling | Reason |
+| --- | --- | --- |
+| [hearsay-tools/cezarion#1337](https://github.com/hearsay-tools/cezarion/issues/1337) | Knowledge / automatic | Expose the existing counted-roster guard and command. |
+| [hearsay-tools/cezarion#1350](https://github.com/hearsay-tools/cezarion/issues/1350) | Knowledge / automatic | Explain visible-text searches to locate affected, already-required browser tests. |
+| [hearsay-tools/cezarion#1336](https://github.com/hearsay-tools/cezarion/issues/1336) | Design | Require duration measurements above a new time threshold. |
+| [hearsay-tools/cezarion#1344](https://github.com/hearsay-tools/cezarion/issues/1344) | Design | Choose mock-edit exemptions from required park fixtures. |
+
+These are expected outcomes, not measured Jev accuracy. Request-contract tests
+verify that the criteria reach the API; real model evaluations must check the
+predictions, including the other reports in the audited batch.
+
 Automatic eligibility requires a selected-category probability of at least 0.8,
 an established-behavior probability of at least 0.9, and independently no more
 than 0.1 probability of a policy, authority, or verification change. A runtime

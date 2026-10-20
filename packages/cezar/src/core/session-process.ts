@@ -1,19 +1,25 @@
 import { ChildProcess, spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
-import { KILL_GRACE_MS } from './runner-runtime.ts';
+import { afterExitDrain, exitDrainBudget, KILL_GRACE_MS } from './runner-runtime.ts';
 
 /**
  * Agent session leaders run in their own process group on POSIX (hearsay-tools/cezarion#890), so
  * Stop, the kill switches, destroy and cezar's own SIGINT/SIGTERM reach what an agent left
- * behind in the worktree. A process that left the group (`setsid`, `setpgid`) is never signalled.
+ * behind in the worktree. A leader that exits on its own (EOF, a crash, an outside kill) ended its
+ * session too: after the exit drain its group gets SIGTERM, then SIGKILL after the grace, so a
+ * stdio MCP server that ignores EOF or a background job does not outlive it
+ * (hearsay-tools/cezarion#1286). A process that left the group (`setsid`, `setpgid`) is never
+ * signalled.
  *
  * Signalling a group whose leader already exited is safe: Linux frees a pid number only when no
  * task uses it as a pid, pgid or sid (`__change_pid` → `free_pid`), and XNU skips a candidate pid
  * while `pghash_exists_locked(pid)` (`forkproc`). While any member lives no new process can get
  * the number; once the group is empty `kill(-pgid)` answers ESRCH. That holds only while one of
  * our processes is in the group, so when the leader exits its members are recorded by incarnation,
- * and the group is signalled later only while one of them is still in it. A number freed and
- * reused, even by a double-fork daemon whose new leader already exited, is never signalled.
+ * and the group is signalled later only while one of them is still in it. The reap after an exit
+ * of its own rescans the group and keeps the rescan only when a recorded member is still in it,
+ * so a child started after the exit is recorded too. A number freed and reused, even by a
+ * double-fork daemon whose new leader already exited, is never signalled.
  *
  * win32 has no groups: the leader stays attached to cezar's console and `taskkill /T /F` ends
  * its tree by parent pid at call time.
@@ -129,6 +135,45 @@ function prune(): void {
   for (const [pgid, leader] of leaders) if (stale(pgid, leader)) drop(pgid, leader);
 }
 
+/** How often a group that got SIGTERM is checked for members left. */
+const GROUP_POLL_MS = 50;
+
+/** The follow-up SIGKILL for a group that got SIGTERM, while it is still ours. The timer is
+ * referenced so a host with nothing else to do (a headless `cez run`) stays up to send it, and it
+ * stops as soon as the group is empty, so that host exits as soon as the group is gone
+ * (hearsay-tools/cezarion#1286). Each check is one `kill(-pgid, 0)`; only the SIGKILL reads the
+ * members, which on darwin spawns `ps` once each. */
+function scheduleKill(pgid: number, leader: Leader, signalledAt: number): void {
+  const deadline = signalledAt + KILL_GRACE_MS;
+  const check = (): void => {
+    if (leaders.get(pgid) !== leader) return;
+    if (!processGroupAlive(pgid)) { drop(pgid, leader); return; }
+    const left = deadline - Date.now();
+    if (left > 0) setTimeout(check, Math.min(GROUP_POLL_MS, left));
+    else if (!stale(pgid, leader)) signalProcessGroup(pgid, 'SIGKILL');
+  };
+  setTimeout(check, Math.max(0, Math.min(GROUP_POLL_MS, deadline - Date.now())));
+}
+
+/** End what a leader that exited on its own left in its group, once (hearsay-tools/cezarion#1286).
+ * The rescan precedes the SIGTERM: a member with the default action is usually gone before a scan
+ * after the signal reads it, and a child started after the exit would then lose its voucher. The
+ * rescan is kept only when a recorded member is still in it; otherwise the number is not ours.
+ * That leaves one gap on the safe side: a member that starts a child and exits before the rescan
+ * leaves nothing recorded, so the child outlives the session. Its group then reads exactly like a
+ * reused number, and telling them apart needs proof the group never emptied, which only the
+ * members' parent can observe. */
+function reap(pgid: number, leader: Leader): void {
+  if (leaders.get(pgid) !== leader || leader.signalledAt !== undefined) return;
+  const recorded = leader.members ?? [];
+  const members = groupMembers(pgid);
+  if (!members.some(m => recorded.some(r => r.pid === m.pid && r.token === m.token))) { drop(pgid, leader); return; }
+  leader.members = members;
+  leader.signalledAt = Date.now();
+  signalProcessGroup(pgid, 'SIGTERM');
+  scheduleKill(pgid, leader, leader.signalledAt);
+}
+
 /** Spawn an agent session leader. Only a real detached `ChildProcess` with a pid is registered,
  * so a test's fake child (made-up pid) never reaches `process.kill(-pid)`. */
 export function spawnSessionLeader(
@@ -145,23 +190,23 @@ export function spawnSessionLeader(
   const leader: Leader = { child };
   leaders.set(pid, leader);
   // Runners clear their own SIGKILL timers when the leader exits. A member that ignored the
-  // SIGTERM cezar sent outlives it, so the follow-up SIGKILL for the group lives here.
-  child.once('exit', () => {
+  // SIGTERM cezar sent outlives it, so the follow-up SIGKILL for the group lives here. A leader
+  // cezar never signalled is reaped after the exit drain, so a descendant's final crash
+  // diagnostic still lands first (harness row S19). The drain is referenced, and bounded by
+  // EXIT_DRAIN_CAP_MS, so a host with nothing else to do stays up to reap.
+  child.once('exit', (code) => {
     if (leaders.get(pid) !== leader) return;
     leader.members = processGroupAlive(pid) ? groupMembers(pid) : [];
     if (stale(pid, leader)) { drop(pid, leader); return; }
-    if (leader.signalledAt === undefined) return;
-    const timer = setTimeout(() => {
-      if (leaders.get(pid) === leader && !stale(pid, leader)) signalProcessGroup(pid, 'SIGKILL');
-    }, Math.max(0, leader.signalledAt + KILL_GRACE_MS - Date.now()));
-    timer.unref?.();
+    if (leader.signalledAt === undefined) afterExitDrain(() => reap(pid, leader), exitDrainBudget(code), true);
+    else scheduleKill(pid, leader, leader.signalledAt);
   });
   return child;
 }
 
 /** Signal a session: its whole group on POSIX, its tree on win32, else the leader alone. A
- * leader that already exited on its own ended its session: what it left behind is not signalled
- * here, as when no signal came at all. */
+ * leader that already exited on its own is not group-signalled here: its exit scheduled the reap
+ * of what it left behind (hearsay-tools/cezarion#1286). */
 export function signalSession(child: ChildProcess, signal: NodeJS.Signals, platform: NodeJS.Platform = process.platform): void {
   const pid = child.pid;
   const leader = pid === undefined ? undefined : leaders.get(pid);
@@ -178,6 +223,18 @@ export function signalSession(child: ChildProcess, signal: NodeJS.Signals, platf
     } catch { /* fall back to the leader alone */ }
   }
   child.kill(signal);
+}
+
+/** Signal what a leader that already exited left in its group, under the reap's guard: Cursor
+ * print ends its group as each turn's leader exits, ahead of the exit drain. A SIGTERM is the reap
+ * itself, sent at most once per group; a SIGKILL goes only to a group that is still ours. */
+export function signalExitedSession(child: ChildProcess, signal: 'SIGTERM' | 'SIGKILL'): void {
+  const pid = child.pid;
+  const leader = pid === undefined ? undefined : leaders.get(pid);
+  if (leader?.child !== child || !exited(child)) return;
+  if (signal === 'SIGTERM') reap(pid!, leader);
+  else if (stale(pid!, leader)) drop(pid!, leader);
+  else signalProcessGroup(pid!, 'SIGKILL');
 }
 
 /** The pgid of a registered, still-running grouped leader, for the worker process ledger. */

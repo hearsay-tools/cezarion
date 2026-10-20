@@ -12,7 +12,8 @@ import { AgentBrowser } from './agent-browser'
 import { pollFor } from './poll'
 import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
 
-// Browser component coverage of the real header + production CSS. The parent integration
+// Browser component coverage of the real wait details + production CSS. They moved from the run
+// header into the Session activity card's status row (hearsay-tools/cezarion#1333). The parent integration
 // suite owns server lifecycle/SSE evidence; this fixture deliberately needs no CI controller.
 const webRoot = resolve(import.meta.dirname, '..')
 const viteCli = resolve(dirname(createRequire(import.meta.url).resolve('vite/package.json')), 'bin/vite.js')
@@ -57,7 +58,7 @@ beforeAll(async () => {
     import { QueryClientProvider } from '@tanstack/react-query';
     import { MemoryRouter } from 'react-router';
     import { createQueryClient } from '../../src/api/query-client';
-    import { RunHeader } from '../../src/routes/task-thread/run-header';
+    import { RunWaitDetails } from '../../src/routes/task-thread/run-waits';
     import '../../src/styles/index.css';
     window.fetch = async input => {
       const path = new URL(input instanceof Request ? input.url : String(input), location.href).pathname;
@@ -67,7 +68,7 @@ beforeAll(async () => {
     function Fixture() {
       const [run, setRun] = useState(${JSON.stringify(run)});
       window.setCiRun = setRun;
-      return <QueryClientProvider client={client}><MemoryRouter><main className="h-dvh min-w-0 overflow-y-auto p-4"><RunHeader run={run} tab="session" /></main></MemoryRouter></QueryClientProvider>;
+      return <QueryClientProvider client={client}><MemoryRouter><main className="h-dvh min-w-0 overflow-y-auto p-4"><RunWaitDetails run={run} /></main></MemoryRouter></QueryClientProvider>;
     }
     createRoot(document.getElementById('root')).render(<Fixture />);
   `)

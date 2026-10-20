@@ -49,7 +49,9 @@ is the reason the design looks the way it does; re-verify before changing any of
 | `CLAUDE_CONFIG_DIR` relocates Claude Code's whole per-user home | `~/.claude-klaudiusz/` holds `.claude.json`, `settings.json`, `projects/`, `sessions/`, `history.jsonl`, `plugins/` |
 | `.claude.json` is a **sibling** of `~/.claude` by default but moves **inside** an overridden dir | `~/.claude.json` exists; `~/.claude/.claude.json` does not; `~/.claude-klaudiusz/.claude.json` does |
 | `CODEX_HOME` relocates Codex's identity too | `auth.json` lives inside `~/.codex`, beside `config.toml` and `sessions` |
-| OpenCode has **no** single home var | `OPENCODE_CONFIG_DIR`/`OPENCODE_CONFIG` move config only; credentials live in `~/.local/share/opencode/opencode.db`, behind a separate `OPENCODE_DB` |
+| OpenCode has **no** single home var | `OPENCODE_CONFIG_DIR`/`OPENCODE_CONFIG` move config only. Corrected 2026-10-19 (hearsay-tools/cezarion#1283, OpenCode 1.18.35 `core/src/global.ts`, `database.ts`): provider credentials live in `$XDG_DATA_HOME/opencode/auth.json` (plus `mcp-auth.json`), not in `opencode.db`, and `OPENCODE_DB` moves only the session database (tested) |
+| `PI_CODING_AGENT_DIR` relocates pi's whole home, credentials included | 2026-10-19 (hearsay-tools/cezarion#1283), pi 1.0.4: `pi --help` documents it; after one real turn a fresh dir held `auth.json`, `models-store.json` and `sessions/`, and `~/.pi/agent` was untouched. `~/.agents/skills` is still read. A session does not resume from another dir ("No session found") |
+| omp's `OMP_PROFILE` (same as `--profile`) moves the credential store | 2026-10-19 (hearsay-tools/cezarion#1283), omp 18.8.0: it created `~/.omp/profiles/<name>/{agent/agent.db,agent/sessions,logs,run,cache}`, and `agent.db` holds `auth_credentials`. The value is a NAME matching `^[a-z0-9][a-z0-9._-]{0,63}$`; `default` means no profile. The profile entry may be a symlink. Under a profile omp ignores `PI_CODING_AGENT_DIR`; `~/.omp/natives`, `~/.claude/plugins` and `~/.agents/skills` stay shared |
 
 `claude --settings <file>` is **not** a substitute: it merges a settings file and relocates
 nothing — not credentials, not sessions, not projects. `--add-dir` is unrelated (extra working
@@ -154,13 +156,64 @@ precisely what this feature exists to prevent. Revisit if OpenCode documents a s
 variable. `XDG_CONFIG_HOME` is rejected regardless: it is machine-wide and would relocate every
 other XDG-aware tool the agent's own Bash calls touch.
 
+### pi and omp (added 2026-10-20, hearsay-tools/cezarion#1283)
+
+**pi** works like Claude and Codex: an account is any absolute folder, spawned with
+`PI_CODING_AGENT_DIR=<folder>`.
+
+**omp** accounts are omp profiles. `OMP_PROFILE` takes a NAME, and omp resolves it under its own
+root, `~/<PI_CONFIG_DIR or .omp>/profiles/<name>`. So an omp account folder must be exactly that,
+and cezar spawns it with `OMP_PROFILE=<name>`. The route refuses any other folder with a 400 that
+names the profiles dir, and the store's schema drops a row of the wrong shape, because `profileEnv`
+emits nothing for it and the account would run on the default login. A profile somewhere else is
+reached through the user's own symlink in the profiles dir, which omp follows. cezar writes nothing
+into `~/.omp` itself. The named account's folder is the profile folder; its config files resolve
+from `<folder>/agent`, while the discovered default stays an agent dir (`agentHomePaths().omp`).
+
+**A host that exports the variable.** `agent-env.ts` passes `PI_*` to pi and `OMP_*`/`PI_*` to
+omp, so a value the cezar process carries reaches every default session. The default is the
+discovered account, so discovery follows it: `PI_CODING_AGENT_DIR` moves pi's default, and
+`OMP_PROFILE` (or `PI_PROFILE` when `OMP_PROFILE` is unset) makes that profile omp's default, with
+`PI_CODING_AGENT_DIR` moving omp's default only while no profile is selected. A named account's
+variable is applied after the allowlist and replaces the host value for its session. Adding the
+default's own folder or profile as a named account is refused. `PI_CONFIG_DIR` moves omp's root,
+and with it the profiles dir that named omp folders must be in.
+
+**omp's root can move after an account is added.** omp resolves the name under the root it computes
+at spawn from `HOME` and `PI_CONFIG_DIR`. Once either changes, `OMP_PROFILE=<name>` would open
+`<new root>/profiles/<name>`, another login or a fresh empty one, while Settings still shows the
+stored folder. So every spawn of a named omp account re-checks the folder against the root the child
+will use (`namedAccountUnavailable`) and refuses rather than spawning bare:
+
+| Path | At a moved root |
+| --- | --- |
+| Step and Continue | `resolveProfileEnvForRoot` throws `AgentAccountUnavailableError`; the step fails before spawning with the message |
+| Owned worker launch | `boundWorkerAccountEnv` checks the child env and throws `WorkerIdentityError` |
+| Worker selection | the error becomes a `DelegationPolicyError` for the spawning parent |
+| Planner | takes its one-step fallback with no model call; the auto-namer keeps its heuristic title |
+| Terminal handoff, Connect | 409 with the message |
+| Account status | an `unknown` row whose hint says why, with no probe; the boot warm-up skips the account |
+
+Pinning `PI_CONFIG_DIR` per spawn instead was rejected: omp also uses that value as the name of the
+project-local folder (`<project>/<PI_CONFIG_DIR>/plugins/installed_plugins.json`), so a pin would
+change what a session reads in the project.
+
+**Owned workers** pin a named pi or omp account's folder like any other. A named omp account pins
+its profile entry with only the parent resolved: the entry's realpath would name no profile and run
+the worker on the default. The discovered pi or omp account binds no folder and spawns bare, as it
+did before they carried accounts: pinning requires the folder to exist at launch, and a machine
+where the agent has never run has none. Evidence accepted before this change has the same shape.
+
+**Downgrade.** A cezar from before this change drops pi and omp rows when it parses
+`agent-accounts.json`, and its next write of the file persists the drop.
+
 ## Surface
 
 | Where | What |
 | --- | --- |
 | `packages/cezar/src/core/agent-profiles.ts` | `PROFILE_ENV_VAR`, `profileEnv`, `looksLikeProfileDir` — the vendor knowledge, pure. Sibling of `agent-config/catalog.ts`, which owns config-FILE knowledge. |
 | `packages/cezar/src/core/shell-env.ts` | Rendering the variable into a shell command, per platform, refusing rather than guessing. |
-| `packages/cezar/src/workspace/agent-profiles.ts` | Resolution against the workspace config. |
+| `packages/cezar/src/workspace/agent-profiles.ts` | Resolution against the workspace config, and `namedAccountUnavailable`, the spawn-time check that omp would still open a named account's profile. |
 | `packages/cezar/src/workspace/agent-accounts.ts` | `~/.cezar/agent-accounts.json` — the store, its house rules, and the one-time import from `config.json`. `config.json`'s own schema is untouched by this feature. |
 | `packages/contract/src/agent-profiles.ts` | The wire shapes. |
 | `GET/POST /api/v1/workspace/agent-profiles`, `PATCH/DELETE …/:id` | Workspace-level, single-mount, `localHandoff`-gated. |

@@ -3159,3 +3159,43 @@ describe(`P8 ${PERMISSION_CRITERIA.find(c => c.id === 'P8')!.name} (hearsay-tool
     }, 45_000);
   }
 });
+
+// cezar's own tools are covered where they run: Codex rows of ci-wait-parity park only
+// when the mock's MCP tool gate lets cezar_wait_for_ci through unasked.
+describe('MCP tool approval routing (hearsay-tools/cezarion#1294)', () => {
+  for (const backend of RUNNER_IDS) {
+    const exemption = exemptionFor('P9', backend);
+    if (exemption) {
+      it(`${backend} P9 exemption — ${exemption.reason}`, () => {
+        expect(exemption.kind).toBe('scenario-unconstructible');
+        expect(HARNESS_ADAPTERS[backend].scenarios['mcp-approval']).toBeUndefined();
+      });
+      continue;
+    }
+    for (const [label, action] of [['Allow once', 'accept'], ['Decline and continue', 'decline']] as const) {
+      it(`${backend} P9 ${action} answers another server's MCP tool approval through the cockpit API`, async () => {
+        let repoRoot = '';
+        // bound: hang guard for the live mock run; the predicate waits on the run settling, and a stuck card fails here instead of at the test timeout.
+        const observation = await driveRun(backend, 'mcp-approval', run => !!run && ['done', 'review'].includes(run.status), 30_000, undefined, {
+          beforeStart: context => { repoRoot = context.repoRoot; },
+          during: async ({ store, manager, runId }) => {
+            await waitFor(() => store.readEvents(runId).some(event => event.type === 'permission.requested'));
+            expect(store.getRun(runId)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
+            const request = store.readEvents(runId).find(event => event.type === 'permission.requested')!;
+            expect(request.title).toBe('Codex requests an MCP tool call');
+            const choice = (request.options as Array<{ id: string; label: string }>).find(option => option.label === label)!;
+            expect(manager.sendMessage(runId, [{ type: 'text', text: 'accept' }])).toBe(false);
+            const response = await answerThroughRoute(repoRoot, store, manager, runId, request, choice.id);
+            expect(response.status).toBe(200);
+            expect(await response.json()).toEqual({ delivered: true });
+          },
+        });
+        expect(observation.events).toContainEqual(expect.objectContaining({ type: 'permission.resolved', optionId: expect.any(String) }));
+        expect(observation.events.filter(event => event.type === 'text').map(event => event.text).join(''))
+          .toContain(`Approval response: ${JSON.stringify({ action, content: null, _meta: null })}`);
+        expect(observation.record?.hasPendingPermission).toBe(false);
+      // bound: per-cell hang guard above driveRun's own 30 s settle bound, sized for a parity cell under host load.
+      }, 45_000);
+    }
+  }
+});

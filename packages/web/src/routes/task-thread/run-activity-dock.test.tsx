@@ -11,7 +11,7 @@ import { RunActivityDock } from './run-activity-dock'
 import { reduceThread } from './thread-state'
 
 /**
- * The unified Run activity accordion (#402, mockups `pasted-1..3.png`): ONE card above the
+ * The unified Session activity accordion (#402, mockups `pasted-1..3.png`): ONE card above the
  * composer whose rows are the sections — workflow, subagents, workers, plan — each an
  * icon + bold title + muted meta + chevron, with the section's own list nested under it.
  */
@@ -86,11 +86,14 @@ function renderDock(
   events: RunEvent[] = EVENTS,
   linked: WorkerInspection[] = workers,
   relationships: 'ok' | 'error' = 'ok',
+  overrides: Record<string, () => Response> = {},
 ) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input).replace('?archived=recent', '')
+      const override = overrides[path]
+      if (override) return override()
       if (path.endsWith('/relationships')) {
         return relationships === 'error' ? json({ error: 'offline' }, 503) : json({ workers: linked })
       }
@@ -127,7 +130,7 @@ describe('RunActivityDock — one card, one row per section', () => {
     renderDock(run())
 
     expect(sectionHead('workflow').textContent).toContain('Do the task')
-    expect(metaOf('workflow')).toBe('Step 1 of 2')
+    expect(metaOf('workflow')).toBe('Do the task · Step 1 of 2')
     expect(sectionHead('subagents').textContent).toContain('Subagents')
     expect(metaOf('subagents')).toBe('1 of 2 complete')
     expect(sectionHead('plan').textContent).toContain('Plan')
@@ -154,12 +157,13 @@ describe('RunActivityDock — one card, one row per section', () => {
     }
   })
 
-  it('omits a section with nothing to show', () => {
+  it('omits a section with nothing to show, but keeps the card for the status and metadata', () => {
     renderDock(run({ steps: [] }), [EVENTS[0]!])
-    expect(section('workflow')).toBeNull()
+    expect(metaOf('workflow')).toBeUndefined()
     expect(section('subagents')).toBeNull()
     expect(section('plan')).toBeNull()
-    expect(document.querySelector('[data-slot="run-activity-dock"]')).toBeNull()
+    expect(section('workspace')).toBeNull()
+    expect(document.querySelector('[data-slot="run-activity-dock"]')).not.toBeNull()
   })
 })
 
@@ -221,17 +225,26 @@ describe('RunActivityDock — narrow viewports', () => {
     narrow()
     renderDock(run())
     expect(document.querySelector('[data-slot="run-activity-dock"]')?.getAttribute('data-state')).toBe('collapsed')
-    expect(document.querySelector('[data-slot="run-activity-count"]')?.textContent).toContain('3 sections')
+    expect(document.querySelector('[data-slot="run-activity-status"]')?.textContent).toBe('Running')
     expect(section('workflow')).toBeNull()
   })
 
   it('shortens each row meta to the odometer once expanded', () => {
     narrow()
     renderDock(run())
-    fireEvent.click(screen.getByRole('button', { name: /Run activity/ }))
-    expect(metaOf('workflow')).toBe('1 / 2')
+    fireEvent.click(screen.getByRole('button', { name: /^Session activity/ }))
+    expect(metaOf('workflow')).toBe('Do the task · 1 / 2')
     expect(metaOf('subagents')).toBe('1 / 2')
     expect(metaOf('plan')).toBe('1 / 3')
+  })
+
+  it('keeps the step meter whole and lets the step name drop when the row runs out of room', () => {
+    narrow()
+    renderDock(run({ id: 'narrow-fit-meta' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Session activity/ }))
+    const meta = section('workflow')!.querySelector('[data-slot="run-activity-meta"]')!
+    expect(meta.querySelector('[data-slot="run-activity-meta-keep"]')?.textContent).toBe('1 / 2')
+    expect(meta.querySelector('[data-slot="run-activity-meta-drop"]')?.textContent).toBe('Do the task ·')
   })
 })
 
@@ -336,7 +349,7 @@ describe('RunActivityDock — workers and the All complete claim', () => {
   it('keeps the progress wording when the failed lookup belongs to a live run', async () => {
     renderDock(root({ status: 'running' } as Partial<ApiRun>), [], allDone, 'error')
     await waitFor(() => expect(document.querySelector('[data-slot="run-activity-workers"]')).not.toBeNull())
-    expect(statusText()).toContain('Working')
+    expect(statusText()).toContain('Running')
   })
 
   it('drops the cleanup line from a worker whose teardown left nothing behind', async () => {
@@ -368,5 +381,142 @@ describe('RunActivityDock — workers and the All complete claim', () => {
   it('leaves an ordinary run without delegation alone', () => {
     renderDock(run({ status: 'done', steps: settled }), [])
     expect(statusText()).toContain('All complete')
+  })
+})
+
+describe('Session activity — status, usage and workspace (#1333)', () => {
+  type CiEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'ci' }>
+  type TimerEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'timer' }>
+  const ciEntry: CiEntry = {
+    id: '00000000-0000-4000-8000-000000000474', kind: 'ci', source: 'agent', via: 'cezar_wait',
+    generation: 'session-1', turnId: 'turn-1', timeoutSeconds: 1800,
+    prUrl: 'https://github.com/owner/repo/pull/474', repository: 'owner/repo', prNumber: 474,
+    headSha: '123456789abcdef', registeredAt: at, deadline: '2026-09-06T00:30:00.000Z', phase: 'open',
+  }
+  const timerEntry: TimerEntry = {
+    id: '00000000-0000-4000-8000-000000000005', kind: 'timer', source: 'agent', via: 'cezar_wait',
+    turnId: 'turn-1', seconds: 300, registeredAt: at, deadline: '2026-09-06T00:05:00.000Z', phase: 'open',
+  }
+  // Module-level disclosure memory is keyed by run id, so every case gets its own run.
+  let seq = 0
+  const fresh = (extra: Partial<ApiRun> = {}) => run({ id: `10000000-0000-4000-8000-1333${String(++seq).padStart(8, '0')}`, ...extra })
+  const waiting = (extra: Partial<ApiRun> = {}) =>
+    fresh({ status: 'waiting', costUsd: 1.26, waits: [ciEntry, timerEntry], steps: [{ ...steps[0]!, status: 'done' }], ...extra })
+  const summary = () => screen.getByRole('button', { name: /^Session activity/ })
+  const ensureOpen = () => {
+    if (summary().getAttribute('aria-expanded') !== 'true') fireEvent.click(summary())
+  }
+
+  it('folds to label, status and cost in one disclosure', () => {
+    renderDock(waiting(), [])
+    if (summary().getAttribute('aria-expanded') === 'true') fireEvent.click(summary())
+    expect(summary().textContent).toContain('Session activity')
+    expect(summary().textContent).toContain('Waiting for CI')
+    expect(summary().textContent).toContain('$1.26')
+    expect(summary().textContent).not.toContain('Next check')
+    expect(summary().getAttribute('aria-label')).toBe('Session activity: Waiting for CI; cost $1.26')
+  })
+
+  it('shows the status and next check first when expanded, with wait details behind it', () => {
+    renderDock(waiting(), [])
+    ensureOpen()
+    const rows = [...document.querySelectorAll('[data-slot="run-activity-dock"] [data-slot^="run-activity-"][data-state]')]
+    expect(rows[0]?.getAttribute('data-slot')).toBe('run-activity-status-row')
+    expect(rows[0]?.textContent).toContain('Waiting for CI')
+    expect(rows[0]?.textContent).toContain('Next check')
+    expect(document.querySelector('[data-slot="ci-wait-status"]')).toBeNull()
+    fireEvent.click(sectionHead('status-row'))
+    expect(document.querySelectorAll('[data-slot="ci-wait-status"]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-slot="monitoring-schedule"]')).toHaveLength(1)
+    // The folded summary's status moves into the first row once the card is open.
+    expect(summary().textContent).not.toContain('Waiting for CI')
+    expect(document.querySelectorAll('[data-slot="run-activity-status"]')).toHaveLength(1)
+  })
+
+  it('gives the next check its own wrapping line, outside the truncating meter', () => {
+    renderDock(waiting(), [])
+    ensureOpen()
+    const next = section('status-row')!.querySelector<HTMLElement>('[data-slot="run-activity-next-check"]')
+    expect(next?.textContent).toMatch(/^Next check /)
+    // A meter truncates to one line; the appointment must be readable at 320px without opening details.
+    expect(next?.closest('[data-slot="run-activity-meta"]')).toBeNull()
+    expect(next?.className).toContain('whitespace-normal')
+    expect(metaOf('status-row')).toBeUndefined()
+  })
+
+  it('renders for a run with no workflow, agents, workers or plan', () => {
+    renderDock(fresh({ steps: [], status: 'queued' }), [])
+    ensureOpen()
+    expect(section('status-row')).not.toBeNull()
+    expect(section('usage')).not.toBeNull()
+    expect(section('workspace')).toBeNull()
+    expect(section('workflow')).not.toBeNull() // the workflow name still has a home
+  })
+
+  it('keeps terminal summaries truthful', async () => {
+    renderDock(fresh({ status: 'failed' }), [])
+    expect(document.querySelector('[data-slot="run-activity-status"]')?.textContent ?? summary().textContent).toContain('Failed')
+    expect(summary().textContent).not.toContain('All complete')
+  })
+
+  it('names the workflow and links its automation', () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true, addEventListener() {}, removeEventListener() {} })))
+    renderDock(fresh({ automation: { automationId: 'nightly', receiptId: 'nightly:schedule:x' } as ApiRun['automation'] }), [], workers, 'ok', {
+      '/api/v1/health': () => json({ capabilities: { automations: true } }),
+    })
+    ensureOpen()
+    expect(sectionHead('workflow').textContent).toContain('quick-task')
+    fireEvent.click(sectionHead('workflow'))
+    return waitFor(() => expect(screen.getByRole('link', { name: 'Automation' }).getAttribute('href')).toContain('/automations/nightly/log'))
+  })
+
+  it('lists runner, account, model and effort under Usage & agent', () => {
+    renderDock(fresh({ runner: 'codex', model: 'gpt-6', effort: 'high', inputTokens: 1200, outputTokens: 300 }), [])
+    ensureOpen()
+    fireEvent.click(sectionHead('usage'))
+    const body = section('usage')!.textContent
+    expect(body).toContain('Runner')
+    expect(body).toContain('codex')
+    expect(body).toContain('gpt-6')
+    expect(body).toContain('high')
+  })
+
+  it('offers branch copy, worktree copy and the resume command under Workspace', () => {
+    renderDock(fresh({ branch: 'cez/parent', worktreePath: '/repo/.ai/cezar/worktrees/parent' }), [])
+    ensureOpen()
+    expect(metaOf('workspace')).toBe('cez/parent')
+    fireEvent.click(sectionHead('workspace'))
+    expect(screen.getByRole('button', { name: 'Copy branch name' })).not.toBeNull()
+    expect(section('workspace')!.textContent).toContain('/repo/.ai/cezar/worktrees/parent')
+  })
+
+  it('rolls a PR conflict up to the Workspace row and the folded summary', async () => {
+    const overrides = {
+      '/api/v1/projects': () => json({
+        projects: [{ id: 'sample', name: 'sample', root: '/sample', addedAt: at, lastOpenedAt: at, source: 'local', status: 'ok', repoUrl: 'https://github.com/owner/repo' }],
+      }),
+      '/api/v1/p/sample/github/ref-status?prs=42': () =>
+        json({ available: true, prs: { 42: 'ready' }, issues: {}, conflicts: [42], recheckAfterMs: null }),
+    }
+    renderDock(fresh({ branch: 'cez/parent', referencedPullRequestUrl: 'https://github.com/owner/repo/pull/42' }), [], workers, 'ok', overrides)
+    if (summary().getAttribute('aria-expanded') === 'true') fireEvent.click(summary())
+    await waitFor(() => expect(document.querySelector('[data-slot="run-activity-conflict"]')?.textContent).toContain('Conflicts'))
+    expect(summary().getAttribute('aria-label')).toContain('pull request conflicts')
+    fireEvent.click(summary())
+    expect(metaOf('workspace')).toContain('PR #42 conflicts')
+    fireEvent.click(sectionHead('workspace'))
+    const chip = document.querySelector<HTMLElement>('[data-slot="run-activity-workspace"] [data-slot="pr-chip"][data-conflicting="true"]')
+    expect(chip).not.toBeNull()
+  })
+
+  it("does not carry one run's open rows into another", () => {
+    const first = renderDock(fresh({ id: 'run-a', branch: 'cez/a' }), [])
+    ensureOpen()
+    fireEvent.click(sectionHead('workspace'))
+    expect(section('workspace')?.getAttribute('data-state')).toBe('open')
+    first.unmount()
+    renderDock(fresh({ id: 'run-b', branch: 'cez/b' }), [])
+    ensureOpen()
+    expect(section('workspace')?.getAttribute('data-state')).toBe('collapsed')
   })
 })

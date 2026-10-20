@@ -14,7 +14,7 @@ const agent = (over: Partial<SubagentSummary> = {}): SubagentSummary => ({
   ...over,
 })
 
-/** Since #402 the rows have no head of their own: the Run activity accordion owns the title,
+/** Since #402 the rows have no head of their own: the Session activity accordion owns the title,
  *  the odometer and the collapse (`run-activity-dock.test.tsx`). These are the rows. */
 const list = () => document.querySelector('[data-slot="agents-list"]')
 const rows = () => Array.from(document.querySelectorAll('[data-slot="agent-item"]'))

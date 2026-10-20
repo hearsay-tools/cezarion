@@ -4,7 +4,7 @@ import { posix, resolve, win32 } from 'node:path';
 import { z } from 'zod';
 import { DEFAULT_AGENT_ACCOUNT_ID } from '@open-mercato/cezar-contract/agent-profiles';
 import { PROVIDER_IDS, type ProviderId } from '../core/provider-auth.ts';
-import { supportsProfiles } from '../core/agent-profiles.ts';
+import { ompProfileName, supportsProfiles } from '../core/agent-profiles.ts';
 import { agentAccountsPath, workspaceConfigPath } from '../paths.ts';
 import { atomicWriteJsonSync } from './config.ts';
 
@@ -113,7 +113,14 @@ const agentAccountSchema = z
     label: z.string().max(200).catch(''),
     addedAt: z.string().max(64).catch(''),
   })
-  .passthrough();
+  .passthrough()
+  // An omp account is an omp PROFILE: `OMP_PROFILE` takes a name, so a folder that is not
+  // `…/profiles/<name>` would resolve to `{}` and run on the default login — the provider lie
+  // above in another shape, dropped by the same salvage. Shape only; the route also checks the
+  // folder is under omp's current root (`ompProfileDirError`).
+  .refine((account) => account.provider !== 'omp' || ompProfileName(account.configDir) !== null, {
+    message: 'an omp account folder must be an omp profile: <omp root>/profiles/<name>',
+  });
 
 export type AgentAccount = z.infer<typeof agentAccountSchema>;
 

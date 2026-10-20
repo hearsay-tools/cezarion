@@ -89,6 +89,29 @@ let pendingApprovalTurn;
 const rl = createInterface({ input: process.stdin });
 let echoSerial = 0;
 let ciWire;
+// hearsay-tools/cezarion#1294: Codex 0.160.1 asks before an MCP tool call with an
+// `mcpServer/elicitation/request` (codex-rs/core/src/mcp_tool_call.rs). The client
+// answers `{ action, content, _meta }`; an error reply rejects the call.
+const mcpToolApprovalRequest = (serverName, tool, overrides = {}) => ({
+  threadId: 'th_mock_1', turnId: 'turn_mock_1', serverName, mode: 'form',
+  _meta: { codex_approval_kind: 'mcp_tool_call', persist: ['session', 'always'], tool_description: `Mock ${tool} tool.`,
+    tool_params: { query: 'cezar' }, tool_params_display: [{ name: 'query', value: 'cezar', display_name: 'query' }] },
+  message: `Allow the ${serverName} MCP server to run tool "${tool}"?`,
+  requestedSchema: { type: 'object', properties: {} }, ...overrides,
+});
+const cezarServer = () => Object.entries(ciWire?.config ?? {}).find(([key]) => key.startsWith('mcp_servers.cezar_ci_'));
+const clientReplies = new Map();
+const requestClient = (id, method, params) => new Promise((resolve) => { clientReplies.set(id, resolve); emit({ id, method, params }); });
+let mcpGateSerial = 0;
+// Codex gates every MCP tool call by the server's (or tool's) approval mode and asks
+// unless it is `approve`, whatever `approval_policy` says.
+async function mcpToolGate(tool) {
+  const [key, server] = cezarServer() ?? [];
+  if (!server || server.default_tools_approval_mode === 'approve') return true;
+  const reply = await requestClient(`mcp-gate-${++mcpGateSerial}`, 'mcpServer/elicitation/request',
+    mcpToolApprovalRequest(key.slice('mcp_servers.'.length), tool));
+  return reply.result?.action === 'accept';
+}
 // #505 steering scenarios: the one turn that accepts `turn/steer`, while it is open.
 let steerTurn = null;
 let steerSerial = 0;
@@ -130,7 +153,13 @@ rl.on('line', async (line) => {
     return;
   }
   if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify(msg)}\n`);
-  if ((msg.id === 'approval-1' || msg.id === 'approval-unsupported-1') && pendingApprovalTurn && (msg.result || msg.error)) {
+  if (clientReplies.has(msg.id) && (msg.result || msg.error)) {
+    const resolve = clientReplies.get(msg.id); clientReplies.delete(msg.id);
+    emit({ method: 'serverRequest/resolved', params: { threadId: 'th_mock_1', requestId: msg.id } });
+    resolve(msg);
+    return;
+  }
+  if ((msg.id === 'approval-1' || msg.id === 'approval-unsupported-1' || msg.id === 'mcp-approval-1') && pendingApprovalTurn && (msg.result || msg.error)) {
     const turnId = pendingApprovalTurn; pendingApprovalTurn = undefined;
     const text = `${msg.error ? `Approval error: ${msg.error.code}` : `Approval response: ${JSON.stringify(msg.result)}`}\nCEZ:DONE`;
     emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId,
@@ -374,14 +403,15 @@ rl.on('line', async (line) => {
     }
     if (turnText.includes('mock:cezar-tool')) {
       const { toolPrompt } = await import('./mock-ci-tool.mjs');
-      const text = await toolPrompt('codex', ciWire, turnText);
+      const tool = /mock:cezar-tool\s+([a-z_]+)/.exec(turnText)?.[1] ?? 'cezar_wait';
+      const text = await mcpToolGate(tool) ? await toolPrompt('codex', ciWire, turnText) : 'user rejected MCP tool call';
       emit({ method: 'item/completed', params: { item: { type: 'agentMessage', id: 'tool-result', text } } });
       emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
       return;
     }
     if (turnText.includes('mock:ci-wait')) {
       const { ciPrompt } = await import('./mock-ci-tool.mjs');
-      const text = await ciPrompt('codex', ciWire, turnText);
+      const text = await mcpToolGate('cezar_wait_for_ci') ? await ciPrompt('codex', ciWire, turnText) : 'user rejected MCP tool call';
       emit({ method: 'item/completed', params: { item: { type: 'agentMessage', id: 'ci-result', text } } });
       emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
       return;
@@ -570,6 +600,19 @@ rl.on('line', async (line) => {
       // No completion for this second child item: parent turn-end must not flush it into v1.
       emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_child', turnId: 'turn_child', itemId: 'item_child_partial', delta: 'Child review still streaming.' } });
       emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
+      return;
+    }
+    // hearsay-tools/cezarion#1294: another server's tool approval by default; `-own` names
+    // cezar's own server, `-form` is a real form (no approval), `-null-turn` has no turn id.
+    const mcpApproval = /mock:mcp-approval(?:-(own|form|null-turn))?/.exec(turnText);
+    if (mcpApproval) {
+      pendingApprovalTurn = 'turn_mock_1';
+      const variant = mcpApproval[1];
+      const server = variant === 'own' ? (cezarServer()?.[0].slice('mcp_servers.'.length) ?? 'cezar_ci_mock') : 'docs';
+      emit({ id: 'mcp-approval-1', method: 'mcpServer/elicitation/request', params: mcpToolApprovalRequest(server, 'search',
+        variant === 'form' ? { _meta: null, message: 'Which region?', requestedSchema: { type: 'object', properties: { region: { type: 'string' } } } }
+          : variant === 'null-turn' ? { turnId: null } : {}) });
+      // No turn/completed until the matching native JSON-RPC response arrives.
       return;
     }
     if (turnText.includes('mock:approval')) {

@@ -95,6 +95,32 @@ test('classification reuses the Jev transport and never includes credentials in 
   assert.doesNotMatch(JSON.stringify({ result, request }), /not-an-actual-secret/);
 });
 
+test('Jev receives independent boolean criteria with only the report as context', async () => {
+  let request;
+  await classify({
+    issue: { ...issue, comments: ['Extra context is not available to Jev.'] },
+    apiKey: 'test-key',
+    fetchImpl: async (_url, options) => {
+      request = JSON.parse(options.body);
+      return { ok: true, json: async () => response() };
+    },
+  });
+  assert.deepEqual(request.state, { title: issue.title, body: issue.body });
+  assert.deepEqual(Object.keys(request.questions), [
+    'category', 'established', 'policy_change', 'authority_change', 'verification_change', 'runtime_change',
+  ]);
+  for (const key of ['established', 'policy_change', 'verification_change']) {
+    const question = request.questions[key];
+    assert.equal(question.type, 'noul', key);
+    assert.deepEqual(Object.keys(question.criteria ?? {}).sort(), ['false', 'true'], key);
+    for (const value of Object.values(question.criteria)) {
+      assert.equal(typeof value, 'string', key);
+      assert.ok(value.trim().length > 0, key);
+    }
+    assert.notEqual(question.criteria.true, question.criteria.false, key);
+  }
+});
+
 test('three automation definitions match only their handling label and keep rollout paused', () => {
   const definitions = buildAutomations();
   assert.equal(definitions.length, 3);

@@ -92,7 +92,8 @@ describe('Hand off to webhook', () => {
     // no note field (hearsay-tools/cezarion#971 lane-3 bundle: `openDialogs: []`, the Hand off
     // button still rendered). Reproduced with an instrumented copy of these steps at load 35-64:
     // full-page capture closed the dialog in 4 of 30 iterations, each logging `resize 1x1
-    // md=false` and a `run-title-row` -> `run-details-actions` swap; viewport capture closed it
+    // md=false` and a `run-title-row` -> `run-details-actions` swap (now `run-mobile-actions`,
+    // hearsay-tools/cezarion#1333); viewport capture closed it
     // in 0 of 30 and fired no resize. The dialog is fixed-position, so the viewport holds it all.
     settledShot('desktop-dialog.png', { viewport: true })
 
@@ -192,10 +193,10 @@ describe('Hand off to webhook', () => {
   it('is a bottom sheet with a full-width 44px action at 360×640', () => {
     browser.setViewport(360, 640)
     openThread('mobile')
-    // #621: below md the pushed top bar owns the title row, so Hand off lives in the run-details
-    // disclosure (lane-4 bundle task-handoff/is-a-bottom-sheet-…-1: trigger present, zero-size).
-    browser.click('[data-slot="mobile-top-bar"] [aria-label="Show run details"]')
-    // Ensure the scrolling run-details trigger is on screen before clicking. CI run 36715710375
+    // #621: below md the pushed top bar owns the title row, so Hand off lives in the
+    // `run-mobile-actions` row under it (hearsay-tools/cezarion#1333; before that, in the
+    // run-details disclosure).
+    // Ensure the scrolling trigger is on screen before clicking. CI run 36715710375
     // shard 3 captured no open dialog at failure and a trigger outside the viewport. A tail-pin
     // moving it before the click is an inference, not a proven sequence; five local runs did not
     // reproduce it (four under CPU load). Evidence: artifact cockpit-failures-shard-3, task-handoff/

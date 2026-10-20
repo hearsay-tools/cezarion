@@ -37,14 +37,25 @@ import { webhookLabel } from '@/lib/webhook'
  * somewhere to notify — the project has a webhook, or this run is already notifying one that has
  * since been removed, so it can still be switched off.
  */
-export function HandoffAction({ run }: { run: ApiRun }) {
+/** The project's task webhook URL, if it has one. */
+function useWebhookUrl(): string | undefined {
   const projectId = useActiveProjectId()
   const projects = useProjects()
+  const entry = projects.data?.projects?.find((project) => project.id === (projectId ?? projects.data?.bootProject))
+  return entry?.webhook?.url
+}
+
+/** Whether `HandoffAction` renders anything for this run — for a container that should not
+ *  render an empty row around it (the phone actions row, hearsay-tools/cezarion#1333). */
+export function useHandoffActionVisible(run: ApiRun): boolean {
+  return Boolean(useWebhookUrl()) || run.notify === true
+}
+
+export function HandoffAction({ run }: { run: ApiRun }) {
+  const url = useWebhookUrl()
   const notify = useNotifyRun(run.id)
   const [dialog, setDialog] = useState<'handoff' | 'note' | null>(null)
 
-  const entry = projects.data?.projects?.find((project) => project.id === (projectId ?? projects.data?.bootProject))
-  const url = entry?.webhook?.url
   const notifying = run.notify === true
   if (!url && !notifying) return null
 

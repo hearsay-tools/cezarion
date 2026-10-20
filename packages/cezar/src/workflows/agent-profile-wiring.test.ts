@@ -8,6 +8,8 @@ import { agentAccountsPath } from '../paths.ts';
 import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import { registerProject } from '../workspace/projects.ts';
 import type { RunManager } from './run.ts';
+import { buildChildEnv } from '../core/agent-env.ts';
+import { AgentAccountUnavailableError } from '../workspace/agent-profiles.ts';
 
 /**
  * Which agent account a STEP spawns under (spec 2026-07-29-agent-profiles).
@@ -27,7 +29,7 @@ describe('RunManager agent-profile resolution', () => {
   type Seam = {
     agentEnvForStep(
       runId: string,
-      backend: 'claude' | 'codex' | 'opencode',
+      backend: 'claude' | 'codex' | 'opencode' | 'pi' | 'omp',
       options?: { generateFollowups?: boolean; recordedProfileId?: string },
     ): Promise<{ env: Record<string, string>; profileId: string }>;
   };
@@ -50,7 +52,7 @@ describe('RunManager agent-profile resolution', () => {
     else process.env.CEZ_HOME = savedHome;
   });
 
-  const addAccount = async (id: string, provider: 'claude' | 'codex', dir: string) => {
+  const addAccount = async (id: string, provider: 'claude' | 'codex' | 'pi' | 'omp', dir: string) => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'settings.json'), '{}', 'utf8');
     await mergeWriteAgentAccounts((store) => {
@@ -58,7 +60,7 @@ describe('RunManager agent-profile resolution', () => {
     });
   };
 
-  const selectAccount = async (provider: 'claude' | 'codex', id: string) => {
+  const selectAccount = async (provider: 'claude' | 'codex' | 'pi' | 'omp', id: string) => {
     await mergeWriteAgentAccounts((store) => {
       const root = realpathSync(repoRoot);
       store.selections[root] = { ...store.selections[root], [provider]: id };
@@ -163,5 +165,90 @@ describe('RunManager agent-profile resolution', () => {
     writeFileSync(agentAccountsPath(), '{ not json', 'utf8');
     const run = newRun();
     expect((await seam().agentEnvForStep(run.id, 'claude')).profileId).toBe('default');
+  });
+
+  /**
+   * omp resolves a profile NAME under `$HOME/<PI_CONFIG_DIR or .omp>`, read from the env the child
+   * inherits, which is this process's. The pi and omp rows own those variables.
+   */
+  const agentVars = ['HOME', 'PI_CONFIG_DIR', 'OMP_PROFILE', 'PI_PROFILE', 'PI_CODING_AGENT_DIR'] as const;
+  const ownAgentHome = () => {
+    const saved = Object.fromEntries(agentVars.map((key) => [key, process.env[key]]));
+    beforeEach(() => {
+      for (const key of agentVars) delete process.env[key];
+      process.env.HOME = home;
+    });
+    afterEach(() => {
+      for (const key of agentVars) {
+        if (saved[key] === undefined) delete process.env[key];
+        else process.env[key] = saved[key];
+      }
+    });
+  };
+
+  /** pi and omp accounts (hearsay-tools/cezarion#1283): one row per runner, same four rules. */
+  const runners = [
+    { provider: 'pi' as const, variable: 'PI_CODING_AGENT_DIR', folder: () => join(home, 'pi-work', 'agent'),
+      spawnedWith: () => join(home, 'pi-work', 'agent'), hostValue: '/host/pi-agent' },
+    // An omp account is an omp profile: the folder sits in `profiles/` and omp gets its NAME.
+    { provider: 'omp' as const, variable: 'OMP_PROFILE', folder: () => join(home, '.omp', 'profiles', 'work'),
+      spawnedWith: () => 'work', hostValue: 'host-profile' },
+  ];
+  for (const { provider, variable, folder, spawnedWith, hostValue } of runners) {
+    describe(`${provider} accounts`, () => {
+      ownAgentHome();
+
+      it('adds NOTHING for the default account', async () => {
+        const { env, profileId } = await seam().agentEnvForStep(newRun().id, provider);
+        expect(profileId).toBe('default');
+        expect(env[variable]).toBeUndefined();
+      });
+
+      it('spawns the project\'s account under its own variable', async () => {
+        await addAccount('work', provider, folder());
+        await selectAccount(provider, 'work');
+        const { env, profileId } = await seam().agentEnvForStep(newRun().id, provider);
+        expect(profileId).toBe('work');
+        expect(env[variable]).toBe(spawnedWith());
+      });
+
+      it('keeps a Continue on the account the step recorded, whatever the project uses now', async () => {
+        // A session only resumes inside the home that created it (pi: "No session found"; omp:
+        // "not found" from another profile), so the recorded account must win.
+        await addAccount('work', provider, folder());
+        const resolved = await seam().agentEnvForStep(newRun().id, provider, { recordedProfileId: 'work' });
+        expect(resolved.profileId).toBe('work');
+        expect(resolved.env[variable]).toBe(spawnedWith());
+      });
+
+      it('lets a host-exported value reach the default account, and a named account replace it', async () => {
+        // `agent-env.ts` passes PI_* to pi and OMP_*/PI_* to omp, so a value the cezar process
+        // carries reaches every default session; a named account's `extraEnv` is applied after it.
+        await addAccount('work', provider, folder());
+        const source = { PATH: '/usr/bin', [variable]: hostValue } as NodeJS.ProcessEnv;
+        const run = newRun();
+        const asDefault = await seam().agentEnvForStep(run.id, provider);
+        expect(buildChildEnv({ backend: provider, source, extraEnv: asDefault.env })[variable]).toBe(hostValue);
+        const asNamed = await seam().agentEnvForStep(run.id, provider, { recordedProfileId: 'work' });
+        expect(buildChildEnv({ backend: provider, source, extraEnv: asNamed.env })[variable]).toBe(spawnedWith());
+      });
+    });
+  }
+
+  describe('an omp account after omp\'s root moved', () => {
+    ownAgentHome();
+
+    it('fails the step before spawning rather than letting OMP_PROFILE open another profile', async () => {
+      // Added under `~/.omp`. With PI_CONFIG_DIR set now, `OMP_PROFILE=work` would open
+      // `~/.omp-alt/profiles/work`: another login, or a fresh empty one, under the name Settings shows.
+      await addAccount('work', 'omp', join(home, '.omp', 'profiles', 'work'));
+      await selectAccount('omp', 'work');
+      process.env.PI_CONFIG_DIR = '.omp-alt';
+      const run = newRun();
+      await expect(seam().agentEnvForStep(run.id, 'omp')).rejects.toBeInstanceOf(AgentAccountUnavailableError);
+      // Continue resolves the step's recorded account and is refused the same way.
+      await expect(seam().agentEnvForStep(run.id, 'omp', { recordedProfileId: 'work' }))
+        .rejects.toThrow(join(home, '.omp-alt', 'profiles'));
+    });
   });
 });

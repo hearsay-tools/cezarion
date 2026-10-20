@@ -327,38 +327,32 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         const exercise = async (release: () => void) => {
           const backend = delayedAck ? 'opencode' : 'claude';
           process.env.CEZ_DRY_RUN = '0'; process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
-          checkpoint('completion-parent-start');
           const p = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold', runner: backend });
           store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
-          checkpoint('completion-parent-waiting');
-          await until(() => store.getRun(p.id)?.status === 'waiting');
+          checkpoint('parent parked'); await until(() => store.getRun(p.id)?.status === 'waiting');
           if (mode === 'continuation') {
-            checkpoint('completion-parent-finish');
-            expect(manager.finish(p.id)).toBe(true); await until(() => !manager.isActive(p.id));
+            expect(manager.finish(p.id)).toBe(true);
+            checkpoint('parent finished'); await until(() => !manager.isActive(p.id));
             expect(manager.continueRun(p.id, { text: 'mock:hold' }).ok).toBe(true);
-            checkpoint('completion-continuation-waiting');
-            await until(() => store.getRun(p.id)?.status === 'waiting');
+            checkpoint('continuation parked'); await until(() => store.getRun(p.id)?.status === 'waiting');
           }
-          const w = await worker(p.id);
+          checkpoint('worker spawned'); const w = await worker(p.id);
           const sent = recordAgentInput(p.id);
-          checkpoint('completion-nudge-sent');
           manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }]);
-          await until(() => completionNudges(p.id).length === 1);
+          checkpoint('completion nudge note'); await until(() => completionNudges(p.id).length === 1);
           if (delayedAck) {
-            // The nudge's own turn ends before its acknowledgement.
-            // It may already have ended by the time the nudge note is observed.
-            const nudgeSeq = completionNudges(p.id)[0]!.seq;
-            checkpoint('completion-nudge-turn-ended');
-            await until(() => store.readEvents(p.id).some(event => event.type === 'turn-end' && event.seq > nudgeSeq));
+            // The nudge's own turn ends before its acknowledgement. The note is written inside that
+            // turn, so its turn-end is the first one after the note; a count read after the note
+            // misses it when the turn ends first (hearsay-tools/cezarion#1355).
+            const note = completionNudges(p.id)[0]!.seq;
+            checkpoint('nudge turn-end');
+            await until(() => store.readEvents(p.id).some(event => event.type === 'turn-end' && event.seq > note));
             const engine = manager as unknown as { active: Map<string, { agentInputFlight?: { settled?: Promise<void> } }> };
             const settled = engine.active.get(p.id)?.agentInputFlight?.settled;
             expect(settled).toBeInstanceOf(Promise);
-            checkpoint('completion-nudge-acknowledged');
-            release(); await settled;
+            checkpoint('acknowledgement settled'); release(); await settled;
           }
-          checkpoint('completion-parent-parked');
-          await until(() => store.getRun(p.id)?.status === 'waiting');
-          checkpoint('completion-assertions');
+          checkpoint('parent parked after nudge'); await until(() => store.getRun(p.id)?.status === 'waiting');
           expect(sentTexts(sent, `Workers are still live: ${w.id}.`)).toHaveLength(1);
           expect(completionNudges(p.id)).toEqual([expect.objectContaining({ message: `${COMPLETION_NUDGE_NOTE} (1/${MAX_AUTO_CONTINUES}): workers_outstanding` })]);
           expect(waitOf(store.getRun(p.id))).toBeUndefined();
