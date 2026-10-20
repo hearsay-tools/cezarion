@@ -9,6 +9,7 @@ import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
+import { openSessionActivityRow } from './session-activity'
 // fixture-server starts: 1
 
 // Real layout regression: jsdom cannot resolve density, clipping, or hit testing.
@@ -381,31 +382,19 @@ describe('density-independent mobile action targets (#166)', () => {
 
 describe('references on a device that cannot hover (#617 01b)', () => {
   for (const [width, height] of [[360, 640], [390, 844]] as const) {
-    it(`${width}px: the header carries the 44px links, and the touch sidebar row is the tap target`, () => {
+    it(`${width}px: Session activity carries the 44px links, and the touch sidebar row is the tap target`, () => {
       browser.setViewport(width, height)
       browser.goto(`${baseUrl}/p/${project}/tasks/${runId}`)
-      browser.waitForFunction(`document.querySelector('[aria-label="Show run details"]') !== null`)
       // The matrix above leaves its last density and theme on the root; start from the defaults.
       appearance('comfortable', 'dark')
-      // Below md the run details start collapsed; the chips live in them. Focus + Enter from the
-      // start, as task-thread.e2e.ts:579-580 (and :663-664) do for the same phone header. Not a
-      // flake fix: at 360px a pointer click on "Show run details" fails every time. The thread
-      // scrolls `main[data-slot="main"]` to its latest message on arrival, which leaves the header
-      // above the viewport (the button's rect y was -32 and -53 in two probes), and
-      // `browser.click` then leaves the details closed. It does NOT fail with a "covered by"
-      // refusal: after a minimal `scrollIntoView({ block: 'nearest' })` the button sits at y=52,
-      // just under the 57px sticky top bar, and nothing covers it.
-      // Reproduced with the click swapped in, this test only (`-t "the sidebar row is the tap
-      // target"`): 360px failed 2/2, 390px passed 1/1. Local bundle (gitignored):
-      // .ai/qa/failures/touch-targets/360px-the-sidebar-row-is-the-tap-target-and-the-task-header-carries-the-44px-lin-1/
-      // — probe.json: kind "wait-value" for the two header chips, lastValue null; snapshot.txt:
-      // `button "Show run details" [expanded=false]`. Focus + Enter does not depend on where the
-      // thread has scrolled.
-      browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)
-      browser.press('Enter')
+      // The chips live in the Session activity card's Workspace row (hearsay-tools/cezarion#1333).
+      // The helper toggles with programmatic clicks: the thread scrolls to its latest message on
+      // arrival, so a coordinate click can miss (the reason the former header flow used focus +
+      // Enter at 360px).
+      openSessionActivityRow(browser, 'workspace')
       type Header = { noHover: boolean; chips: Array<{ w: number; h: number; top: number; right: number }>; inner: number; scroll: number }
       const header = waitForSettledSample(browser, `(() => {
-        const chips = [...document.querySelectorAll('[data-slot="run-meta"] :is([data-slot="pr-chip"], [data-slot="issue-chip"])')]
+        const chips = [...document.querySelectorAll('[data-slot="run-activity-workspace"] :is([data-slot="pr-chip"], [data-slot="issue-chip"])')]
         if (chips.length !== 2 || chips.some((chip) => chip.getBoundingClientRect().width === 0)) return null
         return { noHover: matchMedia('(hover: none)').matches, inner: innerWidth, scroll: document.documentElement.scrollWidth,
           chips: chips.map((chip) => { const r = chip.getBoundingClientRect(); return { w: r.width, h: r.height, top: Math.round(r.top), right: r.right } }) }
@@ -424,7 +413,7 @@ describe('references on a device that cannot hover (#617 01b)', () => {
 
       // The sidebar row is a `hover: none` affordance, not a width one, and the phone drawer no
       // longer holds the quick list (#621): measure it in the desktop sidebar of this hover-less
-      // browser. The phone half of the test is the task header above.
+      // browser. The phone half of the test is the Session activity card above.
       browser.setViewport(1440, 900)
       browser.goto(`${baseUrl}/p/${project}`)
       const row = `[data-slot="sidebar"] [data-slot="task-row"][data-run-id="${runId}"]`

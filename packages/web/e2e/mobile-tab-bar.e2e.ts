@@ -209,7 +209,7 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
     expect(undersized(`${DRAWER} [data-slot="drawer-tools"], ${DRAWER} [data-slot="drawer-project-current"] button`)).toEqual([])
   })
 
-  it('shows a pushed task screen: no tab bar, back / title / state up top, facet tabs, and Back returns to the list', () => {
+  it('shows a pushed task screen: no tab bar, back / title up top with no status, facet tabs, and Back returns to the list', () => {
     browser.setViewport(PHONE.width, PHONE.height)
     openList()
     browser.click(`[data-slot="task-card"][data-run-id="${RUN_ID}"] a[href]`)
@@ -232,8 +232,9 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
       }
     })()`) as { tabBar: boolean; fab: boolean; menu: boolean; back: string; title: string; stateText: string; stateDot: boolean; kebab: boolean; facets: string[]; ownTitle: boolean; composer: boolean; overflow: number }
     expect(screen).toMatchObject({ tabBar: false, fab: false, menu: false, back: 'Back', title: expect.stringContaining(RUN_TITLE), kebab: true, ownTitle: false, composer: true })
-    expect(screen.stateText.length).toBeGreaterThan(0)
-    expect(screen.stateDot).toBe(true)
+    // The phone bar carries no status (hearsay-tools/cezarion#1333): the Session activity card does.
+    expect(screen.stateText).toBeUndefined()
+    expect(screen.stateDot).toBe(false)
     // Session, Changes (3 changed files), Commits, Files.
     expect(screen.facets).toEqual(['Session', 'Changes3', 'Commits', 'Files'])
     expect(screen.overflow).toBeLessThanOrEqual(0)

@@ -7,6 +7,7 @@ import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { contrastSampleExpression, hoverVisiblePoint, type ContrastSample } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
+import { openSessionActivityRow } from './session-activity'
 // fixture-server starts: 1
 
 // #677: real rows and real CSS. Only the external forge answer is deterministic.
@@ -200,11 +201,10 @@ describe('sidebar reference status (#677)', () => {
     }
     browser.setViewport(360, 640)
     browser.goto(`${base}/p/${project}/tasks/ref-conflict`)
-    browser.waitForFunction(`document.querySelector('[aria-label="Show run details"]') !== null`)
-    browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)
-    browser.press('Enter')
+    // The task's chips live in the Session activity card's Workspace row (hearsay-tools/cezarion#1333).
+    openSessionActivityRow(browser, 'workspace')
     const header = waitForSettledSample(browser, `(() => {
-      const el = document.querySelector('[data-slot="run-meta"] [data-slot="pr-chip"]')
+      const el = document.querySelector('[data-slot="run-activity-workspace"] [data-slot="pr-chip"]')
       if (!el || el.getBoundingClientRect().height === 0) return null
       return { tag: el.tagName, tone: el.className, height: el.getBoundingClientRect().height }
     })()`) as { tag: string; tone: string; height: number }
