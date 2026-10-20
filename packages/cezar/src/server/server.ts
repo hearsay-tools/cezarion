@@ -200,13 +200,14 @@ import {
 import {
   defaultAgentProfile,
   listAgentProfiles,
+  ompProfileDirError,
   profileDirState,
   resolveProfileEnvForRoot,
   resolveStoredProfile,
   sameProfileDir,
   type ResolvedAgentProfile,
 } from '../workspace/agent-profiles.ts';
-import { PROFILE_CAPABLE_PROVIDERS, profileEnv, supportsProfiles } from '../core/agent-profiles.ts';
+import { PROFILE_CAPABLE_PROVIDERS, profileAgentDir, profileEnv, supportsProfiles } from '../core/agent-profiles.ts';
 import { quoteExecutable, withEnvPrefix } from '../core/shell-env.ts';
 import { resolveCursorExecutable } from '../core/cursor-model-catalog.ts';
 import { resolveOmpExecutable } from '../core/omp-model-catalog.ts';
@@ -2128,6 +2129,10 @@ export function createApp(deps: ServerDeps) {
       ...(profile.provider === 'claude' ? { claude: profile.path } : {}),
       ...(profile.provider === 'codex' ? { codex: profile.path } : {}),
       ...(profile.provider === 'opencode' ? { opencodeConfig: profile.path } : {}),
+      ...(profile.provider === 'pi' ? { pi: profile.path } : {}),
+      // The discovered omp account is already an agent dir; a named one is a profile folder that
+      // keeps its config in `agent/`.
+      ...(profile.provider === 'omp' ? { omp: profile.isDefault ? profile.path : profileAgentDir('omp', profile.path) } : {}),
     };
     const defs = listConfigFiles().filter(
       (def) => def.scope === 'user' && def.runners.includes(profile.provider),
@@ -2190,7 +2195,7 @@ export function createApp(deps: ServerDeps) {
   };
 
   /** Validate a client-supplied config dir. Returns the error text, or null when it is usable. */
-  const checkProfileDir = (configDir: string): string | null => {
+  const checkProfileDir = async (configDir: string, provider?: ProviderId): Promise<string | null> => {
     if (CONTROL_CHARS_RE.test(configDir)) return 'folder must not contain control characters';
     const expanded = expandTilde(configDir);
     // Absolute after expansion: a relative dir would resolve against whatever cwd the agent
@@ -2198,6 +2203,8 @@ export function createApp(deps: ServerDeps) {
     // `isAbsoluteConfigDir`, never a leading-`/` test — see its note: a string test refuses every
     // real Windows path, and this is the only gate the Add-account dialog has.
     if (!isAbsoluteConfigDir(expanded)) return `folder must be an absolute path: ${configDir}`;
+    // An omp account is selected by profile NAME, so only a folder in omp's profiles dir can be one.
+    if (provider === 'omp') return ompProfileDirError(expanded);
     return null;
   };
 
@@ -2210,7 +2217,9 @@ export function createApp(deps: ServerDeps) {
     path: string,
     exceptId?: string,
   ): Promise<string | null> => {
-    if (await sameProfileDir(path, defaultAgentProfile(provider).path)) {
+    // Compared as agent dirs: the discovered omp account is one (a host `OMP_PROFILE=work` makes it
+    // `…/profiles/work/agent`), while a named omp account is the profile folder holding it.
+    if (await sameProfileDir(profileAgentDir(provider, path), defaultAgentProfile(provider).path)) {
       return 'that is already this agent\'s default folder';
     }
     for (const candidate of profiles) {
@@ -2262,7 +2271,7 @@ export function createApp(deps: ServerDeps) {
       if (!supportsProfiles(provider)) {
         return c.json({ error: `${provider} cannot carry more than one account` }, 400);
       }
-      const dirError = checkProfileDir(configDir);
+      const dirError = await checkProfileDir(configDir, provider);
       if (dirError) return c.json({ error: dirError }, 400);
 
       // Read-first, exactly like `POST /projects`: the duplicate check needs `realpath`, and the
@@ -2317,7 +2326,7 @@ export function createApp(deps: ServerDeps) {
         const id = c.req.param('id');
         const { label, configDir } = c.req.valid('json');
         if (configDir !== undefined) {
-          const dirError = checkProfileDir(configDir);
+          const dirError = await checkProfileDir(configDir);
           if (dirError) return c.json({ error: dirError }, 400);
         }
 
@@ -2332,6 +2341,9 @@ export function createApp(deps: ServerDeps) {
         const current = existing.find((a) => a.id === id);
         if (!current) return c.json({ error: `unknown account: ${id}` }, 404);
         if (configDir !== undefined) {
+          // The provider's own folder rule needs the account, so it runs once the id is known.
+          const dirError = await checkProfileDir(configDir, current.provider);
+          if (dirError) return c.json({ error: dirError }, 400);
           const conflict = await conflictingProfile(existing, current.provider, expandTilde(configDir), id);
           if (conflict !== null) return c.json({ error: conflict }, 409);
         }

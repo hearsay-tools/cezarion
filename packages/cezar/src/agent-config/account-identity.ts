@@ -159,9 +159,13 @@ export async function readAccountIdentity(
 ): Promise<AccountIdentity> {
   if (provider === 'claude') return readClaudeIdentity(configDir);
   if (provider === 'codex') return readCodexIdentity(configDir);
-  return {
-    available: false,
-    reason: 'OpenCode keeps its login outside its config folder, so cezar cannot read it.',
-    fields: [],
-  };
+  return { available: false, reason: UNREADABLE_IDENTITY[provider], fields: [] };
 }
+
+/** Why "Show details" has nothing for the agents whose identity is not read here. */
+const UNREADABLE_IDENTITY: Record<Exclude<ProviderId, 'claude' | 'codex'>, string> = {
+  opencode: 'OpenCode keeps its login outside its config folder, so cezar cannot read it.',
+  pi: 'cezar does not read which login a pi account is signed in as.',
+  omp: 'cezar does not read which login an omp account is signed in as.',
+  cursor: 'cezar does not read which login a Cursor account is signed in as.',
+};

@@ -1,12 +1,18 @@
 import { createHash } from 'node:crypto';
 import { workerInputRecipeSchema, type WorkerInputRecipe } from '@open-mercato/cezar-contract/delegation';
-import { isAbsolute } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { realpathSync, statSync } from 'node:fs';
 import { z } from 'zod';
 import { profileEnv, supportsProfiles } from '../core/agent-profiles.ts';
 import type { ResolvedAgentProfile } from '../workspace/agent-profiles.ts';
 import { agentHomePaths, claudeStateFilePath } from '../paths.ts';
 import { workflowDefSchema, type WorkflowDef } from '../workflows/types.ts';
+
+/**
+ * Providers that gained accounts after workers were accepted with a bare default binding
+ * (hearsay-tools/cezarion#1283). That evidence still loads, and still spawns with nothing added.
+ */
+const HOMELESS_DEFAULT_PROVIDERS: ReadonlySet<string> = new Set(['pi', 'omp']);
 
 const absolutePathSchema = z.string().min(1).max(4096).refine(isAbsolute).refine(path => !/[\u0000-\u001f\u007f]/.test(path));
 
@@ -20,9 +26,9 @@ export const workerAccountBindingSchema = z.object({
     z.object({ kind: z.literal('native'), statePath: absolutePathSchema }).strict(),
     z.object({ kind: z.literal('relocated') }).strict(),
   ]).optional(),
-}).strict().refine(binding => supportsProfiles(binding.provider)
-  ? binding.homePath !== undefined
-  : binding.homePath === undefined && binding.profileId === 'default')
+}).strict().refine(binding => binding.homePath !== undefined
+  ? supportsProfiles(binding.provider)
+  : binding.profileId === 'default' && (!supportsProfiles(binding.provider) || HOMELESS_DEFAULT_PROVIDERS.has(binding.provider)))
   .refine(binding => binding.provider === 'claude'
     ? binding.claudeLayout !== undefined && (binding.claudeLayout.kind !== 'native' || binding.profileId === 'default')
     : binding.claudeLayout === undefined);
@@ -82,7 +88,13 @@ export function captureWorkerAccount(profile: ResolvedAgentProfile, env: NodeJS.
   // Bind an existing symlink to its actual home. A native first-run home may not exist yet.
   const claudeHome = agentHomePaths(env).claude;
   let homePath = profile.provider === 'claude' ? claudeHome : profile.path;
-  try { homePath = realpathSync(homePath); } catch { /* The owned consumer still requires it to exist. */ }
+  try {
+    // A named omp account is selected by its profile entry's NAME, and the entry may be a symlink
+    // omp follows itself: resolving it would leave a path that names no profile. Pin the parent.
+    homePath = isOmpProfileBinding(profile.provider, profile.id)
+      ? join(realpathSync(dirname(homePath)), basename(homePath))
+      : realpathSync(homePath);
+  } catch { /* The owned consumer still requires it to exist. */ }
   const claudeLayout = profile.provider !== 'claude' ? undefined
     : env.CLAUDE_CONFIG_DIR?.trim() ? { kind: 'relocated' as const }
     : { kind: 'native' as const, statePath: claudeStateFilePath(claudeHome, env) };
@@ -93,9 +105,18 @@ export function captureWorkerAccount(profile: ResolvedAgentProfile, env: NodeJS.
 
 export function boundWorkerAccountEnv(binding: WorkerAccountBinding, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
   if (binding.homePath === undefined) return {};
+  const ompProfile = isOmpProfileBinding(binding.provider, binding.profileId);
+  const pinned = ompProfile ? dirname(binding.homePath) : binding.homePath;
   try {
-    if (!statSync(binding.homePath).isDirectory() || realpathSync(binding.homePath) !== binding.homePath) throw new Error();
+    if (!statSync(binding.homePath).isDirectory() || realpathSync(pinned) !== pinned) throw new Error();
   } catch { throw new WorkerIdentityError('Accepted worker account identity is unavailable'); }
+  if (binding.provider === 'omp') {
+    // The discovered omp account is spawned bare, so it keeps whatever profile the host selects.
+    if (!ompProfile) return {};
+    const selected = profileEnv('omp', binding.homePath);
+    if (Object.keys(selected).length === 0) throw new WorkerIdentityError('Accepted omp account names no omp profile');
+    return selected;
+  }
   if (binding.claudeLayout?.kind === 'native') {
     const nativeHome = agentHomePaths(env).claude;
     try {
@@ -105,6 +126,11 @@ export function boundWorkerAccountEnv(binding: WorkerAccountBinding, env: NodeJS
     return {};
   }
   return profileEnv(binding.provider, binding.homePath);
+}
+
+/** A named omp account: an omp profile, selected by name rather than by folder. */
+function isOmpProfileBinding(provider: string, profileId: string): boolean {
+  return provider === 'omp' && profileId !== 'default';
 }
 
 /** Canonical schema order makes equivalent persisted object ordering immaterial. */

@@ -1,7 +1,8 @@
 import { readdir, realpath } from 'node:fs/promises';
-import { profileEnv, looksLikeProfileDir } from '../core/agent-profiles.ts';
+import { dirname, resolve } from 'node:path';
+import { isOmpProfileName, ompProfileName, profileEnv, looksLikeProfileDir } from '../core/agent-profiles.ts';
 import type { ProviderId } from '../core/provider-auth.ts';
-import { agentHomePaths, expandTilde } from '../paths.ts';
+import { agentHomePaths, expandTilde, ompProfilesDir } from '../paths.ts';
 import {
   DEFAULT_AGENT_ACCOUNT_ID,
   loadAgentAccounts,
@@ -184,6 +185,34 @@ export async function resolveRuntimeAuthVerificationTarget(
   return account
     ? { kind: 'profile', id: account.id, configDir: resolveStoredProfile(account).path }
     : null;
+}
+
+/**
+ * Why `path` cannot be a named omp account, or `null` when it can. `path` is already expanded.
+ *
+ * An omp account is an omp profile, selected by NAME (`OMP_PROFILE`), and omp resolves that name
+ * under its own root: `~/<PI_CONFIG_DIR or .omp>/profiles/<name>`. A folder anywhere else would
+ * make omp open a different folder than the one Settings names, so it is refused here rather than
+ * discovered at run time. The parent is compared through `realpath`, so the real spelling of a
+ * profiles dir behind a symlinked home is the same place; the profile entry itself may be a symlink
+ * to a folder elsewhere, which omp follows.
+ */
+export async function ompProfileDirError(
+  path: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string | null> {
+  const profilesDir = ompProfilesDir(env);
+  const name = ompProfileName(path);
+  const segments = path.split(/[\\/]+/).filter((segment) => segment !== '');
+  const last = segments[segments.length - 1] ?? '';
+  if (name === null && segments[segments.length - 2] === 'profiles' && !isOmpProfileName(last)) {
+    return `"${last}" is not an omp profile name: use lowercase letters, digits, ".", "_" or "-" (not "default")`;
+  }
+  const parent = dirname(resolve(path));
+  if (name === null || !(await sameProfileDir(parent, profilesDir))) {
+    return `an omp account is an omp profile: the folder must be ${profilesDir}/<name>`;
+  }
+  return null;
 }
 
 /**

@@ -8,6 +8,7 @@ import { agentAccountsPath } from '../paths.ts';
 import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import { registerProject } from '../workspace/projects.ts';
 import type { RunManager } from './run.ts';
+import { buildChildEnv } from '../core/agent-env.ts';
 
 /**
  * Which agent account a STEP spawns under (spec 2026-07-29-agent-profiles).
@@ -27,7 +28,7 @@ describe('RunManager agent-profile resolution', () => {
   type Seam = {
     agentEnvForStep(
       runId: string,
-      backend: 'claude' | 'codex' | 'opencode',
+      backend: 'claude' | 'codex' | 'opencode' | 'pi' | 'omp',
       options?: { generateFollowups?: boolean; recordedProfileId?: string },
     ): Promise<{ env: Record<string, string>; profileId: string }>;
   };
@@ -50,7 +51,7 @@ describe('RunManager agent-profile resolution', () => {
     else process.env.CEZ_HOME = savedHome;
   });
 
-  const addAccount = async (id: string, provider: 'claude' | 'codex', dir: string) => {
+  const addAccount = async (id: string, provider: 'claude' | 'codex' | 'pi' | 'omp', dir: string) => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'settings.json'), '{}', 'utf8');
     await mergeWriteAgentAccounts((store) => {
@@ -58,7 +59,7 @@ describe('RunManager agent-profile resolution', () => {
     });
   };
 
-  const selectAccount = async (provider: 'claude' | 'codex', id: string) => {
+  const selectAccount = async (provider: 'claude' | 'codex' | 'pi' | 'omp', id: string) => {
     await mergeWriteAgentAccounts((store) => {
       const root = realpathSync(repoRoot);
       store.selections[root] = { ...store.selections[root], [provider]: id };
@@ -164,4 +165,51 @@ describe('RunManager agent-profile resolution', () => {
     const run = newRun();
     expect((await seam().agentEnvForStep(run.id, 'claude')).profileId).toBe('default');
   });
+
+  /** pi and omp accounts (hearsay-tools/cezarion#1283): one row per runner, same four rules. */
+  const runners = [
+    { provider: 'pi' as const, variable: 'PI_CODING_AGENT_DIR', folder: () => join(home, 'pi-work', 'agent'),
+      spawnedWith: () => join(home, 'pi-work', 'agent'), hostValue: '/host/pi-agent' },
+    // An omp account is an omp profile: the folder sits in `profiles/` and omp gets its NAME.
+    { provider: 'omp' as const, variable: 'OMP_PROFILE', folder: () => join(home, '.omp', 'profiles', 'work'),
+      spawnedWith: () => 'work', hostValue: 'host-profile' },
+  ];
+  for (const { provider, variable, folder, spawnedWith, hostValue } of runners) {
+    describe(`${provider} accounts`, () => {
+      it('adds NOTHING for the default account', async () => {
+        const { env, profileId } = await seam().agentEnvForStep(newRun().id, provider);
+        expect(profileId).toBe('default');
+        expect(env[variable]).toBeUndefined();
+      });
+
+      it('spawns the project\'s account under its own variable', async () => {
+        await addAccount('work', provider, folder());
+        await selectAccount(provider, 'work');
+        const { env, profileId } = await seam().agentEnvForStep(newRun().id, provider);
+        expect(profileId).toBe('work');
+        expect(env[variable]).toBe(spawnedWith());
+      });
+
+      it('keeps a Continue on the account the step recorded, whatever the project uses now', async () => {
+        // A session only resumes inside the home that created it (pi: "No session found"; omp:
+        // "not found" from another profile), so the recorded account must win.
+        await addAccount('work', provider, folder());
+        const resolved = await seam().agentEnvForStep(newRun().id, provider, { recordedProfileId: 'work' });
+        expect(resolved.profileId).toBe('work');
+        expect(resolved.env[variable]).toBe(spawnedWith());
+      });
+
+      it('lets a host-exported value reach the default account, and a named account replace it', async () => {
+        // `agent-env.ts` passes PI_* to pi and OMP_*/PI_* to omp, so a value the cezar process
+        // carries reaches every default session; a named account's `extraEnv` is applied after it.
+        await addAccount('work', provider, folder());
+        const source = { PATH: '/usr/bin', [variable]: hostValue } as NodeJS.ProcessEnv;
+        const run = newRun();
+        const asDefault = await seam().agentEnvForStep(run.id, provider);
+        expect(buildChildEnv({ backend: provider, source, extraEnv: asDefault.env })[variable]).toBe(hostValue);
+        const asNamed = await seam().agentEnvForStep(run.id, provider, { recordedProfileId: 'work' });
+        expect(buildChildEnv({ backend: provider, source, extraEnv: asNamed.env })[variable]).toBe(spawnedWith());
+      });
+    });
+  }
 });

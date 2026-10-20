@@ -1246,10 +1246,13 @@ export async function withSkillParentRun(
   const adapter = HARNESS_ADAPTERS[backend];
   const repoRoot = mkdtempSync(join(tmpdir(), `cez-skill-parent-${backend}-`));
   // Acceptance binds the live parent's account, and spawn requires that directory to exist.
-  // Supply an empty test-owned home rather than relying on an installed host login.
+  // Supply an empty test-owned home rather than relying on an installed host login. omp's account
+  // variable selects a profile by NAME, so its default home moves through PI_CODING_AGENT_DIR,
+  // which omp honours only while no profile is selected.
   const accountHome = join(repoRoot, 'account');
   mkdirSync(accountHome);
-  const overrides = { ...env, ...profileEnv(backend, accountHome), CEZ_HOME: join(repoRoot, 'workspace-home'),
+  const defaultHome = backend === 'omp' ? { PI_CODING_AGENT_DIR: accountHome, OMP_PROFILE: '' } : profileEnv(backend, accountHome);
+  const overrides = { ...env, ...defaultHome, CEZ_HOME: join(repoRoot, 'workspace-home'),
     [adapter.binEnv]: adapter.mockBin, CEZ_DELEGATION: '1', CEZ_AUTONAME: '0' };
   const saved = Object.keys({ ...overrides, CEZ_DRY_RUN: '' }).map(name => [name, process.env[name]] as const);
   Object.assign(process.env, overrides);
