@@ -1126,6 +1126,32 @@ describe('TaskQuickListContainer', () => {
     expect(screen.getByText('Pinned attention')).toBeTruthy()
   })
 
+  it('sweeps only the selected tab\'s finished tasks (#1332)', async () => {
+    const rows = [run({ id: 'manual-done' }), auto({ id: 'auto-done' })]
+    const sweeps: unknown[] = []
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).includes('archive-finished')) {
+        sweeps.push(JSON.parse(String(init?.body)))
+        return new Response(JSON.stringify({ archived: 0, ids: [], pinnedIds: [] }), { status: 200 })
+      }
+      return new Response(JSON.stringify(rows), { status: 200 })
+    })
+    render(<QueryClientProvider client={createQueryClient()}><MemoryRouter><ListViewProvider>
+      <TaskQuickListContainer />
+    </ListViewProvider></MemoryRouter></QueryClientProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: /Automations/ }))
+    await waitFor(() => expect(row('auto-done')).not.toBeNull())
+    // The tab's own count: one finished automation task, not the project's two.
+    expect(within(document.querySelector('[data-bucket="Finished"]') as HTMLElement).getByRole('heading', { name: 'Finished 1' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Archive all' }))
+    await waitFor(() => expect(sweeps).toEqual([{ scope: 'unpinned', automation: true }]))
+    fireEvent.click(screen.getByRole('button', { name: /^Active/ }))
+    await waitFor(() => expect(row('manual-done')).not.toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'Archive all' }))
+    await waitFor(() => expect(sweeps).toHaveLength(2))
+    expect(sweeps[1]).toEqual({ scope: 'unpinned', automation: false })
+  })
+
   it('drives the sidebar Active/Automations view', async () => {
     renderContainer([run({ id: 'a', status: 'running' }), auto({ id: 'b', status: 'done' })])
 

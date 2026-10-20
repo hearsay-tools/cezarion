@@ -1327,7 +1327,8 @@ export function TaskQuickListContainer({ showViewControls = true, projectId: exp
           pin.mutate({ id: run.id, pinned })
         }
         onArchiveRun={archive.archiveOne}
-        onSweep={archive.sweep}
+        // Each tab sweeps only its own finished tasks: the ones it lists and counts.
+        onSweep={(scope) => archive.sweep(scope, view === 'automations')}
         sweeping={archive.sweeping}
       />
     </ReferenceStatusProvider>

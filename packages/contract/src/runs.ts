@@ -743,8 +743,13 @@ export type CancelAutoResumeResponse = z.infer<typeof cancelAutoResumeResponseSc
 export const archiveFinishedScopeSchema = z.enum(['unpinned', 'pinned']);
 export type ArchiveFinishedScope = z.infer<typeof archiveFinishedScopeSchema>;
 
-/** `POST /runs/archive-finished` body — optional, an absent body sweeps both scopes. */
-export const archiveFinishedRequestSchema = z.object({ scope: archiveFinishedScopeSchema.optional() });
+/** `POST /runs/archive-finished` body — optional, an absent body sweeps both scopes. `automation`
+ *  narrows the sweep to tasks an automation launched (`true`) or to every other task (`false`):
+ *  the sidebar's Automations and Active tabs (hearsay-tools/cezarion#1332). Absent takes both. */
+export const archiveFinishedRequestSchema = z.object({
+  scope: archiveFinishedScopeSchema.optional(),
+  automation: z.boolean().optional(),
+});
 export type ArchiveFinishedRequest = z.infer<typeof archiveFinishedRequestSchema>;
 
 /** `POST /runs/archive-finished` — `archived` counts every record flipped (owned workers

@@ -22,7 +22,9 @@ import {
   workerDestroyRetrySchema,
 } from '@open-mercato/cezar-contract/delegation';
 import {
+  automationIdOf,
   continuationMessageSchema,
+  isAutomationTask,
   toRunSummary,
   runRecordSchema as contractRunRecordSchema,
   runPullRequestSchema,
@@ -1617,12 +1619,14 @@ const startToken = (pid: number) => { const token = processStartToken(pid); retu
  *  then filtered by pin state. Mirrored clause for clause by `isSweepable` in the cockpit's
  *  `lib/tasks-table.ts`. */
 export function isSweepable(
-  run: Pick<RunRecord, 'archived' | 'status' | 'autoResumeAt' | 'pinned'> & { delegation?: { role: string } },
+  run: Pick<RunRecord, 'archived' | 'status' | 'autoResumeAt' | 'pinned'> & { delegation?: { role: string }; automationId?: string },
   scope?: ArchiveFinishedScope,
+  automation?: boolean,
 ): boolean {
   if (run.archived || !['done', 'failed', 'cancelled'].includes(run.status)) return false;
   if (run.status === 'failed' && run.autoResumeAt !== undefined) return false;
   if (run.delegation?.role === 'worker') return false;
+  if (automation !== undefined && isAutomationTask(run) !== automation) return false;
   if (scope === 'unpinned') return !run.pinned;
   if (scope === 'pinned') return run.pinned === true;
   return true;
@@ -3704,17 +3708,18 @@ export class RunStore extends EventEmitter {
   /** Bulk-archive finished runs (#780). `isSweepable` decides which; `archived` counts every
    *  record that flipped (cascaded workers included), `ids` lists the top-level runs picked and
    *  `pinnedIds` the subset that carried a pin before `clearPin` dropped it. */
-  archiveFinished(scope?: ArchiveFinishedScope): { archived: number; ids: string[]; pinnedIds: string[] } {
+  archiveFinished(scope?: ArchiveFinishedScope, automation?: boolean): { archived: number; ids: string[]; pinnedIds: string[] } {
     let archived = 0;
     // Snapshot first: cascade may archive still-live workers, mutating the held set, and the pin
     // has to be read before `applyArchived` clears it. Runs not in memory are picked off their
     // stored summary, which carries every field `isSweepable` reads.
     const picked: Array<readonly [Parameters<typeof isSweepable>[0] & { id: string }, ListOrder]> =
-      [...this.held.values()].filter((run) => isSweepable(run, scope)).map((run) => [run, this.listOrder(run)]);
+      [...this.held.values()].filter((run) => isSweepable({ ...run, automationId: automationIdOf(run) }, scope, automation))
+        .map((run) => [run, this.listOrder(run)]);
     for (const row of this.db?.listWhere("archived = 0 AND status IN ('done', 'failed', 'cancelled') AND parent_run_id IS NULL") ?? []) {
       if (this.held.has(row.id) || this.deleted.has(row.id)) continue;
       const summary = parseStoredSummary(row.summary);
-      if (summary && isSweepable(summary, scope)) picked.push([summary, row]);
+      if (summary && isSweepable(summary, scope, automation)) picked.push([summary, row]);
     }
     // Another process's runs are not this store's to archive (#779, plan step 3): they stay out.
     // A sweepable run is never a worker (`isSweepable`), so each is its own family.
