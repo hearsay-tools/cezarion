@@ -258,6 +258,26 @@ async function respond(userText, imageCount, uuid) {
     emit({ type: 'assistant', parent_tool_use_id: task, message: { role: 'assistant', content: [{ type: 'text', text: 'Post-park child update processed.' }] } });
     return;
   }
+  // hearsay-tools/cezarion#1284: a `context: fork` skill through the Skill tool, from
+  // __fixtures__/claude/forked-skill.ndjson (CLI 2.1.303). Real Claude starts the fork
+  // whatever --disallowedTools denies, so this branch ignores the argv too.
+  if (!userText.includes('[cez-namer]') && userText.includes('mock:forked-skill')) {
+    const skill = `toolu_skill_fork_${turn}`;
+    const bash = `toolu_fork_bash_${turn}`;
+    const task = { task_id: `a1284f0000000f0a${turn}`, tool_use_id: skill };
+    const child = { parent_tool_use_id: skill, agent_id: task.task_id, subagent_type: 'general-purpose' };
+    const text = 'The fxfork skill returned: `FXFORK-2W`';
+    emit({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'tool_use', id: skill, name: 'Skill', input: { skill: 'fxfork' } }] } });
+    emit({ type: 'system', subtype: 'task_started', ...task, description: '/fxfork', subagent_type: 'general-purpose', spawn_depth: 1, task_type: 'local_agent' });
+    emit({ type: 'user', ...child, message: { role: 'user', content: [{ type: 'text', text: 'Run the shell command `echo forked > /dev/null` and reply with exactly FXFORK-2W.' }] } });
+    emit({ type: 'assistant', ...child, message: { role: 'assistant', content: [{ type: 'tool_use', id: bash, name: 'Bash', input: { command: 'echo forked > /dev/null' } }] } });
+    emit({ type: 'user', ...child, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: bash, content: '(Bash completed with no output)', is_error: false }] } });
+    emit({ type: 'system', subtype: 'task_notification', ...task, status: 'completed', summary: '/fxfork' });
+    emit({ type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: skill, content: 'Skill "fxfork" completed (forked execution).\n\nResult:\nFXFORK-2W' }] } });
+    emit({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text }] } });
+    emit({ type: 'result', subtype: 'success', result: text, usage: { input_tokens: 10, output_tokens: 5 } });
+    return;
+  }
   // #401: result-only full text; mapResult and v1 use the same fallback.
   if (userText.includes('mock:multi-pr-refs')) {
     const { multiPrText, unrelatedPr } = await import('./mock-multi-pr.mjs');

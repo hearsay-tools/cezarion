@@ -91,6 +91,9 @@ export function startCursorPrintProcess(
           .then(() => { cancel(); resolve(); });
       });
     }
+    // This ends Cursor's `worker-server` and its `typescript-language-server`: Cursor spawns
+    // them `detached: false`, so they stay in this group after the leader exits, and nothing
+    // else ends them before Cursor's own 300 s idle exit (hearsay-tools/cezarion#1285).
     signal('SIGTERM');
     const drainMs = options.drainMs ?? 250;
     await new Promise<void>(resolve => { drainTimer = setTimeout(resolve, drainMs); });

@@ -82,7 +82,7 @@ export const CLAUDE_SPEC_SUPPORT: AgentRunSpecSupport = {
   images: { honored: true, via: 'image blocks ahead of the text in the first stdin message' },
   cwd: { honored: true, via: 'spawn cwd' },
   allowedTools: { honored: true, via: '--allowedTools, through buildAllowedTools' },
-  restrictNativeDelegation: { honored: true, via: '--disallowedTools Agent,Task (D1)' },
+  restrictNativeDelegation: { honored: true, via: '--disallowedTools Agent,Task,Workflow (D1); context: fork skills are not blocked' },
   bashAllowlist: { honored: true, via: 'Bash(<prefix>:*) entries in --allowedTools, one per prefix' },
   additionalDirectories: { honored: true, via: '--add-dir, once per directory' },
   env: { honored: true, via: 'merged over the child env through buildChildEnv' },
@@ -583,8 +583,13 @@ export function buildClaudeArgs(
     }
   }
   // Claude 2.1.260 --help: per-process deny rules; Agent is current, Task
-  // remains the name in older harnesses/recorded fixtures. Never widen grants.
-  if (spec.restrictNativeDelegation) args.push('--disallowedTools', 'Agent,Task');
+  // remains the name in older harnesses/recorded fixtures. Workflow runs a
+  // script that starts subagents; a free 2.1.303 probe (`/reload-plugins` as
+  // the only stream-json line) lists it in init `tools` under `Agent,Task` and
+  // drops it under this deny. `context: fork` skills still start a subagent
+  // (AGENT_PROTOCOL.md D1 forked-skill gap, hearsay-tools/cezarion#1284).
+  // Never widen grants.
+  if (spec.restrictNativeDelegation) args.push('--disallowedTools', 'Agent,Task,Workflow');
   const allowed = buildAllowedTools(spec.allowedTools ?? [], spec.bashAllowlist);
   if (spec.cezarTools) {
     const { name, command, args: toolArgs } = spec.cezarTools;

@@ -57,13 +57,13 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         `You cannot delegate, control peers, merge automatically, or accept your own review.`,
         `Follow your assigned task and selected input context. Your questions — cezar_ask, or a native question — go to your parent, which answers or asks the human; do not wait for a human.`,
         `Native workers are not tracked by cezar: do not spawn them.`,
-        `Per-run controls suppress verified native entry points only; custom extensions and same-user unrestricted shell are not hard isolation.`,
+        `Per-run controls suppress verified native entry points only; custom extensions, Claude forked skills (context: fork) and same-user unrestricted shell are not hard isolation.`,
         `Commit reviewed work before your parent deliberately integrates it; report the summary, commits, tests and remaining concerns.`,
       ].join(' ')
       : [
         `Prefer governed cezar workers for delegation.`,
         `Native workers are not tracked by cezar; do not spawn them.`,
-        `Per-run controls suppress verified native entry points only; custom extensions and same-user unrestricted shell are not hard isolation.`,
+        `Per-run controls suppress verified native entry points only; custom extensions, Claude forked skills (context: fork) and same-user unrestricted shell are not hard isolation.`,
         `Owned workers are available through the bundled command ${invocation}.`,
         `Commands return JSON.`,
         `Before choosing a runner or model, use ${bundledWorkerInvocation('discover')} runners, then ${bundledWorkerInvocation('discover')} models --runner=<name>.`,
