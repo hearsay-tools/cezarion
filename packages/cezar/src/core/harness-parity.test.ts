@@ -563,6 +563,8 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
 /** Criteria driven through `whileOpen` rather than one settled observation. */
 const CONTROL_CRITERIA = [
   { id: 'D1', scenario: 'baseline' },
+  // hearsay-tools/cezarion#1284: a forked skill starts no native subagent in a restricted session.
+  { id: 'D2', scenario: 'forked-skill' },
   { id: 'S5', scenario: 'baseline' },
   { id: 'S6', scenario: 'baseline' },
   { id: 'S11', scenario: 'ask' },
@@ -2128,6 +2130,50 @@ describe('harness parity — D1 governed native delegation', () => {
       expect(rows.filter(row => row.method === 'PATCH')).toEqual([]);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }, 45000);
+});
+
+// D2 (hearsay-tools/cezarion#1284): a restricted session's forked skill starts no native
+// subagent. Only Claude's wire constructs the scenario, and Claude 2.1.303 starts the fork
+// whatever its deny rules say (AGENT_PROTOCOL.md, Claude forked-skill gap), so its row is
+// pinned the other way round: the day Claude can block forks, it fails and must go live.
+describe('harness parity — D2 forked skill in a restricted session', () => {
+  for (const backend of RUNNER_IDS) {
+    const exempt = exemptionFor('D2', backend);
+    if (exempt?.kind === 'scenario-unconstructible') {
+      it(`${backend} is exempt from D2 — ${exempt.reason}`, () => {
+        expect(HARNESS_ADAPTERS[backend].scenarios['forked-skill']).toBeUndefined();
+      });
+      continue;
+    }
+    it(exempt ? `${backend} is exempt from D2 — ${exempt.reason}` : `${backend} D2 starts no native subagent from a forked skill in a restricted session`, async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'cez-forked-skill-'));
+      const argsFile = join(dir, 'args.ndjson');
+      try {
+        const obs = await driveSeam(backend, 'forked-skill', { spec: {
+          restrictNativeDelegation: true,
+          env: { CEZ_MOCK_ARGS_FILE: argsFile, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' },
+        } });
+        expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
+        expect(obs.v1.at(-1)?.type).toBe('done');
+        const items = obs.v2.flatMap(event => event.type === 'item.started' || event.type === 'item.completed' ? [event.item] : []);
+        const nested = items.filter(item => item.parentItemId !== undefined);
+        if (!exempt) {
+          expect(nested).toEqual([]);
+          return;
+        }
+        // The exact absent capability, not "some assertion threw": the session was
+        // restricted, and the forked child still ran nested under the Skill call.
+        expect(exempt.kind).toBe('capability-absent');
+        const args = JSON.parse(readFileSync(argsFile, 'utf8').trim().split('\n')[0]!) as string[];
+        expect(args).toContain('--disallowedTools');
+        expect(args[args.indexOf('--disallowedTools') + 1]).toBe('Agent,Task,Workflow');
+        const skill = items.find(item => item.kind === 'tool' && item.name === 'Skill');
+        expect(skill).toBeDefined();
+        expect(new Set(nested.map(item => item.parentItemId))).toEqual(new Set([skill!.id]));
+        expect(nested.some(item => item.kind === 'tool' && item.name === 'Bash' && item.status === 'completed')).toBe(true);
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }, 45_000);
+  }
 });
 
 // ---- AgentRunSpec support declarations (#284) ------------------------------

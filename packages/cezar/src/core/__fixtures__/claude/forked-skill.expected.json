@@ -1,0 +1,130 @@
+[
+  {
+    "type": "session.started",
+    "sessionId": "5d2c1a0e-1284-4f0a-9b3c-7e6d5c4b3a21",
+    "backend": "claude",
+    "model": "claude-haiku-5-5",
+    "cwd": "/repo",
+    "tools": [
+      "Bash",
+      "Edit",
+      "Glob",
+      "Grep",
+      "NotebookEdit",
+      "Read",
+      "Skill",
+      "TaskStop",
+      "WebFetch",
+      "WebSearch",
+      "Write"
+    ]
+  },
+  {
+    "type": "turn.started",
+    "turnId": "turn_1"
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_skill_fork_01",
+      "name": "Skill",
+      "toolKind": "task",
+      "title": "Skill: fxfork",
+      "status": "running",
+      "input": {
+        "skill": "fxfork"
+      }
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_fork_bash_01",
+      "name": "Bash",
+      "toolKind": "execute",
+      "title": "Ran echo forked > /dev/null",
+      "status": "running",
+      "input": {
+        "command": "echo forked > /dev/null",
+        "description": "Run the no-op echo redirect command"
+      },
+      "parentItemId": "toolu_skill_fork_01"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_fork_bash_01",
+      "name": "Bash",
+      "toolKind": "execute",
+      "title": "Ran echo forked > /dev/null",
+      "status": "completed",
+      "input": {
+        "command": "echo forked > /dev/null",
+        "description": "Run the no-op echo redirect command"
+      },
+      "parentItemId": "toolu_skill_fork_01",
+      "output": "(Bash completed with no output)"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_skill_fork_01",
+      "name": "Skill",
+      "toolKind": "task",
+      "title": "Skill: fxfork",
+      "status": "completed",
+      "input": {
+        "skill": "fxfork"
+      },
+      "output": "Skill \"fxfork\" completed (forked execution).\n\nResult:\nFXFORK-2W"
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "item_1",
+      "role": "assistant",
+      "text": "The fxfork skill returned: `FXFORK-2W`"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "item_1",
+      "role": "assistant",
+      "text": "The fxfork skill returned: `FXFORK-2W`"
+    }
+  },
+  {
+    "type": "turn.completed",
+    "turnId": "turn_1",
+    "stopReason": "end_turn",
+    "usage": {
+      "input": 4,
+      "output": 168,
+      "total": 56851,
+      "cacheRead": 28249,
+      "cacheWrite": 28430
+    },
+    "costUsd": 0.0072375
+  },
+  {
+    "type": "usage.updated",
+    "usage": {
+      "input": 4,
+      "output": 168,
+      "total": 56851,
+      "cacheRead": 28249,
+      "cacheWrite": 28430
+    },
+    "costUsd": 0.0072375
+  }
+]
