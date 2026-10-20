@@ -41,10 +41,16 @@ export interface PiRunnerOptions {
  */
 /**
  * What the pi CLI receives from each `AgentRunSpec` field (#284). Tool names
- * are mapped onto pi's own through `piTools`; pi has no command-prefix
- * equivalent for `bashAllowlist`, so a request for one drops `bash` from
- * `--tools` (fail closed) rather than widening. Held against the recorded argv
- * and RPC prompt by the harness parity matrix.
+ * are mapped onto pi's own through `piTools`, and `allowedTools` takes one of
+ * three paths (hearsay-tools/cezarion#1305). A list holding every default
+ * built-in sends no allowlist: `--no-builtin-tools` plus the default-tools
+ * extension, which activates the listed built-ins, so MCP and extension tools
+ * stay callable. A narrowed list keeps the `--tools` allowlist. A list that
+ * maps to nothing fails closed: `--tools` with only the cezar tools, or
+ * `--no-tools`. pi has no command-prefix equivalent for `bashAllowlist`, so a
+ * request for one narrows the list and drops `bash` from `--tools` (fail
+ * closed) rather than widening. Held against the recorded argv and RPC prompt
+ * by the harness parity matrix.
  */
 export const PI_SPEC_SUPPORT: AgentRunSpecSupport = {
   cezarTools: { honored: true, via: 'explicit CI --extension and selected tool admission' },
@@ -52,9 +58,9 @@ export const PI_SPEC_SUPPORT: AgentRunSpecSupport = {
   userPrompt: { honored: true, via: 'RPC prompt message' },
   images: { honored: true, via: 'RPC prompt images' },
   cwd: { honored: true, via: 'spawn cwd' },
-  allowedTools: { honored: true, via: '--tools, mapped onto pi tool names through piTools' },
+  allowedTools: { honored: true, via: 'mapped through piTools: the default list sends --no-builtin-tools and names its built-ins to the default-tools extension; a narrowed list sends --tools; a list that maps to nothing sends --tools with the cezar tools only, or --no-tools' },
   restrictNativeDelegation: { honored: true, via: '--exclude-tools subagent (D1)' },
-  bashAllowlist: { honored: true, via: 'no prefix equivalent: bash is dropped from --tools when an allowlist is set (fail closed)' },
+  bashAllowlist: { honored: true, via: 'no prefix equivalent: an allowlist narrows the list to --tools without bash, or --no-tools when nothing else is left (fail closed)' },
   additionalDirectories: { honored: false, reason: 'pi has no extra-root flag' },
   env: { honored: true, via: 'merged over the child env through buildChildEnv' },
   model: { honored: true, via: '--model provider/model' },
@@ -621,12 +627,30 @@ export function buildPiArgs(spec: AgentRunSpec): string[] {
   // Pi 0.85.1 --exclude-tools covers the shipped subagent extension. Arbitrary
   // custom delegation tool names have no discoverable capability (D1 exemption).
   if (spec.restrictNativeDelegation) args.push('--exclude-tools', 'subagent');
-  const tools = piTools(spec.allowedTools ?? [], spec.bashAllowlist);
-  if (tools.length > 0) {
-    if (spec.cezarTools) tools.push(...cezarToolNames(spec.env ?? {}));
-    args.push('--tools', tools.join(','));
-  }
+  if (spec.allowedTools) args.push(...piToolArgs(spec, spec.allowedTools));
   return args;
+}
+
+// The built-ins cezar's default list maps onto (DEFAULT_ALLOWED_TOOLS through piTools).
+const PI_DEFAULT_BUILTINS = ['read', 'edit', 'write', 'grep', 'find', 'bash'];
+
+/**
+ * pi reads --tools as an allowlist that hides every tool it does not name, MCP and extension tools
+ * included (hearsay-tools/cezarion#1305). So the default list sends no allowlist: --no-builtin-tools
+ * keeps every tool registered and the default-tools extension activates the listed built-ins. A
+ * narrowed list or a bashAllowlist keeps the allowlist, and a list that maps to nothing fails closed.
+ */
+function piToolArgs(spec: AgentRunSpec, allowedTools: string[]): string[] {
+  const narrowedBash = (spec.bashAllowlist?.length ?? 0) > 0;
+  const tools = piTools(allowedTools, spec.bashAllowlist);
+  if (!narrowedBash && PI_DEFAULT_BUILTINS.every((tool) => tools.includes(tool))) {
+    // An mcp__ name activated directly would override the exposure its server configured. The
+    // cezar tools need no name: pi activates an extension's tools on registration.
+    const builtins = tools.filter((tool) => !tool.startsWith('mcp__'));
+    return ['--no-builtin-tools', '--extension', piDefaultToolsExtensionPath(), '--cezar-builtin-tools', builtins.join(',')];
+  }
+  if (spec.cezarTools) tools.push(...cezarToolNames(spec.env ?? {}));
+  return tools.length > 0 ? ['--tools', tools.join(',')] : ['--no-tools'];
 }
 
 function piDegradedServiceRetryExtensionPath(): string {
@@ -635,6 +659,10 @@ function piDegradedServiceRetryExtensionPath(): string {
 
 function piProjectSkillsExtensionPath(): string {
   return fileURLToPath(new URL('../../scripts/pi-project-skills.mjs', import.meta.url));
+}
+
+function piDefaultToolsExtensionPath(): string {
+  return fileURLToPath(new URL('../../scripts/pi-default-tools.mjs', import.meta.url));
 }
 
 function restorePiDegradedServiceError(errorMessage: string): string {
