@@ -602,3 +602,27 @@ describe('Usage & agent — the canonical model identity (#546)', () => {
     expect(agentDetails()).toEqual({ Runner: 'claude', Model: 'anthropic/claude-opus-4-8', Effort: 'auto' })
   })
 })
+
+describe('Workspace — compact tools (hearsay-tools/cezarion#1333 mockup)', () => {
+  it('offers Open in… as one menu, plus worktree-path and resume-command copies', async () => {
+    const sent = stubFetch({
+      '/api/v1/open-targets': () => jsonResponse({ targets: [{ id: 'cli:opencode', label: 'OpenCode' }, { id: 'finder', label: 'Files' }] }),
+    })
+    const writeText = vi.fn(() => Promise.resolve())
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+    renderCard(run('failed', { id: freshId(), runner: 'opencode', branch: 'cez/x', worktreePath: '/tmp/wt' }))
+    const workspace = openRow('workspace')
+    // The targets stay behind one trigger, as the ··· menu shows them, so the row stays short.
+    const trigger = await within(workspace).findByRole('button', { name: 'Open in…' })
+    expect(within(workspace).queryByRole('button', { name: /OpenCode/ })).toBeNull()
+    expect(workspace.querySelector('[data-slot="resume-command"] pre')).toBeNull()
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /OpenCode/ }))
+    await waitFor(() => expect(sent.some((r) => r.method === 'POST' && r.path.endsWith('/open-in'))).toBe(true))
+
+    fireEvent.click(within(workspace).getByRole('button', { name: 'Copy worktree path' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('/tmp/wt'))
+    fireEvent.click(within(workspace).getByRole('button', { name: 'Copy resume command' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('cd /tmp/wt && opencode --session sess-1'))
+  })
+})

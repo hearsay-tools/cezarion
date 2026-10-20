@@ -47,7 +47,9 @@ export function ActivityRow({
   const head = (
     <>
       <span aria-hidden className="flex size-4 shrink-0 items-center justify-center text-accent-text">{icon}</span>
-      <span className="min-w-0 shrink truncate text-[14px] font-semibold text-foreground">{title}</span>
+      {/* A plain label (`Workspace`) keeps its width and the meta truncates; a composed title
+          (`Workflow · <name>`) can be long, so it shares the row. */}
+      <span className={cn('truncate text-[14px] font-semibold text-foreground', typeof title === 'string' ? 'shrink-0' : 'min-w-0 shrink')}>{title}</span>
       {meta !== undefined ? (
         <span
           data-slot="run-activity-meta"

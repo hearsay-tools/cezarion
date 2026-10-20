@@ -35,7 +35,7 @@ import { useAgentIdentity } from './run-agent-identity'
 import { resumeHint, runActionFlags } from './run-actions'
 import { runStatusLine } from './run-status'
 import { RunWaitDetails, hasWaitDetails } from './run-waits'
-import { BranchCopy, LinkedReferences, OpenInTargets, useResumeInTerminal, useRunReferenceRequests } from './run-workspace'
+import { BranchCopy, LinkedReferences, WorkspaceTools, useResumeInTerminal, useRunReferenceRequests } from './run-workspace'
 import { latestPlanEntries, type ThreadState } from './thread-state'
 
 /**
@@ -292,7 +292,7 @@ function SessionActivityCard({
                 {run.worktreePath ? (
                   <DetailLine label="Worktree"><span className="min-w-0 break-all font-mono text-[12px] text-foreground">{run.worktreePath}</span></DetailLine>
                 ) : null}
-                <OpenInTargets run={run} canResume={flags.terminal} onResume={() => resume.mutate()} />
+                <WorkspaceTools run={run} canResume={flags.terminal} onResume={() => resume.mutate()} />
               </div>
             </ActivityRow>
           ) : null}

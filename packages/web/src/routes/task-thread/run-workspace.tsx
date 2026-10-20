@@ -6,7 +6,7 @@ import { ApiError, openRunIn, openRunInCli } from '@/api/client'
 import { useOpenTargets, useProjectRepoBase, useProviderStatus, useReferenceProjectId } from '@/api/queries'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 import { CopyIcon, XIcon } from '@/components/design-icons'
-import { openInIcon, type OpenInChoice } from '@/components/open-in-menu'
+import { OpenInMenu, openInIcon, type OpenInChoice } from '@/components/open-in-menu'
 import { ReferenceChip } from '@/components/reference-chip'
 import { ResolveConflictsButton } from '@/components/reference-conflict-action'
 import { Button } from '@/components/ui/button'
@@ -153,6 +153,43 @@ export function OpenInTargets({ run, canResume, onResume }: { run: ApiRun; canRe
         <Button variant="outline" onClick={() => void copyToClipboard(hint, 'Command copied to clipboard.')}><CopyIcon />Copy resume command</Button>
       </div> : null}
     </>
+  )
+}
+
+/** The Session activity card's Workspace tools (hearsay-tools/cezarion#1333 mockup): "Open in…"
+ *  as one menu (the resume item first, then the targets), and compact copies of the worktree path
+ *  and the resume command. The full chooser panel stays behind the header's ··· menu. */
+export function WorkspaceTools({ run, canResume, onResume }: { run: ApiRun; canResume: boolean; onResume: () => void }) {
+  const { canResumeHere, choices, open } = useOpenInChoices(run, canResume)
+  const hint = resumeHint(run)
+  const path = run.worktreePath
+  if (!canResumeHere && choices.length === 0 && !hint && !path) return null
+  const compact = 'max-md:min-h-11'
+  return (
+    <div data-slot="workspace-tools" className="flex min-w-0 flex-wrap gap-2">
+      {canResumeHere || choices.length > 0 ? (
+        <OpenInMenu
+          choices={choices}
+          onPick={(target) => open.mutate(target)}
+          disabled={open.isPending}
+          triggerVariant="outline"
+          className={compact}
+          leading={canResumeHere ? (
+            <DropdownMenuItem data-target="terminal-resume" onSelect={onResume}><SquareTerminalIcon aria-hidden="true" />Terminal (resume session)</DropdownMenuItem>
+          ) : undefined}
+        />
+      ) : null}
+      {path ? (
+        <Button variant="outline" size="sm" className={compact} onClick={() => void copyToClipboard(path, 'Worktree path copied')}>
+          <CopyIcon aria-hidden="true" />Copy worktree path
+        </Button>
+      ) : null}
+      {hint ? (
+        <Button variant="outline" size="sm" data-slot="resume-command" title={hint} className={compact} onClick={() => void copyToClipboard(hint, 'Command copied to clipboard.')}>
+          <CopyIcon aria-hidden="true" />Copy resume command
+        </Button>
+      ) : null}
+    </div>
   )
 }
 
