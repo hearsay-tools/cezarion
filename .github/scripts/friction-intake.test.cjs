@@ -104,10 +104,21 @@ test('three automation definitions match only their handling label and keep roll
     assert.equal(d.filters.includeExisting, false);
     assert.deepEqual(d.filters.authors, ['wjarka']);
     assert.equal(d.task.worktree, true);
-    assert.equal(d.task.autonomous, true);
     assert.equal(d.task.variants, 1);
     assert.ok(d.filters.allLabels.includes('friction'));
     assert.notEqual(d.enabled, true);
+  }
+});
+
+test('design handling selects dev-flow and allows its human approval gate', () => {
+  const definitions = buildAutomations();
+  const design = definitions.find(d => d.filters.changedLabels.includes('friction-design'));
+  assert.equal(design.task.autonomous, false);
+  assert.equal(design.task.workflow, undefined);
+  assert.deepEqual(design.task.steps, [{ id: 'task', skill: 'dev-flow', prompt: '{{task}}' }]);
+  for (const implementation of definitions.filter(d => d !== design)) {
+    assert.equal(implementation.task.autonomous, true);
+    assert.equal(implementation.task.workflow, 'quick-task');
   }
 });
 
