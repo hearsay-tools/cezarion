@@ -158,7 +158,11 @@ function scheduleKill(pgid: number, leader: Leader, signalledAt: number): void {
 /** End what a leader that exited on its own left in its group, once (hearsay-tools/cezarion#1286).
  * The rescan precedes the SIGTERM: a member with the default action is usually gone before a scan
  * after the signal reads it, and a child started after the exit would then lose its voucher. The
- * rescan is kept only when a recorded member is still in it; otherwise the number is not ours. */
+ * rescan is kept only when a recorded member is still in it; otherwise the number is not ours.
+ * That leaves one gap on the safe side: a member that starts a child and exits before the rescan
+ * leaves nothing recorded, so the child outlives the session. Its group then reads exactly like a
+ * reused number, and telling them apart needs proof the group never emptied, which only the
+ * members' parent can observe. */
 function reap(pgid: number, leader: Leader): void {
   if (leaders.get(pgid) !== leader || leader.signalledAt !== undefined) return;
   const recorded = leader.members ?? [];
