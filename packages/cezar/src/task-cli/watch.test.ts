@@ -4,6 +4,8 @@ import { pollHitDeadline, abortedPoll, TIMEOUT_GRACE_MS } from './watch.ts';
 import { TaskCliError } from './http.ts';
 import { runRecordSchema, toRunSummary } from '@open-mercato/cezar-contract/runs';
 import { startTestCockpit, type TestCockpit } from './cockpit.testkit.ts';
+import type { Wait } from '@open-mercato/cezar-contract';
+import type { RunRecord } from '../runs/store.ts';
 
 /** `cez task wait` / `log` / `log --follow` / `start --wait` (#504). */
 describe('cez task watching', () => {
@@ -19,6 +21,21 @@ describe('cez task watching', () => {
   const lines = () => out.map((line) => JSON.parse(line) as Record<string, unknown>);
   const create = (task = 't') => harness.store.createRun({ title: task, workflow: 'quick-task', task, steps: [] }).id;
   const later = (ms: number, action: () => void) => setTimeout(action, ms);
+  // A park is a wait-list entry (hearsay-tools/cezarion#1301). The entry is committed before the
+  // run parks, so no poll reads a `waiting` run without it.
+  const parkOn = (id: string, wait: Wait, over: Partial<RunRecord> = {}) => {
+    harness.store.commitWait(id, wait);
+    harness.store.updateRun(id, { status: 'waiting', ...over });
+  };
+  const parkOnWorkers = (id: string, hasPendingHumanAsk = false) => parkOn(id, {
+    kind: 'worker', id: '00000000-0000-4000-8000-0000000000aa', source: 'agent', via: 'cez-worker-wait', registeredAt: '2026-09-05T00:00:00.000Z',
+    deadline: '2026-09-06T00:00:00.000Z', timeoutSeconds: 600, phase: 'open', turnId: 'turn-1',
+    workerIds: ['00000000-0000-4000-8000-000000000001'], revisions: [], outcomes: [],
+  }, { hasPendingHumanAsk, delegation: { role: 'root', permissions: [], receipts: [] } });
+  const parkOnTimer = (id: string) => parkOn(id, {
+    kind: 'timer', id: '00000000-0000-4000-8000-0000000000ab', source: 'agent', via: 'monitoring-line', registeredAt: new Date().toISOString(),
+    deadline: new Date(Date.now() + 600_000).toISOString(), phase: 'open', turnId: 'turn-1', seconds: 600,
+  });
 
   describe('wait', () => {
     it('exits 0 once the run reaches review', async () => {
@@ -63,10 +80,7 @@ describe('cez task watching', () => {
      * wait promptly; a root parked on its own workers and a monitoring run do not.
      */
     describe('attention is the default, derived from the shared function', () => {
-      const parkedOnWorkers = (id: string) => harness.store.updateRun(id, {
-        status: 'waiting',
-        delegation: { role: 'root', permissions: [], receipts: [], wait: { id: '00000000-0000-4000-8000-0000000000aa', workerIds: ['00000000-0000-4000-8000-000000000001'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } },
-      } as never);
+      const parkedOnWorkers = (id: string) => parkOnWorkers(id);
 
       it('ends the default wait as soon as an interactive task parks, exit 0, with "needs you"', async () => {
         const id = create();
@@ -89,10 +103,10 @@ describe('cez task watching', () => {
 
       it('does not end an attention wait on a running or monitoring run', async () => {
         const id = create();
-        later(40, () => harness.store.updateRun(id, { status: 'running', activity: 'monitoring' }));
+        later(40, () => parkOnTimer(id));
         expect(await run(['wait', id, '--timeout-seconds', '1'])).toBe(3);
-        expect(last()).toMatchObject({ timedOut: true, runs: [{ id, status: 'running', activity: 'monitoring', attention: 'running', attentionLabel: 'monitoring' }] });
-        harness.store.updateRun(id, { status: 'running', activity: undefined });
+        expect(last()).toMatchObject({ timedOut: true, runs: [{ id, status: 'waiting', attention: 'running', attentionLabel: 'monitoring' }] });
+        harness.store.updateRun(id, { status: 'running' });
         expect(await run(['wait', id, '--timeout-seconds', '1'])).toBe(3);
         expect(last()).toMatchObject({ timedOut: true, runs: [{ id, status: 'running', attention: 'running', attentionLabel: 'running' }] });
       });
@@ -223,11 +237,7 @@ describe('cez task watching', () => {
      * `--until settled` keeps the terminal-only behaviour.
      */
     describe('--follow until attention (#931)', () => {
-      const parkedOnWorkers = (id: string, hasPendingHumanAsk = false) => harness.store.updateRun(id, {
-        status: 'waiting',
-        hasPendingHumanAsk,
-        delegation: { role: 'root', permissions: [], receipts: [], wait: { id: '00000000-0000-4000-8000-0000000000aa', workerIds: ['00000000-0000-4000-8000-000000000001'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } },
-      } as never);
+      const parkedOnWorkers = (id: string, hasPendingHumanAsk = false) => parkOnWorkers(id, hasPendingHumanAsk);
 
       it('ends a default follow once an interactive task parks, exit 0, after every event', async () => {
         const id = create();
@@ -263,9 +273,9 @@ describe('cez task watching', () => {
 
       it('does not end on a running or monitoring run', async () => {
         const id = create();
-        later(40, () => harness.store.updateRun(id, { status: 'running', activity: 'monitoring' }));
+        later(40, () => parkOnTimer(id));
         expect(await run(['log', id, '--follow', '--timeout-seconds', '1'])).toBe(3);
-        expect(last()).toMatchObject({ id, status: 'running', attention: 'running', attentionLabel: 'monitoring', until: 'attention', timedOut: true });
+        expect(last()).toMatchObject({ id, status: 'waiting', attention: 'running', attentionLabel: 'monitoring', until: 'attention', timedOut: true });
       });
 
       it.each(['attention', 'settled'])('reports a run deleted mid-follow as missing, exit 1, under --until %s', async (until) => {

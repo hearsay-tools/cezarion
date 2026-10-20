@@ -133,7 +133,7 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
   ) : undefined
 
   return (
-    // The sidebar's Active/Archived filter. The Tasks table owns a separate copy and is not a
+    // The sidebar's Active/Automations filter. The Tasks table owns a separate copy and is not a
     // consumer.
     <ListViewProvider>
       <AppShell

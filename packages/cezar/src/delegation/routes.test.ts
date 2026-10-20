@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 import { createDelegationRoutes } from './routes.ts';
-import { fixture } from './service.testkit.ts';
+import { fixture, seedWorkerWait } from './service.testkit.ts';
 import { conversationSendResultSchema, conversationInspectResultSchema, inboxReserveResultSchema, inboxReceiptResultSchema, requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
 import { workerListResultSchema, delegationErrorResponseSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema } from '@open-mercato/cezar-contract/delegation';
 import { seedRuns } from '../runs/run-store.testkit.ts';
@@ -171,16 +171,15 @@ describe('authenticated delegation HTTP family', () => {
     expect(response.status).toBe(400);
   });
   it('cancels with existing wait-only authority and returns retained settlement on retry', async () => {
-    const { workerId } = await spawn(); const waitId = randomUUID();
+    const { workerId } = await spawn();
+    // A worker wait in the list (hearsay-tools/cezarion#1235, #1301), registered as `cez worker wait` does.
+    const waitId = seedWorkerWait(f.store, f.parent.id, [workerId]);
     const delegation = f.store.getRun(f.parent.id)!.delegation!;
     if (delegation.role !== 'root') throw Error('fixture');
-    f.store.commitDelegation([{ id: f.parent.id, delegation: { ...delegation, permissions: ['wait'], wait: {
-      id: waitId, workerIds: [workerId], phase: 'registered', deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [],
-    } } }]);
+    f.store.commitDelegation([{ id: f.parent.id, delegation: { ...delegation, permissions: ['wait'] } }]);
     const response = await request('/cancel-wait', { waitId });
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ wait: { id: waitId, reason: 'cancelled' } });
-    f.store.commitWorkerWaitWithdrawal(f.parent.id, waitId);
     expect(await (await request('/cancel-wait', { waitId })).json()).toMatchObject({ wait: { id: waitId, reason: 'cancelled' } });
     expect(f.store.getRun(workerId)?.status).toBe('queued');
     const retired = f.store.getRun(f.parent.id)!.delegation!;

@@ -60,11 +60,12 @@ function summary(wait: Wait): string {
   return clip(wait.note === undefined ? 'timer' : `timer: ${wait.note}`);
 }
 
-/** The open waits as both tools list them back to the agent. A human wait has no deadline. */
+/** The open waits as both tools list them back to the agent. A human wait has no deadline, and
+ *  Cezar's own deadline-less worker wait is not the agent's to list (hearsay-tools/cezarion#1301). */
 export function openWaitList(waits: readonly Wait[]): OpenWait[] {
-  return waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait)).map((wait): OpenWait => wait.kind === 'human'
+  return waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait) && !(wait.kind === 'worker' && wait.deadline === undefined)).map((wait): OpenWait => wait.kind === 'human'
     ? { wait_id: wait.id, kind: wait.kind, summary: summary(wait) }
-    : { wait_id: wait.id, kind: wait.kind, deadline: wait.deadline, summary: summary(wait) });
+    : { wait_id: wait.id, kind: wait.kind, deadline: wait.deadline!, summary: summary(wait) });
 }
 
 /**
@@ -149,7 +150,8 @@ export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
   const items = open.map((wait) => {
     if (wait.kind === 'ci') return `CI wait ${wait.id} for ${wait.repository}#${wait.prNumber}, deadline ${wait.deadline}`;
     if (wait.kind === 'human') return `your question ${wait.id} to the user`;
-    if (wait.kind === 'worker') return `worker wait ${wait.id} on ${workerTargetPhrase(wait)}, deadline ${wait.deadline}`;
+    // Cezar's completion wait has no deadline (hearsay-tools/cezarion#1301).
+    if (wait.kind === 'worker') return `worker wait ${wait.id} on ${workerTargetPhrase(wait)}, ${wait.deadline === undefined ? 'no deadline' : `deadline ${wait.deadline}`}`;
     return `timer ${wait.id} at ${wait.deadline}${wait.note === undefined ? '' : ` (${wait.note})`}`;
   });
   const asked = open.some((wait) => wait.kind === 'human');

@@ -30,7 +30,7 @@ export const RUNS_IMPORT_COMPLETE_KEY = 'import-complete';
 /** `PRAGMA user_version` of a database this build created. A higher number means a newer cezar
  *  wrote it; that is refused rather than read, because a newer schema may store what this one
  *  would silently drop on its next write. */
-export const RUN_DATABASE_SCHEMA_VERSION = 6;
+export const RUN_DATABASE_SCHEMA_VERSION = 7;
 
 /**
  * The oldest `user_version` the READ-ONLY reader can read as it stands (`openReadOnly`). It never
@@ -201,6 +201,16 @@ const MIGRATIONS: readonly string[] = [
   --
   -- No live recompute: isLiveRecord already calls a row with an open wait live, of any kind, and
   -- every row the old predicate called live through delegation.wait is read up and rewritten by open.
+  `,
+  `
+  -- Schema 7 changes no table: a record no longer carries delegation.wait, delegation.lastWait or
+  -- delegation.completion (hearsay-tools/cezarion#1301, phase 3b). Cezar's completion gate wait is a
+  -- worker entry in waits (source 'cezar', via 'completion'), and this build reads a stored one up
+  -- (upgradeLegacyWaits, store.ts). A schema-6 build would read an upgraded completion entry without
+  -- its deadline as unreadable and recover the run without the wait it parked on, so the bump makes
+  -- it refuse the store as unsupported-schema instead; the recovery is to run this version again.
+  --
+  -- No live recompute: isLiveRecord already calls a row with an open wait live, of any kind.
   `,
 ];
 

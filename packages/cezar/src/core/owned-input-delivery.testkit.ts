@@ -75,6 +75,12 @@ export async function withDelayedCommand(backend: 'codex' | 'opencode' | 'pi' | 
       source = patch(original, source, anchor, `    if(command.message.includes(${JSON.stringify(marker)})) delayedAck(()=>send({id:command.id,type:'response',command:'prompt',success:true}));
     else send({id:command.id,type:'response',command:'prompt',success:true});
     send({type:'agent_start'}); send({type:'turn_start'}); sendText([command.message]);`);
+      // The scripted-turn branch acknowledges on its own; with the marker its frames stream on too.
+      const scripted = "    const { turnMessages } = await import('./mock-turn-messages.mjs');\n    send({ id: command.id, type: 'response', command: 'prompt', success: true });\n";
+      source = patch(original, source, scripted, `    const { turnMessages } = await import('./mock-turn-messages.mjs');
+    if(command.message.includes(${JSON.stringify(marker)})) delayedAck(()=>send({id:command.id,type:'response',command:'prompt',success:true}));
+    else send({id:command.id,type:'response',command:'prompt',success:true});
+`);
     }
     // The marker's turn also takes the agent-echo branch; OMP needs no patch, its baseline already echoes.
     const echo = { codex: 'turnText', opencode: 'body', pi: 'command.message', omp: undefined }[backend];

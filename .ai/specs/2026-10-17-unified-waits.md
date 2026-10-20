@@ -485,6 +485,9 @@ builder" unless a bullet says otherwise.
   monitoring slot for its workers' wakes and opens no timer. It is the only remaining writer of
   that activity. A store read of that row (a restart, the read-only runs index) upgrades it like
   any legacy row: `waiting`, no timer, `activity` dropped. Phase 3 moves it into the wait list.
+  *Replaced in phase 3b (hearsay-tools/cezarion#1301): nothing writes `activity: 'monitoring'`;
+  a blocked done gets a refusal nudge, and an ignored one parks on Cezar's list worker wait. See
+  § Phase 3b decisions.*
 - **A resolved wait in the line reads `waiting for capacity`.** Rung 10: a `waiting` run with
   a resolved wait and no human signal is bucket none, tone running, a ring, no pulse. An open
   CI or timer wait still reads `waiting for CI` or `monitoring`.
@@ -590,7 +593,9 @@ nudge, and the dry-run mocks answering it) are recorded with it.
   questions too; the native mappers still build questions with options. A worker's open question
   reaches its parent with `<header>: <your answer>` as its reply line.
 - **A worker's human wait carries a card**, since every `cezar_ask` does. A worker's no-wait
-  fallback stays today's plain park until phase 3.
+  fallback stays today's plain park until phase 3. *Phase 3b (hearsay-tools/cezarion#1301)
+  routes the second no-wait turn end to the parent as an open question; see § Phase 3b
+  decisions.*
 - **The budget is durable.** `automaticWakes` (timers, and in 2b nudges) lives on the run
   record. A human message and a human Continue reset it; a scheduler continuation and a restart
   keep it. A parent's answer to its worker does not reset it. A batch carrying timer results
@@ -771,6 +776,8 @@ Calls made by the agent (owner to check):
   `delegation.wait` with its old engine, including the `reason: 'message'` stand-in and the
   retirement of that wait by a non-progress message. The routing test is the one predicate
   "parked on the completion wait". Each kept piece carries a comment naming 3b.
+  *Replaced in phase 3b (hearsay-tools/cezarion#1301): the completion wait and its old engine are
+  gone; see § Phase 3b decisions.*
 - **Upgraded queued wake inputs are kept.** An upgraded `wake-pending` wait records its
   already-queued input as `wakeInputId`; the result is delivered once, and a cancelled
   receipt's undelivered input is delivered as an ordinary input.
@@ -832,7 +839,7 @@ failure settles). The earlier tables still hold for the states they list. One ro
 | | The answer arrives | A human; or the parent, for a routed worker question | The answer is delivered (a parent's routed answer is admitted mid-turn); owed results and messages follow at that turn's end. **For a human-owned question the only default exit is this human action** |
 | | Stop, Finish, delete | The user | The wait is cancelled; the run settles (Stop leaves the question for a human, as before) |
 | Pending PORTABLE question (`cezar_ask`), results or messages owed | A boundary | The runner's turn end | Delivered beside the card (`besideQuestion`); the card stays answerable and keeps its `askSeq`; a parent's answer goes through the answer seam and withdraws no wait |
-| Completion park (`delegation.wait` named by `completion.waitId`; unchanged until phase 3b) | The wait's workers settle (`mode: all`) | `reconcileWorkerFamily`, the old engine | The completion wake delivers; a list wait that resolved meanwhile is held until it |
+| Completion park (`delegation.wait` named by `completion.waitId`; replaced in phase 3b, see § Transitions out (phase 3b)) | The wait's workers settle (`mode: all`) | `reconcileWorkerFamily`, the old engine | The completion wake delivers; a list wait that resolved meanwhile is held until it |
 | | The wait's deadline (10 minutes) passes | `workerWaitTimers` | Resolves `timeout`; the completion wake delivers |
 | | A progress message | A worker | The stand-in `reason: 'message'` wakes the run; the completion wait is retained |
 | | Any other message | A worker, the parent or a human | The stand-in wakes the run and delivering it ends the completion wait (old behavior, removed in 3b) |
@@ -840,4 +847,208 @@ failure settles). The earlier tables still hold for the states they list. One ro
 
 No state's only default exit is a human action except a pending native question for a
 human-owned asker, which is the question's own gate and not a wait: every worker wait has a
-deadline.
+deadline. (Phase 3b adds Cezar's deadline-less completion worker wait, which its workers'
+settlement ends; its rows are in § Transitions out (phase 3b). The completion park row above is
+superseded there.)
+
+## Phase 3b decisions
+
+Phase 3b (hearsay-tools/cezarion#1301), the second half of phase 3 (hearsay-tools/cezarion#1235),
+moves the last two waits off the old worker-wait engine: the completion gate's own wait and a
+worker's no-wait fallback.
+This section and the table below are self-contained, and they replace phase 1's "Worker
+completion keeps `activity: monitoring`" and phase 3a's "The completion park is unchanged until
+3b" bullets, phase 2's "a worker's no-wait fallback stays today's plain park", and phase 3a's
+completion park rows.
+
+Calls made by the owner (2026-10-19):
+
+- **A blocked done becomes a refusal nudge.** At a turn end whose done the completion check
+  refuses (the done line, or a `cezar_done` accepted earlier in the turn whose check fails at the
+  turn end), Cezar opens no wait and parks nothing. It sends the agent the refusal `cezar_done`
+  returns mid-turn (`worker_questions`, `workers_outstanding`, else `workers_uncollected`) as one
+  automatic turn, built by the one helper both paths share. The agent then waits, stops or
+  collects on its own. The 10-minute Cezar-opened `delegation.wait`, its deadline and its
+  `delegation.completion` record are gone. A pending human question still parks for the user, as
+  before.
+- **The nudge says what happens next.** When live workers block the done, the nudge adds exactly
+  one sentence (`COMPLETION_WILL_WAIT`): *If you end your turn with done again while these workers
+  are live, Cezar will wait on them for you and wake you when they have all settled.* The
+  mid-turn `cezar_done` answer never carries it.
+- **A closed session gets the nudge too.** A block found after the session closed
+  (`settleSuccess` after its async work, a restart, a legacy accepted Finish) queues the refusal as
+  one lifecycle input, charged as the live nudge is; `queueWaitWake`'s scheduler continuation
+  reopens the session and delivers it, and that turn counts as the nudge's. Its reply is bounded
+  like the live nudge's (`awaitCompletionNudgeReply`: the reply timer, armed again after the wake's
+  checkpoint). A run owes one refusal at a time: a done blocked again while it is owed queues no
+  second copy and charges nothing. The owed refusal holds the closing session like a wait does
+  (`holdsClosingWakes`): a reopened session that closes or fails before Cezar submits it is a failed
+  delivery, with the backoff and the bound of `MAX_WAKE_DELIVERY_ATTEMPTS`, after which the run
+  fails keeping the refusal for Continue to deliver once. Its delivery clears the failure count, as
+  a message's does.
+- **An ignored refusal parks on the workers.** One nudge per cycle. If the turn that answers it
+  ends on a blocked done again with workers still live, Cezar registers a list `worker` wait on
+  them for the agent: `source: 'cezar'`, `via: 'completion'`, `mode: 'all'`, the live blocking
+  workers only, no `deadline` and no `timeoutSeconds`, no slot, idle-closing at `IDLE_TIMEOUT_MS`
+  like phase 3a's worker parks. Their settlement resolves it; their messages and routed questions
+  wake the parent beside it. With only uncollected results or unanswered worker questions, Cezar
+  opens its own human wait (`via: 'completion'`, the refusal as its note) and the run parks for
+  the user.
+- **A worker's no-wait fallback: nudge, then parent.** A worker keeps the one no-wait nudge. When
+  its next turn also ends with no wait and no done, Cezar's `no-wait` human wait carries one open
+  question (`WORKER_FALLBACK_QUESTION`: *Worker `<id>` ended its turn without waiting on anything
+  or finishing. Reply with what it should do next.*), raised as `ask.requested` so
+  `routeWorkerQuestion` takes it to the parent as a request. The parent's reply resumes the worker
+  through the answer seam; a parent that cannot receive leaves it with the human
+  (`worker-question-fallback`).
+
+Calls made by the agent (owner to check):
+
+- **Waits and owed input come first.** A refused done is not a done: it cancels no wait. With an
+  open agent wait or input owed at that turn end, there is no nudge; the run parks on its waits or
+  takes the input, and the refusal is a timeline note. The agent meets the refusal again at its
+  next done. Cezar's own human waits are withdrawn by the nudge instead.
+- **One cycle.** A cycle is consecutive turns: the turn that answers a refusal nudge is the only
+  one whose blocked done takes the second step; any other turn end, a human message, a wake or
+  the agent's own wait starts a fresh cycle. A human message or a wake clears the cycle even when
+  it arrives before the nudge's turn ends (a harness that never answered the nudge); only the
+  delivery of the queued refusal itself marks its turn as the nudge's. The queued refusal is known
+  by `purpose: 'completion-refusal'` on its persisted `AgentInput`, never by process memory, so a
+  Continue after a run that failed at the delivery bound, and a restart, deliver it as the nudge:
+  under the nudge's reply bound, and holding a closing session as a wait does. Stop retires an
+  undelivered refusal, as it discards the run's waits, so no later Continue delivers a stale one;
+  on a `failed` run that owed only the refusal it answers `{ cancelled: true }`, the run stays
+  `failed`, and the note is `Stop discarded the completion refusal this task still owed; the task
+  stays failed` (`REFUSAL_DISCARDED_NOTE`). Deletion drops it with the row.
+- **Bounds.** The nudge and every parent reply that resumes a worker from its fallback question
+  are charged to the automatic-wake budget (`MAX_AUTO_CONTINUES`, 40) through
+  `chargeAutomaticWake`, so neither an agent that keeps declaring done nor a parent and worker
+  going back and forth spins without bound. The nudge's reply is bounded by the no-wait nudge's
+  reply timer (`COMPLETION_NO_REPLY_NOTE`). A spent budget opens Cezar's `budget` human wait for a
+  root, and plain-parks a worker without routing.
+- **Autonomous runs** are nudged again instead of parked, until the budget, as the no-wait nudge
+  is (§ Autonomous runs), so an autonomous parent is never parked for a human while its workers
+  run.
+- **Agent-registered worker waits keep their deadline.** `workerWaitEntrySchema` makes
+  `deadline` and `timeoutSeconds` optional for `source: 'cezar'` entries only; the agent's worker
+  waits still require both (1–1800 seconds), and the legacy `WorkerWait` shape keeps its deadline.
+- **`via: 'completion'`** is a new `via` value; `openHumanAlias` treats it as `source: 'cezar'`,
+  like `no-wait` and `budget`.
+
+Decisions made during execution:
+
+- **The fallback question is Cezar's, not the worker's.** What the plain park it replaced let
+  through still goes through: a parent's steer, an automatic message, an admitted Continue, a clean
+  exit or a restart supersedes it. Its routed request gets the `completed-without-reply` outcome
+  (so it no longer holds the parent's done), the parent's unread copy is retired, and only then is
+  the question closed unanswered (`human-ask-closed`, reason `superseded`) and Cezar's wait
+  withdrawn. A refused Continue leaves all three intact. A question the worker asked itself is
+  never superseded.
+- **A legacy accepted Finish intent** (`delegation.finishRequestedAt`) is cleared and takes the
+  same refusal path as a done.
+- **The old engine is deleted.** The `reason: 'message'` stand-in, `retainsWorkerWaitOnProgress`,
+  `prepareWorkerWaitBatch`, `parkWorkerWait`, the completion deadline timers and admission caches
+  are gone. `delegation.wait`, `delegation.lastWait`, `delegation.completion` and
+  `activity: 'monitoring'` are no longer written; the schema keeps them optional so old rows
+  parse. `worker_wait_pending` stays in the contract's `DoneErrorCode` (and the ask and CI wait
+  codes) for old clients and is never returned.
+- **Upgrade on read, store schema 7.** A stored root whose `delegation.wait` is the completion
+  wait (`completion.waitId === wait.id`) is read into a `worker` list entry (`source: 'cezar'`,
+  `via: 'completion'`, its workers, mode, deadline and phase; an already-queued wake input kept as
+  `wakeInputId`), and `delegation.wait`/`completion` are dropped. Its promised wake happens once,
+  through the list engine. A schema-6 build refuses a schema-7 store as `unsupported-schema`.
+- **Inspection.** The legacy `WorkerWait` shape keeps its required deadline, so worker
+  inspection's `wait` never carries the completion wait. Inspection adds an optional
+  `completionWait` (`workerCompletionWaitSchema` in `packages/contract`: that shape without
+  `deadline` or request fields, plus `via: 'completion'`), present while the parent holds an open
+  or owed completion wait on the worker; the cockpit's Workers section reads the same projection
+  (`completionWaitView`) and says the wait has no deadline. The open-waits footer names it
+  `worker wait <id> on N workers, no deadline`.
+- **Display.** A refusal nudge reads like the no-wait nudge: a `running (completion nudge)`
+  heartbeat and a note naming the refusal code (`COMPLETION_NUDGE_NOTE`). The completion human
+  wait reads as Cezar's own human wait (note `completion blocked; waiting for you` or the refusal).
+  A routed fallback reads on the worker as a routed question and on the parent as an incoming
+  request.
+- **Coverage.** `RUNNER_IDS` cells in `workflows/waits-parity-cells.testkit.ts`, each on every runner's
+  native mock wire through `HARNESS_ADAPTERS`: U20 and U20u (the nudge, with and without the
+  will-wait sentence), U20h and U20m (a human message, in the opening session or a continuation, or
+  a worker message after a nudge the harness acknowledged on its native wire and never answered
+  starts a fresh cycle), U20a (a done in the turn that answers an input acknowledged after that
+  turn ended: the done waits at the boundary and the acknowledgement's settlement gives the nudge;
+  Claude and Cursor print are exempt, as neither ends a turn before its acknowledgement), U11 (an open timer at a blocked done: no
+  nudge, the refusal is a note), U21
+  (an ignored refusal parks on the completion worker wait, which settlement wakes), U21r (that
+  wait restarted and settled), U21m (a worker message wakes it beside the open wait), U21t (an
+  agent timer beside it keeps its deadline), U21h (only uncollected results: Cezar's human wait),
+  U21a (autonomous: nudged again until the budget), U22 (a closed session reopened to deliver the
+  refusal), U22s (a reopened session that acknowledges it on its native wire and never answers:
+  the reply bound parks it), U22c (reopened sessions that keep closing first: one copy, the delivery bound, the
+  run fails keeping it and Continue delivers it once; a legacy Finish too), U22f (one such close
+  counts a failure and the delivery clears it), U24 (a worker's fallback routed to its parent, whose reply resumes it), U25 (an
+  automatic message supersedes it) and U9v (an upgraded completion wait wakes once through the
+  list). The silent harness is each native mock's `mock:ack-only` reply
+  (`CEZ_MOCK_COMPLETION_REPLY`). Cursor print takes named exemptions from U20h, U20m and U22s (no
+  acknowledgement before native model work, as F8), and OpenCode from U20h (one prompt per turn: a
+  human prompt waits for a turn that never goes idle). `workflows/old-engine-removed.test.ts` guards that no source writes `delegation.wait` or
+  `activity: 'monitoring'`.
+
+### Transitions out (phase 3b)
+
+Required by AGENTS.md for every state 3b adds or keeps. Shipped defaults: `maxParallel: 2`,
+`maxMonitoringSessions: 2`, budget 40, no autonomy, `IDLE_TIMEOUT_MS` 15 minutes, the no-wait
+nudge's reply bound (`NO_WAIT_NUDGE_REPLY_MS`, 5 minutes). Earlier tables hold for the states they
+list, except phase 3a's completion park rows, which this table replaces. One row per exit.
+
+| State | Trigger | Who or what fires it | Behavior at shipped defaults |
+| --- | --- | --- | --- |
+| `running`, root turn ending on a blocked done (first in the cycle) | The turn ends | The runner's turn end | Refusal nudge submitted (one automatic turn, charged); the run stays `running` |
+| | An open wait or owed input | `canAutoContinue` | No nudge; parks on its waits or takes the input; the refusal is a note |
+| | The session is gone | `settleSuccess` / recovery | The refusal is queued as a lifecycle wake; the scheduler continuation reopens the session and delivers it |
+| | The session is gone and a refusal is already owed | `settleSuccess` / recovery | No second copy and no charge; the owed copy's wake reopens the session |
+| | The reopened session closes or fails before the refusal is submitted | The close/failure path (`holdsClosingWakes`) | A failed delivery: `waiting`, retried after the backoff; at `MAX_WAKE_DELIVERY_ATTEMPTS` (3) the run fails keeping the refusal (`WAKE_DELIVERY_CAP_NOTE`), and Continue delivers it once |
+| | The budget is spent | The budget | Cezar's `budget` human wait; parks for the user |
+| `running`, refusal nudge turn | The turn ends with a wait | The runner's turn end | Parks on that wait (earlier tables) |
+| | The turn ends on a blocked done again, workers live | The runner's turn end | Cezar registers a list worker wait on them (no deadline); parks `waiting`, no slot |
+| | The turn ends on a blocked done again, only uncollected or questions | The runner's turn end | Cezar's own human wait with the refusal note; parks `waiting` for the user |
+| | The turn ends on a blocked done again, autonomous run | The runner's turn end | Nudged again, charged, until the budget; then Cezar's `budget` human wait |
+| | The turn ends with no wait and no done | The runner's turn end | The ordinary turn-end rule: the no-wait nudge (if unspent this session), else Cezar's `no-wait` human wait |
+| | The done is no longer blocked | The runner's turn end | Finishes |
+| | No reply within the nudge reply bound (a live nudge, or a queued one delivered to the reopened session) | The reply timer | Cezar's own human wait; parks for the user; a late reply resumes it |
+| | Provider failure or clean close | The failure/close path | As phase 2b's no-wait nudge rows |
+| `waiting`, root on Cezar's completion worker wait (no slot, no deadline) | Every worker on it settles | Worker settlement, `reconcileWorkerFamily` | Resolves `outcome`; wakes the parent; its next blocked done starts a fresh cycle |
+| | A worker message or routed question | The worker | Wakes the parent; the wait stays open |
+| | A human message | The user | Delivered; the wait stays open; the budget resets |
+| | 15 minutes idle | The idle timer | Session closes; the run stays `waiting`; a wake reopens it through the scheduler continuation |
+| | Restart | Recovery | Re-observes outcomes; a settlement meanwhile resolves it and wakes the parent once |
+| | `cezar_cancel_wait` | The agent, in a woken turn | Cancelled into `lastWaits`; no wake |
+| | Finish | The user | Refused while workers are live or uncollected or a worker question is unanswered (`delegationFinishBlockedReason`, the readiness check every Finish action runs first); the wait stays open. Accepted once readiness holds |
+| | Stop, delete | The user | Cancelled; the run settles |
+| `waiting`, root on Cezar's completion human wait (no slot) | A worker settles, messages or asks | The worker | Wakes the run (Cezar's own wait does not hold worker input); a fresh cycle |
+| | Every worker already settled, with results uncollected and nothing owed (no message, no question) | Nothing | **No default exit: only a human action ends it.** No settlement or message is left to come, so the parent waits for the user (Needs you, the refusal as its note) |
+| | A human message | The user | Delivered; the wait settles; a fresh cycle; the budget resets |
+| | 15 minutes idle | The idle timer | The session closes; the run stays `waiting`; a worker wake, if one remains, reopens it through the scheduler continuation |
+| | Finish | The user | Refused while results are uncollected or a worker question is unanswered (`delegationFinishBlockedReason`); the run stays parked. Accepted once readiness holds |
+| | Stop, delete | The user | Settles |
+| `waiting`, root with an upgraded completion wait (schema 7) | Its workers settle, or its stored deadline passes | `reconcileWorkerFamily` / the per-wait timer | Resolves once through the list; the woken turn's done takes the 3b path |
+| `running`, worker turn ending with no wait (first) | The turn ends | The runner's turn end | No-wait nudge, unchanged |
+| `running`, worker no-wait nudge turn | The turn ends with no wait and no done | The runner's turn end | A human wait with an open card; `ask.requested`; routed to the parent; the worker parks `waiting` (no slot) |
+| `waiting`, worker on a routed fallback question | The parent replies | The parent (`worker reply`) | Answered through the answer seam, charged to the worker's budget; the worker resumes (reopened through the scheduler if its session closed) |
+| | The parent steers, or an automatic message arrives | The parent or Cezar | Supersedes the question (`human-ask-closed`, `superseded`; the routed request completes without reply); the message is delivered and the worker resumes |
+| | An admitted Continue | The user | Supersedes the question; the worker continues. A refused Continue leaves it intact |
+| | The worker's process exits cleanly, its session idle-closes (15 minutes), or a restart finds no process | The close path, the idle timer, recovery | Supersedes the question; the worker goes on as the plain park did (a workflow continues; an idle-closed worker settles and its parent can collect it) |
+| | The parent cannot receive | `routeWorkerQuestion` | `worker-question-fallback`; the question waits for a human (Needs you); a human message answers it |
+| | The parent finishes, stops or fails | The parent's terminal path | Live owned workers are cancelled with their root, as before |
+| | The parent goes to review | The parent's review path | Workers keep running; the routed question falls back to the human |
+| | A human message | The user | Refused while the question is routed to the parent (as for a worker's own routed question); after `worker-question-fallback` it answers it and the worker resumes |
+| | Stop, delete | The user | Settles |
+| `running`, worker turn with its budget spent | The turn ends with no wait | The runner's turn end | Plain park, not routed; a human message or a parent message continues it. **Its only default exits are a human or the parent** |
+
+Two states 3b adds or keeps have no automatic exit, and the table says so. The completion human
+wait, once every worker has settled and only uncollected results remain, has a human as its only
+default exit: nothing is left to come from the workers, and only the parent itself could collect,
+which needs a turn the user starts. The budget-spent worker park keeps phase 2b's plain park and
+ends only on a human or a parent message. Otherwise no state 3b adds waits only on a human: the completion worker
+wait ends on its workers' settlement, the completion human wait with workers still live on a
+worker's next settlement, message or question, and the fallback question on the parent's reply.
+Finish never ends a completion park early: the readiness check refuses it while any blocker
+remains.

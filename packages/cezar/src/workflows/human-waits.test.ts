@@ -21,7 +21,7 @@ import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { toolCall } from './waits-parity.testkit.ts';
 
 // hearsay-tools/cezarion#1234: the human kind of the wait list on the Claude wire. The rules are
-// runner-neutral (RUNNER_IDS coverage is U7h and U9h in `waits-parity.test.ts`); the runner,
+// runner-neutral (RUNNER_IDS coverage is U7h and U9h in `waits-parity-cells.testkit.ts`); the runner,
 // store, tool handlers and scheduler stay real.
 
 const card = (question: string) => [{ header: 'Choice', question, options: [{ label: 'Parser' }, { label: 'Runner' }] }];

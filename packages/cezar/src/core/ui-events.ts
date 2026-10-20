@@ -343,8 +343,10 @@ export interface UiPlanUpdatedEvent {
 
 /**
  * Native tool/permission approval, answered separately from ordinary input.
- * Codex emits per-item `requestApproval` JSON-RPC requests. Other runners
- * retain their existing native permission handling.
+ * Codex emits per-item `requestApproval` JSON-RPC requests; OpenCode emits
+ * `permission.asked` for asks its user's own permission rules make (its
+ * built-in asks are answered by the runner, hearsay-tools/cezarion#1266).
+ * Other runners retain their existing native permission handling.
  */
 export type UiPermissionRequestedEvent = PermissionRequest;
 

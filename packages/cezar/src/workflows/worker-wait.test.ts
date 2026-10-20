@@ -4,7 +4,6 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
-import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
@@ -12,12 +11,11 @@ import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { collectWorkerEvidence } from '../delegation/results.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
-import { RunManager } from './run.ts';
+import { COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, RunManager } from './run.ts';
 import { currentUsage } from '../core/process-usage.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { withDelayedCommand } from '../core/owned-input-delivery.testkit.ts';
-import { repointMockImports } from '../core/mock-patch.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 import {
@@ -26,20 +24,29 @@ import {
   store, terminal, track, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
 import { blockRunWrites, readPersistedRuns } from '../runs/run-store.testkit.ts';
-import { monitoringWakeOf } from './waits.testkit.ts';
-import { MONITORING_WAKE_NUDGE } from './waits.ts';
 
-// hearsay-tools/cezarion#1233: a monitoring park is `waiting` on an open monitoring timer; completion
-// attention with live workers still writes the older `running`/`monitoring` pair until phase 3.
-// Both read as the monitoring label.
-const monitors = (id: string) => deriveAttention(store.getRun(id)!).label === 'monitoring';
+/** The refusal nudges a blocked done received (hearsay-tools/cezarion#1301), as their notes. */
+const completionNudges = (id: string) => store.readEvents(id).filter(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE));
+/** The agent inputs Cezar submitted on the session, by text. */
+const sentTexts = (sent: string[], text: string) => sent.filter(entry => entry.includes(text));
+/** Record every text a session is sent through Cezar's agent-input seam. */
+function recordAgentInput(id: string): string[] {
+  const sent: string[] = [];
+  const session = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(id)!.session;
+  const real = session.sendAgentMessage.bind(session);
+  session.sendAgentMessage = ((content, ...rest) => {
+    sent.push(content.map(block => block.type === 'text' ? block.text : '').join('\n'));
+    return real(content, ...rest);
+  }) as AgentSession['sendAgentMessage'];
+  return sent;
+}
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
 describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
   for (const mode of ['fresh', 'continuation'] as const) {
-    it(`readiness ${mode}: DONE waits for live workers without accepting human Finish`, async () => {
+    it(`readiness ${mode}: a DONE blocked by live workers gets the refusal nudge, opens no wait, and Finish stays refused`, async () => {
       const p = await parent();
       await until(() => store.getRun(p.id)?.status === 'waiting');
       if (mode === 'continuation') {
@@ -48,10 +55,14 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         await until(() => store.getRun(p.id)?.status === 'waiting');
       }
       const w = await worker(p.id);
+      const sent = recordAgentInput(p.id);
       expect(manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }])).toBe(true);
-      await until(() => waitOf(store.getRun(p.id))?.phase === 'parked' || terminal.includes(store.getRun(p.id)?.status ?? ''));
-      expect(store.getRun(p.id)?.status).toBe('waiting');
-      expect(waitOf(store.getRun(p.id))).toMatchObject({ mode: 'all', workerIds: [w.id] });
+      // hearsay-tools/cezarion#1301: the refusal `cezar_done` gives, as one automatic turn.
+      await until(() => completionNudges(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting');
+      expect(sentTexts(sent, `Workers are still live: ${w.id}.`)).toEqual([expect.stringContaining(COMPLETION_WILL_WAIT)]);
+      expect(waitOf(store.getRun(p.id))).toBeUndefined();
+      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
+      expect(store.getRun(p.id)?.waits?.filter(wait => wait.kind === 'worker') ?? []).toEqual([]);
       expect(manager.finish(p.id)).toBe(false);
       expect(store.getRun(p.id)?.delegation).not.toHaveProperty('finishRequestedAt');
       expect(store.getRun(w.id)?.status).toBe('queued');
@@ -59,13 +70,20 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     });
   }
 
-  it('readiness closed session defers successful done with outstanding workers', async () => {
+  // hearsay-tools/cezarion#1301: a closed session's blocked done is queued as the refusal, and the
+  // scheduler continuation reopens the session to deliver it; Cezar opens no wait.
+  it('readiness closed session reopens to refuse a successful done with outstanding workers', async () => {
     const p = await parent(); const w = await worker(p.id);
     const state = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!;
     state.session.end();
-    await until(() => !manager.isActive(p.id));
-    expect(store.getRun(p.id)?.status).toBe('waiting');
-    expect(waitOf(store.getRun(p.id))).toMatchObject({ mode: 'all', workerIds: [w.id] });
+    const refusal = (run: RunRecord | undefined) => run?.agentInputs?.find(input => input.source === 'lifecycle' && input.text.includes(`Workers are still live: ${w.id}.`));
+    await until(() => !!refusal(store.getRun(p.id))?.deliveredAt && store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true);
+    expect(refusal(store.getRun(p.id))?.text).toContain(COMPLETION_WILL_WAIT);
+    expect(completionNudges(p.id)).toHaveLength(1);
+    expect(store.getRun(p.id)?.status).not.toBe('done');
+    expect(waitOf(store.getRun(p.id))).toBeUndefined();
+    expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
+    expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
     expect(store.getRun(w.id)?.status).toBe('queued');
   });
 
@@ -176,85 +194,69 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(store.getRun(p.id)?.status).toBe('done');
   });
 
-  it('readiness timeout and repeated DONE monitor live workers without another automatic wait', async () => {
+  // hearsay-tools/cezarion#1301: a blocked DONE gets the refusal nudge. The nudge's own turn end with
+  // live workers opens the live-worker re-check timer, so the next blocked DONE parks on that timer
+  // with the refusal as a note, and neither opens an automatic worker wait.
+  it('readiness repeated DONE with live workers: one nudge, then a park on the re-check timer, and no automatic wait', async () => {
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id);
     manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }]);
-    await until(() => !!waitOf(store.getRun(p.id)) || terminal.includes(store.getRun(p.id)?.status ?? ''));
-    const wait = waitOf(store.getRun(p.id)); expect(wait).toBeDefined();
-    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(wait!.deadline);
-    manager.reconcileWorkerWaits(); vi.useRealTimers();
-    await until(() => !waitOf(store.getRun(p.id)));
-    await until(() => monitors(p.id));
+    await until(() => completionNudges(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting');
+    const timer = store.getRun(p.id)?.waits?.find(wait => wait.kind === 'timer' && wait.via === 'monitoring-line');
+    expect(timer).toBeDefined();
     const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
     const engine = manager as unknown as { active: Map<string, { session: AgentSession }> };
     engine.active.get(p.id)!.session.sendMessage([{ type: 'text', text: 'mock:done' }]);
-    await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
-    expect(store.getRun(p.id)).toMatchObject({ status: 'running', activity: 'monitoring' });
-    expect(store.getRun(p.id)?.delegation).toMatchObject({ completion: { phase: 'attention' } });
+    const refused = () => store.readEvents(p.id).filter(event => event.type === 'note' && String(event.message).startsWith(`Completion blocked: Workers are still live: ${w.id}.`));
+    await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && refused().length === 1 && store.getRun(p.id)?.status === 'waiting');
+    expect(completionNudges(p.id)).toHaveLength(1);
+    expect(store.getRun(p.id)?.waits).toEqual([expect.objectContaining({ id: timer!.id, phase: 'open' })]);
+    expect(store.getRun(p.id)?.activity).toBeUndefined();
+    expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle')).toHaveLength(1);
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle') ?? []).toEqual([]);
     expect(store.getRun(w.id)?.status).toBe('queued');
   });
 
-  it.each([false, true])('spent completion budget stops monitoring after workers settle (repeated DONE=%s)', async repeated => {
-    const mock = join(root, 'settled-monitor.mjs');
-    const source = repointMockImports(HARNESS_ADAPTERS.claude.mockBin, readFileSync(HARNESS_ADAPTERS.claude.mockBin, 'utf8').replace(
-      "userText.includes('mock:monitoring')",
-      "(userText.includes('mock:monitoring') || userText.includes('Re-check the downstream work'))"));
-    writeFileSync(mock, source, { mode: 0o755 });
-    process.env.CEZ_DRY_RUN = '0'; process.env.CEZ_CLAUDE_BIN = mock;
+  // The refusal nudge is charged to the automatic-wake budget; with it spent, the blocked DONE opens
+  // Cezar's budget human wait instead (hearsay-tools/cezarion#1301).
+  it('a blocked DONE with the automatic-wake budget spent opens the budget human wait instead of a nudge', async () => {
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id);
-    manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }]);
-    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    const wait = waitOf(store.getRun(p.id))!;
-    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime(wait.deadline);
-    manager.reconcileWorkerWaits();
-    await until(() => !waitOf(store.getRun(p.id)) && monitors(p.id));
-    const session = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!.session;
-    const turn = async (text: string) => {
-      const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
-      session.sendMessage([{ type: 'text', text }]);
-      await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
-    };
-    if (repeated) await turn('mock:done');
-    expect(monitors(p.id)).toBe(true);
-    fixtureUpdateRun(w.id, { status: 'done' });
-    // The already armed wake must still let the parent collect newly settled work.
-    // Its explicit MONITORING reply cannot renew the spent completion budget.
-    await vi.advanceTimersByTimeAsync(300_001);
-    await until(() => store.getRun(p.id)?.status === 'waiting');
-    expect(store.getRun(p.id)?.status).toBe('waiting');
-    expect(store.getRun(p.id)?.activity).toBeUndefined();
-    expect(monitoringWakeOf(store.getRun(p.id))).toBeUndefined();
+    store.commitWakeCounters(p.id, { automaticWakes: MAX_AUTO_CONTINUES });
+    const sent = recordAgentInput(p.id);
+    const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
+    // Straight to the session: a human message would restart the budget.
+    (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!.session.sendMessage([{ type: 'text', text: 'mock:done' }]);
+    await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && store.getRun(p.id)?.status === 'waiting');
+    expect(completionNudges(p.id)).toEqual([]);
+    expect(sentTexts(sent, `Workers are still live: ${w.id}.`)).toEqual([]);
+    expect(store.getRun(p.id)?.waits).toEqual([expect.objectContaining({ kind: 'human', source: 'cezar', via: 'budget', phase: 'open' })]);
+    expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).includes(`Workers are still live: ${w.id}.`))).toBe(true);
+    expect(store.getRun(p.id)?.automaticWakes).toBe(MAX_AUTO_CONTINUES);
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
-    expect(manager.finish(p.id)).toBe(false); // Still must collect the settled result.
-    // The monitoring timer's wake is a lifecycle input too since hearsay-tools/cezarion#1233.
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle' && input.text !== MONITORING_WAKE_NUDGE)).toHaveLength(1);
+    expect(manager.finish(p.id)).toBe(false);
   });
 
-  it('readiness settled uncollected completion sends one collection response then remains attention', async () => {
+  it('readiness settled uncollected completion sends the collect refusal without the will-wait sentence, then finishes once collected', async () => {
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id);
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
+    const sent = recordAgentInput(p.id);
     manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }]);
-    await until(() => store.getRun(p.id)?.agentInputs?.some(input => !!input.deliveredAt) === true);
-    await until(() => store.getRun(p.id)?.status === 'waiting');
-    const state = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!;
-    const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
-    state.session.sendMessage([{ type: 'text', text: 'mock:done' }]);
-    await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
-    expect(store.getRun(p.id)?.status).toBe('waiting');
+    await until(() => completionNudges(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting');
+    const [nudge, ...more] = sentTexts(sent, `worker collect ${w.id}`);
+    expect(more).toEqual([]);
+    expect(nudge).not.toContain(COMPLETION_WILL_WAIT);
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle')).toHaveLength(1);
-    expect(store.getRun(p.id)?.agentInputs?.[0]?.text).toMatch(/collect/i);
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle') ?? []).toEqual([]);
     await collect(w.id);
     process.env.CEZ_REVIEW_GATE = '1';
     writeFileSync(join(store.getRun(p.id)!.worktreePath!, 'parent-result.txt'), 'parent result');
+    const state = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!;
     state.session.sendMessage([{ type: 'text', text: 'mock:done' }]);
     await until(() => !manager.isActive(p.id));
     expect(store.getRun(p.id)?.status).toBe('review');
@@ -274,18 +276,20 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => !manager.isActive(p.id));
   });
 
-  it('readiness closed-session wait resumes on a later proof after restart and preserves its cycle', async () => {
+  // hearsay-tools/cezarion#1301: which input is a refusal is in memory only; one still queued at a
+  // crash is a lifecycle input no wait names, which recovery delivers as ordinary input.
+  it('readiness closed-session refusal still queued at a crash is delivered after recovery', async () => {
     const p = await parent(); const w = await worker(p.id);
-    (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!.session.end();
-    await until(() => !manager.isActive(p.id));
-    const wait = waitOf(store.getRun(p.id)); expect(wait).toBeDefined();
-    await restart();
-    expect(waitOf(store.getRun(p.id))?.id).toBe(wait!.id);
-    await until(() => store.getRun(w.id)?.status === 'waiting');
-    manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
-    await until(() => store.getRun(p.id)?.agentInputs?.some(input => input.id === wait!.id && !!input.deliveredAt) === true);
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const events = new Map();
+    const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<RunRecord>;
+    const text = `Workers are still live: ${w.id}. u-crash`;
+    const input = { id: randomUUID(), parentRunId: p.id, source: 'lifecycle' as const, text, createdAt: new Date().toISOString() };
+    for (const run of disk) if (run.id === p.id) Object.assign(run, { agentInputs: [...run.agentInputs ?? [], input] });
+    await restart(false, disk, events);
+    await until(() => !!store.getRun(p.id)?.agentInputs?.find(entry => entry.id === input.id)?.deliveredAt);
     expect(store.getRun(p.id)?.status).not.toBe('done');
-    expect(store.getRun(p.id)?.delegation).toHaveProperty('completion');
+    expect(waitOf(store.getRun(p.id))).toBeUndefined();
   });
 
   it('readiness ready human Finish retires an accepted wait before closing its session', async () => {
@@ -302,32 +306,27 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent(); const first = await worker(p.id); const second = await worker(p.id);
     const generation = store.commitWorkerExecutionStart(first.id);
     store.updateRun(first.id, { status: 'cancelled' });
-    const metadata = store.getRun(p.id)!.delegation;
-    if (metadata?.role !== 'root') throw Error('fixture');
-    const wait: WorkerWait = { id: randomUUID(), mode: 'all', workerIds: [first.id, second.id], phase: 'parked',
-      deadline: new Date(Date.now() + 600000).toISOString(),
-      outcomes: [{ workerId: first.id, revision: 0, status: 'cancelled', observedAt: new Date().toISOString() }] };
-    store.commitDelegation([{ id: p.id, delegation: { ...metadata, wait } }]);
+    // An agent's worker wait is a list entry (hearsay-tools/cezarion#1301).
+    const now = Date.now();
+    store.commitWait(p.id, { kind: 'worker', id: randomUUID(), source: 'agent', via: 'cez-worker-wait', registeredAt: new Date(now).toISOString(),
+      deadline: new Date(now + 600000).toISOString(), timeoutSeconds: 600, phase: 'open', turnId: 'turn-1', mode: 'all',
+      workerIds: [first.id, second.id], revisions: [{ workerId: first.id, revision: 0 }, { workerId: second.id, revision: 0 }],
+      outcomes: [{ workerId: first.id, revision: 0, status: 'cancelled', observedAt: new Date(now).toISOString() }] });
     manager.reconcileWorkerWaits();
     expect(waitOf(store.getRun(p.id))?.outcomes).toEqual([]);
     expect(store.commitWorkerExecutionComplete(first.id, generation)).toBe(true);
     expect(waitOf(store.getRun(p.id))?.outcomes).toHaveLength(1);
   });
 
+  // hearsay-tools/cezarion#1301: the refusal nudge goes through the agent-input seam, so an OpenCode
+  // acknowledgement that lands after the nudge's own turn ended neither sends it twice nor charges
+  // it twice.
   for (const mode of ['fresh', 'continuation'] as const) {
     for (const delayedAck of [false, true]) {
-      it(`completion timeout ${mode} monitors live workers with delayed ACK=${delayedAck}`, async () => {
+      it(`completion nudge ${mode} is sent and charged once with delayed ACK=${delayedAck}`, async () => {
         const exercise = async (release: () => void) => {
           const backend = delayedAck ? 'opencode' : 'claude';
-          const original = HARNESS_ADAPTERS[backend].mockBin;
-          const mock = join(root, `timeout-${backend}.mjs`);
-          let source = readFileSync(original, 'utf8');
-          if (delayedAck) source = source.replace("text: JSON.parse(body).parts.map(part => part.text ?? '').join('\\n'),",
-            "text: JSON.parse(body).parts.map(part => part.text ?? '').join('\\n') + '\\nCEZ:MONITORING',");
-          else source = source.replace("userText.includes('mock:monitoring')", "(userText.includes('mock:monitoring') || userText.includes('Worker wait'))");
-          expect(source).not.toBe(readFileSync(original, 'utf8'));
-          writeFileSync(mock, repointMockImports(original, source), { mode: 0o755 });
-          process.env.CEZ_DRY_RUN = '0'; process.env[HARNESS_ADAPTERS[backend].binEnv] = mock;
+          process.env.CEZ_DRY_RUN = '0'; process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
           const p = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold', runner: backend });
           store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
           await until(() => store.getRun(p.id)?.status === 'waiting');
@@ -337,49 +336,28 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
             await until(() => store.getRun(p.id)?.status === 'waiting');
           }
           const w = await worker(p.id);
+          const sent = recordAgentInput(p.id);
           manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }]);
-          await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-          const wait = waitOf(store.getRun(p.id))!;
-          const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
-          vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
-          vi.setSystemTime(wait.deadline); manager.reconcileWorkerWaits();
-          expect.soft(store.getRun(p.id)?.delegation).toMatchObject({ completion: { phase: 'attention' } });
-          const persisted = (readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[]).find(run => run.id === p.id);
-          expect.soft(persisted?.delegation).toMatchObject({ completion: { phase: 'attention' }, wait: { id: wait.id, reason: 'timeout' } });
-          await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
+          await until(() => completionNudges(p.id).length === 1);
           if (delayedAck) {
-            expect(store.getRun(p.id)?.agentInputs?.find(input => input.id === wait.id)?.deliveredAt).toBeUndefined();
+            // The nudge's own turn ends before its acknowledgement.
+            const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
+            await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
             const engine = manager as unknown as { active: Map<string, { agentInputFlight?: { settled?: Promise<void> } }> };
             const settled = engine.active.get(p.id)?.agentInputFlight?.settled;
             expect(settled).toBeInstanceOf(Promise);
             release(); await settled;
           }
-          await until(() => !waitOf(store.getRun(p.id)));
-          expect.soft(store.getRun(p.id)?.status).toBe('waiting');
-          expect.soft(store.getRun(p.id)?.activity).toBeUndefined();
-          expect.soft(monitoringWakeOf(store.getRun(p.id))).toBeDefined();
-          expect.soft(semaphore.busy()).toBe(0);
-          await vi.advanceTimersByTimeAsync(300_001);
-          // The wake's admitted turn is charged at its delivery checkpoint, after the provider ACK.
-          const charged = () => store.readEvents(p.id).filter(event => event.type === 'note' && String(event.message).includes('automatic monitoring wake-up'));
-          await until(() => charged().length > 0);
-          expect(charged()).toHaveLength(1);
-          expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle' && input.text !== MONITORING_WAKE_NUDGE)).toHaveLength(1);
+          await until(() => store.getRun(p.id)?.status === 'waiting');
+          expect(sentTexts(sent, `Workers are still live: ${w.id}.`)).toHaveLength(1);
+          expect(completionNudges(p.id)).toEqual([expect.objectContaining({ message: `${COMPLETION_NUDGE_NOTE} (1/${MAX_AUTO_CONTINUES}): workers_outstanding` })]);
+          expect(waitOf(store.getRun(p.id))).toBeUndefined();
+          expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
           expect(store.getRun(w.id)?.status).toBe('queued');
-          const receipt = store.getRun(p.id)?.delegation;
-          expect(receipt).toMatchObject({ completion: { phase: 'attention' }, lastWait: { id: wait.id, reason: 'timeout' } });
-          // Monitoring still admits a deliberate wait; a human can then reset the cycle. Since
-          // hearsay-tools/cezarion#1235 the deliberate wait is a list entry the message leaves open.
-          const deliberate = register(p.id, [w.id]);
-          expect(deliberate.id).not.toBe(wait.id);
-          expect(manager.sendMessage(p.id, [{ type: 'text', text: delayedAck ? 'mock:agent-echo' : 'mock:monitoring' }])).toBe(true);
-          await until(() => store.getRun(p.id)?.status === 'waiting' && !(store.getRun(p.id)?.delegation as { completion?: unknown } | undefined)?.completion && monitoringWakeOf(store.getRun(p.id)) !== undefined);
-          expect(workerEntryOf(store.getRun(p.id))?.id).toBe(deliberate.id);
+          expect(semaphore.busy()).toBe(0);
         };
-        try {
-          if (delayedAck) await withDelayedCommand('opencode', exercise, 'Worker wait');
-          else await exercise(() => {});
-        } finally { vi.useRealTimers(); }
+        if (delayedAck) await withDelayedCommand('opencode', exercise, 'Workers are still live');
+        else await exercise(() => {});
       });
     }
   }
