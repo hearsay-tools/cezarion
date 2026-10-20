@@ -249,9 +249,9 @@ sender-closed. Late replies remain recorded without replacing a first settlement
 Both roles can wait on their own requests: a request wait is a `worker` entry in the run's
 wait list (`requestIds`; hearsay-tools/cezarion#1235 phase 3a), and a reply resolves only the
 request wait that names it. An incoming message wakes the run with that wait still open and in
-the footer, and the turn end parks on it again; unresolved obligations are retained. Only the
-completion gate's own wait (`delegation.wait`, until phase 3b) is still interrupted by a
-non-progress message with reason `message`. A worker
+the footer, and the turn end parks on it again; unresolved obligations are retained. No message
+retires a wait: since hearsay-tools/cezarion#1301 (phase 3b) the completion gate's own wait is a
+list `worker` entry too, and the old `reason: 'message'` interruption is gone. A worker
 progress message wakes a parent waiting for worker completion without retiring
 that wait. After progress delivery the same wait parks again with its original
 ID, selected workers and deadline; terminal outcomes still produce one wake.
@@ -846,14 +846,16 @@ most 2,000 characters and unknown keys are `invalid_request`. It answers
 `{ ok: true, finishes: 'at_turn_end', open_waits }`, or `{ ok: false, code, message,
 workers?, open_waits? }`. It is refused, in this order, by the session refusals
 `cezar_wait` answers, then `not_final_step` (a workflow step that is not the last, whose turn
-end runs the next step), `worker_wait_pending`, `root_finish_pending`,
+end runs the next step), `root_finish_pending`,
 `human_question_pending` (an earlier turn's question is unanswered), and for a root parent
 `worker_questions`, `workers_outstanding` and `workers_uncollected`, each listing up to 64
 `{ worker_id, reason }` and naming the command that clears them (a general form of the
 command when listing every worker would pass `WAIT_MESSAGE_MAX`, 4,096 characters). The answer
 a Continue opened with is not a pending question while its turn runs. The turn end that reads an
 accepted done takes it, and a human message clears it. A non-interactive workflow step still
-ignores the done line. The close writes `summary` as a `note`, then the
+ignores the done line. `worker_wait_pending` stays in the code enum for old clients and is never
+returned (it was the old completion wait's refusal, removed by hearsay-tools/cezarion#1301). A done
+refused at the turn end becomes the refusal nudge described below. The close writes `summary` as a `note`, then the
 lifecycle event `goal achieved — session closed` with `via: 'cezar_done'` (or
 `via: 'done-line'` for the `CEZ:DONE` line, which closes through the same path), and cancels
 every open wait, a human wait from the same turn included.
@@ -893,10 +895,26 @@ none of them. A park whose top wait is workers holds no slot, reads as the worke
 idle-closes after `IDLE_TIMEOUT_MS`; a resolution or a message reopens it through the scheduler
 continuation. Messages are not waits: a worker message or reply wakes the run with every wait
 still open and in the footer, and beside a pending portable question it is delivered next to the
-card, which stays answerable; beside a pending native question it waits for the answer's turn end. The completion gate's own worker wait (`delegation.wait`, until
-phase 3b) is the one park that still outranks the list: every open timer and CI wait keeps its
-deadline through it, and a wait that resolves while the run is parked there is held until the
-worker wake is delivered.
+card, which stays answerable; beside a pending native question it waits for the answer's turn end.
+
+A root's done that the completion check refuses at a turn end (hearsay-tools/cezarion#1301, phase
+3b) opens no wait. The agent gets the refusal `cezar_done` would return (`worker_questions`,
+`workers_outstanding`, else `workers_uncollected`, one helper builds both) as one automatic turn,
+charged to the automatic-wake budget and bounded by the no-wait nudge's reply timer, with the
+heartbeat `running (completion nudge)`. When live workers block it, the nudge adds one sentence:
+*If you end your turn with done again while these workers are live, Cezar will wait on them for
+you and wake you when they have all settled.* The mid-turn `cezar_done` answer never carries it.
+An open agent wait or owed input comes first: no nudge, the refusal is a note, and the run parks
+on its waits. A block found after the session closed (or a legacy accepted Finish) queues the
+refusal as one lifecycle input that the scheduler continuation reopens the session to deliver.
+One nudge per cycle: when the turn that answers it ends on a blocked done again, Cezar registers
+a list `worker` wait on the live workers (`source: 'cezar'`, `via: 'completion'`, `mode: 'all'`,
+no deadline, no slot; it idle-closes like any worker park), or with only uncollected results or
+unanswered worker questions opens its own human wait (`via: 'completion'`); an autonomous run is
+nudged again until the budget. Settlement resolves the worker wait; worker messages wake the
+parent beside it. `delegation.wait`, `delegation.completion` and `activity: 'monitoring'` are no
+longer written; store schema 7 reads a stored completion wait into the list
+(`upgradeLegacyWaits`), keeping an already-queued wake input as `wakeInputId`.
 
 The agent ends its turn after registering. At a turn end, in both turn-end handlers:
 a question or a permission gate parks for the human, an accepted `CEZ:DONE` finishes,
@@ -1056,8 +1074,8 @@ turn open, settles its worker, cancels or records completed destruction, then re
 new worker wait and CI wait before releasing the turn; R27 reproduces the delivery
 sequence through the real private CI controller and verifies CI registration succeeds
 beside the worker wait (the old refusal is gone, so these now pin the absence of a block).
-`worker_wait_pending` survives for the completion gate's own wait only, until
-hearsay-tools/cezarion#1235 phase 3b.
+`worker_wait_pending` is no longer returned by any tool since hearsay-tools/cezarion#1301 (phase
+3b) removed the completion gate's own wait; it stays in the error-code enums for old clients.
 
 Every cezar tool comes from one list (`packages/cezar/src/ci-wait/tools.ts`, hearsay-tools/cezarion#781):
 the adapter's `tools/list` and server instructions, Pi's and OMP's extensions, Claude's
@@ -1138,10 +1156,9 @@ one turn carries both and spends one wake, and a third timer due at the budget i
 cancelled with the cap note and wakes nothing. A second U10 case holds the provider
 acknowledgement of a timer batch sent at 39: a timer that comes due meanwhile is
 cancelled, the held batch keeps the fortieth wake, and a CI result still wakes the agent
-uncharged. U11 opens a monitoring-line timer, parks
-the parent on the completion gate's worker wait (its `CEZ:DONE` with a live worker), fires the timer, and checks that the timer kept its deadline, was
-held while the parent read **waiting on 1 worker**, and was delivered after the worker
-wake. U12 delivers a timer result beside a pending portable question and holds its
+uncharged. U11 opens a monitoring-line timer and ends the turn on a done blocked by a live
+worker: the timer keeps its deadline, the run parks on it with the refusal as a note and no
+nudge, and the timer's result is delivered. U12 delivers a timer result beside a pending portable question and holds its
 provider acknowledgement: the wait stays `resolved` and its input undelivered until the
 acknowledgement lands after the wake turn ended, and then the run is back in Needs you and
 the answer keeps its `askSeq`. U13 rejects that acknowledgement once: the session fails, the
@@ -1212,8 +1229,14 @@ and any other turn end gets the no-wait nudge once, charged to the automatic-wak
 Cezar opens a `no-wait` human wait (`source: 'cezar'`). Nothing reads the turn's prose. Cezar's own
 human waits raise no human gate: they are shown as their note, worker messages still wake the run,
 the agent's own wait or question replaces them, they end with the session that opened them, and
-the agent's `open_waits` and footer leave them out. A worker keeps the nudge, and its fallback is
-the plain park. The native mocks answer the nudge with a `cezar_ask` card, or with the ask line in
+the agent's `open_waits` and footer leave them out. A worker keeps the nudge; since
+hearsay-tools/cezarion#1301 (phase 3b) its second no-wait turn end opens Cezar's `no-wait` wait
+with one open question (`Worker <id> ended its turn without waiting on anything or finishing.
+Reply with what it should do next.`), raised as `ask.requested` and routed to the parent like a
+worker question; the parent's reply resumes the worker, charged to its budget. A parent's steer,
+an automatic message, an admitted Continue, a clean exit, an idle close or a restart supersedes
+it (`human-ask-closed`, reason `superseded`; its routed request completes without reply). A worker
+whose budget is spent keeps the plain park. The native mocks answer the nudge with a `cezar_ask` card, or with the ask line in
 a session taught the markers, unless `CEZ_MOCK_NUDGE_REPLY=plain`. The unit fixtures set `plain`,
 and the cells that need the card opt out. U5 ends a turn with no wait: one nudge, then a second
 no-wait turn end opens the `no-wait` wait, which reads Needs you and is answered by the user's
@@ -1253,11 +1276,21 @@ Continue delivers it once. A message-only wake that fails once counts the failur
 delivered message clears the count. A message the agent has not read is not delivered: on
 Claude's wire the failure ends the process before the mock reads the steered message. U9u
 restarts a parked parent from a row an older build wrote, with its worker wait in
-`delegation.wait`: a cancelled receipt's queued wake is delivered as ordinary input and the wait
+`delegation.wait`, and U9v does the same for the completion gate's wait (schema 7), which wakes
+once through the list: a cancelled receipt's queued wake is delivered as ordinary input and the wait
 stays cancelled in `lastWaits`, and a `reason: 'message'` stand-in whose message a provider took
 before the crash reads as interrupted execution, so recovery resumes the parent. U19 delivers a worker message beside a pending portable question on every runner:
 the message reaches the wire, nothing answers the card, and the human's answer keeps its
 `askSeq`. No runner takes U12's exemption here: U19 pins delivery, not a delayed acknowledgement.
+Phase 3b (hearsay-tools/cezarion#1301) adds, on every runner: U20 and U20u (a blocked done at the
+turn end gets one refusal nudge, with the will-wait sentence for live workers and without it for a
+settled, uncollected one, and opens no wait), U21 (an ignored refusal parks on Cezar's completion
+worker wait, which settlement wakes), U21r (that deadline-less wait restarted and settled), U21m (a
+worker message wakes the parent beside it), U21t (an agent timer beside it keeps its deadline),
+U21h (only uncollected results: Cezar's human wait), U21a (an autonomous parent is nudged again
+until the budget), U22 (a done blocked after the session closed reopens it and delivers the
+refusal), U24 (a worker's second no-wait turn end asks its parent, whose reply resumes it) and U25
+(an automatic message supersedes that question).
 
 **R74** extends that native-wire matrix to a failed nonfinal workflow agent.
 CI recovery must retain the failed attempt, including across restart and CI
@@ -2067,9 +2100,9 @@ An available `diff.path` names a JSON `{ result, diffSnapshot }` document, **not
 raw patch**. Latest settled collection is required for parent readiness; running
 or obsolete collected output cannot satisfy it. Collection is observation, not
 integration. Automatic completion wakes for inspection/collection without silently
-accepting review. Live-worker parents park as monitoring after markerless turns or
-timeout/repeated premature completion, using the existing capped monitoring wakes.
-Settled but uncollected results still retain attention on repeated completion. Human
+accepting review. A done blocked by live or uncollected workers is refused once as an automatic
+turn; a repeated one parks on Cezar's deadline-less worker wait on the live workers, or, with only
+uncollected results, on Cezar's human wait (hearsay-tools/cezarion#1301). Human
 Finish refuses unmet readiness. Continue a reviewing parent before its worker.
 
 Review and deliberately integrate desired worker commits with Git before cleanup.
