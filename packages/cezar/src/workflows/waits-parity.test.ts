@@ -206,7 +206,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U21', 'U21m', 'U21h', 'U21a', 'U22', 'U24']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U21', 'U21r', 'U21m', 'U21h', 'U21a', 'U22', 'U24']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -1498,6 +1498,21 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
       expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
       expect(toRunSummary(store.getRun(p.id)!).waitingOn).toEqual({ kind: 'workers', count: 1 });
+      fixtureUpdateRun(w.id, { status: 'done' });
+      await until(() => settled(p.id, entry.id)?.phase === 'delivered' && prompted(runner, workerWake(entry)).length > 0);
+      expect(settled(p.id, entry.id)).toMatchObject({ result: { reason: 'outcome' } });
+      expect(inputsFor(p.id, entry.id)).toHaveLength(1);
+      expect(prompted(runner, workerWake(entry))).toHaveLength(1);
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+    });
+
+    it(`${runner} U21r after a restart, a deadline-less completion wait resolves on the worker's settlement and wakes the parent once`, async () => {
+      process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
+      const { p, w } = await parentWithWorker(runner);
+      const entry = await ignoreRefusal(runner, p.id, `Workers are still live: ${w.id}.`, () => workerWaits(p.id)[0]?.phase === 'open');
+      store.flush();
+      await restart(false, readPersistedRuns(join(root, '.ai/cezar')));
+      expect(workerWaits(p.id)).toEqual([entry]);
       fixtureUpdateRun(w.id, { status: 'done' });
       await until(() => settled(p.id, entry.id)?.phase === 'delivered' && prompted(runner, workerWake(entry)).length > 0);
       expect(settled(p.id, entry.id)).toMatchObject({ result: { reason: 'outcome' } });
