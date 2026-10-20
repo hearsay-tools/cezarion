@@ -80,6 +80,22 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
       `timer 33333333-3333-4333-8333-333333333333 at ${timer().deadline}. Call cezar_cancel_wait for any you no longer need.`);
   });
 
+  it('omits tool guidance without tools while retaining waits and human reply guidance', () => {
+    const human: HumanWaitEntry = { id: '55555555-5555-4555-8555-555555555555', kind: 'human', source: 'agent', via: 'cezar_ask',
+      registeredAt: '2026-10-17T10:00:00.000Z', phase: 'open', turnId: 'turn-1', askSeq: 4 };
+    const hidden: HumanWaitEntry = { ...human, source: 'cezar', via: 'no-wait' };
+    expect(openWaitsFooter([timer({ via: 'monitoring-line' })], { tools: false })).toBe(
+      `Still open: timer ${timer().id} at ${timer().deadline}.`);
+    expect(openWaitsFooter([human, ci()], { tools: false })).toBe(
+      `Still open: your question ${human.id} to the user; CI wait ${ci().id} for Acme/Repo#12, deadline ${ci().deadline}. The user's reply answers it.`);
+    expect(openWaitsFooter([human], { tools: false })).toBe(`Still open: your question ${human.id} to the user. The user's reply answers it.`);
+    expect(openWaitsFooter([hidden], { tools: false })).toBeUndefined();
+    expect(openWaitsFooter([], { tools: false })).toBeUndefined();
+    expect(openWaitsFooter([ci({ phase: 'resolved', result })], { tools: false })).toBeUndefined();
+    expect(openWaitsFooter([ci()], { tools: true })).toBe(
+      `Still open: CI wait ${ci().id} for Acme/Repo#12, deadline ${ci().deadline}. Call cezar_cancel_wait for any you no longer need.`);
+  });
+
   it('footer lists an open worker wait', () => {
     const base = { id: '77777777-7777-4777-8777-777777777777', kind: 'worker', source: 'agent', via: 'cez-worker-wait', turnId: 'turn-1', timeoutSeconds: 600, mode: 'any',
       registeredAt: '2026-10-17T10:00:00.000Z', deadline: '2026-10-17T10:10:00.000Z', phase: 'open' } as const;
