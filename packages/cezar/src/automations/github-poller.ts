@@ -69,6 +69,11 @@ export interface GithubPollOptions {
   historyScan?: AutomationRuntimeState['historyScan'];
 }
 
+/** A fresh eligibility read rejected the candidate before any task was created. */
+export class AutomationCandidateChangedError extends Error {
+  constructor() { super('Automation item is closed or no longer matches current labels; no task was created.'); }
+}
+
 export class GithubPoller {
   private readonly run: NonNullable<GithubPollerOptions['run']>;
 
@@ -77,6 +82,13 @@ export class GithubPoller {
       maxBuffer: 4 * 1024 * 1024,
       timeout: GITHUB_COMMAND_TIMEOUT_MS,
     })).stdout);
+  }
+
+  /** Opt-in launch eligibility: require an open item and fresh labels, preserving historical events. */
+  async matchesCurrentLabels(candidate: GithubCandidate, definition: GithubAutomationDefinition): Promise<boolean> {
+    const raw = await this.run('gh', ['api', `repos/${candidate.repo}/issues/${candidate.number}`]);
+    const issue = z.object({ state: z.enum(['open', 'closed']), labels: z.array(z.object({ name: z.string() })) }).parse(JSON.parse(raw));
+    return issue.state === 'open' && matchesFilters({ ...candidate, labels: issue.labels.map(label => label.name) }, definition);
   }
 
   async poll(

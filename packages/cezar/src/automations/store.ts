@@ -353,7 +353,8 @@ export class AutomationStore {
     occurrenceAt?: string;
   }): AutomationReceipt | undefined {
     const receiptKey = `${input.automationId}:${input.eventId}`;
-    if (this.latestReceipts().has(receiptKey)) return undefined;
+    const previous = this.latestReceipts().get(receiptKey);
+    if (previous && previous.status !== 'released') return undefined;
     const now = this.now().toISOString();
     const receipt = automationReceiptSchema.parse({
       ...input,
@@ -401,7 +402,7 @@ export class AutomationStore {
     const latest = [...this.latestReceipts().values()].filter((row) => {
       // Event history expires; the first reservation of an issue must not. Keep one
       // durable issue reservation so a new label months later cannot launch it again.
-      const issue = row.candidate?.event.startsWith('issue.')
+      const issue = row.status !== 'released' && row.candidate?.event.startsWith('issue.')
         ? `${row.automationId}:${row.candidate.repo.toLowerCase()}:${row.candidate.number}`
         : undefined;
       const firstIssue = issue !== undefined && !issues.has(issue);
