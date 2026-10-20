@@ -2454,23 +2454,36 @@ teardown. P1 pins the manager/API path and terminal continuation.
 
 <a id="recoverable-opencode-skill-discovery-723"></a>
 
-### Recoverable OpenCode skill discovery (hearsay-tools/cezarion#723)
+### Recoverable OpenCode skill discovery (hearsay-tools/cezarion#723, hearsay-tools/cezarion#1265)
 
-OpenCode 1.18.33's [skill loader](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/skill/index.ts#L96-L111)
-skips an unreadable optional skill after publishing an unscoped `session.error`
-with `error.name: UnknownError` and `error.data.message: Failed to parse skill <path>`.
-For that exact prefix and a path ending in `/SKILL.md` (or a Windows separator),
-Cezar emits a v1 `note` and a v2 `session.error` with `fatal: false`, preserving the
-path and suggesting checking readability and repairing or reinstalling the skill.
-This warning neither sets the turn's error flag nor enters the agent-input ACK
-barrier. A successful later idle remains `end_turn`. All scoped errors and all
-other unscoped errors keep existing failure handling; free-form frontmatter errors
-cannot safely be classified from this wire and are not guessed recoverable.
-No protocol shape changes or automatic filesystem repairs are involved.
+OpenCode's [skill loader](https://github.com/anomalyco/opencode/blob/v1.18.35/packages/opencode/src/skill/index.ts#L105-L116)
+skips a skill it cannot load after publishing an unscoped `session.error` with
+`error.name: UnknownError`. For an unreadable file, `error.data.message` is
+`Failed to parse skill <path>` (captured on 1.18.33, hearsay-tools/cezarion#723).
+For malformed YAML frontmatter it is the `FrontmatterError` text from
+[config/markdown.ts](https://github.com/anomalyco/opencode/blob/v1.18.35/packages/opencode/src/config/markdown.ts#L20-L34),
+`<path>: Failed to parse YAML frontmatter: <parser detail>`; a 2026-10-18
+reproduction on OpenCode 1.18.35 showed the turn going on to answer after that
+frame (hearsay-tools/cezarion#1265). Cezar classifies both as recoverable only
+when the path ends in `/SKILL.md` (or a Windows separator); the frontmatter path
+must start the message and sit on one line, while its detail may span lines or be
+empty. Cezar then emits a v1 `note` and a v2 `session.error` with `fatal: false`.
+The unreadable-file note preserves the path and suggests checking readability and
+repairing or reinstalling the skill. The frontmatter note names the path, keeps the
+parser detail collapsed to one line, and suggests fixing the frontmatter between
+the `---` lines, for example by quoting values that contain a colon or a quote, or
+removing the skill. Neither warning sets the turn's error flag or enters the
+agent-input ACK barrier. A successful later idle remains `end_turn`. All scoped
+errors, even with the same text, and all other unscoped errors keep existing
+failure handling. No protocol shape changes or automatic filesystem repairs are
+involved.
 
 Harness cells R44/R45 exercise fresh and Continue success through the native
-OpenCode wire. Other `RUNNER_IDS` members have named executable wire exemptions
-for this server-wide discovery diagnostic. R46 exercises genuine provider failure
-on Continue through every native `HARNESS_ADAPTERS` wire, complementing fresh R2.
-The OpenCode cells also retain scoped skill-text and unscoped provider failures;
-mapper and withheld-ACK tests cover completion state and barrier bypass.
+OpenCode wire: the mock's `mock:skill-warning` sends both unreadable-file
+diagnostics and the frontmatter frame captured from `opencode serve` 1.18.35.
+Other `RUNNER_IDS` members have named executable wire exemptions for these
+server-wide skill diagnostics. R46 exercises genuine provider failure on Continue
+through every native `HARNESS_ADAPTERS` wire, complementing fresh R2. The
+OpenCode cells also retain scoped skill-text, scoped frontmatter-text
+(`mock:scoped-frontmatter-failure`) and unscoped provider failures; mapper and
+withheld-ACK tests cover completion state and barrier bypass for both diagnostics.
