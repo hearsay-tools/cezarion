@@ -559,7 +559,8 @@ describe('task thread', () => {
     }))`) as Array<{ text: string; href: string; current: string | null }>
     expect(tabs).toEqual([
       { text: 'Session', href: scoped(`/tasks/${RUN_ID}`), current: 'page' },
-      { text: 'Changes', href: scoped(`/tasks/${RUN_ID}/changes`), current: null },
+      // The changed-file count shows at every width (hearsay-tools/cezarion#1333).
+      { text: 'Changes1', href: scoped(`/tasks/${RUN_ID}/changes`), current: null },
       { text: 'Commits', href: scoped(`/tasks/${RUN_ID}/commits`), current: null },
       { text: 'Files', href: scoped(`/tasks/${RUN_ID}/files`), current: null },
     ])
@@ -870,7 +871,13 @@ describe('task thread', () => {
     openSessionActivityRow(browser, 'workspace')
     openSessionActivityRow(browser, 'usage')
     expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
-    expect(waitForSettledSample(browser, `[...document.querySelectorAll('[data-slot="run-header"] *, [data-slot="run-activity-dock"] *')].filter(el => el.getBoundingClientRect().right > innerWidth).map(el => ({slot:el.dataset.slot, text:el.textContent?.slice(0,60), width:el.getBoundingClientRect().width}))`)).toEqual([])
+    // Measured as painted: a span inside a `truncate` row is wider than the row, and its
+    // overflow-clipping ancestor decides where it stops on screen.
+    expect(waitForSettledSample(browser, `[...document.querySelectorAll('[data-slot="run-header"] *, [data-slot="run-activity-dock"] *')].filter(el => {
+      let right = el.getBoundingClientRect().right
+      for (let a = el.parentElement; a; a = a.parentElement) if (getComputedStyle(a).overflowX !== 'visible') right = Math.min(right, a.getBoundingClientRect().right)
+      return right > innerWidth
+    }).map(el => ({slot:el.dataset.slot, text:el.textContent?.slice(0,60), width:el.getBoundingClientRect().width}))`)).toEqual([])
     // #251: one defined account is not a choice — the lone login never joins the agent lines.
     const agent = browser.text('[data-slot="agent-details"]')
     expect(agent).toContain('high')

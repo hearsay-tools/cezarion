@@ -223,7 +223,7 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
         menu: top.querySelector('button[aria-label^="Open projects"]') !== null,
         back: top.querySelector('[data-slot="mobile-back"]')?.getAttribute('aria-label'),
         title: top.querySelector('[data-slot="mobile-run-title"]')?.textContent,
-        stateText: state?.textContent, stateDot: state?.querySelector('[data-slot="status-dot"]') !== null,
+        stateText: state?.textContent, stateDot: Boolean(state?.querySelector('[data-slot="status-dot"]')),
         kebab: top.querySelector('[aria-label="Run actions"]') !== null,
         facets: [...document.querySelectorAll('[data-slot="run-tabs"] a')].map((a) => a.textContent.trim()),
         ownTitle: document.querySelector('[data-slot="run-header"] h1') !== null,
