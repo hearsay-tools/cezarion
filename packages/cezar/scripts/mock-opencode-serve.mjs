@@ -97,8 +97,8 @@ const hostname = arg('--hostname', '127.0.0.1');
 const DEFAULT_SESSION_ID = 'ses_mock_1';
 let SESSION_ID = DEFAULT_SESSION_ID;
 const MESSAGE_ID = 'msg_mock_1';
-// #1265: the captured FrontmatterError text, verbatim, for a skill whose
-// frontmatter holds `foo: "unterminated`.
+// hearsay-tools/cezarion#1265: the captured FrontmatterError text, verbatim,
+// for a skill whose frontmatter holds `foo: "unterminated`.
 const FRONTMATTER_ERROR = '/home/agent/.agents/skills/bad4/SKILL.md: Failed to parse YAML frontmatter: unexpected end of the stream within a double quoted scalar at line 6, column 1:\n    \n    ^';
 
 function sessionStorePath() {
@@ -560,14 +560,15 @@ const server = createServer((req, res) => {
         for (const root of ['.claude', '.agents']) send({ type: 'session.error', properties: {
           error: { name: 'UnknownError', data: { message: `Failed to parse skill /home/agent/${root}/skills/pen-design/SKILL.md` } },
         } });
-        // #1265: unscoped FrontmatterError frame captured from `opencode serve`
-        // 1.18.35 on 2026-10-18; upstream skill/index.ts:105-116 skips the skill.
+        // hearsay-tools/cezarion#1265: unscoped FrontmatterError frame captured
+        // from `opencode serve` 1.18.35 on 2026-10-18; upstream
+        // skill/index.ts:105-116 skips the skill.
         send({ type: 'session.error', properties: { error: { name: 'UnknownError', data: { message: FRONTMATTER_ERROR } } } });
       }
       const fatalControl = Object.entries({
-        'mock:unscoped-provider-failure': { message: 'provider unavailable — retry after restoring service' },
         'mock:scoped-skill-failure': { sessionID: SESSION_ID, message: 'Failed to parse skill /skills/required/SKILL.md' },
         'mock:scoped-frontmatter-failure': { sessionID: SESSION_ID, message: FRONTMATTER_ERROR },
+        'mock:unscoped-provider-failure': { message: 'provider unavailable — retry after restoring service' },
       }).find(([marker]) => body.includes(marker))?.[1];
       if (fatalControl) {
         send({ type: 'session.error', properties: {

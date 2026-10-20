@@ -3,12 +3,13 @@
  * unscoped `UnknownError` session.error, then skips the skill and continues
  * (1.18.35 skill/index.ts:105-116):
  * https://github.com/anomalyco/opencode/blob/v1.18.35/packages/opencode/src/skill/index.ts#L105-L116
- * The message is `Failed to parse skill <path>` for an unreadable file (#723,
- * captured on 1.18.33), or the FrontmatterError text from config/markdown.ts:20-34,
+ * The message is `Failed to parse skill <path>` for an unreadable file
+ * (hearsay-tools/cezarion#723, captured on 1.18.33), or the FrontmatterError
+ * text from config/markdown.ts:20-34,
  * `<path>: Failed to parse YAML frontmatter: <parser detail>`:
  * https://github.com/anomalyco/opencode/blob/v1.18.35/packages/opencode/src/config/markdown.ts#L20-L34
- * A 2026-10-18 reproduction on OpenCode 1.18.35 (#1265) showed the turn going on
- * to answer after that frontmatter frame.
+ * A 2026-10-18 reproduction on OpenCode 1.18.35 (hearsay-tools/cezarion#1265)
+ * showed the turn going on to answer after that frontmatter frame.
  *
  * Only those proven wire shapes are recoverable, and only for a `SKILL.md` path
  * at the start of the message. In particular an absent session ID alone says

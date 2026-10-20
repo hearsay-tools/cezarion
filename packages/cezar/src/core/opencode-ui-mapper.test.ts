@@ -483,9 +483,9 @@ describe('mapOpencodeEvent edge cases', () => {
       .toContainEqual({ type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn' });
   });
 
-  it('keeps a skipped skill with malformed YAML frontmatter a repairable warning (#1265)', () => {
+  it('keeps a skipped skill with malformed YAML frontmatter a repairable warning (hearsay-tools/cezarion#1265)', () => {
     let state = opencodeTurnStarted(opencodeSessionStarted(SESSION_ID, createOpencodeUiState()).state).state;
-    // OpenCode 1.18.35 `opencode serve` capture, 2026-10-18 (#1265).
+    // OpenCode 1.18.35 `opencode serve` capture, 2026-10-18 (hearsay-tools/cezarion#1265).
     const mapped = mapOpencodeEvent({ type: 'session.error', properties: { error: { name: 'UnknownError', data: {
       message: '/home/agent/.agents/skills/bad4/SKILL.md: Failed to parse YAML frontmatter: unexpected end of the stream within a double quoted scalar at line 6, column 1:\n    \n    ^',
     } } } }, state);

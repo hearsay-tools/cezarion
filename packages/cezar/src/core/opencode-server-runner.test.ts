@@ -586,8 +586,8 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   });
 
   for (const { issue, path, message } of [
-    { issue: '#723', path: '/skills/pen-design/SKILL.md', message: 'Failed to parse skill /skills/pen-design/SKILL.md' },
-    { issue: '#1265', path: '/skills/bad4/SKILL.md',
+    { issue: 'hearsay-tools/cezarion#723', path: '/skills/pen-design/SKILL.md', message: 'Failed to parse skill /skills/pen-design/SKILL.md' },
+    { issue: 'hearsay-tools/cezarion#1265', path: '/skills/bad4/SKILL.md',
       message: '/skills/bad4/SKILL.md: Failed to parse YAML frontmatter: unexpected end of the stream within a double quoted scalar at line 6, column 1:\n    \n    ^' },
   ]) it(`skill diagnostics bypass the agent ACK barrier and leave subsequent input usable (${issue})`, async () => {
     await withSession({ holdFollowupPrompt: true }, async ({ events, uiEvents, mock, session }) => {

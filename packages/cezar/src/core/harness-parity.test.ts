@@ -833,7 +833,7 @@ async function continueDiagnosticRun(backend: RunnerId, prompt: string): Promise
     });
 }
 
-describe('harness parity — recoverable skill diagnostics (#723, #1265)', () => {
+describe('harness parity — recoverable skill diagnostics (hearsay-tools/cezarion#723, hearsay-tools/cezarion#1265)', () => {
   for (const backend of RUNNER_IDS) {
     for (const continuation of [false, true]) {
       const id = continuation ? 'R45' : 'R44';
