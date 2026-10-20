@@ -658,6 +658,7 @@ The provisioned command has these forms (the session instructions supply the abs
 cez worker spawn --baseline parent-head --request-id <UUID> 'Implement the assigned change'
 cez worker spawn --baseline parent-head --request-id <UUID> --runner codex --effort high --context-file ./selected-context.txt 'Review the parser'
 cez worker spawn --baseline parent-head --request-id <UUID> --workflow review 'Review the parser change'
+cez worker list                         # All own workers, revisions and cleanup resources (fetches pages automatically)
 cez worker inspect <worker-id>
 cez worker steer <worker-id> 'Consider this additional constraint'
 cez worker diff <worker-id>

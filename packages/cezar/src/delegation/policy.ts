@@ -54,6 +54,12 @@ export function authorizeWorker(caller: Caller, target: RunRecord | undefined, o
   // This grants no permission to relaunch or delete resources without the manager/Git barriers.
 }
 
+/** Listing is an inspection of the authenticated parent's durable receipts. */
+export function authorizeWorkerList(caller: Caller, parent: RunRecord | undefined, projectId: string): void {
+  requireRootAuthority(caller, parent, projectId, 'inspect');
+  requireActiveParent(parent!);
+}
+
 /** Check before receipt lookup: replay skips the creation cap, never authority or lifecycle. */
 export function authorizeSpawnReplay(caller: Caller, parent: RunRecord | undefined, projectId: string): void {
   requireRootAuthority(caller, parent, projectId, 'spawn');

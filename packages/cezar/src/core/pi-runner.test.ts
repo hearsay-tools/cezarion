@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -733,7 +733,28 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
 });
 
 describe('pi RPC argv', () => {
-  const retryExtensionArgs = ['--extension', expect.stringMatching(/scripts\/pi-retry-degraded-service\.mjs$/)];
+  const cezarExtensionArgs = [
+    '--extension',
+    expect.stringMatching(/scripts\/pi-retry-degraded-service\.mjs$/),
+    '--extension',
+    expect.stringMatching(/scripts\/pi-project-skills\.mjs$/),
+  ];
+
+  it('always loads the project-skills extension from a shipped script, before the CI extension (hearsay-tools/cezarion#1295)', () => {
+    for (const spec of [
+      { cwd: '/repo', userPrompt: 'task' },
+      { cwd: '/repo', userPrompt: 'task', cezarTools: { name: 'cezar_ci_test', command: 'node', args: ['/x.mjs'] } },
+    ]) {
+      const args = buildPiArgs(spec);
+      const extensions = args.flatMap((arg, index) => (arg === '--extension' ? [args[index + 1]!] : []));
+      expect(extensions.slice(0, 2)).toEqual([
+        expect.stringMatching(/scripts\/pi-retry-degraded-service\.mjs$/),
+        expect.stringMatching(/scripts\/pi-project-skills\.mjs$/),
+      ]);
+      if (spec.cezarTools) expect(extensions[2]).toMatch(/scripts\/pi-ci-wait\.mjs$/);
+      expect(existsSync(extensions[1]!)).toBe(true);
+    }
+  });
 
   it('uses pi RPC mode, exact session selection, provider/model, and pi tool names', () => {
     expect(
@@ -749,7 +770,7 @@ describe('pi RPC argv', () => {
     ).toEqual([
       '--mode',
       'rpc',
-      ...retryExtensionArgs,
+      ...cezarExtensionArgs,
       '--session',
       'session-1',
       '--append-system-prompt',
@@ -765,7 +786,7 @@ describe('pi RPC argv', () => {
     expect(buildPiArgs({ cwd: '/repo', userPrompt: 'task', sessionId: 'session-1' })).toEqual([
       '--mode',
       'rpc',
-      ...retryExtensionArgs,
+      ...cezarExtensionArgs,
       '--session-id',
       'session-1',
     ]);
@@ -779,7 +800,7 @@ describe('pi RPC argv', () => {
         allowedTools: ['Read', 'Bash'],
         bashAllowlist: ['npm test'],
       }),
-    ).toEqual(['--mode', 'rpc', ...retryExtensionArgs, '--tools', 'read']);
+    ).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--tools', 'read']);
   });
 
   it('maps the complete subagent trio onto pi --tools so the default extras list is representable', () => {
@@ -789,7 +810,7 @@ describe('pi RPC argv', () => {
         userPrompt: 'task',
         allowedTools: ['Read', 'Edit', 'Write', 'Grep', 'Glob', 'Bash', 'Subagent', 'SubagentSupervisor', 'SubagentWait'],
       }),
-    ).toEqual(['--mode', 'rpc', ...retryExtensionArgs, '--tools', 'read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait']);
+    ).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--tools', 'read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait']);
   });
 
   it('does not inject Subagent when allowedTools is an explicit subset', () => {
@@ -799,13 +820,13 @@ describe('pi RPC argv', () => {
         userPrompt: 'task',
         allowedTools: ['Read', 'Bash'],
       }),
-    ).toEqual(['--mode', 'rpc', ...retryExtensionArgs, '--tools', 'read,bash']);
+    ).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--tools', 'read,bash']);
   });
 
   it('maps a canonical effort pin onto --thinking and omits it when unset', () => {
     expect(
       buildPiArgs({ cwd: '/repo', userPrompt: 'task', effort: 'high' }),
-    ).toEqual(['--mode', 'rpc', ...retryExtensionArgs, '--thinking', 'high']);
+    ).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--thinking', 'high']);
     expect(buildPiArgs({ cwd: '/repo', userPrompt: 'task' })).not.toContain('--thinking');
     expect(
       buildPiArgs({ cwd: '/repo', userPrompt: 'task', effort: 'auto' }),

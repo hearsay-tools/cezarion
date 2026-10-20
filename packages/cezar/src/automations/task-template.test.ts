@@ -346,3 +346,121 @@ describe('automation task templates', () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 });
+
+it('obsolete handling events cannot claim the issue before its current handler', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'cezar-current-route-'));
+  const store = RunStore.open(join(root, '.ai/cezar'));
+  try {
+    const automations = AutomationStore.open(join(root, '.ai/cezar'));
+    const auto = automations.create({ ...definition, events: ['issue.labeled'], filters: { ...definition.filters, includeExisting: true,
+      requireCurrentLabels: true, allLabels: ['friction', 'friction-auto'], changedLabels: ['friction-auto'], excludeLabels: ['friction-design'],
+    } }) as GithubAutomationDefinition;
+    const design = automations.create({ ...auto, filters: { ...auto.filters, allLabels: ['friction', 'friction-design'], changedLabels: ['friction-design'], excludeLabels: ['friction-auto'] } }) as GithubAutomationDefinition;
+    const timestamp = new Date(Date.now() - 60_000).toISOString();
+    const poller = new GithubPoller({ run: async (_exe, args) => args.some(arg => arg.includes('/timeline'))
+      ? JSON.stringify([
+        { id: 1, event: 'labeled', created_at: timestamp, label: { name: 'friction-auto' } },
+        { id: 2, event: 'unlabeled', created_at: new Date(Date.parse(timestamp) + 1000).toISOString(), label: { name: 'friction-auto' } },
+        { id: 3, event: 'labeled', created_at: new Date(Date.parse(timestamp) + 2000).toISOString(), label: { name: 'friction-design' } },
+      ])
+      : args.includes('/search/issues') ? JSON.stringify({ items: [{ node_id: candidate.nodeId, number: 7, title: 'Issue', html_url: candidate.url,
+        created_at: timestamp, updated_at: timestamp, user: { login: 'alice' }, labels: [{ name: 'friction' }, { name: 'friction-design' }],
+        repository_url: 'https://api.github.com/repos/acme/demo' }] })
+      : JSON.stringify({ state: 'open', labels: [{ name: 'friction' }, { name: 'friction-design' }] }),
+    });
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store: automations, timeZone: 'UTC',
+      github: { owner: 'acme', repo: 'demo', poller },
+      launch: (definition, candidate, receiptId) => launchAutomationRun({ root, store, manager: fakeManager(store), definition, candidate, receiptId, poller }),
+    });
+    await scheduler.check(auto);
+    expect(store.findNonArchivedRunByIssue(candidate.repo, 7)).toBeUndefined();
+    expect(automations.latestReceipts().size).toBe(0);
+    await scheduler.check(design);
+    const runId = store.findNonArchivedRunByIssue(candidate.repo, 7);
+    expect(runId).toBeTruthy();
+    expect(store.getRun(runId!)?.automation?.automationId).toBe(design.id);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+it('a current-label opt-in rechecks immediately before run creation, including receipt retries', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'cezar-current-launch-'));
+  const store = RunStore.open(join(root, '.ai/cezar'));
+  try {
+    const poller = new GithubPoller({ run: async () => JSON.stringify({ state: 'open', labels: [{ name: 'friction-design' }] }) });
+    await expect(launchAutomationRun({ root, store, manager: fakeManager(store), receiptId: 'retry', poller,
+      candidate: { ...candidate, event: 'issue.labeled', changedLabel: 'friction-auto', labels: ['friction-auto'] },
+      definition: { ...definition, filters: { ...definition.filters, requireCurrentLabels: true, allLabels: ['friction-auto'] } },
+    })).rejects.toThrow(/current labels/);
+    expect(store.findNonArchivedRunByIssue(candidate.repo, 7)).toBeUndefined();
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+it.each(['same', 'new'])('releases a late stale-route receipt so a %s event can launch after restart', async (next) => {
+  const root = await mkdtemp(join(tmpdir(), 'cezar-late-route-'));
+  const dataDir = join(root, '.ai/cezar');
+  const store = RunStore.open(dataDir);
+  try {
+    const automations = AutomationStore.open(dataDir);
+    const rule = automations.create({ ...definition, filters: { ...definition.filters, includeExisting: true,
+      requireCurrentLabels: true, allLabels: ['friction-auto'],
+    } }) as GithubAutomationDefinition;
+    let reads = 0;
+    let changeDuringLaunch = true;
+    const poller = new GithubPoller({ run: async () => JSON.stringify({ state: 'open',
+      labels: [{ name: changeDuringLaunch && ++reads > 1 ? 'friction-design' : 'friction-auto' }],
+    }) });
+    let event = { ...candidate, labels: ['friction-auto'], timestamp: new Date(Date.now() - 60_000).toISOString() };
+    vi.spyOn(poller, 'poll').mockImplementation(async () => ({ candidates: [event], truncated: false, pages: 1 }));
+    const scheduler = (storage: AutomationStore) => new ProjectAutomationScheduler({ projectId: 'p', store: storage, timeZone: 'UTC',
+      github: { owner: 'acme', repo: 'demo', poller },
+      launch: (definition, candidate, receiptId) => launchAutomationRun({ root, store, manager: fakeManager(store), definition, candidate, receiptId, poller }),
+    });
+    await scheduler(automations).check(rule).catch(() => undefined);
+    expect(store.findNonArchivedRunByIssue(candidate.repo, 7)).toBeUndefined();
+    const released = [...automations.latestReceipts().values()][0]!;
+    expect(released).toMatchObject({ status: 'released' });
+    expect(automations.isReservationInFlight(released.receiptId)).toBe(false);
+    expect(automations.logs({ automationId: rule.id })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ result: 'skipped', receiptId: released.receiptId }),
+    ]));
+    expect(automations.state(rule.id)?.backoffUntil).toBeUndefined();
+    changeDuringLaunch = false;
+    if (next === 'new') event = { ...event, eventId: 'later-event' };
+    const restarted = AutomationStore.open(dataDir);
+    await scheduler(restarted).check(rule);
+    const runId = store.findNonArchivedRunByIssue(candidate.repo, 7);
+    expect(runId).toBeTruthy();
+    const launched = restarted.latestReceipts().get(`${rule.id}:${event.eventId}`)!;
+    expect(launched).toMatchObject({ status: 'launched', runId });
+    expect(launched.receiptId).not.toBe(released.receiptId);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+it.each(['before reservation', 'before launch'])('skips a closed issue %s without retaining a claim', async (when) => {
+  const root = await mkdtemp(join(tmpdir(), 'cezar-closed-route-'));
+  const store = RunStore.open(join(root, '.ai/cezar'));
+  try {
+    const automations = AutomationStore.open(join(root, '.ai/cezar'));
+    const rule = automations.create({ ...definition, filters: { ...definition.filters, includeExisting: true,
+      requireCurrentLabels: true, allLabels: ['friction-auto'],
+    } }) as GithubAutomationDefinition;
+    let reads = 0;
+    let closed = true;
+    const poller = new GithubPoller({ run: async () => JSON.stringify({
+      state: closed && (++reads > 1 || when === 'before reservation') ? 'closed' : 'open',
+      labels: [{ name: 'friction-auto' }],
+    }) });
+    const event = { ...candidate, labels: ['friction-auto'], timestamp: new Date(Date.now() - 60_000).toISOString() };
+    vi.spyOn(poller, 'poll').mockResolvedValue({ candidates: [event], truncated: false, pages: 1 });
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store: automations, timeZone: 'UTC',
+      github: { owner: 'acme', repo: 'demo', poller },
+      launch: (definition, candidate, receiptId) => launchAutomationRun({ root, store, manager: fakeManager(store), definition, candidate, receiptId, poller }),
+    });
+    await scheduler.check(rule);
+    expect(store.findNonArchivedRunByIssue(candidate.repo, 7)).toBeUndefined();
+    expect([...automations.latestReceipts().values()].every(receipt => receipt.status === 'released')).toBe(true);
+    closed = false;
+    await scheduler.check(rule);
+    expect(store.findNonArchivedRunByIssue(candidate.repo, 7)).toBeTruthy();
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});

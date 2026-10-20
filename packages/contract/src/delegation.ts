@@ -315,6 +315,25 @@ export const workerInspectionSchema = z.object({
 });
 export type WorkerInspection = z.infer<typeof workerInspectionSchema>;
 
+/** Small summaries omit inspection inputs, wait payloads and assistant output. */
+export const workerListEntrySchema = workerInspectionSchema.pick({
+  workerId: true, parentRunId: true, status: true, workspace: true, destroy: true,
+}).extend({
+  revision: z.number().int().nonnegative(),
+  settled: z.boolean(),
+  destroyed: z.boolean(),
+}).strict();
+export const workerListResultSchema = z.object({ workers: z.array(workerListEntrySchema).max(1_024) }).strict();
+export type WorkerListResult = z.infer<typeof workerListResultSchema>;
+/** Receipt offsets are scoped to the authenticated parent; each page examines at most 32. */
+export const workerListQuerySchema = z.object({ offset: z.string().regex(/^\d{1,4}$/).refine(value => Number(value) <= 1_024).optional() }).strict();
+export type WorkerListQuery = z.infer<typeof workerListQuerySchema>;
+export const workerListPageSchema = workerListResultSchema.extend({
+  workers: z.array(workerListEntrySchema).max(32),
+  nextOffset: z.number().int().min(1).max(1_024).optional(),
+}).strict();
+export type WorkerListPage = z.infer<typeof workerListPageSchema>;
+
 export const workerDiffSchema = z.object({
   workerId: z.uuid(),
   baselineSha: commitShaSchema,

@@ -1,6 +1,6 @@
 import { githubBaselineState } from './github-baseline.ts';
 import type { AutomationCoordinator } from './coordinator.ts';
-import type { GithubCandidate, GithubPoller, GithubPollResult } from './github-poller.ts';
+import { AutomationCandidateChangedError, type GithubCandidate, type GithubPoller, type GithubPollResult } from './github-poller.ts';
 import { AutomationProjectUnavailableError, ScheduleRunner, type ScheduleLauncher } from './schedule-runner.ts';
 import type { AutomationLease, AutomationStore } from './store.ts';
 import { isGithubAutomation, isScheduleAutomation, type AutomationRuntimeState, type GithubAutomationDefinition } from './types.ts';
@@ -180,10 +180,20 @@ export class ProjectAutomationScheduler {
   }
 
   private async launch(definition: GithubAutomationDefinition, candidate: GithubCandidate): Promise<void> {
+    if (definition.filters.requireCurrentLabels) {
+      const matches = await this.handle.github!.poller.matchesCurrentLabels(candidate, definition);
+      this.assertCurrent(definition);
+      if (!matches) {
+        await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event,
+          result: 'skipped', reason: 'Automation item is closed or no longer matches current labels; no receipt or task was created.',
+          githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url });
+        return;
+      }
+    }
     // Keep event receipts (including old ones) for retry/recovery, but collapse every issue
     // event onto its first reservation, even after restart or a definition edit.
     const previous = candidate.event.startsWith('issue.')
-      ? [...this.handle.store.latestReceipts().values()].find((receipt) => receipt.automationId === definition.id
+      ? [...this.handle.store.latestReceipts().values()].find((receipt) => receipt.status !== 'released' && receipt.automationId === definition.id
         && receipt.candidate?.event.startsWith('issue.')
         && receipt.candidate.repo.toLowerCase() === candidate.repo.toLowerCase()
         && receipt.candidate.number === candidate.number)
@@ -211,7 +221,14 @@ export class ProjectAutomationScheduler {
         githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url,
       });
     } catch (error) {
-      this.handle.store.appendReceipt({ ...receipt, status: 'launch-error', error: error instanceof Error ? error.message : String(error), updatedAt: new Date().toISOString() });
+      const released = error instanceof AutomationCandidateChangedError;
+      this.handle.store.appendReceipt({ ...receipt, status: released ? 'released' : 'launch-error', error: error instanceof Error ? error.message : String(error), updatedAt: new Date().toISOString() });
+      if (released) {
+        await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event,
+          result: 'skipped', reason: error.message, receiptId: receipt.receiptId,
+          githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url });
+        return;
+      }
       throw error;
     }
   }

@@ -158,3 +158,20 @@ test('each issue-intake provider interpolates only its own model and effort vari
   assert.match(codex, /model: \$\{.*vars\.ISSUE_INTAKE_CODEX_MODEL \|\| 'gpt-5\.6-luna'/);
   assert.match(codex, /effort: \$\{.*vars\.ISSUE_INTAKE_CODEX_EFFORT \|\| 'max'/);
 });
+
+test('all ordinary intake providers receive label context without friction routing labels', () => {
+  const yaml = require('yaml');
+  const { execFileSync } = require('node:child_process');
+  const workflow = yaml.parse(fs.readFileSync(workflowPath, 'utf8'));
+  for (const name of ['claude-intake', 'codex-intake', 'jev-intake']) {
+    const fetch = workflow.jobs[name].steps.find(s => s.name === 'Fetch issue context').run;
+    const line = fetch.split('\n').find(line => line.includes('gh label list'));
+    assert.ok(line);
+    // Execute its actual jq expression, if any, on representative label data.
+    const expression = line.match(/--jq '([^']+)'/)?.[1] ?? '.';
+    const result = JSON.parse(execFileSync('jq', [expression], { input: JSON.stringify([
+      { name: 'bug' }, { name: 'friction' }, { name: 'friction-auto' }, { name: 'friction-knowledge' },
+    ]), encoding: 'utf8' }));
+    assert.deepEqual(result.map(l => l.name), ['bug'], name);
+  }
+});
