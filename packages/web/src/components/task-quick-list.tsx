@@ -26,13 +26,14 @@ import { directionalUsageText } from '@/components/directional-usage'
 import {
   capBuckets,
   groupRuns,
-  listCounts,
+  sidebarCounts,
+  sidebarRuns,
   loudestMember,
   refPrefixMatches,
   runTitle,
   sidebarActiveRunId,
   splitRefPrefix,
-  type ListView,
+  type SidebarView,
   type QuickListBucket,
   type QuickListRow,
 } from '@/lib/task-groups'
@@ -43,7 +44,7 @@ import { useSidebarSections } from '@/lib/use-sidebar-sections'
 import { cn } from '@/lib/utils'
 
 /**
- * The sidebar's task quick-list (spec, "App shell & navigation"): Active/Archived tabs, then the
+ * The sidebar's task quick-list (spec, "App shell & navigation"): Active/Automations tabs, then the
  * runs grouped Needs you / Finished / Working, with variant groups collapsed into one tile.
  *
  * Presentational — every decision it paints (which bucket, which order, which dot, whether a
@@ -69,8 +70,8 @@ export function TaskQuickList({
   projectId = null,
 }: {
   runs: RunSummary[]
-  view: ListView
-  onViewChange: (view: ListView) => void
+  view: SidebarView
+  onViewChange: (view: SidebarView) => void
   /** The run open at `/tasks/:id`, so its row can show as active. */
   currentRunId?: string | null
   /** The variant group open at `/compare/:groupId`, so its group row can show as active. */
@@ -96,19 +97,16 @@ export function TaskQuickList({
   projectId?: string | null
 }) {
   const onNavigate = useSidebarNavigate()
-  const counts = listCounts(runs)
-  const allBuckets = groupRuns(runs, view)
+  const counts = sidebarCounts(runs)
+  // Both tabs list unarchived tasks in status sections (hearsay-tools/cezarion#1332); archived
+  // history and Restore live on the Tasks table.
+  const inView = sidebarRuns(runs, view)
+  const allBuckets = groupRuns(inView, 'active')
   const buckets = capBuckets(allBuckets, sidebarLimits ?? rowLimit ?? { overall: null })
-  // Withheld in the archived view, where `groupRuns` answers one `Archived` bucket and never
-  // reads `run.pinned` — the same call the thread header makes on an archived run.
-  const pinToggle = view === 'archived' ? undefined : onTogglePin
-  // Archiving is withheld there too: the Archived view has nothing left to file away, and
-  // restoring stays in the thread and the Tasks table.
-  const archiveRow = view === 'archived' ? undefined : onArchiveRun
-  const sweep = view === 'archived' ? undefined : onSweep
-  // From the FULL list, not the capped buckets: "Archive all" sweeps rows the cap hides, so its
-  // visibility must not depend on which of them are painted.
-  const sweepCounts = sweep ? sweepCountsOf(runs) : undefined
+  // From the tab's FULL list, not the capped buckets: "Archive all" sweeps rows the cap hides, so
+  // its visibility must not depend on which of them are painted. The container scopes the sweep
+  // itself to the same tab.
+  const sweepCounts = onSweep ? sweepCountsOf(inView) : undefined
 
   return (
     <div data-slot="quick-list">
@@ -123,36 +121,27 @@ export function TaskQuickList({
           must not be able to hide that the view is filtered. */}
       {showViewControls ? <div className="sticky top-0 z-10 bg-sidebar pt-2 pb-1">
         <div className="inline-flex w-full gap-0.5 rounded-md bg-muted p-[2px]">
-          <ViewTab view="active" current={view} onSelect={onViewChange} count={counts.active}>
-            Active
-            {/* The one reason to look at a tab you are not on. */}
-            {counts.waiting > 0 && view !== 'active' ? (
-              <StatusDot tone="pending" pulse data-slot="waiting-dot" aria-label="needs you" />
-            ) : null}
-          </ViewTab>
-          <ViewTab view="archived" current={view} onSelect={onViewChange} count={counts.archived}>
-            Archived
-          </ViewTab>
+          <SidebarViewTabs view={view} onSelect={onViewChange} counts={counts} />
         </div>
       </div> : null}
 
       {allBuckets.length === 0 ? (
         <p className="px-3 py-3.5 text-xs text-soft-foreground">
-          {view === 'archived' ? 'Nothing archived yet.' : 'No tasks yet — describe one.'}
+          {view === 'automations' ? 'No automation tasks.' : 'No tasks yet — describe one.'}
         </p>
       ) : (
         <QuickListBuckets
           buckets={buckets}
-          allBuckets={view === 'active' ? allBuckets : buckets}
+          allBuckets={allBuckets}
           sectionProjectId={projectId}
           currentRunId={sidebarActiveRunId(currentRunId, runs)}
           currentGroupId={currentGroupId}
           now={now}
           showTokens={showTokens}
           showCost={showCost}
-          onTogglePin={pinToggle}
-          onArchiveRun={archiveRow}
-          onSweep={sweep}
+          onTogglePin={onTogglePin}
+          onArchiveRun={onArchiveRun}
+          onSweep={onSweep}
           sweeping={sweeping}
           sweepCounts={sweepCounts}
         />
@@ -169,7 +158,7 @@ export function sweepCountsOf(runs: readonly RunSummary[]): { unpinned: number; 
 
 /**
  * The bucketed rows alone — the piece the multi-project sidebar reuses per project group
- * (step 3.3), without the Active/Archived tabs that belong to the boot list's framing.
+ * (step 3.3), without the Active/Automations tabs that belong to the boot list's framing.
  *
  * `scope` prefixes every row target with an EXPLICIT `/p/<id>` (a non-active project's rows
  * must land in that project); `null` keeps the wrapper-Link default — the active scope.
@@ -312,9 +301,9 @@ function ViewTab({
   count,
   children,
 }: {
-  view: ListView
-  current: ListView
-  onSelect: (view: ListView) => void
+  view: SidebarView
+  current: SidebarView
+  onSelect: (view: SidebarView) => void
   count: number
   children: React.ReactNode
 }) {
@@ -1280,7 +1269,7 @@ function GroupSweepButton({
 
 /**
  * The quick-list wired to live data: `useRuns()` for the list (kept fresh by the global SSE
- * stream, Step 3.2), the router for which row is open, and the sidebar Active/Archived context —
+ * stream, Step 3.2), the router for which row is open, and the sidebar Active/Automations context —
  * independent of the Tasks table's own tabs.
  */
 export function TaskQuickListContainer({ showViewControls = true, projectId: explicitProjectId, boot = false }: { showViewControls?: boolean; projectId?: string; boot?: boolean }) {
@@ -1305,7 +1294,7 @@ export function TaskQuickListContainer({ showViewControls = true, projectId: exp
   const referenceProjectId = useReferenceProjectId()
   const projectId = explicitProjectId ?? referenceProjectId
   const repoBase = useProjectRepoBase(projectId)
-  const buckets = capBuckets(groupRuns(runs.data ?? [], view), sidebarLimits)
+  const buckets = capBuckets(groupRuns(sidebarRuns(runs.data ?? [], view), 'active'), sidebarLimits)
   const referenceRequests = projectId === undefined ? [] : buckets.flatMap(bucket =>
     bucket.rows.flatMap(row => (row.kind === 'run' ? [row.run] : row.members).flatMap(run =>
       taskReferences(run, repoBase).filter(ref => isOwnRepoReference(ref, repoBase)).map(
@@ -1338,7 +1327,8 @@ export function TaskQuickListContainer({ showViewControls = true, projectId: exp
           pin.mutate({ id: run.id, pinned })
         }
         onArchiveRun={archive.archiveOne}
-        onSweep={archive.sweep}
+        // Each tab sweeps only its own finished tasks: the ones it lists and counts.
+        onSweep={(scope) => archive.sweep(scope, view === 'automations')}
         sweeping={archive.sweeping}
       />
     </ReferenceStatusProvider>
@@ -1371,14 +1361,32 @@ export function SidebarSessionScope() {
   otherProjects.forEach((project, index) => {
     for (const run of otherLists[index]?.data ?? []) add(project.id, run)
   })
-  const counts = listCounts(combined)
   return (
     <div data-slot="sidebar-session-scope" role="group" aria-label="Session scope" className="flex w-full gap-1 rounded-lg bg-muted p-[3px]">
-      <ViewTab view="active" current={view} onSelect={setView} count={counts.active}>
-        Active
-        {counts.waiting > 0 && view !== 'active' ? <StatusDot tone="pending" pulse data-slot="waiting-dot" aria-label="needs you" /> : null}
-      </ViewTab>
-      <ViewTab view="archived" current={view} onSelect={setView} count={counts.archived}>Archived</ViewTab>
+      <SidebarViewTabs view={view} onSelect={setView} counts={sidebarCounts(combined)} />
     </div>
+  )
+}
+
+/** Active and Automations (hearsay-tools/cezarion#1332), each with its count and, while another
+ *  tab is selected, a dot when its own tasks need you: the one reason to look at a tab you are
+ *  not on. */
+function SidebarViewTabs({ view, onSelect, counts }: {
+  view: SidebarView
+  onSelect: (view: SidebarView) => void
+  counts: ReturnType<typeof sidebarCounts>
+}) {
+  const dot = <StatusDot tone="pending" pulse data-slot="waiting-dot" aria-label="needs you" />
+  return (
+    <>
+      <ViewTab view="active" current={view} onSelect={onSelect} count={counts.active}>
+        Active
+        {counts.activeWaiting > 0 && view !== 'active' ? dot : null}
+      </ViewTab>
+      <ViewTab view="automations" current={view} onSelect={onSelect} count={counts.automations}>
+        Automations
+        {counts.automationsWaiting > 0 && view !== 'automations' ? dot : null}
+      </ViewTab>
+    </>
   )
 }

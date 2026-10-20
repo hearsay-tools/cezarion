@@ -15,6 +15,8 @@ import {
   refPrefixMatches,
   runTitle,
   sidebarActiveRunId,
+  sidebarCounts,
+  sidebarRuns,
   sortRuns,
   splitRefPrefix,
   type QuickListBucket,
@@ -837,4 +839,34 @@ describe('project sidebar combined limits (#810)', () => {
 it.each([null, [], 'broken', { overall: -1 }, { overall: 'unlimited' }].map(value => [value]))('applies shipped defaults to malformed stored limits %j', limits => {
   const buckets = groupRuns(Array.from({ length: 12 }, (_, i) => run({ id: `malformed-${i}` })), 'active')
   expect(capBuckets(buckets, limits as never).flatMap(bucket => bucket.rows)).toHaveLength(10)
+})
+
+describe('sidebar Active and Automations (#1332)', () => {
+  const auto = (over: Partial<RunRecord> = {}): RunSummary => ({ ...run(over), automationId: 'auto-1' })
+  const fixture = () => [
+    run({ id: 'manual', status: 'running' }),
+    run({ id: 'autonomous', autonomous: true }),
+    auto({ id: 'scheduled' }),
+    auto({ id: 'asks', status: 'waiting' }),
+    auto({ id: 'gone', archived: true }),
+    run({ id: 'archived', archived: true }),
+    { ...ownedWorker({ id: 'worker', status: 'waiting' }), automationId: 'auto-1' },
+    auto({ id: 'va', groupId: 'g1', variant: 'A', title: 'Nightly (A)' }),
+    auto({ id: 'vb', groupId: 'g1', variant: 'B', title: 'Nightly (B)' }),
+  ]
+
+  it('splits unarchived tasks by recorded origin, never by autonomy', () => {
+    expect(sidebarRuns(fixture(), 'active').map((r) => r.id)).toEqual(['manual', 'autonomous'])
+    expect(sidebarRuns(fixture(), 'automations').map((r) => r.id)).toEqual(['scheduled', 'asks', 'worker', 'va', 'vb'])
+  })
+
+  it('keeps an automation variant group as one tile in its status section', () => {
+    expect(shape(groupRuns(sidebarRuns(fixture(), 'automations'), 'active'))).toEqual(['Needs you: asks', 'Finished: scheduled, [AB]'])
+  })
+
+  it('counts each tab and its own attention, without workers or archived tasks', () => {
+    // Variants count one per run, as the Tasks table counts them.
+    expect(sidebarCounts(fixture())).toEqual({ active: 2, automations: 4, activeWaiting: 0, automationsWaiting: 1 })
+    expect(sidebarCounts([])).toEqual({ active: 0, automations: 0, activeWaiting: 0, automationsWaiting: 0 })
+  })
 })

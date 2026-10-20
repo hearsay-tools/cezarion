@@ -107,7 +107,7 @@ describe('useSidebarArchive', () => {
     act(() => result.current.sweep('unpinned'))
     expect(result.current.sweeping).toBe('unpinned')
     await vi.waitFor(() => expect(toastMock).toHaveBeenCalledTimes(1))
-    expect(api.archiveProjectFinished).toHaveBeenCalledWith('p1', 'unpinned')
+    expect(api.archiveProjectFinished).toHaveBeenCalledWith('p1', 'unpinned', undefined)
     expect(toastMock.mock.calls[0]![0]).toBe('Archived 3 tasks')
     await vi.waitFor(() => expect(result.current.sweeping).toBeNull())
     await act(async () => { toastMock.mock.calls[0]![1].action.onAction() })

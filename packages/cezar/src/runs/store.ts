@@ -22,7 +22,9 @@ import {
   workerDestroyRetrySchema,
 } from '@open-mercato/cezar-contract/delegation';
 import {
+  automationIdOf,
   continuationMessageSchema,
+  isAutomationTask,
   toRunSummary,
   runRecordSchema as contractRunRecordSchema,
   runPullRequestSchema,
@@ -1386,6 +1388,17 @@ const LEGACY_REFERENCE_HEAL_SQL =
   "(json_extract(summary, '$.markerRefs.pr') IS NOT NULL AND json_extract(summary, '$.referencedPullRequestUrl') IS NULL)" +
   " OR (NOT EXISTS (SELECT 1 FROM meta WHERE key = 'issue-attribution:' || runs.id AND value = CAST(runs.revision AS TEXT)) AND json_extract(summary, '$.markerRefs.issue') IS NOT NULL)";
 
+/**
+ * Rows whose record names the automation that launched it while the stored summary does not
+ * (hearsay-tools/cezarion#1332): summaries a cezar wrote before `RunSummary.automationId`
+ * existed. Open rewrites each one's summary once, so the sidebar's Automations tab classifies a
+ * finished task nobody has opened since the upgrade. `instr` keeps the JSON parse off every
+ * other row.
+ */
+const AUTOMATION_ORIGIN_HEAL_SQL =
+  "instr(data, '\"automation') > 0 AND json_extract(summary, '$.automationId') IS NULL" +
+  " AND (json_extract(data, '$.automation.automationId') IS NOT NULL OR json_extract(data, '$.automationTrigger.automationId') IS NOT NULL)";
+
 /** Mark-all-read's rule (see `RunStore.markAllRead`) over the columns and the stored summary. */
 const MARK_ALL_READ_SQL = "archived = 0 AND status IN ('done', 'failed') AND finished_at IS NOT NULL" +
   " AND NOT (status = 'failed' AND json_extract(summary, '$.autoResumeAt') IS NOT NULL)" +
@@ -1606,12 +1619,14 @@ const startToken = (pid: number) => { const token = processStartToken(pid); retu
  *  then filtered by pin state. Mirrored clause for clause by `isSweepable` in the cockpit's
  *  `lib/tasks-table.ts`. */
 export function isSweepable(
-  run: Pick<RunRecord, 'archived' | 'status' | 'autoResumeAt' | 'pinned'> & { delegation?: { role: string } },
+  run: Pick<RunRecord, 'archived' | 'status' | 'autoResumeAt' | 'pinned'> & { delegation?: { role: string }; automationId?: string },
   scope?: ArchiveFinishedScope,
+  automation?: boolean,
 ): boolean {
   if (run.archived || !['done', 'failed', 'cancelled'].includes(run.status)) return false;
   if (run.status === 'failed' && run.autoResumeAt !== undefined) return false;
   if (run.delegation?.role === 'worker') return false;
+  if (automation !== undefined && isAutomationTask(run) !== automation) return false;
   if (scope === 'unpinned') return !run.pinned;
   if (scope === 'pinned') return run.pinned === true;
   return true;
@@ -1837,6 +1852,17 @@ export class RunStore extends EventEmitter {
           this.db!.getMeta(`issue-attribution:${row.id}`) !== String(row.revision);
         this.adoptLoadedRun(decoded, { keepLive: this.keepLive, onlyIfChanged: !needsIssueCheck }, row);
         if (needsIssueCheck) this.dirty.add(row.id);
+      }
+    }
+    const stale = this.db!.listWhere(AUTOMATION_ORIGIN_HEAL_SQL).filter((row) => !this.held.has(row.id));
+    const restamp = this.claimFamilies(stale.map(rowFamily));
+    for (const row of stale) {
+      if (!restamp.has(rowFamily(row))) continue;
+      const decoded = decode(row);
+      // Nothing in the record changes, only its summary: held dirty, the next save rewrites it.
+      if (decoded) {
+        this.adoptLoadedRun(decoded, { keepLive: this.keepLive }, row);
+        this.dirty.add(row.id);
       }
     }
     for (const rootId of this.anchoredFamilies()) this.holdFamily(rootId, decode);
@@ -3682,17 +3708,18 @@ export class RunStore extends EventEmitter {
   /** Bulk-archive finished runs (#780). `isSweepable` decides which; `archived` counts every
    *  record that flipped (cascaded workers included), `ids` lists the top-level runs picked and
    *  `pinnedIds` the subset that carried a pin before `clearPin` dropped it. */
-  archiveFinished(scope?: ArchiveFinishedScope): { archived: number; ids: string[]; pinnedIds: string[] } {
+  archiveFinished(scope?: ArchiveFinishedScope, automation?: boolean): { archived: number; ids: string[]; pinnedIds: string[] } {
     let archived = 0;
     // Snapshot first: cascade may archive still-live workers, mutating the held set, and the pin
     // has to be read before `applyArchived` clears it. Runs not in memory are picked off their
     // stored summary, which carries every field `isSweepable` reads.
     const picked: Array<readonly [Parameters<typeof isSweepable>[0] & { id: string }, ListOrder]> =
-      [...this.held.values()].filter((run) => isSweepable(run, scope)).map((run) => [run, this.listOrder(run)]);
+      [...this.held.values()].filter((run) => isSweepable({ ...run, automationId: automationIdOf(run) }, scope, automation))
+        .map((run) => [run, this.listOrder(run)]);
     for (const row of this.db?.listWhere("archived = 0 AND status IN ('done', 'failed', 'cancelled') AND parent_run_id IS NULL") ?? []) {
       if (this.held.has(row.id) || this.deleted.has(row.id)) continue;
       const summary = parseStoredSummary(row.summary);
-      if (summary && isSweepable(summary, scope)) picked.push([summary, row]);
+      if (summary && isSweepable(summary, scope, automation)) picked.push([summary, row]);
     }
     // Another process's runs are not this store's to archive (#779, plan step 3): they stay out.
     // A sweepable run is never a worker (`isSweepable`), so each is its own family.
