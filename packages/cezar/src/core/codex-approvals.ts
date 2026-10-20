@@ -56,7 +56,7 @@ const permissionsParams = common.extend({ cwd: z.string(), permissions: permissi
 // hearsay-tools/cezarion#1294: Codex asks before an MCP tool call with an elicitation
 // (codex-rs/core/src/mcp_tool_call.rs). Like Codex's own TUI, read one as a tool approval
 // only when its kind says so and its form asks for nothing; elicitations carry no item id.
-const messageOnlySchema = z.object({ type: z.literal('object'), properties: z.object({}).strict() }).passthrough().nullish();
+const messageOnlySchema = z.object({ type: z.literal('object'), properties: z.object({}).strict().optional() }).passthrough().nullish();
 const mcpToolParams = z.object({
   threadId: text, turnId: text, serverName: text, mode: z.literal('form'), message: z.string(), requestedSchema: messageOnlySchema,
   _meta: z.object({ codex_approval_kind: z.literal('mcp_tool_call'), persist: z.union([z.string(), z.array(z.string())]).optional() }).passthrough(),
