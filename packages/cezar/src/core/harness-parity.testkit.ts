@@ -63,6 +63,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `ask-reply-late` | native ask whose reply acknowledgement can lag the resumed turn |
  * | `ask-bad` | a malformed ask, and then still end the turn |
  * | `subagent` | child work and terminal signal, then parent monitoring text followed by late child text |
+ * | `forked-skill` | a skill call that runs as a native forked subagent: child work nested under the call, then its result and final text |
  * | `hook-after-park` | a mid-turn hook with context, a monitoring park, then a late hook (#961) |
  * | `steer-tool` | one slow tool; agent input sent while it runs is read before the turn ends (#505) |
  * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
@@ -128,6 +129,7 @@ export const SCENARIOS = [
   'ask-reply-late',
   'subagent',
   'subagent-after-park',
+  'forked-skill',
   'hook-after-park',
   'steer-tool',
   'steer-late',
@@ -349,6 +351,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-bad': 'mock:ask-bad',
       subagent: 'mock:subagents',
       'subagent-after-park': 'mock:subagent-after-park',
+      'forked-skill': 'mock:forked-skill',
       'hook-after-park': 'mock:hook-after-park',
       'steer-tool': 'mock:steer-tool',
       // A line written after the last model call runs as the CLI's next queued turn.
@@ -804,6 +807,21 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'U13', backend: 'cursor', kind: 'capability-absent',
     reason: 'Cursor print acknowledges agent input on the first model work of the process it spawns; the print wire has no rejection of an admitted prompt.',
   },
+  // D2 (hearsay-tools/cezarion#1284): a forked skill starts no native subagent in a
+  // restricted session. Each reason was checked against the installed CLI on 2026-10-20.
+  {
+    criterion: 'D2', backend: 'claude', kind: 'capability-absent',
+    reason: 'Claude Code 2.1.303 starts a `context: fork` skill\'s subagent from the Skill tool or a typed /name without consulting the Agent/Task deny rules; no Skill(...) rule, setting or hook can stop it while ordinary skills keep working (AGENT_PROTOCOL.md D1 forked-skill gap).',
+  },
+  ...([
+    ['codex', 'Codex 0.160.1 injects a selected skill into the same thread; its SKILL.md frontmatter (name, description, metadata) and agents/openai.yaml (interface, dependencies, policy) have no fork field. Native subagents start only through the multi-agent tools D1 disables.'],
+    ['opencode', 'OpenCode 1.18.35 skips the task permission only for a subtask part, which only POST /session/{id}/command creates, or after a user agent part. cezar posts text parts through prompt_async and never calls /command; the skill tool returns the skill\'s content in the same session.'],
+    ['pi', 'pi 1.0.4 reads skill frontmatter name, description and disable-model-invocation, and prompt-template description and argument-hint; both expand to text in the same session. pi has no native subagent primitive (D1 excludes the subagent extension), and /fork forks the conversation.'],
+    ['cursor', 'Cursor 2026.10.16-e3cb207 turns skill frontmatter (name, description, alwaysApply, disable-model-invocation, environments) into a rule the agent reads in the same conversation; no field forks. Native subagents start only through task_tool_call, which D1 leaves out of --allowed-tools.'],
+    ['omp', 'OMP 18.8.0 renders an invoked skill\'s SKILL.md body into a message in the same session, and slash-command frontmatter reads only description and argument-hint. Native subagents start only through task and eval, which D1 denies and drops from --tools.'],
+  ] as const).map(([backend, reason]) => ({
+    criterion: 'D2', backend, kind: 'scenario-unconstructible' as const, reason,
+  })),
 ];
 
 export function exemptionFor(criterion: string, backend: RunnerId): ParityExemption | undefined {
