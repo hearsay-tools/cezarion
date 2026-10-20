@@ -3032,24 +3032,55 @@ describe(`P7 ${PERMISSION_CRITERIA.find(c => c.id === 'P7')!.name} (hearsay-tool
 describe(`P8 ${PERMISSION_CRITERIA.find(c => c.id === 'P8')!.name} (hearsay-tools/cezarion#1266)`, () => {
   for (const backend of RUNNER_IDS) {
     if (permissionExemption('P8', backend, 'permission-late')) continue;
-    // The runner's own close (autoEndAfterFirstTurn), so the cell drives the seam. Through RunManager a
-    // non-final step also needs its turn boundary, which resuming the parked run clears.
-    it(`${backend} P8 holds the session for the late card and ends it once the answer is accepted`, async () => {
+    // A session's own close (autoEndAfterFirstTurn) lives at the seam.
+    it(`${backend} P8 reopens the turn for the late card and ends the session after that turn`, async () => {
       const observation = await driveSeam(backend, 'permission-late', {
         sessionOptions: { autoEndAfterFirstTurn: true },
         whileOpen: async (session, observed) => {
+          const turnEnds = () => observed.v1.filter(event => event.type === 'turn-end').length;
           await waitFor(() => observed.v2.some(event => event.type === 'permission.requested'));
-          expect(observed.v1.some(event => event.type === 'turn-end')).toBe(true);
+          expect(turnEnds()).toBe(1);
+          const started = observed.v2.flatMap((event, index) => event.type === 'turn.started' ? [index] : []);
+          expect(started).toHaveLength(2);
+          expect(observed.v2.findIndex(event => event.type === 'turn.completed')).toBeLessThan(started[1]!);
+          expect(started[1]!).toBeLessThan(observed.v2.findIndex(event => event.type === 'permission.requested'));
           expect(session.open).toBe(true);
           const request = observed.v2.find((event): event is PermissionRequestedEvent => event.type === 'permission.requested')!;
           const allow = request.options.find(option => option.label.toLowerCase().includes('allow once'))!;
           expect(session.respondPermission!(request.requestId, allow.id)).toBe(true);
           await waitFor(() => !session.open);
+          expect(turnEnds()).toBe(2);
         },
       });
       expect(observation.failure).toBeUndefined();
       expect(observation.v2.filter(event => event.type === 'permission.resolved'))
         .toEqual([expect.objectContaining({ optionId: expect.any(String) })]);
+      expect(observation.v2.filter(event => event.type === 'turn.completed')).toHaveLength(2);
+      expect(textEvents(observation.v1).join('\n')).toContain('Approval response: {"reply":"once"}');
+    }, 45_000);
+
+    // Through RunManager only a non-final step closes on its own; the second step proves it did.
+    it(`${backend} P8 lets the workflow advance past a non-final step whose late card is answered`, async () => {
+      let repoRoot = '';
+      const { pick } = HARNESS_ADAPTERS[backend].approvalDecisions![0]!;
+      const workflowDef: WorkflowDef = {
+        name: 'permission-late', source: 'built-in',
+        steps: [{ id: 'first', name: 'First', prompt: '{{task}}' }, { id: 'second', name: 'Second', prompt: promptFor(backend, 'done') }],
+      };
+      const observation = await driveRun(backend, 'permission-late', run => !!run && ['done', 'review'].includes(run.status), 30_000, undefined, {
+        workflowDef,
+        beforeStart: context => { repoRoot = context.repoRoot; },
+        during: async ({ store, manager, runId }) => {
+          await waitFor(() => store.readEvents(runId).some(event => event.type === 'permission.requested'));
+          expect(store.getRun(runId)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
+          const request = store.readEvents(runId).find(event => event.type === 'permission.requested')!;
+          const response = await answerThroughRoute(repoRoot, store, manager, runId, request, optionPicked(request, pick).id);
+          expect(response.status).toBe(200);
+        },
+      });
+      expect(permissionResolutionsOf(observation.events)).toEqual([expect.objectContaining({ optionId: expect.any(String) })]);
+      expect(observation.record?.hasPendingPermission).toBe(false);
+      expect(observation.record?.steps.map(step => [step.id, step.status])).toEqual([['first', 'done'], ['second', 'done']]);
     }, 45_000);
   }
 });

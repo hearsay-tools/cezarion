@@ -63,7 +63,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `approval-reply-fails` | the `approval` request, whose first answer the backend refuses to accept; a later answer ends the turn |
  * | `approval-malformed` | a malformed native permission request; the backend ends the turn with `CEZ:DONE` once it is refused |
  * | `permission-classify` | a request the backend settles while cezar reads its config, then a marker request (`CEZ_MOCK_RELEASE_FILE` gates) |
- * | `permission-late` | the turn ends with `CEZ:DONE`, then a native permission request arrives; its answer starts no turn |
+ * | `permission-late` | the turn ends with `CEZ:DONE`, then a native permission request from a run the server started; its answer resumes that run, which ends with `CEZ:DONE` |
  * | `ask` | an ask — native where the wire has one, a `CEZ:ASK` marker otherwise |
  * | `ask-resume` | accept one human answer, then finish with `CEZ:DONE` without another prompt |
  * | `plan-resume` | Legacy Cursor ACP `cursor/create_plan` variant (direct ACP tests) |
@@ -275,7 +275,7 @@ export const PERMISSION_CRITERIA = [
   { id: 'P5', scenario: 'approval-reply-fails', name: 'keeps a native request answerable when its answer is not accepted' },
   { id: 'P6', scenario: 'approval-malformed', name: 'refuses a malformed native request instead of hanging on it' },
   { id: 'P7', scenario: 'permission-classify', name: 'holds agent input from receipt and shows no card for a request settled before it' },
-  { id: 'P8', scenario: 'permission-late', name: 'ends a self-closing session once a request that arrived after its turn ended is answered' },
+  { id: 'P8', scenario: 'permission-late', name: 'reopens the turn for a request that arrives after it ended, and closes the step once it is answered' },
 ] as const;
 
 export interface HarnessAdapter {

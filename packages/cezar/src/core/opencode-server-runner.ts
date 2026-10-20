@@ -1363,6 +1363,13 @@ class OpencodeSession implements AgentSession {
     }
     if (this.handledPermissionIds.has(nativeId)) return;
     this.handledPermissionIds.add(nativeId);
+    // OpenCode asks only from inside a running session loop, so a main-session ask after the idle
+    // means the server started a run: reopen the turn, as a steered follow-on run does. That run's
+    // own idle closes it. A child session's ask leaves the main turn alone.
+    if (!this.turnActive && this.sessionId !== undefined && stringField(props, 'sessionID') === this.sessionId) {
+      this.openTurn();
+      this.emitUi(opencodeTurnStarted);
+    }
     const pending: PendingOpencodePermission = parsed.success
       ? { nativeId, ask: parsed.data, phase: 'classifying' }
       : { nativeId, phase: 'rejecting' };

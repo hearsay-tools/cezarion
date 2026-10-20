@@ -247,10 +247,9 @@ const sendQuestionPart = (input) =>
 /** hearsay-tools/cezarion#1266: OpenCode 1.18.35 `permission.asked`. No `session.idle`
  *  follows: the asking tool waits until `POST /permission/{id}/reply` answers it. */
 const pendingPermissionAsks = new Set();
-// hearsay-tools/cezarion#1266 lifecycle scenarios (harness parity P5, P7, P8).
+// hearsay-tools/cezarion#1266 lifecycle scenarios (harness parity P5, P7).
 let failPermissionReplies = 0;
 let classifyPending = false;
-const lateAsks = new Set();
 async function waitForMockFile(file) {
   const deadline = Date.now() + 15_000;
   while (!parityGateFs.existsSync(file)) {
@@ -363,12 +362,6 @@ const server = createServer((req, res) => {
       }
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end('true');
-      // P8: the turn already ended, so the answer settles the ask and starts nothing.
-      if (lateAsks.delete(id)) {
-        pendingPermissionAsks.delete(id);
-        send({ type: 'permission.replied', properties: { sessionID: SESSION_ID, requestID: id, reply } });
-        return;
-      }
       if (pendingPermissionAsks.delete(id)) setTimeout(() => {
         send({ type: 'permission.replied', properties: { sessionID: SESSION_ID, requestID: id, reply } });
         send({ type: 'message.part.updated', properties: { part: {
@@ -767,10 +760,10 @@ const server = createServer((req, res) => {
         return;
       }
       if (body.includes('mock:permission-late')) {
-        // P8: the ask lands right after the idle, inside the runner's auto-end delay.
+        // P8: the ask lands right after the idle, inside the runner's auto-end delay. As in real
+        // OpenCode, it comes from a run the server started, which the answer resumes and its idle ends.
         send({ type: 'message.updated', properties: { info: info({}) } });
         textPart('prt_late_done', 'The turn finished before the late request.\n\nCEZ:DONE');
-        lateAsks.add('per_mock_late');
         send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
         sendPermissionAsk('per_mock_late', 'bash', ['git push'], ['git push *']);
         return;

@@ -1132,12 +1132,15 @@ answers nothing. P5 answers through the HTTP route and the backend refuses the
 answer: a replacement card is published before the old one resolves, so the run
 stays `waiting` with `hasPendingPermission` set, and the replacement completes
 the run. P6 sends a malformed request, which cezar refuses natively (a JSON-RPC
-error, or an OpenCode `reject`) without a card while the turn goes on. P7 and P8
-drive the seam, because agent input and a session's own close
-(`autoEndAfterFirstTurn`) live there. P7 refuses agent input from receipt, while
+error, or an OpenCode `reject`) without a card while the turn goes on. P7 drives
+the seam, where agent input lives: it refuses agent input from receipt, while
 OpenCode reads its config to classify the ask, and shows no card for an ask
-OpenCode settles in that window. P8 holds a self-closing session open for a card
-that arrived after its turn ended, then ends it once the answer is accepted.
+OpenCode settles in that window. P8 sends a card after the turn ended. OpenCode
+asks only from a running session loop, so the runner reopens the turn
+(`turn.started`) for a main-session ask; the answer resumes that run, and its own
+`session.idle` ends the turn. At the seam, a self-closing session
+(`autoEndAfterFirstTurn`) then closes. Through `RunManager`, a non-final
+workflow step with such a card advances to the next step.
 Codex carries named exemptions for P5 (a JSON-RPC response gets no reply that
 could refuse it), P7 (its request is shown on receipt, with nothing to read
 first) and P8 (a request arrives only inside the turn it names). Wires with no

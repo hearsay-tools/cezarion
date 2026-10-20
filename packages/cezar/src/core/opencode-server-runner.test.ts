@@ -2101,56 +2101,78 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   });
 
   describe('auto-end after a permission that arrived once the turn ended', () => {
-    /** `session.idle` arms the auto-end; the ask lands inside its delay and must hold it. */
-    async function idleThenAsk(mock: Harness['mock'], uiEvents: UiEvent[]): Promise<PermissionRequested> {
+    const turnStarts = (uiEvents: UiEvent[]) => uiEvents.filter((e) => e.type === 'turn.started').length;
+    /** `session.idle` arms the auto-end; the ask lands inside its delay. OpenCode asks only from a
+     *  running session loop, so the ask reopens the turn, and that run's own idle closes it. */
+    async function idleThenAsk(mock: Harness['mock'], uiEvents: UiEvent[], events: AgentEvent[], sessionID = 'ses_test'): Promise<PermissionRequested> {
       await waitFor(() => mock.promptPosts.length === 1);
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
-      sendPermission(mock, permissionAsk('per_1', 'skill'));
+      sendPermission(mock, permissionAsk('per_1', 'skill', { sessionID }));
       await waitFor(() => permissionRequests(uiEvents).length === 1);
+      expect(count(events, 'turn-end')).toBe(1);
       return permissionRequests(uiEvents)[0]!;
     }
+    async function idleEnds(mock: Harness['mock'], events: AgentEvent[], session: Harness['session']): Promise<void> {
+      expect(session.open).toBe(true);
+      mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
+      await waitFor(() => !session.open);
+      expect(count(events, 'turn-end')).toBe(2);
+    }
 
-    it('ends once OpenCode reports the ask replied', async () => {
-      await withSession({ ...configured, autoEndAfterFirstTurn: true }, async ({ uiEvents, mock, session }) => {
-        const request = await idleThenAsk(mock, uiEvents);
-        expect(session.open).toBe(true);
+    it('ends after the reopened turn once OpenCode reports the ask replied', async () => {
+      await withSession({ ...configured, autoEndAfterFirstTurn: true }, async ({ events, uiEvents, mock, session }) => {
+        const request = await idleThenAsk(mock, uiEvents, events);
+        expect(turnStarts(uiEvents)).toBe(2);
         mock.send({ type: 'permission.replied', properties: { sessionID: 'ses_test', requestID: 'per_1', reply: 'once' } });
-        await waitFor(() => !session.open);
+        await waitFor(() => permissionResolutions(uiEvents).length === 1);
         expect(permissionResolutions(uiEvents)).toEqual([{ type: 'permission.resolved', requestId: request.requestId, reason: 'resolved by OpenCode' }]);
+        await idleEnds(mock, events, session);
       });
     });
 
-    it('ends once the human answer is accepted', async () => {
-      await withSession({ ...configured, autoEndAfterFirstTurn: true }, async ({ uiEvents, mock, session }) => {
-        const request = await idleThenAsk(mock, uiEvents);
-        expect(session.open).toBe(true);
+    it('ends after the reopened turn once the human answer is accepted', async () => {
+      await withSession({ ...configured, autoEndAfterFirstTurn: true }, async ({ events, uiEvents, mock, session }) => {
+        const request = await idleThenAsk(mock, uiEvents, events);
         const allowId = optionNamed(request, 'Allow once');
         expect(session.respondPermission!(request.requestId, allowId)).toBe(true);
-        await waitFor(() => !session.open);
+        await waitFor(() => permissionResolutions(uiEvents).length === 1);
         expect(permissionResolutions(uiEvents)).toEqual([{ type: 'permission.resolved', requestId: request.requestId, optionId: allowId }]);
+        await idleEnds(mock, events, session);
       });
     });
 
-    it('ends once a card the UI could not show is rejected', async () => {
+    it('ends after the reopened turn once a card the UI could not show is rejected', async () => {
       const onUiEvent = (e: UiEvent) => { if (e.type === 'permission.requested') throw new Error('ui down'); };
-      await withSession({ ...configured, autoEndAfterFirstTurn: true, onUiEvent }, async ({ uiEvents, mock, session }) => {
-        const request = await idleThenAsk(mock, uiEvents);
-        await waitFor(() => !session.open);
+      await withSession({ ...configured, autoEndAfterFirstTurn: true, onUiEvent }, async ({ events, uiEvents, mock, session }) => {
+        const request = await idleThenAsk(mock, uiEvents, events);
+        await waitFor(() => mock.permissionReplies.length === 1);
         expect(mock.permissionReplies).toEqual([{ path: '/permission/per_1/reply', body: { reply: 'reject', message: 'permission UI unavailable' } }]);
         expect(permissionResolutions(uiEvents)).toEqual([{ type: 'permission.resolved', requestId: request.requestId, reason: 'permission UI unavailable' }]);
+        await idleEnds(mock, events, session);
       });
     });
 
-    it('ends once a configured ask is rejected for want of a permission UI', async () => {
-      await withSession({ ...configured, autoEndAfterFirstTurn: true, noUi: true }, async ({ mock, session }) => {
+    it('ends after the reopened turn once a configured ask is rejected for want of a permission UI', async () => {
+      await withSession({ ...configured, autoEndAfterFirstTurn: true, noUi: true }, async ({ events, mock, session }) => {
         await waitFor(() => mock.promptPosts.length === 1);
         mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
         sendPermission(mock, permissionAsk('per_1', 'skill'));
-        await waitFor(() => !session.open);
+        await waitFor(() => mock.permissionReplies.length === 1);
         expect(mock.permissionReplies).toEqual([{
           path: '/permission/per_1/reply',
           body: { reply: 'reject', message: 'no permission UI is attached to this cezar session' },
         }]);
+        await idleEnds(mock, events, session);
+      });
+    });
+
+    it('leaves the main turn closed for a child session ask and ends once it is answered', async () => {
+      await withSession({ ...configured, autoEndAfterFirstTurn: true }, async ({ events, uiEvents, mock, session }) => {
+        const request = await idleThenAsk(mock, uiEvents, events, 'ses_child');
+        expect(turnStarts(uiEvents)).toBe(1);
+        expect(session.respondPermission!(request.requestId, optionNamed(request, 'Allow once'))).toBe(true);
+        await waitFor(() => !session.open);
+        expect(count(events, 'turn-end')).toBe(1);
       });
     });
   });
