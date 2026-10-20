@@ -166,6 +166,10 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     questionReplyStatus?: number;
     questionReplyDelayMs?: number;
     questionGetDelayMs?: number;
+    /** `GET /config` body; `'fail'` answers 500 (hearsay-tools/cezarion#1266). */
+    config?: unknown;
+    configDelayMs?: number;
+    permissionReplyStatus?: number;
   }
 
   /** In-process stand-in for `opencode serve`: just the endpoints the runner
@@ -179,6 +183,8 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     const questionReplies: Array<{ path: string; body: unknown }> = [];
     const questionRejects: Array<{ path: string; body: unknown }> = [];
     const pendingQuestions: unknown[] = [];
+    const configGets: number[] = [];
+    const permissionReplies: Array<{ path: string; body: unknown }> = [];
     let questionReplyStatus = opts.questionReplyStatus ?? 200;
     const server = createServer((req, res) => {
       const url = req.url ?? '';
@@ -204,6 +210,16 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
         res.writeHead(200, { 'content-type': 'application/json' });
         if (opts.questionGetDelayMs) setTimeout(() => res.end(JSON.stringify(pendingQuestions)), opts.questionGetDelayMs);
         else res.end(JSON.stringify(pendingQuestions));
+        return;
+      }
+      if (req.method === 'GET' && url === '/config') {
+        configGets.push(Date.now());
+        const answer = () => {
+          res.writeHead(opts.config === 'fail' ? 500 : 200, { 'content-type': 'application/json' });
+          res.end(opts.config === 'fail' ? '{}' : JSON.stringify(opts.config ?? {}));
+        };
+        if (opts.configDelayMs) setTimeout(answer, opts.configDelayMs);
+        else answer();
         return;
       }
       let body = '';
@@ -238,6 +254,12 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
           else reply();
           return;
         }
+        if (req.method === 'POST' && /^\/permission\/[^/]+\/reply$/.test(url)) {
+          permissionReplies.push({ path: url, body: JSON.parse(body || '{}') });
+          res.writeHead(opts.permissionReplyStatus ?? 200, { 'content-type': 'application/json' });
+          res.end('{}');
+          return;
+        }
         if (req.method === 'POST' && /^\/question\/[^/]+\/reject$/.test(url)) {
           questionRejects.push({ path: url, body: JSON.parse(body || '{}') });
           res.writeHead(200, { 'content-type': 'application/json' });
@@ -259,6 +281,8 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       questionReplies,
       questionRejects,
       pendingQuestions,
+      configGets,
+      permissionReplies,
       setQuestionReplyStatus(status: number): void {
         questionReplyStatus = status;
       },
@@ -371,6 +395,8 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       autoEndAfterFirstTurn?: boolean;
       effort?: string;
       model?: string;
+      /** Start the session without a v2 channel, as a headless caller does. */
+      noUi?: boolean;
     },
     run: (h: Harness) => Promise<void>,
   ): Promise<void> {
@@ -385,10 +411,12 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       {
         autoEndAfterFirstTurn: opts.autoEndAfterFirstTurn,
         onAgentInputReady: opts.onAgentInputReady,
-        onUiEvent: (e) => {
-          uiEvents.push(e);
-          opts.onUiEvent?.(e);
-        },
+        ...(opts.noUi ? {} : {
+          onUiEvent: (e: UiEvent) => {
+            uiEvents.push(e);
+            opts.onUiEvent?.(e);
+          },
+        }),
       },
     );
     try {
@@ -1662,6 +1690,164 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       await session.result;
       // The prompt never posts into a session that cannot hear its events.
       expect(count(events, 'turn-end')).toBe(0);
+    });
+  });
+
+  // ---- native permission asks (hearsay-tools/cezarion#1266) ---------------
+
+  type PermissionRequested = Extract<UiEvent, { type: 'permission.requested' }>;
+  const permissionAsk = (id: string, permission: string, extra: Record<string, unknown> = {}) => ({
+    id, sessionID: 'ses_test', permission, patterns: ['*'], metadata: {}, always: ['*'], ...extra,
+  });
+  const sendPermission = (mock: Harness['mock'], props: unknown) =>
+    mock.send({ type: 'permission.asked', properties: props });
+  const permissionRequests = (uiEvents: UiEvent[]) =>
+    uiEvents.filter((e): e is PermissionRequested => e.type === 'permission.requested');
+  const permissionResolutions = (uiEvents: UiEvent[]) => uiEvents.filter((e) => e.type === 'permission.resolved');
+  const notes = (events: AgentEvent[]) => events.flatMap((e) => e.type === 'note' ? [e.message] : []);
+  const optionNamed = (request: PermissionRequested, label: string) => request.options.find((o) => o.label === label)!.id;
+  const configured = { config: { permission: { skill: 'ask' } } };
+
+  it('answers an OpenCode default ask once without surfacing it', async () => {
+    await withSession({ config: {} }, async ({ events, uiEvents, mock }) => {
+      await waitFor(() => mock.promptPosts.length === 1);
+      sendPermission(mock, permissionAsk('per_1', 'external_directory', { patterns: ['/outside/*'] }));
+      sendPermission(mock, permissionAsk('per_2', 'doom_loop'));
+      await waitFor(() => mock.permissionReplies.length === 2 && notes(events).some((n) => /built-in permission asks/.test(n)));
+      expect(mock.permissionReplies).toEqual([
+        { path: '/permission/per_1/reply', body: { reply: 'once' } },
+        { path: '/permission/per_2/reply', body: { reply: 'once' } },
+      ]);
+      expect(permissionRequests(uiEvents)).toEqual([]);
+      expect(notes(events).filter((n) => /built-in permission asks/.test(n))).toHaveLength(1);
+      expect(mock.configGets).toHaveLength(1);
+    });
+  });
+
+  it('bridges a user-configured ask and replies with the chosen option', async () => {
+    await withSession(configured, async ({ uiEvents, mock, session }) => {
+      await waitFor(() => mock.promptPosts.length === 1);
+      sendPermission(mock, permissionAsk('per_1', 'skill', { patterns: ['brainstorming'] }));
+      await waitFor(() => permissionRequests(uiEvents).length === 1);
+      const [request] = permissionRequests(uiEvents);
+      expect(request!.options.map((o) => o.label)).toEqual(['Allow once', 'Allow always', 'Reject']);
+      expect(session.sendAgentMessage([{ type: 'text', text: 'x' }])).toBe(false);
+      const rejectId = optionNamed(request!, 'Reject');
+      expect(session.respondPermission!(request!.requestId, rejectId)).toBe(true);
+      await waitFor(() => mock.permissionReplies.length === 1);
+      expect(mock.permissionReplies.at(-1)).toEqual({ path: '/permission/per_1/reply', body: { reply: 'reject' } });
+      expect(permissionResolutions(uiEvents)).toEqual([{ type: 'permission.resolved', requestId: request!.requestId, optionId: rejectId }]);
+      expect(session.respondPermission!(request!.requestId, rejectId)).toBe(false);
+    });
+  });
+
+  it('bridges every ask when the OpenCode config cannot be read', async () => {
+    await withSession({ config: 'fail' }, async ({ events, uiEvents, mock }) => {
+      await waitFor(() => mock.promptPosts.length === 1);
+      sendPermission(mock, permissionAsk('per_1', 'external_directory', { patterns: ['/outside/*'] }));
+      await waitFor(() => permissionRequests(uiEvents).length === 1);
+      expect(mock.permissionReplies).toEqual([]);
+      expect(notes(events).some((n) => /could not read the OpenCode config/.test(n))).toBe(true);
+    });
+  });
+
+  it('rejects a configured ask when no permission UI is attached', async () => {
+    await withSession({ ...configured, noUi: true }, async ({ mock }) => {
+      await waitFor(() => mock.promptPosts.length === 1);
+      sendPermission(mock, permissionAsk('per_1', 'skill'));
+      await waitFor(() => mock.permissionReplies.length === 1);
+      expect(mock.permissionReplies).toEqual([{
+        path: '/permission/per_1/reply',
+        body: { reply: 'reject', message: 'no permission UI is attached to this cezar session' },
+      }]);
+    });
+  });
+
+  it('expires a pending permission when the turn ends', async () => {
+    await withSession(configured, async ({ events, uiEvents, mock, session }) => {
+      await waitFor(() => mock.promptPosts.length === 1);
+      sendPermission(mock, permissionAsk('per_1', 'skill'));
+      await waitFor(() => permissionRequests(uiEvents).length === 1);
+      const [request] = permissionRequests(uiEvents);
+      mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
+      await waitFor(() => count(events, 'turn-end') === 1);
+      expect(permissionResolutions(uiEvents)).toEqual([{ type: 'permission.resolved', requestId: request!.requestId, reason: 'turn ended' }]);
+      expect(session.respondPermission!(request!.requestId, optionNamed(request!, 'Allow once'))).toBe(false);
+      expect(mock.permissionReplies).toEqual([]);
+    });
+  });
+
+  it('expires a pending permission on interrupt', async () => {
+    await withSession(configured, async ({ uiEvents, mock, session }) => {
+      await waitFor(() => mock.promptPosts.length === 1);
+      sendPermission(mock, permissionAsk('per_1', 'skill'));
+      await waitFor(() => permissionRequests(uiEvents).length === 1);
+      const [request] = permissionRequests(uiEvents);
+      session.interrupt();
+      await session.result;
+      expect(permissionResolutions(uiEvents)).toEqual([{ type: 'permission.resolved', requestId: request!.requestId, reason: 'session ended' }]);
+      expect(session.respondPermission!(request!.requestId, optionNamed(request!, 'Allow once'))).toBe(false);
+      expect(mock.permissionReplies).toEqual([]);
+    });
+  });
+
+  it('resolves a pending permission that OpenCode reports replied', async () => {
+    await withSession(configured, async ({ uiEvents, mock }) => {
+      await waitFor(() => mock.promptPosts.length === 1);
+      sendPermission(mock, permissionAsk('per_1', 'skill'));
+      await waitFor(() => permissionRequests(uiEvents).length === 1);
+      const [request] = permissionRequests(uiEvents);
+      mock.send({ type: 'permission.replied', properties: { sessionID: 'ses_test', requestID: 'per_1', reply: 'once' } });
+      await waitFor(() => permissionResolutions(uiEvents).length === 1);
+      expect(permissionResolutions(uiEvents)).toEqual([{ type: 'permission.resolved', requestId: request!.requestId, reason: 'resolved by OpenCode' }]);
+    });
+  });
+
+  it('falls back to the cockpit when the automatic reply fails', async () => {
+    await withSession({ config: {}, permissionReplyStatus: 500 }, async ({ uiEvents, mock }) => {
+      await waitFor(() => mock.promptPosts.length === 1);
+      sendPermission(mock, permissionAsk('per_1', 'external_directory', { patterns: ['/outside/*'] }));
+      await waitFor(() => permissionRequests(uiEvents).length === 1);
+      expect(mock.permissionReplies).toEqual([{ path: '/permission/per_1/reply', body: { reply: 'once' } }]);
+    });
+  });
+
+  it('classifies asks that arrive during the config read in order', async () => {
+    let mockRef: Harness['mock'] | undefined;
+    const repliesAtBridge: number[] = [];
+    const onUiEvent = (e: UiEvent) => { if (e.type === 'permission.requested') repliesAtBridge.push(mockRef!.permissionReplies.length); };
+    // The delayed config read is what this test exercises: both asks arrive while it is in flight.
+    await withSession({ ...configured, configDelayMs: 200, onUiEvent }, async ({ uiEvents, mock }) => {
+      mockRef = mock;
+      await waitFor(() => mock.promptPosts.length === 1);
+      sendPermission(mock, permissionAsk('per_1', 'external_directory', { patterns: ['/outside/*'] }));
+      sendPermission(mock, permissionAsk('per_2', 'skill'));
+      await waitFor(() => permissionRequests(uiEvents).length === 1);
+      expect(mock.configGets).toHaveLength(1);
+      expect(mock.permissionReplies).toEqual([{ path: '/permission/per_1/reply', body: { reply: 'once' } }]);
+      expect(repliesAtBridge).toEqual([1]);
+      expect(JSON.parse(permissionRequests(uiEvents)[0]!.details!)).toMatchObject({ permission: 'skill' });
+    });
+  });
+
+  it('handles each native ask id once', async () => {
+    await withSession(configured, async ({ uiEvents, mock }) => {
+      await waitFor(() => mock.promptPosts.length === 1);
+      sendPermission(mock, permissionAsk('per_1', 'skill', { patterns: ['first'] }));
+      sendPermission(mock, permissionAsk('per_1', 'skill', { patterns: ['first'] }));
+      // Asks are handled in arrival order, so a later distinct ask's card proves the duplicate was handled.
+      sendPermission(mock, permissionAsk('per_2', 'skill', { patterns: ['later'] }));
+      await waitFor(() => permissionRequests(uiEvents).some((r) => r.details!.includes('later')));
+      expect(permissionRequests(uiEvents).filter((r) => r.details!.includes('first'))).toHaveLength(1);
+    });
+  });
+
+  it('answers default asks from a child session', async () => {
+    await withSession({ config: {} }, async ({ mock }) => {
+      await waitFor(() => mock.promptPosts.length === 1);
+      sendPermission(mock, permissionAsk('per_1', 'external_directory', { sessionID: 'ses_child', patterns: ['/outside/*'] }));
+      await waitFor(() => mock.permissionReplies.length === 1);
+      expect(mock.permissionReplies).toEqual([{ path: '/permission/per_1/reply', body: { reply: 'once' } }]);
     });
   });
 });
