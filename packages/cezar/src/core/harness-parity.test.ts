@@ -33,6 +33,7 @@ import { agentInputEventSchema } from '@open-mercato/cezar-contract/events';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import type { AgentInput } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
+import type { UiEvent } from './ui-events.ts';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -2847,6 +2848,208 @@ describe('default permission asks (hearsay-tools/cezarion#1266)', () => {
       expect(observation.record?.hasPendingPermission).toBeFalsy();
       expect(observation.events.filter(event => event.type === 'text').map(event => event.text).join('')).toContain('Approval response: {"reply":"once"}');
       expect(observation.events).toContainEqual(expect.objectContaining({ type: 'turn.completed' }));
+    }, 45_000);
+  }
+});
+
+// ---- the pending request's lifecycle (hearsay-tools/cezarion#1266, P3–P8) --------------------
+
+type PermissionRequestedEvent = Extract<UiEvent, { type: 'permission.requested' }>;
+type StoredEvent = Record<string, unknown>;
+const joinedText = (events: readonly StoredEvent[]) => events.filter(event => event.type === 'text').map(event => event.text).join('');
+const permissionResolutionsOf = (events: readonly StoredEvent[]) => events.filter(event => event.type === 'permission.resolved');
+
+/** Registers the exemption cell when there is one; P1's shape for every lifecycle criterion. */
+function permissionExemption(id: string, backend: RunnerId, scenario: ScenarioName): boolean {
+  const exemption = exemptionFor(id, backend);
+  if (!exemption) return false;
+  it(`${backend} ${id} exemption — ${exemption.reason}`, () => {
+    expect(exemption.kind).toBe('scenario-unconstructible');
+    expect(HARNESS_ADAPTERS[backend].scenarios[scenario]).toBeUndefined();
+  });
+  return true;
+}
+
+/** A fresh `CEZ_MOCK_RELEASE_FILE` path; the mock waits for the file before its next step. */
+async function withRelease<T>(body: (release: string) => Promise<T>): Promise<T> {
+  const dir = mkdtempSync(join(tmpdir(), 'cez-permission-'));
+  try { return await body(join(dir, 'release')); } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+function answerThroughRoute(repoRoot: string, store: RunStore, manager: Parameters<typeof createApp>[0]['manager'], runId: string,
+  request: StoredEvent, optionId: string): Promise<Response> {
+  return apiRequest(createApp({ repoRoot, store, manager, version: 'test' }), `/api/v1/runs/${runId}/permissions`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ requestId: request.requestId, optionId }),
+  });
+}
+
+const optionPicked = (request: StoredEvent, pick: string) =>
+  (request.options as Array<{ id: string; label: string }>).find(option => option.label.toLowerCase().includes(pick))!;
+
+const RETIREMENTS = [
+  { id: 'P3', scenario: 'approval-resolved', text: 'Native approval settled without a cockpit answer.' },
+  { id: 'P4', scenario: 'approval-turn-end', text: 'Turn ended with the approval still pending.' },
+] as const;
+
+for (const { id, scenario, text } of RETIREMENTS) {
+  describe(`${id} ${PERMISSION_CRITERIA.find(c => c.id === id)!.name} (hearsay-tools/cezarion#1266)`, () => {
+    for (const backend of RUNNER_IDS) {
+      if (permissionExemption(id, backend, scenario)) continue;
+      it(`${backend} ${id} retires the card, its capability and the run's pending permission`, async () => {
+        await withRelease(async (release) => {
+          let requestId = '';
+          const observation = await driveRun(backend, scenario, run => !!run && ['done', 'review'].includes(run.status), 30_000, undefined, {
+            env: { CEZ_MOCK_RELEASE_FILE: release },
+            during: async ({ store, manager, runId }) => {
+              await waitFor(() => store.readEvents(runId).some(event => event.type === 'permission.requested'));
+              const request = store.readEvents(runId).find(event => event.type === 'permission.requested')!;
+              requestId = request.requestId as string;
+              expect(store.getRun(runId)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
+              expect(manager.sendMessage(runId, [{ type: 'text', text: 'accept' }])).toBe(false);
+              writeFileSync(release, 'go');
+              await waitFor(() => store.readEvents(runId).some(event => event.type === 'permission.resolved' && event.requestId === requestId));
+              // The retired card answers nothing, whether or not the run has moved on yet.
+              expect(manager.respondPermission(runId, requestId, (request.options as Array<{ id: string }>)[0]!.id)).toBe(false);
+            },
+          });
+          const resolutions = permissionResolutionsOf(observation.events);
+          expect(resolutions).toEqual([expect.objectContaining({ requestId, reason: expect.any(String) })]);
+          expect(resolutions[0]).not.toHaveProperty('optionId');
+          expect(observation.record?.hasPendingPermission).toBe(false);
+          expect(joinedText(observation.events)).toContain(text);
+          expect(observation.events).toContainEqual(expect.objectContaining({ type: 'turn.completed' }));
+        });
+      }, 45_000);
+    }
+  });
+}
+
+describe(`P5 ${PERMISSION_CRITERIA.find(c => c.id === 'P5')!.name} (hearsay-tools/cezarion#1266)`, () => {
+  for (const backend of RUNNER_IDS) {
+    if (permissionExemption('P5', backend, 'approval-reply-fails')) continue;
+    it(`${backend} P5 replaces the card it could not deliver and keeps the run waiting`, async () => {
+      let repoRoot = '';
+      const { pick, echo } = HARNESS_ADAPTERS[backend].approvalDecisions![0]!;
+      let freshId = '';
+      const observation = await driveRun(backend, 'approval-reply-fails', run => !!run && ['done', 'review'].includes(run.status), 30_000, undefined, {
+        beforeStart: context => { repoRoot = context.repoRoot; },
+        during: async ({ store, manager, runId }) => {
+          const requests = () => store.readEvents(runId).filter(event => event.type === 'permission.requested');
+          await waitFor(() => requests().length === 1);
+          const first = requests()[0]!;
+          const firstChoice = optionPicked(first, pick);
+          // From the refused answer to the replacement card, the run never stops waiting on a card.
+          const changes: Array<{ status: string; hasPendingPermission?: boolean }> = [];
+          const recordChange = (record: RunRecord) => {
+            if (record.id === runId) changes.push({ status: record.status, hasPendingPermission: record.hasPendingPermission });
+          };
+          store.on('run', recordChange);
+          try {
+            const response = await answerThroughRoute(repoRoot, store, manager, runId, first, firstChoice.id);
+            expect(response.status).toBe(200);
+            expect(await response.json()).toEqual({ delivered: true });
+            await waitFor(() => requests().length === 2 &&
+              store.readEvents(runId).some(event => event.type === 'permission.resolved' && event.requestId === first.requestId));
+          } finally { store.off('run', recordChange); }
+          for (const change of changes) expect(change).toEqual({ status: 'waiting', hasPendingPermission: true });
+          const events = store.readEvents(runId);
+          const fresh = requests()[1]!;
+          freshId = fresh.requestId as string;
+          expect(freshId).not.toBe(first.requestId);
+          const oldResolution = events.findIndex(event => event.type === 'permission.resolved' && event.requestId === first.requestId);
+          expect(events.findIndex(event => event.type === 'permission.requested' && event.requestId === freshId)).toBeLessThan(oldResolution);
+          expect(events[oldResolution]).toMatchObject({ reason: expect.any(String) });
+          expect(events[oldResolution]).not.toHaveProperty('optionId');
+          expect(store.getRun(runId)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
+          expect(manager.respondPermission(runId, first.requestId as string, firstChoice.id)).toBe(false);
+          expect(manager.sendMessage(runId, [{ type: 'text', text: 'accept' }])).toBe(false);
+          const retry = await answerThroughRoute(repoRoot, store, manager, runId, fresh, optionPicked(fresh, pick).id);
+          expect(retry.status).toBe(200);
+        },
+      });
+      expect(permissionResolutionsOf(observation.events).filter(event => event.optionId !== undefined))
+        .toEqual([expect.objectContaining({ requestId: freshId, optionId: expect.any(String) })]);
+      expect(observation.record?.hasPendingPermission).toBe(false);
+      expect(joinedText(observation.events)).toContain(echo);
+      expect(observation.events).toContainEqual(expect.objectContaining({ type: 'turn.completed' }));
+    }, 45_000);
+  }
+});
+
+describe(`P6 ${PERMISSION_CRITERIA.find(c => c.id === 'P6')!.name} (hearsay-tools/cezarion#1266)`, () => {
+  for (const backend of RUNNER_IDS) {
+    if (permissionExemption('P6', backend, 'approval-malformed')) continue;
+    it(`${backend} P6 refuses the malformed request natively and the turn goes on`, async () => {
+      const observation = await driveRun(backend, 'approval-malformed', run => !!run && ['done', 'review'].includes(run.status), 30_000);
+      expect(observation.events.some(event => event.type === 'permission.requested')).toBe(false);
+      expect(observation.record?.hasPendingPermission).toBeFalsy();
+      expect(observation.statuses).not.toContain('waiting');
+      expect(joinedText(observation.events)).toContain(HARNESS_ADAPTERS[backend].malformedApprovalEcho!);
+      expect(observation.events).toContainEqual(expect.objectContaining({ type: 'turn.completed' }));
+    }, 45_000);
+  }
+});
+
+describe(`P7 ${PERMISSION_CRITERIA.find(c => c.id === 'P7')!.name} (hearsay-tools/cezarion#1266)`, () => {
+  for (const backend of RUNNER_IDS) {
+    if (permissionExemption('P7', backend, 'permission-classify')) continue;
+    // Agent input reaches a session only through `sendAgentMessage`, so the cell drives the seam.
+    it(`${backend} P7 refuses agent input before the card and drops the request settled meanwhile`, async () => {
+      await withRelease(async (release) => {
+        const argsFile = `${release}.args.ndjson`;
+        let inputReady = 0;
+        const observation = await driveSeam(backend, 'permission-classify', {
+          spec: { env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_ARGS_FILE: argsFile, CEZ_MOCK_RELEASE_FILE: release } },
+          sessionOptions: { onAgentInputReady: () => { inputReady += 1; } },
+          whileOpen: async (session, observed) => {
+            await waitFor(() => existsSync(`${release}.config-read`));
+            expect(session.sendAgentMessage([{ type: 'text', text: 'steer' }])).toBe(false);
+            const before = inputReady;
+            writeFileSync(`${release}.settle`, 'go');
+            // SSE frames are handled in order: the text after the native reply proves it was read.
+            await waitFor(() => observed.v2.some(event => JSON.stringify(event).includes('OpenCode settled the ask itself.')));
+            await waitFor(() => inputReady > before);
+            writeFileSync(release, 'go');
+            await waitFor(() => observed.v2.some(event => event.type === 'permission.requested'));
+            const requests = observed.v2.filter((event): event is PermissionRequestedEvent => event.type === 'permission.requested');
+            expect(requests).toHaveLength(1);
+            expect(JSON.parse(requests[0]!.details!)).toMatchObject({ patterns: ['marker'] });
+            const allow = requests[0]!.options.find(option => option.label.toLowerCase().includes('allow once'))!;
+            expect(session.respondPermission!(requests[0]!.requestId, allow.id)).toBe(true);
+            await waitFor(() => observed.v1.some(event => event.type === 'turn-end'));
+          },
+        });
+        expect(observation.failure).toBeUndefined();
+        const urls = readFileSync(argsFile, 'utf8').split('\n').filter(Boolean).map(line => (JSON.parse(line) as { url?: string }).url);
+        expect(urls).not.toContain('/permission/per_mock_classify/reply');
+        expect(urls).toContain('/permission/per_mock_marker/reply');
+      });
+    }, 45_000);
+  }
+});
+
+describe(`P8 ${PERMISSION_CRITERIA.find(c => c.id === 'P8')!.name} (hearsay-tools/cezarion#1266)`, () => {
+  for (const backend of RUNNER_IDS) {
+    if (permissionExemption('P8', backend, 'permission-late')) continue;
+    // The runner's own close (autoEndAfterFirstTurn), so the cell drives the seam. Through RunManager a
+    // non-final step also needs its turn boundary, which resuming the parked run clears.
+    it(`${backend} P8 holds the session for the late card and ends it once the answer is accepted`, async () => {
+      const observation = await driveSeam(backend, 'permission-late', {
+        sessionOptions: { autoEndAfterFirstTurn: true },
+        whileOpen: async (session, observed) => {
+          await waitFor(() => observed.v2.some(event => event.type === 'permission.requested'));
+          expect(observed.v1.some(event => event.type === 'turn-end')).toBe(true);
+          expect(session.open).toBe(true);
+          const request = observed.v2.find((event): event is PermissionRequestedEvent => event.type === 'permission.requested')!;
+          const allow = request.options.find(option => option.label.toLowerCase().includes('allow once'))!;
+          expect(session.respondPermission!(request.requestId, allow.id)).toBe(true);
+          await waitFor(() => !session.open);
+        },
+      });
+      expect(observation.failure).toBeUndefined();
+      expect(observation.v2.filter(event => event.type === 'permission.resolved'))
+        .toEqual([expect.objectContaining({ optionId: expect.any(String) })]);
     }, 45_000);
   }
 });

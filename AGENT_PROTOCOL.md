@@ -1122,6 +1122,27 @@ per session from `GET /config`; an unreadable config sends every ask to the
 cockpit, and no reply is ever `always`. Wires with no built-in ask that cezar
 answers carry named exemptions.
 
+**P3–P8** (hearsay-tools/cezarion#1266) pin the pending request's lifecycle: a
+native request holds from its receipt until the backend settles it. P3 to P6 run
+through `RunManager`. P3 retires a card the backend settles itself (Codex
+`serverRequest/resolved`, OpenCode `permission.replied`), and P4 retires one
+still pending when its turn ends. In both, `permission.resolved` carries a reason
+and no option, `hasPendingPermission` clears, and the retired card's option
+answers nothing. P5 answers through the HTTP route and the backend refuses the
+answer: a replacement card is published before the old one resolves, so the run
+stays `waiting` with `hasPendingPermission` set, and the replacement completes
+the run. P6 sends a malformed request, which cezar refuses natively (a JSON-RPC
+error, or an OpenCode `reject`) without a card while the turn goes on. P7 and P8
+drive the seam, because agent input and a session's own close
+(`autoEndAfterFirstTurn`) live there. P7 refuses agent input from receipt, while
+OpenCode reads its config to classify the ask, and shows no card for an ask
+OpenCode settles in that window. P8 holds a self-closing session open for a card
+that arrived after its turn ended, then ends it once the answer is accepted.
+Codex carries named exemptions for P5 (a JSON-RPC response gets no reply that
+could refuse it), P7 (its request is shown on receipt, with nothing to read
+first) and P8 (a request arrives only inside the turn it names). Wires with no
+native permission request carry P1's exemption for each row.
+
 
 **R72/R73** (hearsay-tools/cezarion#994), in `workflows/ci-wait-failure-parity.test.ts`,
 drive every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native provider-error

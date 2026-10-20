@@ -247,6 +247,20 @@ const sendQuestionPart = (input) =>
 /** hearsay-tools/cezarion#1266: OpenCode 1.18.35 `permission.asked`. No `session.idle`
  *  follows: the asking tool waits until `POST /permission/{id}/reply` answers it. */
 const pendingPermissionAsks = new Set();
+// hearsay-tools/cezarion#1266 lifecycle scenarios (harness parity P5, P7, P8).
+let failPermissionReplies = 0;
+let classifyPending = false;
+const lateAsks = new Set();
+async function waitForMockFile(file) {
+  const deadline = Date.now() + 15_000;
+  while (!parityGateFs.existsSync(file)) {
+    if (Date.now() > deadline) throw new Error(`${file} was not created`);
+    await new Promise(r => setTimeout(r, 10));
+  }
+}
+const textPart = (id, text) => send({ type: 'message.part.updated', properties: { part: {
+  id, messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text, time: { start: 1, end: 2 },
+} } });
 const sendPermissionAsk = (id, permission, patterns, always) => {
   pendingPermissionAsks.add(id);
   send({ type: 'permission.asked', properties: {
@@ -286,8 +300,25 @@ const server = createServer((req, res) => {
   // Only user-written config, as the real server returns it: this user configured `bash: ask`,
   // so `mock:approval` reaches the cockpit and the built-in `mock:permission-default` ask does not.
   if (req.method === 'GET' && url === '/config') {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ permission: { bash: 'ask' } }));
+    const answer = () => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ permission: { bash: 'ask' } }));
+    };
+    if (!classifyPending) { answer(); return; }
+    // P7: hold the config read, settle the ask natively while cezar classifies it, then send a
+    // marker ask. Files beside CEZ_MOCK_RELEASE_FILE hand each step to the test and back.
+    classifyPending = false;
+    const release = process.env.CEZ_MOCK_RELEASE_FILE;
+    void (async () => {
+      parityGateFs.writeFileSync(`${release}.config-read`, '');
+      await waitForMockFile(`${release}.settle`);
+      pendingPermissionAsks.delete('per_mock_classify');
+      send({ type: 'permission.replied', properties: { sessionID: SESSION_ID, requestID: 'per_mock_classify', reply: 'reject' } });
+      textPart('prt_classify_settled', 'OpenCode settled the ask itself.');
+      await waitForMockFile(release);
+      answer();
+      sendPermissionAsk('per_mock_marker', 'bash', ['marker'], ['marker']);
+    })();
     return;
   }
   if (req.method === 'GET' && url.startsWith('/event')) {
@@ -323,8 +354,21 @@ const server = createServer((req, res) => {
       // The reply resumes the held turn, then its own session.idle ends it, as a question reply does.
       const id = decodeURIComponent(permissionReply[1]);
       const reply = body ? JSON.parse(body).reply : undefined;
+      // P5: refuse the first answer; the ask stays pending, as a failed reply leaves it.
+      if (failPermissionReplies > 0 && pendingPermissionAsks.has(id)) {
+        failPermissionReplies -= 1;
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'mock: reply refused' }));
+        return;
+      }
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end('true');
+      // P8: the turn already ended, so the answer settles the ask and starts nothing.
+      if (lateAsks.delete(id)) {
+        pendingPermissionAsks.delete(id);
+        send({ type: 'permission.replied', properties: { sessionID: SESSION_ID, requestID: id, reply } });
+        return;
+      }
       if (pendingPermissionAsks.delete(id)) setTimeout(() => {
         send({ type: 'permission.replied', properties: { sessionID: SESSION_ID, requestID: id, reply } });
         send({ type: 'message.part.updated', properties: { part: {
@@ -686,6 +730,50 @@ const server = createServer((req, res) => {
           send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
           return;
         }
+      }
+      if (body.includes('mock:approval-resolved') || body.includes('mock:approval-turn-end')) {
+        // P3/P4: OpenCode settles the ask itself, or the turn ends around it, once the test releases it.
+        const resolved = body.includes('mock:approval-resolved');
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        sendPermissionAsk('per_mock_1', 'bash', ['git status --short'], ['git status *']);
+        await waitForMockRelease();
+        pendingPermissionAsks.delete('per_mock_1');
+        if (resolved) send({ type: 'permission.replied', properties: { sessionID: SESSION_ID, requestID: 'per_mock_1', reply: 'once' } });
+        textPart('prt_approval_settled', resolved ? 'Native approval settled without a cockpit answer.\n\nCEZ:DONE'
+          : 'Turn ended with the approval still pending.\n\nCEZ:DONE');
+        send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+        return;
+      }
+      if (body.includes('mock:approval-reply-fails')) {
+        failPermissionReplies = 1;
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        sendPermissionAsk('per_mock_1', 'bash', ['git status --short'], ['git status *']);
+        return;
+      }
+      if (body.includes('mock:permission-malformed')) {
+        // P6: `patterns` must be an array; cezar rejects the ask by its id.
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        pendingPermissionAsks.add('per_mock_bad');
+        send({ type: 'permission.asked', properties: {
+          id: 'per_mock_bad', sessionID: SESSION_ID, permission: 'bash', patterns: 'git status --short', metadata: {},
+          always: ['git status *'], tool: { messageID: MESSAGE_ID, callID: 'call_mock_bash' },
+        } });
+        return;
+      }
+      if (body.includes('mock:permission-classify')) {
+        classifyPending = true;
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        sendPermissionAsk('per_mock_classify', 'bash', ['git status --short'], ['git status *']);
+        return;
+      }
+      if (body.includes('mock:permission-late')) {
+        // P8: the ask lands right after the idle, inside the runner's auto-end delay.
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        textPart('prt_late_done', 'The turn finished before the late request.\n\nCEZ:DONE');
+        lateAsks.add('per_mock_late');
+        send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+        sendPermissionAsk('per_mock_late', 'bash', ['git push'], ['git push *']);
+        return;
       }
       if (body.includes('mock:permission-default')) {
         send({ type: 'message.updated', properties: { info: info({}) } });
