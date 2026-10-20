@@ -621,6 +621,11 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     expect(f.manager.continueRun(worker.id, { text: 'again' })).toMatchObject({ ok: false, error: expect.stringContaining('identity') });
     expect(sessions).toHaveLength(1);
   });
+  // A parent whose session closes with a live worker owes the refusal its done got, and the
+  // scheduler continuation reopens it to deliver it (hearsay-tools/cezarion#1301, design
+  // 2026-10-19-worker-waits-phase-3b § A blocked done at a turn end, "A closed session"): that
+  // continuation is the parent's next session, where a human Continue used to be.
+  const owesRefusal = (runId: string) => f.store.getRun(runId)?.agentInputs?.some(input => input.source === 'lifecycle' && !input.deliveredAt) === true;
   async function startSkillParent() {
     const dir = join(f.root, '.ai/cezar/skills'); mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'parent-skill.md'), 'PARENT SKILL BODY 778');
@@ -647,8 +652,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   it('gives first-session and post-Continue spawns the same inherited prompt', async () => {
     const { parent, caller, pump } = await startSkillParent();
     const first = await controller.service.spawn(caller, { task: 'first', baseline: 'HEAD', requestId: randomUUID() });
-    sessions[0]!.finish(); await until(() => !f.manager.isActive(parent.id));
-    expect(f.manager.continueRun(parent.id, { text: 'continue' }).ok).toBe(true);
+    sessions[0]!.finish(); await until(() => owesRefusal(parent.id));
     pump.mockRestore(); await (f.manager as unknown as { pump(): Promise<void> }).pump();
     await until(() => sessions.some(s => s !== sessions[0] && s.spec.env?.CEZ_TASK_ID === parent.id));
     vi.spyOn(f.manager as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
@@ -705,16 +709,14 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     f.store.updateRun(run.id, { model: 'sonnet', systemPrompt: 'changed parent' }); f.store.flush();
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     expect(reopened.getRun(child.workerId)).toMatchObject({ model: 'haiku', systemPrompt: 'parent restriction', workflowDef: { steps: [{ allowedTools: ['Read', 'Bash'], bashAllowlist: ['git status'] }] } }); reopened.flush();
-    first.finish(); await until(() => !f.manager.isActive(run.id));
+    first.finish(); await until(() => owesRefusal(run.id));
     expect(controller.credentials.authenticate(token)).toBeUndefined();
-    pump.mockRestore();
-    expect(f.manager.continueRun(run.id, { text: 'continue' }).ok).toBe(true);
-    await until(() => sessions.length >= 2);
+    pump.mockRestore(); await (f.manager as unknown as { pump(): Promise<void> }).pump();
+    await until(() => sessions.some(s => s !== first && s.spec.cwd === f.root));
     const second = sessions.find(s => s !== first && s.spec.cwd === f.root)!;
     expect(second.spec.env?.CEZ_DELEGATION_TOKEN).not.toBe(token);
     expect(controller.credentials.authenticate(second.spec.env?.CEZ_DELEGATION_TOKEN!)).toMatchObject({ runId: run.id });
-    second.finish(); await until(() => !f.manager.isActive(run.id));
-    expect(controller.credentials.authenticate(second.spec.env?.CEZ_DELEGATION_TOKEN!)).toBeUndefined();
+    second.finish(); await until(() => controller.credentials.authenticate(second.spec.env?.CEZ_DELEGATION_TOKEN!) === undefined);
   });
   it('keeps an empty tool grant and absent prompt pinned after acceptance and on worker Continue', async () => {
     const workflow = { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!, allowedTools: [], bashAllowlist: [] }] };
