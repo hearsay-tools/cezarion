@@ -314,6 +314,21 @@ the repo root, lists that spec:
 grep -lE 'link-safety|data-streamdown|thread-markdown' packages/web/e2e/*.e2e.ts
 ```
 
+Specs also assert on visible text, and the attribute grep does not find those
+assertions. When a cockpit change adds, renames or removes visible copy (a label,
+a tab, a heading, a button, an empty state), also grep the specs for that copy.
+Grep both the new and the old string: a spec can assert that text is present,
+and a spec can assert that it is absent. In hearsay-tools/cezarion#1335 the
+sidebar got a new tab labelled "Automations". The attribute grep found
+`quick-list.e2e.ts` and `mobile-task-controls.e2e.ts`, and both passed locally.
+`automations.e2e.ts` asserts that the sidebar does not show "Automations" while
+the feature is off, and it failed only in CI. This grep, run from the repo root,
+lists that spec:
+
+```bash
+grep -lF 'Automations' packages/web/e2e/*.e2e.ts
+```
+
 **In a unit test, a timeout is a hang guard, never the thing the test waits on.**
 Wait for the product's own signal: an event, a callback, a store write, a file
 the fixture publishes. A test that proves something did NOT happen moves past
