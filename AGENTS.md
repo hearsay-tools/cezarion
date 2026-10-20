@@ -78,6 +78,26 @@ exit must also say so. For example,
 its list of input mechanisms and exits does not enumerate the transitions out of
 every state the change retains.
 
+**Commit an outcome with what it depends on, or after it.** A write that records
+an outcome (`delivered`, `charged`, `settled`, `answered`) must commit atomically
+with the write holding what that outcome needs, or after that write commits.
+Check every crash boundary between the writes: a delivered answer must already
+be saved, and a delivered automatic wake must already be charged. A best-effort
+write in a cleanup path must never throw past the cleanup and prevent it from
+finishing. Test the boundary by reading the **committed row** at the point a crash
+would hit, rather than checking only the final state or the in-memory object.
+hearsay-tools/cezarion#1250 is the worked example: its review caught a wake delivered
+without its charge, a counter write blocking Finish, and a Continue settling its
+human wait before saving `continuationMessage`.
+
+**Test the path with no live session.** When changing a path that reads
+`this.active.get(runId)`, add a test with no session. Restart recovery and
+scheduler continuations can reach the path before a session exists; an absent
+entry must still produce the required durable outcome and a usable next step.
+hearsay-tools/cezarion#1250 is the worked example: recovery used wording that assumed
+cezar tools, a timer resumed a continuation without its tool controller, and a
+wake at the budget cap cancelled its timer without opening the budget wait.
+
 **Find every construction site of a shared in-memory object — grep the TYPE, not the
 field.** `ActiveRun` is built in `execute` AND in `runContinuation`; open-mercato/cezar#811 populated
 `state.skills` in the first only, so registry `/skill` expansion worked on new tasks and
