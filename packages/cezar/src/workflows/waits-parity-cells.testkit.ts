@@ -216,16 +216,20 @@ async function conversingParent(runner: RunnerId) {
 
 const timerText = (wait: Wait, note: string) => `Timer ${wait.id} fired: ${note}. Continue toward the task goal; register another wait if you are still waiting.`;
 
-// The cells take one runner shard each: one file runs serially, and every runner's cells in one
-// file outgrew a CI shard's time limit (hearsay-tools/cezarion#1301). The criteria guard and the
-// single-runner cells run once, in shard 0.
-export function describeWaitParity(shard: number, of: number): void {
-  const runners = RUNNER_IDS.filter((_, index) => index % of === shard);
+// Each runner's cells run from their own `waits-<runner>-parity.test.ts`: one file runs serially,
+// and every runner's cells in one file outgrew a CI shard's time limit (hearsay-tools/cezarion#1301).
+// `waits-parity.test.ts` runs the criteria guard and the single-runner cells.
+export function describeWaitParity(scope: RunnerId | 'once'): void {
+  const runners: RunnerId[] = scope === 'once' ? [] : [scope];
   describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', { timeout: 45_000 }, () => {
     useWorkerWaitFixture();
     afterEach(() => vi.restoreAllMocks());
 
-    if (shard === 0) {
+    if (scope === 'once') {
+      it('runs every runner\'s cells from its own file', () => {
+        for (const runner of RUNNER_IDS) expect(existsSync(new URL(`./waits-${runner}-parity.test.ts`, import.meta.url)), runner).toBe(true);
+      });
+
       it('registers every criterion', () => {
         expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U25']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
@@ -2016,7 +2020,7 @@ export function describeWaitParity(shard: number, of: number): void {
       });
     }
 
-    if (shard !== 0) return;
+    if (scope !== 'once') return;
     // hearsay-tools/cezarion#1301: a run owes at most one refusal. A gate that refuses the done again
     // while the queued copy waits out a failed delivery's backoff adds no second copy and no charge.
     it('a done blocked again while its queued refusal is owed queues no second copy', async () => {

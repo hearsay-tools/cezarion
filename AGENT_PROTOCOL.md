@@ -1149,7 +1149,7 @@ exemptions or normalized-event injection.
 wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
 normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`, `cezar_ask`,
 `cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
-`workflows/waits-parity.testkit.ts`, run by `workflows/waits-parity-cells.testkit.ts`, one shard of `RUNNER_IDS` per file (`waits-parity.test.ts`, `waits-shard-1-parity.test.ts`, `waits-shard-2-parity.test.ts`). U1
+`workflows/waits-parity.testkit.ts`, defined in `workflows/waits-parity-cells.testkit.ts` and run from one `waits-<runner>-parity.test.ts` per runner, with the criteria guard in `waits-parity.test.ts`. U1
 registers a CI wait and a timer through `cezar_wait`, parks, and wakes with each result.
 U2 opens both: the timer wakes, the CI wait stays open and is in that turn's footer,
 the turn end re-parks without a new registration, and the later CI result is

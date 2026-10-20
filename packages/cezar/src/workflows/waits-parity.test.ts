@@ -1,4 +1,5 @@
 import { describeWaitParity } from './waits-parity-cells.testkit.ts';
 
-// Shard 1 of 3 of the wait list's RUNNER_IDS cells (hearsay-tools/cezarion#1301).
-describeWaitParity(0, 3);
+// The wait list's criteria guard and single-runner cells; each runner's RUNNER_IDS cells run from
+// `waits-<runner>-parity.test.ts` (hearsay-tools/cezarion#1301).
+describeWaitParity('once');
