@@ -58,6 +58,7 @@ export const WAIT_CRITERIA = [
   { id: 'U21a', scenario: 'autonomous-cap', name: 'an autonomous parent\'s ignored refusal is nudged again until the budget' },
   { id: 'U22', scenario: 'baseline', name: 'a done blocked after the session closed reopens it and delivers the refusal' },
   { id: 'U24', scenario: 'baseline', name: 'a worker\'s second no-wait turn end asks its parent, and the reply resumes it' },
+  { id: 'U25', scenario: 'baseline', name: 'an automatic message supersedes a worker\'s fallback question' },
 ] as const;
 
 /** The native mocks' `mock:cezar-tool` prompt: one cezar tool call through the runner's own wire.

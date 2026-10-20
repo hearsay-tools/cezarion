@@ -206,7 +206,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U21', 'U21r', 'U21m', 'U21h', 'U21a', 'U22', 'U24']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U21', 'U21r', 'U21m', 'U21h', 'U21a', 'U22', 'U24', 'U25']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -1640,6 +1640,37 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(store.readEvents(w.id).filter(event => event.type === 'note' && String(event.message).startsWith(WORKER_FALLBACK_REPLY_NOTE)))
         .toEqual([expect.objectContaining({ message: `${WORKER_FALLBACK_REPLY_NOTE} (${wakes + 1}/${MAX_AUTO_CONTINUES})` })]);
       await until(() => prompted(runner, `${WORKER_FALLBACK_HEADER}: cez-dev`).length > 0);
+    });
+
+    // hearsay-tools/cezarion#1301: an automatic message to a worker supersedes Cezar's pending fallback
+    // question, as the plain park it replaced let it through: it reaches the wire, the routed request
+    // gets an outcome, and the parent's done is no longer blocked by the question.
+    it(`${runner} U25 an automatic message supersedes a worker's fallback question`, async () => {
+      process.env.CEZ_DELEGATION = '1';
+      nativeWire(runner);
+      const p = await parent(HARNESS_ADAPTERS[runner].scenarios.baseline!, runner);
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+      const delegation = store.getRun(p.id)!.delegation!;
+      if (delegation.role !== 'root') throw Error('root fixture');
+      store.commitDelegation([{ id: p.id, delegation: { ...delegation, permissions: [...delegation.permissions, 'steer'] } }]);
+      const w = await worker(p.id, HARNESS_ADAPTERS[runner].scenarios.baseline!, runner);
+      manager.enqueueOwnedRun(w.id);
+      const routed = () => store.readEvents(w.id).find(event => event.type === 'worker-question-routed');
+      await until(() => routed() !== undefined && store.getRun(w.id)?.status === 'waiting');
+      const askSeq = asks(w.id)[0]!.seq;
+      const requestId = String(routed()!.messageId);
+      const unanswered = () => (manager as unknown as { unansweredQuestions(id: string): { workerId: string }[] }).unansweredQuestions(p.id);
+      expect(unanswered()).toEqual([expect.objectContaining({ workerId: w.id })]);
+      const text = 'automatic steer U25';
+      expect((manager as unknown as { deliverMessage(id: string, content: unknown[], userAuthored: boolean): boolean })
+        .deliverMessage(w.id, [{ type: 'text', text }], false)).toBe(true);
+      await until(() => prompted(runner, text).length > 0);
+      expect(store.readEvents(w.id).filter(event => event.type === 'human-ask-closed'))
+        .toEqual([expect.objectContaining({ askSeq, reason: 'superseded' })]);
+      const conversation = (store.getRun(p.id)!.delegation as { conversation?: { outcomes: Array<{ requestId: string }> } }).conversation;
+      expect(conversation?.outcomes.filter(outcome => outcome.requestId === requestId)).toHaveLength(1);
+      expect(unanswered()).toEqual([]);
+      expect(humanOpen(w.id)).toEqual([]);
     });
   }
 
