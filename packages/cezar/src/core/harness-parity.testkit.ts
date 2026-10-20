@@ -639,7 +639,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   })),
   ...(['R44', 'R45'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion, backend, kind: 'scenario-unconstructible' as const,
-    reason: 'The OpenCode server-wide unscoped session.error UnknownError skill-discovery diagnostic has no equivalent on this native wire. R2/R46 retain native provider failure coverage.',
+    reason: 'The OpenCode server-wide unscoped session.error UnknownError skill diagnostics (an unreadable skill file, or a skill with malformed YAML frontmatter) have no equivalent on this native wire. R2/R46 retain native provider failure coverage.',
   }))),
   ...(['H2'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'omp'] as const).map(backend => ({
     criterion, backend, kind: 'capability-absent' as const,
