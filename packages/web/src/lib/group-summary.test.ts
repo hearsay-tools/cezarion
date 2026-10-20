@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { summaryOf } from '@/test/run-summary-fixture'
+import { timerWait, workerWait } from '@/test/wait-fixtures'
 import { describe, expect, it } from 'vitest'
 
 import type { RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
@@ -15,7 +16,8 @@ function run(over: Partial<RunRecord> = {}): RunSummary {
 }
 const parked = (): Partial<RunRecord> => ({
   status: 'waiting',
-  delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'w', workerIds: ['00000000-0000-4000-8000-000000000001'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } },
+  delegation: { role: 'root', permissions: [], receipts: [] },
+  waits: [workerWait()],
 } as Partial<RunRecord>)
 
 describe('attentionFamily', () => {
@@ -41,7 +43,7 @@ describe('groupFamilies (the aggregate in words)', () => {
     expect(groupFamilies([run({ status: 'done' }), run({ status: 'review' }), run({ status: 'queued' })])).toEqual(['1 needs review', '1 queued'])
   })
   it('counts running, monitoring and waiting on workers as one working family — never "waiting"', () => {
-    expect(groupFamilies([run(), run({ activity: 'monitoring' }), run(parked())])).toEqual(['3 working'])
+    expect(groupFamilies([run(), run({ status: 'waiting', waits: [timerWait()] } as Partial<RunRecord>), run(parked())])).toEqual(['3 working'])
     expect(groupFamilies([run({ status: 'waiting' }), run(parked())])).toEqual(['1 needs you', '1 working'])
   })
   it('puts cancelled after done, and counts scheduled apart from queued (a clock, not a slot)', () => {

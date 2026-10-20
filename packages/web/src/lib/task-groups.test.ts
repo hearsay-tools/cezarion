@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { summaryOf } from '@/test/run-summary-fixture'
+import { timerWait, workerWait } from '@/test/wait-fixtures'
 import { describe, expect, it } from 'vitest'
 
 import type { RunRecord, RunSummary, RunStatus } from '@open-mercato/cezar-api-client'
@@ -83,8 +84,9 @@ describe('bucketOf', () => {
     expect(bucketOf(run({ status, archived: true }), 'archived')).toBe('Archived')
   })
 
+  // The monitoring park is the agent's open timer since hearsay-tools/cezarion#1301.
   it("a monitoring run stays in Working, not Needs you (#490)", () => {
-    expect(bucketOf(run({ status: 'running', activity: 'monitoring' }), 'active')).toBe('Working')
+    expect(bucketOf(run({ status: 'waiting', waits: [timerWait()] } as Partial<RunRecord>), 'active')).toBe('Working')
   })
 
   it('a run waiting out a usage limit is Working, not Finished', () => {
@@ -655,14 +657,14 @@ describe('pin promotion preserves visible variant membership (#93)', () => {
   })
 })
 
-it.each(['registered', 'parked', 'wake-pending'] as const)('keeps %s worker waits in the appropriate existing group/count', phase => {
-  const record = run({ status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase, outcomes: [] } } })
-  expect(bucketOf(record, 'active')).toBe(phase === 'registered' ? 'Needs you' : 'Working')
-  expect(listCounts([record, run({ status: 'waiting' })])).toEqual({ active: 2, archived: 0, waiting: phase === 'registered' ? 2 : 1 })
+it.each(['open', 'resolved'] as const)('keeps %s worker waits in the appropriate existing group/count', phase => {
+  const record = run({ status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [] }, waits: [workerWait({ workerIds: ['worker'], phase })] } as Partial<RunRecord>)
+  expect(bucketOf(record, 'active')).toBe('Working')
+  expect(listCounts([record, run({ status: 'waiting' })])).toEqual({ active: 2, archived: 0, waiting: 1 })
 })
 
 it('counts a parked parent question as Needs you from the run summary', () => {
-  const record = run({ status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })
+  const record = run({ status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [] }, waits: [workerWait({ workerIds: ['worker'] })] } as Partial<RunRecord>)
   expect(bucketOf(record, 'active')).toBe('Needs you')
   expect(listCounts([record])).toEqual({ active: 1, archived: 0, waiting: 1 })
   expect(bucketOf({ ...record, hasPendingHumanAsk: false }, 'active')).toBe('Working')
@@ -793,7 +795,7 @@ it('keeps attentive pins after the cap is exhausted without spending ordinary ro
 
 it('does not bury an attentive variant behind a non-attentive waiting parent', () => {
   const parked = run({ id: 'parked', status: 'waiting', groupId: 'g', variant: 'A',
-    delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })
+    delegation: { role: 'root', permissions: [], receipts: [] }, waits: [workerWait({ workerIds: ['worker'] })] } as Partial<RunRecord>)
   expect(shape(groupRuns([parked, run({ status: 'review', groupId: 'g', variant: 'B' })], 'active'))).toEqual(['Needs you: [AB]'])
 })
 
