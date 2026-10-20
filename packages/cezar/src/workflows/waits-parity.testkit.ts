@@ -54,6 +54,7 @@ export const WAIT_CRITERIA = [
   { id: 'U21', scenario: 'baseline', name: 'an ignored refusal with live workers parks on a Cezar worker wait that settlement wakes' },
   { id: 'U21r', scenario: 'baseline', name: 'after a restart, a deadline-less completion wait resolves on the worker\'s settlement and wakes the parent once' },
   { id: 'U21m', scenario: 'baseline', name: 'a worker message wakes a parent parked on the completion wait and the wait stays open' },
+  { id: 'U21t', scenario: 'baseline', name: 'an agent timer registered beside a completion-wait park keeps its deadline and wakes beside it' },
   { id: 'U21h', scenario: 'baseline', name: 'an ignored refusal with only uncollected results parks on Cezar\'s human wait' },
   { id: 'U21a', scenario: 'autonomous-cap', name: 'an autonomous parent\'s ignored refusal is nudged again until the budget' },
   { id: 'U22', scenario: 'baseline', name: 'a done blocked after the session closed reopens it and delivers the refusal' },

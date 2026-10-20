@@ -206,7 +206,7 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
   afterEach(() => vi.restoreAllMocks());
 
   it('registers every criterion', () => {
-    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U21', 'U21r', 'U21m', 'U21h', 'U21a', 'U22', 'U24', 'U25']);
+    expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U24', 'U25']);
     for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
   });
 
@@ -1536,6 +1536,40 @@ describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', 
       expect(manager.finish(f.w.id)).toBe(true);
       await until(() => settled(f.p.id, entry.id)?.phase === 'delivered' && prompted(runner, workerWake(entry)).length > 0);
       expect(inputsFor(f.p.id, entry.id)).toHaveLength(1);
+      await until(() => store.getRun(f.p.id)?.status === 'waiting');
+    });
+
+    // Review round 1 (hearsay-tools/cezarion#1301): a blocked done never opens the completion wait
+    // beside an open timer (U11), but the reverse order is reachable. A worker message wakes a parent
+    // parked on its completion wait (U21m), and that turn opens the agent's timer.
+    it(`${runner} U21t an agent timer registered beside a completion-wait park keeps its deadline and wakes beside it`, async () => {
+      process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
+      const f = await conversingParent(runner);
+      const entry = await ignoreRefusal(runner, f.p.id, `Workers are still live: ${f.w.id}.`, () => workerWaits(f.p.id)[0]?.phase === 'open');
+      let turns = turnEnds(f.p.id);
+      const id = await f.progress(messagesPrompt(runner, ['Still checking.\nCEZ:MONITORING']));
+      await until(() => delivered(f.p.id, id) && turnEnds(f.p.id) > turns && parkedOn(f.p.id, viaOf(f.p.id, 'monitoring-line')));
+      const timer = viaOf(f.p.id, 'monitoring-line')!;
+      expect(store.getRun(f.p.id)?.waits).toEqual([
+        expect.objectContaining({ id: entry.id, via: 'completion', phase: 'open' }),
+        expect.objectContaining({ id: timer.id, source: 'agent', phase: 'open', deadline: timer.deadline }),
+      ]);
+      expect(workerWaits(f.p.id)[0]).not.toHaveProperty('deadline');
+      // The timer wakes the parent once; the completion wait stays open, with no deadline.
+      turns = turnEnds(f.p.id);
+      fireTimer(timer.id);
+      await until(() => settled(f.p.id, timer.id)?.phase === 'delivered' && turnEnds(f.p.id) > turns &&
+        parkedOn(f.p.id, workerWaits(f.p.id)[0]));
+      expect(inputsFor(f.p.id, timer.id)).toHaveLength(1);
+      expect(prompted(runner, inputsFor(f.p.id, timer.id)[0]!.text)).toHaveLength(1);
+      expect(store.getRun(f.p.id)?.waits).toEqual([expect.objectContaining({ id: entry.id, via: 'completion', phase: 'open' })]);
+      expect(workerWaits(f.p.id)[0]).not.toHaveProperty('deadline');
+      expect(inputsFor(f.p.id, entry.id)).toEqual([]);
+      // The worker's settlement still resolves the completion wait, and it wakes the parent once.
+      expect(manager.finish(f.w.id)).toBe(true);
+      await until(() => settled(f.p.id, entry.id)?.phase === 'delivered' && prompted(runner, workerWake(entry)).length > 0);
+      expect(inputsFor(f.p.id, entry.id)).toHaveLength(1);
+      expect(prompted(runner, workerWake(entry))).toHaveLength(1);
       await until(() => store.getRun(f.p.id)?.status === 'waiting');
     });
 
