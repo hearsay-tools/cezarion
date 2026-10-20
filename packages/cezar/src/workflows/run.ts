@@ -9488,31 +9488,38 @@ export class RunManager {
 
   /**
    * Cezar's fallback question is Cezar's, not the worker's (hearsay-tools/cezarion#1301): what the
-   * plain park it replaced let through still goes through. A parent's input, a Continue or an idle
-   * close supersedes it: the question closes unanswered (`human-ask-closed`, `superseded`), Cezar's
-   * wait goes, and its routed request gets an outcome, so it no longer holds the parent's done. A
-   * question the worker asked itself is never superseded. True when one closed.
+   * plain park it replaced let through still goes through. A parent's input, a Continue or a closed
+   * session supersedes it: its routed request gets an outcome, so it no longer holds the parent's
+   * done, the parent's unread copy is retired, and only then does the question close unanswered
+   * (`human-ask-closed`, `superseded`) and Cezar's wait go. Each step is idempotent and the close
+   * comes last, so a failed write leaves the question pending and the next supersession, or
+   * recovery, finishes it. A question the worker asked itself is never superseded. True when it
+   * closed.
    */
   private supersedeWorkerFallback(runId: string): boolean {
     const run = this.store.getRun(runId);
     const ask = this.store.transcriptFacts(runId).pendingAsk;
     if (run?.delegation?.role !== 'worker' || !ask || !this.isWorkerFallbackAsk(runId, ask.seq)) return false;
+    const root = this.store.getRun(run.delegation.parentRunId);
+    const requestId = ask.routedMessageId;
+    if (root?.delegation?.role === 'root' && requestId !== undefined) {
+      try {
+        const conversation = root.delegation.conversation;
+        if (conversation?.messages.some(message => message.id === requestId) && !conversation.outcomes.some(outcome => outcome.requestId === requestId)) {
+          this.store.commitConversation(root.id, { ...conversation, outcomes: [...conversation.outcomes,
+            { requestId, status: 'completed-without-reply', observedAt: new Date().toISOString() }] });
+          projectConversationEvents(this.store, this.store.getRun(root.id)!);
+        }
+        this.retireUnreadParentQuestion(root.id, requestId);
+      } catch (error) {
+        console.warn(`[cez] fallback question not superseded: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
+      }
+    }
     this.store.appendEvent(runId, { type: 'human-ask-closed', askSeq: ask.seq, reason: 'superseded' });
     this.withdrawCezarHumanWaits(runId);
     const state = this.active.get(runId);
     if (state) state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
-    const root = this.store.getRun(run.delegation.parentRunId);
-    const conversation = root?.delegation?.role === 'root' ? root.delegation.conversation : undefined;
-    const requestId = ask.routedMessageId;
-    if (root && conversation && requestId !== undefined && conversation.messages.some(message => message.id === requestId) &&
-      !conversation.outcomes.some(outcome => outcome.requestId === requestId)) {
-      try {
-        this.store.commitConversation(root.id, { ...conversation, outcomes: [...conversation.outcomes,
-          { requestId, status: 'completed-without-reply', observedAt: new Date().toISOString() }] });
-        projectConversationEvents(this.store, this.store.getRun(root.id)!);
-        this.retireUnreadParentQuestion(root.id, requestId);
-      } catch (error) { console.warn(`[cez] fallback question outcome failed: ${error instanceof Error ? error.message : String(error)}`); }
-    }
     return true;
   }
 

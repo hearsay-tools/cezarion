@@ -150,6 +150,36 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     expectFallbackIntact(f, waits, outcomes);
   });
 
+  // hearsay-tools/cezarion#1301: the routed request's outcome and the parent's unread copy are
+  // settled before the worker's question closes, so a failed write leaves it all for a retry, and
+  // recovery finishes it.
+  for (const failing of ['outcome', 'retire'] as const) {
+    it(`a failed ${failing} write leaves the fallback question pending, and recovery supersedes it`, async () => {
+      const f = await idleWorker();
+      const fail = failing === 'outcome'
+        ? vi.spyOn(store, 'commitConversation').mockImplementationOnce(() => { throw Error('disk full'); })
+        : vi.spyOn(manager as unknown as { retireUnreadParentQuestion(parentId: string, requestId: string): void }, 'retireUnreadParentQuestion')
+          .mockImplementationOnce(() => { throw Error('disk full'); });
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(steer(f.w.id, f.p.id, 'mock:agent-echo Also lint').result).toBe('queued');
+      await until(() => fail.mock.calls.length > 0);
+      fail.mockRestore();
+      expect(eventsOf(f.w.id, 'human-ask-closed')).toEqual([]);
+      expect(store.transcriptFacts(f.w.id).pendingAsk?.seq).toBe(f.askSeq);
+      expect(store.getRun(f.w.id)?.waits).toEqual([expect.objectContaining({ via: 'no-wait', askSeq: f.askSeq })]);
+      if (failing === 'outcome') expect(conversationOf(f.p.id)?.outcomes.some(outcome => outcome.requestId === f.requestId) ?? false).toBe(false);
+      // A crash now: recovery finds the worker waiting on the question with no process left.
+      store.flush();
+      const disk = readPersistedRuns(join(root, '.ai/cezar'));
+      await restart(false, disk, eventCheckpoint());
+      expect(eventsOf(f.w.id, 'human-ask-closed')).toEqual([expect.objectContaining({ askSeq: f.askSeq, reason: 'superseded' })]);
+      expect(conversationOf(f.p.id)?.outcomes).toContainEqual(expect.objectContaining({ requestId: f.requestId, status: 'completed-without-reply' }));
+      const question = store.getRun(f.p.id)?.agentInputs?.find(input => input.id === f.requestId);
+      // The parent no longer owes it: retired from its queue, or no longer awaiting a read.
+      expect(!question || !!question.consumedAt || (!!question.deliveredAt && !question.awaitingRead)).toBe(true);
+    });
+  }
+
   it("a worker's own question still holds a parent's steer", async () => {
     const f = await askedPair();
     try {
