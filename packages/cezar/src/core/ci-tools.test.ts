@@ -78,9 +78,9 @@ describe('CI tool injection', () => {
     expect(args[args.indexOf('--allowedTools') + 1]).toBe('Read,mcp__cezar_ci_test__cezar_wait_for_ci,mcp__cezar_ci_test__cezar_wait,mcp__cezar_ci_test__cezar_ask,mcp__cezar_ci_test__cezar_cancel_wait,mcp__cezar_ci_test__cezar_done');
     expect(args).not.toContain('--strict-mcp-config');
   });
-  it('Pi preserves discovered extensions, retry extension and selected tools', () => {
+  it('Pi preserves discovered extensions, retry and project-skills extensions and selected tools', () => {
     const args = buildPiArgs({ ...spec, allowedTools: ['Read'] });
-    expect(args.filter(value => value === '--extension')).toHaveLength(2);
+    expect(args.filter(value => value === '--extension')).toHaveLength(3);
     expect(args).not.toContain('--no-extensions');
     expect(args[args.indexOf('--tools') + 1]).toBe('read,cezar_wait_for_ci,cezar_wait,cezar_ask,cezar_cancel_wait,cezar_done');
   });
@@ -114,7 +114,7 @@ describe('CI tool injection', () => {
         expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
         const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
         if (backend === 'claude') expect(rows[0]).toContain('--mcp-config');
-        if (backend === 'pi') expect(rows[0].filter((item: string) => item === '--extension')).toHaveLength(2);
+        if (backend === 'pi') expect(rows[0].filter((item: string) => item === '--extension')).toHaveLength(3);
         if (backend === 'omp') expect(rows[0].filter((item: string) => item === '--extension')).toHaveLength(1);
         if (backend === 'codex') {
           const config = rows.find(row => row.method === (resume ? 'thread/resume' : 'thread/start')).params.config;
