@@ -156,10 +156,14 @@ describe('the Markdown preview in the Changes views', () => {
     expect(before.toggleHeight).toBeGreaterThanOrEqual(44)
 
     // hearsay-tools/cezarion#1333 put the phone's Archive in a row under the top bar, which moves
-    // this switch below the 640px fold. CI run 39460793218 shard 4 and a local run both failed here
-    // with the preview never opening (bundle markdown-preview/task-Changes-at-360px-…-1: the
-    // screenshot shows the tree, and the guide card is below the viewport). Where the click landed
-    // was not traced; centring the switch before the coordinate click passed locally (11/11).
+    // this switch below the 640px fold. Without the scroll below, this test failed 2 of 2 runs with
+    // the preview never opening: CI run 39460793218 (Cockpit browser E2E shard 4/4) and one local
+    // run. Local bundle (gitignored):
+    // .ai/qa/failures/markdown-preview/task-Changes-at-360px-the-toggle-stays-the-per-file-switch-is-a-44px-target-noth-1/
+    // — probe.json: kind "wait-value", lastValue null; screenshot.png: the tree on screen, the guide
+    // card below the viewport. With the scroll it passed 1 of 1 locally and in CI run 39464284482
+    // (shard 4/4). Reproduce: npm run test:e2e -- markdown-preview.e2e.ts -t "task Changes at 360px"
+    // with this evaluate line removed. Where the unscrolled click landed was not traced.
     browser.evaluate(`document.querySelector(${JSON.stringify(`${guideCard} [data-slot="diff-file-preview-toggle"]`)}).scrollIntoView({ block: 'center', behavior: 'instant' })`)
     browser.click(`${guideCard} [data-slot="diff-file-preview-toggle"]`)
     const after = browser.waitForValue<{ switchHeight: number; overflow: number; wide: string[] }>(
