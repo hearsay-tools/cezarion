@@ -49,6 +49,8 @@ const LONG_RUN = {
   workflow: 'workflow-' + 'unbroken'.repeat(12), branch: 'cez/' + 'long-branch-'.repeat(18),
   model: 'fork-model-' + 'long-model-'.repeat(10), effort: 'high',
   steps: RUN.steps.map((step) => ({ ...step, profileId: 'default' })),
+  // Seven-figure counts so the Usage row's tokens and cost cannot both fit on a phone.
+  inputTokens: 1_234_567, outputTokens: 345_678, costUsd: 12.34, // shown as `$12`
 }
 const TYPO_RUNS = [
   { ...LONG_RUN, id: 'typography-long-model', runner: 'opencode', model: 'opencode/muse-spark-1.3-contributor-free', effort: 'auto' },
@@ -936,11 +938,25 @@ describe('task thread', () => {
       // The folded status must be painted whole, not squeezed to an ellipsis or clipped by the card.
       const status = card.querySelector(':scope > button [data-slot="run-activity-status"] .truncate')
       const statusCut = status ? status.scrollWidth > status.clientWidth + 1 || status.getBoundingClientRect().right > card.getBoundingClientRect().right : null
-      return { state: card.dataset.state, overflow: document.documentElement.scrollWidth - innerWidth, statusCut,
+      // A two-part row meta never paints half a word: what it keeps sits whole across its row,
+      // what it drops is either whole on its line or wrapped wholly onto the clipped one below.
+      // The open card scrolls on a short phone, so the kept part is measured across, not down.
+      const inside = (r, c) => r.left >= c.left - 1 && r.right <= c.right + 1 && r.top >= c.top - 1 && r.bottom <= c.bottom + 1
+      const metaCut = [...card.querySelectorAll('[data-slot="run-activity-meta-keep"], [data-slot="run-activity-meta-drop"]')].filter(part => {
+        const r = part.getBoundingClientRect()
+        if (part.dataset.slot === 'run-activity-meta-keep') {
+          const row = part.closest('button').getBoundingClientRect()
+          return r.left < row.left - 1 || r.right > row.right + 1
+        }
+        const clip = part.parentElement.getBoundingClientRect()
+        return !inside(r, clip) && r.top < clip.bottom
+      }).map(part => part.textContent)
+      const usageKeep = card.querySelector('[data-slot="run-activity-usage"] [data-slot="run-activity-meta-keep"]')?.textContent ?? null
+      return { state: card.dataset.state, overflow: document.documentElement.scrollWidth - innerWidth, statusCut, metaCut, usageKeep,
         summaryHeight: Math.round(summary.getBoundingClientRect().height), small,
         composer: box('[data-slot="composer"]'), transcript: box('[data-slot="thread-rows"]') }
     })()`
-    type Sample = { state: string; overflow: number; statusCut: boolean | null; summaryHeight: number; small: string[]; composer: { left: number; width: number }; transcript: { left: number; width: number } | null }
+    type Sample = { state: string; overflow: number; statusCut: boolean | null; metaCut: string[]; usageKeep: string | null; summaryHeight: number; small: string[]; composer: { left: number; width: number }; transcript: { left: number; width: number } | null }
     browser.evaluate(`document.querySelector('${SESSION_ACTIVITY_SUMMARY}[aria-expanded="true"]')?.click()`)
     const folded = waitForSettledSample<Sample>(browser, `(${sample}).state === 'collapsed' ? ${sample} : null`)
     expect(folded.overflow).toBeLessThanOrEqual(0)
@@ -955,6 +971,8 @@ describe('task thread', () => {
     const expanded = waitForSettledSample<Sample>(browser, sample)
     expect(expanded.state).toBe('open')
     expect(expanded.overflow).toBeLessThanOrEqual(0)
+    expect(expanded.metaCut).toEqual([])
+    expect(expanded.usageKeep).toBe('$12')
     if (width < 768) expect(expanded.small).toEqual([])
     expect(expanded.composer).toEqual(folded.composer)
     expect(expanded.transcript).toEqual(folded.transcript)

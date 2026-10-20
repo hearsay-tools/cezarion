@@ -30,7 +30,7 @@ import { PlanList, planCounts } from './plan-dock'
 import { collectSubagents, subagentCounts } from './subagent-dock'
 import { StepRail, activeStepIndex, railVisual } from './step-rail'
 import { WorkerActivitySection, useWorkersVerdict } from './run-relationships'
-import { ActivityRow, meterText } from './run-activity-row'
+import { ActivityRow, meterText, type MetaParts } from './run-activity-row'
 import { useAgentIdentity } from './run-agent-identity'
 import { resumeHint, runActionFlags } from './run-actions'
 import { runStatusLine } from './run-status'
@@ -162,6 +162,9 @@ function SessionActivityCard({
           : 'Incomplete'
   const failed = line.attention.tone === 'danger' || run.status === 'cancelled'
   const cost = metrics.cost && run.costUsd !== undefined ? formatCost(run.costUsd) : undefined
+  const tokens = metrics.tokens && (run.inputTokens !== undefined || run.outputTokens !== undefined)
+    ? <DirectionalUsage inputTokens={run.inputTokens} outputTokens={run.outputTokens} />
+    : undefined
   const glyph = allComplete
     ? <CircleCheckIcon aria-hidden className="size-3.5 shrink-0 text-success" />
     : <StatusDot tone={line.attention.tone} shape={line.attention.shape} pulse={line.attention.pulse} />
@@ -244,7 +247,7 @@ function SessionActivityCard({
               icon={workflow.length > 0 ? <WorkflowGlyph steps={workflow} /> : <WorkflowIcon className="size-4" />}
               title={<>Workflow{workflowName ? <span className="font-normal text-muted-foreground"> · {workflowName}</span> : null}</>}
               meta={workflow.length > 0
-                ? `${workflow[activeStepIndex(workflow)]!.name} · ${meterText(activeStepIndex(workflow) + 1, workflow.length, desktop, 'step')}`
+                ? { drop: workflow[activeStepIndex(workflow)]!.name, keep: meterText(activeStepIndex(workflow) + 1, workflow.length, desktop, 'step') }
                 : undefined}
               open={isOpen('workflow')}
               onToggle={() => toggle('workflow')}
@@ -284,11 +287,11 @@ function SessionActivityCard({
             slot="usage"
             icon={<ChartColumnIcon className="size-4" />}
             title="Usage & agent"
-            meta={<UsageMeta run={run} showTokens={metrics.tokens} cost={cost} />}
+            meta={usageMeta(tokens, cost)}
             open={isOpen('usage')}
             onToggle={() => toggle('usage')}
           >
-            <AgentDetails run={run} />
+            <AgentDetails run={run} tokens={tokens} cost={cost} />
           </ActivityRow>
           {hasWorkspace ? (
             <ActivityRow
@@ -326,24 +329,20 @@ function DetailLine({ label, children }: { label: string; children: ReactNode })
   )
 }
 
-function UsageMeta({ run, showTokens, cost }: { run: ApiRun; showTokens: boolean; cost?: string }) {
-  const tokens = showTokens && (run.inputTokens !== undefined || run.outputTokens !== undefined)
-  if (!tokens && !cost) return null
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
-      {tokens ? <DirectionalUsage inputTokens={run.inputTokens} outputTokens={run.outputTokens} /> : null}
-      {tokens && cost ? <span aria-hidden className="text-soft-foreground">·</span> : null}
-      {cost ? <span>{cost}</span> : null}
-    </span>
-  )
+/** Cost is what a narrow row keeps; the tokens show beside it only while both fit. */
+function usageMeta(tokens: ReactNode, cost: string | undefined): MetaParts | undefined {
+  if (cost) return { keep: cost, drop: tokens ?? undefined }
+  return tokens ? { keep: tokens } : undefined
 }
 
 /** Runner, account, model, effort and identity (#416, #546), as labelled lines rather than the
  *  header badge's hover menu. Same `data-slot`s as that menu, so readers keep their anchors. */
-function AgentDetails({ run }: { run: ApiRun }) {
+function AgentDetails({ run, tokens, cost }: { run: ApiRun; tokens: ReactNode; cost?: string }) {
   const { runner, account, model, effort, identity } = useAgentIdentity(run)
   return (
     <dl data-slot="agent-details" className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[13px]">
+      {tokens ? <><dt className="font-medium text-foreground">Tokens</dt><dd className="min-w-0 text-[12px]">{tokens}</dd></> : null}
+      {cost ? <><dt className="font-medium text-foreground">Cost</dt><dd className="min-w-0 font-mono text-[12px] tabular-nums">{cost}</dd></> : null}
       <dt className="font-medium text-foreground">Runner</dt><dd className="min-w-0 break-all font-mono text-[12px]">{runner}</dd>
       {account ? <><dt className="font-medium text-foreground">Account</dt><dd data-slot="agent-badge-account" className="min-w-0 break-all font-mono text-[12px]">{account}</dd></> : null}
       <dt className="font-medium text-foreground">Model</dt><dd className="min-w-0 break-all font-mono text-[12px]">{model}</dd>

@@ -237,6 +237,15 @@ describe('RunActivityDock — narrow viewports', () => {
     expect(metaOf('subagents')).toBe('1 / 2')
     expect(metaOf('plan')).toBe('1 / 3')
   })
+
+  it('keeps the step meter whole and lets the step name drop when the row runs out of room', () => {
+    narrow()
+    renderDock(run({ id: 'narrow-fit-meta' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Session activity/ }))
+    const meta = section('workflow')!.querySelector('[data-slot="run-activity-meta"]')!
+    expect(meta.querySelector('[data-slot="run-activity-meta-keep"]')?.textContent).toBe('1 / 2')
+    expect(meta.querySelector('[data-slot="run-activity-meta-drop"]')?.textContent).toBe('Do the task ·')
+  })
 })
 
 describe('RunActivityDock — the workflow glyph', () => {

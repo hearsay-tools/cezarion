@@ -403,6 +403,28 @@ describe('Usage & agent — metrics', () => {
     expect(row('usage')!.querySelector('[data-slot="agent-details"]')).not.toBeNull()
   })
 
+  it('lists tokens and cost in the opened row, so a phone that drops them from the summary still has them', () => {
+    stubFetch()
+    renderCard(run('done', { id: freshId(), costUsd: 0.04 }))
+    expect(usageDetails()).toMatchObject({ Tokens: 'IN 24.6k · OUT 2.4k', Cost: '$0.04' })
+  })
+
+  it('keeps the cost whole and lets the tokens drop when the summary runs out of room', () => {
+    stubFetch()
+    renderCard(run('done', { id: freshId(), costUsd: 0.04 }))
+    const meta = row('usage')!.querySelector('[data-slot="run-activity-meta"]')!
+    expect(meta.querySelector('[data-slot="run-activity-meta-keep"]')?.textContent).toBe('$0.04')
+    expect(meta.querySelector('[data-slot="run-activity-meta-drop"]')?.textContent).toContain('IN 24.6k · OUT 2.4k')
+  })
+
+  it('keeps the tokens when the run reported no cost', () => {
+    stubFetch()
+    renderCard(run('done', { id: freshId(), costUsd: undefined }))
+    const meta = row('usage')!.querySelector('[data-slot="run-activity-meta"]')!
+    expect(meta.querySelector('[data-slot="run-activity-meta-keep"]')?.textContent).toBe('IN 24.6k · OUT 2.4k')
+    expect(meta.querySelector('[data-slot="run-activity-meta-drop"]')).toBeNull()
+  })
+
   it('shows a backend-reported zero cost and omits an unreported cost', () => {
     stubFetch()
     renderCard(run('done', { id: freshId(), costUsd: 0 }))
@@ -416,12 +438,18 @@ describe('Usage & agent — metrics', () => {
   })
 })
 
-/** The agent lines, as `{ Runner: 'codex', Model: …, … }` — `dt` text to `dd` text. */
-function agentDetails(): Record<string, string> {
+/** Every line of the opened row, as `{ Tokens: …, Runner: 'codex', … }` — `dt` text to `dd` text. */
+function usageDetails(): Record<string, string> {
   const dl = openRow('usage').querySelector('[data-slot="agent-details"]')!
   const out: Record<string, string> = {}
   for (const dt of dl.querySelectorAll('dt')) out[dt.textContent ?? ''] = dt.nextElementSibling?.textContent ?? ''
   return out
+}
+
+/** The agent lines alone, without the usage lines (`Tokens`, `Cost`) that lead the row. */
+function agentDetails(): Record<string, string> {
+  const { Tokens: _tokens, Cost: _cost, ...agent } = usageDetails()
+  return agent
 }
 
 describe('Usage & agent — which agent ran (#416, #52, #411)', () => {

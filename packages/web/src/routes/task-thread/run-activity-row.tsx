@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { isValidElement, type ReactNode } from 'react'
 
 import { ChevronDownIcon } from '@/components/design-icons'
 import { cn } from '@/lib/utils'
@@ -22,6 +22,16 @@ export function meterText(done: number, total: number, desktop: boolean, noun?: 
   return noun === 'step' ? `Step ${done} of ${total}` : `${done} of ${total} complete`
 }
 
+/** A row meta in two parts; see `ActivityRow`'s `meta`. */
+export interface MetaParts {
+  keep: ReactNode
+  drop?: ReactNode
+}
+
+function isMetaParts(meta: ReactNode | MetaParts): meta is MetaParts {
+  return typeof meta === 'object' && meta !== null && !isValidElement(meta) && 'keep' in meta
+}
+
 export function ActivityRow({
   slot,
   icon,
@@ -37,7 +47,9 @@ export function ActivityRow({
   slot: string
   icon: ReactNode
   title: ReactNode
-  meta?: ReactNode
+  /** A plain meta truncates with an ellipsis. `{ keep, drop }` never cuts text: `keep` always
+   *  shows whole, `drop` shows before it only while all of it fits, and is gone otherwise. */
+  meta?: ReactNode | MetaParts
   open: boolean
   /** Absent: the row has nothing to disclose and renders as a plain, non-interactive line. */
   onToggle?: () => void
@@ -50,7 +62,25 @@ export function ActivityRow({
       {/* A plain label (`Workspace`) keeps its width and the meta truncates; a composed title
           (`Workflow · <name>`) can be long, so it shares the row. */}
       <span className={cn('truncate text-[14px] font-semibold text-foreground', typeof title === 'string' ? 'shrink-0' : 'min-w-0 shrink')}>{title}</span>
-      {meta !== undefined ? (
+      {isMetaParts(meta) ? (
+        // `contents`: both parts sit in the row itself. Inside a wrapper box, the drop's unbreakable
+        // width would become that box's minimum and push the kept part out of the row.
+        <span data-slot="run-activity-meta" className="contents text-[13px] text-muted-foreground tabular-nums">
+          {meta.drop !== undefined ? (
+            // One line tall and clipped: a zero-width, full-height first item holds the line, so a
+            // `drop` too wide for what is left wraps whole onto the hidden second line instead of
+            // being cut. Without the height the empty first line collapses and the second shows.
+            <span className="flex h-[1lh] min-w-0 shrink-[2] flex-wrap overflow-hidden">
+              <span aria-hidden className="h-[1lh] w-0" />
+              <span data-slot="run-activity-meta-drop" className="whitespace-nowrap">
+                {meta.drop}
+                <span className="text-soft-foreground"> ·</span>
+              </span>
+            </span>
+          ) : null}{' '}
+          <span data-slot="run-activity-meta-keep" className="shrink-0 whitespace-nowrap">{meta.keep}</span>
+        </span>
+      ) : meta !== undefined ? (
         <span
           data-slot="run-activity-meta"
           className="min-w-0 shrink-[2] truncate text-[13px] text-muted-foreground tabular-nums"
