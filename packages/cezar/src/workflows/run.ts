@@ -6719,9 +6719,10 @@ export class RunManager {
       this.waitingBeforeFinalWorkflowStep(run) && (!run.workflowDef || this.waitingWorkflowStepIndex(run) < 0)) {
       return { ok: false, error: 'cannot continue a waiting run before its final workflow step' };
     }
-    // A Continue supersedes Cezar's fallback question on a worker (hearsay-tools/cezarion#1301).
-    if (!opts.answerInputId) this.supersedeWorkerFallback(runId);
-    const pendingHumanAsk = run.delegation?.role !== 'invalid' && this.hasPendingHumanAsk(runId);
+    // A Continue supersedes Cezar's fallback question on a worker (hearsay-tools/cezarion#1301), so
+    // the checks below treat it as gone; it closes only once the Continue is admitted.
+    const supersedes = !opts.answerInputId && this.pendingWorkerFallback(runId);
+    const pendingHumanAsk = run.delegation?.role !== 'invalid' && this.hasPendingHumanAsk(runId) && !supersedes;
     if (run.status === 'waiting' && hasRegisteredRunProcess(runId)) {
       return { ok: false, error: 'cannot continue a waiting run' };
     }
@@ -6845,6 +6846,7 @@ export class RunManager {
           } };
         this.beginWorkerExecution(runId, false);
       } catch (error) { return { ok: false, error: admissionError(error, 'original execution checkpoint unavailable') }; }
+      if (supersedes) this.supersedeWorkerFallback(runId);
       const content: PastedContent[] = [
         ...(opts.text?.trim() ? [{ type: 'text' as const, text: opts.text.trim() }] : []), ...(opts.images ?? []),
       ];
@@ -6864,6 +6866,7 @@ export class RunManager {
 
     try { this.beginWorkerExecution(runId, !deferForCapacity); }
     catch (error) { return { ok: false, error: admissionError(error, 'worker execution checkpoint unavailable') }; }
+    if (supersedes) this.supersedeWorkerFallback(runId);
     // Everything that could refuse this continuation has now passed, so a pending usage-limit
     // resume is superseded either way: this IS that resume (it re-stamps its own counter), or a
     // human got there first — and then the counter starts over, because the cap only exists to
@@ -9468,6 +9471,12 @@ export class RunManager {
     const ask = this.store.transcriptFacts(runId).pendingAsk;
     const questions = ask?.seq === askSeq ? askRequestSchema.safeParse({ questions: ask.questions }).data?.questions : undefined;
     return questions?.length === 1 && questions[0]!.header === WORKER_FALLBACK_HEADER && questions[0]!.question === WORKER_FALLBACK_QUESTION(runId);
+  }
+
+  /** The worker's pending question is Cezar's fallback question. */
+  private pendingWorkerFallback(runId: string): boolean {
+    const ask = this.store.transcriptFacts(runId).pendingAsk;
+    return this.store.getRun(runId)?.delegation?.role === 'worker' && !!ask && this.isWorkerFallbackAsk(runId, ask.seq);
   }
 
   /** The parent's reply to a worker's fallback question resumed it: one automatic wake, so a

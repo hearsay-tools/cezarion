@@ -122,6 +122,34 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     await until(() => store.getRun(f.w.id)?.status === 'waiting');
   });
 
+  /** The fallback question stands, and the worker's waits and its request's outcomes are as given. */
+  function expectFallbackIntact(f: Awaited<ReturnType<typeof idleWorker>>, waits: unknown, outcomes: unknown) {
+    expect(eventsOf(f.w.id, 'human-ask-closed')).toEqual([]);
+    expect(store.transcriptFacts(f.w.id).pendingAsk?.seq).toBe(f.askSeq);
+    expect(store.getRun(f.w.id)?.waits).toEqual(waits);
+    expect(conversationOf(f.p.id)?.outcomes.filter(outcome => outcome.requestId === f.requestId)).toEqual(outcomes);
+  }
+
+  // hearsay-tools/cezarion#1301: a refused Continue changes nothing, so it supersedes nothing.
+  it('a refused Continue leaves the fallback question, its wait and its routed request intact', async () => {
+    const f = await idleWorker();
+    // A waiting worker whose process is still registered (as one a restart found alive) refuses it.
+    const isActive = manager.isActive.bind(manager);
+    const inactive = vi.spyOn(manager, 'isActive').mockImplementation(id => id !== f.w.id && isActive(id));
+    expect(manager.continueRun(f.w.id, { text: 'mock:hold' })).toEqual({ ok: false, error: 'cannot continue a waiting run' });
+    inactive.mockRestore();
+    expectFallbackIntact(f, [expect.objectContaining({ kind: 'human', source: 'cezar', via: 'no-wait', askSeq: f.askSeq })], []);
+    // A stopped worker under a parent's pending Finish refuses it too.
+    manager.requestWorkerStop(f.w.id); expect(await manager.awaitRunTermination(f.w.id, 15_000)).toBe(true);
+    await until(() => store.getRun(f.p.id)?.status === 'waiting');
+    store.commitRootFinishIntent(f.p.id);
+    // The stop already settled the worker's waits and its open request; the refusal leaves both as they are.
+    const waits = structuredClone(store.getRun(f.w.id)?.waits);
+    const outcomes = conversationOf(f.p.id)?.outcomes.filter(outcome => outcome.requestId === f.requestId);
+    expect(manager.continueRun(f.w.id, { text: 'mock:hold' }, true)).toEqual({ ok: false, error: 'parent finish is pending' });
+    expectFallbackIntact(f, waits, outcomes);
+  });
+
   it("a worker's own question still holds a parent's steer", async () => {
     const f = await askedPair();
     try {
