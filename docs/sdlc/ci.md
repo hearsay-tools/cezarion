@@ -118,6 +118,21 @@ with the existing environment reuse and skip-exit-0 behavior. For iteration use
 A literal `--` ends wrapper option parsing. A filtered pass is selection-only
 verification, not evidence that the complete browser gate passed.
 
+Runs in the same checkout share one test environment. The wrapper and direct
+Vitest/Squeal browser runs hold an exclusive lease through bootstrap, specs and
+registry restoration. Another run, standalone bootstrap or shutdown waits up to
+300 seconds, then fails without changing the active environment. `--force` does
+not bypass a holder. Exited holders are reclaimed using PID and process-start
+identity. A surviving build or clone child keeps its command group protected;
+a changing or unreadable process list stays protected. The cached server runs
+outside that group. On Windows, a named Job Object owns the command and its
+children; closing it kills the mutators, while the cached app explicitly breaks
+away. Recovery checks the named job before reclaiming its holder. Native Windows
+CI verifies shell identity, arguments, overlap, crash cleanup and cache survival.
+The disposable lease records
+live in `.ai/qa/test-env-lease.sqlite`. Do not delete them while tests run.
+Use the isolated local lanes above when parallel browser execution is needed.
+
 The E2E bootstrap builds into the ignored `.ai/qa/build/cezar` mirror
 (`.ai/scripts/build-e2e.sh`) and never writes `packages/cezar/dist` or
 `packages/cezar/web/dist`, so a production `npm run build` and a browser run no

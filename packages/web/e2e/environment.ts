@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
+import { acquireTestEnvLease } from '../../../.ai/scripts/test-env-lease.mjs'
+import { setup as pinWorkspaceRegistry } from './workspace-registry.ts'
 import { tmpdirExceedsSocketBudget } from '../../../.ai/scripts/resolve-browser-launch.mjs'
 
 const exec = promisify(execFile)
@@ -32,30 +34,60 @@ export function useSocketSafeTmpdir(
   }
 }
 
-/** Prepare browser E2E even when Vitest is driven directly by Squeal. */
+/** Prepare browser E2E even when Vitest is driven directly by Squeal.
+ * Provenance: hearsay-tools/cezarion#1304. A local reproduction on main
+ * 049628d0d ran the actual try_reuse/teardown_stale functions against a live
+ * temporary HTTP server: stale TTL changed HTTP 200 to ECONNREFUSED while its
+ * caller was active. The launcher regression pins that replacement boundary.
+ * With the lease, two concurrent smoke.e2e.ts invocations (second TTL=1),
+ * and a separate --force pair, each passed 24 tests / 1 skip after queueing.
+ * This setup applies the same lifetime protection to direct Vitest/Squeal.
+ */
 export async function setup(): Promise<() => void> {
+  const previousToken = process.env.TEST_ENV_LEASE_TOKEN
+  const lease = await acquireTestEnvLease(root, {
+    token: previousToken,
+    onWait: message => console.error(`[test-env] ${message}`),
+  })
+  process.env.TEST_ENV_LEASE_TOKEN = lease.token
+  let restoreTmpdir = () => {}
+  let restoreRegistry = () => {}
+  const release = () => {
+    try { restoreRegistry() }
+    finally {
+      try { restoreTmpdir() }
+      finally {
+        if (previousToken === undefined) delete process.env.TEST_ENV_LEASE_TOKEN
+        else process.env.TEST_ENV_LEASE_TOKEN = previousToken
+        lease.release()
+      }
+    }
+  }
   try {
-    const { stdout, stderr } = await exec('sh', [resolve(root, '.ai/scripts/test-env-up.sh')], {
-      cwd: root,
-      timeout: 300_000,
-      maxBuffer: 8 * 1024 * 1024,
-    })
-    if (stdout.trim()) console.log(stdout.trim())
-    if (stderr.trim()) console.error(stderr.trim())
+    // The wrapper already bootstrapped with its requested --server-env flags. Booting
+    // again here would discard those flags, and could replace our own server at the TTL.
+    if (!(previousToken && process.env.TEST_ENV_LEASE_BOOTSTRAPPED === '1')) {
+      const { stdout, stderr } = await exec('sh', [resolve(root, '.ai/scripts/test-env-up.sh')], {
+        cwd: root,
+        timeout: 300_000,
+        maxBuffer: 8 * 1024 * 1024,
+      })
+      if (stdout.trim()) console.log(stdout.trim())
+      if (stderr.trim()) console.error(stderr.trim())
+    }
+    const descriptor = JSON.parse(await readFile(resolve(root, '.ai/qa/test-env.json'), 'utf8')) as {
+      browser?: { installed?: boolean; notes?: string }
+    }
+    if (descriptor.browser?.installed !== true) {
+      throw new Error(`Browser E2E could not run: ${descriptor.browser?.notes ?? 'browser unavailable'}`)
+    }
+    // Decide from THIS caller's TMPDIR only after boot: the detached server must not
+    // inherit a temporary directory that test teardown later removes.
+    restoreTmpdir = useSocketSafeTmpdir()
+    restoreRegistry = await pinWorkspaceRegistry()
+    return release
   } catch (cause) {
+    release()
     throw new Error('Browser E2E environment bootstrap failed', { cause })
   }
-
-  const descriptor = JSON.parse(await readFile(resolve(root, '.ai/qa/test-env.json'), 'utf8')) as {
-    browser?: { installed?: boolean; notes?: string }
-  }
-  if (descriptor.browser?.installed !== true) {
-    throw new Error(`Browser E2E could not run: ${descriptor.browser?.notes ?? 'browser unavailable'}`)
-  }
-  // Chrome and the Vitest workers need a socket-safe TMPDIR, decided from THIS caller's env:
-  // the descriptor's runtimeEnv is the answer for whoever booted the shared env, which may have
-  // had a short TMPDIR when ours is long, or the reverse (hearsay-tools/cezarion#1090). Only
-  // after test-env-up.sh: a server it cold-boots inherits our env and outlives this run, so it
-  // must never get a directory the teardown below deletes.
-  return useSocketSafeTmpdir()
 }
