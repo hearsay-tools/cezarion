@@ -1715,6 +1715,26 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     expect(store.readEvents(record.id).filter(event => event.type === 'ask.requested')).toHaveLength(1);
   }, 30_000);
 
+  // Review of #1437: a stored pending-question flag can be stale when the answer's receipt reached
+  // the transcript but the row's save did not; recovery settles the upgraded wait it read from it.
+  it('settles an upgraded legacy human wait at recovery when the transcript holds its answer', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, candidate => candidate?.status === 'waiting');
+    manager.dispose();
+    const ask = store.appendEvent(record.id, { type: 'ask.requested', requestId: 'answered-question',
+      questions: [{ header: 'Choice', question: 'Which implementation?', options: [{ label: 'First' }, { label: 'Second' }] }] });
+    store.appendEvent(record.id, { type: 'human-input-delivered', askSeq: ask.seq });
+    const legacy = { id: '00000000-0000-4000-8000-0000000000aa', kind: 'human' as const, source: 'agent' as const, via: 'ask-line' as const,
+      registeredAt: '2026-10-21T00:00:00.000Z', phase: 'open' as const, turnId: 'legacy' };
+    store.updateRun(record.id, { waits: [legacy] });
+    manager = createFixtureManager(store, repoRoot);
+    await manager.recover();
+    expect(store.getRun(record.id)?.waits?.filter(wait => wait.kind === 'human' && wait.phase === 'open') ?? []).toEqual([]);
+    expect(store.getRun(record.id)?.lastWaits).toEqual(expect.arrayContaining([expect.objectContaining({ id: legacy.id })]));
+    expect(store.readEvents(record.id).filter(event => event.type === 'ask.requested')).toHaveLength(1);
+  }, 30_000);
+
   it('honors cancellation that races an idle-close callback', async () => {
     const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
     currentId = record.id;

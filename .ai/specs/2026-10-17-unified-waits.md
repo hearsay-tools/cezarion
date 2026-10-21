@@ -1200,6 +1200,13 @@ Calls made by the agent:
   lazily before 4b). Recovery opens an agent human wait for it (`via: 'ask-line'`,
   `turnId: 'recovered'`, `askSeq` the ask's seq), so it still reads Needs you; no second card is
   shown (`adoptTranscriptAsk`).
+- **Recovery settles a stale legacy wait.** A stored `hasPendingHumanAsk: true` can predate the
+  answer's receipt (`human-input-delivered` reached the transcript, the row's save did not). An
+  upgraded wait (`turnId: 'legacy'`, no `askSeq`) is settled as answered at recovery when the
+  transcript holds no unanswered ask (`settleAnsweredLegacyAsk`).
+- **`asksQuestion` decides the CLI's `question` and the webhook's `task.question`.** It is true for
+  an open agent human wait and for a Cezar wait that carries a card (a worker's fallback question
+  to its parent); Cezar's `no-wait`, `budget` and `completion` waits ask nothing.
 - **No store schema bump.** The planned schema 9 is not needed: a schema-8 build reads a 4b row
   correctly, because every reader it has derives attention from the human wait as well. A row
   4b rewrites only loses the two dropped keys.
@@ -1219,7 +1226,7 @@ tables hold for the states they list. One row per exit.
 | `waiting` with an upgraded human wait (no `askSeq`) | Restart recovery | `RunManager.recover` → `surfaceHumanWait` | The wait is attached to the transcript's pending ask (`askSeq` set); the card shows once; the run reads Needs you |
 | | A human message or the ask's answer | The user | The answer settles the wait at acceptance and is delivered at the next turn boundary, as for any human wait |
 | | Finish, Stop or delete | The user | Settles as for any parked run; the wait is cancelled |
-| | No pending ask in the transcript | Recovery | The wait stays open and the run reads Needs you; only a human action ends it, as for any open question (phase 2a) |
+| | No unanswered ask in the transcript (its answer was delivered after the row was saved) | Recovery → `settleAnsweredLegacyAsk` | The wait settles as answered; the run reads as its remaining waits say |
 | A live row with an unanswered `ask.requested` and no human wait | Restart recovery | `RunManager.recover` → `adoptTranscriptAsk` | An open agent human wait is committed with the ask's `askSeq`; the run reads Needs you; its exits are the rows above |
 | `running` wake turn with a shown question (`askSeq`) | The turn ends | The runner's turn end | Parks `waiting` on the open human wait; Needs you, as before 4b |
 | | The user answers | The user | The wait settles; the answer is delivered at the turn boundary (transcript receipt) |

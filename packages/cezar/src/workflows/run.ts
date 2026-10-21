@@ -3515,6 +3515,9 @@ export class RunManager {
       // Phase 4b (hearsay-tools/cezarion#1236): attention reads the human wait, so an unanswered ask
       // an older cezar left without one gets one now, attached to that ask.
       if (this.adoptTranscriptAsk(run.id)) run = this.store.getRun(run.id)!;
+      // A stored pending-question flag can be stale: the answer's receipt reached the transcript and
+      // the row's save did not. The wait read from it is answered (review of #1437).
+      if (this.settleAnsweredLegacyAsk(run.id)) run = this.store.getRun(run.id)!;
       // hearsay-tools/cezarion#1234: a crash after a human wait's registration and before its turn
       // end shows the question now. The run waits on the user, its other waits re-armed.
       if (this.unsurfacedHumanWait(run.id)) {
@@ -5610,6 +5613,20 @@ export class RunManager {
     try {
       this.store.commitWait(runId, { id: randomUUID(), kind: 'human', source: 'agent', via: 'ask-line', registeredAt: new Date().toISOString(), phase: 'open', turnId: 'recovered', askSeq });
       return true;
+    } catch (error) {
+      console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }
+
+  /** The human wait upgraded from a stored `hasPendingHumanAsk` (`turnId: 'legacy'`, never shown)
+   *  is settled as answered when the transcript holds no unanswered ask: that flag was read from the
+   *  transcript, so its ask was answered after the row was last saved. */
+  private settleAnsweredLegacyAsk(runId: string): boolean {
+    const legacy = this.store.getRun(runId)?.waits?.filter(wait => wait.kind === 'human' && wait.phase === 'open' && wait.turnId === 'legacy' && wait.askSeq === undefined) ?? [];
+    if (!legacy.length || this.hasPendingHumanAsk(runId)) return false;
+    try {
+      return this.store.commitHumanWaitsAnswered(runId, legacy.map(wait => wait.id)).length > 0;
     } catch (error) {
       console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
       return false;
