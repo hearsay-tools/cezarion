@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Hono } from 'hono';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { workspaceUiStatePath } from '../paths.ts';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
@@ -21,10 +21,14 @@ describe('the ui-state API — skillUsage (#408)', () => {
   let repoRoot: string;
   let store: RunStore;
   let app: Hono;
-  const legacyWorkspaceStatePath = workspaceUiStatePath();
+  let home: string;
+  let legacyWorkspaceStatePath: string;
 
   beforeEach(() => {
-    rmSync(legacyWorkspaceStatePath, { force: true });
+    // A home of its own: an inherited CEZ_HOME keeps a real workspace ui-state this must not touch.
+    home = mkdtempSync(join(tmpdir(), 'cez-uistateapi-home-'));
+    vi.stubEnv('CEZ_HOME', home);
+    legacyWorkspaceStatePath = workspaceUiStatePath();
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-uistateapi-'));
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
@@ -35,7 +39,8 @@ describe('the ui-state API — skillUsage (#408)', () => {
   afterEach(() => {
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
-    rmSync(legacyWorkspaceStatePath, { force: true });
+    vi.unstubAllEnvs();
+    rmSync(home, { recursive: true, force: true });
   });
 
   const uiStatePath = () => join(repoRoot, '.ai/cezar', 'ui-state.json');

@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { importableSkillSchema } from '@open-mercato/cezar-contract/skills';
 import * as config from './config.ts';
 import { workspaceUiStatePath } from './paths.ts';
@@ -127,9 +127,17 @@ describe('discoverSkills default-skill selection per project (#1408)', () => {
     await writeFile(workspaceUiStatePath(), JSON.stringify({ importedSkills }));
   }
 
+  // A home of its own: an inherited CEZ_HOME keeps a real workspace ui-state this must not touch.
+  let home: string;
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), 'cezar-skills-home-'));
+    vi.stubEnv('CEZ_HOME', home);
+  });
+
   afterEach(async () => {
     vi.restoreAllMocks();
-    await rm(workspaceUiStatePath(), { force: true });
+    vi.unstubAllEnvs();
+    await rm(home, { recursive: true, force: true });
   });
 
   function offerDefaults(): void {
