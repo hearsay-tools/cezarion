@@ -216,18 +216,29 @@ async function conversingParent(runner: RunnerId) {
 
 const timerText = (wait: Wait, note: string) => `Timer ${wait.id} fired: ${note}. Continue toward the task goal; register another wait if you are still waiting.`;
 
-// Each runner's cells run from their own `waits-<runner>-parity.test.ts`: one file runs serially,
-// and every runner's cells in one file outgrew a CI shard's time limit (hearsay-tools/cezarion#1301).
-// `waits-parity.test.ts` runs the criteria guard and the single-runner cells.
-export function describeWaitParity(scope: RunnerId | 'once'): void {
-  const runners: RunnerId[] = scope === 'once' ? [] : [scope];
+// Each runner's cells run from their own files: one file runs serially, and every runner's cells in
+// one file outgrew a CI shard's time limit (hearsay-tools/cezarion#1301). One runner's cells in one
+// file then outgrew Squeal's 600 s per-file cap on a loaded host, so each runner has two files:
+// `waits-<runner>-parity.test.ts` runs the `base` rows and `waits-<runner>-workers-parity.test.ts`
+// the `workers` rows (hearsay-tools/cezarion#1288). `waits-parity.test.ts` runs the criteria guard
+// and the single-runner cells.
+export type WaitParityPart = 'base' | 'workers';
+export const WAIT_PARITY_FILES: Readonly<Record<WaitParityPart, (runner: RunnerId) => string>> = {
+  base: runner => `waits-${runner}-parity.test.ts`,
+  workers: runner => `waits-${runner}-workers-parity.test.ts`,
+};
+
+export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPart } | 'once'): void {
+  const runnersFor = (part: WaitParityPart): RunnerId[] => scope !== 'once' && scope.part === part ? [scope.runner] : [];
   describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', { timeout: 45_000 }, () => {
     useWorkerWaitFixture();
     afterEach(() => vi.restoreAllMocks());
 
     if (scope === 'once') {
       it('runs every runner\'s cells from its own file', () => {
-        for (const runner of RUNNER_IDS) expect(existsSync(new URL(`./waits-${runner}-parity.test.ts`, import.meta.url)), runner).toBe(true);
+        for (const runner of RUNNER_IDS) for (const file of Object.values(WAIT_PARITY_FILES)) {
+          expect(existsSync(new URL(`./${file(runner)}`, import.meta.url)), file(runner)).toBe(true);
+        }
       });
 
       it('registers every criterion', () => {
@@ -236,7 +247,7 @@ export function describeWaitParity(scope: RunnerId | 'once'): void {
       });
     }
 
-    for (const runner of runners) {
+    for (const runner of runnersFor('base')) {
       for (const tools of [false, true]) {
         it(`${runner} U26 footer capability follows provisioning on opening, live delivery, Continue and no-session recovery (${tools ? 'tools' : 'markers'})`, async () => {
           nativeWire(runner);
@@ -1255,7 +1266,9 @@ export function describeWaitParity(scope: RunnerId | 'once'): void {
         expect(manager.finish(run.id)).toBe(true);
         await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
       });
+    }
 
+    for (const runner of runnersFor('workers')) {
       it(`${runner} U2w ci and worker open: the worker resolving wakes the agent with ci still open and in the footer, and the later ci result is delivered`, async () => {
         const external = github();
         const { p, w } = await parentWithWorker(runner);

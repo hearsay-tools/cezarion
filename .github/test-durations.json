@@ -44,6 +44,29 @@
         "job": 114279011780,
         "shard": "Vitest shard 2/2"
       }
+    ],
+    "updates": [
+      {
+        "issue": "hearsay-tools/cezarion#1288",
+        "files": "packages/cezar/src/core/harness*-parity.test.ts and packages/cezar/src/workflows/waits*-parity.test.ts, split per runner",
+        "aggregation": "One passed run: each file's passed suite-summary duration",
+        "run": 39580602036,
+        "sha": "9052788392b33f7216dc88bfbb6392217e29ec0f",
+        "jobs": [
+          {
+            "job": 119163005062,
+            "shard": "Vitest shard 1/3"
+          },
+          {
+            "job": 119163005102,
+            "shard": "Vitest shard 2/3"
+          },
+          {
+            "job": 119163005109,
+            "shard": "Vitest shard 3/3"
+          }
+        ]
+      }
     ]
   },
   "durationsMs": {
@@ -126,7 +149,13 @@
     "packages/cezar/src/core/effort.test.ts": 9,
     "packages/cezar/src/core/harness-autosave-settlement.test.ts": 75102,
     "packages/cezar/src/core/harness-autosave.test.ts": 23467,
-    "packages/cezar/src/core/harness-parity.test.ts": 622850,
+    "packages/cezar/src/core/harness-claude-parity.test.ts": 197175,
+    "packages/cezar/src/core/harness-codex-parity.test.ts": 98987,
+    "packages/cezar/src/core/harness-cursor-parity.test.ts": 77566,
+    "packages/cezar/src/core/harness-omp-parity.test.ts": 33079,
+    "packages/cezar/src/core/harness-opencode-parity.test.ts": 81890,
+    "packages/cezar/src/core/harness-parity.test.ts": 9848,
+    "packages/cezar/src/core/harness-pi-parity.test.ts": 28661,
     "packages/cezar/src/core/input-submissions.test.ts": 8,
     "packages/cezar/src/core/managed-session.test.ts": 20,
     "packages/cezar/src/core/model-discovery-guard.test.ts": 17,
@@ -445,13 +474,19 @@
     "packages/cezar/src/workflows/timeout-schema.test.ts": 18,
     "packages/cezar/src/workflows/types.test.ts": 14,
     "packages/cezar/src/workflows/unread-liveness.test.ts": 3906,
-    "packages/cezar/src/workflows/waits-claude-parity.test.ts": 370000,
-    "packages/cezar/src/workflows/waits-codex-parity.test.ts": 140000,
-    "packages/cezar/src/workflows/waits-cursor-parity.test.ts": 185000,
-    "packages/cezar/src/workflows/waits-omp-parity.test.ts": 85000,
-    "packages/cezar/src/workflows/waits-opencode-parity.test.ts": 110000,
-    "packages/cezar/src/workflows/waits-parity.test.ts": 20000,
-    "packages/cezar/src/workflows/waits-pi-parity.test.ts": 80000,
+    "packages/cezar/src/workflows/waits-claude-parity.test.ts": 161520,
+    "packages/cezar/src/workflows/waits-claude-workers-parity.test.ts": 208911,
+    "packages/cezar/src/workflows/waits-codex-parity.test.ts": 47892,
+    "packages/cezar/src/workflows/waits-codex-workers-parity.test.ts": 47970,
+    "packages/cezar/src/workflows/waits-cursor-parity.test.ts": 95666,
+    "packages/cezar/src/workflows/waits-cursor-workers-parity.test.ts": 96928,
+    "packages/cezar/src/workflows/waits-omp-parity.test.ts": 33015,
+    "packages/cezar/src/workflows/waits-omp-workers-parity.test.ts": 48006,
+    "packages/cezar/src/workflows/waits-opencode-parity.test.ts": 59906,
+    "packages/cezar/src/workflows/waits-opencode-workers-parity.test.ts": 67243,
+    "packages/cezar/src/workflows/waits-parity.test.ts": 20321,
+    "packages/cezar/src/workflows/waits-pi-parity.test.ts": 32416,
+    "packages/cezar/src/workflows/waits-pi-workers-parity.test.ts": 55629,
     "packages/cezar/src/workflows/worker-destroy.test.ts": 122868,
     "packages/cezar/src/workflows/worker-inbox-liveness.test.ts": 2964,
     "packages/cezar/src/workflows/worker-location-evidence.test.ts": 42656,
