@@ -1,4 +1,4 @@
 import { describeWaitParity } from './waits-parity-cells.testkit.ts';
 
-// The wait list's RUNNER_IDS cells on the cursor wire (hearsay-tools/cezarion#1301).
-describeWaitParity('cursor');
+// The wait list's RUNNER_IDS base cells on the cursor wire (hearsay-tools/cezarion#1301, hearsay-tools/cezarion#1288).
+describeWaitParity({ runner: 'cursor', part: 'base' });

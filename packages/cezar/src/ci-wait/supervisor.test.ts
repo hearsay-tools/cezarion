@@ -74,11 +74,16 @@ it('turns corrupt persisted identity into a visible error instead of rejecting t
  expect((await supervisor('passed').watch(broken,new AbortController().signal)).outcome).toBe('error');
 });
 
-it.each(['passed','failed','head_changed','mixed_passed'] as const)('attributes a final %s snapshot after real gh watch completes',async outcome=>{
+it.each(['passed','failed','head_changed','mixed_passed','conflicting'] as const)('attributes a final %s snapshot after real gh watch completes',async outcome=>{
  const dir=await mkdtemp(join(tmpdir(),'ci-watch-final-'));dirs.push(dir);const s=supervisor(`watch_${outcome}`,{CI_FIXTURE_COUNTER:join(dir,'watched')});
  expect(await s.watch(wait(),new AbortController().signal)).toMatchObject({outcome:outcome==='mixed_passed'?'passed':outcome,headSha:'a'.repeat(40),...(outcome==='head_changed'?{observedHeadSha:'b'.repeat(40)}:{totalChecks:outcome==='mixed_passed'?2:1})});
 });
 
 it('rejects metadata for a different PR number', async () => {
  await expect(supervisor('passed').resolve('https://github.com/org/repo/pull/13')).rejects.toMatchObject({code:'malformed_data'});
+});
+
+it('reports a conflict from real gh metadata with unchanged canonical identity', async () => {
+ const result = await supervisor('conflicting').watch(wait(),new AbortController().signal);
+ expect(result).toMatchObject({outcome:'conflicting',mergeable:'CONFLICTING',mergeStateStatus:'DIRTY',headSha:'a'.repeat(40)});
 });

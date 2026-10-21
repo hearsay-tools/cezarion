@@ -145,10 +145,10 @@ function liveProvisioning(fixture: Fixture): Promise<void> | undefined {
 }
 
 describe('harness parity — skill provisioning (#1408)', () => {
-  expect(SKILL_PROVISION_CRITERIA.map((row) => row.id)).toEqual(['R81', 'R82', 'R83', 'R84', 'R85']);
+  expect(SKILL_PROVISION_CRITERIA.map((row) => row.id)).toEqual(['R86', 'R87', 'R88', 'R89', 'R90']);
 
   for (const backend of RUNNER_IDS) {
-    it(`${backend} R81 provisions the selected skill and its companions on Start`, async () => {
+    it(`${backend} R86 provisions the selected skill and its companions on Start`, async () => {
       await withProvisionRun(backend, async (fixture) => {
         expect(fixture.worktree).not.toBe('');
         expect(installed(fixture.worktree, LEAD)).toBe(true);
@@ -159,7 +159,7 @@ describe('harness parity — skill provisioning (#1408)', () => {
       });
     }, 60_000);
 
-    it(`${backend} R82 provisions the selected skill's companions on an ordinary Continue`, async () => {
+    it(`${backend} R87 provisions the selected skill's companions on an ordinary Continue`, async () => {
       await withProvisionRun(backend, async (fixture) => {
         await idleClose(fixture.manager, fixture.runId);
         removeInstalled(fixture.worktree, HELPER);
@@ -169,7 +169,7 @@ describe('harness parity — skill provisioning (#1408)', () => {
       });
     }, 60_000);
 
-    it(`${backend} R83 provisions them when recover() resumes a continuation with no live session`, async () => {
+    it(`${backend} R88 provisions them when recover() resumes a continuation with no live session`, async () => {
       await withProvisionRun(backend, async (fixture) => {
         await idleClose(fixture.manager, fixture.runId);
         removeInstalled(fixture.worktree, HELPER);
@@ -181,7 +181,7 @@ describe('harness parity — skill provisioning (#1408)', () => {
       });
     }, 90_000);
 
-    it(`${backend} R84 delivers a live /name, then one input naming what was installed`, async () => {
+    it(`${backend} R89 delivers a live /name, then one input naming what was installed`, async () => {
       await withProvisionRun(backend, async (fixture) => {
         expect(fixture.manager.sendMessage(fixture.runId, [{ type: 'text', text: `/${LIVE} go` }])).toBe(true);
         await liveProvisioning(fixture);
@@ -196,7 +196,7 @@ describe('harness parity — skill provisioning (#1408)', () => {
       });
     }, 90_000);
 
-    it(`${backend} R85 Stop during skill preparation launches nothing`, async () => {
+    it(`${backend} R90 Stop during skill preparation launches nothing`, async () => {
       let release!: () => void;
       const held = new Promise<void>((resolve) => { release = resolve; });
       const real = provision.provisionSkills;

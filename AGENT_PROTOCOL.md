@@ -1150,6 +1150,12 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
+The cells are defined in `core/harness-parity-cells.testkit.ts`. Each runner's
+`RUNNER_IDS` cells run from its own `core/harness-<runner>-parity.test.ts`.
+`core/harness-parity.test.ts` runs the matrix guard, the single-runner cells and
+a guard that every runner has its file (hearsay-tools/cezarion#1288). Below,
+`core/harness-parity.test.ts` names this whole matrix.
+
 **P1** (hearsay-tools/cezarion#1049, hearsay-tools/cezarion#1266) routes an
 approval from each native mock that carries one through `RunManager`, the
 cockpit HTTP decision route, and the exact native reply: the Codex JSON-RPC
@@ -1212,7 +1218,7 @@ exemptions or normalized-event injection.
 wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
 normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`, `cezar_ask`,
 `cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
-`workflows/waits-parity.testkit.ts`, defined in `workflows/waits-parity-cells.testkit.ts` and run from one `waits-<runner>-parity.test.ts` per runner, with the criteria guard in `waits-parity.test.ts`. U1
+`workflows/waits-parity.testkit.ts`, defined in `workflows/waits-parity-cells.testkit.ts` and run from two files per runner: `waits-<runner>-parity.test.ts` for the base rows and `waits-<runner>-workers-parity.test.ts` for the worker rows (U2w onward), with the criteria guard in `waits-parity.test.ts` (hearsay-tools/cezarion#1288). U1
 registers a CI wait and a timer through `cezar_wait`, parks, and wakes with each result.
 U2 opens both: the timer wakes, the CI wait stays open and is in that turn's footer,
 the turn end re-parks without a new registration, and the later CI result is
@@ -1547,17 +1553,17 @@ records `worktreeSetup.status === 'done'`, and the paragraph saying what ran rea
 message on each runner's own wire. The note is appended in `workflows/run.ts` before the
 runner seam, so no runner can lose it on the way. No runner is exempt.
 
-**R81–R85** (hearsay-tools/cezarion#1408), in `core/skill-provision-parity.test.ts`, drive every
+**R86–R90** (hearsay-tools/cezarion#1408), in `core/skill-provision-parity.test.ts`, drive every
 `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire on a skill-driven task in its
-own worktree. The selected skill names a companion. R81: Start installs both in `.claude`,
-`.agents` and `.cursor` `skills/`, and nothing under them shows in `git status`. R82: an
-ordinary Continue, whose prompt names no skill, reinstalls the step skill's companion. R83:
-`recover()` resumes a persisted continuation with no live session and reinstalls it. R84: a
+own worktree. The selected skill names a companion. R86: Start installs both in `.claude`,
+`.agents` and `.cursor` `skills/`, and nothing under them shows in `git status`. R87: an
+ordinary Continue, whose prompt names no skill, reinstalls the step skill's companion. R88:
+`recover()` resumes a persisted continuation with no live session and reinstalls it. R89: a
 live `/name` message is delivered at once, its companions install after it, and one durable
 lifecycle agent input names what landed; a repeat installs nothing and sends nothing. That
 input follows the agent-input rules: a pending question holds it until the question is
 answered. Cezar does not rely on a runner's native lookup seeing a skill added mid-session,
-so the input is the delivery on every runner. R85: Stop while the install is held launches no
+so the input is the delivery on every runner. R90: Stop while the install is held launches no
 agent. No runner is exempt.
 
 Crash-diagnostic rows **S15–S17** (hearsay-tools/cezarion#499) drive every `RUNNER_IDS` adapter's
@@ -2696,3 +2702,18 @@ through every native `HARNESS_ADAPTERS` wire, complementing fresh R2. The
 OpenCode cells also retain scoped skill-text, scoped frontmatter-text
 (`mock:scoped-frontmatter-failure`) and unscoped provider failures; mapper and
 withheld-ACK tests cover completion state and barrier bypass for both diagnostics.
+
+### CI conflict observation parity (hearsay-tools/cezarion#1339)
+
+R81–R84 in `workflows/ci-wait-conflict-parity.test.ts` exercise every
+`RUNNER_IDS` native mock through `HARNESS_ADAPTERS`, with a real GitHub client
+and supervisor reading explicit `CONFLICTING` metadata from a separate gh wire.
+R81 covers a fresh session, R82 a Continue, and R83 restart recovery without an
+active session. They read committed rows before wake admission, inject a failed
+checkpoint, retain one lifecycle input across duplicate completion, and deliver
+one conflict observation over the native prompt channel. R83 also reboots with
+a resolved but undelivered result after the external PR becomes clean: the saved
+observation must survive without reclassification. No timer or repair authority
+is introduced.
+R84 cancels an open wait while native gh checks are blocked, then attempts late
+resolution and proves there is no lifecycle input or native conflict prompt.
