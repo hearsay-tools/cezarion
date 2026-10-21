@@ -5,7 +5,8 @@
  * Two classes, in this order:
  *  1. wakes of runs already in progress — a queued wait wake, and every queued continuation
  *     (a scheduler continuation that reopens a closed session, a usage-limit resume, a Continue),
- *     first come first served by when the wake joined the line;
+ *     and a queued owned worker (its family's work in progress, joined at its creation), first
+ *     come first served by when the wake joined the line;
  *  2. runs that have not started, first come first served in queue order.
  *
  * An entry that cannot leave the line now (no capacity, an account on a usage-limit hold, a

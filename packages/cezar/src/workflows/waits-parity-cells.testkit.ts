@@ -2049,18 +2049,14 @@ export function describeWaitParity(scope: RunnerId | 'once'): void {
               await until(() => noReplyNotes(p.id).length === 1 && gated(p.id));
               if (runner === 'opencode') expect(refusals()[0]!.deliveredAt).toBeUndefined();
               expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'no-wait' })]);
-              // The parked parent holds no slot; its wake went ahead of the worker, which may hold one now
-              // (hearsay-tools/cezarion#1236).
-              expect(semaphore.busy() - (manager.isActive(w.id) ? 1 : 0)).toBe(0);
+              expect(semaphore.busy()).toBe(0);
               releaseAck();
               // The reply bound can beat the native ACK. Its human gate alone does not prove
               // delivery committed; the late ACK resumes wake bookkeeping and re-arms that bound.
               checkpoint('u22r-refusal-delivered-and-reparked');
               await until(() => refusals().some(input => !!input.deliveredAt) && gated(p.id));
               expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'no-wait' })]);
-              // The parked parent holds no slot; its wake went ahead of the worker, which may hold one now
-              // (hearsay-tools/cezarion#1236).
-              expect(semaphore.busy() - (manager.isActive(w.id) ? 1 : 0)).toBe(0);
+              expect(semaphore.busy()).toBe(0);
             } else {
               await until(() => prompted(runner, refusal).length > before && store.getRun(p.id)?.status === 'waiting' &&
                 (workerWaits(p.id)[0]?.phase === 'open' || humanOpen(p.id).some(wait => wait.via === 'completion')));

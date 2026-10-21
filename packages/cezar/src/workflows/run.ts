@@ -3020,7 +3020,15 @@ export class RunManager {
   /** When a queued entry joined the line as a wake of a run already in progress, or undefined for
    *  a run that has not started (hearsay-tools/cezarion#1236, `nextLineEntry`). */
   private wakeJoinedAt(runId: string): number | undefined {
-    return this.waitWakeQueuedAt.get(runId) ?? this.pendingContinuations.get(runId)?.lineJoinedAt;
+    const wake = this.waitWakeQueuedAt.get(runId) ?? this.pendingContinuations.get(runId)?.lineJoinedAt;
+    if (wake !== undefined || !this.pendingJobs.has(runId)) return wake;
+    // An owned worker is its family's work in progress, not a new task: it joins the wakes at its
+    // creation, so its parent's later wake (a worker wait that timed out, say) does not take the
+    // slot before the worker it waits on has run.
+    const run = this.store.getRun(runId);
+    if (run?.delegation?.role !== 'worker') return undefined;
+    const created = Date.parse(run.createdAt);
+    return Number.isFinite(created) ? created : undefined;
   }
 
   /** The oldest wake in this manager's line that an account hold does not keep there, or null:

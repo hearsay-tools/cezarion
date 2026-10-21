@@ -1077,7 +1077,10 @@ Calls made by the agent:
 - **The line has two classes** (`workflows/line-order.ts`, `nextLineEntry`). A *wake* is a queued
   wait wake or a queued continuation (a scheduler continuation, a usage-limit resume, a
   Continue), ordered by when it joined the line (`waitWakeQueuedAt`, or the continuation's
-  `lineJoinedAt`). An *unstarted* run is a queued job, in queue order. Wakes go first. An entry
+  `lineJoinedAt`). A queued owned worker counts as a wake that joined at its creation: it is
+  its family's work in progress, so its parent's later wake (a worker wait that timed out) does
+  not take the slot before the worker has run. An *unstarted* run is any other queued job, in
+  queue order. Wakes go first. An entry
   that cannot leave (no capacity, an account hold, a cleanup, a pending finish) keeps its place,
   and the next eligible entry is taken.
 - **Across projects**, the workspace semaphore wakes the project with the oldest wake first
