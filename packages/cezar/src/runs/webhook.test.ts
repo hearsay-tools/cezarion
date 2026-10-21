@@ -130,7 +130,7 @@ describe('TaskWebhook', () => {
     };
     enter({ status: 'waiting' });
     enter({ status: 'failed' });
-    enter({ status: 'failed', autoResumeAt: '2026-10-20T23:00:00.000Z' });
+    enter({ status: 'waiting', autoResumeAt: '2026-10-20T23:00:00.000Z' });
     enter({ status: 'done' });
     enter({ status: 'cancelled' });
     enter({ status: 'queued' });

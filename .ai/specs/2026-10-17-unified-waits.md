@@ -1052,3 +1052,105 @@ wait ends on its workers' settlement, the completion human wait with workers sti
 worker's next settlement, message or question, and the fallback question on the parent's reply.
 Finish never ends a completion park early: the readiness check refuses it while any blocker
 remains.
+
+## Phase 4a decisions
+
+Phase 4a (hearsay-tools/cezarion#1236) is the first half of phase 4. It puts wakes of started runs
+ahead of new tasks, holds every line entry on a usage-limited account, and stores a usage-limited
+run as `waiting`. The "Slots and the line", "Status and display" and "Liveness bounds" sections
+stay authoritative; this section records the calls made within "Left to the builder".
+
+Calls made by the owner (2026-10-21):
+
+- **The split.** 4a is this section and references the issue without closing it. 4b, the next
+  pull request on the same issue, closes it: the rest of the `deriveAttention` rewrite on
+  `waitingOn`, removal of the legacy park state, removal of `cezar_wait_for_ci` and its private
+  route (with its `BACKWARD_COMPATIBILITY.md` entry), and removal of
+  `RunStore.commitCiWaitWithdrawal` and the `human_ask_pending` / `human_ask_unanswered` codes.
+  4b gets its own decisions section and Transitions out table.
+- **A withdrawn appointment ends `failed`.** A per-task cancel, an archive, the setting switched
+  off, a missed window, the cap or a refused resume settles the held run `failed`, with its kept
+  error and the note it has today. The end state is the one before 4a.
+
+Calls made by the agent:
+
+- **The line has two classes** (`workflows/line-order.ts`, `nextLineEntry`). A *wake* is a queued
+  wait wake or a queued continuation (a scheduler continuation, a usage-limit resume, a
+  Continue), ordered by when it joined the line (`waitWakeQueuedAt`, or the continuation's
+  `lineJoinedAt`). A queued owned worker counts as a wake that joined at its creation: it is
+  its family's work in progress, so its parent's later wake (a worker wait that timed out) does
+  not take the slot before the worker has run. An *unstarted* run is any other queued job, in
+  queue order. Wakes go first. An entry
+  that cannot leave (no capacity, an account hold, a cleanup, a pending finish) keeps its place,
+  and the next eligible entry is taken.
+- **Across projects**, the workspace semaphore wakes the project with the oldest wake first
+  (`oldestWakeAt()`, optional on a participant), then the oldest queued entry as before.
+- **Every line entry honours an account hold.** A CI or timer wake for a run in the monitoring
+  pool joined no line before; while its account is held it now joins the line, keeps its
+  monitoring slot, and leaves (without a regular slot) on the first pump after the hold lifts. A
+  `deadline` hold blocks every entry on the account. An `inFlight` hold blocks every entry except
+  other resumes, so it blocks a wake.
+- **A usage-limited run is `waiting` with `autoResumeAt`.** The failure path writes `waiting`, no
+  `finishedAt`, and keeps `error`. The store clears `autoResumeAt` on every status but `waiting`,
+  so a resume that starts (`running`) retires the appointment. `failed` + `autoResumeAt` from an
+  older store loads as `waiting` + `autoResumeAt` (schema 8).
+- **The held run is never woken by its own waits.** They stay open, resolve and stay owed; the
+  resume's opening turn delivers them, as a scheduler continuation delivers results.
+- **A human message or Continue during the hold** is the user's own Continue: it retires the
+  appointment and joins the line as a wake (origin human, budget reset, human waits answered). It
+  starts at once when a slot is free and no other run holds its account; another run's known
+  deadline on that account keeps it queued until the hold lifts. Human input into a live session
+  still skips the line.
+- **Holds are keyed by the execution account** (`workflows/execution-account.ts`): a live
+  session's step settings, a queued continuation's backend, else the step that holds the run's
+  latest session, else the record's `runner` and `agentProfile`. A mixed-runner step is held by
+  the account it ran on, on both sides of the hold.
+- **A held wake is not advertised.** `oldestWakeAt()` leaves out a wake its account holds, so
+  another project's eligible wake gets a freed slot first.
+- **A withdrawal is committed before it is reported** (`RunStore.commitAutoResumeWithdrawal`):
+  status, `finishedAt` and the cleared appointment are written at once, then the timer goes and
+  the note is appended.
+- **The cockpit treats a hold as a closed session** (`isRunActive(run)`): Continue with its
+  runner and account pickers, Archive, Delete and Don't resume; Stop only when it holds wait
+  results; no paused hint and no Finish.
+- **Stop during the hold** keeps the behaviour of the scheduled `failed` run: with open waits,
+  Stop discards them, withdraws the resume and the run ends `failed`; with none, Stop is refused.
+- **Restart.** Recovery re-arms the held run's open waits and leaves the resume to
+  `reconcileAutoResumes`; it does not reopen a session.
+- **Attention.** `waitingOn.kind === 'usage-limit'` reads `{ bucket: 'none', tone: 'neutral',
+  shape: 'ring', pulse: false, label: 'usage limit' }`, after the human rung and before workers.
+  The old `failed` + `autoResumeAt` → `scheduled` rung is gone. The cockpit's meta line says
+  `usage limit, resumes in 12m`; `cez task` says `usage limit, resumes <ISO time>`. The sidebar
+  group family keeps the word `scheduled`.
+- **Webhook.** A usage-limit hold sends no delivery, as the scheduled resume sent none
+  (`deriveWebhookState` returns `undefined`).
+
+### Transitions out (phase 4a)
+
+Required by AGENTS.md for every state 4a adds or keeps. Shipped defaults: `maxParallel: 2`,
+`maxMonitoringSessions: 2`, auto-resume on, at most 12 resumes. Earlier tables hold for the states
+they list. One row per exit.
+
+| State | Trigger | Who or what fires it | Behavior at shipped defaults |
+| --- | --- | --- | --- |
+| `waiting` + `autoResumeAt` (usage limit, no session, no slot) | The resume time passes | The auto-resume timer (`fireAutoResume`), re-armed by `reconcileAutoResumes` after a restart | A resume continuation joins the line as a wake; it starts when a slot is free (a resume passes an `inFlight` hold); its opening turn delivers every resolved wait |
+| | A human message or Continue | The user | The appointment is retired; the continuation joins the line as a wake and starts when a slot is free and no other run holds the account |
+| | Per-task cancel (`DELETE /runs/:id/auto-resume`) or archive | The user | Settles `failed` with the kept error and the note it has today |
+| | Auto-resume switched off | The user (settings), seen by the next pump | Settles `failed`, note `automatic resume cancelled — auto-resume is switched off` |
+| | The window was missed by over a day | `reconcileAutoResumes` | Settles `failed` with the expiry note |
+| | The cap is reached, the run is archived or unreadable at fire time | `fireAutoResume` | Settles `failed` with the matching note |
+| | `continueRun` refuses at fire time | `fireAutoResume` | Settles `failed` with the `could not start` note |
+| | Stop with open waits | The user | Waits discarded, the resume withdrawn; settles `failed` |
+| | Stop with no open wait | The user | Refused, as for the scheduled `failed` run before 4a; the hold stays |
+| | Delete | The user | The run and its timers go |
+| | One of its waits resolves | The wait's own watcher or timer | Stays resolved and owed; no wake; the resume delivers it |
+| | Restart | Recovery | Open waits re-armed; the resume re-armed by `reconcileAutoResumes` |
+| A wake held by an account hold (live session, regular or monitoring slot) | The hold lifts | The resume timer, the resume's turn end, a per-task cancel, an archive or the settings change, each of which pumps | Admitted by that pump and delivered at the session's turn boundary |
+| | Stop, cancel or delete | The user | Waits cancelled; the queued wake is dropped |
+| | A human message | The user | Delivered at once (human input skips the line); the held results stay owed and go with the next admitted wake |
+| A wake queued behind capacity (no hold) | A slot frees | Any slot release (the semaphore wakes the project with the oldest wake first) | Admitted before any unstarted run |
+| An unstarted run queued | A slot frees with no wake able to leave and no hold on its account | Slot release | Starts, as before 4a |
+
+Every state above has a default exit that needs no human: the resume timer for the hold (or a
+settlement to `failed`), a pump for a held or queued wake, and a slot release for an unstarted
+run.

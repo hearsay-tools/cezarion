@@ -32,7 +32,7 @@ import { StepRail, activeStepIndex, railVisual } from './step-rail'
 import { WorkerActivitySection, useWorkersVerdict } from './run-relationships'
 import { ActivityRow, meterText, type MetaParts } from './run-activity-row'
 import { useAgentIdentity } from './run-agent-identity'
-import { resumeHint, runActionFlags } from './run-actions'
+import { isSessionOpen, resumeHint, runActionFlags } from './run-actions'
 import { runStatusLine } from './run-status'
 import { RunWaitDetails, hasWaitDetails } from './run-waits'
 import { BranchCopy, LinkedReferences, WorkspaceTools, useResumeInTerminal, useRunReferenceRequests } from './run-workspace'
@@ -113,7 +113,7 @@ function SessionActivityCard({
   const queuePosition = run.status === 'queued' ? queuePositions(runs.data ?? []).get(run.id) : undefined
   const line = runStatusLine(run, { hasPendingHumanAsk, queuePosition })
   const conflicts = useConflictingPullRequests(prNumbers)
-  const sessionOpen = run.status === 'running' || run.status === 'waiting'
+  const sessionOpen = isSessionOpen(run)
   const runIsTerminal = !sessionOpen && run.status !== 'queued'
   const workflow = run.steps
   const agents = useMemo(() => collectSubagents(currentThread.turns, runIsTerminal), [currentThread.turns, runIsTerminal])

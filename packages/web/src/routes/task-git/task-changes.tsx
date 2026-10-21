@@ -46,7 +46,7 @@ function ChangesView({ run }: { run: ApiRun }) {
   // repo reported no remote for every project (#791).
   const repo = useRepo()
   // Poll while the run is active so writes appear as the agent makes them.
-  const changes = useRunChanges(run.id, isRunActive(run.status))
+  const changes = useRunChanges(run.id, isRunActive(run))
   const desktop = useIsDesktop()
 
   const [mode, setMode] = useState<DiffMode>('unified')

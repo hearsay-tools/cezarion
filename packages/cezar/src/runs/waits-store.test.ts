@@ -666,15 +666,15 @@ describe('upgrade-on-read of agent worker waits', () => {
     }
   });
 
-  it('a store at schema 7 is refused by a schema-6 reader', () => {
-    expect(RUN_DATABASE_SCHEMA_VERSION).toBe(7);
+  it('a store at schema 7 or later is refused by a schema-6 reader', () => {
+    expect(RUN_DATABASE_SCHEMA_VERSION).toBeGreaterThanOrEqual(7);
     const directory = mkdtempSync(join(tmpdir(), 'cez-waits-schema6-'));
     try {
       RunStore.open(directory, { keepLive: true }).close();
       const path = join(directory, RUNS_DB_FILE);
       const raw = new DatabaseSync(path);
       try {
-        expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 7 });
+        expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: RUN_DATABASE_SCHEMA_VERSION });
       } finally {
         raw.close();
       }
@@ -682,7 +682,7 @@ describe('upgrade-on-read of agent worker waits', () => {
       // read it, because it would drop each deadline-less completion entry as unreadable on its next write.
       expect(() => RunDatabase.open(path, 6)).toThrow(RunDatabaseUnsupportedSchemaError);
       expect(() => RunDatabase.openReadOnly(path, 6)).toThrow(RunDatabaseUnsupportedSchemaError);
-      expect(() => RunDatabase.open(path, 6)).toThrow(expect.objectContaining({ kind: 'unsupported-schema', found: 7, supported: 6 }));
+      expect(() => RunDatabase.open(path, 6)).toThrow(expect.objectContaining({ kind: 'unsupported-schema', found: RUN_DATABASE_SCHEMA_VERSION, supported: 6 }));
       // This build still opens it.
       RunDatabase.open(path).close();
     } finally {

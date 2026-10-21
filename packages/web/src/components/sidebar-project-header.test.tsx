@@ -18,7 +18,7 @@ const runs = [
   { id: 'running', status: 'running' },
   { id: 'cancelled', status: 'cancelled', finishedAt },
   { id: 'archived', status: 'done', finishedAt, archived: true },
-  { id: 'scheduled', status: 'failed', finishedAt, autoResumeAt: finishedAt },
+  { id: 'scheduled', status: 'waiting', autoResumeAt: finishedAt },
   { id: 'worker', status: 'done', finishedAt, delegation: { role: 'worker' } },
 ]
 let requests: { url: string; method: string; body: unknown }[]

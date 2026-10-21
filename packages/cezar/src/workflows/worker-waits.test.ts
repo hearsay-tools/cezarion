@@ -466,7 +466,9 @@ describe('human messages beside an owed timer wait', { timeout: 45_000 }, () => 
   useWorkerWaitFixture();
   afterEach(() => vi.restoreAllMocks());
 
-  /** A parent whose timer came due during a restart, queued behind a worker that holds the one slot. */
+  /** A parent whose timer comes due after a restart, queued behind a worker that holds the one slot.
+   *  The timer fires once the worker has the slot: a wake already in the line would go ahead of a
+   *  worker that has not started (hearsay-tools/cezarion#1236). */
   async function queuedTimerWake() {
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
@@ -475,10 +477,10 @@ describe('human messages beside an owed timer wait', { timeout: 45_000 }, () => 
     if (!answer.ok) throw Error('refused');
     const timer = entryOf(p.id, answer.wait_id)!;
     if (timer.kind === 'human') throw Error('unexpected human wait');
-    store.commitWait(p.id, { ...timer, deadline: new Date().toISOString() });
     await restart();
     await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(blocker.id)?.sessionEverOpened === true);
-    expect(store.getRun(p.id)?.status).toBe('queued');
+    (manager as unknown as { waitTimers: Map<string, { timer: { _onTimeout(): void } }> }).waitTimers.get(timer.id)!.timer._onTimeout();
+    await until(() => store.getRun(p.id)?.status === 'queued');
     expect(entryOf(p.id, timer.id)?.phase).toBe('resolved');
     return { p, blocker, timer };
   }

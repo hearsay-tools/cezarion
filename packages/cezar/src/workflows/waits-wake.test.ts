@@ -428,15 +428,16 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     expect(engine().waitTimers.has(later.id)).toBe(false);
   });
 
-  it('claude a usage-limited wake continuation is not counted: the run fails into the usage-limit resume and keeps its result', async () => {
+  it('claude a usage-limited wake continuation is not counted: the run waits for the usage-limit resume and keeps its result', async () => {
     nativeWire('claude');
     persistentWakeFailure(root, 'claude', { usageLimit: true });
     // Far out, so the resume never fires during the test.
     process.env.CEZ_MOCK_LIMIT_RESET_SECONDS = '3600';
     const { run, timer } = await timerOwedWithoutSession();
     fireTimer(timer.id);
-    // The usage-limit resume is scheduled as the failed session is dropped.
-    await until(() => store.getRun(run.id)?.status === 'failed' && !manager.isActive(run.id));
+    // The usage-limit resume is scheduled as the failed session is dropped; the run waits for it
+    // (hearsay-tools/cezarion#1236).
+    await until(() => store.getRun(run.id)?.status === 'waiting' && !!store.getRun(run.id)?.autoResumeAt && !manager.isActive(run.id));
     expect(prompted('claude', TIMER_WAKE_OPENING)).toHaveLength(1);
     expect(store.getRun(run.id)?.autoResumeAt).toBeDefined();
     expect(waitById(run.id, timer.id)?.phase).toBe('resolved');
@@ -451,7 +452,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     process.env.CEZ_MOCK_LIMIT_RESET_SECONDS = '3600';
     const { run, timer } = await timerOwedWithoutSession();
     fireTimer(timer.id);
-    await until(() => store.getRun(run.id)?.status === 'failed' && !manager.isActive(run.id) && engine().autoResumeTimers.has(run.id));
+    await until(() => store.getRun(run.id)?.status === 'waiting' && !manager.isActive(run.id) && engine().autoResumeTimers.has(run.id));
     expect(manager.cancel(run.id)).toBe(true);
     expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
     expect(settled(run.id, timer.id)?.phase).toBe('cancelled');
@@ -464,12 +465,12 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     expect(manager.isActive(run.id)).toBe(false);
   });
 
-  it('claude Stop on an ordinary failed run is refused and leaves its automatic resume armed', async () => {
+  it('claude Stop on a usage-limited run without waits is refused and leaves its automatic resume armed', async () => {
     nativeWire('claude');
     process.env.CEZ_MOCK_LIMIT_RESET_SECONDS = '3600';
     // A usage-limited first turn fails the run without any wait.
     const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:limit ship it', runner: 'claude' });
-    await until(() => store.getRun(run.id)?.status === 'failed' && !manager.isActive(run.id) && engine().autoResumeTimers.has(run.id));
+    await until(() => store.getRun(run.id)?.status === 'waiting' && !manager.isActive(run.id) && engine().autoResumeTimers.has(run.id));
     expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
     expect(manager.cancel(run.id)).toBe(false);
     expect(engine().autoResumeTimers.has(run.id)).toBe(true);

@@ -357,14 +357,14 @@ describe('debounced saves write only what changed', () => {
   it('stores the record, its toRunSummary projection and the query columns', () => {
     const store = open();
     const run = store.createRun({ title: 'summary', workflow: '(planned)', task: 't', steps: [{ id: 's', name: 'Planner', kind: 'agent' }] });
-    store.updateRun(run.id, { status: 'failed', autoResumeAt: '2026-10-06T00:00:00.000Z', finishedAt: '2026-10-05T00:00:00.000Z' });
+    store.updateRun(run.id, { status: 'waiting', autoResumeAt: '2026-10-06T00:00:00.000Z', error: 'usage limit' });
     store.setArchived(run.id, false);
     store.flush();
     const saved = row(run.id)!;
     expect(JSON.parse(saved.data)).toEqual(JSON.parse(JSON.stringify(store.getRun(run.id))));
     expect(JSON.parse(saved.summary)).toEqual(JSON.parse(JSON.stringify(toRunSummary(store.getRun(run.id)!))));
     expect(saved).toMatchObject({
-      status: 'failed', archived: false, finishedAt: '2026-10-05T00:00:00.000Z', live: true, parentRunId: null,
+      status: 'waiting', archived: false, finishedAt: null, live: true, parentRunId: null,
     });
   });
 });
@@ -388,7 +388,15 @@ describe('loading normalizes and saves exactly the rows it changed', () => {
       expect(run).not.toHaveProperty('ciWait');
       expect(run).not.toHaveProperty('activity');
     }],
-    ['a usage-limit resume on a run that is not failed', record('auto', { autoResumeAt: '2026-10-06T00:00:00.000Z' }), true, (run) => expect(run).not.toHaveProperty('autoResumeAt')],
+    ['a usage-limit resume on a run that is not waiting', record('auto', { autoResumeAt: '2026-10-06T00:00:00.000Z' }), true, (run) => expect(run).not.toHaveProperty('autoResumeAt')],
+    // Phase 4a (hearsay-tools/cezarion#1236): a usage-limited run is waiting, kept with its error.
+    ['an old failed usage-limit row', record('limit', { status: 'failed', error: 'usage limit', finishedAt: '2026-10-05T00:00:00.000Z', autoResumeAt: '2026-10-06T00:00:00.000Z' }), true, (run) => {
+      expect(run).toMatchObject({ status: 'waiting', error: 'usage limit', autoResumeAt: '2026-10-06T00:00:00.000Z' });
+      expect(run).not.toHaveProperty('finishedAt');
+    }],
+    ['an old failed usage-limit row opened without live runs', record('limit-cold', { status: 'failed', error: 'usage limit', autoResumeAt: '2026-10-06T00:00:00.000Z' }), undefined, (run) => {
+      expect(run).toMatchObject({ status: 'waiting', autoResumeAt: '2026-10-06T00:00:00.000Z' });
+    }],
     ['an exhausted wake cap from the previous process', record('cap', { status: 'running', monitoringWakeCapReached: true } as Partial<RunRecord>), true, (run) => expect(run).not.toHaveProperty('monitoringWakeCapReached')],
     ['a referenced PR the created-PR declaration used to erase', record('heal', {
       markerRefs: { pr: 9 }, pullRequestUrl: 'https://github.com/o/r/pull/9', referencedPrCandidates: ['https://github.com/o/r/pull/4'],

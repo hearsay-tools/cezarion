@@ -25,7 +25,7 @@ describe('attentionFamily', () => {
     ['needs you', 'needs you'], ['needs review', 'needs review'], ['needs permission', 'needs permission'],
     ['failed', 'failed'], ['running', 'working'], ['monitoring', 'working'], ['waiting on 2 workers', 'working'],
     ['waiting on workers', 'working'], ['waiting on worker replies', 'working'], ['queued', 'queued'],
-    ['scheduled', 'scheduled'], ['done', 'done'], ['cancelled', 'cancelled'],
+    ['usage limit', 'scheduled'], ['done', 'done'], ['cancelled', 'cancelled'],
   ])('%s → %s', (label, family) => {
     expect(attentionFamily(label)).toBe(family)
   })
@@ -48,7 +48,7 @@ describe('groupFamilies (the aggregate in words)', () => {
   })
   it('puts cancelled after done, and counts scheduled apart from queued (a clock, not a slot)', () => {
     expect(groupFamilies([run({ status: 'cancelled' }), run({ status: 'done' })])).toEqual(['1 done', '1 cancelled'])
-    expect(groupFamilies([run({ status: 'failed', autoResumeAt: ago(-60_000) }), run({ status: 'queued' })])).toEqual(['1 queued', '1 scheduled'])
+    expect(groupFamilies([run({ status: 'waiting', autoResumeAt: ago(-60_000) }), run({ status: 'queued' })])).toEqual(['1 queued', '1 scheduled'])
   })
   it('counts needs permission apart from needs review (a tool approval is not a review)', () => {
     expect(familiesOfLabels(['needs review', 'needs permission'])).toEqual(['1 needs permission', '1 needs review'])
@@ -59,7 +59,7 @@ describe('groupFamilies (the aggregate in words)', () => {
     for (let i = 0; i < GROUP_FAMILIES.length; i++) for (let j = i + 1; j < GROUP_FAMILIES.length; j++) {
       expect(GROUP_FAMILIES.indexOf(GROUP_FAMILIES[i]!)).toBeLessThan(GROUP_FAMILIES.indexOf(GROUP_FAMILIES[j]!))
     }
-    expect(groupFamilies([run({ status: 'done' }), run({ status: 'queued' }), run({ status: 'failed', autoResumeAt: ago(-60_000) })])).toEqual(['1 queued', '1 scheduled'])
+    expect(groupFamilies([run({ status: 'done' }), run({ status: 'queued' }), run({ status: 'waiting', autoResumeAt: ago(-60_000) })])).toEqual(['1 queued', '1 scheduled'])
   })
 })
 

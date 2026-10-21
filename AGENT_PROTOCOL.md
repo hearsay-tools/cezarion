@@ -1233,7 +1233,12 @@ delivers its result in a later turn. U4 cancels with `cezar_cancel_wait`, and no
 is delivered. U7 lands `cezar_wait_for_ci`, the monitoring line and `ScheduleWakeup`
 in the same list with their `via`; only `ScheduleWakeup` is exempt, as
 `native scheduler tool exists only on the Claude wire`. U8 parks on a CI wait, and separately on a
-timer, at `maxParallel: 1` and wakes without queueing behind the held slot. U9 leaves the run
+timer, at `maxParallel: 1` and wakes without queueing behind the held slot. U8l
+(hearsay-tools/cezarion#1236) holds the only slot while a timer park's wake and an
+unstarted task wait in the line, and the wake takes the freed slot first, though the
+task queued earlier. U8h settles a CI wait for a park whose account a seeded
+usage-limit record holds, once with a deadline hold and once with a resume in flight:
+the result waits in the line and is delivered once the hold lifts. U9 leaves the run
 recoverable after a provider failure and after a clean close with each kind open, and
 the next wake delivers. U10 resolves two timers before one boundary with 39 wakes spent:
 one turn carries both and spends one wake, and a third timer due at the budget is

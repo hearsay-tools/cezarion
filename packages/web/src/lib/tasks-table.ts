@@ -59,7 +59,7 @@ export function scheduledResume(
   run: Pick<RunSummary, 'status' | 'autoResumeAt'>,
   now: Date = new Date(),
 ): { label: string; title: string } | undefined {
-  if (run.status !== 'failed' || !run.autoResumeAt) return undefined
+  if (run.status !== 'waiting' || !run.autoResumeAt) return undefined
   const at = new Date(run.autoResumeAt)
   if (!Number.isFinite(at.getTime())) return undefined
   const sameDay = at.toDateString() === now.toDateString()
