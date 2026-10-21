@@ -224,6 +224,8 @@ describe('palette voice mode', () => {
 
     await waitFor(() => expect(content()?.getAttribute('data-voice-proposal')).toBe('true'))
     expect(content()?.className).not.toContain('top-[10vh]')
+    // The card sits above the composer: an answer docks at the bottom.
+    expect(content()?.className).toContain('bottom-[2vh]')
     expect(overlay()?.className).toContain('bg-transparent')
     expect(input.value).toBe('')
     expect(document.activeElement).toBe(input)
@@ -234,5 +236,40 @@ describe('palette voice mode', () => {
     await waitFor(() => expect(content()).toBeNull())
     expect(voiceStore.getProposal()).toBeUndefined()
     expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000002', 'cancelled')
+  })
+
+  it('docks a tell at the top, away from the composer at the bottom', async () => {
+    let draft = ''
+    voiceStore.registerComposer({
+      runId: 'r1',
+      getDraft: () => draft,
+      setDraft: (text) => {
+        draft = text
+        return true
+      },
+      clearVoiceDraft: (text) => {
+        if (draft === text) draft = ''
+        return draft === ''
+      },
+      submit: () => true,
+    })
+    mocks.voiceDecide.mockResolvedValue({
+      action: 'tell',
+      decisionId: '00000000-0000-4000-8000-000000000003',
+      runId: 'r1',
+      text: 'run the tests again',
+      confidence: 0.9,
+    } satisfies VoiceDecision)
+    renderPalette({ voice: true, runs: [run({ id: 'r1', title: 'Say hello', status: 'waiting' })], entry: '/tasks/r1' })
+    const input = await openPalette()
+
+    fireEvent.change(input, { target: { value: 'tell it: run the tests again' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(content()?.getAttribute('data-voice-proposal')).toBe('true'))
+    expect(draft).toBe('run the tests again')
+    expect(content()?.className).toContain('top-[2vh]')
+    expect(content()?.className).not.toContain('bottom-[2vh]')
+    expect(document.activeElement).toBe(input)
   })
 })

@@ -107,6 +107,70 @@ function expectNoVoiceActivity(): void {
   })
 }
 
+/** What a docked palette leaves of the proposal's targets: whether the palette input has focus,
+ *  and for each target the part of it really on screen (its box clipped by every scrolling or
+ *  clipping ancestor and by the window), whether that is the whole box, and which points sampled
+ *  across that part land inside the palette. The docked overlay is transparent and is not the
+ *  palette; a point counts as covered when `elementFromPoint` lands inside its dialog content. */
+const dockProbe = (selector: string) => `(() => {
+  const dialog = document.querySelector('[data-slot="dialog-content"]')
+  const box = (r) => ({ top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right) })
+  const targets = [...document.querySelectorAll('${selector}')].map((el) => {
+    const r = el.getBoundingClientRect()
+    let top = Math.max(r.top, 0), bottom = Math.min(r.bottom, innerHeight)
+    let left = Math.max(r.left, 0), right = Math.min(r.right, innerWidth)
+    for (let p = el.parentElement; p; p = p.parentElement) {
+      const style = getComputedStyle(p)
+      if (!/auto|scroll|hidden|clip/.test(style.overflowX + style.overflowY)) continue
+      const q = p.getBoundingClientRect()
+      top = Math.max(top, q.top); bottom = Math.min(bottom, q.bottom); left = Math.max(left, q.left); right = Math.min(right, q.right)
+    }
+    const shown = bottom > top && right > left
+    const whole = shown && top <= r.top + 0.5 && bottom >= r.bottom - 0.5 && left <= r.left + 0.5 && right >= r.right - 0.5
+    const covered = []
+    if (shown) for (const fx of [0.05, 0.5, 0.95]) for (const fy of [0.05, 0.5, 0.95]) {
+      const x = left + (right - left) * fx
+      const y = top + (bottom - top) * fy
+      if (dialog?.contains(document.elementFromPoint(x, y))) covered.push([Math.round(x), Math.round(y)])
+    }
+    return { box: box(r), shown, whole, covered }
+  })
+  return {
+    focused: document.activeElement?.hasAttribute('cmdk-input') === true,
+    docked: dialog?.getAttribute('data-voice-proposal') === 'true',
+    palette: dialog ? box(dialog.getBoundingClientRect()) : null,
+    viewport: [innerWidth, innerHeight],
+    targets,
+  }
+})()`
+
+interface DockTarget { box: object; shown: boolean; whole: boolean; covered: number[][] }
+interface DockReport { focused: boolean; docked: boolean; palette: object | null; viewport: [number, number]; targets: DockTarget[] }
+
+/** The docked palette keeps its input focused and covers no part of the target that is on screen,
+ *  at the default viewport and at a short one (spec "Confirmation": the confirm field has focus
+ *  while the highlighted card is visible; ruling R23). `whole` asks for the whole target on screen:
+ *  a prompt line fits; a tall card may be partly scrolled out of its thread at any height. */
+function expectTargetUncovered(selector: string, { whole }: { whole: boolean }): void {
+  const check = (size: string) =>
+    // bound: holdMs spans a few polls so the dialog's open animation and the resize have settled;
+    // the matcher is the product state itself, polled until it holds.
+    browser.waitForStable<DockReport>(dockProbe(selector), {
+      holdMs: 300,
+      matcher: (report) =>
+        report.focused && report.docked && report.targets.length === 1 &&
+        report.targets.every((target) => target.shown && (!whole || target.whole) && target.covered.length === 0),
+      failure: `the docked palette covers or hides ${selector}, or the input lost focus, at ${size}`,
+    })
+  check('1440x900')
+  browser.setViewport(1280, 640)
+  try {
+    check('1280x640')
+  } finally {
+    browser.setViewport(1440, 900)
+  }
+}
+
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'cez-voice-'))
   const git = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { stdio: 'ignore' })
@@ -147,6 +211,8 @@ describe('voice mode with the dry-run engine', () => {
     browser.press('Enter')
     browser.waitForFunction(`${sentences(FILLED)} === 2`)
     browser.waitForFunction(`document.querySelector('[data-slot="ask-voice-prompt"]') !== null`)
+    expectTargetUncovered('[data-slot="ask-card"][data-voice-proposal="true"]', { whole: false })
+    expectTargetUncovered('[data-slot="ask-voice-prompt"]', { whole: true })
 
     browser.fill(INPUT, 'yes, confirmed')
     browser.waitForFunction(`document.querySelector('${ROW}') !== null`)
@@ -193,6 +259,7 @@ describe('voice mode with the dry-run engine', () => {
     browser.press('Enter')
     browser.waitForFunction(`document.querySelector('[data-slot="composer"][data-voice-proposal="true"]') !== null`)
     browser.waitForFunction(`document.querySelector('[data-slot="composer-voice-prompt"]') !== null`)
+    expectTargetUncovered('[data-slot="composer-voice-prompt"]', { whole: true })
 
     browser.fill(INPUT, 'yes, confirmed')
     browser.waitForFunction(`document.querySelector('${ROW}') !== null`)

@@ -241,11 +241,14 @@ export function CommandPalette() {
   }, [])
 
   // Voice mode (spec 2026-10-21-voice-mode, § Confirmation): while a proposal waits for its
-  // confirmation, the palette moves to the bottom of the viewport over a clear overlay, so the
-  // highlighted question card or composer stays visible and the input keeps focus for "yes,
-  // confirmed". Only the palette makes proposals, so with voice off this never docks.
+  // confirmation, the palette docks over a clear overlay, away from what the proposal filled, so
+  // the highlighted question card or composer stays visible and the input keeps focus for "yes,
+  // confirmed". The composer sits at the bottom of the thread, so a tell docks at the top; a
+  // question card sits above it, so an answer docks at the bottom (ruling R23). Only the palette
+  // makes proposals, so with voice off this never docks.
   const proposal = useVoiceProposal()
   const docked = open && proposal !== undefined
+  const dock = !docked ? 'top-[10vh]' : proposal?.kind === 'tell' ? 'top-[2vh]' : 'top-auto bottom-[2vh]'
 
   return (
     <CommandDialog
@@ -265,7 +268,7 @@ export function CommandPalette() {
       // the result count changes, so the whole modal — search box included — jumps under the
       // cursor as you type. Anchored near the top it only ever grows downward, and the input you
       // are typing into never moves.
-      className={`${docked ? 'top-auto bottom-[2vh]' : 'top-[10vh]'} translate-y-0 sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl`}
+      className={`${dock} translate-y-0 sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl`}
       overlayClassName={docked ? 'bg-transparent' : undefined}
       contentProps={docked ? { 'data-voice-proposal': 'true' } : undefined}
     >
