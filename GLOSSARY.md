@@ -18,8 +18,9 @@ and proof that worker resources can be removed remain separate facts.
 
 A test fixture that selects when a native runner mock fails and how long that
 failure remains active. It can hold one failure until release, or keep failing
-matching wake prompts until lifted. Its lifetime can span mock subprocess
-restarts within the same test fixture.
+matching wake prompts until lifted. All matching runs in a test fixture share
+that failure state. The state survives mock subprocess restarts and ends with
+the fixture; separate fixtures have separate state.
 
 The real runner and its transport remain in use. The mock retains its native
 failure response, including an intentional process exit where the test needs
