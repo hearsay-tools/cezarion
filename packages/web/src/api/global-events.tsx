@@ -490,7 +490,7 @@ function createRunDetailRefresher(queryClient: QueryClient) {
 const RELATIONSHIPS_REFRESH_DEBOUNCE_MS = 400
 
 function relationshipsShapeOf(run: RunRecord): string {
-  return JSON.stringify([run.status, run.currentStepId, run.activity, run.delegation])
+  return JSON.stringify([run.status, run.currentStepId, run.delegation])
 }
 
 function createRelationshipsRefresher(queryClient: QueryClient): {

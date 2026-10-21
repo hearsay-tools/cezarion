@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { openHumanWait } from '@/test/run-summary-fixture'
 
 import type { ApiRun, RunStatus } from '@open-mercato/cezar-api-client'
 
@@ -75,6 +76,6 @@ describe('runStatusLine', () => {
   })
 
   it('reads a pending human ask over the wait it parked on', () => {
-    expect(runStatusLine(run('waiting', { waits: [ciEntry()] }), { hasPendingHumanAsk: true, now }).label).toBe('Needs you')
+    expect(runStatusLine(run('waiting', { waits: [ciEntry(), openHumanWait()] }), { now }).label).toBe('Needs you')
   })
 })

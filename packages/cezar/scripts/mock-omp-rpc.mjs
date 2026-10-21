@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Load only when configured: ordinary mock turns retain their event-loop ordering.
+const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
+  : (await import('./mock-failure-control.mjs')).readFailureControl();
 // Offline OMP (Oh My Pi) `--mode rpc` mock in OMP's own wire shape (v18.4.11, #595): the `ready`
 // frame, id-echoed responses, `prompt_result`, `session_settled`. Startup argv and model errors
 // are copied from the real binary (2026-10-05). Keep it standalone: optional scenario helpers
@@ -59,7 +62,7 @@ if (typeof flags.get('--tools') === 'string') {
   const disabled = (process.env.CEZ_MOCK_OMP_DISABLED_TOOLS ?? '').split(',').filter(Boolean);
   const registered = (name) => (BUILTIN_TOOLS.includes(name) && !GATED_TOOLS.has(name) && !disabled.includes(name))
     || mcpTools.includes(name)
-    || (extensions.length > 0 && (['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'].includes(name) || ((name === 'cezar_preview_serve' || name === 'cezar_preview_stop') && process.env.CEZ_PREVIEW === '1')));
+    || (extensions.length > 0 && (['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'].includes(name) || ((name === 'cezar_preview_serve' || name === 'cezar_preview_stop') && process.env.CEZ_PREVIEW === '1')));
   // Mirrors v18.4.11 `emt()`: every missing name in ONE error, unknown names first, then the
   // built-ins this session lacks, each line singular for one name.
   const missing = tools.filter((name) => !registered(name));
@@ -623,7 +626,9 @@ async function prompt(command) {
     endTurn();
     return;
   }
-  if (message.includes('mock:provider-error')) {
+  const selectedFailure = failureControl?.failureFor(message);
+  const nativeFailure = selectedFailure instanceof Promise ? await selectedFailure : selectedFailure;
+  if (failureControl ? nativeFailure === 'provider' : message.includes('mock:provider-error')) {
     const error = { message: 'Not Found', provider: 'anthropic', model: 'claude-mock', retryable: false };
     assistantText([], { stopReason: 'error', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } }, extra: { errorMessage: 'Not Found' } });
     endTurn({ status: 'error', error });

@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { summaryOf } from '@/test/run-summary-fixture'
+import { openHumanWait } from '@/test/run-summary-fixture'
 import { timerWait, workerWait } from '@/test/wait-fixtures'
 import { describe, expect, it } from 'vitest'
 
@@ -634,7 +635,7 @@ describe('pin promotion preserves visible variant membership (#93)', () => {
   it('promotes once with multiple pins, preserves sibling flags/order, and spends no row budget', () => {
     const a = run({ id: 'a', groupId: 'g', variant: 'A', status: 'waiting' })
     const b = run({ id: 'b', groupId: 'g', variant: 'B', status: 'done', pinned: true })
-    const c = run({ id: 'c', groupId: 'g', variant: 'C', status: 'running', activity: 'monitoring', pinned: true })
+    const c = run({ id: 'c', groupId: 'g', variant: 'C', status: 'running', pinned: true })
     const rows = [c, b, a, run({ id: 'single-pin', pinned: true }), ...Array.from({ length: 12 }, (_, i) => run({ id: `recent-${i}` }))]
     const before = structuredClone(rows)
     expect(shape(capBuckets(groupRuns(rows, 'active'), 0))).toEqual(['Needs you: [ABC]', 'Finished: single-pin'])
@@ -667,10 +668,11 @@ it.each(['open', 'resolved'] as const)('keeps %s worker waits in the appropriate
 })
 
 it('counts a parked parent question as Needs you from the run summary', () => {
-  const record = run({ status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [] }, waits: [workerWait({ workerIds: ['worker'] })] } as Partial<RunRecord>)
+  const parked = { status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [] }, waits: [workerWait({ workerIds: ['worker'] })] } as Partial<RunRecord>
+  const record = run({ ...parked, waits: [...parked.waits!, openHumanWait()] })
   expect(bucketOf(record, 'active')).toBe('Needs you')
   expect(listCounts([record])).toEqual({ active: 1, archived: 0, waiting: 1 })
-  expect(bucketOf({ ...record, hasPendingHumanAsk: false }, 'active')).toBe('Working')
+  expect(bucketOf(run(parked), 'active')).toBe('Working')
 })
 
 function ownedWorker(over: Partial<RunRecord> = {}, parentRunId = 'parent'): RunSummary {

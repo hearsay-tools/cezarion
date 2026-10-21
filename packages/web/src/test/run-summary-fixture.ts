@@ -21,3 +21,13 @@ export function summaryOf(run: RunRecord): RunSummary {
     ...(currentStepBackend === undefined ? {} : { currentStepBackend }),
   } as unknown as RunSummary
 }
+
+/** An open human wait: how a record says the agent asked the user (phase 4b,
+ *  hearsay-tools/cezarion#1236). `askSeq` marks a question the user already sees. */
+export function openHumanWait(askSeq?: number): NonNullable<RunRecord['waits']>[number] {
+  return {
+    id: '00000000-0000-4000-8000-0000000000ac', kind: 'human', source: 'agent', via: 'cezar_ask',
+    registeredAt: '2026-09-16T00:00:00.000Z', phase: 'open', turnId: 'turn-1',
+    ...(askSeq === undefined ? {} : { askSeq }),
+  }
+}

@@ -117,7 +117,7 @@ describe('CI header browser accessibility', () => {
           expect(waitForSettledSample(browser, `document.querySelector('${link}').getBoundingClientRect().left >= 0`)).toBe(true)
           const contrast = browser.evaluate(contrastSampleExpression(link)) as ContrastSample
           expect(contrast.ratio).toBeGreaterThanOrEqual(4.5)
-          expect(browser.evaluate(`getComputedStyle(document.querySelector('${link}')).boxShadow !== 'none'`)).toBe(true)
+          expect(browser.evaluate(`getComputedStyle(document.querySelector('${link}')).outlineStyle !== 'none'`)).toBe(true)
           browser.screenshot(resolve(artifacts, `${theme}-${width}-${zoom}.png`), { viewport: true })
         })
       }

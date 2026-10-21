@@ -187,7 +187,7 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     await until(() => needsYou(run.id));
     expect(asks(run.id)).toMatchObject([{ questions: card('Which module?') }]);
     expect(humanOpen(run.id)).toMatchObject([{ id: registered.wait_id, askSeq: asks(run.id)[0]!.seq }]);
-    expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human' });
+    expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human', shown: true });
     expect(manager.isActive(run.id)).toBe(false);
   });
 
@@ -200,7 +200,7 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     expect(humanOpen(run.id)[0]?.questions).toBeUndefined();
     expect(store.getRun(run.id)?.waits?.some(wait => wait.kind === 'timer')).toBe(false);
     expect(asks(run.id)).toEqual([]);
-    expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human' });
+    expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human', shown: true });
   });
 
   it('a timer cancelled at the budget with nothing else open opens a budget human wait', async () => {
@@ -219,7 +219,7 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     expect(store.readEvents(run.id).find(event => event.seq === budget!.askSeq))
       .toMatchObject({ type: 'note', message: `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you` });
     expect(gates(run.id)).toEqual([]);
-    expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human' });
+    expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human', shown: true });
   });
 });
 

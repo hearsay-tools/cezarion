@@ -128,7 +128,8 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
     assert.equal(parked.json.timedOut, false);
     assert.equal(parked.json.until, 'attention');
     assert.equal(parked.json.status, 'waiting');
-    assert.equal(parked.json.hasPendingHumanAsk, false, 'a finished turn is attention without a structured question (#609)');
+    assert.equal('hasPendingHumanAsk' in parked.json, false, 'phase 4b dropped the field (hearsay-tools/cezarion#1236)');
+    assert.equal(parked.json.question, undefined, 'a finished turn is attention without a structured question (#609)');
     assert.equal(parked.json.attention, 'waiting');
     assert.equal(parked.json.attentionLabel, 'needs you');
     const parkedStatus = await task(['status', String(parked.json.id)]);

@@ -13,7 +13,7 @@ import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { bookkeeping, eventCheckpoint, fixtureUpdateRun, manager, parent, register, restart, root, semaphore, spendWorkerBudget, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
-import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 
 /** #505 PR B: a worker's question goes to its owning parent, not to the human. */
@@ -74,7 +74,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
     expect(conversationOf(p.id)?.messages.some(m => m.question) ?? false).toBe(false);
     expect(store.getRun(p.id)?.agentInputs?.length ?? 0).toBe(inputs);
-    expect(store.getRun(w.id)?.hasPendingHumanAsk).toBe(true);
+    expect(hasPendingAsk(store, w.id)).toBe(true);
   });
 
   it('a budget-spent worker plain-parks without routing', async () => {
@@ -201,7 +201,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       // Nothing was submitted: the steer waits for the answer, and the question stands.
       expect((manager as unknown as { active: Map<string, { agentInputFlight?: unknown }> }).active.get(f.w.id)?.agentInputFlight).toBeUndefined();
       expect(eventsOf(f.w.id, 'human-ask-closed')).toEqual([]);
-      expect(store.getRun(f.w.id)?.hasPendingHumanAsk).toBe(true);
+      expect(hasPendingAsk(store, f.w.id)).toBe(true);
     } finally { f.close(); }
   });
 
@@ -269,7 +269,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       await until(() => beside().length === 3 && beside().every(input => !!input.deliveredAt));
       await until(() => said(f.w.id, 'Only src'));
       expect(answered(f.w.id)).toEqual([]);
-      await until(() => store.getRun(f.w.id)?.status === 'waiting' && store.getRun(f.w.id)?.hasPendingHumanAsk === true);
+      await until(() => store.getRun(f.w.id)?.status === 'waiting' && hasPendingAsk(store, f.w.id) === true);
       await f.reply('mock:agent-echo Use the parser');
       await until(() => answered(f.w.id).length === 1);
     } finally { f.close(); }
@@ -365,7 +365,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     expect(question()).toBeDefined();
     await until(() => !!question()?.deliveredAt);
     expect(eventsOf(p.id, 'human-input-delivered')).toEqual([]);
-    await until(() => store.getRun(p.id)?.status === 'waiting' && store.getRun(p.id)?.hasPendingHumanAsk === true);
+    await until(() => store.getRun(p.id)?.status === 'waiting' && hasPendingAsk(store, p.id) === true);
     expect(manager.sendMessage(p.id, [{ type: 'text', text: 'Vitest' }])).toBe(true);
     await until(() => eventsOf(p.id, 'human-input-delivered').length === 1);
     const human = eventsOf(p.id, 'human-input-delivered');

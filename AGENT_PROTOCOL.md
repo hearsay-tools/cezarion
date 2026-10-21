@@ -844,6 +844,13 @@ one-option list is `invalid_request`, never an open question, and `multiSelect` 
 to options. The answer carries the wait id and `open_waits`, with no deadline. The ask line
 takes open questions too, since both share `askRequestSchema`.
 
+The user sees only the agent's assistant text and the card, never its reasoning or a tool
+call's arguments (hearsay-tools/cezarion#1428). So the lifecycle instructions, the tool
+description and its success hint tell the agent to send the full draft, findings or
+explanation as assistant text before it asks. An `invalid_request` names every failing field
+with its limit from `ASK_LIMITS`, and tells the agent to send the detail it cut as assistant
+text before it retries with a short question.
+
 At most 16 waits are open at once. A
 timer is refused with `timers_disabled` when `resources.monitoringWakeIntervalMinutes` is
 `null`, and with `wake_budget_spent` once the run's automatic-wake budget
@@ -896,8 +903,8 @@ delivered or been cancelled matches nothing, so a later call for that PR opens a
 wait. A timer repeats an open timer only with the same seconds and note in the same turn.
 
 The aliases land in the same list, each recorded in the entry's `via`.
-`cezar_wait_for_ci({ pr, timeout_seconds? })` is deprecated and opens the same CI
-wait (`via: 'cezar_wait_for_ci'`); it is removed in phase 4 (hearsay-tools/cezarion#1236).
+The deprecated `cezar_wait_for_ci` tool was removed in phase 4b (hearsay-tools/cezarion#1236);
+`via: 'cezar_wait_for_ci'` remains only on stored entries it opened.
 At a turn end, the `CEZ:MONITORING` line opens a timer of
 `resources.monitoringWakeIntervalMinutes` × 60 seconds (`via: 'monitoring-line'`),
 and Claude's `ScheduleWakeup` opens one of its `delaySeconds` clamped to 60–3,600,
@@ -1076,8 +1083,9 @@ The tools are provisioned through `AgentRunSpec.cezarTools` independently of wor
 permissions. Claude, Codex, OpenCode and Cursor use the bundled stdio MCP adapter;
 Pi and OMP use a bundled extension over the same shared client. The private chained Hono
 family accepts `POST /api/v1/tools/wait`, `POST /api/v1/tools/cancel-wait`,
-`POST /api/v1/tools/done` and the deprecated `POST /api/v1/tools/ci-wait` over a Unix-domain socket or Windows
-named pipe; authenticated GET holds the adapter lifetime connection. It is **not** a cockpit HTTP route or network listener. Middleware
+`POST /api/v1/tools/done` over a Unix-domain socket or Windows
+named pipe; authenticated `GET /api/v1/tools/ci-wait` holds the adapter lifetime connection
+(the path is historical: its POST was removed with `cezar_wait_for_ci`, hearsay-tools/cezarion#1236). It is **not** a cockpit HTTP route or network listener. Middleware
 validates the shared schema. A memory-only session capability binds project, run
 and generation; the model supplies neither a run ID nor a filesystem path.
 `CEZ_TOOL_TOKEN` and `CEZ_TOOL_SOCKET` are internal child-environment wiring, never
@@ -1090,8 +1098,9 @@ codes for manager disposal, capability revocation, missing/inactive/stopping run
 missing/replaced/closed sessions, cancellation/finish, stale session generation,
 worker waits, stopped worker execution and parent finish. A pending or unanswered
 human question refuses nothing in phase 1 (hearsay-tools/cezarion#1233): the wait opens,
-and its result is delivered beside the question at a boundary. The contract still lists
-`human_ask_pending` and `human_ask_unanswered`, but registration never sends them. Registration checks again after metadata lookup, distinguishing an
+and its result is delivered beside the question at a boundary; phase 4b
+(hearsay-tools/cezarion#1236) removed the unused `human_ask_pending` and
+`human_ask_unanswered` codes from the contract. Registration checks again after metadata lookup, distinguishing an
 aborted registration from a changed turn. Only missing or revoked transport
 capabilities are `unauthorized`; an unknown registration failure is `unavailable`.
 Safe messages never forward request contents or raw provider errors.
@@ -1135,7 +1144,7 @@ extensions and permissions when adding a collision-resistant per-session tool na
 | OpenCode | Merge the local MCP entry into parsed runtime configuration without discarding supplied config or replacing unrelated servers; malformed configuration fails explicitly. |
 | Cursor | Supply the supported ACP descriptor and environment on `session/new` and `session/load`; verify invocation and existing permission routing. |
 | Pi | Add an explicit CI extension alongside the retry extension; exercise actual tool registration and calls without replacing discovered extensions or tool settings. |
-| OMP | Add an explicit CI `--extension scripts/omp-ci-wait.mjs` alongside the user's discovered extensions (never `--no-extensions`); registration is proven by `get_state.dumpTools` listing `cezar_wait_for_ci` on the real binary (v18.4.11). `--tools` admits exactly the names the extension registers, since OMP exits 2 on an unknown name. The extension imports `src/ci-wait/tools.ts` in a source checkout; real OMP cannot resolve the workspace contract package there, so it falls back to `dist/ci-wait/tools.js` only when that file exists and otherwise rethrows the source error. MCP injection is rejected: OMP has no CLI flag for it, only `.omp/mcp.json` files. |
+| OMP | Add an explicit CI `--extension scripts/omp-ci-wait.mjs` alongside the user's discovered extensions (never `--no-extensions`); registration is proven by `get_state.dumpTools` listing the then-current CI tool on the real binary (v18.4.11; see `core/__fixtures__/omp/README.md`). `--tools` admits exactly the names the extension registers, since OMP exits 2 on an unknown name. The extension imports `src/ci-wait/tools.ts` in a source checkout; real OMP cannot resolve the workspace contract package there, so it falls back to `dist/ci-wait/tools.js` only when that file exists and otherwise rethrows the source error. MCP injection is rejected: OMP has no CLI flag for it, only `.omp/mcp.json` files. |
 
 These are **release requirements**, not a claim that a configuration fixture alone
 proves tool discovery. Every `RUNNER_IDS` backend needs named executable parity
@@ -1230,7 +1239,7 @@ U2 opens both: the timer wakes, the CI wait stays open and is in that turn's foo
 the turn end re-parks without a new registration, and the later CI result is
 delivered. U3 delivers a human message during a CI wait, keeps the wait open and
 delivers its result in a later turn. U4 cancels with `cezar_cancel_wait`, and nothing
-is delivered. U7 lands `cezar_wait_for_ci`, the monitoring line and `ScheduleWakeup`
+is delivered. U7 lands `cezar_wait`, the monitoring line and `ScheduleWakeup`
 in the same list with their `via`; only `ScheduleWakeup` is exempt, as
 `native scheduler tool exists only on the Claude wire`. U8 parks on a CI wait, and separately on a
 timer, at `maxParallel: 1` and wakes without queueing behind the held slot. U8l

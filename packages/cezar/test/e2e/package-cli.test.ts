@@ -90,10 +90,10 @@ const client = new Client({ name:'installed-ci-smoke', version:'1' });
 try {
  await client.connect(new StdioClientTransport({ ...session.descriptor, env:session.env, stderr:'pipe' }));
  assert.match(client.getInstructions() ?? '', /^The interface to Cezarion[^\\n]*\\n- cezar_wait: /);
- // Deprecated: still listed and callable, but no trigger line suggests it.
- assert.ok(!(client.getInstructions() ?? '').includes('- cezar_wait_for_ci:'));
+ // hearsay-tools/cezarion#1236: the deprecated CI alias is gone.
+ assert.ok(!(client.getInstructions() ?? '').includes('cezar_wait_for_ci'));
  const tools = await client.listTools();
- assert.deepEqual(tools.tools.map(tool => tool.name), ['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
+ assert.deepEqual(tools.tools.map(tool => tool.name), ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
  // Flag unset: neither preview tool appears in the listing or in the instructions.
  assert.ok(!tools.tools.some(tool => tool.name === 'cezar_preview_serve'));
  assert.ok(!(client.getInstructions() ?? '').includes('cezar_preview_serve'));
@@ -104,32 +104,30 @@ try {
  const previewClient = new Client({ name:'installed-preview-smoke', version:'1' });
  try {
    await previewClient.connect(new StdioClientTransport({ ...session.descriptor, env:{ ...session.env, CEZ_PREVIEW:'1' }, stderr:'pipe' }));
-   assert.deepEqual((await previewClient.listTools()).tools.map(tool => tool.name), ['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_preview_serve', 'cezar_preview_stop']);
+   assert.deepEqual((await previewClient.listTools()).tools.map(tool => tool.name), ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_preview_serve', 'cezar_preview_stop']);
    assert.match(previewClient.getInstructions() ?? '', /^- cezar_preview_serve: load when you have started, or are about to start, a web server the user should click through\\.$/m);
    assert.match(previewClient.getInstructions() ?? '', /^- cezar_preview_stop: load when your Cezar-started preview server needs stopping or restarting\\.$/m);
  } finally { await previewClient.close(); }
- const result = await client.callTool({ name:'cezar_wait_for_ci', arguments:{pr:wait.prUrl} });
- assert.notEqual(result.isError, true);
- assert.match(JSON.stringify(result), new RegExp(wait.id));
  const opened = await client.callTool({ name:'cezar_wait', arguments:{ kind:'ci', pr:wait.prUrl } });
  assert.notEqual(opened.isError, true);
+ assert.match(JSON.stringify(opened), new RegExp(wait.id));
  assert.match(JSON.stringify(opened), /End your turn to wait/);
  const closed = await client.callTool({ name:'cezar_cancel_wait', arguments:{ wait_id:wait.id } });
  assert.notEqual(closed.isError, true);
- assert.equal(count, 2);
+ assert.equal(count, 1);
  Object.assign(process.env, session.env);
  const registered = [];
  piExtension({ registerTool(tool) { registered.push(tool); } });
- assert.deepEqual(registered.map(tool => tool.name), ['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
- const piResult = await registered[0].execute('pi-call', {pr:wait.prUrl});
+ assert.deepEqual(registered.map(tool => tool.name), ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
+ const piResult = await registered[0].execute('pi-call', {kind:'ci', pr:wait.prUrl});
  assert.notEqual(piResult.isError, true);
- assert.equal(count, 3);
+ assert.equal(count, 2);
  const ompRegistered = [];
  ompExtension({ registerTool(tool) { ompRegistered.push(tool); } });
- assert.deepEqual(ompRegistered.map(tool => tool.name), ['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
- const ompResult = await ompRegistered[0].execute('omp-call', {pr:wait.prUrl});
+ assert.deepEqual(ompRegistered.map(tool => tool.name), ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
+ const ompResult = await ompRegistered[0].execute('omp-call', {kind:'ci', pr:wait.prUrl});
  assert.notEqual(ompResult.isError, true);
- assert.equal(count, 4);
+ assert.equal(count, 3);
  process.env.CEZ_DRY_RUN = '1';
  delete process.env.CEZ_CODEX_BIN;
  delete process.env.CEZ_OPENCODE_BIN;
@@ -139,7 +137,7 @@ try {
    await createRunner(backend).run({ cwd:process.cwd(), userPrompt:'mock:ci-wait ' + wait.prUrl, cezarTools:session.descriptor, env:session.env, timeoutMs:10_000 }, event => events.push(event));
    assert.ok(!events.some(event => event.type === 'error'), JSON.stringify(events));
  }
- assert.equal(count, 7);
+ assert.equal(count, 6);
  console.log('installed CI adapters passed');
 } finally { await client.close(); await controller.close(); }
 `);

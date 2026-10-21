@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { summaryOf } from '@/test/run-summary-fixture'
+import { openHumanWait } from '@/test/run-summary-fixture'
 import { describe, expect, it } from 'vitest'
 
 import type { RunRecord, RunSummary, RunStatus } from '@open-mercato/cezar-api-client'
@@ -180,14 +181,6 @@ describe('wantsAttention', () => {
   })
 })
 
-// The monitoring activity is no longer a park (hearsay-tools/cezarion#1301): CI and timer parks are
-// open waits, so an old row's leftover activity reads as the status it carries.
-it("reads an old row's activity: 'monitoring' as its plain status", () => {
-  expect(deriveAttention(run({ status: 'running', activity: 'monitoring' })).label).toBe('running')
-  expect(wantsAttention(run({ status: 'running', activity: 'monitoring' }))).toBe(false)
-  expect(deriveAttention(run({ status: 'done', activity: 'monitoring' })).label).toBe('done')
-})
-
 describe('tone vocabulary', () => {
   it('is exactly the StatusDot tones', () => {
     // attention.ts names its tones itself to stay UI-free, so the two lists can drift. These
@@ -245,13 +238,13 @@ it("never reads an old row's delegation.wait", () => {
 })
 
 it('keeps a parked parent with a pending human ask in list attention without transcript context', () => {
-  const record = onWaits('waiting', [workerEntry()], { hasPendingHumanAsk: true })
+  const record = onWaits('waiting', [workerEntry(), openHumanWait()])
   expect(deriveAttention(record)).toEqual({ bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' })
   expect(wantsAttention(record)).toBe(true)
 })
 
 it('keeps a resolved worker wait with a pending human ask in list attention', () => {
-  const record = onWaits('waiting', [workerEntry({ phase: 'resolved' })], { hasPendingHumanAsk: true })
+  const record = onWaits('waiting', [workerEntry({ phase: 'resolved' }), openHumanWait()])
   expect(deriveAttention(record)).toEqual({ bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' })
   expect(wantsAttention(record)).toBe(true)
 })
@@ -262,12 +255,17 @@ it('keeps a running parent with a resolved worker wait as running', () => {
   })
 })
 
-it('keeps a queued parent with a resolved worker wait and a pending ask as queued', () => {
-  const record = onWaits('queued', [workerEntry({ phase: 'resolved' })], { hasPendingHumanAsk: true })
-  expect(deriveAttention(record)).toEqual({
-    bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'queued',
+// Rung 3 (phase 4b, hearsay-tools/cezarion#1236): a question the user cannot see yet does not
+// outrank the queued wake; one the user sees is Needs you at any live status.
+it('reads a queued parent with a resolved worker wait by whether its question is shown', () => {
+  const unshown = onWaits('queued', [workerEntry({ phase: 'resolved' }), openHumanWait()])
+  expect(deriveAttention(unshown)).toEqual({
+    bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity',
   })
-  expect(wantsAttention(record)).toBe(false)
+  expect(wantsAttention(unshown)).toBe(false)
+  const shown = onWaits('queued', [workerEntry({ phase: 'resolved' }), openHumanWait(3)])
+  expect(deriveAttention(shown).label).toBe('needs you')
+  expect(wantsAttention(shown)).toBe(true)
 })
 
 /** A CI or timer park is `waiting` with an open wait (spec 2026-10-17-unified-waits, phase 1).
@@ -296,7 +294,7 @@ describe('a run parked on an open wait', () => {
   })
 
   it('is Needs you again with a pending human ask', () => {
-    const record = run({ status: 'waiting', waits: [openCi()], hasPendingHumanAsk: true })
+    const record = run({ status: 'waiting', waits: [openCi(), openHumanWait()] })
     expect(deriveAttention(record).label).toBe('needs you')
     expect(wantsAttention(record)).toBe(true)
   })

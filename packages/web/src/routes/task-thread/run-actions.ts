@@ -181,9 +181,9 @@ export function archiveInComposer(run: RunRecord): boolean {
 
 /** Promote only an authoritative clear verdict on a Needs-you task. Unknown eligibility
  * stays hidden until the detail response arrives; the client never reconstructs blockers. */
-export function offersComposerFinish(run: ApiRun, hasPendingHumanAsk = false): boolean {
+export function offersComposerFinish(run: ApiRun): boolean {
   return run.status === 'waiting' && run.finishBlocked === null &&
-    deriveAttention(run, hasPendingHumanAsk).bucket === 'waiting'
+    deriveAttention(run).bucket === 'waiting'
 }
 
 /**

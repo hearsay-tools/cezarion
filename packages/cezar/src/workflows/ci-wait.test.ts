@@ -11,7 +11,7 @@ import { WAIT_LIMIT, type Wait } from '@open-mercato/cezar-contract/waits';
 import type { CiWait, CiWaitResult } from '@open-mercato/cezar-contract';
 import { controlledWire, manager, parent, root, restart, semaphore, store, until, worker, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
-import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { ciWatchRequest, waitResultText } from './waits.ts';
 
 // Tool transport is exercised by adapter parity; lifecycle tests control only external resources.
@@ -43,7 +43,7 @@ function github() {
 
 async function register(id: string) {
   const state = (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(id)!;
-  return timed(await manager.registerCiWait(id, { pr, timeout_seconds: 30 }, state.ciGeneration));
+  return timed(await manager.registerWait(id, { kind: 'ci', pr, timeout_seconds: 30 }, 'cezar_wait', state.ciGeneration));
 }
 
 describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () => {
@@ -52,7 +52,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
 
   it('rejects registration outside an active run without writing a receipt', async () => {
     github();
-    await expect(Promise.resolve().then(() => manager.registerCiWait('absent', { pr, timeout_seconds: 30 }, 'old')))
+    await expect(Promise.resolve().then(() => manager.registerWait('absent', { kind: 'ci', pr, timeout_seconds: 30 }, 'cezar_wait', 'old')))
       .rejects.toMatchObject({ code: 'run_missing' });
     expect(store.listRuns()).toEqual([]);
   });
@@ -67,10 +67,8 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     expect(receipt.phase).toBe('open');
     const persisted = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; waits?: Wait[] }>;
     expect(persisted.find(row => row.id === run.id)?.waits?.find(entry => entry.kind === 'ci')?.id).toBe(receipt.id);
-    expect(store.getRun(run.id)?.activity).not.toBe('monitoring');
     writeFileSync(gate, 'end');
     await until(() => parked(run.id));
-    expect(store.getRun(run.id)?.activity).toBeUndefined();
     expect(store.getRun(run.id)?.waits?.some(entry => entry.kind === 'timer')).toBeFalsy();
     expect(semaphore.busy()).toBe(0); // its slot is a monitoring slot
     expect((manager as unknown as { monitoring: Set<string> }).monitoring.has(run.id)).toBe(true);
@@ -86,7 +84,6 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     external.settle(success());
     await until(() => ciWaitOf(run.id)?.phase === 'resolved');
     expect(store.getRun(run.id)?.agentInputs?.find(input => input.id === receipt.id)?.deliveredAt).toBeUndefined();
-    expect(store.getRun(run.id)?.activity).not.toBe('monitoring');
     writeFileSync(gate, 'end');
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
     expect(ciWaitOf(run.id)).toBeUndefined();
@@ -290,7 +287,6 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     expect(manager.isActive(run.id)).toBe(false);
     expect(ciWaitOf(run.id)?.id).toBe(receipt.id);
     expect(store.getRun(run.id)?.status).toBe('waiting');
-    expect(store.getRun(run.id)?.activity).toBeUndefined();
     external.settle(success());
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
     expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === receipt.id)).toHaveLength(1);
@@ -379,14 +375,14 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const run = await parent('mock:ask');
     const wait = await register(run.id);
     writeFileSync(gate, 'end');
-    await until(() => store.getRun(run.id)?.status === 'waiting' && store.getRun(run.id)?.hasPendingHumanAsk === true);
+    await until(() => store.getRun(run.id)?.status === 'waiting' && hasPendingAsk(store, run.id) === true);
     expect(ciWaitOf(run.id)?.phase).toBe('open');
     expect(external.aborted()).toBe(false);
     external.settle(success());
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
     expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
     // This wire never echoes a consumed line, so the re-park itself is U3b's, on native wires.
-    expect(store.getRun(run.id)?.hasPendingHumanAsk).toBe(true);
+    expect(hasPendingAsk(store, run.id)).toBe(true);
     expect(store.readEvents(run.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
   });
 
@@ -398,7 +394,6 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     state.session.end();
     await until(() => !manager.isActive(run.id));
     expect(store.getRun(run.id)?.status).toBe('waiting');
-    expect(store.getRun(run.id)?.activity).toBeUndefined();
     external.settle(success());
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
     expect(lastCiWaitOf(run.id)?.result?.outcome).toBe('passed');
@@ -720,7 +715,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     const timer = await registerTimer(run.id, 600);
     store.flush();
     const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<Record<string, unknown> & { id: string }>;
-    Object.assign(disk.find(entry => entry.id === run.id)!, { status: 'review', activity: undefined });
+    Object.assign(disk.find(entry => entry.id === run.id)!, { status: 'review' });
     await restart(false, disk);
     await until(() => (store.getRun(run.id)?.waits ?? []).length === 0);
     expect([settledById(run.id, ci.id)?.phase, settledById(run.id, timer.id)?.phase]).toEqual(['cancelled', 'cancelled']);

@@ -15,6 +15,7 @@ import {
   type RunSummary,
 } from '@open-mercato/cezar-contract/runs';
 import { changesPayloadSchema } from '@open-mercato/cezar-contract/repo';
+import { asksQuestion } from '@open-mercato/cezar-contract/waits';
 import { runHistoryContextSchema } from '@open-mercato/cezar-contract/events';
 import { skillSchema } from '@open-mercato/cezar-contract/skills';
 import { openUrl } from '../open-url.ts';
@@ -178,8 +179,8 @@ const ATTENTION_HELP = [
   '  status, list, wait and log --follow carry `attention` (the cockpit bucket) and',
   '  `attentionLabel` (its phrase), derived by the same function as the cockpit\'s Needs You.',
   '  Read those, not the raw status:',
-  '  - `waiting` is attention even when hasPendingHumanAsk is false (a finished turn parks the task);',
-  '    never clear a task on hasPendingHumanAsk alone.',
+  '  - `waiting` is attention even when no question is pending (a finished turn parks the task);',
+  '    a pending question also shows as `question` on status.',
   '  - `waiting` on its own open CI or timer wait (attentionLabel "waiting for CI" or "monitoring")',
   '    is neither settled nor attention: the agent is still watching what it registered. attention: running.',
   '  - a task parked on its own workers ("waiting on 2 workers") is attention: none; keep waiting.',
@@ -248,7 +249,7 @@ export function taskHelp(operation?: string): string {
     ] : []),
     'Commands find the running cockpit that serves this checkout (ports 4321-4370) and print JSON.',
     'notify: with a task webhook set in Settings → General, start notifies it unless --no-notify;',
-    'the webhook gets task.status, task.question, task.activity and task.subscribed POSTs.',
+    'the webhook gets task.status, task.question and task.subscribed POSTs.',
     'Exit codes: 0 ok (wait/start --wait: done, review, or stopped for attention) · 1 task failed/cancelled',
     'or message not delivered · 2 no cockpit or refused · 3 timed out · 64 usage error.',
   ].join('\n');
@@ -576,7 +577,7 @@ async function execute(
     case 'status': {
       const run = await getRun(cockpit, id);
       if (values.full) { print(run); return EXIT.ok; }
-      const question = run.hasPendingHumanAsk ? await pendingQuestion(cockpit, id) : undefined;
+      const question = asksQuestion(run) ? await pendingQuestion(cockpit, id) : undefined;
       print({ ...projectStatus(run, threadUrl(cockpit, id), question), handoffUrl: handoffUrl(cockpit, id) });
       return EXIT.ok;
     }

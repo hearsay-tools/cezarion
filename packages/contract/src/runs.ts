@@ -55,14 +55,6 @@ export const runStatusSchema = z.enum([
 ]);
 export type RunStatus = z.infer<typeof runStatusSchema>;
 
-/**
- * Sub-state of `running` (spec 2026-07-18-subagent-monitoring-status, #490): the agent ended its
- * turn still working on its own downstream work (a sub-agent, a monitored command) and said so
- * with the `CEZ:MONITORING` marker — a non-attention state, not "needs you".
- */
-export const runActivitySchema = z.enum(['monitoring']);
-export type RunActivity = z.infer<typeof runActivitySchema>;
-
 export const stepStatusSchema = z.enum([
   'pending',
   'running',
@@ -306,13 +298,6 @@ export const runRecordSchema = z.object({
   /** The last webhook delivery's outcome (#589). Absent until a delivery was attempted. */
   webhook: runWebhookOutcomeSchema.optional(),
   status: runStatusSchema,
-  /** `monitoring` while `status === 'running'` and the agent is working on downstream work.
-   *  Absent on old runs; cleared on resume/end. No longer written: CI and timer parks are
-   *  `waiting` with an open wait. Still read from older rows and summaries. */
-  activity: runActivitySchema.optional(),
-  /** Derived from valid human questions and matching delivery receipts in durable history.
-   * List attention only; never authorization to deliver an answer or wake a worker. */
-  hasPendingHumanAsk: z.boolean().optional(),
   /** Live native approval attention; grants themselves never persist. */
   hasPendingPermission: z.boolean().optional(),
   /** Exact ISO-8601 instant this run resumes itself after a provider usage limit stopped it
@@ -455,8 +440,6 @@ export const runSummarySchema = z.object({
   titleSummary: z.string().optional(),
   titleOrigin: z.enum(['user', 'auto', 'marker']).optional(),
   status: runStatusSchema,
-  activity: runActivitySchema.optional(),
-  hasPendingHumanAsk: runRecordSchema.shape.hasPendingHumanAsk,
   hasPendingPermission: runRecordSchema.shape.hasPendingPermission,
   /** The run's top open wait (`computeWaitingOn`), which `deriveAttention` reads. The wait list
    *  itself stays on the record. */
@@ -568,7 +551,7 @@ export type RunIndexEntry = z.infer<typeof runIndexEntrySchema>;
 
 /** Keys a summary copies verbatim from the record when the record has them. */
 const SUMMARY_OPTIONAL_KEYS = [
-  'titleSummary', 'titleOrigin', 'activity', 'hasPendingHumanAsk', 'hasPendingPermission', 'finishedAt', 'seenAt',
+  'titleSummary', 'titleOrigin', 'hasPendingPermission', 'finishedAt', 'seenAt',
   'autoResumeAt', 'branch', 'startedAt', 'pullRequestUrl', 'pullRequests', 'referencedPullRequestUrl', 'prNumber',
   'issueNumber', 'referencedIssueUrl', 'markerRefs', 'costUsd', 'peakRssBytes', 'peakProcCount',
   'groupId', 'variant', 'pinned', 'runner', 'model', 'notify', 'diffStat', 'inputTokens',

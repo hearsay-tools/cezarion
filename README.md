@@ -633,9 +633,8 @@ Controller recovery can replay an
 observation after an ambiguous delivery checkpoint, identified by its stable
 lifecycle input ID.
 
-`cezar_wait_for_ci` (a `pr` and an optional `timeout_seconds`) still works and opens
-the same CI wait, but it is deprecated: new prompts and skills should call
-`cezar_wait` with `kind: "ci"`. It will be removed (hearsay-tools/cezarion#1236).
+The deprecated `cezar_wait_for_ci` tool was removed (hearsay-tools/cezarion#1236):
+call `cezar_wait` with `kind: "ci"` instead.
 
 The adapters are bundled for Claude (including `claude-cli`), Codex, OpenCode,
 Cursor, Pi and OMP. Internal socket/capability environment values are runtime wiring,
@@ -802,10 +801,10 @@ derived by the same function the cockpit's Needs You uses, so the CLI and the co
 disagree. Read those rather than the raw status:
 
 - `attention: waiting` (`attentionLabel` "needs you" / "needs review"), `error` or `permission`
-  means the task wants a human. A `waiting` task is attention **even when `hasPendingHumanAsk`
-  is false** — a finished turn parks the task for follow-up without a structured question —
-  unless its top open wait is CI or a timer (below). Never clear a task on `hasPendingHumanAsk`
-  alone.
+  means the task wants a human. A `waiting` task is attention **even when no question is
+  pending** — a finished turn parks the task for follow-up without a structured question —
+  unless its top open wait is CI or a timer (below). A pending question shows as `question`
+  on `status` and as `waitingOn` `{ kind: 'human' }`; never clear a task on its absence alone.
 - `attention: running` with `attentionLabel` "waiting for CI" or "monitoring" (`status: waiting`
   with an open CI wait or timer in `waitingOn`) is neither settled nor attention: the agent is
   still working on its own sub-agents or a watched command, whatever its last log line says.

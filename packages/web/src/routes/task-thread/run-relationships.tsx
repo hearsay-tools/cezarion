@@ -98,13 +98,15 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
       icon={<GitBranchIcon className="size-4" />}
       title="Workers"
       meta={workerMeta({ ids, workers, parentId, desktop, query })}
+      aside={query.data?.capacity ? <CapacityNote capacity={query.data.capacity} /> : undefined}
       open={open}
       onToggle={onToggle}
     >
       <div aria-label="Task relationships" className="min-w-0 text-[13px] text-muted-foreground" role="group">
+        {query.data?.capacity && query.data.capacity.outstanding >= query.data.capacity.limit
+          ? <p role="status" className="px-1 py-1">All worker slots are in use. Clean up finished workers to free a slot.</p> : null}
         {metadata?.role === 'worker' && metadata.destroy ? <Cleanup state={metadata.destroy} /> : null}
         {wait ? <WaitNote wait={wait} dependencyLabel={dependencyLabel} /> : null}
-        {query.data?.capacity ? <CapacityNote capacity={query.data.capacity} /> : null}
         {parentId ? <ParentLink id={parentId} /> : null}
         {ids.length > 0 ? (
           <ul className="grid max-h-64 min-w-0 gap-0.5 overflow-y-auto">
@@ -234,11 +236,10 @@ function ParentLink({ id }: { id: string }) {
  * names the one recovery a human has here — cleaning up finished workers.
  */
 function CapacityNote({ capacity }: { capacity: NonNullable<RunRelationships['capacity']> }) {
-  const full = capacity.outstanding >= capacity.limit
-  return <p role="status" className={cn('px-2 break-words', full && 'text-foreground')}>
-    {full ? `All ${capacity.limit} worker slots are in use. Clean up finished workers to free a slot.`
-      : `Capacity ${capacity.outstanding} of ${capacity.limit} in use`}
-  </p>
+  return <span data-slot="worker-capacity" role="status" aria-label={`Worker capacity: ${capacity.outstanding} of ${capacity.limit} in use`}
+    className="ms-auto shrink-0 whitespace-nowrap text-[13px] font-normal text-muted-foreground tabular-nums">
+    {capacity.outstanding} of {capacity.limit} in use
+  </span>
 }
 
 const SETTLED = new Set<WorkerInspection['status']>(['review', 'done', 'failed', 'cancelled'])

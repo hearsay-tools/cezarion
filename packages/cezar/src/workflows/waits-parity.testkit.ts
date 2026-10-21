@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { createFailureControl, type FailureControlOptions } from '../../scripts/mock-failure-control.mjs';
 import { expect } from 'vitest';
 import type { RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
@@ -13,7 +13,7 @@ export const WAIT_CRITERIA = [
   { id: 'U9', scenario: 'provider-error', name: 'provider failure and clean close with a ci or timer wait open leave the run recoverable and the next wake delivers' },
   { id: 'U2', scenario: 'baseline', name: 'ci and timer open: the timer wakes, ci stays open and is in the footer, the turn end re-parks without re-registering, the later ci result is delivered' },
   { id: 'U3', scenario: 'hold', name: 'a human message during a ci wait is delivered, the wait stays open, and its result arrives in a later turn' },
-  { id: 'U7', scenario: 'turn-messages', name: 'cezar_wait_for_ci, the monitoring line and ScheduleWakeup land in the same wait list' },
+  { id: 'U7', scenario: 'turn-messages', name: 'cezar_wait, the monitoring line and ScheduleWakeup land in the same wait list' },
   { id: 'U7m', scenario: 'turn-messages', name: 'the monitoring line adds no timer beside an open ci, timer or worker wait' },
   { id: 'U7f', scenario: 'turn-messages', name: 'the monitoring line alone opens an identifiable timer and keeps its deadline' },
   { id: 'U8', scenario: 'baseline', name: 'a ci or timer park keeps its slot and wakes without queueing at maxParallel 1' },
@@ -78,7 +78,7 @@ export const WAIT_CRITERIA = [
 
 /** The native mocks' `mock:cezar-tool` prompt: one cezar tool call through the runner's own wire.
  *  Several in one prompt run in order; `wait_id: 'last'` names the previous answer's wait. */
-export function toolCall(name: 'cezar_wait' | 'cezar_wait_for_ci' | 'cezar_ask' | 'cezar_cancel_wait' | 'cezar_done', args: Record<string, unknown>): string {
+export function toolCall(name: 'cezar_wait' | 'cezar_ask' | 'cezar_cancel_wait' | 'cezar_done', args: Record<string, unknown>): string {
   return `mock:cezar-tool ${name} ${Buffer.from(JSON.stringify(args)).toString('base64url')}`;
 }
 /** After the `toolCall`s in the same prompt, the turn ends with `text`. */
@@ -90,36 +90,8 @@ export function thenSay(text: string): string {
 // A scheduler-owned opening prompt fails once; the next process/turn uses the
 // unchanged success fixture. No runner methods or normalized events are mocked.
 export function gatedProviderFailure(root: string, runner: RunnerId) {
-  const adapter = HARNESS_ADAPTERS[runner];
-  const held = join(root, 'provider-held'), released = join(root, 'provider-released'), failed = join(root, 'provider-failed');
-  const anchor: Record<RunnerId, string> = {
-    claude: "if (userText.includes('mock:auth-error')) {",
-    codex: "if (turnText.includes('mock:provider-error') || turnText.includes('mock:empty-success')) {",
-    opencode: "if (body.includes('mock:provider-error')) {",
-    pi: "if (command.type === 'prompt' && command.message.includes('mock:provider-error')) {",
-    cursor: "if (mode === 'provider-error') {",
-    omp: "if (message.includes('mock:provider-error')) {",
-  };
-  const text: Record<RunnerId, string> = { claude: 'userText', codex: 'turnText', opencode: 'body', pi: 'command.message', cursor: 'prompt', omp: 'message' };
-  let source = readFileSync(adapter.mockBin, 'utf8').replace(/^#!.*\n/, '');
-  expect(source.split(anchor[runner])).toHaveLength(2);
-  source = source.replace(anchor[runner], `if (ciFailurePrompt(${text[runner]})) { await ciFailureGate();`);
-  if (runner === 'cursor') source = source.replace("prompt.includes('mock:provider-error')", 'ciFailurePrompt(prompt)');
-  source = source.replace(/import\('(\.\/[^']+)'\)/g, (_match, path: string) => `import(${JSON.stringify(pathToFileURL(join(dirname(adapter.mockBin), path)).href)})`);
-  source = `import * as ciFailureFs from 'node:fs';
-function ciFailurePrompt(text) {
-  return typeof text === 'string' && !ciFailureFs.existsSync(${JSON.stringify(failed)}) && (text.includes(${JSON.stringify(adapter.scenarios['provider-error'])}) || text.includes('Resume to receive the queued CI observation.'));
-}
-async function ciFailureGate() {
-  ciFailureFs.writeFileSync(${JSON.stringify(held)}, 'held');
-  while (!ciFailureFs.existsSync(${JSON.stringify(released)})) await new Promise(resolve => setTimeout(resolve, 5));
-  ciFailureFs.writeFileSync(${JSON.stringify(failed)}, 'failed');
-}
-${source}`;
-  const mock = join(root, 'ci-failure-native.mjs');
-  writeFileSync(mock, '#!/usr/bin/env node\n' + source, { mode: 0o755 });
-  process.env.CEZ_DRY_RUN = '0'; process.env[adapter.binEnv] = mock;
-  return { held: () => existsSync(held), release: () => writeFileSync(released, '') };
+  const { held, release } = nativeFailureControl(root, runner, { mode: 'gated-once' });
+  return { held, release };
 }
 
 /** The opening prompt of the scheduler continuation that delivers a timer result. */
@@ -134,33 +106,19 @@ export const MESSAGE_WAKE_OPENING = 'Resume to receive queued messages.';
 // a message steered behind the opening would be read; `unread` makes Claude's failure end the
 // process instead, as a crash would, before it reads one. Every other prompt is unchanged.
 export function persistentWakeFailure(root: string, runner: RunnerId, { usageLimit = false, opening = TIMER_WAKE_OPENING, unread = false } = {}) {
-  const adapter = HARNESS_ADAPTERS[runner];
-  const lifted = join(root, 'wake-failure-lifted');
-  const anchor: Record<RunnerId, string> = {
-    claude: usageLimit ? "if (userText.includes('mock:limit')) {" : "if (userText.includes('mock:auth-error')) {",
-    codex: "if (turnText.includes('mock:provider-error') || turnText.includes('mock:empty-success')) {",
-    opencode: "if (body.includes('mock:provider-error')) {",
-    pi: "if (command.type === 'prompt' && command.message.includes('mock:provider-error')) {",
-    cursor: "if (mode === 'provider-error') {",
-    omp: "if (message.includes('mock:provider-error')) {",
-  };
   if (usageLimit) expect(runner).toBe('claude');
-  const text: Record<RunnerId, string> = { claude: 'userText', codex: 'turnText', opencode: 'body', pi: 'command.message', cursor: 'prompt', omp: 'message' };
-  let source = readFileSync(adapter.mockBin, 'utf8').replace(/^#!.*\n/, '');
-  expect(source.split(anchor[runner])).toHaveLength(2);
-  source = source.replace(anchor[runner], unread && runner === 'claude'
-    ? `if (wakeFailurePrompt(userText)) process.exit(1);\n  ${anchor[runner]}` : `if (wakeFailurePrompt(${text[runner]})) {`);
-  if (runner === 'cursor') source = source.replace("prompt.includes('mock:provider-error')", 'wakeFailurePrompt(prompt)');
-  source = source.replace(/import\('(\.\/[^']+)'\)/g, (_match, path: string) => `import(${JSON.stringify(pathToFileURL(join(dirname(adapter.mockBin), path)).href)})`);
-  source = `import * as wakeFailureFs from 'node:fs';
-function wakeFailurePrompt(text) {
-  return typeof text === 'string' && text.includes(${JSON.stringify(opening)}) && !wakeFailureFs.existsSync(${JSON.stringify(lifted)});
+  const { lift } = nativeFailureControl(root, runner, { mode: 'persistent', opening,
+    failure: unread && runner === 'claude' ? 'unread' : usageLimit ? 'usage-limit' : 'provider' });
+  return { lift };
 }
-${source}`;
-  const mock = join(root, 'wake-failure-native.mjs');
-  writeFileSync(mock, '#!/usr/bin/env node\n' + source, { mode: 0o755 });
-  process.env.CEZ_DRY_RUN = '0'; process.env[adapter.binEnv] = mock;
-  return { lift: () => writeFileSync(lifted, '') };
+
+function nativeFailureControl(root: string, runner: RunnerId, options: FailureControlOptions) {
+  const control = createFailureControl(root, options);
+  const adapter = HARNESS_ADAPTERS[runner];
+  process.env.CEZ_DRY_RUN = '0';
+  process.env[adapter.binEnv] = adapter.mockBin;
+  process.env.CEZ_MOCK_FAILURE_CONTROL = control.path;
+  return control;
 }
 
 type NativeInput = {

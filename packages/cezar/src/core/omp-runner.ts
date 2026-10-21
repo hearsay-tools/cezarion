@@ -83,7 +83,7 @@ const OMP_DELEGATION_TOOLS: ReadonlySet<string> = new Set(['task', 'wait', 'eval
  * support). Held against the mock's recorded argv and RPC by the harness parity matrix.
  */
 export const OMP_SPEC_SUPPORT: AgentRunSpecSupport = {
-  cezarTools: { honored: true, via: 'explicit CI --extension; cezar_wait_for_ci admitted when --tools is set' },
+  cezarTools: { honored: true, via: 'explicit CI --extension; the cezar tools admitted when --tools is set' },
   systemPrompt: { honored: true, via: '--append-system-prompt' },
   userPrompt: { honored: true, via: 'RPC prompt.message' },
   images: { honored: true, via: "RPC prompt.images ({type:'image', data, mimeType})" },
