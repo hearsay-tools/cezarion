@@ -11,7 +11,8 @@ import { blank } from './test-wait-discipline.testkit.ts';
  * contract module, delegation's schemas among them. A value imported through a root puts all of
  * them in the importer's runtime closure, so an edit to any shared schema reruns tests that never
  * use it. A type import costs nothing at runtime, so the roots stay open to `import type`, to
- * `export type … from` and to an `import('<root>').T` type query. Everything else is refused here.
+ * `export type … from` and to an `import('<root>').T` type query inside a type alias. Everything
+ * else is refused here.
  */
 const repo = join(import.meta.dirname, '../../..');
 const ROOTS = ['@open-mercato/cezar-contract', '@open-mercato/cezar-api-client'];
@@ -38,21 +39,50 @@ function declarationKind(head: string): Kind | undefined {
   return 'default';
 }
 
+/** The `=` of a type alias at a statement start. TypeScript needs the name on the line of `type`. */
+const ALIAS_HEAD = /(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?type[ \t]+[\w$]+\s*(?:<[^;]*?>)?\s*=(?!>)/g;
+/** A line that ends mid-type, and a line that starts mid-type: the type goes on past the break between. */
+const ENDS_OPEN = /(?:[=|&,<:?.]|=>)\s*$/;
+const STARTS_OPEN = /^\s*(?:[|&?:.,]|=>)/;
+
+/**
+ * Whether the blanked `code` ends inside a type alias, where `import('<root>')` is a type query.
+ * The alias opened last runs from its `=` to a `;` at its own bracket depth, a bracket that closes
+ * past that depth, or a line break at that depth between two lines that neither ends nor starts
+ * mid-type. Outside an alias, `typeof import(…)` is an expression that runs the import.
+ */
+function insideTypeAlias(code: string): boolean {
+  const head = [...code.matchAll(ALIAS_HEAD)].at(-1);
+  if (head === undefined) return false;
+  let depth = 0;
+  for (let i = head.index + head[0].length; i < code.length; i++) {
+    const ch = code.charAt(i);
+    if ('([{'.includes(ch)) depth++;
+    else if (')]}'.includes(ch)) {
+      if (--depth < 0) return false;
+    } else if (depth === 0 && ch === ';') return false;
+    else if (depth === 0 && ch === '\n' && !ENDS_OPEN.test(code.slice(head.index, i)) && !STARTS_OPEN.test(code.slice(i + 1))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** Every runtime import of a package root in `source`. Strings and comments are blanked first. */
 export function scanRootImports(file: string, source: string): RootImport[] {
   const code = blank(source);
   const sites: RootImport[] = [];
   const lineAt = (offset: number) => source.slice(0, offset).split('\n').length;
-  // `blank` keeps each string's quotes and turns its content to spaces, at the same offsets.
-  for (const match of code.matchAll(/(['"]) *\1/g)) {
+  // `blank` keeps the quotes of each string and the backticks of each template, and turns their
+  // content to spaces at the same offsets. A template keeps its `${…}`, so one with a
+  // substitution never matches: no static scan can read its specifier.
+  for (const match of code.matchAll(/([`'"]) *\1/g)) {
     const at = match.index;
     const root = rootOf(source.slice(at + 1, at + match[0].length - 1));
     if (root === undefined) continue;
     const before = code.slice(0, at);
     if (/\bimport\s*\(\s*$/.test(before)) {
-      const statement = before.slice(Math.max(before.lastIndexOf(';'), before.lastIndexOf('\n')) + 1);
-      const typeQuery = /^\s*(?:export\s+)?type\s/.test(statement) || /\btypeof\s+import\s*\(\s*$/.test(before);
-      if (!typeQuery) sites.push({ file, line: lineAt(at), root, kind: 'dynamic', names: [] });
+      if (!insideTypeAlias(before)) sites.push({ file, line: lineAt(at), root, kind: 'dynamic', names: [] });
       continue;
     }
     if (/\bimport\s*$/.test(before)) {
@@ -132,6 +162,12 @@ describe('scanning one file', () => {
     [`const m = await import('${R}')`, 'dynamic'],
     [`import { a } from '${R}/index'`, 'value-import'],
     [`import { a } from "@open-mercato/cezar-api-client"`, 'value-import'],
+    [`const m = await import(\`${R}\`)`, 'dynamic'],
+    [`const t = typeof import('${R}')`, 'dynamic'],
+    [`type T = X\nconst m = import('${R}')`, 'dynamic'],
+    [`type T = X; const m = import('${R}')`, 'dynamic'],
+    [`{ type T = X } const m = import('${R}')`, 'dynamic'],
+    [`type T = X\nconst m = c ?\n  import('${R}') : d`, 'dynamic'],
   ])('refuses %s', (source, kind) => {
     expect(kinds(source)).toEqual([kind]);
   });
@@ -145,6 +181,12 @@ describe('scanning one file', () => {
     `const s = "import { a } from '${R}'"`,
     `const t = \`export * from '${R}'\``,
     `// import { a } from '${R}'`,
+    `type T =\n  import('${R}').RunRecord`,
+    `type T =\n  | A\n  | import('${R}').B`,
+    `type T = {\n  a: A;\n  b: import('${R}').B;\n}`,
+    `type T = Map<\n  string,\n  import('${R}').B\n>`,
+    `export type M = typeof import('${R}')`,
+    `declare type T = import('${R}').X`,
   ])('allows %s', (source) => {
     expect(kinds(source)).toEqual([]);
   });
