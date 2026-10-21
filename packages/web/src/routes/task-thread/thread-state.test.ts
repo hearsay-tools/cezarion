@@ -962,6 +962,16 @@ describe('reduceThread — AskUser cards (#473)', () => {
     expect(other).toMatchObject({ resolved: false })
   })
 
+  // hearsay-tools/cezarion#1301: new input supersedes a worker's fallback question.
+  it('a superseded question resolves its card as closed, not answered', () => {
+    const closed = allItems([
+      line(2, 'ask.requested', ASK),
+      line(3, 'human-ask-closed', { askSeq: 2, reason: 'superseded' }),
+    ]).find((i) => i.kind === 'ask')
+    expect(closed).toMatchObject({ resolved: true, closed: 'superseded' })
+    expect((closed as { answeredBy?: string }).answeredBy).toBeUndefined()
+  })
+
   it('drops an ask.requested with no valid questions', () => {
     expect(
       allItems([line(1, 'ask.requested', { requestId: 'x', questions: [] })]).some(
@@ -1086,6 +1096,17 @@ describe('reduceThread — parent/worker conversation', () => {
   }
   const outcome = { requestId: id, status: 'replied' as const, observedAt: message.createdAt, replyId: '44444444-4444-4444-8444-444444444444' }
 
+  it('amends only a timeout with a late reply and keeps the amendment on replay', () => {
+    const expired = { requestId: id, status: 'timed-out', observedAt: message.createdAt }
+    const amended = { ...outcome, status: 'replied-late', observedAt: '2026-09-08T13:00:00.000Z' }
+    const { turns } = reduceThread([
+      line(1, 'conversation-message', { message, delivery: 'queued' }),
+      line(2, 'request-outcome', { outcome: expired }),
+      line(3, 'request-outcome', { outcome: amended }),
+      line(4, 'request-outcome', { outcome: expired }),
+    ])
+    expect(turns[0]!.items[0]).toMatchObject({ outcome: { status: 'replied-late', observedAt: amended.observedAt, replyId: amended.replyId } })
+  })
   it('attaches a later outcome onto the request and never emits a standalone outcome note', () => {
     const { turns } = reduceThread([
       line(1, 'conversation-message', { message, delivery: 'queued' }),

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, it, describe } from 'vitest';
-import { deriveAttention } from '@open-mercato/cezar-contract/attention';
+import { deriveAttention, WEBHOOK_TRIGGERS } from '@open-mercato/cezar-contract/attention';
 import type { ApiRun } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
@@ -54,14 +54,14 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
         afterDelivery?.();
         await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && semaphore.busy() === 0);
       };
-      if (row.id === 'M3' || row.id === 'M8') {
-        store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [],
-          ...(row.id === 'M8' ? { completion: { phase: 'attention' } } : {}) } }]);
-        if (row.id === 'M3') await worker(p.id);
+      if (row.id === 'M3') {
+        store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+        await worker(p.id);
       }
       const calls: TaskWebhookPayload[] = [];
       const hook = new TaskWebhook(store, { dataDir: join(root, '.ai/cezar'), dryRun: false,
-        resolveProject: async () => ({ id: 'project', webhook: { url: 'https://example.test/hook' } }), origin: () => 'http://localhost',
+        // Every state: these rows pin what a delivery says, not which states send one (#1356).
+        resolveProject: async () => ({ id: 'project', webhook: { url: 'https://example.test/hook', triggers: WEBHOOK_TRIGGERS } }), origin: () => 'http://localhost',
         fetch: (async (_url, init) => { calls.push(JSON.parse(String(init?.body))); return new Response(null, { status: 204 }); }) as typeof fetch,
       });
       store.updateRun(p.id, { notify: true });
@@ -198,11 +198,6 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
             await send([example]);
             attention('needs you', true);
           }
-        } else {
-          await send([MONITORING_TEXT, ACK_TEXT], () => {
-            store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: [], receipts: [], completion: { phase: 'attention' } } }]);
-          });
-          attention('needs you', true);
         }
         await hook.idle();
         const final = calls.at(-1)!;

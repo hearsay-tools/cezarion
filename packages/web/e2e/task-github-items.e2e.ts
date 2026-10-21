@@ -9,11 +9,12 @@ import type { RunRecord } from '@open-mercato/cezar-api-client'
 
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { openSessionActivityRow } from './session-activity'
 // fixture-server starts: 1
 
 /**
  * Task GitHub item tabs (#692) end-to-end: a task that references an own-repo PR and issue gets
- * one tab per item, and the header chips open those tabs instead of GitHub.
+ * one tab per item, and the Session activity chips open those tabs instead of GitHub.
  *
  * The fixture repo carries a github.com `origin`, so the project's repo resolves, and
  * `CEZ_DRY_RUN=1` answers every forge read from the built-in mock — whose PR #128 and issue #142
@@ -35,7 +36,7 @@ const runId = 'task-items-1'
 const scoped = (path: string) => `/p/${bootProject}${path}`
 const tabs = '[data-slot="run-tabs"]'
 const activeTab = `${tabs} a[aria-current="page"]`
-const prChip = '[data-slot="run-meta"] [data-slot="pr-chip"]'
+const prChip = '[data-slot="run-activity-workspace"] [data-slot="pr-chip"]'
 
 
 beforeAll(async () => {
@@ -80,11 +81,11 @@ afterAll(async () => {
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
 
-/** Opens the task, clicks the header PR chip and returns once the PR tab is the active one. */
-function openPrFromChip({ revealDetails = false } = {}) {
+/** Opens the task, clicks the Session activity card's PR chip (hearsay-tools/cezarion#1333) and
+ *  returns once the PR tab is the active one. */
+function openPrFromChip() {
   browser.goto(`${baseUrl}${scoped(`/tasks/${runId}`)}`)
-  // On a phone the meta row (and its chips) sits behind the details toggle.
-  if (revealDetails) browser.click('button[aria-label="Show run details"]')
+  openSessionActivityRow(browser, 'workspace')
   browser.click(prChip)
   return browser.waitForValue<string | null>(
     `(() => {
@@ -126,7 +127,7 @@ describe('task GitHub item tabs against the dry-run mock', () => {
     }
   })
 
-  it('the header PR chip opens the PR tab with its merge box, and the issue tab shows the issue body', () => {
+  it('the Session activity PR chip opens the PR tab with its merge box, and the issue tab shows the issue body', () => {
     const active = openPrFromChip()
     expect(active).toContain(`#${PR}`)
     expect(browser.url()).toBe(`${baseUrl}${scoped(`/tasks/${runId}/pr/${PR}`)}`)
@@ -181,7 +182,7 @@ describe('task GitHub item tabs against the dry-run mock', () => {
 
   it('on a phone the chip lands on a PR tab that is inside the viewport', () => {
     browser.setViewport(390, 844)
-    openPrFromChip({ revealDetails: true })
+    openPrFromChip()
     const rect = waitForSettledSample<{ left: number; right: number; width: number }>(browser,
       `(() => {
         const tab = document.querySelector('${activeTab}')

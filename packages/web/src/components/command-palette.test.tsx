@@ -1091,7 +1091,9 @@ describe('the pure ordering helpers', () => {
 
 it('preserves parked-parent wait phases without listing owned workers', async () => {
   const workerId = '10000000-0000-4000-8000-000000000002'
-  const live = run({ id: 'live-parent', title: 'Live parent', status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [], wait: { id: workerId, workerIds: [workerId], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })
+  const live = run({ id: 'live-parent', title: 'Live parent', status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [] },
+    // A worker wait is a wait-list entry (hearsay-tools/cezarion#1301).
+    waits: [{ kind: 'worker', id: '10000000-0000-4000-8000-000000000003', source: 'agent', via: 'cez-worker-wait', registeredAt: '2026-09-05T00:00:00.000Z', deadline: '2026-09-06T00:00:00.000Z', phase: 'open', turnId: 'turn-1', timeoutSeconds: 600, workerIds: [workerId], revisions: [], outcomes: [] }] } as Parameters<typeof run>[0])
   const liveWorker = run({
     id: 'live-worker',
     title: 'Secret worker title',
@@ -1111,7 +1113,7 @@ it('preserves parked-parent wait phases without listing owned workers', async ()
     },
   })
   renderPalette({ projects: [project({ id: 'cezar' }), project({ id: 'other' })], runs: [live, liveWorker], indexed: [
-    { ...live, id: 'indexed-parent', title: 'Indexed parent', projectId: 'other', delegation: { role: 'root', wait: { phase: 'parked' } } },
+    { ...live, id: 'indexed-parent', title: 'Indexed parent', projectId: 'other', delegation: { role: 'root' }, waitingOn: { kind: 'workers', count: 0 } },
     { ...live, id: 'indexed-worker', title: 'Indexed worker unique', status: 'running', projectId: 'other', delegation: { role: 'worker', parentRunId: 'parent' } },
   ] })
   openWith({ metaKey: true })
@@ -1132,7 +1134,7 @@ it('preserves parked-parent wait phases without listing owned workers', async ()
 it('preserves pending human attention in live and indexed palette rows', async () => {
   const live = run({ id: 'live-asking', title: 'Live question', status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })
   renderPalette({ projects: [project({ id: 'cezar' }), project({ id: 'other' })], runs: [live], indexed: [
-    { ...live, id: 'indexed-asking', title: 'Indexed question', projectId: 'other', delegation: { role: 'root', wait: { phase: 'parked' } } },
+    { ...live, id: 'indexed-asking', title: 'Indexed question', projectId: 'other', delegation: { role: 'root' }, waitingOn: { kind: 'workers', count: 0 } },
   ] })
   openWith({ metaKey: true })
   await screen.findByText('Indexed question')

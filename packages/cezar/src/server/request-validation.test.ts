@@ -212,6 +212,14 @@ describe('request validation bounds (#429)', () => {
       const all = await apiRequest(app, path, { method: 'POST' });
       expect(all.status).toBe(200);
       expect(await all.json()).toEqual({ archived: 1, ids: [loose], pinnedIds: [] });
+
+      // #1332: the sidebar's per-tab sweep narrows by automation origin.
+      store.setArchived(loose, false);
+      expect((await postJson(path, { automation: 'yes' })).status).toBe(400);
+      const automations = await postJson(path, { scope: 'unpinned', automation: true });
+      expect(await automations.json()).toEqual({ archived: 0, ids: [], pinnedIds: [] });
+      const manual = await postJson(path, { scope: 'unpinned', automation: false });
+      expect(await manual.json()).toEqual({ archived: 1, ids: [loose], pinnedIds: [] });
     },
   );
 

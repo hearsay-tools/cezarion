@@ -34,6 +34,34 @@ and five independent Noul questions in one request: established intended behavio
 policy changes, authority changes, verification changes, and runtime changes.
 Code combines them; Jev does not select an executable workflow or use tools.
 
+Jev has no repository context beyond the supplied title and body. The
+established-behavior question asks whether the report describes an existing
+requirement enforced by code, tests or documentation and a bounded way to restore
+or explain it. It does not ask Jev to verify the source or infer project approval.
+A filename, citation or assertion that something is a bug is insufficient on its
+own. The implementation worker must verify the reported requirement before acting.
+
+The established-behavior, policy-change and verification-change questions each
+carry explicit true/false criteria. Explaining an existing command or guard, or
+finding the assertions for tests already required, preserves the requirement.
+Introducing an obligation, exemption, threshold, permission or behavioral
+guarantee changes policy even when delivered as documentation. Changing what must
+pass, what may be skipped or which results count as accepted changes verification.
+Missing evidence remains uncertain; it does not establish permission to act.
+
+These reports illustrate the intended boundary for calibration:
+
+| Report | Intended handling | Reason |
+| --- | --- | --- |
+| [hearsay-tools/cezarion#1337](https://github.com/hearsay-tools/cezarion/issues/1337) | Knowledge / automatic | Expose the existing counted-roster guard and command. |
+| [hearsay-tools/cezarion#1350](https://github.com/hearsay-tools/cezarion/issues/1350) | Knowledge / automatic | Explain visible-text searches to locate affected, already-required browser tests. |
+| [hearsay-tools/cezarion#1336](https://github.com/hearsay-tools/cezarion/issues/1336) | Design | Require duration measurements above a new time threshold. |
+| [hearsay-tools/cezarion#1344](https://github.com/hearsay-tools/cezarion/issues/1344) | Design | Choose mock-edit exemptions from required park fixtures. |
+
+These are expected outcomes, not measured Jev accuracy. Request-contract tests
+verify that the criteria reach the API; real model evaluations must check the
+predictions, including the other reports in the audited batch.
+
 Automatic eligibility requires a selected-category probability of at least 0.8,
 an established-behavior probability of at least 0.9, and independently no more
 than 0.1 probability of a policy, authority, or verification change. A runtime
@@ -103,7 +131,7 @@ needs a rerun; no background retry task is created outside the bounded transport
 | --- | --- |
 | `friction-auto` | Verify established intent, implement a bounded remedy, verify, open a draft PR |
 | `friction-guarded` | Name the approved guarantee, reproduce the violation, prove regression red/green, verify neighboring and boundary-specific guarantees, open a draft PR |
-| `friction-design` | Investigate, propose behavior and alternatives with acceptance criteria and a verification plan, then stop before product implementation |
+| `friction-design` | Run `/dev-flow` on its Design Track, prefer a bounded design in chat, ask for approval in the same task, then implement and verify before a draft implementation PR |
 
 All three require an open issue by `wjarka`, `friction`, their own handling label,
 no other handling label, exactly one recognized category, and no existing claim,
@@ -131,14 +159,31 @@ for other automations is unchanged: historical event labels still match. Preview
 counts describe historical matches; execution can skip a superseded route.
 
 Tasks use Codex, one isolated worktree, no generated follow-ups, and human review;
-none may merge or enable automation. Implementation routes can escalate to a
-design proposal whenever investigation exposes an unresolved decision.
+none may merge or enable automation. Automatic and guarded tasks run autonomously.
+The design route selects the `dev-flow` skill in an agent step and sets
+`autonomous:false`, so its human design-approval gate can ask questions and pause.
+Implementation routes can escalate to a design proposal whenever investigation
+exposes an unresolved decision.
 
-A design proposal records current load-bearing guarantees, alternatives and
-trade-offs, defaults, cost/authority boundaries, persistence/compatibility,
-acceptance criteria and verification. Run-state changes include a **Transitions
-out** table covering failure and no-session recovery. Approve the proposal and
-**Continue the same task** to implement it. Relabeling is not a new-stage handoff:
+Design tasks explicitly select `/dev-flow`'s **Design Track**, even when a Direct
+or Micro track might otherwise apply. Prefer a bounded design in chat when the
+investigated remedy is small and clear: state behavior, scope, files, acceptance
+criteria and verification, then request explicit human approval through
+`cezar_ask`. Architectural changes follow the skill's spec-and-plan path, with
+working files left untracked. Neither path opens a design-only or plan-only PR,
+commits planning files, or posts a standalone Plan handoff to the issue. A missing
+`dev-flow` skill is a blocker, not permission to substitute a documentation PR.
+
+The design records current load-bearing guarantees, alternatives and trade-offs,
+defaults, cost/authority boundaries, persistence/compatibility, acceptance criteria
+and verification. Run-state changes include a **Transitions out** table covering
+failure and no-session recovery. Automatic launch and labels never grant design
+approval. The task pauses for questions and explicit approval before product
+implementation; after approval, **Continue the same task** through `/dev-flow`'s
+implementation, verification and draft implementation PR. The approved design
+stays in the session, with the handoff maintained for resumption. Recheck
+eligibility on Continue while recognizing the same task's own assignment and
+claim; competing work still blocks it. Relabeling is not a new-stage handoff:
 cezar's existing issue deduplication can block a second task for that issue.
 
 The Jev action itself creates no cezar task, leaving issue deduplication available
@@ -160,3 +205,7 @@ prompts. Running `node .github/scripts/friction-policy.cjs` emits the definition
 for review. Create each with `cez automation create --file <definition.json>`
 without `--enable`, then use `cez automation check <id>` without `--execute`.
 Compare existing definitions before updating them; do not create duplicate polls.
+When updating an existing design poll, remove its `task.workflow` key (the CLI
+accepts `null` to remove a task key), set its `task.steps` to the `dev-flow` agent
+step, and set `task.autonomous:false`. Preview the updated filter without
+`--execute`; preserve its existing enablement and backlog settings.

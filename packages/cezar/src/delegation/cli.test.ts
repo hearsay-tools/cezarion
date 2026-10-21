@@ -7,7 +7,7 @@ import { Writable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runWorkerCommand } from './cli.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
-import { fixture } from './service.testkit.ts';
+import { fixture, seedWorkerWait } from './service.testkit.ts';
 import { createDelegationRoutes } from './routes.ts';
 import { createDelegationApp, startDelegationTransport } from './transport.ts';
 
@@ -100,6 +100,23 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     expect(waitHelp).toContain('--request');
     expect(waitHelp).toContain('--mode');
     expect(waitHelp).toContain('--timeout-seconds');
+  });
+  it('sends a long resume deadline through the HTTP boundary and rejects it for an ordinary request', async () => {
+    const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
+    const args = ['send', workerId, 'Fix review', '--id', randomUUID(), '--kind', 'request', '--timeout-seconds', '7200'];
+    expect(await runWorkerCommand(args, env)).toBe(1);
+    expect(json().code).toBe('invalid_input');
+    expect(await runWorkerCommand([...args, '--resume'], env)).toBe(1);
+    expect(json().code).toBe('incompatible_state');
+    f.manager.cancel(workerId);
+    await f.manager.awaitRunTermination(workerId, 10_000);
+    f.store.updateStep(workerId, 'task', { status: 'done', sessionId: 'previous-session', backend: 'claude' });
+    const generation = f.store.commitWorkerExecutionStart(workerId);
+    f.store.updateRun(workerId, { status: 'done' });
+    f.store.commitWorkerExecutionComplete(workerId, generation);
+    expect(await runWorkerCommand([...args, '--resume'], env)).toBe(0);
+    const sent = json();
+    expect(Date.parse(sent.message.deadline) - Date.parse(sent.message.createdAt)).toBe(7_200_000);
   });
   // hearsay-tools/cezarion#1235: the help a parent reads says waits coexist and how to stop one.
   it('documents that several waits coexist, that messages close none, and how cancel-wait stops one', async () => {
@@ -451,11 +468,10 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
       expect(await runWorkerCommand(['wait', workerId, '--mode', mode], env)).toBe(1);
       expect(json().code).toBe('incompatible_state');
     }
-    const waitId = randomUUID(); const delegation = f.store.getRun(f.parent.id)!.delegation!;
+    const delegation = f.store.getRun(f.parent.id)!.delegation!;
     if (delegation.role !== 'root') throw Error('fixture');
-    f.store.commitDelegation([{ id: f.parent.id, delegation: { ...delegation, permissions: ['wait'], wait: {
-      id: waitId, workerIds: [workerId], phase: 'registered', deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [],
-    } } }]);
+    f.store.commitDelegation([{ id: f.parent.id, delegation: { ...delegation, permissions: ['wait'] } }]);
+    const waitId = seedWorkerWait(f.store, f.parent.id, [workerId]);
     expect(await runWorkerCommand(['cancel-wait', waitId], env)).toBe(0);
     expect(json()).toMatchObject({ wait: { id: waitId, reason: 'cancelled' } });
     expect(f.store.getRun(workerId)?.status).toBe('queued');

@@ -50,7 +50,8 @@ describe('projectSignal', () => {
         entry({
           id: 'parent',
           status: 'waiting',
-          delegation: { role: 'root', wait: { phase: 'parked' } },
+          delegation: { role: 'root' },
+          waitingOn: { kind: 'workers', count: 2 },
         }),
         entry({ id: 'w1', status: 'running', delegation: { role: 'worker', parentRunId: 'parent' } }),
         entry({ id: 'w2', status: 'running', delegation: { role: 'worker', parentRunId: 'parent' } }),

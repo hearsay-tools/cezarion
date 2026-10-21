@@ -5,9 +5,10 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { seedTranscript } from './seed-transcript'
 
-import { disclosureVisibilityExpression, settleVisual, visibilitySampleExpression, waitForSettledSample } from './visual-ready'
+import { settleVisual, visibilitySampleExpression, waitForSettledSample } from './visual-ready'
 import { expectEditorFitsViewport } from './session-layout'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
+import { openSessionActivityRow, SESSION_ACTIVITY_SUMMARY } from './session-activity'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import {
   applyContrastQaVariant,
@@ -48,6 +49,8 @@ const LONG_RUN = {
   workflow: 'workflow-' + 'unbroken'.repeat(12), branch: 'cez/' + 'long-branch-'.repeat(18),
   model: 'fork-model-' + 'long-model-'.repeat(10), effort: 'high',
   steps: RUN.steps.map((step) => ({ ...step, profileId: 'default' })),
+  // Seven-figure counts so the Usage row's tokens and cost cannot both fit on a phone.
+  inputTokens: 1_234_567, outputTokens: 345_678, costUsd: 12.34, // shown as `$12`
 }
 const TYPO_RUNS = [
   { ...LONG_RUN, id: 'typography-long-model', runner: 'opencode', model: 'opencode/muse-spark-1.3-contributor-free', effort: 'auto' },
@@ -136,9 +139,6 @@ function backToList(): void {
 // #795 review: React disclosure commit precedes the held visibility measurement.
 // False is accepted and asserted, including hidden details on a phone.
 const settledVisibility = (selector: string) => waitForSettledSample<boolean>(browser, visibilitySampleExpression(selector))
-const settledDetailsVisibility = (expanded: boolean) => waitForSettledSample<boolean>(browser,
-  disclosureVisibilityExpression('[aria-label="Show run details"], [aria-label="Hide run details"]', '[data-slot="run-details"]', expanded),
-)
 
 describe('task thread', () => {
   it('reply focus highlights the composer shell without an inner rectangle', () => {
@@ -380,7 +380,7 @@ describe('task thread', () => {
   })
 
   it('the step rail maps the record steps to checklist rows over the progress bar', () => {
-    // The rail lives in the Run activity card's workflow section now (#402), whose row is
+    // The rail lives in the Session activity card's workflow section now (#402), whose row is
     // titled by the current step and opens the same checklist.
     expect(browser.text('[data-slot="run-activity-workflow"] > button')).toContain('Verify')
     browser.click('[data-slot="run-activity-workflow"] > button')
@@ -460,51 +460,45 @@ describe('task thread', () => {
     expect(browser.evaluate(`document.querySelector('[data-route="task-thread"] h1').textContent`)).toBe(
       'Explain what cezar does',
     )
-    expect(browser.evaluate(`document.querySelector('[data-slot="pill"]').textContent`)).toBe('done')
+    expect(browser.evaluate(`document.querySelector('[data-slot="pill"]').textContent`)).toBe('Done')
     // The #381 money shot: tool cards (one expanded) + markdown + image, desktop width.
     browser.screenshot(`${artifactsDir}/thread-desktop.png`)
   })
 
-  it('the header meta line reads workflow · branch chip · ± · tokens · cost off the record', () => {
-    const meta = browser.evaluate(
-      `document.querySelector('[data-slot="run-meta"]').textContent`,
-    ) as string
-    expect(meta).toContain('quick-task')
-    expect(meta).toContain('cez/fcd519dd')
-    expect(meta).toContain('+1 −0')
+  it('Session activity reads workflow, branch, cost and agent off the record (hearsay-tools/cezarion#1333)', () => {
+    expect(browser.count('[data-slot="run-meta"]')).toBe(0)
+    openSessionActivityRow(browser, 'usage')
+    expect(browser.text('[data-slot="run-activity-workflow"] > button')).toContain('quick-task')
+    const usage = browser.text('[data-slot="run-activity-usage"] > button')
     // This historical record has no input/output counters; do not guess from tokensUsed.
-    expect(meta).not.toContain('3.6k tokens')
-    expect(meta).toContain('$0.04')
-    // The fork keeps the backend/model badge in the header.
-    expect(meta).toContain('claude · auto')
+    expect(usage).not.toContain('3.6k tokens')
+    expect(usage).toContain('$0.04')
+    const agent = browser.text('[data-slot="agent-details"]')
+    expect(agent).toContain('claude')
+    expect(agent).toContain('auto')
+    expect(browser.text('[data-slot="run-activity-workspace"] > button')).toContain('cez/fcd519dd')
+    openSessionActivityRow(browser, 'workspace')
     // Branch renders as the mono chip, not plain text.
-    expect(
-      browser.evaluate(`document.querySelector('[data-slot="branch-chip"]').textContent`),
-    ).toBe('cez/fcd519dd')
+    expect(browser.text('[data-slot="run-activity-workspace"] [data-slot="branch-chip"]')).toBe('cez/fcd519dd')
   })
 
   it('copies the branch by keyboard with readable light and dark controls at phone and desktop widths', () => {
-    const copy = '[data-slot="run-meta"] [aria-label="Copy branch name"]'
+    const copy = '[data-slot="run-activity-workspace"] [aria-label="Copy branch name"]'
     const variants = contrastQaVariants.filter((variant) => variant.density === 'comfortable')
-    const measurements: Array<{ variant: string; branch: string; buttonHeight: number; headerOverflow: number; textRatio: number; focusRatio: number }> = []
+    const measurements: Array<{ variant: string; branch: string; buttonHeight: number; cardOverflow: number; textRatio: number; focusRatio: number }> = []
     try {
       for (const variant of variants) {
         const runId = variant.viewport.width === 360 ? LONG_RUN.id : RUN_ID
         browser.goto(`${baseUrl}${scoped(`/tasks/${runId}`)}`)
-        browser.waitForFunction(`document.querySelector('[data-slot="branch-chip"]') !== null`)
         applyContrastQaVariant(browser, variant)
-        if (variant.viewport.width === 360) {
-          browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
-          browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)
-          browser.press('Enter')
-          browser.waitForFunction(`document.querySelector('[aria-label="Hide run details"]') !== null`)
-          browser.waitForFunction(`document.querySelector(${JSON.stringify(copy)})?.getClientRects().length > 0`)
-        }
+        // The branch copy lives in the Session activity card's Workspace row (hearsay-tools/cezarion#1333).
+        openSessionActivityRow(browser, 'workspace')
+        browser.waitForFunction(`document.querySelector(${JSON.stringify(copy)})?.getClientRects().length > 0`)
         const layout = waitForSettledSample<{ height: number; overflow: number }>(browser, `(() => {
           const button = document.querySelector(${JSON.stringify(copy)})
           if (!button?.getClientRects().length) return null
-          return { height: button.getBoundingClientRect().height,
-            overflow: document.querySelector('[data-slot="run-header"]').scrollWidth - document.querySelector('[data-slot="run-header"]').clientWidth }
+          const card = document.querySelector('[data-slot="run-activity-dock"]')
+          return { height: button.getBoundingClientRect().height, overflow: card.scrollWidth - card.clientWidth }
         })()`)
         if (variant.viewport.width === 360) expect(layout.height).toBeGreaterThanOrEqual(44)
         expect(layout.overflow, variant.id).toBeLessThanOrEqual(1)
@@ -514,7 +508,7 @@ describe('task thread', () => {
         const focus = browser.evaluate(contrastSampleExpression(copy, 'outline-color', 'parent')) as ContrastSample
         expect(focus.ratio, `${variant.id} focus ring`).toBeGreaterThanOrEqual(3)
         measurements.push({ variant: variant.id, branch: runId === LONG_RUN.id ? 'long' : 'short',
-          buttonHeight: layout.height, headerOverflow: layout.overflow, textRatio: text.ratio, focusRatio: focus.ratio })
+          buttonHeight: layout.height, cardOverflow: layout.overflow, textRatio: text.ratio, focusRatio: focus.ratio })
         browser.press('Enter')
         browser.waitForFunction(`document.querySelector('[aria-label="Copied branch name"]') !== null`)
         browser.screenshot(`${artifactsDir}/branch-copy-${variant.id}.png`, { viewport: true })
@@ -525,25 +519,19 @@ describe('task thread', () => {
     } finally {
       restoreContrastQaDefaults(browser)
       browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
-      browser.waitForFunction(`document.querySelector('[data-slot="branch-chip"]') !== null`)
+      browser.waitForFunction(`document.querySelector('[data-slot="run-activity-dock"]') !== null`)
     }
   })
 
   it('keeps clipboard failure instructions AA readable in light and dark themes', () => {
-    const copy = '[data-slot="run-meta"] [aria-label="Copy branch name"]'
+    const copy = '[data-slot="run-activity-workspace"] [aria-label="Copy branch name"]'
     const cases = contrastQaVariants.filter((variant) => variant.density === 'comfortable')
     const measurements: Array<{ variant: string; failure: string; ratio: number }> = []
     try {
       for (const variant of cases) {
         browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
-        browser.waitForFunction(`document.querySelector('[data-slot="branch-chip"]') !== null`)
         applyContrastQaVariant(browser, variant)
-        if (variant.viewport.width === 360) {
-          browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
-          browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)
-          browser.press('Enter')
-          browser.waitForFunction(`document.querySelector('[aria-label="Hide run details"]') !== null`)
-        }
+        openSessionActivityRow(browser, 'workspace')
         const failure = variant.id.includes('dark') ? 'denied' : 'missing'
         browser.evaluate(`Object.defineProperty(navigator, 'clipboard', {
           configurable: true,
@@ -561,7 +549,7 @@ describe('task thread', () => {
     } finally {
       restoreContrastQaDefaults(browser)
       browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
-      browser.waitForFunction(`document.querySelector('[data-slot="branch-chip"]') !== null`)
+      browser.waitForFunction(`document.querySelector('[data-slot="run-activity-dock"]') !== null`)
     }
   })
 
@@ -573,7 +561,8 @@ describe('task thread', () => {
     }))`) as Array<{ text: string; href: string; current: string | null }>
     expect(tabs).toEqual([
       { text: 'Session', href: scoped(`/tasks/${RUN_ID}`), current: 'page' },
-      { text: 'Changes', href: scoped(`/tasks/${RUN_ID}/changes`), current: null },
+      // The changed-file count shows at every width (hearsay-tools/cezarion#1333).
+      { text: 'Changes1', href: scoped(`/tasks/${RUN_ID}/changes`), current: null },
       { text: 'Commits', href: scoped(`/tasks/${RUN_ID}/commits`), current: null },
       { text: 'Files', href: scoped(`/tasks/${RUN_ID}/files`), current: null },
     ])
@@ -724,9 +713,8 @@ describe('task thread', () => {
       })()`),
     ).toBe(true)
 
-    // Phone default: the unified run-activity dock collapses to the odometer.
+    // Phone default: the Session activity card folds to its one summary row.
     expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-dock"]').dataset.state`)).toBe('collapsed')
-    expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-count"]').textContent`)).toBe('· 2 sections')
     // The fixture run is `done` with two plan entries never ticked off: finished, not complete.
     expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-status"]').textContent`)).toContain('Incomplete')
 
@@ -734,7 +722,7 @@ describe('task thread', () => {
     browser.setViewport(1440, 900)
   })
 
-  it('mobile header: the action bar folds into the kebab in the top bar, beside the title and state', () => {
+  it('mobile header: the action bar folds into the kebab in the top bar, beside the title, with no status', () => {
     browser.setViewport(390, 844)
     browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
     browser.waitForFunction(`document.querySelector('[data-slot="run-header"]') !== null`)
@@ -745,48 +733,48 @@ describe('task thread', () => {
         `document.querySelector('[data-slot="run-actions"]')`,
       ),
     ).toBe(null)
-    // The pushed screen's top bar carries the kebab, the title and the state line (#621); the
-    // run header drops its own title row below md, so there is no h1 or pill left in it.
+    // The pushed screen's top bar carries the kebab and the title (#621); the run header drops its
+    // own title row below md, so there is no h1 or pill left in it, and the bar shows no status
+    // (hearsay-tools/cezarion#1333): the Session activity card does.
     const bar = waitForSettledSample(browser, `(() => {
       const top = document.querySelector('[data-slot="mobile-top-bar"]')
       const kebab = top?.querySelector('[aria-label="Run actions"]')
       const title = top?.querySelector('[data-slot="mobile-run-title"]')
       if (!kebab || !title) return null
-      return { kebab: kebab.offsetParent !== null, state: title.querySelector('[data-slot="mobile-run-state"]').textContent,
+      return { kebab: kebab.offsetParent !== null, state: top.querySelector('[data-slot="mobile-run-state"]') !== null,
         h1: document.querySelector('[data-route="task-thread"] h1') !== null, pill: document.querySelector('[data-slot="run-header"] [data-slot="pill"]') !== null }
-    })()`) as { kebab: boolean; state: string; h1: boolean; pill: boolean }
-    expect(bar).toEqual({ kebab: true, state: expect.stringContaining('done'), h1: false, pill: false })
+    })()`) as { kebab: boolean; state: boolean; h1: boolean; pill: boolean }
+    expect(bar).toEqual({ kebab: true, state: false, h1: false, pill: false })
 
-    // #737: title + state fit the 56px bar, the 44px rename target is a sibling of the text stack
-    // (so it can neither grow it nor overlap the state line), and while renaming the input opens
-    // below the bar without covering the title or state text.
+    // #737: the title fits the 56px bar, the 44px rename target is a sibling of the title (so it can
+    // neither grow it nor overlap it), and while renaming the input opens below the bar without
+    // covering the title.
     const probe = `(() => {
       const top = document.querySelector('[data-slot="mobile-top-bar"] > div')
       const stack = top?.querySelector('[data-slot="mobile-run-title"]')
-      const state = stack?.querySelector('[data-slot="mobile-run-state"]')
+      const heading = stack?.querySelector('h1')
       const rename = top?.querySelector('[aria-label="Rename task"]')
       const input = document.querySelector('[data-slot="title-input"]')
-      if (!top || !stack || !state) return null
+      if (!top || !stack || !heading) return null
       const box = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height } }
-      const t = box(top), s = box(stack), st = box(state)
+      const t = box(top), s = box(stack), h = box(heading)
       const hit = (e) => { const r = box(e); return Math.min(r.w, r.h) >= 44 && r.t >= t.t && r.b <= t.b }
       const apart = (a, b) => a.r <= b.l || b.r <= a.l || a.b <= b.t || b.b <= a.t
-      const res = { bar: Math.round(t.h), stackFits: s.t >= t.t && s.b <= t.b, stackHeight: Math.round(s.h), stateInStack: st.b <= s.b + 0.5,
-        stateVisible: st.w > 0 && st.h > 0 }
-      if (rename) { const r = box(rename); res.renameHit = hit(rename); res.renameClearOfStack = apart(r, s); res.renameClearOfState = apart(r, st) }
-      if (input) { const i = box(input); res.input = { h: Math.round(i.h), belowBar: i.t >= t.b, clearOfState: apart(i, st), hitsOk: i.h >= 44, topmost: document.elementFromPoint(i.l + i.w / 2, i.t + i.h / 2) === input } }
+      const res = { bar: Math.round(t.h), stackFits: s.t >= t.t && s.b <= t.b, stackHeight: Math.round(s.h), titleVisible: h.w > 0 && h.h > 0 }
+      if (rename) { const r = box(rename); res.renameHit = hit(rename); res.renameClearOfStack = apart(r, s) }
+      if (input) { const i = box(input); res.input = { h: Math.round(i.h), belowBar: i.t >= t.b, clearOfTitle: apart(i, h), hitsOk: i.h >= 44, topmost: document.elementFromPoint(i.l + i.w / 2, i.t + i.h / 2) === input } }
       return res
     })()`
-    type Probe = { bar: number; stackFits: boolean; stackHeight: number; stateInStack: boolean; stateVisible: boolean
-      renameHit?: boolean; renameClearOfStack?: boolean; renameClearOfState?: boolean
-      input?: { h: number; belowBar: boolean; clearOfState: boolean; hitsOk: boolean; topmost: boolean } }
+    type Probe = { bar: number; stackFits: boolean; stackHeight: number; titleVisible: boolean
+      renameHit?: boolean; renameClearOfStack?: boolean
+      input?: { h: number; belowBar: boolean; clearOfTitle: boolean; hitsOk: boolean; topmost: boolean } }
     const resting = browser.waitForValue(probe, (v) => (v as Probe | null)?.renameHit !== undefined) as Probe
-    expect(resting).toMatchObject({ bar: 56, stackFits: true, stateInStack: true, stateVisible: true, renameHit: true, renameClearOfStack: true, renameClearOfState: true })
+    expect(resting).toMatchObject({ bar: 56, stackFits: true, titleVisible: true, renameHit: true, renameClearOfStack: true })
     expect(resting.stackHeight).toBeLessThanOrEqual(40)
     browser.click('[data-slot="mobile-top-bar"] [aria-label="Rename task"]')
     // The popover animates in (zoom/slide): sample only once the geometry has held still.
     const editing = browser.waitForStable<Probe | null>(probe, { holdMs: 400, matcher: (v) => v?.input !== undefined }) as Probe
-    expect(editing).toMatchObject({ bar: 56, stackFits: true, stateVisible: true, input: { belowBar: true, clearOfState: true, hitsOk: true, topmost: true } })
+    expect(editing).toMatchObject({ bar: 56, stackFits: true, titleVisible: true, input: { belowBar: true, clearOfTitle: true, hitsOk: true, topmost: true } })
     browser.press('Escape')
     browser.waitForFunction(`document.querySelector('[data-slot="title-input"]') === null`)
 
@@ -794,16 +782,14 @@ describe('task thread', () => {
     browser.setViewport(1440, 900)
   })
 
-  it('phone header keeps disclosure state while pinning and unpinning with keyboard controls', async () => {
+  it('phone Session activity keeps its open rows while pinning and unpinning with keyboard controls', async () => {
     browser.setViewport(360, 640)
     browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
-    browser.waitForFunction(`document.querySelector('[aria-label="Show run details"]') !== null`)
-    expect(settledDetailsVisibility(false)).toBe(false)
-    browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)
-    browser.press('Enter')
-    expect(settledDetailsVisibility(true)).toBe(true)
-    for (const label of ['Hide run details', 'Run actions']) {
-      expect(waitForSettledSample(browser, `(() => { const r = document.querySelector('[aria-label="${label}"]').getBoundingClientRect(); return r.width >= 44 && r.height >= 44 })()`)).toBe(true)
+    openSessionActivityRow(browser, 'workspace')
+    const workspaceOpen = () => waitForSettledSample(browser,
+      `document.querySelector('[data-slot="run-activity-workspace"] > button')?.getAttribute('aria-expanded') === 'true'`)
+    for (const control of [SESSION_ACTIVITY_SUMMARY, '[aria-label="Run actions"]']) {
+      expect(waitForSettledSample(browser, `(() => { const r = document.querySelector('${control}').getBoundingClientRect(); return r.width >= 44 && r.height >= 44 })()`)).toBe(true)
     }
     for (const wasPinned of [false, true]) {
       browser.click('[aria-label="Run actions"]')
@@ -818,13 +804,12 @@ describe('task thread', () => {
       browser.waitForFunction(`document.querySelector('${pin}').getAttribute('aria-checked') === '${!wasPinned}'`)
       browser.press('Escape')
       browser.waitForFunction(`document.querySelector('[data-slot="run-actions-menu"]') === null`)
-      expect(settledDetailsVisibility(true)).toBe(true)
+      expect(workspaceOpen()).toBe(true)
       expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     }
     const record = await (await fetch(`${baseUrl}/api/v1/runs/${RUN_ID}`)).json()
     expect(record).not.toHaveProperty('pinned')
     expect(record).not.toHaveProperty('pinnedAt')
-    browser.click('[aria-label="Hide run details"]')
     browser.setViewport(1440, 900)
   })
 
@@ -853,8 +838,8 @@ describe('task thread', () => {
     expect(settledVisibility('[aria-label="Attach files"]')).toBe(true)
     expect(settledVisibility('[aria-label="Send"]')).toBe(true)
     expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
-    for (const label of ['Show run details', 'Run actions']) {
-      expect(waitForSettledSample(browser, `(() => { const r = document.querySelector('[aria-label="${label}"]').getBoundingClientRect(); return r.width >= 44 && r.height >= 44 })()`)).toBe(true)
+    for (const control of [SESSION_ACTIVITY_SUMMARY, '[aria-label="Run actions"]']) {
+      expect(waitForSettledSample(browser, `(() => { const r = document.querySelector('${control}').getBoundingClientRect(); return r.width >= 44 && r.height >= 44 })()`)).toBe(true)
     }
     // At the start of the transcript, the header and bottom dock still leave reading space.
     browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
@@ -869,7 +854,8 @@ describe('task thread', () => {
     browser.evaluate(`document.documentElement.classList.add('light')`)
     browser.screenshot(`${artifactsDir}/phone-reading-light.png`, { viewport: true })
     browser.setViewport(1440, 900)
-    expect(settledVisibility('[data-slot="run-details"]')).toBe(true)
+    // Desktop gets the one status pill back (hearsay-tools/cezarion#1333).
+    expect(settledVisibility('[data-slot="run-header"] [data-slot="pill"]')).toBe(true)
     expect(settledVisibility('[data-slot="follow-up-engine"]')).toBe(true)
     expect(browser.count('[aria-label="Expand composer"]')).toBe(0)
     expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="run-header"]')).position`)).toBe('sticky')
@@ -881,13 +867,23 @@ describe('task thread', () => {
   it('keeps long metadata inside a phone viewport across task tabs and run switches', () => {
     browser.setViewport(360, 640)
     browser.goto(`${baseUrl}${scoped(`/tasks/${LONG_RUN.id}`)}`)
-    browser.waitForFunction(`document.querySelector('[aria-label="Show run details"]') !== null`)
+    browser.waitForFunction(`document.querySelector('${SESSION_ACTIVITY_SUMMARY}') !== null`)
     expect(browser.count('[data-slot="run-activity-plan"]')).toBe(0)
-    browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)
-    browser.press('Space')
-    expect(browser.waitForValue(`document.querySelector('[aria-label="Hide run details"]')?.getAttribute('aria-expanded') ?? null`)).toBe('true')
+    // The long branch and worktree path live in the Session activity card (hearsay-tools/cezarion#1333).
+    openSessionActivityRow(browser, 'workspace')
+    openSessionActivityRow(browser, 'usage')
     expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
-    expect(waitForSettledSample(browser, `[...document.querySelectorAll('[data-slot="run-header"] *')].filter(el => el.getBoundingClientRect().right > innerWidth).map(el => ({slot:el.dataset.slot, text:el.textContent?.slice(0,60), width:el.getBoundingClientRect().width}))`)).toEqual([])
+    // Measured as painted: a span inside a `truncate` row is wider than the row, and its
+    // overflow-clipping ancestor decides where it stops on screen.
+    expect(waitForSettledSample(browser, `[...document.querySelectorAll('[data-slot="run-header"] *, [data-slot="run-activity-dock"] *')].filter(el => {
+      let right = el.getBoundingClientRect().right
+      for (let a = el.parentElement; a; a = a.parentElement) if (getComputedStyle(a).overflowX !== 'visible') right = Math.min(right, a.getBoundingClientRect().right)
+      return right > innerWidth
+    }).map(el => ({slot:el.dataset.slot, text:el.textContent?.slice(0,60), width:el.getBoundingClientRect().width}))`)).toEqual([])
+    // #251: one defined account is not a choice — the lone login never joins the agent lines.
+    const agent = browser.text('[data-slot="agent-details"]')
+    expect(agent).toContain('high')
+    expect(agent).not.toContain('Account')
     for (const tab of ['changes', 'commits', 'files', '']) {
       const tabSelector = `[data-slot="run-tabs"] a[href="${scoped(`/tasks/${LONG_RUN.id}${tab ? '/' + tab : ''}`)}"]`
       browser.evaluate(`document.querySelector('${tabSelector}').scrollIntoView({block: 'start'})`)
@@ -895,43 +891,106 @@ describe('task thread', () => {
       browser.press('Enter')
       browser.waitForFunction(`document.querySelector('[data-slot="run-tabs"] a[aria-current="page"]')?.getAttribute('href') === '${scoped(`/tasks/${LONG_RUN.id}${tab ? '/' + tab : ''}`)}'`)
       browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
-      expect(settledDetailsVisibility(true)).toBe(true)
       expect(settledVisibility('[aria-label="Run actions"]')).toBe(true)
       expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     }
+    // Back on Session, the card remembers what was open for this run.
+    expect(browser.waitForValue(`document.querySelector('[data-slot="run-activity-workspace"] > button')?.getAttribute('aria-expanded') ?? null`)).toBe('true')
     // Navigate through the real phone UI (Back to the list, then the task card); a full browser.goto would reset module memory.
-    for (const [id, label] of [[RUN_ID, 'Show run details'], [LONG_RUN.id, 'Hide run details']]) {
+    for (const [id, expanded] of [[RUN_ID, 'false'], [LONG_RUN.id, 'true']]) {
       backToList()
       const link = `[data-slot="task-card"][data-run-id="${id}"] a[href]`
       browser.waitForFunction(`document.querySelector('${link}') !== null`)
       browser.evaluate(`document.querySelector('${link}').scrollIntoView({ block: 'center' })`)
       browser.evaluate(`document.querySelector('${link}').focus()`)
       browser.press('Enter')
-      // The toggle lives in the shell's top bar below md (#621), outside the route's [data-run-id] wrapper.
-      browser.waitForFunction(`document.querySelector('[data-route="task-thread"][data-run-id="${id}"]') !== null && document.querySelector('[aria-label="${label}"]') !== null`)
-      expect(settledDetailsVisibility(id === LONG_RUN.id)).toBe(id === LONG_RUN.id)
+      browser.waitForFunction(`document.querySelector('[data-route="task-thread"][data-run-id="${id}"] ${SESSION_ACTIVITY_SUMMARY}') !== null`)
+      expect(browser.waitForValue(`document.querySelector('${SESSION_ACTIVITY_SUMMARY}')?.getAttribute('aria-expanded') ?? null`)).toBe(expanded)
       expect(settledVisibility('[data-slot="session-controls"]')).toBe(true)
     }
     expect(waitForSettledSample(browser, `(() => { const el = document.querySelector('[data-slot="follow-up-model-pill"]'); return el.scrollHeight <= el.clientHeight })()`)).toBe(true)
     expect(waitForSettledSample(browser, `(() => { const el = document.querySelector('[data-slot="main"]'); return el.scrollWidth <= el.clientWidth })()`)).toBe(true)
-    browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
-    browser.click('[data-slot="agent-badge"]')
-    expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
-    expect(waitForSettledSample(browser, `(() => { const r = document.querySelector('[data-slot="dropdown-menu-content"]').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth })()`)).toBe(true)
-    expect(browser.text('[data-slot="dropdown-menu-content"]')).toContain('effort: high')
-    // #251: one defined account is not a choice — the lone login never joins the badge menu.
-    expect(browser.text('[data-slot="dropdown-menu-content"]')).not.toContain('account:')
-    browser.press('Escape')
-    browser.waitForFunction(`document.querySelector('[data-slot="dropdown-menu-content"]') === null`)
     browser.setReducedMotion()
     expect(browser.evaluate(`matchMedia('(prefers-reduced-motion: reduce)').matches`)).toBe(true)
-    expect(browser.evaluate(`getComputedStyle(document.querySelector('[aria-label="Hide run details"] svg')).transitionProperty`)).toBe('none')
-    browser.click('[aria-label="Hide run details"]')
-    expect(browser.evaluate(`document.querySelector('[aria-label="Show run details"]').getAttribute('aria-expanded')`)).toBe('false')
+    expect(browser.evaluate(`getComputedStyle(document.querySelector('${SESSION_ACTIVITY_SUMMARY} > svg:last-child')).transitionProperty`)).toBe('none')
+    expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="run-activity-usage"] > button > svg:last-child')).transitionProperty`)).toBe('none')
+    browser.evaluate(`document.querySelector('${SESSION_ACTIVITY_SUMMARY}').click()`)
+    expect(browser.waitForValue(`document.querySelector('${SESSION_ACTIVITY_SUMMARY}')?.getAttribute('aria-expanded') ?? null`)).toBe('false')
     browser.evaluate(`document.documentElement.classList.remove('light')`)
     browser.screenshot(`${artifactsDir}/phone-long-details-dark.png`, { viewport: true })
     browser.setViewport(1440, 900)
   })
+
+  // hearsay-tools/cezarion#1333: one card, the same at every width. Folded it is one summary row;
+  // open, every control in it is a 44px target on a phone (desktop rows keep their compact
+  // `md:` sizes, as the rest of the cockpit does). Expanding it never reshapes the composer or the
+  // transcript beside it: the composer and transcript are out of this issue's scope.
+  it.each([[320, 640], [360, 640], [390, 844], [1280, 900]] as const)('Session activity fits %ipx folded and expanded', (width, height) => {
+    browser.setViewport(width, height)
+    browser.goto(`${baseUrl}${scoped(`/tasks/${LONG_RUN.id}`)}`)
+    browser.waitForFunction(`document.querySelector('${SESSION_ACTIVITY_SUMMARY}') !== null && document.querySelector('[data-slot="composer"]') !== null`)
+    const sample = `(() => {
+      const card = document.querySelector('[data-slot="run-activity-dock"]')
+      const summary = card.querySelector(':scope > button')
+      const box = (sel) => { const r = document.querySelector(sel)?.getBoundingClientRect(); return r ? { left: Math.round(r.left), width: Math.round(r.width) } : null }
+      const small = [...card.querySelectorAll('button, a')].filter(el => el.getClientRects().length && el.getBoundingClientRect().height < 44)
+        .map(el => (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 40))
+      // The folded status must be painted whole, not squeezed to an ellipsis or clipped by the card.
+      const status = card.querySelector(':scope > button [data-slot="run-activity-status"] .truncate')
+      const statusCut = status ? status.scrollWidth > status.clientWidth + 1 || status.getBoundingClientRect().right > card.getBoundingClientRect().right : null
+      // A two-part row meta never paints half a word: what it keeps sits whole across its row,
+      // what it drops is either whole on its line or wrapped wholly onto the clipped one below.
+      // The open card scrolls on a short phone, so the kept part is measured across, not down.
+      const inside = (r, c) => r.left >= c.left - 1 && r.right <= c.right + 1 && r.top >= c.top - 1 && r.bottom <= c.bottom + 1
+      const metaCut = [...card.querySelectorAll('[data-slot="run-activity-meta-keep"], [data-slot="run-activity-meta-drop"]')].filter(part => {
+        const r = part.getBoundingClientRect()
+        if (part.dataset.slot === 'run-activity-meta-keep') {
+          const row = part.closest('button').getBoundingClientRect()
+          return r.left < row.left - 1 || r.right > row.right + 1
+        }
+        const clip = part.parentElement.getBoundingClientRect()
+        return !inside(r, clip) && r.top < clip.bottom
+      }).map(part => part.textContent)
+      const usageKeep = card.querySelector('[data-slot="run-activity-usage"] [data-slot="run-activity-meta-keep"]')?.textContent ?? null
+      return { state: card.dataset.state, overflow: document.documentElement.scrollWidth - innerWidth, statusCut, metaCut, usageKeep,
+        summaryHeight: Math.round(summary.getBoundingClientRect().height), small,
+        composer: box('[data-slot="composer"]'), transcript: box('[data-slot="thread-rows"]') }
+    })()`
+    type Sample = { state: string; overflow: number; statusCut: boolean | null; metaCut: string[]; usageKeep: string | null; summaryHeight: number; small: string[]; composer: { left: number; width: number }; transcript: { left: number; width: number } | null }
+    browser.evaluate(`document.querySelector('${SESSION_ACTIVITY_SUMMARY}[aria-expanded="true"]')?.click()`)
+    const layoutSelectors = {
+      card: '[data-slot="run-activity-dock"]',
+      status: '[data-slot="run-activity-status"] .truncate',
+      keptMeta: '[data-slot="run-activity-meta-keep"]',
+      droppedMeta: '[data-slot="run-activity-meta-drop"]',
+      rows: '[data-slot="run-activity-dock"] button',
+      composer: '[data-slot="composer"]',
+      transcript: '[data-slot="thread-rows"]',
+    }
+    const folded = waitForSettledSample<Sample>(browser, `(${sample}).state === 'collapsed' ? ${sample} : null`)
+    browser.recordLayout('folded', layoutSelectors)
+    expect(folded.overflow).toBeLessThanOrEqual(0)
+    expect(folded.statusCut).toBe(false)
+    // One 44px summary; on a narrow phone its status may take a second line inside it.
+    expect(folded.summaryHeight).toBeGreaterThanOrEqual(44)
+    if (width >= 768) expect(folded.summaryHeight).toBeLessThan(60)
+    if (width < 768) expect(folded.small).toEqual([])
+    openSessionActivityRow(browser, 'workspace')
+    openSessionActivityRow(browser, 'usage')
+    openSessionActivityRow(browser, 'workflow')
+    const expanded = waitForSettledSample<Sample>(browser, sample)
+    browser.recordLayout('expanded', layoutSelectors)
+    expect(expanded.state).toBe('open')
+    expect(expanded.overflow).toBeLessThanOrEqual(0)
+    expect(expanded.metaCut).toEqual([])
+    expect(expanded.usageKeep).toBe('$12')
+    if (width < 768) expect(expanded.small).toEqual([])
+    expect(expanded.composer).toEqual(folded.composer)
+    expect(expanded.transcript).toEqual(folded.transcript)
+    browser.screenshot(`${artifactsDir}/session-activity-${width}.png`, { viewport: true })
+    browser.setViewport(1440, 900)
+  })
+
 
 })
 

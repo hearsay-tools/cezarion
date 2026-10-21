@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 import type { AgentHomePaths } from './agent-config/catalog.ts';
+import { isOmpProfileName } from './core/agent-profiles.ts';
 
 /**
  * Per-user cezar home. Literal `~/.cezar` on every platform (no XDG, no
@@ -152,7 +153,8 @@ export function serverLockPath(instance: string = DEFAULT_SERVER_INSTANCE): stri
  * vendors document: `$CLAUDE_CONFIG_DIR` relocates Claude Code's home;
  * `$CODEX_HOME` relocates Codex's; `$XDG_CONFIG_HOME` relocates OpenCode's config
  * dir (falling back to `~/.config`); `$PI_CODING_AGENT_DIR` relocates Pi's agent dir
- * (default `~/.pi/agent`); OMP shares that variable (default `~/.omp/agent`). Read per call so tests and ops can set env live.
+ * (default `~/.pi/agent`); OMP reads that variable too unless `$OMP_PROFILE` selects a profile
+ * (`ompAgentDir`). Read per call so tests and ops can set env live.
  *
  * These are the DEFAULT profile's dirs. A second login of the same CLI is an
  * agent profile (`src/core/agent-profiles.ts`) and resolves through
@@ -170,11 +172,40 @@ export function agentHomePaths(env: NodeJS.ProcessEnv = process.env): AgentHomeP
     cursor: env.CURSOR_CONFIG_DIR?.trim()
       || ((process.platform === 'linux' || process.platform === 'freebsd') && env.XDG_CONFIG_HOME?.trim()
         ? join(env.XDG_CONFIG_HOME.trim(), 'cursor') : join(home, '.cursor')),
-    // OMP (Oh My Pi) reads Pi's `PI_CODING_AGENT_DIR`; otherwise `~/<PI_CONFIG_DIR or .omp>/agent`
-    // (OMP v18.4.11, `can1357/oh-my-pi` `docs/environment-variables.md` and `docs/config-usage.md`,
-    // main @ 7318a70cf4ed).
-    omp: env.PI_CODING_AGENT_DIR?.trim() || join(home, env.PI_CONFIG_DIR?.trim() || '.omp', 'agent'),
+    omp: ompAgentDir(env, home),
   };
+}
+
+/**
+ * OMP's (Oh My Pi's) agent dir under `env`, mirroring how omp 18.8.0 resolves it
+ * (`packages/utils/src/dirs.ts`):
+ *
+ * - a profile — `OMP_PROFILE` when it is set at all, else `PI_PROFILE` — selects
+ *   `<root>/profiles/<name>/agent`, and omp then ignores `PI_CODING_AGENT_DIR`;
+ * - otherwise `PI_CODING_AGENT_DIR`, else `<root>/agent`;
+ *
+ * where `<root>` is `~/<PI_CONFIG_DIR or .omp>`. A host that exports a profile therefore moves the
+ * DEFAULT account (see `PROFILE_ENV_VAR` in `core/agent-profiles.ts`). `default`, a blank value
+ * and a name omp would refuse select no profile.
+ */
+function ompAgentDir(env: NodeJS.ProcessEnv, home: string): string {
+  const root = ompRootDir(env, home);
+  const selected = (env.OMP_PROFILE !== undefined ? env.OMP_PROFILE : env.PI_PROFILE)?.trim();
+  if (selected && isOmpProfileName(selected)) return join(root, 'profiles', selected, 'agent');
+  return env.PI_CODING_AGENT_DIR?.trim() || join(root, 'agent');
+}
+
+function ompRootDir(env: NodeJS.ProcessEnv, home: string): string {
+  return join(home, env.PI_CONFIG_DIR?.trim() || '.omp');
+}
+
+/**
+ * Where omp keeps its named profiles, `~/<PI_CONFIG_DIR or .omp>/profiles`. A named omp account
+ * is one folder in here: `OMP_PROFILE` takes a name, so a folder anywhere else could not be
+ * selected (see `ompProfileDirError` in `workspace/agent-profiles.ts`).
+ */
+export function ompProfilesDir(env: NodeJS.ProcessEnv = process.env): string {
+  return join(ompRootDir(env, env.HOME || env.USERPROFILE || homedir()), 'profiles');
 }
 
 /**

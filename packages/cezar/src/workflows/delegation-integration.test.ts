@@ -12,7 +12,7 @@ import { DelegationController } from '../delegation/provision.ts';
 import { RunStore } from '../runs/store.ts';
 import { createApp } from '../server/server.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
-import { RunManager } from './run.ts';
+import { COMPLETION_WILL_WAIT, RunManager, WORKER_FALLBACK_QUESTION } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 
@@ -133,20 +133,26 @@ describe('public delegation completion integration', () => {
     expect(environments.get(b)?.CEZ_DELEGATION_TOKEN).not.toBe(environments.get(a)?.CEZ_DELEGATION_TOKEN);
 
     reply(p.id, 1, { text: 'Attempted completion before observing workers\nCEZ:DONE' });
-    await until(() => store.getRun(p.id)?.delegation?.role === 'root' && store.getRun(p.id)?.status === 'waiting', 'early completion parks');
+    // hearsay-tools/cezarion#1301: the blocked done is answered with the refusal, as the parent's next
+    // turn, and Cezar opens no wait for it.
+    const refusal = await input(p.id, 2);
+    expect(refusal.text).toContain('Workers are still live:');
+    for (const id of [a, b]) expect(refusal.text).toContain(`worker stop ${id}`);
+    expect(refusal.text).toContain(COMPLETION_WILL_WAIT);
     const gate = store.getRun(p.id)!.delegation;
-    if (gate?.role !== 'root' || !gate.wait) throw Error('completion wait absent');
-    expect(gate).toMatchObject({ completion: { phase: 'waiting' }, wait: { mode: 'all', phase: 'parked' } });
-    expect(new Set(gate.wait.workerIds)).toEqual(new Set([a, b]));
+    expect(gate).not.toHaveProperty('wait');
+    expect(gate).not.toHaveProperty('completion');
     expect(manager.finish(p.id)).toBe(false);
-    const cancelledWait = await command(p.id, ['cancel-wait', gate.wait.id]);
-    expect(cancelledWait).toHaveProperty('wait.reason', 'cancelled');
-    await input(p.id, 2); reply(p.id, 2);
-    await until(() => monitoringPark(p.id), 'parent finishes cancellation receipt');
+    reply(p.id, 2);
+    await until(() => monitoringPark(p.id), 'parent ends its refusal turn');
     const wait = await command<WorkerWaitResult>(p.id, ['wait', a, b, '--mode', 'any']);
     expect(wait.wait.mode).toBe('any');
     await finishWorker(p.id, a, 'alpha');
-    await input(p.id, 3); reply(p.id, 3);
+    // hearsay-tools/cezarion#1301: worker a ended its first turn idle, so after its no-wait nudge its
+    // fallback question woke the parent before the steer superseded it; the wait-any wake follows.
+    const question = await input(p.id, 3); reply(p.id, 3);
+    expect(question.text).toContain(WORKER_FALLBACK_QUESTION(a));
+    if (!question.text.includes(`Worker wait ${wait.wait.id}`)) { await input(p.id, 4); reply(p.id, 4); }
     await until(() => monitoringPark(p.id), 'parent observes wait-any wake');
     expect(store.getRun(p.id)?.agentInputs?.filter(item => item.id === wait.wait.id && item.deliveredAt)).toHaveLength(1);
     expect(store.getRun(b)?.status).toBe('running');

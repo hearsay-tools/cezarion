@@ -7,6 +7,7 @@ import {
   cezarHomeDir,
   claudeStateFilePath,
   instanceSlug,
+  ompProfilesDir,
   serverInstancesDir,
   serverLockPath,
   serverStatePath,
@@ -112,6 +113,31 @@ describe('agentHomePaths', () => {
     expect(
       agentHomePaths({ ...home, PI_CONFIG_DIR: '  ', PI_CODING_AGENT_DIR: ' ' } as NodeJS.ProcessEnv).omp,
     ).toBe('/home/u/.omp/agent');
+  });
+
+  it('discovers a host-selected OMP profile as the default account (OMP_PROFILE, then PI_PROFILE)', () => {
+    // omp 18.8.0 reads OMP_PROFILE when it is set at all, else PI_PROFILE; under a profile its
+    // agent dir is `<root>/profiles/<name>/agent` and PI_CODING_AGENT_DIR is ignored.
+    const home = { HOME: '/home/u' };
+    const omp = (env: Record<string, string>) => agentHomePaths({ ...home, ...env } as NodeJS.ProcessEnv).omp;
+    expect(omp({ OMP_PROFILE: 'work' })).toBe('/home/u/.omp/profiles/work/agent');
+    expect(omp({ OMP_PROFILE: 'work', PI_CODING_AGENT_DIR: '/opt/omp-agent' })).toBe('/home/u/.omp/profiles/work/agent');
+    expect(omp({ OMP_PROFILE: 'work', PI_CONFIG_DIR: '.omp-alt' })).toBe('/home/u/.omp-alt/profiles/work/agent');
+    expect(omp({ PI_PROFILE: 'other' })).toBe('/home/u/.omp/profiles/other/agent');
+    expect(omp({ OMP_PROFILE: 'work', PI_PROFILE: 'other' })).toBe('/home/u/.omp/profiles/work/agent');
+    // `default` and a blank OMP_PROFILE both mean no profile — and a set-but-blank OMP_PROFILE
+    // still hides PI_PROFILE, exactly as omp reads them.
+    expect(omp({ OMP_PROFILE: 'default' })).toBe('/home/u/.omp/agent');
+    expect(omp({ OMP_PROFILE: ' ', PI_PROFILE: 'other' })).toBe('/home/u/.omp/agent');
+    // A name omp would refuse selects nothing cezar can describe; fall through to the plain home.
+    expect(omp({ OMP_PROFILE: 'Bad Name' })).toBe('/home/u/.omp/agent');
+  });
+
+  it('puts named OMP profiles under the OMP root, which PI_CONFIG_DIR moves', () => {
+    expect(ompProfilesDir({ HOME: '/home/u' } as NodeJS.ProcessEnv)).toBe('/home/u/.omp/profiles');
+    expect(ompProfilesDir({ HOME: '/home/u', PI_CONFIG_DIR: '.omp-alt' } as NodeJS.ProcessEnv)).toBe(
+      '/home/u/.omp-alt/profiles',
+    );
   });
 
   it('honors agent-specific home overrides', () => {

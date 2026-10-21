@@ -192,6 +192,25 @@ describe('agent accounts store', () => {
       expect((await loadAgentAccounts()).accounts.map((a) => a.id)).toEqual(['work']);
     });
 
+    it('keeps pi and omp accounts — both have one variable that moves their credentials', async () => {
+      write({ accounts: [
+        account('pi-work', { provider: 'pi', configDir: '~/.pi-work/agent' }),
+        account('omp-work', { provider: 'omp', configDir: '~/.omp/profiles/work' }),
+      ] });
+      expect((await loadAgentAccounts()).accounts.map((a) => a.id)).toEqual(['pi-work', 'omp-work']);
+    });
+
+    it('refuses an omp folder that names no profile — OMP_PROFILE could not select it', async () => {
+      // `profileEnv` emits nothing for such a folder, so a named account there would run on the
+      // DEFAULT omp login: the same lie as an OpenCode row, refused by the same salvage.
+      write({ accounts: [
+        account('anywhere', { provider: 'omp', configDir: '/data/omp-work' }),
+        account('upper', { provider: 'omp', configDir: '~/.omp/profiles/Work' }),
+        account('ok', { provider: 'omp', configDir: '~/.omp/profiles/work' }),
+      ] });
+      expect((await loadAgentAccounts()).accounts.map((a) => a.id)).toEqual(['ok']);
+    });
+
     it('refuses a configDir carrying control characters (it reaches a shell command)', async () => {
       write({ accounts: [account('work', { configDir: `~/.claude${String.fromCharCode(10)}evil` })] });
       expect((await loadAgentAccounts()).accounts).toEqual([]);

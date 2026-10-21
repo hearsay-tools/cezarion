@@ -44,7 +44,7 @@ export function AskCard({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
         className="rounded-lg border border-border bg-card px-3.5 py-2.5 text-xs text-muted-foreground"
       >
         <span className="text-soft-foreground">
-          {ask.closed === 'finish' ? 'Closed when the task finished' : ask.answeredBy === 'parent' ? 'Answered by parent' : 'Answered'}
+          {ask.closed === 'finish' ? 'Closed when the task finished' : ask.closed === 'superseded' ? 'Closed when the worker went on' : ask.answeredBy === 'parent' ? 'Answered by parent' : 'Answered'}
         </span>
         {ask.answer ? (
           <span className="ml-1.5 break-words whitespace-pre-line text-foreground">{ask.answer}</span>

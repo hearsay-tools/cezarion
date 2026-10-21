@@ -275,6 +275,13 @@ describe('request shapes', () => {
       method: 'POST',
       body: { scope: 'unpinned' },
     },
+    {
+      name: 'archiveProjectFinished (sidebar tab filter, #1332)',
+      call: () => archiveProjectFinished('other', 'unpinned', true),
+      path: '/api/v1/p/other/runs/archive-finished',
+      method: 'POST',
+      body: { scope: 'unpinned', automation: true },
+    },
     { name: 'finishRun', call: () => finishRun('run-1'), path: '/api/v1/runs/run-1/finish', method: 'POST' },
     {
       name: 'continueRun (no text)',

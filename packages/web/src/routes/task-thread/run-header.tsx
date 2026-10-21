@@ -1,35 +1,25 @@
 import './run-header.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { AppWindowIcon, FileTextIcon, MailIcon, PencilIcon, PinOffIcon, SquareTerminalIcon } from 'lucide-react'
-import { BotIcon, ChevronDownIcon, CircleDotIcon, CopyIcon, EllipsisIcon, GitPullRequestIcon, PinIcon, Trash2Icon, XIcon } from '@/components/design-icons'
-import { Fragment, useEffect, useId, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
-import { Link, useActiveProjectId, useNavigate } from '@/lib/project-router'
+import { AppWindowIcon, FileTextIcon, MailIcon, PencilIcon, PinOffIcon } from 'lucide-react'
+import { CircleDotIcon, CopyIcon, EllipsisIcon, GitPullRequestIcon, PinIcon, Trash2Icon, XIcon } from '@/components/design-icons'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate } from '@/lib/project-router'
 
-import { ApiError, deleteRun, openRunIn, openRunInCli } from '@/api/client'
+import { deleteRun } from '@/api/client'
 import {
   queryKeys,
-  useAgentProfiles,
-  useConfig,
   useHealth,
   useMarkRunUnseen,
-  useOpenTargets,
   usePatchRun,
   usePinRun,
-  useProjectRepoBase,
-  useReferenceProjectId,
-  useProviderStatus,
   useRunHandoff,
   useRuns,
 } from '@/api/queries'
-import { DEFAULT_AGENT_ACCOUNT_ID } from '@open-mercato/cezar-api-client/contract/agent-profiles'
-import type { ApiRun, OpenTarget, Wait } from '@open-mercato/cezar-api-client'
-import { hasAccountChoice, useAgentAccounts } from '@/api/agent-accounts'
-import { DiffStatLabel } from '@/components/diff-stat'
+import type { ApiRun } from '@open-mercato/cezar-api-client'
 import { TitleEditInput, useTitleEditor } from '@/components/editable-title'
 import { Pill } from '@/components/pill'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { ReferenceChip, ReferenceStatusGlyph } from '@/components/reference-chip'
-import { ResolveConflictsButton } from '@/components/reference-conflict-action'
+import { ReferenceStatusGlyph } from '@/components/reference-chip'
 import { ReferenceStatusProvider } from '@/components/reference-status'
 import { TabLink } from '@/components/tab-link'
 import { MobileRunBarPortal, useIsDesktopViewport, useMobileRunBarSlot } from '@/components/mobile-run-bar'
@@ -55,33 +45,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { openInIcon, type OpenInChoice } from '@/components/open-in-menu'
 import { toast } from '@/components/ui/toaster'
-import { DirectionalUsage } from '@/components/directional-usage'
 import { deriveAttention } from '@/lib/attention'
 import { queuePositions, runTitle } from '@/lib/task-groups'
-import { usableRunners } from '@/lib/provider-status'
-import {
-  formatCost,
-  prNumber,
-  taskIssueUrl,
-  taskPrUrl,
-  taskItemPath,
-  isOwnRepoReference,
-  taskItemTabs,
-  taskReferences,
-  workflowLabel,
-  type TaskItemTab,
-  type TaskReference,
-} from '@/lib/tasks-table'
-import { usageMetricVisibility } from '@/lib/token-metrics'
-import { cn, isHttpUrl } from '@/lib/utils'
+import { taskItemTabs, type TaskItemTab } from '@/lib/tasks-table'
+import { cn } from '@/lib/utils'
 
 import { ArchiveButton } from './archive-action'
-import { HandoffAction } from './handoff-action'
+import { runStatusLine, statusLineText } from './run-status'
+import { OpenInMenuForRun, copyToClipboard, useResumeInTerminal, useRunReferenceRequests } from './run-workspace'
+import { HandoffAction, useHandoffActionVisible } from './handoff-action'
 import { Markdown } from './markdown'
 import { TaskFileScope } from './task-file-scope'
-import { archiveInComposer, cliTargetResumes, cliTargetRunner, lastSessionBackend, resumeHint, runActionFlags } from './run-actions'
+import { archiveInComposer, resumeHint, runActionFlags } from './run-actions'
 
 /**
  * The run header (spec §"Task thread" → Header): editable title + status pill, the meta line,
@@ -146,16 +122,6 @@ function ItemTabLabel({ tab }: { tab: TaskItemTab }) {
   )
 }
 
-/** Which project/run pairs the reader has expanded the phone-width meta row for (#765). A module-level map for
- *  the same reason `WorkflowSteps` keeps one (`openByRun` in step-rail.tsx) — and it has to be BOTH
- *  module-level and run-keyed, because the two navigations a reader makes here remount the header
- *  in opposite ways. A Session → Changes hop resolves a different route element, so it DOES remount
- *  and plain `useState` would throw the expand away; run A → run B stays on `/tasks/:id`, so React
- *  reconciles the same element and does NOT remount — the docks below it key themselves by `run.id`
- *  for exactly this reason — so even lazily-initialized `useState` would carry run A's expansion
- *  into run B. Session-lifetime only; no server persistence invented for it. */
-const detailsOpenByRun = new Map<string, boolean>()
-
 /**
  * The preview pane's header toggle (#781): `Preview`, `Preview :5173`, `Preview :5173 +1`. It only
  * opens the pane, on the one server's current state or on the empty state when there are none or
@@ -202,26 +168,15 @@ export function RunHeader({
   const [openChooser, setOpenChooser] = useState(false)
   const actions = useRunActions(run, onMarkedUnread)
 
-  // The phone-width meta disclosure (#765). The map is the state — a re-render bump rather than a
-  // mirrored `useState` — so switching runs reads that run's own answer instead of the last one's.
-  const [, bumpDetails] = useReducer((n: number) => n + 1, 0)
-  const detailsId = useId()
-  const projectId = useActiveProjectId()
-  const detailsKey = JSON.stringify([projectId, run.id])
-  const detailsOpen = detailsOpenByRun.get(detailsKey) ?? false
-  const toggleDetails = () => {
-    detailsOpenByRun.set(detailsKey, !detailsOpen)
-    bumpDetails()
-  }
-
   // The queue position a parked run shows in its pill ("queued #2"). Reads the shared runs-list
   // query — already warm from the sidebar quick-list — because position is a property of the
   // whole queue, not of this record.
   const runs = useRuns()
   const health = useHealth()
-  const metricVisibility = usageMetricVisibility(health.data)
   const queuePosition =
     run.status === 'queued' ? queuePositions(runs.data ?? []).get(run.id) : undefined
+  // One status line for the pill and the Session activity card (hearsay-tools/cezarion#1333).
+  const statusLine = runStatusLine(run, { hasPendingHumanAsk, queuePosition })
 
   // Below md, on a pushed task route, the shell's top bar carries the title, state line and run
   // actions (#621), so this header drops its own copy. Both halves are required: the slot exists
@@ -233,23 +188,9 @@ export function RunHeader({
   // Below md the facets swap in place, so Back from the pushed screen returns to the list the
   // user came from rather than stepping through every tab they visited; desktop keeps its history.
   const phoneBar = barSlot !== null
-  const repoBase = useProjectRepoBase()
-  const references = useMemo(() => taskReferences(run, repoBase), [run, repoBase])
-  const primaryReference = references[0]
-  // One status batch for the whole header: the meta row's chips and the item tabs' glyphs read the
-  // same provider, so the tabs add no request (#692).
-  const referenceProjectId = useReferenceProjectId()
-  const referenceRequests = useMemo(
-    () =>
-      referenceProjectId === undefined
-        ? []
-        : references.filter(reference => isOwnRepoReference(reference, repoBase)).map((reference) => ({
-            projectId: referenceProjectId,
-            kind: reference.kind,
-            number: reference.number,
-          })),
-    [references, referenceProjectId, repoBase],
-  )
+  // One status batch for the whole header: the item tabs' glyphs read it (#692), and the Session
+  // activity card's chips share the same registry entry.
+  const { referenceProjectId, repoBase, requests: referenceRequests } = useRunReferenceRequests(run)
   // The linked own-repo issues and PRs, one tab each after Files (#692).
   const itemTabs = useMemo(() => taskItemTabs(run, repoBase), [run, repoBase])
   const activeItem = typeof tab === 'object' ? tab : null
@@ -277,27 +218,6 @@ export function RunHeader({
     />
   )
 
-  // Phone-width only: above `md` the meta row never collapses, so a control to expand
-  // it would be a permanently disabled-looking chevron next to always-visible content.
-  // On the Session tab of a run with a plan it lands in the slot #764 freed by hiding
-  // the plan mirror here; on the three `task-git` tabs no tally is passed at all, so
-  // there the row does grow by one control — the price of the collapse.
-  const detailsToggle = (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      className="size-11 md:hidden"
-      aria-label={detailsOpen ? 'Hide run details' : 'Show run details'}
-      aria-controls={detailsId}
-      aria-expanded={detailsOpen}
-      onClick={toggleDetails}
-    >
-      <ChevronDownIcon
-        aria-hidden="true"
-        className={cn('transition-transform motion-reduce:transition-none', detailsOpen && 'rotate-180')}
-      />
-    </Button>
-  )
   // #281: Archive out of the kebab. The Session tab's composer carries it — within a
   // thumb's reach, which this header is not on a phone, where it scrolls away by
   // design. The three git tabs have no composer, so the header carries it there, and
@@ -305,6 +225,7 @@ export function RunHeader({
   // failed run holding wait results (hearsay-tools/cezarion#1233), so the header carries
   // Archive on the Session tab too.
   const archiveButton = flags.archive && (tab !== 'session' || !archiveInComposer(run)) ? <ArchiveButton run={run} /> : null
+  const handoffVisible = useHandoffActionVisible(run)
 
   return (
     <ReferenceStatusProvider projectId={referenceProjectId} repoBase={repoBase} requests={referenceRequests}>
@@ -320,21 +241,12 @@ export function RunHeader({
     >
       {run.archived && run.autoArchive?.reason === 'pull-requests-merged' && run.autoArchive.archivedAt === run.archivedAt ? <p data-slot="auto-archive-reason" className="text-[13px] text-muted-foreground">Archived automatically after all associated PRs merged.</p> : null}
       <div className="w-full">
-        {/* On the pushed phone screen the row would hold only controls (details chevron, Archive,
-            Handoff) between the top bar and the facet tabs. The chevron moves into the top bar and
-            the rest into the disclosure below, so the row does not render at all. */}
+        {/* Pushed phone screen (#621): the shell's top bar carries back, the title and the run
+            actions. hearsay-tools/cezarion#1333 took the state line out of it: the run's status
+            lives in Session activity, the one card both viewports read. */}
         {barSlot ? (
           <MobileRunBarPortal slot={barSlot}>
-            <MobileRunTitle run={run}>
-              <span data-slot="mobile-run-state" className="flex min-w-0 items-center gap-1.5 text-[11.5px] leading-tight text-soft-foreground">
-                <StatusDot tone={attention.tone} shape={attention.shape} pulse={attention.pulse} />
-                <span className="truncate">
-                  {attention.label}{queuePosition !== undefined ? ` #${queuePosition}` : ''}
-                  {primaryReference ? ` · #${primaryReference.number}` : ''}
-                </span>
-              </span>
-            </MobileRunTitle>
-            {detailsToggle}
+            <MobileRunTitle run={run} />
             {actionsKebab}
           </MobileRunBarPortal>
         ) : (
@@ -343,11 +255,11 @@ export function RunHeader({
               {run.delegation?.role === 'worker' ? 'Worker session' : run.delegation?.role === 'root' ? 'Parent session' : 'Task session'}
             </p>
             <EditableTitle run={run} />
-            <Pill dot={attention.tone} shape={attention.shape} pulse={attention.pulse}>
-              {attention.label}{queuePosition !== undefined ? ` #${queuePosition}` : ''}
+            {/* Desktop only: below md the header shows no status at all (#1333). */}
+            <Pill dot={attention.tone} shape={attention.shape} pulse={attention.pulse} className="max-md:hidden">
+              {statusLineText(statusLine)}
             </Pill>
             <span className="ml-auto flex shrink-0 items-center gap-1 md:gap-2.5">
-              {detailsToggle}
               {archiveButton}
               {previewToggle}
               <HandoffAction run={run} />
@@ -356,34 +268,16 @@ export function RunHeader({
           </div>
         )}
 
-        {/* #765: workflow, branch, tracker refs, diff, tokens and cost wrap across several rows on
-            a phone. `hidden` rather than a visual-only class so the collapsed rows leave the
-            accessibility tree instead of lingering as invisible-but-focusable chips. `md:block`
-            keeps the desktop header exactly as it was — this is a narrow-viewport fix, and a
-            desktop reader who has always seen these at a glance should not have to click for them. */}
-        <div id={detailsId} data-slot="run-details" className={cn(detailsOpen ? 'block' : 'hidden', 'md:block')}>
-          {/* Pushed phone screen (#621): the controls the dropped title row used to carry. */}
-          {barSlot ? (
-            <div data-slot="run-details-actions" className="flex flex-wrap items-center gap-2 pt-2">
-              {archiveButton}
-              {previewToggle}
-              <HandoffAction run={run} />
-            </div>
-          ) : null}
-          <MetaRow
-            run={run}
-            showTokens={metricVisibility.tokens}
-            showCost={metricVisibility.cost}
-            // `capabilities?.` like `usageMetricVisibility` above it: this header is rendered
-            // against minimal health payloads (a `{defaultRunner}`-only answer is pinned by its
-            // own test), so every capability read here tolerates an absent object. Absent stays
-            // fail-closed — the chip degrades to text rather than linking into a disabled view.
-            automationsAvailable={health.data?.capabilities?.automations === true}
-          />
-        </div>
-        {/* Outside the disclosure on purpose: "this run wakes itself up at 14:20" is status, not
-            metadata — it belongs with the pill above, not behind a tap with the diff stats. */}
-        <OpenWaits run={run} />
+        {/* Pushed phone screen: the controls the dropped title row used to carry, in a row of
+            their own — rendered only when one of them applies, so an empty row never sits
+            between the top bar and the tabs. */}
+        {barSlot && (archiveButton || previewToggle || handoffVisible) ? (
+          <div data-slot="run-mobile-actions" className="flex flex-wrap items-center gap-2 pt-2">
+            {archiveButton}
+            {previewToggle}
+            <HandoffAction run={run} />
+          </div>
+        ) : null}
 
         {/* Below md (#621): 13.5px labels and quiet counts, tabs spread across the row. The 44px
             floor stays — the touch-target sweep measures these links — so the design's 40px is the
@@ -403,7 +297,7 @@ export function RunHeader({
           <TabLink to={`/tasks/${run.id}`} active={tab === 'session'} replace={phoneBar}>
             Session
           </TabLink>
-          <TabLink to={`/tasks/${run.id}/changes`} active={tab === 'changes'} replace={phoneBar} count={phoneBar && run.diffStat && run.diffStat.files > 0 ? run.diffStat.files : undefined}>
+          <TabLink to={`/tasks/${run.id}/changes`} active={tab === 'changes'} replace={phoneBar} count={run.diffStat && run.diffStat.files > 0 ? run.diffStat.files : undefined}>
             Changes
           </TabLink>
           <TabLink to={`/tasks/${run.id}/commits`} active={tab === 'commits'} replace={phoneBar}>
@@ -454,93 +348,6 @@ export function RunHeader({
   )
 }
 
-/**
- * "Open in…" session takeover (#open-in): resume the session in a real terminal, open the run's
- * worktree in a local editor / Finder / terminal / agent CLI, or copy its path.
- *
- * The menu itself is the shared `OpenInMenu` (components/open-in-menu.tsx); what lives here is
- * everything run-SPECIFIC — the resume item, which agent handoffs are currently usable, the
- * `(resume)` labelling, and the copy-path row. Renders when the session can be resumed OR the
- * machine offers worktree targets (both empty in hosted mode → nothing to show).
- */
-function OpenInMenuForRun({
-  run,
-  canResume,
-  onResume,
-  onOpen,
-  onClose,
-}: {
-  run: ApiRun
-  canResume: boolean
-  onResume: () => void
-  onOpen?: () => void
-  onClose?: () => void
-}) {
-  const targets = useOpenTargets()
-  const providers = useProviderStatus()
-  const open = useMutation({
-    mutationFn: (target: string) => openRunIn(run.id, target),
-    onError: (error: Error) => toast(error.message, { tone: 'danger' }),
-  })
-  const availableRunners = usableRunners(providers.data)
-  // The action routes remain authoritative for a stale browser. Once the complete status has
-  // arrived, hide only unavailable *agent* handoffs; editors, Finder, and file tools stay
-  // available because they do not launch a provider.
-  const agentAvailable = (runner: ApiRun['runner']) =>
-    !providers.isSuccess || availableRunners.includes(runner ?? 'claude')
-  const canResumeHere = canResume && agentAvailable(lastSessionBackend(run))
-  const choices: OpenInChoice[] = run.worktreePath
-    ? (targets.data?.targets ?? [])
-        .filter((target) => {
-          const runner = cliTargetRunner(target.id)
-          return runner === undefined || agentAvailable(runner)
-        })
-        // Agent-CLI targets (#402): the one matching this run's own runner resumes THIS run's
-        // session when one exists — label that explicitly so it reads as different from just
-        // opening the editor/file-manager entries. Every other CLI (wrong backend, or no session
-        // yet) still opens, just starts clean — no silent cross-backend resume attempt.
-        .map((target) => {
-          const resumes = cliTargetResumes(run, target.id)
-          return {
-            target,
-            ...(resumes ? { suffix: ' (resume)', title: "Resume this run's session" } : {}),
-          }
-        })
-    : []
-  if (!canResumeHere && choices.length === 0) return null
-
-  const copyPath = () => {
-    const path = run.worktreePath
-    if (!path) return
-    void navigator.clipboard
-      .writeText(path)
-      .then(() => toast('Worktree path copied'))
-      .catch(() => toast(`Path: ${path}`))
-  }
-
-  if (onOpen) return <DropdownMenuItem onSelect={onOpen}>Open in…</DropdownMenuItem>
-  const hint = resumeHint(run)
-  return (
-    <section aria-label="Open task worktree in…" className="task-action-panel my-5 rounded-xl border border-border bg-card p-6">
-      <div className="flex items-center justify-between gap-3"><h2 className="text-lg font-medium">Open task worktree in…</h2><Button variant="ghost" size="icon" aria-label="Close worktree chooser" onClick={onClose}><XIcon /></Button></div>
-      {run.worktreePath ? <p className="my-4 break-all text-xs text-muted-foreground">{run.worktreePath}</p> : null}
-      <div className="task-open-targets mt-4 flex flex-wrap gap-3">
-        {canResumeHere ? <Button variant="outline" data-target="terminal-resume" onClick={onResume}><SquareTerminalIcon />Terminal (resume session)</Button> : null}
-        {choices.map(({ target, suffix, title }) => {
-          const Icon = openInIcon(target)
-          return <Button variant="outline" key={target.id} data-target={target.id} title={title} disabled={open.isPending} onClick={() => open.mutate(target.id)}><Icon aria-hidden="true" />{target.label}{suffix ?? ''}</Button>
-        })}
-        {run.worktreePath ? <Button variant="outline" onClick={copyPath}><CopyIcon />Copy worktree path</Button> : null}
-      </div>
-      {hint ? <div className="mt-5 border-t border-border pt-5">
-        <h3 className="text-base font-medium">Resume in a terminal</h3>
-        <pre className="my-4 whitespace-pre-wrap break-all rounded-lg border border-border bg-background p-4 text-xs">{hint}</pre>
-        <Button variant="outline" onClick={() => void copyToClipboard(hint, 'Command copied to clipboard.')}><CopyIcon />Copy resume command</Button>
-      </div> : null}
-    </section>
-  )
-}
-
 /** The mutations + confirm state, bundled so the desktop bar and the mobile kebab drive the
  *  exact same behavior. Every failure surfaces the server's own words as a danger toast. */
 function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
@@ -582,18 +389,7 @@ function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
     },
     onError,
   })
-  const terminal = useMutation({
-    mutationFn: () => openRunInCli(run.id),
-    onError: (error: Error) => {
-      // The legacy 409 fallback: no terminal emulator → the server sends the manual command;
-      // put it on the clipboard so "no terminal" still ends with the user one paste away.
-      if (error instanceof ApiError && error.command) {
-        void copyToClipboard(error.command, 'No terminal found — command copied to clipboard.')
-        return
-      }
-      onError(error)
-    },
-  })
+  const terminal = useResumeInTerminal(run)
 
   return {
     pin,
@@ -606,16 +402,6 @@ function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
 }
 
 type RunActions = ReturnType<typeof useRunActions>
-
-async function copyToClipboard(text: string, doneMessage: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast(doneMessage)
-  } catch {
-    // No clipboard access (permissions, http) — show the command itself; it is the payload.
-    toast(`Run manually: ${text}`)
-  }
-}
 
 /** The rename machine bound to a run, shared by the desktop h1 and the phone top bar. */
 function useRunTitleEditor(run: ApiRun) {
@@ -657,12 +443,11 @@ function EditableTitle({ run }: { run: ApiRun }) {
   )
 }
 
-/** The phone top bar's title (#621, #737): the title + state stack (15px/600 over 11.5px, children
- *  is the state line) and, as its SIBLING, the 44px rename button — so the touch target never adds
- *  to the stack's height and never overlaps the state text, whatever its length. The 44px input
- *  cannot sit in the 56px bar without hiding the state line, so renaming opens it in a popover
- *  anchored under the pencil; the same `useTitleEditor` machine (Enter/blur commit, Escape cancel). */
-function MobileRunTitle({ run, children }: { run: ApiRun; children: ReactNode }) {
+/** The phone top bar's title (#621, #737): the 15px/600 title and, as its SIBLING, the 44px rename
+ *  button. The bar shows no status (hearsay-tools/cezarion#1333): the Session activity card does.
+ *  The 44px input cannot sit in the 56px bar, so renaming opens it in a popover anchored under the
+ *  pencil; the same `useTitleEditor` machine (Enter/blur commit, Escape cancel). */
+function MobileRunTitle({ run }: { run: ApiRun }) {
   const { title, editor } = useRunTitleEditor(run)
   return (
     <Popover
@@ -674,7 +459,6 @@ function MobileRunTitle({ run, children }: { run: ApiRun; children: ReactNode })
     >
       <div data-slot="mobile-run-title" className="flex min-w-0 flex-1 flex-col gap-px">
         <h1 className="truncate text-[15px] leading-tight font-semibold text-foreground" title={run.task}>{title}</h1>
-        {children}
       </div>
       <PopoverTrigger asChild>
         <button
@@ -698,502 +482,6 @@ function MobileRunTitle({ run, children }: { run: ApiRun; children: ReactNode })
         <TitleEditInput editor={editor} className="text-[16px] font-semibold" />
       </PopoverContent>
     </Popover>
-  )
-}
-
-function BranchCopy({ branch }: { branch: string }) {
-  const [copiedBranch, setCopiedBranch] = useState<string | null>(null)
-  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => () => {
-    if (resetTimer.current !== null) clearTimeout(resetTimer.current)
-  }, [])
-
-  const copied = copiedBranch === branch
-  const copy = async () => {
-    if (resetTimer.current !== null) clearTimeout(resetTimer.current)
-    setCopiedBranch(null)
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
-      await navigator.clipboard.writeText(branch)
-      setCopiedBranch(branch)
-      resetTimer.current = setTimeout(() => setCopiedBranch(null), 2000)
-    } catch {
-      toast(`Could not copy branch. Select and copy: ${branch}`)
-    }
-  }
-
-  return (
-    <span className="inline-flex min-w-0 max-w-full items-center gap-1">
-      <span
-        data-slot="branch-chip"
-        className="min-w-0 rounded-sm border border-border bg-card px-1.5 py-px font-mono text-[11px] font-medium break-all"
-      >
-        {branch}
-      </span>
-      <button
-        type="button"
-        aria-label={copied ? 'Copied branch name' : 'Copy branch name'}
-        onClick={() => void copy()}
-        className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm px-2 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground md:min-h-8"
-      >
-        <CopyIcon className="size-3.5" aria-hidden="true" />
-        <span aria-live="polite">{copied ? 'Copied' : 'Copy'}</span>
-      </button>
-    </span>
-  )
-}
-
-/** workflow · branch chip · ± on the left; tokens · cost · agent icon on the right (mockup
- *  `.meta-row`, #416). Each part renders only when the record carries it — absence is absence,
- *  not a placeholder. Runner and model no longer sit in the loose dot-list (#416): they read as
- *  a status for the *active* session, so they move into the agent badge next to the token
- *  count, revealed on hover/focus rather than always-on text. */
-function MetaRow({
-  run,
-  showTokens,
-  showCost,
-  automationsAvailable,
-}: {
-  run: ApiRun
-  showTokens: boolean
-  showCost: boolean
-  /** `capabilities.automations` (#801). A run launched while automations were on keeps its
-   *  `run.automation` provenance forever, so the chip must survive the flag going off — as
-   *  plain text, because the route it used to link to is disabled. */
-  automationsAvailable: boolean
-}) {
-  // #526: the issue chip may be synthesized from the CEZ:ISSUE marker, and the only repository
-  // such a link may name is the one on screen — never the transcript's.
-  const repoBase = useProjectRepoBase()
-  // Own-repo pills open the task's item tab (#692); a foreign reference keeps its GitHub link.
-  const referenceProjectId = useReferenceProjectId()
-  const itemPath = (reference: TaskReference) =>
-    referenceProjectId === undefined ? undefined : taskItemPath(referenceProjectId, run.id, reference, repoBase)
-  // The chips' statuses come from the `ReferenceStatusProvider` `RunHeader` mounts around the
-  // whole header — the same seam the tables use, which keeps the header's chip and the table's
-  // chip answering identically for the same PR.
-  const references = useMemo(() => taskReferences(run, repoBase), [run, repoBase])
-  // `workflowLabel` so an inline chain shows its first step's name, not the bare "(planned)"
-  // placeholder — which reads like a status next to the live status pill.
-  const parts: ReactNode[] = [<span key="workflow" className="min-w-0 max-w-full break-all">{workflowLabel(run)}</span>]
-  if (run.branch) {
-    parts.push(
-      <BranchCopy key="branch" branch={run.branch} />,
-    )
-  }
-  // EVERY PR the task points at, in `taskReferences` order — the same order, and the same
-  // statuses, the global Tasks table paints. A task opened on someone else's PR that pushes a
-  // follow-up of its own is about both, and its own page is the last place that should have to
-  // pick one.
-  //
-  // A reference with no URL still gets its chip, exactly as All tasks paints it: a number-only
-  // reference is what a `CEZ:PR` declaration looks like before any link is scraped, and the two
-  // pages read their repository from DIFFERENT places (this one from health's remote, All tasks
-  // from the project registry's `repoUrl`) — so "no URL here" never means "nothing to show".
-  // `ReferenceChip` degrades such a chip to inert text on its own.
-  const prReferences = references.filter((reference) => reference.kind === 'PR')
-  for (const reference of prReferences) {
-    parts.push(
-      <ReferenceChip
-        key={`pr-${reference.number}`}
-        reference={reference}
-        to={itemPath(reference)}
-        taskTitle={runTitle(run)}
-        // 44px on touch (#617 01b): the sidebar row shows references as plain text there, so
-        // this header is where they are tapped. CSS px, not `min-h-11`: spacing units follow
-        // density, and ultra would make that 33px.
-        className="h-5 no-hover:min-h-[44px] no-hover:min-w-[44px]"
-        // Shown only on a chip that IS conflicting — the chip decides that, being the thing that
-        // knows — and mounted only while its panel is open. The same component the Tasks table
-        // hands its chips, so both send the same prompt on the same seam.
-        conflictAction={<ResolveConflictsButton run={run} prNumber={reference.number} />}
-      />,
-    )
-  }
-  // The one PR chip `taskReferences` cannot express: a forge URL whose last segment is not a
-  // number (`taskPrUrl`'s own tolerance — an unrecognized forge still gets a working link, just
-  // without a number cezar would be inventing). Gated on that URL not being painted already,
-  // NOT on there being no chips at all: today every `pullRequestUrl` is a GitHub `…/pull/N` and
-  // the two are the same test, but a forge whose PR URLs do not end in a number (#847's GitLab
-  // adapter) would have a `prNumber` chip standing in front of a link that then never rendered.
-  const prUrl = taskPrUrl(run)
-  if (prUrl && isHttpUrl(prUrl) && !prReferences.some((reference) => reference.url === prUrl)) {
-    parts.push(
-      <ReferenceChip
-        key="pr"
-        reference={{ kind: 'PR', url: prUrl }}
-        taskTitle={runTitle(run)}
-        className="h-5 no-hover:min-h-[44px] no-hover:min-w-[44px]"
-      />,
-    )
-  }
-  const issueUrl = taskIssueUrl(run, repoBase)
-  if (issueUrl && isHttpUrl(issueUrl)) {
-    const number = prNumber(issueUrl)
-    parts.push(
-      <ReferenceChip
-        key="issue"
-        reference={{ kind: 'Issue', ...(number ? { number: Number(number) } : {}), url: issueUrl }}
-        to={number ? itemPath({ kind: 'Issue', number: Number(number), url: issueUrl }) : undefined}
-        taskTitle={runTitle(run)}
-        className="h-5 no-hover:min-h-[44px] no-hover:min-w-[44px]"
-      />,
-    )
-  }
-  if (run.diffStat) parts.push(<DiffStatLabel key="diff" stat={run.diffStat} />)
-  if (run.automation) {
-    // Provenance is history and is always shown; only the LINK is gated. Following it with the
-    // capability off would land on the disabled `/automations` state, which says nothing about
-    // this task.
-    parts.push(
-      automationsAvailable ? (
-        <Link
-          key="automation"
-          to={`/automations/${encodeURIComponent(run.automation.automationId)}/log`}
-          className="rounded-sm border border-border bg-card px-1.5 py-px text-[11px] font-medium hover:text-foreground"
-        >
-          Automation
-        </Link>
-      ) : (
-        <span
-          key="automation"
-          data-slot="automation-origin"
-          title="Automations are off on this server (CEZ_AUTOMATIONS)"
-          className="rounded-sm border border-border bg-card px-1.5 py-px text-[11px] font-medium"
-        >
-          Automation
-        </span>
-      ),
-    )
-  }
-
-  const usage: ReactNode[] = []
-  if (showTokens && (run.inputTokens !== undefined || run.outputTokens !== undefined)) {
-    usage.push(
-      <DirectionalUsage
-        key="tokens"
-        inputTokens={run.inputTokens}
-        outputTokens={run.outputTokens}
-      />,
-    )
-  }
-  if (showCost && run.costUsd !== undefined) {
-    usage.push(
-      <span key="cost" className="tabular-nums">
-        {formatCost(run.costUsd)}
-      </span>,
-    )
-  }
-
-  return (
-    <>
-      <div
-        data-slot="run-meta"
-        className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground md:mt-1.5 md:gap-y-1"
-      >
-        {parts.map((part, index) => (
-          <Fragment key={index}>
-            {index > 0 ? (
-              <span className="text-soft-foreground" aria-hidden="true">
-                ·
-              </span>
-            ) : null}
-            {part}
-          </Fragment>
-        ))}
-        <span className="ml-auto flex min-w-0 max-w-full items-center gap-1.5">
-          {usage.map((part, index) => (
-            <Fragment key={index}>
-              {index > 0 ? (
-                <span className="text-soft-foreground" aria-hidden="true">
-                  ·
-                </span>
-              ) : null}
-              {part}
-            </Fragment>
-          ))}
-          <AgentBadge run={run} />
-        </span>
-      </div>
-    </>
-  )
-}
-
-type CiWait = Extract<Wait, { kind: 'ci' }>
-type TimerWait = Extract<Wait, { kind: 'timer' }>
-type WorkerWait = Extract<Wait, { kind: 'worker' }>
-type ListedWait = CiWait | TimerWait | WorkerWait
-
-/** Only these statuses can have a wait in flight; a finished run's leftovers are history. */
-const IN_FLIGHT_STATUSES: readonly ApiRun['status'][] = ['running', 'queued', 'waiting']
-
-/** The kinds this header renders: CI, timer and worker waits. Streamed records were only checked
- *  for `id`. A human wait shows as Needs you and its question card, through the pill, never in
- *  this list. A worker wait shows only while open: its result is not owed in a line of its own. */
-function renderableWaits(value: unknown): ListedWait[] {
-  return Array.isArray(value)
-    ? value.filter((wait): wait is ListedWait => wait?.kind === 'ci' || wait?.kind === 'timer' || wait?.kind === 'worker')
-    : []
-}
-
-function formatInstant(value: string | undefined) {
-  const date = value ? new Date(value) : undefined
-  return date && Number.isFinite(date.getTime())
-    ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'long' }).format(date)
-    : undefined
-}
-
-/** A resolved wait's result is owed to the agent: mid-turn it waits for the turn end, otherwise
- *  for the wake turn to be admitted. */
-function owedLabel(prefix: string, run: ApiRun) {
-  return `${prefix} — ${run.status === 'running' ? 'current turn still working' : 'waiting for capacity'}`
-}
-
-/**
- * Every open wait on the run (spec 2026-10-17-unified-waits), then the last settled CI
- * observation. Snapshot-only status: none of it starts a browser watcher, and the pill reads
- * `waitingOn` through `deriveAttention`, not this list. The settled observation (or the retained
- * recovery error) stays beside an open timer, and gives way only to a CI wait of its own.
- */
-function OpenWaits({ run }: { run: ApiRun }) {
-  const listed = renderableWaits(run.waits)
-  const open = IN_FLIGHT_STATUSES.includes(run.status)
-    ? listed.filter(wait => wait.kind === 'worker' ? wait.phase === 'open' : wait.phase === 'open' || wait.phase === 'resolved')
-    : []
-  const ciOpen = open.some(wait => wait.kind === 'ci')
-  // `lastWaits` is newest last; a settled entry still in `waits` is newer than all of them.
-  const settled = [...renderableWaits(run.lastWaits), ...listed.filter(wait => !open.includes(wait) && wait.phase !== 'open')]
-  const lastCi = ciOpen ? undefined : settled.filter((wait): wait is CiWait => wait.kind === 'ci').at(-1)
-  const error = ciOpen ? undefined : run.lastWaitsError
-  if (!open.length && !lastCi && !error) return null
-  return (
-    <div data-slot="open-waits" className="mt-1 flex min-w-0 flex-col gap-1">
-      {open.map(wait => wait.kind === 'ci'
-        ? <CiWaitStatus key={wait.id} run={run} wait={wait} />
-        : wait.kind === 'worker'
-          ? <WorkerWaitStatus key={wait.id} wait={wait} />
-          : <TimerWaitStatus key={wait.id} run={run} wait={wait} />)}
-      {error ? (
-        <div data-slot="ci-wait-status" role="status" aria-live="polite" aria-atomic="true"
-          className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
-          {error}
-        </div>
-      ) : lastCi ? <CiWaitStatus run={run} wait={lastCi} settled /> : null}
-    </div>
-  )
-}
-
-function CiWaitStatus({ run, wait, settled = false }: { run: ApiRun; wait: CiWait; settled?: boolean }) {
-  const result = wait.result
-  const outcomes = {
-    passed: 'CI checks passed — observed checks only; not merge approval',
-    failed: 'CI checks failed — inspect the PR checks',
-    cancelled: 'CI wait cancelled',
-    skipped: 'CI checks skipped — inspect the PR checks',
-    no_checks: 'No CI checks found — inspect the PR workflows',
-    deadline: 'CI wait timed out — inspect the PR checks',
-    error: 'CI wait unavailable — inspect access and the PR checks',
-    head_changed: `CI head changed — ${result?.headSha.slice(0, 7)} → ${result?.observedHeadSha?.slice(0, 7) ?? 'unknown'}`,
-  }
-  const cancelled = settled && wait.phase === 'cancelled'
-  const label = !settled
-    ? wait.phase === 'resolved' ? owedLabel('CI result ready', run) : 'Waiting for CI'
-    : cancelled ? 'CI wait cancelled' : result ? outcomes[result.outcome] : 'CI wait unavailable'
-  const timestamp = !settled ? wait.deadline : cancelled ? wait.cancelledAt : result?.observedAt
-  const dateLabel = formatInstant(timestamp)
-  const prLabel = `${wait.repository}#${wait.prNumber}`
-  return (
-    <div data-slot="ci-wait-status" role="status" aria-live="polite" aria-atomic="true"
-      className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-1">
-        <span>{label}</span>
-        <span aria-hidden="true">—</span>
-        {isHttpUrl(wait.prUrl) ? (
-          <a href={wait.prUrl} target="_blank" rel="noopener noreferrer"
-            className="inline-flex min-h-11 min-w-11 max-w-full items-center rounded-sm px-1 font-medium text-foreground underline underline-offset-2 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none">
-            {prLabel}
-          </a>
-        ) : <span>{prLabel}</span>}
-      </div>
-      {dateLabel ? (
-        <p>{!settled ? 'Deadline' : cancelled ? 'Cancelled' : 'Observed'}{' '}<time dateTime={timestamp}>{dateLabel}</time></p>
-      ) : !settled ? <p>CI deadline unavailable</p> : null}
-    </div>
-  )
-}
-
-/** "Waiting on N workers" / "N request replies": the ids not yet reported, with the deadline. */
-function WorkerWaitStatus({ wait }: { wait: WorkerWait }) {
-  const byWorker = wait.workerIds !== undefined
-  const reported = new Set((byWorker ? wait.outcomes : wait.requestOutcomes)?.map(outcome => 'workerId' in outcome ? outcome.workerId : outcome.requestId))
-  const count = (wait.workerIds ?? wait.requestIds ?? []).filter(id => !reported.has(id)).length
-  const noun = byWorker ? (count === 1 ? 'worker' : 'workers') : (count === 1 ? 'request reply' : 'request replies')
-  const dateLabel = formatInstant(wait.deadline)
-  return (
-    <div data-slot="worker-wait-status" role="status" aria-live="polite" aria-atomic="true"
-      className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
-      <p>Waiting on {count} {noun}</p>
-      {dateLabel ? <p>Deadline{' '}<time dateTime={wait.deadline}>{dateLabel}</time></p> : <p>Worker wait deadline unavailable</p>}
-    </div>
-  )
-}
-
-function TimerWaitStatus({ run, wait }: { run: ApiRun; wait: TimerWait }) {
-  const dateLabel = formatInstant(wait.deadline)
-  return (
-    <div data-slot="monitoring-schedule" role="status" aria-live="polite" aria-atomic="true"
-      className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
-      {wait.phase === 'resolved' ? <p>{owedLabel('Automatic check due', run)}</p> : dateLabel ? (
-        <p>
-          Next automatic check{' '}
-          <time dateTime={wait.deadline} className="font-medium text-foreground">
-            {dateLabel}
-          </time>
-        </p>
-      ) : <p>Automatic check time unavailable</p>}
-      {wait.note ? <p>{wait.note}</p> : null}
-    </div>
-  )
-}
-
-/** The agent icon by the token counter (#416): hover/focus reveals the runner, account, model and
- *  canonical model identity — the answer to "what am I actually running here?" — without turning
- *  them into permanent text next to the live status pill. Always rendered (a run always has an
- *  effective runner, `model` reads "auto" when the runner picks it), and reuses the same
- *  click/keyboard-accessible `DropdownMenu` as the rest of this header instead of inventing a
- *  hover-only affordance.
- *
- *  This is the production reader for `RunRecord.modelIdentity` (#546): the field was persisted by
- *  #405 for cost attribution and replay and had none, which is how a persisted field rots into
- *  something nobody can tell is load-bearing. The menu is the right home for it — it answers a
- *  question only a user debugging "which provider actually served this?" asks, so it belongs
- *  behind the same disclosure as the account rather than in the truncating summary line. The
- *  account itself follows the composer's rule (#251): shown only when the chosen runner has a
- *  choice of login, because one defined account is not worth a word of the summary. */
-function AgentBadge({ run }: { run: ApiRun }) {
-  // The record keeps only what the caller ASKED for: `POST /api/runs` persists the raw optional
-  // `runner` (`src/runs/store.ts`), while the run actually executes as
-  // `input.runner ?? config.defaultRunner` (`src/workflows/run.ts`). Mirror that resolution —
-  // hardcoding 'claude' would name the wrong agent on a repo whose `defaultRunner` is
-  // codex/opencode, and "which agent produced this?" is the one question #416 exists to answer.
-  // 'claude' stays the last resort only while the active project's config is in flight.
-  // `/api/health` describes the boot project and can name the wrong runner on scoped routes.
-  const config = useConfig()
-  const profiles = useAgentProfiles()
-  const { accounts } = useAgentAccounts()
-  const runner = run.runner ?? config.data?.defaultRunner ?? 'claude'
-  const model = run.model ?? 'auto'
-  // Unset effort means the harness default, the same way unset model reads `auto` (#411):
-  // the badge answers "what am I running here?" and names the default instead of pretending
-  // the question was never asked (#52's omit decision, superseded for the unpinned case).
-  const effort = run.effort || 'auto'
-  // The account is read from the STEP that actually spawned, never from the run's composer
-  // override or the project's current selection (spec 2026-07-29-agent-profiles): the override is
-  // absent whenever the run just followed the project, and the project's selection can have been
-  // changed since — both would name an account this run may never have touched. The last step that
-  // recorded one is what ran; `sessionId` and `profileId` are a pair for exactly this reason.
-  const profileStep = [...run.steps].reverse().find((step) => step.profileId)
-  const accountId = profileStep?.profileId
-  // The choice count is judged against the backend that RECORDED the account, not the run's
-  // `runner`: spec 2026-07-29-agent-profiles puts the account on the spawning step, and a step
-  // may run a different backend than the run label — counting Claude's logins for a Codex
-  // account both hides Codex accounts on a lone-Claude host and shows lone Codex logins on a
-  // multi-Claude one. Steps from before the field existed fall back to the run runner.
-  const accountBackend = profileStep?.backend ?? runner
-  // One login is not a choice (#251, spec 2026-07-29-agent-profiles): a KNOWN account is named
-  // only when its backend has two or more defined accounts — the same `hasAccountChoice`
-  // count the composer pill applies — and the badge stays silent while the profiles query is in
-  // flight, so a lone `default` never paints the summary just to vanish a moment later. A REMOVED
-  // account is the exception to the count: the id is the only remaining pointer to the folder its
-  // sessions live in, so `<id> (removed)` shows regardless of how many logins are left — deleting
-  // an account must not retroactively erase which one a historical run ran under. A FAILED query
-  // never settles, so silence there would be permanent; the recorded id shows verbatim, without
-  // a `(removed)` claim the unreadable catalog cannot back.
-  // The row must match on id AND backend: ids are unique per provider only, so a same-id
-  // account on another backend is a different login (#411) — matching it would let the badge
-  // claim "not removed" for a folder that is gone.
-  const known = profiles.data?.profiles.find(
-    (p) => p.id === accountId && p.provider === accountBackend,
-  )
-  const account = accountId === undefined || profiles.isPending
-    ? undefined
-    : profiles.isError
-      ? accountId
-      : accountId === DEFAULT_AGENT_ACCOUNT_ID
-        // The recorded `default` is the backend's own home: discovered, never deletable — so an
-        // empty or failed catalog cannot make it "(removed)" (#411), and a lone default stays
-        // omitted exactly as the count rule above intends.
-        ? hasAccountChoice(accounts, accountBackend) ? 'default' : undefined
-        : known
-          ? hasAccountChoice(accounts, accountBackend)
-            ? known.label
-            : undefined
-          : `${accountId} (removed)`
-  // The canonical `provider/model` the run actually resolved to (#405), shown only when it says
-  // something `model` does not (#546). `model` is the free-text the caller ASKED for — `opus`,
-  // `auto`, a gateway id — so on a repo whose Claude runner points at a custom endpoint the two
-  // genuinely differ, and "which provider served this?" is a question only this field answers.
-  // Absent on pre-#405 records and skipped when it merely repeats `model`, following the same
-  // omitted-not-guessed rule as the account line below: an identity nothing wrote down is not
-  // one this header may invent.
-  const identity = run.modelIdentity && run.modelIdentity !== model ? run.modelIdentity : undefined
-  const summary = [runner, account, model, effort].filter(Boolean).join(' · ')
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          data-slot="agent-badge"
-          title={summary}
-          aria-label={`Agent: ${runner}, ${account ? `account ${account}, ` : ''}model ${model}${effort ? `, effort ${effort}` : ''}`}
-          className="flex min-w-0 shrink items-center max-md:min-h-11 gap-1.5 rounded-sm px-1 py-1 text-soft-foreground hover:bg-muted hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
-        >
-          <BotIcon className="size-3.5 shrink-0" aria-hidden="true" />
-          {/* READ, not just reachable. This was an icon alone, and "which agent, account and model
-              produced this?" turned out to be unanswerable without knowing to click it — the whole
-              point of the badge. #416 moved runner/model out of the loose dot-list to cut noise;
-              this puts them back as ONE quiet, truncating string rather than three chips, and the
-              menu still carries the labelled breakdown. */}
-          <span data-slot="agent-badge-summary" className="truncate font-mono text-[11px]">
-            {summary}
-          </span>
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-[9rem] max-md:max-w-[calc(100vw-2rem)] max-md:break-all">
-        <DropdownMenuLabel className="font-mono text-[11px] font-normal text-muted-foreground">
-          runner: {runner}
-        </DropdownMenuLabel>
-        {/* Omitted, not guessed, when no step recorded one: a run from before accounts existed
-            cannot be said to have used the discovered account — nothing wrote that down. */}
-        {account ? (
-          <DropdownMenuLabel
-            data-slot="agent-badge-account"
-            className="font-mono text-[11px] font-normal text-muted-foreground"
-          >
-            account: {account}
-          </DropdownMenuLabel>
-        ) : null}
-        <DropdownMenuLabel className="font-mono text-[11px] font-normal text-muted-foreground">
-          model: {model}
-        </DropdownMenuLabel>
-        {effort ? (
-          <DropdownMenuLabel
-            data-slot="agent-badge-effort"
-            className="font-mono text-[11px] font-normal text-muted-foreground"
-          >
-            effort: {effort}
-          </DropdownMenuLabel>
-        ) : null}
-        {identity ? (
-          <DropdownMenuLabel
-            data-slot="agent-badge-identity"
-            className="font-mono text-[11px] font-normal text-muted-foreground"
-          >
-            identity: {identity}
-          </DropdownMenuLabel>
-        ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
   )
 }
 

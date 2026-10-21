@@ -14,6 +14,17 @@ in `packages/cezar/src/core/` cites those two by section; this file cites the co
 disagree, **the code wins** — the golden fixtures and the parity test are
 executable, the prose is not.
 
+**Editing runner prose.** Name a runner or backend when its wire matters, but
+never count them: write "every runner" or "the runner shards", never a number.
+A count goes stale when a runner is added. The guard `protocol and matrix prose
+name runners without a counted roster` in `packages/cezar/src/core/harness-parity.test.ts`
+refuses a counted roster in this file and in the harness-parity spec and test
+files. To run only that guard, from the repository root:
+
+```bash
+npm test -- packages/cezar/src/core/harness-parity.test.ts -t "counted roster"
+```
+
 The protocol has **two layers that ship together**:
 
 - **v1 `AgentEvent`** — the original flat stream. Persisted in old NDJSON
@@ -245,23 +256,31 @@ its obligation ID; follow-ups and replies name `requestId`. Exact message retrie
 reuse the existing durable input; changed payloads are rejected. Follow-ups and
 progress cannot discharge obligations. Explicit reply and completed-without-reply
 are distinct outcomes, alongside failed, cancelled, destroyed, timed-out, and
-sender-closed. Late replies remain recorded without replacing a first settlement.
+sender-closed. A first reply after deadline expiry amends `timed-out` to
+`replied-late`, retaining its reply ID and observation time. Other settlements
+remain unchanged. The amendment emits a separate idempotent outcome projection;
+it never reopens a settled wait or request.
 Both roles can wait on their own requests: a request wait is a `worker` entry in the run's
 wait list (`requestIds`; hearsay-tools/cezarion#1235 phase 3a), and a reply resolves only the
 request wait that names it. An incoming message wakes the run with that wait still open and in
-the footer, and the turn end parks on it again; unresolved obligations are retained. Only the
-completion gate's own wait (`delegation.wait`, until phase 3b) is still interrupted by a
-non-progress message with reason `message`. A worker
+the footer, and the turn end parks on it again; unresolved obligations are retained. No message
+retires a wait: since hearsay-tools/cezarion#1301 (phase 3b) the completion gate's own wait is a
+list `worker` entry too, and the old `reason: 'message'` interruption is gone. A worker
 progress message wakes a parent waiting for worker completion without retiring
 that wait. After progress delivery the same wait parks again with its original
 ID, selected workers and deadline; terminal outcomes still produce one wake.
 Harness row **WP1** in `workflows/worker-wait-conversations.test.ts` exercises
 repeated progress and one terminal wake through every `RUNNER_IDS` native mock
-wire using `HARNESS_ADAPTERS` (hearsay-tools/cezarion#1138).
+wire using `HARNESS_ADAPTERS` (hearsay-tools/cezarion#1138). Row **WP2** pins a
+resumed request pending after 45 minutes within a one-hour bound and delivery of
+a reply after expiry as `replied-late` on those native wires (hearsay-tools/cezarion#1241).
 
 Messages are bounded to 100,000 characters, 32 undelivered inputs per recipient,
 1,024 messages per family, and 32 pending obligations. Requests and waits expire
-in 600 seconds by default (1–1,800 seconds accepted). Several waits can be open at once (workers, CI, timers); a message wakes the run and closes none.
+in 600 seconds by default (1–1,800 seconds accepted). Requests sent with
+`--resume` accept `--timeout-seconds 1–86400` (24 hours maximum); their default
+remains 600 seconds. Set the request bound explicitly for a long review round:
+a worker wait has its own deadline and does not extend the request. Several waits can be open at once (workers, CI, timers); a message wakes the run and closes none.
 Ordinary sends to review/terminal recipients return `not-delivered` with an
 actionable `message.instruction`; `continuation-required` means no input was
 queued. The CLI exits 1 for these receipts. An active owning parent can explicitly
@@ -339,8 +358,12 @@ Notable fields (full doc-comments in the source):
   **Caveat (open-mercato/cezar#430):** the zero-config default (`DEFAULT_ALLOWED_TOOLS`) includes
   unrestricted `Bash`, and Codex/OpenCode do not honor `allowedTools` at all.
   Treat the default `auto` permission mode as full shell access, not a
-  sandbox: Codex uses `danger-full-access` with `approvalPolicy: never`, and
-  OpenCode auto-approves every permission. Configurable restrictive modes are
+  sandbox: unmanaged Codex uses `danger-full-access` and keeps the user's approval
+  policy (approvals reach Needs you), and OpenCode's own permission config
+  governs. cezar answers OpenCode's built-in asks (outside-worktree reads, `.env`
+  reads, the repeated-call guard) with a once reply unless the user's config has
+  a rule for that permission, and shows any other ask as a cockpit permission
+  card (hearsay-tools/cezarion#1266). Configurable restrictive modes are
   specified by `2026-07-17-permission-modes` (open-mercato/cezar#475).
 - `restrictNativeDelegation?` — optional per-invocation intent, mapped only inside
   adapters; absent preserves ordinary settings. Governed session provisioning
@@ -846,14 +869,16 @@ most 2,000 characters and unknown keys are `invalid_request`. It answers
 `{ ok: true, finishes: 'at_turn_end', open_waits }`, or `{ ok: false, code, message,
 workers?, open_waits? }`. It is refused, in this order, by the session refusals
 `cezar_wait` answers, then `not_final_step` (a workflow step that is not the last, whose turn
-end runs the next step), `worker_wait_pending`, `root_finish_pending`,
+end runs the next step), `root_finish_pending`,
 `human_question_pending` (an earlier turn's question is unanswered), and for a root parent
 `worker_questions`, `workers_outstanding` and `workers_uncollected`, each listing up to 64
 `{ worker_id, reason }` and naming the command that clears them (a general form of the
 command when listing every worker would pass `WAIT_MESSAGE_MAX`, 4,096 characters). The answer
 a Continue opened with is not a pending question while its turn runs. The turn end that reads an
 accepted done takes it, and a human message clears it. A non-interactive workflow step still
-ignores the done line. The close writes `summary` as a `note`, then the
+ignores the done line. `worker_wait_pending` stays in the code enum for old clients and is never
+returned (it was the old completion wait's refusal, removed by hearsay-tools/cezarion#1301). A done
+refused at the turn end becomes the refusal nudge described below. The close writes `summary` as a `note`, then the
 lifecycle event `goal achieved — session closed` with `via: 'cezar_done'` (or
 `via: 'done-line'` for the `CEZ:DONE` line, which closes through the same path), and cancels
 every open wait, a human wait from the same turn included.
@@ -893,10 +918,35 @@ none of them. A park whose top wait is workers holds no slot, reads as the worke
 idle-closes after `IDLE_TIMEOUT_MS`; a resolution or a message reopens it through the scheduler
 continuation. Messages are not waits: a worker message or reply wakes the run with every wait
 still open and in the footer, and beside a pending portable question it is delivered next to the
-card, which stays answerable; beside a pending native question it waits for the answer's turn end. The completion gate's own worker wait (`delegation.wait`, until
-phase 3b) is the one park that still outranks the list: every open timer and CI wait keeps its
-deadline through it, and a wait that resolves while the run is parked there is held until the
-worker wake is delivered.
+card, which stays answerable; beside a pending native question it waits for the answer's turn end.
+
+A root's done that the completion check refuses at a turn end (hearsay-tools/cezarion#1301, phase
+3b) opens no wait. The agent gets the refusal `cezar_done` would return (`worker_questions`,
+`workers_outstanding`, else `workers_uncollected`, one helper builds both) as one automatic turn,
+charged to the automatic-wake budget and bounded by the no-wait nudge's reply timer, with the
+heartbeat `running (completion nudge)`. When live workers block it, the nudge adds one sentence:
+*If you end your turn with done again while these workers are live, Cezar will wait on them for
+you and wake you when they have all settled.* The mid-turn `cezar_done` answer never carries it.
+An open agent wait or owed input comes first: no nudge, the refusal is a note, and the run parks
+on its waits. A block found after the session closed (or a legacy accepted Finish) queues the
+refusal as one lifecycle input that the scheduler continuation reopens the session to deliver.
+Its reply is bounded like the live nudge's, a run owes one refusal at a time, and the owed refusal
+holds a closing session like a wait: a reopened session that closes or fails before the refusal is
+submitted is a failed delivery, bounded by `MAX_WAKE_DELIVERY_ATTEMPTS`. The input carries
+`purpose: 'completion-refusal'` on the run record, so a Continue after the run failed at that bound
+and a restart deliver it under the same two bounds. Stop retires it while undelivered, so no later
+Continue delivers a stale refusal (U22x).
+One nudge per cycle: a human message or a wake starts a fresh one. When the turn that answers it
+ends on a blocked done again, Cezar registers
+a list `worker` wait on the live workers (`source: 'cezar'`, `via: 'completion'`, `mode: 'all'`,
+no deadline, no slot; it idle-closes like any worker park), or with only uncollected results or
+unanswered worker questions opens its own human wait (`via: 'completion'`), which parks for the
+user; once every worker has settled and only uncollected results remain, only a human action ends
+it. An autonomous run is nudged again until the budget. Finish refuses either park while any
+blocker remains (`delegationFinishBlockedReason`); Stop and delete settle it. Settlement resolves the worker wait; worker messages wake the
+parent beside it. `delegation.wait`, `delegation.completion` and `activity: 'monitoring'` are no
+longer written; store schema 7 reads a stored completion wait into the list
+(`upgradeLegacyWaits`), keeping an already-queued wake input as `wakeInputId`.
 
 The agent ends its turn after registering. At a turn end, in both turn-end handlers:
 a question or a permission gate parks for the human, an accepted `CEZ:DONE` finishes,
@@ -1056,8 +1106,8 @@ turn open, settles its worker, cancels or records completed destruction, then re
 new worker wait and CI wait before releasing the turn; R27 reproduces the delivery
 sequence through the real private CI controller and verifies CI registration succeeds
 beside the worker wait (the old refusal is gone, so these now pin the absence of a block).
-`worker_wait_pending` survives for the completion gate's own wait only, until
-hearsay-tools/cezarion#1235 phase 3b.
+`worker_wait_pending` is no longer returned by any tool since hearsay-tools/cezarion#1301 (phase
+3b) removed the completion gate's own wait; it stays in the error-code enums for old clients.
 
 Every cezar tool comes from one list (`packages/cezar/src/ci-wait/tools.ts`, hearsay-tools/cezarion#781):
 the adapter's `tools/list` and server instructions, Pi's and OMP's extensions, Claude's
@@ -1081,7 +1131,7 @@ extensions and permissions when adding a collision-resistant per-session tool na
 | Harness | Injection and evidence required before shipping |
 | --- | --- |
 | Claude / `claude-cli` | Add `--mcp-config` without `--strict-mcp-config`; admit only the added tool when tools are restricted; exercise fresh and resumed argv. |
-| Codex | Merge `mcp_servers` for both `thread/start` and `thread/resume`; forward internal environment names with `env_vars`; verify discovery and invocation on both paths. |
+| Codex | Merge `mcp_servers` for both `thread/start` and `thread/resume`; forward internal environment names with `env_vars`; set `default_tools_approval_mode = "approve"` on that entry so Codex never asks before a cezar tool (hearsay-tools/cezarion#1294); verify discovery and invocation on both paths. |
 | OpenCode | Merge the local MCP entry into parsed runtime configuration without discarding supplied config or replacing unrelated servers; malformed configuration fails explicitly. |
 | Cursor | Supply the supported ACP descriptor and environment on `session/new` and `session/load`; verify invocation and existing permission routing. |
 | Pi | Add an explicit CI extension alongside the retry extension; exercise actual tool registration and calls without replacing discovered extensions or tool settings. |
@@ -1100,14 +1150,54 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
-**P1** (hearsay-tools/cezarion#1049) routes an approval from the native Codex
-mock through `RunManager`, the cockpit HTTP decision route, and the exact
-JSON-RPC reply. Decline and cancel both reach `turn/completed`, including in
-an autonomous run; ordinary user/agent text cannot grant permission. The
-exhaustive `RUNNER_IDS` / `HARNESS_ADAPTERS` row registers named executable
-exemptions for native wires that cannot carry Codex app-server approval
-requests and their `availableDecisions` union.
+**P1** (hearsay-tools/cezarion#1049, hearsay-tools/cezarion#1266) routes an
+approval from each native mock that carries one through `RunManager`, the
+cockpit HTTP decision route, and the exact native reply: the Codex JSON-RPC
+response, or OpenCode's `POST /permission/{id}/reply` for an ask the user's
+own permission config makes. Each adapter's `approvalDecisions` names the
+options P1 picks and the reply its mock echoes; every pick reaches the turn
+end, including in an autonomous run, and ordinary user/agent text cannot grant
+permission. The exhaustive `RUNNER_IDS` / `HARNESS_ADAPTERS` row registers
+named executable exemptions for native wires that carry no permission request
+cezar answers through the cockpit.
 
+**P2** (hearsay-tools/cezarion#1266) pins a backend's own built-in permission
+ask: OpenCode's `external_directory` ask, which no user rule names, is answered
+with a once reply and the run never parks. OpenCode reads the user's rules once
+per session from `GET /config`; an unreadable config sends every ask to the
+cockpit, and no reply is ever `always`. Wires with no built-in ask that cezar
+answers carry named exemptions.
+
+**P3–P8** (hearsay-tools/cezarion#1266) pin the pending request's lifecycle: a
+native request holds from its receipt until the backend settles it. P3 to P6 run
+through `RunManager`. P3 retires a card the backend settles itself (Codex
+`serverRequest/resolved`, OpenCode `permission.replied`), and P4 retires one
+still pending when its turn ends. In both, `permission.resolved` carries a reason
+and no option, `hasPendingPermission` clears, and the retired card's option
+answers nothing. P5 answers through the HTTP route and the backend refuses the
+answer: a replacement card is published before the old one resolves, so the run
+stays `waiting` with `hasPendingPermission` set, and the replacement completes
+the run. P6 sends a malformed request, which cezar refuses natively (a JSON-RPC
+error, or an OpenCode `reject`) without a card while the turn goes on. P7 drives
+the seam, where agent input lives: it refuses agent input from receipt, while
+OpenCode reads its config to classify the ask, and shows no card for an ask
+OpenCode settles in that window. P8 sends a card after the turn ended. OpenCode
+asks only from a running session loop, so the runner reopens the turn
+(`turn.started`) for a main-session ask; the answer resumes that run, and its own
+`session.idle` ends the turn. At the seam, a self-closing session
+(`autoEndAfterFirstTurn`) then closes. Through `RunManager`, a non-final
+workflow step with such a card advances to the next step.
+Codex carries named exemptions for P5 (a JSON-RPC response gets no reply that
+could refuse it), P7 (its request is shown on receipt, with nothing to read
+first) and P8 (a request arrives only inside the turn it names). Wires with no
+native permission request carry P1's exemption for each row.
+
+**P9** (hearsay-tools/cezarion#1294) routes another MCP server's tool approval
+from the native Codex mock through `RunManager` and the cockpit HTTP decision
+route; accept and decline each reach Codex as the exact elicitation reply. The
+mock models Codex's MCP tool gate, so Codex rows of `ci-wait-parity`,
+`ci-tools` H1 and U0 fail if cezar's own server loses `approve`. Runners whose
+wires carry no MCP tool approval request have named exemptions.
 
 **R72/R73** (hearsay-tools/cezarion#994), in `workflows/ci-wait-failure-parity.test.ts`,
 drive every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native provider-error
@@ -1122,7 +1212,7 @@ exemptions or normalized-event injection.
 wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
 normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`, `cezar_ask`,
 `cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
-`workflows/waits-parity.testkit.ts`, run by `workflows/waits-parity.test.ts`. U1
+`workflows/waits-parity.testkit.ts`, defined in `workflows/waits-parity-cells.testkit.ts` and run from one `waits-<runner>-parity.test.ts` per runner, with the criteria guard in `waits-parity.test.ts`. U1
 registers a CI wait and a timer through `cezar_wait`, parks, and wakes with each result.
 U2 opens both: the timer wakes, the CI wait stays open and is in that turn's footer,
 the turn end re-parks without a new registration, and the later CI result is
@@ -1138,10 +1228,9 @@ one turn carries both and spends one wake, and a third timer due at the budget i
 cancelled with the cap note and wakes nothing. A second U10 case holds the provider
 acknowledgement of a timer batch sent at 39: a timer that comes due meanwhile is
 cancelled, the held batch keeps the fortieth wake, and a CI result still wakes the agent
-uncharged. U11 opens a monitoring-line timer, parks
-the parent on the completion gate's worker wait (its `CEZ:DONE` with a live worker), fires the timer, and checks that the timer kept its deadline, was
-held while the parent read **waiting on 1 worker**, and was delivered after the worker
-wake. U12 delivers a timer result beside a pending portable question and holds its
+uncharged. U11 opens a monitoring-line timer and ends the turn on a done blocked by a live
+worker: the timer keeps its deadline, the run parks on it with the refusal as a note and no
+nudge, and the timer's result is delivered. U12 delivers a timer result beside a pending portable question and holds its
 provider acknowledgement: the wait stays `resolved` and its input undelivered until the
 acknowledgement lands after the wake turn ended, and then the run is back in Needs you and
 the answer keeps its `askSeq`. U13 rejects that acknowledgement once: the session fails, the
@@ -1212,8 +1301,14 @@ and any other turn end gets the no-wait nudge once, charged to the automatic-wak
 Cezar opens a `no-wait` human wait (`source: 'cezar'`). Nothing reads the turn's prose. Cezar's own
 human waits raise no human gate: they are shown as their note, worker messages still wake the run,
 the agent's own wait or question replaces them, they end with the session that opened them, and
-the agent's `open_waits` and footer leave them out. A worker keeps the nudge, and its fallback is
-the plain park. The native mocks answer the nudge with a `cezar_ask` card, or with the ask line in
+the agent's `open_waits` and footer leave them out. A worker keeps the nudge; since
+hearsay-tools/cezarion#1301 (phase 3b) its second no-wait turn end opens Cezar's `no-wait` wait
+with one open question (`Worker <id> ended its turn without waiting on anything or finishing.
+Reply with what it should do next.`), raised as `ask.requested` and routed to the parent like a
+worker question; the parent's reply resumes the worker, charged to its budget. A parent's steer,
+an automatic message, an admitted Continue, a clean exit, an idle close or a restart supersedes
+it (`human-ask-closed`, reason `superseded`; its routed request completes without reply). A worker
+whose budget is spent keeps the plain park. The native mocks answer the nudge with a `cezar_ask` card, or with the ask line in
 a session taught the markers, unless `CEZ_MOCK_NUDGE_REPLY=plain`. The unit fixtures set `plain`,
 and the cells that need the card opt out. U5 ends a turn with no wait: one nudge, then a second
 no-wait turn end opens the `no-wait` wait, which reads Needs you and is answered by the user's
@@ -1253,11 +1348,35 @@ Continue delivers it once. A message-only wake that fails once counts the failur
 delivered message clears the count. A message the agent has not read is not delivered: on
 Claude's wire the failure ends the process before the mock reads the steered message. U9u
 restarts a parked parent from a row an older build wrote, with its worker wait in
-`delegation.wait`: a cancelled receipt's queued wake is delivered as ordinary input and the wait
+`delegation.wait`, and U9v does the same for the completion gate's wait (schema 7), which wakes
+once through the list: a cancelled receipt's queued wake is delivered as ordinary input and the wait
 stays cancelled in `lastWaits`, and a `reason: 'message'` stand-in whose message a provider took
 before the crash reads as interrupted execution, so recovery resumes the parent. U19 delivers a worker message beside a pending portable question on every runner:
 the message reaches the wire, nothing answers the card, and the human's answer keeps its
 `askSeq`. No runner takes U12's exemption here: U19 pins delivery, not a delayed acknowledgement.
+Phase 3b (hearsay-tools/cezarion#1301) adds, on every runner: U20 and U20u (a blocked done at the
+turn end gets one refusal nudge, with the will-wait sentence for live workers and without it for a
+settled, uncollected one, and opens no wait), U20h and U20m (a human message, in the opening session
+or a continuation, or a worker message after a refusal nudge the harness never answered starts a
+fresh cycle: its blocked done gets a fresh nudge, not the park), U20a (a done in the turn that answers
+an input acknowledged only after that turn ended still gets the nudge once the acknowledgement
+lands, never an implicit re-check timer), U21 (an ignored refusal parks on Cezar's completion
+worker wait, which settlement wakes), U21r (that deadline-less wait restarted and settled), U21m (a
+worker message wakes the parent beside it), U21t (an agent timer beside it keeps its deadline),
+U21h (only uncollected results: Cezar's human wait), U21a (an autonomous parent is nudged again
+until the budget), U22 (a done blocked after the session closed reopens it and delivers the
+refusal), U22s (a reopened session that acknowledges the refusal and never answers parks at the
+nudge's reply bound), U22c (reopened sessions that keep closing first: one copy, the delivery bound,
+and Continue delivers it once; a legacy Finish too), U22f (one such close counts a failure, and the
+delivery clears it), U22x (Stop retires a refusal a closed session still owes, and a Continue after
+it does not deliver it), U24 (a worker's second no-wait turn end asks its parent, whose reply resumes it) and U25
+(an automatic message supersedes that question). The harness that never answers is each native
+mock's `mock:ack-only` reply (`CEZ_MOCK_COMPLETION_REPLY`): it acknowledges the refusal on its own
+wire and opens no turn until more input arrives. Cursor print is exempt from U20h, U20m and U22s
+(each prompt spawns a process whose init frame is `turn.started`, as F8), and OpenCode from U20h (a
+human prompt waits for the busy turn to go idle, and that turn never does; U20m's worker message
+steers it). Claude and Cursor print are exempt from U20a: neither can end a turn before its input is
+acknowledged (the stdin write; the first model work of the spawned process).
 
 **R74** extends that native-wire matrix to a failed nonfinal workflow agent.
 CI recovery must retain the failed attempt, including across restart and CI
@@ -1333,6 +1452,16 @@ leader that cannot process EOF or SIGTERM escalates to SIGKILL for the whole gro
 same outcome. Every runner spawns and signals through `core/session-process.ts`, which also
 sends the group its SIGKILL when a member outlives a leader cezar stopped. win32 has no process
 groups and skips these rows; it ends the tree with `taskkill /T /F`. No wire exemptions.
+
+**S30–S31** (hearsay-tools/cezarion#1286), in the same file, use the same scenario for a leader
+cezar did not signal. S30: `end()` with no SIGSTOP; the native mock exits on EOF by itself, and once
+the session settles the in-group child is gone and the `setsid` child keeps running. OpenCode's
+runner and Cursor print end by a cezar signal on `end()`, so their S30 cells take S27/S28's path.
+S31: the leader alone is SIGKILLed from outside, with the same outcome. `core/session-process.ts`
+reaps the group of a leader that exited on its own after the exit drain (SIGTERM, then SIGKILL
+after the grace), under the same reuse guard, and keeps its host up until the group is empty or
+the SIGKILL is sent. Cursor print reaches the same reap when it ends its group after each turn.
+win32 skips both rows. No wire exemptions.
 
 **R43** (hearsay-tools/cezarion#738), in `workflows/worker-reboot-parity.test.ts` and
 `workflows/worker-location-evidence.test.ts`, drives every `RUNNER_IDS`
@@ -2103,9 +2232,9 @@ An available `diff.path` names a JSON `{ result, diffSnapshot }` document, **not
 raw patch**. Latest settled collection is required for parent readiness; running
 or obsolete collected output cannot satisfy it. Collection is observation, not
 integration. Automatic completion wakes for inspection/collection without silently
-accepting review. Live-worker parents park as monitoring after markerless turns or
-timeout/repeated premature completion, using the existing capped monitoring wakes.
-Settled but uncollected results still retain attention on repeated completion. Human
+accepting review. A done blocked by live or uncollected workers is refused once as an automatic
+turn; a repeated one parks on Cezar's deadline-less worker wait on the live workers, or, with only
+uncollected results, on Cezar's human wait (hearsay-tools/cezarion#1301). Human
 Finish refuses unmet readiness. Continue a reviewing parent before its worker.
 
 Review and deliberately integrate desired worker commits with Git before cleanup.
@@ -2447,11 +2576,42 @@ and mid-turn steering. Removing the startup selection must fail the managed cell
 
 A JSON-RPC message with a method and a numeric or string ID is a server
 request, never a notification. Cezar handles modern command execution, file
-change and permission approval requests as well as `item/tool/requestUserInput`.
-Every other server request receives `-32601` (method not supported); a malformed
-supported request receives `-32602`. Unsupported legacy approvals, dynamic tools,
-MCP elicitation, token refresh and attestation therefore cannot silently stall
-the transport. Notifications have no reply.
+change and permission approval requests, MCP tool approvals and
+`item/tool/requestUserInput`. Every other server request receives `-32601`
+(method not supported); a malformed supported request receives `-32602`.
+Unsupported legacy approvals, dynamic tools, other MCP elicitations (forms, URLs),
+token refresh and attestation therefore cannot silently stall the transport.
+Notifications have no reply.
+
+#### MCP tool approvals (hearsay-tools/cezarion#1294)
+
+Codex gates every MCP tool call by the server's or tool's approval mode
+(`mcp_servers.<name>.default_tools_approval_mode`, `…tools.<tool>.approval_mode`:
+`auto | prompt | writes | approve`), separately from `approval_policy`. Unless the
+mode is `approve`, it asks the client first with `mcpServer/elicitation/request`.
+Cezar sets `approve` on its own server's per-thread entry, so its tools never wait
+on a prompt, and never sets `approval_policy`.
+
+An elicitation is a tool approval when its `mode` is `form`,
+`_meta.codex_approval_kind` is `mcp_tool_call` and `requestedSchema` asks for
+nothing (absent, null or no properties), the test Codex's own TUI applies. It
+routes like the other approvals: the same thread and turn checks, a
+`permission.requested` titled "Codex requests an MCP tool call" with the server,
+message, tool description and arguments, and these options, each answered with
+the exact native reply:
+
+| Option | Offered when | Reply |
+| --- | --- | --- |
+| Allow once | always | `{ action: "accept", content: null, _meta: null }` |
+| Allow this tool for this session | `_meta.persist` names `session` | `{ action: "accept", content: null, _meta: { persist: "session" } }` |
+| Always allow this tool (saved in your Codex config) | `_meta.persist` names `always`, and the server is not cezar's own | `{ action: "accept", content: null, _meta: { persist: "always" } }` |
+| Decline and continue | always | `{ action: "decline", content: null, _meta: null }` |
+
+Codex saves `always` as an approve rule in the user's Codex config, so it is never
+offered for cezar's per-run server. Codex reads `cancel` as the same skipped call
+as `decline`, so it is not offered. If Codex still asks before a cezar tool (an
+older Codex that ignores the key, say), the request reaches Needs you like any
+other; it is never answered silently. Elicitations carry no item ID.
 
 Approvals emit the `permission.requested` event with an opaque, fresh
 request ID, item ID when present, a title, full action/scope details and offered

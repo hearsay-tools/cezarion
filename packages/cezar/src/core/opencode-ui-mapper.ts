@@ -207,7 +207,7 @@ export function mapOpencodeEvent(evt: unknown, state: OpencodeUiMapperState): Op
       return mapSessionError(props, state);
     default:
       // server.connected, session.updated, message.part.removed,
-      // permission.* (reserved for the permission.* events later), …
+      // permission.* (the runner answers or bridges those; it owns the reply), …
       return { events: [], state };
   }
 }

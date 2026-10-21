@@ -36,6 +36,14 @@ import { toast } from '@/components/ui/toaster'
  * folder, no control characters); this dialog only refuses an empty field, because that is not a
  * request worth sending.
  */
+/** An example folder per agent. Generic names: this string ships to every cezar user. */
+const FOLDER_EXAMPLE: Partial<Record<ProviderId, string>> = {
+  claude: '~/.claude-second',
+  codex: '~/.codex-second',
+  pi: '~/.pi-second/agent',
+  omp: '~/.omp/profiles/second',
+}
+
 export function AddAccountDialog({
   open,
   onOpenChange,
@@ -142,7 +150,7 @@ export function AddAccountDialog({
               aria-label="Config folder"
               data-slot="add-account-dir"
               value={configDir}
-              placeholder={provider === 'codex' ? '~/.codex-second' : '~/.claude-second'}
+              placeholder={FOLDER_EXAMPLE[provider] ?? '~/.claude-second'}
               onChange={(event) => {
                 setConfigDir(event.target.value)
                 setSelected(null)
@@ -164,6 +172,15 @@ export function AddAccountDialog({
           <p className="text-[11px] text-soft-foreground">
             A <code>~</code> is kept as written and expanded when the agent runs.
           </p>
+          {/* omp selects an account by profile NAME, so only a folder in its profiles dir can be
+              one. Said here rather than left to the server's 400, which would arrive after the
+              user had already typed a folder somewhere else. */}
+          {provider === 'omp' ? (
+            <p data-slot="add-account-omp-hint" className="text-[11px] text-soft-foreground">
+              An omp account is an omp profile: use <code>~/.omp/profiles/&lt;name&gt;</code>, with
+              a lowercase name. The profile folder may link to a folder elsewhere.
+            </p>
+          ) : null}
         </div>
 
         {/* Collapsed by default: typing (or pasting) the path is the fast path, and browsing to a

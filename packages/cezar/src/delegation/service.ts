@@ -12,6 +12,7 @@ import {
   type DiscoveryResponse,
 } from '@open-mercato/cezar-contract/discovery';
 import {
+  MAX_CONVERSATION_REQUEST_SECONDS,
   conversationSendRequestSchema,
   conversationInspectRequestSchema,
   conversationCancelRequestSchema,
@@ -49,7 +50,7 @@ import {
   type WorkerWait,
   type WorkerWaitRequest,
 } from '@open-mercato/cezar-contract/delegation';
-import { workerWaitEntryToLegacy, type WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import { completionWaitEntry, hasWorkerDeadline, workerCompletionWaitProjection, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import type { RunStore, RunRecord } from '../runs/store.ts';
 import { workerDestroyView, workerOutcome } from '../runs/delegation-state.ts';
 import type { DelegationExecutionSettings, RunManager } from '../workflows/run.ts';
@@ -358,6 +359,11 @@ export class DelegationService {
       const destroyed = recipient.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete';
       const resumable = !['queued', 'running', 'waiting'].includes(recipient.status) || !!recipient.stopping || (recipient.delegation?.role === 'worker' && !!recipient.delegation.destroy);
       const resume = !!request.resume && resumable;
+      // The extended bound belongs to a new continuation, not merely the flag.
+      // Exact retries have already returned above, even if that continuation is now active.
+      if (request.timeoutSeconds > MAX_CONVERSATION_REQUEST_SECONDS && !resume) {
+        throw new DelegationPolicyError('incompatible_state', 'Extended request deadlines require resuming a settled worker; active workers accept at most 1800 seconds');
+      }
       if (resume && (destroyed || recipient.delegation?.role !== 'worker' || recipient.delegation.destroy ||
         recipient.status === 'cancelled' || recipient.stopping)) throw new DelegationPolicyError('incompatible_state',
           `Worker is ${destroyed ? 'destroyed' : 'stopped or being destroyed'}; --resume cannot restart it. Spawn a new worker with the follow-up instruction`);
@@ -386,7 +392,13 @@ export class DelegationService {
       if (state.messages.length + reservedMessages >= 1024 || (enqueue && request.kind === 'request' && state.messages.filter(message => message.kind === 'request' && message.state === 'accepted' && !state.outcomes.some(outcome => outcome.requestId === message.id)).length >= 32) ||
         (enqueue && !answering && (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');
       const outcomes = [...state.outcomes];
-      if (request.kind === 'reply' && !settled) outcomes.push({ requestId: request.requestId!, status: 'replied', observedAt: now, replyId: request.id });
+      // Only deadline expiry can be amended. Cancellation, lifecycle settlement and an
+      // earlier reply still win; the request never becomes pending again.
+      if (request.kind === 'reply' && (!settled || settled.status === 'timed-out')) {
+        const outcome = { requestId: request.requestId!, status: settled ? 'replied-late' as const : 'replied' as const, observedAt: now, replyId: request.id };
+        if (settled) outcomes[outcomes.indexOf(settled)] = outcome;
+        else outcomes.push(outcome);
+      }
       const input = { id: message.id, source: 'agent' as const, parentRunId: root.id, text: message.text, createdAt: now,
         conversation: { senderRunId: sender.id, recipientRunId: recipient.id, kind: message.kind, ...(message.requestId ? { requestId: message.requestId } : {}) } };
       const next = { messages: [...state.messages, message], outcomes };
@@ -608,20 +620,22 @@ export class DelegationService {
     project.manager.settleOrphanedWorkerExecution(worker.id); // #469: an orphan that died after recovery settles
     const outcome = workerOutcome(worker, new Date().toISOString());
     const wait = this.inspectedWait(parent, worker.id);
+    const completion = parent.delegation?.role === 'root' ? completionWaitEntry(parent.waits, worker.id) : undefined;
+    const completionWait = completion ? workerCompletionWaitProjection(completion, parent) : undefined;
     return { workerId: worker.id, parentRunId: parent.id, status: worker.status, workspace: worker.delegation.workspace,
       ...(worker.runner === undefined ? {} : { backend: worker.runner }), ...(worker.model === undefined ? {} : { model: worker.model }),
       ...(worker.delegation.context === undefined ? {} : { inputs: worker.delegation.context.inputs }),
       ...(worker.currentStepId === undefined ? {} : { currentStepId: worker.currentStepId }),
       ...(worker.activity === undefined ? {} : { activity: worker.activity }),
-      ...(wait ? { wait } : {}), ...(worker.delegation.destroy ? { destroy: workerDestroyView(worker) } : {}), ...(outcome ? { outcome } : {}) };
+      ...(wait ? { wait } : {}), ...(completionWait ? { completionWait } : {}), ...(worker.delegation.destroy ? { destroy: workerDestroyView(worker) } : {}), ...(outcome ? { outcome } : {}) };
   }
-  /** The wait an inspection shows: the completion gate's (`delegation.wait`, until phase 3b of
-   *  hearsay-tools/cezarion#1235), else the newest open or owed list wait naming the worker, in
-   *  the legacy `WorkerWait` shape. */
+  /** The wait an inspection shows: the newest open or owed list wait naming the worker, in the
+   *  legacy `WorkerWait` shape (hearsay-tools/cezarion#1235). Cezar's completion wait carries no
+   *  deadline, which that shape requires, so inspection shows it as `completionWait`
+   *  (hearsay-tools/cezarion#1301). */
   private inspectedWait(parent: RunRecord, workerId: string): WorkerWait | undefined {
     if (parent.delegation?.role !== 'root') return undefined;
-    if (parent.delegation.wait) return parent.delegation.wait;
-    const entry = (parent.waits ?? []).filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker' && !!wait.workerIds?.includes(workerId)).at(-1);
+    const entry = (parent.waits ?? []).filter((wait): wait is DeadlinedWorkerWaitEntry => wait.kind === 'worker' && hasWorkerDeadline(wait) && !!wait.workerIds?.includes(workerId)).at(-1);
     return entry ? workerWaitEntryToLegacy(entry) : undefined;
   }
   async collect(caller: Caller, params: WorkerParams): Promise<WorkerCollectedResult> {

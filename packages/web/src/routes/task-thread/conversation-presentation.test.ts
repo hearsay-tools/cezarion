@@ -51,6 +51,7 @@ describe('conversation presentation titles', () => {
     expect(conversationKindLabel('request')).toBe('Request')
     expect(conversationKindLabel('reply')).toBe('Reply')
     expect(conversationOutcomeLabel('replied')).toBe('Replied')
+    expect(conversationOutcomeLabel('replied-late')).toBe('Replied late')
     expect(conversationOutcomeLabel('pending')).toBe('Pending')
   })
 

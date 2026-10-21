@@ -1747,6 +1747,14 @@ describe('ProviderAuthService', () => {
       expect(win.loginCommand('codex', 'C:\\bad"dir')).toBeNull();
     });
 
+    it('aims a pi login at the account folder and an omp login at the account\'s profile', () => {
+      const posix = new ProviderAuthService({ platform: 'linux' });
+      expect(posix.loginCommand('pi', '/home/u/.pi-work/agent'))
+        .toBe("export PI_CODING_AGENT_DIR='/home/u/.pi-work/agent'; 'pi' /login");
+      expect(posix.loginCommand('omp', '/home/u/.omp/profiles/work'))
+        .toBe("export OMP_PROFILE='work'; 'omp' login");
+    });
+
     it('adds nothing for OpenCode, whose credentials do not follow its config dir', () => {
       expect(new ProviderAuthService({ platform: 'linux' }).loginCommand('opencode', '/oc-work'))
         .toBe("'opencode' auth login");

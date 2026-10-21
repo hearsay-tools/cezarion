@@ -85,6 +85,11 @@ describe('mobile Tasks controls', () => {
     // Active/Archived selection. Opening it must not overwrite the page's query or selection.
     expect(browser.waitForValue(`document.querySelectorAll('${drawer} [data-slot="quick-list"]').length`, (count: number) => count === 1)).toBe(1)
     expect(browser.count(`${drawer} [data-slot="view-tab"]`)).toBe(2)
+    // At 360px both sidebar tabs stay on screen, Active beside Automations (#1332).
+    expect(browser.evaluate(`[...document.querySelectorAll('${drawer} [data-slot="view-tab"]')].map(tab => {
+      const box = tab.getBoundingClientRect()
+      return tab.dataset.view + ':' + (box.width > 0 && box.right <= innerWidth)
+    })`)).toEqual(['active:true', 'automations:true'])
     browser.click('[aria-label="Close menu"]')
     browser.waitForFunction(`document.querySelector('${drawer}') === null`)
     expect(browser.evaluate(`document.querySelector('${tab('archived')}').getAttribute('aria-pressed')`)).toBe('true')

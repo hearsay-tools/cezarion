@@ -1,5 +1,5 @@
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -41,13 +41,23 @@ describe('getRepoInfo — remote discovery', () => {
     expect(info?.remote).toBe('git@github.com:acme/demo.git');
   });
 
-  it('uses an empty test-only global config, no system config, and a fixed commit identity', () => {
-    const globalConfig = process.env.GIT_CONFIG_GLOBAL;
-    expect(globalConfig).toBeTruthy();
-    expect(readFileSync(globalConfig!, 'utf8')).toBe('');
+  it('uses a test-only global config, no system config, and a fixed commit identity', () => {
+    expect(process.env.GIT_CONFIG_GLOBAL).toBeTruthy();
+    // Only what vitest.setup.ts writes: automatic maintenance off, nothing from the host.
+    expect(g(dir, 'config', '--global', '--list').trim().split('\n')).toEqual(['gc.auto=0', 'maintenance.auto=false']);
     expect(process.env.GIT_CONFIG_NOSYSTEM).toBe('1');
     expect(g(dir, 'var', 'GIT_AUTHOR_IDENT')).toMatch(/^Cezar Tests <tests@cezar.invalid> /);
     expect(g(dir, 'var', 'GIT_COMMITTER_IDENT')).toMatch(/^Cezar Tests <tests@cezar.invalid> /);
+  });
+
+  // hearsay-tools/cezarion#1279: Git 2.54+ maintenance repacks in the background and deletes
+  // loose objects while a test still clones or removes the repository.
+  it('starts no automatic maintenance after a fixture commit', () => {
+    const commit = spawnSync('git', ['commit', '--allow-empty', '-qm', 'traced'], {
+      cwd: dir, encoding: 'utf8', env: { ...process.env, GIT_TRACE: '1' },
+    });
+    expect(commit.status, commit.stderr).toBe(0);
+    expect(commit.stderr).not.toMatch(/\b(?:maintenance run|gc) --auto\b/);
   });
 
   it('falls back to the first configured remote when none is named origin', async () => {

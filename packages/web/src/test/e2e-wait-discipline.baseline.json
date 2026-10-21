@@ -212,12 +212,6 @@
       "count": 1
     },
     {
-      "file": "task-thread.e2e.ts",
-      "rule": "one-shot-read",
-      "site": "expect(browser.evaluate(`document.querySelector('[aria-label=\"Show run details\"]').getAttribute('aria-expanded')`)).toBe('false')",
-      "count": 1
-    },
-    {
       "file": "task-views-layout.e2e.ts",
       "rule": "one-shot-read",
       "site": "expect(browser.text('[data-slot=\"task-card\"]:first-child')).toContain('Memory')",
