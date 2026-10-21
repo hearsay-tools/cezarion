@@ -3026,17 +3026,6 @@ export class RunStore extends EventEmitter {
     this.commitWait(id, ciWaitEntry(ciWaitSchema.parse(wait)), input);
   }
 
-  /** Legacy withdrawal: cancels every open or resolved CI wait, optionally accepting human input in
-   *  the same commit. Kept until its callers move (unified waits, Task 4). */
-  commitCiWaitWithdrawal(id: string, acceptedHumanMessage?: QueuedMessage): void {
-    const run = this.peek(id);
-    const next = run && withWaitsCancelled(run, (run.waits ?? []).filter((wait) => wait.kind === 'ci').map((wait) => wait.id));
-    if (!run || !next) return;
-    this.commitIndex(new Map([[id, { ...next,
-      ...(acceptedHumanMessage ? { queuedMessages: [...(run.queuedMessages ?? []), queuedMessageSchema.parse(acceptedHumanMessage)] } : {}),
-    }]]));
-  }
-
   /** Legacy CI delivery over `commitWaitDelivery`: only a resolved CI wait's own input. Kept until
    *  its callers move (unified waits, Task 4). */
   commitCiWaitDelivery(id: string, inputId: string): void {

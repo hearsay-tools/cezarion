@@ -49,18 +49,6 @@ describe('atomic CI wait checkpoints', () => {
     expect(reopened.getRun(id)?.agentInputs).toHaveLength(1);
   });
 
-  it('withdrawal retires the wait and pending lifecycle input while retaining the human message', () => {
-    store.commitCiWait(id, { ...wait, phase: 'wake-pending', wakeId: wait.id }, input(id, wait.id));
-    const human = { id: randomUUID(), text: 'change direction', createdAt: new Date().toISOString() };
-    store.commitCiWaitWithdrawal(id, human);
-    for (const record of [store.getRun(id), RunStore.open(directory, { keepLive: true }).getRun(id)]) {
-      expect(record?.waits).toBeUndefined();
-      expect(record?.lastWaits).toEqual([expect.objectContaining({ id: wait.id, phase: 'cancelled' })]);
-      expect(record?.agentInputs).toEqual([]);
-      expect(record?.queuedMessages).toEqual([human]);
-    }
-  });
-
   it('checkpointing delivery retires current intent atomically and preserves the stable receipt', () => {
     store.commitCiWait(id, { ...wait, phase: 'wake-pending', wakeId: wait.id }, input(id, wait.id));
     store.commitCiWaitDelivery(id, wait.id);

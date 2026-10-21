@@ -1090,8 +1090,9 @@ codes for manager disposal, capability revocation, missing/inactive/stopping run
 missing/replaced/closed sessions, cancellation/finish, stale session generation,
 worker waits, stopped worker execution and parent finish. A pending or unanswered
 human question refuses nothing in phase 1 (hearsay-tools/cezarion#1233): the wait opens,
-and its result is delivered beside the question at a boundary. The contract still lists
-`human_ask_pending` and `human_ask_unanswered`, but registration never sends them. Registration checks again after metadata lookup, distinguishing an
+and its result is delivered beside the question at a boundary; phase 4b
+(hearsay-tools/cezarion#1236) removed the unused `human_ask_pending` and
+`human_ask_unanswered` codes from the contract. Registration checks again after metadata lookup, distinguishing an
 aborted registration from a changed turn. Only missing or revoked transport
 capabilities are `unauthorized`; an unknown registration failure is `unavailable`.
 Safe messages never forward request contents or raw provider errors.

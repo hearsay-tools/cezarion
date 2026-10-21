@@ -315,7 +315,6 @@ it.each([
   ['run_stopping', /run.*stopping/i], ['session_replaced', /session.*replaced|no active session/i],
   ['session_closed', /session.*closed/i], ['run_cancelled', /run.*cancelled/i],
   ['finish_requested', /finish.*requested/i], ['generation_mismatch', /earlier session/i],
-  ['human_ask_pending', /human question.*pending/i], ['human_ask_unanswered', /human question.*unanswered/i],
   ['worker_wait_pending', /worker wait.*[Ee]nd your turn/], ['worker_execution_stopped', /worker execution.*stopped/i],
   ['root_finish_pending', /parent.*finishing/i], ['registration_aborted', /registration.*interrupted/i],
   ['turn_changed', /turn.*changed/i], ['unauthorized', /capability.*missing|revoked/i],
