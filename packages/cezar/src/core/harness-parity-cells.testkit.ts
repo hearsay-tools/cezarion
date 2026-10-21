@@ -624,6 +624,11 @@ const CONTROL_CRITERIA = [
   { id: 'R27', scenario: 'hold' },
   // hearsay-tools/cezarion#1225: cancel/destroy releases the same-turn wait slot.
   { id: 'R80', scenario: 'hold' },
+  // workflows/ci-wait-conflict-parity.test.ts: real gh metadata, atomic input, native wake.
+  { id: 'R81', scenario: 'baseline' },
+  { id: 'R82', scenario: 'baseline' },
+  { id: 'R83', scenario: 'baseline' },
+  { id: 'R84', scenario: 'baseline' },
   { id: 'R28', scenario: 'baseline' },
   { id: 'R29', scenario: 'baseline' },
   { id: 'R30', scenario: 'baseline' },
