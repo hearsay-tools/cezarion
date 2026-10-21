@@ -23,8 +23,18 @@ describe('executionAccount', () => {
   });
 
   it('takes a continuation that switches backend at its word, on the run account', () => {
-    expect(executionAccount({ runner: 'codex', agentProfile: undefined, steps: [step('codex', 'other')] }, 'claude'))
+    expect(executionAccount({ runner: 'codex', agentProfile: undefined, steps: [step('codex', 'other')] }, { backend: 'claude' }))
       .toEqual({ runner: 'claude', agentProfile: undefined });
+  });
+
+  it('takes the account a Continue selected on the same backend, which starts a new session', () => {
+    expect(executionAccount({ runner: 'codex', agentProfile: 'new', steps: [step('codex', 'old')] }, { backend: 'codex' }))
+      .toEqual({ runner: 'codex', agentProfile: 'new' });
+  });
+
+  it('takes the account of the session a continuation resumes', () => {
+    expect(executionAccount({ runner: 'codex', agentProfile: 'new', steps: [step('codex', 'old')] }, { backend: 'codex', sessionId: 'sess-codex' }))
+      .toEqual({ runner: 'codex', agentProfile: 'old' });
   });
 
   it('prefers a live session\'s own settings', () => {

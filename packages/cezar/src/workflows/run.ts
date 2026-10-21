@@ -2650,11 +2650,11 @@ export class RunManager {
   }
 
   /** The run with the account its next turn runs on (`executionAccount`): a live session's step
-   *  settings, a queued continuation's backend, else its latest session step. Both sides of a hold
+   *  settings, a queued continuation's account, else its latest session step. Both sides of a hold
    *  read it, so a mixed-runner step is held by the account it ran on (hearsay-tools/cezarion#1236). */
   private withExecutionAccount<T extends RunRecord>(run: T): T {
     const live = this.active.get(run.id)?.delegationSettings;
-    return { ...run, ...executionAccount(run, this.pendingContinuations.get(run.id)?.backend, live) };
+    return { ...run, ...executionAccount(run, this.pendingContinuations.get(run.id), live) };
   }
 
   /** A monitoring-pool member's wake waiting in the line: it already holds its slot, so it needs
