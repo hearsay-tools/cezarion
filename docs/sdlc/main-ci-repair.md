@@ -6,7 +6,10 @@ this immediate reporting path. The daily recurring-failure sweep remains in plac
 
 A cancelled run can contain completed failed jobs. Those jobs are reported;
 cancellation alone is not a defect. Cancelled jobs are reported only when their
-check-run annotation establishes a time limit.
+check-run annotation establishes a time limit. A failed job that starts at or
+after the first cancelled job without a time limit completes is not reported:
+it failed because of the cancellation. The `always()` verification gate is the
+example. It reads its cancelled needs and exits 1 (hearsay-tools/cezarion#1442).
 
 The reporter uses the existing shared Actions concurrency group and durable
 signature and occurrence markers. Matching open reports receive evidence rather
@@ -47,6 +50,7 @@ produce separate reports, so the task's duplicate-work check remains necessary.
 ## Verification
 
 Reporter tests cover trusted event eligibility, failed jobs in cancelled runs,
-evidence before routing, and retry recovery. The workflow test pins the trigger,
+failures that start after the cancellation, evidence before routing, and retry
+recovery. The workflow test pins the trigger,
 permissions, trusted checkout and shared lock. Preview the local automation before
 enabling it; a preview does not launch tasks or advance its execution cursor.

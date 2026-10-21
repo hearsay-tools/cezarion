@@ -70,6 +70,7 @@ async function reportFailure({github,owner,repo,event,log=()=>{},fetchImpl=fetch
   validateRun(run);
   const jobs=await github.paginate('GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}/jobs',{...base,run_id:run.id,attempt_number:run.run_attempt,per_page:100});
   const failed=[];
+  let cancelledAt=Infinity;
   for(const job of jobs) {
     if(job.conclusion==='failure' || job.conclusion==='timed_out') failed.push(job);
     if(job.conclusion!=='cancelled') continue;
@@ -78,6 +79,15 @@ async function reportFailure({github,owner,repo,event,log=()=>{},fetchImpl=fetch
     const annotations=await github.paginate('GET /repos/{owner}/{repo}/check-runs/{check_run_id}/annotations',{...base,check_run_id:job.id,per_page:100});
     const timeout=annotations.find(annotation=>TIME_LIMIT.test(annotation.message || ''))?.message;
     if(timeout) failed.push({...job,timeout});
+    else cancelledAt=Math.min(cancelledAt,Date.parse(job.completed_at) || Infinity);
+  }
+  // In a cancelled run, a job that starts after the cancellation fails only
+  // because of it: an `always()` gate reads its cancelled needs
+  // (hearsay-tools/cezarion#1442). Failures that ended earlier still report.
+  if(run.conclusion==='cancelled') {
+    for(let i=failed.length-1;i>=0;i--) {
+      if(!failed[i].timeout && Date.parse(failed[i].started_at)>=cancelledAt) failed.splice(i,1);
+    }
   }
   if(!failed.length) {
     if(run.conclusion==='cancelled') {log(`Run ${run.id} was cancelled before any job reached its time limit; nothing to report.`);return {reported:0};}
