@@ -84,6 +84,41 @@ describe('Claude model refusal retry (hearsay-tools/cezarion#1351)', () => {
     });
   });
 
+  it('retries a refused queued turn without inheriting the previous turn work', async () => {
+    await fixture(async ({ events, ui, send, turns, inputs }) => {
+      send('queued-seed');
+      await until(() => events.some(e => e.type === 'text' && e.text === 'Completed mock:model-refusal:queued-seed'));
+      expect(turns()).toBe(1);
+      send('once:queued');
+      await until(() => turns() === 3 || events.some(isRetry));
+      expect(events.filter(e => e.type === 'error')).toEqual([]);
+      expect(events.filter(isRetry)).toHaveLength(1);
+      expect(turns()).toBe(2);
+      await vi.advanceTimersByTimeAsync(5000);
+      await until(() => turns() === 3);
+      expect(inputs().map(input => input.userText)).toEqual([
+        'mock:model-refusal:seed', 'mock:model-refusal:queued-seed',
+        'mock:model-refusal:once:queued', 'mock:model-refusal:once:queued',
+      ]);
+      expect(ui.filter(e => e.type === 'turn.started')).toHaveLength(4);
+      expect(ui.filter(e => e.type === 'turn.completed')).toHaveLength(4);
+    });
+  });
+
+  it('retains background work observed in a queued turn', async () => {
+    await fixture(async ({ events, send, turns, inputs }) => {
+      send('queued-seed');
+      await until(() => events.some(e => e.type === 'text' && e.text === 'Completed mock:model-refusal:queued-seed'));
+      expect(turns()).toBe(1);
+      send('system-task-started');
+      await until(() => turns() === 3);
+      expect(events.some(e => e.type === 'error')).toBe(true);
+      expect(events.filter(isRetry)).toEqual([]);
+      await vi.advanceTimersByTimeAsync(20000);
+      expect(inputs()).toHaveLength(3);
+    });
+  });
+
   it('bounds exhaustion at 5s then 15s and preserves the first refusal', async () => {
     await fixture(async ({ events, send, turns, inputs }) => {
       send('always');

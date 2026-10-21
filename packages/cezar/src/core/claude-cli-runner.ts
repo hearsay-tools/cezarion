@@ -484,6 +484,10 @@ export class ClaudeCliRunner implements AgentRunner {
             // CLI never runs must not look like activity. Decided before the turn-end
             // callback, which may itself submit (and announce) the next prompt.
             queuedTurnPending = unsettled.size > 0;
+            // Remaining inputs belong to the next turn. Clear the completed
+            // turn's work before any queued frame (including system activity)
+            // arrives; resetting at its first assistant frame would erase work.
+            if (queuedTurnPending) attemptDidWork = false;
             onEvent?.({ type: 'turn-end' });
             // Drain later human input only after a successful logical turn.
             // Failed turns retain the hold until the workflow tears down.

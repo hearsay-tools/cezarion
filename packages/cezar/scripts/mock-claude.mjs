@@ -167,7 +167,7 @@ async function respond(userText, imageCount, uuid) {
   // hearsay-tools/cezarion#1351: native refusals before any model work.
   if (userText.startsWith('mock:model-refusal')) {
     const { modelRefusalReply } = await import('./mock-claude-model-refusal.mjs');
-    modelRefusalReply(userText, uuid, emit, emitReplay);
+    await modelRefusalReply(userText, uuid, emit, emitReplay);
     return;
   }
   if (userText.includes('mock:crash-stderr')) {

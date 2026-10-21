@@ -1,16 +1,18 @@
 // Native Claude stream-json fixtures, with independent per-input retry counts.
 const attempts = new Map();
 const model = 'claude-test-model';
-export function modelRefusalReply(text, uuid, emit, replay) {
+export async function modelRefusalReply(text, uuid, emit, replay) {
   const mode = text.split(':')[2];
   const count = (attempts.get(text) ?? 0) + 1;
   attempts.set(text, count);
   const selected = mode === 'changed' ? 'claude-other-model' : model;
   emit({ type: 'system', subtype: 'init', ...(mode === 'missing-session' ? {} : { session_id: mode === 'changed-session' ? 'other-session' : mode === 'empty-session' ? '' : 'model-refusal-session' }),
     ...(mode === 'missing-model' ? {} : { model: mode === 'empty-model' ? '' : selected }) });
-  if (mode === 'seed' || (mode === 'once' && count > 1) || mode === 'later') {
+  if (mode === 'seed' || mode === 'queued-seed' || (mode === 'once' && count > 1) || mode === 'later') {
     replay(uuid, text);
     emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: `Completed ${text}` }] } });
+    // Leave the final model call complete while another stdin line queues.
+    if (mode === 'queued-seed') await new Promise(resolve => setTimeout(resolve, 250));
     emit({ type: 'result', subtype: 'success', result: `Completed ${text}`,
       usage: { input_tokens: 10, output_tokens: 5 }, user_message_uuids: [uuid], queued_turn_count: 0 });
     return;
