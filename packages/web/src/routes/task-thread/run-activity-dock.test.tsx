@@ -501,6 +501,49 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
     expect(body).toContain('high')
   })
 
+  it('shows agent identity in both folded summaries', () => {
+    renderDock(fresh({ runner: 'codex', model: 'gpt-6', modelIdentity: 'openai/gpt-6', effort: 'high', costUsd: 1.26 }), [])
+    ensureOpen()
+    const usage = sectionHead('usage').textContent
+    expect(usage).toContain('openai')
+    expect(usage).toContain('gpt-6')
+    expect(usage).toContain('high')
+    fireEvent.click(summary())
+    expect(summary().textContent).toContain('codex')
+    expect(summary().textContent).toContain('gpt-6')
+    expect(summary().textContent).toContain('high')
+  })
+
+  it('surfaces the waiting PR in the folded status and card', () => {
+    renderDock(waiting({ waits: [ciEntry] }), [])
+    ensureOpen()
+    expect(section('status-row')?.querySelector('[data-slot="pr-chip"]')?.textContent).toContain('474')
+    fireEvent.click(summary())
+    expect(summary().querySelector('[data-slot="pr-chip"]')?.textContent).toContain('474')
+  })
+
+  it('surfaces Issue and PR chips in the folded Workspace row and card', () => {
+    renderDock(fresh({ referencedIssueUrl: 'https://github.com/owner/repo/issues/15', referencedPullRequestUrl: 'https://github.com/owner/repo/pull/42' }), [])
+    ensureOpen()
+    expect(sectionHead('workspace').querySelector('[data-slot="issue-chip"]')?.textContent).toContain('15')
+    expect(sectionHead('workspace').querySelector('[data-slot="pr-chip"]')?.textContent).toContain('42')
+    fireEvent.click(summary())
+    expect(summary().querySelector('[data-slot="issue-chip"]')?.textContent).toContain('15')
+    expect(summary().querySelector('[data-slot="pr-chip"]')?.textContent).toContain('42')
+  })
+
+  it('keeps capacity above the worker disclosure when the list is folded', async () => {
+    const record = fresh({ delegation: { role: 'root', permissions: [], receipts: [] } })
+    renderDock(record, [], workers, 'ok', {
+      [`/api/v1/p/sample/runs/${record.id}/relationships`]: () => json({ workers, capacity: { outstanding: 2, limit: 32, created: 2, creationLimit: 1024 } }),
+    })
+    ensureOpen()
+    await waitFor(() => expect(document.querySelector('[data-slot="worker-capacity"]')?.textContent).toContain('2 of 32'))
+    fireEvent.click(sectionHead('workers'))
+    expect(document.querySelector('[data-slot="worker-capacity"]')?.textContent).toContain('2 of 32')
+    expect(section('workers')?.contains(document.querySelector('[data-slot="worker-capacity"]'))).toBe(false)
+  })
+
   it('offers branch copy, worktree copy and the resume command under Workspace', () => {
     renderDock(fresh({ branch: 'cez/parent', worktreePath: '/repo/.ai/cezar/worktrees/parent' }), [])
     ensureOpen()

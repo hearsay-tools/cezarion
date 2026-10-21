@@ -1,6 +1,7 @@
 import type { ApiRun, Wait } from '@open-mercato/cezar-api-client'
 
 import { isHttpUrl } from '@/lib/utils'
+import type { TaskReference } from '@/lib/tasks-table'
 
 /**
  * The run's wait details (spec 2026-10-17-unified-waits): every open CI, timer and worker wait,
@@ -59,6 +60,12 @@ export function hasWaitDetails(run: ApiRun): boolean {
   return waitView(run) !== undefined
 }
 
+/** Only current CI waits belong beside the live status; settled observations stay in details. */
+export function ciWaitReferences(run: ApiRun): TaskReference[] {
+  return (waitView(run)?.open ?? []).filter((wait): wait is CiWait => wait.kind === 'ci')
+    .map(wait => ({ kind: 'PR', number: wait.prNumber, url: wait.prUrl }))
+}
+
 export function RunWaitDetails({ run }: { run: ApiRun }) {
   const view = waitView(run)
   if (!view) return null
@@ -102,20 +109,22 @@ function CiWaitStatus({ run, wait, settled = false }: { run: ApiRun; wait: CiWai
   const prLabel = `${wait.repository}#${wait.prNumber}`
   return (
     <div data-slot="ci-wait-status" role="status" aria-live="polite" aria-atomic="true"
-      className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-1">
-        <span>{label}</span>
-        <span aria-hidden="true">—</span>
+      className="min-w-0 text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+      <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1">
+        <dt className="font-medium text-foreground">Status</dt><dd>{label}</dd>
+        <dt className="font-medium text-foreground">Pull request</dt><dd className="min-w-0">
         {isHttpUrl(wait.prUrl) ? (
           <a href={wait.prUrl} target="_blank" rel="noopener noreferrer"
-            className="inline-flex min-h-11 min-w-11 max-w-full items-center rounded-sm px-1 font-medium text-foreground underline underline-offset-2 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none">
+            className="inline-flex min-h-11 min-w-11 max-w-full items-center rounded-sm px-1 font-medium text-foreground underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:bg-muted">
             {prLabel}
           </a>
         ) : <span>{prLabel}</span>}
-      </div>
-      {dateLabel ? (
-        <p>{!settled ? 'Deadline' : cancelled ? 'Cancelled' : 'Observed'}{' '}<time dateTime={timestamp}>{dateLabel}</time></p>
-      ) : !settled ? <p>CI deadline unavailable</p> : null}
+        </dd>
+        {dateLabel ? <>
+          <dt className="font-medium text-foreground">{!settled ? 'Deadline' : cancelled ? 'Cancelled' : 'Observed'}</dt>
+          <dd><time dateTime={timestamp}>{dateLabel}</time></dd>
+        </> : !settled ? <><dt className="font-medium text-foreground">Deadline</dt><dd>CI deadline unavailable</dd></> : null}
+      </dl>
     </div>
   )
 }

@@ -37,6 +37,7 @@ export function ActivityRow({
   icon,
   title,
   meta,
+  summary,
   open,
   onToggle,
   className,
@@ -50,6 +51,8 @@ export function ActivityRow({
   /** A plain meta truncates with an ellipsis. `{ keep, drop }` never cuts text: `keep` always
    *  shows whole, `drop` shows before it only while all of it fits, and is gone otherwise. */
   meta?: ReactNode | MetaParts
+  /** A summary that manages its own whole-item overflow. */
+  summary?: ReactNode
   open: boolean
   /** Absent: the row has nothing to disclose and renders as a plain, non-interactive line. */
   onToggle?: () => void
@@ -62,7 +65,7 @@ export function ActivityRow({
       {/* A plain label (`Workspace`) keeps its width and the meta truncates; a composed title
           (`Workflow · <name>`) can be long, so it shares the row. */}
       <span className={cn('truncate text-[14px] font-semibold text-foreground', typeof title === 'string' ? 'shrink-0' : 'min-w-0 shrink')}>{title}</span>
-      {isMetaParts(meta) ? (
+      {summary ?? (isMetaParts(meta) ? (
         // `contents`: both parts sit in the row itself. Inside a wrapper box, the drop's unbreakable
         // width would become that box's minimum and push the kept part out of the row.
         <span data-slot="run-activity-meta" className="contents text-[13px] text-muted-foreground tabular-nums">
@@ -87,7 +90,7 @@ export function ActivityRow({
         >
           {meta}
         </span>
-      ) : null}
+      ) : null)}
     </>
   )
   const disclosable = onToggle !== undefined

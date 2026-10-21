@@ -93,6 +93,8 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
   const wait = completionWaitView(run) ?? workerWaitView(run)
   const dependencyLabel = metadata && metadata.role !== 'invalid' && wait ? workerWaitLabel(metadata.role, wait) : undefined
   return (
+    <>
+    {query.data?.capacity ? <CapacityNote capacity={query.data.capacity} /> : null}
     <ActivityRow
       slot="workers"
       icon={<GitBranchIcon className="size-4" />}
@@ -104,7 +106,6 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
       <div aria-label="Task relationships" className="min-w-0 text-[13px] text-muted-foreground" role="group">
         {metadata?.role === 'worker' && metadata.destroy ? <Cleanup state={metadata.destroy} /> : null}
         {wait ? <WaitNote wait={wait} dependencyLabel={dependencyLabel} /> : null}
-        {query.data?.capacity ? <CapacityNote capacity={query.data.capacity} /> : null}
         {parentId ? <ParentLink id={parentId} /> : null}
         {ids.length > 0 ? (
           <ul className="grid max-h-64 min-w-0 gap-0.5 overflow-y-auto">
@@ -140,6 +141,7 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
         </div> : null}
       </div>
     </ActivityRow>
+    </>
   )
 }
 
@@ -235,10 +237,11 @@ function ParentLink({ id }: { id: string }) {
  */
 function CapacityNote({ capacity }: { capacity: NonNullable<RunRelationships['capacity']> }) {
   const full = capacity.outstanding >= capacity.limit
-  return <p role="status" className={cn('px-2 break-words', full && 'text-foreground')}>
-    {full ? `All ${capacity.limit} worker slots are in use. Clean up finished workers to free a slot.`
-      : `Capacity ${capacity.outstanding} of ${capacity.limit} in use`}
-  </p>
+  return <div data-slot="worker-capacity" role="status" className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1 border-t border-border px-3.5 py-2.5 text-[13px]">
+    <span className="font-medium text-foreground">Worker capacity</span>
+    <span className="text-muted-foreground tabular-nums">{capacity.outstanding} of {capacity.limit} in use</span>
+    {full ? <span className="basis-full text-muted-foreground">All worker slots are in use. Clean up finished workers to free a slot.</span> : null}
+  </div>
 }
 
 const SETTLED = new Set<WorkerInspection['status']>(['review', 'done', 'failed', 'cancelled'])
