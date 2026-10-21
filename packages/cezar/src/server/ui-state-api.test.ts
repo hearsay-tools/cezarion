@@ -76,6 +76,18 @@ describe('the ui-state API — skillUsage (#408)', () => {
     expect(rawFile().importedSkills).toEqual([]);
   });
 
+  it('an unrelated preference save keeps following the legacy workspace selection', async () => {
+    mkdirSync(dirname(legacyWorkspaceStatePath), { recursive: true });
+    writeFileSync(legacyWorkspaceStatePath, JSON.stringify({ importedSkills: ['om-fix'] }));
+    const res = await put({ lastRunner: 'codex' });
+    // The answer is the effective state, so the cockpit cache keeps the inherited selection.
+    expect(await res.json()).toEqual({ lastRunner: 'codex', importedSkills: ['om-fix'] });
+    expect(rawFile()).toEqual({ lastRunner: 'codex' });
+
+    writeFileSync(legacyWorkspaceStatePath, JSON.stringify({ importedSkills: ['om-review'] }));
+    expect(await (await get()).json()).toEqual({ lastRunner: 'codex', importedSkills: ['om-review'] });
+  });
+
   it('persists the default-skill selection in this project ui-state', async () => {
     const res = await put({ importedSkills: ['om-fix'] });
     expect(res.status).toBe(200);

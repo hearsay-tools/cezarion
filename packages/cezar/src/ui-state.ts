@@ -35,6 +35,14 @@ export function uiStatePath(repoRoot: string): string {
  * by `uiStateBody`) is what actually enforces it.
  */
 export async function readUiState(repoRoot: string): Promise<UiState> {
+  return withLegacySkillSelection(await readProjectUiState(repoRoot));
+}
+
+/**
+ * The project's own file, without the legacy workspace fallback. Writes merge from this, so a
+ * save of another preference never copies an inherited selection into the project (#1408).
+ */
+export async function readProjectUiState(repoRoot: string): Promise<UiState> {
   let state: UiState = {};
   try {
     const parsed: unknown = JSON.parse(await readFile(uiStatePath(repoRoot), 'utf8'));
@@ -45,6 +53,11 @@ export async function readUiState(repoRoot: string): Promise<UiState> {
   } catch {
     // Missing or unreadable: an empty preference bag.
   }
+  return state;
+}
+
+/** `state` with the legacy workspace selection filled in when the project has none of its own. */
+export async function withLegacySkillSelection(state: UiState): Promise<UiState> {
   if (Array.isArray(state.importedSkills)) return state;
   const legacy = await readWorkspaceUiState();
   return Array.isArray(legacy.importedSkills) ? { ...state, importedSkills: legacy.importedSkills } : state;

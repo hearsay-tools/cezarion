@@ -230,7 +230,7 @@ import { checkoutRepo, type CloneRunner } from './checkout.ts';
 import { createProject, listGithubOwners, type CommandRunner } from './create-project.ts';
 import { armPreview, ProjectContextError, ProjectContexts, projectWarmupEnabled, sweepRegisteredPreviewLeftovers, type ProjectContext } from './project-context.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
-import { readUiState, uiStatePath } from '../ui-state.ts';
+import { readProjectUiState, readUiState, uiStatePath, withLegacySkillSelection } from '../ui-state.ts';
 import { agentHomePaths, expandTilde } from '../paths.ts';
 import { isLoopbackHostHeader, normalizeHostname, resolveCapabilities } from './capabilities.ts';
 import { applicationUpdateInputSchema, type ApplicationUpdateState } from '@open-mercato/cezar-contract/application-update';
@@ -3508,14 +3508,15 @@ export function createApp(deps: ServerDeps) {
       // single request may not stuff an unbounded key set (#429) — the shared
       // schema+cap half of both ui-state routes lives in `uiStateBody`.
       const parsed = { data: c.req.valid('json') };
-      const merged = { ...(await readUiState(repoRoot)), ...parsed.data };
+      // Merge into the project's own file: the legacy skill fallback is read-only (#1408).
+      const merged = { ...(await readProjectUiState(repoRoot)), ...parsed.data };
       try {
         await mkdir(dataDir, { recursive: true });
         await writeFile(uiStatePath(repoRoot), `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
       }
-      return c.json(merged);
+      return c.json(await withLegacySkillSelection(merged));
     });
 
   // ---- chained family: workflows (project-scoped) --------------------------
