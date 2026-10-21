@@ -282,10 +282,10 @@ describe('useVoiceCommand', () => {
 
     for (let i = 0; i < 3; i++) {
       const held = enter(harness, { repeat: true })
+      expect(target.send).not.toHaveBeenCalled()
       expect(held.handled).toBe(true)
       expect(held.event.preventDefault).toHaveBeenCalled()
     }
-    expect(target.send).not.toHaveBeenCalled()
     expect(voiceStore.getProposal()).toMatchObject({ decisionId: DECISION_ID(1) })
 
     expect(enter(harness).handled).toBe(true)
