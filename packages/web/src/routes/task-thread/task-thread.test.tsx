@@ -415,6 +415,70 @@ describe('ThreadView', () => {
     expect(document.querySelector('[data-slot="composer"]')?.hasAttribute('data-voice-proposal')).toBe(false)
   })
 
+  it('switching to a task whose Stop is pending still clears the tell proposed for the first', () => {
+    const first = run('running', { id: 'run-a' })
+    const second = run('running', { id: 'run-b', stopping: true })
+    const { rerender, queryClient } = renderView(<ThreadView run={first} thread={reduceThread(EVENTS)} />)
+    act(() => {
+      voiceStore.propose({ kind: 'tell', decisionId: 'd1', runId: first.id, text: 'for task A' })
+    })
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter><ThreadView run={second} thread={reduceThread(EVENTS)} /></MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect((screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement).value).toBe('')
+    expect(voiceStore.getProposal()).toBeUndefined()
+    expect(voiceStore.lastDrop()).toBe('task-closed')
+  })
+
+  it('cancel during a pending Stop clears the voice text, and spares an edited draft', () => {
+    const thread = run('running')
+    const { rerender, queryClient } = renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)
+    const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
+    const stopPending = (stopping: boolean) => rerender(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter><ThreadView run={{ ...thread, stopping }} thread={reduceThread(EVENTS)} /></MemoryRouter>
+      </QueryClientProvider>,
+    )
+    act(() => {
+      voiceStore.propose({ kind: 'tell', decisionId: 'd1', runId: thread.id, text: 'hello' })
+    })
+    stopPending(true)
+    act(() => voiceStore.cancel())
+    expect(textarea.value).toBe('')
+    expect(voiceStore.getProposal()).toBeUndefined()
+
+    stopPending(false)
+    act(() => {
+      voiceStore.propose({ kind: 'tell', decisionId: 'd2', runId: thread.id, text: 'hello' })
+    })
+    fireEvent.change(textarea, { target: { value: 'hello, and my own words' } })
+    act(() => voiceStore.cancel())
+    expect(textarea.value).toBe('hello, and my own words')
+    expect(voiceStore.getProposal()).toBeUndefined()
+  })
+
+  it('an erased tell draft is not sent: confirm is busy and the proposal stays', async () => {
+    const thread = run('running')
+    renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)
+    const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
+    const sent = vi.mocked(globalThis.fetch)
+    act(() => {
+      voiceStore.propose({ kind: 'tell', decisionId: 'd1', runId: thread.id, text: 'hello' })
+    })
+    fireEvent.change(textarea, { target: { value: '' } })
+    const before = sent.mock.calls.length
+    let result: ReturnType<typeof voiceStore.confirm> | undefined
+    act(() => {
+      result = voiceStore.confirm()
+    })
+    expect(result).toEqual({ ok: false, reason: 'busy' })
+    expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+    await act(async () => {})
+    expect(sent.mock.calls.slice(before).filter(([url]) => String(url).endsWith('/messages'))).toHaveLength(0)
+  })
+
   it('leaving the thread drops a pending tell', () => {
     const thread = run('running')
     renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)

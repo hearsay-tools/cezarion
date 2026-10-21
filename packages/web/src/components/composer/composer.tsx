@@ -156,8 +156,11 @@ export interface ComposerHandle {
   /** Replace the draft. True when the draft now holds `text`; false (nothing written) while edits
    *  are blocked by a pending Stop or a retained send, like every other edit. */
   setDraft: (text: string) => boolean
+  /** Empty the draft only when it still equals `text` (voice-owned, unedited) and no send is in
+   *  flight; it does not check the Stop-pending guard. True when the draft is empty afterwards. */
+  clearVoiceDraft: (text: string) => boolean
   /** Run the send button's path (`submitDraft`): the same guards, the same `onSubmit`. True when the
-   *  send started; false when the composer is disabled, stopping or busy. */
+   *  send started; false when the composer is disabled, stopping, busy or the draft is empty. */
   submit: () => boolean
 }
 
@@ -448,11 +451,19 @@ export function Composer({
 
   // ---- submit --------------------------------------------------------------------------------
 
+  /** The one rule for "a send would not start": the composer is disabled, stopping or busy, or
+   *  the message is empty. `send` and the handle's `submit` both ask it, so they cannot differ. */
+  const sendRefused = useCallback(
+    (messageText: string, messageImages: PendingAttachment[]) =>
+      disabled || stopping || busyRef.current ||
+      (messageText.trim() === '' && messageImages.length === 0 && !allowEmptySubmit),
+    [disabled, stopping, allowEmptySubmit],
+  )
+
   const send = useCallback(
     async (messageText: string, messageImages: PendingAttachment[], restoreOnError: boolean) => {
       const body = messageText.trim()
-      if (disabled || stopping || busyRef.current) return
-      if (body === '' && messageImages.length === 0 && !allowEmptySubmit) return
+      if (sendRefused(messageText, messageImages)) return
       // Lock before any callback/state update: two keyboard events can share a render.
       busyRef.current = true
       if (retainDraftUntilSuccess) attachmentEpoch.current += 1
@@ -491,15 +502,15 @@ export function Composer({
         }
       }
     },
-    [allowEmptySubmit, disabled, stopping, onSubmit, retainDraftUntilSuccess, clearOnSuccess, onPendingChange, setText],
+    [sendRefused, onSubmit, retainDraftUntilSuccess, clearOnSuccess, onPendingChange, setText],
   )
 
-  /** Returns whether the send started: false when the composer is disabled, stopping or busy. */
+  /** Returns whether the send started: false when `sendRefused` (disabled, stopping, busy, empty). */
   const submitDraft = useCallback(() => {
-    if (disabled || stopping || busyRef.current) return false
+    if (sendRefused(textRef.current, imagesRef.current)) return false
     void send(textRef.current, imagesRef.current, true)
     return true
-  }, [disabled, stopping, send])
+  }, [sendRefused, send])
 
   // Rides the same `pendingCaretRef` + layout-effect restore the `/` autocomplete uses, rather
   // than a rAF: the caret is set in the same paint as the text, so there is no window in which a
@@ -521,6 +532,15 @@ export function Composer({
       setDraft: (next: string) => {
         if (editsBlocked()) return false
         setText(next)
+        return true
+      },
+      // Removes text a voice proposal put there, never the user's own: it ignores the Stop-pending
+      // guard (a draft left behind would become the next task's), but not a send in flight, which
+      // owns the text now, nor an edit, which makes the draft the user's.
+      clearVoiceDraft: (voiceText: string) => {
+        if (textRef.current === '') return true
+        if (busyRef.current || textRef.current !== voiceText) return false
+        setText('')
         return true
       },
       submit: submitDraft,

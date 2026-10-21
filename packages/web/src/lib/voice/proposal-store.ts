@@ -31,7 +31,10 @@ export interface ComposerTarget {
   getDraft(): string
   /** True when the draft now holds `text`; false when edits are blocked. */
   setDraft(text: string): boolean
-  /** True when the composer started the send; false when it is disabled, stopping or busy. */
+  /** Empties the draft only when it still equals `text` and no send is in flight; true when it is
+   *  empty afterwards. Unlike `setDraft` it ignores a pending Stop: it removes voice's own text. */
+  clearVoiceDraft(text: string): boolean
+  /** True when the composer started the send; false when it is disabled, stopping, busy or empty. */
   submit(): boolean
 }
 
@@ -57,7 +60,7 @@ const cardFor = (p: Extract<VoiceProposal, { kind: 'answer' }>) => cards.get(car
 /** Undo what a proposal put on screen: the card goes back to its snapshot, the draft is emptied. */
 function undo(p: VoiceProposal) {
   if (p.kind === 'answer') cardFor(p)?.restore()
-  else composers.get(p.runId)?.setDraft('')
+  else composers.get(p.runId)?.clearVoiceDraft(p.text)
 }
 
 /** Later entries for a question replace earlier ones; the result is in question order. */
@@ -165,7 +168,7 @@ export const voiceStore = {
       if (proposal?.kind === 'tell' && proposal.runId === target.runId) {
         // The composer can outlive this registration (the thread switched to another run): the
         // proposed text must not become that run's draft. An edited draft stays the user's.
-        if (target.getDraft() === proposal.text) target.setDraft('')
+        target.clearVoiceDraft(proposal.text)
         dropProposal('task-closed')
       }
     }

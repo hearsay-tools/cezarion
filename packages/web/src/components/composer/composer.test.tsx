@@ -841,6 +841,62 @@ describe('retained submission (#164)', () => {
     expect(started).toBe(true)
   })
 
+  it('submit is refused for an empty draft, like the send button', async () => {
+    const handle = React.createRef<import('./composer').ComposerHandle>()
+    const { onSubmit } = renderComposer({ ref: handle })
+    expect(handle.current?.submit()).toBe(false)
+    act(() => {
+      handle.current?.setDraft('   ')
+    })
+    expect(handle.current?.submit()).toBe(false)
+    expect(onSubmit).not.toHaveBeenCalled()
+    cleanup()
+    // The Continue shape: an empty submit IS the action, so the handle starts it.
+    const allowed = React.createRef<import('./composer').ComposerHandle>()
+    const { onSubmit: onContinue } = renderComposer({ ref: allowed, allowEmptySubmit: true })
+    await act(async () => {
+      expect(allowed.current?.submit()).toBe(true)
+    })
+    expect(onContinue).toHaveBeenCalledTimes(1)
+  })
+
+  it('clearVoiceDraft clears only an unedited voice draft, even while Stop is pending', () => {
+    const handle = React.createRef<import('./composer').ComposerHandle>()
+    const { textarea } = renderComposer({ ref: handle })
+    act(() => {
+      handle.current?.setDraft('voice text')
+    })
+    act(() => {
+      expect(handle.current?.clearVoiceDraft('other text')).toBe(false)
+    })
+    expect(textarea.value).toBe('voice text')
+    act(() => {
+      expect(handle.current?.clearVoiceDraft('voice text')).toBe(true)
+    })
+    expect(textarea.value).toBe('')
+    expect(handle.current?.clearVoiceDraft('voice text')).toBe(true)
+
+    // Stop pending: setDraft refuses, clearVoiceDraft still removes voice's own text.
+    cleanup()
+    stubSkillsFetch()
+    const stopped = React.createRef<import('./composer').ComposerHandle>()
+    const view = (stopping: boolean) => (
+      <QueryClientProvider client={createQueryClient()}>
+        <Composer onSubmit={vi.fn(() => Promise.resolve({}))} ref={stopped} stopping={stopping} />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(view(false))
+    act(() => {
+      stopped.current?.setDraft('voice text')
+    })
+    rerender(view(true))
+    expect(stopped.current?.setDraft('x')).toBe(false)
+    act(() => {
+      expect(stopped.current?.clearVoiceDraft('voice text')).toBe(true)
+    })
+    expect((screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement).value).toBe('')
+  })
+
   it('marks the root while a voice proposal fills the draft', () => {
     renderComposer({ voiceProposal: true })
     expect(document.querySelector('[data-slot="composer"]')?.getAttribute('data-voice-proposal')).toBe('true')

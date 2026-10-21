@@ -40,6 +40,10 @@ function fakeComposer(initial = '') {
       draft = text
       return true
     }),
+    clearVoiceDraft: vi.fn((text: string) => {
+      if (draft === text) draft = ''
+      return draft === ''
+    }),
     submit: vi.fn(() => {
       draft = ''
       return true
@@ -247,6 +251,22 @@ describe('voiceStore', () => {
       expect(composer.getDraft()).toBe('hello again')
       expect(voiceStore.confirm()).toEqual({ ok: true })
       expect(composer.submit).toHaveBeenCalledTimes(1)
+      expect(voiceStore.getProposal()).toBeUndefined()
+    })
+
+    it('cancel empties the draft through clearVoiceDraft, which spares an edited one', () => {
+      const composer = fakeComposer()
+      voiceStore.registerComposer(composer)
+      voiceStore.propose(tell('d1', 'hello'))
+      voiceStore.cancel()
+      expect(composer.clearVoiceDraft).toHaveBeenCalledWith('hello')
+      expect(composer.getDraft()).toBe('')
+      expect(voiceStore.getProposal()).toBeUndefined()
+
+      voiceStore.propose(tell('d2', 'hello'))
+      composer.setDraft('hello, and more')
+      voiceStore.cancel()
+      expect(composer.getDraft()).toBe('hello, and more')
       expect(voiceStore.getProposal()).toBeUndefined()
     })
 

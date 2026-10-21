@@ -198,6 +198,8 @@ export function ThreadView({
         runId: run.id,
         getDraft: () => composerRef.current?.getDraft() ?? '',
         setDraft: (text) => composerRef.current?.setDraft(text) ?? false,
+        // A composer that is already gone holds no draft.
+        clearVoiceDraft: (text) => composerRef.current?.clearVoiceDraft(text) ?? true,
         submit: () => composerRef.current?.submit() ?? false,
       }),
     [run.id],
