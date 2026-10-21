@@ -90,6 +90,8 @@ function SkillsCatalog() {
     onSuccess: (catalog) => {
       // The POST answers the merged catalog — seed the shared query instead of refetching.
       queryClient.setQueryData(queryKeys.skills, catalog)
+      // The fetch can change which team skills are defaults too; the switches read that list.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.importableSkills })
       toast('Team skills refreshed.')
     },
     onError: (error) => toast(error.message, { tone: 'danger' }),

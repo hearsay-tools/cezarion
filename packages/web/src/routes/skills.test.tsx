@@ -53,6 +53,7 @@ function serve({
   skills = SKILLS,
   refreshed = SKILLS,
   importable = [],
+  refreshedImportable,
   importableError = false,
   holdSkills = false,
   uiState = {},
@@ -63,6 +64,8 @@ function serve({
   skills?: Skill[]
   refreshed?: Skill[]
   importable?: Skill[]
+  /** What /skills/importable answers once a refresh POST landed. */
+  refreshedImportable?: Skill[]
   importableError?: boolean
   holdSkills?: boolean
   uiState?: Record<string, unknown>
@@ -75,6 +78,7 @@ function serve({
   // PUT answers the MERGED state; the switches reconcile their optimistic write with that echo,
   // so the stub must merge and return rather than answer `{}`.
   let project: Record<string, unknown> = { ...uiState }
+  let offered = importable
   const global: Record<string, unknown> = { ...workspaceUiState }
   const json = (payload: unknown) =>
     new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })
@@ -88,13 +92,16 @@ function serve({
       if (url === '/api/v1/skills' && method === 'GET') {
         return holdSkills ? new Promise<never>(() => {}) : json(skills)
       }
-      if (url === '/api/v1/skills/refresh' && method === 'POST') return json(refreshed)
+      if (url === '/api/v1/skills/refresh' && method === 'POST') {
+        if (refreshedImportable) offered = refreshedImportable
+        return json(refreshed)
+      }
       // Both the fast read and the ?wait=1 convergence read hit this endpoint.
       if (url.startsWith('/api/v1/skills/importable')) {
         return importableError
           ? // 409 is what a project whose run store cannot open answers; a 4xx is not retried.
             new Response(JSON.stringify({ error: 'store busy' }), { status: 409, headers: { 'content-type': 'application/json' } })
-          : json(importable)
+          : json(offered)
       }
       if (url === '/api/v1/workflows') return json(WORKFLOWS)
       if (url === '/api/v1/launch-key') return json({ key: 'sekret' })
@@ -397,6 +404,20 @@ describe('enable and preview default skills (#1408)', () => {
     serve({ skills: CATALOG, importable: [IMPORTABLE[0]!] })
     renderAt('/skills?skill=__import')
     await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('om-fix'))
+  })
+
+  it('Refresh re-reads the default list, so a newly offered default skill gets a live switch', async () => {
+    serve({
+      skills: CATALOG.filter((skill) => skill.name !== 'code-review'),
+      refreshed: [...CATALOG, IMPORTABLE[1]!],
+      importable: [IMPORTABLE[0]!],
+      refreshedImportable: IMPORTABLE,
+    })
+    renderAt('/skills')
+    await waitFor(() => expect(switchFor('pr-create')?.disabled).toBe(false))
+    fireEvent.click(document.querySelector('[data-slot="skills-refresh"]')!)
+    await waitFor(() => expect(switchFor('code-review')?.getAttribute('aria-label')).toBe('Enable code-review'))
+    expect(switchFor('code-review')?.getAttribute('data-locked')).toBeNull()
   })
 
   it('has no separate "Manage skills" entry', async () => {
