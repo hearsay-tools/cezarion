@@ -11,6 +11,7 @@ import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { manager, store, restart, root, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { ciNativeMessages } from './waits-parity.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
+import { ciWatchRequest } from './waits.ts';
 
 const resources = vi.hoisted(() => ({ github: undefined as GithubCiClient | undefined, toolless: false }));
 vi.mock('../ci-wait/resources.ts', async importOriginal => {
@@ -132,7 +133,7 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       // Cancellation has committed before the external check command can complete.
       expect(disk(run.id).lastWaits.find((entry: { id: string }) => entry.id === wait.id)).toMatchObject({ phase: 'cancelled' });
       writeFileSync(gate, '');
-      const request = { ...wait, phase: 'parked' } as Parameters<CiWatcherSupervisor['watch']>[0];
+      const request = ciWatchRequest(wait);
       // Reap the cancelled in-flight query before obtaining a genuine late conflict.
       await supervisor.watch(request, new AbortController().signal);
       const late = await supervisor.watch(request, new AbortController().signal);
