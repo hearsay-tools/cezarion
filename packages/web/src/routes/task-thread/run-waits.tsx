@@ -85,6 +85,7 @@ function CiWaitStatus({ run, wait, settled = false }: { run: ApiRun; wait: CiWai
   const outcomes = {
     passed: 'CI checks passed — observed checks only; not merge approval',
     failed: 'CI checks failed — inspect the PR checks',
+    conflicting: 'PR has merge conflicts — inspect the PR; not merge approval',
     cancelled: 'CI wait cancelled',
     skipped: 'CI checks skipped — inspect the PR checks',
     no_checks: 'No CI checks found — inspect the PR workflows',
