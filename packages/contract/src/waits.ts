@@ -35,6 +35,7 @@ export type WaitPhase = z.infer<typeof waitPhaseSchema>;
  *  `cez worker wait`, the alias that opens a `worker` wait; `completion` is the worker wait
  *  cezar opens for a root whose done is refused twice (hearsay-tools/cezarion#1301). */
 export const waitViaSchema = z.enum([
+  // `cezar_wait_for_ci` is kept for stored rows only: the tool was removed (hearsay-tools/cezarion#1236).
   'cezar_wait', 'cezar_wait_for_ci', 'cezar_ask', 'monitoring-line', 'schedule-wakeup', 'ask-line', 'native-ask', 'no-wait', 'budget',
   'cez-worker-wait', 'completion',
 ]);
@@ -144,7 +145,7 @@ export type Wait = z.infer<typeof waitSchema>;
 
 // ---- the tools ----------------------------------------------------------------------------
 
-/** `cezar_wait`. The `ci` branch keeps `cezar_wait_for_ci`'s bounds and default. */
+/** `cezar_wait`. The `ci` branch keeps the removed `cezar_wait_for_ci`'s bounds and default. */
 export const cezarWaitRequestSchema = z.discriminatedUnion('kind', [
   ciWaitRequestSchema.extend({ kind: z.literal('ci') }).strict(),
   z.object({

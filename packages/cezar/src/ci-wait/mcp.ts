@@ -5,9 +5,6 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { monitorCiOwner } from './client.ts';
 import { cezarServerInstructions, cezarTools } from './tools.ts';
 
-// Existing importers read the CI tool from here.
-export { ciToolDefinition, invokeCiTool } from './tools.ts';
-
 // #497: deferred-tool harnesses show a bare tool name until the agent loads its
 // schema, so the initialize instructions carry one trigger line per listed tool.
 export function createCiMcpServer(env: NodeJS.ProcessEnv = process.env): Server {

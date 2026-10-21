@@ -80,6 +80,8 @@ Real-binary checks against `omp/18.4.11` (linux-x64), recorded on a host with no
 | 2026-10-05 | Same extension from a source checkout, with `dist/` built | The extension's own `src/ci-wait/tools.ts` import fails inside OMP (`Cannot find package '@open-mercato/cezar-contract'`: the workspace package exports TypeScript source), OMP then exits 2 with `Unknown tool in --tools: cezar_wait_for_ci`. `omp-ci-wait.mjs` therefore falls back to `dist/ci-wait/tools.js`. A source checkout without a build still cannot load the extension under a real OMP; the installed package ships `dist/`. |
 | 2026-10-05 | Live `cezar_wait_for_ci` call from a model turn | **Unverified.** The live turns below did not call it; the call path is covered offline by `ci-tools.test.ts`, `ci-wait-parity.test.ts` and `ci-wait-refusal.test.ts` through `scripts/mock-omp-rpc.mjs`. |
 
+The rows above are history. hearsay-tools/cezarion#1236 removed `cezar_wait_for_ci`; the extension now registers `cezar_wait` first, and `ompTools` admits the names `cezarTools(process.env)` lists, so a current `--tools` list carries `cezar_wait` in its place.
+
 Live model turns through `OmpRunner` (`omp/18.4.11`, logged in with `xai-oauth`, model `xai-oauth/grok-4.6`, 2026-10-05, a scratch git repository):
 
 | Check | Outcome |

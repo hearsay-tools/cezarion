@@ -2476,10 +2476,10 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         const controller = await CiToolController.start();
         const dir = mkdtempSync(join(tmpdir(), 'cez-tools-list-'));
         try {
-          const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'ci', source: 'agent', via: 'cezar_wait_for_ci', phase: 'open' } }), ask: async () => ({ ok: false, code: 'unavailable', message: 'none' }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', open_waits: [] }) });
+          const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'ci', source: 'agent', via: 'cezar_wait', phase: 'open' } }), ask: async () => ({ ok: false, code: 'unavailable', message: 'none' }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', open_waits: [] }) });
           const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, allowedTools, env: { ...session.env, CEZ_MOCK_ARGS_FILE: join(dir, 'wire'), CEZ_MOCK_CI_PR: wait.prUrl, CEZ_MOCK_CI_RESULT: join(dir, 'result'), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
           expect(obs.v1.filter((event) => event.type === 'error')).toEqual([]);
-          const waits = ['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'];
+          const waits = ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'];
           const expected = enabled ? [...waits, 'cezar_preview_serve', 'cezar_preview_stop'] : waits;
           expect(JSON.parse(readFileSync(join(dir, 'result'), 'utf8')).names).toEqual(expected);
           const argv: string[] = JSON.parse(readFileSync(join(dir, 'wire'), 'utf8').trim().split('\n')[0]!);
@@ -3214,7 +3214,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   });
 
   // cezar's own tools are covered where they run: Codex rows of ci-wait-parity park only
-  // when the mock's MCP tool gate lets cezar_wait_for_ci through unasked.
+  // when the mock's MCP tool gate lets cezar_wait through unasked.
   describeRunners('MCP tool approval routing (hearsay-tools/cezarion#1294)', () => {
     for (const backend of runners) {
       const exemption = exemptionFor('P9', backend);

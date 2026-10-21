@@ -633,9 +633,8 @@ Controller recovery can replay an
 observation after an ambiguous delivery checkpoint, identified by its stable
 lifecycle input ID.
 
-`cezar_wait_for_ci` (a `pr` and an optional `timeout_seconds`) still works and opens
-the same CI wait, but it is deprecated: new prompts and skills should call
-`cezar_wait` with `kind: "ci"`. It will be removed (hearsay-tools/cezarion#1236).
+The deprecated `cezar_wait_for_ci` tool was removed (hearsay-tools/cezarion#1236):
+call `cezar_wait` with `kind: "ci"` instead.
 
 The adapters are bundled for Claude (including `claude-cli`), Codex, OpenCode,
 Cursor, Pi and OMP. Internal socket/capability environment values are runtime wiring,

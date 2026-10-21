@@ -2,7 +2,7 @@ import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } f
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { askErrorMessage, doneErrorMessage, waitErrorMessage } from '../ci-wait/errors.ts';
 import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type DoneErrorCode, type CiWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
-import { ciWaitResultSchema, type CiWaitRequest, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
+import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { AUTONOMOUS_NUDGE, decideTurnEnd } from './turn-end.ts';
 import { nextLineEntry } from './line-order.ts';
@@ -2133,11 +2133,6 @@ export class RunManager {
     // A copy cezar runs from the old command must not keep answering for the new registration.
     if (changed) await this.preview.replaced(runId, server.port).catch(() => {});
     return checked.answer();
-  }
-
-  /** The deprecated `cezar_wait_for_ci` route's registration, kept for its callers and tests. */
-  registerCiWait(runId: string, request: CiWaitRequest, generation: string, capabilitySignal?: AbortSignal): Promise<CiWaitEntry | TimerWaitEntry | WorkerWaitEntry> {
-    return this.registerWait(runId, { kind: 'ci', ...request }, 'cezar_wait_for_ci', generation, capabilitySignal);
   }
 
   /** The checks every wait registration shares: the session that called is the run's current one,

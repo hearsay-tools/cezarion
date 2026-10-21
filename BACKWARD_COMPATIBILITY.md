@@ -149,7 +149,7 @@ Breaking: removing/renaming a route; making a previously optional body field req
 
 ### Private CI tool IPC (#474)
 
-`GET` and `POST /api/v1/tools/ci-wait` belong to a separate, chained, typed Hono family on
+`GET /api/v1/tools/ci-wait` (and, until hearsay-tools/cezarion#1236, its `POST`) belong to a separate, chained, typed Hono family on
 local IPC (Unix-domain socket / Windows named pipe), not the cockpit server's
 route table. It has no `/p/:projectId` alias and must never become an unauthenticated
 network route. Middleware validates the strict shared `CiWaitRequest`; a
@@ -157,8 +157,8 @@ memory-only capability determines project, run and session generation. No caller
 run ID or path is accepted. `CEZ_TOOL_TOKEN` / `CEZ_TOOL_SOCKET` are internal
 provisioned environment values, not authored configuration or delegation grants.
 The MCP tool name `cezar_wait_for_ci` and its default 1,800-second timeout (range
-1–7,200) are model-facing compatibility surfaces, deprecated since
-hearsay-tools/cezarion#1233 (see below). Preserve user MCP configuration
+1–7,200) were model-facing compatibility surfaces, deprecated since
+hearsay-tools/cezarion#1233 and removed in hearsay-tools/cezarion#1236 (see below). Preserve user MCP configuration
 and explicit denials when provisioning a session.
 
 Additive for #781 (live preview v1): `POST /api/v1/tools/preview-serve` joins the same
@@ -198,11 +198,20 @@ server. Their names, the `kind` values, the timer range (60–7,200 seconds, `no
 characters) and the CI timeout default and range are model-facing compatibility surfaces.
 
 **Deprecated (hearsay-tools/cezarion#1233):** `cezar_wait_for_ci` and
-`GET`/`POST /api/v1/tools/ci-wait` keep working with an unchanged receipt, and a
-registration through them opens a `ci` entry in the same wait list. The tool's description
-now points to `cezar_wait`, and the server instructions no longer suggest it. Phase 4
-(hearsay-tools/cezarion#1236) removes the tool and its route, and records the break and
-its migration (call `cezar_wait` with `kind: "ci"`) here.
+`GET`/`POST /api/v1/tools/ci-wait` kept working with an unchanged receipt, and a
+registration through them opened a `ci` entry in the same wait list. The tool's description
+pointed to `cezar_wait`, and the server instructions no longer suggested it.
+
+**Breaking, phase 4b (hearsay-tools/cezarion#1236):** the MCP tool `cezar_wait_for_ci` and
+`POST /api/v1/tools/ci-wait` are removed. No runner lists or admits the tool; a call to it is
+an unknown tool, and the POST answers 404. Migration: call `cezar_wait` with `kind: "ci"`
+(the same `pr` and `timeout_seconds`, with the same bounds and default). The answer shape
+differs: the removed tool answered the `CiWaitReceipt` (`{ waitId, prUrl, repository,
+prNumber, headSha, registeredAt, deadline, phase }`, refusals as `{ code, message }` with
+`503`), while `cezar_wait` answers the `CezarWaitAnswer` (`{ ok: true, wait_id, kind,
+deadline, open_waits }` or `{ ok: false, code, message, open_waits? }`, always `200`). The
+authenticated `GET /api/v1/tools/ci-wait` stays: it holds the adapter's lifetime connection,
+and its path is historical. Stored wait entries with `via: 'cezar_wait_for_ci'` still parse.
 
 Additive for hearsay-tools/cezarion#1234 (unified waits, phase 2): `POST /api/v1/tools/ask` joins
 the private family, behind the same bearer capability and a 16 KiB body limit. Middleware

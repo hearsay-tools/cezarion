@@ -2,38 +2,9 @@ import { request } from 'node:http';
 import { previewStopResult } from '../preview/registration.ts';
 import { previewRefusal } from './errors.ts';
 import { cezarAskAnswerSchema, cezarCancelWaitAnswerSchema, cezarDoneAnswerSchema, cezarWaitAnswerSchema, type CezarAskAnswer, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarWaitAnswer } from '@open-mercato/cezar-contract/waits';
-import { ciWaitRequestSchema, ciWaitReceiptSchema, ciWaitErrorSchema, type CiWaitReceipt } from '@open-mercato/cezar-contract/ci-wait';
 import { previewServeResultSchema, previewStopResultSchema, type PreviewStopResult, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 
 const UNAVAILABLE = 'CI tool unavailable: the owning session is closed or the private IPC connection failed.';
-export async function callCiWait(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<CiWaitReceipt> {
-  const parsed = ciWaitRequestSchema.safeParse(input);
-  if (!parsed.success) throw new Error('Invalid CI wait arguments: provide a GitHub PR URL and optional timeout_seconds (1–7200).');
-  const socketPath = env.CEZ_TOOL_SOCKET; const token = env.CEZ_TOOL_TOKEN;
-  if (!socketPath || !token) throw new Error(UNAVAILABLE);
-  return new Promise((resolve, reject) => {
-    const req = request({ socketPath, path: '/api/v1/tools/ci-wait', method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } }, response => {
-      const chunks: Buffer[] = []; let bytes = 0;
-      response.on('data', (chunk: Buffer) => { bytes += chunk.length; if (bytes > 32768) req.destroy(new Error(UNAVAILABLE)); else chunks.push(chunk); });
-      response.on('error', () => reject(new Error(UNAVAILABLE)));
-      response.on('end', () => {
-        try {
-          const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-          if (response.statusCode !== 200) {
-            const error = ciWaitErrorSchema.safeParse(body);
-            reject(new Error(error.success ? `${error.data.code}: ${error.data.message}` : UNAVAILABLE));
-            return;
-          }
-          resolve(ciWaitReceiptSchema.parse(body));
-        } catch { reject(new Error(UNAVAILABLE)); }
-      });
-    });
-    req.setTimeout(15000, () => req.destroy(new Error(UNAVAILABLE)));
-    req.on('error', () => reject(new Error(UNAVAILABLE)));
-    req.end(JSON.stringify(parsed.data));
-  });
-}
-
 /**
  * #781: posts the arguments unparsed, so the server names the failing field in its hint. Every
  * transport failure, refusal or unreadable answer becomes the typed `unavailable` result; this
@@ -87,7 +58,10 @@ function callTool<T>(input: unknown, env: NodeJS.ProcessEnv, route: string, sche
   });
 }
 
-/** Controller pipe death (including SIGKILL) bounds the adapter's lifetime. */
+/**
+ * Controller pipe death (including SIGKILL) bounds the adapter's lifetime. The GET keeps its
+ * historical `ci-wait` path; the POST of the removed `cezar_wait_for_ci` (hearsay-tools/cezarion#1236) is gone.
+ */
 export function monitorCiOwner(onClose: () => void, env: NodeJS.ProcessEnv = process.env): () => void {
   let stopped = false;
   const close = () => { if (!stopped) { stopped = true; onClose(); } };

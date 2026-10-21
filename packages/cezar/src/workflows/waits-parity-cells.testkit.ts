@@ -388,24 +388,24 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         expect(store.readEvents(run.id).filter(event => event.type === 'user-message').map(event => event.text)).toContain(text);
       });
 
-      it(`${runner} U7 cezar_wait_for_ci, the monitoring line and ScheduleWakeup land in the same wait list`, async () => {
+      it(`${runner} U7 cezar_wait, the monitoring line and ScheduleWakeup land in the same wait list`, async () => {
         github();
         nativeWire(runner);
-        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait_for_ci', { pr }), runner });
-        await until(() => parkedOn(run.id, viaOf(run.id, 'cezar_wait_for_ci')));
-        expect(viaOf(run.id, 'cezar_wait_for_ci')).toMatchObject({ kind: 'ci', prUrl: pr });
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'ci', pr }), runner });
+        await until(() => parkedOn(run.id, viaOf(run.id, 'cezar_wait')));
+        expect(viaOf(run.id, 'cezar_wait')).toMatchObject({ kind: 'ci', prUrl: pr });
         let turns = turnEnds(run.id);
         expect(manager.sendMessage(run.id, [{ type: 'text', text: messagesPrompt(runner, ['Still waiting for CI.\nCEZ:MONITORING']) }])).toBe(true);
         await until(() => turnEnds(run.id) > turns && parkedOn(run.id, viaOf(run.id, 'monitoring-line')));
         // The default five-minute interval, beside the CI wait it does not replace.
         expect(viaOf(run.id, 'monitoring-line')).toMatchObject({ kind: 'timer', seconds: 300 });
-        expect(viaOf(run.id, 'cezar_wait_for_ci')?.phase).toBe('open');
+        expect(viaOf(run.id, 'cezar_wait')?.phase).toBe('open');
         const scheduler = { type: 'tool-call', id: 'toolu_1', tool: 'ScheduleWakeup', input: { delaySeconds: 120 } } as const;
         if (exemptionFor('U7', runner)) {
           // capability-absent: the same tool name on this wire is not a scheduler.
           expect(exemptionFor('U7', runner)?.reason).toBe('native scheduler tool exists only on the Claude wire');
           expect(claudeScheduleWakeupDelay(scheduler, runner)).toBeUndefined();
-          expect(store.getRun(run.id)?.waits?.map(wait => wait.via).sort()).toEqual(['cezar_wait_for_ci', 'monitoring-line']);
+          expect(store.getRun(run.id)?.waits?.map(wait => wait.via).sort()).toEqual(['cezar_wait', 'monitoring-line']);
           return;
         }
         expect(claudeScheduleWakeupDelay(scheduler, runner)).toBe(120);
@@ -413,7 +413,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:schedule-wakeup:120' }])).toBe(true);
         await until(() => turnEnds(run.id) > turns && parkedOn(run.id, viaOf(run.id, 'schedule-wakeup')));
         expect(viaOf(run.id, 'schedule-wakeup')).toMatchObject({ kind: 'timer', seconds: 120 });
-        expect(store.getRun(run.id)?.waits?.map(wait => wait.via).sort()).toEqual(['cezar_wait_for_ci', 'monitoring-line', 'schedule-wakeup']);
+        expect(store.getRun(run.id)?.waits?.map(wait => wait.via).sort()).toEqual(['cezar_wait', 'monitoring-line', 'schedule-wakeup']);
       });
 
       for (const kind of ['ci', 'timer'] as const) {

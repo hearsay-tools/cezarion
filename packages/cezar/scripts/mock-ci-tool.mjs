@@ -7,7 +7,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 export async function probeCiTool(backend, wire, pr = process.env.CEZ_MOCK_CI_PR) {
   if (!pr) return;
-  return probeCezarTool(backend, wire, 'cezar_wait_for_ci', { pr });
+  return probeCezarTool(backend, wire, 'cezar_wait', { kind: 'ci', pr });
 }
 
 // Calls one cezar tool the way the real harness would: through the wired MCP server (or Pi/OMP extension).

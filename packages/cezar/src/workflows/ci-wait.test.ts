@@ -43,7 +43,7 @@ function github() {
 
 async function register(id: string) {
   const state = (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(id)!;
-  return timed(await manager.registerCiWait(id, { pr, timeout_seconds: 30 }, state.ciGeneration));
+  return timed(await manager.registerWait(id, { kind: 'ci', pr, timeout_seconds: 30 }, 'cezar_wait', state.ciGeneration));
 }
 
 describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () => {
@@ -52,7 +52,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
 
   it('rejects registration outside an active run without writing a receipt', async () => {
     github();
-    await expect(Promise.resolve().then(() => manager.registerCiWait('absent', { pr, timeout_seconds: 30 }, 'old')))
+    await expect(Promise.resolve().then(() => manager.registerWait('absent', { kind: 'ci', pr, timeout_seconds: 30 }, 'cezar_wait', 'old')))
       .rejects.toMatchObject({ code: 'run_missing' });
     expect(store.listRuns()).toEqual([]);
   });

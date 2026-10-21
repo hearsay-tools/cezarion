@@ -37,7 +37,7 @@ function active(id: string) {
   return (manager as unknown as { active: Map<string, { session: AgentSession; ciGeneration: string }> }).active.get(id);
 }
 function register(id: string): Promise<Wait> {
-  return manager.registerCiWait(id, { pr: identity.prUrl, timeout_seconds: 30 }, active(id)!.ciGeneration);
+  return manager.registerWait(id, { kind: 'ci', pr: identity.prUrl, timeout_seconds: 30 }, 'cezar_wait', active(id)!.ciGeneration);
 }
 
 async function ownedChain(runner: RunnerId, workflow: WorkflowDef) {
