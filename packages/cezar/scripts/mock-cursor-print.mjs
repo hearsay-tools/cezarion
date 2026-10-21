@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Load only when configured: ordinary mock turns retain their event-loop ordering.
+const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
+  : (await import('./mock-failure-control.mjs')).readFailureControl();
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 // Publish a pid atomically (temporary sibling, then rename): a test reading it sees no
 // file or a whole pid, never the empty file whose Number() is 0 (hearsay-tools/cezarion#953).
@@ -130,7 +133,9 @@ if (mode === 'native-question') {
     tool_call: { askQuestionToolCall: { args, result: { rejected: { reason: 'Questions skipped by the user, continue with the information you already have' } } } } });
   finish('I could not ask the question.'); process.exit(0);
 }
-if (mode === 'provider-error') {
+const selectedFailure = failureControl?.failureFor(prompt);
+const nativeFailure = selectedFailure instanceof Promise ? await selectedFailure : selectedFailure;
+if (failureControl ? nativeFailure === 'provider' : mode === 'provider-error') {
   result('RetriableError: provider unavailable', true);
   process.exit(0);
 }
@@ -209,7 +214,7 @@ if (prompt.includes('mock:ask-snapshot')) {
 }
 if (prompt.includes('mock:ask-prose')) { finish('Use `CEZ:ASK {"questions":[]}` in your reply.\n> CEZ:ASK {not valid json'); process.exit(0); }
 if (prompt.includes('mock:ask-bad')) { finish('Malformed question skipped.'); process.exit(0); }
-if (prompt.includes('mock:provider-error')) { result('RetriableError: provider unavailable', true); process.exit(0); }
+if (!failureControl && prompt.includes('mock:provider-error')) { result('RetriableError: provider unavailable', true); process.exit(0); }
 if (prompt.includes('mock:split-text')) {
   const text = 'parity split text\nCEZ:MONITORING'; assistant(text); result(text); process.exit(0);
 }

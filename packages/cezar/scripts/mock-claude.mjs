@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Load only when configured: ordinary mock turns retain their event-loop ordering.
+const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
+  : (await import('./mock-failure-control.mjs')).readFailureControl(['provider', 'usage-limit', 'unread']);
 // Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
 import { spawn as watchdogSpawn } from 'node:child_process';
 import { closeSync as watchdogCloseInput, renameSync as watchdogRename, writeFileSync as watchdogWrite } from 'node:fs';
@@ -483,7 +486,10 @@ async function respond(userText, imageCount, uuid) {
   // Mirrors the real Claude Code 2.1.148 revoked-token envelope: the CLI puts
   // the credential failure in an `is_error` result even though its subtype is
   // `success`, rather than emitting a dedicated error frame.
-  if (userText.includes('mock:auth-error')) {
+  const selectedFailure = failureControl?.failureFor(userText);
+  const nativeFailure = selectedFailure instanceof Promise ? await selectedFailure : selectedFailure;
+  if (nativeFailure === 'unread') process.exit(1);
+  if (failureControl?.failure === 'provider' ? nativeFailure === 'provider' : userText.includes('mock:auth-error')) {
     emit({
       type: 'result',
       subtype: 'success',
@@ -501,7 +507,7 @@ async function respond(userText, imageCount, uuid) {
   // (spec 2026-08-03-auto-resume-after-usage-limit) reachable under CEZ_DRY_RUN=1 for QA and
   // the e2e smoke. `CEZ_MOCK_LIMIT_RESET_SECONDS` moves the reset instant (default 60 s out),
   // so a dry run can actually watch the resume fire instead of reading about it.
-  if (userText.includes('mock:limit')) {
+  if (failureControl?.failure === 'usage-limit' ? nativeFailure === 'usage-limit' : userText.includes('mock:limit')) {
     const configured = Number(process.env.CEZ_MOCK_LIMIT_RESET_SECONDS ?? '60');
     const seconds = Number.isFinite(configured) ? configured : 60;
     emit({

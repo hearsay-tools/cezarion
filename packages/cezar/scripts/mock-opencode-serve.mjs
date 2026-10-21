@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Load only when configured: ordinary mock turns retain their event-loop ordering.
+const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
+  : (await import('./mock-failure-control.mjs')).readFailureControl();
 // Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
 import { spawn as watchdogSpawn } from 'node:child_process';
 import { renameSync as watchdogRename, writeFileSync as watchdogWrite } from 'node:fs';
@@ -667,7 +670,9 @@ const server = createServer((req, res) => {
         setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
         return;
       }
-      if (body.includes('mock:provider-error')) {
+      const selectedFailure = failureControl?.failureFor(body);
+      const nativeFailure = selectedFailure instanceof Promise ? await selectedFailure : selectedFailure;
+      if (failureControl ? nativeFailure === 'provider' : body.includes('mock:provider-error')) {
         // The session-level error frame, wire shape copied verbatim from
         // `__fixtures__/opencode/session-error.ndjson`. #53: a bare upstream
         // rejection used to read like a missing executable, and the run parked
