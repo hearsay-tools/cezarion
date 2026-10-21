@@ -17,7 +17,7 @@ let coordinator: ReturnType<typeof createLiveCoordinator>
 beforeEach(() => {
   vi.useFakeTimers(); Worker.all = []
   vi.stubGlobal('SharedWorker', Worker)
-  vi.stubGlobal('fetch', vi.fn(async path => new Response(JSON.stringify(String(path).endsWith('/health') ? { bootProject: 'boot', capabilities: { localHandoff: true, followups: true, singleProject: false, automations: false, preview: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true } } : { generation: 'one', results: [] }))))
+  vi.stubGlobal('fetch', vi.fn(async path => new Response(JSON.stringify(String(path).endsWith('/health') ? { bootProject: 'boot', capabilities: { localHandoff: true, followups: true, singleProject: false, automations: false, preview: false, voice: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true } } : { generation: 'one', results: [] }))))
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
   coordinator = createLiveCoordinator()
 })

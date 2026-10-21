@@ -208,6 +208,7 @@ describe('resolveCapabilities — automations (#801)', () => {
     expect(resolveCapabilities({ CEZ_AUTOMATIONS: '1' })).toMatchObject({
       automations: true,
       preview: false,
+      voice: false,
       followups: false,
       singleProject: false,
     });
