@@ -10,7 +10,7 @@ import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.t
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
-import { collect, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { checkpoint, collect, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
@@ -242,12 +242,59 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       });
 
       it('registers every criterion', () => {
-        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U25']);
+        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U26', 'U25']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
     }
 
     for (const runner of runnersFor('base')) {
+      for (const tools of [false, true]) {
+        it(`${runner} U26 footer capability follows provisioning on opening, live delivery, Continue and no-session recovery (${tools ? 'tools' : 'markers'})`, async () => {
+          nativeWire(runner);
+          // Only tool availability is controlled; every prompt crosses the real native runner.
+          const capability = () => {
+            if (!tools) vi.spyOn((manager as unknown as { ciResources: { controller(): Promise<unknown> } }).ciResources, 'controller').mockResolvedValue(undefined);
+          };
+          capability();
+          const task = `${HARNESS_ADAPTERS[runner].scenarios.baseline!} footer-opening`;
+          const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task });
+          const timer: Wait = { id: randomUUID(), kind: 'timer', source: 'agent', via: 'monitoring-line', phase: 'open',
+            turnId: 'seed', seconds: 7200, registeredAt: new Date().toISOString(), deadline: new Date(Date.now() + 7_200_000).toISOString() };
+          // Persist before the asynchronous opening launch, as recovery/queued work can leave it.
+          store.updateRun(run.id, { waits: [timer] });
+          const footerOf = (text: string) => {
+            const footer = text.slice(text.lastIndexOf('Still open:'));
+            expect(footer).toContain(`Still open: timer ${timer.id} at ${timer.deadline}.`);
+            if (tools) expect(footer).toContain('Call cezar_cancel_wait for any you no longer need.');
+            else expect(footer).not.toMatch(/cezar_\w+/);
+          };
+          await until(() => parkedOn(run.id, waitOfKind(run.id, 'timer')));
+          footerOf(prompted(runner, 'footer-opening').at(-1)!);
+          const turns = turnEnds(run.id);
+          expect(manager.sendMessage(run.id, [{ type: 'text', text: 'footer-human-message' }])).toBe(true);
+          await until(() => prompted(runner, 'footer-human-message').length > 0 && turnEnds(run.id) > turns && store.getRun(run.id)?.status === 'waiting');
+          footerOf(prompted(runner, 'footer-human-message').at(-1)!);
+          const handlers = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+          const registered = await handlers.registerWait({ kind: 'timer', seconds: 60, note: 'footer-agent-wake' }, 'cezar_wait', new AbortController().signal);
+          if (!('wait' in registered)) throw Error('registration refused');
+          fireTimer(registered.wait.id);
+          await until(() => settled(run.id, registered.wait.id)?.phase === 'delivered' && prompted(runner, 'footer-agent-wake').length > 0 && store.getRun(run.id)?.status === 'waiting');
+          footerOf(prompted(runner, 'footer-agent-wake').at(-1)!);
+          engine().active.get(run.id)!.session.end();
+          await until(() => !manager.isActive(run.id));
+          expect(manager.continueRun(run.id, { text: 'footer-continue' }).ok).toBe(true);
+          await until(() => prompted(runner, 'footer-continue').length > 0 && store.getRun(run.id)?.status === 'waiting');
+          footerOf(prompted(runner, 'footer-continue').at(-1)!);
+          await restart();
+          capability();
+          expect(manager.isActive(run.id)).toBe(false);
+          expect(manager.continueRun(run.id, { text: 'footer-after-recovery' }).ok).toBe(true);
+          await until(() => prompted(runner, 'footer-after-recovery').length > 0 && store.getRun(run.id)?.status === 'waiting');
+          footerOf(prompted(runner, 'footer-after-recovery').at(-1)!);
+          expect(store.getRun(run.id)?.waits).toEqual([timer]);
+        });
+      }
+
       it(`${runner} U1 ci and timer register through cezar_wait on the native wire, park, and wake with their result`, async () => {
         const external = github();
         nativeWire(runner);
@@ -376,23 +423,33 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           nativeWire(runner);
           expect(semaphore.maxParallel()).toBe(1);
           const request = kind === 'ci' ? { kind, pr } : { kind, seconds: 60, note: 'u8' };
+          // These live mock servers must not overwrite each other's session JSON. U8 never
+          // restarts either server; keep their shared args file for native prompt assertions.
+          if (runner === 'opencode') process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = join(root, 'u8-parked-sessions.json');
           const parked = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', request), runner });
+          checkpoint(`u8-parked-waiting:${parked.id}`);
           await until(() => parkedOn(parked.id, waitOfKind(parked.id, kind)));
           const wait = waitOfKind(parked.id, kind)!;
           // The only regular slot goes to a turn held open until this test releases it.
           const release = join(root, 'u8-release');
           process.env.CEZ_MOCK_RELEASE_FILE = release;
+          // parkedOn above proves the first child already inherited its own store path.
+          if (runner === 'opencode') process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = join(root, 'u8-blocker-sessions.json');
           const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-gated']!, runner });
           try {
+            checkpoint(`u8-blocker-started:${blocker.id}`);
             await until(() => store.readEvents(blocker.id).some(event => event.type === 'turn.started'));
             const queue = (manager as unknown as { queue: string[] }).queue;
             const push = vi.spyOn(queue, 'push');
+            checkpoint('u8-wake-delivered');
             if (kind === 'ci') external.settle(); else fireTimer(wait.id);
             await until(() => settled(parked.id, wait.id)?.phase === 'delivered');
             expect(store.getRun(blocker.id)?.status).toBe('running');
             expect(push.mock.calls.flat()).not.toContain(parked.id);
           } finally { writeFileSync(release, ''); }
+          checkpoint('u8-blocker-waiting');
           await until(() => store.getRun(blocker.id)?.status === 'waiting');
+          checkpoint('u8-parked-waiting-after-wake');
           await until(() => store.getRun(parked.id)?.status === 'waiting' && !agentWaits(parked.id).length);
         });
       }
@@ -1905,54 +1962,67 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         });
 
         it(`${runner} U22r after a restart, a refusal queued for a closed session is delivered ${how}`, async () => {
-          if (variant === 'silent' && exemptionFor('U22s', runner)) {
-            expect(exemptionFor('U22s', runner)?.kind).toBe('capability-absent');
-            return;
-          }
-          if (variant === 'silent') silenceRefusals();
-          else process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
-          const { p, w } = await parentWithWorker(runner);
-          const refusal = `Workers are still live: ${w.id}.`;
-          const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
-          // The disk as the refusal was queued and charged, before any session took it: a crash there.
-          let disk: ReturnType<typeof readPersistedRuns> | undefined, events: Map<string, string> | undefined;
-          const capture = ({ runId, event }: { runId: string; event: { type: string; message?: unknown } }) => {
-            if (runId !== p.id || disk || event.type !== 'note' || !String(event.message).startsWith(COMPLETION_NUDGE_NOTE)) return;
-            events = eventCheckpoint();
-            disk = readPersistedRuns(join(root, '.ai/cezar'));
+          const exercise = async (releaseAck: () => void) => {
+            if (variant === 'silent' && exemptionFor('U22s', runner)) {
+              expect(exemptionFor('U22s', runner)?.kind).toBe('capability-absent');
+              return;
+            }
+            if (variant === 'silent') silenceRefusals();
+            else process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
+            const { p, w } = await parentWithWorker(runner);
+            const refusal = `Workers are still live: ${w.id}.`;
+            const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
+            // The disk as the refusal was queued and charged, before any session took it: a crash there.
+            let disk: ReturnType<typeof readPersistedRuns> | undefined, events: Map<string, string> | undefined;
+            const capture = ({ runId, event }: { runId: string; event: { type: string; message?: unknown } }) => {
+              if (runId !== p.id || disk || event.type !== 'note' || !String(event.message).startsWith(COMPLETION_NUDGE_NOTE)) return;
+              events = eventCheckpoint();
+              disk = readPersistedRuns(join(root, '.ai/cezar'));
+            };
+            store.on('event', capture);
+            engine().active.get(p.id)!.session.end();
+            await until(() => disk !== undefined);
+            store.off('event', capture);
+            let closes = variant === 'closing' ? 1 : 0;
+            const closeOnce = ({ runId, event }: { runId: string; event: { type: string } }) => {
+              if (runId !== p.id || event.type !== 'turn-end' || !closes || !refusals().some(input => !input.deliveredAt)) return;
+              closes--;
+              engine().active.get(p.id)?.session.end();
+            };
+            await restart(false, disk, events);
+            // The old manager may have reached a mock before it stopped: count from here.
+            const before = prompted(runner, refusal).length;
+            // Recovery reopens the run through the scheduler; its first turn end is a mock round trip away.
+            store.on('event', closeOnce);
+            onTestFinished(() => { store.off('event', closeOnce); });
+            if (variant === 'silent') silenceRefusals();
+            else retryAtOnce();
+            expect(refusals()).toEqual([expect.objectContaining({ source: 'lifecycle' })]);
+            if (variant === 'silent') {
+              await until(() => noReplyNotes(p.id).length === 1 && gated(p.id));
+              if (runner === 'opencode') expect(refusals()[0]!.deliveredAt).toBeUndefined();
+              expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'no-wait' })]);
+              expect(semaphore.busy()).toBe(0);
+              releaseAck();
+              // The reply bound can beat the native ACK. Its human gate alone does not prove
+              // delivery committed; the late ACK resumes wake bookkeeping and re-arms that bound.
+              checkpoint('u22r-refusal-delivered-and-reparked');
+              await until(() => refusals().some(input => !!input.deliveredAt) && gated(p.id));
+              expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'no-wait' })]);
+              expect(semaphore.busy()).toBe(0);
+            } else {
+              await until(() => prompted(runner, refusal).length > before && store.getRun(p.id)?.status === 'waiting' &&
+                (workerWaits(p.id)[0]?.phase === 'open' || humanOpen(p.id).some(wait => wait.via === 'completion')));
+              expect(closes).toBe(0);
+              expect(store.getRun(p.id)?.waitDeliveryFailures).toBeUndefined();
+            }
+            expect(prompted(runner, refusal).length - before).toBe(1);
+            expect(refusals()).toEqual([expect.objectContaining({ deliveredAt: expect.any(String) })]);
+            expect(nudgeNotes(p.id)).toHaveLength(1);
           };
-          store.on('event', capture);
-          engine().active.get(p.id)!.session.end();
-          await until(() => disk !== undefined);
-          store.off('event', capture);
-          let closes = variant === 'closing' ? 1 : 0;
-          const closeOnce = ({ runId, event }: { runId: string; event: { type: string } }) => {
-            if (runId !== p.id || event.type !== 'turn-end' || !closes || !refusals().some(input => !input.deliveredAt)) return;
-            closes--;
-            engine().active.get(p.id)?.session.end();
-          };
-          await restart(false, disk, events);
-          // The old manager may have reached a mock before it stopped: count from here.
-          const before = prompted(runner, refusal).length;
-          // Recovery reopens the run through the scheduler; its first turn end is a mock round trip away.
-          store.on('event', closeOnce);
-          onTestFinished(() => { store.off('event', closeOnce); });
-          if (variant === 'silent') silenceRefusals();
-          else retryAtOnce();
-          expect(refusals()).toEqual([expect.objectContaining({ source: 'lifecycle' })]);
-          if (variant === 'silent') {
-            await until(() => noReplyNotes(p.id).length === 1 && gated(p.id));
-            expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'no-wait' })]);
-            expect(semaphore.busy()).toBe(0);
-          } else {
-            await until(() => prompted(runner, refusal).length > before && store.getRun(p.id)?.status === 'waiting' &&
-              (workerWaits(p.id)[0]?.phase === 'open' || humanOpen(p.id).some(wait => wait.via === 'completion')));
-            expect(closes).toBe(0);
-            expect(store.getRun(p.id)?.waitDeliveryFailures).toBeUndefined();
-          }
-          expect(prompted(runner, refusal).length - before).toBe(1);
-          expect(refusals()).toEqual([expect.objectContaining({ deliveredAt: expect.any(String) })]);
-          expect(nudgeNotes(p.id)).toHaveLength(1);
+          if (runner === 'opencode' && variant === 'silent') {
+            await withDelayedCommand('opencode', exercise, 'mock:ack-only');
+          } else await exercise(() => {});
         });
       }
 

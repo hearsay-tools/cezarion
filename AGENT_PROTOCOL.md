@@ -14,6 +14,17 @@ in `packages/cezar/src/core/` cites those two by section; this file cites the co
 disagree, **the code wins** — the golden fixtures and the parity test are
 executable, the prose is not.
 
+**Editing runner prose.** Name a runner or backend when its wire matters, but
+never count them: write "every runner" or "the runner shards", never a number.
+A count goes stale when a runner is added. The guard `protocol and matrix prose
+name runners without a counted roster` in `packages/cezar/src/core/harness-parity.test.ts`
+refuses a counted roster in this file and in the harness-parity spec and test
+files. To run only that guard, from the repository root:
+
+```bash
+npm test -- packages/cezar/src/core/harness-parity.test.ts -t "counted roster"
+```
+
 The protocol has **two layers that ship together**:
 
 - **v1 `AgentEvent`** — the original flat stream. Persisted in old NDJSON

@@ -958,7 +958,17 @@ describe('task thread', () => {
     })()`
     type Sample = { state: string; overflow: number; statusCut: boolean | null; metaCut: string[]; usageKeep: string | null; summaryHeight: number; small: string[]; composer: { left: number; width: number }; transcript: { left: number; width: number } | null }
     browser.evaluate(`document.querySelector('${SESSION_ACTIVITY_SUMMARY}[aria-expanded="true"]')?.click()`)
+    const layoutSelectors = {
+      card: '[data-slot="run-activity-dock"]',
+      status: '[data-slot="run-activity-status"] .truncate',
+      keptMeta: '[data-slot="run-activity-meta-keep"]',
+      droppedMeta: '[data-slot="run-activity-meta-drop"]',
+      rows: '[data-slot="run-activity-dock"] button',
+      composer: '[data-slot="composer"]',
+      transcript: '[data-slot="thread-rows"]',
+    }
     const folded = waitForSettledSample<Sample>(browser, `(${sample}).state === 'collapsed' ? ${sample} : null`)
+    browser.recordLayout('folded', layoutSelectors)
     expect(folded.overflow).toBeLessThanOrEqual(0)
     expect(folded.statusCut).toBe(false)
     // One 44px summary; on a narrow phone its status may take a second line inside it.
@@ -969,6 +979,7 @@ describe('task thread', () => {
     openSessionActivityRow(browser, 'usage')
     openSessionActivityRow(browser, 'workflow')
     const expanded = waitForSettledSample<Sample>(browser, sample)
+    browser.recordLayout('expanded', layoutSelectors)
     expect(expanded.state).toBe('open')
     expect(expanded.overflow).toBeLessThanOrEqual(0)
     expect(expanded.metaCut).toEqual([])

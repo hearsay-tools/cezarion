@@ -68,6 +68,7 @@ export const WAIT_CRITERIA = [
   { id: 'U22r', scenario: 'baseline', name: 'after a restart, a refusal queued for a closed session is delivered within the nudge\'s reply bound and the closing sessions\' delivery retry' },
   { id: 'U22x', scenario: 'baseline', name: 'Stop retires a refusal a closed session still owes, and a Continue after it does not deliver it' },
   { id: 'U24', scenario: 'baseline', name: 'a worker\'s second no-wait turn end asks its parent, and the reply resumes it' },
+  { id: 'U26', scenario: 'baseline', name: 'footer capability follows provisioning on opening, live delivery, Continue and no-session recovery' },
   { id: 'U25', scenario: 'baseline', name: 'an automatic message supersedes a worker\'s fallback question' },
 ] as const;
 
