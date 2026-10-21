@@ -52,7 +52,7 @@ import { appendTurnText } from '../workflows/run.ts';
 import * as gitWorktree from '../git-worktree.ts';
 import { cleanupCheckpoint, seedSettledFamily } from '../workflows/delegation-reconcile.testkit.ts';
 import { supportsProfiles } from './agent-profiles.ts';
-import { plannedWorkflow, skillTaskSteps, type WorkflowDef } from '../workflows/types.ts';
+import { allowedToolsForStep, plannedWorkflow, skillTaskSteps, type WorkflowDef } from '../workflows/types.ts';
 import { workerWorkflowHash, type WorkerAccountBinding, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import {
   withOwnedInputRun,
@@ -2381,15 +2381,20 @@ describe('harness parity — AgentRunSpec support declarations', () => {
 // `cezar_preview_serve` and `cezar_preview_stop` are listed under `CEZ_PREVIEW=1` exactly.
 describe('harness parity — cezarTools list behind CEZ_PREVIEW', () => {
   const wait = { id: '11111111-1111-4111-8111-111111111111', generation: 'gen', turnId: 'turn', timeoutSeconds: 1800, prUrl: 'https://github.com/owner/repo/pull/1', repository: 'owner/repo', prNumber: 1, headSha: 'a'.repeat(40), registeredAt: '2026-09-22T00:00:00.000Z', deadline: '2026-09-22T00:30:00.000Z', phase: 'registered' as const };
-  for (const backend of RUNNER_IDS) for (const enabled of [true, false]) {
-    it(`${backend} R35 ${enabled ? 'exposes' : 'hides'} preview serve and stop with CEZ_PREVIEW ${enabled ? 'on' : 'off'}`, async () => {
+  // hearsay-tools/cezarion#1305: pi also runs the default list, which admits the tools through no allowlist.
+  const lists = (backend: RunnerId) => [
+    { label: '', allowedTools: ['Read'] },
+    ...(backend === 'pi' ? [{ label: ' on the default tool list', allowedTools: allowedToolsForStep(undefined, 'pi') }] : []),
+  ];
+  for (const backend of RUNNER_IDS) for (const enabled of [true, false]) for (const { label, allowedTools } of lists(backend)) {
+    it(`${backend} R35 ${enabled ? 'exposes' : 'hides'} preview serve and stop with CEZ_PREVIEW ${enabled ? 'on' : 'off'}${label}`, async () => {
       vi.stubEnv('CEZ_PREVIEW', enabled ? '1' : '');
       const { CiToolController } = await import('../ci-wait/controller.ts');
       const controller = await CiToolController.start();
       const dir = mkdtempSync(join(tmpdir(), 'cez-tools-list-'));
       try {
         const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'ci', source: 'agent', via: 'cezar_wait_for_ci', phase: 'open' } }), ask: async () => ({ ok: false, code: 'unavailable', message: 'none' }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', open_waits: [] }) });
-        const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, allowedTools: ['Read'], env: { ...session.env, CEZ_MOCK_ARGS_FILE: join(dir, 'wire'), CEZ_MOCK_CI_PR: wait.prUrl, CEZ_MOCK_CI_RESULT: join(dir, 'result'), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
+        const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, allowedTools, env: { ...session.env, CEZ_MOCK_ARGS_FILE: join(dir, 'wire'), CEZ_MOCK_CI_PR: wait.prUrl, CEZ_MOCK_CI_RESULT: join(dir, 'result'), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
         expect(obs.v1.filter((event) => event.type === 'error')).toEqual([]);
         const waits = ['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'];
         const expected = enabled ? [...waits, 'cezar_preview_serve', 'cezar_preview_stop'] : waits;
@@ -2399,7 +2404,9 @@ describe('harness parity — cezarTools list behind CEZ_PREVIEW', () => {
           const allowed = argv[argv.indexOf('--allowedTools') + 1]!.split(',');
           expect(allowed.filter((name) => name.startsWith(`mcp__${session.descriptor.name}__`))).toEqual(expected.map((name) => `mcp__${session.descriptor.name}__${name}`));
         }
-        if (backend === 'pi' || backend === 'omp') expect(argv[argv.indexOf('--tools') + 1]!.split(',').filter((name) => name.startsWith('cezar_'))).toEqual(expected);
+        // hearsay-tools/cezarion#1305: pi's default list sends no allowlist, so the extension's tools stay active.
+        if (backend === 'pi' && !argv.includes('--tools')) expect(argv).toContain('--no-builtin-tools');
+        else if (backend === 'pi' || backend === 'omp') expect(argv[argv.indexOf('--tools') + 1]!.split(',').filter((name) => name.startsWith('cezar_'))).toEqual(expected);
       } finally {
         vi.unstubAllEnvs();
         await controller.close();
