@@ -788,12 +788,6 @@
       "count": 1
     },
     {
-      "file": "runs/store-transcript-facts.test.ts",
-      "rule": "short-bound",
-      "site": "await expect.poll(() => reopened.heldIds(), { timeout: 5_000 }).toEqual([]);",
-      "count": 1
-    },
-    {
       "file": "runs/webhook.test.ts",
       "rule": "sleep",
       "site": "await new Promise((done) => setTimeout(done, 20));",
