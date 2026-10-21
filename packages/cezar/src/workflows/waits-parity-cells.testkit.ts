@@ -231,7 +231,7 @@ export function describeWaitParity(scope: RunnerId | 'once'): void {
       });
 
       it('registers every criterion', () => {
-        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U26', 'U25']);
+        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U26', 'U25']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
     }
@@ -386,16 +386,15 @@ export function describeWaitParity(scope: RunnerId | 'once'): void {
         expect(viaOf(run.id, 'cezar_wait_for_ci')).toMatchObject({ kind: 'ci', prUrl: pr });
         let turns = turnEnds(run.id);
         expect(manager.sendMessage(run.id, [{ type: 'text', text: messagesPrompt(runner, ['Still waiting for CI.\nCEZ:MONITORING']) }])).toBe(true);
-        await until(() => turnEnds(run.id) > turns && parkedOn(run.id, viaOf(run.id, 'monitoring-line')));
-        // The default five-minute interval, beside the CI wait it does not replace.
-        expect(viaOf(run.id, 'monitoring-line')).toMatchObject({ kind: 'timer', seconds: 300 });
+        await until(() => turnEnds(run.id) > turns && parkedOn(run.id, viaOf(run.id, 'cezar_wait_for_ci')));
+        expect(viaOf(run.id, 'monitoring-line')).toBeUndefined();
         expect(viaOf(run.id, 'cezar_wait_for_ci')?.phase).toBe('open');
         const scheduler = { type: 'tool-call', id: 'toolu_1', tool: 'ScheduleWakeup', input: { delaySeconds: 120 } } as const;
         if (exemptionFor('U7', runner)) {
           // capability-absent: the same tool name on this wire is not a scheduler.
           expect(exemptionFor('U7', runner)?.reason).toBe('native scheduler tool exists only on the Claude wire');
           expect(claudeScheduleWakeupDelay(scheduler, runner)).toBeUndefined();
-          expect(store.getRun(run.id)?.waits?.map(wait => wait.via).sort()).toEqual(['cezar_wait_for_ci', 'monitoring-line']);
+          expect(store.getRun(run.id)?.waits?.map(wait => wait.via).sort()).toEqual(['cezar_wait_for_ci']);
           return;
         }
         expect(claudeScheduleWakeupDelay(scheduler, runner)).toBe(120);
@@ -403,7 +402,63 @@ export function describeWaitParity(scope: RunnerId | 'once'): void {
         expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:schedule-wakeup:120' }])).toBe(true);
         await until(() => turnEnds(run.id) > turns && parkedOn(run.id, viaOf(run.id, 'schedule-wakeup')));
         expect(viaOf(run.id, 'schedule-wakeup')).toMatchObject({ kind: 'timer', seconds: 120 });
-        expect(store.getRun(run.id)?.waits?.map(wait => wait.via).sort()).toEqual(['cezar_wait_for_ci', 'monitoring-line', 'schedule-wakeup']);
+        expect(store.getRun(run.id)?.waits?.map(wait => wait.via).sort()).toEqual(['cezar_wait_for_ci', 'schedule-wakeup']);
+      });
+
+      // hearsay-tools/cezarion#1268: exercise the marker on each runner's native wire.
+      for (const kind of ['ci', 'timer', 'worker'] as const) {
+        it(`${runner} U7m the monitoring line adds no timer beside an open ${kind} wait`, async () => {
+          const external = github();
+          nativeWire(runner);
+          const family = kind === 'worker' ? await parentWithWorker(runner) : undefined;
+          const run = family?.p ?? manager.startRun(QUICK_TASK_WORKFLOW, {
+            task: toolCall('cezar_wait', kind === 'ci' ? { kind, pr } : { kind: 'timer', seconds: 600, note: 'u7m' }), runner,
+          });
+          if (family) await parentTurn(run.id, toolCall('cezar_wait', { kind: 'worker', worker_ids: [family.w.id], timeout_seconds: 600 }), () => workerWaits(run.id).length === 1);
+          await until(() => parkedOn(run.id, waitOfKind(run.id, kind)));
+          const wait = structuredClone(waitOfKind(run.id, kind)!);
+          const marker = messagesPrompt(runner, ['Still checking.\nCEZ:MONITORING']);
+          await parentTurn(run.id, marker, () => parkedOn(run.id, waitOfKind(run.id, kind)) === true);
+          expect(store.getRun(run.id)?.waits).toEqual([wait]);
+          expect(readPersistedRuns(join(root, '.ai/cezar')).find(row => row.id === run.id)?.waits).toEqual([wait]);
+          // An existing wait is still sufficient when automatic re-checks are disabled.
+          const interval = vi.spyOn(semaphore, 'monitoringWakeIntervalMinutes').mockReturnValue(null);
+          await parentTurn(run.id, marker, () => parkedOn(run.id, waitOfKind(run.id, kind)) === true);
+          expect(store.getRun(run.id)?.waits).toEqual([wait]);
+          expect(humanOpen(run.id)).toEqual([]);
+          interval.mockRestore();
+          const budget = vi.spyOn(manager as unknown as { automaticWakes(id: string): number }, 'automaticWakes').mockReturnValue(MAX_AUTO_CONTINUES);
+          await parentTurn(run.id, marker, () => parkedOn(run.id, waitOfKind(run.id, kind)) === true);
+          expect(store.getRun(run.id)?.waits).toEqual([wait]);
+          expect(humanOpen(run.id)).toEqual([]);
+          budget.mockRestore();
+          if (kind === 'timer') {
+            await restart();
+            expect(manager.isActive(run.id)).toBe(false);
+            expect(store.getRun(run.id)?.waits).toEqual([wait]);
+            fireTimer(wait.id);
+          } else if (family) fixtureUpdateRun(family.w.id, { status: 'done' });
+          else external.settle();
+          await until(() => settled(run.id, wait.id)?.phase === 'delivered');
+          expect(inputsFor(run.id, wait.id)).toHaveLength(1);
+          await until(() => store.getRun(run.id)?.status === 'waiting');
+        });
+      }
+
+      it(`${runner} U7f the monitoring line alone opens an identifiable timer and keeps its deadline`, async () => {
+        nativeWire(runner);
+        const marker = messagesPrompt(runner, ['Still checking.\nCEZ:MONITORING']);
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: marker, runner });
+        await until(() => parkedOn(run.id, viaOf(run.id, 'monitoring-line')));
+        const timer = structuredClone(viaOf(run.id, 'monitoring-line')!);
+        expect(timer).toMatchObject({ kind: 'timer', seconds: 300, note: 'Opened by CEZ:MONITORING.' });
+        await parentTurn(run.id, marker, () => parkedOn(run.id, viaOf(run.id, 'monitoring-line')) === true);
+        expect(store.getRun(run.id)?.waits).toEqual([timer]);
+        expect(readPersistedRuns(join(root, '.ai/cezar')).find(row => row.id === run.id)?.waits).toEqual([timer]);
+        fireTimer(timer.id);
+        await until(() => settled(run.id, timer.id)?.phase === 'delivered');
+        expect(inputsFor(run.id, timer.id)).toHaveLength(1);
+        await until(() => store.getRun(run.id)?.status === 'waiting');
       });
 
       for (const kind of ['ci', 'timer'] as const) {
