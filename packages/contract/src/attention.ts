@@ -134,6 +134,8 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
     !hasPendingHumanAsk && !run.hasPendingHumanAsk
     && (run.status === 'waiting' || run.status === 'queued')
     && run.delegation?.role !== 'invalid'
+    // A usage-limit hold waits for its appointment, not for a slot (phase 4a).
+    && !(run.status === 'waiting' && run.autoResumeAt !== undefined)
     // A worker wait owes its wake as a resolved list entry (hearsay-tools/cezarion#1235, #1301).
     && Array.isArray(run.waits) && run.waits.some((wait) => wait?.kind === 'worker' && wait.phase === 'resolved')
   ) {

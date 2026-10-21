@@ -94,6 +94,11 @@ describe('deriveAttention', () => {
     expect(deriveAttention(run({ status: 'waiting', autoResumeAt: '2026-10-21T15:00:00.000Z', waits: [human] })).label).toBe('needs you');
     expect(deriveAttention(run({ status: 'waiting', autoResumeAt: '2026-10-21T15:00:00.000Z', delegation: { role: 'root' }, waits: [workerEntry()] } as AttentionInput)).label).toBe('usage limit');
   });
+
+  it('a usage limit outranks a resolved worker wake, which waits for the appointment, not capacity', () => {
+    const record = { status: 'waiting', autoResumeAt: '2026-10-21T15:00:00.000Z', delegation: { role: 'root' }, waits: [workerEntry({ phase: 'resolved' })] } as AttentionInput;
+    expect(deriveAttention(record).label).toBe('usage limit');
+  });
 });
 
 /** A worker wait is a list entry (hearsay-tools/cezarion#1235), Cezar's completion wait included
