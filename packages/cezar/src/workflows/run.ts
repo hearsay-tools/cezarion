@@ -6601,13 +6601,15 @@ export class RunManager {
       return { ok: true };
     }
 
-    try { this.beginWorkerExecution(runId, !deferForCapacity); }
-    catch (error) { return { ok: false, error: admissionError(error, 'worker execution checkpoint unavailable') }; }
     // A human Continue of a run held for its usage-limit resume has no session to steer, so it
     // joins the line as a wake instead of starting at once: another run's known deadline on the
     // same account still holds it (hearsay-tools/cezarion#1236). It stays the human's own
     // continuation in every other way. `fireAutoResume` always defers, so this is never the resume.
     const toLine = deferForCapacity || onUsageLimitHold(run);
+    // A continuation bound for the line reserves its worker execution unadmitted, so the pump can
+    // admit it when it leaves; an admitted one with no session is refused by `canLeaveLine`.
+    try { this.beginWorkerExecution(runId, !toLine); }
+    catch (error) { return { ok: false, error: admissionError(error, 'worker execution checkpoint unavailable') }; }
     // Everything that could refuse this continuation has now passed, so a pending usage-limit
     // resume is superseded either way: this IS that resume (it re-stamps its own counter), or a
     // human got there first — and then the counter starts over, because the cap only exists to
