@@ -1,5 +1,6 @@
 // @vitest-environment node
 
+import { openHumanWait } from '@/test/run-summary-fixture'
 import { timerWait, workerWait } from '@/test/wait-fixtures'
 import { describe, expect, it } from 'vitest'
 
@@ -12,7 +13,8 @@ const root = { role: 'root', permissions: [], receipts: [] }
 
 /** One run that sits in each status, built from the real record shapes the dot reads. */
 const FIXTURES: Record<VoiceStatus, Partial<RunRecord>> = {
-  'needs-you': { status: 'waiting', hasPendingHumanAsk: true },
+  // A shown question: the open human wait the card raised (hearsay-tools/cezarion#1236).
+  'needs-you': { status: 'running', waits: [openHumanWait(3)] } as Partial<RunRecord>,
   working: { status: 'running' },
   finished: { status: 'done' },
   archived: { status: 'done', archived: true },
@@ -28,7 +30,8 @@ const FIXTURES: Record<VoiceStatus, Partial<RunRecord>> = {
     waits: [workerWait({ phase: 'resolved' })],
   } as Partial<RunRecord>,
   queued: { status: 'queued' },
-  scheduled: { status: 'failed', autoResumeAt: '2026-07-14T12:00:00.000Z' },
+  // A usage-limit hold: `waiting` with a resume booked (hearsay-tools/cezarion#1236).
+  scheduled: { status: 'waiting', autoResumeAt: '2026-07-14T12:00:00.000Z' },
   'waiting-on-workers': { status: 'waiting', delegation: root, waits: [workerWait()] } as Partial<RunRecord>,
   done: { status: 'done' },
   cancelled: { status: 'cancelled' },

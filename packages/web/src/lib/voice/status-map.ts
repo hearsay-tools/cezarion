@@ -38,8 +38,11 @@ export function voiceStatusMatches(status: VoiceStatus, run: RunSummary): boolea
     case 'monitoring':
     case 'waiting-for-capacity':
     case 'queued':
-    case 'scheduled':
       return labelIs(run, status)
+    // The dot names a booked resume after its cause (hearsay-tools/cezarion#1236); the status id
+    // keeps the sidebar's word for it (`SCHEDULED_WEIGHT` in `lib/task-groups.ts`).
+    case 'scheduled':
+      return deriveAttention(run).label === 'usage limit'
     case 'waiting-on-workers':
       return deriveAttention(run).label.startsWith('waiting on ')
     case 'done':
