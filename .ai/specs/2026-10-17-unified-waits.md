@@ -1094,7 +1094,22 @@ Calls made by the agent:
 - **The held run is never woken by its own waits.** They stay open, resolve and stay owed; the
   resume's opening turn delivers them, as a scheduler continuation delivers results.
 - **A human message or Continue during the hold** is the user's own Continue: it retires the
-  appointment and starts at once. A human Continue skips the line, as human input always has.
+  appointment and joins the line as a wake (origin human, budget reset, human waits answered). It
+  starts at once when a slot is free and no other run holds its account; another run's known
+  deadline on that account keeps it queued until the hold lifts. Human input into a live session
+  still skips the line.
+- **Holds are keyed by the execution account** (`workflows/execution-account.ts`): a live
+  session's step settings, a queued continuation's backend, else the step that holds the run's
+  latest session, else the record's `runner` and `agentProfile`. A mixed-runner step is held by
+  the account it ran on, on both sides of the hold.
+- **A held wake is not advertised.** `oldestWakeAt()` leaves out a wake its account holds, so
+  another project's eligible wake gets a freed slot first.
+- **A withdrawal is committed before it is reported** (`RunStore.commitAutoResumeWithdrawal`):
+  status, `finishedAt` and the cleared appointment are written at once, then the timer goes and
+  the note is appended.
+- **The cockpit treats a hold as a closed session** (`isRunActive(run)`): Continue with its
+  runner and account pickers, Archive, Delete and Don't resume; Stop only when it holds wait
+  results; no paused hint and no Finish.
 - **Stop during the hold** keeps the behaviour of the scheduled `failed` run: with open waits,
   Stop discards them, withdraws the resume and the run ends `failed`; with none, Stop is refused.
 - **Restart.** Recovery re-arms the held run's open waits and leaves the resume to
@@ -1116,7 +1131,7 @@ they list. One row per exit.
 | State | Trigger | Who or what fires it | Behavior at shipped defaults |
 | --- | --- | --- | --- |
 | `waiting` + `autoResumeAt` (usage limit, no session, no slot) | The resume time passes | The auto-resume timer (`fireAutoResume`), re-armed by `reconcileAutoResumes` after a restart | A resume continuation joins the line as a wake; it starts when a slot is free (a resume passes an `inFlight` hold); its opening turn delivers every resolved wait |
-| | A human message or Continue | The user | The appointment is retired; the continuation starts now |
+| | A human message or Continue | The user | The appointment is retired; the continuation joins the line as a wake and starts when a slot is free and no other run holds the account |
 | | Per-task cancel (`DELETE /runs/:id/auto-resume`) or archive | The user | Settles `failed` with the kept error and the note it has today |
 | | Auto-resume switched off | The user (settings), seen by the next pump | Settles `failed`, note `automatic resume cancelled — auto-resume is switched off` |
 | | The window was missed by over a day | `reconcileAutoResumes` | Settles `failed` with the expiry note |
