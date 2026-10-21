@@ -8,6 +8,7 @@ import { buildChildEnv } from './agent-env.ts';
 import { buildClaudeArgs } from './claude-cli-runner.ts';
 import { buildPiArgs } from './pi-runner.ts';
 import { ciOpenCodeEnv } from '../ci-wait/injection.ts';
+import { allowedToolsForStep } from '../workflows/types.ts';
 import { askToolDefinition, cancelWaitToolDefinition, ciToolDefinition, cezarServerInstructions, cezarTools, waitToolDefinition } from '../ci-wait/tools.ts';
 
 const descriptor = { name: 'cezar_ci_test', command: process.execPath, args: ['/installed/dist/ci-wait/mcp.js'] };
@@ -59,6 +60,10 @@ describe('wait tool definitions', () => {
     expect(claude[claude.indexOf('--allowedTools') + 1]!.split(',')).toContain('mcp__cezar_ci_test__cezar_wait_for_ci');
     const pi = buildPiArgs({ ...spec, allowedTools: ['Read'] });
     expect(pi[pi.indexOf('--tools') + 1]!.split(',')).toContain('cezar_wait_for_ci');
+    // hearsay-tools/cezarion#1305: the default list sends no allowlist, so the CI extension's tools stay active.
+    const piDefault = buildPiArgs({ ...spec, allowedTools: allowedToolsForStep(undefined, 'pi') });
+    expect(piDefault).not.toContain('--tools');
+    expect(piDefault.some(arg => arg.endsWith('/pi-ci-wait.mjs'))).toBe(true);
   });
 });
 
@@ -83,6 +88,20 @@ describe('CI tool injection', () => {
     expect(args.filter(value => value === '--extension')).toHaveLength(3);
     expect(args).not.toContain('--no-extensions');
     expect(args[args.indexOf('--tools') + 1]).toBe('read,cezar_wait_for_ci,cezar_wait,cezar_ask,cezar_cancel_wait,cezar_done');
+  });
+  it('Pi keeps the CI extension tools active on the default list by sending no allowlist (hearsay-tools/cezarion#1305)', () => {
+    const args = buildPiArgs({ ...spec, allowedTools: allowedToolsForStep(undefined, 'pi') });
+    expect(args.filter(value => value === '--extension')).toHaveLength(4);
+    expect(args).not.toContain('--no-extensions');
+    expect(args).not.toContain('--tools');
+    expect(args).toContain('--no-builtin-tools');
+    // pi activates an extension's tools on registration; naming them again is not needed.
+    expect(args[args.indexOf('--cezar-builtin-tools') + 1]!.split(',').filter(name => name.startsWith('cezar_'))).toEqual([]);
+  });
+  it('Pi admits only the cezar tools when an empty list carries them (hearsay-tools/cezarion#1305)', () => {
+    const args = buildPiArgs({ ...spec, allowedTools: [] });
+    expect(args).not.toContain('--no-tools');
+    expect(args[args.indexOf('--tools') + 1]).toBe('cezar_wait_for_ci,cezar_wait,cezar_ask,cezar_cancel_wait,cezar_done');
   });
   it('OpenCode merges runtime config without overwriting servers or permissions', () => {
     const supplied = { mcp: { existing: { type: 'remote', url: 'https://example.org/mcp' } }, permission: { '*': 'deny' } };
@@ -200,8 +219,18 @@ describe('U0 wait tools on every native wire', () => {
     { tool: 'cezar_done', args: {}, resume: false },
     { tool: 'cezar_done', args: {}, resume: true },
   ];
-  for (const backend of RUNNER_IDS) for (const { tool, args, resume } of cases) {
-    it(`${backend} U0 calls ${tool} through its native wire on ${resume ? 'resume' : 'fresh'}`, async () => {
+  // hearsay-tools/cezarion#1305: pi admits the cezar tools by name on a narrowed list, through no
+  // allowlist on the default list, and as the only names on an empty one.
+  const piLists = [
+    { label: 'the default tool list', allowedTools: allowedToolsForStep(undefined, 'pi') },
+    { label: 'an empty tool list', allowedTools: [] as string[] },
+  ];
+  const drives = [
+    ...RUNNER_IDS.flatMap(backend => cases.map(entry => ({ backend, ...entry, label: '', allowedTools: ['Read'] }))),
+    ...piLists.flatMap(list => [false, true].map(resume => ({ backend: 'pi' as const, ...cases[0]!, resume, ...list, label: ` with ${list.label}` }))),
+  ];
+  for (const { backend, tool, args, resume, label, allowedTools } of drives) {
+    it(`${backend} U0 calls ${tool} through its native wire on ${resume ? 'resume' : 'fresh'}${label}`, async () => {
       const { CiToolController } = await import('../ci-wait/controller.ts');
       const controller = await CiToolController.start();
       const dir = mkdtempSync(join(tmpdir(), 'cez-wait-call-'));
@@ -219,7 +248,7 @@ describe('U0 wait tools on every native wire', () => {
         const resultFile = join(dir, 'result');
         const file = join(dir, 'wire');
         if (backend === 'opencode' && resume) seedOpencodeMockSession(file);
-        const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, resume, allowedTools: ['Read'], restrictNativeDelegation: true, userPrompt: call(tool, args), env: { ...session.env, CEZ_MOCK_ARGS_FILE: file, CEZ_MOCK_CI_RESULT: resultFile, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
+        const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, resume, allowedTools, restrictNativeDelegation: true, userPrompt: call(tool, args), env: { ...session.env, CEZ_MOCK_ARGS_FILE: file, CEZ_MOCK_CI_RESULT: resultFile, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
         expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
         const result = JSON.parse(readFileSync(resultFile, 'utf8'));
         expect(result.names).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
@@ -245,7 +274,8 @@ describe('U0 wait tools on every native wire', () => {
         const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
         const argv: string[] | undefined = Array.isArray(rows[0]) ? rows[0] : undefined;
         if (backend === 'claude') expect(argv![argv!.indexOf('--allowedTools') + 1]!.split(',')).toEqual(expect.arrayContaining(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'].map(name => `mcp__${session.descriptor.name}__${name}`)));
-        if (backend === 'pi' || backend === 'omp') expect(argv![argv!.indexOf('--tools') + 1]!.split(',')).toEqual(expect.arrayContaining(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']));
+        if (backend === 'pi' && !argv!.includes('--tools')) expect(argv).toContain('--no-builtin-tools');
+        else if (backend === 'pi' || backend === 'omp') expect(argv![argv!.indexOf('--tools') + 1]!.split(',')).toEqual(expect.arrayContaining(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']));
         if (backend === 'cursor') expect(argv![argv!.indexOf('--allowed-tools') + 1]!.split(',')).toContain('mcp_tool_call');
         expect(readFileSync(file, 'utf8')).not.toContain(session.env.CEZ_TOOL_TOKEN);
       } finally { await controller.close(); rmSync(dir, { recursive: true, force: true }); }
