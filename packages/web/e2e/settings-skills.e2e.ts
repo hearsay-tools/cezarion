@@ -112,9 +112,13 @@ describe('settings → skills against the live dry-run server', () => {
         const selected = browser.evaluate(contrastSampleExpression(selectedSelector)) as ContrastSample
         expect(selected.ratio, `${variant.id} selected: ${selected.foreground} on ${selected.background}`).toBeGreaterThanOrEqual(4.5)
 
-        // The update card heads the list (#1408); with its upgrade-notes callout shown, the row
-        // starts under the 360×640 tab bar. Local run 2026-10-21 (env reused after
-        // skills-update.e2e.ts): hover refused, "covered by <a.relative.flex> at its click point".
+        // Scroll BETA into view: the update card now heads the list (#1408), so at 360×640 the row
+        // starts under the mobile tab bar. Evidence: this case failed with "covered by
+        // <a.relative.flex inside div#root>" (bundle .ai/qa/failures/settings-skills/
+        // keeps-selected-and-hovered-skill-descriptions-AA-readable-with-visible-keyboard--1/:
+        // probe.json hover refused at the click point; PR #1424 comment 6316871712). Reproduce with
+        // `npm run test:e2e -- skills-update.e2e.ts settings-skills.e2e.ts` — 1 of 2 failed
+        // before, 2 of 2 passed after.
         browser.evaluate(`document.querySelector(${JSON.stringify(row(BETA))}).scrollIntoView({ block: 'center' })`)
         browser.hover(row(BETA))
         const hoveredSelector = `${row(BETA)} > span:last-child`
@@ -154,8 +158,13 @@ describe('settings → skills against the live dry-run server', () => {
     try {
       for (const variant of contrastQaVariants.filter((v) => v.id.startsWith('mobile-') && v.density === 'comfortable')) {
         applyContrastQaVariant(browser, variant)
-        // The update card heads the list, so at 360×640 the row starts below the fold, where
-        // elementFromPoint finds nothing (local run 2026-10-21, all four probes false).
+        // Scroll the switch into view: the update card heads the list, so at 360×640 the row starts
+        // below the fold. Evidence: this case failed with "hit area: expected [ false, false,
+        // false, false ]" (bundle .ai/qa/failures/settings-skills/
+        // every-row-has-its-own-switch-with-a-44-px-target-at-360-640-light-and-dark-1408-1/:
+        // probe.json all four elementFromPoint probes missed; PR #1424 comment 6316871712).
+        // Reproduce with `npm run test:e2e -- skills-update.e2e.ts settings-skills.e2e.ts` —
+        // 2 of 2 failed before, 2 of 2 passed after.
         const target = browser.waitForValue(`(() => {
           const el = document.querySelector(${JSON.stringify(toggle)})
           if (!el) return null
@@ -236,9 +245,13 @@ describe('settings → skills against the live dry-run server', () => {
     const before = Number(browser.evaluate(`document.querySelector('[data-slot="skill-rows"]').scrollTop`))
     expect(before).toBe(150)
 
-    // The keyboard case before this one leaves the page scrolled, so the sticky header can sit
-    // over the button. CI run 39596536546, job 119210886966: click refused, "covered by
-    // <header.row-start-1.hidden> at its click point". Bring it into view, as a user would.
+    // Scroll Refresh into view: clicking BETA scrolls the main pane on a long team catalog, so the
+    // page header covers the button. Evidence: this case failed with "covered by
+    // <header.row-start-1.hidden>" (bundle .ai/qa/failures/settings-skills/
+    // refresh-keeps-the-selection-and-the-list-scroll-position-384-1/: probe.json main pane
+    // scrolled to the BETA row; CI run 39596536546, artifact cockpit-failures-shard-4). Reproduce
+    // with `npm run test:e2e -- settings-skills.e2e.ts` — 1 of 1 CI run failed before (0 of 3
+    // local: the local catalog is short), 1 of 1 CI run and 4 of 4 local passed after.
     browser.evaluate(`document.querySelector('[data-slot="skills-refresh"]').scrollIntoView({ block: 'center' })`)
     browser.click('[data-slot="skills-refresh"]')
     // The button disables while the POST runs; wait until the round-trip settled.
