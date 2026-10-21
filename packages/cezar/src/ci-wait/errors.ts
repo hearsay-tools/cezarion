@@ -1,4 +1,5 @@
 import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, type AskErrorCode, type DoneErrorCode, type WaitErrorCode } from '@open-mercato/cezar-contract/waits';
+import { ASK_LIMITS } from '@open-mercato/cezar-contract/ask-schema';
 import type { CiWaitErrorCode, PreviewResultCode, PreviewServeResult } from '@open-mercato/cezar-contract';
 import type { z } from 'zod';
 
@@ -81,15 +82,44 @@ export function askErrorMessage(code: AskErrorCode): string {
   return askMessages[code];
 }
 
-const ASK_FIELDS = 'cezar_ask takes only questions: 1–4 questions, each with a header of at most 12 characters, the question, and either 2–4 options with unique labels or no options for an open question';
+const L = ASK_LIMITS;
+const ASK_FIELDS = `cezar_ask takes only questions: 1–${L.questions} questions with unique texts, each with a header of 1–${L.header} characters, a question of 1–${L.question} characters, an optional id of 1–${L.id} characters, and either ${L.minOptions}–${L.maxOptions} options with unique labels of 1–${L.label} characters and descriptions of at most ${L.description} characters, or no options for an open question`;
+/** hearsay-tools/cezarion#1428: a rejected call never reaches the user, so the agent that cut the
+ *  context out of a card to fit it must send that context as text, not refer to it as sent. */
+const ASK_CONTEXT = 'The user never sees a rejected call: send longer context (a draft, findings, an explanation) as assistant text before you call cezar_ask, and keep each question short.';
+const ASK_FIELD_RULES: Record<string, string> = {
+  questions: `must be a list of 1–${L.questions} questions with unique texts`,
+  question_entry: 'must be an object with a header and a question',
+  id: `must be 1–${L.id} characters`,
+  header: `must be 1–${L.header} characters`,
+  question: `must be 1–${L.question} characters`,
+  options: `must be ${L.minOptions}–${L.maxOptions} options with unique labels, or left out for an open question`,
+  option_entry: 'must be an object with a label and an optional description',
+  label: `must be 1–${L.label} characters`,
+  description: `must be at most ${L.description} characters`,
+  multiSelect: 'must be true or false',
+};
 
-/** Names the unknown field or the failing question, never the value the agent sent. */
+/** The rule for one failing path: its last field, or the entry of the list an index points into. */
+function askFieldRule(path: readonly PropertyKey[]): string | undefined {
+  const last = path.at(-1);
+  if (typeof last === 'number') return ASK_FIELD_RULES[path.at(-2) === 'options' ? 'option_entry' : 'question_entry'];
+  return typeof last === 'string' ? ASK_FIELD_RULES[last] : undefined;
+}
+
+/** Names every failing field with its limit, never the value the agent sent. */
 export function askInvalidInput(error?: z.ZodError): string {
+  const tail = `${ASK_CONTEXT} ${ASK_FIELDS}.`;
   const issue = error?.issues[0];
-  if (issue?.code === 'unrecognized_keys') return `Unknown field ${issue.keys.map(key => JSON.stringify(key.slice(0, 64))).join(', ')}: ${ASK_FIELDS}.`;
-  const path = error?.issues.find(entry => entry.path[0] === 'questions')?.path;
-  if (path) return `\`${path.filter(part => typeof part === 'string' || typeof part === 'number').join('.')}\` is invalid: ${ASK_FIELDS}.`;
-  return `The arguments must be a JSON object: ${ASK_FIELDS}.`;
+  if (issue?.code === 'unrecognized_keys') return `Unknown field ${issue.keys.map(key => JSON.stringify(key.slice(0, 64))).join(', ')}. ${tail}`;
+  const failures = new Map<string, string>();
+  for (const entry of error?.issues ?? []) {
+    const rule = entry.path[0] === 'questions' ? askFieldRule(entry.path) : undefined;
+    const name = entry.path.filter(part => typeof part === 'string' || typeof part === 'number').join('.');
+    if (rule && !failures.has(name)) failures.set(name, `\`${name}\` ${rule}`);
+  }
+  if (failures.size) return `${[...failures.values()].join('; ')}. ${tail}`;
+  return `The arguments must be a JSON object. ${tail}`;
 }
 
 // hearsay-tools/cezarion#1234: `cezar_done` refusals that name no worker. The worker refusals list

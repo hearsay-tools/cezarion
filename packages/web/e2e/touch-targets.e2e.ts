@@ -39,7 +39,7 @@ beforeAll(async () => {
     id: runId, title: 'Touch target fixture', task: 'Touch target fixture', workflow: 'quick-task',
     runner: 'claude', status: 'done', archived: false, createdAt: new Date().toISOString(), tokensUsed: 0,
     // Both references (#617 01b): the sidebar row shows them as plain text on touch, and the
-    // task header carries them as the real 44px links.
+    // Workspace carries them as the real 44px links.
     pullRequestUrl: 'https://github.com/o/r/pull/594', referencedIssueUrl: 'https://github.com/o/r/issues/451',
     steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 'touch-fixture-session' }],
   } satisfies RunRecord]))
@@ -389,12 +389,22 @@ describe('references on a device that cannot hover (#617 01b)', () => {
       appearance('comfortable', 'dark')
       // The chips live in the Session activity card's Workspace row (hearsay-tools/cezarion#1333).
       openSessionActivityRow(browser, 'workspace')
-      type Header = { noHover: boolean; chips: Array<{ w: number; h: number; top: number; right: number }>; inner: number; scroll: number }
+      type Header = {
+        noHover: boolean
+        chips: Array<{ w: number; h: number; top: number; bottom: number; left: number; right: number }>
+        groups: Array<{ kind: string; label: string; slots: string[] }>
+        inner: number
+        scroll: number
+      }
       const header = waitForSettledSample(browser, `(() => {
         const chips = [...document.querySelectorAll('[data-slot="run-activity-workspace"] :is([data-slot="pr-chip"], [data-slot="issue-chip"])')]
         if (chips.length !== 2 || chips.some((chip) => chip.getBoundingClientRect().width === 0)) return null
         return { noHover: matchMedia('(hover: none)').matches, inner: innerWidth, scroll: document.documentElement.scrollWidth,
-          chips: chips.map((chip) => { const r = chip.getBoundingClientRect(); return { w: r.width, h: r.height, top: Math.round(r.top), right: r.right } }) }
+          chips: chips.map((chip) => { const r = chip.getBoundingClientRect(); return { w: r.width, h: r.height, top: Math.round(r.top), bottom: Math.round(r.bottom), left: r.left, right: r.right } }),
+          groups: [...document.querySelectorAll('[data-slot="run-activity-workspace"] [data-reference-kind]')].map(group => ({
+            kind: group.dataset.referenceKind, label: group.firstElementChild.textContent,
+            slots: [...group.querySelectorAll('[data-slot="pr-chip"], [data-slot="issue-chip"]')].map(chip => chip.dataset.slot),
+          })) }
       })()`) as Header
       // The whole point is the touch path; a pointer-capable run would prove nothing here.
       expect(header.noHover).toBe(true)
@@ -403,8 +413,20 @@ describe('references on a device that cannot hover (#617 01b)', () => {
         expect(chip.h, JSON.stringify(chip)).toBeGreaterThanOrEqual(44)
         expect(chip.right, JSON.stringify(chip)).toBeLessThanOrEqual(header.inner)
       }
-      // No wrap between the two chips, and no horizontal overflow from the bigger targets.
-      expect(header.chips[0]!.top).toBe(header.chips[1]!.top)
+      // PRs and Issues now have separate labeled rows. The former same-row assertion failed
+      // at both widths: CI run 39610780143, cockpit-failures-shard-1 artifact 12351000804,
+      // touch-targets/360px-Session-activity-carries-the-44px-links-and-the-touch-sidebar-row-is-the-t-1/
+      // and touch-targets/390px-Session-activity-carries-the-44px-links-and-the-touch-sidebar-row-is-the-t-1/.
+      // Its probe.json reports a 56px top difference; snapshot.txt and screenshot.png show
+      // the approved grouped layout. Keep the 44px targets, aligned chip column and overflow guard.
+      // Scratch test-only proof at a4e88c027: 2/2 failed before, 2/2 passed after, using
+      // `npm exec -- vitest run --config .ai/qa/touch-reference-proof/vitest.config.ts -t 'Session activity carries'`.
+      expect(header.groups).toEqual([
+        { kind: 'PR', label: 'PRs', slots: ['pr-chip'] },
+        { kind: 'Issue', label: 'Issues', slots: ['issue-chip'] },
+      ])
+      expect(header.chips[1]!.top).toBeGreaterThanOrEqual(header.chips[0]!.bottom)
+      expect(header.chips[0]!.left).toBe(header.chips[1]!.left)
       expect(header.scroll).toBeLessThanOrEqual(header.inner)
       browser.screenshot(`${artifacts}/${width}-touch-header-references.png`, { viewport: true })
 

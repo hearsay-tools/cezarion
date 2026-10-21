@@ -4,10 +4,10 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 
 - Upstream: [open-mercato/cezar](https://github.com/open-mercato/cezar) `main`
 - Fork point: `feb85666` (2026-08-31)
-- Last scan: 2026-10-13 to `42568d82` ([report](scans/2026-10-13.md))
-- Entries: 226 · pending: 176 · planned: 7 · ported: 29 · partial: 1 · diverged: 6 · n/a: 7
+- Last scan: 2026-10-19 to `8908221a` ([report](scans/2026-10-19.md))
+- Entries: 289 · pending: 239 · planned: 7 · ported: 29 · partial: 1 · diverged: 6 · n/a: 7
 
-## Pending (176)
+## Pending (239)
 
 | Upstream | Date | Title | Conflicts | Note |
 | --- | --- | --- | --- | --- |
@@ -187,6 +187,69 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#1408](https://github.com/open-mercato/cezar/pull/1408) | 2026-10-12 | fix: error popup should be reported (#1408) | 2 |  |
 | [#1356](https://github.com/open-mercato/cezar/pull/1356) | 2026-10-12 | fix(web): contain oversized Markdown in task threads (#1356) | 1 |  |
 | [#1398](https://github.com/open-mercato/cezar/pull/1398) | 2026-10-12 | feat: branch naming instructions and project settings regrouping (#1398) | 15 |  |
+| [#1415](https://github.com/open-mercato/cezar/pull/1415) | 2026-10-13 | feat(automations): pull_request.closed and pull_request.merged GitHub triggers (#1415) | 10 |  |
+| [#1416](https://github.com/open-mercato/cezar/pull/1416) | 2026-10-13 | ci: shard the vitest suites and drop the mock's demo pacing in tests (#1416) | 6 |  |
+| [#1414](https://github.com/open-mercato/cezar/pull/1414) | 2026-10-13 | fix(web): show the pointer cursor on buttons and menu items (#1414) | 2 |  |
+| [#1401](https://github.com/open-mercato/cezar/pull/1401) | 2026-10-14 | docs(specs): outbound webhooks — signed task events per project (#1401) | 0 |  |
+| [#1418](https://github.com/open-mercato/cezar/pull/1418) | 2026-10-14 | chore(release): bump the release set to 0.15.1 and add the changelog entry (#1418) | 8 |  |
+| [#1417](https://github.com/open-mercato/cezar/pull/1417) | 2026-10-14 | feat(web): sidebar pin + archive row actions, Pinned section in the Tasks table (#1417) | 7 |  |
+| [#1428](https://github.com/open-mercato/cezar/pull/1428) | 2026-10-14 | fix(server): gate runs on the selected agent account, not only the default login (#1428) | 3 |  |
+| [#1430](https://github.com/open-mercato/cezar/pull/1430) | 2026-10-14 | fix(server): adopt an existing PR and retry transient gh pr create failures (#1430) | 2 |  |
+| [#1431](https://github.com/open-mercato/cezar/pull/1431) | 2026-10-14 | fix(server): open the login when Connect cannot read an agent's auth state, and observe sign-in (#1431) | 10 |  |
+| [#1436](https://github.com/open-mercato/cezar/pull/1436) | 2026-10-14 | fix(server): outlive the browser's keep-alive pool so a POST never lands on a closed socket (#1436) | 1 |  |
+| [#1429](https://github.com/open-mercato/cezar/pull/1429) | 2026-10-14 | fix(skills): install a task's selected skill and its companions into its worktree (#1429) | 5 |  |
+| [#1435](https://github.com/open-mercato/cezar/pull/1435) | 2026-10-14 | fix(runs): continue in a fresh session when Claude has pruned the conversation (#1435) | 8 |  |
+| [#1441](https://github.com/open-mercato/cezar/pull/1441) | 2026-10-14 | feat(telemetry): report the transport cause of 'cannot reach the cezar server' errors (#1437) (#1441) | 5 |  |
+| [#1390](https://github.com/open-mercato/cezar/pull/1390) | 2026-10-14 | fix(ui): stop rebuilding foreign issue and PR numbers into the project's repo (#819, #854) (#1390) | 5 |  |
+| [#1440](https://github.com/open-mercato/cezar/pull/1440) | 2026-10-14 | feat(telemetry): count session-resume fallbacks and task failures (#1440) | 8 |  |
+| [#1426](https://github.com/open-mercato/cezar/pull/1426) | 2026-10-15 | feat: GitHub Enterprise as a GitHub provider on any domain (#1426) | 13 |  |
+| [#1443](https://github.com/open-mercato/cezar/pull/1443) | 2026-10-15 | chore(release): bump the release set to 0.15.2 and add the changelog entry (#1443) | 8 |  |
+| [#1451](https://github.com/open-mercato/cezar/pull/1451) | 2026-10-15 | fix: accept attachment-only tasks on POST /runs (telemetry 18c930de) (#1451) | 4 |  |
+| [#1447](https://github.com/open-mercato/cezar/pull/1447) | 2026-10-15 | fix(skills): follow a dropped skills-update apply to its result (#1447) | 6 |  |
+| [#1452](https://github.com/open-mercato/cezar/pull/1452) | 2026-10-15 | feat(telemetry): label task archive/pin events with the button used, not the task status (#1452) | 10 |  |
+| [#1448](https://github.com/open-mercato/cezar/pull/1448) | 2026-10-15 | feat(attachments): stage uploads on attach — up to 20 per message, 20 MB of images (#1448) | 22 |  |
+| [#1453](https://github.com/open-mercato/cezar/pull/1453) | 2026-10-15 | fix(dictation): hide the mic where it can't work, group dictation failures as one (telemetry 38ccdbdc) (#1453) | 6 |  |
+| [#1456](https://github.com/open-mercato/cezar/pull/1456) | 2026-10-15 | fix(provider-auth): probe Copilot with --no-auto-update and name a non-ACP copilot (telemetry 298c2e1f) (#1456) | 2 |  |
+| [#1454](https://github.com/open-mercato/cezar/pull/1454) | 2026-10-15 | fix(cockpit): reload once when a stale shell's chunk fails to load (#1454) | 1 |  |
+| [#1455](https://github.com/open-mercato/cezar/pull/1455) | 2026-10-15 | fix(cockpit): hide Terminal resume in hosted mode (telemetry f179cc7d) (#1455) | 1 |  |
+| [#1458](https://github.com/open-mercato/cezar/pull/1458) | 2026-10-15 | fix(pr): survive a dropped response to the PR publish (telemetry 9119d21a) (#1458) | 2 |  |
+| [#1462](https://github.com/open-mercato/cezar/pull/1462) | 2026-10-15 | fix(repo): don't offer to switch to a branch another worktree holds (telemetry da5ca728) (#1462) | 5 |  |
+| [#1461](https://github.com/open-mercato/cezar/pull/1461) | 2026-10-15 | fix(install): retry with a cezar-owned npm cache when ~/.npm is root-owned (telemetry 7a3f659a) (#1461) | 3 |  |
+| [#1463](https://github.com/open-mercato/cezar/pull/1463) | 2026-10-15 | chore(desktop): bump the shell to 0.1.7 for the npm-cache EACCES fix (#1461) (#1463) | 4 |  |
+| [#1460](https://github.com/open-mercato/cezar/pull/1460) | 2026-10-15 | fix(spawn): run Windows npm .cmd shims as node <script> (telemetry a330744e) (#1460) | 8 |  |
+| [#1459](https://github.com/open-mercato/cezar/pull/1459) | 2026-10-15 | fix(pr): don't offer or push an empty branch as a PR (telemetry 16aef26d) (#1459) | 11 |  |
+| [#1466](https://github.com/open-mercato/cezar/pull/1466) | 2026-10-15 | fix(provider-auth): re-ask a CLI that exits 0 having printed nothing (telemetry 35838a52) (#1466) | 2 |  |
+| [#1467](https://github.com/open-mercato/cezar/pull/1467) | 2026-10-15 | fix(thread): wait out a session gap instead of failing a reply with 409 session closed (telemetry 1408d7cb) (#1467) | 2 |  |
+| [#1433](https://github.com/open-mercato/cezar/pull/1433) | 2026-10-16 | feat(web): sort Tasks by last activity, with a Recent/Created toggle (#1433) | 20 |  |
+| [#1470](https://github.com/open-mercato/cezar/pull/1470) | 2026-10-16 | fix(spawn): run npm's .ps1 shims and native-binary shims without a shell (telemetry 3626ac13) (#1470) | 4 |  |
+| [#1473](https://github.com/open-mercato/cezar/pull/1473) | 2026-10-16 | fix(thread): treat 'run is still active' on a one-click Continue as already live, not a failure (telemetry 77117b95) (#1473) | 6 |  |
+| [#1474](https://github.com/open-mercato/cezar/pull/1474) | 2026-10-16 | test(thread): pin the review send-back recovery; footer Continue is not a message_sent (#1473 review) (#1474) | 4 |  |
+| [#1472](https://github.com/open-mercato/cezar/pull/1472) | 2026-10-16 | fix(automations): copy filters and skill steps from another project's automation; flag prompt-only author conditions (#1472) | 8 |  |
+| [#1424](https://github.com/open-mercato/cezar/pull/1424) | 2026-10-16 | feat: task terminal and workspace layouts from brutus, with the terminal as a view (#1424) | 42 |  |
+| [#1481](https://github.com/open-mercato/cezar/pull/1481) | 2026-10-16 | feat(telemetry): report agent errors shown in a thread; offer Update for an outdated agent CLI (#1481) | 10 |  |
+| [#1495](https://github.com/open-mercato/cezar/pull/1495) | 2026-10-17 | feat(worktrees): run lifecycle scripts with explicit recovery (#1495) | 36 |  |
+| [#1413](https://github.com/open-mercato/cezar/pull/1413) | 2026-10-17 | feat(settings): one full-screen settings surface with a shared sidebar (#1413) | 24 |  |
+| [#1482](https://github.com/open-mercato/cezar/pull/1482) | 2026-10-17 | fix(composer): accept HTML, CSV, JSON and source files as attachments (telemetry 6c4b3066) (#1482) | 1 |  |
+| [#1492](https://github.com/open-mercato/cezar/pull/1492) | 2026-10-17 | feat: Design Mode and Preview as the task workspace's Browser view (supersedes #1422, #1423) (#1492) | 40 |  |
+| [#1501](https://github.com/open-mercato/cezar/pull/1501) | 2026-10-17 | test(worktrees): a settled lifecycle operation waits for its record to release it (#1501) | 1 |  |
+| [#1497](https://github.com/open-mercato/cezar/pull/1497) | 2026-10-17 | fix(provider-gate): name a signed-out selected account, and check it before Start (telemetry ac53a6ef) (#1497) | 7 |  |
+| [#1500](https://github.com/open-mercato/cezar/pull/1500) | 2026-10-18 | fix(opencode): answer permission prompts so a run never hangs on one (#1500) | 3 |  |
+| [#1503](https://github.com/open-mercato/cezar/pull/1503) | 2026-10-18 | fix(provider-auth): resolve Cursor's cursor-agent first, read older CLIs' plain status (telemetry 8d304c50) (#1503) | 7 |  |
+| [#1502](https://github.com/open-mercato/cezar/pull/1502) | 2026-10-18 | fix(telemetry): scrub file names from toast reports so attachment refusals group (telemetry 0f1255b6) (#1502) | 4 |  |
+| [#1504](https://github.com/open-mercato/cezar/pull/1504) | 2026-10-18 | fix(provider-auth): report a version-manager shim with nothing behind it as not-installed (telemetry f67df9d2) (#1504) | 2 |  |
+| [#1457](https://github.com/open-mercato/cezar/pull/1457) | 2026-10-18 | fix(web): highlight each diff hunk and side separately (#1457) | 0 |  |
+| [#1505](https://github.com/open-mercato/cezar/pull/1505) | 2026-10-18 | feat(web): ⌘P task palette — act on tasks, switch fast, keyboard shortcuts (#1505) | 26 |  |
+| [#1510](https://github.com/open-mercato/cezar/pull/1510) | 2026-10-18 | fix(attachments): take any file as a path-only binary attachment instead of refusing it (telemetry 48850f4a) (#1510) | 7 |  |
+| [#1511](https://github.com/open-mercato/cezar/pull/1511) | 2026-10-18 | fix(provider-auth): latch a runtime auth rejection on the agent account that ran (telemetry 9e4a95db) (#1511) | 7 |  |
+| [#1512](https://github.com/open-mercato/cezar/pull/1512) | 2026-10-19 | feat(self-update): update when idle (#1512) | 12 |  |
+| [#1514](https://github.com/open-mercato/cezar/pull/1514) | 2026-10-19 | fix(windows): retry transient EPERM/EBUSY when atomically replacing state files (telemetry 4a7c9f6c) (#1514) | 3 |  |
+| [#1515](https://github.com/open-mercato/cezar/pull/1515) | 2026-10-19 | fix(windows): retry transient EPERM in the async atomic writers too (#1515) | 8 |  |
+| [#1516](https://github.com/open-mercato/cezar/pull/1516) | 2026-10-19 | fix(provider-auth): re-ask a status probe a signal interrupted instead of reporting it (telemetry ce0c5d1f) (#1516) | 2 |  |
+| [#1517](https://github.com/open-mercato/cezar/pull/1517) | 2026-10-19 | fix(provider-auth): ask a timed-out status probe once more with a longer budget (telemetry e316b141) (#1517) | 2 |  |
+| [#1518](https://github.com/open-mercato/cezar/pull/1518) | 2026-10-19 | fix(agent-profiles): resolve an unregistered boot project when saving an account selection (telemetry d81f8db7) (#1518) | 0 |  |
+| [#1519](https://github.com/open-mercato/cezar/pull/1519) | 2026-10-19 | fix(provider-auth): a hung status probe keeps a recent connected answer (telemetry b28d2993) (#1519) | 2 |  |
+| [#1520](https://github.com/open-mercato/cezar/pull/1520) | 2026-10-19 | fix(runs): never prune a live run or its dispatch ancestors (telemetry 73c6e796) (#1520) | 2 |  |
+| [#1521](https://github.com/open-mercato/cezar/pull/1521) | 2026-10-19 | fix(web): stop the host widget's per-frame effect setState from tripping React #185 (telemetry 21762d83) (#1521) | 4 |  |
 
 ## Planned (7)
 

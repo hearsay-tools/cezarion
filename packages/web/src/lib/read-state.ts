@@ -30,13 +30,13 @@ export type ReadStateInput = Pick<
  * A run stopped by a provider usage limit with a resume already scheduled (spec
  * 2026-08-03-auto-resume-after-usage-limit).
  *
- * It is `failed` on the record, but it is not a *done item*: it has an appointment to pick the
- * work back up, so neither half of this grammar applies — there is no outcome to have missed
- * (no unread marker, no nav-badge count) and no history to dim (not a read done item). The
- * status dot says `scheduled` for the same reason (`lib/attention.ts`).
+ * It is `waiting` on the record (hearsay-tools/cezarion#1236), so it is not a *done item*: it
+ * has an appointment to pick the work back up, so neither half of this grammar applies — there
+ * is no outcome to have missed (no unread marker, no nav-badge count) and no history to dim (not
+ * a read done item). The status dot says `usage limit` for the same reason (`lib/attention.ts`).
  */
 export function isScheduledResume(run: ReadStateInput): boolean {
-  return run.status === 'failed' && run.autoResumeAt !== undefined
+  return run.status === 'waiting' && run.autoResumeAt !== undefined
 }
 
 /** A finished run — done, failed, or cancelled. These are the rows the read/unread treatment

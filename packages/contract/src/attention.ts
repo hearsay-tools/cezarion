@@ -119,22 +119,13 @@ export function workerWaitLabel(role: 'root' | 'worker', wait: Pick<WorkerWait, 
  *  - `review`/permission → blue `--info`: there is work to look at (was brand teal until #617).
  *  - `running` → the violet family (`--status-running`), pulsing and filled; `monitoring` is the
  *    same hue as a ring, and a parked parent is the same hue as the robot (#617 status key).
- *  - `queued`/`scheduled` → neutral ring, still: parked, not transitioning. `cancelled` shares the
+ *  - `queued`/usage limit → neutral ring, still: parked, not transitioning. `cancelled` shares the
  *    neutral hue but is filled — it has ended.
  *  - `done`/`failed` → the green/red outcome, still.
  */
 export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false): Attention {
   if (hasPendingPermission(run)) {
     return { bucket: 'permission', tone: 'info', shape: 'filled', pulse: true, label: 'needs permission' };
-  }
-  // A run a provider usage limit stopped is `failed` on the record, but it is not an outcome —
-  // it is a task with an appointment (spec 2026-08-03-auto-resume-after-usage-limit). Painting
-  // it red would report a failure that is about to undo itself, and putting it in the `error`
-  // bucket would notify the user about work that needs nothing from them. It reads as parked,
-  // like `queued`: amber, still, and asking for nothing. Ahead of the `failed` rung because the
-  // chain is first-match-wins.
-  if (run.status === 'failed' && run.autoResumeAt) {
-    return { bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'scheduled' };
   }
   if (run.status === 'failed') {
     return { bucket: 'error', tone: 'danger', shape: 'filled', pulse: false, label: 'failed' };
@@ -143,6 +134,8 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
     !hasPendingHumanAsk && !run.hasPendingHumanAsk
     && (run.status === 'waiting' || run.status === 'queued')
     && run.delegation?.role !== 'invalid'
+    // A usage-limit hold waits for its appointment, not for a slot (phase 4a).
+    && !(run.status === 'waiting' && run.autoResumeAt !== undefined)
     // A worker wait owes its wake as a resolved list entry (hearsay-tools/cezarion#1235, #1301).
     && Array.isArray(run.waits) && run.waits.some((wait) => wait?.kind === 'worker' && wait.phase === 'resolved')
   ) {
@@ -159,6 +152,12 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
   // An open human signal makes `waitingOn` human (or the transcript argument says so), which
   // falls through to Needs you.
   const waitingOn = run.status === 'waiting' && !hasPendingHumanAsk ? resolveWaitingOn(run) : undefined;
+  // A run a provider usage limit stopped waits for its appointment (spec 2026-10-17-unified-waits,
+  // phase 4a): it needs nothing from you, so it reads as parked on a clock, like `queued`. A human
+  // wait wins inside `computeWaitingOn`; workers, CI and timers rank below it.
+  if (waitingOn?.kind === 'usage-limit') {
+    return { bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'usage limit' };
+  }
   if (waitingOn?.kind === 'ci') {
     return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for CI' };
   }
@@ -235,8 +234,8 @@ export const DEFAULT_WEBHOOK_TRIGGERS: readonly WebhookTrigger[] = ['needs-you',
  * `RunRecord` → the webhook state it is in, or `undefined` for none (hearsay-tools/cezarion#1356).
  *
  * Read off `deriveAttention`, so the webhook and the status dot never disagree: a run the dot
- * shows as parked on a clock or a free slot — `queued`, a usage limit's scheduled resume,
- * waiting for capacity — is in no state and sends nothing. A wait kind the dot has no rung for
+ * shows as parked on a clock or a free slot — `queued`, a usage limit's resume, waiting for
+ * capacity — is in no state and sends nothing. A wait kind the dot has no rung for
  * reads as Needs you there and as `waiting-other` here, since nobody is asked anything.
  */
 export function deriveWebhookState(run: AttentionInput): WebhookTrigger | undefined {
@@ -270,6 +269,8 @@ export function deriveWebhookState(run: AttentionInput): WebhookTrigger | undefi
       return 'waiting-ci';
     case 'timer':
       return 'waiting-timer';
+    case 'usage-limit':
+      return undefined;
     default:
       return 'waiting-other';
   }

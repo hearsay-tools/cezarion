@@ -879,6 +879,12 @@ function promptNamesRepo(url: string, task: string): boolean {
  * an archived run, so a cleared field is the whole cancellation.
  */
 function clearPendingAutoResume(run: RunRecord): void {
+  // A withdrawn appointment settles the run failed with its kept error (hearsay-tools/cezarion#1236),
+  // the state a usage-limited run was in before it waited.
+  if (run.status === 'waiting' && run.autoResumeAt !== undefined) {
+    run.status = 'failed';
+    run.finishedAt ??= new Date().toISOString();
+  }
   run.autoResumeAt = undefined;
   run.autoResumeAttempts = undefined;
 }
@@ -1173,6 +1179,12 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
     }
   }
   run.stopping = undefined;
+  // A usage-limited run is waiting for its resume (hearsay-tools/cezarion#1236, phase 4a). Rows a
+  // schema-7 cezar wrote kept it failed with the appointment; they read as the waiting run they are.
+  if (run.status === 'failed' && run.autoResumeAt !== undefined) {
+    run.status = 'waiting';
+    run.finishedAt = undefined;
+  }
   // A run that was live when the previous process exited can never finish —
   // surface that instead of a forever-"running" ghost. `review` survives
   // restarts on purpose: the gate is pure data (worktree + branch + record)
@@ -1180,7 +1192,9 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
   // all still work.
   if (
     !opts?.keepLive &&
-    (run.status === 'running' || run.status === 'queued' || run.status === 'waiting')
+    (run.status === 'running' || run.status === 'queued' || run.status === 'waiting') &&
+    // A usage-limit park runs no process, so no exit interrupted it: its appointment stands.
+    !(run.status === 'waiting' && run.autoResumeAt !== undefined)
   ) {
     run.status = 'failed';
     run.error = 'interrupted — cezar process exited during the run';
@@ -1194,8 +1208,8 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
   // 2026-10-17-unified-waits), and recovery reads the ones a crash left behind.
   // A pending usage-limit resume survives the restart on purpose (the wait can be
   // hours) — `RunManager.recover()` re-arms it from this field. It can only mean
-  // anything on a `failed` run, so anywhere else it is stale bookkeeping.
-  if (run.status !== 'failed') run.autoResumeAt = undefined;
+  // anything on a `waiting` run, so anywhere else it is stale bookkeeping.
+  if (run.status !== 'waiting') run.autoResumeAt = undefined;
   // Heal a record written before `referencedPrDeclaration` existed: a task that re-declared
   // `CEZ:PR` with the PR it had just CREATED cleared the PR it was ABOUT, because no candidate
   // could match the created number. The evidence is all still on the record — only the
@@ -1414,7 +1428,6 @@ const AUTOMATION_ORIGIN_HEAL_SQL =
 
 /** Mark-all-read's rule (see `RunStore.markAllRead`) over the columns and the stored summary. */
 const MARK_ALL_READ_SQL = "archived = 0 AND status IN ('done', 'failed') AND finished_at IS NOT NULL" +
-  " AND NOT (status = 'failed' AND json_extract(summary, '$.autoResumeAt') IS NOT NULL)" +
   " AND (json_extract(summary, '$.seenAt') IS NULL OR json_extract(summary, '$.seenAt') < finished_at)";
 
 /** History retention's candidates among the given ids (a JSON array): finished, without
@@ -1628,8 +1641,8 @@ const workerProcessRecordSchema = z.object({ generation: z.string().uuid(), cont
   processes: z.array(recordedProcessSchema).max(WORKER_PROCESS_CAP) }).strict();
 const startToken = (pid: number) => { const token = processStartToken(pid); return token === undefined ? {} : { startToken: token }; };
 
-/** The bulk-archive sweep's one predicate (#780): finished, not archived, not scheduled (a
- *  `failed` run waiting out a usage limit), not an owned worker (those leave with their parent),
+/** The bulk-archive sweep's one predicate (#780): finished (a run waiting out a usage limit is
+ *  `waiting`, hearsay-tools/cezarion#1236), not archived, not an owned worker (those leave with their parent),
  *  then filtered by pin state. Mirrored clause for clause by `isSweepable` in the cockpit's
  *  `lib/tasks-table.ts`. */
 export function isSweepable(
@@ -1638,7 +1651,6 @@ export function isSweepable(
   automation?: boolean,
 ): boolean {
   if (run.archived || !['done', 'failed', 'cancelled'].includes(run.status)) return false;
-  if (run.status === 'failed' && run.autoResumeAt !== undefined) return false;
   if (run.delegation?.role === 'worker') return false;
   if (automation !== undefined && isAutomationTask(run) !== automation) return false;
   if (scope === 'unpinned') return !run.pinned;
@@ -2976,6 +2988,17 @@ export class RunStore extends EventEmitter {
       ...(stepId ? { steps: run.steps.map((step) => step.id === stepId ? { ...step, status: 'waiting' as const } : step) } : {}) }]]));
   }
 
+  /** A usage-limit appointment withdrawn, committed at once instead of on the debounced save
+   *  (hearsay-tools/cezarion#1236): a crash right after the withdrawal must not find it on disk,
+   *  or recovery re-arms work the user cancelled. A run held for its resume settles `failed`. */
+  commitAutoResumeWithdrawal(id: string): void {
+    const run = this.peek(id);
+    if (!run || (run.autoResumeAt === undefined && run.autoResumeAttempts === undefined)) return;
+    const held = run.status === 'waiting' && run.autoResumeAt !== undefined;
+    this.commitIndex(new Map([[id, { ...run, autoResumeAt: undefined, autoResumeAttempts: undefined,
+      ...(held ? { status: 'failed' as const, finishedAt: new Date().toISOString() } : {}) }]]));
+  }
+
   /** The wake counters alone, committed at once instead of on the debounced save: a crash after
    *  an autonomous nudge or a failed delivery keeps what it spent or counted. */
   commitWakeCounters(id: string, counters: WakeCounters): void {
@@ -3369,12 +3392,11 @@ export class RunStore extends EventEmitter {
       normalized.activity = undefined;
     }
     // …and the mirror image for the usage-limit resume (spec
-    // 2026-08-03-auto-resume-after-usage-limit): it is a promise made ABOUT a failed run, so a
-    // run coming back to life — the resume itself, a user Continue, a re-queue — retires it.
-    // The manager's timer re-checks the record before it fires, so a cleared field is enough.
-    if (normalized.status && ['running', 'waiting', 'queued'].includes(normalized.status)) {
-      normalized.autoResumeAt = undefined;
-    }
+    // 2026-08-03-auto-resume-after-usage-limit): it is the appointment of a `waiting` run
+    // (hearsay-tools/cezarion#1236), so a run coming back to life — the resume itself, a user
+    // Continue, a re-queue — or settling retires it. The manager's timer re-checks the record
+    // before it fires, so a cleared field is enough.
+    if (normalized.status && normalized.status !== 'waiting') normalized.autoResumeAt = undefined;
     const archived = Object.prototype.hasOwnProperty.call(normalized, 'archived')
       ? Boolean(normalized.archived)
       : undefined;
@@ -3385,6 +3407,7 @@ export class RunStore extends EventEmitter {
     // Restore before mutating so a throw leaves status and archived unchanged (#818 S3).
     if (archived === false) restoreHistory(this.dataDir, id);
     Object.assign(run, this.redactPatch(normalized));
+    if (run.status !== 'waiting') run.autoResumeAt = undefined;
     if (normalized.task !== undefined) this.resolveEditedTaskRefs(run);
     if (archived !== undefined) this.applyArchived(run, archived);
     else this.touch(run);
@@ -3775,9 +3798,8 @@ export class RunStore extends EventEmitter {
    *   - cancelled runs are never unread — you stopped them yourself;
    *   - archived ones never are either, since archiving is a stronger "done with this"
    *     than reading;
-   *   - and a `failed` run with a pending `autoResumeAt` is not a done item AT ALL
-   *     (`isScheduledResume`, spec 2026-08-03-auto-resume-after-usage-limit): it has an
-   *     appointment to pick the work back up, so there is no outcome to have missed.
+   *   - and a run waiting out a usage limit is not a done item AT ALL: it is `waiting` with
+   *     its appointment (hearsay-tools/cezarion#1236), so there is no outcome to have missed.
    *
    *  Keeping the two rules identical is what makes the returned count the number the
    *  cockpit's unread badge was showing. The `autoResumeAt` clause is the one that drifted
@@ -3809,7 +3831,6 @@ export class RunStore extends EventEmitter {
       const unread =
         !run.archived &&
         (run.status === 'done' || run.status === 'failed') &&
-        !(run.status === 'failed' && run.autoResumeAt !== undefined) &&
         run.finishedAt !== undefined &&
         (run.seenAt === undefined || run.seenAt < run.finishedAt);
       if (!unread) continue;

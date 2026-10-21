@@ -32,10 +32,15 @@ export interface AttentionFields {
   attentionLabel: string;
 }
 
-/** The two derived fields, from the same function the cockpit's Needs You reads. */
+/** The two derived fields, from the same function the cockpit's Needs You reads. A usage-limit
+ *  hold also names its resume instant (hearsay-tools/cezarion#1236): the cockpit shows it beside
+ *  the label, and a CLI reader has only the label. */
 export function attentionFields(run: Parameters<typeof deriveAttention>[0]): AttentionFields {
   const attention = deriveAttention(run);
-  return { attention: attention.bucket, attentionLabel: attention.label };
+  const label = attention.label === 'usage limit' && run.autoResumeAt
+    ? `usage limit, resumes ${run.autoResumeAt}`
+    : attention.label;
+  return { attention: attention.bucket, attentionLabel: label };
 }
 
 export function projectStatus(run: ApiRun, url: string, question?: unknown) {

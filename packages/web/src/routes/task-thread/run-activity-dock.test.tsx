@@ -151,6 +151,20 @@ describe('RunActivityDock — one card, one row per section', () => {
     expect(document.querySelectorAll('[data-slot="plan-item"]')).toHaveLength(0)
   })
 
+  it('shows an unsettled subagent as stalled during a usage-limit hold, which has no session', () => {
+    // hearsay-tools/cezarion#1236: a hold is `waiting` with no live session, so nothing will settle
+    // the row until the resume; it must not pulse as live.
+    renderDock(run({ status: 'waiting', autoResumeAt: '2099-01-01T00:00:00.000Z' }))
+    fireEvent.click(sectionHead('subagents'))
+    expect(document.querySelectorAll('[data-slot="agent-item"] [data-stalled="true"]')).toHaveLength(1)
+  })
+
+  it('keeps an unsettled subagent live while a waiting run holds its session', () => {
+    renderDock(run({ status: 'waiting' }))
+    fireEvent.click(sectionHead('subagents'))
+    expect(document.querySelectorAll('[data-slot="agent-item"] [data-stalled="true"]')).toHaveLength(0)
+  })
+
   it('keeps every row a 44px touch target', () => {
     renderDock(run())
     for (const key of ['workflow', 'subagents', 'plan']) {
@@ -434,7 +448,7 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
     expect(summary().textContent).toContain('Waiting for CI')
     expect(summary().textContent).toContain('$1.26')
     expect(summary().textContent).not.toContain('Next check')
-    expect(summary().getAttribute('aria-label')).toBe('Session activity: Waiting for CI; cost $1.26')
+    expect(summary().getAttribute('aria-label')).toContain('Session activity: Waiting for CI; cost $1.26')
   })
 
   it('shows the status and next check first when expanded, with wait details behind it', () => {
@@ -499,6 +513,81 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
     expect(body).toContain('codex')
     expect(body).toContain('gpt-6')
     expect(body).toContain('high')
+  })
+
+  it('shows agent identity in both folded summaries', () => {
+    renderDock(fresh({ runner: 'codex', model: 'gpt-6', modelIdentity: 'openai/gpt-6', effort: 'high', costUsd: 1.26 }), [])
+    ensureOpen()
+    const usage = sectionHead('usage').textContent
+    expect(usage).toContain('openai')
+    expect(usage).toContain('gpt-6')
+    expect(usage).toContain('high')
+    fireEvent.click(summary())
+    expect(summary().textContent).toContain('codex')
+    expect(summary().textContent).toContain('gpt-6')
+    expect(summary().textContent).toContain('high')
+    expect(summary().getAttribute('aria-label')).toContain('runner codex; model gpt-6; effort high')
+  })
+
+  it('reads the saved provider even when the model already includes it', () => {
+    renderDock(fresh({ runner: 'claude', model: 'anthropic/opus', modelIdentity: 'anthropic/opus' }), [])
+    ensureOpen()
+    expect(section('usage')?.querySelector('[data-summary-item="provider"]')?.textContent).toBe('anthropic')
+  })
+
+  it('omits the provider when no canonical identity was saved', () => {
+    renderDock(fresh({ runner: 'codex', model: 'gpt-6' }), [])
+    ensureOpen()
+    expect(section('usage')?.querySelector('[data-summary-item="provider"]')).toBeNull()
+  })
+
+  it('surfaces the waiting PR in the folded status and card', () => {
+    renderDock(waiting({ waits: [ciEntry] }), [])
+    ensureOpen()
+    expect(section('status-row')?.querySelector('[data-slot="pr-chip"]')?.textContent).toContain('474')
+    fireEvent.click(summary())
+    expect(summary().querySelector('[data-slot="pr-chip"]')?.textContent).toContain('474')
+    expect(summary().getAttribute('aria-label')).toContain('PR #474')
+  })
+
+  it('surfaces Issue and PR chips in the folded Workspace row and card', () => {
+    renderDock(fresh({ referencedIssueUrl: 'https://github.com/owner/repo/issues/15', referencedPullRequestUrl: 'https://github.com/owner/repo/pull/42' }), [])
+    ensureOpen()
+    expect(sectionHead('workspace').querySelector('[data-slot="issue-chip"]')?.textContent).toContain('15')
+    expect(sectionHead('workspace').querySelector('[data-slot="pr-chip"]')?.textContent).toContain('42')
+    fireEvent.click(summary())
+    expect(summary().querySelector('[data-slot="issue-chip"]')?.textContent).toContain('15')
+    expect(summary().querySelector('[data-slot="pr-chip"]')?.textContent).toContain('42')
+    expect(summary().getAttribute('aria-label')).toContain('Issue #15')
+    expect(summary().getAttribute('aria-label')).toContain('PR #42')
+  })
+
+  it('groups expanded Workspace references into labeled rows and keeps standard chip styles in summaries', () => {
+    renderDock(fresh({ referencedIssueUrl: 'https://github.com/owner/repo/issues/15', referencedPullRequestUrl: 'https://github.com/owner/repo/pull/42' }), [])
+    ensureOpen()
+    const foldedChip = sectionHead('workspace').querySelector<HTMLElement>('[data-slot="pr-chip"]')!
+    expect(foldedChip.className).toContain('border-accent-strong/35')
+    expect(foldedChip.tagName).toBe('SPAN')
+    expect(foldedChip.hasAttribute('tabindex')).toBe(false)
+    fireEvent.click(sectionHead('workspace'))
+    const linked = section('workspace')!.querySelector('[data-slot="linked-references"]')!
+    expect(linked.querySelector('[data-reference-kind="PR"]')?.textContent).toContain('PRs')
+    expect(linked.querySelector('[data-reference-kind="PR"] [data-slot="pr-chip"]')).not.toBeNull()
+    expect(linked.querySelector('[data-reference-kind="PR"] [data-slot="issue-chip"]')).toBeNull()
+    expect(linked.querySelector('[data-reference-kind="Issue"]')?.textContent).toContain('Issues')
+    expect(linked.querySelector('[data-reference-kind="Issue"] [data-slot="issue-chip"]')).not.toBeNull()
+  })
+
+  it('keeps capacity in the Workers header when the list is folded', async () => {
+    const record = fresh({ delegation: { role: 'root', permissions: [], receipts: [] } })
+    renderDock(record, [], workers, 'ok', {
+      [`/api/v1/p/sample/runs/${record.id}/relationships`]: () => json({ workers, capacity: { outstanding: 2, limit: 32, created: 2, creationLimit: 1024 } }),
+    })
+    ensureOpen()
+    await waitFor(() => expect(document.querySelector('[data-slot="worker-capacity"]')?.textContent).toContain('2 of 32'))
+    fireEvent.click(sectionHead('workers'))
+    expect(document.querySelector('[data-slot="worker-capacity"]')?.textContent).toContain('2 of 32')
+    expect(sectionHead('workers').contains(document.querySelector('[data-slot="worker-capacity"]'))).toBe(true)
   })
 
   it('offers branch copy, worktree copy and the resume command under Workspace', () => {

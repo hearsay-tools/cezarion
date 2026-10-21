@@ -183,6 +183,8 @@ const ATTENTION_HELP = [
   '  - `waiting` on its own open CI or timer wait (attentionLabel "waiting for CI" or "monitoring")',
   '    is neither settled nor attention: the agent is still watching what it registered. attention: running.',
   '  - a task parked on its own workers ("waiting on 2 workers") is attention: none; keep waiting.',
+  '  - a task held by a provider usage limit ("usage limit, resumes <ISO time>") is attention: none;',
+  '    it resumes itself at that time.',
   '  - attention: waiting | error | permission ends a wait or a follow; attentionLabel says why',
   '    ("needs you", "needs review", "failed").',
   '  --until attention (default) stops when the task needs you or ends. --until settled is the',

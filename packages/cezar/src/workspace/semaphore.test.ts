@@ -151,6 +151,28 @@ describe('WorkspaceSemaphore', () => {
     expect(order).toEqual(['older', 'newer', 'idle']);
   });
 
+  it('release() pumps a project holding a wake before an older unstarted queue (hearsay-tools/cezarion#1236)', async () => {
+    // Wakes of started runs go ahead of runs that have not started, across projects too: the
+    // oldest wake first, then the unstarted queues by age, empty queues last.
+    const order: string[] = [];
+    const named = (name: string, queuedAt: number | null, wakeAt?: number | null): SemaphoreParticipant => ({
+      busySlots: () => 0,
+      oldestQueuedAt: () => queuedAt,
+      ...(wakeAt === undefined ? {} : { oldestWakeAt: () => wakeAt }),
+      pump: () => {
+        order.push(name);
+      },
+    });
+    const sem = new WorkspaceSemaphore();
+    sem.register(named('idle', null));
+    sem.register(named('unstarted', 1));
+    sem.register(named('late-wake', 5, 9));
+    sem.register(named('early-wake', 7, 8));
+    sem.register(named('no-wake', 3, null));
+    await sem.release();
+    expect(order).toEqual(['early-wake', 'late-wake', 'unstarted', 'no-wake', 'idle']);
+  });
+
   it('a release landing mid-sweep re-runs the sweep instead of being dropped', async () => {
     const sem = new WorkspaceSemaphore();
     let reentered = false;

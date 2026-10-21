@@ -125,7 +125,7 @@ describe('isReadDoneItem', () => {
 })
 
 describe('a run waiting out a usage limit', () => {
-  const scheduled = done({ status: 'failed', autoResumeAt: '2026-08-03T19:33:53.000Z' })
+  const scheduled = done({ status: 'waiting', autoResumeAt: '2026-08-03T19:33:53.000Z' })
 
   it('is neither unread nor read history — it is not finished at all', () => {
     // No outcome to have missed, and nothing to dim as history (spec
@@ -137,7 +137,7 @@ describe('a run waiting out a usage limit', () => {
 
   it('goes back to the ordinary rule once the schedule is gone', () => {
     expect(isUnread(done({ status: 'failed' }))).toBe(true)
-    expect(isUnread({ ...scheduled, autoResumeAt: undefined })).toBe(true)
+    expect(isUnread({ ...scheduled, status: 'failed', autoResumeAt: undefined })).toBe(true)
   })
 
   it('cannot be put back into unread either — eligibility excludes it, read receipt or not', () => {
@@ -147,7 +147,7 @@ describe('a run waiting out a usage limit', () => {
     // both receipt states, because eligibility is deliberately receipt-independent.
     expect(canBeUnread(scheduled)).toBe(false)
     expect(canBeUnread({ ...scheduled, seenAt: '2026-08-03T19:00:00.000Z' })).toBe(false)
-    expect(canBeUnread({ ...scheduled, autoResumeAt: undefined })).toBe(true)
+    expect(canBeUnread({ ...scheduled, status: 'failed', autoResumeAt: undefined })).toBe(true)
   })
 })
 

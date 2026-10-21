@@ -114,7 +114,7 @@ describe('a resumed session keeps its workflow step tools', () => {
   function terminalRun(input: {
     def?: WorkflowDef;
     steps: { id: string; sessionId?: string; backend?: 'claude' | 'codex' | 'pi' }[];
-    status?: 'done' | 'failed';
+    status?: 'done' | 'failed' | 'waiting';
     error?: string;
     autoResumeAt?: string;
     effort?: string;
@@ -132,7 +132,7 @@ describe('a resumed session keeps its workflow step tools', () => {
     });
     store.updateRun(record.id, {
       status: input.status ?? 'done',
-      finishedAt: new Date().toISOString(),
+      ...(input.status === 'waiting' ? {} : { finishedAt: new Date().toISOString() }),
       workflowDef: input.def,
       error: input.error,
       autoResumeAt: input.autoResumeAt,
@@ -328,7 +328,8 @@ describe('a resumed session keeps its workflow step tools', () => {
     const id = terminalRun({
       def: SINGLE_DEF,
       steps: [{ id: 'work', sessionId: 'sess-1', backend: 'claude' }],
-      status: 'failed',
+      // A usage-limited run waits for its resume (hearsay-tools/cezarion#1236).
+      status: 'waiting',
       error: 'Claude AI usage limit reached|1756166400',
       autoResumeAt: new Date(Date.now() - 1_000).toISOString(),
     });

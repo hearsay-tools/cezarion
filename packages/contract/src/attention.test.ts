@@ -77,11 +77,27 @@ describe('deriveAttention', () => {
     expect(deriveAttention(run({ status: 'done', activity: 'monitoring' })).label).toBe('done');
   });
 
-  it('reads a failed run with an auto-resume appointment as scheduled, not as an error', () => {
-    expect(deriveAttention(run({ status: 'failed', autoResumeAt: '2026-08-03T19:33:53.000Z' }))).toEqual({
-      bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'scheduled',
+  it('reads a usage-limited waiting run as usage limit, not as Needs you', () => {
+    expect(deriveAttention(run({ status: 'waiting', autoResumeAt: '2026-10-21T15:00:00.000Z' }))).toEqual({
+      bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'usage limit',
     });
     expect(deriveAttention(run({ status: 'running', autoResumeAt: '2026-08-03T19:33:53.000Z' })).label).toBe('running');
+  });
+
+  it('reads a failed run as failed, whatever autoResumeAt it carries', () => {
+    expect(deriveAttention(run({ status: 'failed', autoResumeAt: '2026-08-03T19:33:53.000Z' })).label).toBe('failed');
+  });
+
+  it('an open human wait outranks the usage limit, and the usage limit outranks workers', () => {
+    const human = { kind: 'human' as const, id: '33333333-3333-4333-8333-333333333333', source: 'agent' as const, via: 'cezar_ask' as const,
+      registeredAt: '2026-10-21T14:00:00.000Z', phase: 'open' as const, turnId: 'turn-1' } as unknown as NonNullable<AttentionInput['waits']>[number];
+    expect(deriveAttention(run({ status: 'waiting', autoResumeAt: '2026-10-21T15:00:00.000Z', waits: [human] })).label).toBe('needs you');
+    expect(deriveAttention(run({ status: 'waiting', autoResumeAt: '2026-10-21T15:00:00.000Z', delegation: { role: 'root' }, waits: [workerEntry()] } as AttentionInput)).label).toBe('usage limit');
+  });
+
+  it('a usage limit outranks a resolved worker wake, which waits for the appointment, not capacity', () => {
+    const record = { status: 'waiting', autoResumeAt: '2026-10-21T15:00:00.000Z', delegation: { role: 'root' }, waits: [workerEntry({ phase: 'resolved' })] } as AttentionInput;
+    expect(deriveAttention(record).label).toBe('usage limit');
   });
 });
 
@@ -370,7 +386,7 @@ describe('deriveWebhookState', () => {
     ['a review', { status: 'review' }, 'needs-you'],
     ['a live permission request on a running run', { status: 'running', hasPendingPermission: true }, 'needs-you'],
     ['a failed run', { status: 'failed' }, 'failed'],
-    ['a failed run with a scheduled resume', { status: 'failed', autoResumeAt: '2026-10-17T16:00:00.000Z' }, undefined],
+    ['a usage-limited run', { status: 'waiting', autoResumeAt: '2026-10-17T16:00:00.000Z' }, undefined],
     ['a done run', { status: 'done' }, 'done'],
     ['a cancelled run', { status: 'cancelled' }, 'cancelled'],
     ['a running run', { status: 'running' }, 'running'],
@@ -379,8 +395,8 @@ describe('deriveWebhookState', () => {
     ['a worker on its parent\'s reply', { status: 'waiting', delegation: { role: 'worker' }, waitingOn: { kind: 'workers', count: 1, replies: true } } as AttentionInput, 'waiting-workers'],
     ['a CI wait', { status: 'waiting', waitingOn: ci }, 'waiting-ci'],
     ['a timer wait', { status: 'waiting', waitingOn: timer }, 'waiting-timer'],
-    // The kind with no option of its own today; a kind added later lands here too.
-    ['a usage-limit wait', { status: 'waiting', waitingOn: { kind: 'usage-limit', at: '2026-10-17T16:00:00.000Z' } }, 'waiting-other'],
+    // A usage-limit park is parked on a clock, as the scheduled resume it replaces was: no state.
+    ['a usage-limit wait', { status: 'waiting', waitingOn: { kind: 'usage-limit', at: '2026-10-17T16:00:00.000Z' } }, undefined],
     ['a resolved wait owed a wake', { status: 'waiting', waitWakePending: true }, undefined],
   ];
 

@@ -417,10 +417,12 @@ describe('workspace runs index API', () => {
     const body = await getIndex();
 
     // `deriveAttention` and `isUnread` both read this field. Dropping it from the slim row would
-    // make the palette paint a red "failed" dot on work that is merely waiting for its slot.
+    // make the palette paint an amber Needs-you dot on work that is merely waiting for its resume.
+    // A schema-7 row stored it failed; the cold reader reads it as the waiting run it is
+    // (hearsay-tools/cezarion#1236).
     expect(body.runs[0]).toMatchObject({
       id: 'parked',
-      status: 'failed',
+      status: 'waiting',
       autoResumeAt: '2026-07-14T15:00:00Z',
     });
   });

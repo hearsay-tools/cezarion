@@ -4714,7 +4714,10 @@ export function createApp(deps: ServerDeps) {
       if (cliRunner) {
         const blocked = await providerActionError([cliRunner]);
         if (blocked) return c.json({ error: blocked }, 409);
-        const engineOwnsSession = run.status === 'running' || run.status === 'queued' || run.status === 'waiting';
+        // A usage-limit hold is `waiting` with no session until its resume (hearsay-tools/cezarion#1236),
+        // so the engine owns nothing there and the session resumes.
+        const usageLimitHold = run.status === 'waiting' && run.autoResumeAt !== undefined;
+        const engineOwnsSession = !usageLimitHold && (run.status === 'running' || run.status === 'queued' || run.status === 'waiting');
         const sessionStep = engineOwnsSession ? undefined : [...run.steps].reverse().find((s) => s.sessionId);
         const sessionId = sessionStep?.sessionId;
         // An id resumeCommand refuses (#431) degrades to a fresh CLI in the worktree,

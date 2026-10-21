@@ -410,20 +410,20 @@ describe('Usage & agent — metrics', () => {
     expect(usageDetails()).toMatchObject({ Tokens: 'IN 24.6k · OUT 2.4k', Cost: '$0.04' })
   })
 
-  it('keeps the cost whole and lets the tokens drop when the summary runs out of room', () => {
+  it('includes both cost and tokens in the usage summary', () => {
     stubFetch()
     renderCard(run('done', { id: freshId(), costUsd: 0.04 }))
     const meta = row('usage')!.querySelector('[data-slot="run-activity-meta"]')!
-    expect(meta.querySelector('[data-slot="run-activity-meta-keep"]')?.textContent).toBe('$0.04')
-    expect(meta.querySelector('[data-slot="run-activity-meta-drop"]')?.textContent).toContain('IN 24.6k · OUT 2.4k')
+    expect(meta.querySelector('[data-summary-item="cost"]')?.textContent).toBe('$0.04')
+    expect(meta.querySelector('[data-summary-item="tokens"]')?.textContent).toContain('IN 24.6k · OUT 2.4k')
   })
 
   it('keeps the tokens when the run reported no cost', () => {
     stubFetch()
     renderCard(run('done', { id: freshId(), costUsd: undefined }))
     const meta = row('usage')!.querySelector('[data-slot="run-activity-meta"]')!
-    expect(meta.querySelector('[data-slot="run-activity-meta-keep"]')?.textContent).toBe('IN 24.6k · OUT 2.4k')
-    expect(meta.querySelector('[data-slot="run-activity-meta-drop"]')).toBeNull()
+    expect(meta.querySelector('[data-summary-item="tokens"]')?.textContent).toBe('IN 24.6k · OUT 2.4k')
+    expect(meta.querySelector('[data-summary-item="cost"]')).toBeNull()
   })
 
   it('shows a backend-reported zero cost and omits an unreported cost', () => {

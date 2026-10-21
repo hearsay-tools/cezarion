@@ -951,7 +951,8 @@ export function exemptionFor(criterion: string, backend: RunnerId): ParityExempt
 export async function waitFor(cond: () => boolean, ms = 10_000): Promise<void> {
   const start = Date.now();
   while (!cond()) {
-    if (Date.now() - start > ms) throw new Error('waitFor timed out');
+    const elapsed = Date.now() - start;
+    if (elapsed > ms) throw new Error(`waitFor timed out after ${elapsed}ms: ${cond.toString()}`);
     await new Promise((r) => setTimeout(r, 10));
   }
 }

@@ -237,11 +237,13 @@ export async function queuedWake(runner: RunnerId = 'claude') {
   await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
   const entry = workerEntryOf(store.getRun(p.id));
   if (!entry) throw Error('fixture');
-  // Overdue on disk: recovery resolves it with `timeout` (hearsay-tools/cezarion#1235).
-  store.commitWait(p.id, { ...entry, deadline: new Date().toISOString() });
   await restart(); checkpoint('queued-wake-restarted');
   await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(w.id)?.sessionEverOpened === true); checkpoint('queued-wake-child-open');
-  expect(store.getRun(p.id)?.status).toBe('queued');
+  // Overdue only once the worker holds the slot: a wake resolved during recovery would take the
+  // slot before the recovered worker, since wakes go first (hearsay-tools/cezarion#1236).
+  store.commitWait(p.id, { ...workerEntryOf(store.getRun(p.id))!, deadline: new Date().toISOString() });
+  manager.reconcileWorkerWaits();
+  await until(() => store.getRun(p.id)?.status === 'queued');
   return { p, w, wait };
 }
 

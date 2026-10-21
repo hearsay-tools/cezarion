@@ -1520,8 +1520,8 @@ describe('meta-line state words (#617, the issue\'s list exactly)', () => {
       run({ id: 'run', status: 'running' }),
       run({ id: 'rev', status: 'review' }),
       run({ id: 'fail', status: 'failed' }),
-      // Already due: no time left to name, so the word falls back to `scheduled`.
-      run({ id: 'sched', status: 'failed', autoResumeAt: ago(60_000) }),
+      // Already due: no time left to name, so the word is `usage limit` alone.
+      run({ id: 'sched', status: 'waiting', autoResumeAt: ago(60_000) }),
       run({ id: 'q', status: 'queued' }),
       run({ id: 'wk', status: 'waiting', delegation: workers, waits: [workerWait({ workerIds: ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'] })] } as Partial<RunRecord>),
       run({ id: 'rep', status: 'waiting', delegation: workers, waits: [workerWait({ workerIds: [], requestIds: ['00000000-0000-4000-8000-000000000009'] })] } as Partial<RunRecord>),
@@ -1530,7 +1530,7 @@ describe('meta-line state words (#617, the issue\'s list exactly)', () => {
     expect(stateOf('run')).toBeNull()
     expect(stateOf('rev')).toBe('needs review')
     expect(stateOf('fail')).toBe('failed')
-    expect(stateOf('sched')).toBe('scheduled')
+    expect(stateOf('sched')).toBe('usage limit')
     expect(stateOf('q')).toBe('queued #1')
     expect(stateOf('wk')).toBe('waiting on 2 workers')
     expect(stateOf('rep')).toBe('waiting on worker replies')
@@ -1690,9 +1690,9 @@ describe('references on a device that cannot hover (#617 01b)', () => {
   })
 })
 
-it('says when a scheduled run resumes, in the meta line (#617 01b)', () => {
-  renderList({ runs: [run({ id: 's', status: 'failed', autoResumeAt: new Date(NOW + 12 * 60_000).toISOString() })] })
-  expect(row('s')?.querySelector('[data-slot="task-row-state"]')?.textContent).toBe('resumes in 12m')
+it('says when a usage-limited run resumes, in the meta line (#617 01b)', () => {
+  renderList({ runs: [run({ id: 's', status: 'waiting', autoResumeAt: new Date(NOW + 12 * 60_000).toISOString() })] })
+  expect(row('s')?.querySelector('[data-slot="task-row-state"]')?.textContent).toBe('usage limit, resumes in 12m')
 })
 
 describe('variant line 1 under width pressure (#617 fix round)', () => {
@@ -2189,7 +2189,7 @@ describe('sidebar archive (#780)', () => {
         run({ id: 'pinned-fin', title: 'Pinned done', status: 'failed', pinned: true }),
         run({ id: 'live', status: 'running' }),
         run({ id: 'ask', status: 'waiting' }),
-        run({ id: 'sched', status: 'failed', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
+        run({ id: 'sched', status: 'waiting', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
         run({ id: 'pinned-live', status: 'running', pinned: true }),
       ],
       onTogglePin: vi.fn(),
@@ -2274,7 +2274,7 @@ describe('sidebar archive (#780)', () => {
     renderList({
       runs: [
         run({ id: 'p3', pinned: true, status: 'running' }),
-        run({ id: 'p4', pinned: true, status: 'failed', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
+        run({ id: 'p4', pinned: true, status: 'waiting', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
       ],
       onSweep,
     })
@@ -2355,7 +2355,7 @@ describe('swipe to archive on touch (#780 §7)', () => {
         run({ id: 'pin', status: 'cancelled', pinned: true }),
         run({ id: 'live', status: 'running' }),
         run({ id: 'ask', status: 'waiting' }),
-        run({ id: 'sched', status: 'failed', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
+        run({ id: 'sched', status: 'waiting', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
       ],
       onArchiveRun: vi.fn(),
       onTogglePin: vi.fn(),

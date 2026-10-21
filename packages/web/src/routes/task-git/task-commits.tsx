@@ -36,7 +36,7 @@ export function TaskCommitsRoute() {
 
 function CommitsView({ run }: { run: ApiRun }) {
   const { sha } = useParams<{ sha: string }>()
-  const commits = useRunCommits(run.id, isRunActive(run.status))
+  const commits = useRunCommits(run.id, isRunActive(run))
 
   return (
     <div data-route="task-commits" className="flex min-h-full flex-col">
@@ -153,7 +153,7 @@ function CommitDiffView({ runId, sha }: { runId: string; sha: string }) {
 
 /** Reuses the task diff payload; paths lead to the existing structured Changes view. */
 function TaskChangedFiles({ run }: { run: ApiRun }) {
-  const changes = useRunChanges(run.id, isRunActive(run.status))
+  const changes = useRunChanges(run.id, isRunActive(run))
   if (changes.isPending) return <p className="mt-[22px] text-xs text-muted-foreground">Loading changed files…</p>
   if (changes.isError) return <p role="status" className="mt-[22px] text-xs text-danger">Could not load changed files: {changes.error.message}</p>
   if (changes.data.files.length === 0) return null

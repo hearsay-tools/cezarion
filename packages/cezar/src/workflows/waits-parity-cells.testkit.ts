@@ -242,7 +242,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       });
 
       it('registers every criterion', () => {
-        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U26', 'U25']);
+        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U26', 'U25']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
     }
@@ -450,6 +450,66 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           checkpoint('u8-blocker-waiting');
           await until(() => store.getRun(blocker.id)?.status === 'waiting');
           checkpoint('u8-parked-waiting-after-wake');
+          await until(() => store.getRun(parked.id)?.status === 'waiting' && !agentWaits(parked.id).length);
+        });
+      }
+
+      it(`${runner} U8l a wake of a started run takes the slot before an unstarted task that queued earlier, at maxParallel 1`, async () => {
+        nativeWire(runner);
+        expect(semaphore.maxParallel()).toBe(1);
+        if (runner === 'opencode') process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = join(root, 'u8l-parked-sessions.json');
+        const parked = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'timer', seconds: 60, note: 'u8l' }), runner });
+        await until(() => parkedOn(parked.id, waitOfKind(parked.id, 'timer')));
+        const wait = waitOfKind(parked.id, 'timer')!;
+        // A closed session: its wake is a scheduler continuation, which needs a regular slot.
+        engine().active.get(parked.id)!.session.end();
+        await until(() => !manager.isActive(parked.id) && store.getRun(parked.id)?.status === 'waiting');
+        const release = join(root, 'u8l-release');
+        process.env.CEZ_MOCK_RELEASE_FILE = release;
+        if (runner === 'opencode') process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = join(root, 'u8l-blocker-sessions.json');
+        const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-gated']!, runner });
+        let task: { id: string } | undefined;
+        try {
+          await until(() => store.readEvents(blocker.id).some(event => event.type === 'turn.started'));
+          // Queued before the wake joins the line.
+          task = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
+          expect(store.getRun(task.id)?.status).toBe('queued');
+          fireTimer(wait.id);
+          await until(() => engine().queue.includes(parked.id));
+          expect(engine().queue.indexOf(task.id)).toBeLessThan(engine().queue.indexOf(parked.id));
+        } finally { writeFileSync(release, ''); }
+        await until(() => settled(parked.id, wait.id)?.phase === 'delivered');
+        const deliveredAt = Date.parse(settled(parked.id, wait.id)!.deliveredAt!);
+        await until(() => store.readEvents(task!.id).some(event => event.type === 'turn.started'));
+        const taskStarted = Date.parse(store.readEvents(task.id).find(event => event.type === 'turn.started')!.ts);
+        expect(taskStarted).toBeGreaterThanOrEqual(deliveredAt);
+        await until(() => terminal.includes(store.getRun(task!.id)?.status ?? '') || store.getRun(task!.id)?.status === 'waiting');
+      });
+
+      for (const hold of ['deadline', 'in-flight'] as const) {
+        it(`${runner} U8h a ci result for a park on a held account waits in the line and is delivered once the hold lifts (${hold})`, async () => {
+          const external = github();
+          nativeWire(runner);
+          if (runner === 'opencode') process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = join(root, 'u8h-sessions.json');
+          const parked = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'ci', pr }), runner });
+          await until(() => parkedOn(parked.id, waitOfKind(parked.id, 'ci')));
+          const wait = waitOfKind(parked.id, 'ci')!;
+          expect(engine().monitoring.has(parked.id)).toBe(true);
+          // Another task on the same account waits out a usage limit, or its resume is testing the
+          // window (hearsay-tools/cezarion#1236).
+          const { agentProfile } = store.getRun(parked.id)!;
+          const holder = store.createRun({ title: 'held', workflow: 'quick-task', task: 'held', steps: [] });
+          store.updateRun(holder.id, hold === 'deadline'
+            ? { status: 'waiting', runner, agentProfile, autoResumeAt: new Date(Date.now() + 600_000).toISOString() }
+            : { status: 'running', runner, agentProfile, autoResumeAttempts: 1 });
+          expect([...manager.accountHolds()[hold === 'deadline' ? 'deadline' : 'inFlight']]).toContain(`${runner}:${agentProfile ?? 'default'}`);
+          external.settle();
+          // The result waits in the line, undelivered, while the account is held.
+          await until(() => store.getRun(parked.id)?.waits?.find(entry => entry.id === wait.id)?.phase === 'resolved' && engine().queue.includes(parked.id));
+          expect(settled(parked.id, wait.id)).toBeUndefined();
+          if (hold === 'deadline') manager.cancelAutoResume(holder.id);
+          else { store.updateRun(holder.id, { status: 'failed', autoResumeAttempts: undefined }); manager.cancelAutoResume(holder.id); }
+          await until(() => settled(parked.id, wait.id)?.phase === 'delivered');
           await until(() => store.getRun(parked.id)?.status === 'waiting' && !agentWaits(parked.id).length);
         });
       }

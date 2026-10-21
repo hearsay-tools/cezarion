@@ -2395,6 +2395,7 @@ describe('RunStore — read receipts (#unread-done-items)', () => {
     const limited = () => {
       const id = finishedRun(store, 'failed');
       store.updateRun(id, {
+        status: 'waiting',
         autoResumeAt: '2026-08-03T18:41:48.000Z',
         autoResumeAttempts: 2,
       });
@@ -2441,7 +2442,7 @@ describe('RunStore — read receipts (#unread-done-items)', () => {
     // task the UI never presented as unread, and reported a count larger than the badge showed.
     const store = RunStore.open(dataDir);
     const scheduled = finishedRun(store, 'failed');
-    store.updateRun(scheduled, { autoResumeAt: '2026-08-03T18:41:48.000Z', autoResumeAttempts: 1 });
+    store.updateRun(scheduled, { status: 'waiting', autoResumeAt: '2026-08-03T18:41:48.000Z', autoResumeAttempts: 1 });
     const ordinary = finishedRun(store, 'done');
 
     // The count is the badge's number: one, not two.
@@ -2450,18 +2451,21 @@ describe('RunStore — read receipts (#unread-done-items)', () => {
     expect(store.getRun(scheduled)?.seenAt).toBeUndefined();
   });
 
-  it('markAllRead stamps the same run once its resume is no longer pending (#803)', () => {
-    // The exclusion is about the APPOINTMENT, not the failure: clear the schedule and the run is
-    // an ordinary unread `failed` done item again. Without this, the clause above would be
-    // indistinguishable from "never stamp a failed run", which is a different (wrong) rule.
+  it('autoResumeAt lives only on a waiting run (hearsay-tools/cezarion#1236)', () => {
+    // A usage-limited run waits for its resume; a withdrawal settles it failed, and any other
+    // status retires the appointment, so a failed run never carries one.
     const store = RunStore.open(dataDir);
     const id = finishedRun(store, 'failed');
+    store.updateRun(id, { status: 'waiting', autoResumeAt: '2026-08-03T18:41:48.000Z' });
+    expect(store.getRun(id)?.autoResumeAt).toBe('2026-08-03T18:41:48.000Z');
+    store.updateRun(id, { status: 'failed' });
+    expect(store.getRun(id)?.autoResumeAt).toBeUndefined();
     store.updateRun(id, { autoResumeAt: '2026-08-03T18:41:48.000Z' });
+    expect(store.getRun(id)?.autoResumeAt).toBeUndefined();
+    store.updateRun(id, { status: 'waiting', autoResumeAt: '2026-08-03T18:41:48.000Z' });
+    store.updateRun(id, { status: 'running' });
+    expect(store.getRun(id)?.autoResumeAt).toBeUndefined();
     expect(store.markAllRead()).toBe(0);
-
-    store.updateRun(id, { autoResumeAt: undefined });
-    expect(store.markAllRead()).toBe(1);
-    expect(store.getRun(id)?.seenAt).toBeDefined();
   });
 });
 
@@ -2729,6 +2733,7 @@ describe('RunStore — archive cascades to owned workers (#250)', () => {
     const { parent, worker } = parentWithWorker(store, 'running');
     store.setPinned(worker.id, true);
     store.updateRun(worker.id, {
+      status: 'waiting',
       autoResumeAt: '2026-08-03T18:41:48.000Z',
       autoResumeAttempts: 1,
     });
@@ -2808,9 +2813,9 @@ describe('RunStore — archive cascades to owned workers (#250)', () => {
       const pinnedRunning = mk('running');
       store.setPinned(pinnedRunning, true);
       const scheduled = mk('failed');
-      store.updateRun(scheduled, { autoResumeAt: SCHEDULED_AT, autoResumeAttempts: 1 });
+      store.updateRun(scheduled, { status: 'waiting', autoResumeAt: SCHEDULED_AT, autoResumeAttempts: 1 });
       const scheduledPinned = mk('failed');
-      store.updateRun(scheduledPinned, { autoResumeAt: SCHEDULED_AT, autoResumeAttempts: 1 });
+      store.updateRun(scheduledPinned, { status: 'waiting', autoResumeAt: SCHEDULED_AT, autoResumeAttempts: 1 });
       store.setPinned(scheduledPinned, true);
       const running = mk('running');
       const { parent, worker } = parentWithWorker(store, 'running');
