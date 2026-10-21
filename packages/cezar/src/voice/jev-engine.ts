@@ -8,17 +8,16 @@ const MODEL = 'jev-1.13.0';
 const TIMEOUT_MS = 5000;
 
 const unit = z.number().min(0).max(1);
-// Loose objects on purpose: Jev may add keys; only what we read is checked.
-const responseSchema = z.object({
-  answers: z.record(
-    z.string(),
-    z.discriminatedUnion('type', [
-      z.object({ type: z.literal('choice'), choice: z.string(), confidence: unit, probabilities: z.record(z.string(), unit) }),
-      z.object({ type: z.literal('noul'), noul: unit }),
-    ]),
-  ),
+// Loose objects on purpose: Jev may add keys; only what we read is checked. The envelope leaves
+// answer values unknown: an answer nobody asked for is dropped, so it is never validated.
+const envelopeSchema = z.object({
+  answers: z.record(z.string(), z.unknown()),
   usage: z.object({ input_tokens: z.unknown().optional() }).optional(),
 });
+const answerSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('choice'), choice: z.string(), confidence: unit, probabilities: z.record(z.string(), unit) }),
+  z.object({ type: z.literal('noul'), noul: unit }),
+]);
 
 /** Jev (TypeSafe) behind the engine seam. Plain `fetch`: no SDK dependency. */
 export class JevVoiceEngine implements DecisionEngine {
@@ -88,12 +87,15 @@ function parse(
   body: unknown,
   questions: Record<string, EngineQuestion>,
 ): { answers: Record<string, EngineAnswer>; inputTokens?: number } {
-  const parsed = responseSchema.safeParse(body);
+  const parsed = envelopeSchema.safeParse(body);
   if (!parsed.success) throw new VoiceEngineError('invalid-answer', undefined, 'the response has the wrong shape');
   const answers: Record<string, EngineAnswer> = {};
   for (const [id, question] of Object.entries(questions)) {
-    const answer = parsed.data.answers[id];
-    if (!answer) throw new VoiceEngineError('invalid-answer', undefined, `no answer for "${id}"`);
+    const raw = parsed.data.answers[id];
+    if (raw === undefined) throw new VoiceEngineError('invalid-answer', undefined, `no answer for "${id}"`);
+    const checked = answerSchema.safeParse(raw);
+    if (!checked.success) throw new VoiceEngineError('invalid-answer', undefined, `"${id}" has the wrong shape`);
+    const answer = checked.data;
     if (answer.type !== question.type) {
       throw new VoiceEngineError('invalid-answer', undefined, `"${id}" has the wrong answer type`);
     }

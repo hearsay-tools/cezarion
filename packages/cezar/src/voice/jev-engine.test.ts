@@ -90,6 +90,16 @@ describe('JevVoiceEngine', () => {
     });
   });
 
+  it.each([
+    ['a malformed noul', { type: 'noul', noul: 2 }],
+    ['an unknown type', { type: 'banana' }],
+    ['a non-object', 'nope'],
+  ])('drops an unasked answer without validating it (%s)', async (_name, extra) => {
+    const body = { ...CANNED, answers: { ...CANNED.answers, extra } };
+    const result = await engineWith(stub(body)).decide({ state: STATE, questions: QUESTIONS }, new AbortController().signal);
+    expect(Object.keys(result.answers).sort()).toEqual(['action', 'is_command']);
+  });
+
   it('omits the token count when usage has none, and drops answers nobody asked for', async () => {
     const body = { ...CANNED, usage: {}, answers: { ...CANNED.answers, extra: { type: 'noul', noul: 1 } } };
     const result = await engineWith(stub(body)).decide({ state: STATE, questions: QUESTIONS }, new AbortController().signal);
