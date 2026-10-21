@@ -124,7 +124,7 @@ function commandError(result: CiCommandResult): CiGithubError {
   if (/rate limit|429/i.test(result.stderr)) return new CiGithubError('command_failed', 'GitHub query was rate limited; wait and retry.', true);
   if (/401|403|auth|log.?in|token/i.test(result.stderr)) return new CiGithubError('authentication', 'GitHub authentication failed; run gh auth login with access to this repository.');
   if (/404|not found|could not resolve|no pull requests/i.test(result.stderr)) return new CiGithubError('inaccessible_pr', 'PR is inaccessible; verify its URL and repository access.');
-  return new CiGithubError('command_failed', 'GitHub query failed; check connectivity and GitHub availability, then retry.', /5\d\d|timeout|timed out|network|connection|rate limit|429|temporar/i.test(result.stderr));
+  return new CiGithubError('command_failed', 'GitHub query failed; check connectivity and GitHub availability, then retry.', true);
 }
 export class GithubCiClient {
   private readonly queries = new CiSemaphore(CI_QUERY_LIMIT);

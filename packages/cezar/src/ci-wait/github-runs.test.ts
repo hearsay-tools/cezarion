@@ -49,6 +49,7 @@ it.each([
  ['HTTP 403: API rate limit exceeded for user', 'command_failed', true],
  ['HTTP 403: You have exceeded a secondary rate limit. Please wait before you try again.', 'command_failed', true],
  ['HTTP 429: Too many requests', 'command_failed', true],
+ ['unexpected gateway reply private-value', 'command_failed', true],
  ['HTTP 403: Resource not accessible by integration', 'authentication', false],
  ['HTTP 401: Bad credentials', 'authentication', false],
 ])('classifies workflow query error %s without exposing diagnostics',async (stderr,code,transient)=>{

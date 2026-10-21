@@ -1064,7 +1064,15 @@ that the PR is merge-ready.
 Bounds are implementation constants: four concurrent watchers and four short
 queries per shared supervisor; ten seconds per metadata/head/snapshot command,
 always bounded by the remaining deadline; at most 60 seconds discovering absent
-checks; three transient retries at 1/5/15 seconds within the original deadline.
+checks; `command_failed` and `query_timeout` retry at 1/5/15 seconds, then every
+30 seconds until the original deadline. A successful observation resets backoff.
+A deadline after unresolved query failures includes the last sanitized error in
+`diagnostic`; cancellation has no retry diagnostic. Authentication, inaccessible
+PRs, missing gh, malformed data and output limits still end with `error`.
+Retry state is memory-only; recovery keeps the persisted deadline and starts
+fresh backoff without requiring a live agent session. R92 in
+`workflows/ci-wait-retry-parity.test.ts` covers retry-to-verdict delivery across
+`RUNNER_IDS`, fresh and recovered.
 Check-status polling (`gh pr checks --watch --interval`) and periodic PR-head
 probes both use 30 seconds. The first observation still runs immediately. Those
 intervals do not stretch the ten-second command timeout, the 60-second discovery
