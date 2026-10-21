@@ -75,6 +75,7 @@ import {
   FOLLOWUP_CRITERIA,
   ANSWER_DELIVERY_CRITERIA,
   SKILL_RESUME_CRITERIA,
+  SKILL_PROVISION_CRITERIA,
   WORKTREE_SETUP_CRITERIA,
   PARITY_EXEMPTIONS,
   PINNED_SESSION_ID,
@@ -1891,6 +1892,7 @@ describe('harness parity — the matrix itself', () => {
     ...FOLLOWUP_CRITERIA.map(c => c.id),
     ...ANSWER_DELIVERY_CRITERIA.map(c => c.id),
     ...SKILL_RESUME_CRITERIA.map(c => c.id),
+    ...SKILL_PROVISION_CRITERIA.map(c => c.id),
     ...WORKTREE_SETUP_CRITERIA.map(c => c.id),
     ...AUTONOMOUS_CRITERIA.map(c => c.id),
     ...FINAL_MESSAGE_CRITERIA.map(c => c.id),
@@ -1920,6 +1922,8 @@ describe('harness parity — the matrix itself', () => {
     if (answerDelivery) return answerDelivery.scenario;
     const skillResume = SKILL_RESUME_CRITERIA.find(c => c.id === id);
     if (skillResume) return skillResume.scenario;
+    const skillProvision = SKILL_PROVISION_CRITERIA.find(c => c.id === id);
+    if (skillProvision) return skillProvision.scenario;
     const worktreeSetup = WORKTREE_SETUP_CRITERIA.find(c => c.id === id);
     if (worktreeSetup) return worktreeSetup.scenario;
     const autonomous = AUTONOMOUS_CRITERIA.find(c => c.id === id);

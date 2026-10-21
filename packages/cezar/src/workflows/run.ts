@@ -558,6 +558,8 @@ interface ActiveRun {
   /** Registry snapshot used to expand `/skill` follow-ups before a backend can
    *  mistake them for its own slash commands (#676). */
   skills?: Skill[];
+  /** The install a live `/name` started after its message went out (#1408); tests await it. */
+  liveSkillProvisioning?: Promise<void>;
   /** Release for exclusive execution in the user's repository working tree.
    *  Worktree-backed runs never need it; root runs ordinarily do unless the
    *  explicit unsafe bypass is active. */
@@ -1817,6 +1819,37 @@ export class RunManager {
     return discoverSkills(this.repoRoot, { builtin: this.builtinSkills() });
   }
   /**
+   * A live `/name` message already carries the skill's body, and `sendMessage` answers
+   * synchronously, so its files and companions install after the message went out (#1408).
+   * When anything new landed, or a team skill's files went to a cache copy the message could not
+   * name, one durable agent input says what and where. Whether a runner's native lookup sees a skill
+   * added mid-session is not relied on: that input is the delivery for every runner. Nothing
+   * new: no input. A run that stopped, or moved to another session, gets none.
+   */
+  private provisionLiveSlashSkill(runId: string, state: ActiveRun, blocks: ContentBlock[]): void {
+    const first = blocks.find((block) => block.type === 'text');
+    const name = first?.type === 'text' ? leadingSlashSkillName(first.text) : undefined;
+    if (!name) return;
+    const session = state.session;
+    state.liveSkillProvisioning = (async () => {
+      const { filesDir, installed } = await this.provisionRunSkills(runId, state, { slash: name });
+      const dir = filesDir.get(name);
+      if (installed.length === 0 && !dir) return;
+      if (state.cancelled || this.active.get(runId) !== state || state.session !== session) return;
+      const text = [
+        ...(installed.length ? [`Skills installed for /${name}: ${installed.join(', ')}.`] : []),
+        ...(dir ? [`Skill files for /${name} are at ${dir}.`] : []),
+      ].join(' ');
+      // The durable queue delivers it at the runner's next opportunity: several runners refuse
+      // agent input while the human message is in flight, and a restart replays it.
+      const input: AgentInput = { id: randomUUID(), parentRunId: runId, source: 'lifecycle', text, createdAt: new Date().toISOString() };
+      this.store.commitAgentInputs(runId, enqueueAgentInput(this.store.getRun(runId)!, input));
+      this.store.appendEvent(runId, { type: 'agent-input', input });
+      this.flushAgentInputs(runId);
+    })().catch(() => undefined);
+  }
+
+  /**
    * Install the run's skills where its agent's own skill lookup finds them, for the step start,
    * Continue, restart recovery and a live `/name` alike (#286, #413, #1024, hearsay-tools/cezarion#1408).
    * The roots are the selected step skill and a leading `/name`, looked up in the registry the
@@ -1841,13 +1874,13 @@ export class RunManager {
     runId: string,
     state: ActiveRun,
     wanted: { stepSkill?: string; slash?: string },
-  ): Promise<{ notes: string[]; filesDir: Map<string, string> }> {
+  ): Promise<{ notes: string[]; filesDir: Map<string, string>; installed: string[] }> {
     const notes: string[] = [];
     const filesDir = new Map<string, string>();
     const registry = state.skills ?? [];
     const roots = [...new Set([wanted.stepSkill, wanted.slash].filter((name): name is string => Boolean(name)))]
       .flatMap((name) => registry.filter((skill) => skill.name === name).slice(0, 1));
-    if (roots.length === 0) return { notes, filesDir };
+    if (roots.length === 0) return { notes, filesDir, installed: [] };
     const teamRoots = roots.filter((skill) => skill.source === 'team' && skill.team?.dir);
     const cacheCopy = async (skill: Skill): Promise<void> => {
       const dir = await materializeSkillToCache(skill).catch(() => null);
@@ -1857,7 +1890,7 @@ export class RunManager {
     };
     if (!this.isOwnTaskWorktree(runId, state.cwd)) {
       for (const skill of teamRoots) await cacheCopy(skill);
-      return { notes, filesDir };
+      return { notes, filesDir, installed: [] };
     }
     const result = await provisionSkills(state.cwd, roots, [...registry, ...getTeamSkillsCached(this.repoRoot)]);
     for (const skill of teamRoots) {
@@ -1877,7 +1910,7 @@ export class RunManager {
       notes.push(`skills installed in the task's workspace: ${others.join(', ') || 'none new'}` +
         (result.truncated ? `; closure capped at ${MAX_SKILL_CLOSURE}, skipped ${result.truncated} and later` : ''));
     }
-    return { notes, filesDir };
+    return { notes, filesDir, installed: result.installed };
   }
   /** `cwd` is the run's recorded task worktree, and not the project root. Unresolvable means no. */
   private isOwnTaskWorktree(runId: string, cwd: string): boolean {
@@ -6130,7 +6163,8 @@ export class RunManager {
     // ride along so the model can *view* them, but a real path is what lets it *operate* on them
     // (save, `cp`, attach to a GitHub issue/PR) — and it's the only usable reference on backends
     // (codex, opencode) that drop image blocks entirely before reaching the model.
-    const expanded = userAuthored ? expandRegistrySlashSkill(contentBlocksOf(content), state.skills ?? []) : contentBlocksOf(content);
+    const blocks = contentBlocksOf(content);
+    const expanded = userAuthored ? expandRegistrySlashSkill(blocks, state.skills ?? []) : blocks;
     const deliverable: ContentBlock[] = persisted.length
       ? [...expanded, pastedAttachmentsNote(persisted)]
       : expanded.length ? expanded : [{ type: 'text', text: 'The user attached a document, but it could not be saved. Ask them to attach it again before discussing its contents.' }];
@@ -6145,6 +6179,7 @@ export class RunManager {
     const delivered = userAuthored ? state.session.sendMessage([...deliverable, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : []),
       ...(footer ? [{ type: 'text' as const, text: footer }] : [])])
       : this.submitAgentInput(runId, state, deliverable);
+    if (delivered && expanded !== blocks) this.provisionLiveSlashSkill(runId, state, blocks);
     if (delivered) {
       if (userAuthored) {
         // The turn that would have finished now answers the user (hearsay-tools/cezarion#1234).
@@ -7078,6 +7113,10 @@ export class RunManager {
     let continuationSkillPrompt: string | undefined;
     let fallbackSkillPrompt: string | undefined;
     const continuedSkillName = toolsStep?.skill;
+    // The continued step's skill and a leading `/name` in this prompt both get their companions;
+    // upstream rebuilt only the slash name, so an ordinary Continue lost the step skill's (#1408).
+    const continuationSlash = leadingSlashSkillName(prompt);
+    let continuationFiles = new Map<string, string>();
     if (continuedSkillName) {
       let skill = (state.skills ?? []).find((candidate) => candidate.name === continuedSkillName);
       if (!skill) {
@@ -7103,11 +7142,11 @@ export class RunManager {
         }
       }
       if (skill) {
-        // Rematerialize a directory team skill — into a #483 rematerialized
-        // worktree, or the cache copy when the worktree is gone — before the
-        // playbook, which names a cache copy's directory (#1024). No note on Continue.
-        const provisioned = await this.provisionRunSkills(runId, state, { stepSkill: skill.name });
-        const playbook = skillSystemPrompt(skill, provisioned.filesDir.get(skill.name));
+        // Reinstall the skill and its companions — into a #483 rematerialized
+        // worktree, or a team skill's cache copy when the worktree is gone — before
+        // the playbook, which names a cache copy's directory (#1024, #1408). No note on Continue.
+        continuationFiles = (await this.provisionRunSkills(runId, state, { stepSkill: skill.name, slash: continuationSlash })).filesDir;
+        const playbook = skillSystemPrompt(skill, continuationFiles.get(skill.name));
         if (skipSkillOnResume) fallbackSkillPrompt = playbook;
         else continuationSkillPrompt = playbook;
       } else if (!skipSkillOnResume) {
@@ -7116,6 +7155,9 @@ export class RunManager {
           message: `skill /${continuedSkillName} is not in the skill registry — its instructions were not re-sent to the continued session`,
         });
       }
+    }
+    if (!continuedSkillName || !(state.skills ?? []).some((candidate) => candidate.name === continuedSkillName)) {
+      if (continuationSlash) continuationFiles = (await this.provisionRunSkills(runId, state, { slash: continuationSlash })).filesDir;
     }
     state.currentStepId = stepId;
     this.beginUsageInvocation(runId, state, stepId);
@@ -7149,7 +7191,7 @@ export class RunManager {
     try {
     // Provisioning determines the actual capability, including a fresh session after recovery.
     const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? [], { tools: !!ciTools });
-    const openingPrompt = expandRegistrySlashSkillText(prompt, state.skills ?? []) +
+    const openingPrompt = expandRegistrySlashSkillText(prompt, state.skills ?? [], continuationFiles) +
       (setupNote ? `\n\n${setupNote}` : '') + (footer ? `\n\n${footer}` : '');
     const continuationTail = composeSystemPrompt(
       record?.systemPrompt,
