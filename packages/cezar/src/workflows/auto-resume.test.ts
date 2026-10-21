@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
+import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import {
   AUTO_RESUME_GRACE_MS,
@@ -559,6 +560,25 @@ describe('a run stopped by a usage limit resumes itself', () => {
     expect(store.getRun(kept.id)?.status).toBe('waiting');
   }, 40_000);
 
+  it('commits a withdrawn appointment before it reports the cancel', async () => {
+    // A crash right after "Don't resume" must not find the appointment still on disk: recovery
+    // would re-arm it and start work the user cancelled (hearsay-tools/cezarion#1236).
+    manager = createFixtureManager(store, repoRoot);
+    const record = manager.startRun(workflow, { task: 'mock:limit ship it', worktree: false });
+    await settle(record.id);
+    store.flush();
+    const committed = () => readPersistedRuns(join(repoRoot, '.ai/cezar')).find((row) => row.id === record.id);
+    expect(committed()).toMatchObject({ status: 'waiting', autoResumeAt: expect.any(String) });
+
+    expect(manager.cancelAutoResume(record.id)).toBe(true);
+
+    // Read at once, before any debounced save: what another process would see.
+    const row = committed();
+    expect(row.status).toBe('failed');
+    expect(row.autoResumeAt).toBeUndefined();
+    expect(row.finishedAt).toEqual(expect.any(String));
+  }, 40_000);
+
   it('cancels an armed resume when the setting is switched off mid-wait', async () => {
     // The real seam: a config PUT refreshes the shared semaphore, which pumps every manager.
     let enabled = true;
@@ -655,6 +675,34 @@ describe('a run stopped by a usage limit resumes itself', () => {
       .poll(() => store.getRun(record.id)?.steps.find((step) => step.id === 'continue-1')?.status, { timeout: 20_000 })
       .toBe('done');
   }, 40_000);
+
+  it('queues a human Continue while another run holds the same account, and starts it once that hold lifts', async () => {
+    // The approved 4a design (hearsay-tools/cezarion#1236): a Continue retires its own appointment
+    // and joins the line as a wake, still subject to another run's known deadline on the account.
+    manager = createFixtureManager(store, repoRoot);
+    const a = manager.startRun(workflow, { task: 'mock:limit probe a', worktree: false });
+    await settle(a.id);
+    // B starts on the same account only once A's hold is out of the way, then hits the limit too.
+    store.updateRun(a.id, { autoResumeAt: undefined, status: 'failed' });
+    const b = manager.startRun(workflow, { task: 'mock:limit probe b', worktree: false });
+    await settle(b.id);
+    store.updateRun(a.id, { status: 'waiting', finishedAt: undefined, autoResumeAt: new Date(Date.now() + 3_600_000).toISOString() });
+    store.updateRun(b.id, { task: 'mock:done ship it' });
+
+    expect(manager.continueRun(b.id, { text: 'mock:done carry on' })).toEqual({ ok: true });
+    // Its own appointment is gone; A's deadline keeps it in the line.
+    expect(store.getRun(b.id)?.autoResumeAt).toBeUndefined();
+    expect(store.getRun(b.id)?.status).toBe('queued');
+    expect(store.getRun(b.id)?.continuationMessage?.origin).toBe('human');
+    // A real pump that sees A's hold must leave it queued.
+    await (manager as unknown as { pump(): Promise<void> }).pump();
+    expect(store.getRun(b.id)?.status).toBe('queued');
+
+    manager.cancelAutoResume(a.id);
+    await expect
+      .poll(() => store.getRun(b.id)?.steps.find((step) => step.id === 'continue-1')?.status, { timeout: 20_000 })
+      .toBe('done');
+  }, 60_000);
 
   it('keeps a wait that resolves during the hold for the resume to deliver', async () => {
     const first = createFixtureManager(store, repoRoot);

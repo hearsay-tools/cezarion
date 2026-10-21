@@ -6,6 +6,7 @@ import { ciWaitResultSchema, type CiWaitRequest, type CiWaitResult } from '@open
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { AUTONOMOUS_NUDGE, decideTurnEnd } from './turn-end.ts';
 import { nextLineEntry } from './line-order.ts';
+import { executionAccount } from './execution-account.ts';
 import { ciWatchRequest, hasCiWait, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import { previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
@@ -2645,7 +2646,15 @@ export class RunManager {
   private wakeHeld(run: RunRecord): boolean {
     const holds = this.semaphore.accountHolds();
     if (!holds.deadline.size && !holds.inFlight.size) return false;
-    return accountHeldFor(run, holds, run.runner ?? 'claude');
+    return accountHeldFor(this.withExecutionAccount(run), holds, run.runner ?? 'claude');
+  }
+
+  /** The run with the account its next turn runs on (`executionAccount`): a live session's step
+   *  settings, a queued continuation's backend, else its latest session step. Both sides of a hold
+   *  read it, so a mixed-runner step is held by the account it ran on (hearsay-tools/cezarion#1236). */
+  private withExecutionAccount<T extends RunRecord>(run: T): T {
+    const live = this.active.get(run.id)?.delegationSettings;
+    return { ...run, ...executionAccount(run, this.pendingContinuations.get(run.id)?.backend, live) };
   }
 
   /** A monitoring-pool member's wake waiting in the line: it already holds its slot, so it needs
@@ -3014,13 +3023,20 @@ export class RunManager {
     return this.waitWakeQueuedAt.get(runId) ?? this.pendingContinuations.get(runId)?.lineJoinedAt;
   }
 
-  /** The oldest wake in this manager's line, or null: the semaphore gives a freed slot to the
-   *  project holding the oldest wake before any project's unstarted runs. */
+  /** The oldest wake in this manager's line that an account hold does not keep there, or null:
+   *  the semaphore gives a freed slot to the project holding the oldest such wake before any
+   *  project's unstarted runs. A held wake is left out, or its project would take the slot and
+   *  start a new task ahead of another project's started run (hearsay-tools/cezarion#1236). */
   private oldestWakeAt(): number | null {
     let oldest: number | null = null;
+    let holds: AccountHolds | undefined;
     for (const id of this.queue) {
       const at = this.wakeJoinedAt(id);
-      if (at !== undefined && (oldest === null || at < oldest)) oldest = at;
+      if (at === undefined || (oldest !== null && at >= oldest)) continue;
+      holds ??= this.semaphore.accountHolds();
+      const run = this.store.getRun(id);
+      if (run && accountHeldFor(this.withExecutionAccount(run), holds, run.runner ?? 'claude')) continue;
+      oldest = at;
     }
     return oldest;
   }
@@ -3107,7 +3123,7 @@ export class RunManager {
           const next = nextLineEntry(this.queue, (id) => this.wakeJoinedAt(id), (id) => {
             const queued = this.store.getRun(id);
             return !this.reclaiming.has(id) && !this.autosaveCleanupBlocker(id) && (capacity() || this.poolWakeQueued(id)) && (!queued || this.historyDeletionPending(id) || ((!this.executions.get(id)?.admitted || this.active.has(id)) && !this.executionBlockedByRootFinish(queued) &&
-              (!anyHold || !accountHeldFor(queued, holds, defaultRunner ?? 'claude'))));
+              (!anyHold || !accountHeldFor(this.withExecutionAccount(queued), holds, defaultRunner ?? 'claude'))));
           });
           if (next === -1) break; // every queued run has a durable reason to remain held
           const candidate = this.queue[next]!;
@@ -4028,7 +4044,7 @@ export class RunManager {
     for (const run of this.store.listRuns()) {
       // A holding run always carries the runner it actually ran on, so the fallback is unused
       // here — it is spelled out rather than `!` so a future record shape degrades, not throws.
-      const key = () => runAccountKey(run, run.runner ?? 'claude');
+      const key = () => runAccountKey(this.withExecutionAccount(run), run.runner ?? 'claude');
       if (onUsageLimitHold(run)) {
         const at = Date.parse(run.autoResumeAt!);
         if (Number.isFinite(at) && at > now) deadline.add(key());
@@ -4089,17 +4105,13 @@ export class RunManager {
    * next Continue.
    */
   private withdrawAutoResume(runId: string, note?: string): void {
+    // Committed first: a store that cannot write throws here with the timer still armed, and the
+    // note is written only once the withdrawal is on disk (hearsay-tools/cezarion#1236).
+    if (this.store.getRun(runId)) this.store.commitAutoResumeWithdrawal(runId);
     const timer = this.autoResumeTimers.get(runId);
     if (timer) clearTimeout(timer);
     this.autoResumeTimers.delete(runId);
-    const run = this.store.getRun(runId);
-    if (!run) return;
-    if (onUsageLimitHold(run)) {
-      this.store.updateRun(runId, { status: 'failed', finishedAt: new Date().toISOString(), autoResumeAttempts: undefined });
-    } else if (run.autoResumeAt !== undefined || run.autoResumeAttempts !== undefined) {
-      this.store.updateRun(runId, { autoResumeAt: undefined, autoResumeAttempts: undefined });
-    }
-    if (note) this.store.appendEvent(runId, { type: 'note', message: note });
+    if (note && this.store.getRun(runId)) this.store.appendEvent(runId, { type: 'note', message: note });
   }
 
   /** Reclaim finished worktrees beyond the keep-limit (#483) — directory only,
@@ -6564,6 +6576,11 @@ export class RunManager {
 
     try { this.beginWorkerExecution(runId, !deferForCapacity); }
     catch (error) { return { ok: false, error: admissionError(error, 'worker execution checkpoint unavailable') }; }
+    // A human Continue of a run held for its usage-limit resume has no session to steer, so it
+    // joins the line as a wake instead of starting at once: another run's known deadline on the
+    // same account still holds it (hearsay-tools/cezarion#1236). It stays the human's own
+    // continuation in every other way. `fireAutoResume` always defers, so this is never the resume.
+    const toLine = deferForCapacity || onUsageLimitHold(run);
     // Everything that could refuse this continuation has now passed, so a pending usage-limit
     // resume is superseded either way: this IS that resume (it re-stamps its own counter), or a
     // human got there first — and then the counter starts over, because the cap only exists to
@@ -6593,10 +6610,10 @@ export class RunManager {
         ...(conversation ? { agentInputId: conversation.input.id } : opts.answerInputId ? { agentInputId: opts.answerInputId } : {}),
         // A parent's answer (#505) answers the ask exactly like a human's.
         origin: recovered ? recovered.origin : deferForCapacity && !opts.answerInputId ? 'lifecycle' as const : 'human' as const },
-      status: deferForCapacity ? 'queued' as const : 'running' as const,
+      status: toLine ? 'queued' as const : 'running' as const,
       error: undefined,
       finishedAt: undefined,
-      currentStepId: deferForCapacity ? undefined : stepId,
+      currentStepId: toLine ? undefined : stepId,
       invalidAsk: undefined,
       archived: false,
       archivedAt: undefined,
@@ -6618,7 +6635,7 @@ export class RunManager {
     this.continuationGenerations.set(runId, Symbol());
     // Keep fresh viewable images even if persistence failed; recovery uses saved URLs.
     const images = contentBlocksOf(opts.images ?? []).filter((block) => block.type === 'image');
-    if (deferForCapacity) {
+    if (toLine) {
       this.pendingContinuations.set(runId, {
         stepId,
         sessionId: resumeSessionId,

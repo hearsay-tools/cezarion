@@ -2988,6 +2988,17 @@ export class RunStore extends EventEmitter {
       ...(stepId ? { steps: run.steps.map((step) => step.id === stepId ? { ...step, status: 'waiting' as const } : step) } : {}) }]]));
   }
 
+  /** A usage-limit appointment withdrawn, committed at once instead of on the debounced save
+   *  (hearsay-tools/cezarion#1236): a crash right after the withdrawal must not find it on disk,
+   *  or recovery re-arms work the user cancelled. A run held for its resume settles `failed`. */
+  commitAutoResumeWithdrawal(id: string): void {
+    const run = this.peek(id);
+    if (!run || (run.autoResumeAt === undefined && run.autoResumeAttempts === undefined)) return;
+    const held = run.status === 'waiting' && run.autoResumeAt !== undefined;
+    this.commitIndex(new Map([[id, { ...run, autoResumeAt: undefined, autoResumeAttempts: undefined,
+      ...(held ? { status: 'failed' as const, finishedAt: new Date().toISOString() } : {}) }]]));
+  }
+
   /** The wake counters alone, committed at once instead of on the debounced save: a crash after
    *  an autonomous nudge or a failed delivery keeps what it spent or counted. */
   commitWakeCounters(id: string, counters: WakeCounters): void {
