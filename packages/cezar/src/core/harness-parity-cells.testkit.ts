@@ -641,6 +641,8 @@ const CONTROL_CRITERIA = [
   // hearsay-tools/cezarion#1399: workflows/ci-wait-rerun-parity.test.ts keeps
   // partial green pending during a rerun, including recovery without a session.
   { id: 'R85', scenario: 'baseline' },
+  // hearsay-tools/cezarion#1440: query retry through native wake, fresh and recovered.
+  { id: 'R92', scenario: 'baseline' },
   { id: 'R28', scenario: 'baseline' },
   { id: 'R29', scenario: 'baseline' },
   { id: 'R30', scenario: 'baseline' },

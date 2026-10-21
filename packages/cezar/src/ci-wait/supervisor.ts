@@ -65,6 +65,7 @@ export class CiWatcherSupervisor {
     let workflowActive = false;
     let release: (() => void) | undefined;
     let retry = 0;
+    let lastQueryError: CiGithubError | undefined;
     const discoveryDeadline = Math.min(Date.parse(wait.deadline), Date.now() + CI_DISCOVERY_MS);
     let metadata: GithubPrMetadata | undefined;
     const observe = (result: CiWaitResult['outcome'], extra: Partial<Pick<CiWaitResult, 'observedHeadSha' | 'diagnostic'>> = {}) =>
@@ -78,7 +79,11 @@ export class CiWatcherSupervisor {
     const conflict = () => metadata?.mergeable === 'CONFLICTING'
       ? observe('conflicting', {diagnostic: 'The pull request conflicts with its base. Inspect the PR; this observation does not authorize a repair or merge.'})
       : undefined;
-    const stopped = () => observe(caller.aborted || this.lifetime.signal.aborted ? 'cancelled' : 'deadline');
+    const stopped = () => {
+      const cancelled = caller.aborted || this.lifetime.signal.aborted;
+      return observe(cancelled ? 'cancelled' : 'deadline', !cancelled && lastQueryError
+        ? { diagnostic: `${lastQueryError.code}: ${lastQueryError.message}` } : {});
+    };
     if (remaining <= 0 || signal.aborted) return stopped();
     const snapshot = async (): Promise<CiWaitResult | undefined> => {
       const before = (await readMetadata()).headSha;
@@ -98,6 +103,7 @@ export class CiWatcherSupervisor {
       while (!signal.aborted) {
         try {
           const settled = await snapshot();
+          retry = 0; lastQueryError = undefined;
           if (settled) return settled;
           // A rerun may hide all its checks, making gh --watch exit immediately.
           // Probe the workflow itself without spinning or spending model turns.
@@ -140,8 +146,13 @@ export class CiWatcherSupervisor {
           }
         } catch (error) {
           if (signal.aborted) return stopped();
-          if (error instanceof CiGithubError && error.transient && retry < CI_RETRY_MS.length) {
-            await delay(CI_RETRY_MS[retry++]!, undefined, {signal});
+          if (error instanceof CiGithubError && (error.code === 'command_failed' || error.code === 'query_timeout')) {
+            lastQueryError = error;
+            // Retain the initial backoff, then use the normal probe interval.
+            // The original deadline and cancellation signal bound every retry.
+            const retryMs = CI_RETRY_MS[retry] ?? CI_PROBE_MS;
+            retry = Math.min(retry + 1, CI_RETRY_MS.length);
+            await delay(retryMs, undefined, {signal});
             continue;
           }
           return observe('error', {diagnostic:error instanceof CiGithubError ? `${error.code}: ${error.message}` : 'unavailable: CI watcher failed; register a new wait.'});

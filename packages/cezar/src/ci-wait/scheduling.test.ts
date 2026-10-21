@@ -104,8 +104,45 @@ it('retries three transient failures with 1/5/15 second backoff without model wa
  await vi.advanceTimersByTimeAsync(5000);expect(github.headReads).toBe(3);
  await vi.advanceTimersByTimeAsync(15000);expect((await result).outcome).toBe('passed');
 });
-it('settles persistent transient errors after the third retry',async()=>{
- vi.useFakeTimers();const github=new ScriptedGithub();github.failures=99;const {result}=start(github);await vi.advanceTimersByTimeAsync(21000);expect((await result).outcome).toBe('error');expect(github.headReads).toBe(4);
+it.each(['command_failed', 'query_timeout'] as const)('retries %s beyond three failures at a capped interval until the deadline', async code => {
+ vi.useFakeTimers(); const github=new ScriptedGithub();
+ github.head=async()=>{github.headReads++;throw new CiGithubError(code,`failure ${github.headReads}`);};
+ const deadline=new AbortController();const timeout=vi.spyOn(AbortSignal,'timeout').mockReturnValueOnce(deadline.signal);
+ const started=start(github,120);timeout.mockRestore();let settled=false;void started.result.then(()=>{settled=true;});
+ await vi.advanceTimersByTimeAsync(21_000);expect(settled).toBe(false);expect(github.headReads).toBe(4);
+ await vi.advanceTimersByTimeAsync(29_999);expect(github.headReads).toBe(4);
+ await vi.advanceTimersByTimeAsync(1);expect(github.headReads).toBe(5);
+ await vi.advanceTimersByTimeAsync(30_000);expect(github.headReads).toBe(6);
+ deadline.abort();
+ expect(await started.result).toMatchObject({outcome:'deadline',diagnostic:`${code}: failure 6`});
+});
+it('recovers an unrecognized command failure and resolves the actual verdict',async()=>{
+ vi.useFakeTimers();const github=new ScriptedGithub();let failed=false;
+ github.hasActiveRuns=async()=>{if(!failed){failed=true;throw new CiGithubError('command_failed','Unrecognized failure');}return false;};
+ github.rows=[{name:'build',state:'SUCCESS',bucket:'pass',link:''}];
+ const started=start(github);await vi.advanceTimersByTimeAsync(1_000);
+ expect(await started.result).toMatchObject({outcome:'passed',totalChecks:1});
+ expect((await started.result).diagnostic).toBeUndefined();
+});
+it.each(['authentication','inaccessible_pr','gh_missing','malformed_data','output_limit'] as const)('ends %s errors immediately even if marked transient',async code=>{
+ vi.useFakeTimers();const github=new ScriptedGithub();github.hasActiveRuns=async()=>{throw new CiGithubError(code,'Permanent failure',true);};
+ const started=start(github);let settled=false;void started.result.then(()=>{settled=true;});
+ await vi.advanceTimersByTimeAsync(0);expect(settled).toBe(true);
+ expect(await started.result).toMatchObject({outcome:'error',diagnostic:`${code}: Permanent failure`});
+});
+it('cancels during retry backoff without reporting a deadline diagnostic',async()=>{
+ vi.useFakeTimers();const github=new ScriptedGithub();github.failures=99;
+ const started=start(github);await vi.advanceTimersByTimeAsync(21_000);started.controller.abort();
+ const result=await started.result;expect(result.outcome).toBe('cancelled');expect(result.diagnostic).toBeUndefined();
+});
+it('clears an earlier failure after a successful pending snapshot and resets backoff',async()=>{
+ vi.useFakeTimers();const github=new ScriptedGithub();github.failures=3;github.workflowActive=true;
+ const deadline=new AbortController();const timeout=vi.spyOn(AbortSignal,'timeout').mockReturnValueOnce(deadline.signal);
+ const started=start(github);timeout.mockRestore();await vi.advanceTimersByTimeAsync(21_000);
+ github.failures=1;await vi.advanceTimersByTimeAsync(30_000);const reads=github.headReads;
+ await vi.advanceTimersByTimeAsync(999);expect(github.headReads).toBe(reads);
+ await vi.advanceTimersByTimeAsync(1);expect(github.headReads).toBe(reads+2);
+ deadline.abort();const result=await started.result;expect(result.outcome).toBe('deadline');expect(result.diagnostic).toBeUndefined();
 });
 it('rejects head changes during snapshot attribution and during a running watch',async()=>{
  vi.useFakeTimers();const github=new ScriptedGithub();github.rows=[{name:'build',state:'PENDING',bucket:'pending',link:''}];github.changedAt=3;
