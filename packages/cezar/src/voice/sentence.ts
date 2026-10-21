@@ -10,8 +10,9 @@ const ORDINAL = '(?:one|two|three|four|first|second|third|fourth|[1-4])';
 /** Where dictated text starts: "tell it", "tell the agent to", "reply with", "say", "message it". */
 const TELL_TRIGGER = /\b(?:tell\s+(?:it|the\s+agent|them)(?:\s+to)?|reply(?:\s+with)?|say|message(?:\s+it)?)\b/gi;
 
-const CONNECTOR = /^(?:(?:answer|and|then|to|for)\b|[\s:,])+/i;
+const CONNECTOR = /^(?:answer|and|then|to|for)\b/i;
 const FILLER = /^(?:um+|uh+|so|okay|ok)\b/i;
+const LEADING = /^[\s:,]+/;
 const TRAILING = /[\s.!?,]+$/;
 
 function escapeRegExp(text: string): string {
@@ -34,22 +35,32 @@ function questionAnchors(headers: string[]): RegExp {
   return new RegExp([...named, numbered].join('|'), 'gi');
 }
 
-/**
- * No leading connector word, colon or comma, no trailing sentence mark. A leading filler ("um", "okay")
- * goes only when words remain after it, so a dictated "okay" or "so" is never cleaned away.
- */
-function clean(text: string): string {
-  let out = text.replace(TRAILING, '');
-  for (let next = strip(out); next !== out; next = strip(out)) out = next;
-  return out;
+/** The words as said: only surrounding space, a leading colon or comma and a trailing sentence mark go. */
+function literal(text: string): string {
+  return text.replace(LEADING, '').replace(/[\s.!?]+$/, '');
 }
 
-/** One step of cleaning: a connector off the front, else a filler when words remain after it. */
-function strip(text: string): string {
-  const connector = text.replace(CONNECTOR, '');
-  if (connector !== text) return connector;
-  const filler = text.replace(FILLER, '');
-  return filler !== text && filler.replace(CONNECTOR, '') !== '' ? filler : text;
+/**
+ * The words without the command syntax around them: no leading connector word ("and", "then", "answer"),
+ * filler ("um", "okay"), colon or comma, no trailing sentence mark. A step that would leave nothing is
+ * not taken, so a dictated "and" or "okay" is never cleaned away.
+ */
+function clean(text: string): string {
+  let out = text.replace(TRAILING, '').replace(LEADING, '');
+  for (;;) {
+    const next = out.replace(CONNECTOR, '').replace(LEADING, '');
+    const step = next !== out ? next : out.replace(FILLER, '').replace(LEADING, '');
+    if (step === out || step === '') return out;
+    out = step;
+  }
+}
+
+/**
+ * Each candidate as said, then cleaned when that differs (spec 2026-10-21-voice-mode: dictated text is
+ * copied exactly; the cleaned form is the alternative for a stray leading "and").
+ */
+function forms(text: string): string[] {
+  return [literal(text), clean(text)];
 }
 
 function unique(texts: string[]): string[] {
@@ -61,16 +72,19 @@ export function candidateSpans(sentence: string, headers: string[] = []): string
   const segments: string[] = [];
   let from = 0;
   for (const anchor of sentence.matchAll(questionAnchors(headers))) {
-    segments.push(clean(sentence.slice(from, anchor.index)));
+    segments.push(sentence.slice(from, anchor.index));
     from = anchor.index + anchor[0].length;
   }
-  segments.push(clean(sentence.slice(from)));
-  const named = segments.filter((segment) => segment !== '');
-  const spans: string[] = [...named];
-  for (let i = 0; i + 1 < named.length; i++) spans.push(`${named[i]}: ${named[i + 1]}`);
+  segments.push(sentence.slice(from));
+  const named = segments.filter((segment) => literal(segment) !== '');
+  const spans: string[] = named.flatMap(forms);
+  for (let i = 0; i + 1 < named.length; i++) {
+    const [a, b] = [named[i]!, named[i + 1]!];
+    spans.push(`${literal(a)}: ${literal(b)}`, `${clean(a)}: ${clean(b)}`);
+  }
   for (const segment of named) {
     const colon = segment.indexOf(':');
-    if (colon >= 0) spans.push(clean(segment.slice(colon + 1)));
+    if (colon >= 0) spans.push(...forms(segment.slice(colon + 1)));
   }
   return unique(spans);
 }
@@ -79,7 +93,7 @@ export function candidateSpans(sentence: string, headers: string[] = []): string
 export function tellStarts(sentence: string): string[] {
   const starts: string[] = [];
   const colon = sentence.indexOf(':');
-  if (colon >= 0) starts.push(clean(sentence.slice(colon + 1)));
-  for (const trigger of sentence.matchAll(TELL_TRIGGER)) starts.push(clean(sentence.slice(trigger.index + trigger[0].length)));
+  if (colon >= 0) starts.push(...forms(sentence.slice(colon + 1)));
+  for (const trigger of sentence.matchAll(TELL_TRIGGER)) starts.push(...forms(sentence.slice(trigger.index + trigger[0].length)));
   return unique(starts);
 }

@@ -25,11 +25,23 @@ describe('candidateSpans', () => {
   });
 
   it('never cleans a segment down to nothing', () => {
-    expect(candidateSpans('answer okay to question one')).toEqual(['okay']);
-    expect(candidateSpans('answer so to question one')).toEqual(['so']);
-    expect(candidateSpans('answer none to question one')).toEqual(['none']);
-    expect(candidateSpans('um, answer ok to question one')).toEqual(['ok']);
+    expect(candidateSpans('answer okay to question one')).toEqual(['answer okay', 'okay']);
+    expect(candidateSpans('answer so to question one')).toEqual(['answer so', 'so']);
+    expect(candidateSpans('answer none to question one')).toEqual(['answer none', 'none']);
+    expect(candidateSpans('um, answer ok to question one')).toEqual(['um, answer ok', 'ok']);
     expect(candidateSpans('okay answer Vitest to question one')).toContain('Vitest');
+  });
+
+  it('keeps an answer that is a connector word', () => {
+    expect(candidateSpans('answer and to question one')).toContain('and');
+    expect(candidateSpans('answer then to question one')).toContain('then');
+  });
+
+  it('offers every span as said first, then cleaned', () => {
+    expect(candidateSpans('answer for now keep both')).toEqual(['answer for now keep both', 'now keep both']);
+    expect(candidateSpans('Vitest to question one, and then Jev to question two.')).toEqual(
+      ['Vitest', 'and then Jev', 'Jev', 'Vitest: and then Jev', 'Vitest: Jev'],
+    );
   });
 
   it('splits at card headers as well as numbers', () => {
@@ -42,12 +54,12 @@ describe('candidateSpans', () => {
 
   it('matches headers case-insensitively, word-bounded and escaped', () => {
     expect(candidateSpans('answer yes to ENGINE', ['engine'])).toContain('yes');
-    expect(candidateSpans('answer yes to engineering', ['engine'])).toEqual(['yes to engineering']);
+    expect(candidateSpans('answer yes to engineering', ['engine'])).toEqual(['answer yes to engineering', 'yes to engineering']);
     expect(candidateSpans('answer yes to C++ (new)', ['C++ (new)'])).toContain('yes');
   });
 
   it('keeps the whole sentence as one span when no question is named', () => {
-    expect(candidateSpans('answer use both')).toEqual(['use both']);
+    expect(candidateSpans('answer use both')).toEqual(['answer use both', 'use both']);
   });
 
   it('returns nothing for an empty sentence', () => {
@@ -55,7 +67,7 @@ describe('candidateSpans', () => {
   });
 
   it('de-duplicates and caps the candidates at 20', () => {
-    expect(candidateSpans('answer a to question one and a to question two')[0]).toBe('a');
+    expect(candidateSpans('answer a to question one and a to question two')).toContain('a');
     expect(candidateSpans('answer a to question one and a to question two').filter((s) => s === 'a')).toHaveLength(1);
     const long = Array.from({ length: 30 }, (_, i) => `word${i} to question one`).join(' and ');
     expect(candidateSpans(long).length).toBeLessThanOrEqual(20);
@@ -74,6 +86,19 @@ describe('tellStarts', () => {
     ['message it stop now', 'stop now'],
   ])('finds the start after a trigger in %j', (sentence, start) => {
     expect(tellStarts(sentence)).toContain(start);
+  });
+
+  it.each([
+    ['tell it: answer the question', 'answer the question'],
+    ['tell it: for now keep both', 'for now keep both'],
+    ['tell it: and then stop.', 'and then stop'],
+    ['tell it: Then run it', 'Then run it'],
+  ])('keeps the dictated words of %j as said', (sentence, start) => {
+    expect(tellStarts(sentence)[0]).toBe(start);
+  });
+
+  it('also offers the start without a stray connector', () => {
+    expect(tellStarts('tell it: and run the tests again')).toEqual(['and run the tests again', 'run the tests again']);
   });
 
   it('returns nothing without a colon or trigger', () => {

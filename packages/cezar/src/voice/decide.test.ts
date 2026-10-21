@@ -216,7 +216,7 @@ describe('decideVoice', () => {
   it('offers the words of an answer that equal a sentinel as quoted options', async () => {
     const engine = stub({ ...command, action: { choice: 'answer' }, q0_span: { choice: textKey('none') } });
     await decide(engine, { request: { text: 'answer none to question one', openRunId: RUN_ID }, ask: OPEN_ASK });
-    expect(Object.keys((engine.calls[0]!.questions.q0_span as { options: object }).options)).toEqual(['“none”', 'none']);
+    expect(Object.keys((engine.calls[0]!.questions.q0_span as { options: object }).options)).toEqual(['“answer none”', '“none”', 'none']);
   });
 
   it('tells the words none', async () => {
