@@ -1160,9 +1160,10 @@ export function describeWaitParity(scope: RunnerId | 'once'): void {
         expect(manager.continueRun(run.id, { text: answer }).ok).toBe(true);
         // The wait is never delivered in a row that lost the answer it was delivered with.
         expect(committed).toEqual({ answer: answer.trim(), delivered: true });
-        await until(() => existsSync(answers));
-        expect(JSON.parse(JSON.parse(readFileSync(answers, 'utf8')).response.content[0].text.split('\n')[0])).toMatchObject({ ok: true, finishes: 'at_turn_end' });
+        // File creation precedes write completion in the mock child. Read its response only
+        // after the native turn has finished, when the child has completed the write.
         await until(() => terminal.includes(store.getRun(run.id)?.status ?? '') && !manager.isActive(run.id));
+        expect(JSON.parse(JSON.parse(readFileSync(answers, 'utf8')).response.content[0].text.split('\n')[0])).toMatchObject({ ok: true, finishes: 'at_turn_end' });
         expect(store.readEvents(run.id).filter(event => event.type === 'lifecycle' && event.message === 'goal achieved — session closed'))
           .toEqual([expect.objectContaining({ via: 'cezar_done' })]);
         expect(settled(run.id, wait!.id)?.phase).toBe('delivered');
