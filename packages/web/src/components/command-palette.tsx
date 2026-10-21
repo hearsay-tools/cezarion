@@ -27,6 +27,9 @@ import { orderSkillsByUsage } from '@/lib/skills'
 import { isOwnedWorker, runTitle } from '@/lib/task-groups'
 import { useCommandShortcut, useKeyShortcut } from '@/lib/use-command-shortcut'
 import { useProjectOrder } from '@/lib/use-project-order'
+import { useVoiceProposal } from '@/lib/voice/proposal-store'
+import { useVoiceCommand } from '@/components/voice/use-voice-command'
+import { VoiceRows } from '@/components/voice/voice-rows'
 
 /**
  * The ⌘K command palette (spec, "Cross-cutting"): projects, tasks, views, actions, skills —
@@ -237,6 +240,13 @@ export function CommandPalette() {
     return () => window.removeEventListener(OPEN_COMMAND_PALETTE_EVENT, onOpen)
   }, [])
 
+  // Voice mode (spec 2026-10-21-voice-mode, § Confirmation): while a proposal waits for its
+  // confirmation, the palette moves to the bottom of the viewport over a clear overlay, so the
+  // highlighted question card or composer stays visible and the input keeps focus for "yes,
+  // confirmed". Only the palette makes proposals, so with voice off this never docks.
+  const proposal = useVoiceProposal()
+  const docked = open && proposal !== undefined
+
   return (
     <CommandDialog
       open={open}
@@ -255,11 +265,13 @@ export function CommandPalette() {
       // the result count changes, so the whole modal — search box included — jumps under the
       // cursor as you type. Anchored near the top it only ever grows downward, and the input you
       // are typing into never moves.
-      className="top-[10vh] translate-y-0 sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl"
+      className={`${docked ? 'top-auto bottom-[2vh]' : 'top-[10vh]'} translate-y-0 sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl`}
+      overlayClassName={docked ? 'bg-transparent' : undefined}
+      contentProps={docked ? { 'data-voice-proposal': 'true' } : undefined}
     >
       {/* The body mounts only while the dialog is open (Radix portals nothing when closed), so
           its queries — notably the skills fetch — run on first open, never on app boot. */}
-      <PaletteContent close={() => setOpen(false)} />
+      <PaletteContent open={open} docked={docked} close={() => setOpen(false)} />
     </CommandDialog>
   )
 }
@@ -322,7 +334,7 @@ function TaskItem({
   )
 }
 
-function PaletteContent({ close }: { close: () => void }) {
+function PaletteContent({ open, docked, close }: { open: boolean; docked: boolean; close: () => void }) {
   const navigate = useNavigate()
   // The UNSCOPED twin, for the handful of targets that live outside every project (`/tasks`).
   const routerNavigate = useRouterNavigate()
@@ -345,6 +357,19 @@ function PaletteContent({ close }: { close: () => void }) {
   // the palette must not offer a GitHub view the sidebar honestly hides.
   const health = useHealth()
   const now = Date.now()
+  // Health loading counts as off: no request, no row, and the palette renders as it always has.
+  const voice = useVoiceCommand({
+    enabled: health.data?.capabilities.voice === true,
+    text: search,
+    close,
+    clearText: () => setSearch(''),
+  })
+  // The body outlives `open` for the length of the exit animation; the hook's unmount cleanup
+  // covers the rest. Both are safe to run twice.
+  const { onClose: closeVoice } = voice
+  React.useEffect(() => {
+    if (!open) closeVoice()
+  }, [open, closeVoice])
 
   // Same threshold as the sidebar's grouped nav (`app-shell-container.tsx`): with one registered
   // project there is nowhere to switch TO, and a one-row group would be pure noise.
@@ -433,13 +458,19 @@ function PaletteContent({ close }: { close: () => void }) {
         placeholder="Search projects, tasks, views, actions, skills…"
         value={search}
         onValueChange={setSearch}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.nativeEvent.isComposing) voice.onEnter(event)
+        }}
       />
       {/* The shadcn default is a flat `max-h-[300px]` — about seven rows, on any monitor. Scaled
           to the viewport instead, so a large screen actually shows the list it has room for.
           `min-h` keeps a short result set from collapsing the box to nothing, which would move
           the bottom edge as violently as the old centring moved the top. */}
-      <CommandList className="max-h-[55vh] min-h-[14rem] sm:max-h-[60vh] lg:max-h-[68vh]">
-        <CommandEmpty>Nothing matches.</CommandEmpty>
+      {/* Docked, the list stays short so the palette covers less of the card behind it. */}
+      <CommandList className={docked ? 'max-h-[28vh]' : 'max-h-[55vh] min-h-[14rem] sm:max-h-[60vh] lg:max-h-[68vh]'}>
+        <VoiceRows row={voice.row} committable={search.trim() !== ''} onSelect={voice.onSelect} />
+        {/* A voice row answers the sentence; "nothing matches" would contradict it. */}
+        {voice.row ? null : <CommandEmpty>Nothing matches.</CommandEmpty>}
 
         {/* First, headless, and the row an empty query pre-selects: opening ⌘K and pressing
             Enter starts a task. It used to sit ninth in Views with a duplicate down in Actions;

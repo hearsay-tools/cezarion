@@ -297,6 +297,15 @@ describe('voiceStore', () => {
     })
   })
 
+  it('headersFor reads the registered card, and nothing once it is gone', () => {
+    expect(voiceStore.headersFor('r1', 'ask_1')).toBeUndefined()
+    const unregister = voiceStore.registerAskCard(fakeCard())
+    expect(voiceStore.headersFor('r1', 'ask_1')).toEqual(['Library', 'Build'])
+    expect(voiceStore.headersFor('r1', 'ask_2')).toBeUndefined()
+    unregister()
+    expect(voiceStore.headersFor('r1', 'ask_1')).toBeUndefined()
+  })
+
   it('notifies subscribers on every change', () => {
     const listener = vi.fn()
     voiceStore.subscribe(listener)

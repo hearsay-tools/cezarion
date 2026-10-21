@@ -1,0 +1,500 @@
+import * as React from 'react'
+
+import { reportVoiceOutcome, voiceDecide } from '@/api/client'
+import { useRuns } from '@/api/queries'
+import { useListView } from '@/components/list-view'
+import { useNavigate, useProjectMatch } from '@/lib/project-router'
+import { groupTitle, runTitle, type SidebarView } from '@/lib/task-groups'
+import { parseNumberedPick } from '@/lib/voice/numbered-pick'
+import { useVoiceProposal, voiceStore, type VoiceProposal } from '@/lib/voice/proposal-store'
+import { resolveOpenTarget, type OpenTarget } from '@/lib/voice/resolve-open'
+import { VOICE_TEXT_MAX } from '@open-mercato/cezar-api-client/contract/voice'
+import type { RunSummary, VoiceDecideRequest, VoiceDecision, VoiceOutcome } from '@open-mercato/cezar-api-client'
+import {
+  answerRowText,
+  noTasksNotice,
+  openRowText,
+  pastEndNotice,
+  tellRowText,
+} from './voice-copy'
+
+/**
+ * Voice mode in the ⌘K palette (spec 2026-10-21-voice-mode, § User experience): a sentence in the
+ * input gets a Will do row, Return commits it, and every action other than opening a task becomes
+ * a proposal that a SECOND input confirms. The server decides what a sentence means; this hook
+ * owns the timing (debounce, abort, the bounded wait on Return), the execution and the outcome
+ * reports.
+ *
+ * The Return that commits a sentence acts only on the decision for exactly that sentence, so it
+ * can create a proposal but never confirm one (§ Input 5). Return confirms only in an empty input
+ * while a proposal is shown.
+ */
+
+export type VoiceRow = { kind: 'will-do' | 'notice'; text: string; choices?: string[] }
+export type VoiceMode = 'idle' | 'preview' | 'choosing' | 'proposal'
+
+/** How long the text must stay unchanged before the palette asks the engine. */
+export const VOICE_PREVIEW_DEBOUNCE_MS = 300
+/** How long Return waits for the decision of its sentence. */
+export const VOICE_DECISION_BOUND_MS = 3000
+
+const NOTICES = {
+  timedOut: 'Voice decision timed out.',
+  unavailable: 'Voice decision unavailable.',
+  noCard: 'This question is not open here.',
+  draftNotEmpty: 'The message box already has text.',
+  busy: 'The task is busy. Try again in a moment.',
+  noOpenTask: 'Open a task first.',
+  noOpenQuestion: 'This task has no open question.',
+  unclear: 'Not sure what to do. Try again.',
+  questionClosed: 'The question was answered or closed elsewhere.',
+  taskClosed: 'The task is no longer open.',
+} as const
+
+/** Two or more words after trimming: a single word stays an ordinary palette search. */
+export function looksLikeSentence(text: string): boolean {
+  return text.trim().split(/\s+/).length >= 2
+}
+
+const voiceable = (text: string) => looksLikeSentence(text) && text.length <= VOICE_TEXT_MAX
+
+/** What a decision depends on: the same sentence, open task and shown proposal ⇒ the same answer. */
+interface DecisionKey {
+  text: string
+  openRunId: string | null
+  proposalId: string | null
+}
+const sameKey = (a: DecisionKey, b: DecisionKey) =>
+  a.text === b.text && a.openRunId === b.openRunId && a.proposalId === b.proposalId
+
+type Settled = { kind: 'decision'; decision: VoiceDecision } | { kind: 'failed' } | { kind: 'aborted' }
+
+interface DecisionRequest {
+  key: DecisionKey
+  controller: AbortController
+  result: Promise<Settled>
+  failed: boolean
+}
+
+type Openable = Extract<OpenTarget, { kind: 'run' | 'group' }>
+interface Choice {
+  target: Openable
+  text: string
+}
+interface Choosing {
+  decisionId: string
+  choices: Choice[]
+}
+
+type OpenDecision = Extract<VoiceDecision, { action: 'open' }>
+
+/** What an `open` decision points at, and the numbered candidates when the engine was not sure. */
+function planOpen(
+  decision: OpenDecision,
+  context: { runs: readonly RunSummary[]; sidebarView: SidebarView; openRunId: string | null },
+): { primary: OpenTarget; choices: Choice[] } {
+  const titleOf = (target: Openable): string => {
+    if (target.kind === 'run') {
+      const run = context.runs.find((candidate) => candidate.id === target.runId)
+      return run ? runTitle(run) : target.runId
+    }
+    const member = context.runs.find((candidate) => candidate.groupId === target.groupId)
+    return member ? groupTitle(member) : target.groupId
+  }
+  const resolve = (status: OpenDecision['status'], position: OpenDecision['position']) =>
+    resolveOpenTarget({ ...context, status, position })
+  const primary = resolve(decision.status, decision.position)
+  const choices: Choice[] = []
+  const seen = new Set<string>()
+  for (const candidate of [{ status: decision.status, position: decision.position }, ...(decision.alternatives ?? [])]) {
+    const target = resolve(candidate.status, candidate.position)
+    if (target.kind !== 'run' && target.kind !== 'group') continue
+    const id = target.kind === 'run' ? `run:${target.runId}` : `group:${target.groupId}`
+    if (seen.has(id)) continue
+    seen.add(id)
+    choices.push({ target, text: openRowText(titleOf(target), candidate.status, candidate.position) })
+  }
+  return { primary, choices: decision.alternatives?.length ? choices : choices.slice(0, 1) }
+}
+
+function proposalText(proposal: VoiceProposal): string {
+  return proposal.kind === 'answer'
+    ? answerRowText(proposal.answers, voiceStore.headersFor(proposal.runId, proposal.askRequestId))
+    : tellRowText(proposal.text)
+}
+
+/** Return falls back to whatever cmdk has selected, as it does without voice. Voice rows are
+ *  never that fallback: a notice row can keep cmdk's selection after it stops being clickable. */
+function clickSelectedItem() {
+  document.querySelector<HTMLElement>('[cmdk-item][data-selected="true"]:not([data-slot^="voice-"])')?.click()
+}
+
+const OFF = { row: undefined, mode: 'idle' as const, onEnter: () => false, onClose: () => {}, onSelect: () => {} }
+
+export function useVoiceCommand(args: { enabled: boolean; text: string; close(): void; clearText(): void }): {
+  row: VoiceRow | undefined
+  mode: VoiceMode
+  /** True when voice handled the key (and prevented cmdk's own Return). */
+  onEnter(event: React.KeyboardEvent): boolean
+  onClose(): void
+  /** A click on a voice row: the Will do row commits, a numbered row picks. */
+  onSelect(choice?: number): void
+} {
+  const { enabled } = args
+  const runs = useRuns().data
+  const [sidebarView] = useListView()
+  const openRunId = useProjectMatch('/tasks/:id/*')?.params.id ?? null
+  const navigate = useNavigate()
+  const proposal = useVoiceProposal()
+
+  const trimmed = args.text.trim()
+  const key = React.useMemo<DecisionKey>(
+    () => ({ text: trimmed, openRunId, proposalId: proposal?.decisionId ?? null }),
+    [trimmed, openRunId, proposal?.decisionId],
+  )
+
+  const [settled, setSettled] = React.useState<{ key: DecisionKey; result: Settled }>()
+  const [notice, setNotice] = React.useState<{ text: string; forText: string }>()
+  const [choosing, setChoosing] = React.useState<Choosing>()
+
+  const pick = choosing ? parseNumberedPick(trimmed, choosing.choices.length) : null
+  // A new sentence that is not a pick ends the choice; an empty input or a pick keeps it.
+  const choosingLive = choosing !== undefined && !(voiceable(trimmed) && pick === null)
+
+  // Every callback reads the latest render through this, never the render that created it.
+  const latest = React.useRef({ ...args, key, runs: runs ?? [], sidebarView, openRunId, navigate, settled, choosing })
+  latest.current = { ...args, key, runs: runs ?? [], sidebarView, openRunId, navigate, settled, choosing }
+
+  const request = React.useRef<DecisionRequest | undefined>(undefined)
+  const committing = React.useRef<DecisionRequest | undefined>(undefined)
+  const mounted = React.useRef(false)
+  /** Decisions a committed sentence acted on: closing never reports them as abandoned. */
+  const acted = React.useRef(new Set<string>())
+  /** One outcome per decision, whichever path reaches it first. */
+  const reported = React.useRef(new Set<string>())
+
+  const report = React.useCallback((decisionId: string, outcome: VoiceOutcome) => {
+    if (reported.current.has(decisionId)) return
+    reported.current.add(decisionId)
+    reportVoiceOutcome(decisionId, outcome)
+  }, [])
+
+  const say = React.useCallback((text: string) => setNotice({ text, forText: latest.current.key.text }), [])
+
+  /** The request for `requestKey`: the one already made for it, or a new one started now. */
+  const requestFor = React.useCallback((requestKey: DecisionKey): DecisionRequest => {
+    const current = request.current
+    if (current && sameKey(current.key, requestKey) && !current.failed) return current
+    current?.controller.abort()
+    const controller = new AbortController()
+    const shown = voiceStore.getProposal()
+    const input: VoiceDecideRequest = {
+      text: requestKey.text,
+      sidebarView: latest.current.sidebarView,
+      ...(requestKey.openRunId === null ? {} : { openRunId: requestKey.openRunId }),
+      ...(shown && shown.decisionId === requestKey.proposalId
+        ? { proposal: { decisionId: shown.decisionId, action: shown.kind } }
+        : {}),
+    }
+    const made: DecisionRequest = {
+      key: requestKey,
+      controller,
+      failed: false,
+      result: voiceDecide(input, controller.signal).then(
+        (decision): Settled => (controller.signal.aborted ? { kind: 'aborted' } : { kind: 'decision', decision }),
+        (): Settled => (controller.signal.aborted ? { kind: 'aborted' } : { kind: 'failed' }),
+      ),
+    }
+    void made.result.then((result) => {
+      if (result.kind === 'failed') made.failed = true
+      if (result.kind !== 'aborted' && mounted.current && request.current === made) setSettled({ key: requestKey, result })
+    })
+    request.current = made
+    return made
+  }, [])
+
+  const openTarget = React.useCallback(
+    (decisionId: string, target: Openable) => {
+      report(decisionId, 'executed')
+      // Opening another task leaves the proposal's card or composer behind.
+      const live = voiceStore.getProposal()
+      if (live) {
+        voiceStore.cancel()
+        report(live.decisionId, 'abandoned')
+      }
+      setChoosing(undefined)
+      latest.current.close()
+      latest.current.navigate(target.kind === 'run' ? `/tasks/${target.runId}` : `/compare/${target.groupId}`)
+    },
+    [report],
+  )
+
+  const confirmProposal = React.useCallback(() => {
+    const live = voiceStore.getProposal()
+    if (!live) return
+    const result = voiceStore.confirm()
+    if (result.ok) {
+      report(live.decisionId, 'confirmed')
+      latest.current.close()
+    } else if ('unanswered' in result) {
+      const first = result.unanswered[0]
+      if (first) say(`Question ${first.index + 1} (${first.header}) still needs an answer.`)
+    } else if (result.reason === 'busy') {
+      say(NOTICES.busy)
+    } else {
+      // Its card or composer is gone without the store noticing: nothing left to send to.
+      voiceStore.cancel()
+      report(live.decisionId, 'abandoned')
+      say(live.kind === 'answer' ? NOTICES.questionClosed : NOTICES.taskClosed)
+    }
+  }, [report, say])
+
+  const act = React.useCallback(
+    (decision: VoiceDecision, made: DecisionRequest) => {
+      acted.current.add(decision.decisionId)
+      const { clearText, runs: currentRuns, sidebarView: view, openRunId: openId } = latest.current
+      switch (decision.action) {
+        case 'open': {
+          const { primary, choices } = planOpen(decision, { runs: currentRuns, sidebarView: view, openRunId: openId })
+          if (choices.length >= 2) {
+            setChoosing({ decisionId: decision.decisionId, choices })
+            clearText()
+            return
+          }
+          const only = choices[0]
+          if (only) return openTarget(decision.decisionId, only.target)
+          return say(primary.kind === 'empty' ? noTasksNotice(decision.status) : pastEndNotice(decision.status, decision.position))
+        }
+        case 'answer':
+        case 'tell': {
+          // A decision about another task than the one on screen has nothing to fill.
+          if (decision.runId !== openId) return
+          const result = voiceStore.propose(
+            decision.action === 'answer'
+              ? { kind: 'answer', decisionId: decision.decisionId, runId: decision.runId, askRequestId: decision.askRequestId, answers: decision.answers }
+              : { kind: 'tell', decisionId: decision.decisionId, runId: decision.runId, text: decision.text },
+          )
+          if (result.ok) {
+            if (result.replaced) report(result.replaced, 'replaced')
+            setChoosing(undefined)
+            clearText()
+            return
+          }
+          return say(result.reason === 'no-card' ? NOTICES.noCard : result.reason === 'draft-not-empty' ? NOTICES.draftNotEmpty : NOTICES.busy)
+        }
+        case 'confirm':
+        case 'cancel': {
+          // Only a proposal that was on screen when this sentence was committed.
+          const shown = voiceStore.getProposal()
+          if (made.key.proposalId === null || shown?.decisionId !== made.key.proposalId) return say(NOTICES.unclear)
+          if (decision.action === 'confirm') return confirmProposal()
+          voiceStore.cancel()
+          report(shown.decisionId, 'cancelled')
+          clearText()
+          return
+        }
+        case 'none':
+          if (decision.reason === 'not-a-command') return clickSelectedItem()
+          return say(
+            decision.reason === 'no-open-task'
+              ? NOTICES.noOpenTask
+              : decision.reason === 'no-open-question'
+                ? NOTICES.noOpenQuestion
+                : NOTICES.unclear,
+          )
+      }
+    },
+    [confirmProposal, openTarget, report, say],
+  )
+
+  const commit = React.useCallback(async () => {
+    const committedKey = latest.current.key
+    const made = requestFor(committedKey)
+    if (committing.current === made) return
+    committing.current = made
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const bound = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), VOICE_DECISION_BOUND_MS)
+    })
+    const result = await Promise.race([made.result, bound])
+    clearTimeout(timer)
+    if (committing.current === made) committing.current = undefined
+    // The text, the open task or the shown proposal moved on: this decision is for something else.
+    if (!mounted.current || !sameKey(latest.current.key, committedKey)) return
+    if (result === 'timeout') {
+      made.controller.abort()
+      if (request.current === made) request.current = undefined
+      return say(NOTICES.timedOut)
+    }
+    if (result.kind === 'aborted') return
+    if (result.kind === 'failed') {
+      say(NOTICES.unavailable)
+      return clickSelectedItem()
+    }
+    act(result.decision, made)
+  }, [act, requestFor, say])
+
+  const choose = React.useCallback(
+    (index: number) => {
+      const current = latest.current.choosing
+      const choice = current?.choices[index]
+      if (current && choice) openTarget(current.decisionId, choice.target)
+    },
+    [openTarget],
+  )
+
+  // Preview: ask a beat after the text settles. A change aborts the request for the old text.
+  React.useEffect(() => {
+    const current = request.current
+    if (current && !sameKey(current.key, key)) {
+      current.controller.abort()
+      request.current = undefined
+    }
+    if (!enabled || !voiceable(key.text) || pick !== null || request.current) return
+    const timer = setTimeout(() => requestFor(key), VOICE_PREVIEW_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [enabled, key, pick, requestFor])
+
+  // A notice speaks about the text it was shown for, and a new sentence ends a choice.
+  React.useEffect(() => {
+    setNotice((current) => (current && current.forText !== trimmed ? undefined : current))
+    if (voiceable(trimmed) && pick === null) setChoosing(undefined)
+  }, [trimmed, pick])
+
+  // A proposal the store drops on its own: its question was answered elsewhere, its task closed.
+  React.useEffect(() => {
+    let previous = voiceStore.getProposal()
+    return voiceStore.subscribe(() => {
+      const now = voiceStore.getProposal()
+      const reason = voiceStore.lastDrop()
+      if (previous && !now && reason && latest.current.enabled) {
+        report(previous.decisionId, 'abandoned')
+        say(reason === 'question-closed' ? NOTICES.questionClosed : NOTICES.taskClosed)
+      }
+      previous = now
+    })
+  }, [report, say])
+
+  const onClose = React.useCallback(() => {
+    const current = latest.current
+    if (!current.enabled) return
+    request.current?.controller.abort()
+    const live = voiceStore.getProposal()
+    if (live) {
+      voiceStore.cancel()
+      report(live.decisionId, 'cancelled')
+    }
+    const preview = current.settled
+    if (preview && sameKey(preview.key, current.key) && preview.result.kind === 'decision') {
+      const { decision } = preview.result
+      if (decision.action !== 'none' && !acted.current.has(decision.decisionId)) report(decision.decisionId, 'abandoned')
+    }
+    if (current.choosing) report(current.choosing.decisionId, 'abandoned')
+  }, [report])
+
+  // The palette body unmounts when the dialog closes, whichever way it closed.
+  React.useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      onClose()
+    }
+  }, [onClose])
+
+  const onEnter = React.useCallback(
+    (event: React.KeyboardEvent): boolean => {
+      const current = latest.current
+      if (!current.enabled) return false
+      const text = current.key.text
+      const handled = () => {
+        event.preventDefault()
+        return true
+      }
+      if (current.choosing) {
+        const index = parseNumberedPick(text, current.choosing.choices.length)
+        if (index !== null) {
+          choose(index)
+          return handled()
+        }
+      }
+      if (text === '' && voiceStore.getProposal() && !current.choosing) {
+        confirmProposal()
+        return handled()
+      }
+      if (voiceable(text)) {
+        void commit()
+        return handled()
+      }
+      return false
+    },
+    [choose, commit, confirmProposal],
+  )
+
+  const onSelect = React.useCallback(
+    (choice?: number) => {
+      if (choice !== undefined) return choose(choice)
+      if (voiceable(latest.current.key.text)) void commit()
+    },
+    [choose, commit],
+  )
+
+  if (!enabled) return OFF
+
+  let row: VoiceRow | undefined
+  if (notice && notice.forText === trimmed) {
+    row = { kind: 'notice', text: notice.text }
+  } else if (choosingLive && choosing) {
+    row = { kind: 'will-do', text: 'Which one?', choices: choosing.choices.map((choice) => choice.text) }
+  } else if (settled && sameKey(settled.key, key) && voiceable(trimmed)) {
+    row = previewRow(settled.result, settled.key, { runs: runs ?? [], sidebarView, openRunId })
+  } else if (proposal && trimmed === '') {
+    row = { kind: 'will-do', text: proposalText(proposal) }
+  }
+
+  const mode: VoiceMode = choosingLive ? 'choosing' : proposal ? 'proposal' : voiceable(trimmed) ? 'preview' : 'idle'
+  return { row, mode, onEnter, onClose, onSelect }
+}
+
+/** The Will do row for a decision that has not been committed yet. */
+function previewRow(
+  result: Settled,
+  requestKey: DecisionKey,
+  context: { runs: readonly RunSummary[]; sidebarView: SidebarView; openRunId: string | null },
+): VoiceRow | undefined {
+  if (result.kind === 'aborted') return undefined
+  if (result.kind === 'failed') return { kind: 'notice', text: NOTICES.unavailable }
+  const { decision } = result
+  switch (decision.action) {
+    case 'open': {
+      const { primary, choices } = planOpen(decision, context)
+      if (choices.length >= 2) return { kind: 'will-do', text: 'Which one?', choices: choices.map((choice) => choice.text) }
+      const only = choices[0]
+      if (only) return { kind: 'will-do', text: only.text }
+      return {
+        kind: 'notice',
+        text: primary.kind === 'empty' ? noTasksNotice(decision.status) : pastEndNotice(decision.status, decision.position),
+      }
+    }
+    case 'answer':
+      if (decision.runId !== context.openRunId) return undefined
+      return { kind: 'will-do', text: answerRowText(decision.answers, voiceStore.headersFor(decision.runId, decision.askRequestId)) }
+    case 'tell':
+      if (decision.runId !== context.openRunId) return undefined
+      return { kind: 'will-do', text: tellRowText(decision.text) }
+    case 'confirm':
+    case 'cancel':
+      if (requestKey.proposalId === null) return { kind: 'notice', text: NOTICES.unclear }
+      return { kind: 'will-do', text: decision.action === 'confirm' ? 'Send it' : 'Drop it' }
+    case 'none':
+      if (decision.reason === 'not-a-command') return undefined
+      return {
+        kind: 'notice',
+        text:
+          decision.reason === 'no-open-task'
+            ? NOTICES.noOpenTask
+            : decision.reason === 'no-open-question'
+              ? NOTICES.noOpenQuestion
+              : NOTICES.unclear,
+      }
+  }
+}

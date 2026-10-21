@@ -149,6 +149,8 @@ export const voiceStore = {
   cancel,
   /** Why the last proposal ended without the user. */
   lastDrop: (): DropReason | undefined => drop,
+  /** The question headers of a registered card, so the palette can name what it will answer. */
+  headersFor: (runId: string, requestId: string): string[] | undefined => cards.get(cardKey(runId, requestId))?.headers,
   registerAskCard(target: AskCardTarget): () => void {
     const key = cardKey(target.runId, target.requestId)
     cards.set(key, target)
