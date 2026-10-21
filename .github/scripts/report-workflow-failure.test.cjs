@@ -122,3 +122,39 @@ test('repairing an unknown reservation keeps available diagnostic evidence',asyn
  await assert.rejects(reportFailure(h.options));await reportFailure(h.options);
  assert.equal(h.state.issues.length,1);assert.match(h.state.comments[0].body,/TS2307/);
 });
+function mainCi(h, patch={}) {
+ Object.assign(h.state.run,{name:'CI',path:'.github/workflows/ci.yml',head_branch:'main',event:'push'},patch);
+ h.options.event.workflow_run=structuredClone(h.state.run);
+}
+test('main push CI routes only after evidence and repairs routing after retry',async()=>{
+ const h=harness();mainCi(h);h.state.failComment=true;
+ await assert.rejects(reportFailure(h.options));
+ assert.ok(!h.calls.some(([route])=>route.endsWith('/labels')));
+ await reportFailure(h.options);
+ const comment=h.calls.findLastIndex(([route])=>route==='POST /repos/{owner}/{repo}/issues/{issue_number}/comments');
+ const label=h.calls.findLastIndex(([route])=>route==='POST /repos/{owner}/{repo}/issues/{issue_number}/labels');
+ assert.ok(label>comment);assert.deepEqual(h.calls[label][1].labels,['main-ci-failure']);
+ assert.match(h.state.issues[0].body,/workflow run/);
+});
+test('CI accepts only same-repository main pushes',async()=>{
+ for(const patch of [{event:'pull_request_target'},{event:'workflow_dispatch'},{event:undefined},{head_branch:'release/x'},{head_repository:{full_name:'foreign/repo'}}]) {
+  const h=harness();mainCi(h,patch);await reportFailure(h.options);assert.equal(h.calls.length,0);
+ }
+});
+test('cancelled main CI retains completed failed jobs but ignores cancellation alone',async()=>{
+ const h=harness();mainCi(h,{conclusion:'cancelled'});await reportFailure(h.options);
+ assert.ok(h.state.issues.length>0);
+ const empty=harness();mainCi(empty,{conclusion:'cancelled'});empty.state.jobs=[];
+ await reportFailure(empty.options);assert.equal(empty.state.issues.length,0);
+});
+
+test('routing failure retries without duplicating saved evidence or routing closed reports',async()=>{
+ const h=harness();mainCi(h);h.state.failLabel=true;
+ await assert.rejects(reportFailure(h.options));
+ assert.equal(h.state.comments.length,1);
+ await reportFailure(h.options);assert.equal(h.state.comments.length,1);
+ const count=h.calls.filter(([route])=>route.endsWith('/labels')).length;
+ assert.equal(count,2);
+ h.state.issues[0].state='closed';await reportFailure(h.options);
+ assert.equal(h.calls.filter(([route])=>route.endsWith('/labels')).length,count);
+});
