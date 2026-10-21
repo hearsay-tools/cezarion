@@ -71,8 +71,8 @@ function setup({ enabled = true, text = '' }: { enabled?: boolean; text?: string
 
 type Harness = ReturnType<typeof setup>
 
-function enter(harness: Harness) {
-  const event = { key: 'Enter', preventDefault: vi.fn(), nativeEvent: { isComposing: false } }
+function enter(harness: Harness, { repeat = false }: { repeat?: boolean } = {}) {
+  const event = { key: 'Enter', repeat, preventDefault: vi.fn(), nativeEvent: { isComposing: false } }
   let handled = false
   act(() => {
     handled = harness.result.current.voice.onEnter(event as unknown as KeyboardEvent)
@@ -261,6 +261,44 @@ describe('useVoiceCommand', () => {
     expect(confirm).toHaveBeenCalledTimes(1)
     expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith(DECISION_ID(1), 'confirmed')
     expect(harness.close).toHaveBeenCalled()
+  })
+
+  it('a held Return never commits or confirms; a fresh press confirms', async () => {
+    mocks.openRunId = 'r1'
+    const target = card(['Library'])
+    voiceStore.registerAskCard(target)
+    const harness = setup()
+    type(harness, 'answer vitest to question one')
+
+    // The key that commits the sentence stays down: its repeats arrive before and after the decision.
+    expect(enter(harness).handled).toBe(true)
+    const early = enter(harness, { repeat: true })
+    expect(early.handled).toBe(true)
+    expect(early.event.preventDefault).toHaveBeenCalled()
+    expect(calls).toHaveLength(1)
+    await answer(calls[0], answerDecision(1, [option(0, 'Vitest')]))
+    expect(harness.result.current.text).toBe('')
+
+    for (let i = 0; i < 3; i++) {
+      const held = enter(harness, { repeat: true })
+      expect(held.handled).toBe(true)
+      expect(held.event.preventDefault).toHaveBeenCalled()
+    }
+    expect(target.send).not.toHaveBeenCalled()
+    expect(voiceStore.getProposal()).toMatchObject({ decisionId: DECISION_ID(1) })
+
+    expect(enter(harness).handled).toBe(true)
+    expect(target.send).toHaveBeenCalledTimes(1)
+    expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith(DECISION_ID(1), 'confirmed')
+  })
+
+  it('a held Return with no sentence and no proposal keeps the default Return', () => {
+    const harness = setup()
+    type(harness, 'open')
+    expect(enter(harness, { repeat: true }).handled).toBe(false)
+    type(harness, '')
+    expect(enter(harness, { repeat: true }).handled).toBe(false)
+    expect(mocks.voiceDecide).not.toHaveBeenCalled()
   })
 
   it('refuses to confirm with an unanswered question', async () => {

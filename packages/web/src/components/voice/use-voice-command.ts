@@ -440,6 +440,9 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
         event.preventDefault()
         return true
       }
+      // A held Return repeats its keydown, and a repeat that reached the emptied input would confirm the
+      // proposal its first press made. Only a fresh press commits or confirms (spec "Input", 5).
+      if (event.repeat) return voiceable(text) || voiceStore.getProposal() ? handled() : false
       if (current.choosing) {
         const index = parseNumberedPick(text, current.choosing.choices.length)
         if (index !== null) {
