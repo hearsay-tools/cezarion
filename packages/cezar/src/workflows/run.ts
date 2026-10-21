@@ -2605,7 +2605,9 @@ export class RunManager {
     // cancellation or termination, including refusals with no runner-ready callback.
     this.retryWaitAdmission(runId);
     if (this.waitWakeAdmitted.has(runId)) { this.deliverAdmittedWake(runId); return; }
-    if (state && this.monitoring.has(runId)) {
+    // A pool member's wake is admitted at once, unless its account is on a usage-limit hold: then
+    // it waits in the line, keeping its monitoring slot, until the hold lifts (hearsay-tools/cezarion#1236).
+    if (state && this.monitoring.has(runId) && !this.wakeHeld(run)) {
       if (this.waitWakeQueuedAt.delete(runId)) { const at = this.queue.indexOf(runId); if (at >= 0) this.queue.splice(at, 1); }
       this.waitWakeAdmitted.add(runId);
       this.deliverAdmittedWake(runId);
@@ -2637,6 +2639,19 @@ export class RunManager {
       this.waitWakeQueuedAt.set(runId, Date.now());
     }
     this.releaseSlot();
+  }
+
+  /** Is this run's account on a usage-limit hold that keeps its wake in the line? */
+  private wakeHeld(run: RunRecord): boolean {
+    const holds = this.semaphore.accountHolds();
+    if (!holds.deadline.size && !holds.inFlight.size) return false;
+    return accountHeldFor(run, holds, run.runner ?? 'claude');
+  }
+
+  /** A monitoring-pool member's wake waiting in the line: it already holds its slot, so it needs
+   *  no regular one to leave (hearsay-tools/cezarion#1236). */
+  private poolWakeQueued(runId: string): boolean {
+    return this.monitoring.has(runId) && this.waitWakeQueuedAt.has(runId) && this.active.has(runId);
   }
 
   /** A worker wait the store upgraded from the old engine as already settled may have had no wake input
@@ -3091,7 +3106,7 @@ export class RunManager {
           // being dequeued and re-queued (which would churn its position and its record).
           const next = nextLineEntry(this.queue, (id) => this.wakeJoinedAt(id), (id) => {
             const queued = this.store.getRun(id);
-            return !this.reclaiming.has(id) && !this.autosaveCleanupBlocker(id) && capacity() && (!queued || this.historyDeletionPending(id) || ((!this.executions.get(id)?.admitted || this.active.has(id)) && !this.executionBlockedByRootFinish(queued) &&
+            return !this.reclaiming.has(id) && !this.autosaveCleanupBlocker(id) && (capacity() || this.poolWakeQueued(id)) && (!queued || this.historyDeletionPending(id) || ((!this.executions.get(id)?.admitted || this.active.has(id)) && !this.executionBlockedByRootFinish(queued) &&
               (!anyHold || !accountHeldFor(queued, holds, defaultRunner ?? 'claude'))));
           });
           if (next === -1) break; // every queued run has a durable reason to remain held
