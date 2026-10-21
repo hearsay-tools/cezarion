@@ -312,6 +312,14 @@ probe is bounded by the remaining budget. On timeout the launcher prints elapsed
 seconds and the last 20 lines of `.ai/qa/test-env-app.log`, then stops the app.
 This budget covers the health wait, excluding build and browser preparation.
 
+The server stays up after the run so the next run can reuse it, but it does not stay up for
+ever (hearsay-tools/cezarion#1448). A watcher process next to it stops it when the checkout or
+the served clone is deleted, or after `TEST_ENV_IDLE_EXIT_MINUTES` (default 30) with no
+test-env lease holder; `0` turns the idle exit off. A run killed with SIGKILL leaves dead
+holder rows, which the watcher removes, so the idle period still runs out.
+`TEST_ENV_WATCH_INTERVAL_SECONDS` (default 30) sets how often it checks. Malformed values fail
+before boot; unset or empty values use the defaults.
+
 ## The project the shared env serves
 
 The shared server never serves this checkout. Each cold boot serves a fresh isolated clone at
