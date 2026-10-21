@@ -107,6 +107,10 @@ describe('a held wake does not advertise itself to the workspace line', () => {
       expect(engine.oldestWakeAt()).toBeNull();
       store.updateRun(holder.id, { status: 'failed', finishedAt: new Date().toISOString() });
       expect(engine.oldestWakeAt()).toBe(1);
+      // Any blocker `pump()` applies leaves it out too: here, a worktree cleanup in progress.
+      const reclaiming = (manager as unknown as { reclaiming: Set<string> }).reclaiming;
+      reclaiming.add(parked.id);
+      try { expect(engine.oldestWakeAt()).toBeNull(); } finally { reclaiming.delete(parked.id); }
     } finally {
       engine.queue.splice(engine.queue.indexOf(parked.id), 1);
       engine.waitWakeQueuedAt.delete(parked.id);

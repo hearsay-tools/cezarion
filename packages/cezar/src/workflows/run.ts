@@ -3042,11 +3042,25 @@ export class RunManager {
       const at = this.wakeJoinedAt(id);
       if (at === undefined || (oldest !== null && at >= oldest)) continue;
       holds ??= this.semaphore.accountHolds();
-      const run = this.store.getRun(id);
-      if (run && accountHeldFor(this.withExecutionAccount(run), holds, run.runner ?? 'claude')) continue;
+      // The same blockers `pump()` applies, capacity aside: a wake that cannot leave for any of
+      // them must not win the slot for its project's unstarted work.
+      if (!this.canLeaveLine(id, holds, this.store.getRun(id)?.runner ?? 'claude')) continue;
       oldest = at;
     }
     return oldest;
+  }
+
+  /** Can this queued entry leave the line now, capacity aside? No worktree cleanup, no
+   *  autosave cleanup, no pending root finish, no account hold, and not already admitted
+   *  elsewhere. `pump()` and `oldestWakeAt()` share it, so the workspace order and the project
+   *  order agree (hearsay-tools/cezarion#1236). */
+  private canLeaveLine(id: string, holds: AccountHolds, fallbackRunner: RunnerId): boolean {
+    if (this.reclaiming.has(id) || this.autosaveCleanupBlocker(id)) return false;
+    const queued = this.store.getRun(id);
+    if (!queued || this.historyDeletionPending(id)) return true;
+    if (this.executions.get(id)?.admitted && !this.active.has(id)) return false;
+    if (this.executionBlockedByRootFinish(queued)) return false;
+    return !accountHeldFor(this.withExecutionAccount(queued), holds, fallbackRunner);
   }
 
   /**
@@ -3128,11 +3142,8 @@ export class RunManager {
           // Wakes first, then unstarted runs, each FIFO among the entries that CAN start
           // (hearsay-tools/cezarion#1236); a held one keeps its place in the queue rather than
           // being dequeued and re-queued (which would churn its position and its record).
-          const next = nextLineEntry(this.queue, (id) => this.wakeJoinedAt(id), (id) => {
-            const queued = this.store.getRun(id);
-            return !this.reclaiming.has(id) && !this.autosaveCleanupBlocker(id) && (capacity() || this.poolWakeQueued(id)) && (!queued || this.historyDeletionPending(id) || ((!this.executions.get(id)?.admitted || this.active.has(id)) && !this.executionBlockedByRootFinish(queued) &&
-              (!anyHold || !accountHeldFor(this.withExecutionAccount(queued), holds, defaultRunner ?? 'claude'))));
-          });
+          const next = nextLineEntry(this.queue, (id) => this.wakeJoinedAt(id),
+            (id) => (capacity() || this.poolWakeQueued(id)) && this.canLeaveLine(id, anyHold ? holds : NO_HOLDS, defaultRunner ?? 'claude'));
           if (next === -1) break; // every queued run has a durable reason to remain held
           const candidate = this.queue[next]!;
           if (this.workerExecutionStopped(candidate)) { this.cancel(candidate); continue; }
