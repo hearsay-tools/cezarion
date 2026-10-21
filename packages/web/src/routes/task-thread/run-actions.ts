@@ -25,6 +25,12 @@ export function isRunActive(run: Pick<RunRecord, 'status' | 'autoResumeAt'>): bo
   return run.status === 'running' || run.status === 'queued' || run.status === 'waiting'
 }
 
+/** A live agent session owns the run: running, or waiting with its session open. A usage-limit
+ *  hold is `waiting` with no session (hearsay-tools/cezarion#1236), so it is not open. */
+export function isSessionOpen(run: Pick<RunRecord, 'status' | 'autoResumeAt'>): boolean {
+  return (run.status === 'running' || run.status === 'waiting') && isRunActive(run)
+}
+
 /** The latest agent session across steps — what Continue/Terminal resume. */
 export function lastSessionId(run: RunRecord): string | undefined {
   return [...run.steps].reverse().find((step) => step.sessionId)?.sessionId
