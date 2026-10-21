@@ -39,8 +39,12 @@ function declarationKind(head: string): Kind | undefined {
   return 'default';
 }
 
-/** The `=` of a type alias at a statement start. TypeScript needs the name on the line of `type`. */
-const ALIAS_HEAD = /(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?type[ \t]+[\w$]+\s*(?:<[^;]*?>)?\s*=(?!>)/g;
+/**
+ * The `=` of a type alias at a statement start. TypeScript needs the name on the line of `type`.
+ * Type parameters end at the first `>` an `=` follows: the alias's own, or a parameter default's
+ * inside the same alias.
+ */
+const ALIAS_HEAD = /(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?type[ \t]+[\w$]+\s*(?:<[\s\S]*?>)?\s*=(?!>)/g;
 /** A line that ends mid-type, and a line that starts mid-type: the type goes on past the break between. */
 const ENDS_OPEN = /(?:[=|&,<:?.]|=>)\s*$/;
 const STARTS_OPEN = /^\s*(?:[|&?:.,]|=>)/;
@@ -187,6 +191,8 @@ describe('scanning one file', () => {
     `type T = Map<\n  string,\n  import('${R}').B\n>`,
     `export type M = typeof import('${R}')`,
     `declare type T = import('${R}').X`,
+    `type T<X extends Foo<Bar>> = import('${R}').X`,
+    `type T<X extends { a: A; b: B }> = import('${R}').X`,
   ])('allows %s', (source) => {
     expect(kinds(source)).toEqual([]);
   });
