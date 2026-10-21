@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { RunRecord } from './runs.ts';
 import {
+  asksQuestion,
   askErrorCodeSchema,
   cezarAskAnswerSchema,
   cezarAskRequestSchema,
@@ -600,5 +601,20 @@ describe('computeWaitingOn with worker entries', () => {
     expect(computeWaitingOn({ waits: [openRequestWait({ requestOutcomes: answered })] })).toEqual({ kind: 'workers', count: 0, replies: true });
     expect(computeWaitingOn({ waits: [openWorkerWait(), ...completionWaits()] })).toEqual({ kind: 'workers', count: 4 });
     expect(computeWaitingOn({ waits: [openRequestWait(), ...completionWaits()] })).toEqual({ kind: 'workers', count: 3 });
+  });
+});
+
+// Review of #1437: Cezar's worker fallback is a real question (it carries `questions`), so
+// `cez task status` and the webhook's `task.question` must see it; its other waits ask nothing.
+describe('asksQuestion', () => {
+  const human = (over: Record<string, unknown>) => ({ id: '00000000-0000-4000-8000-0000000000ac', kind: 'human', source: 'agent', via: 'cezar_ask',
+    registeredAt: '2026-10-21T00:00:00.000Z', phase: 'open', turnId: 't', ...over }) as unknown as NonNullable<RunRecord['waits']>[number];
+  it('is true for the agent\'s question and for Cezar\'s fallback question, false for Cezar\'s plain waits', () => {
+    expect(asksQuestion({ waits: [human({})] })).toBe(true);
+    expect(asksQuestion({ waits: [human({ source: 'cezar', via: 'no-wait', questions: [{ header: 'Worker', question: 'What next?' }] })] })).toBe(true);
+    expect(asksQuestion({ waits: [human({ source: 'cezar', via: 'no-wait' })] })).toBe(false);
+    expect(asksQuestion({ waits: [human({ source: 'cezar', via: 'budget' })] })).toBe(false);
+    expect(asksQuestion({ waits: [human({ phase: 'resolved' })] })).toBe(false);
+    expect(asksQuestion({})).toBe(false);
   });
 });

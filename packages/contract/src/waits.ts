@@ -369,10 +369,11 @@ export function asksHuman(run: Pick<WaitingOnInput, 'waits'>): boolean {
   return Array.isArray(run.waits) && run.waits.some((wait) => wait?.kind === 'human' && wait.phase === 'open');
 }
 
-/** Whether the agent asked the user something: an open human wait the agent opened. Cezar's own
- *  (`no-wait`, `budget`, `completion`) waits for the user without a question. */
-export function agentAsksHuman(run: Pick<WaitingOnInput, 'waits'>): boolean {
-  return Array.isArray(run.waits) && run.waits.some((wait) => wait?.kind === 'human' && wait.phase === 'open' && wait.source === 'agent');
+/** Whether a question waits on the user: an open human wait the agent opened, or one of Cezar's
+ *  that carries a card (a worker's fallback question to its parent). Cezar's other waits
+ *  (`no-wait`, `budget`, `completion`) wait for the user without a question. */
+export function asksQuestion(run: Pick<WaitingOnInput, 'waits'>): boolean {
+  return Array.isArray(run.waits) && run.waits.some((wait) => wait?.kind === 'human' && wait.phase === 'open' && (wait.source === 'agent' || !!wait.questions?.length));
 }
 
 /** A resolved wait is a wake owed to the agent: its result is in, its turn has not started.

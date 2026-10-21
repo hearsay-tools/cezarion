@@ -15,7 +15,7 @@ import {
   type RunSummary,
 } from '@open-mercato/cezar-contract/runs';
 import { changesPayloadSchema } from '@open-mercato/cezar-contract/repo';
-import { agentAsksHuman } from '@open-mercato/cezar-contract/waits';
+import { asksQuestion } from '@open-mercato/cezar-contract/waits';
 import { runHistoryContextSchema } from '@open-mercato/cezar-contract/events';
 import { skillSchema } from '@open-mercato/cezar-contract/skills';
 import { openUrl } from '../open-url.ts';
@@ -577,7 +577,7 @@ async function execute(
     case 'status': {
       const run = await getRun(cockpit, id);
       if (values.full) { print(run); return EXIT.ok; }
-      const question = agentAsksHuman(run) ? await pendingQuestion(cockpit, id) : undefined;
+      const question = asksQuestion(run) ? await pendingQuestion(cockpit, id) : undefined;
       print({ ...projectStatus(run, threadUrl(cockpit, id), question), handoffUrl: handoffUrl(cockpit, id) });
       return EXIT.ok;
     }

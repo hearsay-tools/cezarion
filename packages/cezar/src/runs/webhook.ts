@@ -3,7 +3,7 @@ import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ApiRun, RunStatus, WebhookTrigger } from '@open-mercato/cezar-contract';
 import { DEFAULT_WEBHOOK_TRIGGERS, deriveWebhookState, type AttentionInput } from '@open-mercato/cezar-contract/attention';
-import { agentAsksHuman } from '@open-mercato/cezar-contract/waits';
+import { asksQuestion } from '@open-mercato/cezar-contract/waits';
 import { projectStatus } from '../task-cli/projections.ts';
 import { loadWorkspaceConfig } from '../workspace/config.ts';
 import { deriveRunContextEvents } from './event-history.ts';
@@ -197,7 +197,7 @@ export class TaskWebhook {
     if (now.state === undefined || before.state === now.state) return;
     // One delivery per entry: a question that parks the run is one `task.question`, not a
     // `task.status` to `waiting` beside it.
-    const event = now.state === 'needs-you' && agentAsksHuman(run) ? 'task.question' : 'task.status';
+    const event = now.state === 'needs-you' && asksQuestion(run) ? 'task.question' : 'task.status';
     this.enqueue({ event, run, previousStatus: before.status, state: now.state, occurredAt });
   }
 
@@ -221,7 +221,7 @@ export class TaskWebhook {
     this.seqs.set(run.id, seq);
     const origin = this.options.origin() ?? '';
     const url = `${origin}/p/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(run.id)}`;
-    const question = agentAsksHuman(run) ? await this.pendingQuestion(run.id) : undefined;
+    const question = asksQuestion(run) ? await this.pendingQuestion(run.id) : undefined;
     return {
       event: pending.event,
       deliveryId: randomUUID(),
