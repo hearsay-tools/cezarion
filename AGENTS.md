@@ -113,12 +113,89 @@ a backend's own slash commands must survive. Against an empty registry that same
 turns "cezar never loaded the list" into a confident user-facing "Unknown skill". Pair
 every silent pass-through with a test that pins the *empty/absent input* case.
 
-**Prove the regression test fails without the fix.** `git stash push -- <source files>`,
-run the new test, confirm red, `git stash pop`. A test written after the diagnosis passes
-against the bug more often than anyone expects, and a green-either-way test is how the
-same regression ships twice. Keep the guard tests that pass both ways — they pin the
-behavior you did NOT want to change (park mode stays reachable; unknown slashes stay
-untouched) — but know which is which.
+**Prove the regression test fails without the fix.** Pin the pre-fix commit as
+`proof_base` and record the command, expected failure and fixed pass. A test written
+after the diagnosis can pass against the bug; a green-either-way test does not prove
+the fix. Keep the guard tests that pass both ways — they pin behavior you did NOT
+want to change (park mode stays reachable; unknown slashes stay untouched) — but
+know which is which. Do not use the shared stash stack for this proof.
+
+For a **source fix**, run the new regression test against the old source in a
+disposable worktree. From the repo root, replace the example commit and paths:
+
+```bash
+proof_base=<pre-fix-commit>
+proof_repo=$(git rev-parse --show-toplevel)
+proof_dir=$(mktemp -d "${TMPDIR:-/tmp}/cezar-red-proof.XXXXXX")
+git worktree add --detach "$proof_dir/tree" "$proof_base"
+(cd "$proof_dir/tree" && pnpm install --frozen-lockfile)
+# Copy the current regression test, plus any new test helpers/fixtures it needs.
+cp packages/cezar/src/path/to/regression.test.ts \
+  "$proof_dir/tree/packages/cezar/src/path/to/regression.test.ts"
+(cd "$proof_dir/tree" && npm test -- --passWithNoTests=false packages/cezar/src/path/to/regression.test.ts)
+# Inspect the failure: it must show the reported defect, not a broken import/setup.
+# Copy only the fixed source files into the scratch tree; keep the same test.
+cp packages/cezar/src/path/to/source.ts \
+  "$proof_dir/tree/packages/cezar/src/path/to/source.ts"
+(cd "$proof_dir/tree" && npm test -- --passWithNoTests=false packages/cezar/src/path/to/regression.test.ts)
+# After saving the evidence, clean up even if setup or a test failed.
+git -C "$proof_repo" worktree remove --force "$proof_dir/tree"
+rmdir "$proof_dir"
+```
+
+Create destination directories for new test paths as needed. Keep the package's
+setup and environment; a scratch worktree needs its own dependency installation,
+not a symlink to another checkout's workspace packages. Do not start Squeal in
+this disposable tree. Run the fixed test in the task worktree too (through Squeal
+when it is validating) so the proof does not replace normal verification.
+
+For a **test-only fix**, reproduce the old test's defect under the same conditions
+as the fixed test. There is no source fix to remove. Keep both versions out of the
+watched test paths: create an ignored scratch copy with `git show`, then select it
+with an explicit scratch Vitest config. For a server test, from the repo root:
+
+```bash
+proof_base=<pre-fix-commit>
+mkdir -p .ai/qa
+proof_dir=$(mktemp -d .ai/qa/red-proof.XXXXXX)
+git check-ignore "$proof_dir/before.test.ts"
+git show "$proof_base:packages/cezar/src/path/to/test.test.ts" > "$proof_dir/before.test.ts"
+```
+
+In that directory, write `vitest.config.ts` with this content:
+
+```typescript
+import { fileURLToPath } from 'node:url'
+import { defineConfig } from 'vitest/config'
+import server from '../../../packages/cezar/vitest.config.ts'
+
+export default defineConfig({
+  ...server,
+  root: fileURLToPath(new URL('../../../packages/cezar/', import.meta.url)),
+  test: {
+    ...server.test,
+    include: [fileURLToPath(new URL('./before.test.ts', import.meta.url))],
+    passWithNoTests: false,
+  },
+})
+```
+
+Adapt the package config for other workspaces. In the scratch test, adjust relative
+imports and fixture paths to their original absolute locations; account for uses
+of `import.meta.url` and colocated mocks too. Preserve the assertions and the
+reproduction conditions. Run `npm test -- --config "$proof_dir/vitest.config.ts"`.
+Inspect the failure, then replace only the scratch test with the fixed version,
+apply the same path adjustments, and run the same command for green. A load-related
+failure needs its original load or a controlled reproduction; an unrelated import
+error, empty test selection or ordinary passing run is not red proof. Scratch tests
+outside a package root can lose `console.log` output; use assertion failures and
+captured runner output as evidence, not the presence or absence of a log line.
+Remove the scratch test and config after saving the evidence (`rm -r "$proof_dir"`).
+
+These recipes leave the task's tracked source and test files in place, so Squeal
+never runs a temporarily swapped version. Ignoring a scratch file alone does not
+exclude it from a test runner: keep it outside the package's test include patterns
+and use the explicit scratch config only for the manual proof.
 
 **Read the run-history evidence before theorizing, and cite it.** `.ai/specs/` records the
 design, `git log -S` and `git merge-base --is-ancestor <commit> <tag>` settle "was this in
@@ -254,6 +331,12 @@ Rules that follow from that:
 
 ## Validation
 
+The pinned TypeScript 7 package is the native compiler and offers no stable
+JavaScript compiler API (`typescript` exports only version fields). For
+source-scanning tests, reuse regex scans over `blank()` from
+`packages/cezar/src/test-wait-discipline.testkit.ts`; see
+`contract-import-boundaries.test.ts` and `test-wait-discipline.test.ts` for examples.
+
 A fresh task worktree (`.ai/cezar/worktrees/<runId>`) has no `node_modules`. Run `pnpm install --frozen-lockfile` in that worktree before the commands below — otherwise Node walks up to the main checkout and typecheck/tests compile against that tree's sources, not this one.
 
 **If Squeal is installed and validating this worktree, use it for iteration.**
@@ -305,6 +388,28 @@ require `npm run build` from the repo root first; then, from `packages/cezar`, r
 `node --import ../../scripts/test-git-env.mjs --import tsx --test <files>` with
 those packaged paths relative to that directory (e.g. `test/e2e/task-cli.test.ts`).
 
+Before opening a PR that renames, moves or removes a `RunRecord` field, also
+search the packaged and browser fixtures for each changed field name, including
+its old and new names or paths. From the repo root, replace the example names
+below with the changed field's names:
+
+```bash
+rg -l -F -e 'delegation.wait' -e 'waits' packages/cezar/test/e2e/*.test.ts packages/web/e2e/*.e2e.ts
+```
+
+Inspect the matches to identify fixtures that read the changed field; common
+names can also match unrelated text. Require passing results for the affected
+fixtures through the Squeal or focused npm paths above. Run `npm run build`
+from the repo root before validating matching packaged fixtures, including with
+Squeal, so they exercise the current built output. This selection supplements
+the dry-run park-fixture and runner-parity requirements above
+(hearsay-tools/cezarion#1300).
+
+In an unbuilt worktree, only a `Cannot find module` error naming a missing
+`dist/` module is the known Squeal limitation. An assertion failure in
+`test:package` is a real failure that needs investigation; do not dismiss it
+alongside missing-`dist` errors.
+
 No tool maps a cockpit source change to the browser specs it affects, with or
 without Squeal: `npm run test:changed` runs `npm test`, whose four unit projects
 hold no browser spec, and Squeal's browser-spec inputs include all of
@@ -340,6 +445,66 @@ lists that spec:
 ```bash
 grep -lF 'Automations' packages/web/e2e/*.e2e.ts
 ```
+
+### One-CPU load reproduction
+
+For a failure that appears under CPU contention, use this optional diagnostic
+from the repo root. It needs **Linux**, Bash, `taskset` (util-linux), and GNU
+`timeout` (coreutils). Choose a focused test file and name; replace both
+placeholders below. This is a controlled reproduction, not a routine test rerun
+or a replacement for the failure bundle. With Squeal validating, read its failure
+report first and follow its installed skill: use this command only when the
+controlled-load result is needed and unknown, not to duplicate background checks.
+
+```bash
+# Select the first CPU allowed to this shell, including inside a cpuset.
+cpu=$(awk '/^Cpus_allowed_list:/ { split($2, cpus, /[,-]/); print cpus[1] }' /proc/self/status)
+LOOPS=2 timeout --kill-after=5s 120s taskset -c "$cpu" bash <<'BASH'
+set -eu
+pids=()
+cleanup() {
+  if ((${#pids[@]})); then
+    kill "${pids[@]}" 2>/dev/null || true
+    wait "${pids[@]}" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+for ((i = 0; i < LOOPS; i++)); do
+  sh -c 'while :; do :; done' &
+  pids+=("$!")
+done
+npm test -- <test-file> -t '<test-name>'
+BASH
+```
+
+The shell, busy loops, test command and its children inherit the same logical
+CPU affinity unless a child explicitly changes it. Together they can consume
+one logical CPU, not the whole host; other sessions using that CPU still compete
+with them. Start with `LOOPS=2`, then increase in small steps only as needed.
+For CPU-bound work, the failing host's load average divided by its available
+logical CPU count gives a rough starting point for runnable work per CPU.
+Each busy loop adds one runnable competitor, and the test adds its own work.
+For example, load 48 over 24 CPUs suggests roughly two runnable tasks per CPU,
+not an exact prescription of two loops. Load average includes I/O waits; CPU
+quotas, priorities and test parallelism also change the result. Record the CPU,
+loop count, command, revision and observed outcome. Eight loops reproduced the
+reported R24/R25 failures in hearsay-tools/cezarion#1392; it is no universal
+threshold or guarantee of reproduction.
+
+Normal completion or test failure runs the EXIT cleanup, which stops and reaps
+only the recorded loop PIDs. Ctrl-C uses the same cleanup. The 120-second limit
+sends SIGTERM to the command group, including test descendants. If Bash remains
+alive five seconds later, GNU `timeout` sends SIGKILL. If Bash exits first,
+`timeout` exits too: a descendant that ignores SIGTERM can survive. This bounds
+the reproduction command, not every possible descendant. After an interrupted
+or timed-out test, check for remaining test processes and stop those you own
+before another attempt. A timeout normally returns 124 (or 137 after SIGKILL),
+not a test assertion result. Do not add `--foreground`: it would exclude children
+from the timeout's group handling. Increase the limit only for a known longer
+focused test, and keep it finite. Traps cannot run after SIGKILL of the shell
+itself; do not kill the outer timeout to stop the reproduction.
 
 **In a unit test, a timeout is a hang guard, never the thing the test waits on.**
 Wait for the product's own signal: an event, a callback, a store write, a file
@@ -396,6 +561,20 @@ files (`npm test -- <files>`) until they pass, state both in the PR's
 Verification, and let CI's Vitest shards decide. Squeal reports and
 `squeal why <check>` output are the same evidence. The rerun is not a full pass;
 green CI shards are. A failure in a file the branch touches never qualifies: fix it.
+
+**When filing a load-dependent test failure, preserve the diagnostic evidence.**
+Quote the full error line verbatim, with nothing cut, including any list after
+its `;`. Name the stack frame that throws the error, rather than an operation
+named in the message. Give the full log location: the originating repo's
+`.ai/cezar/runs/<runId>.ndjson` (or `.ndjson.br`), or `squeal why <check>`
+with the check identifier and its worktree path.
+
+Plain text searches do not read Brotli-compressed `.ndjson.br` logs. To read one,
+replace `<file.ndjson.br>` with its path:
+
+```bash
+node -e "process.stdout.write(require('node:zlib').brotliDecompressSync(require('node:fs').readFileSync(process.argv[1])))" '<file.ndjson.br>'
+```
 
 CI's final gate covers:
 
@@ -510,7 +689,8 @@ element, the target's count/rect/computed style and the element under its centre
 `wait` gives up, and `packages/web/e2e/failure-setup.ts` writes the same bundle from
 `onTestFailed` for a plain `expect` failure. The thrown error names the directory; CI
 uploads it as the `cockpit-failures-shard-<n>` artifact and lists it in the step summary.
-Read the bundle before theorizing about a flake. Writing or fixing a spec starts at
+Read the bundle before theorizing about a flake. For CPU-dependent failures, see
+[One-CPU load reproduction](#one-cpu-load-reproduction). Writing or fixing a spec starts at
 `packages/web/e2e/README.md`: the wait rules the `e2e-wait-discipline` unit test enforces,
 how to read a bundle, and the single-test reproduction with an env-gated server delay.
 
@@ -543,6 +723,6 @@ row's value when the thing it names changes, rather than its label.
 | Automated review rounds | The `AUTOMATED_REVIEW_ROUNDS` repository variable, read with `gh variable get AUTOMATED_REVIEW_ROUNDS`; the review workflow falls back to 3 only when the variable is unset or empty |
 | Commit convention | Conventional Commits |
 | Specs and plans | unknown |
-| Board | **Cezarion**, org `hearsay-tools`, project #1 |
+| Board | **Cezarion**, org `hearsay-tools`, project #1. For same-repository PRs targeting `main`, `.github/workflows/pr-readiness.yml` owns draft state and syncs existing PR and closing-linked issue cards: draft → In progress, ready → In review. Each new head returns the PR to draft; the workflow marks it ready when the head's required checks pass and no review thread is unresolved. Open a draft PR, fix its checks and review threads, and let the workflow move it to ready and In review; do not move the card to In review or run `gh pr ready` by hand. Board sync skips without project access and never moves Done cards back. The initial claim still moves the issue to In progress. |
 | Task orchestrator | Cezar |
 | SDLC feedback | `apptension/toolkit-dev` |

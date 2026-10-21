@@ -2790,11 +2790,13 @@ export function createApp(deps: ServerDeps) {
           }
           if (webhook !== undefined) {
             // The token is write-only (#589): the form never has it back, so an omitted token
-            // keeps the stored one and only `''` clears it.
+            // keeps the stored one and only `''` clears it. An omitted `triggers` keeps the stored
+            // selection the same way, so a URL or token edit never resets it (#1356).
             if (webhook === null) delete entry.webhook;
             else {
               const token = webhook.token === undefined ? entry.webhook?.token : webhook.token || undefined;
-              entry.webhook = { url: webhook.url, ...(token ? { token } : {}) };
+              const triggers = webhook.triggers ?? entry.webhook?.triggers;
+              entry.webhook = { url: webhook.url, ...(token ? { token } : {}), ...(triggers === undefined ? {} : { triggers }) };
             }
           }
           updated = entry;
