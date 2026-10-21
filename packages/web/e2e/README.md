@@ -242,6 +242,33 @@ directory as the `cockpit-failures-shard-<n>` artifact:
 | `snapshot.txt` | The accessibility tree (`snapshot -i`) |
 | `probe.json` | `kind` (`wait-selector`, `wait-fn`, `wait-value` or `test`), the selector, predicate or expression that timed out, the last sample for `wait-value`, the URL, the focused element's path, open dialogs, and for a selector its match count, rect, computed style and the element under its centre |
 
+Each selected spec clears its own old bundle directory before its setup starts. Bundles from
+unselected specs remain. Archive evidence you need before rerunning its spec. All captures and
+retries from the current spec execution remain, with increasing `-<n>` suffixes. Cleanup errors
+fail setup rather than mix revisions. Parallel local lanes use separate worktrees; do not run
+independent browser suites concurrently in the same checkout and shared test environment.
+Plain assertion failures print `(failure bundle: <dir>)` alongside the original assertion.
+
+For layout assertions, record named CSS selectors immediately before the assertion block:
+
+```ts
+browser.recordLayout('expanded', {
+  card: '[data-slot="run-activity-dock"]',
+  meta: '[data-slot="run-activity-meta-keep"]',
+})
+expect(expanded.metaCut).toEqual([])
+```
+
+A failure bundle then also contains `layout.json`, with every labelled sample from that test
+attempt. Each sample records its time, session, URL, viewport, selector match counts, element
+rectangles, scroll/client widths and heights, and nearest overflow-clipping ancestor box and
+axes (or `null`). Missing selectors have zero matches; invalid selectors and failed reads have
+an error. Measurements are read-only and are not assertion retries. They precede the assertion;
+they are not an atomic snapshot of an earlier `evaluate()` result. Reuse labels such as
+`folded` and `expanded` to distinguish states. Samples reset for each test and retry, and no
+layout file is written for tests that did not request measurements. Capture failures remain
+best-effort and never replace the assertion failure.
+
 Read `probe.json` first. `target.count: 0` is a render that never happened; `count: 1` with
 `elementUnderCentre.coversTarget: true` is an overlay; `inViewport: false` is a scroll that
 did not happen; a `visibility: hidden` or `opacity: 0` in `style` is a transition mid-flight.

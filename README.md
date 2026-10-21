@@ -833,10 +833,12 @@ bot that tails to terminal state adds `--until settled`. `log` without `--follow
 
 **A bot that lives behind an HTTP endpoint** does not have to poll. Set a **Task webhook** (URL
 and an optional Bearer token) in the project's **Settings → General**, and every task that opts
-in POSTs `task.status` on each status change, `task.question` when it asks something,
-`task.activity` when an older run's monitoring ends (a run parked on CI or a timer now changes status to
-`waiting` instead), and `task.subscribed` when it opts in (at start, or when it is handed off). Each
-body carries the same slim projection `cez task status` prints, under `task`. `cez task start`
+in POSTs one delivery each time it enters a state you selected there: **Needs you**, **Failed**,
+**Done** and **Cancelled** by default, plus **Running**, **Waiting for agents**, **Waiting on CI**,
+**Waiting** (a timer) and **Any other wait** when you tick them. A question that puts the task in
+Needs you is `task.question`; every other entry is `task.status`, and the body's `state` names the
+state. `task.subscribed` (when it opts in, at start or on hand-off) and **Send test** always go out.
+Each body carries the same slim projection `cez task status` prints, under `task`. `cez task start`
 opts in whenever the project has a webhook (`--no-notify` to skip it); the cockpit's New task form
 has a **Notify webhook** toggle; and a running task's **Hand off** button (or
 `cez task notify <id> --message '…'`) turns it on later with a note for the bot. `notify` (and

@@ -11,6 +11,7 @@ import {
   PROJECT_TAG_MAX_LENGTH,
   PROJECT_WEBHOOK_TOKEN_MAX_LENGTH,
 } from '@open-mercato/cezar-contract/project-limits';
+import { WEBHOOK_TRIGGERS, type WebhookTrigger } from '@open-mercato/cezar-contract/attention';
 import { projectWebhookUrlSchema } from '@open-mercato/cezar-contract/projects';
 import { PROVIDER_IDS, type ProviderId } from '../core/provider-auth.ts';
 import { assertCezarHomeWriteIsSandboxed, workspaceConfigPath } from '../paths.ts';
@@ -75,6 +76,14 @@ const workspaceProjectSchema = z
       .object({
         url: projectWebhookUrlSchema,
         token: z.string().max(PROJECT_WEBHOOK_TOKEN_MAX_LENGTH).optional().catch(undefined),
+        /** The states that send a delivery (hearsay-tools/cezarion#1356). Absent means the
+         *  default; `[]` stays `[]`. An unknown value (a newer cezar's option) is dropped on its
+         *  own and the rest of the list kept, so one value never resets the selection. */
+        triggers: z
+          .array(z.unknown())
+          .transform((values) => [...new Set(values.filter(isWebhookTrigger))])
+          .optional()
+          .catch(undefined),
       })
       .passthrough()
       .optional()
@@ -83,6 +92,10 @@ const workspaceProjectSchema = z
   .passthrough();
 
 export type WorkspaceProject = z.infer<typeof workspaceProjectSchema>;
+
+function isWebhookTrigger(value: unknown): value is WebhookTrigger {
+  return (WEBHOOK_TRIGGERS as readonly unknown[]).includes(value);
+}
 
 /**
  * Zero-config cadence, in minutes, for re-checking a run parked with
