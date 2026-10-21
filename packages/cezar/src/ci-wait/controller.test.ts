@@ -313,6 +313,9 @@ describe('private wait routes', () => {
     expect(await callCezarAsk({ questions: [{ header: 'Area', question: 'Which?', options: [{ label: 'L'.repeat(61), description: 'D'.repeat(281) }, { label: 'B' }] }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.options.0.label\` must be 1–60 characters; \`questions.0.options.0.description\` must be at most 280 characters. ${askTail}` });
     expect(await callCezarAsk({ questions: [{ header: '', question: 'Which?', id: '' }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.id\` must be 1–64 characters; \`questions.0.header\` must be 1–12 characters. ${askTail}` });
     expect(await callCezarAsk({ questions: ['which?'] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0\` must be an object with a header and a question. ${askTail}` });
+    // Every failing field, however many: a capped list sends the agent into another rejection.
+    const overlong = [0, 1, 2, 3].map(index => ({ header: `Header ${index} too long`, question: `${index}${findings}` }));
+    expect(await callCezarAsk({ questions: overlong }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `${[0, 1, 2, 3].map(index => `\`questions.${index}.header\` must be 1–12 characters; \`questions.${index}.question\` must be 1–400 characters`).join('; ')}. ${askTail}` });
     expect(await callCezarAsk([], session.env)).toEqual({ ok: false, code: 'invalid_request', message: `The arguments must be a JSON object. ${askTail}` });
     // The message never echoes the value the agent sent.
     expect(JSON.stringify(await callCezarAsk({ questions: [{ header: 'File friction', question: findings }] }, session.env))).not.toContain('FFFF');

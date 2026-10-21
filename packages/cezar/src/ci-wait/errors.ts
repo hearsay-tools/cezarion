@@ -118,7 +118,7 @@ export function askInvalidInput(error?: z.ZodError): string {
     const name = entry.path.filter(part => typeof part === 'string' || typeof part === 'number').join('.');
     if (rule && !failures.has(name)) failures.set(name, `\`${name}\` ${rule}`);
   }
-  if (failures.size) return `${[...failures.values()].slice(0, 4).join('; ')}. ${tail}`;
+  if (failures.size) return `${[...failures.values()].join('; ')}. ${tail}`;
   return `The arguments must be a JSON object. ${tail}`;
 }
 
