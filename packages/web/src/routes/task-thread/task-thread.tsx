@@ -442,8 +442,8 @@ export function ThreadView({
               nested section's — into the next one. */}
           <RunActivityDock key={run.id} run={run} currentThread={currentThread} hasPendingHumanAsk={hasPendingHumanAsk} onOpenWorker={setOpenAgentId} />
 
-          {/* A usage-limit stop is the one `failed` state that is still going somewhere — the
-              dock says so before the composer offers a Continue nobody needs to press. */}
+          {/* A usage-limit hold is a `waiting` run with a resume booked — the dock says when,
+              before the composer offers a Continue nobody needs to press. */}
           <AutoResumeHint run={run} />
 
           {run.status === 'waiting' ? (

@@ -273,21 +273,20 @@ describe('TasksOverview — the table', () => {
     expect(pillOf('d')?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('success')
   })
 
-  it('shows a usage-limit wait as "scheduled" with its time, not as a red failure', () => {
-    // The record is `failed`, but the task has an appointment (spec
-    // 2026-08-03-auto-resume-after-usage-limit): amber, still, and carrying the instant the way
-    // a queued row carries its position.
+  it('shows a usage-limit hold as "usage limit" with its time, not as a red failure', () => {
+    // The record is `waiting` with an appointment (hearsay-tools/cezarion#1236): neutral, still,
+    // and carrying the instant the way a queued row carries its position.
     renderOverview({
       runs: [
-        run({ id: 'sched', status: 'failed', autoResumeAt: new Date(NOW + 45 * 60_000).toISOString() }),
+        run({ id: 'sched', status: 'waiting', autoResumeAt: new Date(NOW + 45 * 60_000).toISOString() }),
         run({ id: 'broke', status: 'failed' }),
       ],
     })
     const pillOf = (id: string) => tableRow(id)?.querySelector('[data-slot="pill"]')
-    expect(pillOf('sched')?.textContent).toContain('scheduled')
+    expect(pillOf('sched')?.textContent).toContain('usage limit')
     // The time itself, locale-formatted — assert it is there rather than its spelling.
     expect(pillOf('sched')?.querySelector('.tabular-nums')?.textContent).toMatch(/\d{1,2}[:.]\d{2}/)
-    // The status key's scheduled mark (#617): neutral ring, still.
+    // The status key's usage-limit mark (#617): neutral ring, still.
     expect(pillOf('sched')?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('neutral')
     expect(pillOf('sched')?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-shape')).toBe('ring')
     // …and an ordinary failure is untouched.

@@ -26,7 +26,7 @@ export function attentionFamily(label: string): GroupFamily {
     case 'needs review': return 'needs review'
     case 'failed': return 'failed'
     case 'queued': return 'queued'
-    case 'scheduled': return 'scheduled'
+    case 'usage limit': return 'scheduled'
     case 'done': return 'done'
     case 'cancelled': return 'cancelled'
     // running, monitoring and every dependency wait (`waiting on …`).

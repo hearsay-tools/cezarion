@@ -250,10 +250,10 @@ describe('ThreadView', () => {
     expect(textarea.placeholder).toBe('Reply — / for skills, @ for files…')
   })
 
-  it('failed by a usage limit → the dock says when it resumes itself, and links the setting', () => {
+  it('held by a usage limit → the dock says when it resumes itself, and links the setting', () => {
     renderView(
       <ThreadView
-        run={run('failed', {
+        run={run('waiting', {
           error: 'step "work" failed: Claude AI usage limit reached|1754236800',
           autoResumeAt: '2026-08-03T17:00:30.000Z',
         })}
@@ -293,7 +293,7 @@ describe('ThreadView', () => {
       <QueryClientProvider client={createQueryClient()}>
         <MemoryRouter>
           <ThreadView
-            run={run('failed', { autoResumeAt: '2026-08-03T17:00:30.000Z' })}
+            run={run('waiting', { autoResumeAt: '2026-08-03T17:00:30.000Z' })}
             thread={reduceThread(EVENTS)}
           />
         </MemoryRouter>
@@ -1014,11 +1014,10 @@ describe('TaskThreadRoute', () => {
       title: 'mock:limit ship it',
       workflow: 'quick-task',
       task: 'mock:limit ship it',
-      status: 'failed',
+      status: 'waiting',
       error: 'step "task" failed: Claude AI usage limit reached|1785785603',
       autoResumeAt: '2026-08-03T19:33:53.000Z',
       createdAt: '2026-08-03T19:23:00.000Z',
-      finishedAt: '2026-08-03T19:23:13.000Z',
       tokensUsed: 0,
       archived: false,
       steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'failed', iterations: 1, tokensUsed: 0, sessionId: 's1' }],

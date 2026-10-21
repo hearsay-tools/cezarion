@@ -46,7 +46,7 @@ export function AutoResumeHint({ run }: { run: ApiRun }) {
     onError: (error: Error) => toast(error.message, { tone: 'danger' }),
   })
 
-  if (run.status !== 'failed' || !run.autoResumeAt) return null
+  if (run.status !== 'waiting' || !run.autoResumeAt) return null
   const at = new Date(run.autoResumeAt)
   if (!Number.isFinite(at.getTime())) return null
   const label = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'long' }).format(at)
@@ -56,8 +56,9 @@ export function AutoResumeHint({ run }: { run: ApiRun }) {
       role="status"
       className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-xs text-muted-foreground"
     >
-      {/* The status key's `scheduled` mark (#617): a still neutral ring — parked on a clock,
-          the same answer `deriveAttention` gives this run everywhere else. */}
+      {/* The status key's `usage limit` mark (#617, hearsay-tools/cezarion#1236): a still
+          neutral ring — parked on a clock, the same answer `deriveAttention` gives this run
+          everywhere else. */}
       <StatusDot tone="neutral" shape="ring" />
       <span>
         Usage limit reached — this task resumes automatically at{' '}

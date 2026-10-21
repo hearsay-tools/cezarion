@@ -70,7 +70,7 @@ describe('projectSignal', () => {
     { name: 'queued is not counted', runs: [entry({ status: 'queued' })], expected: {} },
     {
       name: 'a scheduled usage-limit resume is not counted',
-      runs: [entry({ status: 'failed', ...finished, autoResumeAt: '2026-09-27T13:00:00Z' })],
+      runs: [entry({ status: 'waiting', autoResumeAt: '2026-09-27T13:00:00Z' })],
       expected: {},
     },
     { name: 'cancelled is not counted', runs: [entry({ status: 'cancelled', ...finished })], expected: {} },
