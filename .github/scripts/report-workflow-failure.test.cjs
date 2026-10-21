@@ -147,6 +147,32 @@ test('cancelled main CI retains completed failed jobs but ignores cancellation a
  const empty=harness();mainCi(empty,{conclusion:'cancelled'});empty.state.jobs=[];
  await reportFailure(empty.options);assert.equal(empty.state.issues.length,0);
 });
+// A newer main push cancels the run; the `always()` gate then starts, reads
+// its cancelled needs and fails (hearsay-tools/cezarion#1442).
+test('cancelled main CI ignores failures that start after the cancellation',async()=>{
+ const h=harness(), failed=h.state.jobs[0];mainCi(h,{conclusion:'cancelled'});
+ const cancelled={...structuredClone(failed),id:failed.id+1,name:'Vitest shard 1/3',conclusion:'cancelled',
+  started_at:'2026-09-10T11:50:00Z',completed_at:'2026-09-10T11:54:00Z',
+  steps:failed.steps.map(step=>step.conclusion==='failure'?{...step,conclusion:'cancelled'}:step)};
+ const gate={...structuredClone(failed),id:failed.id+2,name:'Unit, build, E2E, and package',
+  started_at:'2026-09-10T11:54:05Z',completed_at:'2026-09-10T11:54:09Z',
+  steps:[{number:2,name:'Require every verification job',conclusion:'failure',started_at:'2026-09-10T11:54:06Z',completed_at:'2026-09-10T11:54:06Z'}]};
+ h.state.jobs.push(cancelled,gate);h.state.annotations={[cancelled.id]:[{annotation_level:'failure',message:'The operation was canceled.'}]};
+ const result=await reportFailure(h.options);
+ assert.equal(result.reported,1);
+ assert.deepEqual(h.state.issues.map(issue=>issue.title),['[Task]: Investigate delegation-integration.test.ts failure']);
+ assert.ok(!h.state.comments.some(comment=>/Require every verification job/.test(comment.body)));
+ h.state.jobs=[cancelled,gate];h.state.run.id++;h.options.event.workflow_run.id++;
+ assert.equal((await reportFailure(h.options)).reported,0);assert.equal(h.state.issues.length,1);
+});
+test('a time limit is not the cancellation: a later failure still reports',async()=>{
+ const h=harness(), failed=h.state.jobs[0];mainCi(h,{conclusion:'cancelled'});
+ h.state.jobs.unshift({...structuredClone(failed),id:failed.id+1,name:'Vitest shard 2/3',conclusion:'cancelled',
+  started_at:'2026-09-10T11:40:00Z',completed_at:'2026-09-10T11:45:00Z',
+  steps:failed.steps.map(step=>step.conclusion==='failure'?{...step,conclusion:'cancelled'}:step)});
+ h.state.annotations={[failed.id+1]:[{annotation_level:'failure',message:TIME_LIMIT}]};
+ assert.equal((await reportFailure(h.options)).reported,2);
+});
 
 test('routing failure retries without duplicating saved evidence or routing closed reports',async()=>{
  const h=harness();mainCi(h);h.state.failLabel=true;
