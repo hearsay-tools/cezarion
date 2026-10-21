@@ -1754,15 +1754,21 @@ export function describeWaitParity(scope: RunnerId | 'once'): void {
 
       // Review round 1 (hearsay-tools/cezarion#1301): a blocked done never opens the completion wait
       // beside an open timer (U11), but the reverse order is reachable. A worker message wakes a parent
-      // parked on its completion wait (U21m), and that turn opens the agent's timer.
+      // parked on its completion wait (U21m). The marker adds no redundant timer
+      // (hearsay-tools/cezarion#1268), but an explicit cezar_wait still opens the agent's timer.
       it(`${runner} U21t an agent timer registered beside a completion-wait park keeps its deadline and wakes beside it`, async () => {
         process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
         const f = await conversingParent(runner);
         const entry = await ignoreRefusal(runner, f.p.id, `Workers are still live: ${f.w.id}.`, () => workerWaits(f.p.id)[0]?.phase === 'open');
         let turns = turnEnds(f.p.id);
-        const id = await f.progress(messagesPrompt(runner, ['Still checking.\nCEZ:MONITORING']));
-        await until(() => delivered(f.p.id, id) && turnEnds(f.p.id) > turns && parkedOn(f.p.id, viaOf(f.p.id, 'monitoring-line')));
-        const timer = viaOf(f.p.id, 'monitoring-line')!;
+        const markerId = await f.progress(messagesPrompt(runner, ['Still checking.\nCEZ:MONITORING']));
+        await until(() => delivered(f.p.id, markerId) && turnEnds(f.p.id) > turns && parkedOn(f.p.id, workerWaits(f.p.id)[0]));
+        expect(store.getRun(f.p.id)?.waits).toEqual([expect.objectContaining({ id: entry.id, via: 'completion', phase: 'open' })]);
+        turns = turnEnds(f.p.id);
+        const id = await f.progress(toolCall('cezar_wait', { kind: 'timer', seconds: 600, note: 'u21t explicit timer' }));
+        await until(() => delivered(f.p.id, id) && turnEnds(f.p.id) > turns && parkedOn(f.p.id, waitOfKind(f.p.id, 'timer')));
+        const timer = timed(waitOfKind(f.p.id, 'timer')!);
+        expect(timer).toMatchObject({ via: 'cezar_wait', note: 'u21t explicit timer' });
         expect(store.getRun(f.p.id)?.waits).toEqual([
           expect.objectContaining({ id: entry.id, via: 'completion', phase: 'open' }),
           expect.objectContaining({ id: timer.id, source: 'agent', phase: 'open', deadline: timer.deadline }),
