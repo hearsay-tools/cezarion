@@ -15,7 +15,7 @@ async function execute(h) {
  return {errors,summary};
 }
 test('completion consumer scopes trigger, credentials and checkout to trusted code',()=>{
- const w=workflow();assert.deepEqual(w.on.workflow_run,{workflows:['Release','Nightly'],types:['completed']});
+ const w=workflow();assert.deepEqual(w.on.workflow_run,{workflows:['CI','Release','Nightly'],types:['completed']});
  assert.deepEqual(w.permissions,{});assert.deepEqual(w.jobs.report.permissions,{actions:'read',checks:'read',contents:'read',issues:'write'});
  const checkout=w.jobs.report.steps.find(s=>s.uses?.startsWith('actions/checkout@'));
  assert.equal(checkout.with.ref,'${{ github.sha }}');assert.equal(checkout.with['persist-credentials'],false);

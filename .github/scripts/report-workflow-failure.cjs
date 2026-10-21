@@ -4,7 +4,7 @@ const LOG_LIMIT = 2 * 1024 * 1024;
 // Oversized single logs are unrecoverable per-job evidence gaps; the sweep
 // records this code without failing, everything else stays a coverage problem.
 const gapError = message => Object.assign(new Error(message), {code: 'log-size'});
-const PATHS = {Release:'.github/workflows/release.yml',Nightly:'.github/workflows/nightly.yml'};
+const PATHS = {CI:'.github/workflows/ci.yml',Release:'.github/workflows/release.yml',Nightly:'.github/workflows/nightly.yml'};
 // A job stopped at its `timeout-minutes` ends `cancelled`, as does one a person
 // or a concurrency group cancelled, and so does its run. Only the check-run
 // annotation tells them apart (hearsay-tools/cezarion#1272). The workflow's job
@@ -14,6 +14,7 @@ const TIME_LIMIT = /exceeded the maximum execution time/i;
 
 function eligible(run, owner, repo) {
   return run && run.status === 'completed' && REPORTED_CONCLUSIONS.includes(run.conclusion)
+    && (run.name !== 'CI' || run.event === 'push')
     && PATHS[run.name] && run.path === PATHS[run.name]
     && run.head_repository?.full_name === `${owner}/${repo}`
     && (run.head_branch === 'main' || (run.name === 'Release' && /^release\/.+/.test(run.head_branch)));
@@ -97,6 +98,16 @@ async function reportFailure({github,owner,repo,event,log=()=>{},fetchImpl=fetch
       const causes=causesForStep({run,job,step,log:jobLog});
       const results=await writer.reportStep({run,job,step,causes});
       reported+=results.filter(result=>result.reported).length;
+      // reportStep commits diagnostic evidence before returning. Retry the label
+      // write even for an already-recorded occurrence after an API failure.
+      if (run.name === 'CI') {
+        for (const {issue} of results) {
+          if (issue.state !== 'open') continue;
+          await github.request('POST /repos/{owner}/{repo}/issues/{issue_number}/labels', {
+            ...base,issue_number:issue.number,labels:['main-ci-failure'],
+          });
+        }
+      }
     }
   }
   return {reported};

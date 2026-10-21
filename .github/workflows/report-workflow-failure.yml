@@ -1,8 +1,8 @@
-name: Report Release and Nightly Failures
+name: Report Main CI, Release and Nightly Failures
 
 on:
   workflow_run:
-    workflows: [Release, Nightly]
+    workflows: [CI, Release, Nightly]
     types: [completed]
 
 permissions: {}
