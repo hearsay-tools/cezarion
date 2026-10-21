@@ -23,7 +23,7 @@ test('Windows wrapper serializes callers, preserves arguments, and kills mutator
     writeFileSync(helper, old.stdout);
   }
   // Native children and the escaped cached server run the exact production launcher.
-  writeFileSync(join(root, 'mutator.cjs'), `require('node:fs').writeFileSync('mutator.pid', String(process.pid)); setInterval(() => {}, 1000)`);
+  writeFileSync(join(root, 'mutator.cjs'), `require('node:fs').writeFileSync('mutator.pid', String(process.pid)); require('node:fs').writeFileSync('job.txt', process.env.TEST_ENV_LEASE_JOB); setInterval(() => {}, 1000)`);
   writeFileSync(join(root, 'cached.cjs'), 'setInterval(() => {}, 1000)');
   const script = join(root, 'mutation.sh');
   writeFileSync(script, `node .ai/scripts/test-env-lease.mjs join "$$"\nnode .ai/scripts/test-env-lease.mjs detach-app cached.log cached.cjs > cached.pid\nprintf '%s\\n' "$@" > args.txt\nnode mutator.cjs\n`);
@@ -48,6 +48,9 @@ test('Windows wrapper serializes callers, preserves arguments, and kills mutator
     cached = Number(readFileSync(join(root, 'cached.pid'), 'utf8').trim());
     assert.ok(Number.isSafeInteger(cached) && cached > 0);
     assert.deepEqual(readFileSync(join(root, 'args.txt'), 'utf8').trimEnd().split('\n'), ['space value', '', 'trailing\\', 'quote"value']);
+    const jobName = readFileSync(join(root, 'job.txt'), 'utf8');
+    const membership = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class Membership { [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr OpenJobObject(uint a,bool i,string n); [DllImport("kernel32.dll")] public static extern IntPtr OpenProcess(uint a,bool i,int p); [DllImport("kernel32.dll")] public static extern bool IsProcessInJob(IntPtr p,IntPtr j,out bool r); }'; $j=[Membership]::OpenJobObject(4,$false,'${jobName}'); $p=[Membership]::OpenProcess(0x1000,$false,${mutator}); $r=$false; $ok=[Membership]::IsProcessInJob($p,$j,[ref]$r); Write-Output "job=$j process=$p queried=$ok member=$r"`], { encoding: 'utf8', timeout: 10_000 });
+    stage(`mutator job membership: ${membership.stdout}; ${membership.stderr}`);
     stage('arguments verified; testing exclusion');
     await assert.rejects(acquireTestEnvLease(root, { timeoutMs: 50 }), /timed out/);
     stage('exclusion verified; killing supervisor');
