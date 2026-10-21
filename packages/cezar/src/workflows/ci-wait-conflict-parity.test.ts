@@ -130,6 +130,7 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       await until(() => store.getRun(run.id)?.status === 'waiting');
       const generation = active(run.id)!.ciGeneration;
       const wait = await manager.registerCiWait(run.id, { pr, timeout_seconds: 120 }, generation);
+      if (wait.kind !== 'ci') throw new Error('Expected a CI wait');
       await until(() => existsSync(log) && readFileSync(log, 'utf8').includes('name,state,link,bucket'));
       expect(manager.cancelWait(run.id, wait.id, generation)).toEqual({ cancelled: true });
       // Cancellation has committed before the external check command can complete.
