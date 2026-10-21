@@ -1735,6 +1735,23 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     expect(store.readEvents(record.id).filter(event => event.type === 'ask.requested')).toHaveLength(1);
   }, 30_000);
 
+  // Review of #1437, round 2: without readable transcript facts there is no evidence of an answer,
+  // so the upgraded wait stays open and the run still reads Needs you.
+  it('keeps an upgraded legacy human wait at recovery when the transcript facts cannot be read', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, candidate => candidate?.status === 'waiting');
+    manager.dispose();
+    const legacy = { id: '00000000-0000-4000-8000-0000000000ab', kind: 'human' as const, source: 'agent' as const, via: 'ask-line' as const,
+      registeredAt: '2026-10-21T00:00:00.000Z', phase: 'open' as const, turnId: 'legacy' };
+    store.updateRun(record.id, { waits: [legacy] });
+    const unreadable = vi.spyOn(store, 'knownTranscriptFacts').mockImplementation(() => undefined);
+    manager = createFixtureManager(store, repoRoot);
+    await manager.recover();
+    unreadable.mockRestore();
+    expect(store.getRun(record.id)?.waits).toEqual([expect.objectContaining({ id: legacy.id, phase: 'open' })]);
+  }, 30_000);
+
   it('honors cancellation that races an idle-close callback', async () => {
     const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
     currentId = record.id;

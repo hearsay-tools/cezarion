@@ -1203,10 +1203,12 @@ Calls made by the agent:
 - **Recovery settles a stale legacy wait.** A stored `hasPendingHumanAsk: true` can predate the
   answer's receipt (`human-input-delivered` reached the transcript, the row's save did not). An
   upgraded wait (`turnId: 'legacy'`, no `askSeq`) is settled as answered at recovery when the
-  transcript holds no unanswered ask (`settleAnsweredLegacyAsk`).
+  transcript's facts are known, non-empty and hold no unanswered ask (`settleAnsweredLegacyAsk`);
+  unreadable facts are no evidence, and the wait stays open.
 - **`asksQuestion` decides the CLI's `question` and the webhook's `task.question`.** It is true for
   an open agent human wait and for a Cezar wait that carries a card (a worker's fallback question
-  to its parent); Cezar's `no-wait`, `budget` and `completion` waits ask nothing.
+  to its parent); Cezar's `no-wait`, `budget` and `completion` waits ask nothing. The cockpit's
+  composer uses it too, so those waits keep the one-click Continue.
 - **No store schema bump.** The planned schema 9 is not needed: a schema-8 build reads a 4b row
   correctly, because every reader it has derives attention from the human wait as well. A row
   4b rewrites only loses the two dropped keys.

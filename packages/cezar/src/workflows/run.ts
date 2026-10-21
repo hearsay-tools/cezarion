@@ -5620,11 +5620,14 @@ export class RunManager {
   }
 
   /** The human wait upgraded from a stored `hasPendingHumanAsk` (`turnId: 'legacy'`, never shown)
-   *  is settled as answered when the transcript holds no unanswered ask: that flag was read from the
-   *  transcript, so its ask was answered after the row was last saved. */
+   *  is settled as answered when the transcript's facts are known and hold no unanswered ask: that
+   *  flag was read from the transcript, so its ask was answered after the row was last saved.
+   *  Unknown facts are no evidence, and the wait stays open. */
   private settleAnsweredLegacyAsk(runId: string): boolean {
     const legacy = this.store.getRun(runId)?.waits?.filter(wait => wait.kind === 'human' && wait.phase === 'open' && wait.turnId === 'legacy' && wait.askSeq === undefined) ?? [];
-    if (!legacy.length || this.hasPendingHumanAsk(runId)) return false;
+    // Only facts read from a non-empty transcript are evidence of the answer (review of #1437).
+    const facts = this.store.knownTranscriptFacts(runId);
+    if (!legacy.length || !facts || facts.bytes === 0 || facts.pendingGateSeq !== undefined) return false;
     try {
       return this.store.commitHumanWaitsAnswered(runId, legacy.map(wait => wait.id)).length > 0;
     } catch (error) {

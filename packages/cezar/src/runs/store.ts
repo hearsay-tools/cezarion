@@ -4084,6 +4084,12 @@ export class RunStore extends EventEmitter {
     return this.facts.get(runId) ?? emptyFacts();
   }
 
+  /** The run's transcript facts when they are known: undefined when the transcript exists but its
+   *  facts are not current or cannot be read, so a caller can tell "no ask" from "no evidence". */
+  knownTranscriptFacts(runId: string): Readonly<TranscriptFacts> | undefined {
+    return this.facts.peek(runId);
+  }
+
   hasProjection(runId: string, projectionId: string): boolean {
     return this.transcriptFacts(runId).projectionIds.includes(projectionId);
   }
