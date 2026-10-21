@@ -123,7 +123,8 @@ describe('automatic Open Mercato skills updates', () => {
     )
     expect(state).toMatchObject({ status: 'current', needsUpgradeNotes: true })
 
-    browser.goto(`${baseUrl}/p/${projectId}/skills?skill=__import`)
+    // The card heads the catalog list since the "Manage skills" panel was retired (#1408).
+    browser.goto(`${baseUrl}/p/${projectId}/skills`)
     browser.waitForFunction(`document.querySelector('[data-slot="skills-update-card"]') !== null`)
     expect(browser.text('[data-slot="skills-update-card"]')).toContain(
       'Installed Open Mercato skills are up to date.',

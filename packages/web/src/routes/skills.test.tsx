@@ -407,12 +407,12 @@ describe('enable and preview default skills (#1408)', () => {
     expect(document.body.textContent).not.toContain('Manage skills')
   })
 
-  it('without default skills there is no Available group and no update card', async () => {
+  it('without default skills there is no Available group, and the update card still shows', async () => {
     serve({ importable: [] })
     renderAt('/skills')
     await waitFor(() => expect(groupRows('skills-group-enabled')).toHaveLength(3))
     expect(group('skills-group-available')).toBeNull()
-    expect(document.querySelector('[data-slot="skills-update-card"]')).toBeNull()
+    await waitFor(() => expect(document.querySelector('[data-slot="skills-update-card"]')).not.toBeNull())
   })
 
   it('loading keeps both cards with a status row', async () => {

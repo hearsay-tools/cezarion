@@ -150,7 +150,6 @@ function SkillsCatalog() {
     }
   }
 
-  const canImport = importable.length > 0
   const param = searchParams.get('skill')
   // Explicit choice if it is still listed, else the first enabled skill, else the first
   // available one, else the bookmarklet panel. A vanished selection degrades, it never crashes.
@@ -226,7 +225,7 @@ function SkillsCatalog() {
             param === null ? 'flex' : 'hidden',
           )}
         >
-          {canImport && updateProjectId ? <SkillsUpdateCard projectId={updateProjectId} /> : null}
+          {updateProjectId ? <SkillsUpdateCard projectId={updateProjectId} /> : null}
           {importableQuery.isError ? (
             <div
               role="alert"

@@ -50,7 +50,8 @@ export interface SkillActivation {
   onCheckedChange: () => void
 }
 
-/** The activation switch: a real `role="switch"` with a 44 px target, its own tab stop. */
+/** The activation switch: a real `role="switch"`, its own tab stop. The track is 24×40 px; a
+ *  transparent `before:` layer on the button itself widens the hit area to 44×48 px. */
 export function SkillSwitch({ skill, activation }: { skill: Pick<Skill, 'name'>; activation: SkillActivation }) {
   return (
     <span className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center">
@@ -62,7 +63,7 @@ export function SkillSwitch({ skill, activation }: { skill: Pick<Skill, 'name'>;
         checked={activation.checked}
         disabled={activation.disabled}
         onCheckedChange={() => activation.onCheckedChange()}
-        className="disabled:cursor-default"
+        className="relative before:absolute before:-inset-x-1 before:-inset-y-2.5 before:content-[''] disabled:cursor-default"
       />
     </span>
   )
