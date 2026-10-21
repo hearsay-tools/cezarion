@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -19,12 +19,23 @@ function gitRoot() {
   return path
 }
 
-it('uses an empty sandbox Git config and fixed identity in web tests', () => {
-  expect(readFileSync(process.env.GIT_CONFIG_GLOBAL!, 'utf8')).toBe('')
-  expect(process.env.GIT_CONFIG_NOSYSTEM).toBe('1')
+it('uses a sandbox Git config with automatic maintenance off and fixed identity in web tests', () => {
   const path = gitRoot()
+  // Only what vitest.setup.ts writes, nothing from the host.
+  expect(execFileSync('git', ['-C', path, 'config', '--global', '--list'], { encoding: 'utf8' }).trim().split('\n'))
+    .toEqual(['gc.auto=0', 'maintenance.auto=false'])
+  expect(process.env.GIT_CONFIG_NOSYSTEM).toBe('1')
   expect(execFileSync('git', ['-C', path, 'var', 'GIT_AUTHOR_IDENT'], { encoding: 'utf8' }))
     .toMatch(/^Cezar Tests <tests@cezar.invalid> /)
+})
+// hearsay-tools/cezarion#1279: Git 2.54+ maintenance repacks in the background and deletes
+// loose objects while a test still clones or removes the repository.
+it('starts no automatic maintenance after a web fixture commit', () => {
+  const commit = spawnSync('git', ['-C', gitRoot(), 'commit', '--allow-empty', '-qm', 'traced'], {
+    encoding: 'utf8', env: { ...process.env, GIT_TRACE: '1' },
+  })
+  expect(commit.status, commit.stderr).toBe(0)
+  expect(commit.stderr).not.toMatch(/\b(?:maintenance run|gc) --auto\b/)
 })
 
 // These exercise only the pre-spawn environment helper: no Cezar process is ever started.
