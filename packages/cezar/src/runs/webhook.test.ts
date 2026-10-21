@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from './store.ts';
 import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { registerProject } from '../workspace/projects.ts';
+import { WEBHOOK_TRIGGERS, type WebhookTrigger } from '@open-mercato/cezar-contract/attention';
 import { TaskWebhook, TaskWebhooks, WEBHOOK_ATTEMPTS, type TaskWebhookOptions } from './webhook.ts';
 
 /** The task webhook (#589): what a store transition turns into on the wire, and what a failing
@@ -45,9 +46,12 @@ describe('TaskWebhook', () => {
     return store.updateRun(run.id, { notify: true })!;
   };
 
-  const attach = (fetchImpl: typeof fetch, extra: Partial<TaskWebhookOptions> = {}) => {
+  const attach = (fetchImpl: typeof fetch, extra: Partial<TaskWebhookOptions> = {}, triggers?: WebhookTrigger[]) => {
     hook = new TaskWebhook(store, {
-      resolveProject: async () => ({ id: 'proj', webhook: { url: 'https://bot.example/hook', token: 'secret-token' } }),
+      resolveProject: async () => ({
+        id: 'proj',
+        webhook: { url: 'https://bot.example/hook', token: 'secret-token', ...(triggers === undefined ? {} : { triggers }) },
+      }),
       origin: () => 'http://127.0.0.1:4321',
       dataDir,
       dryRun: false,
@@ -58,18 +62,18 @@ describe('TaskWebhook', () => {
     return hook;
   };
 
-  it('POSTs every status transition of an opted-in run with the Bearer token, in order', async () => {
+  it('POSTs each entry into a selected state with the Bearer token, in order', async () => {
     const { calls, fetchImpl } = recorder();
-    const webhook = attach(fetchImpl);
+    const webhook = attach(fetchImpl, {}, ['running', 'needs-you']);
     const run = create(true);
     store.updateRun(run.id, { status: 'running' });
     store.updateRun(run.id, { status: 'waiting' });
     await webhook.idle();
 
-    expect(calls.map((call) => [call.body.event, call.body.previousStatus, call.body.status])).toEqual([
-      ['task.subscribed', null, 'queued'],
-      ['task.status', 'queued', 'running'],
-      ['task.status', 'running', 'waiting'],
+    expect(calls.map((call) => [call.body.event, call.body.previousStatus, call.body.status, call.body.state])).toEqual([
+      ['task.subscribed', null, 'queued', null],
+      ['task.status', 'queued', 'running', 'running'],
+      ['task.status', 'running', 'waiting', 'needs-you'],
     ]);
     expect(calls[0]!.url).toBe('https://bot.example/hook');
     expect(calls[0]!.headers.authorization).toBe('Bearer secret-token');
@@ -102,28 +106,80 @@ describe('TaskWebhook', () => {
     expect(calls[0]!.body).not.toHaveProperty('message');
   });
 
-  it('reports monitoring on and off as task.activity, and a new question as task.question', async () => {
+  it('sends a question as one task.question under Needs you, not a task.status beside it', async () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl);
     const run = optedIn();
     store.updateRun(run.id, { status: 'running' });
-    store.updateRun(run.id, { activity: 'monitoring' });
-    store.updateRun(run.id, { activity: undefined });
-    store.updateRun(run.id, { status: 'waiting', hasPendingHumanAsk: true });
+    // The ask lands mid-turn, while the run still runs; the park is what enters Needs you.
+    store.updateRun(run.id, { hasPendingHumanAsk: true });
+    store.updateRun(run.id, { status: 'waiting' });
     await webhook.idle();
-    expect(calls.map((call) => [call.body.event, call.body.activity])).toEqual([
-      ['task.status', null],
-      ['task.activity', 'monitoring'],
-      ['task.activity', null],
-      ['task.status', null],
-      ['task.question', null],
+    expect(calls.map((call) => [call.body.event, call.body.state, call.body.previousStatus])).toEqual([
+      ['task.question', 'needs-you', 'running'],
     ]);
   });
 
-  // hearsay-tools/cezarion#1233: a CI park is `waiting` with an open wait; no activity is written.
-  it('reports a CI park as task.status waiting with the waiting-for-CI label and no task.activity', async () => {
+  it('with no stored triggers sends only Needs you, Failed, Done and Cancelled', async () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl);
+    const enter = (patch: Parameters<RunStore['updateRun']>[1]) => {
+      const run = optedIn();
+      store.updateRun(run.id, { status: 'running' });
+      store.updateRun(run.id, patch);
+    };
+    enter({ status: 'waiting' });
+    enter({ status: 'failed' });
+    enter({ status: 'failed', autoResumeAt: '2026-10-20T23:00:00.000Z' });
+    enter({ status: 'done' });
+    enter({ status: 'cancelled' });
+    enter({ status: 'queued' });
+    await webhook.idle();
+    expect(calls.map((call) => call.body.state).sort()).toEqual(['cancelled', 'done', 'failed', 'needs-you']);
+  });
+
+  it('sends nothing but task.subscribed for an empty selection', async () => {
+    const { calls, fetchImpl } = recorder();
+    const webhook = attach(fetchImpl, {}, []);
+    const run = create(true);
+    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: 'done' });
+    await webhook.idle();
+    expect(calls.map((call) => call.body.event)).toEqual(['task.subscribed']);
+  });
+
+  it('sends nothing when the run leaves a selected state for an unselected one, and one delivery on re-entry', async () => {
+    const { calls, fetchImpl } = recorder();
+    const webhook = attach(fetchImpl, {}, ['running']);
+    const run = optedIn();
+    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { title: 'renamed' });
+    store.updateRun(run.id, { status: 'waiting' });
+    store.updateRun(run.id, { status: 'running' });
+    await webhook.idle();
+    expect(calls.map((call) => [call.body.state, call.body.seq])).toEqual([['running', 1], ['running', 2]]);
+  });
+
+  it('reads the selection per delivery, so a settings change applies without a restart', async () => {
+    const { calls, fetchImpl } = recorder();
+    let triggers: WebhookTrigger[] = ['done'];
+    const webhook = attach(fetchImpl, {
+      resolveProject: async () => ({ id: 'proj', webhook: { url: 'https://bot.example/hook', triggers } }),
+    });
+    const first = optedIn();
+    store.updateRun(first.id, { status: 'running' });
+    await webhook.idle();
+    triggers = ['running'];
+    const second = optedIn();
+    store.updateRun(second.id, { status: 'running' });
+    await webhook.idle();
+    expect(calls.map((call) => call.body.runId)).toEqual([second.id]);
+  });
+
+  // hearsay-tools/cezarion#1233: a CI park is `waiting` with an open wait; no activity is written.
+  it('with waiting-ci selected sends one delivery each time a run starts waiting on CI', async () => {
+    const { calls, fetchImpl } = recorder();
+    const webhook = attach(fetchImpl, {}, ['waiting-ci']);
     const run = optedIn();
     store.updateRun(run.id, { status: 'running' });
     const now = Date.now();
@@ -131,9 +187,29 @@ describe('TaskWebhook', () => {
       registeredAt: new Date(now).toISOString(), deadline: new Date(now + 1_800_000).toISOString(), phase: 'open', turnId: 'turn-1',
       prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40), generation: 'gen-1', timeoutSeconds: 1800 });
     store.updateRun(run.id, { status: 'waiting', activity: undefined });
+    store.updateRun(run.id, { title: 'still on CI' });
+    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: 'waiting' });
     await webhook.idle();
     expect(calls.map((call) => call.body.event)).toEqual(['task.status', 'task.status']);
-    expect(calls.at(-1)!.body).toMatchObject({ event: 'task.status', activity: null, task: { status: 'waiting', attentionLabel: 'waiting for CI' } });
+    expect(calls.at(-1)!.body).toMatchObject({
+      event: 'task.status', state: 'waiting-ci', status: 'waiting', previousStatus: 'running', activity: null,
+      task: { status: 'waiting', attentionLabel: 'waiting for CI' },
+    });
+  });
+
+  it('only waits it has no option for match waiting-other', async () => {
+    const { calls, fetchImpl } = recorder();
+    const webhook = attach(fetchImpl, {}, WEBHOOK_TRIGGERS.filter((trigger) => trigger !== 'needs-you'));
+    const run = optedIn();
+    store.updateRun(run.id, { status: 'running' });
+    // No wait kind the store writes today lacks an option, so the record a later kind would
+    // produce goes straight to the subscriber, on the emission the store fires for every write.
+    const parked = { ...store.getRun(run.id)!, status: 'waiting' as const, waitingOn: { kind: 'future-wait' } };
+    store.emit('run', parked);
+    await webhook.idle();
+    // The store's own record is still `running`; only the emitted one parked.
+    expect(calls.map((call) => call.body.state).slice(0, 2)).toEqual(['running', 'waiting-other']);
   });
 
   it('sends task.subscribed with the hand-off note', async () => {
@@ -150,14 +226,14 @@ describe('TaskWebhook', () => {
     const { calls, fetchImpl } = recorder(() => new Response('down', { status: 503 }));
     const webhook = attach(fetchImpl);
     const run = optedIn();
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: 'done' });
     await webhook.idle();
 
     expect(calls).toHaveLength(WEBHOOK_ATTEMPTS);
     // One deliveryId across the retries, so a receiver can dedupe.
     expect(new Set(calls.map((call) => call.body.deliveryId)).size).toBe(1);
     const after = store.getRun(run.id)!;
-    expect(after.status).toBe('running');
+    expect(after.status).toBe('done');
     expect(after.webhook?.lastError).toBe('HTTP 503');
     const failed = store.readEvents(run.id).filter((event) => event.type === 'webhook.failed');
     expect(failed).toHaveLength(1);
@@ -175,18 +251,18 @@ describe('TaskWebhook', () => {
     }) as unknown as typeof fetch;
     const webhook = attach(timeoutFetch, { timeoutMs: 10 });
     const run = optedIn();
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: 'done' });
     await webhook.idle();
     expect(calls).toHaveLength(WEBHOOK_ATTEMPTS);
     expect(store.getRun(run.id)?.webhook?.lastError).toBe('timed out');
-    expect(store.getRun(run.id)?.status).toBe('running');
+    expect(store.getRun(run.id)?.status).toBe('done');
   });
 
   it('does not retry a 4xx the endpoint meant', async () => {
     const { calls, fetchImpl } = recorder(() => new Response(null, { status: 401 }));
     const webhook = attach(fetchImpl);
     const run = optedIn();
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: 'done' });
     await webhook.idle();
     expect(calls).toHaveLength(1);
     expect(store.getRun(run.id)?.webhook?.lastError).toBe('HTTP 401');
@@ -196,12 +272,12 @@ describe('TaskWebhook', () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl, { dryRun: true });
     const run = optedIn();
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: 'done' });
     await webhook.idle();
     expect(calls).toEqual([]);
     const logged = store.readEvents(run.id).filter((event) => event.type === 'webhook.dry-run');
     expect(logged).toHaveLength(1);
-    expect(logged[0]).toMatchObject({ event: 'task.status', payload: { status: 'running', previousStatus: 'queued' } });
+    expect(logged[0]).toMatchObject({ event: 'task.status', payload: { status: 'done', previousStatus: 'queued', state: 'done' } });
     expect(JSON.stringify(logged[0])).not.toContain('secret-token');
   });
 
@@ -252,7 +328,7 @@ describe('TaskWebhooks', () => {
     expect(hooks.attach({ id: 'default', root, store })).toBe(hook);
 
     const run = store.createRun({ title: 't', workflow: 'quick-task', task: 't', notify: true, steps: [] });
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: 'done' });
     await new Promise((done) => setTimeout(done, 20));
     expect(calls).toEqual([]);
 
