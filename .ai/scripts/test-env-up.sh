@@ -73,6 +73,16 @@ if ! node -e 'const s=process.argv[1]; process.exit(/^[1-9][0-9]*$/.test(s) && N
   echo "TEST_ENV_HEALTH_TIMEOUT_SECONDS must be a positive integer number of seconds" >&2
   exit 2
 fi
+# The detached app's watcher (test-env-lease.mjs watch-app) reads both; refuse a bad value here,
+# before anything boots (#1448); unset or empty uses the default. 0 minutes turns the idle exit off; a deleted checkout still stops it.
+if ! node -e 'const s=process.argv[1]; process.exit(s === "" || /^\d+(\.\d+)?$/.test(s) ? 0 : 1)' -- "${TEST_ENV_IDLE_EXIT_MINUTES:-}"; then
+  echo "TEST_ENV_IDLE_EXIT_MINUTES must be a non-negative number of minutes (default 30; 0 turns the idle exit off)" >&2
+  exit 2
+fi
+if ! node -e 'const s=process.argv[1]; process.exit(s === "" || (/^\d+(\.\d+)?$/.test(s) && Number(s) > 0) ? 0 : 1)' -- "${TEST_ENV_WATCH_INTERVAL_SECONDS:-}"; then
+  echo "TEST_ENV_WATCH_INTERVAL_SECONDS must be a positive number of seconds (default 30)" >&2
+  exit 2
+fi
 TEST_ENV_CACHE_TTL_SECONDS=${TEST_ENV_CACHE_TTL_SECONDS:-600}
 
 # The preparation chain: install workspace links/dependencies, then build-e2e.sh — server

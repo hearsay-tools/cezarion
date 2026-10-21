@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { basename, join, resolve } from 'node:path';
 import { afterEach, test } from 'node:test';
 import { parsePid, readPid, requirePid, writePidSource } from '../../src/pid-file.testkit.ts';
@@ -918,3 +919,151 @@ exit 1
   spawnSync('/bin/sh', [down], { encoding: 'utf8', env, timeout: 20_000 });
   launchedPids.delete(descriptor(fixture.root).app.pid);
 });
+
+// ---- the server's own end (hearsay-tools/cezarion#1448) ------------------------------------
+// The detached server outlives every caller; its watcher stops it once nothing uses it.
+
+const WATCH = { TEST_ENV_WATCH_INTERVAL_SECONDS: '0.2' };
+
+function alive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
+}
+
+async function waitForExit(pid: number, what: string, log: () => string): Promise<void> {
+  // bound: a hang guard far above one 0.2 s poll plus the watcher's 10 s stop budget.
+  const deadline = Date.now() + 30_000;
+  while (alive(pid)) {
+    assert.ok(Date.now() < deadline, `${what} (pid ${pid}) is still running:\n${log()}`);
+    await delay(50);
+  }
+}
+
+function appLog(root: string): string {
+  try { return readFileSync(join(root, '.ai/qa/test-env-app.log'), 'utf8'); } catch { return '(no app log)'; }
+}
+
+async function watcherPid(root: string): Promise<number> {
+  // bound: the watcher logs this line as it starts, right after detach-app returns.
+  const deadline = Date.now() + 10_000;
+  while (true) {
+    const match = /\[test-env\] watcher (\d+) watching cezar pid \d+/.exec(appLog(root));
+    const pid = match && parsePid(match[1]!);
+    if (pid) return pid;
+    assert.ok(Date.now() < deadline, `no watcher started:\n${appLog(root)}`);
+    await delay(20);
+  }
+}
+
+function bootWatched(extra: NodeJS.ProcessEnv): { root: string; env: NodeJS.ProcessEnv; pid: number } {
+  const fixture = makeFixture(false);
+  const env = { ...fixtureEnv, PATH: fixture.path, ...WATCH, ...extra };
+  const cold = spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-up.sh')], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(cold.status, 0, cold.stderr);
+  const pid = descriptor(fixture.root).app.pid;
+  launchedPids.add(pid);
+  return { root: fixture.root, env, pid };
+}
+
+test('the server exits when its checkout is deleted', async () => {
+  const { root, pid } = bootWatched({});
+  const watcher = await watcherPid(root);
+  rmSync(root, { recursive: true, force: true });
+  await waitForExit(pid, 'server', () => '(checkout deleted)');
+  await waitForExit(watcher, 'watcher', () => '(checkout deleted)');
+});
+
+test('the server exits when its test-env state is deleted, and the checkout is not recreated', async () => {
+  const { root, pid } = bootWatched({});
+  const watcher = await watcherPid(root);
+  rmSync(join(root, '.ai/qa'), { recursive: true, force: true });
+  await waitForExit(pid, 'server', () => '(.ai/qa deleted)');
+  await waitForExit(watcher, 'watcher', () => '(.ai/qa deleted)');
+  assert.equal(existsSync(join(root, '.ai/qa')), false);
+});
+
+test('an idle server with no lease holder exits and its descriptor reads stopped', async () => {
+  const { root, pid } = bootWatched({ TEST_ENV_IDLE_EXIT_MINUTES: '0.01' });
+  const watcher = await watcherPid(root);
+  await waitForExit(pid, 'server', () => appLog(root));
+  await waitForExit(watcher, 'watcher', () => appLog(root));
+  assert.equal(JSON.parse(readFileSync(join(root, '.ai/qa/test-env.json'), 'utf8')).status, 'stopped');
+  assert.match(appLog(root), new RegExp(`stopping cezar pid ${pid}: idle`));
+});
+
+test('a live lease keeps the server; a SIGKILLed holder no longer does', async () => {
+  const fixture = makeFixture(false);
+  const root = fixture.root;
+  const env = { ...fixtureEnv, PATH: fixture.path, ...WATCH, TEST_ENV_IDLE_EXIT_MINUTES: '0.01' };
+  const lease = pathToFileURL(join(root, '.ai/scripts/test-env-lease.mjs')).href;
+  // The holder boots the server under its own token, so no gap is left without a holder.
+  const holder = spawn(process.execPath, ['--input-type=module', '-e', `
+    import { spawnSync } from 'node:child_process';
+    import { writeFileSync } from 'node:fs';
+    import { acquireTestEnvLease } from ${JSON.stringify(lease)};
+    const { token } = await acquireTestEnvLease(${JSON.stringify(root)});
+    const up = spawnSync('/bin/sh', [${JSON.stringify(join(root, '.ai/scripts/test-env-up.sh'))}], {
+      encoding: 'utf8', env: { ...process.env, TEST_ENV_LEASE_TOKEN: token },
+    });
+    writeFileSync(${JSON.stringify(join(root, '.ai/held'))}, JSON.stringify({ status: up.status, stderr: up.stderr }));
+    setInterval(() => {}, 1_000_000);
+  `], { env, stdio: 'ignore' });
+  try {
+    // bound: a hang guard for one fixture cold boot.
+    const deadline = Date.now() + 20_000;
+    while (!existsSync(join(root, '.ai/held'))) {
+      assert.ok(Date.now() < deadline, `holder never booted the server:\n${appLog(root)}`);
+      await delay(20);
+    }
+    const up = JSON.parse(readFileSync(join(root, '.ai/held'), 'utf8')) as { status: number; stderr: string };
+    assert.equal(up.status, 0, up.stderr);
+    const pid = descriptor(root).app.pid;
+    launchedPids.add(pid);
+    // bound: proves an absence; 2 s is three idle periods and about ten polls.
+    await delay(2_000);
+    assert.ok(alive(pid), `a held lease must keep the server:\n${appLog(root)}`);
+    assert.equal((await fetch(descriptor(root).baseUrl)).status, 200);
+    holder.kill('SIGKILL');
+    await once(holder, 'close');
+    await waitForExit(pid, 'server', () => appLog(root));
+  } finally { holder.kill('SIGKILL'); }
+});
+
+test('TEST_ENV_IDLE_EXIT_MINUTES=0 keeps an idle server', async () => {
+  const { root, env, pid } = bootWatched({ TEST_ENV_IDLE_EXIT_MINUTES: '0' });
+  await watcherPid(root);
+  // bound: proves an absence across about ten polls.
+  await delay(2_000);
+  assert.ok(alive(pid), appLog(root));
+  const stopped = spawnSync('/bin/sh', [join(root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(stopped.status, 0, stopped.stderr);
+});
+
+test('test-env-down.sh stopping the server also ends its watcher', async () => {
+  const { root, env, pid } = bootWatched({});
+  const watcher = await watcherPid(root);
+  const stopped = spawnSync('/bin/sh', [join(root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(stopped.status, 0, stopped.stderr);
+  assert.ok(!alive(pid));
+  await waitForExit(watcher, 'watcher', () => appLog(root));
+  assert.doesNotMatch(appLog(root), /watcher stopping/);
+});
+
+for (const [name, value, rule] of [
+  ['TEST_ENV_IDLE_EXIT_MINUTES', '-1', 'non-negative number'],
+  ['TEST_ENV_IDLE_EXIT_MINUTES', 'abc', 'non-negative number'],
+  ['TEST_ENV_IDLE_EXIT_MINUTES', '1.', 'non-negative number'],
+  ['TEST_ENV_WATCH_INTERVAL_SECONDS', '0', 'positive number'],
+  ['TEST_ENV_WATCH_INTERVAL_SECONDS', '1e3', 'positive number'],
+] as const) {
+  test(`malformed ${name}=${JSON.stringify(value)} is refused before boot`, () => {
+    const fixture = makeFixture(false);
+    writeFileSync(join(fixture.root, 'bin/npm'), '#!/bin/sh\nexit 99\n', { mode: 0o755 });
+    const result = spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-up.sh')], {
+      encoding: 'utf8', env: { ...fixtureEnv, PATH: fixture.path, [name]: value }, timeout: 9_000, killSignal: 'SIGKILL',
+    });
+    assert.equal(result.status, 2, result.stderr);
+    assert.match(result.stderr, new RegExp(`${name} must be a ${rule}`));
+    assert.equal(existsSync(join(fixture.root, '.ai/qa/test-env.json')), false);
+  });
+}
