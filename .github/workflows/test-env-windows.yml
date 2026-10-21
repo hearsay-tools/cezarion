@@ -64,6 +64,19 @@ jobs:
             throw 'Expected the nested cached-server lifetime failure'
           }
           $global:LASTEXITCODE = 0
+      - name: Prove the broker environment regression
+        shell: pwsh
+        env:
+          TEST_ENV_PROOF_BASE: 'fce355d201ee86ebff914a42fe23c0bc4787f7dc'
+        run: |
+          git fetch --depth=1 origin $env:TEST_ENV_PROOF_BASE
+          $output = node --test .github/scripts/test-env-windows.test.mjs 2>&1 | Out-String
+          $failed = $LASTEXITCODE -ne 0
+          Write-Output $output
+          if (!$failed -or $output -notmatch 'cached app must inherit bootstrap environment') {
+            throw 'Expected the lost bootstrap environment failure'
+          }
+          $global:LASTEXITCODE = 0
       - name: Verify production lease on native Windows
         shell: pwsh
         run: node --test .github/scripts/test-env-windows.test.mjs

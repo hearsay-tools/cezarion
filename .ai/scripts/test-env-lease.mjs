@@ -154,9 +154,9 @@ export async function acquireTestEnvLease(root, { token, pid = process.pid, grou
 
 // Only the supervisor outside the mutation job can start the cached app.
 // This local pipe admits the existing detach-app operation, never a shell command.
-async function detachApp(args, root) {
+async function detachApp(args, root, effectiveEnv = process.env) {
   const fd = openSync(resolve(root, args[0]), 'w');
-  const env = { ...process.env };
+  const env = { ...effectiveEnv };
   for (const key of Object.keys(env)) if (key.startsWith('TEST_ENV_LEASE_')) delete env[key];
   try {
     const child = spawn(process.execPath, args.slice(1), { cwd: root, detached: true, stdio: ['ignore', fd, fd], env });
@@ -187,8 +187,10 @@ async function cachedAppBroker(root, token) {
           const request = JSON.parse(data);
           if (request.token !== token || request.operation !== 'detach-app' ||
               !Array.isArray(request.args) || request.args.length < 2 || request.args.length > 128 ||
-              !request.args.every(arg => typeof arg === 'string' && !arg.includes('\0'))) throw new Error('invalid cached-app request');
-          const pid = await detachApp(request.args, root);
+              !request.args.every(arg => typeof arg === 'string' && !arg.includes('\0')) ||
+              !request.env || typeof request.env !== 'object' || Array.isArray(request.env) ||
+              !Object.entries(request.env).every(([key, value]) => key && !/[=\0]/.test(key) && typeof value === 'string' && !value.includes('\0'))) throw new Error('invalid cached-app request');
+          const pid = await detachApp(request.args, root, request.env);
           socket.end(JSON.stringify({ pid }) + '\n');
         } catch (error) { socket.end(JSON.stringify({ error: error.message }) + '\n'); }
       })();
@@ -198,13 +200,15 @@ async function cachedAppBroker(root, token) {
   return { pipe, close() { for (const socket of sockets) socket.destroy(); server.close(); } };
 }
 async function requestCachedApp(args) {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (key.startsWith('TEST_ENV_LEASE_')) delete env[key];
   return new Promise((done, fail) => {
     const socket = connect(process.env.TEST_ENV_LEASE_BROKER);
     socket.setEncoding('utf8');
     let data = '';
     socket.setTimeout(15_000, () => socket.destroy(new Error('cached-app broker timed out')));
     socket.on('error', fail);
-    socket.on('connect', () => socket.write(JSON.stringify({ operation: 'detach-app', token: process.env.TEST_ENV_LEASE_TOKEN, args }) + '\n'));
+    socket.on('connect', () => socket.write(JSON.stringify({ operation: 'detach-app', token: process.env.TEST_ENV_LEASE_TOKEN, args, env }) + '\n'));
     socket.on('data', chunk => { data += chunk; if (Buffer.byteLength(data) > 4096) socket.destroy(new Error('invalid cached-app receipt')); });
     socket.on('end', () => {
       try {

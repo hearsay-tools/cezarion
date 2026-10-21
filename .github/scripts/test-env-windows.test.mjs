@@ -27,9 +27,9 @@ test('Windows wrapper serializes callers, preserves arguments, and kills mutator
   }
   // Native children and the escaped cached server run the exact production launcher.
   writeFileSync(join(root, 'mutator.cjs'), `require('node:fs').writeFileSync('mutator.pid', String(process.pid)); require('node:fs').writeFileSync('job.txt', process.env.TEST_ENV_LEASE_JOB); setInterval(() => {}, 1000)`);
-  writeFileSync(join(root, 'cached.cjs'), 'setInterval(() => {}, 1000)');
+  writeFileSync(join(root, 'cached.cjs'), `require('node:fs').writeFileSync('cached-env.json', JSON.stringify({ dryRun: process.env.CEZ_DRY_RUN, home: process.env.CEZ_HOME, preview: process.env.CEZ_PREVIEW, leaseKeys: Object.keys(process.env).filter(key => key.startsWith('TEST_ENV_LEASE_')) })); setInterval(() => {}, 1000)`);
   const script = join(root, 'mutation.sh');
-  writeFileSync(script, `node .ai/scripts/test-env-lease.mjs join "$$"\nnode .ai/scripts/test-env-lease.mjs detach-app cached.log cached.cjs > cached.pid\nprintf '%s\\n' "$@" > args.txt\nnode mutator.cjs\n`);
+  writeFileSync(script, `node .ai/scripts/test-env-lease.mjs join "$$"\nexport CEZ_DRY_RUN=1 CEZ_HOME=isolated-bootstrap-home CEZ_PREVIEW=1\nnode .ai/scripts/test-env-lease.mjs detach-app cached.log cached.cjs > cached.pid\nprintf '%s\\n' "$@" > args.txt\nnode mutator.cjs\n`);
   const outer = join(root, 'outer.sh');
   writeFileSync(outer, `node .ai/scripts/test-env-lease.mjs run sh mutation.sh "$@"\n`);
   const env = { ...process.env, PATH: `C:\\Program Files\\Git\\bin;${process.env.PATH}` };
@@ -69,6 +69,8 @@ test('Windows wrapper serializes callers, preserves arguments, and kills mutator
       assert.throws(() => process.kill(mutator, 0), { code: 'ESRCH' });
       stage('lease reclaimed with mutator stopped; checking cached server');
       assert.doesNotThrow(() => process.kill(cached, 0), 'cached server must survive every enclosing job');
+      await until(() => existsSync(join(root, 'cached-env.json')), 'cached-app environment receipt');
+      assert.deepEqual(JSON.parse(readFileSync(join(root, 'cached-env.json'), 'utf8')), { dryRun: '1', home: 'isolated-bootstrap-home', preview: '1', leaseKeys: [] }, 'cached app must inherit bootstrap environment without lease secrets');
     } finally { next.release(); }
     console.log('PASS: native wrapper, shell identity, argv, exclusive lease, job cleanup, cached server survival');
   } finally {
