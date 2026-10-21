@@ -339,7 +339,12 @@ async function provisionPass(
     for (const agentDir of TEAM_SKILL_AGENT_DIRS) {
       checkpoint();
       // Ignore first: an entry git could see must never exist, not even for a crash's length.
-      const planned = skills.map((skill) => skill.name);
+      // Only names cezar may write: a recorded entry or a free path, never the user's own skill.
+      const planned: string[] = [];
+      for (const skill of skills) {
+        const rel = `${agentDir}/skills/${skill.name}`;
+        if (records.has(rel) || !(await lstat(join(worktree, rel)).catch(() => null))) planned.push(skill.name);
+      }
       if (await landsInside(root, join(worktree, agentDir, 'skills', '.gitignore'))) {
         await syncIgnore(agentDir, [...ownedNames(agentDir), ...planned]);
       }

@@ -198,6 +198,19 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     expect(await status(worktree)).toBe('');
   });
 
+  it('never hides an untracked skill the user already has at a planned name', async () => {
+    mkdirSync(join(worktree, '.agents', 'skills'), { recursive: true });
+    writeFileSync(join(worktree, '.agents', 'skills', '.gitignore'), '# repo rules\n*.tmp\n');
+    await git(worktree, 'add', '-A');
+    await git(worktree, ...GIT_ID, 'commit', '-q', '-m', 'repo gitignore');
+    const mine = join(worktree, '.agents', 'skills', 'lead-skill');
+    mkdirSync(mine);
+    writeFileSync(join(mine, 'SKILL.md'), 'MINE\n');
+    await provisionSkills(worktree, [lead], [lead]);
+    expect(readFileSync(join(mine, 'SKILL.md'), 'utf8')).toBe('MINE\n');
+    expect(await status(worktree)).toContain('.agents/skills/lead-skill/SKILL.md');
+  });
+
   it('records every entry in the worktree git dir, nothing in the working tree or a link target', async () => {
     await provisionSkills(worktree, [lead], [lead, helper]);
     const manifest = JSON.parse(readFileSync(await manifestPath(), 'utf8')) as {
