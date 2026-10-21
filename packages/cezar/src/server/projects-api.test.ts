@@ -789,6 +789,7 @@ describe('workspace projects API', () => {
         singleProject: false,
         automations: false,
         preview: false,
+        voice: false,
         tokenMetrics: true,
         tokenUsageMetrics: true,
         costMetrics: true,

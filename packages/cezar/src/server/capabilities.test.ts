@@ -161,6 +161,7 @@ describe('resolveCapabilities — followups (#471)', () => {
       singleProject: false,
       automations: false,
       preview: false,
+      voice: false,
       tokenMetrics: true,
       tokenUsageMetrics: true,
       costMetrics: true,
@@ -262,5 +263,18 @@ describe('resolveCapabilities — preview (#781)', () => {
 
   it.each([undefined, '', '0', 'true', 'yes', ' 1'])('is off for CEZ_PREVIEW=%j', (value) => {
     expect(resolveCapabilities(value === undefined ? {} : { CEZ_PREVIEW: value }).preview).toBe(false);
+  });
+});
+
+describe('voice capability', () => {
+  it.each([
+    [{}, false],
+    [{ CEZ_VOICE: '1' }, false],
+    [{ CEZ_VOICE: '1', TYPESAFE_API_KEY: 'k' }, true],
+    [{ CEZ_VOICE: '1', CEZ_DRY_RUN: '1' }, true],
+    [{ CEZ_VOICE: 'true', TYPESAFE_API_KEY: 'k' }, false],
+    [{ CEZ_VOICE: '1', TYPESAFE_API_KEY: '' }, false],
+  ])('resolves %j to voice=%s', (env, expected) => {
+    expect(resolveCapabilities(env).voice).toBe(expected);
   });
 });

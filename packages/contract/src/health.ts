@@ -58,6 +58,14 @@ export const capabilitiesSchema = z.object({
    */
   preview: z.boolean(),
   /**
+   * `true` means `CEZ_VOICE=1` opted this server into voice mode and a way to decide exists:
+   * `TYPESAFE_API_KEY` is set, or `CEZ_DRY_RUN=1` supplies the fake engine. Off — the default —
+   * the `/api/v1/…/voice/*` family answers `409` and the ⌘K palette renders as before.
+   *
+   * REQUIRED for the same reason as `tokenMetrics` below: this server always sends it.
+   */
+  voice: z.boolean(),
+  /**
    * `false` means `CEZ_HIDE_TOKEN_METRICS=1` asks the browser to omit token counts and monetary
    * cost (#481). The telemetry itself still rides in run/event payloads — this is presentation
    * only.

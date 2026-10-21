@@ -129,6 +129,7 @@ export function isLoopbackHostHeader(host: string | null | undefined): boolean {
  *  `CEZ_FOLLOWUPS=1` ⇒ the follow-up inbox exists (#471).
  *  `CEZ_AUTOMATIONS=1` ⇒ GitHub automations exist (#801).
  *  `CEZ_PREVIEW=1` ⇒ live preview exists (#781); same boot-time-flag caveat as `automations`.
+ *  `CEZ_VOICE=1` plus `TYPESAFE_API_KEY` (or `CEZ_DRY_RUN=1`) ⇒ voice mode exists; same caveat.
  *
  *  Read per request — cheap, and tests/ops can flip `CEZ_REMOTE` live. `followups` is honest
  *  per request too, but flipping it ON at runtime is only half a switch: the per-dataDir
@@ -151,6 +152,9 @@ export function resolveCapabilities(env: NodeJS.ProcessEnv = process.env, bindHo
     singleProject: env.CEZ_SINGLE_PROJECT === '1',
     automations: env.CEZ_AUTOMATIONS === '1',
     preview: env.CEZ_PREVIEW === '1',
+    // Boot-time flag, like `automations`. The key is read here only as present or absent; the
+    // fake engine under CEZ_DRY_RUN needs none.
+    voice: env.CEZ_VOICE === '1' && (!!env.TYPESAFE_API_KEY || env.CEZ_DRY_RUN === '1'),
     tokenMetrics: tokenUsageMetrics && costMetrics,
     tokenUsageMetrics,
     costMetrics,
