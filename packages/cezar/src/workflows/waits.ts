@@ -60,11 +60,12 @@ function summary(wait: Wait): string {
   return clip(wait.note === undefined ? 'timer' : `timer: ${wait.note}`);
 }
 
-/** The open waits as both tools list them back to the agent. A human wait has no deadline. */
+/** The open waits as both tools list them back to the agent. A human wait has no deadline, and
+ *  Cezar's own deadline-less worker wait is not the agent's to list (hearsay-tools/cezarion#1301). */
 export function openWaitList(waits: readonly Wait[]): OpenWait[] {
-  return waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait)).map((wait): OpenWait => wait.kind === 'human'
+  return waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait) && !(wait.kind === 'worker' && wait.deadline === undefined)).map((wait): OpenWait => wait.kind === 'human'
     ? { wait_id: wait.id, kind: wait.kind, summary: summary(wait) }
-    : { wait_id: wait.id, kind: wait.kind, deadline: wait.deadline, summary: summary(wait) });
+    : { wait_id: wait.id, kind: wait.kind, deadline: wait.deadline!, summary: summary(wait) });
 }
 
 /**
@@ -142,18 +143,21 @@ function workerTargetPhrase(wait: WorkerWaitEntry): string {
 
 /** The footer a delivered turn ends with: every wait still open, or undefined when none is. The
  *  user's reply settles a question and a question the user saw cannot be cancelled, so cancel is
- *  offered only for CI waits, worker waits and timers (hearsay-tools/cezarion#1234). */
-export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
+ *  offered only for CI waits, worker waits and timers (hearsay-tools/cezarion#1234), and only
+ *  when the session has cezar tools (hearsay-tools/cezarion#1270). */
+export function openWaitsFooter(waits: readonly Wait[], { tools }: { tools: boolean } = { tools: true }): string | undefined {
   const open = waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait));
   if (!open.length) return undefined;
   const items = open.map((wait) => {
     if (wait.kind === 'ci') return `CI wait ${wait.id} for ${wait.repository}#${wait.prNumber}, deadline ${wait.deadline}`;
     if (wait.kind === 'human') return `your question ${wait.id} to the user`;
-    if (wait.kind === 'worker') return `worker wait ${wait.id} on ${workerTargetPhrase(wait)}, deadline ${wait.deadline}`;
+    // Cezar's completion wait has no deadline (hearsay-tools/cezarion#1301).
+    if (wait.kind === 'worker') return `worker wait ${wait.id} on ${workerTargetPhrase(wait)}, ${wait.deadline === undefined ? 'no deadline' : `deadline ${wait.deadline}`}`;
     return `timer ${wait.id} at ${wait.deadline}${wait.note === undefined ? '' : ` (${wait.note})`}`;
   });
   const asked = open.some((wait) => wait.kind === 'human');
   const cancellable = open.some((wait) => wait.kind !== 'human');
+  if (!tools) return `Still open: ${items.join('; ')}.${asked ? " The user's reply answers it." : ''}`;
   const close = !asked ? 'Call cezar_cancel_wait for any you no longer need.'
     : cancellable ? "The user's reply answers your question; call cezar_cancel_wait for any CI wait, worker wait or timer you no longer need."
     : "The user's reply answers it.";

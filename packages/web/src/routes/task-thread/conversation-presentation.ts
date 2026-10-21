@@ -57,6 +57,8 @@ export function conversationOutcomeLabel(status: NonNullable<ThreadConversationM
       return 'Pending'
     case 'replied':
       return 'Replied'
+    case 'replied-late':
+      return 'Replied late'
     case 'timed-out':
       return 'Timed out'
     case 'cancelled':

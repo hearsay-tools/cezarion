@@ -11,6 +11,7 @@ import {
   cezarWaitAnswerSchema,
   cezarWaitRequestSchema,
   computeWaitingOn,
+  hasWorkerDeadline,
   LAST_WAITS_LIMIT,
   resolveWaitingOn,
   TIMER_MAX_SECONDS,
@@ -19,16 +20,19 @@ import {
   waitErrorCodeSchema,
   waitingOnSchema,
   waitSchema,
+  completionWaitView,
+  workerWaitView,
   workerWaitEntrySchema,
   workerWaitEntryToLegacy,
   openWaitSchema,
   waitViaSchema,
   type CiWaitEntry,
+  type DeadlinedWorkerWaitEntry,
   type HumanWaitEntry,
   type TimerWaitEntry,
   type WorkerWaitEntry,
 } from './waits.ts';
-import { workerWaitSchema } from './delegation.ts';
+import { workerCompletionWaitSchema, workerInspectionSchema, workerWaitSchema } from './delegation.ts';
 
 /**
  * The wait list (spec 2026-10-17-unified-waits, phase 1: hearsay-tools/cezarion#1233). The
@@ -91,6 +95,7 @@ function openHuman(over: Partial<HumanWaitEntry> = {}): HumanWaitEntry {
   };
 }
 
+/** An old row's completion wait in `delegation.wait`: never read since hearsay-tools/cezarion#1301. */
 function parkedRootWait(): RunRecord['delegation'] {
   return {
     role: 'root', permissions: [], receipts: [],
@@ -100,6 +105,15 @@ function parkedRootWait(): RunRecord['delegation'] {
       deadline: '2026-10-17T16:00:00.000Z', phase: 'parked', outcomes: [],
     },
   } as unknown as RunRecord['delegation'];
+}
+
+/** Cezar's completion wait on two workers: a list entry with no deadline (hearsay-tools/cezarion#1301). */
+function completionWaits(over: Record<string, unknown> = {}): WorkerWaitEntry[] {
+  return [workerWaitEntrySchema.parse({
+    kind: 'worker', id: '33333333-3333-4333-8333-333333333333', source: 'cezar', via: 'completion', registeredAt: '2026-10-17T15:00:00.000Z',
+    phase: 'open', turnId: 'turn-1', mode: 'all', revisions: [], outcomes: [],
+    workerIds: ['44444444-4444-4444-8444-444444444444', '55555555-5555-4555-8555-555555555555'], ...over,
+  })];
 }
 
 describe('limits', () => {
@@ -145,7 +159,7 @@ describe('computeWaitingOn', () => {
     const timer = openTimer({ deadline: '2026-10-17T15:05:00.000Z' });
     expect(computeWaitingOn({ waits: [timer, ci] })?.kind).toBe('ci');
     expect(computeWaitingOn({ waits: [timer] })?.kind).toBe('timer');
-    expect(computeWaitingOn({ waits: [ci], delegation: parkedRootWait() })?.kind).toBe('workers');
+    expect(computeWaitingOn({ waits: [ci, ...completionWaits()] })?.kind).toBe('workers');
     expect(computeWaitingOn({ waits: [ci], autoResumeAt: '2026-10-17T16:00:00.000Z' })?.kind).toBe('usage-limit');
     expect(computeWaitingOn({ waits: [ci], hasPendingHumanAsk: true })?.kind).toBe('human');
     expect(computeWaitingOn({ waits: [{ ...ci, phase: 'resolved' }] })).toBeUndefined();
@@ -173,24 +187,23 @@ describe('computeWaitingOn', () => {
 
   it('carries the usage-limit instant and the count of workers still owed', () => {
     expect(computeWaitingOn({ autoResumeAt: '2026-10-17T16:00:00.000Z' })).toEqual({ kind: 'usage-limit', at: '2026-10-17T16:00:00.000Z' });
-    expect(computeWaitingOn({ delegation: parkedRootWait() })).toEqual({ kind: 'workers', count: 2 });
+    expect(computeWaitingOn({ waits: completionWaits() })).toEqual({ kind: 'workers', count: 2 });
   });
 
   it('counts a worker wait that is still open, not one whose wake is already queued', () => {
-    const delegation = (phase: string) => {
-      const root = parkedRootWait() as { wait: Record<string, unknown> };
-      return { ...root, wait: { ...root.wait, phase } } as unknown as RunRecord['delegation'];
-    };
-    expect(computeWaitingOn({ delegation: delegation('registered') })?.kind).toBe('workers');
-    expect(computeWaitingOn({ delegation: delegation('wake-pending'), waits: [openCi()] })?.kind).toBe('ci');
+    expect(computeWaitingOn({ waits: completionWaits() })?.kind).toBe('workers');
+    expect(computeWaitingOn({ waits: [...completionWaits({ phase: 'resolved' }), openCi()] })?.kind).toBe('ci');
     expect(computeWaitingOn({ delegation: { role: 'invalid' }, waits: [openCi()] })?.kind).toBe('ci');
+    // An old row's `delegation.wait` is not read: the store moves it into the list on open.
+    expect(computeWaitingOn({ delegation: parkedRootWait(), waits: [openCi()] })?.kind).toBe('ci');
+    expect(computeWaitingOn({ delegation: parkedRootWait() })).toBeUndefined();
   });
 
   it('produces values the waitingOn schema accepts', () => {
     for (const input of [
       { hasPendingHumanAsk: true },
       { autoResumeAt: '2026-10-17T16:00:00.000Z' },
-      { delegation: parkedRootWait() },
+      { waits: completionWaits() },
       { waits: [openCi()] },
       { waits: [openTimer({ note: 'deploy' })] },
     ]) {
@@ -284,7 +297,7 @@ describe('human waits', () => {
   });
 
   it('an open human wait outranks usage limit, workers, ci and timer', () => {
-    expect(computeWaitingOn({ waits: [openCi(), openTimer(), openHuman()], autoResumeAt: '2026-10-17T16:00:00.000Z', delegation: parkedRootWait() }))
+    expect(computeWaitingOn({ waits: [openCi(), openTimer(), openHuman()], autoResumeAt: '2026-10-17T16:00:00.000Z' }))
       .toEqual({ kind: 'human' });
     for (const phase of ['delivered', 'cancelled'] as const) {
       expect(computeWaitingOn({ waits: [openCi(), openHuman({ phase })] })?.kind).toBe('ci');
@@ -370,12 +383,17 @@ function workerBase(over: Record<string, unknown> = {}) {
   };
 }
 
-function openWorkerWait(over: Partial<WorkerWaitEntry> = {}): WorkerWaitEntry {
-  return workerWaitEntrySchema.parse(workerBase({ mode: 'all', workerIds: [W1, W2], revisions: [{ workerId: W1, revision: 1 }], outcomes: [], ...over }));
+function deadlined(entry: WorkerWaitEntry): DeadlinedWorkerWaitEntry {
+  if (!hasWorkerDeadline(entry)) throw new Error('worker wait fixture lost its deadline');
+  return entry;
 }
 
-function openRequestWait(over: Record<string, unknown> = {}): WorkerWaitEntry {
-  return workerWaitEntrySchema.parse(workerBase({ requestIds: [R1], requestOutcomes: [], ...over }));
+function openWorkerWait(over: Partial<WorkerWaitEntry> = {}): DeadlinedWorkerWaitEntry {
+  return deadlined(workerWaitEntrySchema.parse(workerBase({ mode: 'all', workerIds: [W1, W2], revisions: [{ workerId: W1, revision: 1 }], outcomes: [], ...over })));
+}
+
+function openRequestWait(over: Record<string, unknown> = {}): DeadlinedWorkerWaitEntry {
+  return deadlined(workerWaitEntrySchema.parse(workerBase({ requestIds: [R1], requestOutcomes: [], ...over })));
 }
 
 describe('worker wait entry', () => {
@@ -502,6 +520,68 @@ describe('workerWaitEntryToLegacy', () => {
   });
 });
 
+describe('deadline-less cezar worker entries (hearsay-tools/cezarion#1301)', () => {
+  const targets = { workerIds: [W1], revisions: [], outcomes: [] };
+
+  it('a cezar worker entry may omit deadline and timeoutSeconds', () => {
+    const entry = { ...workerBase(targets), source: 'cezar', via: 'completion', deadline: undefined, timeoutSeconds: undefined };
+    expect(workerWaitEntrySchema.safeParse(entry).success).toBe(true);
+  });
+
+  it('an agent worker entry still requires deadline and timeoutSeconds', () => {
+    const result = workerWaitEntrySchema.safeParse({ ...workerBase(targets), source: 'agent', deadline: undefined, timeoutSeconds: undefined });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((issue) => issue.path[0])).toContain('deadline');
+  });
+
+  it('a cezar entry with only one of deadline and timeoutSeconds is refused', () => {
+    const cezar = { ...workerBase(targets), source: 'cezar', via: 'completion' };
+    expect(workerWaitEntrySchema.safeParse({ ...cezar, timeoutSeconds: undefined }).success).toBe(false);
+    expect(workerWaitEntrySchema.safeParse({ ...cezar, deadline: undefined }).success).toBe(false);
+    expect(workerWaitEntrySchema.safeParse(cezar).success).toBe(true);
+  });
+
+  it('a deadline-less worker entry is reported without a deadline, and the CI deadline stands alone', () => {
+    const bare = workerWaitEntrySchema.parse({ ...workerBase(targets), source: 'cezar', via: 'completion', deadline: undefined, timeoutSeconds: undefined });
+    const ci = openCi();
+    // Workers keep their priority over CI: the bare entry wins and carries no deadline.
+    expect(resolveWaitingOn({ waits: [bare, ci] })).toEqual({ kind: 'workers', count: 1 });
+    expect(resolveWaitingOn({ waits: [bare] })).toEqual({ kind: 'workers', count: 1 });
+    expect(computeWaitingOn({ waits: [ci] })).toMatchObject({ kind: 'ci', deadline: ci.deadline });
+  });
+
+  it('the legacy WorkerWait shape still requires a deadline, and renders only deadlined entries', () => {
+    const legacy = { id: WORKER_WAIT_ID, workerIds: [W1], phase: 'registered', outcomes: [] };
+    expect(workerWaitSchema.safeParse({ ...legacy, deadline: '2026-10-19T10:10:00.000Z' }).success).toBe(true);
+    expect(workerWaitSchema.safeParse(legacy).success).toBe(false);
+    const bare = workerWaitEntrySchema.parse({ ...workerBase(targets), source: 'cezar', via: 'completion', deadline: undefined, timeoutSeconds: undefined });
+    expect(hasWorkerDeadline(bare)).toBe(false);
+    expect(workerWaitView({ waits: [bare], delegation: { role: 'root' } as never })).toBeUndefined();
+  });
+
+  // Inspection and the relationships view still show the parent's wait while it parks on Cezar's
+  // completion wait, which has no deadline (hearsay-tools/cezarion#1301).
+  it('projects a deadline-less completion entry for inspection and the relationships view', () => {
+    const bare = workerWaitEntrySchema.parse({ ...workerBase(targets), source: 'cezar', via: 'completion', mode: 'all', deadline: undefined, timeoutSeconds: undefined });
+    const root = { role: 'root' } as never;
+    const view = completionWaitView({ waits: [bare], delegation: root });
+    expect(view).toEqual({ id: bare.id, via: 'completion', workerIds: [W1], mode: 'all', phase: 'registered', outcomes: [], wakeId: bare.id });
+    expect(workerCompletionWaitSchema.safeParse(view).success).toBe(true);
+    expect(completionWaitView({ status: 'waiting', waits: [bare], delegation: root })?.phase).toBe('parked');
+    expect(completionWaitView({ status: 'waiting', hasPendingHumanAsk: true, waits: [bare], delegation: root })?.phase).toBe('registered');
+    expect(completionWaitView({ waits: [{ ...bare, phase: 'resolved', result: { reason: 'outcome' } }], delegation: root })).toMatchObject({ phase: 'wake-pending', reason: 'outcome' });
+    // A deadlined entry, an upgraded completion wait included, is the legacy view's.
+    expect(completionWaitView({ waits: [workerWaitEntrySchema.parse(workerBase(targets))], delegation: root })).toBeUndefined();
+    expect(completionWaitView({ waits: [bare] })).toBeUndefined();
+    // The projection carries no deadline, and the legacy shape keeps requiring one.
+    expect(workerCompletionWaitSchema.safeParse({ ...view, deadline: '2026-10-19T10:10:00.000Z' }).success).toBe(false);
+    const inspection = { workerId: W1, parentRunId: WORKER_WAIT_ID, status: 'running',
+      workspace: { ownerRunId: W1, resourceId: W1, kind: 'owned-isolated', path: '/w', branch: 'cez/w', baselineSha: 'a'.repeat(40) } };
+    expect(workerInspectionSchema.safeParse({ ...inspection, completionWait: view }).success).toBe(true);
+    expect(workerInspectionSchema.safeParse({ ...inspection, wait: view }).success).toBe(false);
+  });
+});
+
 describe('computeWaitingOn with worker entries', () => {
   it('an open worker entry names workers, above CI and timer, below usage limit and human', () => {
     const waits = [openCi(), openTimer(), openWorkerWait()];
@@ -511,12 +591,12 @@ describe('computeWaitingOn with worker entries', () => {
     expect(waitingOnSchema.parse(computeWaitingOn({ waits }))).toEqual({ kind: 'workers', count: 2 });
   });
 
-  it('counts a request wait by the requests without an outcome, and adds the completion wait', () => {
+  it("counts a request wait by the requests without an outcome, and adds Cezar's completion wait", () => {
     const answered = [{ requestId: R1, status: 'replied' as const, observedAt: '2026-10-19T10:02:00.000Z' }];
     // Only request entries open: `replies` lets a summary say "worker replies" (hearsay-tools/cezarion#1235).
     expect(computeWaitingOn({ waits: [openRequestWait()] })).toEqual({ kind: 'workers', count: 1, replies: true });
     expect(computeWaitingOn({ waits: [openRequestWait({ requestOutcomes: answered })] })).toEqual({ kind: 'workers', count: 0, replies: true });
-    // delegation.wait stays for the completion gate until 3b.
-    expect(computeWaitingOn({ waits: [openWorkerWait()], delegation: parkedRootWait() })).toEqual({ kind: 'workers', count: 4 });
+    expect(computeWaitingOn({ waits: [openWorkerWait(), ...completionWaits()] })).toEqual({ kind: 'workers', count: 4 });
+    expect(computeWaitingOn({ waits: [openRequestWait(), ...completionWaits()] })).toEqual({ kind: 'workers', count: 3 });
   });
 });

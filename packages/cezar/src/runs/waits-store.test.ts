@@ -10,7 +10,7 @@ import type { AgentInput, CiWaitResult } from '@open-mercato/cezar-contract';
 import { RunDatabase, RunDatabaseUnsupportedSchemaError, RUN_DATABASE_SCHEMA_VERSION, RUNS_DB_FILE } from './run-database.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
 import { isLiveRecord } from './run-row.ts';
-import { parseRunRecords, RunStore, workerWaitEntry, type RunRecord } from './store.ts';
+import { holdsWorkerWait, parseRunRecords, RunStore, workerWaitEntry, type RunRecord } from './store.ts';
 import { readPersistedRuns, seedRuns } from './run-store.testkit.ts';
 
 /**
@@ -562,16 +562,70 @@ describe('upgrade-on-read of agent worker waits', () => {
     }
   });
 
-  it('leaves the completion gate wait in delegation.wait', () => {
-    const wait = legacyWait({ mode: 'all', deadline: iso(600_000) });
-    const run = parseOne(rootRow({ wait, completion: { phase: 'waiting', waitId: WAIT_ID } }));
-    expect(run.waits).toBeUndefined();
-    expect(run.delegation).toMatchObject({ wait: expect.objectContaining({ id: WAIT_ID }), completion: { waitId: WAIT_ID } });
-    // The agent's own wait beside it is the one that moves.
+  it('upgrades a parked completion wait into a cezar worker entry and drops completion', () => {
+    const wait = legacyWait({ mode: 'all', deadline: iso(600_000), workerIds: [WORKER, REQUEST], revisions: undefined });
+    const row = rootRow({ wait, completion: { phase: 'waiting', waitId: WAIT_ID } });
+    const run = parseOne(row);
+    expect(run.waits).toEqual([{
+      id: WAIT_ID, kind: 'worker', source: 'cezar', via: 'completion', phase: 'open', turnId: 'upgraded',
+      registeredAt: iso(0), deadline: iso(600_000), timeoutSeconds: 600, mode: 'all',
+      workerIds: [WORKER, REQUEST], revisions: [], outcomes: [],
+    }]);
+    expect(run.delegation).not.toHaveProperty('wait');
+    expect(run.delegation).not.toHaveProperty('lastWait');
+    expect(run.delegation).not.toHaveProperty('completion');
+    expect(run.lastWaitsError).toBeUndefined();
+    expect(run.status).toBe('waiting');
+    // The agent's own wait beside it upgrades as an agent entry.
     const other = '66666666-6666-4666-8666-666666666666';
     const both = parseOne(rootRow({ wait, lastWait: legacyWait({ id: other, phase: 'wake-pending', reason: 'outcome', wakeId: other, outcomes: [outcome] }), completion: { phase: 'waiting', waitId: WAIT_ID } }));
-    expect(both.delegation).toMatchObject({ wait: expect.objectContaining({ id: WAIT_ID }) });
-    expect(both.lastWaits).toEqual([expect.objectContaining({ id: other, kind: 'worker' })]);
+    expect(both.waits).toEqual([expect.objectContaining({ id: WAIT_ID, source: 'cezar', via: 'completion' })]);
+    expect(both.lastWaits).toEqual([expect.objectContaining({ id: other, kind: 'worker', source: 'agent' })]);
+    // A completion marker with no wait behind it is only dropped.
+    const bare = parseOne(rootRow({ completion: { phase: 'attention' } }));
+    expect(bare.delegation).not.toHaveProperty('completion');
+    expect(bare.waits).toBeUndefined();
+  });
+
+  it('upgrades a wake-pending completion wait keeping its queued input', () => {
+    const wait = legacyWait({ mode: 'all', phase: 'wake-pending', reason: 'outcome', wakeId: WAKE_ID, outcomes: [outcome] });
+    const run = parseOne(rootRow({ wait, completion: { phase: 'waiting', waitId: WAIT_ID } }, { agentInputs: [wakeInput(WAKE_ID)] }));
+    expect(run.waits).toEqual([expect.objectContaining({
+      id: WAIT_ID, source: 'cezar', via: 'completion', phase: 'resolved', result: { reason: 'outcome' }, wakeInputId: WAKE_ID, deadline: iso(540_000), timeoutSeconds: 600,
+    })]);
+    expect(run.delegation).not.toHaveProperty('wait');
+    expect(run.delegation).not.toHaveProperty('completion');
+    // A wake the provider already took settles it as delivered.
+    const done = parseOne(rootRow({ wait, completion: { phase: 'waiting', waitId: WAIT_ID } }, { agentInputs: [wakeInput(WAKE_ID, { deliveredAt: iso(-500) })] }));
+    expect(done.waits).toBeUndefined();
+    expect(done.lastWaits).toEqual([expect.objectContaining({ id: WAIT_ID, source: 'cezar', via: 'completion', phase: 'delivered' })]);
+  });
+
+  it('restart keeps a deadline-less completion wait and wakes on settlement', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'cez-waits-completion-'));
+    const entry = {
+      id: WAIT_ID, kind: 'worker' as const, source: 'cezar' as const, via: 'completion' as const, phase: 'open' as const, turnId: 'turn',
+      registeredAt: iso(0), mode: 'all' as const, workerIds: [WORKER], revisions: [], outcomes: [],
+    };
+    seedRuns(directory, [rootRow({}, { waits: [entry] })]);
+    let store = RunStore.open(directory, { keepLive: true });
+    const reopen = () => { store.close(); store = RunStore.open(directory, { keepLive: true }); return store.getRun(RUN_ID)!; };
+    try {
+      const reopened = reopen();
+      expect(reopened.lastWaitsError).toBeUndefined();
+      expect(reopened.waits).toEqual([entry]);
+      expect(holdsWorkerWait(reopened)).toBe(true);
+      // Settling after the reopen resolves it once, and the same wake input is appended once.
+      const resolved = { ...entry, phase: 'resolved' as const, resolvedAt: iso(1_000), result: { reason: 'outcome' as const }, wakeInputId: WAKE_ID };
+      store.commitWait(RUN_ID, resolved, wakeInput(WAKE_ID));
+      store.commitWait(RUN_ID, resolved, wakeInput(WAKE_ID));
+      const after = reopen();
+      expect(after.waits).toEqual([resolved]);
+      expect(after.agentInputs?.filter((input) => input.id === WAKE_ID)).toHaveLength(1);
+    } finally {
+      store.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('upgrades a worker run\'s own wait on its requests', () => {
@@ -612,23 +666,23 @@ describe('upgrade-on-read of agent worker waits', () => {
     }
   });
 
-  it('a store at schema 6 is refused by a schema-5 reader', () => {
-    expect(RUN_DATABASE_SCHEMA_VERSION).toBe(6);
+  it('a store at schema 7 is refused by a schema-6 reader', () => {
+    expect(RUN_DATABASE_SCHEMA_VERSION).toBe(7);
     const directory = mkdtempSync(join(tmpdir(), 'cez-waits-schema6-'));
     try {
       RunStore.open(directory, { keepLive: true }).close();
       const path = join(directory, RUNS_DB_FILE);
       const raw = new DatabaseSync(path);
       try {
-        expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 6 });
+        expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 7 });
       } finally {
         raw.close();
       }
-      // A schema-5 build's bound is 5: both of its openers must refuse a schema-6 store rather than
-      // read it, because it would drop each worker entry as unreadable on its next write.
-      expect(() => RunDatabase.open(path, 5)).toThrow(RunDatabaseUnsupportedSchemaError);
-      expect(() => RunDatabase.openReadOnly(path, 5)).toThrow(RunDatabaseUnsupportedSchemaError);
-      expect(() => RunDatabase.open(path, 5)).toThrow(expect.objectContaining({ kind: 'unsupported-schema', found: 6, supported: 5 }));
+      // A schema-6 build's bound is 6: both of its openers must refuse a schema-7 store rather than
+      // read it, because it would drop each deadline-less completion entry as unreadable on its next write.
+      expect(() => RunDatabase.open(path, 6)).toThrow(RunDatabaseUnsupportedSchemaError);
+      expect(() => RunDatabase.openReadOnly(path, 6)).toThrow(RunDatabaseUnsupportedSchemaError);
+      expect(() => RunDatabase.open(path, 6)).toThrow(expect.objectContaining({ kind: 'unsupported-schema', found: 7, supported: 6 }));
       // This build still opens it.
       RunDatabase.open(path).close();
     } finally {
@@ -664,14 +718,16 @@ describe('the summary and live column of an upgraded worker wait', () => {
     }
   });
 
-  it('keeps the completion wait in the summary, and projects nothing else from delegation.wait', () => {
+  it('reads the completion wait into the list, and the summary keeps no delegation.wait', () => {
     seedRuns(directory, [stored(parked, { completion: { phase: 'waiting', waitId: WAIT_ID } })]);
     const store = RunStore.open(directory, { keepLive: true });
     try { store.flush(); } finally { store.close(); }
     const db = RunDatabase.openReadOnly(join(directory, RUNS_DB_FILE))!;
     try {
       expect(db.get(RUN_ID)!.live).toBe(true);
-      expect(JSON.parse(db.listAll()[0]!.summary).delegation).toMatchObject({ wait: { phase: 'parked' } });
+      const summary = JSON.parse(db.listAll()[0]!.summary);
+      expect(summary.delegation ?? {}).not.toHaveProperty('wait');
+      expect(summary.waitingOn).toMatchObject({ kind: 'workers' });
     } finally {
       db.close();
     }

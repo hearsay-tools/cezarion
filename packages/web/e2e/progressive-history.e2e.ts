@@ -296,13 +296,16 @@ beforeAll(async () => {
      document.querySelector('[data-slot="history-boundary"] button:not([disabled])') !== null`,
   )
   // This stored running fixture is recovered through a real dry-run continuation. Query
-  // idle can be true before that continuation publishes its waiting/PR header update. The
-  // no-hover PR chip grows the metadata row by 12px; establish that completed layout before
-  // measuring a paging anchor, including when the preceding tail-paint test is filtered out.
+  // idle can be true before that continuation publishes its waiting/PR update, which rewrites
+  // the header pill and the Session activity card's status and Workspace rows
+  // (hearsay-tools/cezarion#1333); establish that completed layout before measuring a paging
+  // anchor, including when the preceding tail-paint test is filtered out.
   await waitForStatus(baseUrl, RUN_ID, ['waiting'])
-  browser.waitForFunction(`document.querySelector('[data-slot="run-header"] [data-slot="pr-chip"]') !== null`)
+  browser.waitForFunction(`document.querySelector('[data-slot="run-activity-workspace"]') !== null &&
+    !/^(Running|Queued)/.test(document.querySelector('[data-slot="run-header"] [data-slot="pill"]')?.textContent ?? 'Running')`)
   waitUntilCockpitIdle()
   settleVisual(browser, '[data-slot="run-header"]', { idle: true })
+  settleVisual(browser, '[data-slot="run-activity-dock"]', { idle: true })
 }, 120_000)
 
 afterAll(async () => {
@@ -315,7 +318,7 @@ afterAll(async () => {
 describe('progressive long-session history', () => {
   it('paints the current tail and docks without requesting an earlier page', () => {
     expect(Number(browser.evaluate(cursorRequestCount))).toBe(0)
-    // Both live in the one Run activity card now (#402): the section heads carry the meters,
+    // Both live in the one Session activity card now (#402): the section heads carry the meters,
     // and the plan's own entries appear once its row is opened.
     expect(browser.text('[data-slot="run-activity-subagents"] [data-slot="run-activity-meta"]')).toBe('0 of 1 complete')
     // A programmatic toggle: this spec's thread is still settling into follow-tail, so a

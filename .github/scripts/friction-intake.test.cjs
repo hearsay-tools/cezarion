@@ -95,6 +95,32 @@ test('classification reuses the Jev transport and never includes credentials in 
   assert.doesNotMatch(JSON.stringify({ result, request }), /not-an-actual-secret/);
 });
 
+test('Jev receives independent boolean criteria with only the report as context', async () => {
+  let request;
+  await classify({
+    issue: { ...issue, comments: ['Extra context is not available to Jev.'] },
+    apiKey: 'test-key',
+    fetchImpl: async (_url, options) => {
+      request = JSON.parse(options.body);
+      return { ok: true, json: async () => response() };
+    },
+  });
+  assert.deepEqual(request.state, { title: issue.title, body: issue.body });
+  assert.deepEqual(Object.keys(request.questions), [
+    'category', 'established', 'policy_change', 'authority_change', 'verification_change', 'runtime_change',
+  ]);
+  for (const key of ['established', 'policy_change', 'verification_change']) {
+    const question = request.questions[key];
+    assert.equal(question.type, 'noul', key);
+    assert.deepEqual(Object.keys(question.criteria ?? {}).sort(), ['false', 'true'], key);
+    for (const value of Object.values(question.criteria)) {
+      assert.equal(typeof value, 'string', key);
+      assert.ok(value.trim().length > 0, key);
+    }
+    assert.notEqual(question.criteria.true, question.criteria.false, key);
+  }
+});
+
 test('three automation definitions match only their handling label and keep rollout paused', () => {
   const definitions = buildAutomations();
   assert.equal(definitions.length, 3);
@@ -104,10 +130,21 @@ test('three automation definitions match only their handling label and keep roll
     assert.equal(d.filters.includeExisting, false);
     assert.deepEqual(d.filters.authors, ['wjarka']);
     assert.equal(d.task.worktree, true);
-    assert.equal(d.task.autonomous, true);
     assert.equal(d.task.variants, 1);
     assert.ok(d.filters.allLabels.includes('friction'));
     assert.notEqual(d.enabled, true);
+  }
+});
+
+test('design handling selects dev-flow and allows its human approval gate', () => {
+  const definitions = buildAutomations();
+  const design = definitions.find(d => d.filters.changedLabels.includes('friction-design'));
+  assert.equal(design.task.autonomous, false);
+  assert.equal(design.task.workflow, undefined);
+  assert.deepEqual(design.task.steps, [{ id: 'task', skill: 'dev-flow', prompt: '{{task}}' }]);
+  for (const implementation of definitions.filter(d => d !== design)) {
+    assert.equal(implementation.task.autonomous, true);
+    assert.equal(implementation.task.workflow, 'quick-task');
   }
 });
 

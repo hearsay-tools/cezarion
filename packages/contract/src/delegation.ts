@@ -55,6 +55,13 @@ export const workerWaitSchema = z.object({
 }).strict();
 export type WorkerWait = z.infer<typeof workerWaitSchema>;
 
+/** Cezar's completion wait as inspection and the relationships view show it: the `WorkerWait`
+ *  projection without a deadline, which that wait does not have, and the `via` that names it.
+ *  `WorkerWait` keeps requiring a deadline (hearsay-tools/cezarion#1301). */
+export const workerCompletionWaitSchema = workerWaitSchema.omit({ deadline: true, requestIds: true, requestOutcomes: true })
+  .extend({ via: z.literal('completion') }).strict();
+export type WorkerCompletionWait = z.infer<typeof workerCompletionWaitSchema>;
+
 /** Automatic retries of a pending destroy (hearsay-tools/cezarion#879): how many scheduled
  * attempts ran since the last explicit request, when the next one is due, and whether they
  * reached the hourly cap with nothing changing, which the cockpit shows as needing attention.
@@ -188,6 +195,9 @@ export const delegationStateSchema = z.discriminatedUnion('role', [
     receipts: z.array(workerCreationReceiptSchema).max(1_024).refine(receipts =>
       new Set(receipts.map(receipt => receipt.requestId)).size === receipts.length &&
       new Set(receipts.map(receipt => receipt.workerId)).size === receipts.length),
+    // `wait`, `lastWait` and `completion` are the old worker-wait engine's, never written since
+    // hearsay-tools/cezarion#1301: every worker wait is a list entry. Kept optional so old rows
+    // parse; the store reads them into the list on open (store schemas 6 and 7).
     wait: workerWaitSchema.optional(),
     lastWait: workerWaitSchema.optional(),
     results: z.array(workerResultReferenceSchema).max(1_024).refine(results => new Set(results.map(result => result.workerId)).size === results.length).optional(),
@@ -197,6 +207,7 @@ export const delegationStateSchema = z.discriminatedUnion('role', [
   }).strict(),
   z.object({
     role: z.literal('worker'),
+    // Never written since hearsay-tools/cezarion#1301, as for a root; kept so old rows parse.
     wait: workerWaitSchema.optional(),
     lastWait: workerWaitSchema.optional(),
     permissions: permissionsSchema,
@@ -279,6 +290,10 @@ export const agentInputSchema = z.object({
    * such input; records written before #505 never carry it, so nothing historical replays. */
   awaitingRead: z.literal(true).optional(),
   inboxClaim: inboxClaimSchema.optional(),
+  /** A completion refusal Cezar queued for a closed session (hearsay-tools/cezarion#1301): its
+   * delivery is the nudge's turn, bounded by the nudge's reply bound, and a session that closes
+   * before it is a failed delivery. Absent on every other input and on records written before. */
+  purpose: z.literal('completion-refusal').optional(),
 }).strict();
 export type AgentInput = z.infer<typeof agentInputSchema>;
 
@@ -293,6 +308,8 @@ export const workerInspectionSchema = z.object({
   model: z.string().max(512).optional(),
   inputs: z.array(workerInputSchema).max(32).optional(),
   wait: workerWaitSchema.optional(),
+  /** The parent's deadline-less completion wait on this worker (hearsay-tools/cezarion#1301). */
+  completionWait: workerCompletionWaitSchema.optional(),
   destroy: workerDestroyViewSchema.optional(),
   outcome: workerOutcomeSchema.optional(),
 });

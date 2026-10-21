@@ -440,7 +440,7 @@ export function ThreadView({
           {/* Keyed by run id, like the docks it replaced: the route survives a task change, so
               an unkeyed dock would carry the previous run's collapse state — its own and every
               nested section's — into the next one. */}
-          <RunActivityDock key={run.id} run={run} currentThread={currentThread} onOpenWorker={setOpenAgentId} />
+          <RunActivityDock key={run.id} run={run} currentThread={currentThread} hasPendingHumanAsk={hasPendingHumanAsk} onOpenWorker={setOpenAgentId} />
 
           {/* A usage-limit stop is the one `failed` state that is still going somewhere — the
               dock says so before the composer offers a Continue nobody needs to press. */}

@@ -24,6 +24,7 @@ import type {
   RunStatus,
 } from '@open-mercato/cezar-api-client'
 
+import { resetActivityDisclosureForTests } from './run-activity-dock'
 import { TaskThreadRoute, ThreadView } from './task-thread'
 import { buildTranscriptRows, mainTranscriptSections } from './session-transcript'
 import { reduceThread } from './thread-state'
@@ -31,6 +32,7 @@ import { reduceThread } from './thread-state'
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  resetActivityDisclosureForTests()
 })
 
 /** ThreadView now hosts the run header, whose hooks need a query client (mutations, the runs
@@ -233,7 +235,7 @@ describe('ThreadView', () => {
   it('shows the header title (auto-summary, never the raw title) and the status pill', () => {
     renderView(<ThreadView run={run('waiting')} thread={reduceThread(EVENTS)} />)
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Do the thing')
-    expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain('needs you')
+    expect(document.querySelector('[data-slot="pill"]')?.textContent?.toLowerCase()).toContain('needs you')
   })
 
   it('waiting → the paused hint (pulsing dot) in the dock, right above an ENABLED composer', () => {
@@ -364,14 +366,20 @@ describe('ThreadView', () => {
     await waitFor(() => expect(textarea.disabled).toBe(false))
   })
 
-  it('monitoring → no paused hint, "message" placeholder, and a "monitoring" pill (#490)', () => {
-    renderView(<ThreadView run={run('running', { activity: 'monitoring' })} thread={reduceThread(EVENTS)} />)
+  // The monitoring park is the agent's open timer since hearsay-tools/cezarion#1301.
+  it('monitoring → a monitoring hint, a live composer, and a "monitoring" pill (#490)', () => {
+    const timer = { kind: 'timer', id: '00000000-0000-4000-8000-0000000000d1', source: 'agent', via: 'monitoring-line', registeredAt: '2026-10-17T15:00:00.000Z',
+      deadline: '2026-10-17T15:05:00.000Z', phase: 'open', turnId: 'turn-1', seconds: 300 }
+    renderView(<ThreadView run={run('waiting', { waits: [timer] } as unknown as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
     // Still working on downstream work, not on you: never the "paused, waiting for your reply" banner.
-    expect(document.querySelector('[data-slot="paused-hint"]')).toBeNull()
-    expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain('monitoring')
+    const hint = document.querySelector('[data-slot="paused-hint"]')?.textContent
+    expect(hint).toContain('Monitoring — you can send a message to resume')
+    expect(hint).not.toContain('waiting for your reply')
+    expect(document.querySelector('[data-slot="pill"]')?.textContent?.toLowerCase()).toContain('monitoring')
     const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
     expect(textarea.disabled).toBe(false)
-    expect(textarea.placeholder).toBe('Message the agent — / for skills, @ for files…')
+    // A waiting run's composer replies, as on any wait.
+    expect(textarea.placeholder).toBe('Reply — / for skills, @ for files…')
   })
 
   /** A closed run with a session to resume is still AUTHORABLE: Continue takes a prompt, so
@@ -817,21 +825,20 @@ describe('ThreadView', () => {
     expect(document.querySelector('[data-slot="plan-mirror"]')).toBeNull()
     expect(document.querySelector('[data-slot="run-header"] [data-slot="workflow-steps"]')).toBeNull()
     const dock = document.querySelector('[data-slot="run-activity-dock"]')!
-    expect(dock.textContent).toContain('Run activity')
-    // Only the workflow has anything to show in this fixture — the count is honest about it.
-    expect(dock.textContent).toContain('1 section')
-    expect(dock.textContent).toContain('Working')
-    // The workflow row is titled by the step the run is on, not by the word "Workflow".
+    expect(dock.textContent).toContain('Session activity')
+    // The status is the same line the header pill reads (hearsay-tools/cezarion#1333).
+    expect(dock.textContent).toContain('Running')
+    // The workflow row names the workflow and the step the run is on.
+    expect(document.querySelector('[data-slot="run-activity-workflow"]')?.textContent).toContain('quick-task')
     expect(document.querySelector('[data-slot="run-activity-workflow"]')?.textContent).toContain('Do the task')
   })
 
-  it('quarantined delegation metadata adds no workers section — and no dock of its own', () => {
+  it('quarantined delegation metadata adds no workers section', () => {
     // `{ role: 'invalid' }` is what the contract parks unreadable metadata as, and
     // carries no usable worker links. Counting it as a section would inflate the
     // dock's tally and leave an empty bordered panel behind.
     renderView(<ThreadView run={run('done', { delegation: { role: 'invalid' } } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
     expect(document.querySelector('[data-slot="run-activity-workers"]')).toBeNull()
-    expect(document.querySelector('[data-slot="run-activity-dock"]')).toBeNull()
   })
 
   it('a live run is never reported as All complete, however quiet its rows are', () => {
@@ -841,7 +848,8 @@ describe('ThreadView', () => {
     renderView(<ThreadView run={run('waiting', { id: 'dock-waiting', delegation } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
     const status = document.querySelector('[data-slot="run-activity-status"]')?.textContent
     expect(status).not.toContain('All complete')
-    expect(status).toContain('In progress')
+    // The run's own attention label, the one its header pill shows (hearsay-tools/cezarion#1333).
+    expect(status).toContain('Needs you')
   })
 
   it.each(['failed', 'cancelled'] as const)('a %s workflow step never reads All complete', (status) => {
@@ -887,7 +895,7 @@ describe('ThreadView', () => {
     const { rerender } = renderView(
       <ThreadView run={run('running', { id: 'dock-run-a', steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />,
     )
-    fireEvent.click(screen.getByRole('button', { name: /Run activity/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Session activity/ }))
     expect(document.querySelector('[data-slot="run-activity-dock"]')?.getAttribute('data-state')).toBe('collapsed')
 
     // The route does not remount between tasks: only the run prop changes.
@@ -1353,27 +1361,28 @@ describe('TaskThreadRoute — read receipts', () => {
   })
 })
 
-it.each(['registered', 'parked', 'wake-pending'] as const)('uses honest dock copy for %s worker waits', phase => {
-  renderView(<ThreadView run={run('waiting', { delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase, outcomes: [] } } })} thread={reduceThread([])} />)
+/** A worker wait in the list (hearsay-tools/cezarion#1301): the agent's open entry on one worker. */
+const workerWait = (over: Record<string, unknown> = {}) => ({
+  kind: 'worker' as const, id: '00000000-0000-4000-8000-0000000000e1', source: 'agent' as const, via: 'cez-worker-wait' as const,
+  registeredAt: '2026-09-05T00:00:00.000Z', deadline: '2026-09-06T00:00:00.000Z', phase: 'open' as const, turnId: 'turn-1',
+  timeoutSeconds: 600, workerIds: ['worker'], revisions: [], outcomes: [], ...over,
+})
+const onWorkerWait = (over: Record<string, unknown> = {}) =>
+  ({ delegation: { role: 'root' as const, permissions: [], receipts: [] }, waits: [workerWait(over)] }) as unknown as Partial<ApiRun>
+
+it.each(['parked', 'wake-pending'] as const)('uses honest dock copy for %s worker waits', phase => {
+  renderView(<ThreadView run={run('waiting', onWorkerWait(phase === 'parked' ? {} : { phase: 'resolved', resolvedAt: '2026-09-05T00:05:00.000Z' }))} thread={reduceThread([])} />)
   const hint = document.querySelector('[data-slot="paused-hint"]')
   // A full record carries the worker ids, so the parked count is said (#617).
   // A queued automatic wake is capacity waiting, not a human gate (#971).
-  expect(hint?.textContent).toContain(
-    phase === 'parked' ? 'Waiting on 1 worker'
-      : phase === 'wake-pending' ? 'Waiting for capacity — you can send a message to resume'
-        : 'waiting for your reply',
-  )
-  expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain(
-    phase === 'parked' ? 'waiting on 1 worker'
-      : phase === 'wake-pending' ? 'waiting for capacity'
-        : 'needs you',
-  )
+  expect(hint?.textContent).toContain(phase === 'parked' ? 'Waiting on 1 worker' : 'Waiting for capacity — you can send a message to resume')
+  expect(document.querySelector('[data-slot="pill"]')?.textContent?.toLowerCase()).toContain(phase === 'parked' ? 'waiting on 1 worker' : 'waiting for capacity')
 })
 it('keeps a visible human ask above parked worker context in the header and dock', () => {
   const thread = reduceThread([line(1, 'ask.requested', { requestId: 'ask', questions: [{ header: 'Choice', question: 'Choose a path', options: [{ label: 'Proceed', description: 'Continue' }] }] })])
-  renderView(<ThreadView run={run('waiting', { delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })} thread={thread} />)
+  renderView(<ThreadView run={run('waiting', onWorkerWait())} thread={thread} />)
   expect(document.querySelector('[data-slot="paused-hint"]')?.textContent).toContain('waiting for your reply')
-  expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain('needs you')
+  expect(document.querySelector('[data-slot="pill"]')?.textContent?.toLowerCase()).toContain('needs you')
   expect(screen.getByText('Choose a path')).toBeTruthy()
 })
 
@@ -1387,10 +1396,10 @@ it.each([false, true].flatMap(fallback => (['pending', 'refused-human-attempt', 
     ...(mode === 'matched-answer' ? [line(12, 'human-input-delivered', { askSeq: 10 })] : []),
   ]
   const history: import('@/api/run-history').RunHistoryState = { visibleEvents, currentEvents, isPending: false, contextPending: false, fallback, hasOlder: true, isFetchingOlder: false, olderError: undefined, loadOlder: async () => {}, jumpToLatest: async () => {}, retainedPages: 1 }
-  renderView(<ThreadView run={run('waiting', { delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-07T12:00:00.000Z', phase: 'parked', outcomes: [] } } })} thread={reduceThread(visibleEvents)} currentThread={reduceThread(currentEvents)} history={history} />)
+  renderView(<ThreadView run={run('waiting', onWorkerWait({ deadline: '2026-09-07T12:00:00.000Z' }))} thread={reduceThread(visibleEvents)} currentThread={reduceThread(currentEvents)} history={history} />)
   const expectedPending = mode !== 'matched-answer' && mode !== 'old-history'
   expect(document.querySelector('[data-slot="paused-hint"]')?.textContent).toContain(expectedPending ? 'waiting for your reply' : 'Waiting on 1 worker')
-  expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain(expectedPending ? 'needs you' : 'waiting on 1 worker')
+  expect(document.querySelector('[data-slot="pill"]')?.textContent?.toLowerCase()).toContain(expectedPending ? 'needs you' : 'waiting on 1 worker')
 })
 
 describe('composer execution actions (#201)', () => {
@@ -1577,14 +1586,14 @@ describe('composer replies after idle close (#315)', () => {
 
 
 it.each(['root', 'worker'] as const)('shows the actual dependency in a parked %s request thread', role => {
-  const wait = { id: 'wait', workerIds: [], requestIds: ['request'], deadline: '2026-09-17T00:00:00.000Z', phase: 'parked' as const, outcomes: [] }
-  const delegation: ApiRun['delegation'] = role === 'root' ? { role, permissions: [], receipts: [], wait } : {
-    role, permissions: [], parentRunId: 'parent', wait,
+  const wait = workerWait({ workerIds: [], requestIds: ['request'], deadline: '2026-09-17T00:00:00.000Z' })
+  const delegation: ApiRun['delegation'] = role === 'root' ? { role, permissions: [], receipts: [] } : {
+    role, permissions: [], parentRunId: 'parent',
     workspace: { kind: 'owned-isolated', ownerRunId: 'worker', resourceId: 'worker', path: '/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) },
   }
-  renderView(<ThreadView run={run('waiting', { delegation })} thread={reduceThread([])} />)
+  renderView(<ThreadView run={run('waiting', { delegation, waits: [wait] } as unknown as Partial<ApiRun>)} thread={reduceThread([])} />)
   expect(document.querySelector('[data-slot="paused-hint"]')?.textContent).toContain(role === 'worker' ? 'Waiting on parent reply' : 'Waiting on worker replies')
-  expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain(role === 'worker' ? 'waiting on parent reply' : 'waiting on worker replies')
+  expect(document.querySelector('[data-slot="pill"]')?.textContent?.toLowerCase()).toContain(role === 'worker' ? 'waiting on parent reply' : 'waiting on worker replies')
   expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
   expect(screen.getAllByRole('button', { name: 'Stop' }).some(button => !button.hasAttribute('disabled'))).toBe(true)
 })

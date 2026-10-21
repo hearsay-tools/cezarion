@@ -1,5 +1,6 @@
+import type { WorkerWait } from './delegation.ts';
 import type { RunIndexEntry, RunRecord, RunSummary } from './runs.ts';
-import { completionWorkersOwed, hasResolvedWait, resolveWaitingOn } from './waits.ts';
+import { hasResolvedWait, resolveWaitingOn } from './waits.ts';
 
 /**
  * The one canonical attention function (cockpit spec, "Design system" → status grammar).
@@ -95,20 +96,14 @@ export type AttentionInput = Pick<RunRecord, 'status' | 'activity' | 'autoResume
   // `waitingOn`, and `resolveWaitingOn` computes it from them (spec 2026-10-17-unified-waits).
   & Partial<Pick<RunSummary, 'waitingOn' | 'waitWakePending'>> & Partial<Pick<RunRecord, 'waits'>>;
 
-/** Dependency wording shared by attention and relationship details (#375). A worker can only
- * wait on requests to its parent; only roots can wait for worker completion. */
-export function delegationWaitLabel(delegation: AttentionInput['delegation']): string | undefined {
-  if (!delegation || delegation.role === 'invalid' || !delegation.wait) return undefined;
-  if (delegation.wait.requestIds?.length) {
-    return delegation.role === 'worker' ? 'waiting on parent reply' : 'waiting on worker replies';
-  }
-  if (delegation.role !== 'root') return undefined;
-  // Full records and run summaries (#817) carry the worker ids (#617: "waiting on 2 workers");
-  // a row without them (an older server's index row) does not claim a count.
-  // The count is the workers still OWED an outcome: a wait-for-all stays `parked` after one of two
-  // has reported, and "waiting on 2" would then overstate it. None left, or nothing to count
-  // from, says no number.
-  const wait = delegation.wait;
+/** Dependency wording for a worker wait in the legacy `WorkerWait` shape, which the run's
+ * relationship details show (#375). A worker can only wait on requests to its parent; only roots
+ * can wait for worker completion. */
+export function workerWaitLabel(role: 'root' | 'worker', wait: Pick<WorkerWait, 'requestIds' | 'workerIds' | 'outcomes'>): string {
+  if (wait.requestIds?.length) return role === 'worker' ? 'waiting on parent reply' : 'waiting on worker replies';
+  // The count is the workers still OWED an outcome (#617: "waiting on 2 workers"): a wait-for-all
+  // stays open after one of two has reported, and "waiting on 2" would then overstate it. None
+  // left says no number.
   const reported = new Set(wait.outcomes?.map((outcome) => outcome.workerId));
   const workers = wait.workerIds?.filter((id) => !reported.has(id)).length;
   return workers ? `waiting on ${workers} worker${workers === 1 ? '' : 's'}` : 'waiting on workers';
@@ -148,9 +143,8 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
     !hasPendingHumanAsk && !run.hasPendingHumanAsk
     && (run.status === 'waiting' || run.status === 'queued')
     && run.delegation?.role !== 'invalid'
-    && (run.delegation?.wait?.phase === 'wake-pending'
-      // hearsay-tools/cezarion#1235: an agent's worker wait owes its wake as a resolved list entry.
-      || (Array.isArray(run.waits) && run.waits.some((wait) => wait?.kind === 'worker' && wait.phase === 'resolved')))
+    // A worker wait owes its wake as a resolved list entry (hearsay-tools/cezarion#1235, #1301).
+    && Array.isArray(run.waits) && run.waits.some((wait) => wait?.kind === 'worker' && wait.phase === 'resolved')
   ) {
     // A queued automatic wake is a scheduler/capacity wait, not a human gate (#971).
     // Covers both the parked session still open (`waiting`) and a leftover after restart
@@ -161,7 +155,7 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
     return { bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' };
   }
   // A CI or timer park is `waiting` on its own downstream work, not on you: it keeps the
-  // running bucket and ring the `activity: 'monitoring'` rung below gave it before the wait list.
+  // running bucket and ring the monitoring activity gave it before the wait list.
   // An open human signal makes `waitingOn` human (or the transcript argument says so), which
   // falls through to Needs you.
   const waitingOn = run.status === 'waiting' && !hasPendingHumanAsk ? resolveWaitingOn(run) : undefined;
@@ -171,26 +165,12 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
   if (waitingOn?.kind === 'timer') {
     return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' };
   }
-  const dependencyLabel = delegationWaitLabel(run.delegation);
-  if (!hasPendingHumanAsk && !run.hasPendingHumanAsk && run.status === 'waiting' && run.delegation?.role !== 'invalid' && run.delegation?.wait?.phase === 'parked' && dependencyLabel) {
-    // Its own workers → the robot; a worker waiting on its parent is waiting on something
-    // outside it → a ring. Both violet: still in motion, just not on this turn.
-    return { bucket: 'none', tone: 'running', shape: run.delegation.role === 'root' ? 'workers' : 'ring', pulse: false, label: dependencyLabel };
-  }
   const workerEntries = (Array.isArray(run.waits) ? run.waits : []).filter((wait) => wait?.kind === 'worker' && wait.phase === 'open');
-  // Does a worker-list wait stand behind `waitingOn`? A full record says so by its entries. A
-  // summary omits `waits`, so it says so by a count above what the legacy `delegation.wait`
-  // alone accounts for (`computeWaitingOn` adds both).
-  const listWorkerWait = Array.isArray(run.waits)
-    ? workerEntries.length > 0
-    : waitingOn?.kind === 'workers' && waitingOn.count > (completionWorkersOwed(run.delegation) ?? 0);
-  // A `registered` completion wait (not yet parked) alone reads as Needs you, as it always has.
-  // Phase 3b (hearsay-tools/cezarion#1235) moves it into the list and this exception goes.
-  const legacyRegisteredOnly = !listWorkerWait && run.delegation?.role !== 'invalid' && run.delegation?.wait?.phase === 'registered';
-  if (waitingOn?.kind === 'workers' && !legacyRegisteredOnly && !run.hasPendingHumanAsk) {
-    // Worker waits in the list (hearsay-tools/cezarion#1235): the same wording as the legacy
-    // `delegation.wait` path above, which the completion gate keeps until phase 3b. A worker
-    // can only wait on replies from its parent; a root with only request waits waits on replies.
+  if (waitingOn?.kind === 'workers' && !run.hasPendingHumanAsk) {
+    // Worker waits in the list (hearsay-tools/cezarion#1235), Cezar's completion wait included
+    // (hearsay-tools/cezarion#1301). Its own workers → the robot; a worker waiting on its parent is
+    // waiting on something outside it → a ring. Both violet: still in motion, just not on this
+    // turn. A root with only request waits waits on replies.
     const role = run.delegation?.role;
     if (role === 'worker') return { bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting on parent reply' };
     if (waitingOn.replies || (workerEntries.length > 0 && workerEntries.every((wait) => wait.kind === 'worker' && wait.requestIds !== undefined))) {
@@ -213,13 +193,6 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
   if (run.status === 'review') {
     return { bucket: 'waiting', tone: 'info', shape: 'filled', pulse: true, label: 'needs review' };
   }
-  if (run.status === 'running' && run.activity === 'monitoring') {
-    // Still working, but on its OWN downstream work (a sub-agent / a monitored
-    // command), not on you (#490). A sub-state of `running`, so it stays in the
-    // `running` bucket — no notification, no "Needs you" — with its own label.
-    // No longer written (CI and timer parks are `waiting` + an open wait); kept for older rows.
-    return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' };
-  }
   if (run.status === 'running') {
     return { bucket: 'running', tone: 'running', shape: 'filled', pulse: true, label: 'running' };
   }
@@ -233,4 +206,71 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
     return { bucket: 'none', tone: 'success', shape: 'filled', pulse: false, label: 'done' };
   }
   return { bucket: 'none', tone: 'neutral', shape: 'filled', pulse: false, label: 'cancelled' };
+}
+
+/**
+ * The task states a project's webhook can send deliveries for (hearsay-tools/cezarion#1356),
+ * named as the cockpit names them. `waiting-other` is every wait kind without an option of its
+ * own, including kinds added later. A change that gives a kind its own option adds that option,
+ * by config migration, to every stored list holding `waiting-other`.
+ */
+export const WEBHOOK_TRIGGERS = [
+  'needs-you',
+  'failed',
+  'done',
+  'cancelled',
+  'running',
+  'waiting-workers',
+  'waiting-ci',
+  'waiting-timer',
+  'waiting-other',
+] as const;
+
+export type WebhookTrigger = (typeof WEBHOOK_TRIGGERS)[number];
+
+/** What a webhook with no stored `triggers` sends: the states that end a task or need a person. */
+export const DEFAULT_WEBHOOK_TRIGGERS: readonly WebhookTrigger[] = ['needs-you', 'failed', 'done', 'cancelled'];
+
+/**
+ * `RunRecord` → the webhook state it is in, or `undefined` for none (hearsay-tools/cezarion#1356).
+ *
+ * Read off `deriveAttention`, so the webhook and the status dot never disagree: a run the dot
+ * shows as parked on a clock or a free slot — `queued`, a usage limit's scheduled resume,
+ * waiting for capacity — is in no state and sends nothing. A wait kind the dot has no rung for
+ * reads as Needs you there and as `waiting-other` here, since nobody is asked anything.
+ */
+export function deriveWebhookState(run: AttentionInput): WebhookTrigger | undefined {
+  const attention = deriveAttention(run);
+  if (attention.bucket === 'permission') return 'needs-you';
+  if (attention.bucket === 'error') return 'failed';
+  switch (run.status) {
+    case 'done':
+      return 'done';
+    case 'cancelled':
+      return 'cancelled';
+    case 'running':
+      return 'running';
+    case 'review':
+      return 'needs-you';
+    case 'waiting':
+      break;
+    default:
+      return undefined;
+  }
+  if (attention.label === 'waiting for capacity') return undefined;
+  if (run.hasPendingHumanAsk) return 'needs-you';
+  const waitingOn = resolveWaitingOn(run);
+  switch (waitingOn?.kind) {
+    case undefined:
+    case 'human':
+      return 'needs-you';
+    case 'workers':
+      return 'waiting-workers';
+    case 'ci':
+      return 'waiting-ci';
+    case 'timer':
+      return 'waiting-timer';
+    default:
+      return 'waiting-other';
+  }
 }

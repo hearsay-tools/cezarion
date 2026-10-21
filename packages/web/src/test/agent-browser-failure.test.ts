@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   AgentBrowser,
   configureFailureCapture,
+  beginFailureSpec,
+  beginFailureTest,
   lastAttachedBrowser,
 } from '../../e2e/agent-browser'
 
@@ -16,12 +18,13 @@ import {
  * what these pin is the capture sequence a failed wait triggers (#408) — the evidence every red
  * shard used to leave behind as nothing but `Wait timed out after 25000ms`.
  */
-function fakeBrowser() {
+function fakeBrowser(pageScript?: string, evalError = false) {
   const dir = mkdtempSync(join(tmpdir(), 'cez-fake-agent-browser-failure-'))
   const log = join(dir, 'calls.ndjson')
   const script = join(dir, 'fake.mjs')
   writeFileSync(script, `
     import { appendFileSync, writeFileSync } from 'node:fs'
+    ${pageScript ? `import { JSDOM } from ${JSON.stringify(import.meta.resolve('jsdom'))}` : ''}
     const args = process.argv.slice(2)
     appendFileSync(process.env.FAKE_LOG, JSON.stringify(args) + '\\n')
     const command = args[2]
@@ -32,8 +35,10 @@ function fakeBrowser() {
       process.stdout.write(JSON.stringify({ success: true, data: { path: args[3] } }))
     } else if (command === 'snapshot') {
       process.stdout.write(JSON.stringify({ success: true, data: { snapshot: '- button "Tools"' } }))
+    } else if (command === 'eval' && ${evalError}) {
+      process.stdout.write(JSON.stringify({ success: false, error: 'tab closed' }))
     } else if (command === 'eval') {
-      process.stdout.write(JSON.stringify({ success: true, data: { result: { url: 'http://fake/p/x', target: { count: 0 } } } }))
+      process.stdout.write(JSON.stringify({ success: true, data: { result: ${pageScript ? `(() => { const dom = new JSDOM('<body><div id=clip style=\"overflow-x:hidden;overflow-y:visible\"><span class=target></span><span class=target></span></div></body>', { url: 'http://fake/p/x', runScripts: 'outside-only' }); dom.window.eval(${JSON.stringify(pageScript)}); return dom.window.eval(args[3]); })()` : `{ url: 'http://fake/p/x', target: { count: 0 } }`} } }))
     } else if (command === 'get') {
       process.stdout.write(JSON.stringify({ success: true, data: { url: 'http://fake/p/x' } }))
     } else {
@@ -44,7 +49,8 @@ function fakeBrowser() {
   writeFileSync(bin, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"\n`)
   chmodSync(bin, 0o755)
   const failures = join(dir, 'failures')
-  configureFailureCapture({ root: failures, spec: 'quick-list', test: 'pencil shows on hover' })
+  configureFailureCapture({ root: failures })
+  beginFailureTest({ spec: 'quick-list', test: 'pencil shows on hover' })
   const browser = AgentBrowser.attach(
     { installed: true, command: bin, version: 'fake', notes: '', runtimeEnv: { FAKE_LOG: log } },
     'failure-test',
@@ -69,8 +75,8 @@ afterEach(() => {
   }
   configureFailureCapture({ root: undefined, spec: undefined, test: undefined })
 })
-function open() {
-  const fake = fakeBrowser()
+function open(pageScript?: string, evalError = false) {
+  const fake = fakeBrowser(pageScript, evalError)
   fakes.push(fake)
   return fake
 }
@@ -82,6 +88,90 @@ function bundleFrom(error: unknown): string {
 }
 
 describe('AgentBrowser failure bundles (#408)', () => {
+
+  it('a selected spec starts clean while unselected evidence and same-run captures survive', () => {
+    const { browser, failures } = open()
+    for (const spec of ['quick-list', 'unselected']) {
+      mkdirSync(join(failures, spec), { recursive: true })
+      writeFileSync(join(failures, spec, 'old-evidence'), 'previous revision')
+    }
+    beginFailureSpec('quick-list')
+    expect(existsSync(join(failures, 'quick-list', 'old-evidence'))).toBe(false)
+    expect(readFileSync(join(failures, 'unselected', 'old-evidence'), 'utf8')).toBe('previous revision')
+    const name = { spec: 'quick-list', test: 'retries' }
+    beginFailureTest(name)
+    const first = browser.captureTestFailure([new Error('first attempt')])!
+    beginFailureTest(name) // A retry has the same test name, but owns a fresh capture.
+    const retry = browser.captureTestFailure([new Error('retry')])!
+    expect(retry).not.toBeNull()
+    expect(readdirSync(join(failures, 'quick-list')).sort()).toEqual(['retries-1', 'retries-2'])
+    expect(readFileSync(join(first, 'probe.json'), 'utf8')).toContain('first attempt')
+    expect(readFileSync(join(retry, 'probe.json'), 'utf8')).toContain('retry')
+  })
+
+  it('cleanup failure stops setup instead of mixing revisions', () => {
+    if (process.getuid?.() === 0) return // root bypasses filesystem permissions
+    const { failures } = open()
+    const specDir = join(failures, 'quick-list')
+    mkdirSync(specDir, { recursive: true })
+    writeFileSync(join(specDir, 'old-evidence'), 'previous revision')
+    chmodSync(specDir, 0o555)
+    try {
+      expect(() => beginFailureSpec('quick-list')).toThrow(/EACCES/)
+    } finally {
+      chmodSync(specDir, 0o755)
+    }
+  })
+
+  it('an assertion bundle retains measured layouts and clears them on a same-name retry', () => {
+    const { browser } = open(`
+      document.body.insertAdjacentHTML('beforeend', '<div id=yclip style="overflow-y:clip"><span id=y></span></div>');
+      for (const el of document.querySelectorAll('#clip, .target, #yclip, #y')) {
+        el.getBoundingClientRect = () => ({ x: 10, y: 20, left: 10, top: 20, right: 110, bottom: 50, width: 100, height: 30 });
+        Object.defineProperties(el, { scrollWidth: { value: 120 }, clientWidth: { value: 100 }, scrollHeight: { value: 30 }, clientHeight: { value: 30 } });
+      }
+    `)
+    const name = { spec: 'quick-list', test: 'geometry' }
+    beginFailureTest(name)
+    browser.recordLayout('folded', { meta: '.target', vertical: '#y', absent: '.absent', invalid: '[' })
+    browser.recordLayout('expanded', { card: '#clip' })
+    // A plain assertion throws after measuring. Capture must persist the earlier samples.
+    let assertion: unknown
+    try { expect('clipped').toBe('whole') } catch (error) { assertion = error }
+    const bundle = browser.captureTestFailure([assertion])!
+    const layout = JSON.parse(readFileSync(join(bundle, 'layout.json'), 'utf8'))
+    expect(layout.map((sample: { label: string }) => sample.label)).toEqual(['folded', 'expanded'])
+    expect(layout[0]).toMatchObject({
+      label: 'folded', page: { url: 'http://fake/p/x', viewport: { width: 1024, height: 768 },
+        selectors: {
+          meta: { selector: '.target', count: 2, matches: [expect.objectContaining({
+            rect: { x: 10, y: 20, left: 10, top: 20, right: 110, bottom: 50, width: 100, height: 30 },
+            scrollWidth: 120, clientWidth: 100, scrollHeight: 30, clientHeight: 30,
+            clippingAncestor: { path: 'div#clip', axes: ['x'], rect: expect.objectContaining({ width: 100 }) },
+          }), expect.any(Object)] },
+          vertical: { count: 1, matches: [expect.objectContaining({ clippingAncestor: { path: 'div#yclip', axes: ['y'], rect: expect.objectContaining({ height: 30 }) } })] },
+          absent: { count: 0, matches: [] }, invalid: { error: expect.any(String) },
+        } },
+    })
+    expect(layout[1].page.selectors.card.matches[0].clippingAncestor).toBeNull()
+    expect(readFileSync(join(bundle, 'probe.json'), 'utf8')).toContain('clipped')
+    beginFailureTest(name)
+    const retry = browser.captureTestFailure([new Error('retry')])!
+    expect(existsSync(join(retry, 'layout.json'))).toBe(false)
+  }, 30_000) // bound: several real Node processes import jsdom and execute the page probes.
+
+  it('a failed layout read is evidence and never replaces the original assertion', () => {
+    const { browser } = open(undefined, true)
+    beginFailureTest({ spec: 'quick-list', test: 'closed page' })
+    expect(() => browser.recordLayout('expanded', { meta: '.target' })).not.toThrow()
+    const bundle = browser.captureTestFailure([new Error('original assertion')])!
+    const layout = JSON.parse(readFileSync(join(bundle, 'layout.json'), 'utf8'))
+    expect(layout).toEqual([expect.objectContaining({ label: 'expanded', error: expect.stringContaining('tab closed') })])
+    const probe = JSON.parse(readFileSync(join(bundle, 'probe.json'), 'utf8'))
+    expect(probe.error).toContain('original assertion')
+    expect(probe.captureErrors).toEqual([expect.stringContaining('tab closed')])
+  })
+
   it('a timed-out click target captures screenshot, snapshot and probe, then names the bundle', () => {
     const { browser, commands, failures } = open()
     let error: unknown

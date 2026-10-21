@@ -30,7 +30,7 @@ import { InputSubmissions } from './input-submissions.ts';
 import { codexStreamError } from './codex-stream-error.ts';
 import { codexTurnOutcome } from './codex-turn-outcome.ts';
 import { codexNetworkIsRestricted, codexPermissionOverrides } from './codex-permissions.ts';
-import { CODEX_APPROVAL_METHODS, codexApproval, type CodexApproval } from './codex-approvals.ts';
+import { codexApproval, isCodexApprovalRequest, type CodexApproval } from './codex-approvals.ts';
 import { cezarToolEnvNames } from '../ci-wait/tools.ts';
 import {
   CodexAppServerRpc,
@@ -87,7 +87,7 @@ export interface CodexRunnerOptions {
  * recorded JSON-RPC by the harness parity matrix.
  */
 export const CODEX_SPEC_SUPPORT: AgentRunSpecSupport = {
-  cezarTools: { honored: true, via: 'thread/start and thread/resume dotted mcp_servers config with env_vars' },
+  cezarTools: { honored: true, via: 'thread/start and thread/resume dotted mcp_servers config with env_vars and default_tools_approval_mode approve' },
   systemPrompt: { honored: true, via: 'prepended to the opening turn/start input through prependSystemPrompt' },
   userPrompt: { honored: true, via: 'turn/start input text' },
   images: { honored: false, reason: 'the adapter sends text input items only; image blocks are dropped' },
@@ -693,7 +693,10 @@ class CodexSession implements AgentSession {
       ...((restrictNetwork || this.spec.restrictNativeDelegation || this.spec.cezarTools) ? { config: {
         ...(restrictNetwork ? { 'sandbox_workspace_write.network_access': false } : {}),
         ...(this.spec.restrictNativeDelegation ? { 'features.multi_agent': false, 'features.multi_agent_v2': false } : {}),
-        ...(this.spec.cezarTools ? { [`mcp_servers.${this.spec.cezarTools.name}`]: { command: this.spec.cezarTools.command, args: this.spec.cezarTools.args, env_vars: cezarToolEnvNames(this.spec.env ?? {}) } } : {}),
+        // hearsay-tools/cezarion#1294: Codex asks before every MCP tool call unless the
+        // server's mode is `approve`, and cezar's own tools must never wait on that.
+        // approval_policy stays the user's (#381); older Codex ignores the unknown key.
+        ...(this.spec.cezarTools ? { [`mcp_servers.${this.spec.cezarTools.name}`]: { command: this.spec.cezarTools.command, args: this.spec.cezarTools.args, env_vars: cezarToolEnvNames(this.spec.env ?? {}), default_tools_approval_mode: 'approve' } } : {}),
       } } : {}),
     };
     let threadResponse: Record<string, unknown>;
@@ -810,7 +813,7 @@ class CodexSession implements AgentSession {
   private dispatch(msg: CodexAppServerMessage): void {
     if (typeof msg.method === 'string' && (typeof msg.id === 'number' || typeof msg.id === 'string')) {
       if (msg.method === 'item/tool/requestUserInput') this.handleUserInputRequest(msg.id, msg.params ?? {});
-      else if (CODEX_APPROVAL_METHODS.has(msg.method)) this.handleApprovalRequest(msg.method, msg.id, msg.params);
+      else if (isCodexApprovalRequest(msg.method, msg.params)) this.handleApprovalRequest(msg.method, msg.id, msg.params);
       else this.rpc.respond({ id: msg.id, error: { code: -32601, message: `unsupported server request: ${msg.method}` } });
       return;
     }
@@ -845,7 +848,7 @@ class CodexSession implements AgentSession {
 
   private handleApprovalRequest(method: string, rpcId: number | string, params: unknown): void {
     const duplicate = [...this.pendingApprovals.entries()].find(([, pending]) => pending.rpcId === rpcId);
-    const approval = codexApproval(method, rpcId, params);
+    const approval = codexApproval(method, rpcId, params, this.spec.cezarTools?.name);
     const routing = params as Record<string, unknown> | undefined;
     if (!approval || !this.activeTurnId || routing?.threadId !== this.threadId || approval.turnId !== this.activeTurnId ||
       duplicate) {

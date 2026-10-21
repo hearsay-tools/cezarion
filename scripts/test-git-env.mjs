@@ -8,7 +8,12 @@ const osTempRoot = process.platform === 'win32'
   : '/tmp'
 const sandbox = mkdtempSync(join(realpathSync(osTempRoot), 'cez-test-git-'))
 const globalConfig = join(sandbox, 'gitconfig')
-writeFileSync(globalConfig, '')
+// No automatic maintenance (hearsay-tools/cezarion#1279). After a commit or fetch,
+// Git 2.54+ repacks in a detached process once `objects/17/` holds two loose
+// objects, and that repack deletes loose objects while a test still clones,
+// copies or removes the repository. packages/cezar/vitest.setup.ts and
+// packages/web/vitest.setup.ts write the same two settings.
+writeFileSync(globalConfig, '[gc]\n\tauto = 0\n[maintenance]\n\tauto = false\n')
 
 process.env.GIT_CONFIG_GLOBAL = globalConfig
 process.env.GIT_CONFIG_NOSYSTEM = '1'

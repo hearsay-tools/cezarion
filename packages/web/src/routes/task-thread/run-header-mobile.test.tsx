@@ -71,13 +71,15 @@ function renderScreen(entry = '/tasks/r1', run: ApiRun = record, tab: RunTab = '
 const topBar = () => document.querySelector('[data-slot="mobile-top-bar"]') as HTMLElement
 
 describe('pushed task screen top bar', () => {
-  it('shows back, the title, a state line with the primary reference and the run actions', () => {
+  it('shows back, the title and the run actions, with no status line (#1333)', () => {
     renderScreen()
     const bar = topBar()
     expect(bar.getAttribute('data-mode')).toBe('task')
     expect(within(bar).getByRole('button', { name: 'Back' })).toBeTruthy()
     expect(within(bar).getByText('Reviewer agent presets')).toBeTruthy()
-    expect(bar.querySelector('[data-slot="mobile-run-state"]')?.textContent).toBe('running · #451')
+    expect(within(bar).getByRole('button', { name: 'Run actions' })).toBeTruthy()
+    expect(bar.querySelector('[data-slot="mobile-run-state"]')).toBeNull()
+    expect(bar.textContent).not.toContain('running')
     // The project chrome is gone: this is a pushed screen, not a list.
     expect(within(bar).queryByRole('button', { name: 'Search' })).toBeNull()
     expect(bar.querySelector('[data-slot="mobile-project-picker"]')).toBeNull()
@@ -93,9 +95,11 @@ describe('pushed task screen top bar', () => {
     expect(title.className).toContain('text-[15px]')
     expect(title.className).toContain('font-semibold')
     fireEvent.click(rename)
-    // The input opens in a popover under the bar, so the bar keeps showing the state line.
+    // The input opens in a popover under the bar, so the bar keeps showing the title, and still
+    // shows no status: the phone bar carries none (hearsay-tools/cezarion#1333).
     expect(screen.getByRole('textbox', { name: 'Task title' })).toBeTruthy()
-    expect(bar.querySelector('[data-slot="mobile-run-state"]')).not.toBeNull()
+    expect(bar.querySelector('h1')?.textContent).toBe('Reviewer agent presets')
+    expect(bar.querySelector('[data-slot="mobile-run-state"]')).toBeNull()
   })
 
   const patches = () => (fetch as ReturnType<typeof vi.fn>).mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'PATCH')
@@ -188,15 +192,13 @@ describe('pushed task screen top bar', () => {
 })
 
 describe('RunHeader below md on a pushed task screen', () => {
-  it('drops its own title and status row, and the details toggle moves to the top bar', () => {
+  it('drops its own title and status row, and has no details toggle anywhere (#1333)', () => {
     renderScreen()
     const header = document.querySelector('[data-slot="run-header"]') as HTMLElement
     expect(header.querySelector('[data-slot="session-kind"]')).toBeNull()
     expect(within(header).queryByText('Reviewer agent presets')).toBeNull()
     expect(within(header).queryByText('running')).toBeNull()
-    // The toggle moved into the top bar (#621); the header keeps no copy.
-    expect(within(header).queryByRole('button', { name: 'Show run details' })).toBeNull()
-    expect(within(topBar()).getByRole('button', { name: 'Show run details' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /run details/ })).toBeNull()
   })
 
   it('styles run-tabs for the phone and counts the changed files only', () => {
@@ -304,8 +306,8 @@ describe('RunHeader below md on a pushed task screen', () => {
     expect(within(header).getByText('Reviewer agent presets')).toBeTruthy()
     expect(within(header).getByRole('button', { name: 'Run actions' })).toBeTruthy()
     expect(document.querySelector('[data-slot="mobile-run-title"]')).toBeNull()
-    // Desktop tabs stay plain labels; the changed-file tally is a phone-only signal.
-    expect(document.querySelector('[data-slot="run-tabs"] [data-slot="tab-count"]')).toBeNull()
+    // The changed-file tally replaces the header's diff stat at every width (#1333).
+    expect(document.querySelector('[data-slot="run-tabs"] [data-slot="tab-count"]')?.textContent).toBe('12')
   })
 })
 
@@ -319,27 +321,21 @@ describe('RunHeader phone layout under the top bar (#621)', () => {
     expect(header.className).toContain('pt-0')
     expect(header.className).not.toContain('pt-[18px]')
     const first = header.firstElementChild?.firstElementChild as HTMLElement
-    expect(first.getAttribute('data-slot')).toBe('run-details')
+    expect(first.getAttribute('data-slot')).toBe('run-mobile-actions')
   })
 
-  it('puts the details chevron in the top bar, before the … button, at 44px', () => {
+  it('renders no actions row when nothing applies, so the tabs come first', () => {
     renderScreen()
-    const bar = topBar()
-    const chevron = within(bar).getByRole('button', { name: 'Show run details' })
-    const kebab = within(bar).getByRole('button', { name: 'Run actions' })
-    expect(chevron.className).toContain('size-11')
-    expect(chevron.compareDocumentPosition(kebab) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(document.querySelectorAll('[aria-label="Show run details"]')).toHaveLength(1)
-    fireEvent.click(chevron)
-    expect(within(bar).getByRole('button', { name: 'Hide run details' }).getAttribute('aria-expanded')).toBe('true')
-    expect(document.querySelector('[data-slot="run-details"]')?.className).toContain('block')
+    const header = document.querySelector('[data-slot="run-header"]') as HTMLElement
+    expect(header.querySelector('[data-slot="run-mobile-actions"]')).toBeNull()
+    expect((header.firstElementChild?.firstElementChild as HTMLElement).getAttribute('data-slot')).toBe('run-tabs')
   })
 
-  it('carries Archive on the git tabs inside the details panel, not beside the tabs', () => {
+  it('carries Archive on the git tabs in the actions row under the top bar, 44px tall', () => {
     renderScreen('/tasks/r1', finished, 'changes')
     const header = document.querySelector('[data-slot="run-header"]') as HTMLElement
     const archive = within(header).getByRole('button', { name: /archive/i })
-    expect(archive.closest('[data-slot="run-details"]')).not.toBeNull()
+    expect(archive.closest('[data-slot="run-mobile-actions"]')).not.toBeNull()
     expect(within(topBar()).queryByRole('button', { name: /archive/i })).toBeNull()
   })
 

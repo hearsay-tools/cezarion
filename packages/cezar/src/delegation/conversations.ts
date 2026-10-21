@@ -1,7 +1,7 @@
 import type { ConversationState, RequestOutcome } from '@open-mercato/cezar-contract';
 import type { RunRecord } from '../runs/store.ts';
 
-/** First durable settlement wins. Review is readiness, never request completion. `lookup` finds a
+/** First durable settlement wins (a reply may later amend deadline expiry in send). Review is readiness, never request completion. `lookup` finds a
  *  sender or recipient by id (the store's `getRun`): a message names its runs, so nothing here
  *  needs every run in the project. */
 export function reconcileConversationState(root: RunRecord, lookup: (id: string) => RunRecord | undefined, now: string, isSettled: (run: RunRecord) => boolean): ConversationState | undefined {
@@ -48,8 +48,9 @@ export function projectConversationEvents(store: import('../runs/store.ts').RunS
           ...(step === 'consumed' && input?.consumedAt ? { consumedAt: input.consumedAt } : {}) });
       }
       const outcome = outcomes.get(message.id);
-      if (outcome && !ids.has(`request-outcome:${outcome.requestId}`)) {
-        store.appendEvent(runId, { type: 'request-outcome', projectionId: `request-outcome:${outcome.requestId}`, outcome });
+      const outcomeProjectionId = outcome && `request-outcome:${outcome.requestId}${outcome.status === 'replied-late' ? ':replied-late' : ''}`;
+      if (outcome && outcomeProjectionId && !ids.has(outcomeProjectionId)) {
+        store.appendEvent(runId, { type: 'request-outcome', projectionId: outcomeProjectionId, outcome });
       }
     }
   }

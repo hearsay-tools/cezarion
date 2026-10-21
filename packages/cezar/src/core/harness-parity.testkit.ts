@@ -50,12 +50,21 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | --- | --- |
  * | `baseline` | one text, one tool call and result, a later visible assistant message, usage, then its terminal turn signal |
  * | `tool-tail` | visible assistant text, a tool call/result, then turn end with no later message |
+ * | `mcp-approval` | ask the native client before another MCP server's tool call, then echo the exact answer and end the turn |
  * | `done` | the same, with a trailing `CEZ:DONE` so the run reaches its review gate |
  * | `hold` | delay the terminal turn signal after the last content event |
  * | `hold-done` | like `hold`, then end with `CEZ:DONE` so a mid-turn follow-up can race the close (#486) |
  * | `hold-ask` | like `hold`, then end with a portable `CEZ:ASK` so a mid-turn follow-up can race the park (#486) |
  * | `split-text` | stream the reply in pieces, ending with a trailing `CEZ:MONITORING` |
  * | `provider-error` | a runtime provider rejection in its native error shape |
+ * | `approval` | a native permission request cezar routes to the cockpit; no turn end until it is answered |
+ * | `permission-default` | a native built-in default permission ask cezar answers itself, then end with `CEZ:DONE` (#1266) |
+ * | `approval-resolved` | the `approval` request, which the backend settles itself once `CEZ_MOCK_RELEASE_FILE` exists, then `CEZ:DONE` |
+ * | `approval-turn-end` | the `approval` request, still pending when the turn ends with `CEZ:DONE` once `CEZ_MOCK_RELEASE_FILE` exists |
+ * | `approval-reply-fails` | the `approval` request, whose first answer the backend refuses to accept; a later answer ends the turn |
+ * | `approval-malformed` | a malformed native permission request; the backend ends the turn with `CEZ:DONE` once it is refused |
+ * | `permission-classify` | a request the backend settles while cezar reads its config, then a marker request (`CEZ_MOCK_RELEASE_FILE` gates) |
+ * | `permission-late` | the turn ends with `CEZ:DONE`, then a native permission request from a run the server started; its answer resumes that run, which ends with `CEZ:DONE` |
  * | `ask` | an ask — native where the wire has one, a `CEZ:ASK` marker otherwise |
  * | `ask-resume` | accept one human answer, then finish with `CEZ:DONE` without another prompt |
  * | `plan-resume` | Legacy Cursor ACP `cursor/create_plan` variant (direct ACP tests) |
@@ -77,6 +86,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  */
 export const SCENARIOS = [
   'approval',
+  'permission-default',
+  'approval-resolved',
+  'approval-turn-end',
+  'approval-reply-fails',
+  'approval-malformed',
+  'permission-classify',
+  'permission-late',
+  'mcp-approval',
   'multi-pr-refs',
   'auto-resumed',
   'turn-messages',
@@ -144,6 +161,9 @@ export const SHUTDOWN_CRITERIA = [
   { id: 'S27', scenario: 'no-progress-leftover', name: "stop ends the leader's process group but not a setsid child" },
   { id: 'S28', scenario: 'no-progress-leftover', name: 'end escalation reaches the whole process group' },
   { id: 'S29', scenario: 'input-closed-live', name: 'settles a live native input transport failure without false success' },
+  // hearsay-tools/cezarion#1286: a session that ends without a signal from cezar.
+  { id: 'S30', scenario: 'no-progress-leftover', name: 'a leader that exits on its own leaves nothing in its process group' },
+  { id: 'S31', scenario: 'no-progress-leftover', name: 'a leader killed from outside leaves nothing in its process group' },
 ] as const;
 
 /** #427: portable intermediate asks, through every native message wire. */
@@ -227,6 +247,7 @@ export const FINAL_MESSAGE_CRITERIA = [
 /** hearsay-tools/cezarion#1138: worker-wait-conversations.test.ts, every native parent wire. */
 export const WORKER_PROGRESS_WAIT_CRITERIA = [
   { id: 'WP1', scenario: 'hold', name: 'delivers progress without retiring the registered worker wait' },
+  { id: 'WP2', scenario: 'hold', name: 'preserves a resumed request past 45 minutes and delivers a late reply amendment' },
 ] as const;
 
 /** #790: skill system prompt on Continue and restart recovery, every native wire. */
@@ -251,8 +272,21 @@ export const ANSWER_DELIVERY_CRITERIA = [
   { id: 'I5', scenario: 'ask-snapshot', name: 'holds conversation input behind a native question and delivers it beside a portable one, never as its answer' },
 ] as const;
 
-/** Native Codex server-request approvals, exercised through the manager and HTTP route. */
-export const PERMISSION_CRITERIA = [{ id: 'P1', scenario: 'approval', name: 'routes explicit native approval decisions and settles the turn' }] as const;
+/** Native approvals, exercised through the manager and HTTP route (P1), and a backend's own
+ *  built-in permission asks, which cezar answers without parking (P2, hearsay-tools/cezarion#1266).
+ *  P3–P8 pin the pending request's lifecycle: it holds from receipt until the backend settles it.
+ *  P9 routes an MCP tool approval for another server (hearsay-tools/cezarion#1294). */
+export const PERMISSION_CRITERIA = [
+  { id: 'P1', scenario: 'approval', name: 'routes explicit native approval decisions and settles the turn' },
+  { id: 'P2', scenario: 'permission-default', name: "answers a backend's built-in default permission ask without parking" },
+  { id: 'P3', scenario: 'approval-resolved', name: 'retires a pending native request the backend settles itself' },
+  { id: 'P4', scenario: 'approval-turn-end', name: 'retires a native request still pending when its turn ends' },
+  { id: 'P5', scenario: 'approval-reply-fails', name: 'keeps a native request answerable when its answer is not accepted' },
+  { id: 'P6', scenario: 'approval-malformed', name: 'refuses a malformed native request instead of hanging on it' },
+  { id: 'P7', scenario: 'permission-classify', name: 'holds agent input from receipt and shows no card for a request settled before it' },
+  { id: 'P8', scenario: 'permission-late', name: 'reopens the turn for a request that arrives after it ended, and closes the step once it is answered' },
+  { id: 'P9', scenario: 'mcp-approval', name: 'routes an MCP tool approval for another server and settles the turn (hearsay-tools/cezarion#1294)' },
+] as const;
 
 export interface HarnessAdapter {
   readonly backend: RunnerId;
@@ -268,6 +302,12 @@ export interface HarnessAdapter {
   readonly mockBin: string;
   /** Scenario name -> the prompt text this backend's mock answers it with. */
   readonly scenarios: Readonly<Partial<Record<ScenarioName, string>>>;
+  /** P1: the option to pick (matched case-insensitively against its label) and the text the
+   *  mock echoes once that native reply arrives. Required with `scenarios.approval`. */
+  readonly approvalDecisions?: readonly { pick: string; echo: string }[];
+  /** P6: the text the mock echoes once cezar refuses its malformed request. Required with
+   *  `scenarios['approval-malformed']`. */
+  readonly malformedApprovalEcho?: string;
 }
 
 /** Resolved from this file, not the cwd, so the paths hold wherever vitest runs. */
@@ -358,8 +398,17 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     askResumeCases: [{ kind: 'item/tool/requestUserInput', scenario: 'ask-resume', answer: 'Library: Vitest' }],
     binEnv: 'CEZ_CODEX_BIN',
     mockBin: CODEX_MOCK,
+    approvalDecisions: [
+      { pick: 'decline', echo: 'Approval response: {"decision":"decline"}' },
+      { pick: 'cancel', echo: 'Approval response: {"decision":"cancel"}' },
+    ],
+    malformedApprovalEcho: 'Approval error: -32602',
     scenarios: {
       approval: 'mock:approval',
+      'approval-resolved': 'mock:approval-resolved',
+      'approval-turn-end': 'mock:approval-turn-end',
+      'approval-malformed': 'mock:approval-malformed',
+      'mcp-approval': 'mock:mcp-approval',
       'input-closed-live': 'mock:no-progress-input-closed',
       'multi-pr-refs': 'mock:multi-pr-refs',
       'turn-messages': 'mock:turn-messages',
@@ -407,7 +456,20 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     askResumeCases: [{ kind: 'question.asked', scenario: 'ask-resume', answer: 'Library: Vitest' }],
     binEnv: 'CEZ_OPENCODE_BIN',
     mockBin: OPENCODE_MOCK,
+    approvalDecisions: [
+      { pick: 'reject', echo: 'Approval response: {"reply":"reject"}' },
+      { pick: 'allow once', echo: 'Approval response: {"reply":"once"}' },
+    ],
+    malformedApprovalEcho: 'Approval response: {"reply":"reject"}',
     scenarios: {
+      approval: 'mock:approval',
+      'permission-default': 'mock:permission-default',
+      'approval-resolved': 'mock:approval-resolved',
+      'approval-turn-end': 'mock:approval-turn-end',
+      'approval-reply-fails': 'mock:approval-reply-fails',
+      'approval-malformed': 'mock:permission-malformed',
+      'permission-classify': 'mock:permission-classify',
+      'permission-late': 'mock:permission-late',
       'input-closed-live': 'mock:no-progress-input-closed',
       'skill-warning': 'mock:skill-warning mock:done',
       'multi-pr-refs': 'mock:multi-pr-refs', 'turn-messages': 'mock:turn-messages',
@@ -617,10 +679,52 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
-  ...(['claude', 'opencode', 'pi', 'cursor', 'omp'] as const).map(backend => ({
+  ...(['claude', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion: 'P1', backend, kind: 'scenario-unconstructible' as const,
-    reason: `${backend}'s native wire does not carry Codex app-server JSON-RPC approval requests or its availableDecisions union. This cell checks that native request/response protocol; ordinary human questions remain covered by R26.`,
+    reason: `${backend}'s native wire does not carry a native permission request that cezar answers through the cockpit permission card. This cell checks that native request/response protocol; ordinary human questions remain covered by R26.`,
   })),
+  ...([
+    ['claude', 'Claude print mode settles every tool permission inside Claude under its headless --permission-mode and sends cezar no MCP tool approval request; cezar\'s own tools are pre-authorized through generated --allowedTools entries (R35).'],
+    ['opencode', 'OpenCode sends no MCP-specific approval request: an ask before any tool call arrives as an ordinary permission.asked from a rule the user wrote, which P1 routes to the cockpit card (hearsay-tools/cezarion#1266).'],
+    ['pi', 'Pi\'s RPC wire carries no tool approval request for cezar to answer; cezar\'s tools reach Pi as an --extension admitted through --tools (R35), not as an MCP server.'],
+    ['cursor', 'Cursor print runs with --force and its stream-json wire carries no MCP tool approval request; cezar\'s own tools load from a private --plugin-dir.'],
+    ['omp', 'OMP\'s RPC wire carries no tool approval request for cezar to answer: tool admission is its --tools list and --config overlay; cezar\'s tools reach OMP as an --extension admitted through --tools (R35), not as an MCP server.'],
+  ] as const).map(([backend, reason]) => ({ criterion: 'P9', backend, kind: 'scenario-unconstructible' as const, reason })),
+  {
+    criterion: 'P2', backend: 'claude', kind: 'scenario-unconstructible',
+    reason: "dontAsk (the default) denies unapproved tools without emitting a permission request, so no built-in default ask reaches cezar to answer.",
+  },
+  {
+    criterion: 'P2', backend: 'codex', kind: 'scenario-unconstructible',
+    reason: "every app-server approval request comes from Codex's own approval policy or MCP tool approval mode, which cezar leaves to Codex and P1 and P9 route to the human; the wire has no built-in ask that cezar answers.",
+  },
+  ...(['pi', 'cursor', 'omp'] as const).map(backend => ({
+    criterion: 'P2', backend, kind: 'scenario-unconstructible' as const,
+    reason: `${backend}'s native wire carries no permission request at all, so there is no built-in default ask for cezar to answer.`,
+  })),
+  ...(['claude', 'pi', 'cursor', 'omp'] as const).flatMap(backend => ([
+    ['P3', 'for the backend to settle itself'],
+    ['P4', 'to outlive its turn'],
+    ['P5', 'whose answer the backend could refuse'],
+    ['P6', 'to arrive malformed'],
+    ['P7', 'to hold input while cezar classifies it'],
+    ['P8', 'to arrive after its turn ended'],
+  ] as const).map(([criterion, situation]) => ({
+    criterion, backend, kind: 'scenario-unconstructible' as const,
+    reason: `${backend}'s native wire does not carry a native permission request that cezar answers through the cockpit permission card, so there is no pending request ${situation}.`,
+  }))),
+  {
+    criterion: 'P5', backend: 'codex', kind: 'scenario-unconstructible',
+    reason: 'Codex answers an approval with a JSON-RPC response written to app-server stdin. JSON-RPC sends no reply to a response, so the wire has no per-answer refusal: the write reaches the server, or the transport fails and the session ends.',
+  },
+  {
+    criterion: 'P7', backend: 'codex', kind: 'scenario-unconstructible',
+    reason: "A Codex approval request is already Codex's own decision to ask (its approval policy runs server-side), so cezar shows the card on receipt with nothing to read first; there is no window between receipt and the card.",
+  },
+  {
+    criterion: 'P8', backend: 'codex', kind: 'scenario-unconstructible',
+    reason: 'Codex app-server sends an approval request only inside the turn it names (`turnId`), so none can arrive after that turn completed.',
+  },
   {
     criterion: 'S29', backend: 'cursor', kind: 'scenario-unconstructible',
     reason: 'Cursor print writes the prompt to stdin once per turn and then closes stdin. It refuses agent input while busy and queues human follow-ups for a new per-turn child, so this admitted-turn/live-followup cell has no writable input transport to close. ACP stdin behavior is a separate legacy transport, not the HARNESS_ADAPTERS cursor-print wire.',
@@ -793,6 +897,24 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   {
     criterion: 'U13', backend: 'cursor', kind: 'capability-absent',
     reason: 'Cursor print acknowledges agent input on the first model work of the process it spawns; the print wire has no rejection of an admitted prompt.',
+  },
+  // U20a (hearsay-tools/cezarion#1301): a turn that ends before its input is acknowledged.
+  {
+    criterion: 'U20a', backend: 'claude', kind: 'capability-absent',
+    reason: 'Claude acknowledges agent input with the local stdin pipe write, so no turn can end before its input is acknowledged.',
+  },
+  {
+    criterion: 'U20a', backend: 'cursor', kind: 'capability-absent',
+    reason: 'Cursor print acknowledges agent input on the first model work of the process it spawns, so no turn can end before its input is acknowledged.',
+  },
+  // U20h/U20m/U22s (hearsay-tools/cezarion#1301): a refusal the harness acknowledges and never answers.
+  ...(['U20h', 'U20m', 'U22s'] as const).map(criterion => ({
+    criterion, backend: 'cursor' as const, kind: 'capability-absent' as const,
+    reason: 'Cursor print has no acknowledgement before native model work: each prompt spawns a process whose init frame is turn.started, which answers the nudge, so a refusal cannot be acknowledged and left unanswered (as F8).',
+  })),
+  {
+    criterion: 'U20h', backend: 'opencode', kind: 'capability-absent',
+    reason: 'OpenCode runs one prompt per turn: a human prompt waits for the busy turn to go idle, and a refusal acknowledged without a turn never goes idle, so the human message the cell sends after the bound is never posted. U20m delivers a worker message, which steers the busy turn.',
   },
   // D2 (hearsay-tools/cezarion#1284): a forked skill starts no native subagent in a
   // restricted session. Each reason was checked against the installed CLI on 2026-10-20.

@@ -1,8 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  acceptedWorkerIdentitySchema, workerExecutionIdentitySchema, workerStepIdentity, WorkerIdentityError,
+  acceptedWorkerIdentitySchema, boundWorkerAccountEnv, captureWorkerAccount, workerAccountBindingSchema,
+  workerExecutionIdentitySchema, workerStepIdentity, WorkerIdentityError,
   type AcceptedWorkerIdentity,
 } from './execution-identity.ts';
+import type { ResolvedAgentProfile } from '../workspace/agent-profiles.ts';
 
 const claude = { provider: 'claude' as const, profileId: 'default', homePath: '/home/x/.claude', claudeLayout: { kind: 'relocated' as const } };
 const codex = { provider: 'codex' as const, profileId: 'work', homePath: '/home/x/codex-work' };
@@ -30,5 +35,68 @@ describe('per-step worker identity (#452)', () => {
     expect(acceptedWorkerIdentitySchema.safeParse({ ...runLevel, steps: [{ stepId: 'a', account: claude, grants: {}, extra: 1 }] }).success).toBe(false);
     expect(acceptedWorkerIdentitySchema.safeParse({ ...runLevel, steps: [{ stepId: 'a', account: claude }] }).success).toBe(false);
     expect(acceptedWorkerIdentitySchema.safeParse({ ...runLevel, steps: [] }).success).toBe(false);
+  });
+});
+
+describe('pi and omp worker accounts (hearsay-tools/cezarion#1283)', () => {
+  let root: string;
+  beforeEach(() => { root = realpathSync(mkdtempSync(join(tmpdir(), 'cez-worker-account-'))); });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  const profile = (provider: 'pi' | 'omp', id: string, path: string): ResolvedAgentProfile =>
+    ({ id, provider, label: id, configDir: path, path, isDefault: id === 'default' });
+
+  it('pins a pi account to its folder and spawns it there', () => {
+    const dir = join(root, 'pi-work'); mkdirSync(dir);
+    const binding = captureWorkerAccount(profile('pi', 'work', dir))!;
+    expect(binding).toEqual({ provider: 'pi', profileId: 'work', homePath: dir });
+    expect(boundWorkerAccountEnv(binding)).toEqual({ PI_CODING_AGENT_DIR: dir });
+  });
+
+  it('keeps a symlinked omp profile\'s NAME — its realpath would select no profile at all', () => {
+    // omp selects `<root>/profiles/<name>` by name and follows the entry itself; pinning the
+    // entry's target would emit nothing and run the worker on the DEFAULT omp login.
+    const target = join(root, 'elsewhere'); mkdirSync(target);
+    const profiles = join(root, 'home', '.omp', 'profiles'); mkdirSync(profiles, { recursive: true });
+    symlinkSync(target, join(profiles, 'work'));
+    const binding = captureWorkerAccount(profile('omp', 'work', join(profiles, 'work')))!;
+    expect(binding).toEqual({ provider: 'omp', profileId: 'work', homePath: join(profiles, 'work') });
+    // The child env: omp resolves the name under `$HOME/.omp`, so the launch checks that root.
+    expect(boundWorkerAccountEnv(binding, { HOME: join(root, 'home') })).toEqual({ OMP_PROFILE: 'work' });
+  });
+
+  it('refuses a named omp binding once the child\'s omp root moved away from its profile', () => {
+    // Accepted under `~/.omp`; a PI_CONFIG_DIR (or HOME) the child inherits now would make
+    // `OMP_PROFILE=work` open `~/.omp-alt/profiles/work`, a different account than the one pinned.
+    const profiles = join(root, 'home', '.omp', 'profiles'); mkdirSync(join(profiles, 'work'), { recursive: true });
+    const binding = captureWorkerAccount(profile('omp', 'work', join(profiles, 'work')))!;
+    expect(() => boundWorkerAccountEnv(binding, { HOME: join(root, 'home'), PI_CONFIG_DIR: '.omp-alt' }))
+      .toThrow(/\.omp-alt\/profiles/);
+    expect(() => boundWorkerAccountEnv(binding, { HOME: join(root, 'other-home') })).toThrow(WorkerIdentityError);
+  });
+
+  it('binds the discovered pi and omp account with no home, so it launches where the agent never ran', () => {
+    // Pinning a home requires it to exist at launch, and a machine where pi or omp has never run
+    // has none; their default workers spawned bare before they carried accounts and still do.
+    for (const provider of ['pi', 'omp'] as const) {
+      const binding = captureWorkerAccount(profile(provider, 'default', join(root, 'never-created', provider)))!;
+      expect(binding, provider).toEqual({ provider, profileId: 'default' });
+      expect(boundWorkerAccountEnv(binding), provider).toEqual({});
+    }
+  });
+
+  it('refuses a named omp binding that names no profile rather than running it on the default', () => {
+    const dir = join(root, 'omp-work'); mkdirSync(dir);
+    expect(() => boundWorkerAccountEnv({ provider: 'omp', profileId: 'work', homePath: dir })).toThrow(WorkerIdentityError);
+  });
+
+  it('still loads pi and omp evidence accepted before they could carry accounts, and spawns it bare', () => {
+    for (const provider of ['pi', 'omp'] as const) {
+      const legacy = workerAccountBindingSchema.parse({ provider, profileId: 'default' });
+      expect(boundWorkerAccountEnv(legacy)).toEqual({});
+    }
+    // A NAMED account always pins its home, and Claude and Codex never had a home-less form.
+    expect(workerAccountBindingSchema.safeParse({ provider: 'pi', profileId: 'work' }).success).toBe(false);
+    expect(workerAccountBindingSchema.safeParse({ provider: 'codex', profileId: 'default' }).success).toBe(false);
   });
 });

@@ -14,11 +14,17 @@ import { ReferenceStatusProvider, ReferenceStatusRegistry } from '@/components/r
 import { QuickListBuckets, SidebarSessionScope, TaskQuickList, TaskQuickListContainer } from '@/components/task-quick-list'
 import { resetSwipeStore } from '@/components/use-swipe-to-archive'
 import { groupRuns } from '@/lib/task-groups'
+import { timerWait, workerWait } from '@/test/wait-fixtures'
 
 const NOW = Date.parse('2026-07-14T12:00:00.000Z')
 const ago = (ms: number) => new Date(NOW - ms).toISOString()
 
 let seq = 0
+
+/** A task an automation launched (#1332): the summary carries its origin. */
+function auto(over: Partial<RunRecord> = {}): RunSummary {
+  return { ...run(over), automationId: 'auto-1' }
+}
 
 function run(over: Partial<RunRecord> = {}): RunSummary {
   seq += 1
@@ -921,13 +927,9 @@ describe('TaskQuickList', () => {
       expect(document.querySelector('[data-slot="pin-toggle"]')).toBeNull()
     })
 
-    it('paints none in the archived view either — `groupRuns` never reads the pin there', () => {
-      renderList({
-        view: 'archived',
-        runs: [run({ id: 'gone', status: 'done', archived: true })],
-        onTogglePin: vi.fn(),
-      })
-      expect(document.querySelector('[data-slot="pin-toggle"]')).toBeNull()
+    it('paints the pin on the Automations tab too', () => {
+      renderList({ view: 'automations', runs: [auto({ id: 'nightly', status: 'done' })], onTogglePin: vi.fn() })
+      expect(row('nightly')?.querySelector('[data-slot="pin-toggle"]')).not.toBeNull()
     })
 
     it('keeps the status dot on a pinned row', () => {
@@ -936,50 +938,75 @@ describe('TaskQuickList', () => {
     })
   })
 
-  describe('the Active/Archived tabs', () => {
+  describe('the Active/Automations tabs (#1332)', () => {
     const runs = () => [
       run({ id: 'a', status: 'running' }),
       run({ id: 'b', status: 'waiting' }),
       run({ id: 'c', status: 'done', archived: true }),
+      auto({ id: 'n', status: 'done' }),
+      auto({ id: 'gone', status: 'done', archived: true }),
     ]
 
     it('shows counts and which view is on', () => {
       renderList({ runs: runs(), view: 'active' })
       const active = screen.getByRole('button', { name: /Active/ })
-      const archived = screen.getByRole('button', { name: /Archived/ })
+      const automations = screen.getByRole('button', { name: /Automations/ })
       expect(active.textContent).toBe('Active2')
-      expect(archived.textContent).toBe('Archived1')
+      expect(automations.textContent).toBe('Automations1')
       expect(active.getAttribute('aria-pressed')).toBe('true')
-      expect(archived.getAttribute('aria-pressed')).toBe('false')
+      expect(automations.getAttribute('aria-pressed')).toBe('false')
+      expect(automations.getAttribute('data-view')).toBe('automations')
+      expect(screen.queryByRole('button', { name: /Archived/ })).toBeNull()
     })
 
-    it('reports the view the user picked', () => {
+    it('reports the view the user picked, from the keyboard too', () => {
       const { onViewChange } = renderList({ runs: runs(), view: 'active' })
-      fireEvent.click(screen.getByRole('button', { name: /Archived/ }))
-      expect(onViewChange).toHaveBeenCalledWith('archived')
+      const automations = screen.getByRole('button', { name: /Automations/ })
+      // Native buttons: Tab reaches them and Enter/Space activate them.
+      expect(automations.tagName).toBe('BUTTON')
+      automations.focus()
+      expect(document.activeElement).toBe(automations)
+      fireEvent.click(automations)
+      expect(onViewChange).toHaveBeenCalledWith('automations')
     })
 
     it('renders no count for an empty bucket', () => {
       renderList({ runs: [run({ status: 'running' })] })
-      // "Archived 0" is noise — an empty bucket says so by being empty.
-      expect(screen.getByRole('button', { name: /Archived/ }).textContent).toBe('Archived')
+      // "Automations 0" is noise — an empty bucket says so by being empty.
+      expect(screen.getByRole('button', { name: /Automations/ }).textContent).toBe('Automations')
     })
 
-    it('flags waiting runs on the Active tab only while you are looking elsewhere', () => {
-      const { unmount } = renderList({ runs: runs(), view: 'archived' })
-      expect(document.querySelector('[data-slot="waiting-dot"]')?.getAttribute('data-tone')).toBe('pending')
+    it('flags a tab only for its own waiting runs, and only while you are looking elsewhere', () => {
+      const { unmount } = renderList({ runs: runs(), view: 'automations' })
+      const activeDot = () => screen.getByRole('button', { name: /Active/ }).querySelector('[data-slot="waiting-dot"]')
+      const automationsDot = () => screen.getByRole('button', { name: /Automations/ }).querySelector('[data-slot="waiting-dot"]')
+      expect(activeDot()?.getAttribute('data-tone')).toBe('pending')
       unmount()
 
-      // On the Active view the rows themselves say it — the tab dot would be noise.
-      renderList({ runs: runs(), view: 'active' })
+      // On the Active view the rows themselves say it, and no automation task is waiting.
+      const second = renderList({ runs: runs(), view: 'active' })
       expect(document.querySelector('[data-slot="waiting-dot"]')).toBeNull()
+      second.unmount()
+
+      renderList({ runs: [run({ id: 'x' }), auto({ id: 'asks', status: 'waiting' })], view: 'active' })
+      expect(automationsDot()).not.toBeNull()
+      expect(activeDot()).toBeNull()
     })
 
-    it('shows the archived view when asked', () => {
-      renderList({ runs: runs(), view: 'archived' })
-      expect(rowsIn('Archived')).toHaveLength(1)
+    it('lists automation tasks in their status sections on the Automations tab', () => {
+      renderList({ runs: [...runs(), auto({ id: 'asks', status: 'waiting' })], view: 'automations' })
+      expect(rowsIn('Needs you')).toHaveLength(1)
+      expect(rowsIn('Finished')).toHaveLength(1)
+      expect(row('n')).not.toBeNull()
       expect(row('a')).toBeNull()
-      expect(row('c')).not.toBeNull()
+      expect(row('gone')).toBeNull()
+      expect(row('c')).toBeNull()
+    })
+
+    it('keeps automation tasks out of Active', () => {
+      renderList({ runs: runs(), view: 'active' })
+      expect(row('a')).not.toBeNull()
+      expect(row('n')).toBeNull()
     })
   })
 
@@ -990,9 +1017,9 @@ describe('TaskQuickList', () => {
       expect(document.querySelectorAll('[data-slot="task-row"]')).toHaveLength(0)
     })
 
-    it('says the archive is empty', () => {
-      renderList({ runs: [run({ status: 'done' })], view: 'archived' })
-      expect(screen.getByText('Nothing archived yet.')).not.toBeNull()
+    it('says there are no automation tasks', () => {
+      renderList({ runs: [run({ status: 'done' }), auto({ archived: true })], view: 'automations' })
+      expect(screen.getByText('No automation tasks.')).not.toBeNull()
     })
   })
 })
@@ -1100,10 +1127,38 @@ describe('TaskQuickListContainer', () => {
     expect(screen.getByText('Pinned attention')).toBeTruthy()
   })
 
-  it('drives the sidebar Active/Archived view', async () => {
-    renderContainer([run({ id: 'a', status: 'running' }), run({ id: 'b', status: 'done', archived: true })])
+  it('sweeps only the selected tab\'s finished tasks (#1332)', async () => {
+    const rows = [run({ id: 'manual-done' }), auto({ id: 'auto-done' })]
+    const sweeps: unknown[] = []
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).includes('archive-finished')) {
+        sweeps.push(JSON.parse(String(init?.body)))
+        return new Response(JSON.stringify({ archived: 0, ids: [], pinnedIds: [] }), { status: 200 })
+      }
+      return new Response(JSON.stringify(rows), { status: 200 })
+    })
+    render(<QueryClientProvider client={createQueryClient()}><MemoryRouter><ListViewProvider>
+      <TaskQuickListContainer />
+    </ListViewProvider></MemoryRouter></QueryClientProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: /Automations/ }))
+    await waitFor(() => expect(row('auto-done')).not.toBeNull())
+    // The tab's own count: one finished automation task, not the project's two.
+    expect(within(document.querySelector('[data-bucket="Finished"]') as HTMLElement).getByRole('heading', { name: 'Finished 1' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Archive all' }))
+    await waitFor(() => expect(sweeps).toEqual([{ scope: 'unpinned', automation: true }]))
+    fireEvent.click(screen.getByRole('button', { name: /^Active/ }))
+    await waitFor(() => expect(row('manual-done')).not.toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'Archive all' }))
+    await waitFor(() => expect(sweeps).toHaveLength(2))
+    expect(sweeps[1]).toEqual({ scope: 'unpinned', automation: false })
+  })
 
-    fireEvent.click(await screen.findByRole('button', { name: /Archived/ }))
+  it('drives the sidebar Active/Automations view', async () => {
+    renderContainer([run({ id: 'a', status: 'running' }), auto({ id: 'b', status: 'done' })])
+
+    await waitFor(() => expect(row('a')).not.toBeNull())
+    expect(row('b')).toBeNull()
+    fireEvent.click(await screen.findByRole('button', { name: /Automations/ }))
 
     await waitFor(() => expect(row('b')).not.toBeNull())
     expect(row('a')).toBeNull()
@@ -1175,7 +1230,7 @@ describe('SidebarSessionScope', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /Active/ }).textContent).toBe('Active2'),
     )
-    fireEvent.click(screen.getByRole('button', { name: /Archived/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Automations/ }))
     expect(document.querySelector('[data-slot="waiting-dot"]')).not.toBeNull()
   })
 
@@ -1283,10 +1338,8 @@ describe('the calmer row (#617)', () => {
     id,
     title: 'Assessing reviewer agent',
     status: 'waiting',
-    delegation: {
-      role: 'root', permissions: [], receipts: [],
-      wait: { id: 'wait', workerIds: Array.from({ length: workers }, (_, i) => `00000000-0000-4000-8000-00000000000${i + 1}`), deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] },
-    },
+    delegation: { role: 'root', permissions: [], receipts: [] },
+    waits: [workerWait({ workerIds: Array.from({ length: workers }, (_, i) => `00000000-0000-4000-8000-00000000000${i + 1}`) })],
   } as Partial<RunRecord>)
 
   it('is two fixed lines — a truncated title and a truncated meta line — whatever the reference count', () => {
@@ -1403,7 +1456,7 @@ describe('the calmer row (#617)', () => {
 
   it('paints the monitoring ring and the queued ring apart from running and cancelled', () => {
     renderList({ runs: [
-      run({ id: 'm', status: 'running', activity: 'monitoring' }),
+      run({ id: 'm', status: 'waiting', waits: [timerWait()] } as Partial<RunRecord>),
       run({ id: 'q', status: 'queued' }),
       run({ id: 'c', status: 'cancelled' }),
     ] })
@@ -1461,17 +1514,17 @@ describe('meta-line state words (#617, the issue\'s list exactly)', () => {
   })
 
   it('says it for every state the issue lists', () => {
-    const workers = { role: 'root', permissions: [], receipts: [], wait: { id: 'w', workerIds: ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } }
+    const workers = { role: 'root', permissions: [], receipts: [] }
     renderList({ runs: [
-      run({ id: 'mon', status: 'running', activity: 'monitoring' }),
+      run({ id: 'mon', status: 'waiting', waits: [timerWait()] } as Partial<RunRecord>),
       run({ id: 'run', status: 'running' }),
       run({ id: 'rev', status: 'review' }),
       run({ id: 'fail', status: 'failed' }),
       // Already due: no time left to name, so the word falls back to `scheduled`.
       run({ id: 'sched', status: 'failed', autoResumeAt: ago(60_000) }),
       run({ id: 'q', status: 'queued' }),
-      run({ id: 'wk', status: 'waiting', delegation: workers } as Partial<RunRecord>),
-      run({ id: 'rep', status: 'waiting', delegation: { ...workers, wait: { ...workers.wait, requestIds: ['00000000-0000-4000-8000-000000000009'] } } } as Partial<RunRecord>),
+      run({ id: 'wk', status: 'waiting', delegation: workers, waits: [workerWait({ workerIds: ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'] })] } as Partial<RunRecord>),
+      run({ id: 'rep', status: 'waiting', delegation: workers, waits: [workerWait({ workerIds: [], requestIds: ['00000000-0000-4000-8000-000000000009'] })] } as Partial<RunRecord>),
     ] })
     expect(stateOf('mon')).toBe('monitoring')
     expect(stateOf('run')).toBeNull()
@@ -1802,7 +1855,7 @@ function stubMedia({ noHover, desktop }: { noHover: boolean; desktop: boolean })
 }
 
 it('shows the selected view count and a project-scoped All link above retained view controls', () => {
-  const { onViewChange } = renderList({ runs: [run(), run({ archived: true }), run({ archived: true })], view: 'archived' }, '/p/project/tasks/task')
+  const { onViewChange } = renderList({ runs: [run(), auto(), auto(), auto({ archived: true })], view: 'automations' }, '/p/project/tasks/task')
   const header = document.querySelector('[data-slot="quick-list-header"]') as HTMLElement
   expect(header).not.toBeNull()
   expect(header.textContent).toBe('Tasks2All')
@@ -2177,12 +2230,8 @@ describe('sidebar archive (#780)', () => {
     expect(archiveButtons()).toHaveLength(0)
   })
 
-  it('withholds the button in the Archived view and on variant group rows', () => {
+  it('withholds the button on variant group rows', () => {
     const onArchiveRun = vi.fn()
-    renderList({ runs: [run({ id: 'old', archived: true })], view: 'archived', onArchiveRun, onSweep: vi.fn() })
-    expect(archiveButtons()).toHaveLength(0)
-    expect(document.querySelector('[data-action="archive-group"]')).toBeNull()
-    cleanup()
     renderList({
       runs: [
         run({ id: 'v1', status: 'done', groupId: 'g', variant: 'A' }),
@@ -2450,7 +2499,7 @@ describe('complete compact sidebar references', () => {
     const working = run({ title: 'Working task', status: 'running' })
     const pinned = run({ title: 'Running variant', status: 'running', groupId: 'mixed', variant: 'A' })
     const waiting = run({ status: 'waiting', groupId: 'mixed', variant: 'B' })
-    const monitoring = run({ title: 'Monitoring task', status: 'running', activity: 'monitoring' })
+    const monitoring = run({ title: 'Monitoring task', status: 'waiting', waits: [timerWait()] } as Partial<RunRecord>)
     const { container } = renderList({ runs: [working, pinned, waiting, monitoring] })
     const row = (id: string) => container.querySelector(`[data-run-id="${id}"]`)!
     expect(row(working.id).querySelector('[data-slot="task-row-state"]')).toBeNull()

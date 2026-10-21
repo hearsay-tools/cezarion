@@ -1,12 +1,21 @@
 import { createHash } from 'node:crypto';
 import { workerInputRecipeSchema, type WorkerInputRecipe } from '@open-mercato/cezar-contract/delegation';
-import { isAbsolute } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { realpathSync, statSync } from 'node:fs';
 import { z } from 'zod';
 import { profileEnv, supportsProfiles } from '../core/agent-profiles.ts';
-import type { ResolvedAgentProfile } from '../workspace/agent-profiles.ts';
+import { namedAccountUnavailable, type ResolvedAgentProfile } from '../workspace/agent-profiles.ts';
 import { agentHomePaths, claudeStateFilePath } from '../paths.ts';
 import { workflowDefSchema, type WorkflowDef } from '../workflows/types.ts';
+
+/**
+ * Providers whose DEFAULT account binds no home: it spawns bare and follows the host env, as it did
+ * before pi and omp carried accounts (hearsay-tools/cezarion#1283). Pinning a home requires the
+ * folder to exist at launch, and a machine where the agent has never run has none, so pinning would
+ * turn a working zero-config worker into "identity is unavailable". Evidence accepted before #1283
+ * has this same shape. Named accounts always pin their folder.
+ */
+const HOMELESS_DEFAULT_PROVIDERS: ReadonlySet<string> = new Set(['pi', 'omp']);
 
 const absolutePathSchema = z.string().min(1).max(4096).refine(isAbsolute).refine(path => !/[\u0000-\u001f\u007f]/.test(path));
 
@@ -20,9 +29,9 @@ export const workerAccountBindingSchema = z.object({
     z.object({ kind: z.literal('native'), statePath: absolutePathSchema }).strict(),
     z.object({ kind: z.literal('relocated') }).strict(),
   ]).optional(),
-}).strict().refine(binding => supportsProfiles(binding.provider)
-  ? binding.homePath !== undefined
-  : binding.homePath === undefined && binding.profileId === 'default')
+}).strict().refine(binding => binding.homePath !== undefined
+  ? supportsProfiles(binding.provider)
+  : binding.profileId === 'default' && (!supportsProfiles(binding.provider) || HOMELESS_DEFAULT_PROVIDERS.has(binding.provider)))
   .refine(binding => binding.provider === 'claude'
     ? binding.claudeLayout !== undefined && (binding.claudeLayout.kind !== 'native' || binding.profileId === 'default')
     : binding.claudeLayout === undefined);
@@ -78,11 +87,19 @@ export type WorkerExecutionIdentity = z.infer<typeof workerExecutionIdentitySche
 export class WorkerIdentityError extends Error {}
 
 export function captureWorkerAccount(profile: ResolvedAgentProfile, env: NodeJS.ProcessEnv = process.env): WorkerAccountBinding | undefined {
-  if (!supportsProfiles(profile.provider)) return { provider: profile.provider, profileId: 'default' };
+  if (!supportsProfiles(profile.provider) || (profile.isDefault && HOMELESS_DEFAULT_PROVIDERS.has(profile.provider))) {
+    return { provider: profile.provider, profileId: 'default' };
+  }
   // Bind an existing symlink to its actual home. A native first-run home may not exist yet.
   const claudeHome = agentHomePaths(env).claude;
   let homePath = profile.provider === 'claude' ? claudeHome : profile.path;
-  try { homePath = realpathSync(homePath); } catch { /* The owned consumer still requires it to exist. */ }
+  try {
+    // A named omp account is selected by its profile entry's NAME, and the entry may be a symlink
+    // omp follows itself: resolving it would leave a path that names no profile. Pin the parent.
+    homePath = isOmpProfileBinding(profile.provider, profile.id)
+      ? join(realpathSync(dirname(homePath)), basename(homePath))
+      : realpathSync(homePath);
+  } catch { /* The owned consumer still requires it to exist. */ }
   const claudeLayout = profile.provider !== 'claude' ? undefined
     : env.CLAUDE_CONFIG_DIR?.trim() ? { kind: 'relocated' as const }
     : { kind: 'native' as const, statePath: claudeStateFilePath(claudeHome, env) };
@@ -93,9 +110,22 @@ export function captureWorkerAccount(profile: ResolvedAgentProfile, env: NodeJS.
 
 export function boundWorkerAccountEnv(binding: WorkerAccountBinding, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
   if (binding.homePath === undefined) return {};
+  const ompProfile = isOmpProfileBinding(binding.provider, binding.profileId);
+  const pinned = ompProfile ? dirname(binding.homePath) : binding.homePath;
   try {
-    if (!statSync(binding.homePath).isDirectory() || realpathSync(binding.homePath) !== binding.homePath) throw new Error();
+    if (!statSync(binding.homePath).isDirectory() || realpathSync(pinned) !== pinned) throw new Error();
   } catch { throw new WorkerIdentityError('Accepted worker account identity is unavailable'); }
+  if (binding.provider === 'omp') {
+    // The discovered omp account is spawned bare, so it keeps whatever profile the host selects.
+    if (!ompProfile) return {};
+    const selected = profileEnv('omp', binding.homePath);
+    if (Object.keys(selected).length === 0) throw new WorkerIdentityError('Accepted omp account names no omp profile');
+    // omp resolves the name under the root it computes from the CHILD's HOME and PI_CONFIG_DIR,
+    // which may have changed since acceptance; a moved root would select another profile.
+    const unavailable = namedAccountUnavailable('omp', binding.homePath, env);
+    if (unavailable !== null) throw new WorkerIdentityError(unavailable);
+    return selected;
+  }
   if (binding.claudeLayout?.kind === 'native') {
     const nativeHome = agentHomePaths(env).claude;
     try {
@@ -105,6 +135,11 @@ export function boundWorkerAccountEnv(binding: WorkerAccountBinding, env: NodeJS
     return {};
   }
   return profileEnv(binding.provider, binding.homePath);
+}
+
+/** A named omp account: an omp profile, selected by name rather than by folder. */
+function isOmpProfileBinding(provider: string, profileId: string): boolean {
+  return provider === 'omp' && profileId !== 'default';
 }
 
 /** Canonical schema order makes equivalent persisted object ordering immaterial. */

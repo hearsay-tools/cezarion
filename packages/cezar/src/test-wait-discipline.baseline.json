@@ -370,18 +370,6 @@
     {
       "file": "core/opencode-server-runner.test.ts",
       "rule": "sleep",
-      "site": "await sleep(180);",
-      "count": 1
-    },
-    {
-      "file": "core/opencode-server-runner.test.ts",
-      "rule": "sleep",
-      "site": "await sleep(240);",
-      "count": 1
-    },
-    {
-      "file": "core/opencode-server-runner.test.ts",
-      "rule": "sleep",
       "site": "await sleep(250);",
       "count": 1
     },
@@ -522,12 +510,6 @@
       "rule": "short-bound",
       "site": "const member = await vi.waitFor(() => requirePid(join(cwd, 'member.pid')), { timeout: 5000 });",
       "count": 1
-    },
-    {
-      "file": "core/session-process.test.ts",
-      "rule": "sleep",
-      "site": "await new Promise(resolve => setTimeout(resolve, 300));",
-      "count": 2
     },
     {
       "file": "core/session-process.test.ts",
@@ -1128,12 +1110,6 @@
       "rule": "short-bound",
       "site": "await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: 8_000 });",
       "count": 3
-    },
-    {
-      "file": "workflows/system-prompt.test.ts",
-      "rule": "sleep",
-      "site": "await new Promise((resolve) => setTimeout(resolve, 700));",
-      "count": 2
     },
     {
       "file": "workflows/worker-destroy.test.ts",

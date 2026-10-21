@@ -19,7 +19,7 @@ export function planCounts(entries: PlanEntry[]): { done: number; total: number 
  * surface). Entry states read ✓ strikethrough / ◐ pulsing "in progress" / ○ pending /
  * ⊘ cancelled.
  *
- * Since #402 the list has no dock of its own: it is the body of the Run activity accordion's
+ * Since #402 the list has no dock of its own: it is the body of the Session activity accordion's
  * **Plan** section, which owns the head, the N/M odometer and the collapse memory
  * (`run-activity-dock.tsx`).
  */

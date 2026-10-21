@@ -561,7 +561,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     try {
       const wait = await registerTimer(run.id, 120, 'check the deploy');
-      expect(Date.parse(wait.deadline) - Date.parse(wait.registeredAt)).toBe(120_000);
+      expect(Date.parse(wait.deadline!) - Date.parse(wait.registeredAt)).toBe(120_000);
       await vi.advanceTimersByTimeAsync(119_000);
       expect(waitById(run.id, wait.id)?.phase).toBe('open');
       expect(inputsFor(run.id, wait.id)).toEqual([]);

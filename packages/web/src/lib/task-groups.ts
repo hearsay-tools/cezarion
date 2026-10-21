@@ -1,4 +1,5 @@
 import { ATTENTION_RANK, deriveAttention } from './attention'
+import { isAutomationTask } from '@open-mercato/cezar-api-client/contract/runs'
 import { normalizeSidebarLimits, type SidebarLimits } from '@open-mercato/cezar-api-client/contract/workspace'
 import type { RunSummary } from '@open-mercato/cezar-api-client'
 
@@ -14,8 +15,12 @@ import type { RunSummary } from '@open-mercato/cezar-api-client'
  * collapsing, same queue numbers.
  */
 
-/** Active/Archived. The same type on both surfaces; each surface holds its own value. */
+/** The Tasks table's Active/Archived. The sidebar asks a different question: `SidebarView`. */
 export type ListView = 'active' | 'archived'
+
+/** The sidebar's two tabs (hearsay-tools/cezarion#1332): unarchived tasks split by who started
+ *  them. Archived history lives on the Tasks table, which keeps `ListView`. */
+export type SidebarView = 'active' | 'automations'
 
 export type BucketLabel = 'Needs you' | 'Working' | 'Finished' | 'Archived'
 
@@ -251,7 +256,7 @@ export function sortRuns(runs: readonly RunSummary[], view: ListView): RunSummar
     })
 }
 
-/** Owned workers are not task-list rows — they live on the parent’s Run activity dock (#312).
+/** Owned workers are not task-list rows — they live on the parent’s Session activity card (#312).
  *  The argument is role-only so a full `RunSummary` and a slim index row both type-check. */
 export function isOwnedWorker(run: { delegation?: { role?: string } | null }): boolean {
   return run.delegation?.role === 'worker'
@@ -400,4 +405,34 @@ export function listCounts(runs: readonly RunSummary[]): {
     if (deriveAttention(run).bucket === 'waiting') waiting += 1
   }
   return { active, archived, waiting }
+}
+
+/** The unarchived runs a sidebar tab lists: Automations holds the tasks an automation launched
+ *  (`isAutomationTask`, the recorded origin), Active every other one. The result goes through
+ *  `groupRuns(…, 'active')`, which drops owned workers and keeps the status sections. */
+export function sidebarRuns(runs: readonly RunSummary[], view: SidebarView): RunSummary[] {
+  const automations = view === 'automations'
+  return runs.filter((run) => !run.archived && isAutomationTask(run) === automations)
+}
+
+/** The sidebar tab counts, and each tab's own "needs you" count for its attention dot. */
+export function sidebarCounts(runs: readonly RunSummary[]): {
+  active: number
+  automations: number
+  activeWaiting: number
+  automationsWaiting: number
+} {
+  const counts = { active: 0, automations: 0, activeWaiting: 0, automationsWaiting: 0 }
+  for (const run of runs) {
+    if (isOwnedWorker(run) || run.archived) continue
+    const waiting = deriveAttention(run).bucket === 'waiting' ? 1 : 0
+    if (isAutomationTask(run)) {
+      counts.automations += 1
+      counts.automationsWaiting += waiting
+    } else {
+      counts.active += 1
+      counts.activeWaiting += waiting
+    }
+  }
+  return counts
 }

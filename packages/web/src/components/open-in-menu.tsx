@@ -113,6 +113,7 @@ export function OpenInMenu({
   /** Rendered BELOW it, separated — the run header's "Copy worktree path". */
   trailing,
   slot,
+  className,
 }: {
   choices: OpenInChoice[]
   onPick: (targetId: string) => void
@@ -123,11 +124,13 @@ export function OpenInMenu({
   leading?: ReactNode
   trailing?: ReactNode
   slot?: string
+  /** Extra trigger classes — a phone row needs the 44px target. */
+  className?: string
 }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant={triggerVariant} size="sm" title={title} disabled={disabled} data-slot={slot}>
+        <Button variant={triggerVariant} size="sm" title={title} disabled={disabled} data-slot={slot} className={className}>
           <ExternalLinkIcon aria-hidden="true" />
           {label}
         </Button>

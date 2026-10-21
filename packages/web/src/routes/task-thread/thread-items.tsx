@@ -599,7 +599,7 @@ function ConversationReference({
 }) {
   const { targets, replies, navigate } = useContext(ConversationNavigation)
   const request = message.requestId ? targets.get(message.requestId) : undefined
-  // A late reply never rewrites a timed-out/cancelled outcome, so correlation
+  // A late reply can retain a cancelled or other settled outcome, so correlation
   // comes from the reply envelope, not exclusively from outcome.replyId.
   const linked = message.requestId ? (request ? [request] : []) : replies.get(message.messageId) ?? []
   const kind = message.requestId ? 'request' : 'reply'

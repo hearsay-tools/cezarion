@@ -14,6 +14,12 @@ import { registerProject } from '../workspace/projects.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 
 /** `cez task` against a real cockpit app on a real socket (#504). */
+/** The agent's open timer: the monitoring park since hearsay-tools/cezarion#1301. */
+const openTimer = () => ({
+  kind: 'timer' as const, id: randomUUID(), source: 'agent' as const, via: 'monitoring-line' as const,
+  registeredAt: new Date().toISOString(), deadline: new Date(Date.now() + 600_000).toISOString(), phase: 'open' as const, turnId: 'turn-1', seconds: 600,
+});
+
 describe('cez task', () => {
   let harness: TestCockpit;
   let store: RunStore;
@@ -419,15 +425,16 @@ describe('cez task', () => {
 
     // #609: the operator who cleared on `hasPendingHumanAsk: false` read the wrong field. The
     // default projection now carries the cockpit's own answer, and `waiting` is attention with
-    // or without a structured question; `running` + `monitoring` is neither settled nor attention.
+    // or without a structured question; a run waiting on its own timer is neither settled nor
+    // attention (the monitoring park is a timer wait since hearsay-tools/cezarion#1301).
     it('carries the cockpit attention bucket and label, from the shared function', async () => {
       const id = await start();
       store.updateRun(id, { status: 'waiting', hasPendingHumanAsk: false });
       expect(await run(['status', id])).toBe(0);
       expect(last()).toMatchObject({ status: 'waiting', hasPendingHumanAsk: false, attention: 'waiting', attentionLabel: 'needs you' });
-      store.updateRun(id, { status: 'running', activity: 'monitoring' });
+      store.commitWait(id, openTimer());
       expect(await run(['status', id])).toBe(0);
-      expect(last()).toMatchObject({ status: 'running', activity: 'monitoring', attention: 'running', attentionLabel: 'monitoring' });
+      expect(last()).toMatchObject({ status: 'waiting', attention: 'running', attentionLabel: 'monitoring' });
     });
 
     it('prints the contract ApiRun with --full, without the derived attention fields', async () => {
@@ -495,11 +502,12 @@ describe('cez task', () => {
       const a = await start('a');
       const b = await start('b');
       store.updateRun(a, { status: 'waiting', hasPendingHumanAsk: false });
-      store.updateRun(b, { status: 'running', activity: 'monitoring' });
+      store.updateRun(b, { status: 'waiting' });
+      store.commitWait(b, openTimer());
       expect(await run(['list'])).toBe(0);
       const rows = last().runs as Array<Record<string, unknown>>;
       expect(rows.find((row) => row.id === a)).toMatchObject({ status: 'waiting', hasPendingHumanAsk: false, attention: 'waiting', attentionLabel: 'needs you' });
-      expect(rows.find((row) => row.id === b)).toMatchObject({ status: 'running', activity: 'monitoring', attention: 'running', attentionLabel: 'monitoring' });
+      expect(rows.find((row) => row.id === b)).toMatchObject({ status: 'waiting', attention: 'running', attentionLabel: 'monitoring' });
       expect(await run(['list', '--full'])).toBe(0);
       for (const row of last().runs as Array<Record<string, unknown>>) {
         expect(apiRunSchema.safeParse(row).success).toBe(true);
@@ -787,7 +795,7 @@ describe('cez task', () => {
         expect(help).toContain('--until settled');
         expect(help).toMatch(/`waiting` is attention even when hasPendingHumanAsk is false/);
         expect(help).toMatch(/never clear a task on hasPendingHumanAsk alone/);
-        expect(help).toMatch(/`running` with activity `monitoring` is neither settled nor attention/);
+        expect(help).toMatch(/`waiting` on its own open CI or timer wait [^`]* is neither settled nor attention/);
         expect(help).toContain('cez task wait <id>                   # default: stops when the task needs you');
         expect(help).toContain('cez task wait <id> --until settled   # terminal status only');
         expect(help).toContain('cez task start \'…\' --wait --autonomous --until settled');

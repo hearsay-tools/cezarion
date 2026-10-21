@@ -113,12 +113,89 @@ a backend's own slash commands must survive. Against an empty registry that same
 turns "cezar never loaded the list" into a confident user-facing "Unknown skill". Pair
 every silent pass-through with a test that pins the *empty/absent input* case.
 
-**Prove the regression test fails without the fix.** `git stash push -- <source files>`,
-run the new test, confirm red, `git stash pop`. A test written after the diagnosis passes
-against the bug more often than anyone expects, and a green-either-way test is how the
-same regression ships twice. Keep the guard tests that pass both ways — they pin the
-behavior you did NOT want to change (park mode stays reachable; unknown slashes stay
-untouched) — but know which is which.
+**Prove the regression test fails without the fix.** Pin the pre-fix commit as
+`proof_base` and record the command, expected failure and fixed pass. A test written
+after the diagnosis can pass against the bug; a green-either-way test does not prove
+the fix. Keep the guard tests that pass both ways — they pin behavior you did NOT
+want to change (park mode stays reachable; unknown slashes stay untouched) — but
+know which is which. Do not use the shared stash stack for this proof.
+
+For a **source fix**, run the new regression test against the old source in a
+disposable worktree. From the repo root, replace the example commit and paths:
+
+```bash
+proof_base=<pre-fix-commit>
+proof_repo=$(git rev-parse --show-toplevel)
+proof_dir=$(mktemp -d "${TMPDIR:-/tmp}/cezar-red-proof.XXXXXX")
+git worktree add --detach "$proof_dir/tree" "$proof_base"
+(cd "$proof_dir/tree" && pnpm install --frozen-lockfile)
+# Copy the current regression test, plus any new test helpers/fixtures it needs.
+cp packages/cezar/src/path/to/regression.test.ts \
+  "$proof_dir/tree/packages/cezar/src/path/to/regression.test.ts"
+(cd "$proof_dir/tree" && npm test -- --passWithNoTests=false packages/cezar/src/path/to/regression.test.ts)
+# Inspect the failure: it must show the reported defect, not a broken import/setup.
+# Copy only the fixed source files into the scratch tree; keep the same test.
+cp packages/cezar/src/path/to/source.ts \
+  "$proof_dir/tree/packages/cezar/src/path/to/source.ts"
+(cd "$proof_dir/tree" && npm test -- --passWithNoTests=false packages/cezar/src/path/to/regression.test.ts)
+# After saving the evidence, clean up even if setup or a test failed.
+git -C "$proof_repo" worktree remove --force "$proof_dir/tree"
+rmdir "$proof_dir"
+```
+
+Create destination directories for new test paths as needed. Keep the package's
+setup and environment; a scratch worktree needs its own dependency installation,
+not a symlink to another checkout's workspace packages. Do not start Squeal in
+this disposable tree. Run the fixed test in the task worktree too (through Squeal
+when it is validating) so the proof does not replace normal verification.
+
+For a **test-only fix**, reproduce the old test's defect under the same conditions
+as the fixed test. There is no source fix to remove. Keep both versions out of the
+watched test paths: create an ignored scratch copy with `git show`, then select it
+with an explicit scratch Vitest config. For a server test, from the repo root:
+
+```bash
+proof_base=<pre-fix-commit>
+mkdir -p .ai/qa
+proof_dir=$(mktemp -d .ai/qa/red-proof.XXXXXX)
+git check-ignore "$proof_dir/before.test.ts"
+git show "$proof_base:packages/cezar/src/path/to/test.test.ts" > "$proof_dir/before.test.ts"
+```
+
+In that directory, write `vitest.config.ts` with this content:
+
+```typescript
+import { fileURLToPath } from 'node:url'
+import { defineConfig } from 'vitest/config'
+import server from '../../../packages/cezar/vitest.config.ts'
+
+export default defineConfig({
+  ...server,
+  root: fileURLToPath(new URL('../../../packages/cezar/', import.meta.url)),
+  test: {
+    ...server.test,
+    include: [fileURLToPath(new URL('./before.test.ts', import.meta.url))],
+    passWithNoTests: false,
+  },
+})
+```
+
+Adapt the package config for other workspaces. In the scratch test, adjust relative
+imports and fixture paths to their original absolute locations; account for uses
+of `import.meta.url` and colocated mocks too. Preserve the assertions and the
+reproduction conditions. Run `npm test -- --config "$proof_dir/vitest.config.ts"`.
+Inspect the failure, then replace only the scratch test with the fixed version,
+apply the same path adjustments, and run the same command for green. A load-related
+failure needs its original load or a controlled reproduction; an unrelated import
+error, empty test selection or ordinary passing run is not red proof. Scratch tests
+outside a package root can lose `console.log` output; use assertion failures and
+captured runner output as evidence, not the presence or absence of a log line.
+Remove the scratch test and config after saving the evidence (`rm -r "$proof_dir"`).
+
+These recipes leave the task's tracked source and test files in place, so Squeal
+never runs a temporarily swapped version. Ignoring a scratch file alone does not
+exclude it from a test runner: keep it outside the package's test include patterns
+and use the explicit scratch config only for the manual proof.
 
 **Read the run-history evidence before theorizing, and cite it.** `.ai/specs/` records the
 design, `git log -S` and `git merge-base --is-ancestor <commit> <tag>` settle "was this in
@@ -221,7 +298,7 @@ Rules that follow from that:
 | When the task involves…                                                                                                                                                                                       | Read first                                                                                                                                                                                                                                    | Key rules                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | CLI entry, `serve`/`run`/`init` subcommands, flags                                                                                                                                                            | `packages/cezar/src/index.ts`                                                                                                                                                                                                                                | Uses `node:util` `parseArgs`, no CLI framework. `serve` is the default command. Headless `run` treats `review` as a terminal success status (exit 0). `serve` boots in a fixed order: bind the listener, open the boot store and build its `RunManager`, `recover()` the boot project, then `startServer`. So anything a recovered run needs (its cockpit address, for one) must reach the boot manager at construction, not from `startServer`. `init` never overwrites existing files. Keep `.ai/cezar/.gitignore` maintenance (`ensureDataGitignore`) in sync with any new state file.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Agent runners / backends                                                                                                                                                                                      | `AGENT_PROTOCOL.md` (the contract), then `packages/cezar/src/core/agent-runner.ts`, `packages/cezar/src/core/runner-factory.ts`, `packages/cezar/src/core/claude-cli-runner.ts`, `packages/cezar/src/core/codex-app-server-runner.ts`, `packages/cezar/src/core/opencode-server-runner.ts`, `packages/cezar/src/core/backend-detect.ts`, `packages/cezar/src/core/harness-parity.test.ts` | One seam: every backend implements `AgentRunner`/`AgentSession` and emits both the v1 `AgentEvent` stream and the normalized v2 `UiEvent` protocol. **Read `AGENT_PROTOCOL.md` first — it is the contract a new runner must satisfy** (the event schema, per-backend mapping, golden-fixture testing, and the backend-parity requirement), with an explicit new-runner checklist. **Two executable parity matrices, and a backend must pass both**: `ui-parity.test.ts` pins what every MAPPER emits, `harness-parity.test.ts` pins what every RUNNER does (session lifecycle, provider-failure surfacing, `sendMessage`, ask routing, park declarations, and each runner's `specSupport` declaration of which `AgentRunSpec` fields reach its wire — hearsay-tools/cezarion#284) — a row a wire genuinely cannot carry needs a declared exemption, never a skip. New backends slot in as one class — do not leak backend-specific types past the seam. `claude-cli` is a legacy backend id kept so old run records parse. `CEZ_DRY_RUN=1` must keep working (bundled mock, no real CLI). Tool access goes through `allowedTools`, but the zero-config default includes unrestricted `Bash` (no `bashAllowlist`) and Codex/OpenCode don't honor `allowedTools` at all — see open-mercato/cezar#430.                                                                                                                                                                                                                                                                                                    |
+| Agent runners / backends                                                                                                                                                                                      | `AGENT_PROTOCOL.md` (the contract), then `packages/cezar/src/core/agent-runner.ts`, `packages/cezar/src/core/runner-factory.ts`, `packages/cezar/src/core/claude-cli-runner.ts`, `packages/cezar/src/core/codex-app-server-runner.ts`, `packages/cezar/src/core/opencode-server-runner.ts`, `packages/cezar/src/core/backend-detect.ts`, `packages/cezar/src/core/harness-parity.test.ts` | One seam: every backend implements `AgentRunner`/`AgentSession` and emits both the v1 `AgentEvent` stream and the normalized v2 `UiEvent` protocol. **Read `AGENT_PROTOCOL.md` first — it is the contract a new runner must satisfy** (the event schema, per-backend mapping, golden-fixture testing, and the backend-parity requirement), with an explicit new-runner checklist. Runner and backend prose never counts runners: `harness-parity.test.ts` refuses a counted roster in `AGENT_PROTOCOL.md` and in the harness-parity spec and test files. To run only that guard, from the repo root: `npm test -- packages/cezar/src/core/harness-parity.test.ts -t "counted roster"`. **Two executable parity matrices, and a backend must pass both**: `ui-parity.test.ts` pins what every MAPPER emits, `harness-parity.test.ts` pins what every RUNNER does (session lifecycle, provider-failure surfacing, `sendMessage`, ask routing, park declarations, and each runner's `specSupport` declaration of which `AgentRunSpec` fields reach its wire — hearsay-tools/cezarion#284) — a row a wire genuinely cannot carry needs a declared exemption, never a skip. New backends slot in as one class — do not leak backend-specific types past the seam. `claude-cli` is a legacy backend id kept so old run records parse. `CEZ_DRY_RUN=1` must keep working (bundled mock, no real CLI). Tool access goes through `allowedTools`, but the zero-config default includes unrestricted `Bash` (no `bashAllowlist`) and Codex/OpenCode don't honor `allowedTools` at all — see open-mercato/cezar#430.                                                                                                                                                                                                                                                                                                    |
 | HTTP server & API routes                                                                                                                                                                                      | `packages/cezar/src/server/server.ts`                                                                                                                                                                                                                        | Hono app, binds to `127.0.0.1` only. A global `/api/*` request-origin guard (open-mercato/cezar#426) runs before every route except `/api/v1/health`: it rejects non-loopback `Host` headers (DNS-rebinding) in local mode and cross-origin mutating requests (CSRF) in both modes — zero-config, no token, so the same-origin cockpit and the Vite dev proxy pass untouched. The loopback test is `isLoopbackHostHeader` (anchored 127.0.0.0/8, missing Host = untrusted); never match it with a `127.` string prefix. **Request validation is route MIDDLEWARE, not a `safeParse` inside the handler** — `jsonZodValidator` / `paramZodValidator` / `queryZodValidator` from `packages/cezar/src/server/validators.ts`, read from `c.req.valid('json'|'param'|'query')`. Hono records a validated shape in the route type only when validation happens as middleware, so a handler-side parse is invisible to `AppType` and the typed client would accept any body for that route. The rejection shape is unchanged: `{ error }` with 400/404/409. CORS is deliberately enabled for `/api/v1/health` only (cross-origin discovery); never widen it. SSE endpoints replay from NDJSON then stream live, deduped by `seq`.                                                                                                                                                                                                                                                                                                   |
 | API request/response shapes (any new field, route or payload) | `packages/contract/src/*.ts`, then `packages/cezar/src/server/validators.ts` | **One zod definition per shape, type inferred — never a hand-written interface.** Add the schema here FIRST, then chain the route and validate through the trio; `contract-parity*.test.ts` proves the schema and the route agree in both directions, and `typed-bodies.test.ts` proves the route reached `AppType` at all. See the HTTP API section above for why a loose `app.get(…)` disappears. |
 | Real-time events (live UI signals, replacing polls)                                                                                                                                                           | `.ai/specs/2026-07-23-websocket-subscriptions.md`, then `packages/cezar/src/server/ws.ts` + the `health` topic in `packages/cezar/src/server/server.ts`, and `packages/web/src/api/ws.ts`                                                                                        | Browser ownership: read `.ai/specs/2026-10-08-browser-tab-coordination.md` first. Local visible documents share one same-origin SharedWorker for the workspace SSE, multiplexed task SSE, topic WebSocket and allowlisted recurring reads; documents retain their own caches/cursors. Hidden documents release demand; authenticated bootstrap, scope reconciliation and bounded history hydration precede restoration. Remote/failed-worker mode uses finite authenticated HTTP (no permanent SSE or ordinary WebSocket). Two live channels: the SSE run/event stream (`/api/v1/workspace/events`, `packages/web/src/api/global-events.tsx`) and the **WebSocket subscription bus** (`/api/v1/ws`, `ws` lib server-side, native `WebSocket` client). The bus is the pattern for any new live signal instead of a `refetchInterval`. Its whole discipline is **demand-driven subscription**: a topic's server publisher starts on the `0→1` subscriber and stops on `1→0`, and one socket per local coordination group ref-counts listeners per topic. **Subscribe at the scope that matches the data's demand lifetime, always return the unsubscribe (`useEffect(() => subscribeTopic(...))`), publish only on change** — a leaked subscription is a server publisher that never stops AND a component that keeps waking for a screen the user left. Per-view signals subscribe in the view; **session-global signals subscribe ONCE at the root**, not per reader — health is the worked example: one `useHealthSubscription()` controller in `GlobalEventsProvider` subscribes after bootstrap only for local mode, while `useHealth()` is a pure cache read the ~15 readers call without touching the socket. Remote mode must open no browser WebSocket because it cannot explicitly carry reverse-proxy credentials; it uses finite authenticated HTTP reconciliation. One socket per local coordination group — never `new WebSocket` for a feature; add a topic. **One named exception: the live preview pane** (hearsay-tools/cezarion#781, spec `.ai/specs/2026-10-02-live-preview-v1.md`) opens its own `/api/v1/p/:projectId/runs/:id/preview/ws` per open pane, in remote mode too, because it streams binary JPEG frames and pointer input that a JSON topic cannot carry. It is opt-in behind `CEZ_PREVIEW=1` (off, the path answers 404), demand-bound to an open pane, refused before the handshake unless the upgrade guard trusts it, and capped at two upgrade attempts so a proxy that cannot carry it (Basic Auth, open-mercato/cezar#688) shows 5.14 instead of looping. A new feature does not get the same exception: add a topic. Liveness: server ping/pong reaping + app-level beat, client watchdog + reconnect. Topics are workspace-level (single-mount, never `/api/v1/p/`) and, because the upgrade guard admits any loopback origin (WS has no CORS), must only carry data safe for any local page — read the spec's security caveat before adding one. |
@@ -241,6 +318,12 @@ Rules that follow from that:
 | Upstream drift (what open-mercato/cezar shipped, what we ported, declined, or solved differently) | `.ai/upstream/README.md`, then `.ai/upstream/ledger.yaml`, `.github/scripts/upstream-scan.cjs`, spec `.ai/specs/2026-09-18-upstream-ledger.md` | One entry per upstream commit since the fork point, keyed by sha; `pending` rows come from the weekly `upstream-scan.yml` PR and are decided by editing `status`, `fork` and `reason` in the YAML, then `node .github/scripts/upstream-scan.cjs render` so `LEDGER.md` matches. The unit gate validates every row. Before planning a port, run `node .github/scripts/upstream-scan.cjs targets <sha>` from current `main`: it re-checks the commit's files against the fork as it is now (hearsay-tools/cezarion#1002). **Never add a git remote named `upstream`**: `gh` prefers it over `origin` and cezar's GitHub tab starts showing the upstream repo; the scan fetches into `refs/cez-upstream/main` instead. |
 
 ## Validation
+
+The pinned TypeScript 7 package is the native compiler and offers no stable
+JavaScript compiler API (`typescript` exports only version fields). For
+source-scanning tests, reuse regex scans over `blank()` from
+`packages/cezar/src/test-wait-discipline.testkit.ts`; see
+`contract-import-boundaries.test.ts` and `test-wait-discipline.test.ts` for examples.
 
 A fresh task worktree (`.ai/cezar/worktrees/<runId>`) has no `node_modules`. Run `pnpm install --frozen-lockfile` in that worktree before the commands below — otherwise Node walks up to the main checkout and typecheck/tests compile against that tree's sources, not this one.
 
@@ -293,6 +376,28 @@ require `npm run build` from the repo root first; then, from `packages/cezar`, r
 `node --import ../../scripts/test-git-env.mjs --import tsx --test <files>` with
 those packaged paths relative to that directory (e.g. `test/e2e/task-cli.test.ts`).
 
+Before opening a PR that renames, moves or removes a `RunRecord` field, also
+search the packaged and browser fixtures for each changed field name, including
+its old and new names or paths. From the repo root, replace the example names
+below with the changed field's names:
+
+```bash
+rg -l -F -e 'delegation.wait' -e 'waits' packages/cezar/test/e2e/*.test.ts packages/web/e2e/*.e2e.ts
+```
+
+Inspect the matches to identify fixtures that read the changed field; common
+names can also match unrelated text. Require passing results for the affected
+fixtures through the Squeal or focused npm paths above. Run `npm run build`
+from the repo root before validating matching packaged fixtures, including with
+Squeal, so they exercise the current built output. This selection supplements
+the dry-run park-fixture and runner-parity requirements above
+(hearsay-tools/cezarion#1300).
+
+In an unbuilt worktree, only a `Cannot find module` error naming a missing
+`dist/` module is the known Squeal limitation. An assertion failure in
+`test:package` is a real failure that needs investigation; do not dismiss it
+alongside missing-`dist` errors.
+
 No tool maps a cockpit source change to the browser specs it affects, with or
 without Squeal: `npm run test:changed` runs `npm test`, whose four unit projects
 hold no browser spec, and Squeal's browser-spec inputs include all of
@@ -312,6 +417,21 @@ the repo root, lists that spec:
 
 ```bash
 grep -lE 'link-safety|data-streamdown|thread-markdown' packages/web/e2e/*.e2e.ts
+```
+
+Specs also assert on visible text, and the attribute grep does not find those
+assertions. When a cockpit change adds, renames or removes visible copy (a label,
+a tab, a heading, a button, an empty state), also grep the specs for that copy.
+Grep both the new and the old string: a spec can assert that text is present,
+and a spec can assert that it is absent. In hearsay-tools/cezarion#1335 the
+sidebar got a new tab labelled "Automations". The attribute grep found
+`quick-list.e2e.ts` and `mobile-task-controls.e2e.ts`, and both passed locally.
+`automations.e2e.ts` asserts that the sidebar does not show "Automations" while
+the feature is off, and it failed only in CI. This grep, run from the repo root,
+lists that spec:
+
+```bash
+grep -lF 'Automations' packages/web/e2e/*.e2e.ts
 ```
 
 **In a unit test, a timeout is a hang guard, never the thing the test waits on.**
@@ -370,6 +490,20 @@ Verification, and let CI's Vitest shards decide. Squeal reports and
 `squeal why <check>` output are the same evidence. The rerun is not a full pass;
 green CI shards are. A failure in a file the branch touches never qualifies: fix it.
 
+**When filing a load-dependent test failure, preserve the diagnostic evidence.**
+Quote the full error line verbatim, with nothing cut, including any list after
+its `;`. Name the stack frame that throws the error, rather than an operation
+named in the message. Give the full log location: the originating repo's
+`.ai/cezar/runs/<runId>.ndjson` (or `.ndjson.br`), or `squeal why <check>`
+with the check identifier and its worktree path.
+
+Plain text searches do not read Brotli-compressed `.ndjson.br` logs. To read one,
+replace `<file.ndjson.br>` with its path:
+
+```bash
+node -e "process.stdout.write(require('node:zlib').brotliDecompressSync(require('node:fs').readFileSync(process.argv[1])))" '<file.ndjson.br>'
+```
+
 CI's final gate covers:
 
 ```bash
@@ -386,6 +520,29 @@ For web-only verification, use `npm run typecheck:web` or
 from this worktree before checking web sources; direct `tsc --noEmit` does not.
 The full root typecheck runs web first, preparing declarations once for all four
 workspace checks.
+
+To typecheck without rebuilding `packages/cezar/dist`, for example while Squeal
+is validating, run both server configs from `packages/cezar`. The root
+`npm run typecheck` rebuilds `dist` first, and Squeal then marks dozens of
+passing checks UNKNOWN (hearsay-tools/squeal#33).
+
+```bash
+./node_modules/.bin/tsc --noEmit -p tsconfig.json       # shipped sources only
+./node_modules/.bin/tsc --noEmit -p tsconfig.test.json  # adds every test file
+```
+
+`tsconfig.json` leaves out every test file: on hearsay-tools/cezarion#1291 a
+TS2353 in `src/runs/waits-store.test.ts` passed it and failed CI.
+`tsconfig.test.json` sets `rootDir` to `.`, so only `tsconfig.json` reports a
+shipped file that imports from outside `src/`. `tsconfig.test.json` also
+compiles the `test/e2e/` imports of `../../dist/`, so in a worktree that was
+never built it fails with TS2307: run `npm run build -w @wjarka/cezarion` once
+first. For contract edits, also run `npm run typecheck:contract` from the repo
+root. It checks `packages/contract/tsconfig.test.json`, because that package's
+`tsconfig.json` leaves out its tests too. Run the root `npm run typecheck` once
+before a PR when declarations matter: a cockpit edit, or a server change that
+the cockpit reads through `AppType` or that a `test/e2e/` file imports from
+`dist`. Expect the UNKNOWN burst then.
 
 `npm test` and `npm run test:unit` are the fast unit gate: no server, no browser. They must stay that way. `npm run test:package` needs a completed `npm run build` (it packs the tarball). Pull request CI runs packaged CLI E2E and cockpit browser E2E as separate checks; the required aggregate fails if the cockpit suite is skipped or failed.
 
@@ -493,6 +650,6 @@ row's value when the thing it names changes, rather than its label.
 | Automated review rounds | The `AUTOMATED_REVIEW_ROUNDS` repository variable, read with `gh variable get AUTOMATED_REVIEW_ROUNDS`; the review workflow falls back to 3 only when the variable is unset or empty |
 | Commit convention | Conventional Commits |
 | Specs and plans | unknown |
-| Board | **Cezarion**, org `hearsay-tools`, project #1 |
+| Board | **Cezarion**, org `hearsay-tools`, project #1. For same-repository PRs targeting `main`, `.github/workflows/pr-readiness.yml` owns draft state and syncs existing PR and closing-linked issue cards: draft → In progress, ready → In review. Each new head returns the PR to draft; the workflow marks it ready when the head's required checks pass and no review thread is unresolved. Open a draft PR, fix its checks and review threads, and let the workflow move it to ready and In review; do not move the card to In review or run `gh pr ready` by hand. Board sync skips without project access and never moves Done cards back. The initial claim still moves the issue to In progress. |
 | Task orchestrator | Cezar |
 | SDLC feedback | `apptension/toolkit-dev` |

@@ -1,3 +1,4 @@
+import { WEBHOOK_TRIGGERS } from './attention.ts';
 import { checkoutProgressEventSchema } from './events.ts';
 import { z } from 'zod';
 import {
@@ -14,6 +15,9 @@ import {
  *
  * Node-free by construction (see README rule 1) — `zod` and nothing else.
  */
+
+/** One task state a project webhook sends deliveries for (hearsay-tools/cezarion#1356). */
+export const webhookTriggerSchema = z.enum(WEBHOOK_TRIGGERS);
 
 /**
  * One `GET /api/v1/projects` registry entry (multi-project spec, step 1.6).
@@ -68,8 +72,10 @@ export const projectListEntrySchema = z.object({
    * directly.
    */
   tags: z.array(z.string()).optional(),
-  /** The task webhook (#589). The token is write-only: the wire says only whether one is set. */
-  webhook: z.object({ url: z.string(), tokenSet: z.boolean() }).optional(),
+  /** The task webhook (#589). The token is write-only: the wire says only whether one is set.
+   *  `triggers` is the stored state selection (hearsay-tools/cezarion#1356); absent means
+   *  `DEFAULT_WEBHOOK_TRIGGERS`, and `[]` means no state sends. */
+  webhook: z.object({ url: z.string(), tokenSet: z.boolean(), triggers: z.array(webhookTriggerSchema).optional() }).optional(),
 });
 export type ProjectListEntry = z.infer<typeof projectListEntrySchema>;
 
@@ -127,6 +133,12 @@ export const projectWebhookUrlSchema = z
 export const projectWebhookInputSchema = z.object({
   url: projectWebhookUrlSchema,
   token: z.string().trim().max(PROJECT_WEBHOOK_TOKEN_MAX_LENGTH).optional(),
+  /** The states that send a delivery (hearsay-tools/cezarion#1356). Omitted keeps the stored
+   *  selection; `[]` stores "none". Each value at most once. */
+  triggers: z
+    .array(webhookTriggerSchema)
+    .refine((values) => new Set(values).size === values.length, 'webhook triggers must not repeat')
+    .optional(),
 });
 export type ProjectWebhookInput = z.infer<typeof projectWebhookInputSchema>;
 
@@ -171,7 +183,7 @@ export const updateProjectInputSchema = z
     /**
      * The task webhook (#589). `null` removes it. An omitted `token` keeps the stored one, so the
      * settings form can change the URL without asking for a secret it never shows again; `''`
-     * clears the token.
+     * clears the token. An omitted `triggers` keeps the stored selection.
      */
     webhook: projectWebhookInputSchema.nullable().optional(),
   })

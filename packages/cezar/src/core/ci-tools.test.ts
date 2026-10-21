@@ -119,7 +119,10 @@ describe('CI tool injection', () => {
         if (backend === 'codex') {
           const config = rows.find(row => row.method === (resume ? 'thread/resume' : 'thread/start')).params.config;
           expect(config['features.multi_agent']).toBe(false);
-          expect(config[`mcp_servers.${descriptor.name}`]).toEqual({ command: descriptor.command, args: descriptor.args, env_vars: ['CEZ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET'] });
+          // hearsay-tools/cezarion#1294: Codex asks before every MCP tool call unless the
+          // server's mode is `approve`; approval_policy stays the user's (#381).
+          expect(config[`mcp_servers.${descriptor.name}`]).toEqual({ command: descriptor.command, args: descriptor.args, env_vars: ['CEZ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET'], default_tools_approval_mode: 'approve' });
+          expect(config).not.toHaveProperty('approval_policy');
         }
         if (backend === 'cursor') {
           const args: string[] = rows[0];

@@ -165,3 +165,12 @@ After approval, write the implementation plan, implement and verify, commit/push
 merge freshly fetched origin/main and reverify if changed, open a draft PR closing
 hearsay-tools/cezarion#112, move its board card to In review, and monitor CI/review through pr-checks.
 No automatic ready-for-review or merge.
+
+## Deadline amendment — hearsay-tools/cezarion#1241
+
+Resume requests now accept an explicit deadline of up to 86,400 seconds; the
+600-second default and ordinary requests/waits' 1,800-second maximum remain.
+A first reply after expiry amends only `timed-out` to `replied-late`, with the
+reply ID and observation time. Other settlements stay final, and settled waits
+never reopen. The transcript emits an idempotent amendment projection and accepts
+that specific transition when replayed.
