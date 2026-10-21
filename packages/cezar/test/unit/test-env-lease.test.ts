@@ -10,6 +10,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { acquireTestEnvLease } from '../../../../.ai/scripts/test-env-lease.mjs';
 import { requirePid } from '../../src/pid-file.testkit.ts';
 
+// A temporary checkout cannot join the daemon caller's lease in another checkout.
+const fixtureEnv = { ...process.env };
+for (const key of Object.keys(fixtureEnv)) if (key.startsWith('TEST_ENV_LEASE_')) delete fixtureEnv[key];
+
 const helper = resolve(import.meta.dirname, '../../../../.ai/scripts/test-env-lease.mjs');
 
 for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
@@ -26,13 +30,17 @@ for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
     `);
     const script = join(root, 'mutation.sh');
     writeFileSync(script, `node '${localHelper}' join "$$"\necho $$ > shell.pid\nnode mutator.mjs\n`);
-    const supervisor = spawn(process.execPath, [localHelper, 'run', 'sh', script], { cwd: root, stdio: 'ignore' });
-    const closed = once(supervisor, 'close');
+    const supervisor = spawn(process.execPath, [localHelper, 'run', 'sh', script], { cwd: root, env: fixtureEnv, stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    supervisor.stderr!.on('data', data => { stderr += data; });
+    // The surviving mutator can retain stderr after the supervisor exits.
+    const closed = once(supervisor, 'exit');
     let mutator: number | undefined;
     try {
       const deadline = Date.now() + 10_000;
       while (!existsSync(join(root, 'mutator.pid'))) {
-        assert.ok(Date.now() < deadline, 'mutator must start');
+        assert.equal(supervisor.exitCode, null, `supervisor exited before mutator started: ${stderr}`);
+        assert.ok(Date.now() < deadline, `mutator must start: ${stderr}`);
         await delay(20);
       }
       mutator = requirePid(join(root, 'mutator.pid'));
@@ -48,6 +56,7 @@ for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
       supervisor.kill('SIGKILL');
       if (mutator) { try { process.kill(mutator, 'SIGKILL'); } catch {} }
       await closed;
+      supervisor.stderr!.destroy();
       rmSync(root, { recursive: true, force: true });
     }
   });
