@@ -45,6 +45,12 @@ const ACTIONS: Record<string, string> = {
   [NONE]: 'None of these actions.',
 };
 
+/** Confirm and cancel act only on a pending proposal, so they are offered only while one is shown. */
+function actionsFor(state: VoiceEngineState): Record<string, string> {
+  if (state.pendingProposal !== undefined) return ACTIONS;
+  return Object.fromEntries(Object.entries(ACTIONS).filter(([id]) => id !== 'confirm' && id !== 'cancel'));
+}
+
 const ORDINAL_WORDS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
 const POSITIONS: Record<string, string> = {
   next: 'The task after the open one.',
@@ -70,7 +76,7 @@ export function buildVoiceQuestions(state: VoiceEngineState, spans: string[], st
       'The sentence tells the cockpit to do something.',
       'The sentence is chatter, a question to someone else or unrelated speech.',
     ),
-    [QUESTION_IDS.action]: choiceQuestion('Which action does `sentence` ask for?', ACTIONS),
+    [QUESTION_IDS.action]: choiceQuestion('Which action does `sentence` ask for?', actionsFor(state)),
     [QUESTION_IDS.status]: choiceQuestion('Which task status does `sentence` name?', {
       ...VOICE_STATUS_DESCRIPTIONS,
       [NONE]: 'No status is named.',
@@ -207,8 +213,10 @@ export async function decideVoice(args: {
     const taken = request.proposal !== undefined && action.confidence >= CONFIRM_MIN;
     return done(taken ? { action: action.choice, decisionId } : none('unclear'));
   }
-  if (noulOf(answers, QUESTION_IDS.isCommand) < IS_COMMAND_MIN || action.choice === NONE) return done(none('not-a-command'));
-  if (action.confidence < ACTION_MIN) return done(none('unclear'));
+  // is_command only tells chatter from an unclear command; it never vetoes a confident action.
+  if (action.choice === NONE || action.confidence < ACTION_MIN) {
+    return done(none(noulOf(answers, QUESTION_IDS.isCommand) < IS_COMMAND_MIN ? 'not-a-command' : 'unclear'));
+  }
   const confidence = action.confidence;
 
   switch (action.choice) {

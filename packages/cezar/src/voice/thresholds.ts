@@ -3,7 +3,11 @@
  * Jev version (spec 2026-10-21-voice-mode, "How it decides"); no other file holds a threshold.
  */
 
-/** `is_command` noul below this reads as chatter. */
+/**
+ * `is_command` noul below this reads as chatter, but only when the action is `none` or below
+ * `ACTION_MIN`; it never vetoes a confident action. Live jev-1.13.0 scored real commands at 0.33–0.47
+ * ("open second failed": 0.33 with `open` at 0.98), while chatter had no action above 0.40.
+ */
 export const IS_COMMAND_MIN = 0.5;
 /** The `action` choice below this confidence is not acted on. */
 export const ACTION_MIN = 0.55;

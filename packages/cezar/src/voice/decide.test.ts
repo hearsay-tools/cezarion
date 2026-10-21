@@ -273,9 +273,57 @@ describe('decideVoice', () => {
   });
 
   it('treats chatter as not a command', async () => {
-    const { decision } = await decide(stub({ is_command: { noul: 0.3 }, action: { choice: 'open' } }));
+    const { decision } = await decide(stub({ is_command: { noul: 0.3 }, action: { choice: 'none' } }));
     expect(decision).toMatchObject({ action: 'none', reason: 'not-a-command' });
-    expect((await decide(stub({ ...command, action: { choice: 'none' } }))).decision).toMatchObject({ reason: 'not-a-command' });
+    const weak = await decide(stub({ is_command: { noul: 0.3 }, action: { choice: 'open', confidence: ACTION_MIN - 0.01 } }));
+    expect(weak.decision).toMatchObject({ action: 'none', reason: 'not-a-command' });
+  });
+
+  it('is unclear for a command with no action', async () => {
+    expect((await decide(stub({ ...command, action: { choice: 'none' } }))).decision).toMatchObject({ action: 'none', reason: 'unclear' });
+  });
+
+  // Live jev-1.13.0 scores (final fix wave, ruling R19): a confident action proceeds whatever
+  // is_command says; a weak or absent action is chatter when is_command is low.
+  describe('the command gate on live scores', () => {
+    it.each([
+      ['open first needs you', 0.35, 0.72, 'needs-you', '1', 1],
+      ['open second failed', 0.33, 0.98, 'failed', '2', 2],
+    ] as const)('opens %j at is_command %d', async (text, isCommand, confidence, status, position, expected) => {
+      const { decision } = await decide(
+        stub({ is_command: { noul: isCommand }, action: { choice: 'open', confidence }, status: { choice: status }, position: { choice: position } }),
+        { request: { text } },
+      );
+      expect(decision).toEqual({ action: 'open', decisionId: DECISION_ID, status, position: expected, confidence });
+    });
+
+    it.each([
+      ['library Vitest, build Webpack', 0.47, 0.94],
+      ['for the library use node test and for the build use vite', 0.41, 0.9],
+    ] as const)('answers %j at is_command %d', async (text, isCommand, confidence) => {
+      const { decision } = await decide(
+        stub({
+          is_command: { noul: isCommand },
+          action: { choice: 'answer', confidence },
+          q0_span: { choice: textKey('Vitest') },
+          q0_choice: { choice: textKey('Vitest') },
+        }),
+        { request: { text, openRunId: RUN_ID }, ask: ASK },
+      );
+      expect(decision).toMatchObject({ action: 'answer', answers: [{ question: 0, kind: 'option', labels: ['Vitest'] }], confidence });
+    });
+
+    it.each([
+      ['I think we should open a PR for that later', 0.12, 'open', 0.4],
+      ['we could answer that tomorrow', 0.2, 'answer', 0.35],
+      ['nice weather today', 0.05, 'none', 0.9],
+    ] as const)('keeps %j as chatter', async (text, isCommand, choice, confidence) => {
+      const { decision } = await decide(
+        stub({ is_command: { noul: isCommand }, action: { choice, confidence }, status: { choice: 'failed' }, position: { choice: 'next' } }),
+        { request: { text, openRunId: RUN_ID }, ask: ASK },
+      );
+      expect(decision).toMatchObject({ action: 'none', reason: 'not-a-command' });
+    });
   });
 
   it('is unclear below the action confidence floor', async () => {
@@ -369,8 +417,15 @@ describe('buildVoiceQuestions', () => {
     recent: [],
   };
 
+  it('offers confirm and cancel only while a proposal is pending', () => {
+    const actions = (s: VoiceEngineState) => Object.keys((buildVoiceQuestions(s, [], []).action as { options: object }).options);
+    expect(actions(state)).toEqual(['open', 'answer', 'tell', 'none']);
+    expect(actions({ ...state, pendingProposal: 'answer' })).toEqual(['open', 'answer', 'tell', 'confirm', 'cancel', 'none']);
+    expect(actions({ ...state, pendingProposal: 'tell' })).toEqual(['open', 'answer', 'tell', 'confirm', 'cancel', 'none']);
+  });
+
   it('describes every action, status and position', () => {
-    const q = buildVoiceQuestions(state, [], []);
+    const q = buildVoiceQuestions({ ...state, pendingProposal: 'answer' }, [], []);
     const options = (id: string) => (q[id]!.type === 'choice' ? (q[id] as { options: Record<string, string | null> }).options : {});
     expect(Object.keys(options('action'))).toEqual(['open', 'answer', 'tell', 'confirm', 'cancel', 'none']);
     expect(Object.values(options('action')).every((d) => typeof d === 'string' && d.length > 0)).toBe(true);
@@ -442,5 +497,9 @@ describe('decideVoice with the dry-run fake', () => {
     const proposal = { decisionId: DECISION_ID, action: 'answer' as const };
     expect((await decide(fake, { request: { text: 'yes, confirmed', proposal } })).decision).toEqual({ action: 'confirm', decisionId: DECISION_ID });
     expect((await decide(fake, { request: { text: 'what a nice day' } })).decision).toMatchObject({ reason: 'not-a-command' });
+  });
+
+  it('reads a confirmation with no proposal as unclear, since confirm is not offered', async () => {
+    expect((await decide(fake, { request: { text: 'yes, confirmed' } })).decision).toMatchObject({ action: 'none', reason: 'unclear' });
   });
 });
