@@ -21,22 +21,25 @@ export interface AskCardTarget {
   apply(answers: VoiceAnswer[]): void
   restore(): void
   unanswered(): number[]
-  send(): void
+  /** True when delivery started; false (nothing changed) while a send is pending or blocked. */
+  send(): boolean
 }
 
 /** What a thread composer lets the store do. */
 export interface ComposerTarget {
   runId: string
   getDraft(): string
-  setDraft(text: string): void
-  submit(): void
+  /** True when the draft now holds `text`; false when edits are blocked. */
+  setDraft(text: string): boolean
+  /** True when the composer started the send; false when it is disabled, stopping or busy. */
+  submit(): boolean
 }
 
-export type ProposeResult = { ok: true; replaced?: string } | { ok: false; reason: 'no-card' | 'draft-not-empty' }
+export type ProposeResult = { ok: true; replaced?: string } | { ok: false; reason: 'no-card' | 'draft-not-empty' | 'busy' }
 export type ConfirmResult =
   | { ok: true }
   | { ok: false; unanswered: { index: number; header: string }[] }
-  | { ok: false; reason: 'no-target' }
+  | { ok: false; reason: 'no-target' | 'busy' }
 
 type DropReason = 'question-closed' | 'task-closed'
 
@@ -90,10 +93,12 @@ function propose(next: VoiceProposal): ProposeResult {
   const draft = composer.getDraft()
   const replacesTell = current?.kind === 'tell' && current.runId === next.runId && draft === current.text
   if (draft.trim() !== '' && !replacesTell) return { ok: false, reason: 'draft-not-empty' }
-  if (current && !replacesTell) undo(current)
+  // Write first: a refused write (a pending Stop, a send in flight) records nothing and leaves the
+  // current proposal alone. A tell for the same run is replaced by that write itself.
+  if (!composer.setDraft(next.text)) return { ok: false, reason: 'busy' }
+  if (current && !(current.kind === 'tell' && current.runId === next.runId)) undo(current)
   proposal = next
   drop = undefined
-  composer.setDraft(next.text)
   notify()
   return current ? { ok: true, replaced: current.decisionId } : { ok: true }
 }
@@ -108,11 +113,11 @@ function confirmProposal(): ConfirmResult {
     if (missing.length > 0) {
       return { ok: false, unanswered: missing.map((index) => ({ index, header: card.headers[index] ?? '' })) }
     }
-    card.send()
+    if (!card.send()) return { ok: false, reason: 'busy' }
   } else {
     const composer = composers.get(current.runId)
     if (!composer) return { ok: false, reason: 'no-target' }
-    composer.submit()
+    if (!composer.submit()) return { ok: false, reason: 'busy' }
   }
   proposal = undefined
   notify()
@@ -157,7 +162,12 @@ export const voiceStore = {
     return () => {
       if (composers.get(target.runId) !== target) return
       composers.delete(target.runId)
-      if (proposal?.kind === 'tell' && proposal.runId === target.runId) dropProposal('task-closed')
+      if (proposal?.kind === 'tell' && proposal.runId === target.runId) {
+        // The composer can outlive this registration (the thread switched to another run): the
+        // proposed text must not become that run's draft. An edited draft stays the user's.
+        if (target.getDraft() === proposal.text) target.setDraft('')
+        dropProposal('task-closed')
+      }
     }
   },
   subscribe(listener: () => void): () => void {

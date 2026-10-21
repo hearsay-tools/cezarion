@@ -25,7 +25,7 @@ function fakeCard(overrides: Partial<AskCardTarget> = {}) {
       applied = []
     }),
     unanswered: vi.fn(() => [0, 1].filter((index) => !applied.some((answer) => answer.question === index))),
-    send: vi.fn(),
+    send: vi.fn(() => true),
     ...overrides,
   }
   return target
@@ -38,9 +38,11 @@ function fakeComposer(initial = '') {
     getDraft: () => draft,
     setDraft: vi.fn((text: string) => {
       draft = text
+      return true
     }),
     submit: vi.fn(() => {
       draft = ''
+      return true
     }),
   }
   return target
@@ -98,6 +100,19 @@ describe('voiceStore', () => {
     expect(voiceStore.confirm()).toEqual({ ok: true })
     expect(card.send).toHaveBeenCalledTimes(1)
     expect(card.restore).not.toHaveBeenCalled()
+    expect(voiceStore.getProposal()).toBeUndefined()
+  })
+
+  it('a refused send keeps the proposal, so a later confirm or cancel still works', () => {
+    let accept = false
+    const card = fakeCard({ send: vi.fn(() => accept) })
+    voiceStore.registerAskCard(card)
+    voiceStore.propose(answer('d1', option(0, 'Vitest'), other(1, 'use both')))
+    expect(voiceStore.confirm()).toEqual({ ok: false, reason: 'busy' })
+    expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+    expect(card.restore).not.toHaveBeenCalled()
+    accept = true
+    expect(voiceStore.confirm()).toEqual({ ok: true })
     expect(voiceStore.getProposal()).toBeUndefined()
   })
 
@@ -170,6 +185,57 @@ describe('voiceStore', () => {
 
     it('is refused when no composer is registered for the run', () => {
       expect(voiceStore.propose(tell('d1', 'hello'))).toEqual({ ok: false, reason: 'no-card' })
+    })
+
+    it('is refused as busy when the write is blocked, and records nothing', () => {
+      const composer = fakeComposer()
+      composer.setDraft = vi.fn(() => false)
+      voiceStore.registerComposer(composer)
+      expect(voiceStore.propose(tell('d1', 'hello'))).toEqual({ ok: false, reason: 'busy' })
+      expect(voiceStore.getProposal()).toBeUndefined()
+      expect(composer.getDraft()).toBe('')
+    })
+
+    it('a blocked tell leaves the current proposal alone', () => {
+      const card = fakeCard()
+      const composer = fakeComposer()
+      composer.setDraft = vi.fn(() => false)
+      voiceStore.registerAskCard(card)
+      voiceStore.registerComposer(composer)
+      voiceStore.propose(answer('d1', option(0, 'Vitest')))
+      expect(voiceStore.propose(tell('d2', 'hello'))).toEqual({ ok: false, reason: 'busy' })
+      expect(card.restore).not.toHaveBeenCalled()
+      expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+    })
+
+    it('a refused submit keeps the tell, its draft and cancel', () => {
+      const composer = fakeComposer()
+      let accept = false
+      composer.submit = vi.fn(() => accept)
+      voiceStore.registerComposer(composer)
+      voiceStore.propose(tell('d1', 'hello'))
+      expect(voiceStore.confirm()).toEqual({ ok: false, reason: 'busy' })
+      expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+      expect(composer.getDraft()).toBe('hello')
+      accept = true
+      expect(voiceStore.confirm()).toEqual({ ok: true })
+    })
+
+    it('unregistering the composer clears the draft it still holds, but not an edited one', () => {
+      const composer = fakeComposer()
+      const unregister = voiceStore.registerComposer(composer)
+      voiceStore.propose(tell('d1', 'hello'))
+      unregister()
+      expect(composer.getDraft()).toBe('')
+      expect(voiceStore.lastDrop()).toBe('task-closed')
+
+      resetVoiceStoreForTests()
+      const edited = fakeComposer()
+      const unregisterEdited = voiceStore.registerComposer(edited)
+      voiceStore.propose(tell('d2', 'hello'))
+      edited.setDraft('hello, and more')
+      unregisterEdited()
+      expect(edited.getDraft()).toBe('hello, and more')
     })
 
     it('fills the draft, replaces an earlier tell, and confirms through submit', () => {

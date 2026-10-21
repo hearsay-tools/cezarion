@@ -207,10 +207,11 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
         ),
       send: () => {
         // The card's own state says why it cannot send (pending, provider gate); the voice-filled
-        // answers stay on it for the user to send once it can.
-        if (!latest.current.canSend) return
+        // answers, the snapshot and the proposal stay, so a later confirm or cancel still works.
+        if (!latest.current.canSend) return false
         snapshot.current = undefined
         latest.current.sendAll()
+        return true
       },
     })
   }, [run.id, ask.id])
@@ -244,7 +245,9 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
             onSelect={(labels) => {
               if (blocked) return
               clearOtherAnswer(index)
-              if (oneTap) void delivery.send(formatAnswer(question, labels))
+              // A voice proposal never takes the one-tap path: the chip only changes the answer,
+              // and the confirmation sends what the card shows.
+              if (oneTap && !voiceAnswers) void delivery.send(formatAnswer(question, labels))
               else setQuestion(index, labels)
             }}
             onOtherToggle={() => {

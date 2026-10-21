@@ -197,8 +197,8 @@ export function ThreadView({
       voiceStore.registerComposer({
         runId: run.id,
         getDraft: () => composerRef.current?.getDraft() ?? '',
-        setDraft: (text) => composerRef.current?.setDraft(text),
-        submit: () => composerRef.current?.submit(),
+        setDraft: (text) => composerRef.current?.setDraft(text) ?? false,
+        submit: () => composerRef.current?.submit() ?? false,
       }),
     [run.id],
   )

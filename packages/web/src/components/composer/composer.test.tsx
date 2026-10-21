@@ -815,6 +815,32 @@ describe('retained submission (#164)', () => {
     expect(onSubmit).toHaveBeenCalledWith('hi', [])
   })
 
+  it('the handle reports whether it acted', async () => {
+    const handle = React.createRef<import('./composer').ComposerHandle>()
+    renderComposer({ ref: handle, stopping: true })
+    expect(handle.current?.setDraft('hi')).toBe(false)
+    expect(handle.current?.getDraft()).toBe('')
+    expect(handle.current?.submit()).toBe(false)
+    cleanup()
+    const disabled = React.createRef<import('./composer').ComposerHandle>()
+    const { onSubmit } = renderComposer({ ref: disabled, disabled: true })
+    expect(disabled.current?.submit()).toBe(false)
+    expect(onSubmit).not.toHaveBeenCalled()
+    cleanup()
+    const open = React.createRef<import('./composer').ComposerHandle>()
+    renderComposer({ ref: open })
+    let accepted: boolean | undefined
+    act(() => {
+      accepted = open.current?.setDraft('hi')
+    })
+    expect(accepted).toBe(true)
+    let started: boolean | undefined
+    await act(async () => {
+      started = open.current?.submit()
+    })
+    expect(started).toBe(true)
+  })
+
   it('marks the root while a voice proposal fills the draft', () => {
     renderComposer({ voiceProposal: true })
     expect(document.querySelector('[data-slot="composer"]')?.getAttribute('data-voice-proposal')).toBe('true')

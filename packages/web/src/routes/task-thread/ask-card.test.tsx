@@ -609,16 +609,48 @@ describe('AskCard voice proposals', () => {
     expect(mutateAsync).toHaveBeenCalledWith({ text: 'Library: date-fns' })
   })
 
-  it('does nothing on confirm while a send is blocked', () => {
+  it('a refused confirm keeps the proposal, its marks and the snapshot', () => {
     providerStatus = {
       providers: [{ provider: 'claude', status: 'not-installed', enabled: true }],
     }
     renderAsk(voiceAsk)
     propose('d1', { question: 0, kind: 'option', labels: ['Vitest'] }, { question: 1, kind: 'option', labels: ['Vite'] })
+    let result: ReturnType<typeof voiceStore.confirm> | undefined
     act(() => {
-      voiceStore.confirm()
+      result = voiceStore.confirm()
     })
+    expect(result).toEqual({ ok: false, reason: 'busy' })
     expect(mutateAsync).not.toHaveBeenCalled()
+    expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+    expect(card().getAttribute('data-voice-proposal')).toBe('true')
+    expect(document.querySelector('[data-slot="ask-voice-prompt"]')).not.toBeNull()
+    expect(document.querySelectorAll('[data-voice-filled]')).toHaveLength(2)
+    // The snapshot survived: cancel puts the card back to empty.
+    act(() => voiceStore.cancel())
+    expect(card().getAttribute('data-voice-proposal')).toBeNull()
+    expect(document.querySelector('[aria-pressed="true"]')).toBeNull()
+  })
+
+  it('a chip tapped during a voice proposal on a one-question card is not sent until confirm', async () => {
+    renderAsk(singleAsk)
+    act(() => {
+      voiceStore.propose({
+        kind: 'answer',
+        decisionId: 'd1',
+        runId: 'r1',
+        askRequestId: singleAsk.id,
+        answers: [{ question: 0, kind: 'option', labels: ['date-fns'] }],
+      })
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Luxon/ }))
+    expect(mutateAsync).not.toHaveBeenCalled()
+    expect(pressed(/Luxon/)).toBe('true')
+    expect(pressed(/date-fns/)).toBe('false')
+    act(() => {
+      expect(voiceStore.confirm()).toEqual({ ok: true })
+    })
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+    expect(mutateAsync).toHaveBeenCalledWith({ text: 'Library: Luxon' })
   })
 
   it('unmounting the card drops its proposal', () => {

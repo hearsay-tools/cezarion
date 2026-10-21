@@ -153,10 +153,12 @@ export interface ComposerHandle {
   insertAtCaret: (snippet: string) => void
   /** The draft as the textarea shows it now. */
   getDraft: () => string
-  /** Replace the draft. Ignored while a retained send is in flight, like every other edit. */
-  setDraft: (text: string) => void
-  /** Run the send button's path (`submitDraft`): the same guards, the same `onSubmit`. */
-  submit: () => void
+  /** Replace the draft. True when the draft now holds `text`; false (nothing written) while edits
+   *  are blocked by a pending Stop or a retained send, like every other edit. */
+  setDraft: (text: string) => boolean
+  /** Run the send button's path (`submitDraft`): the same guards, the same `onSubmit`. True when the
+   *  send started; false when the composer is disabled, stopping or busy. */
+  submit: () => boolean
 }
 
 const QUICK_REPLIES: Record<string, string> = { KeyA: 'Yes, approved.', KeyC: 'Continue.' }
@@ -492,9 +494,11 @@ export function Composer({
     [allowEmptySubmit, disabled, stopping, onSubmit, retainDraftUntilSuccess, clearOnSuccess, onPendingChange, setText],
   )
 
+  /** Returns whether the send started: false when the composer is disabled, stopping or busy. */
   const submitDraft = useCallback(() => {
-    if (disabled || stopping || busyRef.current) return
+    if (disabled || stopping || busyRef.current) return false
     void send(textRef.current, imagesRef.current, true)
+    return true
   }, [disabled, stopping, send])
 
   // Rides the same `pendingCaretRef` + layout-effect restore the `/` autocomplete uses, rather
@@ -515,8 +519,9 @@ export function Composer({
       // writes keep the composer's own guards: `submit` is the send button's `submitDraft`.
       getDraft: () => textRef.current,
       setDraft: (next: string) => {
-        if (editsBlocked()) return
+        if (editsBlocked()) return false
         setText(next)
+        return true
       },
       submit: submitDraft,
     }),
