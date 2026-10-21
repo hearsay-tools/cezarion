@@ -51,6 +51,19 @@ jobs:
             throw 'Expected the pre-broker mutator containment failure'
           }
           $global:LASTEXITCODE = 0
+      - name: Prove the nested broker regression
+        shell: pwsh
+        env:
+          TEST_ENV_PROOF_BASE: 'a1c38255f5e1c32a6b0d71b9647a935ac1943320'
+        run: |
+          git fetch --depth=1 origin $env:TEST_ENV_PROOF_BASE
+          $output = node --test .github/scripts/test-env-windows.test.mjs 2>&1 | Out-String
+          $failed = $LASTEXITCODE -ne 0
+          Write-Output $output
+          if (!$failed -or $output -notmatch 'cached server must survive every enclosing job') {
+            throw 'Expected the nested cached-server lifetime failure'
+          }
+          $global:LASTEXITCODE = 0
       - name: Verify production lease on native Windows
         shell: pwsh
         run: node --test .github/scripts/test-env-windows.test.mjs

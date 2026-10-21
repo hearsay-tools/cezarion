@@ -30,9 +30,11 @@ test('Windows wrapper serializes callers, preserves arguments, and kills mutator
   writeFileSync(join(root, 'cached.cjs'), 'setInterval(() => {}, 1000)');
   const script = join(root, 'mutation.sh');
   writeFileSync(script, `node .ai/scripts/test-env-lease.mjs join "$$"\nnode .ai/scripts/test-env-lease.mjs detach-app cached.log cached.cjs > cached.pid\nprintf '%s\\n' "$@" > args.txt\nnode mutator.cjs\n`);
+  const outer = join(root, 'outer.sh');
+  writeFileSync(outer, `node .ai/scripts/test-env-lease.mjs run sh mutation.sh "$@"\n`);
   const env = { ...process.env, PATH: `C:\\Program Files\\Git\\bin;${process.env.PATH}` };
   for (const key of Object.keys(env)) if (key.startsWith('TEST_ENV_LEASE_')) delete env[key];
-  const supervisor = spawn(process.execPath, [helper, 'run', 'sh', script, 'space value', '', 'trailing\\', 'quote"value'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const supervisor = spawn(process.execPath, [helper, 'run', 'sh', outer, 'space value', '', 'trailing\\', 'quote"value'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   const stage = message => console.log(`Windows lease: ${message}`);
   let log = '';
   supervisor.stdout.on('data', data => { log += data; });
@@ -66,7 +68,7 @@ test('Windows wrapper serializes callers, preserves arguments, and kills mutator
     try {
       assert.throws(() => process.kill(mutator, 0), { code: 'ESRCH' });
       stage('lease reclaimed with mutator stopped; checking cached server');
-      process.kill(cached, 0);
+      assert.doesNotThrow(() => process.kill(cached, 0), 'cached server must survive every enclosing job');
     } finally { next.release(); }
     console.log('PASS: native wrapper, shell identity, argv, exclusive lease, job cleanup, cached server survival');
   } finally {

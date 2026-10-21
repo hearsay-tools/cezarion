@@ -239,8 +239,13 @@ async function main(args) {
   });
   let broker;
   try {
-    if (job) broker = await cachedAppBroker(root, lease.token);
-    const env = { ...process.env, TEST_ENV_LEASE_TOKEN: lease.token, TEST_ENV_LEASE_ENTRY: args[2], ...(job ? { TEST_ENV_LEASE_JOB: job, TEST_ENV_LEASE_BROKER: broker.pipe } : {}) };
+    // A nested bootstrap is inside its caller's Job Object. Only the outer
+    // supervisor's broker is outside every mutation job. acquire verified the
+    // inherited token against a live holder before this pipe can be reused.
+    const inheritedBroker = job && process.env.TEST_ENV_LEASE_TOKEN === lease.token
+      ? process.env.TEST_ENV_LEASE_BROKER : undefined;
+    if (job && !inheritedBroker) broker = await cachedAppBroker(root, lease.token);
+    const env = { ...process.env, TEST_ENV_LEASE_TOKEN: lease.token, TEST_ENV_LEASE_ENTRY: args[2], ...(job ? { TEST_ENV_LEASE_JOB: job, TEST_ENV_LEASE_BROKER: inheritedBroker ?? broker.pipe } : {}) };
     const command = job ? ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', windowsScript, 'run', windowsPayload({ job, parent: process.pid, start: identity(process.pid).start, command: windowsCommand(args.slice(1)) })] : args.slice(1);
     const child = spawn(command[0], command.slice(1), {
       stdio: 'inherit', detached: !job, env,
