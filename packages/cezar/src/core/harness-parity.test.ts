@@ -65,6 +65,7 @@ import {
   exemptionFor,
   HARNESS_ADAPTERS,
   SHUTDOWN_CRITERIA,
+  MODEL_REFUSAL_CRITERIA,
   PERMISSION_CRITERIA,
   WORKFLOW_TIMEOUT_CRITERIA,
   NO_PROGRESS_CRITERIA,
@@ -1882,6 +1883,7 @@ describe('OpenCode durable input acknowledgements', () => {
 describe('harness parity — the matrix itself', () => {
   const allIds = [
     ...SHUTDOWN_CRITERIA.map(c => c.id),
+    ...MODEL_REFUSAL_CRITERIA.map(c => c.id),
     ...PERMISSION_CRITERIA.map(c => c.id),
     ...MONITORING_TURN_CRITERIA.map(c => c.id),
     ...MONITORING_ACK_CRITERIA.map(c => c.id),
@@ -1906,6 +1908,8 @@ describe('harness parity — the matrix itself', () => {
   const scenarioOf = (id: string): ScenarioName => {
     const permission = PERMISSION_CRITERIA.find(c => c.id === id);
     if (permission) return permission.scenario;
+    const refusal = MODEL_REFUSAL_CRITERIA.find(c => c.id === id);
+    if (refusal) return refusal.scenario;
     const shutdown = SHUTDOWN_CRITERIA.find(c => c.id === id);
     if (shutdown) return shutdown.scenario;
     const monitor = [...MONITORING_TURN_CRITERIA, ...MONITORING_ACK_CRITERIA, ...MONITORING_ORDER_CRITERIA].find(c => c.id === id);

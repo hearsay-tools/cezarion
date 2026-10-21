@@ -134,6 +134,7 @@ export const SCENARIOS = [
   'split-text',
   'provider-error',
   'provider-unavailable',
+  'post-success-refusal',
   'ask',
   'ask-resume',
   'plan-resume',
@@ -164,6 +165,11 @@ export const SHUTDOWN_CRITERIA = [
   // hearsay-tools/cezarion#1286: a session that ends without a signal from cezar.
   { id: 'S30', scenario: 'no-progress-leftover', name: 'a leader that exits on its own leaves nothing in its process group' },
   { id: 'S31', scenario: 'no-progress-leftover', name: 'a leader killed from outside leaves nothing in its process group' },
+] as const;
+
+/** hearsay-tools/cezarion#1351: earlier success must not swallow a later native rejection. */
+export const MODEL_REFUSAL_CRITERIA = [
+  { id: 'S32', scenario: 'post-success-refusal', name: 'bounds a provider refusal after prior success and retains its diagnosis' },
 ] as const;
 
 /** #427: portable intermediate asks, through every native message wire. */
@@ -377,6 +383,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       // Claude's mock has carried an auth-rejection branch since #430.
       'provider-error': 'mock:auth-error',
       'provider-unavailable': 'mock:auth-error',
+      'post-success-refusal': 'mock:model-refusal:always',
       ask: 'mock:ask',
       'ask-resume': 'mock:ask mock:resume-done',
       'ask-reply-late': 'mock:ask',
@@ -436,6 +443,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       // #83: 0.147 reports provider rejection on turn/completed with turn.error.
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:stream-retry',
+      'post-success-refusal': 'mock:provider-error',
       ask: 'mock:native-codex-ask',
       'ask-resume': 'mock:native-codex-ask mock:resume-done',
       'ask-reply-late': 'mock:native-codex-ask',
@@ -499,6 +507,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'split-text': 'mock:split-text',
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
+      'post-success-refusal': 'mock:provider-error',
       ask: 'mock:ask',
       'ask-resume': 'mock:ask mock:resume-done',
       'ask-reply-late': 'mock:ask-reply-late',
@@ -535,6 +544,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr-single': 'mock:crash-stderr-single', done: 'mock:done', hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text', 'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
+      'post-success-refusal': 'mock:provider-error',
       ask: 'mock:ask',
       'ask-resume': 'mock:ask mock:resume-done',
       'plan-resume': 'mock:plan mock:resume-done',
@@ -570,6 +580,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'split-text': 'mock:split-text',
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
+      'post-success-refusal': 'mock:provider-error',
       ask: 'mock:ask',
       'ask-resume': 'mock:ask mock:resume-done',
       'ask-reply-late': 'mock:ask',
@@ -622,6 +633,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'split-text': 'mock:split-text',
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
+      'post-success-refusal': 'mock:provider-error',
       ask: 'mock:ask',
       'ask-resume': 'mock:ask mock:resume-done',
       'ask-reply-late': 'mock:ask',

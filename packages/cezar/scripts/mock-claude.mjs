@@ -164,6 +164,12 @@ function writeHandoffAndTodo() {
 
 async function respond(userText, imageCount, uuid) {
   respondingUuid = uuid;
+  // hearsay-tools/cezarion#1351: native refusals before any model work.
+  if (userText.startsWith('mock:model-refusal')) {
+    const { modelRefusalReply } = await import('./mock-claude-model-refusal.mjs');
+    modelRefusalReply(userText, uuid, emit, emitReplay);
+    return;
+  }
   if (userText.includes('mock:crash-stderr')) {
     const { crashWithStderr } = await import('./mock-runner-crash.mjs');
     if (crashWithStderr(userText, '{"type":"assistant","message":')) return;
