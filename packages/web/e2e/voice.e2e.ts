@@ -57,6 +57,56 @@ function sayInPalette(sentence: string): void {
   browser.waitForFunction(`document.querySelector('${ROW}') !== null`)
 }
 
+/** Records every request the page makes to a `/voice/` route. `voiceDecide` reaches the network
+ *  through `fetchOrThrow` -> the global `fetch`, resolved per call, so wrapping `window.fetch`
+ *  sees it. Installed after navigation (a load drops it) and before the sentence is typed. */
+const INSTALL_VOICE_RECORDER = `(() => {
+  window.__voiceCalls = []
+  const original = window.fetch
+  window.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    if (url.includes('/voice/')) window.__voiceCalls.push(url)
+    return original.call(window, input, init)
+  }
+  return true
+})()`
+
+/** What the page did about the sentence: voice requests made, voice rows shown, and whether the
+ *  palette's own "Nothing matches." answer is on screen. */
+const VOICE_ACTIVITY = `({
+  calls: window.__voiceCalls.length,
+  decides: window.__voiceCalls.filter((url) => url.includes('/voice/decide')).length,
+  rows: document.querySelectorAll('${ROW}').length,
+  empty: document.body.textContent.includes('Nothing matches.'),
+})`
+
+interface VoiceActivity { calls: number; decides: number; rows: number; empty: boolean }
+
+/** Opens the task list of `server`, installs the recorder, opens ⌘K and types `sentence`. */
+function typeWithRecorder(server: string, projectId: string, sentence: string): void {
+  browser.goto(`${server}/p/${projectId}/`)
+  browser.waitForFunction(`document.querySelector('[data-slot="sidebar"]') !== null`)
+  browser.evaluate(INSTALL_VOICE_RECORDER)
+  browser.press('Control+k')
+  browser.waitForFunction(`document.activeElement?.hasAttribute('cmdk-input') === true`)
+  browser.fill(INPUT, sentence)
+  browser.waitForFunction(`document.querySelector('${INPUT}').value === '${sentence}'`)
+}
+
+/** The voice-off guard: after the palette has answered the sentence, no voice request and no voice
+ *  row appears for a window longer than the preview debounce. */
+function expectNoVoiceActivity(): void {
+  browser.waitForFunction(`document.body.textContent.includes('Nothing matches.')`)
+  // bound: with voice off nothing observable happens, so there is no completion signal to wait on
+  // and absence needs a real-time window. 1500 ms outlasts VOICE_PREVIEW_DEBOUNCE_MS (300 ms, in
+  // components/voice/use-voice-command.ts) plus the request start; a slower host can only make
+  // this pass falsely, never fail falsely.
+  browser.waitForStable<VoiceActivity>(VOICE_ACTIVITY, {
+    holdMs: 1500,
+    matcher: (activity) => activity.calls === 0 && activity.rows === 0 && activity.empty,
+  })
+}
+
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'cez-voice-'))
   const git = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { stdio: 'ignore' })
@@ -151,26 +201,31 @@ describe('voice mode with the dry-run engine', () => {
       `[...document.querySelectorAll('[data-role="user"]')].some((message) => message.textContent.includes('run the tests again'))`,
     )
   }, 90_000)
+
+  it('the absence check sees voice work when voice is on', () => {
+    // Same steps as the voice-off guard. If its window could not see a voice request or a voice
+    // row, the guard would pass on a regression; here both must show.
+    typeWithRecorder(base, project, 'open next finished')
+    browser.waitForValue<VoiceActivity>(VOICE_ACTIVITY, (activity) => activity.decides >= 1)
+    browser.waitForFunction(`document.querySelector('${ROW}') !== null`)
+  }, 90_000)
 })
 
 describe('voice mode on the shared environment', () => {
-  it('voice is absent by default', async ({ skip }) => {
+  it('voice is absent by default', async () => {
     const shared = readTestEnv().baseUrl
     const health = (await fetch(`${shared}/api/v1/health`).then((response) => response.json())) as {
       capabilities: { voice?: boolean }
     }
-    skip(health.capabilities.voice === true, 'the shared environment explicitly enabled voice')
+    // The precondition is the thing under test. `.ai/scripts/test-env-up.sh` scrubs CEZ_*, so the
+    // shared environment has voice off unless voice became default-on, the regression this guards.
+    expect(
+      health.capabilities.voice,
+      'the shared environment must run with voice off (no CEZ_VOICE); voice is on by default, which is the regression this test catches',
+    ).toBe(false)
     const sharedProject = await bootProjectId(shared)
 
-    browser.goto(`${shared}/p/${sharedProject}/`)
-    browser.waitForFunction(`document.querySelector('[data-slot="sidebar"]') !== null`)
-    browser.press('Control+k')
-    browser.waitForFunction(`document.activeElement?.hasAttribute('cmdk-input') === true`)
-    browser.fill(INPUT, 'open next finished')
-    // The sentence matches no palette row, so the palette's own answer is "Nothing matches." With
-    // voice on, a voice row takes that place; it would arrive with or before it, never after.
-    browser.waitForFunction(`document.querySelector('${INPUT}').value === 'open next finished'`)
-    browser.waitForFunction(`document.body.textContent.includes('Nothing matches.')`)
-    expect(browser.count(ROW)).toBe(0)
+    typeWithRecorder(shared, sharedProject, 'open next finished')
+    expectNoVoiceActivity()
   }, 60_000)
 })
