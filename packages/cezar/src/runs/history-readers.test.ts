@@ -36,6 +36,7 @@ const NDJSON_ALLOW_FILES = new Set([
   join('automations', 'store.ts'),
   join('data-gitignore.ts'),
   join('runs', 'history-file.ts'),
+  join('voice', 'decision-log.ts'), // its own `voice/decisions.ndjson`, not a run transcript
 ]);
 
 const EVENTS_PATH_ALLOW = [
