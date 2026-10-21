@@ -373,6 +373,25 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     for (const dir of AGENT_DIRS) expect(existsSync(join(worktree, dir, 'skills', 'lead-skill'))).toBe(false);
   });
 
+  it('an interrupted entry the user then changed stays theirs, and out of git', async () => {
+    const interrupted = async (target: string, path: string, type?: 'dir' | 'file' | 'junction') => {
+      symlinkSync(target, path, type);
+      throw new Error('interrupted');
+    };
+    await provisionSkills(worktree, [lead], [lead], { symlink: interrupted });
+    const dest = join(worktree, '.claude', 'skills', 'lead-skill');
+    rmSync(dest);
+    mkdirSync(dest);
+    writeFileSync(join(dest, 'SKILL.md'), 'MINE\n');
+    await provisionSkills(worktree, [], [lead]);
+    expect(readFileSync(join(dest, 'SKILL.md'), 'utf8')).toBe('MINE\n');
+    expect(await status(worktree)).toBe('');
+    await provisionSkills(worktree, [], [{ ...lead, body: 'still lead' }]);
+    expect(readFileSync(join(dest, 'SKILL.md'), 'utf8')).toBe('MINE\n');
+    await removeProvisionedSkills(worktree);
+    expect(readFileSync(join(dest, 'SKILL.md'), 'utf8')).toBe('MINE\n');
+  });
+
   it('a copied skill follows its source when the source changes in place', async () => {
     const refuse = async () => { throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); };
     await provisionSkills(worktree, [lead], [lead, helper], { symlink: refuse });

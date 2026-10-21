@@ -85,12 +85,20 @@ const TEAM_MARKER = '.cezar-team-skill.json';
 export interface ProvisionedEntry {
   /** `/`-joined, relative to the worktree. */
   path: string;
-  /** `pending` is saved before an entry is created and replaced once it exists: a pass that
-   *  died between the two leaves a path that is cezar's, kept out of git, and rewritten next time. */
+  /** `pending` is saved before an entry is created, with the identity the finished entry will
+   *  have, and replaced once it exists. A pass that died between the two leaves a path that stays
+   *  out of git; it is rewritten only while it still matches, so one the user changed stays theirs. */
   kind: 'link' | 'copy' | 'generated' | 'team-copy' | 'ignore-file' | 'pending';
   skill?: string;
   source?: string;
   identity: string;
+  /** A pending entry's other finished form: the copy a failed link falls back to. */
+  alternate?: string;
+}
+
+/** `current` is what cezar left at the entry's path (either finished form of a pending one). */
+function matches(record: ProvisionedEntry, current: string | null): boolean {
+  return current !== null && (current === record.identity || current === record.alternate);
 }
 
 export interface SkillManifest {
@@ -181,7 +189,6 @@ async function digestInto(hash: Hash, path: string, rel: string): Promise<void> 
 async function identityOf(path: string, kind: ProvisionedEntry['kind']): Promise<string | null> {
   const stat = await lstat(path).catch(() => null);
   if (!stat) return null;
-  if (kind === 'pending') return 'pending';
   if (stat.isSymbolicLink()) return `link:${await readlink(path)}`;
   if (kind === 'team-copy') {
     const marker = await readFile(join(path, TEAM_MARKER), 'utf8').catch(() => null);
@@ -189,6 +196,21 @@ async function identityOf(path: string, kind: ProvisionedEntry['kind']): Promise
   }
   const hash = createHash('sha256');
   await digestInto(hash, path, '');
+  return `tree:${hash.digest('hex')}`;
+}
+
+/** The identity `identityOf` reads from a directory holding exactly `files` (no subdirectories). */
+function treeIdentity(files: ReadonlyArray<{ name: string; link?: string; content?: string | Buffer }>): string {
+  const hash = createHash('sha256');
+  hash.update('D \n');
+  for (const file of [...files].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    if (file.link !== undefined) hash.update(`L ${file.name} ${file.link}\n`);
+    else {
+      hash.update(`F ${file.name} `);
+      hash.update(file.content ?? '');
+      hash.update('\n');
+    }
+  }
   return `tree:${hash.digest('hex')}`;
 }
 
@@ -371,28 +393,48 @@ async function provisionPass(
           wanted.add(rel);
           continue;
         }
-        if (record && (record.kind === 'pending' || current === record.identity)) await removePath(dest);
-        else if (current !== null) {
+        if (record && matches(record, current)) await removePath(dest);
+        else if (record?.kind === 'pending' && current !== null) {
+          // An interrupted entry that no longer matches: maybe the user's now. Leave it, ignored.
+          wanted.add(rel);
+          continue;
+        } else if (current !== null) {
           // Not cezar's (tracked, or the user's own), or replaced since: leave it.
           records.delete(rel);
           continue;
         }
-        records.set(rel, { path: rel, kind: 'pending', skill: skill.name, identity: 'pending' });
-        await save();
+        const pending = async (identity: string, alternate?: string) => {
+          records.set(rel, { path: rel, kind: 'pending', skill: skill.name, identity, ...(alternate ? { alternate } : {}) });
+          await save();
+        };
         await mkdir(dirname(dest), { recursive: true });
         let kind: ProvisionedEntry['kind'];
         if (plan.how === 'link-dir') {
+          await pending(`link:${plan.target}`);
           kind = await makeLink(plan.target, dest, linkType).then(
             () => 'link' as const,
-            () => cp(plan.target, dest, { recursive: true, dereference: true }).then(() => 'copy' as const),
+            async () => {
+              await pending(`link:${plan.target}`, (await identityOf(plan.target, 'copy')) ?? undefined);
+              await cp(plan.target, dest, { recursive: true, dereference: true });
+              return 'copy' as const;
+            },
           );
         } else if (plan.how === 'link-file') {
+          await pending(treeIdentity([{ name: 'SKILL.md', link: plan.target }]));
           await mkdir(dest);
           kind = await makeLink(plan.target, join(dest, 'SKILL.md'), 'file').then(
             () => 'generated' as const,
-            () => copyFile(plan.target, join(dest, 'SKILL.md')).then(() => 'copy' as const),
+            async () => {
+              await pending(
+                treeIdentity([{ name: 'SKILL.md', link: plan.target }]),
+                treeIdentity([{ name: 'SKILL.md', content: await readFile(plan.target) }]),
+              );
+              await copyFile(plan.target, join(dest, 'SKILL.md'));
+              return 'copy' as const;
+            },
           );
         } else {
+          await pending(treeIdentity([{ name: 'SKILL.md', content: plan.text }]));
           await mkdir(dest);
           await writeFile(join(dest, 'SKILL.md'), plan.text, 'utf8');
           kind = 'generated';
@@ -412,6 +454,9 @@ async function provisionPass(
     for (const record of [...records.values()]) {
       if (record.kind === 'ignore-file' || wanted.has(record.path)) continue;
       if (await ownedAt(worktree, record, contained)) await removePath(join(worktree, record.path));
+      else if (record.kind === 'pending' && (await contained(record.path)) && (await lstat(join(worktree, record.path)).catch(() => null))) {
+        continue; // changed since the interrupted pass: never deleted, still kept out of git
+      }
       records.delete(record.path);
     }
     await save();
@@ -448,13 +493,12 @@ export function removeProvisionedSkills(worktree: string): Promise<void> {
   });
 }
 
-/** The recorded path still lands in the worktree and is what cezar left there (a pending one
- *  always is: only an interrupted pass of cezar's leaves it). */
+/** The recorded path still lands in the worktree and is what cezar left there. */
 async function ownedAt(
   worktree: string,
   record: ProvisionedEntry,
   contained: (rel: string) => Promise<boolean>,
 ): Promise<boolean> {
   if (!(await contained(record.path))) return false;
-  return (await identityOf(join(worktree, record.path), record.kind)) === record.identity;
+  return matches(record, await identityOf(join(worktree, record.path), record.kind));
 }
