@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Load only when configured: ordinary mock turns retain their event-loop ordering.
+const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
+  : (await import('./mock-failure-control.mjs')).readFailureControl();
 // Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
 import { spawn as watchdogSpawn } from 'node:child_process';
 import { closeSync as watchdogCloseInput, renameSync as watchdogRename, writeFileSync as watchdogWrite, existsSync as promptAckReleased } from 'node:fs';
@@ -308,7 +311,7 @@ async function handle(command) {
     send({ type: 'turn_start' });
     sendText(['parity split text', '\n\n', 'CEZ:', 'MONITORING']);
     sendTurnEnd();
-  } else if (command.type === 'prompt' && command.message.includes('mock:provider-error')) {
+  } else if (command.type === 'prompt' && (failureControl ? (await failureControl.failureFor(command.message)) === 'provider' : command.message.includes('mock:provider-error'))) {
     // An assistant `message_end` whose stopReason is `error`, carrying the
     // transport diagnostic — wire shape copied from
     // `src/core/__fixtures__/pi/provider-error.ndjson`. #54: this arrived

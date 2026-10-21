@@ -935,9 +935,10 @@ describe('task thread', () => {
       const box = (sel) => { const r = document.querySelector(sel)?.getBoundingClientRect(); return r ? { left: Math.round(r.left), width: Math.round(r.width) } : null }
       const small = [...card.querySelectorAll('button, a')].filter(el => el.getClientRects().length && el.getBoundingClientRect().height < 44)
         .map(el => (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 40))
-      // The folded status must be painted whole, not squeezed to an ellipsis or clipped by the card.
-      const status = card.querySelector(':scope > button [data-slot="run-activity-status"] .truncate')
-      const statusCut = status ? status.scrollWidth > status.clientWidth + 1 || status.getBoundingClientRect().right > card.getBoundingClientRect().right : null
+      // A summary keeps or removes each whole value, including the folded status.
+      const status = card.querySelector(':scope > button [data-summary-item="status"]')
+      const statusCut = !status || (status.dataset.hidden !== 'true' &&
+        (status.scrollWidth > status.clientWidth + 1 || status.getBoundingClientRect().right > status.parentElement.getBoundingClientRect().right + 1))
       // A two-part row meta never paints half a word: what it keeps sits whole across its row,
       // what it drops is either whole on its line or wrapped wholly onto the clipped one below.
       // The open card scrolls on a short phone, so the kept part is measured across, not down.
@@ -951,16 +952,21 @@ describe('task thread', () => {
         const clip = part.parentElement.getBoundingClientRect()
         return !inside(r, clip) && r.top < clip.bottom
       }).map(part => part.textContent)
-      const usageKeep = card.querySelector('[data-slot="run-activity-usage"] [data-slot="run-activity-meta-keep"]')?.textContent ?? null
-      return { state: card.dataset.state, overflow: document.documentElement.scrollWidth - innerWidth, statusCut, metaCut, usageKeep,
+      const summaryCut = [...card.querySelectorAll('[data-slot="activity-summary"] > [data-hidden="false"]')]
+        .filter(part => !inside(part.getBoundingClientRect(), part.parentElement.getBoundingClientRect())).map(part => part.dataset.summaryItem)
+      const usageItems = [...card.querySelectorAll('[data-slot="run-activity-usage"] [data-summary-item]')]
+      const removalOrder = ['tokens', 'cost', 'provider', 'effort', 'model'].filter(id => usageItems.some(item => item.dataset.summaryItem === id))
+      const removed = removalOrder.filter(id => usageItems.find(item => item.dataset.summaryItem === id).dataset.hidden === 'true')
+      const usageOrderValid = removed.every((id, index) => id === removalOrder[index])
+      return { state: card.dataset.state, overflow: document.documentElement.scrollWidth - innerWidth, statusCut, metaCut, summaryCut, usageOrderValid,
         summaryHeight: Math.round(summary.getBoundingClientRect().height), small,
         composer: box('[data-slot="composer"]'), transcript: box('[data-slot="thread-rows"]') }
     })()`
-    type Sample = { state: string; overflow: number; statusCut: boolean | null; metaCut: string[]; usageKeep: string | null; summaryHeight: number; small: string[]; composer: { left: number; width: number }; transcript: { left: number; width: number } | null }
+    type Sample = { state: string; overflow: number; statusCut: boolean; metaCut: string[]; summaryCut: string[]; usageOrderValid: boolean; summaryHeight: number; small: string[]; composer: { left: number; width: number }; transcript: { left: number; width: number } | null }
     browser.evaluate(`document.querySelector('${SESSION_ACTIVITY_SUMMARY}[aria-expanded="true"]')?.click()`)
     const layoutSelectors = {
       card: '[data-slot="run-activity-dock"]',
-      status: '[data-slot="run-activity-status"] .truncate',
+      status: '[data-slot="run-activity-status"]',
       keptMeta: '[data-slot="run-activity-meta-keep"]',
       droppedMeta: '[data-slot="run-activity-meta-drop"]',
       rows: '[data-slot="run-activity-dock"] button',
@@ -971,7 +977,8 @@ describe('task thread', () => {
     browser.recordLayout('folded', layoutSelectors)
     expect(folded.overflow).toBeLessThanOrEqual(0)
     expect(folded.statusCut).toBe(false)
-    // One 44px summary; on a narrow phone its status may take a second line inside it.
+    expect(folded.summaryCut).toEqual([])
+    // One 44px summary; narrower rows remove whole values by priority.
     expect(folded.summaryHeight).toBeGreaterThanOrEqual(44)
     if (width >= 768) expect(folded.summaryHeight).toBeLessThan(60)
     if (width < 768) expect(folded.small).toEqual([])
@@ -983,7 +990,8 @@ describe('task thread', () => {
     expect(expanded.state).toBe('open')
     expect(expanded.overflow).toBeLessThanOrEqual(0)
     expect(expanded.metaCut).toEqual([])
-    expect(expanded.usageKeep).toBe('$12')
+    expect(expanded.summaryCut).toEqual([])
+    expect(expanded.usageOrderValid).toBe(true)
     if (width < 768) expect(expanded.small).toEqual([])
     expect(expanded.composer).toEqual(folded.composer)
     expect(expanded.transcript).toEqual(folded.transcript)

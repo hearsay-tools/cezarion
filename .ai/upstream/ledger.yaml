@@ -42,6 +42,11 @@ scans:
     since: 7af006dea4b4fa6f6c98f46ba08d5759712c3fbc
     added: 11
     report: scans/2026-10-13.md
+  - date: 2026-10-19
+    upstreamHead: 8908221ae1a278dab6dca366316a3eed8c95e540
+    since: 42568d82e185296479a9cd9a8ec769f43d36c7ec
+    added: 63
+    report: scans/2026-10-19.md
 entries:
   - sha: 3c8657688d48b7391d985560e1b0acda28e5ad9e
     pr: 943
@@ -1833,3 +1838,444 @@ entries:
     status: pending
     hint:
       conflicts: 15
+  - sha: 4020c2aba2bc2a2fd7ab89c46664f31d716c0e9a
+    pr: 1415
+    title: "feat(automations): pull_request.closed and pull_request.merged GitHub triggers (#1415)"
+    date: 2026-10-13
+    status: pending
+    hint:
+      conflicts: 10
+  - sha: a51b6c8e67d2a37f013f987d2f1d35bd060b0c62
+    pr: 1416
+    title: "ci: shard the vitest suites and drop the mock's demo pacing in tests (#1416)"
+    date: 2026-10-13
+    status: pending
+    hint:
+      conflicts: 6
+  - sha: b7af5e0c9cf7e1a211885b5b0272fa3d1b0c8384
+    pr: 1414
+    title: "fix(web): show the pointer cursor on buttons and menu items (#1414)"
+    date: 2026-10-13
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: aa708491d055e8e35249173badeca8f81487cd59
+    pr: 1401
+    title: "docs(specs): outbound webhooks — signed task events per project (#1401)"
+    date: 2026-10-14
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: ae60471e94331310b72524540a4d35fb9834e7fc
+    pr: 1418
+    title: "chore(release): bump the release set to 0.15.1 and add the changelog entry (#1418)"
+    date: 2026-10-14
+    status: pending
+    hint:
+      conflicts: 8
+  - sha: 3e6411b498bee8636186b7ed2519178fce8d43a6
+    pr: 1417
+    title: "feat(web): sidebar pin + archive row actions, Pinned section in the Tasks table (#1417)"
+    date: 2026-10-14
+    status: pending
+    hint:
+      conflicts: 7
+  - sha: e4065ae717adfd22097f2c14e997f0d4082082fe
+    pr: 1428
+    title: "fix(server): gate runs on the selected agent account, not only the default login (#1428)"
+    date: 2026-10-14
+    status: pending
+    hint:
+      conflicts: 3
+  - sha: ad10dcffd4e94f3c5554298ea0632e887e9a7c8f
+    pr: 1430
+    title: "fix(server): adopt an existing PR and retry transient gh pr create failures (#1430)"
+    date: 2026-10-14
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: 49af8b67e257cf1beca1608a0f1fabfa164a5b65
+    pr: 1431
+    title: "fix(server): open the login when Connect cannot read an agent's auth state, and observe sign-in (#1431)"
+    date: 2026-10-14
+    status: pending
+    hint:
+      conflicts: 10
+  - sha: 5017e291a9e7bab2a279d21389ec698e1132ffd1
+    pr: 1436
+    title: "fix(server): outlive the browser's keep-alive pool so a POST never lands on a closed socket (#1436)"
+    date: 2026-10-14
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: 5af13cabbb13577a738ecb794e93d62f13fdfea5
+    pr: 1429
+    title: "fix(skills): install a task's selected skill and its companions into its worktree (#1429)"
+    date: 2026-10-14
+    status: pending
+    hint:
+      conflicts: 5
+  - sha: d59b3e7fb1b024a7e00e645c4a99f15a18f37ee4
+    pr: 1435
+    title: "fix(runs): continue in a fresh session when Claude has pruned the conversation (#1435)"
+    date: 2026-10-14
+    status: pending
+    hint:
+      conflicts: 8
+  - sha: 8c2e6669a2afa98168c67de10c2f848c62fa51e3
+    pr: 1441
+    title: "feat(telemetry): report the transport cause of 'cannot reach the cezar server' errors (#1437) (#1441)"
+    date: 2026-10-14
+    status: pending
+    hint:
+      conflicts: 5
+  - sha: 4a46746ba6d2c21eab746a346937386912943452
+    pr: 1390
+    title: "fix(ui): stop rebuilding foreign issue and PR numbers into the project's repo (#819, #854) (#1390)"
+    date: 2026-10-14
+    status: pending
+    hint:
+      conflicts: 5
+  - sha: 40cc745a0ed1ddb99bd2449b6637648f69fdfa89
+    pr: 1440
+    title: "feat(telemetry): count session-resume fallbacks and task failures (#1440)"
+    date: 2026-10-14
+    status: pending
+    hint:
+      conflicts: 8
+  - sha: b1f5c752bf5c911ded0642c52d51f685ffef333f
+    pr: 1426
+    title: "feat: GitHub Enterprise as a GitHub provider on any domain (#1426)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 13
+  - sha: a9cc59b6fba6b24ea9b7c6944ecbd447ceafda90
+    pr: 1443
+    title: "chore(release): bump the release set to 0.15.2 and add the changelog entry (#1443)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 8
+  - sha: dd6598ccd0bed5ac1353e9750c2d9f3efb16beb1
+    pr: 1451
+    title: "fix: accept attachment-only tasks on POST /runs (telemetry 18c930de) (#1451)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 4
+  - sha: 75efeaacb381a17c3bdbbf74325ff5d42415a564
+    pr: 1447
+    title: "fix(skills): follow a dropped skills-update apply to its result (#1447)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 6
+  - sha: 92c2d5bd78b57a8210f5af590c379131cd0c53a7
+    pr: 1452
+    title: "feat(telemetry): label task archive/pin events with the button used, not the task status (#1452)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 10
+  - sha: 31c408009920f04d88345a4831f85b5a5f050ee6
+    pr: 1448
+    title: "feat(attachments): stage uploads on attach — up to 20 per message, 20 MB of images (#1448)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 22
+  - sha: d1c0c02eddf4f9e4a46c5dc63692c67054a5b618
+    pr: 1453
+    title: "fix(dictation): hide the mic where it can't work, group dictation failures as one (telemetry 38ccdbdc) (#1453)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 6
+  - sha: ad016a8ae414798963593eaa83b244d577fa3279
+    pr: 1456
+    title: "fix(provider-auth): probe Copilot with --no-auto-update and name a non-ACP copilot (telemetry 298c2e1f) (#1456)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: 5deb78e9d96ec171faaeb989c5858524a69c500b
+    pr: 1454
+    title: "fix(cockpit): reload once when a stale shell's chunk fails to load (#1454)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: 1dc4076828450338860ff6f0bd3f2d4ab51415bd
+    pr: 1455
+    title: "fix(cockpit): hide Terminal resume in hosted mode (telemetry f179cc7d) (#1455)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: cd3f830165ece54ba5bc188a23cc4c68f464d017
+    pr: 1458
+    title: "fix(pr): survive a dropped response to the PR publish (telemetry 9119d21a) (#1458)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: 22a2d64ce2dc473861f327651f173a0a0144f1f2
+    pr: 1462
+    title: "fix(repo): don't offer to switch to a branch another worktree holds (telemetry da5ca728) (#1462)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 5
+  - sha: 569f7ea37c8289d3ecc5ff8f3added7660a0b200
+    pr: 1461
+    title: "fix(install): retry with a cezar-owned npm cache when ~/.npm is root-owned (telemetry 7a3f659a) (#1461)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 3
+  - sha: dfe24a7742a8760bc58c1a94a8e69a82c384ac5d
+    pr: 1463
+    title: "chore(desktop): bump the shell to 0.1.7 for the npm-cache EACCES fix (#1461) (#1463)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 4
+  - sha: c1eb6d045dea587873dfeb2b50b3f17e7067f1e1
+    pr: 1460
+    title: "fix(spawn): run Windows npm .cmd shims as node <script> (telemetry a330744e) (#1460)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 8
+  - sha: d5eebd18e4f06f37bead75c04207329440b61df2
+    pr: 1459
+    title: "fix(pr): don't offer or push an empty branch as a PR (telemetry 16aef26d) (#1459)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 11
+  - sha: 8f8dcb5fb71c1d59ebdd38c0761af0eb5bbdcc72
+    pr: 1466
+    title: "fix(provider-auth): re-ask a CLI that exits 0 having printed nothing (telemetry 35838a52) (#1466)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: c9244fbd5f9741aa9a0ff5e303862c5134bdac67
+    pr: 1467
+    title: "fix(thread): wait out a session gap instead of failing a reply with 409 session closed (telemetry 1408d7cb) (#1467)"
+    date: 2026-10-15
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: a0b7d06a6e5405c9f815162d629ceb26fb4a606f
+    pr: 1433
+    title: "feat(web): sort Tasks by last activity, with a Recent/Created toggle (#1433)"
+    date: 2026-10-16
+    status: pending
+    hint:
+      conflicts: 20
+  - sha: 44dcb23ad7e47535648052f94aa6e64e4ec1df86
+    pr: 1470
+    title: "fix(spawn): run npm's .ps1 shims and native-binary shims without a shell (telemetry 3626ac13) (#1470)"
+    date: 2026-10-16
+    status: pending
+    hint:
+      conflicts: 4
+  - sha: 37f3c16e9f617604050747f2fd1050f8852a990b
+    pr: 1473
+    title: "fix(thread): treat 'run is still active' on a one-click Continue as already live, not a failure (telemetry 77117b95) (#1473)"
+    date: 2026-10-16
+    status: pending
+    hint:
+      conflicts: 6
+  - sha: a8cf7ab43b642ec4009b4930ce9a9a765261068b
+    pr: 1474
+    title: "test(thread): pin the review send-back recovery; footer Continue is not a message_sent (#1473 review) (#1474)"
+    date: 2026-10-16
+    status: pending
+    hint:
+      conflicts: 4
+  - sha: 400f97881f0307b5ffacced52878e4b70bd568d3
+    pr: 1472
+    title: "fix(automations): copy filters and skill steps from another project's automation; flag prompt-only author conditions (#1472)"
+    date: 2026-10-16
+    status: pending
+    hint:
+      conflicts: 8
+  - sha: 1c8e9fa3f29de6b0300e561d4feda29a96d6918a
+    pr: 1424
+    title: "feat: task terminal and workspace layouts from brutus, with the terminal as a view (#1424)"
+    date: 2026-10-16
+    status: pending
+    hint:
+      conflicts: 42
+  - sha: 7119098571b982942abd9241f3bf25ce6d59e20a
+    pr: 1481
+    title: "feat(telemetry): report agent errors shown in a thread; offer Update for an outdated agent CLI (#1481)"
+    date: 2026-10-16
+    status: pending
+    hint:
+      conflicts: 10
+  - sha: a93e0535700636aef35e5a618f55b4d4a451e626
+    pr: 1495
+    title: "feat(worktrees): run lifecycle scripts with explicit recovery (#1495)"
+    date: 2026-10-17
+    status: pending
+    hint:
+      conflicts: 36
+  - sha: 9e85d8dbce8093ade051896176494a3cb323127d
+    pr: 1413
+    title: "feat(settings): one full-screen settings surface with a shared sidebar (#1413)"
+    date: 2026-10-17
+    status: pending
+    hint:
+      conflicts: 24
+  - sha: 3cf33c9dae82c7bd516beb6874dc6633b997fa84
+    pr: 1482
+    title: "fix(composer): accept HTML, CSV, JSON and source files as attachments (telemetry 6c4b3066) (#1482)"
+    date: 2026-10-17
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: bccdadb5f9674ce74132b78134909dabcbe962d3
+    pr: 1492
+    title: "feat: Design Mode and Preview as the task workspace's Browser view (supersedes #1422, #1423) (#1492)"
+    date: 2026-10-17
+    status: pending
+    hint:
+      conflicts: 40
+  - sha: 2794022b27808c756d32c0d51e7c2453b6b8d502
+    pr: 1501
+    title: "test(worktrees): a settled lifecycle operation waits for its record to release it (#1501)"
+    date: 2026-10-17
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: 0e616e4bb1f1c2eeaa6011ef778d3dcef4fa09cd
+    pr: 1497
+    title: "fix(provider-gate): name a signed-out selected account, and check it before Start (telemetry ac53a6ef) (#1497)"
+    date: 2026-10-17
+    status: pending
+    hint:
+      conflicts: 7
+  - sha: 6f1742342f32064294f75f3df248eedd0b296502
+    pr: 1500
+    title: "fix(opencode): answer permission prompts so a run never hangs on one (#1500)"
+    date: 2026-10-18
+    status: pending
+    hint:
+      conflicts: 3
+  - sha: 2a7ea8cf02d35a364d680ed881948f5a90dbc008
+    pr: 1503
+    title: "fix(provider-auth): resolve Cursor's cursor-agent first, read older CLIs' plain status (telemetry 8d304c50) (#1503)"
+    date: 2026-10-18
+    status: pending
+    hint:
+      conflicts: 7
+  - sha: 04b49b0de23c61de2a85614385a10550410d5b81
+    pr: 1502
+    title: "fix(telemetry): scrub file names from toast reports so attachment refusals group (telemetry 0f1255b6) (#1502)"
+    date: 2026-10-18
+    status: pending
+    hint:
+      conflicts: 4
+  - sha: 2e0dc7402c83ef2773f056edebc43d8f1ff166ce
+    pr: 1504
+    title: "fix(provider-auth): report a version-manager shim with nothing behind it as not-installed (telemetry f67df9d2) (#1504)"
+    date: 2026-10-18
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: 01f21951ab0f671dc4541f2c076b1706316c4d0f
+    pr: 1457
+    title: "fix(web): highlight each diff hunk and side separately (#1457)"
+    date: 2026-10-18
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 6d52dfbfc0e35680712df6a76fddb804c2f96ff7
+    pr: 1505
+    title: "feat(web): ⌘P task palette — act on tasks, switch fast, keyboard shortcuts (#1505)"
+    date: 2026-10-18
+    status: pending
+    hint:
+      conflicts: 26
+  - sha: c732937995afcb5cc683ee643493cd3aa56b2289
+    pr: 1510
+    title: "fix(attachments): take any file as a path-only binary attachment instead of refusing it (telemetry 48850f4a) (#1510)"
+    date: 2026-10-18
+    status: pending
+    hint:
+      conflicts: 7
+  - sha: 45e7996d786154abdcbd7836d4ac90402b7e3fc4
+    pr: 1511
+    title: "fix(provider-auth): latch a runtime auth rejection on the agent account that ran (telemetry 9e4a95db) (#1511)"
+    date: 2026-10-18
+    status: pending
+    hint:
+      conflicts: 7
+  - sha: ee2a5acd4999a73a11ddc0859b0fdfaf8e759a64
+    pr: 1512
+    title: "feat(self-update): update when idle (#1512)"
+    date: 2026-10-19
+    status: pending
+    hint:
+      conflicts: 12
+  - sha: bd452eec8749021f613d971321a66a024454371b
+    pr: 1514
+    title: "fix(windows): retry transient EPERM/EBUSY when atomically replacing state files (telemetry 4a7c9f6c) (#1514)"
+    date: 2026-10-19
+    status: pending
+    hint:
+      conflicts: 3
+  - sha: 3c6ecac9a0582281805800b8785e0c14028ab355
+    pr: 1515
+    title: "fix(windows): retry transient EPERM in the async atomic writers too (#1515)"
+    date: 2026-10-19
+    status: pending
+    hint:
+      conflicts: 8
+  - sha: 6928bc8d47daa5c232aa3eb2d4468b0419e926d5
+    pr: 1516
+    title: "fix(provider-auth): re-ask a status probe a signal interrupted instead of reporting it (telemetry ce0c5d1f) (#1516)"
+    date: 2026-10-19
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: 8a386fe5641f0dafaf2811423259430d7dd7c3af
+    pr: 1517
+    title: "fix(provider-auth): ask a timed-out status probe once more with a longer budget (telemetry e316b141) (#1517)"
+    date: 2026-10-19
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: 9ea11bc6531bb8416ada2be242c2937851112ed8
+    pr: 1518
+    title: "fix(agent-profiles): resolve an unregistered boot project when saving an account selection (telemetry d81f8db7) (#1518)"
+    date: 2026-10-19
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: dad7794a38f4a67730b8d4e26039ae068d9899e8
+    pr: 1519
+    title: "fix(provider-auth): a hung status probe keeps a recent connected answer (telemetry b28d2993) (#1519)"
+    date: 2026-10-19
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: f9190cda81ae08f4a2933bdca8350bc54b28438c
+    pr: 1520
+    title: "fix(runs): never prune a live run or its dispatch ancestors (telemetry 73c6e796) (#1520)"
+    date: 2026-10-19
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: 8908221ae1a278dab6dca366316a3eed8c95e540
+    pr: 1521
+    title: "fix(web): stop the host widget's per-frame effect setState from tripping React #185 (telemetry 21762d83) (#1521)"
+    date: 2026-10-19
+    status: pending
+    hint:
+      conflicts: 4

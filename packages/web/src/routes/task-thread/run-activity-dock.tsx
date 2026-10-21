@@ -20,7 +20,7 @@ import { ReferenceStatusProvider, useConflictingPullRequests } from '@/component
 import { StatusDot } from '@/components/status-dot'
 import { Link } from '@/lib/project-router'
 import { queuePositions } from '@/lib/task-groups'
-import { formatCost, taskIssueUrl, taskPrUrl, workflowLabel } from '@/lib/tasks-table'
+import { formatCost, referenceKey, taskIssueUrl, taskPrUrl, workflowLabel, type TaskReference } from '@/lib/tasks-table'
 import { usageMetricVisibility } from '@/lib/token-metrics'
 import { cn } from '@/lib/utils'
 import { useIsDesktop } from '@/lib/use-desktop'
@@ -30,11 +30,13 @@ import { PlanList, planCounts } from './plan-dock'
 import { collectSubagents, subagentCounts } from './subagent-dock'
 import { StepRail, activeStepIndex, railVisual } from './step-rail'
 import { WorkerActivitySection, useWorkersVerdict } from './run-relationships'
-import { ActivityRow, meterText, type MetaParts } from './run-activity-row'
+import { ActivityRow, meterText } from './run-activity-row'
+import { ActivitySummary, type SummaryItem } from './activity-summary'
+import { ActivityReferences } from './activity-references'
 import { useAgentIdentity } from './run-agent-identity'
 import { isSessionOpen, resumeHint, runActionFlags } from './run-actions'
 import { runStatusLine } from './run-status'
-import { RunWaitDetails, hasWaitDetails } from './run-waits'
+import { RunWaitDetails, ciWaitReferences, hasWaitDetails } from './run-waits'
 import { BranchCopy, LinkedReferences, WorkspaceTools, useResumeInTerminal, useRunReferenceRequests } from './run-workspace'
 import { latestPlanEntries, type ThreadState } from './thread-state'
 
@@ -78,6 +80,7 @@ export function RunActivityDock(props: {
     <ReferenceStatusProvider projectId={referenceProjectId} repoBase={repoBase} requests={requests}>
       <SessionActivityCard
         {...props}
+        references={references}
         prNumbers={requests.filter((request) => request.kind === 'PR').map((request) => request.number)}
         hasReferences={references.length > 0 || Boolean(taskPrUrl(props.run)) || Boolean(taskIssueUrl(props.run, repoBase))}
       />
@@ -91,14 +94,17 @@ function SessionActivityCard({
   onOpenWorker,
   prNumbers,
   hasReferences,
+  references,
 }: {
   run: ApiRun
   currentThread: ThreadState
   onOpenWorker?: (id: string) => void
   prNumbers: number[]
   hasReferences: boolean
+  references: TaskReference[]
 }) {
   const desktop = useIsDesktop()
+  const identity = useAgentIdentity(run)
   const [open, setOpen] = useState(() => openByRun.get(run.id) ?? desktop)
   // Nested rows start closed on every viewport — the expanded card is a list of section heads,
   // and a reader opens the one they came for. Workers are the exception, open by default so
@@ -173,6 +179,29 @@ function SessionActivityCard({
     ? <CircleCheckIcon aria-hidden className="size-3.5 shrink-0 text-success" />
     : <StatusDot tone={line.attention.tone} shape={line.attention.shape} pulse={line.attention.pulse} />
   const conflictText = conflicts.length === 1 ? `PR #${conflicts[0]} conflicts` : `${conflicts.length} PRs conflict`
+  const waitReferences = ciWaitReferences(run)
+  const summaryReferences = [...new Map([...references, ...waitReferences].map(reference => [referenceKey(reference), reference])).values()]
+  // The saved canonical identity names the provider. The display helper can omit an identity
+  // that repeats the model, and a runner name does not identify who served the model.
+  const provider = run.modelIdentity?.includes('/') ? run.modelIdentity.split('/')[0] : undefined
+  const agentSummary: SummaryItem[] = [
+    ...(provider ? [{ id: 'provider', priority: 2, content: provider }] : []),
+    { id: 'model', priority: 4, content: identity.model },
+    { id: 'effort', priority: 3, content: identity.effort },
+    ...(cost ? [{ id: 'cost', priority: 1, content: cost }] : []),
+    ...(tokens ? [{ id: 'tokens', priority: 0, content: tokens }] : []),
+  ]
+  const foldedSummary: SummaryItem[] = [
+    { id: 'status', priority: 5, content: <span data-slot="run-activity-status" className={cn('inline-flex items-center gap-1.5', allComplete ? 'text-success' : failed && 'text-danger')}>{glyph}{statusText}</span> },
+    { id: 'runner', priority: 2, content: identity.runner },
+    { id: 'model', priority: 4, content: identity.model },
+    { id: 'effort', priority: 3, content: identity.effort },
+    ...(cost ? [{ id: 'cost', priority: 1, content: <span data-slot="run-activity-cost">{cost}</span> }] : []),
+    ...(summaryReferences.length || conflicts.length ? [{ id: 'chips', priority: 0, content: <>
+      <ActivityReferences run={run} references={summaryReferences} />
+      {conflicts.length > 0 ? <span data-slot="run-activity-conflict" className="inline-flex items-center gap-1 font-medium text-conflict"><TriangleAlertIcon aria-hidden className="size-3.5" />Conflicts</span> : null}
+    </> }] : []),
+  ]
 
   return (
     <section
@@ -183,43 +212,20 @@ function SessionActivityCard({
       <button
         type="button"
         aria-expanded={open}
-        aria-label={`Session activity: ${statusText}${conflicts.length ? '; pull request conflicts' : ''}${cost ? `; cost ${cost}` : ''}`}
+        aria-label={`Session activity: ${statusText}${conflicts.length ? '; pull request conflicts' : ''}${cost ? `; cost ${cost}` : ''}${!open ? `; runner ${identity.runner}; model ${identity.model}; effort ${identity.effort}${summaryReferences.length ? `; ${summaryReferences.map(reference => `${reference.kind} #${reference.number}`).join('; ')}` : ''}` : ''}`}
         onClick={() => {
           openByRun.set(run.id, !open)
           setOpen(!open)
         }}
-        className="flex min-h-11 w-full min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 px-3.5 py-2 text-left text-[14px] hover:bg-muted/40"
+        className="flex min-h-11 w-full min-w-0 items-center gap-2.5 px-3.5 py-2 text-start text-[14px] hover:bg-muted/40 active:bg-muted focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
       >
         <LayersIcon aria-hidden className="size-4 shrink-0 text-accent-text" />
         <span className="shrink-0 font-semibold">Session activity</span>
-        {/* Folded only: once open, the first row carries the status (and its next check). The
-            status and a conflict travel together; `flex-auto` sizes the group to its whole text, so
-            on a phone row without room for it the group wraps under the label instead of being
-            squeezed to an ellipsis or clipped. */}
-        {open ? null : (
-          <span className="flex min-w-0 flex-auto items-center gap-2.5">
-            <span
-              data-slot="run-activity-status"
-              className={cn(
-                'flex min-w-0 shrink items-center gap-1.5 text-[13px]',
-                allComplete ? 'text-success' : failed ? 'text-danger' : 'text-muted-foreground',
-              )}
-            >
-              {glyph}
-              <span className="truncate">{statusText}</span>
-            </span>
-            {conflicts.length > 0 ? (
-              <span data-slot="run-activity-conflict" className="flex shrink-0 items-center gap-1 text-[13px] font-medium text-conflict">
-                <TriangleAlertIcon aria-hidden className="size-3.5" />
-                Conflicts
-              </span>
-            ) : null}
-          </span>
-        )}
-        {cost ? <span data-slot="run-activity-cost" className="ml-auto shrink-0 text-[13px] text-muted-foreground tabular-nums">{cost}</span> : null}
+        {open ? null : <ActivitySummary items={foldedSummary} />}
+        {open && cost ? <span data-slot="run-activity-cost" className="ms-auto shrink-0 text-[13px] text-muted-foreground tabular-nums">{cost}</span> : null}
         <ChevronDownIcon
           aria-hidden
-          className={cn('size-4 shrink-0 text-soft-foreground transition-transform motion-reduce:transition-none', !cost && 'ml-auto', open && 'rotate-180')}
+          className={cn('size-4 shrink-0 text-soft-foreground motion-safe:transition-transform motion-reduce:transition-none', open && !cost && 'ms-auto', open && 'rotate-180')}
         />
       </button>
       {open ? (
@@ -240,6 +246,9 @@ function SessionActivityCard({
                 ) : null}
               </span>
             }
+            summary={!isOpen('status') && waitReferences.length > 0 ? <ActivitySummary items={[
+              { id: 'chips', priority: 0, content: <ActivityReferences run={run} references={waitReferences} /> },
+            ]} /> : undefined}
             open={isOpen('status')}
             onToggle={hasWaitDetails(run) ? () => toggle('status') : undefined}
           >
@@ -291,7 +300,7 @@ function SessionActivityCard({
             slot="usage"
             icon={<ChartColumnIcon className="size-4" />}
             title="Usage & agent"
-            meta={usageMeta(tokens, cost)}
+            summary={<span data-slot="run-activity-meta" className="contents"><ActivitySummary items={agentSummary} /></span>}
             open={isOpen('usage')}
             onToggle={() => toggle('usage')}
           >
@@ -302,6 +311,11 @@ function SessionActivityCard({
               slot="workspace"
               icon={<GitBranchIcon className="size-4" />}
               title="Workspace"
+              summary={!isOpen('workspace') && references.length > 0 ? <span data-slot="run-activity-meta" className="contents"><ActivitySummary items={[
+                ...(run.branch ? [{ id: 'branch', priority: 0, content: <span className="font-mono text-[12px]">{run.branch}</span> }] : []),
+                { id: 'chips', priority: 1, content: <ActivityReferences run={run} references={references} /> },
+                ...(conflicts.length > 0 ? [{ id: 'conflicts', priority: 2, content: <span className="font-medium text-conflict">{conflictText}</span> }] : []),
+              ]} /></span> : undefined}
               meta={conflicts.length > 0
                 ? <span className="inline-flex items-center gap-1 font-medium text-conflict"><TriangleAlertIcon aria-hidden className="size-3.5" />{conflictText}</span>
                 : run.branch ? <span className="font-mono text-[12px]">{run.branch}</span> : undefined}
@@ -331,12 +345,6 @@ function DetailLine({ label, children }: { label: string; children: ReactNode })
       {children}
     </div>
   )
-}
-
-/** Cost is what a narrow row keeps; the tokens show beside it only while both fit. */
-function usageMeta(tokens: ReactNode, cost: string | undefined): MetaParts | undefined {
-  if (cost) return { keep: cost, drop: tokens ?? undefined }
-  return tokens ? { keep: tokens } : undefined
 }
 
 /** Runner, account, model, effort and identity (#416, #546), as labelled lines rather than the

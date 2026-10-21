@@ -37,6 +37,8 @@ export function ActivityRow({
   icon,
   title,
   meta,
+  summary,
+  aside,
   open,
   onToggle,
   className,
@@ -50,6 +52,10 @@ export function ActivityRow({
   /** A plain meta truncates with an ellipsis. `{ keep, drop }` never cuts text: `keep` always
    *  shows whole, `drop` shows before it only while all of it fits, and is gone otherwise. */
   meta?: ReactNode | MetaParts
+  /** A summary that manages its own whole-item overflow. */
+  summary?: ReactNode
+  /** A value that stays visible beside the section meter, including when folded. */
+  aside?: ReactNode
   open: boolean
   /** Absent: the row has nothing to disclose and renders as a plain, non-interactive line. */
   onToggle?: () => void
@@ -62,7 +68,7 @@ export function ActivityRow({
       {/* A plain label (`Workspace`) keeps its width and the meta truncates; a composed title
           (`Workflow · <name>`) can be long, so it shares the row. */}
       <span className={cn('truncate text-[14px] font-semibold text-foreground', typeof title === 'string' ? 'shrink-0' : 'min-w-0 shrink')}>{title}</span>
-      {isMetaParts(meta) ? (
+      {summary ?? (isMetaParts(meta) ? (
         // `contents`: both parts sit in the row itself. Inside a wrapper box, the drop's unbreakable
         // width would become that box's minimum and push the kept part out of the row.
         <span data-slot="run-activity-meta" className="contents text-[13px] text-muted-foreground tabular-nums">
@@ -87,7 +93,7 @@ export function ActivityRow({
         >
           {meta}
         </span>
-      ) : null}
+      ) : null)}
     </>
   )
   const disclosable = onToggle !== undefined
@@ -102,16 +108,17 @@ export function ActivityRow({
           type="button"
           aria-expanded={open}
           onClick={onToggle}
-          className="flex min-h-11 w-full min-w-0 items-center gap-2.5 px-3.5 py-2 text-left hover:bg-muted/40"
+          className="flex min-h-11 w-full min-w-0 items-center gap-2.5 px-3.5 py-2 text-start hover:bg-muted/40 active:bg-muted focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
         >
           {head}
+          {aside}
           <ChevronDownIcon
             aria-hidden
-            className={cn('ml-auto size-4 shrink-0 text-soft-foreground transition-transform motion-reduce:transition-none', open && 'rotate-180')}
+            className={cn('size-4 shrink-0 text-soft-foreground motion-safe:transition-transform motion-reduce:transition-none', !aside && 'ms-auto', open && 'rotate-180')}
           />
         </button>
       ) : (
-        <div className="flex min-h-11 w-full min-w-0 items-center gap-2.5 px-3.5 py-2">{head}</div>
+        <div className="flex min-h-11 w-full min-w-0 items-center gap-2.5 px-3.5 py-2">{head}{aside}</div>
       )}
       {disclosable && open ? (
         <div data-slot="run-activity-body" className="min-w-0 border-t border-border/60 bg-muted/30 px-3.5 py-2.5">
