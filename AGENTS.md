@@ -299,6 +299,28 @@ require `npm run build` from the repo root first; then, from `packages/cezar`, r
 `node --import ../../scripts/test-git-env.mjs --import tsx --test <files>` with
 those packaged paths relative to that directory (e.g. `test/e2e/task-cli.test.ts`).
 
+Before opening a PR that renames, moves or removes a `RunRecord` field, also
+search the packaged and browser fixtures for each changed field name, including
+its old and new names or paths. From the repo root, replace the example names
+below with the changed field's names:
+
+```bash
+rg -l -F -e 'delegation.wait' -e 'waits' packages/cezar/test/e2e/*.test.ts packages/web/e2e/*.e2e.ts
+```
+
+Inspect the matches to identify fixtures that read the changed field; common
+names can also match unrelated text. Require passing results for the affected
+fixtures through the Squeal or focused npm paths above. Run `npm run build`
+from the repo root before validating matching packaged fixtures, including with
+Squeal, so they exercise the current built output. This selection supplements
+the dry-run park-fixture and runner-parity requirements above
+(hearsay-tools/cezarion#1300).
+
+In an unbuilt worktree, only a `Cannot find module` error naming a missing
+`dist/` module is the known Squeal limitation. An assertion failure in
+`test:package` is a real failure that needs investigation; do not dismiss it
+alongside missing-`dist` errors.
+
 No tool maps a cockpit source change to the browser specs it affects, with or
 without Squeal: `npm run test:changed` runs `npm test`, whose four unit projects
 hold no browser spec, and Squeal's browser-spec inputs include all of
