@@ -42,7 +42,14 @@ function writerFor(projectId: string) {
 export function useSkillSelection(
   projectId: string,
   importableNames: readonly string[],
-): { enabled: ReadonlySet<string>; toggle: (name: string) => void; pending: boolean } {
+): {
+  enabled: ReadonlySet<string>
+  toggle: (name: string) => void
+  pending: boolean
+  /** The project's stored selection has loaded. Before it has, a toggle would build on a guess,
+   *  so the switches stay disabled. */
+  ready: boolean
+} {
   const queryClient = useQueryClient()
   const uiState = useProjectUiState(projectId)
   const [inFlight, setInFlight] = React.useState(0)
@@ -88,5 +95,5 @@ export function useSkillSelection(
     [projectId, queryClient],
   )
 
-  return { enabled, toggle, pending: inFlight > 0 }
+  return { enabled, toggle, pending: inFlight > 0, ready: uiState.isSuccess }
 }

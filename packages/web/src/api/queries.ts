@@ -193,7 +193,7 @@ export const queryKeys = {
   get skillsReady() {
     return [queryScope(), 'skills', 'ready'] as const
   },
-  /** Children of `skills`: the "Import skills" panel's opt-in catalog. Sharing the `skills`
+  /** Children of `skills`: the default skills the catalog can enable. Sharing the `skills`
    *  prefix means a refresh that invalidates the catalog re-reads the importable list too. */
   get importableSkills() {
     return [queryScope(), 'skills', 'importable'] as const
@@ -1230,9 +1230,9 @@ export function useSkills(enabled = true) {
   return skills
 }
 
-/** The opt-in catalog for the "Import skills" panel — the default (vendor) repo's full skill
- *  list, regardless of import state. Same fast-then-`wait=1` convergence as `useSkills`: the
- *  panel renders whatever the cache holds immediately, then the cold-clone wait fills it in. */
+/** Every skill the default (vendor) repo offers, enabled or not, as full definitions so the Skills
+ *  catalog can preview one before it is enabled. Same fast-then-`wait=1` convergence as
+ *  `useSkills`: the catalog renders whatever the cache holds, then the cold-clone wait fills it in. */
 export function useImportableSkills(enabled = true) {
   const queryClient = useQueryClient()
   const importableKey = queryKeys.importableSkills
