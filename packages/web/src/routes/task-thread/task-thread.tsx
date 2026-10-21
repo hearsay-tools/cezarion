@@ -20,7 +20,7 @@ import {
 } from '@/api/queries'
 import { useRunHistory, type RunHistoryState } from '@/api/run-history'
 import { pendingHumanAsk } from '@open-mercato/cezar-api-client/contract/ask'
-import { asksHuman } from '@open-mercato/cezar-api-client/contract/waits'
+import { asksQuestion } from '@open-mercato/cezar-api-client/contract/waits'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { Composer } from '@/components/composer/composer'
@@ -217,7 +217,8 @@ export function ThreadView({
   // meanings. A rejection is already a danger toast from inside the hook — swallowed here so the
   // click handler does not also surface it as an unhandled rejection.
   const finishAction = useFinishRun(run.id)
-  const needsAnswer = transcriptAsk || asksHuman(run)
+  // Cezar's own waits ask nothing, so they leave empty Continue available (review of #1437).
+  const needsAnswer = transcriptAsk || asksQuestion(run)
   const hasContinuation = !sessionOpen && !queued && continueAction.available
   const continuable = hasContinuation && continueAction.canContinue
   // A closed session can never settle its in-flight items — nothing in the reducer rewrites a

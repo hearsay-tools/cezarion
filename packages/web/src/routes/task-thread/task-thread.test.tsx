@@ -1445,6 +1445,13 @@ describe('composer execution actions (#201)', () => {
     expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
   })
 
+  // Review of #1437: Cezar's own wait (`no-wait`) asks nothing, so it keeps the one-click Continue.
+  it('offers empty Continue beside a Cezar wait that asks no question', async () => {
+    const cezarWait = { ...openHumanWait(), source: 'cezar' as const, via: 'no-wait' as const }
+    renderView(<ThreadView run={run('done', { waits: [cezarWait], steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 's1' }] })} thread={reduceThread([])} />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' }).hasAttribute('disabled')).toBe(false))
+  })
+
   it('requires an answer instead of offering empty Continue for a pending human question', async () => {
     renderView(<ThreadView run={run('done', { waits: [openHumanWait()], steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 's1' }] })} thread={reduceThread([])} />)
     await waitFor(() => expect(screen.getByRole('textbox').hasAttribute('disabled')).toBe(false))
