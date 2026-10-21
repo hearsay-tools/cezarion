@@ -74,6 +74,14 @@ async function decide(
 }
 
 describe('decideVoice', () => {
+  it('returns the state it sent to the engine', async () => {
+    const engine = stub({});
+    const result = await decide(engine, { request: { text: 'open next finished' }, ask: ASK });
+    expect(result.state).toBe(engine.calls[0]!.state);
+    expect(result.state).toMatchObject({ sentence: 'open next finished', view: { sidebarView: 'active', openTask: false }, recent: [] });
+    expect(result.state.card?.map((entry) => entry.header)).toEqual(['Library', 'Engine']);
+  });
+
   it('opens next finished', async () => {
     const { decision } = await decide(
       stub({ ...command, action: { choice: 'open', confidence: 0.9 }, status: { choice: 'finished', confidence: 0.9 }, position: { choice: 'next' } }),

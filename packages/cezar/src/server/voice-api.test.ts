@@ -137,6 +137,40 @@ describe('voice routes', () => {
       expect(readLog(dataDir)[0]).toMatchObject({ openRunId: runId });
     });
 
+    it('logs the state behind the decision: view, proposal, card headers and recent', async () => {
+      const { runId } = runWithCard();
+      const first = await decide({ text: 'open next finished', sidebarView: 'automations' });
+      const { decisionId } = (await first.json()) as VoiceDecision;
+      const res = await decide({
+        text: 'yes, confirmed',
+        sidebarView: 'active',
+        openRunId: runId,
+        proposal: { decisionId: crypto.randomUUID(), action: 'answer' },
+      });
+      expect(res.status).toBe(200);
+      const [firstLine, secondLine] = readLog(dataDir) as Array<{ state: Record<string, unknown> }>;
+      expect(firstLine!.state).toMatchObject({ view: { sidebarView: 'automations', openTask: false }, recent: [] });
+      expect(firstLine!.state).not.toHaveProperty('pendingProposal');
+      expect(secondLine!.state).toMatchObject({
+        sentence: 'yes, confirmed',
+        view: { sidebarView: 'active', openTask: true },
+        pendingProposal: 'answer',
+        card: [{ header: 'First' }],
+        recent: [{ sentence: 'open next finished', action: 'open' }],
+      });
+      expect(decisionId).toBeTruthy();
+    });
+
+    it('seeds recent actions from the log after a restart, once per project', async () => {
+      const first = await decide({ text: 'open next finished', sidebarView: 'active' });
+      const { decisionId } = (await first.json()) as VoiceDecision;
+      await apiRequest(app(), '/api/v1/voice/outcome', post({ decisionId, outcome: 'executed' }));
+      // A second app is a restarted cezar: its recent actions start empty and are read from the log.
+      await decide({ text: 'open next finished', sidebarView: 'active' });
+      const lines = readLog(dataDir).filter((l) => l.type === 'decision') as Array<{ state: { recent: unknown } }>;
+      expect(lines[1]!.state.recent).toEqual([{ sentence: 'open next finished', action: 'open', outcome: 'executed' }]);
+    });
+
     it('treats an unknown run as no open task', async () => {
       const res = await decide({ text: 'tell it: hello there', sidebarView: 'active', openRunId: 'no-such-run' });
       expect(res.status).toBe(200);
@@ -204,8 +238,15 @@ describe('voice routes', () => {
 
     it('rethrows anything that is not an engine error and logs nothing', async () => {
       const engine: DecisionEngine = { id: 'jev', decide: () => Promise.reject(new Error('boom')) };
-      const res = await apiRequest(family(engine) as unknown as Hono, '/voice/decide', post(body));
-      expect(res.status).toBe(500);
+      // Hono's default handler prints the stack of an unhandled error; the expected one stays out of the output.
+      const printed = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const res = await apiRequest(family(engine) as unknown as Hono, '/voice/decide', post(body));
+        expect(res.status).toBe(500);
+        expect(printed).toHaveBeenCalled();
+      } finally {
+        printed.mockRestore();
+      }
       expect(existsSync(join(dataDir, 'voice'))).toBe(false);
     });
 

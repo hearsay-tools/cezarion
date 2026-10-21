@@ -174,7 +174,7 @@ export async function decideVoice(args: {
   engine: DecisionEngine;
   decisionId: string;
   signal: AbortSignal;
-}): Promise<{ decision: VoiceDecision; answers: Record<string, EngineAnswer>; latencyMs: number }> {
+}): Promise<{ decision: VoiceDecision; answers: Record<string, EngineAnswer>; latencyMs: number; state: VoiceEngineState }> {
   const { request, ask, recent, engine, decisionId, signal } = args;
   const state: VoiceEngineState = {
     sentence: request.text,
@@ -199,7 +199,7 @@ export async function decideVoice(args: {
   const latencyMs = Math.round(performance.now() - started);
 
   const none = (reason: Extract<VoiceDecision, { action: 'none' }>['reason']): VoiceDecision => ({ action: 'none', decisionId, reason });
-  const done = (decision: VoiceDecision) => ({ decision, answers, latencyMs });
+  const done = (decision: VoiceDecision) => ({ decision, answers, latencyMs, state });
 
   const action = pickOf(answers, QUESTION_IDS.action);
   if (action.choice === 'confirm' || action.choice === 'cancel') {

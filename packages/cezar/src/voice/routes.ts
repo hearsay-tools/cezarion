@@ -45,10 +45,11 @@ export function createVoiceRoutes(deps: VoiceRouteDeps) {
       const request: VoiceDecideRequest = known ? body : rest;
       const ask = known ? readPendingHumanAsk(project.dataDir, body.openRunId!) : undefined;
       const decisionId = deps.uuid?.() ?? randomUUID();
+      deps.recent.load(project.id, project.dataDir);
       const recent = deps.recent.last(project.id);
       const engine = deps.engine();
       try {
-        const { decision, answers, latencyMs } = await decideVoice({
+        const { decision, answers, latencyMs, state } = await decideVoice({
           request,
           ...(ask ? { ask } : {}),
           recent,
@@ -63,6 +64,7 @@ export function createVoiceRoutes(deps: VoiceRouteDeps) {
           sentence: request.text,
           ...(request.openRunId !== undefined ? { openRunId: request.openRunId } : {}),
           engine: engine.id,
+          state,
           answers,
           decision,
           latencyMs,
@@ -86,6 +88,7 @@ export function createVoiceRoutes(deps: VoiceRouteDeps) {
     .post('/voice/outcome', jsonZodValidator(voiceOutcomeRequestSchema), async (c) => {
       const project = c.get('project');
       const { decisionId, outcome } = c.req.valid('json');
+      deps.recent.load(project.id, project.dataDir);
       appendVoiceLog(project.dataDir, { type: 'outcome', at: new Date().toISOString(), decisionId, outcome });
       deps.recent.settle(project.id, decisionId, outcome);
       return c.json({ ok: true as const }, 200);
