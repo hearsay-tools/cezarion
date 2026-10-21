@@ -37,7 +37,7 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
   afterEach(() => vi.unstubAllEnvs());
 
   for (const runner of RUNNER_IDS) {
-    it(`${runner} R81 checkpoints and delivers the failed step and continuation causes before Continue text`, async () => {
+    it(`${runner} R85 checkpoints and delivers the failed step and continuation causes before Continue text`, async () => {
       const messages = native(runner);
       const id = await start(runner, 'provider-error');
       for (const text of [`${HARNESS_ADAPTERS[runner].scenarios['provider-error']}\nKeep this second line.`, '']) {
@@ -65,7 +65,7 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
       }
     }, 60_000);
 
-    it(`${runner} R83 leaves a non-error Continue unchanged`, async () => {
+    it(`${runner} R87 leaves a non-error Continue unchanged`, async () => {
       const messages = native(runner);
       const id = await start(runner, 'done');
       const before = messages().length;
@@ -75,7 +75,7 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
       expect(messages()[before]).toBe(text);
     }, 30_000);
 
-    it(`${runner} R84 keeps the accepted failure cause and attachment through a restart`, async () => {
+    it(`${runner} R88 keeps the accepted failure cause and attachment through a restart`, async () => {
       const messages = native(runner);
       const id = await start(runner, 'provider-error');
       const failed = structuredClone(store.getRun(id)!.steps.at(-1)!);
@@ -105,7 +105,7 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
       expect(readFileSync(path, 'utf8')).toBe('brief-1380');
     }, 60_000);
 
-    it(`${runner} R85 keeps multiline errors on one line without hiding a slash skill or changing human history`, async () => {
+    it(`${runner} R89 keeps multiline errors on one line without hiding a slash skill or changing human history`, async () => {
       const messages = native(runner);
       const skills = join(root, '.ai/cezar/skills');
       mkdirSync(skills, { recursive: true });
@@ -122,7 +122,7 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
       expect(store.readEvents(id).filter(event => event.type === 'user-message').at(-1)?.text).toBe('/resume-check');
     }, 30_000);
 
-    it(`${runner} R86 explains repeated recovery once when the interrupted task had no saved message`, async () => {
+    it(`${runner} R90 explains repeated recovery once when the interrupted task had no saved message`, async () => {
       const messages = native(runner);
       const id = await start(runner, 'done');
       store.updateStep(id, 'task', { status: 'running', finishedAt: undefined });
@@ -141,7 +141,7 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
       expect(prompt.split('\n')[0]).toContain('verify their state before restarting');
     }, 60_000);
 
-    it(`${runner} R87 preserves human text that equals the legacy restart fallback`, async () => {
+    it(`${runner} R91 preserves human text that equals the legacy restart fallback`, async () => {
       const messages = native(runner);
       const id = await start(runner, 'done');
       const text = 'The cezar process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.';
@@ -152,7 +152,7 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
     }, 30_000);
 
     for (const status of ['running', 'queued'] as const) {
-      it(`${runner} R82 explains restart ahead of a saved ${status} continuation, without a live session`, async () => {
+      it(`${runner} R86 explains restart ahead of a saved ${status} continuation, without a live session`, async () => {
         const messages = native(runner);
         const id = await start(runner, 'done');
         const original = store.getRun(id)!.steps[0]!;

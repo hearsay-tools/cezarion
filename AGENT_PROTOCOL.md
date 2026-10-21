@@ -1150,6 +1150,12 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
+The cells are defined in `core/harness-parity-cells.testkit.ts`. Each runner's
+`RUNNER_IDS` cells run from its own `core/harness-<runner>-parity.test.ts`.
+`core/harness-parity.test.ts` runs the matrix guard, the single-runner cells and
+a guard that every runner has its file (hearsay-tools/cezarion#1288). Below,
+`core/harness-parity.test.ts` names this whole matrix.
+
 **P1** (hearsay-tools/cezarion#1049, hearsay-tools/cezarion#1266) routes an
 approval from each native mock that carries one through `RunManager`, the
 cockpit HTTP decision route, and the exact native reply: the Codex JSON-RPC
@@ -1212,7 +1218,7 @@ exemptions or normalized-event injection.
 wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
 normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`, `cezar_ask`,
 `cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
-`workflows/waits-parity.testkit.ts`, defined in `workflows/waits-parity-cells.testkit.ts` and run from one `waits-<runner>-parity.test.ts` per runner, with the criteria guard in `waits-parity.test.ts`. U1
+`workflows/waits-parity.testkit.ts`, defined in `workflows/waits-parity-cells.testkit.ts` and run from two files per runner: `waits-<runner>-parity.test.ts` for the base rows and `waits-<runner>-workers-parity.test.ts` for the worker rows (U2w onward), with the criteria guard in `waits-parity.test.ts` (hearsay-tools/cezarion#1288). U1
 registers a CI wait and a timer through `cezar_wait`, parks, and wakes with each result.
 U2 opens both: the timer wakes, the CI wait stays open and is in that turn's footer,
 the turn end re-parks without a new registration, and the later CI result is
@@ -2683,3 +2689,18 @@ through every native `HARNESS_ADAPTERS` wire, complementing fresh R2. The
 OpenCode cells also retain scoped skill-text, scoped frontmatter-text
 (`mock:scoped-frontmatter-failure`) and unscoped provider failures; mapper and
 withheld-ACK tests cover completion state and barrier bypass for both diagnostics.
+
+### CI conflict observation parity (hearsay-tools/cezarion#1339)
+
+R81–R84 in `workflows/ci-wait-conflict-parity.test.ts` exercise every
+`RUNNER_IDS` native mock through `HARNESS_ADAPTERS`, with a real GitHub client
+and supervisor reading explicit `CONFLICTING` metadata from a separate gh wire.
+R81 covers a fresh session, R82 a Continue, and R83 restart recovery without an
+active session. They read committed rows before wake admission, inject a failed
+checkpoint, retain one lifecycle input across duplicate completion, and deliver
+one conflict observation over the native prompt channel. R83 also reboots with
+a resolved but undelivered result after the external PR becomes clean: the saved
+observation must survive without reclassification. No timer or repair authority
+is introduced.
+R84 cancels an open wait while native gh checks are blocked, then attempts late
+resolution and proves there is no lifecycle input or native conflict prompt.

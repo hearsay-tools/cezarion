@@ -189,3 +189,11 @@ it('cezar_wait advertises worker fields with their bounds', () => {
   expect(waitToolDefinition.description).toMatch(/worker/);
   expect(cezarTools().find(tool => tool.definition.name === 'cezar_cancel_wait')!.definition.description).toMatch(/worker/);
 });
+
+it('accepts old observations and the new bounded conflict metadata', () => {
+ const old = {outcome:'passed',headSha:'a'.repeat(40),observedAt:new Date().toISOString(),checks:[],totalChecks:0,truncated:false};
+ expect(ciWaitResultSchema.safeParse(old).success).toBe(true);
+ expect(ciWaitResultSchema.safeParse({...old,outcome:'conflicting',mergeable:'CONFLICTING',mergeStateStatus:'DIRTY'}).success).toBe(true);
+ expect(ciWaitResultSchema.safeParse({...old,mergeable:'DIRTY'}).success).toBe(false);
+ expect(ciWaitResultSchema.safeParse({...old,mergeStateStatus:'x'.repeat(65)}).success).toBe(false);
+});

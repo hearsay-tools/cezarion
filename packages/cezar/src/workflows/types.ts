@@ -210,6 +210,9 @@ export const HARNESS_EXTRA_TOOLS: { readonly [K in RunnerId]: readonly string[] 
   claude: [],
   codex: [],
   opencode: [],
+  // The trio still marks the default list (hearsay-tools/cezarion#75). pi itself gets no --tools
+  // allowlist for it (hearsay-tools/cezarion#1305): the default-tools extension activates these
+  // names with the built-ins, so MCP and other extension tools stay callable.
   pi: ['Subagent', 'SubagentSupervisor', 'SubagentWait'],
   cursor: [],
   // R1 (rulings): find and ast_grep are gated behind settings that default off, and a --tools
