@@ -70,11 +70,11 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       });
       const commit = store.commitWait.bind(store);
       let rejected = false;
+      let failedCheckpoint: ReturnType<typeof disk>;
       const checkpoint = vi.spyOn(store, 'commitWait').mockImplementation((id, entry, input) => {
         if (id === run.id && entry.id === wait.id && entry.phase === 'resolved' && !rejected) {
           rejected = true;
-          expect(disk(id).waits.find((item: { id: string }) => item.id === wait.id).phase).toBe('open');
-          expect(disk(id).agentInputs?.some((item: { id: string }) => item.id === wait.id) ?? false).toBe(false);
+          failedCheckpoint = disk(id);
           throw new Error('injected checkpoint failure');
         }
         return commit(id, entry, input);
@@ -82,6 +82,8 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       writeFileSync(gate, '');
       await until(() => open(run.id)?.phase === 'resolved');
       expect(rejected).toBe(true);
+      expect(failedCheckpoint.waits.find((item: { id: string }) => item.id === wait.id).phase).toBe('open');
+      expect(failedCheckpoint.agentInputs?.some((item: { id: string }) => item.id === wait.id) ?? false).toBe(false);
       checkpoint.mockRestore();
       expect(open(run.id)).toMatchObject({ result: { outcome: 'conflicting', mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' } });
       expect(committed.waits.find((entry: { id: string }) => entry.id === wait.id)).toMatchObject({ phase: 'resolved', result: { outcome: 'conflicting' } });
