@@ -19,7 +19,9 @@ const services: CiWatcherSupervisor[]=[];
 function start(github: GithubCiClient, seconds=1800) {const s=new CiWatcherSupervisor({github});services.push(s);const c=new AbortController();controllers.push(c);return {service:s,controller:c,result:s.watch(wait(seconds),c.signal)};}
 class ScriptedGithub extends GithubCiClient {
  headReads=0; snapshots=0; watchers=0; active=0; peak=0; failures=0; changedAt=Infinity;
+ mergeable: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN' = 'MERGEABLE'; conflictAt=Infinity;
  rows: GithubCheck[]=[];
+ override async metadata() { const headSha = await this.head(); return {headSha, mergeable: this.headReads >= this.conflictAt ? 'CONFLICTING' as const : this.mergeable, mergeStateStatus: 'DIRTY'}; }
  override async head():Promise<string> {this.headReads++; if(this.failures-->0) throw new CiGithubError('command_failed','Service unavailable',true);return this.headReads>=this.changedAt?'b'.repeat(40):identity.headSha;}
  override async checks():Promise<GithubCheck[]> {this.snapshots++;return this.rows;}
  override async watch(_pr:CiPrIdentity,signal:AbortSignal):Promise<void> {this.watchers++;this.active++;this.peak=Math.max(this.peak,this.active);try{await new Promise<void>(resolve=>{if(signal.aborted)resolve();else signal.addEventListener('abort',()=>resolve(),{once:true});});}finally{this.active--;}}
@@ -84,4 +86,42 @@ it('expires a queued wait on its original deadline without starting a fifth watc
 it('sanitizes external names, control sequences and credential-bearing links',async()=>{
  const github=new ScriptedGithub();github.rows=[{name:'\x1b[31mbuild\x1b[0m\x00',state:'SUCCESS',bucket:'pass',link:'https://user:password@example.com/check?token=secret'}];
  expect(await start(github).result).toMatchObject({outcome:'passed',truncated:true,checks:[{name:'build',state:'SUCCESS',link:''}]});
+});
+
+it('resolves a same-head conflict during a pending watch and reaps it at the existing probe', async () => {
+ vi.useFakeTimers(); const github = new ScriptedGithub(); github.conflictAt = 3;
+ github.rows = [{name:'build',state:'PENDING',bucket:'pending',link:''}];
+ const started = start(github);
+ await vi.advanceTimersByTimeAsync(1); expect(github.active).toBe(1);
+ await vi.advanceTimersByTimeAsync(29_999);
+ // A deadline guard keeps the pre-fix test finite: without conflict detection it cancels.
+ const observed = started.result; started.controller.abort();
+ expect(await observed).toMatchObject({outcome:'conflicting',mergeable:'CONFLICTING',mergeStateStatus:'DIRTY',headSha:identity.headSha});
+ expect(github.active).toBe(0); expect(github.headReads).toBe(3);
+});
+it.each(['MERGEABLE', 'UNKNOWN'] as const)('does not treat advisory DIRTY with %s as a conflict', async mergeable => {
+ vi.useFakeTimers(); const github = new ScriptedGithub(); github.mergeable = mergeable;
+ github.rows = [{name:'build',state:'PENDING',bucket:'pending',link:''}];
+ const started = start(github); await vi.advanceTimersByTimeAsync(30_000);
+ expect(github.active).toBe(1); started.controller.abort();
+ expect(await started.result).toMatchObject({outcome:'cancelled',mergeable,mergeStateStatus:'DIRTY'});
+});
+it('uses final snapshot metadata rather than an earlier conflict and retains ordinary passing behavior', async () => {
+ const github = new ScriptedGithub();
+ github.metadata = async () => ({headSha: await github.head(), mergeable: github.headReads === 1 ? 'CONFLICTING' : 'UNKNOWN', mergeStateStatus:'UNKNOWN'});
+ github.rows = [{name:'build',state:'SUCCESS',bucket:'pass',link:''}];
+ expect(await start(github).result).toMatchObject({outcome:'passed',mergeable:'UNKNOWN'});
+});
+it('prefers a changed head over a conflict on the same metadata read', async () => {
+ const github = new ScriptedGithub(); github.changedAt=2; github.conflictAt=2;
+ github.rows = [{name:'build',state:'SUCCESS',bucket:'pass',link:''}];
+ expect(await start(github).result).toMatchObject({outcome:'head_changed',mergeable:'CONFLICTING',observedHeadSha:'b'.repeat(40)});
+});
+it.each(['pass', 'fail', 'pending', 'none'] as const)('resolves an initial conflict ahead of %s checks', async bucket => {
+ const github = new ScriptedGithub(); github.conflictAt=1;
+ github.rows = bucket === 'none' ? [] : [{name:'build',state:bucket,bucket,link:''}];
+ const started = start(github);
+ // Advance through the initial snapshot without waiting for the pre-fix deadline.
+ await new Promise<void>(resolve => setImmediate(resolve)); started.controller.abort();
+ expect(await started.result).toMatchObject({outcome:'conflicting',mergeable:'CONFLICTING',totalChecks:github.rows.length});
 });

@@ -2683,3 +2683,18 @@ through every native `HARNESS_ADAPTERS` wire, complementing fresh R2. The
 OpenCode cells also retain scoped skill-text, scoped frontmatter-text
 (`mock:scoped-frontmatter-failure`) and unscoped provider failures; mapper and
 withheld-ACK tests cover completion state and barrier bypass for both diagnostics.
+
+### CI conflict observation parity (hearsay-tools/cezarion#1339)
+
+R81–R84 in `workflows/ci-wait-conflict-parity.test.ts` exercise every
+`RUNNER_IDS` native mock through `HARNESS_ADAPTERS`, with a real GitHub client
+and supervisor reading explicit `CONFLICTING` metadata from a separate gh wire.
+R81 covers a fresh session, R82 a Continue, and R83 restart recovery without an
+active session. They read committed rows before wake admission, inject a failed
+checkpoint, retain one lifecycle input across duplicate completion, and deliver
+one conflict observation over the native prompt channel. R83 also reboots with
+a resolved but undelivered result after the external PR becomes clean: the saved
+observation must survive without reclassification. No timer or repair authority
+is introduced.
+R84 cancels an open wait while native gh checks are blocked, then attempts late
+resolution and proves there is no lifecycle input or native conflict prompt.
