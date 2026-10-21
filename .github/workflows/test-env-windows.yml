@@ -36,6 +36,8 @@ jobs:
           if (!$failed -or $output -notmatch 'cannot verify test environment lease identity') {
             throw 'Expected the pre-fix Windows identity failure'
           }
+          # GitHub's pwsh wrapper otherwise propagates the expected red exit.
+          $global:LASTEXITCODE = 0
       - name: Verify production lease on native Windows
         shell: pwsh
         run: node --test .github/scripts/test-env-windows.test.mjs
