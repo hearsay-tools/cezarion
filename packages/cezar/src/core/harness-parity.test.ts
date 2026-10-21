@@ -563,6 +563,14 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
 
 /** Criteria driven through `whileOpen` rather than one settled observation. */
 const CONTROL_CRITERIA = [
+  // hearsay-tools/cezarion#1380: workflows/resume-diagnostics-parity.test.ts.
+  { id: 'R81', scenario: 'provider-error' },
+  { id: 'R82', scenario: 'done' },
+  { id: 'R83', scenario: 'done' },
+  { id: 'R84', scenario: 'provider-error' },
+  { id: 'R85', scenario: 'provider-error' },
+  { id: 'R86', scenario: 'done' },
+  { id: 'R87', scenario: 'done' },
   { id: 'D1', scenario: 'baseline' },
   // hearsay-tools/cezarion#1284: a forked skill starts no native subagent in a restricted session.
   { id: 'D2', scenario: 'forked-skill' },

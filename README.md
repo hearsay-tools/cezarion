@@ -119,7 +119,10 @@ and an orchestrator keeps a whole queue of them moving.
   push a **draft PR** — never an auto-merge.
 - ♻️ **Losing a session when it fails.** Every run records its `claude` session id.
   Take it over interactively in one click (`claude --resume <id>`), or continue it
-  in-process from the cockpit.
+  in-process from the cockpit. After a failure, Continue tells the agent which
+  step failed and gives its saved error before your message. Restart recovery
+  also explains the restart when replaying a saved message. Background commands
+  may have stopped; the agent is told to verify their state before restarting them.
 - 🔀 **Locked into one agent vendor.** Most tools wed you to a single CLI. cezar
   drives **Claude Code, Codex and OpenCode (experimental)** through one runner seam — set a
   default, pick a backend per task, or mix them inside one workflow (implement
