@@ -106,7 +106,7 @@ export const githubChecksSchema = z.array(z.object({ name: z.string(), state: z.
 export type GithubCheck = z.infer<typeof githubChecksSchema>[number];
 const workflowPagesSchema = z.array(z.object({
   total_count: z.number().int().nonnegative(),
-  workflow_runs: z.array(z.object({ id: z.number().int().positive(), head_sha: z.string().regex(/^[0-9a-f]{40}$/i), status: z.string().min(1) })),
+  workflow_runs: z.array(z.tuple([z.number().int().positive(), z.string().min(1), z.boolean()])),
 })).min(1);
 function parseJson<T>(text: string, schema: z.ZodType<T>): T {
   try { return schema.parse(JSON.parse(text)); } catch { throw new CiGithubError('malformed_data', 'GitHub returned malformed structured data; update gh and retry.'); }
@@ -158,16 +158,17 @@ export class GithubCiClient {
     // search cap or a changing page set cannot turn incomplete data into success.
     const result = await this.query(['api', '--hostname', 'github.com',
       `repos/${pr.repository}/actions/runs?head_sha=${pr.headSha}&per_page=100`, '--paginate',
-      '--jq', '{total_count, workflow_runs: [.workflow_runs[] | {id, head_sha, status}]} | @json'], signal);
+      '--jq', `{total_count, workflow_runs: [.workflow_runs[] | [.id, .status, (.head_sha | if type == "string" and test("^[0-9a-fA-F]{40}$") then ascii_downcase == ${JSON.stringify(pr.headSha.toLowerCase())} else null end)]]} | @json`], signal);
     if (result.code !== 0) throw commandError(result);
-    // --jq emits one compact JSON line per page; --slurp cannot be combined with --jq.
+    // Compact tuples keep 1000 ordinary runs below the output cap while retaining
+    // independent head matching. --jq emits one JSON line per page; --slurp cannot be combined with --jq.
     const pages = parseJson('[' + result.stdout.trim().split(/\r?\n/).filter(Boolean).join(',') + ']', workflowPagesSchema);
     const runs = pages.flatMap(page => page.workflow_runs);
-    const unique = new Set(runs.map(run => run.id));
+    const unique = new Set(runs.map(run => run[0]));
     if (unique.size !== runs.length || unique.size < Math.max(...pages.map(page => page.total_count))) {
       throw new CiGithubError('malformed_data', 'GitHub returned an incomplete workflow run list; retry the CI wait.');
     }
-    return runs.some(run => run.head_sha.toLowerCase() === pr.headSha.toLowerCase() && run.status !== 'completed');
+    return runs.some(([, status, headMatches]) => headMatches && status !== 'completed');
   }
   async checks(pr: CiPrIdentity, signal: AbortSignal): Promise<GithubCheck[]> {
     const result = await this.query(['pr', 'checks', String(pr.prNumber), '--repo', `github.com/${pr.repository}`, '--json', 'name,state,link,bucket'], signal);

@@ -21,7 +21,7 @@ if (mode === 'transient') {
 if (args[0] === 'api') {
  if (process.env.CI_FIXTURE_API_ERROR) { console.error(process.env.CI_FIXTURE_API_ERROR); process.exit(1); }
  const pages = rerun ? [{total_count:1,workflow_runs:[{id:1,head_sha:head,status:rerun==='complete'?'completed':rerun==='hidden'?'queued':'in_progress'}]}] : JSON.parse(process.env.CI_FIXTURE_RUN_PAGES || '[{"total_count":0,"workflow_runs":[]}]');
- for (const page of pages) console.log(JSON.stringify(page));
+ for (const page of pages) console.log(JSON.stringify({...page,workflow_runs:page.workflow_runs?.map(run=>[run.id,run.status,typeof run.head_sha==='string' && /^[0-9a-f]{40}$/i.test(run.head_sha) ? run.head_sha.toLowerCase()===head : null])}));
 } else if (args[1] === 'view') {
  console.log(JSON.stringify({url:'https://github.com/org/repo/pull/12',number:12,headRefOid: phase === 'head_changed' ? 'b'.repeat(40) : head}));
 } else if (args.includes('--watch')) {

@@ -28,6 +28,7 @@ it.each([
  [{total_count:2,workflow_runs:[run(1)]},{total_count:2,workflow_runs:[run(1)]}],
  [{total_count:1,workflow_runs:[{id:1,head_sha:identity.headSha}]}],
  [{total_count:1,workflow_runs:[run(1,'')]}],
+ [{total_count:1,workflow_runs:[run(1,'in_progress','invalid')]}],
 ].map(pages=>({pages})))('rejects incomplete or malformed workflow data instead of allowing success: $pages',async ({pages})=>{
  await expect(client(pages).hasActiveRuns(identity,signal())).rejects.toMatchObject({code:'malformed_data'});
 });
@@ -38,7 +39,7 @@ it('queries the captured head with bounded paginated structured output',async()=
  const dir=await mkdtemp(join(tmpdir(),'ci-runs-'));dirs.push(dir);const log=join(dir,'calls');
  await client([{total_count:0,workflow_runs:[]}],{CI_FIXTURE_LOG:log}).hasActiveRuns(identity,signal());
  const {args}=JSON.parse((await readFile(log,'utf8')).trim()) as {args:string[]};
- expect(args).toEqual(['api','--hostname','github.com','repos/org/repo/actions/runs?head_sha='+identity.headSha+'&per_page=100','--paginate','--jq','{total_count, workflow_runs: [.workflow_runs[] | {id, head_sha, status}]} | @json']);
+ expect(args).toEqual(['api','--hostname','github.com','repos/org/repo/actions/runs?head_sha='+identity.headSha+'&per_page=100','--paginate','--jq','{total_count, workflow_runs: [.workflow_runs[] | [.id, .status, (.head_sha | if type == "string" and test("^[0-9a-fA-F]{40}$") then ascii_downcase == '+JSON.stringify(identity.headSha)+' else null end)]]} | @json']);
 });
 it('supports workflow queries in the bundled dry-run command',async()=>{
  expect(await new GithubCiClient({env:{...process.env,CEZ_DRY_RUN:'1'}}).hasActiveRuns(identity,signal())).toBe(false);
@@ -52,4 +53,11 @@ it.each([
  ['HTTP 401: Bad credentials', 'authentication', false],
 ])('classifies workflow query error %s without exposing diagnostics',async (stderr,code,transient)=>{
  await expect(client([],{CI_FIXTURE_API_ERROR:stderr as string}).hasActiveRuns(identity,signal())).rejects.toMatchObject({code,transient});
+});
+
+it('observes a complete 1000-run Actions history within the existing output cap',async()=>{
+ const pages=Array.from({length:10},(_,page)=>({total_count:1000,workflow_runs:Array.from({length:100},(_,index)=>run(page*100+index+1))}));
+ expect(await client(pages).hasActiveRuns(identity,signal())).toBe(false);
+ pages[9]!.workflow_runs[99]!.status='in_progress';
+ expect(await client(pages).hasActiveRuns(identity,signal())).toBe(true);
 });
