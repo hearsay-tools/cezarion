@@ -531,6 +531,6 @@ row's value when the thing it names changes, rather than its label.
 | Automated review rounds | The `AUTOMATED_REVIEW_ROUNDS` repository variable, read with `gh variable get AUTOMATED_REVIEW_ROUNDS`; the review workflow falls back to 3 only when the variable is unset or empty |
 | Commit convention | Conventional Commits |
 | Specs and plans | unknown |
-| Board | **Cezarion**, org `hearsay-tools`, project #1 |
+| Board | **Cezarion**, org `hearsay-tools`, project #1. For same-repository PRs targeting `main`, `.github/workflows/pr-readiness.yml` owns draft state and syncs existing PR and closing-linked issue cards: draft → In progress, ready → In review. Each new head returns the PR to draft; the workflow marks it ready when the head's required checks pass and no review thread is unresolved. Open a draft PR, fix its checks and review threads, and let the workflow move it to ready and In review; do not move the card to In review or run `gh pr ready` by hand. Board sync skips without project access and never moves Done cards back. The initial claim still moves the issue to In progress. |
 | Task orchestrator | Cezar |
 | SDLC feedback | `apptension/toolkit-dev` |
