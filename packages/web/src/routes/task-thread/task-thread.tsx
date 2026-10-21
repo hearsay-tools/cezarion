@@ -22,11 +22,12 @@ import { useRunHistory, type RunHistoryState } from '@/api/run-history'
 import { pendingHumanAsk } from '@open-mercato/cezar-api-client/contract/ask'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
-import { Composer } from '@/components/composer/composer'
+import { Composer, type ComposerHandle } from '@/components/composer/composer'
 import { StatusDot } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
 import { useKeyboardInsetVar } from '@/lib/keyboard-inset'
 import { isUnread } from '@/lib/read-state'
+import { useVoiceProposal, voiceStore } from '@/lib/voice/proposal-store'
 import { taskIssueUrl, taskPrUrl } from '@/lib/tasks-table'
 import { cn, isHttpUrl } from '@/lib/utils'
 
@@ -186,6 +187,21 @@ export function ThreadView({
 }) {
   const projectId = useActiveProjectId()
   const runs = useRuns()
+  // A voice "tell it" proposal fills this composer's draft (spec 2026-10-21-voice-mode). The
+  // store reaches the composer through its handle, registered for this run while it is mounted.
+  const composerRef = useRef<ComposerHandle>(null)
+  const voiceProposal = useVoiceProposal()
+  const tellProposed = voiceProposal?.kind === 'tell' && voiceProposal.runId === run.id
+  useEffect(
+    () =>
+      voiceStore.registerComposer({
+        runId: run.id,
+        getDraft: () => composerRef.current?.getDraft() ?? '',
+        setDraft: (text) => composerRef.current?.setDraft(text),
+        submit: () => composerRef.current?.submit(),
+      }),
+    [run.id],
+  )
   const hasPendingHumanAsk = history
     ? pendingHumanAsk(history.currentEvents) !== undefined
     : currentThread.turns.some(turn => turn.items.some(item => item.kind === 'ask' && !item.resolved))
@@ -473,7 +489,15 @@ export function ThreadView({
             <p className="px-1 text-xs text-muted-foreground" role="status">Starts a new agent conversation.</p>
           ) : null}
 
+          {tellProposed ? (
+            <p data-slot="composer-voice-prompt" className="px-1 text-xs font-medium text-foreground">
+              Send this message? Say “yes, confirmed” or press Return.
+            </p>
+          ) : null}
+
           <Composer
+            ref={composerRef}
+            voiceProposal={tellProposed}
             onStop={runActionFlags(run).cancel ? stopAction.stop : undefined}
             onFinish={
               offersComposerFinish(run, hasPendingHumanAsk)

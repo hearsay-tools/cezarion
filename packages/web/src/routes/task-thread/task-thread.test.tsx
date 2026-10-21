@@ -28,9 +28,11 @@ import { resetActivityDisclosureForTests } from './run-activity-dock'
 import { TaskThreadRoute, ThreadView } from './task-thread'
 import { buildTranscriptRows, mainTranscriptSections } from './session-transcript'
 import { reduceThread } from './thread-state'
+import { resetVoiceStoreForTests, voiceStore } from '@/lib/voice/proposal-store'
 
 afterEach(() => {
   cleanup()
+  resetVoiceStoreForTests()
   vi.unstubAllGlobals()
   resetActivityDisclosureForTests()
 })
@@ -317,6 +319,55 @@ describe('ThreadView', () => {
     const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
     expect(textarea.disabled).toBe(false)
     expect(textarea.placeholder).toBe('Message the agent — / for skills, @ for files…')
+  })
+
+  it('a voice tell fills the composer, shows its prompt, cancels back to empty', () => {
+    const thread = run('running')
+    renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)
+    const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
+    const tell = { kind: 'tell', decisionId: 'd1', runId: thread.id, text: 'use the second plan' } as const
+    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).toBeNull()
+
+    let result: ReturnType<typeof voiceStore.propose> | undefined
+    act(() => {
+      result = voiceStore.propose(tell)
+    })
+    expect(result).toEqual({ ok: true })
+    expect(textarea.value).toBe('use the second plan')
+    expect(document.querySelector('[data-slot="composer"]')?.getAttribute('data-voice-proposal')).toBe('true')
+    expect(document.querySelector('[data-slot="composer-voice-prompt"]')?.textContent).toBe(
+      'Send this message? Say “yes, confirmed” or press Return.',
+    )
+
+    act(() => voiceStore.cancel())
+    expect(textarea.value).toBe('')
+    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).toBeNull()
+    expect(document.querySelector('[data-slot="composer"]')?.hasAttribute('data-voice-proposal')).toBe(false)
+  })
+
+  it('a voice tell is refused while the draft has text, and for another run', () => {
+    const thread = run('running')
+    renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)
+    fireEvent.change(screen.getByLabelText('Reply to the agent'), { target: { value: 'typing' } })
+    expect(voiceStore.propose({ kind: 'tell', decisionId: 'd1', runId: thread.id, text: 'hello' })).toEqual({
+      ok: false,
+      reason: 'draft-not-empty',
+    })
+    expect(voiceStore.propose({ kind: 'tell', decisionId: 'd2', runId: 'someone-else', text: 'hello' })).toEqual({
+      ok: false,
+      reason: 'no-card',
+    })
+  })
+
+  it('leaving the thread drops a pending tell', () => {
+    const thread = run('running')
+    renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)
+    act(() => {
+      voiceStore.propose({ kind: 'tell', decisionId: 'd1', runId: thread.id, text: 'hello' })
+    })
+    cleanup()
+    expect(voiceStore.getProposal()).toBeUndefined()
+    expect(voiceStore.lastDrop()).toBe('task-closed')
   })
 
   it.each([

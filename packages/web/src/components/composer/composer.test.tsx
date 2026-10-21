@@ -804,6 +804,25 @@ describe('retained submission (#164)', () => {
     expect(textarea.value).toBe('')
   })
 
+  it('the handle sets, reads and submits the draft', async () => {
+    const handle = React.createRef<import('./composer').ComposerHandle>()
+    const { textarea, onSubmit } = renderComposer({ ref: handle })
+    act(() => handle.current?.setDraft('hi'))
+    expect(textarea.value).toBe('hi')
+    expect(handle.current?.getDraft()).toBe('hi')
+    await act(async () => handle.current?.submit())
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    expect(onSubmit).toHaveBeenCalledWith('hi', [])
+  })
+
+  it('marks the root while a voice proposal fills the draft', () => {
+    renderComposer({ voiceProposal: true })
+    expect(document.querySelector('[data-slot="composer"]')?.getAttribute('data-voice-proposal')).toBe('true')
+    cleanup()
+    renderComposer()
+    expect(document.querySelector('[data-slot="composer"]')?.hasAttribute('data-voice-proposal')).toBe(false)
+  })
+
   it('blocks attachment mutations, templates and late file reads while pending', async () => {
     let resolve!: () => void
     let read!: (bytes: ArrayBuffer) => void

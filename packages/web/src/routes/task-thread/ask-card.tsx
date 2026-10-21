@@ -1,9 +1,10 @@
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
-import type { ApiRun } from '@open-mercato/cezar-api-client'
+import type { ApiRun, VoiceAnswer } from '@open-mercato/cezar-api-client'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Link } from '@/lib/project-router'
+import { voiceStore, useVoiceProposal } from '@/lib/voice/proposal-store'
 import { cn } from '@/lib/utils'
 
 import { useAskAnswer } from './ask-answer'
@@ -150,15 +151,81 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
         .join('\n'),
     )
 
+  // ---- voice proposal (spec 2026-10-21-voice-mode) -----------------------------------------
+  // The store registers this card once per mount, so its methods read `latest`, which every
+  // render (and every apply) refreshes, never the render that registered them.
+  const rootRef = useRef<HTMLDivElement>(null)
+  const latest = useRef({ selections, otherAnswers, sendAll, canSend: !delivery.isPending && !blocked })
+  latest.current = { ...latest.current, selections, otherAnswers, sendAll, canSend: !delivery.isPending && !blocked }
+  // What the card held before the first voice apply; present exactly while a proposal fills it.
+  const snapshot = useRef<{ selections: Record<number, string[]>; otherAnswers: Record<number, string> } | undefined>(undefined)
+  const proposal = useVoiceProposal()
+  const voiceAnswers =
+    proposal?.kind === 'answer' && proposal.runId === run.id && proposal.askRequestId === ask.id
+      ? proposal.answers
+      : undefined
+
+  useEffect(() => {
+    const setBoth = (nextSelections: Record<number, string[]>, nextOthers: Record<number, string>) => {
+      latest.current = { ...latest.current, selections: nextSelections, otherAnswers: nextOthers }
+      setSelections(nextSelections)
+      setOtherAnswers(nextOthers)
+    }
+    return voiceStore.registerAskCard({
+      runId: run.id,
+      requestId: ask.id,
+      headers: questions.map((question) => question.header),
+      apply: (answers: VoiceAnswer[]) => {
+        const { selections: current, otherAnswers: currentOthers } = latest.current
+        snapshot.current ??= { selections: current, otherAnswers: currentOthers }
+        const nextSelections = { ...current }
+        const nextOthers = { ...currentOthers }
+        for (const answer of answers) {
+          const question = questions[answer.question]
+          if (!question) continue
+          if (answer.kind === 'option' && question.options) {
+            nextSelections[answer.question] = question.multiSelect === true ? answer.labels : answer.labels.slice(0, 1)
+            delete nextOthers[answer.question]
+          } else if (answer.kind === 'other') {
+            nextSelections[answer.question] = []
+            nextOthers[answer.question] = answer.text
+          }
+        }
+        setBoth(nextSelections, nextOthers)
+        rootRef.current?.scrollIntoView?.({ block: 'nearest' })
+      },
+      restore: () => {
+        const saved = snapshot.current
+        snapshot.current = undefined
+        if (saved) setBoth(saved.selections, saved.otherAnswers)
+      },
+      unanswered: () =>
+        questions.flatMap((_, index) =>
+          (latest.current.selections[index]?.length ?? 0) > 0 || Boolean(latest.current.otherAnswers[index]?.trim())
+            ? []
+            : [index],
+        ),
+      send: () => {
+        // The card's own state says why it cannot send (pending, provider gate); the voice-filled
+        // answers stay on it for the user to send once it can.
+        if (!latest.current.canSend) return
+        snapshot.current = undefined
+        latest.current.sendAll()
+      },
+    })
+  }, [run.id, ask.id])
+
   // The session ended before the question was answered — say so, because sending the
   // answer now does more than reply: it reopens the agent's session to deliver it.
   const resuming = delivery.mode === 'resume'
 
   return (
     <div
+      ref={rootRef}
       data-slot="ask-card"
       data-resolved="false"
       data-delivery={delivery.mode}
+      data-voice-proposal={voiceAnswers ? 'true' : undefined}
       className="rounded-lg border border-accent-strong/25 bg-accent-strong/[0.04] px-4 pt-3.5 pb-3.5"
     >
       <div className="mb-2.5 flex items-center gap-2">
@@ -173,6 +240,7 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
             selected={selections[index] ?? []}
             isOther={otherAnswers[index] !== undefined}
             otherAnswer={otherAnswers[index] ?? ''}
+            voiceFilled={voiceAnswers?.some((answer) => answer.question === index) ?? false}
             onSelect={(labels) => {
               if (blocked) return
               clearOtherAnswer(index)
@@ -220,6 +288,11 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
           </span>
         </div>
       )}
+      {voiceAnswers ? (
+        <p data-slot="ask-voice-prompt" className="mt-3 text-xs font-medium text-foreground">
+          Send these answers? Say “yes, confirmed” or press Return.
+        </p>
+      ) : null}
       {delivery.blockedBy === 'provider' ? (
         <div data-slot="ask-provider-gate" className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           <span>{delivery.reason}</span>
@@ -249,6 +322,7 @@ function AskQuestionBlock({
   selected,
   isOther,
   otherAnswer,
+  voiceFilled,
   onSelect,
   onOtherToggle,
   onOtherChange,
@@ -258,6 +332,8 @@ function AskQuestionBlock({
   selected: string[]
   isOther: boolean
   otherAnswer: string
+  /** A voice proposal filled this question. */
+  voiceFilled: boolean
   onSelect: (labels: string[]) => void
   onOtherToggle: () => void
   onOtherChange: (answer: string) => void
@@ -277,7 +353,7 @@ function AskQuestionBlock({
   }
 
   return (
-    <div role="group" aria-label={question.question}>
+    <div role="group" aria-label={question.question} data-voice-filled={voiceFilled ? 'true' : undefined}>
       <div className="mb-0.5 flex items-center gap-2">
         <span className="rounded-md bg-accent-strong px-1.5 py-0.5 text-[12px] font-semibold uppercase tracking-wide text-accent-strong-foreground">
           {question.header}

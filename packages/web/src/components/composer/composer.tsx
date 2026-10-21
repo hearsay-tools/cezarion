@@ -137,6 +137,9 @@ export interface ComposerProps {
    * plain text.
    */
   getMentionCandidates?: () => string[]
+  /** A voice proposal is filling this draft (spec 2026-10-21-voice-mode): marks the root so the
+   *  host's confirm prompt and a test can find it. Changes nothing else. */
+  voiceProposal?: boolean
   /** Exposes `ComposerHandle` — see there for why this exists. */
   ref?: Ref<ComposerHandle>
 }
@@ -148,6 +151,12 @@ export interface ComposerHandle {
   /** Insert `snippet` at the caret, blank-line separated (`insertTemplate`), then refocus with
    *  the caret parked end after it. */
   insertAtCaret: (snippet: string) => void
+  /** The draft as the textarea shows it now. */
+  getDraft: () => string
+  /** Replace the draft. Ignored while a retained send is in flight, like every other edit. */
+  setDraft: (text: string) => void
+  /** Run the send button's path (`submitDraft`): the same guards, the same `onSubmit`. */
+  submit: () => void
 }
 
 const QUICK_REPLIES: Record<string, string> = { KeyA: 'Yes, approved.', KeyC: 'Continue.' }
@@ -187,6 +196,7 @@ export function Composer({
   autocompleteSkills = true,
   quickReplies = false,
   getMentionCandidates,
+  voiceProposal = false,
   ref,
 }: ComposerProps) {
   // Optionally controlled: `value` (when given) shadows the internal state, and every write is
@@ -273,24 +283,6 @@ export function Composer({
   useEffect(() => {
     if (autoFocus) textareaRef.current?.focus()
   }, []) // deliberately not [autoFocus]
-
-  // Rides the same `pendingCaretRef` + layout-effect restore the `/` autocomplete uses, rather
-  // than a rAF: the caret is set in the same paint as the text, so there is no window in which a
-  // closing dropdown can take the focus back (the QA finding on #413's first cut).
-  useImperativeHandle(
-    ref,
-    () => ({
-      insertAtCaret: (snippet: string) => {
-        if (editsBlocked()) return
-        const el = textareaRef.current
-        const result = insertTemplate(textRef.current, el?.selectionStart ?? textRef.current.length, snippet)
-        setText(result.text)
-        pendingCaretRef.current = result.caret
-        el?.focus()
-      },
-    }),
-    [setText, retainDraftUntilSuccess],
-  )
 
   // ---- autocomplete ------------------------------------------------------------------------
 
@@ -504,6 +496,32 @@ export function Composer({
     if (disabled || stopping || busyRef.current) return
     void send(textRef.current, imagesRef.current, true)
   }, [disabled, stopping, send])
+
+  // Rides the same `pendingCaretRef` + layout-effect restore the `/` autocomplete uses, rather
+  // than a rAF: the caret is set in the same paint as the text, so there is no window in which a
+  // closing dropdown can take the focus back (the QA finding on #413's first cut).
+  useImperativeHandle(
+    ref,
+    () => ({
+      insertAtCaret: (snippet: string) => {
+        if (editsBlocked()) return
+        const el = textareaRef.current
+        const result = insertTemplate(textRef.current, el?.selectionStart ?? textRef.current.length, snippet)
+        setText(result.text)
+        pendingCaretRef.current = result.caret
+        el?.focus()
+      },
+      // The voice proposal (spec 2026-10-21-voice-mode) reads, fills and sends the draft. Both
+      // writes keep the composer's own guards: `submit` is the send button's `submitDraft`.
+      getDraft: () => textRef.current,
+      setDraft: (next: string) => {
+        if (editsBlocked()) return
+        setText(next)
+      },
+      submit: submitDraft,
+    }),
+    [setText, retainDraftUntilSuccess, submitDraft],
+  )
 
   const stop = async () => {
     if (!onStop || stopping || busyRef.current) return
@@ -727,6 +745,7 @@ export function Composer({
           ref={rootRef}
           data-slot="composer"
           data-disabled={disabled || undefined}
+          data-voice-proposal={voiceProposal || undefined}
           onDrop={onDrop}
           onDragOver={(event) => event.preventDefault()}
           className={cn(
