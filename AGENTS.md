@@ -513,6 +513,15 @@ shrink the baseline with
 `TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts`.
 The scan cannot see a shrunk product budget, so review checks that one.
 
+When a PR adds or splits a Vitest unit test file taking longer than about one
+minute on CI, add or update its repository-relative path and measured duration
+in milliseconds under `durationsMs` in `.github/test-durations.json`. Use the
+passed per-file Vitest suite-summary line in the CI log, not an individual test
+timing or total job duration; record the source run and commit in provenance.
+For split files, measure each resulting file separately. Keep browser E2E weights
+in their separate manifest. See [the Vitest sequencer](docs/sdlc/ci.md) for its
+balancing-only role and median fallback for unlisted files.
+
 **The final gate and full-suite runs belong in CI.** Do not run the entire local
 gate, `squeal run --all`, or the full Vitest or browser suite just to finish a
 task, commit, open a PR, or complete a review. Run a full local suite only when
