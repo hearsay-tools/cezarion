@@ -9,10 +9,12 @@ import { atomicWriteJsonSync } from './config.ts';
  * Data Model). Same split as `src/ui-state.ts`: this module owns the tolerant
  * read and the atomic write; the schema and key cap live at the route boundary
  * (`GET/PUT /api/workspace/ui-state`, step 2.7). The state is an opaque
- * `.passthrough()`-style bag — cross-project prefs (appearance, notifications,
- * curated skills) live here; project-scoped prefs stay in each repo's own file,
- * and prefs that describe the BROWSER rather than the workspace (sidebar
- * collapse, the last visited location) stay in that browser's localStorage.
+ * `.passthrough()`-style bag — cross-project prefs (appearance, notifications)
+ * live here; project-scoped prefs stay in each repo's own file. The legacy
+ * `importedSkills` key stays readable as the fallback for a project that has not
+ * saved its own selection (hearsay-tools/cezarion#1408). Prefs that describe the
+ * BROWSER rather than the workspace (sidebar collapse, the last visited location)
+ * stay in that browser's localStorage.
  */
 
 /** Read `~/.cezar/ui-state.json` on demand — never cached, never throws.

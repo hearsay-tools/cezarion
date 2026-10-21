@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
+import { pollFor, pollJson } from './poll'
 import {
   applyContrastQaVariant,
   contrastQaVariants,
@@ -111,6 +112,14 @@ describe('settings → skills against the live dry-run server', () => {
         const selected = browser.evaluate(contrastSampleExpression(selectedSelector)) as ContrastSample
         expect(selected.ratio, `${variant.id} selected: ${selected.foreground} on ${selected.background}`).toBeGreaterThanOrEqual(4.5)
 
+        // Scroll BETA into view: the update card now heads the list (#1408), so at 360×640 the row
+        // starts under the mobile tab bar. Evidence: this case failed with "covered by
+        // <a.relative.flex inside div#root>" (bundle .ai/qa/failures/settings-skills/
+        // keeps-selected-and-hovered-skill-descriptions-AA-readable-with-visible-keyboard--1/:
+        // probe.json hover refused at the click point; PR #1424 comment 6316871712). Reproduce with
+        // `npm run test:e2e -- skills-update.e2e.ts settings-skills.e2e.ts` — 1 of 2 failed
+        // before, 2 of 2 passed after.
+        browser.evaluate(`document.querySelector(${JSON.stringify(row(BETA))}).scrollIntoView({ block: 'center' })`)
         browser.hover(row(BETA))
         const hoveredSelector = `${row(BETA)} > span:last-child`
         const hovered = browser.evaluate(contrastSampleExpression(hoveredSelector)) as ContrastSample
@@ -140,6 +149,89 @@ describe('settings → skills against the live dry-run server', () => {
     }
   })
 
+  it('every row has its own switch with a 44 px target at 360×640, light and dark (#1408)', () => {
+    // Dry-run has no default team skills, so the seeded project skills show their locked
+    // "always enabled" switch; a live switch shares the same component and hit area.
+    const toggle = `[data-slot="skills-list"] [data-slot="skill-switch"][data-skill="${ALPHA}"]`
+    browser.goto(`${baseUrl}${scoped('/skills')}`)
+    browser.waitForFunction(`document.querySelector(${JSON.stringify(toggle)}) !== null`)
+    try {
+      for (const variant of contrastQaVariants.filter((v) => v.id.startsWith('mobile-') && v.density === 'comfortable')) {
+        applyContrastQaVariant(browser, variant)
+        // Scroll the switch into view: the update card heads the list, so at 360×640 the row starts
+        // below the fold. Evidence: this case failed with "hit area: expected [ false, false,
+        // false, false ]" (bundle .ai/qa/failures/settings-skills/
+        // every-row-has-its-own-switch-with-a-44-px-target-at-360-640-light-and-dark-1408-1/:
+        // probe.json all four elementFromPoint probes missed; PR #1424 comment 6316871712).
+        // Reproduce with `npm run test:e2e -- skills-update.e2e.ts settings-skills.e2e.ts` —
+        // 2 of 2 failed before, 2 of 2 passed after.
+        const target = browser.waitForValue(`(() => {
+          const el = document.querySelector(${JSON.stringify(toggle)})
+          if (!el) return null
+          el.scrollIntoView({ block: 'center' })
+          const box = el.getBoundingClientRect()
+          const x = box.left + box.width / 2
+          const y = box.top + box.height / 2
+          // The hit area, not the drawn track: a tap 22 px off-centre must still land on the switch.
+          const hits = [[x - 21, y], [x + 21, y], [x, y - 21], [x, y + 21]]
+            .map(([px, py]) => el.contains(document.elementFromPoint(px, py)))
+          return {
+            role: el.getAttribute('role'),
+            label: el.getAttribute('aria-label'),
+            insideRow: el.closest('[data-slot="skill-row"]') !== null,
+            hits,
+          }
+        })()`, (value) => value !== null && typeof value === 'object') as {
+          role: string; label: string; insideRow: boolean; hits: boolean[]
+        }
+        expect(target.role).toBe('switch')
+        expect(target.label).toBe(`${ALPHA} is always enabled`)
+        expect(target.insideRow).toBe(false)
+        expect(target.hits, `${variant.id} hit area`).toEqual([true, true, true, true])
+        browser.screenshot(`${artifactsDir}/issue-1408-skills-${variant.id}.png`, { viewport: true })
+      }
+    } finally {
+      restoreContrastQaDefaults(browser)
+    }
+  })
+
+  it('a default skill switches off and back on by keyboard, and the project saves each change (#1408)', async () => {
+    // Dry-run serves the default team skills, so their live switches are reachable here.
+    const uiStateFile = resolve(servedRoot(), '.ai/cezar/ui-state.json')
+    const savedUiState = existsSync(uiStateFile) ? readFileSync(uiStateFile, 'utf8') : null
+    const live = '[data-slot="skills-list"] [data-slot="skill-switch"]:not([data-locked]):not([disabled])'
+    browser.goto(`${baseUrl}${scoped('/skills')}`)
+    const name = String(browser.waitForValue(
+      `document.querySelector(${JSON.stringify(live)})?.getAttribute('data-skill') ?? null`,
+      (value) => typeof value === 'string' && value.length > 0,
+    ))
+    const toggle = `[data-slot="skills-list"] [data-slot="skill-switch"][data-skill="${name}"]`
+    const saved = (included: boolean) => pollFor(async (signal) => {
+      const state = await pollJson<{ importedSkills?: string[] }>(`${baseUrl}/api/v1/p/${bootProject}/ui-state`, signal)
+      return Array.isArray(state.importedSkills) && state.importedSkills.includes(name) === included ? state : undefined
+    }, () => `ui-state never saved ${name} as ${included ? 'enabled' : 'disabled'}`, { timeoutMs: 10_000, intervalMs: 100 })
+    try {
+      focusWithKeyboard(browser, toggle)
+      browser.press('Space')
+      expect(browser.waitForValue(
+        `document.querySelector('[data-slot="skills-group-available"] [data-slot="skill-row"][data-skill="${name}"]') !== null`,
+        (value) => value === true,
+      )).toBe(true)
+      await saved(false)
+      // The row moved groups; its switch is a new element, so focus it again before the second press.
+      focusWithKeyboard(browser, toggle)
+      browser.press('Space')
+      expect(browser.waitForValue(
+        `document.querySelector(${JSON.stringify(toggle)})?.getAttribute('aria-checked') ?? null`,
+        (value) => value === 'true',
+      )).toBe('true')
+      await saved(true)
+    } finally {
+      if (savedUiState === null) rmSync(uiStateFile, { force: true })
+      else writeFileSync(uiStateFile, savedUiState, 'utf8')
+    }
+  })
+
   it('refresh keeps the selection and the list scroll position (#384)', () => {
     browser.click(row(BETA))
     browser.waitForFunction(
@@ -153,6 +245,14 @@ describe('settings → skills against the live dry-run server', () => {
     const before = Number(browser.evaluate(`document.querySelector('[data-slot="skill-rows"]').scrollTop`))
     expect(before).toBe(150)
 
+    // Scroll Refresh into view: clicking BETA scrolls the main pane on a long team catalog, so the
+    // page header covers the button. Evidence: this case failed with "covered by
+    // <header.row-start-1.hidden>" (bundle .ai/qa/failures/settings-skills/
+    // refresh-keeps-the-selection-and-the-list-scroll-position-384-1/: probe.json main pane
+    // scrolled to the BETA row; CI run 39596536546, artifact cockpit-failures-shard-4). Reproduce
+    // with `npm run test:e2e -- settings-skills.e2e.ts` — 1 of 1 CI run failed before (0 of 3
+    // local: the local catalog is short), 1 of 1 CI run and 4 of 4 local passed after.
+    browser.evaluate(`document.querySelector('[data-slot="skills-refresh"]').scrollIntoView({ block: 'center' })`)
     browser.click('[data-slot="skills-refresh"]')
     // The button disables while the POST runs; wait until the round-trip settled.
     browser.waitForFunction(`!document.querySelector('[data-slot="skills-refresh"]').disabled`)

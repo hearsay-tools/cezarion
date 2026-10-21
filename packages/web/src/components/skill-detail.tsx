@@ -4,6 +4,7 @@ import { Link } from '@/lib/project-router'
 
 import type { Skill } from '@open-mercato/cezar-api-client'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
+import { Switch } from '@/components/ui/switch'
 import { isProjectSkill } from '@/lib/skills'
 import { cn } from '@/lib/utils'
 
@@ -36,25 +37,71 @@ export function SkillSourceTag({ source, className }: { source: Skill['source'];
   )
 }
 
+/**
+ * Whether a skill is enabled for this project, and how to change it (hearsay-tools/cezarion#1408).
+ * A `locked` switch is on for good: local and global skills, and team skills from a repo the
+ * project configured itself. Only default (vendor) team skills have a live switch.
+ */
+export interface SkillActivation {
+  ariaLabel: string
+  checked: boolean
+  disabled: boolean
+  locked: boolean
+  onCheckedChange: () => void
+}
+
+/** The activation switch: a real `role="switch"`, its own tab stop. The track is 24×40 px; a
+ *  transparent `before:` layer on the button itself widens the hit area to 44×48 px. */
+export function SkillSwitch({ skill, activation }: { skill: Pick<Skill, 'name'>; activation: SkillActivation }) {
+  return (
+    <span className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center">
+      <Switch
+        data-slot="skill-switch"
+        data-skill={skill.name}
+        data-locked={activation.locked || undefined}
+        aria-label={activation.ariaLabel}
+        checked={activation.checked}
+        disabled={activation.disabled}
+        onCheckedChange={() => activation.onCheckedChange()}
+        className="relative before:absolute before:-inset-x-1 before:-inset-y-2.5 before:content-[''] disabled:cursor-default"
+      />
+    </span>
+  )
+}
+
 export function SkillDetailBody({
   skill,
   usedBy,
+  activation,
   heading: Heading = 'h2',
 }: {
   skill: Skill
   /** "workflow › step" breadcrumbs (`skillUsedBy`). Omit to hide the section (the pickers'
    *  preview has no workflow catalog at hand — absence must not read as "unused"). */
   usedBy?: readonly string[]
+  /** The catalog's switch for this skill. Omit where the skill cannot be switched (pickers). */
+  activation?: SkillActivation
   heading?: 'h2' | 'h3'
 }) {
   return (
     <div data-slot="skill-detail" className="min-w-0">
       <div className="flex min-w-0 flex-col items-start gap-4">
         <span className="sw-detail-source text-[12px]"><SkillSourceTag source={skill.source} /> skill</span>
-        <Heading className="min-w-0 text-[19px] font-normal md:text-2xl break-words [overflow-wrap:anywhere]">
-          {skill.name}
-        </Heading>
+        <div className="flex w-full min-w-0 items-start justify-between gap-3">
+          <Heading className="min-w-0 text-[19px] font-normal md:text-2xl break-words [overflow-wrap:anywhere]">
+            {skill.name}
+          </Heading>
+          {activation ? <SkillSwitch skill={skill} activation={activation} /> : null}
+        </div>
       </div>
+      {activation && !activation.checked ? (
+        <p
+          data-slot="skill-inactive-notice"
+          className="mt-4 rounded-md border border-border bg-background px-3 py-2 text-[13px] text-muted-foreground"
+        >
+          Not enabled for this project — agents can’t pick it.
+        </p>
+      ) : null}
       <p data-slot="skill-path" className="mt-4 text-[12px] break-all text-soft-foreground">
         {skill.path}
         {skill.team ? ` · from ${skill.team.repo}` : ''}

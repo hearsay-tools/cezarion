@@ -1573,6 +1573,19 @@ records `worktreeSetup.status === 'done'`, and the paragraph saying what ran rea
 message on each runner's own wire. The note is appended in `workflows/run.ts` before the
 runner seam, so no runner can lose it on the way. No runner is exempt.
 
+**R92–R96** (hearsay-tools/cezarion#1408), in `core/skill-provision-parity.test.ts`, drive every
+`RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire on a skill-driven task in its
+own worktree. The selected skill names a companion. R92: Start installs both in `.claude`,
+`.agents` and `.cursor` `skills/`, and nothing under them shows in `git status`. R93: an
+ordinary Continue, whose prompt names no skill, reinstalls the step skill's companion. R94:
+`recover()` resumes a persisted continuation with no live session and reinstalls it. R95: a
+live `/name` message is delivered at once, its companions install after it, and one durable
+lifecycle agent input names what landed; a repeat installs nothing and sends nothing. That
+input follows the agent-input rules: a pending question holds it until the question is
+answered. Cezar does not rely on a runner's native lookup seeing a skill added mid-session,
+so the input is the delivery on every runner. R96: Stop while the install is held launches no
+agent. No runner is exempt.
+
 Crash-diagnostic rows **S15–S17** (hearsay-tools/cezarion#499) drive every `RUNNER_IDS` adapter's
 native transport through an uncaught-exception-shaped stderr fixture, a plain
 single-line failure, and a clean/requested shutdown with stderr. RPC mocks send

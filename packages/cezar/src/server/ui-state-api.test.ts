@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { Hono } from 'hono';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { workspaceUiStatePath } from '../paths.ts';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { createApp } from './server.ts';
@@ -20,8 +21,14 @@ describe('the ui-state API — skillUsage (#408)', () => {
   let repoRoot: string;
   let store: RunStore;
   let app: Hono;
+  let home: string;
+  let legacyWorkspaceStatePath: string;
 
   beforeEach(() => {
+    // A home of its own: an inherited CEZ_HOME keeps a real workspace ui-state this must not touch.
+    home = mkdtempSync(join(tmpdir(), 'cez-uistateapi-home-'));
+    vi.stubEnv('CEZ_HOME', home);
+    legacyWorkspaceStatePath = workspaceUiStatePath();
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-uistateapi-'));
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
@@ -32,6 +39,8 @@ describe('the ui-state API — skillUsage (#408)', () => {
   afterEach(() => {
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+    rmSync(home, { recursive: true, force: true });
   });
 
   const uiStatePath = () => join(repoRoot, '.ai/cezar', 'ui-state.json');
@@ -49,6 +58,46 @@ describe('the ui-state API — skillUsage (#408)', () => {
     const res = await get();
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({});
+  });
+
+  // hearsay-tools/cezarion#1408 (port of upstream open-mercato/cezar#1082): the default-skill
+  // selection is per project; the old workspace value seeds a project that never chose.
+  it('keeps a legacy workspace skill selection until this project saves its own', async () => {
+    mkdirSync(dirname(legacyWorkspaceStatePath), { recursive: true });
+    writeFileSync(legacyWorkspaceStatePath, JSON.stringify({ importedSkills: ['om-fix'] }));
+
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ importedSkills: ['om-fix'] });
+    expect(() => readFileSync(uiStatePath(), 'utf8')).toThrow();
+  });
+
+  it('uses this project selection, including an empty one, over the legacy workspace value', async () => {
+    mkdirSync(dirname(legacyWorkspaceStatePath), { recursive: true });
+    writeFileSync(legacyWorkspaceStatePath, JSON.stringify({ importedSkills: ['om-fix'] }));
+    await put({ importedSkills: [] });
+
+    expect(await (await get()).json()).toMatchObject({ importedSkills: [] });
+    expect(rawFile().importedSkills).toEqual([]);
+  });
+
+  it('an unrelated preference save keeps following the legacy workspace selection', async () => {
+    mkdirSync(dirname(legacyWorkspaceStatePath), { recursive: true });
+    writeFileSync(legacyWorkspaceStatePath, JSON.stringify({ importedSkills: ['om-fix'] }));
+    const res = await put({ lastRunner: 'codex' });
+    // The answer is the effective state, so the cockpit cache keeps the inherited selection.
+    expect(await res.json()).toEqual({ lastRunner: 'codex', importedSkills: ['om-fix'] });
+    expect(rawFile()).toEqual({ lastRunner: 'codex' });
+
+    writeFileSync(legacyWorkspaceStatePath, JSON.stringify({ importedSkills: ['om-review'] }));
+    expect(await (await get()).json()).toEqual({ lastRunner: 'codex', importedSkills: ['om-review'] });
+  });
+
+  it('persists the default-skill selection in this project ui-state', async () => {
+    const res = await put({ importedSkills: ['om-fix'] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ importedSkills: ['om-fix'] });
+    expect(rawFile().importedSkills).toEqual(['om-fix']);
   });
 
   it('PUT skillUsage persists and round-trips through GET', async () => {

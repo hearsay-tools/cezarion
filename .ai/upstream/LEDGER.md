@@ -5,9 +5,9 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 - Upstream: [open-mercato/cezar](https://github.com/open-mercato/cezar) `main`
 - Fork point: `feb85666` (2026-08-31)
 - Last scan: 2026-10-19 to `8908221a` ([report](scans/2026-10-19.md))
-- Entries: 289 · pending: 240 · planned: 7 · ported: 28 · partial: 1 · diverged: 6 · n/a: 7
+- Entries: 289 · pending: 239 · planned: 7 · ported: 29 · partial: 1 · diverged: 6 · n/a: 7
 
-## Pending (240)
+## Pending (239)
 
 | Upstream | Date | Title | Conflicts | Note |
 | --- | --- | --- | --- | --- |
@@ -134,7 +134,6 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#1327](https://github.com/open-mercato/cezar/pull/1327) | 2026-10-08 | feat: customizable cockpit branding (#1327) | 16 |  |
 | [#1339](https://github.com/open-mercato/cezar/pull/1339) | 2026-10-08 | test(e2e): repair four assertions that had gone stale against the UI (#1339) | 2 |  |
 | [#1299](https://github.com/open-mercato/cezar/pull/1299) | 2026-10-09 | feat(cockpit): browse the repository from the Git tab — tree, viewer and path filter (#1299) | 10 |  |
-| [#1082](https://github.com/open-mercato/cezar/pull/1082) | 2026-10-09 | feat(skills): unify browsing, activation, and preview (#1082) | 13 |  |
 | [#1336](https://github.com/open-mercato/cezar/pull/1336) | 2026-10-09 | feat(web): filter tasks by origin (Regular \| Automations \| All) + Tasks facets (#1336) | 12 |  |
 | [#1305](https://github.com/open-mercato/cezar/pull/1305) | 2026-10-09 | fix(cockpit): scroll the Changes tree and diff in their own columns (#1305) | 11 |  |
 | [#1311](https://github.com/open-mercato/cezar/pull/1311) | 2026-10-09 | fix(web): fit nested sidebar rows at minimum width; mark unread by weight only (#1311) | 8 |  |
@@ -264,7 +263,7 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#1249](https://github.com/open-mercato/cezar/pull/1249) | 2026-10-09 | fix(cockpit): keep an ask card's picks when the thread unmounts its row (#1249) | [issue #1007](https://github.com/hearsay-tools/cezarion/issues/1007) | 2026-10-13 | Retain option selections and free-text answers across card remounts and navigation; preserve parent routing, human fallback and answer delivery. |
 | [#1402](https://github.com/open-mercato/cezar/pull/1402) | 2026-10-12 | feat: create a new project (fresh git repo, optional private GitHub repo, templates) (#1402) | [issue #1014](https://github.com/hearsay-tools/cezarion/issues/1014) | 2026-10-13 | Adapt local and explicitly chosen private GitHub/template project creation to the current registry and checkout flow; exclude upstream telemetry. |
 
-## Ported (28)
+## Ported (29)
 
 | Upstream | Date | Title | Fork | Decided | Reason / note |
 | --- | --- | --- | --- | --- | --- |
@@ -291,6 +290,7 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#1014](https://github.com/open-mercato/cezar/pull/1014) | 2026-09-17 | fix(providers): a runtime auth rejection verifies itself before it sticks (#1014) | [PR #598](https://github.com/hearsay-tools/cezarion/pull/598), [issue #431](https://github.com/hearsay-tools/cezarion/issues/431) | 2026-09-25 |  |
 | [#1009](https://github.com/open-mercato/cezar/pull/1009) | 2026-09-17 | fix(server-deploy): fail the deploy when the service did not actually restart (#1009) | [PR #644](https://github.com/hearsay-tools/cezarion/pull/644), [issue #430](https://github.com/hearsay-tools/cezarion/issues/430), [2d328382](https://github.com/hearsay-tools/cezarion/commit/2d328382), [0dfb93c6](https://github.com/hearsay-tools/cezarion/commit/0dfb93c6), [3e676ecd](https://github.com/hearsay-tools/cezarion/commit/3e676ecd) | 2026-09-27 |  |
 | [#994](https://github.com/open-mercato/cezar/pull/994) | 2026-09-18 | fix(server-install): ubuntu-vps vhost emits a standalone http2 directive nginx < 1.25.1 rejects (#994) | [PR #648](https://github.com/hearsay-tools/cezarion/pull/648), [issue #429](https://github.com/hearsay-tools/cezarion/issues/429), [5847c428](https://github.com/hearsay-tools/cezarion/commit/5847c4282c26ba56fb95d833efc4f391e53b8600) | 2026-09-27 |  |
+| [#1082](https://github.com/open-mercato/cezar/pull/1082) | 2026-10-09 | feat(skills): unify browsing, activation, and preview (#1082) | [PR #1424](https://github.com/hearsay-tools/cezarion/pull/1424) | 2026-10-21 | the selection is stored per project with the legacy workspace fallback; the bookmarklet relocation was not ported |
 | [#1318](https://github.com/open-mercato/cezar/pull/1318) | 2026-10-09 | fix(git): avoid shared config locks during worktree creation (#1318) | [PR #1075](https://github.com/hearsay-tools/cezarion/pull/1075), [issue #1006](https://github.com/hearsay-tools/cezarion/issues/1006) | 2026-10-15 | No-track creation on both fresh paths (ordinary tasks and owned workers, upstream patched only the task path); reattach unchanged; real-Git regressions cover both under a held config lock. |
 | [#1349](https://github.com/open-mercato/cezar/pull/1349) | 2026-10-10 | feat(cockpit): Markdown preview toggle in the Changes diff (#1349) | [PR #1076](https://github.com/hearsay-tools/cezarion/pull/1076), [issue #1012](https://github.com/hearsay-tools/cezarion/issues/1012) | 2026-10-15 | Re-implemented by hearsay-tools/cezarion#1076 on the existing file readers with no recurring polling; adds a per-file switch and phone support, and loads repository images only (never remote ones). |
 | [#1362](https://github.com/open-mercato/cezar/pull/1362) | 2026-10-10 | feat: speed up GitHub tab with paged hydration (#1362) | [PR #1189](https://github.com/hearsay-tools/cezarion/pull/1189) | 2026-10-17 | re-implemented together with open-mercato/cezar#1362, #1366 and #1374 on the fork's own GitHub surface (assignees, viewer filters, boards, account-keyed cache, sidebar); owner decisions: list-backed presets keep paging, and the list keeps a deprecated body |

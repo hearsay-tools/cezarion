@@ -266,6 +266,15 @@ export const SKILL_RESUME_CRITERIA = [
   { id: 'R59', scenario: 'baseline', name: 'recovers a continued session before its next session event' },
 ] as const;
 
+/** hearsay-tools/cezarion#1408: the selected skill and its companions reach every runner's task worktree. */
+export const SKILL_PROVISION_CRITERIA = [
+  { id: 'R92', scenario: 'baseline', name: 'provisions the selected skill and its companions on Start' },
+  { id: 'R93', scenario: 'baseline', name: "provisions the selected skill's companions on an ordinary Continue" },
+  { id: 'R94', scenario: 'baseline', name: 'provisions them when recover() resumes a continuation with no live session' },
+  { id: 'R95', scenario: 'baseline', name: 'delivers a live /name, then one input naming what was installed' },
+  { id: 'R96', scenario: 'baseline', name: 'Stop during skill preparation launches nothing' },
+] as const;
+
 /** hearsay-tools/cezarion#917: worktree setup's note reaches every runner's opening message. */
 export const WORKTREE_SETUP_CRITERIA = [
   { id: 'R58', scenario: 'baseline', name: 'delivers the worktree setup note in the opening message' },

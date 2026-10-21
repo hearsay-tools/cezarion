@@ -230,7 +230,7 @@ import { checkoutRepo, type CloneRunner } from './checkout.ts';
 import { createProject, listGithubOwners, type CommandRunner } from './create-project.ts';
 import { armPreview, ProjectContextError, ProjectContexts, projectWarmupEnabled, sweepRegisteredPreviewLeftovers, type ProjectContext } from './project-context.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
-import { readUiState, uiStatePath } from '../ui-state.ts';
+import { readProjectUiState, readUiState, uiStatePath, withLegacySkillSelection } from '../ui-state.ts';
 import { agentHomePaths, expandTilde } from '../paths.ts';
 import { isLoopbackHostHeader, normalizeHostname, resolveCapabilities } from './capabilities.ts';
 import { applicationUpdateInputSchema, type ApplicationUpdateState } from '@open-mercato/cezar-contract/application-update';
@@ -857,6 +857,9 @@ const uiStateSchema = z
     lastWorktree: z.boolean().optional(),
     lastAutonomous: z.boolean().optional(),
     lastGenerateFollowups: z.boolean().optional(),
+    // The default team-skill selection belongs to this project's ui-state, never the workspace
+    // state (hearsay-tools/cezarion#1408).
+    importedSkills: z.array(z.string().min(1).max(200)).max(UI_STATE_MAX_KEYS).optional(),
     // Skill selection frequency (#408): name → times chosen, incremented on a successful run
     // start from EITHER composer (`/new`'s SourcePill and the follow-up `SkillsPicker`). Drives
     // the shared `orderSkillsByUsage` sort (web/app/src/lib/skills.ts) so both pickers float the
@@ -904,8 +907,7 @@ const uiStateSchema = z
       .optional(),
     // Skills promo banner (#391): set once the cockpit banner is dismissed, never unset.
     // Server-persisted (not a cookie) so the "shown once" promise holds across browsers.
-    // Retained for backward compatibility — the banner is gone, replaced by the workspace-level
-    // `importedSkills` curation (see `workspaceUiStateSchema`); `.passthrough()` would preserve
+    // Retained for backward compatibility — the banner is gone; `.passthrough()` would preserve
     // the key regardless, but keep it typed.
     dismissedSkillsBanner: z.boolean().optional(),
   })
@@ -3479,16 +3481,8 @@ export function createApp(deps: ServerDeps) {
       const gated = await gatedSkillsRepos(repoRoot);
       if (gated.size === 0) return c.json([]);
       if (c.req.valid('query').wait === '1') await waitForTeamSkills(repoRoot);
-      const importable = getTeamSkillsCached(repoRoot)
-        .filter((skill) => skill.team && gated.has(skill.team.repo))
-        // Spread `description` rather than writing it unconditionally: an undefined VALUE is
-        // dropped by JSON.stringify, so the key is absent on the wire, and writing it always
-        // typed the route as sending a key it does not. contract/skills.ts says `.optional()`,
-        // which is what the client actually receives.
-        .map((skill) => ({
-          name: skill.name,
-          ...(skill.description !== undefined ? { description: skill.description } : {}),
-        }));
+      // The full skill, so the Skills catalog can preview one before it is enabled.
+      const importable = getTeamSkillsCached(repoRoot).filter((skill) => skill.team && gated.has(skill.team.repo));
       return c.json(importable);
     })
 
@@ -3514,14 +3508,15 @@ export function createApp(deps: ServerDeps) {
       // single request may not stuff an unbounded key set (#429) — the shared
       // schema+cap half of both ui-state routes lives in `uiStateBody`.
       const parsed = { data: c.req.valid('json') };
-      const merged = { ...(await readUiState(repoRoot)), ...parsed.data };
+      // Merge into the project's own file: the legacy skill fallback is read-only (#1408).
+      const merged = { ...(await readProjectUiState(repoRoot)), ...parsed.data };
       try {
         await mkdir(dataDir, { recursive: true });
         await writeFile(uiStatePath(repoRoot), `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
       }
-      return c.json(merged);
+      return c.json(await withLegacySkillSelection(merged));
     });
 
   // ---- chained family: workflows (project-scoped) --------------------------

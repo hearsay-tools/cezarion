@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { normalizeSidebarLimits, type UiState } from '@open-mercato/cezar-contract/workspace';
+import { readWorkspaceUiState } from './workspace/ui-state.ts';
 
 /**
  * `.ai/cezar/ui-state.json` — small GUI preferences the cockpit persists (files, not a DB).
@@ -16,7 +17,10 @@ export function uiStatePath(repoRoot: string): string {
 }
 
 /**
- * Read `ui-state.json` on demand — never cached, never throws.
+ * Read `ui-state.json` on demand — never cached, never throws. A project with no
+ * `importedSkills` array of its own takes the legacy workspace-level array, so a selection an
+ * older cockpit saved there still applies; a project array, even `[]`, always wins
+ * (hearsay-tools/cezarion#1408).
  *
  * Typed by the CONTRACT (`UiState`), not by a loose record: `GET /api/v1/ui-state` answers this
  * value verbatim, so a `Record<string, unknown>` here made the route name no key at all and the
@@ -31,12 +35,30 @@ export function uiStatePath(repoRoot: string): string {
  * by `uiStateBody`) is what actually enforces it.
  */
 export async function readUiState(repoRoot: string): Promise<UiState> {
+  return withLegacySkillSelection(await readProjectUiState(repoRoot));
+}
+
+/**
+ * The project's own file, without the legacy workspace fallback. Writes merge from this, so a
+ * save of another preference never copies an inherited selection into the project (#1408).
+ */
+export async function readProjectUiState(repoRoot: string): Promise<UiState> {
+  let state: UiState = {};
   try {
     const parsed: unknown = JSON.parse(await readFile(uiStatePath(repoRoot), 'utf8'));
-    if (!parsed || typeof parsed !== 'object') return {};
-    const state = parsed as UiState;
-    return 'sidebarLimits' in state ? { ...state, sidebarLimits: normalizeSidebarLimits(state.sidebarLimits) } : state;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      state = parsed as UiState;
+      if ('sidebarLimits' in state) state = { ...state, sidebarLimits: normalizeSidebarLimits(state.sidebarLimits) };
+    }
   } catch {
-    return {};
+    // Missing or unreadable: an empty preference bag.
   }
+  return state;
+}
+
+/** `state` with the legacy workspace selection filled in when the project has none of its own. */
+export async function withLegacySkillSelection(state: UiState): Promise<UiState> {
+  if (Array.isArray(state.importedSkills)) return state;
+  const legacy = await readWorkspaceUiState();
+  return Array.isArray(legacy.importedSkills) ? { ...state, importedSkills: legacy.importedSkills } : state;
 }

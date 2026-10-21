@@ -236,4 +236,88 @@ describe('team directory skills never land in the main checkout (#1024)', { time
         `.agents/skills/${TEAM_SKILL}/, and .cursor/skills/${TEAM_SKILL}/`,
     ]);
   });
+
+  // hearsay-tools/cezarion#1408: the selected skill's companions, and a `/name` team directory skill.
+  const promptWorkflow: WorkflowDef = plannedWorkflow([{ id: 'task', name: 'task', prompt: '{{task}}' }, { id: 'verify', command: 'true' }]);
+
+  function writeLocalSkill(name: string, body: string): void {
+    mkdirSync(join(repoRoot, '.ai/skills', name), { recursive: true });
+    writeFileSync(join(repoRoot, '.ai/skills', name, 'SKILL.md'), `---\nname: ${name}\ndescription: ${name} skill\n---\n${body}\n`);
+  }
+
+  /** Start a run and hold its first session open, so its worktree is still there to inspect. */
+  async function launch(def: WorkflowDef, task: string, worktree?: boolean): Promise<{ id: string; spec: AgentRunSpec; finish(): Promise<void> }> {
+    const before = launches.length;
+    const record = manager.startRun(def, { task, ...(worktree === undefined ? {} : { worktree }) });
+    await vi.waitFor(() => expect(launches.length).toBe(before + 1), { timeout: LAUNCH_WAIT_MS });
+    return {
+      id: record.id,
+      spec: launches[before]!,
+      finish: async () => {
+        sessions[before]!();
+        await vi.waitFor(() => expect(manager.isActive(record.id)).toBe(false), { timeout: LAUNCH_WAIT_MS });
+      },
+    };
+  }
+
+  const notesOf = (runId: string): string[] => store.readEvents(runId)
+    .filter((event) => event.type === 'note').map((event) => String(event.message));
+
+  it("a selected skill's companion lands in the task worktree (#1408)", async () => {
+    writeLocalSkill('lead-1408', 'then run helper-1408');
+    writeLocalSkill('helper-1408', 'HELPER-1408');
+    const run = await launch(plannedWorkflow([...skillTaskSteps('lead-1408'), { id: 'verify', command: 'true' }]), 'go');
+    expect(run.spec.cwd).not.toBe(repoRoot);
+    for (const agentDir of AGENT_SKILL_DIRS) {
+      expect(readFileSync(join(run.spec.cwd, agentDir, 'skills', 'helper-1408', 'SKILL.md'), 'utf8')).toContain('HELPER-1408');
+    }
+    expect(notesOf(run.id)).toContain("skills installed in the task's workspace: lead-1408, helper-1408");
+    await run.finish();
+  });
+
+  it('a /name opening prompt materializes a team directory skill in the worktree (#1118)', async () => {
+    await seedTeamSource();
+    const run = await launch(promptWorkflow, `/${TEAM_SKILL} please`);
+    expect(run.spec.cwd).not.toBe(repoRoot);
+    expect(readFileSync(join(run.spec.cwd, '.agents', 'skills', TEAM_SKILL, 'references', 'notes.md'), 'utf8')).toBe(NOTES);
+    expect(run.spec.userPrompt).toContain(V1_BODY);
+    expect(run.spec.userPrompt).not.toContain('Skill files are installed on disk at:');
+    await run.finish();
+  });
+
+  it('a worktree-off /name opening prompt names the cache copy (#1118)', async () => {
+    const { repo, source } = await seedTeamSource();
+    const run = await launch(promptWorkflow, `/${TEAM_SKILL} please`, false);
+    const filesDir = join(home, '.cache', 'cez', 'skill-files', basename(bareDirFor(repo)), source.commit, TEAM_SKILL);
+    expect(run.spec.userPrompt).toContain(`Skill files are installed on disk at: ${filesDir}`);
+    expect(readFileSync(join(filesDir, 'references', 'notes.md'), 'utf8')).toBe(NOTES);
+    await run.finish();
+  });
+
+  it('the step note reports a capped closure (#1408)', async () => {
+    for (let i = 0; i < 26; i++) writeLocalSkill(`chain-${i}`, i < 25 ? `next chain-${i + 1}` : 'end');
+    const run = await launch(plannedWorkflow([...skillTaskSteps('chain-0'), { id: 'verify', command: 'true' }]), 'go');
+    const note = notesOf(run.id).find((message) => message.startsWith("skills installed in the task's workspace:"));
+    expect(note).toMatch(/; closure capped at 24, skipped chain-24 and later$/);
+    expect(existsSync(join(run.spec.cwd, '.agents', 'skills', 'chain-24'))).toBe(false);
+    await run.finish();
+  });
+
+  describe('guards', () => {
+    it('an in-place run writes no skill entry in the checkout', async () => {
+      writeLocalSkill('lead-1408', 'then run helper-1408');
+      writeLocalSkill('helper-1408', 'HELPER-1408');
+      const run = await launch(plannedWorkflow([...skillTaskSteps('lead-1408'), { id: 'verify', command: 'true' }]), 'go', false);
+      expect(run.spec.cwd).toBe(repoRoot);
+      for (const agentDir of AGENT_SKILL_DIRS) expect(existsSync(join(repoRoot, agentDir)), agentDir).toBe(false);
+      await run.finish();
+    });
+
+    it('an unknown /command passes through unchanged', async () => {
+      const run = await launch(promptWorkflow, '/compact now');
+      expect(run.spec.userPrompt.startsWith('/compact now')).toBe(true);
+      for (const agentDir of AGENT_SKILL_DIRS) expect(existsSync(join(run.spec.cwd, agentDir, 'skills', 'compact')), agentDir).toBe(false);
+      await run.finish();
+    });
+  });
 });

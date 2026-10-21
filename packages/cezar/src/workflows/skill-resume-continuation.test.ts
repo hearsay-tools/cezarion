@@ -297,7 +297,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
     await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: LAUNCH_WAIT_MS });
     expect(materialize).toHaveBeenCalledTimes(1);
-    expect(materialize).toHaveBeenCalledWith(worktree, skill);
+    expect(materialize).toHaveBeenCalledWith(worktree, skill, expect.any(Function), { onlyOwned: true });
     expect(launches[0]!.spec.systemPrompt).toContain(skillSystemPrompt(skill));
     expect(store.readEvents(id).some((event) => event.type === 'note' && String(event.message).includes(MATERIALIZED_NOTE))).toBe(false);
     sessions[0]!.finish();

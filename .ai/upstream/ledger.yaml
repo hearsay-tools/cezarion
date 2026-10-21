@@ -1385,9 +1385,13 @@ entries:
     pr: 1082
     title: "feat(skills): unify browsing, activation, and preview (#1082)"
     date: 2026-10-09
-    status: pending
+    status: ported
     hint:
       conflicts: 13
+    fork:
+      pr: 1424
+    decided: 2026-10-21
+    note: the selection is stored per project with the legacy workspace fallback; the bookmarklet relocation was not ported
   - sha: 79c2b79c73c8a617d098dfd6f29e99e6fa431357
     pr: 1336
     title: "feat(web): filter tasks by origin (Regular | Automations | All) + Tasks facets (#1336)"

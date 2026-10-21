@@ -1,7 +1,11 @@
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { dirname, join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importableSkillSchema } from '@open-mercato/cezar-contract/skills';
+import * as config from './config.ts';
+import { workspaceUiStatePath } from './paths.ts';
+import * as remote from './skills-remote.ts';
 import {
   discoverSkills,
   filterImportedTeamSkills,
@@ -98,6 +102,72 @@ describe('filterImportedTeamSkills', () => {
   it('gates nothing when the gated set is empty (repo configured its own skillsRepos)', () => {
     const skills = [teamSkill('pr-create', OM)];
     expect(filterImportedTeamSkills(skills, new Set(), []).map((s) => s.name)).toEqual(['pr-create']);
+  });
+});
+
+/**
+ * hearsay-tools/cezarion#1408 (port of upstream open-mercato/cezar#1082): the default-skill
+ * selection lives in each project's `.ai/cezar/ui-state.json`. The old workspace value only seeds
+ * a project that has no selection of its own.
+ */
+describe('discoverSkills default-skill selection per project (#1408)', () => {
+  const teamNames = async (repoRoot: string) =>
+    (await discoverSkills(repoRoot)).filter((skill) => skill.source === 'team').map((skill) => skill.name);
+
+  async function project(importedSkills?: string[]): Promise<string> {
+    const repoRoot = await mkdtemp(join(tmpdir(), 'cezar-skills-'));
+    tempDirs.push(repoRoot);
+    await mkdir(join(repoRoot, '.ai/cezar'), { recursive: true });
+    if (importedSkills) await writeFile(join(repoRoot, '.ai/cezar/ui-state.json'), JSON.stringify({ importedSkills }));
+    return repoRoot;
+  }
+
+  async function workspaceSelection(importedSkills: string[]): Promise<void> {
+    await mkdir(dirname(workspaceUiStatePath()), { recursive: true });
+    await writeFile(workspaceUiStatePath(), JSON.stringify({ importedSkills }));
+  }
+
+  // A home of its own: an inherited CEZ_HOME keeps a real workspace ui-state this must not touch.
+  let home: string;
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), 'cezar-skills-home-'));
+    vi.stubEnv('CEZ_HOME', home);
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    await rm(home, { recursive: true, force: true });
+  });
+
+  function offerDefaults(): void {
+    vi.spyOn(remote, 'getTeamSkillsCached').mockReturnValue([teamSkill('om-fix', OM), teamSkill('om-review', OM)]);
+    vi.spyOn(config, 'gatedSkillsRepos').mockResolvedValue(new Set([OM]));
+  }
+
+  it('an empty project selection hides every default skill, even when the workspace lists them', async () => {
+    offerDefaults();
+    await workspaceSelection(['om-fix', 'om-review']);
+    expect(await teamNames(await project([]))).toEqual([]);
+  });
+
+  it('keeps a separate selection for each project', async () => {
+    offerDefaults();
+    const first = await project(['om-fix']);
+    const second = await project(['om-review']);
+    expect(await teamNames(first)).toEqual(['om-fix']);
+    expect(await teamNames(second)).toEqual(['om-review']);
+  });
+
+  it('a project with no selection keeps the legacy workspace selection', async () => {
+    offerDefaults();
+    await workspaceSelection(['om-review']);
+    expect(await teamNames(await project())).toEqual(['om-review']);
+  });
+
+  it('the importable catalog carries the full skill, a description-less one included', () => {
+    const skill = teamSkill('om-fix', OM);
+    expect(importableSkillSchema.parse(skill)).toEqual(skill);
   });
 });
 
