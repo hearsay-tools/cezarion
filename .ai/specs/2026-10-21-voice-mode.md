@@ -31,7 +31,7 @@ sends the sentence and its action list to Jev; code acts on the typed answer.
 The **⌘K palette understands sentences**. Text arrives by typing or from any dictation tool that
 pastes into the palette input. A server-side **decision engine** (Jev in v1) maps the sentence to
 one action from a **code-owned action catalog**, with each parameter picked from a list code
-supplies. Navigation runs at once. Anything that wakes an agent shows a **highlighted proposal**
+supplies. Return commits a sentence: navigation then runs with no further step. Anything that wakes an agent shows a **highlighted proposal**
 and waits for confirmation: the user says "yes, confirmed" or presses Return.
 
 ## Goals (v1)
@@ -92,10 +92,14 @@ From AGENTS.md (research § F):
 2. The user types, or dictates with their tool, which pastes the sentence.
 3. The palette's normal results stay instant. When the text reads like a sentence, the palette asks
    the engine and, if the answer is a command, shows a **Will do** row at the top: one line saying
-   what will happen ("Open *Fix flaky e2e shard* — next finished").
-4. **Return** runs the Will do row. If Return comes before the decision (Superwhisper's Shift
-   finish sends paste and Return together), the palette waits for the decision, bounded, then runs
-   it. If the engine says "not a command", Return does what it does today.
+   what will happen ("Open *Fix flaky e2e shard* — next finished"). This is a preview only:
+   **nothing runs because text arrived.**
+4. **Return commits the sentence** and runs the Will do row: navigation runs, and every other
+   action becomes a proposal (§ Confirmation). The user presses Return, or Superwhisper presses it
+   when the user holds Shift at the end. If Return comes before the decision, the palette waits
+   for it, bounded, then acts. If the engine says "not a command", Return does what it does today.
+5. **The Return that commits a sentence never confirms a proposal**, even when it arrives before
+   the decision. So one dictation gesture can create a proposal but never send it.
 
 ### Open by status and position
 
@@ -105,16 +109,26 @@ From AGENTS.md (research § F):
   relative to the open task inside that status's list; when the open task is not in the list,
   "next" is the first. Code computes the target; Jev only picks the position word.
 - **Status:** one entry from a **code-owned status map**. Each entry has a name, a one-line
-  description for Jev, and a predicate over `RunSummary`:
-  - the sidebar groups: Needs you, Working, Finished, Archived (`bucketOf` in
-    `packages/web/src/lib/task-groups.ts`);
-  - the finer labels the status dot shows (`deriveAttention` in
-    `packages/contract/src/attention.ts`): needs review, needs permission, failed, waiting for CI,
-    monitoring, queued, scheduled, waiting on workers, done, cancelled, unseen.
-- **List order:** the order the sidebar shows (`sortRuns`/`groupRuns`), so "next" matches what the
-  user sees.
-- Opening is navigation: it runs at once, with no confirmation. An empty list gives one line in the
-  palette ("No failed tasks") and no navigation.
+  description for Jev, and **its own predicate** over `RunSummary`. Predicates may overlap; they
+  are not "equals the dot label", because the dot shows exactly one label per run:
+  - the sidebar sections: Needs you, Working, Finished (`bucketOf` in
+    `packages/web/src/lib/task-groups.ts`), plus Archived (see List below);
+  - finer states (`deriveAttention` in `packages/contract/src/attention.ts`): needs review, needs
+    permission, failed, running, waiting for CI, monitoring, waiting for capacity, queued,
+    scheduled, waiting on workers (every worker-wait label: "waiting on N workers", "waiting on
+    worker replies", "waiting on parent reply"), done, cancelled;
+  - **unread**, from the sidebar's read state (`isUnread` in `packages/web/src/lib/read-state.ts`).
+    The dot's `unseen` bucket is reserved and never emitted, so it is not used.
+  - Combined filters ("open next unread failed") are not in v1.
+- **List:** the tasks of the **sidebar tab the user is on** (Active or Automations, `sidebarRuns`),
+  in the sidebar's order (`groupRuns(…, 'active')`), **including rows the sidebar's row cap hides**
+  (`capBuckets`). Owned workers are left out, as in the sidebar. A variant group counts as one row
+  and opens what its tile opens. The "open task" that "next" counts from is the sidebar's highlighted
+  row (`sidebarActiveRunId`, which maps a worker to its parent). **Archived** is not a sidebar
+  section: it walks the Tasks table's archived order over the rows already loaded
+  (`ARCHIVED_WINDOW`, 200); older archived tasks are out of reach in v1.
+- Opening is navigation: it runs on Return, with no confirmation. An empty list gives one line in
+  the palette ("No failed tasks") and no navigation.
 
 ### Answer the question card
 
@@ -135,6 +149,12 @@ through the card's existing path: one combined message in the `header: answer` f
 `useAskAnswer` (live message or Continue). "Change question two to …" refills one question. "No" or
 Esc drops the voice-filled answers and leaves the card as it was.
 
+**The proposal collects answers across sentences**, so "answer X to question first" and then "Y to
+question second" fill one card. The card's Send needs every question answered (`allAnswered` in
+`packages/web/src/routes/task-thread/ask-card.tsx`), and voice keeps that rule: while a question has
+no answer, a confirmation is refused with one line naming it ("Question 2 (*Engine*) still needs an
+answer") and the proposal stays open. Partial answers are never sent.
+
 If the open task has no pending question card, or the card is routed to a parent task, the palette
 says so in one line and does nothing.
 
@@ -147,10 +167,11 @@ tasks with no question card (a parked turn).
 ### Confirmation
 
 A pending proposal stays until the user confirms, cancels, replaces it or leaves. Confirmation is
-"yes, confirmed" (judged by the engine in v1) or Return. **The confirm field must have focus while
-the highlighted card is visible**, so a dictation tool can paste "yes, confirmed" into it. How the
-palette and the card share the screen during this step is a builder decision (see § Left to the
-builder).
+a **separate input made while the proposal is on screen**: a committed sentence the engine judges
+to be a confirmation ("yes, confirmed"), or Return in the emptied input after the proposal is
+shown. **The confirm field must have focus while the highlighted card is visible**, so a dictation
+tool can paste "yes, confirmed" into it. How the palette and the card share the screen during this
+step is a builder decision (see § Left to the builder).
 
 ### When the engine is not sure
 
@@ -183,11 +204,19 @@ actions with their outcomes (Jev has no memory between calls).
 
 ## Architecture
 
-- **Route:** `POST /api/v1/p/:projectId/voice/decide` (and its boot alias). Request: the sentence
-  plus a small context (current view, open run id, a pending proposal if any). Response: a
-  discriminated union on `action` (`open` with status and position; `answer` with one entry per
-  addressed question, each either a choice label or Other text; `tell` with text; `confirm`;
-  `cancel`; `pick` with a number; `none`), plus confidence and a `decisionId`.
+- **Routes** (each with its boot alias):
+  - `POST /api/v1/p/:projectId/voice/decide`. Request: the sentence plus a small context (current
+    view, open run id, a pending proposal if any). Response: a discriminated union on `action`
+    (`open` with status and position; `answer` with one entry per addressed question, each either a
+    choice label or Other text; `tell` with text; `confirm`; `cancel`; `pick` with a number;
+    `none`), plus confidence and a `decisionId`.
+  - `POST /api/v1/p/:projectId/voice/outcome` `{ decisionId, outcome }`, where `outcome` is
+    `executed` (navigation ran), `confirmed`, `cancelled`, `replaced` (a new sentence replaced the
+    proposal) or `abandoned` (the palette closed, or the user navigated away, with a proposal or a
+    preview not acted on). The browser sends it when the outcome happens; it is best-effort and
+    never blocks the action.
+  - The server keeps the last three decisions and outcomes per project (from the decision log) for
+    the engine's state; the browser does not send that history.
 - **Decision engine seam (server):** one interface, `decide(state, questions) → typed answers`, with
   Jev as the first implementation. The model version is pinned (as `jev-1.13.0` is in
   `.github/scripts/jev-issue-intake.cjs`), because thresholds are tuned against one version. Other
@@ -199,15 +228,19 @@ actions with their outcomes (Jev has no memory between calls).
 - **Execution (browser):** navigation through the project router; answers fill the `AskCard` state
   and send through `useAskAnswer`; tell-it fills the composer and sends through its existing path.
 - **Decision log:** each decision appends one line to a local NDJSON file under `.ai/cezar/`
-  (sentence, state summary, engine answers, chosen action, outcome: confirmed, cancelled, changed or
-  ignored, latency). It is written only while the feature is on, kept out of git through
+  (sentence, state summary, engine answers, chosen action, latency), and each outcome appends one
+  line keyed by `decisionId`. It is written only while the feature is on, kept out of git through
   `ensureDataGitignore`, and safe to delete. It is the evidence for moving stable routes into plain
   code, and for a replay set like `.github/scripts/jev-intake-replay.cjs`.
 - **Flag and capability:** a `CEZ_VOICE=1`-style flag plus `TYPESAFE_API_KEY`. `health`
-  capabilities gain a `voice` boolean (like `automations` and `preview`). With the flag or key
-  missing, the route answers 409 and the palette is unchanged.
-- **Dry run:** under `CEZ_DRY_RUN=1` the engine is a deterministic fake, so unit and browser tests
-  run with no key.
+  capabilities gain a `voice` boolean (like `automations` and `preview`):
+  `voice = flag on AND (key set OR CEZ_DRY_RUN=1)`. When it is false, both routes answer 409 and
+  the palette is unchanged.
+- **Dry run:** under `CEZ_DRY_RUN=1` the engine is always a deterministic fake, even when a key is
+  set, so dry runs never reach the network. The fake understands a fixed phrase set: "open
+  <position> <status>", "answer <choice text | the Nth answer | other words> to question <N>",
+  "tell it: <text>", "yes, confirmed", "no" / "cancel", and a bare number for a numbered pick.
+  That covers the browser E2E cases.
 - **Remote mode:** works unchanged; it is plain HTTP and needs no microphone.
 
 ## Transitions out
@@ -217,17 +250,20 @@ resource and no `maxParallel` slot.
 
 | State | Trigger | Who or what fires it | Behavior at shipped defaults |
 | --- | --- | --- | --- |
-| deciding | engine answer arrives | the `voice/decide` response | navigation runs; other actions become a proposal; "none" leaves the palette as it is |
-| deciding | the text changes | the user types or pastes | the request is aborted; a new one starts |
+| preview | the text changes | the user types or pastes | the open request is aborted; a new one starts; nothing runs |
+| preview | Return | the user, or the dictation tool's Shift finish | the sentence is committed: the next state is deciding, or the result runs at once when the decision is already there |
+| preview | Esc or the palette closes | the user | preview ends; `abandoned` is reported |
+| deciding | the committed sentence's answer arrives | the `voice/decide` response | navigation runs (`executed`); other actions become a proposal; "none" falls back to today's Return |
 | deciding | engine error or timeout | a bounded client timeout | one error line; the palette works as today |
-| proposal | "yes, confirmed" or Return | the user | sent through the existing path; proposal ends |
-| proposal | "no", "cancel" or Esc | the user | voice-filled values are removed; proposal ends |
-| proposal | a new answer or change sentence | the user | proposal is replaced |
-| proposal | the user navigates away or closes the palette | the user | proposal ends; the card returns to its prior state |
-| proposal | the question is answered elsewhere or the run moves on | the live run stream (SSE) | proposal ends with one line saying why |
+| proposal | "yes, confirmed" or Return in the emptied input, with every question answered | the user, after the proposal is shown | sent through the existing path; proposal ends (`confirmed`) |
+| proposal | a confirmation while a question has no answer | the user | refused with one line naming the question; proposal stays |
+| proposal | "no", "cancel" or Esc | the user | voice-filled values are removed; proposal ends (`cancelled`) |
+| proposal | a new answer or change sentence | the user | proposal is updated or replaced (`replaced` when replaced) |
+| proposal | the user navigates away or closes the palette | the user | proposal ends; the card returns to its prior state (`abandoned`) |
+| proposal | the question is answered elsewhere or the run moves on | the live run stream (SSE) | proposal ends with one line saying why (`abandoned`) |
 
-Feature off (the default): neither state is reachable. The proposal state's only exits are user
-actions and live run updates, by design: it waits for the user and holds nothing.
+Feature off (the default): no state is reachable. The proposal state's only exits are user actions
+and live run updates, by design: it waits for the user and holds nothing.
 
 ## Testing
 
@@ -265,8 +301,15 @@ actions and live run updates, by design: it waits for the user and holds nothing
 ## My calls (owner to check)
 
 - The decision log, its location and its contents (dictated text is stored locally).
-- Flag name `CEZ_VOICE` and a `voice` capability; route answers 409 when off.
+- Flag name `CEZ_VOICE` and a `voice` capability; both routes answer 409 when off.
 - Return before the decision waits for it (bounded); "not a command" falls back to today's Return.
+- The Return that commits a sentence never confirms; confirming is always a second input.
+- Answers collect across sentences; a confirmation with an unanswered question is refused, as the
+  card's Send is today. Partial answers are never sent.
+- "Next" walks the sidebar tab the user is on, past the row cap; Archived walks only the loaded
+  200; "unread" replaces the dot's unused "unseen"; no combined filters.
+- A second route reports outcomes; the server keeps the recent-actions history.
+- Dry run always uses the fake engine and turns the capability on without a key.
 - "No" and Esc drop voice-filled answers instead of keeping them unsent.
 - Numbered candidates below a confidence floor (for open; never for answers).
 - English only in v1 (Jev's primary language).
