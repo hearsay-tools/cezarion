@@ -706,6 +706,59 @@ No option is chosen here.
 
 ---
 
+## H. The owner's reference video
+
+[Rethinking AI with Jev: Instant, Nearly Free, and Unlocking What's Next](https://www.youtube.com/watch?v=3MwcIgBRras)
+(MEGA DEV live session with John Lindquist, 2026-10-08). Read from the auto-generated
+English transcript on 2026-10-21; quotes below are from that transcript.
+
+**What the to-do demo does.** The presenter dictates into a plain text input: "I need to buy
+some milk", "sort by date", "show me the tasks assigned to Leo", "move the plan weekend
+trip from personal to family", "mark the plan weekend trip as complete". As soon as "the
+microphone detects that you've stopped speaking", the app sends the sentence and "all the
+options and buttons and everything available on the page" to Jev as choices. Jev answers
+in about 100 ms; "if you saw any lag at all … it was … waiting for me to pause". He calls
+it a debounce problem: the inference is so fast that ordinary code must slow down.
+
+**How it maps speech to calls** (the grocery-store explainer the to-do app is built on):
+
+- One request carries several pick-one questions over the whole sentence: which tool, which
+  filter, which product, how many. "Then the store's code reads the tool answer first" and
+  uses only the answers that tool takes.
+- Argument values come from the app's own lists: "The words coconut yogurts are not what
+  the function receives. Jev scores those words against the store's list of items, picks
+  coconut yogurt, and the function gets that item's ID." "Only an ID from the store's own
+  list can" reach the function.
+- A yes/no gate ("does this change the cart?") with a 50 % cutoff asks the shopper to
+  confirm before the cart changes.
+- Scores are re-run after every word, so the top pick can change mid-sentence.
+- "The to-do app … adds one more step in front. Plain code splits a long sentence into
+  separate requests." His live failure came from this split: "the dictation left the word
+  and at the front … that was a dictation mistake, not a Jev mistake."
+
+**Lessons he states.**
+
+- **Search first, then decide.** "When I started building the to-do app, I started thinking,
+  oh, I'll have all of the items in the to-do app be available to Jev. And that's where Jev
+  started inferring weird things because I gave it so many options … instead of having code
+  do like a traditional search for the most relevant items and then Jev matching on the
+  most relevant items."
+- **Three sources of menus.** The app writes the menu (functions, to-do actions); the screen
+  is the menu ("Plain code reads the buttons and fields off the page and numbers them");
+  the menu changes under you (each new page, each freed agent).
+- **Two hand-offs.** "A menu that grows with your data needs search first and decisions that
+  keep coming out the same become plain code." Slow, open-ended work ("let's craft an email
+  together") is not Jev's job.
+
+**Inference for cezar.** The demo takes text from dictation into an input box; the speech
+engine is not part of the Jev design. A cezar voice mode can therefore accept text from any
+source (the cockpit's own mic, or a system dictation tool typing into a command box). The
+"screen is the menu" pattern matches "jump to this thread / click this" requests; the
+"app writes the menu" pattern matches the action catalog in §E. Open-ended requests
+("look into why CI is red") map to cezar's own hand-off: start or message an agent task.
+
+---
+
 ## Sources (all read 2026-10-21)
 
 TypeSafe: [docs index](https://docs.typesafe.ai/llms.txt) and the pages linked above;
