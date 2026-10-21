@@ -53,7 +53,7 @@ it('returns a bounded wire receipt without persisted authority or delivery state
 it.each([
   'manager_disposed', 'capability_revoked', 'run_missing', 'run_not_running', 'run_stopping',
   'session_replaced', 'session_closed', 'run_cancelled', 'finish_requested', 'generation_mismatch',
-  'human_ask_pending', 'human_ask_unanswered', 'worker_wait_pending', 'worker_execution_stopped',
+  'worker_wait_pending', 'worker_execution_stopped',
   'root_finish_pending', 'registration_aborted', 'turn_changed',
 ])('accepts the specific registration refusal %s without losing its diagnostic', async code => {
   const { ciWaitErrorSchema } = await import('@open-mercato/cezar-contract/ci-wait');
@@ -67,7 +67,7 @@ it.each([
 describe('cezar_done tool contract', () => {
   it('lists cezar_ask and cezar_done with the wait tools and gives each a trigger line', () => {
     for (const env of [{}, { CEZ_PREVIEW: '1' }]) {
-      expect(cezarTools(env).map(tool => tool.definition.name).slice(0, 5)).toEqual(['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
+      expect(cezarTools(env).map(tool => tool.definition.name).slice(0, 4)).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
       expect(cezarServerInstructions(env)).toContain('- cezar_done: load when the task is complete and verified.');
       expect(cezarServerInstructions(env)).toContain('- cezar_ask: load when you need the user');
     }

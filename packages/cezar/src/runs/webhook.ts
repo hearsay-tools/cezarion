@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ApiRun, RunActivity, RunStatus, WebhookTrigger } from '@open-mercato/cezar-contract';
+import type { ApiRun, RunStatus, WebhookTrigger } from '@open-mercato/cezar-contract';
 import { DEFAULT_WEBHOOK_TRIGGERS, deriveWebhookState, type AttentionInput } from '@open-mercato/cezar-contract/attention';
+import { asksQuestion } from '@open-mercato/cezar-contract/waits';
 import { projectStatus } from '../task-cli/projections.ts';
 import { loadWorkspaceConfig } from '../workspace/config.ts';
 import { deriveRunContextEvents } from './event-history.ts';
@@ -54,7 +55,6 @@ export interface TaskWebhookPayload {
   previousStatus: RunStatus | null;
   /** The state this delivery reports the run entering; `null` on `task.subscribed`. */
   state: WebhookTrigger | null;
-  activity: RunActivity | null;
   occurredAt: string;
   message?: string;
   task: Record<string, unknown>;
@@ -197,7 +197,7 @@ export class TaskWebhook {
     if (now.state === undefined || before.state === now.state) return;
     // One delivery per entry: a question that parks the run is one `task.question`, not a
     // `task.status` to `waiting` beside it.
-    const event = now.state === 'needs-you' && run.hasPendingHumanAsk ? 'task.question' : 'task.status';
+    const event = now.state === 'needs-you' && asksQuestion(run) ? 'task.question' : 'task.status';
     this.enqueue({ event, run, previousStatus: before.status, state: now.state, occurredAt });
   }
 
@@ -221,7 +221,7 @@ export class TaskWebhook {
     this.seqs.set(run.id, seq);
     const origin = this.options.origin() ?? '';
     const url = `${origin}/p/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(run.id)}`;
-    const question = run.hasPendingHumanAsk ? await this.pendingQuestion(run.id) : undefined;
+    const question = asksQuestion(run) ? await this.pendingQuestion(run.id) : undefined;
     return {
       event: pending.event,
       deliveryId: randomUUID(),
@@ -232,7 +232,6 @@ export class TaskWebhook {
       status: run.status,
       previousStatus: pending.previousStatus,
       state: pending.state ?? null,
-      activity: run.activity ?? null,
       occurredAt: pending.occurredAt,
       ...(pending.message === undefined ? {} : { message: pending.message }),
       // The same slim projection `cez task status` prints, so a bot parses one shape.

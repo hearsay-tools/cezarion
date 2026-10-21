@@ -1,9 +1,8 @@
 import { cezarAskRequestSchema, cezarCancelWaitRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type CezarAskAnswer } from '@open-mercato/cezar-contract/waits';
 import { ASK_LIMITS } from '@open-mercato/cezar-contract/ask-schema';
-import { ciWaitRequestSchema } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, previewServeRequestSchema } from '@open-mercato/cezar-contract/preview';
 import { z } from 'zod';
-import { callCezarAsk, callCezarCancelWait, callCezarDone, callCezarWait, callCiWait, callPreviewServe, callPreviewStop } from './client.ts';
+import { callCezarAsk, callCezarCancelWait, callCezarDone, callCezarWait, callPreviewServe, callPreviewStop } from './client.ts';
 
 /**
  * The one list of cezar tools (#781). The MCP adapter lists it, Pi's extension registers it, and
@@ -12,11 +11,8 @@ import { callCezarAsk, callCezarCancelWait, callCezarDone, callCezarWait, callCi
 type ToolResult = { content: Array<{ type: 'text'; text: string }>; isError?: boolean; details: unknown };
 export type CezarTool = {
   definition: { name: string; description: string; inputSchema: { type: 'object'; properties?: Record<string, unknown>; [key: string]: unknown } };
-  /**
-   * #497: deferred-tool harnesses show a bare name, so the server instructions carry this line.
-   * Absent for a deprecated tool: it stays listed and admitted, but nothing suggests it.
-   */
-  trigger?: string;
+  /** #497: deferred-tool harnesses show a bare name, so the server instructions carry this line. */
+  trigger: string;
   /** Pi's tool label. */
   label: string;
   invoke(input: unknown): Promise<ToolResult>;
@@ -25,21 +21,6 @@ export type CezarTool = {
 /** Live preview is on under the exact value `1` only (spec 2026-10-02-live-preview-v1). */
 export function previewToolEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CEZ_PREVIEW === '1';
-}
-
-/** hearsay-tools/cezarion#1233: deprecated alias of `cezar_wait` with kind "ci", removed in phase 4 (#1236). */
-export const ciToolDefinition = {
-  name: 'cezar_wait_for_ci',
-  description: 'Deprecated: use cezar_wait with kind "ci". Register a bounded CI wait for a GitHub pull request. End your turn after registration; Cezar resumes you with an observation. No marker is needed. Passing reported checks does not prove all expected workflows appeared and is not merge approval.',
-  inputSchema: { ...z.toJSONSchema(ciWaitRequestSchema, { io: 'input' }), type: 'object' as const },
-};
-export async function invokeCiTool(input: unknown) {
-  try {
-    const receipt = await callCiWait(input);
-    return { content: [{ type: 'text' as const, text: `${JSON.stringify(receipt)}\nRegistered. Please end your turn to wait; no marker is needed. This observation is not merge approval.` }], details: receipt };
-  } catch (error) {
-    return { isError: true, content: [{ type: 'text' as const, text: error instanceof Error ? error.message : 'CI tool unavailable' }], details: {} };
-  }
 }
 
 /**
@@ -136,7 +117,7 @@ export const previewToolDefinition = {
   inputSchema: { ...z.toJSONSchema(previewServeRequestSchema, { io: 'input' }), type: 'object' as const },
 };
 
-/** JSON first, then the hint as a plain sentence: the shape `cezar_wait_for_ci` answers in. */
+/** JSON first, then the hint as a plain sentence: the shape every cezar tool answers in. */
 export async function invokePreviewTool(input: unknown) {
   const result = await callPreviewServe(input);
   return { content: [{ type: 'text' as const, text: `${JSON.stringify(result)}\n${result.hint}` }], isError: !result.ok, details: result };
@@ -153,8 +134,6 @@ export async function invokePreviewStopTool(input: unknown) {
 }
 const PREVIEW_STOP_TOOL: CezarTool = { definition: previewStopToolDefinition, trigger: 'load when your Cezar-started preview server needs stopping or restarting.', label: 'Stop live preview', invoke: invokePreviewStopTool };
 
-// Deprecated: still listed, so every runner keeps admitting it, but with no trigger line.
-const CI_TOOL: CezarTool = { definition: ciToolDefinition, label: 'Wait for CI', invoke: invokeCiTool };
 const WAIT_TOOL: CezarTool = { definition: waitToolDefinition, trigger: 'load when you are waiting on CI for a PR, or want to re-check something later; end your turn after it answers.', label: 'Wait', invoke: invokeWaitTool };
 const ASK_TOOL: CezarTool = { definition: askToolDefinition, trigger: 'load when you need the user: a decision only they can make, or missing input; send the full context as assistant text before you call it, and end your turn after it answers.', label: 'Ask the user', invoke: invokeAskTool };
 const CANCEL_WAIT_TOOL: CezarTool = { definition: cancelWaitToolDefinition, trigger: 'load when a wait you registered is no longer needed.', label: 'Cancel wait', invoke: invokeCancelWaitTool };
@@ -162,7 +141,7 @@ const DONE_TOOL: CezarTool = { definition: doneToolDefinition, trigger: 'load wh
 const PREVIEW_TOOL: CezarTool = { definition: previewToolDefinition, trigger: 'load when you have started, or are about to start, a web server the user should click through.', label: 'Live preview', invoke: invokePreviewTool };
 
 export function cezarTools(env: NodeJS.ProcessEnv = process.env): CezarTool[] {
-  const waits = [CI_TOOL, WAIT_TOOL, ASK_TOOL, CANCEL_WAIT_TOOL, DONE_TOOL];
+  const waits = [WAIT_TOOL, ASK_TOOL, CANCEL_WAIT_TOOL, DONE_TOOL];
   return previewToolEnabled(env) ? [...waits, PREVIEW_TOOL, PREVIEW_STOP_TOOL] : waits;
 }
 export function cezarToolNames(env: NodeJS.ProcessEnv = process.env): string[] {
@@ -180,6 +159,6 @@ export function cezarToolEnvNames(env: NodeJS.ProcessEnv = process.env): string[
 export function cezarServerInstructions(env: NodeJS.ProcessEnv = process.env): string {
   return [
     'The interface to Cezarion, the orchestrator running this session. Load a tool below when its situation comes up.',
-    ...cezarTools(env).flatMap(tool => tool.trigger ? [`- ${tool.definition.name}: ${tool.trigger}`] : []),
+    ...cezarTools(env).map(tool => `- ${tool.definition.name}: ${tool.trigger}`),
   ].join('\n');
 }

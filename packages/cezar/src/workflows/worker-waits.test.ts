@@ -7,7 +7,7 @@ import type { Wait } from '@open-mercato/cezar-contract/waits';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { RunStore } from '../runs/store.ts';
-import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
@@ -386,14 +386,14 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
 
   it('a worker message reaches a parent with a pending cezar_ask card beside it; the card stays answerable', async () => {
     const f = await conversing('mock:ask');
-    await until(() => store.getRun(f.p.id)?.hasPendingHumanAsk === true);
+    await until(() => hasPendingAsk(store, f.p.id) === true);
     const askSeq = eventsOf(f.p.id, 'ask.requested')[0]!.seq;
     const send = vi.spyOn(sessionOf(f.p.id), 'sendAgentMessage');
     const id = await say(f, 'worker', f.p.id, 'progress', 'Still working');
     await until(() => delivered(f.p.id, id));
     expect(send.mock.calls.find(call => call[1]?.includes(id))?.[2]).toEqual({ besideQuestion: true });
     // The card is still the one the human answers, with its askSeq.
-    await until(() => store.getRun(f.p.id)?.hasPendingHumanAsk === true && store.getRun(f.p.id)?.status === 'waiting');
+    await until(() => hasPendingAsk(store, f.p.id) === true && store.getRun(f.p.id)?.status === 'waiting');
     expect(eventsOf(f.p.id, 'ask.requested')).toHaveLength(1);
     expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'Vitest' }])).toBe(true);
     await until(() => eventsOf(f.p.id, 'human-input-delivered').some(event => event.askSeq === askSeq));

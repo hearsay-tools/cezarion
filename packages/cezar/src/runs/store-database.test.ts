@@ -413,19 +413,15 @@ describe('loading normalizes and saves exactly the rows it changed', () => {
     expect(row('control')?.revision).toBe(1);
   });
 
-  it('a refreshed pending human ask', () => {
-    const root = record('root', { status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [] } });
-    seedRuns(dataDir, [root, record('control')]);
-    mkdirSync(join(dataDir, 'runs'), { recursive: true });
-    const questions = [{ header: 'Choice', question: 'Which implementation?', options: [{ label: 'First' }, { label: 'Second' }] }];
-    writeFileSync(join(dataDir, 'runs', 'root.ndjson'),
-      `${JSON.stringify({ seq: 1, ts: '2026-10-05T00:00:00.000Z', type: 'ask.requested', requestId: 'q1', questions })}\n`);
+  it('a stored pending-question summary read into a human wait', () => {
+    seedRuns(dataDir, [record('root', { status: 'waiting', hasPendingHumanAsk: true } as Partial<RunRecord>), record('control')]);
     const store = open({ keepLive: true });
-    if (store.getRun('root')?.hasPendingHumanAsk !== true) throw new Error('fixture: the ask was not recognised');
     const seen = writes(store);
     store.flush();
     expect(seen).toEqual([{ upserts: ['root'], deletes: [] }]);
-    expect(readPersistedRuns(dataDir).find((run) => run.id === 'root')?.hasPendingHumanAsk).toBe(true);
+    const row = readPersistedRuns(dataDir).find((run) => run.id === 'root');
+    expect(row).not.toHaveProperty('hasPendingHumanAsk');
+    expect(row?.waits).toEqual([expect.objectContaining({ kind: 'human', via: 'ask-line', phase: 'open' })]);
   });
 
   it('a summary stored before it carried automation origin (#1332)', () => {

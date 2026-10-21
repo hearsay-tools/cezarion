@@ -37,7 +37,7 @@ function active(id: string) {
   return (manager as unknown as { active: Map<string, { session: AgentSession; ciGeneration: string }> }).active.get(id);
 }
 function register(id: string): Promise<Wait> {
-  return manager.registerCiWait(id, { pr: identity.prUrl, timeout_seconds: 30 }, active(id)!.ciGeneration);
+  return manager.registerWait(id, { kind: 'ci', pr: identity.prUrl, timeout_seconds: 30 }, 'cezar_wait', active(id)!.ciGeneration);
 }
 
 async function ownedChain(runner: RunnerId, workflow: WorkflowDef) {
@@ -84,7 +84,7 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
         active(run.id)!.session.end();
         await until(() => !manager.isActive(run.id));
         // Clean CI parking must survive a close, without fabricating failure.
-        expect(store.getRun(run.id)).toMatchObject({ status: 'waiting', activity: undefined });
+        expect(store.getRun(run.id)).toMatchObject({ status: 'waiting' });
         expect(store.getRun(run.id)?.waits?.find(open => open.id === wait.id)?.phase).toBe('open');
         expect(store.getRun(run.id)?.error).toBeUndefined();
         settle();

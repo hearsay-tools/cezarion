@@ -71,7 +71,6 @@ type SectionKey = 'status' | 'workflow' | 'subagents' | 'workers' | 'plan' | 'us
 export function RunActivityDock(props: {
   run: ApiRun
   currentThread: ThreadState
-  hasPendingHumanAsk?: boolean
   onOpenWorker?: (id: string) => void
 }) {
   // Own provider for the Workspace chips and the conflict roll-up. The app root's registry unions
@@ -92,7 +91,6 @@ export function RunActivityDock(props: {
 function SessionActivityCard({
   run,
   currentThread,
-  hasPendingHumanAsk = false,
   onOpenWorker,
   prNumbers,
   hasReferences,
@@ -100,7 +98,6 @@ function SessionActivityCard({
 }: {
   run: ApiRun
   currentThread: ThreadState
-  hasPendingHumanAsk?: boolean
   onOpenWorker?: (id: string) => void
   prNumbers: number[]
   hasReferences: boolean
@@ -117,7 +114,7 @@ function SessionActivityCard({
   const metrics = usageMetricVisibility(health.data)
   const runs = useRuns()
   const queuePosition = run.status === 'queued' ? queuePositions(runs.data ?? []).get(run.id) : undefined
-  const line = runStatusLine(run, { hasPendingHumanAsk, queuePosition })
+  const line = runStatusLine(run, { queuePosition })
   const conflicts = useConflictingPullRequests(prNumbers)
   const sessionOpen = isSessionOpen(run)
   const runIsTerminal = !sessionOpen && run.status !== 'queued'

@@ -42,7 +42,7 @@ describe('CI tool registration and scheduled delivery across harnesses', { timeo
         expect(ciWaitOf(run.id)?.id).toBe(firstWait.id);
       }
       const wait = ciWaitOf(run.id)!;
-      expect(store.getRun(run.id)).toMatchObject({ status: 'waiting', activity: undefined });
+      expect(store.getRun(run.id)).toMatchObject({ status: 'waiting' });
       expect(store.getRun(run.id)?.delegation).toBeUndefined();
       expect(store.getRun(run.id)?.waits?.some(entry => entry.kind === 'timer')).toBeFalsy();
       settle({ outcome: 'passed', headSha: wait.headSha, observedAt: new Date().toISOString(),

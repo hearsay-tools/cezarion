@@ -211,14 +211,15 @@ with `autoResumeAt`, not `failed`.
 
 1. live permission prompt → needs permission (unchanged)
 2. `failed` without a resume → failed
-3. an open human wait, at any status → **Needs you**
+3. an open human wait the user sees (`askSeq`), at any live status → **Needs you**; one not
+   shown yet only while `waiting` (phase 4b)
 4. `review` → needs review
 5. `running` → running
-6. `waiting` + usage limit → "usage limit, resumes 15:00"
+6. `waiting` + usage limit → "usage limit" (the sidebar meta line adds "resumes in 12m")
 7. `waiting` + workers → "waiting on 2 workers" (robot)
-8. `waiting` + CI → "waiting for CI on org/repo#12" (ring)
-9. `waiting` + timer → "next check 15:05" (ring)
-10. `waiting` with a resolved wake in the line → "waiting for a slot"
+8. `waiting` + CI → "waiting for CI" (ring; the status line names the check time)
+9. `waiting` + timer → "monitoring" (ring; the sidebar meta line adds "next check 15:05")
+10. `waiting` with a resolved wake in the line → "waiting for capacity"
 11. `queued`, `done`, `cancelled` as today
 
 `hasPendingHumanAsk`, `ciWait`/`lastCiWait`, `delegation.wait`/`lastWait` (for
@@ -1154,3 +1155,88 @@ they list. One row per exit.
 Every state above has a default exit that needs no human: the resume timer for the hold (or a
 settlement to `failed`), a pump for a held or queued wake, and a slot release for an unstarted
 run.
+
+## Phase 4b decisions
+
+Phase 4b (hearsay-tools/cezarion#1236) closes the issue. It finishes the `deriveAttention`
+rewrite on `waitingOn`, removes the legacy park state, removes `cezar_wait_for_ci` and its
+private route, and removes `RunStore.commitCiWaitWithdrawal` and the `human_ask_pending` /
+`human_ask_unanswered` codes. "Status and display" above is amended to match.
+
+Calls made by the owner (2026-10-21):
+
+- **Drop both wire fields.** `activity` and `hasPendingHumanAsk` leave the contract, the API,
+  `cez task` JSON, worker inspection and the webhook payload. `BACKWARD_COMPATIBILITY.md` §2
+  names the migration: read `waitingOn`, the open human wait, or `attention` / `attentionLabel`.
+- **Split by fact.** "A pending question" was two facts: the user has not answered (the human
+  wait, settled when the answer is accepted) and the agent has not received the answer (the
+  transcript receipt: `ask.requested` without a matching `human-input-delivered`, retired at
+  delivery). Everything that shows state (attention, `waitingOn`, summaries, the webhook, the
+  CLI) reads the open human wait. Answer delivery in `workflows/run.ts` keeps the transcript
+  receipt.
+- **Labels stay.** `waiting for CI` and `monitoring` keep their words. The sidebar meta line adds
+  the time, as it does for a usage limit: `monitoring, next check 15:05`.
+
+Calls made by the agent:
+
+- **Rung 3 reads `shown`.** `waitingOn` `{ kind: 'human' }` gains an optional `shown: true` when
+  an open human wait has an `askSeq`. A shown question reads Needs you at any live status, a wake
+  turn's included; an unshown one (an upgraded legacy row before recovery attaches it, or an ask
+  being recorded) reads Needs you only while the run is `waiting`. The old `hasPendingHumanAsk`
+  argument gave the same answer for a running wake turn, so no state lost its badge.
+- **The `run.ts` gates do not move.** The `cezar_done` refusal, the autonomous-nudge skip, the
+  turn-end question check and the session auto-end all ask "has the agent received the answer",
+  which is the transcript receipt. Moving them to the human wait would let a turn end or a nudge
+  fire between the user's answer and its delivery. Each of them already also reads the open wait
+  where state matters (the nudge skips on any open wait; the turn-end check ORs an open human
+  wait).
+- **The legacy summary is upgraded on read.** `hasPendingHumanAsk: true` on a waiting row becomes
+  an open human wait (`via: 'ask-line'`, `turnId: 'legacy'`, a run-derived id, no `askSeq`),
+  unless one is already open, in the live store and in the cold index alike. Recovery's
+  `surfaceHumanWait` attaches it to the transcript's pending ask, so no second card appears.
+  On any other row, or when false, the summary is dropped.
+- **Recovery adopts an unanswered transcript ask.** A live row can carry an unanswered
+  `ask.requested` with no human wait and a stored summary of false (summaries were refreshed
+  lazily before 4b). Recovery opens an agent human wait for it (`via: 'ask-line'`,
+  `turnId: 'recovered'`, `askSeq` the ask's seq), so it still reads Needs you; no second card is
+  shown (`adoptTranscriptAsk`). An open Cezar human wait that is not shown as that ask (a crash
+  after the ask was saved, before the live handler replaced it) is withdrawn first, as the live
+  ask does, so the run reports the agent's question.
+- **Recovery settles a stale legacy wait.** A stored `hasPendingHumanAsk: true` can predate the
+  answer's receipt (`human-input-delivered` reached the transcript, the row's save did not). An
+  upgraded wait (`turnId: 'legacy'`, no `askSeq`) is settled as answered at recovery when the
+  transcript's facts are known, non-empty and hold no unanswered ask (`settleAnsweredLegacyAsk`);
+  unreadable facts are no evidence, and the wait stays open.
+- **`asksQuestion` decides the CLI's `question` and the webhook's `task.question`.** It is true for
+  an open agent human wait and for a Cezar wait that carries a card (a worker's fallback question
+  to its parent); Cezar's `no-wait`, `budget` and `completion` waits ask nothing. The cockpit's
+  composer uses it too, so those waits keep the one-click Continue.
+- **No store schema bump.** The planned schema 9 is not needed: a schema-8 build reads a 4b row
+  correctly, because every reader it has derives attention from the human wait as well. A row
+  4b rewrites only loses the two dropped keys.
+- **`activity` leaves `isLiveRecord`.** No decoded record has carried it since schema 4, which
+  rewrote every row it loaded. A row an older cezar stored with `activity` keeps its `live`
+  column (never recomputed on read), so open still loads and rewrites it.
+- **Kept on purpose.** `parkAfterAck` and the monitoring slot pool stay; both still have callers.
+  The `via: 'cezar_wait_for_ci'` enum value stays so old rows parse.
+
+### Transitions out (phase 4b)
+
+Required by AGENTS.md for every state 4b changes or keeps. Shipped defaults as in 4a. Earlier
+tables hold for the states they list. One row per exit.
+
+| State | Trigger | Who or what fires it | Behavior at shipped defaults |
+| --- | --- | --- | --- |
+| `waiting` with an upgraded human wait (no `askSeq`) | Restart recovery | `RunManager.recover` → `surfaceHumanWait` | The wait is attached to the transcript's pending ask (`askSeq` set); the card shows once; the run reads Needs you |
+| | A human message or the ask's answer | The user | The answer settles the wait at acceptance and is delivered at the next turn boundary, as for any human wait |
+| | Finish, Stop or delete | The user | Settles as for any parked run; the wait is cancelled |
+| | No unanswered ask in the transcript (its answer was delivered after the row was saved) | Recovery → `settleAnsweredLegacyAsk` | The wait settles as answered; the run reads as its remaining waits say |
+| A live row with an unanswered `ask.requested` and no human wait, or only a Cezar human wait not shown as that ask | Restart recovery | `RunManager.recover` → `adoptTranscriptAsk` | The Cezar wait is withdrawn; an open agent human wait is committed with the ask's `askSeq`; the run reads Needs you; its exits are the rows above |
+| `running` wake turn with a shown question (`askSeq`) | The turn ends | The runner's turn end | Parks `waiting` on the open human wait; Needs you, as before 4b |
+| | The user answers | The user | The wait settles; the answer is delivered at the turn boundary (transcript receipt) |
+| | Stop | The user | The session ends; the run settles `cancelled` |
+| `queued` wake with an unshown human wait | A slot frees | Slot release | Starts; the opening turn shows the question; Needs you |
+| | A human message | The user | Delivered at once; the wait settles |
+
+Every state 4b changes keeps a default exit that needs no human except the open question itself,
+whose only exit is a human answer by design (phase 2a).

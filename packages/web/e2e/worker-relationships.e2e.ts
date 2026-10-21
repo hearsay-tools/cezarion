@@ -38,7 +38,9 @@ beforeAll(async () => {
     ...ids.map((id, i) => record(id, `Owned worker ${i + 1}`, { archived: i === 31, delegation: worker(id, parentId, i === 0 ? { destroy: { requestedAt: now, phase: 'incomplete', remaining: ['branch'], error: 'Branch is checked out elsewhere' } } : {}) })),
     record(orphanId, 'Worker with unavailable parent', { delegation: worker(orphanId, absentId) }),
     record(waitingId, 'Waiting root fixture', { status: 'waiting', delegation: { ...rootMetadata([absentId]), wait: wait() } }),
-    record(askId, 'Question root fixture', { status: 'waiting', delegation: { ...rootMetadata([absentId]), wait: wait() } }),
+    // Every ask opens a human wait; attention reads it (hearsay-tools/cezarion#1236, phase 4b).
+    record(askId, 'Question root fixture', { status: 'waiting', delegation: { ...rootMetadata([absentId]), wait: wait() },
+      waits: [{ id: randomUUID(), kind: 'human', source: 'agent', via: 'ask-line', registeredAt: now, phase: 'open', turnId: 'turn-1', askSeq: 1 }] }),
     record(requestParentId, 'Parent awaiting worker reply', { status: 'waiting', delegation: { ...rootMetadata([requestWorkerId]), wait: { ...wait(), workerIds: [], requestIds: [randomUUID()] } } }),
     record(requestWorkerId, 'Worker awaiting parent reply', { status: 'waiting', delegation: worker(requestWorkerId, requestParentId, { wait: { ...wait(), workerIds: [], requestIds: [randomUUID()] } }) }),
     record(emptyId, 'Empty root fixture', { delegation: rootMetadata([]) }),
@@ -184,7 +186,7 @@ it('shows unavailable parent with retry, successful empty state, worker wait and
   // A full record carries its worker ids, so the count is said (#617).
   open(waitingId); expect(browser.text(region)).toContain('Waiting on 1 worker')
   expect(browser.count('[data-slot="ask-card"]')).toBe(0)
-  // The real server derives attention from the seeded ask.requested event.
+  // The real server derives attention from the seeded human wait.
   // Visit both lists before the ask detail so its history cannot prime attention.
   browser.goto(`${base}/p/${project}/`)
   const projectAsk = `[data-slot="task-row"][data-run-id="${askId}"]`

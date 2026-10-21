@@ -29,8 +29,6 @@ const messages: Record<CiWaitErrorCode, string> = {
   run_cancelled: 'The run was cancelled. Resume it before registering a CI wait.',
   finish_requested: 'Run finish was requested. Complete that transition before resuming and registering a CI wait.',
   generation_mismatch: 'This CI tool belongs to an earlier session. Use the current session tool.',
-  human_ask_pending: 'A human question is pending in this session. Wait for its answer before registering a CI wait.',
-  human_ask_unanswered: 'A recorded human question is unanswered. Wait for its answer before registering a CI wait.',
   worker_wait_pending: 'A worker wait is still pending, including any result awaiting delivery. End your turn to receive its result, then retry the CI wait.',
   worker_execution_stopped: 'Worker execution has stopped. Ask the parent to resume the worker before waiting for CI.',
   root_finish_pending: 'The parent is finishing. Complete that transition before resuming and registering a CI wait.',

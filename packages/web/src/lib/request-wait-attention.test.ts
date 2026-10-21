@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { expect, it } from 'vitest'
-import { summaryOf } from '@/test/run-summary-fixture'
+import { openHumanWait, summaryOf } from '@/test/run-summary-fixture'
 import { runDelegationSummarySchema } from '@open-mercato/cezar-api-client/contract/delegation'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { deriveAttention, wantsAttention } from './attention'
@@ -45,9 +45,8 @@ it.each([
   const previous = diffRunTransitions(new Map(), [{ ...record, status: 'running' }]).statuses
   const parked = diffRunTransitions(previous, [record])
   expect(parked.entering).toEqual([])
-  const asking = { ...record, hasPendingHumanAsk: true }
+  const asking = summaryOf({ ...waiting(role), waits: [...(waiting(role).waits ?? []), openHumanWait()] })
   expect(deriveAttention(asking).label).toBe('needs you')
-  expect(deriveAttention(record, true).label).toBe('needs you')
   expect(bucketOf(asking, 'active')).toBe('Needs you')
   expect(listCounts([asking]).waiting).toBe(role === 'worker' ? 0 : 1)
   expect(diffRunTransitions(parked.statuses, [asking]).entering).toEqual([asking])
@@ -66,7 +65,8 @@ it.each(['root', 'worker'] as const)('follows %s lifecycle after reply, timeout,
 })
 
 it('keeps a resolved parent wait with a pending human ask as Needs you', () => {
-  const asking = summaryOf({ ...waiting('root', { phase: 'resolved', resolvedAt: '2026-09-16T00:05:00.000Z' }), hasPendingHumanAsk: true })
+  const resolved = waiting('root', { phase: 'resolved', resolvedAt: '2026-09-16T00:05:00.000Z' })
+  const asking = summaryOf({ ...resolved, waits: [...(resolved.waits ?? []), openHumanWait()] })
   expect(deriveAttention(asking).label).toBe('needs you')
   expect(wantsAttention(asking)).toBe(true)
   expect(bucketOf(asking, 'active')).toBe('Needs you')
@@ -83,7 +83,7 @@ it('keeps a waiting run without a request wait visible to humans', () => {
 
 // The monitoring activity is no longer a park (hearsay-tools/cezarion#1301): a timer wait is.
 it('keeps monitoring quiet and notifies for later human and completion gates (fork #772)', () => {
-  const base = summaryOf({ ...waiting('root'), waits: undefined, delegation: undefined, status: 'running', hasPendingHumanAsk: false })
+  const base = summaryOf({ ...waiting('root'), waits: undefined, delegation: undefined, status: 'running' })
   const previous = diffRunTransitions(new Map(), [base]).statuses
   const timer = {
     kind: 'timer' as const, id: '00000000-0000-4000-8000-0000000000d1', source: 'agent' as const, via: 'cezar_wait' as const,
@@ -97,7 +97,7 @@ it('keeps monitoring quiet and notifies for later human and completion gates (fo
   expect(monitoring.entering).toEqual([])
   for (const gate of [
     { ...monitor, waits: undefined }, // explicit prose gate, no ASK
-    { ...monitor, waits: undefined, hasPendingHumanAsk: true },
+    { ...monitor, waits: [openHumanWait()] },
     { ...monitor, status: 'review' as const, waits: undefined },
     { ...monitor, status: 'failed' as const, waits: undefined },
   ]) {

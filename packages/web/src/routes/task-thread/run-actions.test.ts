@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest'
+import { openHumanWait } from '@/test/run-summary-fixture'
 
 import { runnerSchema, type Runner } from '@open-mercato/cezar-api-client/contract/health'
 import type { ApiRun, RunRecord, RunStatus, StepState } from '@open-mercato/cezar-api-client'
@@ -449,33 +450,33 @@ describe('unstarted continuation (#201)', () => {
 
 describe('offersComposerFinish — the gold primary on a Needs-you task (#281)', () => {
   const root = { role: 'root' as const, permissions: [], receipts: [] }
-  const cases: Array<{ name: string; record: ApiRun; ask?: boolean; expected: boolean }> = [
+  const cases: Array<{ name: string; record: ApiRun; expected: boolean }> = [
     { name: 'clear waiting task', record: run('waiting'), expected: true },
     { name: 'clear root', record: run('waiting', { delegation: root }), expected: true },
     { name: 'blocked root', record: run('waiting', { delegation: root, finishBlocked: 'Collect worker results.' }), expected: false },
     { name: 'inactive mid-workflow run', record: run('waiting', { finishBlocked: 'Continue the remaining workflow steps before finishing.' }), expected: false },
     { name: 'unknown eligibility', record: run('waiting', { finishBlocked: undefined }), expected: false },
-    { name: 'ordinary pending ask', record: run('waiting', { hasPendingHumanAsk: true }), expected: true },
-    { name: 'live ordinary pending ask', record: run('waiting'), ask: true, expected: true },
+    { name: 'ordinary pending ask', record: run('waiting', { waits: [openHumanWait()] }), expected: true },
+    { name: 'shown ordinary pending ask', record: run('waiting', { waits: [openHumanWait(4)] }), expected: true },
     ...(['running', 'queued', 'review', 'done', 'failed', 'cancelled'] as const).map(status => ({
       name: status, record: run(status), expected: false,
     })),
   ]
 
-  it.each(cases)('$name → $expected', ({ record, ask, expected }) => {
-    expect(offersComposerFinish(record, ask ?? false)).toBe(expected)
+  it.each(cases)('$name → $expected', ({ record, expected }) => {
+    expect(offersComposerFinish(record)).toBe(expected)
   })
 
   it('only ever promotes an action the flags offer', () => {
-    for (const { record, ask } of cases) {
-      if (!offersComposerFinish(record, ask ?? false)) continue
+    for (const { record } of cases) {
+      if (!offersComposerFinish(record)) continue
       expect(runActionFlags(record).finish).toBe(true)
     }
   })
 
   it('archiving does not change the answer — the rule is about the gate, not the filing', () => {
-    for (const { record, ask, expected } of cases) {
-      expect(offersComposerFinish({ ...record, archived: true }, ask ?? false)).toBe(expected)
+    for (const { record, expected } of cases) {
+      expect(offersComposerFinish({ ...record, archived: true })).toBe(expected)
     }
   })
 })

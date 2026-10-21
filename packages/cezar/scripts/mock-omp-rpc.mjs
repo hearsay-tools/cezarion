@@ -62,7 +62,7 @@ if (typeof flags.get('--tools') === 'string') {
   const disabled = (process.env.CEZ_MOCK_OMP_DISABLED_TOOLS ?? '').split(',').filter(Boolean);
   const registered = (name) => (BUILTIN_TOOLS.includes(name) && !GATED_TOOLS.has(name) && !disabled.includes(name))
     || mcpTools.includes(name)
-    || (extensions.length > 0 && (['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'].includes(name) || ((name === 'cezar_preview_serve' || name === 'cezar_preview_stop') && process.env.CEZ_PREVIEW === '1')));
+    || (extensions.length > 0 && (['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'].includes(name) || ((name === 'cezar_preview_serve' || name === 'cezar_preview_stop') && process.env.CEZ_PREVIEW === '1')));
   // Mirrors v18.4.11 `emt()`: every missing name in ONE error, unknown names first, then the
   // built-ins this session lacks, each line singular for one name.
   const missing = tools.filter((name) => !registered(name));

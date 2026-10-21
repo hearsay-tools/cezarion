@@ -414,7 +414,7 @@ rl.on('line', async (line) => {
     }
     if (turnText.includes('mock:ci-wait')) {
       const { ciPrompt } = await import('./mock-ci-tool.mjs');
-      const text = await mcpToolGate('cezar_wait_for_ci') ? await ciPrompt('codex', ciWire, turnText) : 'user rejected MCP tool call';
+      const text = await mcpToolGate('cezar_wait') ? await ciPrompt('codex', ciWire, turnText) : 'user rejected MCP tool call';
       emit({ method: 'item/completed', params: { item: { type: 'agentMessage', id: 'ci-result', text } } });
       emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
       return;

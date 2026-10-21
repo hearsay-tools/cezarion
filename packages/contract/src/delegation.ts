@@ -302,7 +302,6 @@ export const workerInspectionSchema = z.object({
   parentRunId: z.uuid(),
   status: z.enum(['queued', 'running', 'waiting', ...workerOutcomeSchema.shape.status.options]),
   currentStepId: z.string().optional(),
-  activity: z.enum(['monitoring']).optional(),
   workspace: workerWorkspaceSchema,
   backend: workerBackendSchema.optional(),
   model: z.string().max(512).optional(),

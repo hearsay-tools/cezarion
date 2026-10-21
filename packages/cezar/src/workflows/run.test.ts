@@ -27,6 +27,8 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { parseTaskMarkers } from '../runs/task-markers.ts';
 import { appendTurnText, trackTurnTail, RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
+import { deriveAttention } from '@open-mercato/cezar-contract/attention';
+import { asksQuestion } from '@open-mercato/cezar-contract/waits';
 import { readPersistedRuns, crashStore } from '../runs/run-store.testkit.ts';
 import { monitoringTimerOf, monitoringWakeOf } from './waits.testkit.ts';
 
@@ -1244,7 +1246,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     const published = await publishedWaiting(record.id);
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(published).toMatchObject({ status: 'waiting', activity: undefined });
+    expect(published).toMatchObject({ status: 'waiting' });
     expect(published.steps.find((step) => step.id === published.currentStepId)?.status).toBe('waiting');
     expect(persistedRun(record.id)).toMatchObject({
       status: 'waiting',
@@ -1278,7 +1280,6 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
     const parked = store.getRun(record.id);
-    expect(parked?.activity).toBeUndefined();
     expect(parked?.waits?.find(wait => wait.phase === 'open')).toMatchObject({ kind: 'timer', via: 'monitoring-line' });
     const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
     expect(state?.idleTimer).toBeUndefined(); // durable monitors do not inherit the 15-minute user-wait timer
@@ -1340,7 +1341,6 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'done' || r?.status === 'review');
-    expect(store.getRun(record.id)?.activity).toBeUndefined();
   }, 30_000);
 
   it('keeps CEZ:ASK ahead of Claude ScheduleWakeup', async () => {
@@ -1351,7 +1351,6 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting');
-    expect(store.getRun(record.id)?.activity).toBeUndefined();
     const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
     expect(state?.idleTimer).toBeDefined();
   }, 30_000);
@@ -1449,7 +1448,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
 
     // hearsay-tools/cezarion#1233: the backend's own turn runs on the pool slot it parked with,
     // and its timer stays open until it fires.
-    expect(store.getRun(record.id)).toMatchObject({ status: 'running', activity: undefined });
+    expect(store.getRun(record.id)).toMatchObject({ status: 'running' });
     expect(Date.parse(String(monitoringWakeOf(store.getRun(record.id))))).toBe(originalDeadline);
     expect(monitoringTimerOf(manager, record.id)).toBeDefined();
     expect(internals.waiting.has(record.id)).toBe(false);
@@ -1588,7 +1587,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
       },
     });
 
-    expect(store.getRun(record.id)).toMatchObject({ status: 'waiting', activity: undefined });
+    expect(store.getRun(record.id)).toMatchObject({ status: 'waiting' });
     expect(monitoringWakeOf(store.getRun(record.id))).toBe(deadline);
     expect(monitoringTimerOf(manager, record.id)).toBe(wakeTimer);
     expect(internals.waiting.has(record.id)).toBe(true);
@@ -1634,7 +1633,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
 
     // hearsay-tools/cezarion#1233: the resumed turn keeps its pool slot and its open timer until
     // its own turn end.
-    expect(store.getRun(record.id)).toMatchObject({ status: 'running', activity: undefined });
+    expect(store.getRun(record.id)).toMatchObject({ status: 'running' });
     expect(monitoringWakeOf(store.getRun(record.id))).toBeDefined();
     expect(monitoringTimerOf(manager, record.id)).toBeDefined();
     expect(internals.waiting.has(record.id)).toBe(false);
@@ -1647,7 +1646,6 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     const record = manager.startRun(SINGLE_STEP, { task: 'just do the thing', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting');
-    expect(store.getRun(record.id)?.activity).toBeUndefined();
     const state = (manager as unknown as {
       active: Map<string, { idleTimer?: NodeJS.Timeout }>;
     }).active.get(record.id);
@@ -1697,6 +1695,82 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     });
     unregisterRunProcess(record.id);
     surviving?.end();
+  }, 30_000);
+
+  // Phase 4b (hearsay-tools/cezarion#1236): attention reads the human wait, so a row an older cezar
+  // left with an unanswered ask and no wait gets one at recovery, attached to that ask.
+  it('opens a human wait at recovery for an unanswered ask the record has no wait for', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, candidate => candidate?.status === 'waiting');
+    manager.dispose();
+    store.updateRun(record.id, { waits: undefined });
+    const ask = store.appendEvent(record.id, { type: 'ask.requested', requestId: 'legacy-question',
+      questions: [{ header: 'Choice', question: 'Which implementation?', options: [{ label: 'First' }, { label: 'Second' }] }] });
+    manager = createFixtureManager(store, repoRoot);
+    await manager.recover();
+    const human = store.getRun(record.id)?.waits?.filter(wait => wait.kind === 'human' && wait.phase === 'open') ?? [];
+    expect(human).toEqual([expect.objectContaining({ source: 'agent', askSeq: ask.seq })]);
+    expect(store.getRun(record.id)?.status).toBe('waiting');
+    expect(deriveAttention(store.getRun(record.id)!).label).toBe('needs you');
+    expect(store.readEvents(record.id).filter(event => event.type === 'ask.requested')).toHaveLength(1);
+  }, 30_000);
+
+  // Review of #1437, round 3: a crash after the ask's event was saved and before the live handler
+  // replaced Cezar's own wait leaves that questionless wait open; recovery replaces it, as live does.
+  it('replaces an open Cezar human wait at recovery with the unanswered ask it was not replaced by', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, candidate => candidate?.status === 'waiting');
+    manager.dispose();
+    const cezar = { id: '00000000-0000-4000-8000-0000000000ac', kind: 'human' as const, source: 'cezar' as const, via: 'no-wait' as const,
+      registeredAt: '2026-10-21T00:00:00.000Z', phase: 'open' as const, turnId: 'no-wait' };
+    store.updateRun(record.id, { waits: [cezar] });
+    const ask = store.appendEvent(record.id, { type: 'ask.requested', requestId: 'crashed-question',
+      questions: [{ header: 'Choice', question: 'Which implementation?', options: [{ label: 'First' }, { label: 'Second' }] }] });
+    manager = createFixtureManager(store, repoRoot);
+    await manager.recover();
+    const human = store.getRun(record.id)?.waits?.filter(wait => wait.kind === 'human' && wait.phase === 'open') ?? [];
+    expect(human).toEqual([expect.objectContaining({ source: 'agent', askSeq: ask.seq })]);
+    expect(asksQuestion(store.getRun(record.id)!)).toBe(true);
+    expect(store.readEvents(record.id).filter(event => event.type === 'ask.requested')).toHaveLength(1);
+  }, 30_000);
+
+  // Review of #1437: a stored pending-question flag can be stale when the answer's receipt reached
+  // the transcript but the row's save did not; recovery settles the upgraded wait it read from it.
+  it('settles an upgraded legacy human wait at recovery when the transcript holds its answer', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, candidate => candidate?.status === 'waiting');
+    manager.dispose();
+    const ask = store.appendEvent(record.id, { type: 'ask.requested', requestId: 'answered-question',
+      questions: [{ header: 'Choice', question: 'Which implementation?', options: [{ label: 'First' }, { label: 'Second' }] }] });
+    store.appendEvent(record.id, { type: 'human-input-delivered', askSeq: ask.seq });
+    const legacy = { id: '00000000-0000-4000-8000-0000000000aa', kind: 'human' as const, source: 'agent' as const, via: 'ask-line' as const,
+      registeredAt: '2026-10-21T00:00:00.000Z', phase: 'open' as const, turnId: 'legacy' };
+    store.updateRun(record.id, { waits: [legacy] });
+    manager = createFixtureManager(store, repoRoot);
+    await manager.recover();
+    expect(store.getRun(record.id)?.waits?.filter(wait => wait.kind === 'human' && wait.phase === 'open') ?? []).toEqual([]);
+    expect(store.getRun(record.id)?.lastWaits).toEqual(expect.arrayContaining([expect.objectContaining({ id: legacy.id })]));
+    expect(store.readEvents(record.id).filter(event => event.type === 'ask.requested')).toHaveLength(1);
+  }, 30_000);
+
+  // Review of #1437, round 2: without readable transcript facts there is no evidence of an answer,
+  // so the upgraded wait stays open and the run still reads Needs you.
+  it('keeps an upgraded legacy human wait at recovery when the transcript facts cannot be read', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, candidate => candidate?.status === 'waiting');
+    manager.dispose();
+    const legacy = { id: '00000000-0000-4000-8000-0000000000ab', kind: 'human' as const, source: 'agent' as const, via: 'ask-line' as const,
+      registeredAt: '2026-10-21T00:00:00.000Z', phase: 'open' as const, turnId: 'legacy' };
+    store.updateRun(record.id, { waits: [legacy] });
+    const unreadable = vi.spyOn(store, 'knownTranscriptFacts').mockImplementation(() => undefined);
+    manager = createFixtureManager(store, repoRoot);
+    await manager.recover();
+    unreadable.mockRestore();
+    expect(store.getRun(record.id)?.waits).toEqual([expect.objectContaining({ id: legacy.id, phase: 'open' })]);
   }, 30_000);
 
   it('honors cancellation that races an idle-close callback', async () => {
@@ -2357,7 +2431,6 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     const before = boundaries();
     expect(manager.sendMessage(record.id, [{ type: 'text', text: 'thanks, carry on' }])).toBe(true);
     await waitFor(record.id, (r) => r?.status === 'waiting' && boundaries() > before);
-    expect(store.getRun(record.id)?.activity).toBeUndefined();
     expect(monitoringWakeOf(store.getRun(record.id))).toBe(timer);
   }, 30_000);
 });
@@ -2470,7 +2543,6 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
     await waitFor(record.id, (r) => r?.status === 'waiting');
     const parked = store.getRun(record.id);
     expect(parked?.status).toBe('waiting'); // attention — NOT running/monitoring
-    expect(parked?.activity).toBeUndefined();
     const asks = readEvents(record.id).filter((e) => e.type === 'ask.requested');
     expect(asks).toHaveLength(1);
     expect(typeof asks[0]!.requestId).toBe('string');
@@ -2587,7 +2659,6 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
 
     const events = readEvents(record.id);
     expect(events.filter((e) => e.type === 'ask.requested')).toHaveLength(1);
-    expect(store.getRun(record.id)?.activity).toBeUndefined();
     expect(events.filter((e) => e.type === 'turn.started')).toHaveLength(1);
   }, 30_000);
 
@@ -2597,7 +2668,6 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
     await waitFor(record.id, (r) => r?.status === 'waiting');
     const parked = store.getRun(record.id);
     expect(parked?.status).toBe('waiting'); // still parks — never worse than the prose fallback
-    expect(parked?.activity).toBeUndefined();
     const events = readEvents(record.id);
     expect(events.some((e) => e.type === 'ask.requested')).toBe(false);
     const rejections = events.filter((e) => e.type === 'note' && String(e.message).includes('not valid JSON'));
