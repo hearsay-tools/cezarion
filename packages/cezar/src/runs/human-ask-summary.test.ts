@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { apiRunSchema, runIndexEntrySchema, toRunSummary } from '@open-mercato/cezar-contract/runs';
 import { RunStore } from './store.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
+import { readPendingHumanAsk } from './human-ask-summary.ts';
 import { readPersistedRuns, readPersistedText, seedRuns } from './run-store.testkit.ts';
 
 let dir: string, store: RunStore, id: string;
@@ -100,4 +101,23 @@ it('recovers human attention for a running root with a durable worker wait befor
   writeFileSync(join(dir, 'runs', `${id}.ndjson`), JSON.stringify({ ...ask(), seq: 1, ts: new Date().toISOString() }) + '\n');
   expect(RunStore.open(dir, { keepLive: true }).getRun(id)).toMatchObject({ status: 'running', hasPendingHumanAsk: true });
   expect(readRunIndexFromDisk(dir).runs[0]).toMatchObject({ status: 'failed', hasPendingHumanAsk: true });
+});
+
+it('reads the pending ask from history', () => {
+  writeFileSync(join(dir, 'runs', `${id}.ndjson`), JSON.stringify({ ...ask(), seq: 1, ts: new Date().toISOString() }) + '\n');
+  expect(readPendingHumanAsk(dir, id)).toEqual({ requestId: 'human-question', questions });
+});
+
+it('returns undefined after the answer is delivered', () => {
+  writeFileSync(join(dir, 'runs', `${id}.ndjson`), [
+    { ...ask(), seq: 1, ts: new Date().toISOString() },
+    { type: 'human-input-delivered', askSeq: 1, seq: 2, ts: new Date().toISOString() },
+  ].map(event => JSON.stringify(event)).join('\n') + '\n');
+  expect(readPendingHumanAsk(dir, id)).toBeUndefined();
+});
+
+it('returns undefined when the run has no history or it cannot be read', () => {
+  expect(readPendingHumanAsk(dir, id)).toBeUndefined();
+  const events = join(dir, 'runs', `${id}.ndjson`); mkdirSync(events);
+  expect(readPendingHumanAsk(dir, id)).toBeUndefined();
 });
