@@ -19,6 +19,7 @@ if (mode === 'transient') {
  if (count < 3) { console.error('HTTP 503 service unavailable'); process.exit(1); }
 }
 if (args[0] === 'api') {
+ if (process.env.CI_FIXTURE_API_ERROR) { console.error(process.env.CI_FIXTURE_API_ERROR); process.exit(1); }
  const pages = rerun ? [{total_count:1,workflow_runs:[{id:1,head_sha:head,status:rerun==='complete'?'completed':rerun==='hidden'?'queued':'in_progress'}]}] : JSON.parse(process.env.CI_FIXTURE_RUN_PAGES || '[{"total_count":0,"workflow_runs":[]}]');
  for (const page of pages) console.log(JSON.stringify(page));
 } else if (args[1] === 'view') {

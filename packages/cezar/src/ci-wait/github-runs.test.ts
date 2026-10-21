@@ -43,3 +43,13 @@ it('queries the captured head with bounded paginated structured output',async()=
 it('supports workflow queries in the bundled dry-run command',async()=>{
  expect(await new GithubCiClient({env:{...process.env,CEZ_DRY_RUN:'1'}}).hasActiveRuns(identity,signal())).toBe(false);
 });
+
+it.each([
+ ['HTTP 403: API rate limit exceeded for user', 'command_failed', true],
+ ['HTTP 403: You have exceeded a secondary rate limit. Please wait before you try again.', 'command_failed', true],
+ ['HTTP 429: Too many requests', 'command_failed', true],
+ ['HTTP 403: Resource not accessible by integration', 'authentication', false],
+ ['HTTP 401: Bad credentials', 'authentication', false],
+])('classifies workflow query error %s without exposing diagnostics',async (stderr,code,transient)=>{
+ await expect(client([],{CI_FIXTURE_API_ERROR:stderr as string}).hasActiveRuns(identity,signal())).rejects.toMatchObject({code,transient});
+});
