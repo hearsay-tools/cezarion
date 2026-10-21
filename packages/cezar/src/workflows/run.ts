@@ -5758,7 +5758,7 @@ export class RunManager {
     }
     // Every delivered turn ends with the waits still open.
     const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? []);
-    if (footer) content = [...content, { type: 'text', text: footer }];
+    if (footer) content = [...content, { type: 'text', text: `\n\n${footer}` }];
     // A refusal queued for a closed session (hearsay-tools/cezarion#1301): this turn is the nudge's.
     const refusal = !!this.store.getRun(runId)?.agentInputs?.some(input => input.purpose === 'completion-refusal' && inputIds.includes(input.id));
     const flight: NonNullable<ActiveRun['agentInputFlight']> = { session, inputIds,
@@ -6113,7 +6113,7 @@ export class RunManager {
     // answers every human wait, so the footer names none.
     const footer = userAuthored ? openWaitsFooter((this.store.getRun(runId)?.waits ?? []).filter(wait => wait.kind !== 'human')) : undefined;
     const delivered = userAuthored ? state.session.sendMessage([...deliverable, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : []),
-      ...(footer ? [{ type: 'text' as const, text: footer }] : [])])
+      ...(footer ? [{ type: 'text' as const, text: `\n\n${footer}` }] : [])])
       : this.submitAgentInput(runId, state, deliverable);
     if (delivered) {
       if (userAuthored) {
