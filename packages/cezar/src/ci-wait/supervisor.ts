@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { ciWaitSchema, ciWaitResultSchema, type CiPrIdentity, type CiWait, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
-import { CiGithubError, CiSemaphore, GithubCiClient, type GithubCheck } from './github.ts';
+import { CiGithubError, CiSemaphore, GithubCiClient, type GithubCheck, type GithubPrMetadata } from './github.ts';
 
 export const CI_WATCHER_LIMIT = 4;
 /** PR-head probes, absent-check rechecks, and stale-watch rechecks. Not the discovery deadline. */
@@ -62,20 +62,36 @@ export class CiWatcherSupervisor {
     const deadline = AbortSignal.timeout(Math.max(0, Math.min(remaining, 7_200_000)));
     const signal = AbortSignal.any([caller, this.lifetime.signal, deadline]);
     let rows: GithubCheck[] = [];
+    let workflowActive = false;
     let release: (() => void) | undefined;
     let retry = 0;
     const discoveryDeadline = Math.min(Date.parse(wait.deadline), Date.now() + CI_DISCOVERY_MS);
-    const stopped = () => observation(wait, caller.aborted || this.lifetime.signal.aborted ? 'cancelled' : 'deadline', rows);
+    let metadata: GithubPrMetadata | undefined;
+    const observe = (result: CiWaitResult['outcome'], extra: Partial<Pick<CiWaitResult, 'observedHeadSha' | 'diagnostic'>> = {}) =>
+      observation(wait, result, rows, { ...(metadata ? { mergeable: metadata.mergeable, mergeStateStatus: metadata.mergeStateStatus } : {}), ...extra });
+    const readMetadata = async () => {
+      const value = await this.github.metadata(wait, signal);
+      signal.throwIfAborted();
+      metadata = value;
+      return value;
+    };
+    const conflict = () => metadata?.mergeable === 'CONFLICTING'
+      ? observe('conflicting', {diagnostic: 'The pull request conflicts with its base. Inspect the PR; this observation does not authorize a repair or merge.'})
+      : undefined;
+    const stopped = () => observe(caller.aborted || this.lifetime.signal.aborted ? 'cancelled' : 'deadline');
     if (remaining <= 0 || signal.aborted) return stopped();
     const snapshot = async (): Promise<CiWaitResult | undefined> => {
-      const before = await this.github.head(wait, signal);
-      if (before !== wait.headSha) return observation(wait, 'head_changed', rows, { observedHeadSha: before });
+      const before = (await readMetadata()).headSha;
+      if (before !== wait.headSha) return observe('head_changed', { observedHeadSha: before });
+      workflowActive = await this.github.hasActiveRuns(wait, signal);
       const observed = await this.github.checks(wait, signal);
-      const after = await this.github.head(wait, signal);
-      if (after !== wait.headSha) return observation(wait, 'head_changed', rows, { observedHeadSha: after });
+      const after = (await readMetadata()).headSha;
+      if (after !== wait.headSha) return observe('head_changed', { observedHeadSha: after });
       rows = observed;
-      const settled = outcome(rows);
-      return settled ? observation(wait, settled, rows) : undefined;
+      const conflicting = conflict();
+      if (conflicting) return conflicting;
+      const settled = workflowActive ? undefined : outcome(rows);
+      return settled ? observe(settled) : undefined;
     };
     try {
       release = await this.slots.acquire(signal);
@@ -83,8 +99,14 @@ export class CiWatcherSupervisor {
         try {
           const settled = await snapshot();
           if (settled) return settled;
+          // A rerun may hide all its checks, making gh --watch exit immediately.
+          // Probe the workflow itself without spinning or spending model turns.
+          if (workflowActive) {
+            await delay(CI_PROBE_MS, undefined, { signal });
+            continue;
+          }
           if (!rows.length) {
-            if (Date.now() >= discoveryDeadline) return observation(wait, 'no_checks', rows);
+            if (Date.now() >= discoveryDeadline) return observe('no_checks');
             await delay(Math.min(CI_PROBE_MS, discoveryDeadline - Date.now()), undefined, { signal });
             continue;
           }
@@ -106,8 +128,10 @@ export class CiWatcherSupervisor {
                 await delay(CI_PROBE_MS, undefined, {signal});
                 break;
               }
-              const head = await this.github.head(wait, signal);
-              if (head !== wait.headSha) return observation(wait, 'head_changed', rows, {observedHeadSha:head});
+              const head = (await readMetadata()).headSha;
+              if (head !== wait.headSha) return observe('head_changed', {observedHeadSha:head});
+              const conflicting = conflict();
+              if (conflicting) return conflicting;
             }
           } finally {
             watchAbort.abort();
@@ -120,13 +144,13 @@ export class CiWatcherSupervisor {
             await delay(CI_RETRY_MS[retry++]!, undefined, {signal});
             continue;
           }
-          return observation(wait, 'error', rows, {diagnostic:error instanceof CiGithubError ? `${error.code}: ${error.message}` : 'unavailable: CI watcher failed; register a new wait.'});
+          return observe('error', {diagnostic:error instanceof CiGithubError ? `${error.code}: ${error.message}` : 'unavailable: CI watcher failed; register a new wait.'});
         }
       }
       return stopped();
     } catch (error) {
       if (signal.aborted) return stopped();
-      return observation(wait, 'error', rows, {diagnostic:error instanceof CiGithubError ? `${error.code}: ${error.message}` : 'unavailable: CI watcher failed; register a new wait.'});
+      return observe('error', {diagnostic:error instanceof CiGithubError ? `${error.code}: ${error.message}` : 'unavailable: CI watcher failed; register a new wait.'});
     } finally { release?.(); }
   }
 }

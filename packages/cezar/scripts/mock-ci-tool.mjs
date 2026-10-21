@@ -24,7 +24,11 @@ export async function probeCezarTool(backend, wire, name, args) {
     extension({ registerTool(tool) { tools.push(tool); } });
     const tool = tools.find(tool => tool.name === name);
     if (!tool) throw new Error(`${name} not registered`);
-    result = { names: tools.map(tool => tool.name), response: await tool.execute('ci-1', args) };
+    // A registered tool pi's tool selection hides answers the model the way pi 1.0.4 does.
+    const response = backend === 'pi' && !piAdmits(wire, name)
+      ? { isError: true, content: [{ type: 'text', text: `Tool ${name} not found` }] }
+      : await tool.execute('ci-1', args);
+    result = { names: tools.map(tool => tool.name), response };
   } else {
     let server; let env;
     if (backend === 'claude') {
@@ -59,6 +63,15 @@ export async function probeCezarTool(backend, wire, name, args) {
   }
   if (process.env.CEZ_MOCK_CI_RESULT) writeFileSync(process.env.CEZ_MOCK_CI_RESULT, JSON.stringify(result));
   return result;
+}
+
+// pi reads --tools as an allowlist and --no-tools as an empty one; with neither (cezar's default
+// list sends --no-builtin-tools), an extension's tools are active once registered
+// (hearsay-tools/cezarion#1305).
+function piAdmits(wire, name) {
+  const index = wire.lastIndexOf('--tools');
+  if (index !== -1) return wire[index + 1].split(',').includes(name);
+  return !wire.includes('--no-tools');
 }
 
 export async function ciPrompt(backend, wire, text) {

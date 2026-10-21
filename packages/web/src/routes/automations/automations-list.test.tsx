@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { AutomationsResponse } from '@open-mercato/cezar-api-client'
@@ -41,7 +41,9 @@ it('shows a schedule row with its label and next run and runs it by hand', async
   expect(screen.getByText('Next run: Thu 04:00')).not.toBeNull()
   expect(screen.getByText('Scheduler running · GitHub available · Europe/Warsaw')).not.toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Run now' }))
-  expect((await screen.findByRole('status')).textContent).toContain('Started task')
+  await waitFor(() => {
+    expect(screen.getByRole('status').textContent).toContain('Started task')
+  })
   expect(calls.find((call) => call.path.endsWith('/a1/run'))?.method).toBe('POST')
   const open = screen.getByRole('link', { name: 'Open task' })
   expect(open.getAttribute('href')).toBe('/tasks/run-7')

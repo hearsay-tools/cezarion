@@ -65,8 +65,9 @@ const dryRunCommand = String.raw`
 const args = process.argv.slice(1);
 if (args[1] === 'view') {
  const url = args[2].startsWith('https:') ? args[2] : 'https://' + args[args.indexOf('--repo')+1] + '/pull/' + args[2];
- console.log(JSON.stringify({url, number:Number(url.split('/').pop()), headRefOid:'a'.repeat(40)}));
-} else if (!args.includes('--watch')) console.log(JSON.stringify([{name:'Dry-run checks',state:'SUCCESS',bucket:'pass',link:''}]));
+ console.log(JSON.stringify({url, number:Number(url.split('/').pop()), headRefOid:'a'.repeat(40),mergeable:'MERGEABLE',mergeStateStatus:'CLEAN'}));
+} else if (args[0] === 'api') console.log(JSON.stringify({total_count:0,workflow_runs:[]}));
+else if (!args.includes('--watch')) console.log(JSON.stringify([{name:'Dry-run checks',state:'SUCCESS',bucket:'pass',link:''}]));
 `;
 export type CiCommandResult = { code: number; stdout: string; stderr: string };
 export type CiCommandOptions = { file: string; args: string[] };
@@ -100,15 +101,27 @@ export async function runCiCommand(command: CiCommandOptions, signal: AbortSigna
   });
 }
 
-const metadataSchema = z.object({ url: z.string(), number: z.number().int().positive(), headRefOid: z.string().regex(/^[0-9a-f]{40}$/i) });
+const metadataSchema = z.object({
+  url: z.string(), number: z.number().int().positive(), headRefOid: z.string().regex(/^[0-9a-f]{40}$/i),
+  mergeable: z.string().nullish().transform(value => value === 'MERGEABLE' || value === 'CONFLICTING' ? value : 'UNKNOWN' as const),
+  mergeStateStatus: z.string().nullish().transform(value => (value ?? 'UNKNOWN')
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, '').slice(0, 64)),
+});
+export type GithubPrMetadata = Pick<z.infer<typeof metadataSchema>, 'mergeable' | 'mergeStateStatus'> & { headSha: string };
 export const githubChecksSchema = z.array(z.object({ name: z.string(), state: z.string(), link: z.string(), bucket: z.enum(['pass', 'fail', 'pending', 'skipping', 'cancel']) }));
 export type GithubCheck = z.infer<typeof githubChecksSchema>[number];
+const workflowPagesSchema = z.array(z.object({
+  total_count: z.number().int().nonnegative(),
+  workflow_runs: z.array(z.tuple([z.number().int().positive(), z.string().min(1), z.boolean()])),
+})).min(1);
 function parseJson<T>(text: string, schema: z.ZodType<T>): T {
   try { return schema.parse(JSON.parse(text)); } catch { throw new CiGithubError('malformed_data', 'GitHub returned malformed structured data; update gh and retry.'); }
 }
 function commandError(result: CiCommandResult): CiGithubError {
   // Only classify stderr: never forward potentially credential-bearing external diagnostics.
   if (result.code === 127) return new CiGithubError('gh_missing', 'GitHub CLI is unavailable; install gh and retry.');
+  if (/rate limit|429/i.test(result.stderr)) return new CiGithubError('command_failed', 'GitHub query was rate limited; wait and retry.', true);
   if (/401|403|auth|log.?in|token/i.test(result.stderr)) return new CiGithubError('authentication', 'GitHub authentication failed; run gh auth login with access to this repository.');
   if (/404|not found|could not resolve|no pull requests/i.test(result.stderr)) return new CiGithubError('inaccessible_pr', 'PR is inaccessible; verify its URL and repository access.');
   return new CiGithubError('command_failed', 'GitHub query failed; check connectivity and GitHub availability, then retry.', /5\d\d|timeout|timed out|network|connection|rate limit|429|temporar/i.test(result.stderr));
@@ -132,11 +145,11 @@ export class GithubCiClient {
     catch (error) { if (!signal.aborted && bounded.aborted) throw new CiGithubError('query_timeout', 'GitHub query exceeded ten seconds; check connectivity and retry.', true); throw error; }
     finally { release?.(); }
   }
-  async resolve(pr: string, signal: AbortSignal): Promise<CiPrIdentity> {
+  private async readMetadata(pr: string, signal: AbortSignal): Promise<CiPrIdentity & GithubPrMetadata> {
     if (!ciWaitRequestSchema.safeParse({pr}).success) throw new CiGithubError('invalid_request', 'Provide an HTTPS GitHub pull request URL.');
     const supplied = new URL(pr);
     if (supplied.hostname !== 'github.com') throw new CiGithubError('unsupported_host', 'This GitHub Enterprise host is not recognized by the forge configuration; use github.com or configure supported forge authentication.');
-    const response = await this.query(['pr', 'view', pr, '--json', 'url,number,headRefOid'], signal);
+    const response = await this.query(['pr', 'view', pr, '--json', 'url,number,headRefOid,mergeable,mergeStateStatus'], signal);
     if (response.code !== 0) throw commandError(response);
     const metadata = parseJson(response.stdout, metadataSchema);
     const validUrl = ciWaitRequestSchema.safeParse({pr:metadata.url});
@@ -144,9 +157,35 @@ export class GithubCiClient {
     const url = new URL(metadata.url);
     const parts = url.pathname.split('/');
     if (url.hostname !== supplied.hostname || Number(parts[4]) !== metadata.number || metadata.number !== Number(supplied.pathname.split('/')[4])) throw new CiGithubError('malformed_data', 'GitHub returned inconsistent PR identity.');
-    return ciPrIdentitySchema.parse({ prUrl: metadata.url, repository: `${parts[1]}/${parts[2]}`, prNumber: metadata.number, headSha: metadata.headRefOid });
+    return { ...ciPrIdentitySchema.parse({ prUrl: metadata.url, repository: `${parts[1]}/${parts[2]}`, prNumber: metadata.number, headSha: metadata.headRefOid }),
+      mergeable: metadata.mergeable, mergeStateStatus: metadata.mergeStateStatus };
   }
-  async head(pr: CiPrIdentity, signal: AbortSignal): Promise<string> { return (await this.resolve(pr.prUrl, signal)).headSha; }
+  async resolve(pr: string, signal: AbortSignal): Promise<CiPrIdentity> {
+    const { prUrl, repository, prNumber, headSha } = await this.readMetadata(pr, signal);
+    return { prUrl, repository, prNumber, headSha };
+  }
+  async metadata(pr: CiPrIdentity, signal: AbortSignal): Promise<GithubPrMetadata> {
+    const { headSha, mergeable, mergeStateStatus } = await this.readMetadata(pr.prUrl, signal);
+    return { headSha, mergeable, mergeStateStatus };
+  }
+  async head(pr: CiPrIdentity, signal: AbortSignal): Promise<string> { return (await this.metadata(pr, signal)).headSha; }
+  async hasActiveRuns(pr: CiPrIdentity, signal: AbortSignal): Promise<boolean> {
+    // gh follows every page in one bounded query. Keep counts so GitHub's filtered
+    // search cap or a changing page set cannot turn incomplete data into success.
+    const result = await this.query(['api', '--hostname', 'github.com',
+      `repos/${pr.repository}/actions/runs?head_sha=${pr.headSha}&per_page=100`, '--paginate',
+      '--jq', `{total_count, workflow_runs: [.workflow_runs[] | [.id, .status, (.head_sha | if type == "string" and test("^[0-9a-fA-F]{40}$") then ascii_downcase == ${JSON.stringify(pr.headSha.toLowerCase())} else null end)]]} | @json`], signal);
+    if (result.code !== 0) throw commandError(result);
+    // Compact tuples keep 1000 ordinary runs below the output cap while retaining
+    // independent head matching. --jq emits one JSON line per page; --slurp cannot be combined with --jq.
+    const pages = parseJson('[' + result.stdout.trim().split(/\r?\n/).filter(Boolean).join(',') + ']', workflowPagesSchema);
+    const runs = pages.flatMap(page => page.workflow_runs);
+    const unique = new Set(runs.map(run => run[0]));
+    if (unique.size !== runs.length || unique.size < Math.max(...pages.map(page => page.total_count))) {
+      throw new CiGithubError('malformed_data', 'GitHub returned an incomplete workflow run list; retry the CI wait.');
+    }
+    return runs.some(([, status, headMatches]) => headMatches && status !== 'completed');
+  }
   async checks(pr: CiPrIdentity, signal: AbortSignal): Promise<GithubCheck[]> {
     const result = await this.query(['pr', 'checks', String(pr.prNumber), '--repo', `github.com/${pr.repository}`, '--json', 'name,state,link,bucket'], signal);
     // gh documents 1 for failed checks and 8 for pending. Only validated JSON decides CI outcome.

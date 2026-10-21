@@ -11,6 +11,8 @@
 
 ## Fixed
 
+- CI waits report PR mergeability and wake with `conflicting` when GitHub explicitly observes a conflict at the registered head, including while checks remain pending. This observation grants no merge or repair approval. Older binaries may reject saved `conflicting` outcomes after downgrade; upgrade again to read that history. (hearsay-tools/cezarion#1339)
+
 - OpenCode tasks no longer hang when OpenCode asks for permission. cezar answers OpenCode's own default asks (reading outside the worktree, reading `.env` files, its repeated-call guard) and shows any ask from your own OpenCode permission rules as a permission card. (hearsay-tools/cezarion#1266)
 - Recover structured questions missing only closing brackets, with a persistent warning to check options and selection count; preserve fork monitoring and Claude wakeups (#88).
 

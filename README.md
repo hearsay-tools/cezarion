@@ -576,6 +576,13 @@ with `wake_budget_spent`, and a run with nothing else to wait on waits for you. 
 budget is kept on the task, so a cockpit restart keeps it; a message from you or a
 Continue starts it again.
 
+A CI wait stays pending while any GitHub Actions workflow run on its captured
+head commit is incomplete, even when a rerun temporarily hides that run's checks.
+It checks again every 30 seconds within the original deadline. Once those runs
+complete, it reads the checks again to decide the result. A result describes what
+GitHub reported; it does not predict workflows that have not appeared yet or grant
+merge approval.
+
 The agent asks you with `cezar_ask`, a card of one to four questions in the ask
 format. A question with two to four options shows them as choices; a question without
 options is open, and the card shows a text box for your answer. The task reads Needs
@@ -833,10 +840,12 @@ bot that tails to terminal state adds `--until settled`. `log` without `--follow
 
 **A bot that lives behind an HTTP endpoint** does not have to poll. Set a **Task webhook** (URL
 and an optional Bearer token) in the project's **Settings → General**, and every task that opts
-in POSTs `task.status` on each status change, `task.question` when it asks something,
-`task.activity` when an older run's monitoring ends (a run parked on CI or a timer now changes status to
-`waiting` instead), and `task.subscribed` when it opts in (at start, or when it is handed off). Each
-body carries the same slim projection `cez task status` prints, under `task`. `cez task start`
+in POSTs one delivery each time it enters a state you selected there: **Needs you**, **Failed**,
+**Done** and **Cancelled** by default, plus **Running**, **Waiting for agents**, **Waiting on CI**,
+**Waiting** (a timer) and **Any other wait** when you tick them. A question that puts the task in
+Needs you is `task.question`; every other entry is `task.status`, and the body's `state` names the
+state. `task.subscribed` (when it opts in, at start or on hand-off) and **Send test** always go out.
+Each body carries the same slim projection `cez task status` prints, under `task`. `cez task start`
 opts in whenever the project has a webhook (`--no-notify` to skip it); the cockpit's New task form
 has a **Notify webhook** toggle; and a running task's **Hand off** button (or
 `cez task notify <id> --message '…'`) turns it on later with a note for the bot. `notify` (and
@@ -1077,7 +1086,7 @@ cezar is not married to one vendor. Every agent step runs through a single
 | **Codex** | [`codex`](https://github.com/openai/codex) | `codex app-server` — JSON-RPC over stdio, the same transport the Codex IDE extensions use. | Ignores `allowedTools`; inherits managed permissions and Codex approval defaults. Confirmed unmanaged sessions use `danger-full-access`. `CEZ_CODEX_NETWORK=0` requires network restriction: unmanaged sessions use network-blocked `workspace-write`; managed filesystem rules remain intact, and an unconfirmed network restriction stops before any turn. If requirements discovery is unavailable, Codex permission defaults apply. |
 | **OpenCode** _(experimental)_ | [`opencode`](https://opencode.ai) | `opencode serve` — a local HTTP server with an SSE event stream. | Ignores `allowedTools` entirely; OpenCode's own permission config governs. cezar answers OpenCode's built-in asks (outside-worktree reads, `.env` reads, the repeated-call guard) once, unless your config has a rule for that permission. Any other ask shows a permission card in the cockpit, and the run waits for your answer. |
 | **Cursor** | [`agent`](https://cursor.com/docs/cli/installation) | Qualified builds use resumable `--print --output-format stream-json` turns; other builds and legacy sessions use ACP. | Print mode admits marketplace plugins, including user and team plugins, and narrows known native delegation tools for governed runs. Per-run `allowedTools` and `bashAllowlist` are unsupported. |
-| **pi** _(experimental)_ | [`pi`](https://github.com/badlogic/pi-mono) | Persistent `--mode rpc` over JSONL; models are picked with the `provider/model` convention. | Maps `allowedTools` onto pi's `--tools` allowlist; default sessions also pass harness extras (`Subagent`, `SubagentSupervisor`, `SubagentWait`) through `--tools`, and an explicit `allowedTools` still restricts. A configured `bashAllowlist` disables Bash because pi cannot express command-prefix rules. |
+| **pi** _(experimental)_ | [`pi`](https://github.com/badlogic/pi-mono) | Persistent `--mode rpc` over JSONL; models are picked with the `provider/model` convention. | Maps `allowedTools` onto pi tool names. The default list, which adds the harness extras `Subagent`, `SubagentSupervisor` and `SubagentWait`, sends no allowlist: `--no-builtin-tools` plus a bundled extension that activates those built-ins, so MCP servers (`direct`, `codemode` and `deferred` exposure) and other pi extensions' tools stay callable. The six base tools alone, the list a worker inherits from a Claude parent, take the same path. A narrowed `allowedTools`, or one that names any tool outside that default set (an `mcp__` tool, `WebFetch` or a custom tool), uses pi's `--tools` allowlist, so a step that grants named tools reaches only those; a list that maps to nothing becomes `--no-tools` (or only the cezar tools). A configured `bashAllowlist` disables Bash because pi cannot express command-prefix rules. |
 | **OMP** _(experimental)_ | [`omp`](https://github.com/can1357/oh-my-pi) | Persistent `--mode rpc` over JSONL (Oh My Pi, a pi fork); models use the `provider/model` convention and are discovered from `omp models --json`. | Maps `allowedTools` onto OMP's `--tools` allowlist (`[]` becomes `--no-tools`); default sessions also pass `todo`, `lsp`, `ast_edit`, `task` and `wait`. A configured `bashAllowlist` disables `bash` because OMP cannot express command-prefix rules. |
 
 > ⚠️ **OpenCode, pi and OMP support are experimental.** These runners work but are less
