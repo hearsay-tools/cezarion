@@ -1,4 +1,5 @@
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
+import { openHumanWait } from '@/test/run-summary-fixture'
 import { act, cleanup, render, renderHook, waitFor } from '@testing-library/react'
 import { Profiler, type ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
@@ -1939,9 +1940,9 @@ it('delivers a secondary-project structured ASK waiting transition to browser no
   setVisibility('hidden')
 
   // The server's CEZ:ASK turn-end path publishes this run summary on the workspace stream.
-  source.emit('run', stampedRun({ ...live, status: 'waiting', hasPendingHumanAsk: true }, 'secondary'))
+  source.emit('run', stampedRun({ ...live, status: 'waiting', waits: [openHumanWait(1)] }, 'secondary'))
   expect(notifications).toEqual(['structured-ask'])
-  source.emit('run', stampedRun({ ...live, status: 'waiting', hasPendingHumanAsk: true, tokensUsed: 42 }, 'secondary'))
+  source.emit('run', stampedRun({ ...live, status: 'waiting', waits: [openHumanWait(1)], tokensUsed: 42 }, 'secondary'))
   expect(notifications).toHaveLength(1)
 })
 

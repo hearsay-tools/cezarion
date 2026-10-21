@@ -6,6 +6,7 @@ import { manager, store, until, semaphore, useWorkerWaitFixture } from './worker
 import { ACK_TEXT, ASK_TEXT, REJECTED_ASK_TEXT, messagesPrompt } from './monitoring-turn.testkit.ts';
 import { CHANNEL_WIRES, withChannelWire } from './monitoring-channel-order.testkit.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
+import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 
 const GATE = 'Please review the changes before I continue.';
 it('enumerates every native channel-divergence capability', () => {
@@ -46,12 +47,12 @@ for (const backend of RUNNER_IDS) describe(`${backend} channel order`, { timeout
           const run = () => store.getRun(p.id)!;
           if (done) { await until(() => !manager.isActive(p.id)); expect(run().status).toBe('done'); }
           else if (earlier === GATE) {
-            expect(run()).toMatchObject({ status: 'waiting', activity: undefined });
+            expect(run()).toMatchObject({ status: 'waiting' });
             expect(monitoringWakeOf(run())).toBeDefined();
           }
           else {
             expect(run().status).toBe('waiting');
-            expect(run().hasPendingHumanAsk).toBe(earlier === ASK_TEXT ? true : undefined);
+            expect(hasPendingAsk(store, p.id)).toBe(earlier === ASK_TEXT);
             expect(run().invalidAsk).toBe(earlier === REJECTED_ASK_TEXT ? true : undefined);
           }
           expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested')).toHaveLength(!done && earlier === ASK_TEXT ? 1 : 0);

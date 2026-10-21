@@ -23,7 +23,7 @@ import {
   store, terminal, track, until, useWorkerWaitFixture, waitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
-import { blockRunWrites, readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { blockRunWrites, readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 
 /** Parked on an agent worker wait in the wait list (hearsay-tools/cezarion#1235): the run waits and
@@ -238,7 +238,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       // which stays pending and answerable; it used to release the admission and wait for the answer.
       session.sendAgentMessage = accept;
       await until(() => !!store.getRun(p.id)?.agentInputs?.[0]?.deliveredAt);
-      expect(store.getRun(p.id)?.hasPendingHumanAsk).toBe(true);
+      expect(hasPendingAsk(store, p.id)).toBe(true);
       expect(waitOf(store.getRun(p.id))).toBeUndefined();
       expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
     });
@@ -513,7 +513,6 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         expect(manager['automaticWakes'](w.id)).toBe(1);
         // hearsay-tools/cezarion#1233: the wake turn keeps its pool slot until its own turn end.
         expect(engine.monitoring.has(w.id)).toBe(true);
-        expect(store.getRun(w.id)?.activity).toBeUndefined();
       }
     } finally { vi.useRealTimers(); release(); await completion; }
   });

@@ -27,11 +27,13 @@ describe('cez task watching', () => {
     harness.store.commitWait(id, wait);
     harness.store.updateRun(id, { status: 'waiting', ...over });
   };
-  const parkOnWorkers = (id: string, hasPendingHumanAsk = false) => parkOn(id, {
+  const parkOnWorkers = (id: string, asks = false) => parkOn(id, {
     kind: 'worker', id: '00000000-0000-4000-8000-0000000000aa', source: 'agent', via: 'cez-worker-wait', registeredAt: '2026-09-05T00:00:00.000Z',
     deadline: '2026-09-06T00:00:00.000Z', timeoutSeconds: 600, phase: 'open', turnId: 'turn-1',
     workerIds: ['00000000-0000-4000-8000-000000000001'], revisions: [], outcomes: [],
-  }, { hasPendingHumanAsk, delegation: { role: 'root', permissions: [], receipts: [] } });
+  }, { delegation: { role: 'root', permissions: [], receipts: [] }, ...(asks ? { waits: [
+    ...(harness.store.getRun(id)?.waits ?? []), { id: '00000000-0000-4000-8000-0000000000ac', kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: '2026-09-05T00:00:00.000Z', phase: 'open', turnId: 'turn-1' },
+  ] } : {}) });
   const parkOnTimer = (id: string) => parkOn(id, {
     kind: 'timer', id: '00000000-0000-4000-8000-0000000000ab', source: 'agent', via: 'monitoring-line', registeredAt: new Date().toISOString(),
     deadline: new Date(Date.now() + 600_000).toISOString(), phase: 'open', turnId: 'turn-1', seconds: 600,
@@ -84,13 +86,13 @@ describe('cez task watching', () => {
 
       it('ends the default wait as soon as an interactive task parks, exit 0, with "needs you"', async () => {
         const id = create();
-        later(40, () => harness.store.updateRun(id, { status: 'waiting', hasPendingHumanAsk: false }));
+        later(40, () => harness.store.updateRun(id, { status: 'waiting' }));
         const started = Date.now();
         expect(await run(['wait', id, '--timeout-seconds', '10'])).toBe(0);
         expect(Date.now() - started).toBeLessThan(5_000);
         expect(last()).toMatchObject({
           until: 'attention', timedOut: false,
-          runs: [{ id, status: 'waiting', hasPendingHumanAsk: false, attention: 'waiting', attentionLabel: 'needs you' }],
+          runs: [{ id, status: 'waiting', attention: 'waiting', attentionLabel: 'needs you' }],
         });
       });
 
@@ -237,13 +239,13 @@ describe('cez task watching', () => {
      * `--until settled` keeps the terminal-only behaviour.
      */
     describe('--follow until attention (#931)', () => {
-      const parkedOnWorkers = (id: string, hasPendingHumanAsk = false) => parkOnWorkers(id, hasPendingHumanAsk);
+      const parkedOnWorkers = (id: string, asks = false) => parkOnWorkers(id, asks);
 
       it('ends a default follow once an interactive task parks, exit 0, after every event', async () => {
         const id = create();
         harness.store.appendEvent(id, { type: 'text', text: 'before' });
         later(100, () => harness.store.appendEvent(id, { type: 'text', text: 'during' }));
-        later(200, () => harness.store.updateRun(id, { status: 'waiting', hasPendingHumanAsk: false }));
+        later(200, () => harness.store.updateRun(id, { status: 'waiting' }));
         const started = Date.now();
         expect(await run(['log', id, '--follow', '--timeout-seconds', '10'])).toBe(0);
         expect(Date.now() - started).toBeLessThan(5_000);
@@ -265,7 +267,7 @@ describe('cez task watching', () => {
         later(40, () => parkedOnWorkers(id));
         expect(await run(['log', id, '--follow', '--timeout-seconds', '1'])).toBe(3);
         expect(last()).toMatchObject({ id, status: 'waiting', attention: 'none', attentionLabel: 'waiting on 1 worker', until: 'attention', timedOut: true });
-        // Same status and activity: only the question changes, and the follow still notices.
+        // Same status: only the question changes, and the follow still notices.
         later(300, () => parkedOnWorkers(id, true));
         expect(await run(['log', id, '--follow', '--timeout-seconds', '10'])).toBe(0);
         expect(last()).toMatchObject({ id, status: 'waiting', attention: 'waiting', attentionLabel: 'needs you', timedOut: false });
@@ -468,7 +470,7 @@ describe('cez task watching against a scripted cockpit', () => {
     const seen: string[] = [];
     handler = (req, res) => {
       seen.push(req.url ?? '');
-      if (req.url === '/api/v1/p/default/runs/r1') return json(res, { ...apiRun('waiting'), hasPendingHumanAsk: false });
+      if (req.url === '/api/v1/p/default/runs/r1') return json(res, apiRun('waiting'));
       if (req.url?.startsWith('/api/v1/p/default/runs/r1/history')) {
         historyCalls += 1;
         return json(res, { events: [], itemCount: 0, liveCursor: 'c', asOfSeq: historyCalls === 1 ? 1 : 3, hasOlder: false });
@@ -510,7 +512,10 @@ describe('cez task watching against a scripted cockpit', () => {
         res.writeHead(200, { 'content-type': 'text/event-stream' });
         res.write(`event: run\ndata: ${JSON.stringify(apiRun('running'))}\n\n`);
         // A last frame for a record that is gone by the time the CLI reads it.
-        setTimeout(() => { deleted = true; res.write(`event: run\ndata: ${JSON.stringify({ ...apiRun('running'), activity: 'monitoring' })}\n\n`); }, 50);
+        // A changed record that is still not attention: a timer park reads `monitoring`.
+        const monitoring = { ...apiRun('waiting'), waits: [{ id: '00000000-0000-4000-8000-0000000000d1', kind: 'timer', source: 'agent', via: 'cezar_wait',
+          registeredAt: '2026-01-01T00:00:00.000Z', deadline: '2026-01-01T00:05:00.000Z', phase: 'open', turnId: 't', seconds: 300 }] };
+        setTimeout(() => { deleted = true; res.write(`event: run\ndata: ${JSON.stringify(monitoring)}\n\n`); }, 50);
         return;
       }
       res.statusCode = 404; res.end();

@@ -290,7 +290,9 @@ export type CezarDoneAnswer = z.infer<typeof cezarDoneAnswerSchema>;
  * A summary field: lists and `deriveAttention` read it instead of the wait list.
  */
 export const waitingOnSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('human') }),
+  /** `shown` once the user sees the question (its `askSeq`): attention reads that as Needs you at
+   *  any status, a wake turn's included (phase 4b, hearsay-tools/cezarion#1236). */
+  z.object({ kind: z.literal('human'), shown: z.literal(true).optional() }),
   // `autoResumeAt` is free text on the record, so the instant it carries is too.
   z.object({ kind: z.literal('usage-limit'), at: z.string() }),
   /** The workers still owed an outcome, or the replies awaited; 0 when the row cannot count.
@@ -310,7 +312,7 @@ export const waitingOnSchema = z.discriminatedUnion('kind', [
 export type WaitingOn = z.infer<typeof waitingOnSchema>;
 
 /** Full records carry the full delegation state; summaries and index rows the slim projection. */
-export type WaitingOnInput = Partial<Pick<RunRecord, 'waits' | 'hasPendingHumanAsk' | 'autoResumeAt'>> & {
+export type WaitingOnInput = Partial<Pick<RunRecord, 'waits' | 'autoResumeAt'>> & {
   delegation?: DelegationState | RunDelegationSummary;
 };
 
@@ -343,7 +345,8 @@ function earliest<T extends CiWaitEntry | TimerWaitEntry>(waits: readonly T[]): 
 export function computeWaitingOn(run: WaitingOnInput): WaitingOn | undefined {
   // `Array.isArray`: the cockpit also projects streamed records, whose shape only `id` was checked on.
   const open = (Array.isArray(run.waits) ? run.waits : []).filter((wait) => wait?.phase === 'open');
-  if (run.hasPendingHumanAsk || open.some((wait) => wait.kind === 'human')) return { kind: 'human' };
+  const human = open.filter((wait) => wait.kind === 'human');
+  if (human.length) return human.some((wait) => wait.askSeq !== undefined) ? { kind: 'human', shown: true } : { kind: 'human' };
   if (run.autoResumeAt) return { kind: 'usage-limit', at: run.autoResumeAt };
   const workers = workersOwed(open);
   if (workers !== undefined) {
@@ -358,6 +361,17 @@ export function computeWaitingOn(run: WaitingOnInput): WaitingOn | undefined {
   const timer = earliest(open.filter((wait): wait is TimerWaitEntry => wait.kind === 'timer'));
   if (timer) return { kind: 'timer', waitId: timer.id, at: timer.deadline, ...(timer.note === undefined ? {} : { note: timer.note }) };
   return undefined;
+}
+
+/** Whether the run waits on the user: an open human wait (phase 4b, hearsay-tools/cezarion#1236). */
+export function asksHuman(run: Pick<WaitingOnInput, 'waits'>): boolean {
+  return Array.isArray(run.waits) && run.waits.some((wait) => wait?.kind === 'human' && wait.phase === 'open');
+}
+
+/** Whether the agent asked the user something: an open human wait the agent opened. Cezar's own
+ *  (`no-wait`, `budget`, `completion`) waits for the user without a question. */
+export function agentAsksHuman(run: Pick<WaitingOnInput, 'waits'>): boolean {
+  return Array.isArray(run.waits) && run.waits.some((wait) => wait?.kind === 'human' && wait.phase === 'open' && wait.source === 'agent');
 }
 
 /** A resolved wait is a wake owed to the agent: its result is in, its turn has not started.
@@ -380,13 +394,13 @@ export function resolveWaitingOn(run: { waitingOn?: WaitingOn } & WaitingOnInput
  * (hearsay-tools/cezarion#1301). An open entry reads `parked` once the run waits on it, unless a
  * pending question holds the run.
  */
-export function workerWaitView(run: Partial<Pick<RunRecord, 'status' | 'hasPendingHumanAsk' | 'waits' | 'delegation'>>): WorkerWait | undefined {
+export function workerWaitView(run: Partial<Pick<RunRecord, 'status' | 'waits' | 'delegation'>>): WorkerWait | undefined {
   const delegation = run.delegation;
   if (!delegation || delegation.role === 'invalid') return undefined;
   const entry = (run.waits ?? []).filter((wait): wait is DeadlinedWorkerWaitEntry => wait.kind === 'worker' && hasWorkerDeadline(wait) && (wait.phase === 'open' || wait.phase === 'resolved')).at(-1);
   if (!entry) return undefined;
   const legacy = workerWaitEntryToLegacy(entry);
-  return entry.phase === 'open' && run.status === 'waiting' && !run.hasPendingHumanAsk ? { ...legacy, phase: 'parked' } : legacy;
+  return entry.phase === 'open' && run.status === 'waiting' && !asksHuman(run) ? { ...legacy, phase: 'parked' } : legacy;
 }
 
 /** The newest open or owed deadline-less completion entry, which `workerWaitView` leaves out. */
@@ -399,9 +413,9 @@ export function completionWaitEntry(waits: readonly Wait[] | undefined, workerId
  * Cezar's completion wait as inspection and the relationships view show it, read from the list
  * like `workerWaitView` (hearsay-tools/cezarion#1301): its phases map as the legacy shape's do.
  */
-export function workerCompletionWaitProjection(entry: WorkerWaitEntry, run: Partial<Pick<RunRecord, 'status' | 'hasPendingHumanAsk'>>): WorkerCompletionWait {
+export function workerCompletionWaitProjection(entry: WorkerWaitEntry, run: Partial<Pick<RunRecord, 'status' | 'waits'>>): WorkerCompletionWait {
   const reason = entry.phase === 'cancelled' ? 'cancelled' : entry.phase === 'open' ? undefined : entry.result?.reason;
-  const parked = entry.phase === 'open' && run.status === 'waiting' && !run.hasPendingHumanAsk;
+  const parked = entry.phase === 'open' && run.status === 'waiting' && !asksHuman(run);
   return {
     id: entry.id,
     via: 'completion',
@@ -416,7 +430,7 @@ export function workerCompletionWaitProjection(entry: WorkerWaitEntry, run: Part
 }
 
 /** A run's deadline-less completion wait in its projection, for the relationships view. */
-export function completionWaitView(run: Partial<Pick<RunRecord, 'status' | 'hasPendingHumanAsk' | 'waits' | 'delegation'>>): WorkerCompletionWait | undefined {
+export function completionWaitView(run: Partial<Pick<RunRecord, 'status' | 'waits' | 'delegation'>>): WorkerCompletionWait | undefined {
   if (run.delegation?.role !== 'root') return undefined;
   const entry = completionWaitEntry(run.waits);
   return entry ? workerCompletionWaitProjection(entry, run) : undefined;

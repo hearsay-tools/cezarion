@@ -141,13 +141,6 @@ describe('useRunRecordReconcile', () => {
     expect(invalidate).not.toHaveBeenCalled()
   })
 
-  it('a monitoring record is already consistent with a parked turn', () => {
-    vi.useFakeTimers()
-    const { invalidate } = renderReconcile(run({ activity: 'monitoring' }), [line(8, 'turn-end')])
-    vi.advanceTimersByTime(STALE_RECORD_GRACE_MS * 2)
-    expect(invalidate).not.toHaveBeenCalled()
-  })
-
   it('a later turn.started cancels pending parked-turn reconciliation', () => {
     vi.useFakeTimers()
     const events = [line(8, 'turn-end')]

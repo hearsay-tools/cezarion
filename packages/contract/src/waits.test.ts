@@ -161,7 +161,8 @@ describe('computeWaitingOn', () => {
     expect(computeWaitingOn({ waits: [timer] })?.kind).toBe('timer');
     expect(computeWaitingOn({ waits: [ci, ...completionWaits()] })?.kind).toBe('workers');
     expect(computeWaitingOn({ waits: [ci], autoResumeAt: '2026-10-17T16:00:00.000Z' })?.kind).toBe('usage-limit');
-    expect(computeWaitingOn({ waits: [ci], hasPendingHumanAsk: true })?.kind).toBe('human');
+    expect(computeWaitingOn({ waits: [ci, openHuman()] })).toEqual({ kind: 'human' });
+    expect(computeWaitingOn({ waits: [ci, openHuman({ askSeq: 4 })] })).toEqual({ kind: 'human', shown: true });
     expect(computeWaitingOn({ waits: [{ ...ci, phase: 'resolved' }] })).toBeUndefined();
   });
 
@@ -201,7 +202,8 @@ describe('computeWaitingOn', () => {
 
   it('produces values the waitingOn schema accepts', () => {
     for (const input of [
-      { hasPendingHumanAsk: true },
+      { waits: [openHuman()] },
+      { waits: [openHuman({ askSeq: 4 })] },
       { autoResumeAt: '2026-10-17T16:00:00.000Z' },
       { waits: completionWaits() },
       { waits: [openCi()] },
@@ -568,7 +570,7 @@ describe('deadline-less cezar worker entries (hearsay-tools/cezarion#1301)', () 
     expect(view).toEqual({ id: bare.id, via: 'completion', workerIds: [W1], mode: 'all', phase: 'registered', outcomes: [], wakeId: bare.id });
     expect(workerCompletionWaitSchema.safeParse(view).success).toBe(true);
     expect(completionWaitView({ status: 'waiting', waits: [bare], delegation: root })?.phase).toBe('parked');
-    expect(completionWaitView({ status: 'waiting', hasPendingHumanAsk: true, waits: [bare], delegation: root })?.phase).toBe('registered');
+    expect(completionWaitView({ status: 'waiting', waits: [bare, openHuman()], delegation: root })?.phase).toBe('registered');
     expect(completionWaitView({ waits: [{ ...bare, phase: 'resolved', result: { reason: 'outcome' } }], delegation: root })).toMatchObject({ phase: 'wake-pending', reason: 'outcome' });
     // A deadlined entry, an upgraded completion wait included, is the legacy view's.
     expect(completionWaitView({ waits: [workerWaitEntrySchema.parse(workerBase(targets))], delegation: root })).toBeUndefined();

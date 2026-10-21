@@ -23,10 +23,11 @@ export function isLiveStatus(status: string): boolean {
  * - a root's Finish has not settled (`finishRequestedAt`). A waiting root is live anyway; a
  *   cancelled one is a snapshot older controllers left, which only the delegation sweep repairs
  *   (`commitRootFinishCancellation`), and until it does, Continue refuses the root and its workers;
- * - an accepted Stop has not settled yet (`stopping`), or a monitoring `activity` is still on it.
- *   `reconcileLoadedRun` rewrites the first and the wait-list upgrade the second
- *   (`upgradeLegacyWaits`), so open loads those rows and the next save persists the normalized
- *   record and its summary.
+ * - an accepted Stop has not settled yet (`stopping`). `reconcileLoadedRun` rewrites it, so open
+ *   loads those rows and the next save persists the normalized record and its summary. A stored
+ *   monitoring `activity` was read into the wait list on every read since store schema 4
+ *   (`upgradeLegacyWaits`), so no decoded record carries one and phase 4b
+ *   (hearsay-tools/cezarion#1236) dropped it from this predicate without a live recompute.
  *
  * Only what the record itself says. The store adds what a record cannot know: the runs a
  * RunManager pins, and their delegation families (see `RunStore`'s held set).
@@ -45,7 +46,7 @@ export function isLiveRecord(run: RunRecord): boolean {
   // and rewritten by that open.
   if (run.delegation?.role === 'worker' && run.delegation.destroy !== undefined && run.delegation.destroy.phase !== 'complete') return true;
   if (run.delegation?.role === 'root' && run.delegation.finishRequestedAt !== undefined) return true;
-  return run.stopping !== undefined || run.activity !== undefined;
+  return run.stopping !== undefined;
 }
 
 /**

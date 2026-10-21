@@ -143,12 +143,6 @@ describe('the review gate on the thread', () => {
     expect(working()?.textContent).toContain('Working')
     expect(screen.getByRole('status', { name: 'Working' })).toBeTruthy()
 
-    rerenderWithProviders(
-      <ThreadView run={run('running', { activity: 'monitoring' })} thread={reduceThread([])} />,
-    )
-    expect(working(), 'no spinner while monitoring').toBeNull()
-    expect(screen.queryByRole('status', { name: 'Working' })).toBeNull()
-
     rerenderWithProviders(<ThreadView run={run('running')} thread={reduceThread([])} />)
     expect(screen.getByRole('status', { name: 'Working' })).toBeTruthy()
 

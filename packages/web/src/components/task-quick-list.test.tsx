@@ -1695,6 +1695,16 @@ it('says when a usage-limited run resumes, in the meta line (#617 01b)', () => {
   expect(row('s')?.querySelector('[data-slot="task-row-state"]')?.textContent).toBe('usage limit, resumes in 12m')
 })
 
+// Phase 4b (hearsay-tools/cezarion#1236): the label stays `monitoring`; the meta line says when.
+it('says when a timer park checks next, in the meta line', () => {
+  const at = new Date(NOW + 5 * 60_000).toISOString()
+  renderList({ runs: [run({ id: 'm', status: 'waiting', waitingOn: { kind: 'timer', waitId: '00000000-0000-4000-8000-0000000000d1', at } })] })
+  const time = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(new Date(at))
+  const sameDay = new Date(at).toDateString() === new Date(NOW).toDateString()
+  const text = sameDay ? time : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(at))
+  expect(row('m')?.querySelector('[data-slot="task-row-state"]')?.textContent).toBe(`monitoring, next check ${text}`)
+})
+
 describe('variant line 1 under width pressure (#617 fix round)', () => {
   const pair = () => [
     run({ id: 'oa', groupId: 'g2', variant: 'A', title: 'Ledger (A)', status: 'running', runner: 'opencode', costUsd: 0.4, inputTokens: 1, outputTokens: 1 }),

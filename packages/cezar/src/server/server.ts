@@ -4105,7 +4105,6 @@ export function createApp(deps: ServerDeps) {
         if (owned?.role !== 'worker') return [];
         return [{ workerId: worker.id, parentRunId: run.id, status: worker.status, workspace: owned.workspace,
           ...(worker.currentStepId === undefined ? {} : { currentStepId: worker.currentStepId }),
-          ...(worker.activity === undefined ? {} : { activity: worker.activity }),
           ...(owned.destroy ? { destroy: workerDestroyView(worker) } : {}),
         }];
       });

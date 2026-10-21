@@ -81,7 +81,6 @@ describe('upgrade-on-read of legacy wait fields', () => {
       agentInputs: [lifecycleInput(legacyCi.id)],
     }));
     expect(run.status).toBe('waiting');
-    expect(run.activity).toBeUndefined();
     // A waiting park's current step waits with it, as every other park writes it.
     expect(run.steps[0]!.status).toBe('waiting');
     expect(run.waits).toEqual([expect.objectContaining({
@@ -129,7 +128,6 @@ describe('upgrade-on-read of legacy wait fields', () => {
   it('upgrades running+monitoring without monitoringWakeAt into plain waiting with no wait', () => {
     const run = parseOne(legacyRow({ activity: 'monitoring' }));
     expect(run.status).toBe('waiting');
-    expect(run.activity).toBeUndefined();
     expect(run.waits).toBeUndefined();
     expect(run.lastWaitsError).toBeUndefined();
   });

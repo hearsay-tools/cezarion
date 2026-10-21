@@ -31,3 +31,10 @@ export function compactTokens(tokens: number): string {
   if (tokens >= 1_000) return `${(Math.floor(tokens / 100) / 10).toFixed(1)}k`
   return String(Math.floor(tokens))
 }
+
+/** A check time as the status line and the sidebar show it: the time alone today, the date and
+ *  the time on another day (hearsay-tools/cezarion#1333, #1236). */
+export function checkTimeText(at: Date, now: Date = new Date()): string {
+  const sameDay = at.toDateString() === now.toDateString()
+  return new Intl.DateTimeFormat(undefined, sameDay ? { timeStyle: 'short' } : { dateStyle: 'medium', timeStyle: 'short' }).format(at)
+}

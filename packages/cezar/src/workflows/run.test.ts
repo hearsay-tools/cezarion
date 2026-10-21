@@ -1244,7 +1244,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     const published = await publishedWaiting(record.id);
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(published).toMatchObject({ status: 'waiting', activity: undefined });
+    expect(published).toMatchObject({ status: 'waiting' });
     expect(published.steps.find((step) => step.id === published.currentStepId)?.status).toBe('waiting');
     expect(persistedRun(record.id)).toMatchObject({
       status: 'waiting',
@@ -1278,7 +1278,6 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
     const parked = store.getRun(record.id);
-    expect(parked?.activity).toBeUndefined();
     expect(parked?.waits?.find(wait => wait.phase === 'open')).toMatchObject({ kind: 'timer', via: 'monitoring-line' });
     const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
     expect(state?.idleTimer).toBeUndefined(); // durable monitors do not inherit the 15-minute user-wait timer
@@ -1340,7 +1339,6 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'done' || r?.status === 'review');
-    expect(store.getRun(record.id)?.activity).toBeUndefined();
   }, 30_000);
 
   it('keeps CEZ:ASK ahead of Claude ScheduleWakeup', async () => {
@@ -1351,7 +1349,6 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting');
-    expect(store.getRun(record.id)?.activity).toBeUndefined();
     const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
     expect(state?.idleTimer).toBeDefined();
   }, 30_000);
@@ -1588,7 +1585,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
       },
     });
 
-    expect(store.getRun(record.id)).toMatchObject({ status: 'waiting', activity: undefined });
+    expect(store.getRun(record.id)).toMatchObject({ status: 'waiting' });
     expect(monitoringWakeOf(store.getRun(record.id))).toBe(deadline);
     expect(monitoringTimerOf(manager, record.id)).toBe(wakeTimer);
     expect(internals.waiting.has(record.id)).toBe(true);
@@ -1647,7 +1644,6 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     const record = manager.startRun(SINGLE_STEP, { task: 'just do the thing', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting');
-    expect(store.getRun(record.id)?.activity).toBeUndefined();
     const state = (manager as unknown as {
       active: Map<string, { idleTimer?: NodeJS.Timeout }>;
     }).active.get(record.id);
@@ -2357,7 +2353,6 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     const before = boundaries();
     expect(manager.sendMessage(record.id, [{ type: 'text', text: 'thanks, carry on' }])).toBe(true);
     await waitFor(record.id, (r) => r?.status === 'waiting' && boundaries() > before);
-    expect(store.getRun(record.id)?.activity).toBeUndefined();
     expect(monitoringWakeOf(store.getRun(record.id))).toBe(timer);
   }, 30_000);
 });
@@ -2470,7 +2465,6 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
     await waitFor(record.id, (r) => r?.status === 'waiting');
     const parked = store.getRun(record.id);
     expect(parked?.status).toBe('waiting'); // attention — NOT running/monitoring
-    expect(parked?.activity).toBeUndefined();
     const asks = readEvents(record.id).filter((e) => e.type === 'ask.requested');
     expect(asks).toHaveLength(1);
     expect(typeof asks[0]!.requestId).toBe('string');
@@ -2587,7 +2581,6 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
 
     const events = readEvents(record.id);
     expect(events.filter((e) => e.type === 'ask.requested')).toHaveLength(1);
-    expect(store.getRun(record.id)?.activity).toBeUndefined();
     expect(events.filter((e) => e.type === 'turn.started')).toHaveLength(1);
   }, 30_000);
 
@@ -2597,7 +2590,6 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
     await waitFor(record.id, (r) => r?.status === 'waiting');
     const parked = store.getRun(record.id);
     expect(parked?.status).toBe('waiting'); // still parks — never worse than the prose fallback
-    expect(parked?.activity).toBeUndefined();
     const events = readEvents(record.id);
     expect(events.some((e) => e.type === 'ask.requested')).toBe(false);
     const rejections = events.filter((e) => e.type === 'note' && String(e.message).includes('not valid JSON'));

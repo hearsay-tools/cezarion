@@ -38,7 +38,7 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker s
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
     await Promise.all(executions.splice(0)); await Promise.all(bookkeeping.splice(0)); manager.dispose();
     // Public completion can be durable before its private completion checkpoint.
-    store.updateRun(w.id, { status: 'done', stopping: undefined, activity: undefined });
+    store.updateRun(w.id, { status: 'done', stopping: undefined });
     store.updateRun(p.id, { status: 'done' });
     for (const id of [p.id, w.id]) expect(isLiveRecord(store.getRun(id)!)).toBe(false);
     const dataDir = join(root, '.ai/cezar'); const files = join(dataDir, 'runs');

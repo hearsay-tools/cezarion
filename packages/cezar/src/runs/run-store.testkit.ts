@@ -54,7 +54,9 @@ function seedRow(record: Record<string, unknown>): RunRowInput {
     createdAt: typeof record.createdAt === 'string' ? record.createdAt : '',
     status: typeof record.status === 'string' ? record.status : '',
     archived: record.archived === true,
-    live: encoded?.live ?? ['queued', 'running', 'waiting'].includes(String(record.status)),
+    // A row with the pre-schema-4 `activity` was live to the cezar that wrote it, and the column
+    // is never recomputed on read (phase 4b dropped `activity` from `isLiveRecord`).
+    live: 'activity' in record || (encoded?.live ?? ['queued', 'running', 'waiting'].includes(String(record.status))),
     data: JSON.stringify(record),
     summary: encoded?.summary ?? '{}',
   };
@@ -141,4 +143,13 @@ export function crashStore(store: RunStore): void {
   internals.db?.close();
   internals.db = null;
   if (internals.owner) closeClaimSession(internals.owner.session);
+}
+
+/**
+ * Whether the transcript holds a question with no delivery receipt yet: the fact the record's
+ * `hasPendingHumanAsk` summary mirrored until phase 4b (hearsay-tools/cezarion#1236). The open
+ * human wait is the display fact; this is the delivery one.
+ */
+export function hasPendingAsk(store: Pick<RunStore, 'transcriptFacts'>, runId: string): boolean {
+  return store.transcriptFacts(runId).pendingAsk !== undefined;
 }

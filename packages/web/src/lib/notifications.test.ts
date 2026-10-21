@@ -98,7 +98,8 @@ describe('diffRunTransitions (attention → notify mapping)', () => {
   })
 
   it('entering monitoring never notifies — it is a running sub-state, not attention (#490)', () => {
-    const monitoring = run({ status: 'running', activity: 'monitoring' })
+    const monitoring = run({ status: 'waiting', waits: [{ kind: 'timer', id: '00000000-0000-4000-8000-0000000000d1', source: 'agent', via: 'cezar_wait',
+      registeredAt: '2026-10-17T15:00:00.000Z', deadline: '2026-10-17T15:05:00.000Z', phase: 'open', turnId: 'turn-1', seconds: 300 }] })
     // From active running (no status change) and from waiting (leaving attention): neither notifies.
     expect(diffRunTransitions(seen([['r1', 'running']]), [monitoring]).entering).toEqual([])
     expect(diffRunTransitions(seen([['r1', 'waiting']]), [monitoring]).entering).toEqual([])

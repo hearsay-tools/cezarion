@@ -418,20 +418,20 @@ describe('cez task', () => {
       expect(await run(['status', id])).toBe(0);
       const printed = last();
       expect(Object.keys(printed).sort()).toEqual(
-        ['id', 'title', 'status', 'attention', 'attentionLabel', 'hasPendingHumanAsk', 'tokensUsed', 'url', 'handoffUrl'].sort(),
+        ['id', 'title', 'status', 'attention', 'attentionLabel', 'tokensUsed', 'url', 'handoffUrl'].sort(),
       );
-      expect(printed).toMatchObject({ id, status: 'queued', hasPendingHumanAsk: false, attention: 'none', attentionLabel: 'queued' });
+      expect(printed).toMatchObject({ id, status: 'queued', attention: 'none', attentionLabel: 'queued' });
     });
 
-    // #609: the operator who cleared on `hasPendingHumanAsk: false` read the wrong field. The
+    // #609: the operator who cleared on a false pending-question flag read the wrong field. The
     // default projection now carries the cockpit's own answer, and `waiting` is attention with
     // or without a structured question; a run waiting on its own timer is neither settled nor
     // attention (the monitoring park is a timer wait since hearsay-tools/cezarion#1301).
     it('carries the cockpit attention bucket and label, from the shared function', async () => {
       const id = await start();
-      store.updateRun(id, { status: 'waiting', hasPendingHumanAsk: false });
+      store.updateRun(id, { status: 'waiting' });
       expect(await run(['status', id])).toBe(0);
-      expect(last()).toMatchObject({ status: 'waiting', hasPendingHumanAsk: false, attention: 'waiting', attentionLabel: 'needs you' });
+      expect(last()).toMatchObject({ status: 'waiting', attention: 'waiting', attentionLabel: 'needs you' });
       store.commitWait(id, openTimer());
       expect(await run(['status', id])).toBe(0);
       expect(last()).toMatchObject({ status: 'waiting', attention: 'running', attentionLabel: 'monitoring' });
@@ -494,19 +494,19 @@ describe('cez task', () => {
       expect(await run(['list', '--status', 'done'])).toBe(0);
       const rows = last().runs as Array<Record<string, unknown>>;
       expect(rows.map((row) => row.id)).toEqual([b]);
-      expect(Object.keys(rows[0]!).sort()).toEqual(['id', 'title', 'status', 'attention', 'attentionLabel', 'hasPendingHumanAsk', 'updatedAt'].sort());
+      expect(Object.keys(rows[0]!).sort()).toEqual(['id', 'title', 'status', 'attention', 'attentionLabel', 'updatedAt'].sort());
       expect(rows[0]).toMatchObject({ attention: 'none', attentionLabel: 'done' });
     });
 
     it('carries attention + attentionLabel on default rows only, never on --full rows (#609)', async () => {
       const a = await start('a');
       const b = await start('b');
-      store.updateRun(a, { status: 'waiting', hasPendingHumanAsk: false });
+      store.updateRun(a, { status: 'waiting' });
       store.updateRun(b, { status: 'waiting' });
       store.commitWait(b, openTimer());
       expect(await run(['list'])).toBe(0);
       const rows = last().runs as Array<Record<string, unknown>>;
-      expect(rows.find((row) => row.id === a)).toMatchObject({ status: 'waiting', hasPendingHumanAsk: false, attention: 'waiting', attentionLabel: 'needs you' });
+      expect(rows.find((row) => row.id === a)).toMatchObject({ status: 'waiting', attention: 'waiting', attentionLabel: 'needs you' });
       expect(rows.find((row) => row.id === b)).toMatchObject({ status: 'waiting', attention: 'running', attentionLabel: 'monitoring' });
       expect(await run(['list', '--full'])).toBe(0);
       for (const row of last().runs as Array<Record<string, unknown>>) {
@@ -544,7 +544,7 @@ describe('cez task', () => {
       expect(rows).toHaveLength(1);
       expect(rows[0]).toEqual({
         id, title: 'do the thing', status, attention: expect.any(String), attentionLabel: expect.any(String),
-        hasPendingHumanAsk: false, updatedAt: expect.any(String), ...datum,
+        updatedAt: expect.any(String), ...datum,
       });
       const response = await fetch(`${cockpit.api}/runs`);
       expect(await run(['list', '--full'])).toBe(0);
@@ -793,8 +793,8 @@ describe('cez task', () => {
         const help = out.at(-1)!;
         expect(help).toContain('attention (default)');
         expect(help).toContain('--until settled');
-        expect(help).toMatch(/`waiting` is attention even when hasPendingHumanAsk is false/);
-        expect(help).toMatch(/never clear a task on hasPendingHumanAsk alone/);
+        expect(help).toMatch(/`waiting` is attention even when no question is pending/);
+        expect(help).not.toMatch(/hasPendingHumanAsk/);
         expect(help).toMatch(/`waiting` on its own open CI or timer wait [^`]* is neither settled nor attention/);
         expect(help).toContain('cez task wait <id>                   # default: stops when the task needs you');
         expect(help).toContain('cez task wait <id> --until settled   # terminal status only');

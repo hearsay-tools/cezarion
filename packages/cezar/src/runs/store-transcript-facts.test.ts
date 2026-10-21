@@ -10,6 +10,7 @@ import { TranscriptFactsQueue } from './transcript-facts-queue.ts';
 import { RunStore } from './store.ts';
 import { countTranscriptReads, restoreTranscriptReads } from './transcript-reads.testkit.ts';
 import { seedSettledFamily } from '../workflows/delegation-reconcile.testkit.ts';
+import { hasPendingAsk } from './run-store.testkit.ts';
 
 const questions = [{ header: 'Pick', question: 'Which one?', options: [{ label: 'A' }, { label: 'B' }] }];
 const dirs: string[] = [];
@@ -47,15 +48,15 @@ describe('RunStore transcript facts (#880)', () => {
     }
   });
 
-  it('appendEvent keeps hasPendingHumanAsk without re-reading the transcript', () => {
+  it('appendEvent keeps the pending-ask fact without re-reading the transcript', () => {
     const { store } = openStore();
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     for (let i = 0; i < 200; i++) store.appendEvent(run.id, { type: 'text', text: `token ${i}` });
     const reads = countTranscriptReads();
     const ask = store.appendEvent(run.id, { type: 'ask.requested', requestId: 'q', questions });
-    expect(store.getRun(run.id)?.hasPendingHumanAsk).toBe(true);
+    expect(hasPendingAsk(store, run.id)).toBe(true);
     store.appendEvent(run.id, { type: 'human-input-delivered', askSeq: ask.seq });
-    expect(store.getRun(run.id)?.hasPendingHumanAsk).toBe(false);
+    expect(hasPendingAsk(store, run.id)).toBe(false);
     expect(reads.counts.files).toEqual([]);
     expect(store.transcriptFacts(run.id).pendingAsk).toBeUndefined();
   });
@@ -177,78 +178,6 @@ describe('RunStore transcript facts off the request path (#880)', () => {
 
 
 describe('off-loop store readiness (hearsay-tools/cezarion#906)', () => {
-  it.each([true, false])('opens a cold waiting root without synchronous history and refreshes its conservative summary (keepLive=%s)', async keepLive => {
-    const { dir, store } = openStore();
-    const run = store.createRun({ title: 'root', task: 'task', workflow: 'w', steps: [] });
-    store.updateRun(run.id, { status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [] } });
-    const ask = store.appendEvent(run.id, { type: 'ask.requested', requestId: 'q', questions });
-    store.appendEvent(run.id, { type: 'human-input-delivered', askSeq: ask.seq });
-    store.updateRun(run.id, { hasPendingHumanAsk: true });
-    store.close(); stores.pop();
-    rmSync(historyPaths(dir, run.id).facts, { force: true });
-    const reads = countTranscriptReads();
-    const joins = vi.spyOn(TranscriptFactsQueue.prototype, 'join');
-    const reopened = RunStore.open(dir, { keepLive }); stores.push(reopened);
-    expect(reads.counts.files).toEqual([]);
-    expect(reopened.getRun(run.id)?.hasPendingHumanAsk).toBe(true);
-    reopened.flush(); // A save before readiness must not lose the deferred repair.
-    await reopened.prepareRecoveryFacts();
-    expect(reopened.getRun(run.id)?.hasPendingHumanAsk).toBe(false);
-    expect(joins).not.toHaveBeenCalled();
-  });
-
-  it.each(['warm', 'selected'] as const)('%s worker failure releases deferred settled families and claims without clearing attention', async mode => {
-    const { dir, store: producer } = openStore();
-    // Selected readiness must be tested independently of the open-time warm catch.
-    const reader = mode === 'selected' ? openStore(dir).store : undefined;
-    await reader?.factsWarmIdle();
-    const families = [seedSettledFamily(producer, dir), seedSettledFamily(producer, dir)];
-    for (const { parentId } of families) {
-      producer.updateRun(parentId, { status: 'waiting' });
-      producer.appendEvent(parentId, { type: 'ask.requested', requestId: parentId, questions });
-    }
-    producer.close(); stores.splice(stores.indexOf(producer), 1);
-    for (const { parentId, workerId } of families) {
-      rmSync(historyPaths(dir, parentId).facts, { force: true });
-      rmSync(historyPaths(dir, workerId).facts, { force: true });
-    }
-    const failure = new Error('facts worker dispatch failed');
-    const dispatch = vi.spyOn(Worker.prototype, 'postMessage').mockImplementation(() => { throw failure; });
-    const joins = vi.spyOn(TranscriptFactsQueue.prototype, 'join');
-    const reopened = reader ?? openStore(dir).store;
-    if (reader) for (const { parentId } of families) expect(reader.adoptFamily(parentId)).toBe(parentId);
-    reopened.flush();
-    for (const { parentId } of families) expect(reopened.heldIds()).toContain(parentId);
-    if (mode === 'warm') await expect(reopened.factsWarmIdle()).resolves.toBeUndefined();
-    else await expect(reopened.prepareTranscriptFacts(families.flatMap(f => [f.parentId, f.workerId]))).rejects.toBe(failure);
-    expect(dispatch).toHaveBeenCalled();
-    expect(joins).not.toHaveBeenCalled();
-    // Failure itself must schedule the ordinary fenced save/eviction, without another caller.
-    await expect.poll(() => reopened.heldIds(), { timeout: 5_000 }).toEqual([]);
-    for (const { parentId, workerId } of families) {
-      expect(reopened.getRun(parentId)?.hasPendingHumanAsk).toBe(true);
-      expect(reopened.heldIds()).not.toContain(parentId);
-      expect(reopened.heldIds()).not.toContain(workerId);
-      expect(existsSync(historyPaths(dir, parentId).facts)).toBe(false);
-    }
-    // This is ownership release, not just memory eviction: a peer can claim both families.
-    const peer = openStore(dir).store;
-    for (const { parentId } of families) expect(peer.adoptFamily(parentId)).toBe(parentId);
-  });
-
-  it.each([undefined, false, true])('retains legacy summary %s for an empty transcript without a sidecar', async summary => {
-    const { dir, store } = openStore();
-    const run = store.createRun({ title: 'legacy', task: 'task', workflow: 'w', steps: [] });
-    store.updateRun(run.id, { status: 'waiting', hasPendingHumanAsk: summary,
-      delegation: { role: 'root', permissions: [], receipts: [] } });
-    store.close(); stores.pop();
-    writeFileSync(historyPaths(dir, run.id).plain, '');
-    rmSync(historyPaths(dir, run.id).facts, { force: true });
-    const reopened = RunStore.open(dir, { keepLive: true }); stores.push(reopened);
-    await reopened.prepareRecoveryFacts();
-    expect(reopened.getRun(run.id)?.hasPendingHumanAsk).toBe(summary === true);
-  });
-
   it('yields between selected ready sidecars instead of chaining all work in microtasks', async () => {
     const { store } = openStore();
     const run = store.createRun({ title: 'ready', task: 'task', workflow: 'w', steps: [] });

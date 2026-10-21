@@ -151,18 +151,16 @@ function PreviewToggle({ servers }: { servers: ApiRun['previewServers'] & object
 export function RunHeader({
   run,
   tab = 'session',
-  hasPendingHumanAsk = false,
   onMarkedUnread,
 }: {
   run: ApiRun
   tab?: RunTab
-  hasPendingHumanAsk?: boolean
   /** Fired the moment "Mark unread" is invoked, BEFORE the mutation — the Session tab uses it
    *  to suppress its auto-mark-read effect for the rest of the visit (#775). Optional because
    *  the three `task-git` tabs render this same header and run no such effect. */
   onMarkedUnread?: () => void
 }) {
-  const attention = deriveAttention(run, hasPendingHumanAsk)
+  const attention = deriveAttention(run)
   const flags = runActionFlags(run)
   const [notesOpen, setNotesOpen] = useState(false)
   const [openChooser, setOpenChooser] = useState(false)
@@ -176,7 +174,7 @@ export function RunHeader({
   const queuePosition =
     run.status === 'queued' ? queuePositions(runs.data ?? []).get(run.id) : undefined
   // One status line for the pill and the Session activity card (hearsay-tools/cezarion#1333).
-  const statusLine = runStatusLine(run, { hasPendingHumanAsk, queuePosition })
+  const statusLine = runStatusLine(run, { queuePosition })
 
   // Below md, on a pushed task route, the shell's top bar carries the title, state line and run
   // actions (#621), so this header drops its own copy. Both halves are required: the slot exists

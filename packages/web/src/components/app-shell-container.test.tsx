@@ -683,7 +683,6 @@ describe('project rail wiring', () => {
     id: 'r1',
     title: 'A task',
     status: 'running',
-    hasPendingHumanAsk: false,
     createdAt: '2026-07-21T12:00:00.000Z',
     archived: false,
     workflow: 'quick-task',

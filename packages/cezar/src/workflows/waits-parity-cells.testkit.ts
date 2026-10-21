@@ -19,7 +19,7 @@ import { claudeScheduleWakeupDelay, COMPLETION_NO_REPLY_NOTE, COMPLETION_NUDGE_N
 import { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE } from './turn-end.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt, MONITORING_TEXT } from './monitoring-turn.testkit.ts';
-import { blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
 import { withDelayedCommand, withHeldPrintResponse, withRejectedCommand } from '../core/owned-input-delivery.testkit.ts';
 import { ciNativeMessages, gatedProviderFailure, MESSAGE_WAKE_OPENING, persistentWakeFailure, thenSay, TIMER_WAKE_OPENING, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
@@ -90,7 +90,7 @@ const parkedOn = (id: string, wait: Wait | undefined) => wait?.phase === 'open' 
 const prompted = (runner: RunnerId, text: string) => ciNativeMessages(runner, root).filter(prompt => prompt.includes(text));
 const asks = (id: string) => store.readEvents(id).filter(event => event.type === 'ask.requested');
 const answered = (id: string, askSeq: number) => store.readEvents(id).some(event => event.type === 'human-input-delivered' && event.askSeq === askSeq);
-const pendingQuestion = (id: string) => store.getRun(id)?.hasPendingHumanAsk === true && store.getRun(id)?.status === 'waiting';
+const pendingQuestion = (id: string) => hasPendingAsk(store, id) === true && store.getRun(id)?.status === 'waiting';
 
 /** A portable question parked, then a timer whose note carries a native mock's ACK marker. */
 async function timerBesideQuestion(runner: RunnerId, note: string) {
@@ -301,7 +301,6 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'ci', pr }), runner });
         await until(() => parkedOn(run.id, waitOfKind(run.id, 'ci')));
         const ci = waitOfKind(run.id, 'ci')!;
-        expect(store.getRun(run.id)?.activity).toBeUndefined();
         expect(ci).toMatchObject({ via: 'cezar_wait', source: 'agent', prUrl: pr });
         expect(manager.isActive(run.id)).toBe(true);
         external.settle();
@@ -626,7 +625,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           // On the wire, acknowledgement withheld: the result is not delivered yet.
           expect(store.getRun(run.id)?.waits?.find(wait => wait.id === timer.id)?.phase).toBe('resolved');
           expect(inputsFor(run.id, timer.id).map(input => input.deliveredAt)).toEqual([undefined]);
-          expect(store.getRun(run.id)?.hasPendingHumanAsk).toBe(true);
+          expect(hasPendingAsk(store, run.id)).toBe(true);
           release();
           await until(() => settled(run.id, timer.id)?.phase === 'delivered');
           // An acknowledgement after the wake turn ended still leaves the run in the question's park.
@@ -671,7 +670,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           // One rejected submission per attempt, each in its own session, then nothing.
           expect(prompted(runner, `Timer ${timer.id} fired`)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS);
           expectHeldAtTheBound(run.id, timer.id);
-          expect(store.getRun(run.id)?.hasPendingHumanAsk).toBe(true);
+          expect(hasPendingAsk(store, run.id)).toBe(true);
           expect(asks(run.id).map(ask => ask.seq)).toEqual([askSeq]);
           lift();
           // The answer opens the turn that also delivers the result.
@@ -952,7 +951,6 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           await until(() => !manager.isActive(run.id));
           // A clean close is not a failure: the park and its wait survive it.
           expect(store.getRun(run.id)?.status).toBe('waiting');
-          expect(store.getRun(run.id)?.activity).toBeUndefined();
           expect(store.getRun(run.id)?.error).toBeUndefined();
           expect(store.getRun(run.id)?.waits?.find(entry => entry.id === wait.id)?.phase).toBe('open');
           if (kind === 'ci') external.settle(); else fireTimer(wait.id);
@@ -1055,7 +1053,8 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         await until(() => pendingQuestion(run.id) && asks(run.id).length === 1);
         engine().active.get(run.id)!.session.end();
         await until(() => !manager.isActive(run.id));
-        expect(store.getRun(run.id)).toMatchObject({ status: 'waiting', hasPendingHumanAsk: true });
+        expect(store.getRun(run.id)).toMatchObject({ status: 'waiting' });
+        expect(hasPendingAsk(store, run.id)).toBe(true);
         expect(store.getRun(run.id)?.error).toBeUndefined();
         expect(humanOpen(run.id)).toMatchObject([{ id: registered.wait_id, askSeq: asks(run.id)[0]!.seq }]);
         expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
@@ -1255,7 +1254,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         expect(noWait).toMatchObject({ via: 'no-wait', source: 'cezar' });
         expect(store.readEvents(run.id).find(event => event.seq === noWait.askSeq)).toMatchObject({ type: 'note', message: NO_WAIT_NOTE });
         expect(store.transcriptFacts(run.id).pendingGateSeq).toBeUndefined();
-        expect(store.getRun(run.id)?.hasPendingHumanAsk).toBeFalsy();
+        expect(hasPendingAsk(store, run.id)).toBeFalsy();
         expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
         const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
         const registered = await tools.registerWait({ kind: 'timer', seconds: 60, note: 'u5d' }, 'cezar_wait', new AbortController().signal);
@@ -1287,7 +1286,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           expect(events.filter(event => event.type === 'human-input-delivered')).toEqual([]);
           expect(pendingHumanAsk(events)).toBeUndefined();
           expect(store.transcriptFacts(run.id).pendingGateSeq).toBeUndefined();
-          expect(store.getRun(run.id)?.hasPendingHumanAsk).toBeFalsy();
+          expect(hasPendingAsk(store, run.id)).toBeFalsy();
         };
         await finishParked(false);
         await finishParked(true);
@@ -1718,7 +1717,6 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         expect(engine().waitTimers.has(entry.id)).toBe(false);
         expect(engine().monitoring.has(p.id)).toBe(false);
         expect(semaphore.busy()).toBe(0);
-        expect(store.getRun(p.id)?.activity).toBeUndefined();
         expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
         expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
         expect(toRunSummary(store.getRun(p.id)!).waitingOn).toEqual({ kind: 'workers', count: 1 });

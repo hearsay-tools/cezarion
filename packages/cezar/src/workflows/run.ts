@@ -2553,7 +2553,7 @@ export class RunManager {
   }
 
   /**
-   * Park a session on its waits (hearsay-tools/cezarion#1233): `waiting`, no activity. A CI or
+   * Park a session on its waits (hearsay-tools/cezarion#1233): `waiting`. A CI or
    * timer park keeps its slot in the monitoring pool, so its wake starts at once, and needs no idle
    * timer; a resolved wait with nothing left open is a wake due now and keeps it too. Worker waits
    * rank above CI and timers (hearsay-tools/cezarion#1235): a park on them holds no slot and arms
@@ -2575,7 +2575,7 @@ export class RunManager {
     const keepsSlot = top === 'ci' || top === 'timer' || (top === undefined && resolvedWaits(run).length > 0);
     // A park that frees its slot publishes the intent first: a refused write throws and keeps it.
     if (keepsSlot) {
-      this.store.updateRun(runId, { status: 'waiting', activity: undefined });
+      this.store.updateRun(runId, { status: 'waiting' });
       if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
     } else this.store.commitParked(runId, state.currentStepId);
     this.waiting.add(runId);
@@ -2639,7 +2639,7 @@ export class RunManager {
       if (!this.queue.includes(runId)) this.queue.push(runId);
     } else if (!this.isActive(runId)) {
       // No live session: create a scheduler-owned continuation, never a direct provider call.
-      this.store.updateRun(runId, { status: 'waiting', activity: undefined });
+      this.store.updateRun(runId, { status: 'waiting' });
       const text = resolved.some(wait => wait.kind === 'ci')
         ? 'Resume to receive the queued CI observation. End this opening turn so Cezar can deliver it; do not poll CI.'
         : resolved.some(wait => wait.kind === 'worker')
@@ -3521,12 +3521,12 @@ export class RunManager {
       // end shows the question now. The run waits on the user, its other waits re-armed.
       if (this.unsurfacedHumanWait(run.id)) {
         this.surfaceHumanWait(run.id, undefined);
-        this.store.updateRun(run.id, { status: 'waiting', activity: undefined });
+        this.store.updateRun(run.id, { status: 'waiting' });
         for (const wait of openWaits(run)) this.armWait(run.id, wait);
         continue;
       }
       if (run.delegation && run.delegation.role !== 'invalid' && this.hasPendingHumanAsk(run.id)) {
-        this.store.updateRun(run.id, { status: 'waiting', activity: undefined });
+        this.store.updateRun(run.id, { status: 'waiting' });
         // A pending question leaves its waits open: they re-arm, and a result still wakes the run.
         for (const wait of openWaits(run)) this.armWait(run.id, wait);
         // Only the durable, explicitly human payload may resume an unanswered
@@ -3543,7 +3543,7 @@ export class RunManager {
       // messages still owes their delivery: it recovers as below, with its waits armed
       // (hearsay-tools/cezarion#1233). A parked one stays parked; its wake folds them in.
       if (run.waits?.length && !this.hasPendingHumanAsk(run.id) && (run.status === 'waiting' || !run.queuedMessages?.length)) {
-        this.store.updateRun(run.id, { status: 'waiting', activity: undefined });
+        this.store.updateRun(run.id, { status: 'waiting' });
         for (const wait of openWaits(run)) this.armWait(run.id, wait);
         continue;
       }
@@ -3883,7 +3883,7 @@ export class RunManager {
   /** Publish the deadline on the record (the cockpit's only source) and arm the timer for it. The
    *  run waits for it (hearsay-tools/cezarion#1236): `waiting`, its error kept for a withdrawal. */
   private armAutoResume(runId: string, deadline: number): void {
-    this.store.updateRun(runId, { status: 'waiting', finishedAt: undefined, activity: undefined, autoResumeAt: new Date(deadline).toISOString() });
+    this.store.updateRun(runId, { status: 'waiting', finishedAt: undefined, autoResumeAt: new Date(deadline).toISOString() });
     const timer = setTimeout(() => this.fireAutoResume(runId), Math.max(0, deadline - Date.now()));
     timer.unref?.();
     this.autoResumeTimers.set(runId, timer);
@@ -4757,7 +4757,7 @@ export class RunManager {
     if (refusal) return this.queueCompletionRefusal(runId, refusal);
     // Every blocker but the pending human question is a refusal: the question parks for the user.
     this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: 'Completion blocked: answer the pending human question.' });
-    this.store.updateRun(runId, { status: 'waiting', activity: undefined, finishedAt: undefined });
+    this.store.updateRun(runId, { status: 'waiting', finishedAt: undefined });
     this.store.flush();
     if (state) {
       this.clearIdleTimer(state);
@@ -4853,7 +4853,7 @@ export class RunManager {
   private queueCompletionRefusal(runId: string, refusal: NonNullable<ReturnType<RunManager['completionRefusal']>>): boolean {
     const state = this.active.get(runId);
     this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: `Completion blocked: ${refusal.message}` });
-    this.store.updateRun(runId, { status: 'waiting', activity: undefined, finishedAt: undefined });
+    this.store.updateRun(runId, { status: 'waiting', finishedAt: undefined });
     this.store.flush();
     if (this.holdsAgentWaits(runId)) return true;
     // One refusal owed at a time: the copy already queued reopens the run (hearsay-tools/cezarion#1301).
@@ -5978,13 +5978,13 @@ export class RunManager {
             // Pool membership changes only at a turn end or a terminal path. A worker park's idle
             // timer belongs to the park, not to the wake turn.
             this.waiting.delete(runId); this.clearIdleTimer(state);
-            this.store.updateRun(runId, { status: 'running', activity: undefined });
+            this.store.updateRun(runId, { status: 'running' });
           } else if (flight.admittedWake && this.waitWakeAdmitted.delete(runId)) {
             // A wake of messages alone (hearsay-tools/cezarion#1235) spends its admission the same way.
             const left = this.store.getRun(runId);
             if (!left || !this.owesWake(left)) { const retry = this.wakeRetries.get(runId); if (retry) clearTimeout(retry); this.wakeRetries.delete(runId); }
             this.waiting.delete(runId); this.clearIdleTimer(state);
-            this.store.updateRun(runId, { status: 'running', activity: undefined });
+            this.store.updateRun(runId, { status: 'running' });
           }
           // The wake's checkpoint clears the park's timers, the nudge's reply bound with them: a
           // refusal's bound belongs to its turn (hearsay-tools/cezarion#1301).
@@ -6201,7 +6201,7 @@ export class RunManager {
     // Its waits stay open and a pool member keeps its slot: only a turn end or a terminal path
     // changes either (hearsay-tools/cezarion#1233).
     this.waiting.delete(runId);
-    this.store.updateRun(runId, { status: 'running', activity: undefined });
+    this.store.updateRun(runId, { status: 'running' });
     if (state.currentStepId) {
       this.store.updateStep(runId, state.currentStepId, { status: 'running' });
     }
@@ -6870,7 +6870,6 @@ export class RunManager {
       error: undefined,
       finishedAt: undefined,
       currentStepId: stepId,
-      activity: undefined, // resuming a monitoring run — it's actively working again (#490)
     });
     this.store.updateStep(runId, stepId, {
       status: 'running',
@@ -7359,7 +7358,7 @@ export class RunManager {
         if (delivery === 'park') {
           // No turn end will show a human wait this session registered (hearsay-tools/cezarion#1234).
           this.surfaceHumanWait(runId, state);
-          this.store.updateRun(runId, { status: 'waiting', activity: undefined });
+          this.store.updateRun(runId, { status: 'waiting' });
           return;
         }
         this.store.updateStep(runId, stepId, { status: 'failed', error: WAKE_SESSION_CLOSED_ERROR, finishedAt: finishedAt() });
@@ -7446,7 +7445,7 @@ export class RunManager {
         // settleSuccess only completes running/waiting steps, so its failure is durable.
         this.surfaceHumanWait(runId, state);
         this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
-        this.store.updateRun(runId, { status: 'waiting', activity: undefined, error: `continue failed: ${message}` });
+        this.store.updateRun(runId, { status: 'waiting', error: `continue failed: ${message}` });
         return;
       }
       this.store.updateRun(runId, {
@@ -7818,7 +7817,7 @@ export class RunManager {
         }
         if (delivery === 'park') {
           this.surfaceHumanWait(runId, state);
-          this.store.updateRun(runId, { status: 'waiting', activity: undefined,
+          this.store.updateRun(runId, { status: 'waiting',
             ...(failure ? { error: runError! } : {}) });
           this.store.flush(); // checkpoint the failed attempt and its recoverable workflow cursor before parking
           this.dropActive(runId);
@@ -8521,7 +8520,7 @@ export class RunManager {
       this.clearHeldHumanInputTimer(state);
       this.monitoring.delete(runId); // released below; its waits stay open
       this.waiting.add(runId);
-      this.store.updateRun(runId, { status: 'waiting', activity: undefined, hasPendingPermission: true });
+      this.store.updateRun(runId, { status: 'waiting', hasPendingPermission: true });
       if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
       this.releaseSlot();
       // Authorization is the human's, even when this run is an owned worker.
@@ -8548,7 +8547,7 @@ export class RunManager {
       this.clearIdleTimer(state);
       this.monitoring.delete(runId); // released below; its waits stay open
       this.waiting.add(runId);
-      this.store.updateRun(runId, { status: 'waiting', activity: undefined });
+      this.store.updateRun(runId, { status: 'waiting' });
       if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
       this.releaseSlot();
       this.routeWorkerQuestion(runId);
@@ -8948,7 +8947,7 @@ export class RunManager {
     for (const step of run.steps) {
       if (step.status === 'running') this.store.updateStep(runId, step.id, { status: 'waiting' });
     }
-    this.store.updateRun(runId, { status: 'waiting', activity: undefined });
+    this.store.updateRun(runId, { status: 'waiting' });
     appendHandoffHeartbeat(this.dataDir, runId, 'session idle-closed — status=waiting; Continue to resume');
     this.store.flush();
   }
@@ -9400,7 +9399,7 @@ export class RunManager {
   /** The turn-end tail's park for the user: `waiting` with the idle timer, no slot. A result
    *  already in (a pending question beside a resolved wait) still queues its wake. */
   private parkForUser(runId: string, state: ActiveRun, stepId: string | undefined): void {
-    this.store.updateRun(runId, { status: 'waiting', activity: undefined });
+    this.store.updateRun(runId, { status: 'waiting' });
     if (stepId) this.store.updateStep(runId, stepId, { status: 'waiting' });
     this.store.flush();
     this.waiting.add(runId);

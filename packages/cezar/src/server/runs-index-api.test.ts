@@ -385,7 +385,10 @@ describe('workspace runs index API', () => {
     const question = { type: 'ask.requested', requestId: 'question', questions: [{ header: 'Choice', question: 'Which option?', options: [{ label: 'First' }, { label: 'Second' }] }] };
     store.updateRun(live.id, { status: 'waiting', delegation });
     store.appendEvent(live.id, question);
-    seedColdProject(otherRoot, [storedRun({ id: 'cold-question', title: 'Cold question', status: 'waiting', delegation, hasPendingHumanAsk: false })]);
+    // Every ask opens a human wait (phase 2); a cold row an older cezar stored keeps the summary,
+    // which the read upgrades into one (phase 4b, hearsay-tools/cezarion#1236).
+    store.commitWait(live.id, { id: '00000000-0000-4000-8000-0000000000ac', kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: '2026-09-05T00:00:00.000Z', phase: 'open', turnId: 'turn-1' });
+    seedColdProject(otherRoot, [storedRun({ id: 'cold-question', title: 'Cold question', status: 'waiting', delegation, hasPendingHumanAsk: true })]);
     mkdirSync(join(otherRoot, '.ai/cezar/runs'));
     writeFileSync(join(otherRoot, '.ai/cezar/runs/cold-question.ndjson'), JSON.stringify({ ...question, seq: 1, ts: new Date().toISOString() }) + '\n');
     const before = readPersistedText(join(otherRoot, '.ai/cezar'));
@@ -393,9 +396,14 @@ describe('workspace runs index API', () => {
     const app = makeApp({ contexts });
     try {
       const body = runsIndexResponseSchema.parse(await (await apiRequest(app, '/api/v1/workspace/runs-index')).json());
-      for (const id of [live.id, 'cold-question']) expect(body.runs.find(run => run.id === id)).toHaveProperty('hasPendingHumanAsk', true);
-      const full = await (await apiRequest(app, `/api/v1/runs/${live.id}`)).json();
-      expect(full).toHaveProperty('hasPendingHumanAsk', true);
+      for (const id of [live.id, 'cold-question']) {
+        const row = body.runs.find(run => run.id === id);
+        expect(row?.waitingOn).toEqual({ kind: 'human' });
+        expect(row).not.toHaveProperty('hasPendingHumanAsk');
+      }
+      const full = await (await apiRequest(app, `/api/v1/runs/${live.id}`)).json() as { waits?: unknown };
+      expect(full.waits).toEqual([expect.objectContaining({ kind: 'human', phase: 'open' })]);
+      expect(full).not.toHaveProperty('hasPendingHumanAsk');
       expect(contexts.peek(other.id)).toBeUndefined();
       expect(readPersistedText(join(otherRoot, '.ai/cezar'))).toBe(before);
     } finally { contexts.disposeAll(); }

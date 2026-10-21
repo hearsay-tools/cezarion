@@ -112,7 +112,7 @@ describe('TaskWebhook', () => {
     const run = optedIn();
     store.updateRun(run.id, { status: 'running' });
     // The ask lands mid-turn, while the run still runs; the park is what enters Needs you.
-    store.updateRun(run.id, { hasPendingHumanAsk: true });
+    store.commitWait(run.id, { id: '00000000-0000-4000-8000-0000000000ac', kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: '2026-09-05T00:00:00.000Z', phase: 'open', turnId: 'turn-1' });
     store.updateRun(run.id, { status: 'waiting' });
     await webhook.idle();
     expect(calls.map((call) => [call.body.event, call.body.state, call.body.previousStatus])).toEqual([
@@ -176,7 +176,7 @@ describe('TaskWebhook', () => {
     expect(calls.map((call) => call.body.runId)).toEqual([second.id]);
   });
 
-  // hearsay-tools/cezarion#1233: a CI park is `waiting` with an open wait; no activity is written.
+  // hearsay-tools/cezarion#1233: a CI park is `waiting` with an open wait.
   it('with waiting-ci selected sends one delivery each time a run starts waiting on CI', async () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl, {}, ['waiting-ci']);
@@ -186,14 +186,14 @@ describe('TaskWebhook', () => {
     store.commitWait(run.id, { id: '55555555-5555-4555-8555-555555555555', kind: 'ci', source: 'agent', via: 'cezar_wait',
       registeredAt: new Date(now).toISOString(), deadline: new Date(now + 1_800_000).toISOString(), phase: 'open', turnId: 'turn-1',
       prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40), generation: 'gen-1', timeoutSeconds: 1800 });
-    store.updateRun(run.id, { status: 'waiting', activity: undefined });
+    store.updateRun(run.id, { status: 'waiting' });
     store.updateRun(run.id, { title: 'still on CI' });
     store.updateRun(run.id, { status: 'running' });
     store.updateRun(run.id, { status: 'waiting' });
     await webhook.idle();
     expect(calls.map((call) => call.body.event)).toEqual(['task.status', 'task.status']);
     expect(calls.at(-1)!.body).toMatchObject({
-      event: 'task.status', state: 'waiting-ci', status: 'waiting', previousStatus: 'running', activity: null,
+      event: 'task.status', state: 'waiting-ci', status: 'waiting', previousStatus: 'running',
       task: { status: 'waiting', attentionLabel: 'waiting for CI' },
     });
   });

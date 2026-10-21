@@ -802,10 +802,10 @@ derived by the same function the cockpit's Needs You uses, so the CLI and the co
 disagree. Read those rather than the raw status:
 
 - `attention: waiting` (`attentionLabel` "needs you" / "needs review"), `error` or `permission`
-  means the task wants a human. A `waiting` task is attention **even when `hasPendingHumanAsk`
-  is false** — a finished turn parks the task for follow-up without a structured question —
-  unless its top open wait is CI or a timer (below). Never clear a task on `hasPendingHumanAsk`
-  alone.
+  means the task wants a human. A `waiting` task is attention **even when no question is
+  pending** — a finished turn parks the task for follow-up without a structured question —
+  unless its top open wait is CI or a timer (below). A pending question shows as `question`
+  on `status` and as `waitingOn` `{ kind: 'human' }`; never clear a task on its absence alone.
 - `attention: running` with `attentionLabel` "waiting for CI" or "monitoring" (`status: waiting`
   with an open CI wait or timer in `waitingOn`) is neither settled nor attention: the agent is
   still working on its own sub-agents or a watched command, whatever its last log line says.

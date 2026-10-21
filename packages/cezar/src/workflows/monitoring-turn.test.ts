@@ -14,6 +14,7 @@ import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { manager, store, root, worker, until, semaphore, useWorkerWaitFixture, register, waitOf } from './worker-wait.testkit.ts';
 import { MONITORING_TURN_CRITERIA, messagesPrompt, MONITORING_TEXT, ACK_TEXT, ASK_TEXT, REJECTED_ASK_TEXT } from './monitoring-turn.testkit.ts';
 import { monitoringTimerOf, monitoringWakeOf } from './waits.testkit.ts';
+import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 
 for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
@@ -97,7 +98,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
             attention('monitoring', false);
             expect(monitoringWakeOf(run())).toBeDefined();
           }
-          expect(run().hasPendingHumanAsk).not.toBe(true);
+          expect(hasPendingAsk(store, p.id)).toBe(false);
           expect(store.readEvents(p.id).some(event => event.type === 'note' && event.code === 'unstructured-human-gate')).toBe(false);
         } else if (row.id === 'M24') {
           // A rejected ask line registers nothing: its diagnostic stays, and the line's timer parks the run.
@@ -107,7 +108,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
             const turnEvents = store.readEvents(p.id).filter(event => event.seq > before);
             attention('monitoring', false);
             expect(run().invalidAsk).toBe(true);
-            expect(run().hasPendingHumanAsk).not.toBe(true);
+            expect(hasPendingAsk(store, p.id)).toBe(false);
             expect(monitoringWakeOf(run())).toBeDefined();
             expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested')).toHaveLength(0);
             expect(turnEvents.some(event => event.type === 'text' && String(event.text).includes(messages.includes(REJECTED_ASK_TEXT) ? REJECTED_ASK_TEXT : 'CEZ:ASK {'))).toBe(true);
@@ -117,13 +118,13 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           await send([MONITORING_TEXT, REJECTED_ASK_TEXT, ASK_TEXT, ACK_TEXT]);
           attention('needs you', true);
           expect(run().invalidAsk).not.toBe(true);
-          expect(run().hasPendingHumanAsk).toBe(true);
+          expect(hasPendingAsk(store, p.id)).toBe(true);
           expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested')).toHaveLength(1);
         } else if (row.id === 'M22') {
           const malformed = 'CEZ:ASK {"questions":[]}';
           await send([ASK_TEXT, malformed]);
           attention('needs you', true);
-          expect(run().hasPendingHumanAsk).not.toBe(true);
+          expect(hasPendingAsk(store, p.id)).toBe(false);
           // A rejected ask line is a turn end with no wait: the nudge's reply ends without one too,
           // so Cezar waits for the user (hearsay-tools/cezarion#1234).
           expect(run().waits).toMatchObject([{ kind: 'human', via: 'no-wait' }]);
@@ -134,7 +135,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           for (const example of [`> ${REJECTED_ASK_TEXT}`, `Example:\n${REJECTED_ASK_TEXT}`, `\`\`\`text\n${REJECTED_ASK_TEXT}\n\`\`\``, `> ${ASK_TEXT}`, `\`\`\`text\n${ASK_TEXT}\nCEZ:DONE\n\`\`\``, `Example:\n${ASK_TEXT}`, 'Example:\nCEZ:DONE', `    ${ASK_TEXT}`, '    CEZ:DONE']) {
             await send([MONITORING_TEXT, example, ACK_TEXT]);
             attention('monitoring', false);
-            expect(run().hasPendingHumanAsk).not.toBe(true);
+            expect(hasPendingAsk(store, p.id)).toBe(false);
             expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested')).toHaveLength(0);
             expect(run().invalidAsk).not.toBe(true);
             expect(store.readEvents(p.id).some(event => event.type === 'note' && event.tone === 'danger')).toBe(false);
@@ -143,7 +144,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           for (const example of [`Example:\n${ASK_TEXT}`, 'Example:\nCEZ:DONE']) {
             await send([MONITORING_TEXT, example]);
             attention('monitoring', false);
-            expect(run().hasPendingHumanAsk).not.toBe(true);
+            expect(hasPendingAsk(store, p.id)).toBe(false);
           }
         } else if (row.id === 'M4' || row.id === 'M7' || row.id === 'M18') {
           if (row.id === 'M18') {
@@ -153,24 +154,24 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
               [MONITORING_TEXT, `Example:\n    ${ASK_TEXT}`, ASK_TEXT, ACK_TEXT]]) {
               await send(messages);
               attention('needs you', true);
-              expect(run().hasPendingHumanAsk).toBe(true);
+              expect(hasPendingAsk(store, p.id)).toBe(true);
               expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested').at(-1)?.questions).toEqual(JSON.parse(ASK_TEXT.slice('CEZ:ASK '.length)).questions);
               expect(store.readEvents(p.id).some(event => event.type === 'note' && event.code === 'unstructured-human-gate')).toBe(false);
             }
           } else await send([MONITORING_TEXT, ASK_TEXT]);
           attention('needs you', true);
-          expect(run().hasPendingHumanAsk).toBe(true);
+          expect(hasPendingAsk(store, p.id)).toBe(true);
           if (row.id === 'M7' || row.id === 'M18') {
             const askSeq = store.readEvents(p.id).filter(event => event.type === 'ask.requested').at(-1)!.seq;
             const timer = manager['active'].get(p.id)!.idleTimer! as NodeJS.Timeout & { _onTimeout(): void };
             const expire = timer._onTimeout; clearTimeout(timer); expire();
             await until(() => !manager.isActive(p.id));
-            expect(run().hasPendingHumanAsk).toBe(true);
+            expect(hasPendingAsk(store, p.id)).toBe(true);
             attention('needs you', true);
             expect(manager.continueRun(p.id, { text: messagesPrompt(backend, [MONITORING_TEXT, ACK_TEXT]) }).ok).toBe(true);
             await until(() => run().status === 'waiting' && manager['active'].get(p.id)?.atTurnBoundary !== undefined);
             attention('monitoring', false);
-            expect(run().hasPendingHumanAsk).not.toBe(true);
+            expect(hasPendingAsk(store, p.id)).toBe(false);
             expect(store.readEvents(p.id).some(event => event.type === 'human-input-delivered')).toBe(true);
             expect(store.readEvents(p.id).some(event => event.type === 'human-input-delivered' && event.askSeq === askSeq)).toBe(true);
           }

@@ -217,7 +217,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
               return;
             }
-            await waitFor(() => store.getRun(runId)?.status === 'waiting' || ['done', 'review', 'failed'].includes(store.getRun(runId)?.status ?? '') || store.getRun(runId)?.activity === 'monitoring');
+            await waitFor(() => store.getRun(runId)?.status === 'waiting' || ['done', 'review', 'failed'].includes(store.getRun(runId)?.status ?? ''));
             const events = store.readEvents(runId).slice(startSeq);
             const notes = nudgeNotes(events);
             const status = store.getRun(runId)?.status;

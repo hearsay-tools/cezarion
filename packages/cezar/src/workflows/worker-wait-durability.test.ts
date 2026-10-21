@@ -294,7 +294,6 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           expect(store.getRun(p.id)?.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
         } else {
           await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-          expect(store.getRun(p.id)?.activity).toBeUndefined();
           expect(store.getRun(p.id)?.status).toBe('waiting');
           expect(semaphore.busy()).toBe(0);
           expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).includes('autonomous — continuing'))).toBe(false);

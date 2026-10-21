@@ -4,7 +4,6 @@ import { runSummarySchema, toRunSummary, type RunSummary } from '@open-mercato/c
 
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunSummaryRow } from './run-database.ts';
 import { decodeRunRecord, holdsWorkerWait, LEGACY_INDEX_FILE, reconcileLoadedRun, rescopeRun, parseRunRecords, type RepoHandle, type RunRecord } from './store.ts';
-import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { matchesRunQuery, searchTokens, sqlPrefilterTokens } from './run-search.ts';
 
 /** A cold project's runs as list rows, and whether older archived roots were left out. */
@@ -150,7 +149,7 @@ function projectRows(db: RunDatabase, rows: readonly RunSummaryRow[], dataDir: s
     }
     // A row that decodes to nothing is one the store leaves out of its list rows too.
     const record = records.get(row.id);
-    if (record) runs.push(coldSummary(record, dataDir, handle));
+    if (record) runs.push(coldSummary(record, handle));
     else unreadable++;
   });
   if (unreadable > 0 && !reportedUnreadable.has(dataDir)) {
@@ -183,7 +182,7 @@ function needsRecord(summary: RunSummary, handle?: RepoHandle | null): boolean {
   if (summary.status === 'queued' || summary.status === 'running' || summary.status === 'waiting') return true;
   // Monitoring state, and a usage-limit resume on anything but a waiting run, are cleared; an old
   // failed one is read as waiting (hearsay-tools/cezarion#1236).
-  if (summary.activity !== undefined) return true;
+  if ((summary as { activity?: unknown }).activity !== undefined) return true;
   if (summary.autoResumeAt !== undefined) return true;
   // A referenced PR that an older cezar's created-PR declaration erased is restored.
   if (summary.referencedPullRequestUrl === undefined && summary.markerRefs?.pr !== undefined) return true;
@@ -191,11 +190,11 @@ function needsRecord(summary: RunSummary, handle?: RepoHandle | null): boolean {
   if (summary.markerRefs?.issue !== undefined) return true;
   // A foreign reference the prompt does not corroborate is dropped; the prompt is in the record.
   if (handle && (summary.referencedPullRequestUrl !== undefined || summary.referencedIssueUrl !== undefined)) return true;
-  // A root waiting on workers has its pending human question re-read from the transcript. Every
-  // worker wait, Cezar's completion wait included, is a list entry (hearsay-tools/cezarion#1301),
-  // which a summary shows as `waitingOn: workers`. A summary an older build stored may still show
-  // the old engine's `delegation.wait`: it is re-derived, so the upgraded record speaks instead.
-  return summary.delegation?.role === 'root' && (summary.delegation.wait !== undefined || summary.waitingOn?.kind === 'workers');
+  // A summary an older build stored may still show the old engine's `delegation.wait`: it is
+  // re-derived, so the upgraded record speaks instead (hearsay-tools/cezarion#1301). A pending
+  // question is an open human wait in the record since phase 4b (hearsay-tools/cezarion#1236), so no
+  // transcript is read for it.
+  return summary.delegation?.role === 'root' && summary.delegation.wait !== undefined;
 }
 
 function readLegacyIndex(dataDir: string, { handle, archivedWindow, roots }: { handle?: RepoHandle | null; archivedWindow?: number; roots?: boolean }): ColdRunIndex {
@@ -217,7 +216,7 @@ function readLegacyIndex(dataDir: string, { handle, archivedWindow, roots }: { h
     // Reconciling never moves `createdAt` or `archived`, so the window is cut before projecting.
     const newest = listed.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const { runs: kept, truncated } = applyWindow(newest, archivedWindow);
-    return { runs: kept.map((run) => coldSummary(run, dataDir, handle)), truncated };
+    return { runs: kept.map((run) => coldSummary(run, handle)), truncated };
   } catch {
     // Corrupt or unreadable index. A project that cannot be read contributes nothing to the
     // index rather than failing the whole workspace's search — the same degrade-quietly rule
@@ -231,10 +230,7 @@ function readLegacyIndex(dataDir: string, { handle, archivedWindow, roots }: { h
  * it is not in the store: the record was just parsed into a fresh object nothing else holds.
  * Never `keepLive` — this reader has no RunManager, so there is nothing to recover into.
  */
-function coldSummary(run: RunRecord, dataDir: string, handle?: RepoHandle | null): RunSummary {
-  if (run.delegation?.role === 'root' && (run.status === 'waiting' || holdsWorkerWait(run))) {
-    refreshHumanAskSummary(run, dataDir);
-  }
+function coldSummary(run: RunRecord, handle?: RepoHandle | null): RunSummary {
   reconcileLoadedRun(run);
   rescopeRun(run, handle);
   return toRunSummary(run);

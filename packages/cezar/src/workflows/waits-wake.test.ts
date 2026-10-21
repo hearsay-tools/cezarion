@@ -8,7 +8,7 @@ import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { manager, restart, root, semaphore, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
-import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { MAX_WAKE_DELIVERY_ATTEMPTS, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { ciNativeMessages, persistentWakeFailure, TIMER_WAKE_OPENING, toolCall } from './waits-parity.testkit.ts';
@@ -105,7 +105,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
       external.settle();
       await until(() => settled(run.id, ci.id)?.phase === 'delivered' && prompted(runner, `CI wait observation ${ci.id}`).length > 0);
       await until(() => turnEnds(run.id) > turns && store.getRun(run.id)?.status === 'waiting');
-      expect(store.getRun(run.id)?.hasPendingHumanAsk).toBe(true);
+      expect(hasPendingAsk(store, run.id)).toBe(true);
       expect(label(run.id)).toBe('needs you');
       expect(store.readEvents(run.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
       expect(manager.sendMessage(run.id, [{ type: 'text', text: 'Vitest' }])).toBe(true);
@@ -146,12 +146,12 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     const idle = engine().active.get(run.id)!.idleTimer!;
     const expire = idle._onTimeout; clearTimeout(idle); expire();
     await until(() => !manager.isActive(run.id));
-    expect(store.getRun(run.id)).toMatchObject({ status: 'waiting', hasPendingHumanAsk: true });
+    expect(store.getRun(run.id)).toMatchObject({ status: 'waiting', waits: expect.arrayContaining([expect.objectContaining({ kind: 'human', phase: 'open' })]) });
     expect(waitById(run.id, ci.id)?.phase).toBe('open');
     external.settle();
     await until(() => settled(run.id, ci.id)?.phase === 'delivered' && prompted('claude', `CI wait observation ${ci.id}`).length > 0);
     await until(() => manager.isActive(run.id) && store.getRun(run.id)?.status === 'waiting');
-    expect(store.getRun(run.id)?.hasPendingHumanAsk).toBe(true);
+    expect(hasPendingAsk(store, run.id)).toBe(true);
     expect(label(run.id)).toBe('needs you');
     expect(manager.sendMessage(run.id, [{ type: 'text', text: 'Vitest' }])).toBe(true);
     // The continuation's opening prompt repeats the task, so the mock asks again; the answer goes to

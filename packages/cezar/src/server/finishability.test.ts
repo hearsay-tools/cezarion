@@ -4,6 +4,7 @@ import { createApp } from './server.js';
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.js';
 import { apiRequest } from './loopback-request.testkit.js';
 import { collect, manager, parent, root, store, until, useWorkerWaitFixture, worker } from '../workflows/worker-wait.testkit.js';
+import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 
 describe('authoritative finishability (#449)', () => {
   useWorkerWaitFixture();
@@ -62,7 +63,7 @@ describe('authoritative finishability (#449)', () => {
 
   it.each([false, true])('pending human ask, delegation root=%s: the verdict agrees with POST', async isRoot => {
     const p = isRoot ? await parent('mock:ask') : manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:ask', runner: 'claude' });
-    await until(() => store.getRun(p.id)?.hasPendingHumanAsk === true);
+    await until(() => hasPendingAsk(store, p.id) === true);
     const verdict = (await detail(p.id)).finishBlocked;
     if (isRoot) expect(verdict).toMatch(/pending human question/);
     else expect(verdict).toBeNull();

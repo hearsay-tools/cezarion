@@ -11,7 +11,7 @@ import { hasResolvedWait, resolveWaitingOn } from './waits.ts';
  * means those can never disagree, which is the whole point of naming it in the spec. Before it
  * moved here the CLI kept its own two-line "is this settled" and the two drifted: a root parked
  * on its own workers stopped a CLI attention wait that the cockpit showed as "waiting on
- * 2 workers" (#553), and an operator cleared a run on `hasPendingHumanAsk: false` while the
+ * 2 workers" (#553), and an operator cleared a run on a pending-question flag while the
  * cockpit showed Needs You (#609).
  *
  * Deliberately UI-free and Node-free: no React, no class names, no tokens, no `node:*` (the
@@ -88,18 +88,17 @@ function isUnseen(_run: AttentionInput): boolean {
 
 /** What attention derivation actually reads. `Pick`ed rather than the full `RunRecord` so
  *  surfaces that only have a status — the cockpit compare view's `GroupVariant` columns — can use
- *  the same canonical function instead of inventing a second status-to-tone mapping. `activity`
- *  is optional (#490), so status-only callers keep working unchanged. Delegation uses the slim
- *  contract projection: full run records, `ApiRun`s and workspace index rows all carry it. */
-export type AttentionInput = Pick<RunRecord, 'status' | 'activity' | 'autoResumeAt' | 'hasPendingHumanAsk' | 'hasPendingPermission'> & Pick<RunIndexEntry, 'delegation'>
-  // A summary carries `waitingOn`; a full or stream-patched record carries `waits` and no
-  // `waitingOn`, and `resolveWaitingOn` computes it from them (spec 2026-10-17-unified-waits).
+ *  the same canonical function instead of inventing a second status-to-tone mapping. Delegation
+ *  uses the slim contract projection: full run records, `ApiRun`s and workspace index rows all
+ *  carry it. A summary carries `waitingOn`; a full or stream-patched record carries `waits` and no
+ *  `waitingOn`, and `resolveWaitingOn` computes it from them (spec 2026-10-17-unified-waits). */
+export type AttentionInput = Pick<RunRecord, 'status' | 'autoResumeAt' | 'hasPendingPermission'> & Pick<RunIndexEntry, 'delegation'>
   & Partial<Pick<RunSummary, 'waitingOn' | 'waitWakePending'>> & Partial<Pick<RunRecord, 'waits'>>;
 
 /** Dependency wording for a worker wait in the legacy `WorkerWait` shape, which the run's
  * relationship details show (#375). A worker can only wait on requests to its parent; only roots
  * can wait for worker completion. */
-export function workerWaitLabel(role: 'root' | 'worker', wait: Pick<WorkerWait, 'requestIds' | 'workerIds' | 'outcomes'>): string {
+export function workerWaitLabel(role: 'root' | 'worker', wait: Pick<WorkerWait, 'requestIds' | 'outcomes' | 'workerIds'>): string {
   if (wait.requestIds?.length) return role === 'worker' ? 'waiting on parent reply' : 'waiting on worker replies';
   // The count is the workers still OWED an outcome (#617: "waiting on 2 workers"): a wait-for-all
   // stays open after one of two has reported, and "waiting on 2" would then overstate it. None
@@ -109,84 +108,40 @@ export function workerWaitLabel(role: 'root' | 'worker', wait: Pick<WorkerWait, 
   return workers ? `waiting on ${workers} worker${workers === 1 ? '' : 's'}` : 'waiting on workers';
 }
 
+const CAPACITY: Attention = { bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' };
+
+/** A worker wait owes its wake as a resolved list entry (hearsay-tools/cezarion#1235, #1301). */
+function owesWorkerWake(run: AttentionInput): boolean {
+  return Array.isArray(run.waits) && run.waits.some((wait) => wait?.kind === 'worker' && wait.phase === 'resolved');
+}
+
 /**
- * `RunRecord` → attention.
+ * `RunRecord` → attention: the spec's ladder (2026-10-17-unified-waits, "Status and display"),
+ * read from the wait list alone since phase 4b (hearsay-tools/cezarion#1236).
  *
  * The chain below *is* the priority order — first match wins, so `error` can never be masked by a
  * lower rung. Tones follow the cockpit mockups (`mockups/tasks-home.html`):
  *
- *  - `waiting` → amber/pending: the agent stopped and is asking you something.
+ *  - Needs you → amber/pending: the agent stopped and is asking you something.
  *  - `review`/permission → blue `--info`: there is work to look at (was brand teal until #617).
- *  - `running` → the violet family (`--status-running`), pulsing and filled; `monitoring` is the
- *    same hue as a ring, and a parked parent is the same hue as the robot (#617 status key).
+ *  - `running` → the violet family (`--status-running`), pulsing and filled; a CI or timer park is
+ *    the same hue as a ring, and a parked parent is the same hue as the robot (#617 status key).
  *  - `queued`/usage limit → neutral ring, still: parked, not transitioning. `cancelled` shares the
  *    neutral hue but is filled — it has ended.
  *  - `done`/`failed` → the green/red outcome, still.
  */
-export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false): Attention {
+export function deriveAttention(run: AttentionInput): Attention {
   if (hasPendingPermission(run)) {
     return { bucket: 'permission', tone: 'info', shape: 'filled', pulse: true, label: 'needs permission' };
   }
   if (run.status === 'failed') {
     return { bucket: 'error', tone: 'danger', shape: 'filled', pulse: false, label: 'failed' };
   }
-  if (
-    !hasPendingHumanAsk && !run.hasPendingHumanAsk
-    && (run.status === 'waiting' || run.status === 'queued')
-    && run.delegation?.role !== 'invalid'
-    // A usage-limit hold waits for its appointment, not for a slot (phase 4a).
-    && !(run.status === 'waiting' && run.autoResumeAt !== undefined)
-    // A worker wait owes its wake as a resolved list entry (hearsay-tools/cezarion#1235, #1301).
-    && Array.isArray(run.waits) && run.waits.some((wait) => wait?.kind === 'worker' && wait.phase === 'resolved')
-  ) {
-    // A queued automatic wake is a scheduler/capacity wait, not a human gate (#971).
-    // Covers both the parked session still open (`waiting`) and a leftover after restart
-    // / Continue (`queued`). Workers already settled; the ring is the same “waiting for
-    // a slot” shape as queued CI. Running still wins because it is checked later. Ahead of
-    // the CI and timer rungs: workers outrank them, and a worker park keeps its open waits
-    // (hearsay-tools/cezarion#1233).
-    return { bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' };
-  }
-  // A CI or timer park is `waiting` on its own downstream work, not on you: it keeps the
-  // running bucket and ring the monitoring activity gave it before the wait list.
-  // An open human signal makes `waitingOn` human (or the transcript argument says so), which
-  // falls through to Needs you.
-  const waitingOn = run.status === 'waiting' && !hasPendingHumanAsk ? resolveWaitingOn(run) : undefined;
-  // A run a provider usage limit stopped waits for its appointment (spec 2026-10-17-unified-waits,
-  // phase 4a): it needs nothing from you, so it reads as parked on a clock, like `queued`. A human
-  // wait wins inside `computeWaitingOn`; workers, CI and timers rank below it.
-  if (waitingOn?.kind === 'usage-limit') {
-    return { bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'usage limit' };
-  }
-  if (waitingOn?.kind === 'ci') {
-    return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for CI' };
-  }
-  if (waitingOn?.kind === 'timer') {
-    return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' };
-  }
-  const workerEntries = (Array.isArray(run.waits) ? run.waits : []).filter((wait) => wait?.kind === 'worker' && wait.phase === 'open');
-  if (waitingOn?.kind === 'workers' && !run.hasPendingHumanAsk) {
-    // Worker waits in the list (hearsay-tools/cezarion#1235), Cezar's completion wait included
-    // (hearsay-tools/cezarion#1301). Its own workers → the robot; a worker waiting on its parent is
-    // waiting on something outside it → a ring. Both violet: still in motion, just not on this
-    // turn. A root with only request waits waits on replies.
-    const role = run.delegation?.role;
-    if (role === 'worker') return { bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting on parent reply' };
-    if (waitingOn.replies || (workerEntries.length > 0 && workerEntries.every((wait) => wait.kind === 'worker' && wait.requestIds !== undefined))) {
-      return { bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on worker replies' };
-    }
-    const count = waitingOn.count;
-    return {
-      bucket: 'none', tone: 'running', shape: 'workers', pulse: false,
-      label: count ? `waiting on ${count} worker${count === 1 ? '' : 's'}` : 'waiting on workers',
-    };
-  }
-  if (!hasPendingHumanAsk && waitingOn === undefined && run.status === 'waiting' && hasResolvedWait(run)) {
-    // A resolved CI or timer wait owes the agent a wake that has not started: the same
-    // scheduler wait as the worker wake above, never a human gate (spec rung 10).
-    return { bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' };
-  }
-  if (run.status === 'waiting') {
+  const live = run.status === 'waiting' || run.status === 'queued' || run.status === 'running';
+  const waitingOn = live ? resolveWaitingOn(run) : undefined;
+  // Rung 3: a question the user sees waits on them at any live status, a wake turn's included. One
+  // registered mid-turn and not shown yet reads as the turn it is in until its turn end shows it.
+  if (waitingOn?.kind === 'human' && (waitingOn.shown || run.status === 'waiting')) {
     return { bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' };
   }
   if (run.status === 'review') {
@@ -194,6 +149,41 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
   }
   if (run.status === 'running') {
     return { bucket: 'running', tone: 'running', shape: 'filled', pulse: true, label: 'running' };
+  }
+  if (run.status === 'waiting' || run.status === 'queued') {
+    // A usage-limit hold waits for its appointment, not for a slot (phase 4a).
+    if (waitingOn?.kind === 'usage-limit') {
+      return { bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'usage limit' };
+    }
+    // A queued automatic wake is a scheduler/capacity wait, not a human gate (#971). Covers both
+    // the parked session still open (`waiting`) and a leftover after restart / Continue
+    // (`queued`). Workers already settled. Ahead of the CI and timer rungs: workers outrank them,
+    // and a worker park keeps its open waits (hearsay-tools/cezarion#1233).
+    if (run.delegation?.role !== 'invalid' && owesWorkerWake(run)) return CAPACITY;
+  }
+  if (run.status === 'waiting') {
+    if (waitingOn?.kind === 'workers') {
+      // Worker waits in the list (hearsay-tools/cezarion#1235), Cezar's completion wait included
+      // (hearsay-tools/cezarion#1301). Its own workers → the robot; a worker waiting on its parent
+      // is waiting on something outside it → a ring. Both violet: still in motion, just not on
+      // this turn. A root with only request waits waits on replies.
+      if (run.delegation?.role === 'worker') return { bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting on parent reply' };
+      if (waitingOn.replies) return { bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on worker replies' };
+      const count = waitingOn.count;
+      return {
+        bucket: 'none', tone: 'running', shape: 'workers', pulse: false,
+        label: count ? `waiting on ${count} worker${count === 1 ? '' : 's'}` : 'waiting on workers',
+      };
+    }
+    // A CI or timer park is `waiting` on its own downstream work, not on you: it keeps the
+    // running bucket and ring the monitoring activity gave it before the wait list.
+    if (waitingOn?.kind === 'ci') return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for CI' };
+    if (waitingOn?.kind === 'timer') return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' };
+    // A resolved CI or timer wait owes the agent a wake that has not started: the same scheduler
+    // wait as the worker wake above, never a human gate (rung 10).
+    if (waitingOn === undefined && hasResolvedWait(run)) return CAPACITY;
+    // Nothing open and nothing owed: the turn ended on the user.
+    return { bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' };
   }
   if (isUnseen(run)) {
     return { bucket: 'unseen', tone: 'accent', shape: 'filled', pulse: false, label: 'unseen' };
@@ -242,6 +232,9 @@ export function deriveWebhookState(run: AttentionInput): WebhookTrigger | undefi
   const attention = deriveAttention(run);
   if (attention.bucket === 'permission') return 'needs-you';
   if (attention.bucket === 'error') return 'failed';
+  // A question the user sees during a wake turn or in the line (rung 3); a waiting run reads
+  // its top wait below.
+  if (attention.label === 'needs you' && run.status !== 'waiting') return 'needs-you';
   switch (run.status) {
     case 'done':
       return 'done';
@@ -257,7 +250,6 @@ export function deriveWebhookState(run: AttentionInput): WebhookTrigger | undefi
       return undefined;
   }
   if (attention.label === 'waiting for capacity') return undefined;
-  if (run.hasPendingHumanAsk) return 'needs-you';
   const waitingOn = resolveWaitingOn(run);
   switch (waitingOn?.kind) {
     case undefined:

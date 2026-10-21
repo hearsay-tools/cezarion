@@ -269,7 +269,7 @@ describe('the branch classifier (issue 08 §A)', () => {
       runs: [
         runRecord('11111111-1', 'done'), // live by the manager, finished by the record
         runRecord('22222222-1', 'review'),
-        runRecord('33333333-1', 'running', { activity: 'monitoring' }),
+        runRecord('33333333-1', 'running'),
       ],
       isActive: (id) => id === '11111111-1',
     });

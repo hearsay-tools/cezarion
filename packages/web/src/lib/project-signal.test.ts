@@ -10,7 +10,6 @@ function entry(overrides: Partial<RunIndexEntry> = {}): RunIndexEntry {
     id: 'r',
     title: 't',
     status: 'done',
-    hasPendingHumanAsk: false,
     createdAt: '2026-09-27T10:00:00Z',
     archived: false,
     workflow: 'quick-task',
@@ -26,7 +25,7 @@ describe('projectSignal', () => {
     { name: 'empty list is idle', runs: [], expected: {} },
     { name: 'a read done run is idle', runs: [entry({ ...finished, seenAt: '2026-09-27T12:00:00Z' })], expected: {} },
     { name: 'needs you only', runs: [entry({ status: 'waiting' })], expected: { needsYou: 1 } },
-    { name: 'a pending human ask on a waiting run is needs you', runs: [entry({ status: 'waiting', hasPendingHumanAsk: true })], expected: { needsYou: 1 } },
+    { name: 'a pending human ask on a waiting run is needs you', runs: [entry({ status: 'waiting', waitingOn: { kind: 'human' } })], expected: { needsYou: 1 } },
     { name: 'unread failure only', runs: [entry({ status: 'failed', ...finished })], expected: { failedUnread: 1 } },
     { name: 'a read failure is not counted', runs: [entry({ status: 'failed', ...finished, seenAt: '2026-09-27T12:00:00Z' })], expected: {} },
     {
@@ -35,7 +34,6 @@ describe('projectSignal', () => {
       expected: { needsYou: 1, failedUnread: 1 },
     },
     { name: 'running is in motion', runs: [entry({ status: 'running' })], expected: { inMotion: 1 } },
-    { name: 'monitoring is in motion', runs: [entry({ status: 'running', activity: 'monitoring' })], expected: { inMotion: 1 } },
     {
       name: 'in motion + unread done',
       runs: [entry({ id: 'a', status: 'running' }), entry({ id: 'b', ...finished })],
@@ -90,7 +88,7 @@ describe('projectSignal', () => {
         entry({ id: 'a', status: 'waiting' }),
         entry({ id: 'b', status: 'failed', ...finished }),
         entry({ id: 'c', status: 'running' }),
-        entry({ id: 'd', status: 'running', activity: 'monitoring' }),
+        entry({ id: 'd', status: 'running' }),
         entry({ id: 'e', ...finished }),
       ],
       expected: { needsYou: 1, failedUnread: 1, inMotion: 2, finishedUnread: 1 },
@@ -105,7 +103,7 @@ describe('projectSignal', () => {
 describe('the incident behind #864', () => {
   it('counts an old waiting root behind hundreds of newer archived runs and workers', () => {
     const runs = [
-      entry({ id: 'old-waiting', status: 'waiting', hasPendingHumanAsk: true, createdAt: '2026-10-03T21:09:02Z' }),
+      entry({ id: 'old-waiting', status: 'waiting', waitingOn: { kind: 'human' }, createdAt: '2026-10-03T21:09:02Z' }),
       ...Array.from({ length: 200 }, (_, i) => entry({ id: `arch-${i}`, archived: true, ...finished })),
       ...Array.from({ length: 300 }, (_, i) => entry({ id: `w-${i}`, archived: true, ...finished, delegation: { role: 'worker', parentRunId: 'x' } as RunIndexEntry['delegation'] })),
     ]

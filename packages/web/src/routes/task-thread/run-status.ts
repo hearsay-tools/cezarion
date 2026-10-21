@@ -1,6 +1,7 @@
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 
 import { deriveAttention, type Attention } from '@/lib/attention'
+import { checkTimeText } from '@/lib/format'
 
 /**
  * The one status line a run shows (hearsay-tools/cezarion#1333): the desktop header pill and the
@@ -20,9 +21,9 @@ const IN_FLIGHT: readonly ApiRun['status'][] = ['running', 'queued', 'waiting']
 
 export function runStatusLine(
   run: ApiRun,
-  { hasPendingHumanAsk = false, queuePosition, now = new Date() }: { hasPendingHumanAsk?: boolean; queuePosition?: number; now?: Date },
+  { queuePosition, now = new Date() }: { queuePosition?: number; now?: Date },
 ): RunStatusLine {
-  const attention = deriveAttention(run, hasPendingHumanAsk)
+  const attention = deriveAttention(run)
   const base = attention.label.charAt(0).toUpperCase() + attention.label.slice(1)
   const label = queuePosition !== undefined ? `${base} #${queuePosition}` : base
   const nextCheck = IN_FLIGHT.includes(run.status) ? earliestOpenTimer(run, now) : undefined
@@ -43,7 +44,5 @@ function earliestOpenTimer(run: ApiRun, now: Date): RunStatusLine['nextCheck'] {
     if (!earliest || at < earliest) earliest = at
   }
   if (!earliest) return undefined
-  const sameDay = earliest.toDateString() === now.toDateString()
-  const text = new Intl.DateTimeFormat(undefined, sameDay ? { timeStyle: 'short' } : { dateStyle: 'medium', timeStyle: 'short' }).format(earliest)
-  return { at: earliest.toISOString(), text }
+  return { at: earliest.toISOString(), text: checkTimeText(earliest, now) }
 }
