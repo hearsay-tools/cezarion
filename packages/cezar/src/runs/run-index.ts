@@ -184,7 +184,7 @@ function needsRecord(summary: RunSummary, handle?: RepoHandle | null): boolean {
   // Monitoring state, and a usage-limit resume on anything but a waiting run, are cleared; an old
   // failed one is read as waiting (hearsay-tools/cezarion#1236).
   if (summary.activity !== undefined) return true;
-  if (summary.autoResumeAt !== undefined && summary.status !== 'waiting') return true;
+  if (summary.autoResumeAt !== undefined) return true;
   // A referenced PR that an older cezar's created-PR declaration erased is restored.
   if (summary.referencedPullRequestUrl === undefined && summary.markerRefs?.pr !== undefined) return true;
   // Issue markers may have overwritten the originating issue in older records.

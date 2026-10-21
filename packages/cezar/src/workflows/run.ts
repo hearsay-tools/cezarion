@@ -5,6 +5,7 @@ import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, ceza
 import { ciWaitResultSchema, type CiWaitRequest, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { AUTONOMOUS_NUDGE, decideTurnEnd } from './turn-end.ts';
+import { nextLineEntry } from './line-order.ts';
 import { ciWatchRequest, hasCiWait, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import { previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
@@ -949,6 +950,9 @@ interface PendingContinuation {
   /** Attachments the user pasted into the follow-up composer — images to view, files (#950) to
    *  be given the path of. Persisted when the continuation actually opens, not here. */
   images: PastedContent[];
+  /** When this continuation joined the line (epoch ms). A queued continuation is a wake of a run
+   *  already in progress, so it goes ahead of unstarted runs, oldest first (`nextLineEntry`). */
+  lineJoinedAt: number;
 }
 
 /** What re-reading a message's persisted attachments yields: viewable blocks for the images, and
@@ -1533,6 +1537,7 @@ export class RunManager {
     this.ciSupervisor = this.ciResources.supervisor;
     this.offSemaphore = this.semaphore.register({
       busySlots: () => this.busySlots(),
+      oldestWakeAt: () => this.oldestWakeAt(),
       pump: () => this.pump(),
       oldestQueuedAt: () => this.oldestQueuedAt(),
       accountHolds: () => this.accountHolds(),
@@ -2981,11 +2986,28 @@ export class RunManager {
   private oldestQueuedAt(): number | null {
     const head = this.queue[0];
     if (!head) return null;
-    const wakeQueuedAt = this.waitWakeQueuedAt.get(head);
+    const wakeQueuedAt = this.wakeJoinedAt(head);
     if (wakeQueuedAt !== undefined) return wakeQueuedAt;
     const createdAt = this.store.getRun(head)?.createdAt;
     const ms = createdAt ? Date.parse(createdAt) : Number.NaN;
     return Number.isNaN(ms) ? null : ms;
+  }
+
+  /** When a queued entry joined the line as a wake of a run already in progress, or undefined for
+   *  a run that has not started (hearsay-tools/cezarion#1236, `nextLineEntry`). */
+  private wakeJoinedAt(runId: string): number | undefined {
+    return this.waitWakeQueuedAt.get(runId) ?? this.pendingContinuations.get(runId)?.lineJoinedAt;
+  }
+
+  /** The oldest wake in this manager's line, or null: the semaphore gives a freed slot to the
+   *  project holding the oldest wake before any project's unstarted runs. */
+  private oldestWakeAt(): number | null {
+    let oldest: number | null = null;
+    for (const id of this.queue) {
+      const at = this.wakeJoinedAt(id);
+      if (at !== undefined && (oldest === null || at < oldest)) oldest = at;
+    }
+    return oldest;
   }
 
   /**
@@ -3064,9 +3086,10 @@ export class RunManager {
         while (this.queue.length > 0) {
           // Recovery may have begun while this pump awaited repository/config discovery.
           if (this.disposed || this.recovering) return;
-          // FIFO among the runs that CAN start; a held one keeps its place in the queue rather
-          // than being dequeued and re-queued (which would churn its position and its record).
-          const next = this.queue.findIndex((id) => {
+          // Wakes first, then unstarted runs, each FIFO among the entries that CAN start
+          // (hearsay-tools/cezarion#1236); a held one keeps its place in the queue rather than
+          // being dequeued and re-queued (which would churn its position and its record).
+          const next = nextLineEntry(this.queue, (id) => this.wakeJoinedAt(id), (id) => {
             const queued = this.store.getRun(id);
             return !this.reclaiming.has(id) && !this.autosaveCleanupBlocker(id) && capacity() && (!queued || this.historyDeletionPending(id) || ((!this.executions.get(id)?.admitted || this.active.has(id)) && !this.executionBlockedByRootFinish(queued) &&
               (!anyHold || !accountHeldFor(queued, holds, defaultRunner ?? 'claude'))));
@@ -3220,6 +3243,7 @@ export class RunManager {
         backend,
         prompt: run.continuationMessage?.text ?? RESTART_CONTINUATION_PROMPT,
         images: [],
+        lineJoinedAt: Date.now(),
       });
       this.queue.push(run.id);
       this.store.appendEvent(run.id, {
@@ -3843,7 +3867,7 @@ export class RunManager {
     for (const run of this.store.listRuns()) {
       if (!onUsageLimitHold(run)) continue;
       if (this.autoResumeTimers.has(run.id)) continue;
-      const deadline = Date.parse(run.autoResumeAt);
+      const deadline = Date.parse(run.autoResumeAt!);
       // A deadline that is unreadable, belongs to a run that has spent its cap, or belongs to a
       // task the user has archived is retired rather than re-armed: it can only mislead. One
       // that has just passed arms at zero — the window is open, which is the point.
@@ -6586,6 +6610,7 @@ export class RunManager {
         backend: targetRunner,
         prompt,
         images,
+        lineJoinedAt: Date.now(),
       });
       this.queue.push(runId);
       this.store.updateRun(runId, {
@@ -6647,7 +6672,7 @@ export class RunManager {
     // invisible to the enforcer forever. Ordinary runs retain their best-effort
     // repoRoot fallback; owned workers must never adopt/recreate an unverified resource.
     if (this.workerExecutionStopped(runId)) { this.starting.delete(runId); return; }
-    if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images })) return;
+    if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() })) return;
     this.workerIdentity(runId);
     const record = this.store.getRun(runId);
     let cwd: string;
@@ -7057,7 +7082,7 @@ export class RunManager {
       this.clearAutosaveTimer(state); this.dropActive(runId);
     };
     if (state.cancelled) { settlePrelaunchCancellation(); return; }
-    if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images }, state)) return;
+    if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() }, state)) return;
     this.store.updateStep(runId, stepId, { profileId: continueProfile.profileId });
 
     state.delegationSettings = { cwd: state.cwd, runner: continueBackend, model: continueModel,
@@ -7143,7 +7168,7 @@ export class RunManager {
         state.cancelled = true;
         settlePrelaunchCancellation();
       } else {
-        this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images }, state);
+        this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() }, state);
       }
       return;
     }
