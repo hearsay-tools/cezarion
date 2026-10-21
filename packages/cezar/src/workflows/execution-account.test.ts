@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -121,6 +121,29 @@ describe('a held wake does not advertise itself to the workspace line', () => {
       const reclaiming = (manager as unknown as { reclaiming: Set<string> }).reclaiming;
       reclaiming.add(parked.id);
       try { expect(engine.oldestWakeAt()).toBeNull(); } finally { reclaiming.delete(parked.id); }
+    } finally {
+      engine.queue.splice(engine.queue.indexOf(parked.id), 1);
+      engine.waitWakeQueuedAt.delete(parked.id);
+    }
+  });
+
+  it('reads a runnerless wake on the configured default runner, as pump() does', async () => {
+    // A legacy record names no runner, so it runs on the configured default. Hard-coding Claude
+    // here advertised it while the default account was held (hearsay-tools/cezarion#1236).
+    mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
+    writeFileSync(join(repoRoot, '.ai/cezar/config.json'), JSON.stringify({ defaultRunner: 'codex' }));
+    const holder = store.createRun({ title: 'holder', workflow: 'w', task: 't', runner: 'codex', steps: [] });
+    store.updateRun(holder.id, { status: 'waiting', autoResumeAt: new Date(Date.now() + 600_000).toISOString() });
+    const parked = store.createRun({ title: 'parked', workflow: 'w', task: 't', steps: [] });
+    const engine = manager as unknown as { queue: string[]; waitWakeQueuedAt: Map<string, number>; oldestWakeAt(): number | null; pump(): Promise<void> };
+    engine.queue.push(parked.id);
+    engine.waitWakeQueuedAt.set(parked.id, 1);
+    try {
+      // Before any pump has read the configuration, the default is unknown: not advertised.
+      expect(engine.oldestWakeAt()).toBeNull();
+      await engine.pump();
+      expect(engine.queue).toContain(parked.id);
+      expect(engine.oldestWakeAt()).toBeNull();
     } finally {
       engine.queue.splice(engine.queue.indexOf(parked.id), 1);
       engine.waitWakeQueuedAt.delete(parked.id);

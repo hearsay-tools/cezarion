@@ -1457,6 +1457,9 @@ export class RunManager {
    *  explicit user Continue, these are bulk scheduler work and must re-enter
    *  through `pump()` so both workspace and per-project caps are honored. */
   private readonly pendingContinuations = new Map<string, PendingContinuation>();
+  /** The configured default runner as `pump()` last read it, so the sync `oldestWakeAt()` resolves
+   *  a runnerless record's account the same way (hearsay-tools/cezarion#1236). */
+  private configuredDefaultRunner: RunnerId | undefined;
   /** Accepted Continues supersede in-flight settlement even before launch or after
    * idle close. Retain these across dropActive/dispose so absence cannot look like
    * the earlier execution again; disposal alone never revokes terminal intent. */
@@ -3043,8 +3046,12 @@ export class RunManager {
       if (at === undefined || (oldest !== null && at >= oldest)) continue;
       holds ??= this.semaphore.accountHolds();
       // The same blockers `pump()` applies, capacity aside: a wake that cannot leave for any of
-      // them must not win the slot for its project's unstarted work.
-      if (!this.canLeaveLine(id, holds, this.store.getRun(id)?.runner ?? 'claude')) continue;
+      // them must not win the slot for its project's unstarted work. A runnerless record runs on
+      // the configured default, which only `pump()` reads (async); until it has, such a wake is
+      // not advertised while anything is held.
+      const runnerless = holds.deadline.size + holds.inFlight.size > 0 && this.store.getRun(id)?.runner === undefined;
+      if (runnerless && this.configuredDefaultRunner === undefined) continue;
+      if (!this.canLeaveLine(id, holds, this.configuredDefaultRunner ?? 'claude')) continue;
       oldest = at;
     }
     return oldest;
@@ -3136,6 +3143,7 @@ export class RunManager {
         // Only pay for the config read when something is actually held: a queued record may name
         // no runner, and then the account it would use is the configured default.
         const defaultRunner = anyHold ? (await loadConfig(this.repoRoot)).defaultRunner : undefined;
+        if (defaultRunner !== undefined) this.configuredDefaultRunner = defaultRunner;
         while (this.queue.length > 0) {
           // Recovery may have begun while this pump awaited repository/config discovery.
           if (this.disposed || this.recovering) return;
