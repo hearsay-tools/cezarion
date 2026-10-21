@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { afterEach, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import * as git from '../git-worktree.ts';
+import * as retention from '../runs/retention.ts';
 import * as workflows from './load.ts';
 import { createFixtureManager, removeFixtureRepo } from './fixture-cleanup.testkit.ts';
 
@@ -136,6 +137,37 @@ it('retains the repository and reports an ownership timeout', async () => {
     expect(existsSync(root)).toBe(true);
   } finally { await removeFixtureRepo(root); }
   expect(manager.isActive(run.id)).toBe(false);
+});
+
+it('keeps draining while owned work settles one operation at a time past one bound', async () => {
+  const { root, manager } = fixture();
+  // Three retention passes that each settle inside the bound but together outlast it: the
+  // teardown of hearsay-tools/cezarion#1323, which still owned `enforceRetention` three times.
+  const passes = [barrier(), barrier(), barrier()];
+  let call = 0;
+  const reclaim = vi.spyOn(retention, 'reclaimWorktrees').mockImplementation(async () => {
+    const pass = passes[call++]!;
+    pass.enter(); await pass.held;
+    return [];
+  });
+  const engine = manager as unknown as { enforceRetention(): Promise<void> };
+  const retained = Promise.allSettled([engine.enforceRetention(), engine.enforceRetention(), engine.enforceRetention()]);
+  await Promise.all(passes.map(pass => pass.entered));
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  try {
+    const removed = removeFixtureRepo(root, 1_000).then(() => undefined, (error: unknown) => error);
+    for (const pass of passes) {
+      await vi.advanceTimersByTimeAsync(600);
+      expect(existsSync(root)).toBe(true);
+      pass.release();
+    }
+    expect(await removed).toBeUndefined();
+    expect(existsSync(root)).toBe(false);
+  } finally {
+    vi.useRealTimers();
+    for (const pass of passes) pass.release();
+    await retained; reclaim.mockRestore();
+  }
 });
 
 it('propagates removal errors', async () => {
