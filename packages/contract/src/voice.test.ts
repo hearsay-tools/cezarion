@@ -37,6 +37,14 @@ describe('voice contract', () => {
     }
   });
 
+  it('describes every worker-wait meaning of waiting-on-workers', () => {
+    // The status covers "waiting on N workers", "waiting on worker replies" and "waiting on parent reply".
+    const text = VOICE_STATUS_DESCRIPTIONS['waiting-on-workers'];
+    expect(text).toMatch(/workers they started/);
+    expect(text).toMatch(/replies from their workers/);
+    expect(text).toMatch(/reply from their parent/);
+  });
+
   it('decision arms parse and keep their discriminant', () => {
     const samples = [
       { action: 'open', decisionId: id, status: 'finished', position: 'next', confidence: 0.9 },

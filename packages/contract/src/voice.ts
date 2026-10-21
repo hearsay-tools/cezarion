@@ -48,7 +48,8 @@ export const VOICE_STATUS_DESCRIPTIONS: Record<VoiceStatus, string> = {
   'waiting-for-capacity': 'Tasks that wait for a free parallel slot or for memory.',
   queued: 'Tasks that have not started yet.',
   scheduled: 'Tasks that a timer will start or wake at a set time.',
-  'waiting-on-workers': 'Tasks that wait for the workers they started.',
+  'waiting-on-workers':
+    'Tasks that wait on other tasks: for the workers they started, for replies from their workers, or for a reply from their parent task.',
   done: 'Tasks that finished their work without error.',
   cancelled: 'Tasks the user stopped.',
   unread: 'Tasks with news the user has not seen yet.',
