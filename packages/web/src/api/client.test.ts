@@ -51,6 +51,8 @@ import {
   setProviderEnabled,
   startTodo,
   retryProviderAuth,
+  reportVoiceOutcome,
+  voiceDecide,
 } from './client'
 import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 
@@ -768,5 +770,55 @@ describe('explicit project actions', () => {
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       '/api/v1/p/selected/runs/run-1/read', '/api/v1/p/selected/open-in',
     ])
+  })
+})
+
+describe('voice calls', () => {
+  const DECISION_ID = '00000000-0000-4000-8000-000000000001'
+
+  it('posts the sentence to the decide route and hands the signal to fetch', async () => {
+    reply({ action: 'none', decisionId: DECISION_ID, reason: 'not-a-command' })
+    const controller = new AbortController()
+    const decision = await voiceDecide({ text: 'open next failed', sidebarView: 'active' }, controller.signal)
+    expect(decision).toEqual({ action: 'none', decisionId: DECISION_ID, reason: 'not-a-command' })
+    expect(lastCall()).toMatchObject({
+      path: '/api/v1/voice/decide',
+      method: 'POST',
+      body: { text: 'open next failed', sidebarView: 'active' },
+    })
+    expect((fetchMock.mock.calls.at(-1)?.[1] as RequestInit).signal).toBeDefined()
+  })
+
+  it('rejects with the server message when voice is off or the engine is down, and does not retry', async () => {
+    reply({ error: 'Voice mode is off: set CEZ_VOICE=1 and TYPESAFE_API_KEY, then restart cezar' }, { status: 409 })
+    const error = (await voiceDecide({ text: 'x', sidebarView: 'active' }).catch((e: unknown) => e)) as ApiError
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error.status).toBe(409)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports an outcome without awaiting it', async () => {
+    reply({ ok: true })
+    expect(reportVoiceOutcome(DECISION_ID, 'executed')).toBeUndefined()
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(lastCall()).toMatchObject({
+      path: '/api/v1/voice/outcome',
+      method: 'POST',
+      body: { decisionId: DECISION_ID, outcome: 'executed' },
+    })
+  })
+
+  it('swallows a failed outcome report without throwing or logging', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    fetchMock.mockRejectedValue(new TypeError('network down'))
+    expect(() => reportVoiceOutcome(DECISION_ID, 'abandoned')).not.toThrow()
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    // Let the rejection settle; an unhandled one would fail the run.
+    await new Promise((resolve) => setTimeout(resolve, 0)) // bound: one macrotask lets the swallowed rejection settle
+    expect(log).not.toHaveBeenCalled()
+    expect(warn).not.toHaveBeenCalled()
+    log.mockRestore()
+    warn.mockRestore()
   })
 })
