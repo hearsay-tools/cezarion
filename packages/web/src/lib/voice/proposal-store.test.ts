@@ -5,19 +5,23 @@ import {
   resetVoiceStoreForTests,
   voiceStore,
   type AskCardTarget,
+  type AskCardValues,
   type ComposerTarget,
   type VoiceProposal,
 } from './proposal-store'
 
 beforeEach(() => resetVoiceStoreForTests())
 
+const EMPTY: AskCardValues = { selections: {}, otherAnswers: {} }
+
 /** A card that remembers what was applied and answers `unanswered` from it, like the real one. */
-function fakeCard(overrides: Partial<AskCardTarget> = {}) {
+function fakeCard(overrides: Partial<AskCardTarget> = {}, values: AskCardValues = EMPTY) {
   let applied: VoiceAnswer[] = []
   const target: AskCardTarget = {
     runId: 'r1',
     requestId: 'ask_1',
     headers: ['Library', 'Build'],
+    read: vi.fn(() => values),
     apply: vi.fn((answers: VoiceAnswer[]) => {
       applied = answers
     }),
@@ -134,19 +138,102 @@ describe('voiceStore', () => {
     expect(voiceStore.lastDrop()).toBeUndefined()
   })
 
-  it('unregistering the card drops its proposal', () => {
-    const unregister = voiceStore.registerAskCard(fakeCard())
+  it('cancel puts back what the card held before the first answer', () => {
+    const before: AskCardValues = { selections: { 0: ['Jest'] }, otherAnswers: {} }
+    const card = fakeCard({}, before)
+    voiceStore.registerAskCard(card)
     voiceStore.propose(answer('d1', option(0, 'Vitest')))
+    voiceStore.propose(answer('d2', option(1, 'Vite')))
+    expect(card.read).toHaveBeenCalledTimes(1)
+    voiceStore.cancel()
+    expect(card.restore).toHaveBeenCalledWith(before)
+  })
+
+  it('unregistering the card keeps its proposal; the same card registering again gets the answers', () => {
+    const before: AskCardValues = { selections: { 0: ['Jest'] }, otherAnswers: {} }
+    const unregister = voiceStore.registerAskCard(fakeCard({}, before))
+    voiceStore.propose(answer('d1', option(0, 'Vitest')))
+    const listener = vi.fn()
+    voiceStore.subscribe(listener)
     unregister()
+    expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+    expect(voiceStore.lastDrop()).toBeUndefined()
+    expect(listener).not.toHaveBeenCalled()
+
+    const again = fakeCard()
+    voiceStore.registerAskCard(again)
+    expect(again.apply).toHaveBeenCalledWith([option(0, 'Vitest')], { reveal: false })
+    expect(again.read).not.toHaveBeenCalled()
+    // The next sentence merges with the first; cancel restores the snapshot taken on the first card.
+    expect(voiceStore.propose(answer('d2', option(1, 'Vite')))).toEqual({ ok: true, replaced: 'd1' })
+    expect(again.apply).toHaveBeenLastCalledWith([option(0, 'Vitest'), option(1, 'Vite')])
+    voiceStore.cancel()
+    expect(again.restore).toHaveBeenCalledWith(before)
+  })
+
+  it('another card registering does not receive the proposal', () => {
+    voiceStore.registerAskCard(fakeCard())
+    voiceStore.propose(answer('d1', option(0, 'Vitest')))
+    const other = fakeCard({ requestId: 'ask_2' })
+    voiceStore.registerAskCard(other)
+    const otherRun = fakeCard({ runId: 'r2' })
+    voiceStore.registerAskCard(otherRun)
+    expect(other.apply).not.toHaveBeenCalled()
+    expect(otherRun.apply).not.toHaveBeenCalled()
+  })
+
+  it('confirm while the card is unmounted has no target and keeps the proposal', () => {
+    const unregister = voiceStore.registerAskCard(fakeCard())
+    voiceStore.propose(answer('d1', option(0, 'Vitest'), other(1, 'use both')))
+    unregister()
+    expect(voiceStore.confirm()).toEqual({ ok: false, reason: 'no-target' })
+    expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+    const again = fakeCard()
+    voiceStore.registerAskCard(again)
+    expect(voiceStore.confirm()).toEqual({ ok: true })
+    expect(again.send).toHaveBeenCalledTimes(1)
+  })
+
+  it('the question settling drops the answer proposal as question-closed', () => {
+    const card = fakeCard()
+    voiceStore.registerAskCard(card)
+    voiceStore.propose(answer('d1', option(0, 'Vitest')))
+    voiceStore.syncPendingAsk('r1', 'ask_1')
+    voiceStore.syncPendingAsk('r2', undefined)
+    expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+    voiceStore.syncPendingAsk('r1', 'ask_2')
     expect(voiceStore.getProposal()).toBeUndefined()
+    expect(voiceStore.lastDrop()).toBe('question-closed')
+    // The question is gone: nothing is put back on its card.
+    expect(card.restore).not.toHaveBeenCalled()
+
+    voiceStore.propose(answer('d2', option(0, 'Vitest')))
+    voiceStore.syncPendingAsk('r1', undefined)
     expect(voiceStore.lastDrop()).toBe('question-closed')
   })
 
-  it('a new proposal resets the drop reason', () => {
-    const unregister = voiceStore.registerAskCard(fakeCard())
-    voiceStore.propose(answer('d1', option(0, 'Vitest')))
-    unregister()
+  it('leaving the task drops its answer proposal as task-closed', () => {
     voiceStore.registerAskCard(fakeCard())
+    voiceStore.propose(answer('d1', option(0, 'Vitest')))
+    voiceStore.leaveTask('r2')
+    expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+    voiceStore.leaveTask('r1')
+    expect(voiceStore.getProposal()).toBeUndefined()
+    expect(voiceStore.lastDrop()).toBe('task-closed')
+  })
+
+  it('a tell is left to its composer by syncPendingAsk and leaveTask', () => {
+    voiceStore.registerComposer(fakeComposer())
+    voiceStore.propose(tell('d1', 'hello'))
+    voiceStore.syncPendingAsk('r1', undefined)
+    voiceStore.leaveTask('r1')
+    expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+  })
+
+  it('a new proposal resets the drop reason', () => {
+    voiceStore.registerAskCard(fakeCard())
+    voiceStore.propose(answer('d1', option(0, 'Vitest')))
+    voiceStore.leaveTask('r1')
     voiceStore.propose(answer('d2', option(0, 'Vitest')))
     expect(voiceStore.lastDrop()).toBeUndefined()
   })

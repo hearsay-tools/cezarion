@@ -653,12 +653,53 @@ describe('AskCard voice proposals', () => {
     expect(mutateAsync).toHaveBeenCalledWith({ text: 'Library: Luxon' })
   })
 
-  it('unmounting the card drops its proposal', () => {
+  // A virtualized thread unmounts offscreen rows while the question stays open (final review, T6).
+  it('a remount of the same open question keeps the voice answers and merges the next sentence', async () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
     renderAsk(voiceAsk)
     propose('d1', { question: 0, kind: 'option', labels: ['Vitest'] })
     cleanup()
-    expect(voiceStore.getProposal()).toBeUndefined()
-    expect(voiceStore.lastDrop()).toBe('question-closed')
+    expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+    expect(voiceStore.lastDrop()).toBeUndefined()
+    let result: ReturnType<typeof voiceStore.confirm> | undefined
+    act(() => {
+      result = voiceStore.confirm()
+    })
+    expect(result).toEqual({ ok: false, reason: 'no-target' })
+    expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+
+    scrollIntoView.mockClear()
+    renderAsk(voiceAsk)
+    expect(pressed(/Vitest/)).toBe('true')
+    expect(card().getAttribute('data-voice-proposal')).toBe('true')
+    expect(screen.getByRole('group', { name: 'Which test library?' }).getAttribute('data-voice-filled')).toBe('true')
+    expect(document.querySelector('[data-slot="ask-voice-prompt"]')).not.toBeNull()
+    // Coming back into view is not a new proposal: the card does not pull the scroll to itself.
+    expect(scrollIntoView).not.toHaveBeenCalled()
+
+    propose('d2', { question: 1, kind: 'option', labels: ['Vite'] })
+    expect(pressed(/Vitest/)).toBe('true')
+    expect(pressed(/Vite$/)).toBe('true')
+    act(() => {
+      result = voiceStore.confirm()
+    })
+    expect(result).toEqual({ ok: true })
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith({ text: 'Library: Vitest\nBuild: Vite' }))
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+  })
+
+  it('cancel after a remount puts back the choice made before voice', () => {
+    renderAsk(voiceAsk)
+    fireEvent.click(screen.getByRole('button', { name: /Jest/ }))
+    propose('d1', { question: 0, kind: 'option', labels: ['Vitest'] })
+    cleanup()
+    renderAsk(voiceAsk)
+    expect(pressed(/Vitest/)).toBe('true')
+    act(() => voiceStore.cancel())
+    expect(pressed(/Jest/)).toBe('true')
+    expect(pressed(/Vitest/)).toBe('false')
+    expect(card().getAttribute('data-voice-proposal')).toBeNull()
   })
 
   it('a routed card registers no target', () => {

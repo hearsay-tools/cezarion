@@ -93,6 +93,7 @@ function card(headers: string[], overrides: Partial<AskCardTarget> = {}): AskCar
     runId: 'r1',
     requestId: 'ask_1',
     headers,
+    read: () => ({ selections: {}, otherAnswers: {} }),
     apply: vi.fn((answers: VoiceAnswer[]) => {
       applied = answers
     }),
@@ -507,11 +508,11 @@ describe('useVoiceCommand', () => {
 
   it('a proposal the store drops on its own is abandoned, with a line saying why', async () => {
     mocks.openRunId = 'r1'
-    const unregister = voiceStore.registerAskCard(card(['Library']))
+    voiceStore.registerAskCard(card(['Library']))
     const harness = setup()
     await proposeAnswer(harness, 1, [option(0, 'Vitest')])
 
-    act(() => unregister())
+    act(() => voiceStore.syncPendingAsk('r1', undefined))
 
     expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith(DECISION_ID(1), 'abandoned')
     expect(harness.result.current.voice.mode).toBe('idle')

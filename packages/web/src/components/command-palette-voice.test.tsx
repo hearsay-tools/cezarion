@@ -197,6 +197,7 @@ describe('palette voice mode', () => {
       runId: 'r1',
       requestId: 'ask_1',
       headers: ['Library'],
+      read: () => ({ selections: {}, otherAnswers: {} }),
       apply: (answers) => {
         applied = answers
       },

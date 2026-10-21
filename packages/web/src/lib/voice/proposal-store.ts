@@ -13,13 +13,22 @@ export type VoiceProposal =
   | { kind: 'answer'; decisionId: string; runId: string; askRequestId: string; answers: VoiceAnswer[] }
   | { kind: 'tell'; decisionId: string; runId: string; text: string }
 
+/** What a question card shows: the chips chosen and the Other text, per question. */
+export interface AskCardValues {
+  selections: Record<number, string[]>
+  otherAnswers: Record<number, string>
+}
+
 /** What an open question card lets the store do. Every method reads the card's latest state. */
 export interface AskCardTarget {
   runId: string
   requestId: string
   headers: string[]
-  apply(answers: VoiceAnswer[]): void
-  restore(): void
+  /** The card's values now; the store keeps them from before the first voice answer. */
+  read(): AskCardValues
+  /** Puts the answers on the card. `reveal: false` (a remount) keeps the scroll where it is. */
+  apply(answers: VoiceAnswer[], options?: { reveal: boolean }): void
+  restore(values: AskCardValues): void
   unanswered(): number[]
   /** True when delivery started; false (nothing changed) while a send is pending or blocked. */
   send(): boolean
@@ -47,6 +56,10 @@ export type ConfirmResult =
 type DropReason = 'question-closed' | 'task-closed'
 
 let proposal: VoiceProposal | undefined
+/** What the answer proposal's card held before voice filled it. It lives here, not in the card, so
+ *  a card that unmounts and mounts again while its question is open (a virtualized thread row)
+ *  keeps the voice answers and can still be put back (final review, T6). */
+let snapshot: AskCardValues | undefined
 let drop: DropReason | undefined
 const cards = new Map<string, AskCardTarget>()
 const composers = new Map<string, ComposerTarget>()
@@ -59,8 +72,10 @@ const cardFor = (p: Extract<VoiceProposal, { kind: 'answer' }>) => cards.get(car
 
 /** Undo what a proposal put on screen: the card goes back to its snapshot, the draft is emptied. */
 function undo(p: VoiceProposal) {
-  if (p.kind === 'answer') cardFor(p)?.restore()
-  else composers.get(p.runId)?.clearVoiceDraft(p.text)
+  if (p.kind === 'answer') {
+    if (snapshot) cardFor(p)?.restore(snapshot)
+    snapshot = undefined
+  } else composers.get(p.runId)?.clearVoiceDraft(p.text)
 }
 
 /** Later entries for a question replace earlier ones; the result is in question order. */
@@ -84,6 +99,7 @@ function propose(next: VoiceProposal): ProposeResult {
       return { ok: true, replaced: current.decisionId }
     }
     if (current) undo(current)
+    snapshot = card.read()
     proposal = next
     drop = undefined
     card.apply(next.answers)
@@ -117,6 +133,7 @@ function confirmProposal(): ConfirmResult {
       return { ok: false, unanswered: missing.map((index) => ({ index, header: card.headers[index] ?? '' })) }
     }
     if (!card.send()) return { ok: false, reason: 'busy' }
+    snapshot = undefined
   } else {
     const composer = composers.get(current.runId)
     if (!composer) return { ok: false, reason: 'no-target' }
@@ -135,12 +152,15 @@ function cancel() {
   notify()
 }
 
-/** The proposal's target went away: nothing to restore, only to forget and say why. */
+/** The proposal's question or task went away: nothing to restore, only to forget and say why. */
 function dropProposal(reason: DropReason) {
   proposal = undefined
+  snapshot = undefined
   drop = reason
   notify()
 }
+
+const answerFor = (runId: string) => (proposal?.kind === 'answer' && proposal.runId === runId ? proposal : undefined)
 
 export const voiceStore = {
   getProposal: (): VoiceProposal | undefined => proposal,
@@ -151,16 +171,27 @@ export const voiceStore = {
   lastDrop: (): DropReason | undefined => drop,
   /** The question headers of a registered card, so the palette can name what it will answer. */
   headersFor: (runId: string, requestId: string): string[] | undefined => cards.get(cardKey(runId, requestId))?.headers,
+  /** A card leaving only removes the target: its question may still be open (a virtualized row, a
+   *  renderer switch). The same card mounting again while its proposal is live gets the answers back. */
   registerAskCard(target: AskCardTarget): () => void {
     const key = cardKey(target.runId, target.requestId)
     cards.set(key, target)
-    return () => {
-      if (cards.get(key) !== target) return
-      cards.delete(key)
-      if (proposal?.kind === 'answer' && cardKey(proposal.runId, proposal.askRequestId) === key) {
-        dropProposal('question-closed')
-      }
+    if (proposal?.kind === 'answer' && cardKey(proposal.runId, proposal.askRequestId) === key) {
+      target.apply(proposal.answers, { reveal: false })
     }
+    return () => {
+      if (cards.get(key) === target) cards.delete(key)
+    }
+  },
+  /** The thread's pending question for `runId` is now `requestId` (none when undefined): an answer
+   *  proposal for any other question of that run ends, because its question was settled. */
+  syncPendingAsk(runId: string, requestId: string | undefined) {
+    const current = answerFor(runId)
+    if (current && current.askRequestId !== requestId) dropProposal('question-closed')
+  },
+  /** The thread for `runId` closed or switched to another run: its answer proposal ends. */
+  leaveTask(runId: string) {
+    if (answerFor(runId)) dropProposal('task-closed')
   },
   registerComposer(target: ComposerTarget): () => void {
     composers.set(target.runId, target)
@@ -190,6 +221,7 @@ export function useVoiceProposal(): VoiceProposal | undefined {
 /** Test-only: the store is a module singleton, so each case starts from an empty one. */
 export function resetVoiceStoreForTests() {
   proposal = undefined
+  snapshot = undefined
   drop = undefined
   cards.clear()
   composers.clear()

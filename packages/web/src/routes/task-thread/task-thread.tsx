@@ -204,9 +204,20 @@ export function ThreadView({
       }),
     [run.id],
   )
+  const pendingAsk = history ? pendingHumanAsk(history.currentEvents) : undefined
   const hasPendingHumanAsk = history
-    ? pendingHumanAsk(history.currentEvents) !== undefined
+    ? pendingAsk !== undefined
     : currentThread.turns.some(turn => turn.items.some(item => item.kind === 'ask' && !item.resolved))
+  // A voice answer proposal outlives its card (a virtualized row unmounts while the question is
+  // open), so the thread says when the question itself settled or the user left the task.
+  const pendingAskId = history
+    ? (typeof pendingAsk?.requestId === 'string' ? pendingAsk.requestId : undefined)
+    : currentThread.turns.flatMap(turn => turn.items).find(item => item.kind === 'ask' && !item.resolved)?.id
+  const historyLoading = history !== undefined && (history.isPending || history.contextPending)
+  useEffect(() => {
+    if (!historyLoading) voiceStore.syncPendingAsk(run.id, pendingAskId)
+  }, [run.id, pendingAskId, historyLoading])
+  useEffect(() => () => voiceStore.leaveTask(run.id), [run.id])
   const attention = deriveAttention(run, hasPendingHumanAsk)
   const footer = threadFooter(run.status, run.error)
   // The Agents dock's data: the current fan-out's sub-agents, or [] when there is none to

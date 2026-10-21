@@ -432,6 +432,65 @@ describe('ThreadView', () => {
     expect(voiceStore.lastDrop()).toBe('task-closed')
   })
 
+  describe('voice answer proposals', () => {
+    const askEvent = line(10, 'ask.requested', {
+      requestId: 'ask-v',
+      questions: [
+        { header: 'Library', question: 'Which test library?', options: [{ label: 'Vitest' }, { label: 'Jest' }] },
+        { header: 'Build', question: 'Which build tool?', options: [{ label: 'Vite' }, { label: 'esbuild' }] },
+      ],
+    })
+    const historyOf = (currentEvents: RunEvent[], over: Partial<import('@/api/run-history').RunHistoryState> = {}) => ({
+      visibleEvents: [askEvent], currentEvents, isPending: false, contextPending: false, fallback: false, hasOlder: false,
+      isFetchingOlder: false, olderError: undefined, loadOlder: async () => {}, jumpToLatest: async () => {}, retainedPages: 1, ...over,
+    })
+    const view = (thread: ApiRun, history: ReturnType<typeof historyOf>) => (
+      <ThreadView run={thread} thread={reduceThread(history.visibleEvents)} currentThread={reduceThread(history.currentEvents)} history={history} />
+    )
+    const proposeFor = (runId: string) =>
+      act(() => voiceStore.propose({ kind: 'answer', decisionId: 'd1', runId, askRequestId: 'ask-v', answers: [{ question: 0, kind: 'option', labels: ['Vitest'] }] }))
+
+    it('the question settling drops it as question-closed; a history still loading does not', () => {
+      const thread = run('waiting')
+      const { rerender, queryClient } = renderView(view(thread, historyOf([askEvent])))
+      proposeFor(thread.id)
+      expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+      const again = (history: ReturnType<typeof historyOf>) =>
+        rerender(<QueryClientProvider client={queryClient}><MemoryRouter>{view(thread, history)}</MemoryRouter></QueryClientProvider>)
+
+      again(historyOf([], { isPending: true, contextPending: true }))
+      expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+      again(historyOf([askEvent]))
+      expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+
+      again(historyOf([askEvent, line(11, 'human-input-delivered', { askSeq: 10 })]))
+      expect(voiceStore.getProposal()).toBeUndefined()
+      expect(voiceStore.lastDrop()).toBe('question-closed')
+    })
+
+    it('switching to another task drops it as task-closed', () => {
+      const first = run('waiting', { id: 'run-a' })
+      const { rerender, queryClient } = renderView(view(first, historyOf([askEvent])))
+      proposeFor(first.id)
+      rerender(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>{view(run('waiting', { id: 'run-b' }), historyOf([askEvent]))}</MemoryRouter>
+        </QueryClientProvider>,
+      )
+      expect(voiceStore.getProposal()).toBeUndefined()
+      expect(voiceStore.lastDrop()).toBe('task-closed')
+    })
+
+    it('leaving the thread drops it as task-closed', () => {
+      const thread = run('waiting')
+      const { unmount } = renderView(view(thread, historyOf([askEvent])))
+      proposeFor(thread.id)
+      unmount()
+      expect(voiceStore.getProposal()).toBeUndefined()
+      expect(voiceStore.lastDrop()).toBe('task-closed')
+    })
+  })
+
   it('cancel during a pending Stop clears the voice text, and spares an edited draft', () => {
     const thread = run('running')
     const { rerender, queryClient } = renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)

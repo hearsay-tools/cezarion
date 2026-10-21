@@ -157,8 +157,6 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const latest = useRef({ selections, otherAnswers, sendAll, canSend: !delivery.isPending && !blocked })
   latest.current = { ...latest.current, selections, otherAnswers, sendAll, canSend: !delivery.isPending && !blocked }
-  // What the card held before the first voice apply; present exactly while a proposal fills it.
-  const snapshot = useRef<{ selections: Record<number, string[]>; otherAnswers: Record<number, string> } | undefined>(undefined)
   const proposal = useVoiceProposal()
   const voiceAnswers =
     proposal?.kind === 'answer' && proposal.runId === run.id && proposal.askRequestId === ask.id
@@ -175,9 +173,10 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
       runId: run.id,
       requestId: ask.id,
       headers: questions.map((question) => question.header),
-      apply: (answers: VoiceAnswer[]) => {
+      // The store keeps what the card held before voice, so a remount can still be put back.
+      read: () => ({ selections: latest.current.selections, otherAnswers: latest.current.otherAnswers }),
+      apply: (answers: VoiceAnswer[], options = { reveal: true }) => {
         const { selections: current, otherAnswers: currentOthers } = latest.current
-        snapshot.current ??= { selections: current, otherAnswers: currentOthers }
         const nextSelections = { ...current }
         const nextOthers = { ...currentOthers }
         for (const answer of answers) {
@@ -192,13 +191,9 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
           }
         }
         setBoth(nextSelections, nextOthers)
-        rootRef.current?.scrollIntoView?.({ block: 'nearest' })
+        if (options.reveal) rootRef.current?.scrollIntoView?.({ block: 'nearest' })
       },
-      restore: () => {
-        const saved = snapshot.current
-        snapshot.current = undefined
-        if (saved) setBoth(saved.selections, saved.otherAnswers)
-      },
+      restore: (values) => setBoth(values.selections, values.otherAnswers),
       unanswered: () =>
         questions.flatMap((_, index) =>
           (latest.current.selections[index]?.length ?? 0) > 0 || Boolean(latest.current.otherAnswers[index]?.trim())
@@ -207,9 +202,8 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
         ),
       send: () => {
         // The card's own state says why it cannot send (pending, provider gate); the voice-filled
-        // answers, the snapshot and the proposal stay, so a later confirm or cancel still works.
+        // answers and the proposal stay, so a later confirm or cancel still works.
         if (!latest.current.canSend) return false
-        snapshot.current = undefined
         latest.current.sendAll()
         return true
       },
