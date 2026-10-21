@@ -1880,7 +1880,10 @@ export class RunManager {
     const registry = state.skills ?? [];
     const roots = [...new Set([wanted.stepSkill, wanted.slash].filter((name): name is string => Boolean(name)))]
       .flatMap((name) => registry.filter((skill) => skill.name === name).slice(0, 1));
-    if (roots.length === 0) return { notes, filesDir, installed: [] };
+    // Stop can land during an earlier await (Continue's team-cache wait): a stopped run writes
+    // nothing, here or between the pass's own steps.
+    const stopped = () => Boolean(state.cancelled) || this.workerExecutionStopped(runId);
+    if (roots.length === 0 || stopped()) return { notes, filesDir, installed: [] };
     const teamRoots = roots.filter((skill) => skill.source === 'team' && skill.team?.dir);
     const cacheCopy = async (skill: Skill): Promise<void> => {
       const dir = await materializeSkillToCache(skill).catch(() => null);
@@ -1892,7 +1895,8 @@ export class RunManager {
       for (const skill of teamRoots) await cacheCopy(skill);
       return { notes, filesDir, installed: [] };
     }
-    const result = await provisionSkills(state.cwd, roots, [...registry, ...getTeamSkillsCached(this.repoRoot)]);
+    const result = await provisionSkills(state.cwd, roots, [...registry, ...getTeamSkillsCached(this.repoRoot)], { cancelled: stopped });
+    if (stopped()) return { notes, filesDir, installed: [] };
     for (const skill of teamRoots) {
       const written = result.teamCopies[skill.name] ?? [];
       if (written.length === TEAM_SKILL_AGENT_DIRS.length) {

@@ -211,6 +211,10 @@ describe('harness parity — skill provisioning (#1408)', () => {
         await waitFor(() => !fixture.manager.isActive(fixture.runId), 30_000);
         expect(fixture.store.getRun(fixture.runId)?.status).toBe('cancelled');
         expect(fixture.wire()).toBe('');
+        // The held preparation resumed after Stop: it wrote nothing either.
+        expect(fixture.worktree).not.toBe('');
+        expect(existsSync(fixture.worktree)).toBe(true);
+        expect(installed(fixture.worktree, LEAD)).toBe(false);
       }, { waitForPark: false });
     }, 60_000);
   }

@@ -507,6 +507,9 @@ export async function materializeSkillDir(
   skill: Skill,
   /** Keeps one written copy out of git; defaults to the shared `info/exclude`. */
   ignore: (agentDir: string) => Promise<void> = (agentDir) => excludeFromGit(repoRoot, `${agentDir}/skills/${skill.name}/`),
+  /** `onlyOwned`: skip a destination that exists without cezar's marker instead of writing into
+   *  it. Task-worktree provisioning sets it: a directory there without the marker is the user's (#1408). */
+  options: { onlyOwned?: boolean } = {},
 ): Promise<string[]> {
   const source = await resolveSkillDirSource(skill);
   if (!source || !skill.team) return [];
@@ -524,6 +527,7 @@ export async function materializeSkillDir(
     // lstat: a marker that is a link elsewhere does not make the dir ours.
     const marked = (await lstat(join(destDir, TEAM_SKILL_MARKER)).catch(() => null))?.isFile() === true;
     const ours = !existsSync(destDir) || marked;
+    if (!ours && options.onlyOwned) continue;
     if (ours) {
       await mkdir(destDir, { recursive: true });
       await writeFile(join(destDir, TEAM_SKILL_MARKER), marker, 'utf8');
