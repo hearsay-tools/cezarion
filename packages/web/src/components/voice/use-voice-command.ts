@@ -49,6 +49,7 @@ const NOTICES = {
   unclear: 'Not sure what to do. Try again.',
   questionClosed: 'The question was answered or closed elsewhere.',
   taskClosed: 'The task is no longer open.',
+  scrollToQuestion: 'Scroll to the question, then confirm.',
 } as const
 
 /** Two or more words after trimming: a single word stays an ordinary palette search. */
@@ -251,11 +252,16 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
       if (first) say(`Question ${first.index + 1} (${first.header}) still needs an answer.`)
     } else if (result.reason === 'busy') {
       say(NOTICES.busy)
+    } else if (live.kind === 'answer') {
+      // Only the card is off screen (a virtualized thread): its question is still open, and the
+      // store re-applies the answers when the card mounts again. ThreadView and the palette's own
+      // close and cancel end the proposal, never this key.
+      say(NOTICES.scrollToQuestion)
     } else {
-      // Its card or composer is gone without the store noticing: nothing left to send to.
+      // A tell whose composer is gone without the store noticing: nothing left to send to.
       voiceStore.cancel()
       report(live.decisionId, 'abandoned')
-      say(live.kind === 'answer' ? NOTICES.questionClosed : NOTICES.taskClosed)
+      say(NOTICES.taskClosed)
     }
   }, [report, say])
 

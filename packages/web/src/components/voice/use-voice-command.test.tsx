@@ -519,6 +519,58 @@ describe('useVoiceCommand', () => {
     expect(harness.result.current.voice.row).toEqual({ kind: 'notice', text: 'The question was answered or closed elsewhere.' })
   })
 
+  it('Return finds the card off screen: the answers stay, nothing is sent, and a remount confirms', async () => {
+    mocks.openRunId = 'r1'
+    const target = card(['Library'])
+    const unregister = voiceStore.registerAskCard(target)
+    const harness = setup()
+    await proposeAnswer(harness, 1, [option(0, 'Vitest')])
+
+    // The card scrolls out of a virtualized thread; its question stays open.
+    unregister()
+    enter(harness)
+
+    expect(voiceStore.getProposal()).toMatchObject({ decisionId: DECISION_ID(1) })
+    expect(mocks.reportVoiceOutcome).not.toHaveBeenCalled()
+    expect(harness.result.current.voice.row).toEqual({ kind: 'notice', text: 'Scroll to the question, then confirm.' })
+    expect(target.send).not.toHaveBeenCalled()
+    expect(harness.close).not.toHaveBeenCalled()
+
+    // The same question mounts again: the store re-applies the answers and a fresh Return confirms.
+    const remounted = card(['Library'])
+    voiceStore.registerAskCard(remounted)
+    expect(remounted.apply).toHaveBeenCalledWith([option(0, 'Vitest')], { reveal: false })
+    enter(harness)
+
+    expect(remounted.send).toHaveBeenCalledTimes(1)
+    expect(mocks.reportVoiceOutcome).toHaveBeenCalledTimes(1)
+    expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith(DECISION_ID(1), 'confirmed')
+  })
+
+  it('a tell whose composer is gone is dropped as a closed task', async () => {
+    mocks.openRunId = 'r1'
+    const unregister = voiceStore.registerComposer({
+      runId: 'r1',
+      getDraft: () => '',
+      setDraft: () => true,
+      clearVoiceDraft: () => true,
+      submit: () => true,
+    })
+    const harness = setup()
+    type(harness, 'tell it: ship it')
+    enter(harness)
+    await answer(calls[0], { action: 'tell', decisionId: DECISION_ID(1), runId: 'r1', text: 'ship it', confidence: 0.9 })
+    expect(voiceStore.getProposal()).toMatchObject({ kind: 'tell' })
+
+    act(() => unregister())
+    enter(harness)
+
+    expect(voiceStore.getProposal()).toBeUndefined()
+    expect(mocks.reportVoiceOutcome).toHaveBeenCalledTimes(1)
+    expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith(DECISION_ID(1), 'abandoned')
+    expect(harness.result.current.voice.row).toEqual({ kind: 'notice', text: 'The task is no longer open.' })
+  })
+
   it('"not a command" lets Return do what it does today', async () => {
     const item = document.createElement('div')
     item.setAttribute('cmdk-item', '')
