@@ -19,6 +19,8 @@ export function modelRefusalReply(text, uuid, emit, replay) {
   let message = `There's an issue with the selected model (${refused}). It may not exist or you may not have access to it. Run --model to pick a different model.`;
   if (mode === 'auth') message = 'Failed to authenticate. API Error: 401 OAuth access token has been revoked.';
   if (mode === 'limit') message = 'API Error: Request rejected (429) · All credentials are cooling down. Please try again later.';
+  if (mode.startsWith('system-')) emit({ type: 'system', subtype: mode.slice(7).replaceAll('-', '_'), task_id: 'already-started' });
+  if (mode === 'tool-progress') emit({ type: 'tool_progress', tool_use_id: 'already-started', tool_name: 'Bash', elapsed_time_seconds: 1 });
   if (mode === 'work') emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'already-ran', name: 'Bash', input: { command: 'touch result' } }] } });
   if (mode === 'prose') emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'I already changed the file.' }] } });
   if (mode === 'assistant-usage') emit({ type: 'assistant', message: { role: 'assistant', content: [], usage: { input_tokens: 1, output_tokens: 0 } } });

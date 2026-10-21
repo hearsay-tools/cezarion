@@ -102,7 +102,7 @@ describe('Claude model refusal retry (hearsay-tools/cezarion#1351)', () => {
     });
   });
 
-  it.each(['changed', 'missing-session', 'empty-session', 'changed-session', 'missing-model', 'empty-model', 'wrong-model', 'missing-usage', 'missing-count', 'invalid-count', 'used', 'cached', 'paid', 'work', 'prose', 'assistant-usage', 'model-tokens', 'model-cost', 'model-invalid', 'auth', 'limit'])('fails immediately when %s makes replay unsafe or unproven', async mode => {
+  it.each(['changed', 'missing-session', 'empty-session', 'changed-session', 'missing-model', 'empty-model', 'wrong-model', 'missing-usage', 'missing-count', 'invalid-count', 'used', 'cached', 'paid', 'work', 'prose', 'assistant-usage', 'model-tokens', 'model-cost', 'model-invalid', 'system-task-started', 'system-task-progress', 'system-task-notification', 'system-hook-started', 'tool-progress', 'auth', 'limit'])('fails immediately when %s makes replay unsafe or unproven', async mode => {
     await fixture(async ({ events, send, turns, inputs }) => {
       send(mode);
       await until(() => turns() === 2 || events.some(isRetry));

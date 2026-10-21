@@ -368,6 +368,9 @@ export class ClaudeCliRunner implements AgentRunner {
             reportedModel = typeof msg.model === 'string' && msg.model !== '' ? msg.model : undefined;
             reportedSession = typeof msg.session_id === 'string' && msg.session_id !== '' ? msg.session_id : undefined;
           }
+          // Background tasks and hooks can start work without assistant content
+          // or token usage. Only init is known to be identity-only metadata.
+          if ((msg.type === 'system' && msg.subtype !== 'init') || msg.type === 'tool_progress') attemptDidWork = true;
           if (msg.type === 'assistant' || msg.type === 'user') {
             // A refusal's own visible text is diagnostic, not model work. Any
             // other output, tool call/result, reasoning or nonzero usage forbids replay.

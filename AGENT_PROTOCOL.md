@@ -2259,7 +2259,8 @@ model (...)” result after that same reported session and model completed a
 successful turn with usage. Eligibility requires an `is_error` result with
 explicit zero input/output usage, zero other accounting counters and no work in
 that attempt. The refusal's own assistant text is diagnostic; tools, reasoning,
-other text, nonzero usage or cost forbid replay. Missing identity or usage,
+other text, background-task or hook system frames, tool progress, nonzero usage
+or cost forbid replay. Missing identity or usage,
 changed model, authentication, rate limits and other errors keep their existing
 failure paths. A resumed session id alone proves no success: eligibility starts
 afresh in every runner process.
