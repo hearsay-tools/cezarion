@@ -17,13 +17,12 @@ export { cliTargetRunner }
 /** "Active" in the legacy sense: the engine still owns the run (a queued run is parked but
  *  claimed). `review` is deliberately NOT active — a parked review can be continued, archived
  *  or deleted like any finished run. */
-export function isRunActive(run: RunStatus | Pick<RunRecord, 'status' | 'autoResumeAt'>): boolean {
-  if (typeof run !== 'string') {
-    // A usage-limit hold is `waiting` with no session (hearsay-tools/cezarion#1236): the engine
-    // has let go of it until its resume, so it keeps a closed run's controls.
-    return isRunActive(run.status) && !(run.status === 'waiting' && run.autoResumeAt !== undefined)
-  }
-  return run === 'running' || run === 'queued' || run === 'waiting'
+export function isRunActive(run: Pick<RunRecord, 'status' | 'autoResumeAt'>): boolean {
+  // A usage-limit hold is `waiting` with no session (hearsay-tools/cezarion#1236): the engine
+  // has let go of it until its resume, so it keeps a closed run's controls. It takes the record,
+  // never a bare status, so no caller can read a hold as active.
+  if (run.status === 'waiting' && run.autoResumeAt !== undefined) return false
+  return run.status === 'running' || run.status === 'queued' || run.status === 'waiting'
 }
 
 /** The latest agent session across steps — what Continue/Terminal resume. */

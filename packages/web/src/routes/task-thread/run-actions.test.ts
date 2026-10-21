@@ -210,7 +210,7 @@ describe('isRunActive', () => {
     ['failed', false],
     ['cancelled', false],
   ] as Array<[RunStatus, boolean]>)('%s → %s', (status, expected) => {
-    expect(isRunActive(status)).toBe(expected)
+    expect(isRunActive({ status })).toBe(expected)
   })
 })
 
