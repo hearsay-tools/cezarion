@@ -79,6 +79,16 @@ it('removes inherited and caller-supplied Git redirection from both discovery an
   expect(env.GIT_CEILING_DIRECTORIES).toBe(realpathSync(tmpdir()))
   expect(env.CEZ_HOME).toBe(join(realpathSync(path), '.cez-home'))
 })
+// hearsay-tools/cezarion#1104: a Git sandbox made per import, removed only on `exit`, outlived every
+// Vitest worker (10,126 of them in /tmp on one host). Fixtures share the shared env's stable file.
+it('points every fixture at the shared test env Git config and keeps it empty', () => {
+  const config = join(import.meta.dirname, '../../../../.ai/qa/gitconfig')
+  const first = fixtureServeEnv(root())
+  execFileSync('git', ['config', '--global', 'cez.stray', 'true'], { env: first })
+  const second = fixtureServeEnv(root())
+  expect([first.GIT_CONFIG_GLOBAL, second.GIT_CONFIG_GLOBAL]).toEqual([config, config])
+  expect(readFileSync(config, 'utf8')).toBe('')
+})
 it('refuses uncertain discovery instead of treating it as a non-Git fixture', () => {
   expect(() => fixtureServeEnv(join(root(), 'missing'))).toThrow()
   expect(() => fixtureServeEnv(root(), { PATH: '' })).toThrow(/verify fixture/)
