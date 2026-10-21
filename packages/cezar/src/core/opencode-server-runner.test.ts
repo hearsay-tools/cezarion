@@ -159,12 +159,15 @@ describe('SIGTERM→SIGKILL escalation for an opencode server that survives SIGT
 describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 }, () => {
   interface MockServerOptions {
     promptStatus?: number;
-    followupPromptDelayMs?: number;
+    /** Hold every prompt acknowledgement after the first until `acknowledgeFollowups()`. */
     holdFollowupPrompt?: boolean;
     refuseSse?: boolean;
     sseStatus?: number;
     questionReplyStatus?: number;
-    questionReplyDelayMs?: number;
+    /** Hold every question reply answer until `releaseQuestionReplies()`; the status is read at
+     *  release. A test that asserts what the runner does while a reply is in flight holds it here:
+     *  a reply delayed on a timer lands mid-assertion on a loaded host (hearsay-tools/cezarion#1314). */
+    holdQuestionReplies?: boolean;
     questionGetDelayMs?: number;
     /** `GET /config` body; `'fail'` answers 500 (hearsay-tools/cezarion#1266). */
     config?: unknown;
@@ -190,6 +193,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     const configGets: number[] = [];
     const permissionReplies: Array<{ path: string; body: unknown }> = [];
     const heldConfig: Array<() => void> = [];
+    const heldQuestionReplies: Array<() => void> = [];
     const heldPermissionReplies: Array<() => void> = [];
     let permissionReplyStatus = opts.permissionReplyStatus ?? 200;
     let questionReplyStatus = opts.questionReplyStatus ?? 200;
@@ -248,7 +252,6 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
             res.end('{}');
           };
           if (promptPosts.length > 1 && opts.holdFollowupPrompt) heldAcknowledgements.push(acknowledge);
-          else if (promptPosts.length > 1 && opts.followupPromptDelayMs) setTimeout(acknowledge, opts.followupPromptDelayMs);
           else acknowledge();
           return;
         }
@@ -258,7 +261,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
             res.writeHead(questionReplyStatus, { 'content-type': 'application/json' });
             res.end('{}');
           };
-          if (opts.questionReplyDelayMs) setTimeout(reply, opts.questionReplyDelayMs);
+          if (opts.holdQuestionReplies) heldQuestionReplies.push(reply);
           else reply();
           return;
         }
@@ -296,6 +299,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       configGets,
       permissionReplies,
       releaseConfig: () => heldConfig.splice(0).forEach(answer => answer()),
+      releaseQuestionReplies: () => heldQuestionReplies.splice(0).forEach(reply => reply()),
       releasePermissionReplies: () => heldPermissionReplies.splice(0).forEach(answer => answer()),
       setPermissionReplyStatus(status: number): void {
         permissionReplyStatus = status;
@@ -403,6 +407,33 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     uiEvents: UiEvent[];
     mock: Awaited<ReturnType<typeof startMockServer>>;
     session: ReturnType<OpencodeServerRunner['startSession']>;
+    /** How many question reply answers the runner has read. A reply that succeeds while the turn
+     *  runs emits nothing, so this is what a test waits on before it sends the turn's idle. The
+     *  runner acts on the answer in the microtasks that follow the read, so a `waitFor` poll that
+     *  sees the count also sees that action. */
+    questionReplyReads: () => number;
+  }
+
+  /** Counts the question reply answers the runner reads through `fetch`. */
+  function countQuestionReplyReads(): { reads: () => number; restore: () => void } {
+    const realFetch = globalThis.fetch;
+    let reads = 0;
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const res = await realFetch(input, init);
+      if (!/\/question\/[^/]+\/reply$/.test(String(input))) return res;
+      const text = res.text.bind(res);
+      Object.defineProperty(res, 'text', {
+        value: async () => {
+          try {
+            return await text();
+          } finally {
+            reads += 1;
+          }
+        },
+      });
+      return res;
+    });
+    return { reads: () => reads, restore: () => spy.mockRestore() };
   }
 
   async function withSession(
@@ -422,6 +453,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     spawnHook.override = () => child;
     const events: AgentEvent[] = [];
     const uiEvents: UiEvent[] = [];
+    const replyReads = countQuestionReplyReads();
     const session = new OpencodeServerRunner({ bin: 'opencode', timeoutMs: 30_000 }).startSession(
       { userPrompt: 'go', cwd: process.cwd(), effort: opts.effort, model: opts.model },
       (e) => events.push(e),
@@ -437,12 +469,13 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       },
     );
     try {
-      await run({ child, events, uiEvents, mock, session });
+      await run({ child, events, uiEvents, mock, session, questionReplyReads: replyReads.reads });
     } finally {
       spawnHook.override = null;
       session.end();
       await session.result.catch(() => undefined);
       await mock.close();
+      replyReads.restore();
     }
   }
 
@@ -837,7 +870,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   });
 
   it('holdsHumanInput is true while queuedQuestionMessages is nonempty (#486)', async () => {
-    await withSession({ questionReplyDelayMs: 250 }, async ({ uiEvents, mock, session }) => {
+    await withSession({ holdQuestionReplies: true }, async ({ uiEvents, mock, session }) => {
       await waitFor(() => mock.promptPosts.length === 1);
       mock.pendingQuestions.push({ id: 'q_queued', sessionID: 'ses_test' });
       sendQuestion(mock, {
@@ -1102,7 +1135,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   });
 
   it('does not recapture or prompt while a native question reply is in flight', async () => {
-    await withSession({ questionReplyDelayMs: 250 }, async ({ uiEvents, mock, session }) => {
+    await withSession({ holdQuestionReplies: true }, async ({ uiEvents, mock, session }) => {
       await waitFor(() => mock.promptPosts.length === 1);
       mock.pendingQuestions.push({ id: 'q_delayed', sessionID: 'ses_test' });
       const input = {
@@ -1215,7 +1248,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   });
 
   it('queues messages sent during a successful question reply and prompts in order after idle', async () => {
-    await withSession({ questionReplyDelayMs: 180, questionGetDelayMs: QUESTION_GET_DELAY_MS }, async ({ events, uiEvents, mock, session }) => {
+    await withSession({ holdQuestionReplies: true, questionGetDelayMs: QUESTION_GET_DELAY_MS }, async ({ events, uiEvents, mock, session, questionReplyReads }) => {
       await waitFor(() => mock.promptPosts.length === 1);
       mock.pendingQuestions.push({ id: 'q_queue', sessionID: 'ses_test' });
       sendQuestion(mock, {
@@ -1233,7 +1266,10 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       await waitFor(() => mock.questionReplies.length === 1);
       session.sendMessage([{ type: 'text', text: 'first queued prompt' }]);
       session.sendMessage([{ type: 'text', text: 'second queued prompt' }]);
-      await sleep(240);
+      mock.releaseQuestionReplies();
+      await waitFor(() => questionReplyReads() === 1);
+      // The reply succeeded mid-turn: both texts now wait for the turn to end, none was posted.
+      expect(session.heldHumanInputCount?.()).toBe(2);
       expect(mock.promptPosts).toHaveLength(1);
 
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
@@ -1249,8 +1285,8 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
 
   it('keeps queued text through a failed reply until a later explicit answer succeeds', async () => {
     await withSession(
-      { questionReplyStatus: 500, questionReplyDelayMs: 120, questionGetDelayMs: QUESTION_GET_DELAY_MS },
-      async ({ events, uiEvents, mock, session }) => {
+      { questionReplyStatus: 500, holdQuestionReplies: true, questionGetDelayMs: QUESTION_GET_DELAY_MS },
+      async ({ events, uiEvents, mock, session, questionReplyReads }) => {
         await waitFor(() => mock.promptPosts.length === 1);
         mock.pendingQuestions.push({ id: 'q_queue_retry', sessionID: 'ses_test' });
         sendQuestion(mock, {
@@ -1267,6 +1303,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
         session.sendMessage([{ type: 'text', text: 'Choice: One' }]);
         await waitFor(() => mock.questionReplies.length === 1);
         session.sendMessage([{ type: 'text', text: 'queued after failed answer' }]);
+        mock.releaseQuestionReplies();
         await waitFor(() =>
           events.some(
             (event) => event.type === 'note' && event.message.includes('question reply failed'),
@@ -1278,11 +1315,13 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
         mock.setQuestionReplyStatus(200);
         session.sendMessage([{ type: 'text', text: 'Choice: Two' }]);
         await waitFor(() => mock.questionReplies.length === 2);
-        await sleep(180);
+        mock.releaseQuestionReplies();
+        await waitFor(() => questionReplyReads() === 2);
         expect(mock.questionReplies.map((reply) => reply.body)).toEqual([
           { answers: [['One']] },
           { answers: [['Two']] },
         ]);
+        expect(session.heldHumanInputCount?.()).toBe(1);
         expect(mock.promptPosts).toHaveLength(1);
 
         mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
@@ -1296,7 +1335,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
 
   it('hints readiness after an idle human prompt receives its late HTTP acknowledgement', async () => {
     let ready = 0;
-    await withSession({ followupPromptDelayMs: 150, onAgentInputReady: () => { ready++; } }, async ({ events, mock, session }) => {
+    await withSession({ holdFollowupPrompt: true, onAgentInputReady: () => { ready++; } }, async ({ events, mock, session }) => {
       await waitFor(() => mock.promptPosts.length === 1);
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
       await waitFor(() => count(events, 'turn-end') === 1);
@@ -1305,9 +1344,13 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
       await waitFor(() => count(events, 'turn-end') === 2);
       expect(session.sendAgentMessage([{ type: 'text', text: 'agent later turn' }])).toBe(false);
+      expect(ready).toBe(0);
+      mock.acknowledgeFollowups();
       await waitFor(() => ready === 1);
-      await expect(session.sendAgentMessage([{ type: 'text', text: 'agent later turn' }])).resolves.toBeUndefined();
+      const sent = session.sendAgentMessage([{ type: 'text', text: 'agent later turn' }]);
       await waitFor(() => mock.promptPosts.length === 3);
+      mock.acknowledgeFollowups();
+      await expect(sent).resolves.toBeUndefined();
     });
   });
 
@@ -1341,7 +1384,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
 
   it('hints non-human readiness only after a successful late reply retry, never on failure', async () => {
     let ready = 0;
-    await withSession({ questionReplyDelayMs: 100, questionReplyStatus: 500, onAgentInputReady: () => { ready++; } }, async ({ events, uiEvents, mock, session }) => {
+    await withSession({ holdQuestionReplies: true, questionReplyStatus: 500, onAgentInputReady: () => { ready++; } }, async ({ events, uiEvents, mock, session }) => {
       await waitFor(() => mock.promptPosts.length === 1);
       mock.pendingQuestions.push({ id: 'q_agent_retry', sessionID: 'ses_test' });
       sendQuestion(mock, { questions: [{ header: 'Choice', question: 'Which option?', options: [{ label: 'One' }, { label: 'Two' }] }] });
@@ -1351,10 +1394,14 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
       await waitFor(() => count(events, 'turn-end') === 1);
       expect(session.sendAgentMessage([{ type: 'text', text: 'agent instruction' }])).toBe(false);
+      mock.releaseQuestionReplies();
       await waitFor(() => uiEvents.filter(event => event.type === 'ask.requested').length === 2);
       expect(ready).toBe(0);
       mock.setQuestionReplyStatus(200);
       session.sendMessage([{ type: 'text', text: 'Choice: Two' }]);
+      await waitFor(() => mock.questionReplies.length === 2);
+      expect(ready).toBe(0);
+      mock.releaseQuestionReplies();
       await waitFor(() => ready === 1);
       await expect(session.sendAgentMessage([{ type: 'text', text: 'agent instruction' }])).resolves.toBeUndefined();
       await waitFor(() => mock.promptPosts.length === 2);
@@ -1364,7 +1411,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   });
 
   it('keeps post-idle messages queued until a delayed reply succeeds and drains them FIFO', async () => {
-    await withSession({ questionReplyDelayMs: 260, questionGetDelayMs: QUESTION_GET_DELAY_MS }, async ({ events, uiEvents, mock, session }) => {
+    await withSession({ holdQuestionReplies: true, questionGetDelayMs: QUESTION_GET_DELAY_MS }, async ({ events, uiEvents, mock, session }) => {
       await waitFor(() => mock.promptPosts.length === 1);
       mock.pendingQuestions.push({ id: 'q_idle_success', sessionID: 'ses_test' });
       sendQuestion(mock, {
@@ -1387,6 +1434,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       await sleep(100);
       expect(mock.promptPosts).toHaveLength(1);
 
+      mock.releaseQuestionReplies();
       await waitFor(() => mock.promptPosts.length === 2);
       expect(mock.promptBodies[1]).toEqual({ parts: [{ type: 'text', text: 'queued A' }] });
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
@@ -1397,7 +1445,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
 
   it('restores an ask after an early-idle reply failure and retains queued text through retry', async () => {
     await withSession(
-      { questionReplyStatus: 500, questionReplyDelayMs: 180 },
+      { questionReplyStatus: 500, holdQuestionReplies: true },
       async ({ events, uiEvents, mock, session }) => {
         await waitFor(() => mock.promptPosts.length === 1);
         mock.pendingQuestions.push({ id: 'q_idle_retry', sessionID: 'ses_test' });
@@ -1417,6 +1465,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
         session.sendMessage([{ type: 'text', text: 'queued A' }]);
         mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
         await waitFor(() => count(events, 'turn-end') === 1);
+        mock.releaseQuestionReplies();
         await waitFor(() => uiEvents.filter((event) => event.type === 'ask.requested').length === 2);
         expect(mock.promptPosts).toHaveLength(1);
 
@@ -1430,6 +1479,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
           { answers: [['Two']] },
         ]);
 
+        mock.releaseQuestionReplies();
         await waitFor(() => mock.promptPosts.length === 2);
         expect(mock.promptBodies[1]).toEqual({ parts: [{ type: 'text', text: 'queued A' }] });
       },
@@ -1438,7 +1488,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
 
   it('defers auto-end while an early-idle reply still owns queued prompt delivery', async () => {
     await withSession(
-      { autoEndAfterFirstTurn: true, questionReplyDelayMs: AUTO_END_DELAY_MS + 180, questionGetDelayMs: 75 },
+      { autoEndAfterFirstTurn: true, holdQuestionReplies: true, questionGetDelayMs: 75 },
       async ({ events, uiEvents, mock, session }) => {
         await waitFor(() => mock.promptPosts.length === 1);
         mock.pendingQuestions.push({ id: 'q_idle_auto_end', sessionID: 'ses_test' });
@@ -1466,6 +1516,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
 
         expect(session.open).toBe(true);
         expect(mock.promptPosts).toHaveLength(1);
+        mock.releaseQuestionReplies();
         await waitFor(() => mock.promptPosts.length === 2);
         expect(mock.promptBodies[1]).toEqual({
           parts: [{ type: 'text', text: 'queued after idle' }],

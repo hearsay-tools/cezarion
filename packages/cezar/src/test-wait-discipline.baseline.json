@@ -370,18 +370,6 @@
     {
       "file": "core/opencode-server-runner.test.ts",
       "rule": "sleep",
-      "site": "await sleep(180);",
-      "count": 1
-    },
-    {
-      "file": "core/opencode-server-runner.test.ts",
-      "rule": "sleep",
-      "site": "await sleep(240);",
-      "count": 1
-    },
-    {
-      "file": "core/opencode-server-runner.test.ts",
-      "rule": "sleep",
       "site": "await sleep(250);",
       "count": 1
     },
