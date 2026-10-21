@@ -1,7 +1,7 @@
 # Make Vitest duration maintenance discoverable
 
-Status: proposed; requires design approval and Continue on the same task.
-Subject: hearsay-tools/cezarion#1336. Design only; no implementation authorized here.
+Status: implemented after the human reviewed the design summary in-session and instructed this same task to proceed autonomously on 2026-10-21.
+Subject: hearsay-tools/cezarion#1336. The original proposal below records the decision and its boundaries.
 
 ## Eligibility and evidence
 
@@ -134,3 +134,11 @@ Design approval and **Continue on this same task** are required before changing
 AGENTS.md. Keep the issue open and its routing labels unchanged. A draft proposal
 PR is review material, not implementation approval; do not relabel to launch a
 second task, merge, or enable an automation.
+
+## Implementation record — 2026-10-21
+
+The human instructed this task to proceed after the accept/amend/reject presentation.
+Implemented the narrow AGENTS.md paragraph on the existing branch and PR.
+Current main was merged first; no manifest weights or product code were changed
+by this task. Verified paths, units and fallback against the sequencer and manifest;
+reviewed the documentation-only diff and checked whitespace.
