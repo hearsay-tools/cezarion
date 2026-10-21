@@ -9,7 +9,7 @@ import { buildClaudeArgs } from './claude-cli-runner.ts';
 import { buildPiArgs } from './pi-runner.ts';
 import { ciOpenCodeEnv } from '../ci-wait/injection.ts';
 import { allowedToolsForStep } from '../workflows/types.ts';
-import { askToolDefinition, cancelWaitToolDefinition, ciToolDefinition, cezarServerInstructions, cezarTools, waitToolDefinition } from '../ci-wait/tools.ts';
+import { askAnswerHint, askToolDefinition, cancelWaitToolDefinition, ciToolDefinition, cezarServerInstructions, cezarTools, waitToolDefinition } from '../ci-wait/tools.ts';
 
 const descriptor = { name: 'cezar_ci_test', command: process.execPath, args: ['/installed/dist/ci-wait/mcp.js'] };
 const spec = { cwd: '/tmp', userPrompt: 'task', cezarTools: descriptor };
@@ -42,7 +42,18 @@ describe('wait tool definitions', () => {
     expect(schema.properties).toMatchObject({ questions: { type: 'array', minItems: 1, maxItems: 4, items: { required: ['header', 'question'], properties: { header: { maxLength: 12 }, options: { minItems: 2, maxItems: 4 } } } } });
     expect(JSON.stringify(schema)).not.toMatch(/"(?:oneOf|anyOf|allOf)"/);
     expect(askToolDefinition.description).toContain('leave the options out to let the user type the answer');
-    expect(cezarServerInstructions()).toContain('- cezar_ask: load when you need the user: a decision only they can make, or missing input; end your turn after it answers.');
+    // hearsay-tools/cezarion#1428: the description names the order and the real limits.
+    expect(askToolDefinition.description).toContain('Before you call it, send everything the decision depends on (the full draft, every finding, what each option means) as assistant text: the user sees only your assistant text and this card, never your reasoning or these arguments.');
+    expect(askToolDefinition.description).toContain('a header of at most 12 characters, a short question of at most 400 characters');
+    expect(cezarServerInstructions()).toContain('- cezar_ask: load when you need the user: a decision only they can make, or missing input; send the full context as assistant text before you call it, and end your turn after it answers.');
+  });
+
+  // hearsay-tools/cezarion#1428: a rejected card's arguments never reach the user, so the retry
+  // hint says where the detail that no longer fits goes.
+  it('tells a rejected cezar_ask to send the detail it cuts as assistant text before it retries', () => {
+    expect(askAnswerHint({ ok: false, code: 'invalid_request', message: 'too long' })).toBe('Not asked. The user never sees the arguments of a rejected call: send any detail you cut from the card as assistant text first, then call cezar_ask again with a short question.');
+    expect(askAnswerHint({ ok: false, code: 'autonomous_run', message: 'continue', open_waits: [] })).toBe('Not asked. Fix the call from the message, or continue without asking.');
+    expect(askAnswerHint({ ok: true, wait_id: 'w', open_waits: [] })).toMatch(/^Asked\. The user sees this card and your assistant text/);
   });
 
   it('marks cezar_wait_for_ci deprecated: still listed and admitted, description points to cezar_wait, no trigger line in the server instructions', () => {
@@ -51,7 +62,7 @@ describe('wait tool definitions', () => {
       const instructions = cezarServerInstructions(env);
       expect(instructions).not.toContain('- cezar_wait_for_ci:');
       expect(instructions).toContain('- cezar_wait: load when you are waiting on CI for a PR, or want to re-check something later; end your turn after it answers.');
-      expect(instructions).toContain('- cezar_ask: load when you need the user: a decision only they can make, or missing input; end your turn after it answers.');
+      expect(instructions).toContain('- cezar_ask: load when you need the user: a decision only they can make, or missing input; send the full context as assistant text before you call it, and end your turn after it answers.');
       expect(instructions).toContain('- cezar_cancel_wait: load when a wait you registered is no longer needed.');
     }
     expect(ciToolDefinition.description.startsWith('Deprecated: use cezar_wait with kind "ci".')).toBe(true);
@@ -257,7 +268,7 @@ describe('U0 wait tools on every native wire', () => {
         if (tool === 'cezar_ask') {
           expect(calls).toEqual([['ask', { questions }]]);
           expect(JSON.parse(json)).toEqual({ ok: true, wait_id: humanId, open_waits: humanOpen });
-          expect(hint).toBe('Asked. End your turn; the user\'s answer wakes you.');
+          expect(hint).toBe('Asked. The user sees this card and your assistant text, never your reasoning or these arguments. If the question refers to a draft or findings you have not sent as assistant text, send them in full now. Then end your turn; the user\'s answer wakes you.');
         } else if (tool === 'cezar_wait') {
           expect(calls).toEqual([['wait', { ...args, timeout_seconds: 1800 }, 'cezar_wait']]);
           expect(JSON.parse(json)).toEqual({ ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: openWaits });
