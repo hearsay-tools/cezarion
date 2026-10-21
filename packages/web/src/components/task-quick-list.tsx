@@ -21,6 +21,7 @@ import { groupMetaParts, referenceKey, resumeLabel, sharedReferenceKeys } from '
 import { useNoHover } from '@/lib/use-no-hover'
 import { useIsDesktop } from '@/lib/use-desktop'
 import { checkTimeText, shortAge } from '@/lib/format'
+import { resolveWaitingOn } from '@open-mercato/cezar-api-client/contract/waits'
 import { isUnread, unreadMarkerTone } from '@/lib/read-state'
 import { directionalUsageText } from '@/components/directional-usage'
 import {
@@ -867,8 +868,9 @@ function metaStateWord(attention: Attention, queuePosition: number | null, run: 
     return resume === 'scheduled' ? label : `${label}, ${resume}`
   }
   // The same detail for a timer: `monitoring, next check 15:05` (phase 4b, hearsay-tools/cezarion#1236).
-  if (label === 'monitoring' && run.waitingOn?.kind === 'timer') {
-    const at = new Date(run.waitingOn.at)
+  const waitingOn = label === 'monitoring' ? resolveWaitingOn(run) : undefined
+  if (waitingOn?.kind === 'timer') {
+    const at = new Date(waitingOn.at)
     if (Number.isFinite(at.getTime())) return `${label}, next check ${checkTimeText(at, new Date(now))}`
   }
   return label

@@ -844,6 +844,13 @@ one-option list is `invalid_request`, never an open question, and `multiSelect` 
 to options. The answer carries the wait id and `open_waits`, with no deadline. The ask line
 takes open questions too, since both share `askRequestSchema`.
 
+The user sees only the agent's assistant text and the card, never its reasoning or a tool
+call's arguments (hearsay-tools/cezarion#1428). So the lifecycle instructions, the tool
+description and its success hint tell the agent to send the full draft, findings or
+explanation as assistant text before it asks. An `invalid_request` names every failing field
+with its limit from `ASK_LIMITS`, and tells the agent to send the detail it cut as assistant
+text before it retries with a short question.
+
 At most 16 waits are open at once. A
 timer is refused with `timers_disabled` when `resources.monitoringWakeIntervalMinutes` is
 `null`, and with `wake_budget_spent` once the run's automatic-wake budget
