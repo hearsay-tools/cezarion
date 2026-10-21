@@ -215,7 +215,7 @@ const MIGRATIONS: readonly string[] = [
   `
   -- Schema 8 changes no table: a usage-limited run is written waiting with autoResumeAt, no longer
   -- failed with it (hearsay-tools/cezarion#1236, phase 4a), and this build reads an old failed row
-  -- with autoResumeAt as waiting (normalizeLoadedRun, store.ts). A schema-7 build would clear the
+  -- with autoResumeAt as waiting (reconcileLoadedRun, store.ts). A schema-7 build would clear the
   -- appointment from a waiting row and show the run as Needs you, so the bump makes it refuse the
   -- store as unsupported-schema instead; the recovery is to run this version again.
   --

@@ -879,6 +879,12 @@ function promptNamesRepo(url: string, task: string): boolean {
  * an archived run, so a cleared field is the whole cancellation.
  */
 function clearPendingAutoResume(run: RunRecord): void {
+  // A withdrawn appointment settles the run failed with its kept error (hearsay-tools/cezarion#1236),
+  // the state a usage-limited run was in before it waited.
+  if (run.status === 'waiting' && run.autoResumeAt !== undefined) {
+    run.status = 'failed';
+    run.finishedAt ??= new Date().toISOString();
+  }
   run.autoResumeAt = undefined;
   run.autoResumeAttempts = undefined;
 }
