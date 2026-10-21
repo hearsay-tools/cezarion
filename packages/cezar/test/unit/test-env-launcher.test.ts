@@ -939,18 +939,18 @@ async function waitForExit(pid: number, what: string, log: () => string): Promis
   }
 }
 
-function appLog(root: string): string {
-  try { return readFileSync(join(root, '.ai/qa/test-env-app.log'), 'utf8'); } catch { return '(no app log)'; }
+function watchLog(root: string): string {
+  try { return readFileSync(join(root, '.ai/qa/test-env-watch.log'), 'utf8'); } catch { return '(no watcher log)'; }
 }
 
 async function watcherPid(root: string): Promise<number> {
   // bound: the watcher logs this line as it starts, right after detach-app returns.
   const deadline = Date.now() + 10_000;
   while (true) {
-    const match = /\[test-env\] watcher (\d+) watching cezar pid \d+/.exec(appLog(root));
+    const match = /\[test-env\] watcher (\d+) watching cezar pid \d+/.exec(watchLog(root));
     const pid = match && parsePid(match[1]!);
     if (pid) return pid;
-    assert.ok(Date.now() < deadline, `no watcher started:\n${appLog(root)}`);
+    assert.ok(Date.now() < deadline, `no watcher started:\n${watchLog(root)}`);
     await delay(20);
   }
 }
@@ -985,10 +985,10 @@ test('the server exits when its test-env state is deleted, and the checkout is n
 test('an idle server with no lease holder exits and its descriptor reads stopped', async () => {
   const { root, pid } = bootWatched({ TEST_ENV_IDLE_EXIT_MINUTES: '0.01' });
   const watcher = await watcherPid(root);
-  await waitForExit(pid, 'server', () => appLog(root));
-  await waitForExit(watcher, 'watcher', () => appLog(root));
+  await waitForExit(pid, 'server', () => watchLog(root));
+  await waitForExit(watcher, 'watcher', () => watchLog(root));
   assert.equal(JSON.parse(readFileSync(join(root, '.ai/qa/test-env.json'), 'utf8')).status, 'stopped');
-  assert.match(appLog(root), new RegExp(`stopping cezar pid ${pid}: idle`));
+  assert.match(watchLog(root), new RegExp(`stopping cezar pid ${pid}: idle`));
 });
 
 test('a live lease keeps the server; a SIGKILLed holder no longer does', async () => {
@@ -1012,7 +1012,7 @@ test('a live lease keeps the server; a SIGKILLed holder no longer does', async (
     // bound: a hang guard for one fixture cold boot.
     const deadline = Date.now() + 20_000;
     while (!existsSync(join(root, '.ai/held'))) {
-      assert.ok(Date.now() < deadline, `holder never booted the server:\n${appLog(root)}`);
+      assert.ok(Date.now() < deadline, `holder never booted the server:\n${watchLog(root)}`);
       await delay(20);
     }
     const up = JSON.parse(readFileSync(join(root, '.ai/held'), 'utf8')) as { status: number; stderr: string };
@@ -1021,11 +1021,11 @@ test('a live lease keeps the server; a SIGKILLed holder no longer does', async (
     launchedPids.add(pid);
     // bound: proves an absence; 2 s is three idle periods and about ten polls.
     await delay(2_000);
-    assert.ok(alive(pid), `a held lease must keep the server:\n${appLog(root)}`);
+    assert.ok(alive(pid), `a held lease must keep the server:\n${watchLog(root)}`);
     assert.equal((await fetch(descriptor(root).baseUrl)).status, 200);
     holder.kill('SIGKILL');
     await once(holder, 'close');
-    await waitForExit(pid, 'server', () => appLog(root));
+    await waitForExit(pid, 'server', () => watchLog(root));
   } finally { holder.kill('SIGKILL'); }
 });
 
@@ -1034,7 +1034,7 @@ test('TEST_ENV_IDLE_EXIT_MINUTES=0 keeps an idle server', async () => {
   await watcherPid(root);
   // bound: proves an absence across about ten polls.
   await delay(2_000);
-  assert.ok(alive(pid), appLog(root));
+  assert.ok(alive(pid), watchLog(root));
   const stopped = spawnSync('/bin/sh', [join(root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
   assert.equal(stopped.status, 0, stopped.stderr);
 });
@@ -1045,8 +1045,8 @@ test('test-env-down.sh stopping the server also ends its watcher', async () => {
   const stopped = spawnSync('/bin/sh', [join(root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
   assert.equal(stopped.status, 0, stopped.stderr);
   assert.ok(!alive(pid));
-  await waitForExit(watcher, 'watcher', () => appLog(root));
-  assert.doesNotMatch(appLog(root), /watcher stopping/);
+  await waitForExit(watcher, 'watcher', () => watchLog(root));
+  assert.doesNotMatch(watchLog(root), /watcher stopping/);
 });
 
 for (const [name, value, rule] of [

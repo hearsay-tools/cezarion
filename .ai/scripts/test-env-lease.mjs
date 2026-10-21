@@ -5,7 +5,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { connect, createServer } from 'node:net';
 import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -181,12 +181,16 @@ async function detachApp(args, root, effectiveEnv = process.env) {
     const start = identity(child.pid).start;
     const repo = args.indexOf('--repo');
     const served = repo >= 0 && args[repo + 1] ? resolve(root, args[repo + 1]) : root;
+    // Its own log, next to the app's, so the app log holds only the app's output.
     if (start) {
-      const watcher = spawn(process.execPath, [import.meta.filename, 'watch-app', String(child.pid), start, root, served], {
-        cwd: tmpdir(), detached: true, stdio: ['ignore', fd, fd], env, windowsHide: true,
-      });
-      await new Promise(done => { watcher.once('spawn', done); watcher.once('error', done); });
-      watcher.unref();
+      const watchFd = openSync(resolve(dirname(resolve(root, args[0])), 'test-env-watch.log'), 'a');
+      try {
+        const watcher = spawn(process.execPath, [import.meta.filename, 'watch-app', String(child.pid), start, root, served], {
+          cwd: tmpdir(), detached: true, stdio: ['ignore', watchFd, watchFd], env, windowsHide: true,
+        });
+        await new Promise(done => { watcher.once('spawn', done); watcher.once('error', done); });
+        watcher.unref();
+      } finally { closeSync(watchFd); }
     }
     return child.pid;
   } finally { closeSync(fd); }

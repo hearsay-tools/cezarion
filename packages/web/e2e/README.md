@@ -318,7 +318,8 @@ the served clone is deleted, or after `TEST_ENV_IDLE_EXIT_MINUTES` (default 30) 
 test-env lease holder; `0` turns the idle exit off. A run killed with SIGKILL leaves dead
 holder rows, which the watcher removes, so the idle period still runs out.
 `TEST_ENV_WATCH_INTERVAL_SECONDS` (default 30) sets how often it checks. Malformed values fail
-before boot; unset or empty values use the defaults.
+before boot; unset or empty values use the defaults. The watcher logs why it stopped a server
+to `.ai/qa/test-env-watch.log`.
 
 ## The project the shared env serves
 
