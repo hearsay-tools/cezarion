@@ -144,7 +144,7 @@ export function ReferenceChip({
    */
   plain?: boolean
   /**
-   * Plain text and nothing else — not a link, not focusable, no status panel. For a list row on
+   * A reference with no controls — not a link, not focusable, no status panel. For a list row on
    * a device that cannot hover (#617 01b), where the whole row is the tap target and a second,
    * 16px-tall target inside it guarantees mis-taps. The reference stays one tap away as a real
    * 44px link in the task header.
@@ -212,7 +212,7 @@ export function ReferenceChip({
     </>
   )
 
-  if (plain && inert) {
+  if (inert) {
     return (
       <span
         data-slot={kind === 'PR' ? 'pr-chip' : 'issue-chip'}
