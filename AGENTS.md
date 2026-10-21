@@ -378,12 +378,16 @@ threshold or guarantee of reproduction.
 
 Normal completion or test failure runs the EXIT cleanup, which stops and reaps
 only the recorded loop PIDs. Ctrl-C uses the same cleanup. The 120-second limit
-signals the command group, including test descendants; five seconds later GNU
-`timeout` uses SIGKILL if it has not exited. A timeout normally returns 124
-(or 137 after SIGKILL), not a test assertion result. Do not add `--foreground`:
-it would exclude children from the timeout's group handling. Increase the limit
-only for a known longer focused test, and keep it finite. Traps cannot run after
-SIGKILL of the shell itself; keep the outer timeout alive until the group exits.
+sends SIGTERM to the command group, including test descendants. If Bash remains
+alive five seconds later, GNU `timeout` sends SIGKILL. If Bash exits first,
+`timeout` exits too: a descendant that ignores SIGTERM can survive. This bounds
+the reproduction command, not every possible descendant. After an interrupted
+or timed-out test, check for remaining test processes and stop those you own
+before another attempt. A timeout normally returns 124 (or 137 after SIGKILL),
+not a test assertion result. Do not add `--foreground`: it would exclude children
+from the timeout's group handling. Increase the limit only for a known longer
+focused test, and keep it finite. Traps cannot run after SIGKILL of the shell
+itself; do not kill the outer timeout to stop the reproduction.
 
 **In a unit test, a timeout is a hang guard, never the thing the test waits on.**
 Wait for the product's own signal: an event, a callback, a store write, a file
