@@ -125,7 +125,11 @@ registry restoration. Another run, standalone bootstrap or shutdown waits up to
 not bypass a holder. Exited holders are reclaimed using PID and process-start
 identity. A surviving build or clone child keeps its command group protected;
 a changing or unreadable process list stays protected. The cached server runs
-outside that group. The disposable lease records
+outside that group. On Windows, a named Job Object owns the command and its
+children; closing it kills the mutators, while the cached app explicitly breaks
+away. Recovery checks the named job before reclaiming its holder. Native Windows
+CI verifies shell identity, arguments, overlap, crash cleanup and cache survival.
+The disposable lease records
 live in `.ai/qa/test-env-lease.sqlite`. Do not delete them while tests run.
 Use the isolated local lanes above when parallel browser execution is needed.
 

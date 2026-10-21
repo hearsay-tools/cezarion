@@ -7,7 +7,7 @@ const { spawnSync } = require('node:child_process');
 
 // Run the real dispatcher, replacing only the expensive server/browser boot and
 // test process with executables that record the arguments they receive.
-function run(t, args = [], { installed = true, exit = 0, bootExit = 0 } = {}) {
+function run(t, args = [], { installed = true, exit = 0, bootExit = 0, inheritedEnv = process.env } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cez-e2e-runner-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, '.ai/scripts'), { recursive: true });
@@ -20,8 +20,11 @@ function run(t, args = [], { installed = true, exit = 0, bootExit = 0 } = {}) {
   for (const name of ['npm', 'npx']) {
     fs.writeFileSync(path.join(root, 'bin', name), `#!/bin/sh\nprintf '%s\\n' "$@" > test-args\nexit ${exit}\n`, { mode: 0o755 });
   }
+  // A temporary checkout cannot join the caller checkout's lease.
+  const env = { ...inheritedEnv, PATH: `${root}/bin:${process.env.PATH}` };
+  for (const key of ['TEST_ENV_LEASE_TOKEN', 'TEST_ENV_LEASE_ENTRY', 'TEST_ENV_LEASE_BOOTSTRAPPED', 'TEST_ENV_LEASE_JOB']) delete env[key];
   const result = spawnSync('sh', ['.ai/scripts/e2e.sh', ...args], {
-    cwd: root, encoding: 'utf8', env: { ...process.env, PATH: `${root}/bin:${process.env.PATH}` },
+    cwd: root, encoding: 'utf8', env,
   });
   const read = (name) => fs.existsSync(path.join(root, name)) ? fs.readFileSync(path.join(root, name), 'utf8').trim().split('\n').filter(Boolean) : [];
   return { ...result, boot: read('boot-args'), tests: read('test-args') };
@@ -124,4 +127,10 @@ test('a failing shard emits failure and exits nonzero', (t) => {
   assert.notEqual(r.status, 0);
   assert.ok(r.tests.includes('--shard=3/4'));
   assert.match(r.stderr, /TEST_E2E_STATUS=failed/);
+});
+
+test('a temporary checkout does not inherit another checkout lease', (t) => {
+  const r = run(t, [], { inheritedEnv: { ...process.env, TEST_ENV_LEASE_TOKEN: 'other-checkout', TEST_ENV_LEASE_ENTRY: 'other-entry', TEST_ENV_LEASE_BOOTSTRAPPED: '1' } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /TEST_E2E_STATUS=passed/);
 });

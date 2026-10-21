@@ -148,13 +148,17 @@ done
   // generated state is ignored the way the real one's is.
   writeFileSync(join(root, '.gitignore'), '/.ai/qa/\n/bin/\nnode_modules/\n/packages/cezar/dist/\n/packages/cezar/web/\n/.ai/build-invocations\n/.ai/build-node-env\n/.ai/inline-contract-dist\n/.ai/app-argv\n/.ai/app-cez-env\n/app.pid\n');
   const git = (...args: string[]) => execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@cezar.invalid', ...args], {
-    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, stdio: 'ignore',
+    env: { ...fixtureEnv, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, stdio: 'ignore',
   });
   git('init', '-q', '-b', 'main');
   git('add', '-A');
   git('commit', '-q', '-m', 'fixture');
   return { root, path: join(root, 'bin') };
 }
+
+// Fixtures are independent checkouts, even when Squeal runs inside a leased browser setup.
+const fixtureEnv = { ...process.env };
+for (const key of ['TEST_ENV_LEASE_TOKEN', 'TEST_ENV_LEASE_ENTRY', 'TEST_ENV_LEASE_BOOTSTRAPPED', 'TEST_ENV_LEASE_JOB']) delete fixtureEnv[key];
 
 const E2E_BUILD = '.ai/qa/build/cezar';
 
@@ -163,7 +167,7 @@ const E2E_BUILD = '.ai/qa/build/cezar';
 for (const invalidation of ['ttl', 'source', 'force', 'down'] as const) {
   test(`a ${invalidation} bootstrap waits until the active browser run releases its environment`, async () => {
     const fixture = makeFixture(false);
-    const env = { ...process.env, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
+    const env = { ...fixtureEnv, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
     const script = join(fixture.root, '.ai/scripts');
     const npm = join(fixture.root, 'bin/npm');
     writeFileSync(npm, readFileSync(npm, 'utf8').replace('case "$*" in', `case "$*" in
@@ -240,7 +244,7 @@ function prebuildE2e(fixture: { root: string }, env: NodeJS.ProcessEnv): void {
 
 test('the bootstrap builds into the ignored mirror and never writes the production build', () => {
   const fixture = makeFixture(false);
-  const env = { ...process.env, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
+  const env = { ...fixtureEnv, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
   const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
   const down = join(fixture.root, '.ai/scripts/test-env-down.sh');
   const invocations = () => readFileSync(join(fixture.root, '.ai/build-invocations'), 'utf8').trim().split('\n');
@@ -293,7 +297,7 @@ test('the bootstrap builds into the ignored mirror and never writes the producti
 test('the e2e cockpit is a production bundle whatever NODE_ENV the caller inherited', () => {
   const fixture = makeFixture(false);
   for (const inherited of ['test', 'development', undefined]) {
-    const env: NodeJS.ProcessEnv = { ...process.env, PATH: fixture.path };
+    const env: NodeJS.ProcessEnv = { ...fixtureEnv, PATH: fixture.path };
     if (inherited === undefined) delete env.NODE_ENV;
     else env.NODE_ENV = inherited;
     prebuildE2e(fixture, env);
@@ -303,7 +307,7 @@ test('the e2e cockpit is a production bundle whatever NODE_ENV the caller inheri
 
 test('a mirror without the e2e marker refuses live reuse and the build cache', () => {
   const fixture = makeFixture(false);
-  const env = { ...process.env, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
+  const env = { ...fixtureEnv, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
   const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
   const down = join(fixture.root, '.ai/scripts/test-env-down.sh');
   const builds = () => readFileSync(join(fixture.root, '.ai/build-invocations'), 'utf8').trim().split('\n').length;
@@ -326,7 +330,7 @@ test('a mirror without the e2e marker refuses live reuse and the build cache', (
 test('a prebuilt lane boots without rebuilding shared assets and records its namespace', () => {
   const fixture = makeFixture(false);
   const env = {
-    ...process.env,
+    ...fixtureEnv,
     PATH: fixture.path,
     E2E_PREBUILT_ASSETS: '1',
     E2E_BROWSER_NAMESPACE: 'cez-e2e-lane-2',
@@ -380,7 +384,7 @@ function descriptor(root: string): {
 
 test('a cold boot serves an isolated clone of the checkout, never the checkout itself', () => {
   const fixture = makeFixture(false);
-  const env = { ...process.env, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
+  const env = { ...fixtureEnv, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
   const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
   // The clone carries the checkout's current edits, committed or not.
   writeFileSync(join(fixture.root, 'package.json'), '{"private":true,"edited":true}\n');
@@ -423,7 +427,7 @@ test('a cold boot serves an isolated clone of the checkout, never the checkout i
 
   // A commit moves HEAD past the clone's base: that takes a fresh clone, so a cold boot.
   execFileSync('git', ['-C', fixture.root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@cezar.invalid', 'commit', '-q', '--allow-empty', '-m', 'later'], {
-    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+    env: { ...fixtureEnv, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
   });
   const moved = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
   assert.equal(moved.status, 0, moved.stderr);
@@ -451,7 +455,7 @@ test('a cold boot serves an isolated clone of the checkout, never the checkout i
 test('ambient CEZ_* never reaches the shared server; --server-env does and keys reuse', () => {
   const fixture = makeFixture(false);
   const env = {
-    ...process.env, PATH: fixture.path, E2E_PREBUILT_ASSETS: '1',
+    ...fixtureEnv, PATH: fixture.path, E2E_PREBUILT_ASSETS: '1',
     CEZ_PREVIEW: '1', CEZ_AUTOMATIONS: '1', CEZ_FOLLOWUPS: '1', CEZ_SINGLE_PROJECT: '1', CEZ_TASK_ID: 'ambient',
   };
   prebuildE2e(fixture, env);
@@ -497,7 +501,7 @@ test('ambient CEZ_* never reaches the shared server; --server-env does and keys 
 
 test('the served clone never replaces a directory it did not create', () => {
   const fixture = makeFixture(false);
-  const env = { ...process.env, PATH: fixture.path, E2E_PREBUILT_ASSETS: '1' };
+  const env = { ...fixtureEnv, PATH: fixture.path, E2E_PREBUILT_ASSETS: '1' };
   prebuildE2e(fixture, env);
   const served = join(fixture.root, '.ai/qa/served', basename(fixture.root));
   mkdirSync(served, { recursive: true });
@@ -528,7 +532,7 @@ test('a failed cold boot leaves no descriptor of the env it replaced', () => {
 
 function unhealthyFixture(mode: 'stalled' | 'unavailable' | 'exited') {
   const fixture = makeFixture(false);
-  const env = { ...process.env, PATH: fixture.path, E2E_PREBUILT_ASSETS: '1' };
+  const env = { ...fixtureEnv, PATH: fixture.path, E2E_PREBUILT_ASSETS: '1' };
   prebuildE2e(fixture, env);
   writeFileSync(join(fixture.root, E2E_BUILD, 'dist/index.js'), `
 ${writePidSource('app.pid')}
@@ -665,7 +669,7 @@ for (const timeout of ['0', '-1', '1.5', 'invalid', '--version', '--help']) {
     // a regressed option parser from leaving a detached app without a descriptor.
     writeFileSync(join(fixture.root, 'bin/npm'), '#!/bin/sh\nexit 99\n', { mode: 0o755 });
     const result = spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-up.sh')], {
-      encoding: 'utf8', env: { ...process.env, PATH: fixture.path, TEST_ENV_HEALTH_TIMEOUT_SECONDS: timeout },
+      encoding: 'utf8', env: { ...fixtureEnv, PATH: fixture.path, TEST_ENV_HEALTH_TIMEOUT_SECONDS: timeout },
       timeout: 9_000, killSignal: 'SIGKILL',
     });
     assert.equal(result.status, 2, result.stderr);
@@ -680,7 +684,7 @@ for (const withSetsid of [true, false]) {
     { skip: withSetsid && !hasSetsid ? 'setsid is not available on this platform' : false },
     async () => {
       const fixture = makeFixture(withSetsid);
-      const env = { ...process.env, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600', TEST_ENV_HEALTH_TIMEOUT_SECONDS: '5' };
+      const env = { ...fixtureEnv, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600', TEST_ENV_HEALTH_TIMEOUT_SECONDS: '5' };
       const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
       const down = join(fixture.root, '.ai/scripts/test-env-down.sh');
       const callerPidFile = join(fixture.root, 'caller.pid');
@@ -735,7 +739,7 @@ test('a tracked file inside the boot second is reused; a later edit still refuse
   // at the second's start (not after startedAt) must attach, and a file dated
   // after startedAt must still refuse and name the path.
   const fixture = makeFixture(false);
-  const env = { ...process.env, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
+  const env = { ...fixtureEnv, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
   const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
   const down = join(fixture.root, '.ai/scripts/test-env-down.sh');
 
@@ -791,7 +795,7 @@ test('browser doctor receives the resolver’s container args and short runtime 
     }))
 `,
   );
-  const env = { ...process.env, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
+  const env = { ...fixtureEnv, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
   const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
   const down = join(fixture.root, '.ai/scripts/test-env-down.sh');
   const cold = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
@@ -846,7 +850,7 @@ exit 1
 `,
     { mode: 0o755 },
   );
-  const env = { ...process.env, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
+  const env = { ...fixtureEnv, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
   const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
   const down = join(fixture.root, '.ai/scripts/test-env-down.sh');
   const cold = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
@@ -902,7 +906,7 @@ exit 1
 `,
     { mode: 0o755 },
   );
-  const env = { ...process.env, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
+  const env = { ...fixtureEnv, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
   const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
   const down = join(fixture.root, '.ai/scripts/test-env-down.sh');
   const cold = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });

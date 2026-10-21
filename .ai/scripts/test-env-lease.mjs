@@ -3,15 +3,34 @@
 // Short SQLite transactions make join/release/reclamation atomic, including after SIGKILL.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { closeSync, mkdirSync, openSync, readdirSync, readFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
+const windowsScript = resolve(import.meta.dirname, 'test-env-windows.ps1');
+function windowsProbe(mode, payload) {
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', windowsScript, mode, payload], {
+    encoding: 'utf8', windowsHide: true, timeout: 15_000,
+  });
+  if (result.status !== 0) return undefined;
+  return result.stdout.trim();
+}
+// Windows command-line quoting, including trailing backslashes and empty args.
+function windowsCommand(args) {
+  return args.map(arg => '"' + arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1') + '"').join(' ');
+}
+const windowsPayload = value => Buffer.from(JSON.stringify(value)).toString('base64');
+
 function identity(pid) {
   try { process.kill(pid, 0); }
   catch (error) { return error.code === 'ESRCH' ? { dead: true } : {}; }
+  if (process.platform === 'win32') {
+    const start = windowsProbe('identity', String(pid));
+    if (start === 'gone') return { dead: true };
+    return /^\d+$/.test(start ?? '') ? { start } : {};
+  }
   if (process.platform === 'linux') {
     try {
       const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
@@ -32,6 +51,10 @@ function identity(pid) {
 // A shell can die before its build/clone child. Retain its group claim until the
 // last non-zombie member exits. Unknown visibility never authorizes replacement.
 function groupLive(pgid) {
+  if (process.platform === 'win32') {
+    const live = windowsProbe('live', String(pgid));
+    return live === 'true' ? true : live === 'false' ? false : undefined;
+  }
   try { process.kill(-pgid, 0); }
   catch (error) { if (error.code === 'ESRCH') return false; }
   if (process.platform === 'linux') {
@@ -92,7 +115,7 @@ export async function acquireTestEnvLease(root, { token, pid = process.pid, grou
         holders = db.prepare('SELECT * FROM holders').all().filter(holder => {
           const current = identity(holder.pid);
           const reused = holder.start && current.start && holder.start !== current.start;
-          const dead = reused || (current.dead && (!holder.pgid || groupLive(holder.pgid) === false));
+          const dead = (reused || current.dead) && (!holder.pgid || groupLive(holder.pgid) === false);
           if (dead) db.prepare('DELETE FROM holders WHERE id = ?').run(holder.id);
           return !dead;
         });
@@ -101,7 +124,7 @@ export async function acquireTestEnvLease(root, { token, pid = process.pid, grou
         }
         if (holders.length === 0 || (token && holders.every(holder => holder.token === token))) {
           token ??= randomUUID();
-          db.prepare('INSERT INTO holders (id, token, pid, start, pgid) VALUES (?, ?, ?, ?, ?)').run(id, token, pid, own.start, group ? pid : null);
+          db.prepare('INSERT INTO holders (id, token, pid, start, pgid) VALUES (?, ?, ?, ?, ?)').run(id, token, pid, own.start, group ? (process.platform === 'win32' ? (typeof group === 'string' ? group : process.env.TEST_ENV_LEASE_JOB) : pid) : null);
           db.exec('COMMIT');
           // Publish ownership only after its holder row is durable.
           let released = false;
@@ -130,39 +153,55 @@ export async function acquireTestEnvLease(root, { token, pid = process.pid, grou
 
 async function main(args) {
   const root = resolve(import.meta.dirname, '../..');
-  if (args[0] === 'detach-app') {
+  if (args[0] === 'detach-app' && process.platform === 'win32' && process.env.TEST_ENV_LEASE_JOB) {
+    const receipt = resolve(root, '.ai/qa', `detached-${randomUUID()}.json`);
+    try {
+      const command = windowsCommand([process.execPath, resolve(process.argv[1]), 'detach-app-escaped', receipt, ...args.slice(1)]);
+      const output = windowsProbe('breakaway', windowsPayload({ command }));
+      if (output === undefined) throw new Error('cannot detach cached app from Windows test job');
+      const { pid } = JSON.parse(readFileSync(receipt, 'utf8'));
+      console.log(pid);
+    } finally { rmSync(receipt, { force: true }); }
+    return;
+  }
+  const receipt = args[0] === 'detach-app-escaped' ? args.splice(1, 1)[0] : undefined;
+  if (args[0] === 'detach-app' || args[0] === 'detach-app-escaped') {
     // The cached server outlives tests and must not hold their command group alive.
     // Node's detached spawn works with and without an external `setsid` command.
     const fd = openSync(args[1], 'w');
     const env = { ...process.env };
-    for (const key of ['TEST_ENV_LEASE_TOKEN', 'TEST_ENV_LEASE_ENTRY', 'TEST_ENV_LEASE_BOOTSTRAPPED']) delete env[key];
+    for (const key of ['TEST_ENV_LEASE_TOKEN', 'TEST_ENV_LEASE_ENTRY', 'TEST_ENV_LEASE_BOOTSTRAPPED', 'TEST_ENV_LEASE_JOB']) delete env[key];
     try {
       const child = spawn(process.execPath, args.slice(2), { detached: true, stdio: ['ignore', fd, fd], env });
       await new Promise((resolveSpawn, reject) => { child.once('spawn', resolveSpawn); child.once('error', reject); });
       child.unref();
-      console.log(child.pid);
+      if (receipt) writeFileSync(receipt, JSON.stringify({ pid: child.pid }));
+      else console.log(child.pid);
     } finally { closeSync(fd); }
     return;
   }
   if (args[0] === 'join') {
     // The shell itself must be recorded, not this short-lived registration process. The
     // supervising `run` owns its lifetime; an abruptly orphaned shell stays protected too.
-    const lease = await acquireTestEnvLease(root, { token: process.env.TEST_ENV_LEASE_TOKEN, pid: Number(args[1]), group: true });
+    const lease = await acquireTestEnvLease(root, { token: process.env.TEST_ENV_LEASE_TOKEN, pid: process.platform === 'win32' ? process.ppid : Number(args[1]), group: true });
     if (!process.env.TEST_ENV_LEASE_TOKEN) { lease.release(); throw new Error('missing inherited test environment lease'); }
     return;
   }
   if (args[0] !== 'run' || args[1] !== 'sh' || !args[2]) throw new Error('usage: test-env-lease.mjs run sh <script> [args] | join <pid>');
+  const job = process.platform === 'win32' ? `Local\\CezTestEnv-${randomUUID()}` : undefined;
   const lease = await acquireTestEnvLease(root, {
+    group: job,
     token: process.env.TEST_ENV_LEASE_TOKEN,
     onWait: message => console.error(`[test-env] ${message}`),
   });
   try {
-    const child = spawn(args[1], args.slice(2), {
-      stdio: 'inherit', detached: true,
-      env: { ...process.env, TEST_ENV_LEASE_TOKEN: lease.token, TEST_ENV_LEASE_ENTRY: args[2] },
+    const env = { ...process.env, TEST_ENV_LEASE_TOKEN: lease.token, TEST_ENV_LEASE_ENTRY: args[2], ...(job ? { TEST_ENV_LEASE_JOB: job } : {}) };
+    const command = job ? ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', windowsScript, 'run', windowsPayload({ job, parent: process.pid, start: identity(process.pid).start, command: windowsCommand(args.slice(1)) })] : args.slice(1);
+    const child = spawn(command[0], command.slice(1), {
+      stdio: 'inherit', detached: !job, env,
     });
     const forward = signal => {
-      try { process.kill(-child.pid, signal); }
+      try { process.kill(job ? child.pid : -child.pid, signal); }
       catch (error) { if (error.code !== 'ESRCH') console.error(`[test-env] cannot signal command group: ${error.message}`); }
     };
     const term = () => forward('SIGTERM');

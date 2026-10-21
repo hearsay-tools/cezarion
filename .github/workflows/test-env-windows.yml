@@ -24,3 +24,18 @@ jobs:
       - name: Probe native process lifetime and Git Bash identity
         shell: pwsh
         run: ./.github/scripts/test-env-windows-probe.ps1
+      - name: Prove the Windows regression against the pre-fix helper
+        shell: pwsh
+        env:
+          TEST_ENV_PROOF_BASE: '07039865b6483d4b40ec8816818c0ec5497a87db'
+        run: |
+          git fetch --depth=1 origin $env:TEST_ENV_PROOF_BASE
+          $output = node --test .github/scripts/test-env-windows.test.mjs 2>&1 | Out-String
+          $failed = $LASTEXITCODE -ne 0
+          Write-Output $output
+          if (!$failed -or $output -notmatch 'cannot verify test environment lease identity') {
+            throw 'Expected the pre-fix Windows identity failure'
+          }
+      - name: Verify production lease on native Windows
+        shell: pwsh
+        run: node --test .github/scripts/test-env-windows.test.mjs

@@ -98,7 +98,7 @@ exit ${bootExit}
     cwd: fixture,
     encoding: 'utf8',
     timeout: 10_000,
-    env: { ...process.env, TMPDIR: callerTmp, TMP: callerTmp, TEMP: callerTmp },
+    env: { ...process.env, TEST_ENV_LEASE_TOKEN: '', TEST_ENV_LEASE_ENTRY: '', TEST_ENV_LEASE_BOOTSTRAPPED: '', TEST_ENV_LEASE_JOB: '', TMPDIR: callerTmp, TMP: callerTmp, TEMP: callerTmp },
   });
   return { ...result, fixture, runtimeTmp, callerTmp };
 }
