@@ -19,12 +19,58 @@ const services: CiWatcherSupervisor[]=[];
 function start(github: GithubCiClient, seconds=1800) {const s=new CiWatcherSupervisor({github});services.push(s);const c=new AbortController();controllers.push(c);return {service:s,controller:c,result:s.watch(wait(seconds),c.signal)};}
 class ScriptedGithub extends GithubCiClient {
  headReads=0; snapshots=0; watchers=0; active=0; peak=0; failures=0; changedAt=Infinity;
+ workflowActive=false;
+ override async hasActiveRuns():Promise<boolean> {return this.workflowActive;}
  rows: GithubCheck[]=[];
  override async head():Promise<string> {this.headReads++; if(this.failures-->0) throw new CiGithubError('command_failed','Service unavailable',true);return this.headReads>=this.changedAt?'b'.repeat(40):identity.headSha;}
  override async checks():Promise<GithubCheck[]> {this.snapshots++;return this.rows;}
  override async watch(_pr:CiPrIdentity,signal:AbortSignal):Promise<void> {this.watchers++;this.active++;this.peak=Math.max(this.peak,this.active);try{await new Promise<void>(resolve=>{if(signal.aborted)resolve();else signal.addEventListener('abort',()=>resolve(),{once:true});});}finally{this.active--;}}
 }
 afterEach(()=>{for(const s of services.splice(0))s.close();for(const c of controllers.splice(0))c.abort();vi.useRealTimers();});
+it('keeps a partial green snapshot pending until the hidden rerun checks return and finish',async()=>{
+ vi.useFakeTimers();const github=new ScriptedGithub();
+ github.rows=[{name:'other workflow',state:'SUCCESS',bucket:'pass',link:''}];github.workflowActive=true;
+ const started=start(github);let settled=false;void started.result.then(()=>{settled=true;});
+ await vi.advanceTimersByTimeAsync(1);expect(settled).toBe(false);
+ // The rerun has restored its check but has not completed it yet.
+ github.rows=[...github.rows,{name:'review rerun',state:'PENDING',bucket:'pending',link:''}];
+ await vi.advanceTimersByTimeAsync(30_000);expect(settled).toBe(false);
+ github.workflowActive=false;github.rows[1]={name:'review rerun',state:'SUCCESS',bucket:'pass',link:''};
+ await vi.advanceTimersByTimeAsync(30_000);
+ expect(await started.result).toMatchObject({outcome:'passed',totalChecks:2});
+});
+it('does not report no_checks while a workflow is active beyond discovery',async()=>{
+ vi.useFakeTimers();const github=new ScriptedGithub();github.workflowActive=true;
+ const started=start(github);let settled=false;void started.result.then(()=>{settled=true;});
+ await vi.advanceTimersByTimeAsync(90_000);expect(settled).toBe(false);
+ github.workflowActive=false;
+ await vi.advanceTimersByTimeAsync(30_000);expect((await started.result).outcome).toBe('no_checks');
+});
+it.each(['pass','fail','cancel','skipping'] as const)('defers the %s check outcome while a workflow is active and retains cancellation',async bucket=>{
+ vi.useFakeTimers();const github=new ScriptedGithub();github.workflowActive=true;
+ github.rows=[{name:'other workflow',state:bucket,bucket,link:''}];
+ const started=start(github);let settled=false;void started.result.then(()=>{settled=true;});
+ await vi.advanceTimersByTimeAsync(60_000);expect(settled).toBe(false);
+ started.controller.abort();expect((await started.result).outcome).toBe('cancelled');
+});
+it('retains the original deadline while a hidden rerun stays active',async()=>{
+ vi.useFakeTimers();const github=new ScriptedGithub();github.workflowActive=true;
+ github.rows=[{name:'other workflow',state:'SUCCESS',bucket:'pass',link:''}];
+ const deadline=new AbortController();const timeout=vi.spyOn(AbortSignal,'timeout').mockReturnValueOnce(deadline.signal);
+ const started=start(github);timeout.mockRestore();
+ await vi.advanceTimersByTimeAsync(30_000);deadline.abort();
+ expect(await started.result).toMatchObject({outcome:'deadline',totalChecks:1});
+});
+it('detects a changed head while a hidden rerun stays active',async()=>{
+ vi.useFakeTimers();const github=new ScriptedGithub();github.workflowActive=true;github.changedAt=3;
+ const started=start(github);await vi.advanceTimersByTimeAsync(30_000);
+ expect(await started.result).toMatchObject({outcome:'head_changed',observedHeadSha:'b'.repeat(40)});
+});
+it('never turns workflow-query failure into a partial green result',async()=>{
+ const github=new ScriptedGithub();github.rows=[{name:'other workflow',state:'SUCCESS',bucket:'pass',link:''}];
+ github.hasActiveRuns=async()=>{throw new CiGithubError('authentication','GitHub authentication failed');};
+ expect(await start(github).result).toMatchObject({outcome:'error',diagnostic:'authentication: GitHub authentication failed'});
+});
 it('discovers absent checks for sixty seconds at a thirty-second interval and never reports them as passing',async()=>{
  vi.useFakeTimers(); const github=new ScriptedGithub(); const {result}=start(github);
  await vi.advanceTimersByTimeAsync(1); expect(github.snapshots).toBe(1);

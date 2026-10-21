@@ -62,6 +62,7 @@ export class CiWatcherSupervisor {
     const deadline = AbortSignal.timeout(Math.max(0, Math.min(remaining, 7_200_000)));
     const signal = AbortSignal.any([caller, this.lifetime.signal, deadline]);
     let rows: GithubCheck[] = [];
+    let workflowActive = false;
     let release: (() => void) | undefined;
     let retry = 0;
     const discoveryDeadline = Math.min(Date.parse(wait.deadline), Date.now() + CI_DISCOVERY_MS);
@@ -70,11 +71,12 @@ export class CiWatcherSupervisor {
     const snapshot = async (): Promise<CiWaitResult | undefined> => {
       const before = await this.github.head(wait, signal);
       if (before !== wait.headSha) return observation(wait, 'head_changed', rows, { observedHeadSha: before });
+      workflowActive = await this.github.hasActiveRuns(wait, signal);
       const observed = await this.github.checks(wait, signal);
       const after = await this.github.head(wait, signal);
       if (after !== wait.headSha) return observation(wait, 'head_changed', rows, { observedHeadSha: after });
       rows = observed;
-      const settled = outcome(rows);
+      const settled = workflowActive ? undefined : outcome(rows);
       return settled ? observation(wait, settled, rows) : undefined;
     };
     try {
@@ -83,6 +85,12 @@ export class CiWatcherSupervisor {
         try {
           const settled = await snapshot();
           if (settled) return settled;
+          // A rerun may hide all its checks, making gh --watch exit immediately.
+          // Probe the workflow itself without spinning or spending model turns.
+          if (workflowActive) {
+            await delay(CI_PROBE_MS, undefined, { signal });
+            continue;
+          }
           if (!rows.length) {
             if (Date.now() >= discoveryDeadline) return observation(wait, 'no_checks', rows);
             await delay(Math.min(CI_PROBE_MS, discoveryDeadline - Date.now()), undefined, { signal });

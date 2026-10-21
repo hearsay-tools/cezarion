@@ -620,6 +620,9 @@ const CONTROL_CRITERIA = [
   { id: 'R27', scenario: 'hold' },
   // hearsay-tools/cezarion#1225: cancel/destroy releases the same-turn wait slot.
   { id: 'R80', scenario: 'hold' },
+  // hearsay-tools/cezarion#1399: workflows/ci-wait-rerun-parity.test.ts keeps
+  // partial green pending during a rerun, including recovery without a session.
+  { id: 'R81', scenario: 'baseline' },
   { id: 'R28', scenario: 'baseline' },
   { id: 'R29', scenario: 'baseline' },
   { id: 'R30', scenario: 'baseline' },
