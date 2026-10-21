@@ -122,6 +122,17 @@ async function proposeAnswer(harness: Harness, n: number, answers: VoiceAnswer[]
   await answer(calls.at(-1), answerDecision(n, answers))
 }
 
+/** One ordinary cmdk row, selected; returns its click spy. */
+function selectedItem() {
+  const item = document.createElement('div')
+  item.setAttribute('cmdk-item', '')
+  item.setAttribute('data-selected', 'true')
+  const click = vi.fn()
+  item.addEventListener('click', click)
+  document.body.append(item)
+  return click
+}
+
 const failed = (over: Parameters<typeof voiceRun>[0] = {}): RunSummary => voiceRun({ status: 'failed', ...over })
 
 describe('looksLikeSentence', () => {
@@ -516,18 +527,106 @@ describe('useVoiceCommand', () => {
     expect(click).toHaveBeenCalledTimes(1)
   })
 
-  it('Return waits at most 3000 ms for the decision', async () => {
+  it('Return waits at most 3000 ms for the decision, then falls back to the selected item', async () => {
+    const click = selectedItem()
     mocks.runs = [failed({ id: 'a' })]
     const harness = setup({ text: 'open the next failed task' })
 
     enter(harness)
     await advance(2999)
     expect(harness.result.current.voice.row).toBeUndefined()
+    expect(click).not.toHaveBeenCalled()
     await advance(1)
 
     expect(harness.result.current.voice.row).toEqual({ kind: 'notice', text: 'Voice decision timed out.' })
     expect(calls[0]?.signal?.aborted).toBe(true)
+    expect(click).toHaveBeenCalledTimes(1)
+    // The decision that arrives after the bound does nothing.
     await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    expect(mocks.reportVoiceOutcome).not.toHaveBeenCalled()
+    expect(click).toHaveBeenCalledTimes(1)
+  })
+
+  it('with a proposal shown, "no" and "Cancel." drop it in the browser', async () => {
+    mocks.openRunId = 'r1'
+    const target = card(['Library'])
+    voiceStore.registerAskCard(target)
+    const harness = setup()
+
+    for (const [n, word] of [[1, 'no'], [2, 'Cancel.']] as const) {
+      await proposeAnswer(harness, n, [option(0, 'Vitest')])
+      const engineCalls = mocks.voiceDecide.mock.calls.length
+      type(harness, word)
+      await advance(1000)
+
+      expect(enter(harness).handled).toBe(true)
+
+      expect(voiceStore.getProposal()).toBeUndefined()
+      expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith(DECISION_ID(n), 'cancelled')
+      expect(harness.result.current.text).toBe('')
+      expect(harness.result.current.voice.mode).toBe('idle')
+      expect(mocks.voiceDecide).toHaveBeenCalledTimes(engineCalls)
+    }
+    expect(target.restore).toHaveBeenCalledTimes(2)
+  })
+
+  it('with no proposal shown, "no" stays an ordinary search', async () => {
+    const harness = setup({ text: 'no' })
+    await advance(1000)
+    expect(enter(harness).handled).toBe(false)
+    expect(mocks.voiceDecide).not.toHaveBeenCalled()
+  })
+
+  it('a preview candidate acts when clicked, for the context it was shown in only', async () => {
+    mocks.runs = [failed({ id: 'a', title: 'Alpha' }), voiceRun({ id: 'c', title: 'Charlie', status: 'done' })]
+    const harness = setup({ text: 'open the next failed one' })
+    await advance(300)
+    await answer(calls[0], {
+      action: 'open',
+      decisionId: DECISION_ID(1),
+      status: 'failed',
+      position: 'next',
+      confidence: 0.4,
+      alternatives: [{ status: 'done', position: 1 }],
+    })
+    expect(harness.result.current.voice.row?.choices).toHaveLength(2)
+
+    // The open task changed since the preview: its candidates are not shown, and a click does nothing.
+    mocks.openRunId = 'elsewhere'
+    harness.rerender()
+    act(() => harness.result.current.voice.onSelect(1))
+    expect(mocks.navigate).not.toHaveBeenCalled()
+
+    mocks.openRunId = null
+    harness.rerender()
+    act(() => harness.result.current.voice.onSelect(1))
+    expect(mocks.navigate).toHaveBeenCalledWith('/tasks/c')
+    expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith(DECISION_ID(1), 'executed')
+    expect(harness.close).toHaveBeenCalled()
+  })
+
+  it('numbered choices are dropped when the open task changes', async () => {
+    mocks.runs = [failed({ id: 'a', title: 'Alpha' }), voiceRun({ id: 'c', title: 'Charlie', status: 'done' })]
+    const harness = setup({ text: 'open the next failed one' })
+    enter(harness)
+    await answer(calls[0], {
+      action: 'open',
+      decisionId: DECISION_ID(1),
+      status: 'failed',
+      position: 'next',
+      confidence: 0.4,
+      alternatives: [{ status: 'done', position: 1 }],
+    })
+    expect(harness.result.current.voice.mode).toBe('choosing')
+
+    mocks.openRunId = 'a'
+    harness.rerender()
+    expect(harness.result.current.voice.mode).toBe('idle')
+    expect(harness.result.current.voice.row).toBeUndefined()
+
+    type(harness, 'two')
+    expect(enter(harness).handled).toBe(false)
     expect(mocks.navigate).not.toHaveBeenCalled()
   })
 

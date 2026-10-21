@@ -58,6 +58,10 @@ export function looksLikeSentence(text: string): boolean {
 
 const voiceable = (text: string) => looksLikeSentence(text) && text.length <= VOICE_TEXT_MAX
 
+/** "no" and "cancel" alone (ruling R17): while a proposal is shown they drop it in the browser,
+ *  like a numbered pick, with no engine call. Otherwise they stay ordinary searches. */
+const isCancelWord = (text: string) => /^(?:no|cancel)$/.test(text.toLowerCase().replace(/[.!?]+$/, '').trim())
+
 /** What a decision depends on: the same sentence, open task and shown proposal ⇒ the same answer. */
 interface DecisionKey {
   text: string
@@ -84,6 +88,9 @@ interface Choice {
 interface Choosing {
   decisionId: string
   choices: Choice[]
+  /** The context the choices were resolved for; numbers mean nothing in another one. */
+  openRunId: string | null
+  sidebarView: SidebarView
 }
 
 type OpenDecision = Extract<VoiceDecision, { action: 'open' }>
@@ -157,13 +164,16 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
   const [notice, setNotice] = React.useState<{ text: string; forText: string }>()
   const [choosing, setChoosing] = React.useState<Choosing>()
 
-  const pick = choosing ? parseNumberedPick(trimmed, choosing.choices.length) : null
+  // Choices resolved for another open task or sidebar tab are gone.
+  const choosingHere =
+    choosing !== undefined && choosing.openRunId === openRunId && choosing.sidebarView === sidebarView ? choosing : undefined
+  const pick = choosingHere ? parseNumberedPick(trimmed, choosingHere.choices.length) : null
   // A new sentence that is not a pick ends the choice; an empty input or a pick keeps it.
-  const choosingLive = choosing !== undefined && !(voiceable(trimmed) && pick === null)
+  const choosingLive = choosingHere !== undefined && !(voiceable(trimmed) && pick === null) ? choosingHere : undefined
 
   // Every callback reads the latest render through this, never the render that created it.
-  const latest = React.useRef({ ...args, key, runs: runs ?? [], sidebarView, openRunId, navigate, settled, choosing })
-  latest.current = { ...args, key, runs: runs ?? [], sidebarView, openRunId, navigate, settled, choosing }
+  const latest = React.useRef({ ...args, key, runs: runs ?? [], sidebarView, openRunId, navigate, settled, choosing: choosingLive })
+  latest.current = { ...args, key, runs: runs ?? [], sidebarView, openRunId, navigate, settled, choosing: choosingLive }
 
   const request = React.useRef<DecisionRequest | undefined>(undefined)
   const committing = React.useRef<DecisionRequest | undefined>(undefined)
@@ -257,7 +267,7 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
         case 'open': {
           const { primary, choices } = planOpen(decision, { runs: currentRuns, sidebarView: view, openRunId: openId })
           if (choices.length >= 2) {
-            setChoosing({ decisionId: decision.decisionId, choices })
+            setChoosing({ decisionId: decision.decisionId, choices, openRunId: openId, sidebarView: view })
             clearText()
             return
           }
@@ -322,9 +332,11 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
     // The text, the open task or the shown proposal moved on: this decision is for something else.
     if (!mounted.current || !sameKey(latest.current.key, committedKey)) return
     if (result === 'timeout') {
+      // The late decision, if it ever comes, is aborted and so never acts.
       made.controller.abort()
       if (request.current === made) request.current = undefined
-      return say(NOTICES.timedOut)
+      say(NOTICES.timedOut)
+      return clickSelectedItem()
     }
     if (result.kind === 'aborted') return
     if (result.kind === 'failed') {
@@ -334,11 +346,25 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
     act(result.decision, made)
   }, [act, requestFor, say])
 
+  /** Opens candidate `index`: from the choice a committed sentence made, or from the preview's
+   *  own candidates when one of them is clicked before Return. The preview counts only while it
+   *  is the decision for the current text, open task and proposal, as for Return. */
   const choose = React.useCallback(
     (index: number) => {
-      const current = latest.current.choosing
-      const choice = current?.choices[index]
-      if (current && choice) openTarget(current.decisionId, choice.target)
+      const current = latest.current
+      if (current.choosing) {
+        const choice = current.choosing.choices[index]
+        if (choice) openTarget(current.choosing.decisionId, choice.target)
+        return
+      }
+      const preview = current.settled
+      if (!preview || !sameKey(preview.key, current.key) || !voiceable(current.key.text)) return
+      if (preview.result.kind !== 'decision' || preview.result.decision.action !== 'open') return
+      const { decision } = preview.result
+      const choice = planOpen(decision, current).choices[index]
+      if (!choice) return
+      acted.current.add(decision.decisionId)
+      openTarget(decision.decisionId, choice.target)
     },
     [openTarget],
   )
@@ -355,11 +381,15 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
     return () => clearTimeout(timer)
   }, [enabled, key, pick, requestFor])
 
-  // A notice speaks about the text it was shown for, and a new sentence ends a choice.
+  // A notice speaks about the text it was shown for. A new sentence, or another open task or
+  // sidebar tab, ends a choice.
+  const choiceEnded = choosing !== undefined && choosingLive === undefined
   React.useEffect(() => {
     setNotice((current) => (current && current.forText !== trimmed ? undefined : current))
-    if (voiceable(trimmed) && pick === null) setChoosing(undefined)
-  }, [trimmed, pick])
+  }, [trimmed])
+  React.useEffect(() => {
+    if (choiceEnded) setChoosing(undefined)
+  }, [choiceEnded])
 
   // A proposal the store drops on its own: its question was answered elsewhere, its task closed.
   React.useEffect(() => {
@@ -417,7 +447,14 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
           return handled()
         }
       }
-      if (text === '' && voiceStore.getProposal() && !current.choosing) {
+      const live = voiceStore.getProposal()
+      if (live && isCancelWord(text)) {
+        voiceStore.cancel()
+        report(live.decisionId, 'cancelled')
+        current.clearText()
+        return handled()
+      }
+      if (text === '' && live && !current.choosing) {
         confirmProposal()
         return handled()
       }
@@ -427,7 +464,7 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
       }
       return false
     },
-    [choose, commit, confirmProposal],
+    [choose, commit, confirmProposal, report],
   )
 
   const onSelect = React.useCallback(
@@ -443,8 +480,8 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
   let row: VoiceRow | undefined
   if (notice && notice.forText === trimmed) {
     row = { kind: 'notice', text: notice.text }
-  } else if (choosingLive && choosing) {
-    row = { kind: 'will-do', text: 'Which one?', choices: choosing.choices.map((choice) => choice.text) }
+  } else if (choosingLive) {
+    row = { kind: 'will-do', text: 'Which one?', choices: choosingLive.choices.map((choice) => choice.text) }
   } else if (settled && sameKey(settled.key, key) && voiceable(trimmed)) {
     row = previewRow(settled.result, settled.key, { runs: runs ?? [], sidebarView, openRunId })
   } else if (proposal && trimmed === '') {

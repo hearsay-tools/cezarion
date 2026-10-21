@@ -1,7 +1,7 @@
 import { summaryOf } from '@/test/run-summary-fixture'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, useLocation } from 'react-router'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
@@ -76,6 +76,12 @@ function health(voice: boolean): HealthResponse {
   }
 }
 
+/** Where did the palette send us? Rendered as a sibling so navigation is observable. */
+function LocationProbe() {
+  const location = useLocation()
+  return <output data-testid="location">{location.pathname}</output>
+}
+
 function renderPalette({ voice, runs = [], entry = '/' }: { voice: boolean; runs?: RunSummary[]; entry?: string }) {
   const routes: Record<string, unknown> = {
     '/api/v1/run-summaries': runs,
@@ -95,6 +101,7 @@ function renderPalette({ voice, runs = [], entry = '/' }: { voice: boolean; runs
         <MemoryRouter initialEntries={[entry]}>
           <ListViewProvider>
             <CommandPalette />
+            <LocationProbe />
           </ListViewProvider>
         </MemoryRouter>
       </ThemeProvider>
@@ -155,6 +162,32 @@ describe('palette voice mode', () => {
     expect(row.closest('[cmdk-item]')?.getAttribute('data-slot')).toBe('voice-row')
     expect(screen.queryByText('Nothing matches.')).toBeNull()
     expect(mocks.voiceDecide).toHaveBeenCalledTimes(1)
+    // bound: the debounce wait above may take up to 10 s on a loaded host.
+  }, 20_000)
+
+  it('a numbered candidate in the preview opens when clicked, before any Return', async () => {
+    mocks.voiceDecide.mockResolvedValue({
+      action: 'open',
+      decisionId: '00000000-0000-4000-8000-000000000003',
+      status: 'failed',
+      position: 'next',
+      confidence: 0.4,
+      alternatives: [{ status: 'done', position: 1 }],
+    } satisfies VoiceDecision)
+    renderPalette({
+      voice: true,
+      runs: [run({ id: 'a', title: 'Alpha' }), run({ id: 'c', title: 'Charlie', status: 'done' })],
+    })
+    const input = await openPalette()
+
+    fireEvent.change(input, { target: { value: 'open the next failed one' } })
+
+    // bound: the 300 ms preview debounce runs on real timers here, under a loaded host.
+    const second = await screen.findByText('Open “Charlie” — first done', undefined, { timeout: 10_000 })
+    fireEvent.click(second)
+
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/tasks/c'))
+    expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000003', 'executed')
     // bound: the debounce wait above may take up to 10 s on a loaded host.
   }, 20_000)
 
