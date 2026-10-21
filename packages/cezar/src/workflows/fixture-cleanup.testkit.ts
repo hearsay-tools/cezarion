@@ -50,6 +50,19 @@ export function managerDisposed(manager: RunManager): boolean {
   return (manager as unknown as { disposed: boolean }).disposed;
 }
 
+/** Wait until every engine call the fixtures under `root` observe has settled, cancelling and
+ * disposing nothing: the fire-and-forget turn-end bookkeeping and the namer have then landed.
+ * A parked session's work never settles, so call this once the runs are terminal; the test's own
+ * timeout is the hang guard (hearsay-tools/cezarion#1316). */
+export async function fixtureWorkSettled(root: string): Promise<void> {
+  const group = fixtures.get(root) ?? [];
+  for (;;) {
+    const work = group.flatMap(({ pending }) => [...pending.keys()]);
+    if (!work.length) return;
+    await Promise.allSettled(work);
+  }
+}
+
 function wakeDrains(root: string): void {
   for (const wake of settled.get(root) ?? []) wake();
 }
