@@ -93,17 +93,18 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
   const wait = completionWaitView(run) ?? workerWaitView(run)
   const dependencyLabel = metadata && metadata.role !== 'invalid' && wait ? workerWaitLabel(metadata.role, wait) : undefined
   return (
-    <>
-    {query.data?.capacity ? <CapacityNote capacity={query.data.capacity} /> : null}
     <ActivityRow
       slot="workers"
       icon={<GitBranchIcon className="size-4" />}
       title="Workers"
       meta={workerMeta({ ids, workers, parentId, desktop, query })}
+      aside={query.data?.capacity ? <CapacityNote capacity={query.data.capacity} /> : undefined}
       open={open}
       onToggle={onToggle}
     >
       <div aria-label="Task relationships" className="min-w-0 text-[13px] text-muted-foreground" role="group">
+        {query.data?.capacity && query.data.capacity.outstanding >= query.data.capacity.limit
+          ? <p role="status" className="px-1 py-1">All worker slots are in use. Clean up finished workers to free a slot.</p> : null}
         {metadata?.role === 'worker' && metadata.destroy ? <Cleanup state={metadata.destroy} /> : null}
         {wait ? <WaitNote wait={wait} dependencyLabel={dependencyLabel} /> : null}
         {parentId ? <ParentLink id={parentId} /> : null}
@@ -141,7 +142,6 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
         </div> : null}
       </div>
     </ActivityRow>
-    </>
   )
 }
 
@@ -236,12 +236,10 @@ function ParentLink({ id }: { id: string }) {
  * names the one recovery a human has here — cleaning up finished workers.
  */
 function CapacityNote({ capacity }: { capacity: NonNullable<RunRelationships['capacity']> }) {
-  const full = capacity.outstanding >= capacity.limit
-  return <div data-slot="worker-capacity" role="status" className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1 border-t border-border px-3.5 py-2.5 text-[13px]">
-    <span className="font-medium text-foreground">Worker capacity</span>
-    <span className="text-muted-foreground tabular-nums">{capacity.outstanding} of {capacity.limit} in use</span>
-    {full ? <span className="basis-full text-muted-foreground">All worker slots are in use. Clean up finished workers to free a slot.</span> : null}
-  </div>
+  return <span data-slot="worker-capacity" role="status" aria-label={`Worker capacity: ${capacity.outstanding} of ${capacity.limit} in use`}
+    className="ms-auto shrink-0 whitespace-nowrap text-[13px] font-normal text-muted-foreground tabular-nums">
+    {capacity.outstanding} of {capacity.limit} in use
+  </span>
 }
 
 const SETTLED = new Set<WorkerInspection['status']>(['review', 'done', 'failed', 'cancelled'])

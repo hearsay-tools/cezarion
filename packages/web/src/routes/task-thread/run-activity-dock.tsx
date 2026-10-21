@@ -228,7 +228,7 @@ function SessionActivityCard({
         {open && cost ? <span data-slot="run-activity-cost" className="ms-auto shrink-0 text-[13px] text-muted-foreground tabular-nums">{cost}</span> : null}
         <ChevronDownIcon
           aria-hidden
-          className={cn('size-4 shrink-0 text-soft-foreground motion-safe:transition-transform', open && !cost && 'ms-auto', open && 'rotate-180')}
+          className={cn('size-4 shrink-0 text-soft-foreground motion-safe:transition-transform motion-reduce:transition-none', open && !cost && 'ms-auto', open && 'rotate-180')}
         />
       </button>
       {open ? (

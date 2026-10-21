@@ -8,10 +8,7 @@ import { referenceKey, type TaskReference } from '@/lib/tasks-table'
 export function ActivityReferences({ run, references }: { run: ApiRun; references: TaskReference[] }) {
   return <span className="inline-flex items-center gap-1.5">
     {references.map(reference => (
-      <span key={referenceKey(reference)} className="inline-flex items-center rounded-md border border-border px-1.5 text-[12px]">
-        {reference.kind === 'Issue' ? <span className="me-1">Issue</span> : null}
-        <ReferenceChip reference={reference} taskTitle={runTitle(run)} plain inert />
-      </span>
+      <ReferenceChip key={referenceKey(reference)} reference={reference} taskTitle={runTitle(run)} inert />
     ))}
   </span>
 }

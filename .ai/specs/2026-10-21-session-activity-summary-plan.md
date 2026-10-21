@@ -25,7 +25,7 @@
 1. Extend dock tests for folded identity, CI chips, Workspace chips and worker capacity. Observe expected failures through Squeal.
 2. Add a reusable priority summary with intrinsic width measurement and a CSS fallback. Integrate the requested removal orders into the dock and usage row.
 3. Render CI state, PR and deadline as labelled details. Reuse safe links and preserve every outcome.
-4. Move worker capacity into a separate row above worker links, outside their disclosure.
+4. Show worker capacity in the Workers section header so it stays visible when the list is folded.
 5. Verify focused unit results, web typecheck/build and real browser widths. Capture and publish expanded, folded and narrow screenshots.
 6. Ask for screenshot approval. Open the draft PR only after approval.
 
@@ -38,3 +38,15 @@
 - Disposable-worktree command: `npm test -- packages/web/src/routes/task-thread/run-activity-dock.test.tsx`.
 - With the current test copied onto the old source: five expected failures (provider identity and accessible summaries), 45 passes.
 - With only the fixed `run-activity-dock.tsx` copied into that same worktree: all 50 tests pass. The disposable worktree was removed.
+
+## Screenshot feedback
+
+- Expanded Workspace groups standard chips into labeled PRs and Issues rows.
+- Folded references use the shared chip colors and borders, with inert controls inside disclosure buttons.
+- Capacity stays in the Workers header; the expanded body retains the full-capacity recovery message.
+- Browser assertions now select measured summary items; the main chevron explicitly disables transitions for reduced motion.
+- Web typecheck/build and updated real Chrome checks pass (ten widths, themes, zoom, chip containment, grouped references, and capacity in the folded Workers header).
+
+- Correction regression proof base: `4a9ea8634`. Copied the current dock and reference-chip tests into a disposable worktree with its own dependencies. Command: `npm test -- packages/web/src/routes/task-thread/run-activity-dock.test.tsx packages/web/src/components/reference-chip.test.tsx`. Old source: three expected failures; fixed source: 126 passes. Scratch worktree removed. Logs: ignored `.ai/qa/session-activity-review/correction-proof-{red,green}.log`.
+
+- Final correction check: all nine selected suites are current/pass at revision 25, including the full `task-thread.e2e.ts` browser suite. All five previously reported browser failures pass. Web typecheck/build and real Chrome checks pass. The remaining 79 slow files were queued and are optional for this task.

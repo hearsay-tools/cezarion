@@ -433,6 +433,18 @@ describe.each([false, true])('plain status visibility (#677), inert=%s', (inert)
   })
 })
 
+it('keeps the standard status chip colors without controls when inert', () => {
+  const chip = chipOf(<ReferenceChip reference={PR} taskTitle="t" status="merged" inert />)
+  expect(chip.tagName).toBe('SPAN')
+  expect(chip.hasAttribute('href')).toBe(false)
+  expect(chip.hasAttribute('tabindex')).toBe(false)
+  expect(chip.className).toContain('text-merged-text')
+  expect(chip.className).toContain('border')
+  fireEvent.focus(chip)
+  fireEvent.pointerEnter(chip, { pointerType: 'mouse' })
+  expect(document.querySelector('[data-slot="reference-status-card"]')).toBeNull()
+})
+
 describe('ReferenceChip with an in-app destination (#692)', () => {
   it('links to the internal path in the same tab, with the accessible name', () => {
     const chip = chipOf(

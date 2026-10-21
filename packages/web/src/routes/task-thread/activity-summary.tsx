@@ -43,7 +43,7 @@ export function ActivitySummary({ items }: { items: SummaryItem[] }) {
     return () => observer.disconnect()
   }, [items])
   return (
-    <span ref={ref} data-slot="activity-summary" className="relative flex h-[1.5em] min-w-0 flex-1 items-center gap-2.5 overflow-clip whitespace-nowrap text-[13px] font-normal text-muted-foreground tabular-nums">
+    <span ref={ref} data-slot="activity-summary" className="relative flex h-[max(1.5em,22px)] min-w-0 flex-1 items-center gap-2.5 overflow-clip whitespace-nowrap text-[13px] font-normal text-muted-foreground tabular-nums">
       {items.map(item => {
         const hidden = item.priority <= cutoff
         return (

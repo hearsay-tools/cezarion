@@ -548,7 +548,23 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
     expect(summary().getAttribute('aria-label')).toContain('PR #42')
   })
 
-  it('keeps capacity above the worker disclosure when the list is folded', async () => {
+  it('groups expanded Workspace references into labeled rows and keeps standard chip styles in summaries', () => {
+    renderDock(fresh({ referencedIssueUrl: 'https://github.com/owner/repo/issues/15', referencedPullRequestUrl: 'https://github.com/owner/repo/pull/42' }), [])
+    ensureOpen()
+    const foldedChip = sectionHead('workspace').querySelector<HTMLElement>('[data-slot="pr-chip"]')!
+    expect(foldedChip.className).toContain('border-accent-strong/35')
+    expect(foldedChip.tagName).toBe('SPAN')
+    expect(foldedChip.hasAttribute('tabindex')).toBe(false)
+    fireEvent.click(sectionHead('workspace'))
+    const linked = section('workspace')!.querySelector('[data-slot="linked-references"]')!
+    expect(linked.querySelector('[data-reference-kind="PR"]')?.textContent).toContain('PRs')
+    expect(linked.querySelector('[data-reference-kind="PR"] [data-slot="pr-chip"]')).not.toBeNull()
+    expect(linked.querySelector('[data-reference-kind="PR"] [data-slot="issue-chip"]')).toBeNull()
+    expect(linked.querySelector('[data-reference-kind="Issue"]')?.textContent).toContain('Issues')
+    expect(linked.querySelector('[data-reference-kind="Issue"] [data-slot="issue-chip"]')).not.toBeNull()
+  })
+
+  it('keeps capacity in the Workers header when the list is folded', async () => {
     const record = fresh({ delegation: { role: 'root', permissions: [], receipts: [] } })
     renderDock(record, [], workers, 'ok', {
       [`/api/v1/p/sample/runs/${record.id}/relationships`]: () => json({ workers, capacity: { outstanding: 2, limit: 32, created: 2, creationLimit: 1024 } }),
@@ -557,7 +573,7 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
     await waitFor(() => expect(document.querySelector('[data-slot="worker-capacity"]')?.textContent).toContain('2 of 32'))
     fireEvent.click(sectionHead('workers'))
     expect(document.querySelector('[data-slot="worker-capacity"]')?.textContent).toContain('2 of 32')
-    expect(section('workers')?.contains(document.querySelector('[data-slot="worker-capacity"]'))).toBe(false)
+    expect(sectionHead('workers').contains(document.querySelector('[data-slot="worker-capacity"]'))).toBe(true)
   })
 
   it('offers branch copy, worktree copy and the resume command under Workspace', () => {

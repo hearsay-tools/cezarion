@@ -17,6 +17,7 @@ import { runTitle } from '@/lib/task-groups'
 import {
   isOwnRepoReference,
   prNumber,
+  referenceKey,
   taskIssueUrl,
   taskItemPath,
   taskPrUrl,
@@ -282,7 +283,8 @@ export function LinkedReferences({ run }: { run: ApiRun }) {
   const itemPath = (reference: TaskReference) =>
     referenceProjectId === undefined ? undefined : taskItemPath(referenceProjectId, run.id, reference, repoBase)
   const references = useMemo(() => taskReferences(run, repoBase), [run, repoBase])
-  const parts: ReactNode[] = []
+  const prChips: ReactNode[] = []
+  const issueChips: ReactNode[] = []
   // EVERY PR the task points at, in `taskReferences` order — the same order, and the same
   // statuses, the global Tasks table paints. A task opened on someone else's PR that pushes a
   // follow-up of its own is about both, and its own page is the last place that should have to
@@ -295,9 +297,9 @@ export function LinkedReferences({ run }: { run: ApiRun }) {
   // `ReferenceChip` degrades such a chip to inert text on its own.
   const prReferences = references.filter((reference) => reference.kind === 'PR')
   for (const reference of prReferences) {
-    parts.push(
+    prChips.push(
       <ReferenceChip
-        key={`pr-${reference.number}`}
+        key={referenceKey(reference)}
         reference={reference}
         to={itemPath(reference)}
         taskTitle={runTitle(run)}
@@ -320,7 +322,7 @@ export function LinkedReferences({ run }: { run: ApiRun }) {
   // adapter) would have a `prNumber` chip standing in front of a link that then never rendered.
   const prUrl = taskPrUrl(run)
   if (prUrl && isHttpUrl(prUrl) && !prReferences.some((reference) => reference.url === prUrl)) {
-    parts.push(
+    prChips.push(
       <ReferenceChip
         key="pr"
         reference={{ kind: 'PR', url: prUrl }}
@@ -329,10 +331,22 @@ export function LinkedReferences({ run }: { run: ApiRun }) {
       />,
     )
   }
+  const issueReferences = references.filter(reference => reference.kind === 'Issue')
+  for (const reference of issueReferences) {
+    issueChips.push(
+      <ReferenceChip
+        key={referenceKey(reference)}
+        reference={reference}
+        to={itemPath(reference)}
+        taskTitle={runTitle(run)}
+        className="h-5 no-hover:min-h-[44px] no-hover:min-w-[44px]"
+      />,
+    )
+  }
   const issueUrl = taskIssueUrl(run, repoBase)
-  if (issueUrl && isHttpUrl(issueUrl)) {
+  if (issueUrl && isHttpUrl(issueUrl) && !issueReferences.some(reference => reference.url === issueUrl)) {
     const number = prNumber(issueUrl)
-    parts.push(
+    issueChips.push(
       <ReferenceChip
         key="issue"
         reference={{ kind: 'Issue', ...(number ? { number: Number(number) } : {}), url: issueUrl }}
@@ -342,6 +356,13 @@ export function LinkedReferences({ run }: { run: ApiRun }) {
       />,
     )
   }
-  if (parts.length === 0) return null
-  return <div data-slot="linked-references" className="flex min-w-0 flex-wrap items-center gap-2">{parts}</div>
+  if (prChips.length === 0 && issueChips.length === 0) return null
+  return <div data-slot="linked-references" className="flex min-w-0 flex-col gap-3">
+    {([['PR', 'PRs', prChips], ['Issue', 'Issues', issueChips]] as const).map(([kind, label, chips]) => chips.length > 0 ? (
+      <div key={kind} data-reference-kind={kind} className="grid min-w-0 grid-cols-[5rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1">
+        <span className="font-medium text-foreground">{label}</span>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">{chips}</div>
+      </div>
+    ) : null)}
+  </div>
 }
