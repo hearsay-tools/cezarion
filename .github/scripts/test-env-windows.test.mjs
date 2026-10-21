@@ -38,12 +38,13 @@ test('Windows wrapper serializes callers, preserves arguments, and kills mutator
   const closed = new Promise(resolveClose => supervisor.once('close', resolveClose));
   stage(`supervisor started pid=${supervisor.pid}`);
   let cached;
+  let mutator;
   try {
     await until(() => { assert.equal(supervisor.exitCode, null, log); return existsSync(join(root, 'mutator.pid')); });
     stage('mutator started');
     const mutatorText = readFileSync(join(root, 'mutator.pid'), 'utf8').trim();
     assert.match(mutatorText, /^\d+$/);
-    const mutator = Number(mutatorText);
+    mutator = Number(mutatorText);
     cached = Number(readFileSync(join(root, 'cached.pid'), 'utf8').trim());
     assert.ok(Number.isSafeInteger(cached) && cached > 0);
     assert.deepEqual(readFileSync(join(root, 'args.txt'), 'utf8').trimEnd().split('\n'), ['space value', '', 'trailing\\', 'quote"value']);
@@ -68,6 +69,8 @@ test('Windows wrapper serializes callers, preserves arguments, and kills mutator
     supervisor.stdout.destroy();
     supervisor.stderr.destroy();
     stage(`cleanup; captured output: ${log}`);
-    rmSync(root, { recursive: true, force: true });
+    const snapshot = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -eq ${mutator || 0} -or $_.ParentProcessId -eq ${supervisor.pid} } | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json`], { encoding: 'utf8', timeout: 10_000 });
+    stage(`native process snapshot: ${snapshot.stdout}; ${snapshot.stderr}`);
+    try { rmSync(root, { recursive: true, force: true }); } catch (error) { stage(`fixture cleanup: ${error.message}`); }
   }
 });

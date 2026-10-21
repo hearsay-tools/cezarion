@@ -75,7 +75,10 @@ try {
   $child = Get-Process -Id $childPid -ErrorAction SilentlyContinue
   if (!$child) { exit 1 }
   while (!$child.WaitForExit(100)) {
-    if ($parent.HasExited) { exit 143 }
+    if ($parent.HasExited) { [Console]::Error.WriteLine('Test environment supervisor exited; closing Windows job'); exit 143 }
   }
   exit $child.ExitCode
-} finally { [LeaseWindows]::CloseHandle($job) | Out-Null }
+} finally {
+  [LeaseWindows]::CloseHandle($job) | Out-Null
+  [Console]::Error.WriteLine('Test environment Windows job handle closed')
+}
