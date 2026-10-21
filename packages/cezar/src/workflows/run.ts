@@ -5605,11 +5605,15 @@ export class RunManager {
   }
 
   /** An unanswered `ask.requested` with no open human wait (a row written before every ask opened
-   *  one) gets an open agent wait shown as that ask. Answer delivery still reads the transcript. */
+   *  one) gets an open agent wait shown as that ask. Answer delivery still reads the transcript.
+   *  Cezar's own wait not shown as that ask is replaced, as the live ask does: a crash between
+   *  saving the ask and replacing it leaves that wait open (review of #1437). */
   private adoptTranscriptAsk(runId: string): boolean {
     const askSeq = this.pendingHumanAskSeq(runId);
-    const run = this.store.getRun(runId);
-    if (askSeq === undefined || !run || run.waits?.some(wait => wait.kind === 'human' && wait.phase === 'open')) return false;
+    const human = openWaits(this.store.getRun(runId) ?? {}).filter((wait): wait is HumanWaitEntry => wait.kind === 'human');
+    if (askSeq === undefined || !this.store.getRun(runId) || human.some(wait => !isCezarHumanWait(wait) || wait.askSeq === askSeq)) return false;
+    this.withdrawCezarHumanWaits(runId);
+    if (openWaits(this.store.getRun(runId) ?? {}).some(wait => wait.kind === 'human')) return false;
     try {
       this.store.commitWait(runId, { id: randomUUID(), kind: 'human', source: 'agent', via: 'ask-line', registeredAt: new Date().toISOString(), phase: 'open', turnId: 'recovered', askSeq });
       return true;

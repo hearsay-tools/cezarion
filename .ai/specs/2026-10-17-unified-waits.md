@@ -1199,7 +1199,9 @@ Calls made by the agent:
   `ask.requested` with no human wait and a stored summary of false (summaries were refreshed
   lazily before 4b). Recovery opens an agent human wait for it (`via: 'ask-line'`,
   `turnId: 'recovered'`, `askSeq` the ask's seq), so it still reads Needs you; no second card is
-  shown (`adoptTranscriptAsk`).
+  shown (`adoptTranscriptAsk`). An open Cezar human wait that is not shown as that ask (a crash
+  after the ask was saved, before the live handler replaced it) is withdrawn first, as the live
+  ask does, so the run reports the agent's question.
 - **Recovery settles a stale legacy wait.** A stored `hasPendingHumanAsk: true` can predate the
   answer's receipt (`human-input-delivered` reached the transcript, the row's save did not). An
   upgraded wait (`turnId: 'legacy'`, no `askSeq`) is settled as answered at recovery when the
@@ -1229,7 +1231,7 @@ tables hold for the states they list. One row per exit.
 | | A human message or the ask's answer | The user | The answer settles the wait at acceptance and is delivered at the next turn boundary, as for any human wait |
 | | Finish, Stop or delete | The user | Settles as for any parked run; the wait is cancelled |
 | | No unanswered ask in the transcript (its answer was delivered after the row was saved) | Recovery → `settleAnsweredLegacyAsk` | The wait settles as answered; the run reads as its remaining waits say |
-| A live row with an unanswered `ask.requested` and no human wait | Restart recovery | `RunManager.recover` → `adoptTranscriptAsk` | An open agent human wait is committed with the ask's `askSeq`; the run reads Needs you; its exits are the rows above |
+| A live row with an unanswered `ask.requested` and no human wait, or only a Cezar human wait not shown as that ask | Restart recovery | `RunManager.recover` → `adoptTranscriptAsk` | The Cezar wait is withdrawn; an open agent human wait is committed with the ask's `askSeq`; the run reads Needs you; its exits are the rows above |
 | `running` wake turn with a shown question (`askSeq`) | The turn ends | The runner's turn end | Parks `waiting` on the open human wait; Needs you, as before 4b |
 | | The user answers | The user | The wait settles; the answer is delivered at the turn boundary (transcript receipt) |
 | | Stop | The user | The session ends; the run settles `cancelled` |

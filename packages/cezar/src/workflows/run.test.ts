@@ -28,6 +28,7 @@ import { parseTaskMarkers } from '../runs/task-markers.ts';
 import { appendTurnText, trackTurnTail, RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
+import { asksQuestion } from '@open-mercato/cezar-contract/waits';
 import { readPersistedRuns, crashStore } from '../runs/run-store.testkit.ts';
 import { monitoringTimerOf, monitoringWakeOf } from './waits.testkit.ts';
 
@@ -1712,6 +1713,26 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     expect(human).toEqual([expect.objectContaining({ source: 'agent', askSeq: ask.seq })]);
     expect(store.getRun(record.id)?.status).toBe('waiting');
     expect(deriveAttention(store.getRun(record.id)!).label).toBe('needs you');
+    expect(store.readEvents(record.id).filter(event => event.type === 'ask.requested')).toHaveLength(1);
+  }, 30_000);
+
+  // Review of #1437, round 3: a crash after the ask's event was saved and before the live handler
+  // replaced Cezar's own wait leaves that questionless wait open; recovery replaces it, as live does.
+  it('replaces an open Cezar human wait at recovery with the unanswered ask it was not replaced by', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, candidate => candidate?.status === 'waiting');
+    manager.dispose();
+    const cezar = { id: '00000000-0000-4000-8000-0000000000ac', kind: 'human' as const, source: 'cezar' as const, via: 'no-wait' as const,
+      registeredAt: '2026-10-21T00:00:00.000Z', phase: 'open' as const, turnId: 'no-wait' };
+    store.updateRun(record.id, { waits: [cezar] });
+    const ask = store.appendEvent(record.id, { type: 'ask.requested', requestId: 'crashed-question',
+      questions: [{ header: 'Choice', question: 'Which implementation?', options: [{ label: 'First' }, { label: 'Second' }] }] });
+    manager = createFixtureManager(store, repoRoot);
+    await manager.recover();
+    const human = store.getRun(record.id)?.waits?.filter(wait => wait.kind === 'human' && wait.phase === 'open') ?? [];
+    expect(human).toEqual([expect.objectContaining({ source: 'agent', askSeq: ask.seq })]);
+    expect(asksQuestion(store.getRun(record.id)!)).toBe(true);
     expect(store.readEvents(record.id).filter(event => event.type === 'ask.requested')).toHaveLength(1);
   }, 30_000);
 
