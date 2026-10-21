@@ -57,7 +57,8 @@ const defaultFailureRoot = resolve(repoRoot, '.ai/qa/failures')
 /** How long `goto` lets the current document load its font faces before navigating
  *  (hearsay-tools/cezarion#808). */
 const FONT_SETTLE_MS = 10_000
-const failureCapture: { root: string; spec: string; test: string } = {
+const failureCapture = {
+  attempt: 0,
   root: defaultFailureRoot,
   spec: 'unknown-spec',
   test: 'unknown-test',
@@ -69,14 +70,31 @@ export function configureFailureCapture(next: { root?: string; spec?: string; te
   if ('test' in next) failureCapture.test = next.test ?? 'unknown-test'
 }
 
+/** Start only the selected spec afresh, before its own setup can fail. An inability to
+ * clear old evidence is a setup failure: silently mixing revisions would misidentify it. */
+export function beginFailureSpec(spec: string): void {
+  configureFailureCapture({ spec, test: 'hooks' })
+  rmSync(join(failureCapture.root, bundleSegment(spec)), { recursive: true, force: true })
+  beginFailureTest({ spec, test: 'hooks' })
+}
+
+/** A retry has the same name, but must own a fresh bundle and fresh measurements. */
+export function beginFailureTest(name: { spec: string; test: string }): void {
+  configureFailureCapture(name)
+  failureCapture.attempt += 1
+  layoutEvidence.length = 0
+}
+
+const layoutEvidence: unknown[] = []
+const captureKey = () => `${failureCapture.spec}/${failureCapture.test}/${failureCapture.attempt}`
+
 /** A filesystem-safe segment: vitest test names carry spaces, quotes and slashes. */
 function bundleSegment(name: string): string {
   const safe = name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
-  return (safe || 'unnamed').slice(0, 80)
+  return (!safe || safe === '.' || safe === '..' ? 'unnamed' : safe).slice(0, 80)
 }
 
-/** The next free `<spec>/<test>-<n>` under the root — free on disk, not in memory, so bundles
- *  from an earlier local run are never overwritten. */
+/** The next free `<spec>/<test>-<n>` in this execution, retaining multiple captures and retries. */
 function nextBundleDir(): string {
   const specDir = join(failureCapture.root, bundleSegment(failureCapture.spec))
   const test = bundleSegment(failureCapture.test)
@@ -251,6 +269,47 @@ function probeScript(reason: FailureReason): string {
       }
     }
     return out
+  })()`
+}
+
+/** Read-only geometry, sampled when the test asks, never by re-running its assertion. */
+function layoutScript(selectors: Record<string, string>): string {
+  return `(() => {
+    const rect = (el) => {
+      const r = el.getBoundingClientRect();
+      return { x: r.x, y: r.y, left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+    };
+    const path = (el) => {
+      const parts = [];
+      for (let node = el; node && parts.length < 12; node = node.parentElement) {
+        parts.unshift(node.tagName.toLowerCase() + (node.id ? '#' + node.id : ''));
+        if (node.id) break;
+      }
+      return parts.join(' > ');
+    };
+    const clippingAncestor = (el) => {
+      for (let node = el.parentElement; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        const axes = [];
+        if (/^(hidden|clip|scroll|auto)$/.test(style.overflowX)) axes.push('x');
+        if (/^(hidden|clip|scroll|auto)$/.test(style.overflowY)) axes.push('y');
+        if (axes.length) return { path: path(node), axes, rect: rect(node) };
+      }
+      return null;
+    };
+    const selectors = {};
+    for (const [name, selector] of Object.entries(${JSON.stringify(selectors)})) {
+      try {
+        const nodes = [...document.querySelectorAll(selector)];
+        selectors[name] = { selector, count: nodes.length, matches: nodes.map(el => ({
+          path: path(el), rect: rect(el),
+          scrollWidth: el.scrollWidth, clientWidth: el.clientWidth,
+          scrollHeight: el.scrollHeight, clientHeight: el.clientHeight,
+          clippingAncestor: clippingAncestor(el),
+        })) };
+      } catch (error) { selectors[name] = { selector, error: String(error) }; }
+    }
+    return { url: location.href, viewport: { width: innerWidth, height: innerHeight, scrollX, scrollY }, selectors };
   })()`
 }
 
@@ -521,6 +580,9 @@ export class AgentBrowser {
     })
     attempt('snapshot', () => writeFileSync(join(dir, 'snapshot.txt'), String(this.run(['snapshot', '-i'], 5_000).snapshot ?? '')))
     attempt('probe', () => { page = this.run(['eval', probeScript(reason)], 5_000).result })
+    if (layoutEvidence.length) {
+      attempt('layout.json', () => writeFileSync(join(dir, 'layout.json'), JSON.stringify(layoutEvidence, null, 2)))
+    }
     const probe = {
       ...reason,
       spec: failureCapture.spec,
@@ -532,7 +594,7 @@ export class AgentBrowser {
       ...(captureErrors.length ? { captureErrors } : {}),
     }
     attempt('probe.json', () => writeFileSync(join(dir, 'probe.json'), JSON.stringify(probe, null, 2)))
-    this.capturedFor = `${failureCapture.spec}/${failureCapture.test}`
+    this.capturedFor = captureKey()
     return dir
   }
 
@@ -543,8 +605,21 @@ export class AgentBrowser {
    * moment of failure and a second one taken after the test unwound would only add noise.
    */
   captureTestFailure(errors: readonly unknown[]): string | null {
-    if (this.capturedFor === `${failureCapture.spec}/${failureCapture.test}`) return null
+    if (this.capturedFor === captureKey()) return null
     return this.captureFailure({ kind: 'test' }, errors.length === 1 ? errors[0] : errors)
+  }
+
+  /** Save named CSS-selector geometry immediately before layout assertions. Multiple labels
+   * (e.g. folded/expanded) survive in the failure bundle; diagnostics never replace a failure. */
+  recordLayout(label: string, selectors: Record<string, string>): void {
+    const sample = { label, session: this.session, capturedAt: new Date().toISOString() }
+    try {
+      // bound: evidence reads must not hold up the original assertion on an unresponsive tab.
+      const page = this.run(['eval', layoutScript(selectors)], 5_000).result
+      layoutEvidence.push({ ...sample, page })
+    } catch (error) {
+      layoutEvidence.push({ ...sample, error: describeError(error) })
+    }
   }
 
   /** One agent-browser invocation. `--json` on every call so results are parsed, not scraped. */
