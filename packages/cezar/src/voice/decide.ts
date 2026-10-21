@@ -11,6 +11,8 @@ import {
 import {
   QUESTION_IDS,
   VoiceEngineError,
+  keyText,
+  textKey,
   type DecisionEngine,
   type EngineAnswer,
   type EngineQuestion,
@@ -26,7 +28,7 @@ import { ACTION_MIN, ANSWER_OPTION_MIN, CONFIRM_MIN, IS_COMMAND_MIN, OPEN_STATUS
  * dictated words and decides.
  */
 
-/** Keys the questions reserve for "no pick"; a candidate that equals one is dropped so keys never collide. */
+/** The bare sentinel keys. Every key that carries text is a `textKey`, so none can collide with these. */
 const NONE = 'none';
 const OTHER = 'other';
 
@@ -52,11 +54,6 @@ const POSITIONS: Record<string, string> = {
   [NONE]: 'No position is named.',
 };
 
-function isReserved(text: string): boolean {
-  const lower = text.trim().toLowerCase();
-  return lower === NONE || lower === OTHER;
-}
-
 function choiceQuestion(instructions: string, options: Record<string, string | null>): EngineQuestion {
   return { type: 'choice', instructions: UNTRUSTED + instructions, options };
 }
@@ -67,8 +64,6 @@ function noulQuestion(instructions: string, yes: string, no: string): EngineQues
 
 /** The spec's fan-out table: every question the sentence might need, in one record. */
 export function buildVoiceQuestions(state: VoiceEngineState, spans: string[], starts: string[]): Record<string, EngineQuestion> {
-  const spanOptions = spans.filter((span) => !isReserved(span));
-  const startOptions = starts.filter((start) => !isReserved(start));
   const questions: Record<string, EngineQuestion> = {
     [QUESTION_IDS.isCommand]: noulQuestion(
       'Is `sentence` a command for the task cockpit, such as opening a task, answering a question or messaging a task?',
@@ -83,14 +78,14 @@ export function buildVoiceQuestions(state: VoiceEngineState, spans: string[], st
     [QUESTION_IDS.position]: choiceQuestion('Which position in the task list does `sentence` name?', POSITIONS),
     [QUESTION_IDS.tellStart]: choiceQuestion(
       'Where does the text to send to the task start in `sentence`? Pick the option that is exactly that text.',
-      Object.fromEntries((startOptions.length > 0 ? startOptions : [state.sentence]).map((start) => [start, null])),
+      Object.fromEntries((starts.length > 0 ? starts : [state.sentence]).map((start) => [textKey(start), null])),
     ),
   };
   state.card?.forEach((entry, i) => {
-    const place = `question ${i + 1} (${ORDINAL_WORDS[i] ?? i + 1}) of \`card\``;
+    const place = `question ${i + 1} (${ORDINAL_WORDS[i] ?? i + 1}, header "${entry.header}") of \`card\``;
     questions[QUESTION_IDS.span(i)] = choiceQuestion(
       `Which words of \`sentence\` are the answer to ${place}? Pick "${NONE}" when the sentence does not address it.`,
-      { ...Object.fromEntries(spanOptions.map((span) => [span, null])), [NONE]: 'The sentence does not address this question.' },
+      { ...Object.fromEntries(spans.map((span) => [textKey(span), null])), [NONE]: 'The sentence does not address this question.' },
     );
     const options = entry.options ?? [];
     if (options.length === 0) return;
@@ -107,7 +102,7 @@ export function buildVoiceQuestions(state: VoiceEngineState, spans: string[], st
     questions[QUESTION_IDS.choice(i)] = choiceQuestion(
       `Which option of ${place} do the words addressed to it name, by its text or by its position?`,
       {
-        ...Object.fromEntries(options.map((option) => [option.label, option.description ?? null])),
+        ...Object.fromEntries(options.map((option) => [textKey(option.label), option.description ?? null])),
         [OTHER]: "the user's own words",
       },
     );
@@ -119,6 +114,13 @@ function pickOf(answers: Record<string, EngineAnswer>, id: string): Extract<Engi
   const answer = answers[id];
   if (answer?.type !== 'choice') throw new VoiceEngineError('invalid-answer', undefined, `no choice answer for ${id}`);
   return answer;
+}
+
+/** The text behind a picked text key; a key the questions never offered is an invalid answer. */
+function textOf(choice: string, id: string): string {
+  const text = keyText(choice);
+  if (text === undefined) throw new VoiceEngineError('invalid-answer', undefined, `no text option for ${id}`);
+  return text;
 }
 
 function noulOf(answers: Record<string, EngineAnswer>, id: string): number {
@@ -137,16 +139,18 @@ function positionOf(choice: string): VoicePosition | undefined {
 function cardAnswers(answers: Record<string, EngineAnswer>, questions: AskQuestion[]): VoiceAnswer[] {
   const out: VoiceAnswer[] = [];
   questions.forEach((question, i) => {
-    const span = pickOf(answers, QUESTION_IDS.span(i)).choice;
-    if (span === NONE) return;
+    const spanPick = pickOf(answers, QUESTION_IDS.span(i)).choice;
+    if (spanPick === NONE) return;
+    const span = textOf(spanPick, QUESTION_IDS.span(i));
     const labels = (question.options ?? []).map((option) => option.label);
     if (labels.length > 0 && question.multiSelect === true) {
       const selected = labels.filter((_, j) => noulOf(answers, QUESTION_IDS.option(i, j)) >= OPTION_SELECTED_MIN);
       out.push(selected.length > 0 ? { question: i, kind: 'option', labels: selected } : { question: i, kind: 'other', text: span });
     } else if (labels.length > 0) {
       const pick = pickOf(answers, QUESTION_IDS.choice(i));
-      const taken = pick.choice !== OTHER && labels.includes(pick.choice) && (pick.probabilities[pick.choice] ?? 0) >= ANSWER_OPTION_MIN;
-      out.push(taken ? { question: i, kind: 'option', labels: [pick.choice] } : { question: i, kind: 'other', text: span });
+      const label = pick.choice === OTHER ? undefined : keyText(pick.choice);
+      const taken = label !== undefined && labels.includes(label) && (pick.probabilities[pick.choice] ?? 0) >= ANSWER_OPTION_MIN;
+      out.push(taken ? { question: i, kind: 'option', labels: [label] } : { question: i, kind: 'other', text: span });
     } else {
       out.push({ question: i, kind: 'other', text: span });
     }
@@ -188,7 +192,7 @@ export async function decideVoice(args: {
       : {}),
     recent,
   };
-  const questions = buildVoiceQuestions(state, candidateSpans(request.text), tellStarts(request.text));
+  const questions = buildVoiceQuestions(state, candidateSpans(request.text, ask?.questions.map((q) => q.header)), tellStarts(request.text));
 
   const started = performance.now();
   const { answers } = await engine.decide({ state, questions }, signal);
@@ -198,8 +202,10 @@ export async function decideVoice(args: {
   const done = (decision: VoiceDecision) => ({ decision, answers, latencyMs });
 
   const action = pickOf(answers, QUESTION_IDS.action);
-  if (request.proposal !== undefined && (action.choice === 'confirm' || action.choice === 'cancel') && action.confidence >= CONFIRM_MIN) {
-    return done({ action: action.choice, decisionId });
+  if (action.choice === 'confirm' || action.choice === 'cancel') {
+    // Only a pending proposal, said with enough confidence, is confirmed or dropped; the command gate does not apply.
+    const taken = request.proposal !== undefined && action.confidence >= CONFIRM_MIN;
+    return done(taken ? { action: action.choice, decisionId } : none('unclear'));
   }
   if (noulOf(answers, QUESTION_IDS.isCommand) < IS_COMMAND_MIN || action.choice === NONE) return done(none('not-a-command'));
   if (action.confidence < ACTION_MIN) return done(none('unclear'));
@@ -230,12 +236,11 @@ export async function decideVoice(args: {
     }
     case 'tell': {
       if (request.openRunId === undefined) return done(none('no-open-task'));
-      const text = pickOf(answers, QUESTION_IDS.tellStart).choice.trim();
+      const text = textOf(pickOf(answers, QUESTION_IDS.tellStart).choice, QUESTION_IDS.tellStart).trim();
       if (text === '') return done(none('unclear'));
       return done({ action: 'tell', decisionId, runId: request.openRunId, text, confidence });
     }
     default:
-      // confirm or cancel without a pending proposal, or below CONFIRM_MIN: nothing to confirm.
       return done(none('unclear'));
   }
 }

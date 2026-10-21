@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { VOICE_STATUS_IDS } from '@open-mercato/cezar-contract/voice';
-import { QUESTION_IDS, type EngineAnswer, type EngineQuestion, type VoiceEngineState } from './engine.ts';
+import { QUESTION_IDS, keyText, textKey, type EngineAnswer, type EngineQuestion, type VoiceEngineState } from './engine.ts';
 import { FakeVoiceEngine } from './fake-engine.ts';
 
 type Card = NonNullable<VoiceEngineState['card']>;
@@ -38,12 +38,12 @@ function questionsFor(
     [QUESTION_IDS.action]: choice(ACTIONS),
     [QUESTION_IDS.status]: choice([...VOICE_STATUS_IDS, 'none']),
     [QUESTION_IDS.position]: choice(POSITIONS),
-    [QUESTION_IDS.tellStart]: choice(tellStarts),
+    [QUESTION_IDS.tellStart]: choice(tellStarts.map(textKey)),
   };
   card?.forEach((entry, i) => {
     const labels = (entry.options ?? []).map((o) => o.label);
-    questions[QUESTION_IDS.span(i)] = choice([...(spans[i] ?? []), 'none']);
-    questions[QUESTION_IDS.choice(i)] = choice([...labels, 'other', 'none']);
+    questions[QUESTION_IDS.span(i)] = choice([...(spans[i] ?? []).map(textKey), 'none']);
+    questions[QUESTION_IDS.choice(i)] = choice([...labels.map(textKey), 'other', 'none']);
     labels.forEach((_, j) => {
       questions[QUESTION_IDS.option(i, j)] = noul();
     });
@@ -73,6 +73,10 @@ function picked(answers: Record<string, EngineAnswer>, id: string): string {
   const answer = answers[id];
   if (answer?.type !== 'choice') throw new Error(`no choice answer for ${id}`);
   return answer.choice;
+}
+/** The text behind a picked text key. */
+function pickedText(answers: Record<string, EngineAnswer>, id: string): string | undefined {
+  return keyText(picked(answers, id));
 }
 function noulOf(answers: Record<string, EngineAnswer>, id: string): number {
   const answer = answers[id];
@@ -104,10 +108,10 @@ describe('FakeVoiceEngine', () => {
       spans,
     });
     expect(picked(answers, QUESTION_IDS.action)).toBe('answer');
-    expect(picked(answers, QUESTION_IDS.choice(0))).toBe('Vitest');
-    expect(picked(answers, QUESTION_IDS.choice(1))).toBe('Webpack');
-    expect(picked(answers, QUESTION_IDS.span(0))).toBe('Vitest');
-    expect(picked(answers, QUESTION_IDS.span(1))).toBe('the second answer');
+    expect(pickedText(answers, QUESTION_IDS.choice(0))).toBe('Vitest');
+    expect(pickedText(answers, QUESTION_IDS.choice(1))).toBe('Webpack');
+    expect(pickedText(answers, QUESTION_IDS.span(0))).toBe('Vitest');
+    expect(pickedText(answers, QUESTION_IDS.span(1))).toBe('the second answer');
   });
 
   it('puts words that match no choice into other, and leaves the other question unaddressed', async () => {
@@ -116,7 +120,7 @@ describe('FakeVoiceEngine', () => {
       spans: { 0: ['use both', 'use'], 1: ['use both'] },
     });
     expect(picked(answers, QUESTION_IDS.choice(0))).toBe('other');
-    expect(picked(answers, QUESTION_IDS.span(0))).toBe('use both');
+    expect(pickedText(answers, QUESTION_IDS.span(0))).toBe('use both');
     expect(picked(answers, QUESTION_IDS.span(1))).toBe('none');
     expect(picked(answers, QUESTION_IDS.choice(1))).toBe('none');
   });
@@ -125,18 +129,26 @@ describe('FakeVoiceEngine', () => {
     const byLabel = await run('answer node TEST to question two', { card: CARD });
     expect(picked(byLabel, QUESTION_IDS.choice(1))).toBe('other'); // question two offers Vite and Webpack
     const second = await run('answer node TEST to question one', { card: CARD });
-    expect(picked(second, QUESTION_IDS.choice(0))).toBe('Node test');
+    expect(pickedText(second, QUESTION_IDS.choice(0))).toBe('Node test');
     const ordinal = await run('answer option two to question 1', { card: CARD });
-    expect(picked(ordinal, QUESTION_IDS.choice(0))).toBe('Node test');
+    expect(pickedText(ordinal, QUESTION_IDS.choice(0))).toBe('Node test');
     const nth = await run('answer the 1st choice to question second', { card: CARD });
-    expect(picked(nth, QUESTION_IDS.choice(1))).toBe('Vite');
+    expect(pickedText(nth, QUESTION_IDS.choice(1))).toBe('Vite');
   });
 
   it('reads a question named before its answer', async () => {
     const answers = await run('answer Vite for the second question', { card: CARD, spans: { 1: ['Vite'] } });
-    expect(picked(answers, QUESTION_IDS.choice(1))).toBe('Vite');
-    expect(picked(answers, QUESTION_IDS.span(1))).toBe('Vite');
+    expect(pickedText(answers, QUESTION_IDS.choice(1))).toBe('Vite');
+    expect(pickedText(answers, QUESTION_IDS.span(1))).toBe('Vite');
     expect(picked(answers, QUESTION_IDS.span(0))).toBe('none');
+  });
+
+  it('picks a card option labeled other by its quoted key, not the free-text sentinel', async () => {
+    const card: Card = [{ header: 'Mode', question: 'Which mode?', options: [{ label: 'other' }, { label: 'main' }] }];
+    const named = await run('answer other to question one', { card });
+    expect(picked(named, QUESTION_IDS.choice(0))).toBe(textKey('other'));
+    const free = await run('answer something else to question one', { card });
+    expect(picked(free, QUESTION_IDS.choice(0))).toBe('other');
   });
 
   it('marks every multi-select option the segment names', async () => {
@@ -149,11 +161,11 @@ describe('FakeVoiceEngine', () => {
   it('finds where the dictated text starts', async () => {
     const answers = await run('tell it: run the tests again', { tellStarts: ['run the tests again', 'the tests again', 'none'] });
     expect(picked(answers, QUESTION_IDS.action)).toBe('tell');
-    expect(picked(answers, QUESTION_IDS.tellStart)).toBe('run the tests again');
+    expect(pickedText(answers, QUESTION_IDS.tellStart)).toBe('run the tests again');
     const spoken = await run('tell the agent to stop. ', { tellStarts: ['stop', 'to stop'] });
-    expect(picked(spoken, QUESTION_IDS.tellStart)).toBe('to stop');
+    expect(pickedText(spoken, QUESTION_IDS.tellStart)).toBe('to stop');
     const unmatched = await run('tell it: something else', { tellStarts: ['first', 'second'] });
-    expect(picked(unmatched, QUESTION_IDS.tellStart)).toBe('first');
+    expect(pickedText(unmatched, QUESTION_IDS.tellStart)).toBe('first');
   });
 
   it.each(['Yes, confirmed.', 'yes', 'confirm', 'Confirmed', 'send it'])('reads %j as confirm', async (sentence) => {

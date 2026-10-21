@@ -24,6 +24,28 @@ describe('candidateSpans', () => {
     expect(candidateSpans('answer Vite for the second question')).toContain('Vite');
   });
 
+  it('never cleans a segment down to nothing', () => {
+    expect(candidateSpans('answer okay to question one')).toEqual(['okay']);
+    expect(candidateSpans('answer so to question one')).toEqual(['so']);
+    expect(candidateSpans('answer none to question one')).toEqual(['none']);
+    expect(candidateSpans('um, answer ok to question one')).toEqual(['ok']);
+    expect(candidateSpans('okay answer Vitest to question one')).toContain('Vitest');
+  });
+
+  it('splits at card headers as well as numbers', () => {
+    const spans = candidateSpans('answer Vitest to Library and Fake to Engine', ['Library', 'Engine']);
+    expect(spans).toContain('Vitest');
+    expect(spans).toContain('Fake');
+    expect(candidateSpans('answer Vitest for the library question', ['Library'])).toContain('Vitest');
+    expect(candidateSpans('answer Vitest library question', ['Library'])).toContain('Vitest');
+  });
+
+  it('matches headers case-insensitively, word-bounded and escaped', () => {
+    expect(candidateSpans('answer yes to ENGINE', ['engine'])).toContain('yes');
+    expect(candidateSpans('answer yes to engineering', ['engine'])).toEqual(['yes to engineering']);
+    expect(candidateSpans('answer yes to C++ (new)', ['C++ (new)'])).toContain('yes');
+  });
+
   it('keeps the whole sentence as one span when no question is named', () => {
     expect(candidateSpans('answer use both')).toEqual(['use both']);
   });

@@ -3,7 +3,7 @@ import type { AskQuestion } from '@open-mercato/cezar-contract/ask';
 import { voiceDecisionSchema, type VoiceDecideRequest } from '@open-mercato/cezar-contract/voice';
 import { buildVoiceQuestions, decideVoice } from './decide.ts';
 import { FakeVoiceEngine } from './fake-engine.ts';
-import { QUESTION_IDS, VoiceEngineError, type DecisionEngine, type EngineAnswer, type EngineQuestion, type VoiceEngineState } from './engine.ts';
+import { QUESTION_IDS, VoiceEngineError, textKey, type DecisionEngine, type EngineAnswer, type EngineQuestion, type VoiceEngineState } from './engine.ts';
 import { ACTION_MIN, CONFIRM_MIN } from './thresholds.ts';
 
 const RUN_ID = '11111111-2222-4333-8444-555555555555';
@@ -124,9 +124,9 @@ describe('decideVoice', () => {
       stub({
         ...command,
         action: { choice: 'answer', confidence: 0.8 },
-        q0_span: { choice: 'Vitest' },
-        q0_choice: { choice: 'Vitest', probabilities: { Vitest: 0.9, 'Node test': 0.1 } },
-        q1_span: { choice: 'use both' },
+        q0_span: { choice: textKey('Vitest') },
+        q0_choice: { choice: textKey('Vitest'), probabilities: { [textKey('Vitest')]: 0.9, [textKey('Node test')]: 0.1 } },
+        q1_span: { choice: textKey('use both') },
         q1_choice: { choice: 'other' },
       }),
       { request: { openRunId: RUN_ID }, ask: ASK },
@@ -146,8 +146,8 @@ describe('decideVoice', () => {
       stub({
         ...command,
         action: { choice: 'answer' },
-        q0_span: { choice: 'maybe vitest' },
-        q0_choice: { choice: 'Vitest', confidence: 0.3, probabilities: { Vitest: 0.3, other: 0.7 } },
+        q0_span: { choice: textKey('maybe vitest') },
+        q0_choice: { choice: textKey('Vitest'), confidence: 0.3, probabilities: { [textKey('Vitest')]: 0.3, other: 0.7 } },
       }),
       { request: { openRunId: RUN_ID }, ask: ASK },
     );
@@ -156,7 +156,7 @@ describe('decideVoice', () => {
 
   it('skips questions the sentence does not address', async () => {
     const { decision } = await decide(
-      stub({ ...command, action: { choice: 'answer' }, q1_span: { choice: 'Fake' }, q1_choice: { choice: 'Fake' } }),
+      stub({ ...command, action: { choice: 'answer' }, q1_span: { choice: textKey('Fake') }, q1_choice: { choice: textKey('Fake') } }),
       { request: { openRunId: RUN_ID }, ask: ASK },
     );
     expect(decision).toMatchObject({ action: 'answer', answers: [{ question: 1, kind: 'option', labels: ['Fake'] }] });
@@ -172,7 +172,7 @@ describe('decideVoice', () => {
       stub({
         ...command,
         action: { choice: 'answer' },
-        q0_span: { choice: 'unit tests and lint' },
+        q0_span: { choice: textKey('unit tests and lint') },
         q0_opt0: { noul: 0.9 },
         q0_opt1: { noul: 0.2 },
         q0_opt2: { noul: 0.7 },
@@ -183,7 +183,7 @@ describe('decideVoice', () => {
   });
 
   it('falls to Other when no multi-select option is selected', async () => {
-    const { decision } = await decide(stub({ ...command, action: { choice: 'answer' }, q0_span: { choice: 'everything' } }), {
+    const { decision } = await decide(stub({ ...command, action: { choice: 'answer' }, q0_span: { choice: textKey('everything') } }), {
       request: { openRunId: RUN_ID },
       ask: MULTI_ASK,
     });
@@ -191,10 +191,57 @@ describe('decideVoice', () => {
   });
 
   it('answers a question with no options in Other, and asks no choice for it', async () => {
-    const engine = stub({ ...command, action: { choice: 'answer' }, q0_span: { choice: 'Ada' } });
+    const engine = stub({ ...command, action: { choice: 'answer' }, q0_span: { choice: textKey('Ada') } });
     const { decision } = await decide(engine, { request: { openRunId: RUN_ID }, ask: OPEN_ASK });
     expect(decision).toMatchObject({ answers: [{ question: 0, kind: 'other', text: 'Ada' }] });
     expect(Object.keys(engine.calls[0]!.questions)).not.toContain('q0_choice');
+  });
+
+  it.each(['none', 'other', 'okay'])('keeps %j as the words of an answer on an open question', async (word) => {
+    const { decision } = await decide(
+      stub({ ...command, action: { choice: 'answer' }, q0_span: { choice: textKey(word) } }),
+      { request: { text: `answer ${word} to question one`, openRunId: RUN_ID }, ask: OPEN_ASK },
+    );
+    expect(decision).toMatchObject({ action: 'answer', answers: [{ question: 0, kind: 'other', text: word }] });
+  });
+
+  it('offers the words of an answer that equal a sentinel as quoted options', async () => {
+    const engine = stub({ ...command, action: { choice: 'answer' }, q0_span: { choice: textKey('none') } });
+    await decide(engine, { request: { text: 'answer none to question one', openRunId: RUN_ID }, ask: OPEN_ASK });
+    expect(Object.keys((engine.calls[0]!.questions.q0_span as { options: object }).options)).toEqual(['“none”', 'none']);
+  });
+
+  it('tells the words none', async () => {
+    const { decision } = await decide(stub({ ...command, action: { choice: 'tell' }, tell_start: { choice: textKey('none') } }), {
+      request: { text: 'tell it: none', openRunId: RUN_ID },
+    });
+    expect(decision).toMatchObject({ action: 'tell', text: 'none' });
+  });
+
+  it('takes a card option labeled other when the engine picks its quoted key', async () => {
+    const ask: Ask = { requestId: 'ask-4', questions: [{ header: 'Mode', question: 'Which mode?', options: [{ label: 'other' }, { label: 'main' }] }] };
+    const { decision } = await decide(
+      stub({ ...command, action: { choice: 'answer' }, q0_span: { choice: textKey('other') }, q0_choice: { choice: textKey('other') } }),
+      { request: { text: 'answer other to question one', openRunId: RUN_ID }, ask },
+    );
+    expect(decision).toMatchObject({ answers: [{ question: 0, kind: 'option', labels: ['other'] }] });
+  });
+
+  it('addresses questions by header', async () => {
+    const ask: Ask = { requestId: 'ask-5', questions: [{ header: 'Library', question: 'Which library?' }, { header: 'Engine', question: 'Which engine?' }] };
+    const engine = stub({ ...command, action: { choice: 'answer' }, q0_span: { choice: textKey('Vitest') }, q1_span: { choice: textKey('Fake') } });
+    const { decision } = await decide(engine, { request: { text: 'answer Vitest to Library and Fake to Engine', openRunId: RUN_ID }, ask });
+    const spans = Object.keys((engine.calls[0]!.questions.q0_span as { options: object }).options);
+    expect(spans).toEqual(expect.arrayContaining([textKey('Vitest'), textKey('Fake')]));
+    expect(decision).toMatchObject({ answers: [{ question: 0, kind: 'other', text: 'Vitest' }, { question: 1, kind: 'other', text: 'Fake' }] });
+  });
+
+  it('is unclear for a confirm that rule 1 does not take, also when it reads as chatter', async () => {
+    const proposal = { decisionId: DECISION_ID, action: 'answer' as const };
+    const { decision } = await decide(stub({ is_command: { noul: 0.2 }, action: { choice: 'confirm', confidence: 0.6 } }), { request: { proposal } });
+    expect(decision).toMatchObject({ action: 'none', reason: 'unclear' });
+    const cancel = await decide(stub({ is_command: { noul: 0.2 }, action: { choice: 'cancel', confidence: 0.9 } }));
+    expect(cancel.decision).toMatchObject({ action: 'none', reason: 'unclear' });
   });
 
   it('refuses answer without an open question', async () => {
@@ -206,7 +253,7 @@ describe('decideVoice', () => {
 
   it('tells the open task the chosen text', async () => {
     const { decision } = await decide(
-      stub({ ...command, action: { choice: 'tell', confidence: 0.85 }, tell_start: { choice: 'run the tests again' } }),
+      stub({ ...command, action: { choice: 'tell', confidence: 0.85 }, tell_start: { choice: textKey('run the tests again') } }),
       { request: { text: 'tell it: run the tests again', openRunId: RUN_ID } },
     );
     expect(decision).toEqual({ action: 'tell', decisionId: DECISION_ID, runId: RUN_ID, text: 'run the tests again', confidence: 0.85 });
@@ -327,19 +374,19 @@ describe('buildVoiceQuestions', () => {
     expect(options('position')['1']).toBe('The first one.');
   });
 
-  it('keys spans and tell starts by their own text and drops reserved ones', () => {
-    const q = buildVoiceQuestions(state, ['Vitest', 'None', ' other ', 'use both'], ['None', 'run it']);
-    const keys = (id: string) => Object.keys((q[id] as { options: object }).options);
-    expect(keys('q0_span')).toEqual(['Vitest', 'use both', 'none']);
-    expect(keys('tell_start')).toEqual(['run it']);
-    expect(keys('q0_choice')).toEqual(['Vitest', 'Node test', 'other']);
-    expect((q.q0_choice as { options: Record<string, string | null> }).options.Vitest).toBe('fast');
-    expect((q.q0_choice as { options: Record<string, string | null> }).options.other).toBe("the user's own words");
+  it('wraps every text option in curly quotes and keeps the sentinels bare', () => {
+    const q = buildVoiceQuestions(state, ['Vitest', 'None', 'other', 'use both'], ['None', 'run it']);
+    const options = (id: string) => (q[id] as { options: Record<string, string | null> }).options;
+    expect(Object.keys(options('q0_span'))).toEqual(['“Vitest”', '“None”', '“other”', '“use both”', 'none']);
+    expect(Object.keys(options('tell_start'))).toEqual(['“None”', '“run it”']);
+    expect(Object.keys(options('q0_choice'))).toEqual(['“Vitest”', '“Node test”', 'other']);
+    expect(options('q0_choice')['“Vitest”']).toBe('fast');
+    expect(options('q0_choice').other).toBe("the user's own words");
   });
 
   it('offers the whole sentence when no tell start was found', () => {
     const q = buildVoiceQuestions(state, [], []);
-    expect(Object.keys((q.tell_start as { options: object }).options)).toEqual([state.sentence]);
+    expect(Object.keys((q.tell_start as { options: object }).options)).toEqual([textKey(state.sentence)]);
   });
 
   it('calls the sentence untrusted data, never instructions', () => {

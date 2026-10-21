@@ -1,4 +1,4 @@
-import { QUESTION_IDS, type DecisionEngine, type EngineAnswer, type EngineQuestion, type VoiceEngineState } from './engine.ts';
+import { QUESTION_IDS, keyText, textKey, type DecisionEngine, type EngineAnswer, type EngineQuestion, type VoiceEngineState } from './engine.ts';
 
 /**
  * The dry-run engine (`CEZ_DRY_RUN=1`): deterministic, offline, and small on purpose. It reads a
@@ -81,7 +81,7 @@ function read(state: VoiceEngineState): {
       if (!indexed) return undefined;
       const segment = segments.get(Number(indexed[1]));
       if (segment === undefined) return undefined; // not addressed: `none`
-      if (indexed[2] === 'span') return options.find((o) => o.trim().toLowerCase() === segment.toLowerCase());
+      if (indexed[2] === 'span') return options.find((o) => keyText(o)?.trim().toLowerCase() === segment.toLowerCase());
       return choiceOf(segment, labelsOf(Number(indexed[1])));
     },
     noul(id) {
@@ -132,7 +132,7 @@ function tellStartOf(sentence: string, options: string[]): string | undefined {
   const colon = sentence.indexOf(':');
   const text = (colon >= 0 ? sentence.slice(colon + 1) : sentence.replace(TELL_PREFIX, '')).trim();
   const spoken = [text, text.replace(/[.!?]+$/, '')].map((t) => t.toLowerCase());
-  return options.find((o) => spoken.includes(o.trim().toLowerCase()));
+  return options.find((o) => spoken.includes(keyText(o)?.trim().toLowerCase() ?? ''));
 }
 
 /** The question each stretch of the sentence belongs to: the words before the anchor that names it. */
@@ -159,11 +159,11 @@ function trimSegment(text: string): string {
 /** The choice's own words first, then "the second answer"; anything else is the user's own words. */
 function choiceOf(segment: string, labels: string[]): string {
   const byLabel = labels.find((label) => label.toLowerCase() === segment.toLowerCase());
-  if (byLabel !== undefined) return byLabel;
+  if (byLabel !== undefined) return textKey(byLabel);
   for (const pattern of ORDINAL_CHOICE) {
     const word = pattern.exec(segment)?.[1];
     const label = word === undefined ? undefined : labels[ordinalValue(word) - 1];
-    if (label !== undefined) return label;
+    if (label !== undefined) return textKey(label);
   }
   return 'other';
 }

@@ -52,6 +52,20 @@ export const QUESTION_IDS = {
 } as const;
 
 /**
+ * Option keys that carry user or card text are wrapped in curly quotes, so they can never equal a bare
+ * key the code owns (`none`, `other`, an action, status or position id). "none" said as an answer is
+ * the key `“none”`; the sentinel stays `none`. The text inside is read back with `keyText`.
+ */
+export function textKey(text: string): string {
+  return `\u201c${text}\u201d`;
+}
+
+/** The text inside a `textKey`, or undefined when the key is not one. */
+export function keyText(key: string): string | undefined {
+  return key.length >= 2 && key.startsWith('\u201c') && key.endsWith('\u201d') ? key.slice(1, -1) : undefined;
+}
+
+/**
  * An engine failure. The message is fixed text and the error carries no request, header or cause,
  * so the API key cannot travel in it.
  */
