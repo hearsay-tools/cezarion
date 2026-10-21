@@ -236,6 +236,10 @@ describe('settings → skills against the live dry-run server', () => {
     const before = Number(browser.evaluate(`document.querySelector('[data-slot="skill-rows"]').scrollTop`))
     expect(before).toBe(150)
 
+    // The keyboard case before this one leaves the page scrolled, so the sticky header can sit
+    // over the button. CI run 39596536546, job 119210886966: click refused, "covered by
+    // <header.row-start-1.hidden> at its click point". Bring it into view, as a user would.
+    browser.evaluate(`document.querySelector('[data-slot="skills-refresh"]').scrollIntoView({ block: 'center' })`)
     browser.click('[data-slot="skills-refresh"]')
     // The button disables while the POST runs; wait until the round-trip settled.
     browser.waitForFunction(`!document.querySelector('[data-slot="skills-refresh"]').disabled`)
