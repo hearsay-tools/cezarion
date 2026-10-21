@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import { setTimeout as delay } from 'node:timers/promises';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
@@ -40,6 +42,9 @@ function makeFixture(withSetsid: boolean): { root: string; path: string } {
   mkdirSync(join(root, 'bin'), { recursive: true });
   copyFileSync(join(repoRoot, '.ai/scripts/test-env-up.sh'), join(root, '.ai/scripts/test-env-up.sh'));
   copyFileSync(join(repoRoot, '.ai/scripts/test-env-down.sh'), join(root, '.ai/scripts/test-env-down.sh'));
+  copyFileSync(join(repoRoot, '.ai/scripts/e2e.sh'), join(root, '.ai/scripts/e2e.sh'));
+  copyFileSync(join(repoRoot, '.ai/scripts/test-env-lease.mjs'), join(root, '.ai/scripts/test-env-lease.mjs'));
+  if (process.platform === 'darwin') symlinkSync(commandPath('ps'), join(root, 'bin/ps'));
   copyFileSync(join(repoRoot, '.ai/scripts/resolve-browser-launch.mjs'), join(root, '.ai/scripts/resolve-browser-launch.mjs'));
   copyFileSync(join(repoRoot, '.ai/scripts/build-e2e.sh'), join(root, '.ai/scripts/build-e2e.sh'));
   copyFileSync(join(repoRoot, '.ai/scripts/e2e-served-repo.mjs'), join(root, '.ai/scripts/e2e-served-repo.mjs'));
@@ -152,6 +157,78 @@ done
 }
 
 const E2E_BUILD = '.ai/qa/build/cezar';
+
+// A real HTTP server and the real wrapper/bootstrap; only browser work is replaced by a
+// barrier. Removing the lifetime lease lets the second bootstrap kill the first server.
+for (const invalidation of ['ttl', 'source', 'force', 'down'] as const) {
+  test(`a ${invalidation} bootstrap waits until the active browser run releases its environment`, async () => {
+    const fixture = makeFixture(false);
+    const env = { ...process.env, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
+    const script = join(fixture.root, '.ai/scripts');
+    const npm = join(fixture.root, 'bin/npm');
+    writeFileSync(npm, readFileSync(npm, 'utf8').replace('case "$*" in', `case "$*" in
+  'exec -- vitest '*)
+    exec node -e '
+      const fs = require("node:fs");
+      setTimeout(() => process.exit(2), 30_000).unref();
+      const d = JSON.parse(fs.readFileSync(".ai/qa/test-env.json", "utf8"));
+      fs.writeFileSync(".ai/spec-started", "ready");
+      const timer = setInterval(async () => {
+        if (!fs.existsSync(".ai/release-spec")) return;
+        clearInterval(timer);
+        try { const r = await fetch(d.baseUrl); process.exit(r.ok ? 0 : 1); }
+        catch { process.exit(1); }
+      }, 20);
+    '
+    ;;
+`));
+    const first = spawn('/bin/sh', [join(script, 'e2e.sh')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const firstExit = once(first, 'close');
+    let firstLog = '';
+    first.stderr.on('data', chunk => { firstLog += chunk; });
+    let second: ReturnType<typeof spawn> | undefined;
+    try {
+      const deadline = Date.now() + 20_000;
+      while (!existsSync(join(fixture.root, '.ai/spec-started'))) {
+        assert.equal(first.exitCode, null, firstLog);
+        assert.ok(Date.now() < deadline, `spec did not start: ${firstLog}`);
+        await delay(20);
+      }
+      const held = descriptor(fixture.root);
+      launchedPids.add(held.app.pid);
+      if (invalidation === 'ttl') {
+        const file = join(fixture.root, '.ai/qa/test-env.json');
+        writeFileSync(file, JSON.stringify({ ...held, startedAt: new Date(Date.now() - 700_000).toISOString() }));
+      }
+      if (invalidation === 'source') writeFileSync(join(fixture.root, 'package.json'), '{"private":true,"changed":true}\n');
+      const before = readFileSync(join(fixture.root, '.ai/qa/test-env.json'), 'utf8');
+      second = spawn('/bin/sh', [join(script, invalidation === 'down' ? 'test-env-down.sh' : 'e2e.sh'),
+        ...(invalidation === 'force' ? ['--force'] : [])], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+      const secondExit = once(second, 'close');
+      let log = '';
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error(`no lease wait: ${log}`)), 15_000);
+        second!.stderr!.on('data', chunk => {
+          log += chunk;
+          if (/waiting for test environment/.test(log)) { clearTimeout(timeout); resolve(); }
+        });
+        second!.once('close', () => { clearTimeout(timeout); resolve(); });
+      });
+      assert.equal(second.exitCode, null, `bootstrap must wait while specs use the server: ${log}`);
+      assert.equal(readFileSync(join(fixture.root, '.ai/qa/test-env.json'), 'utf8'), before);
+      assert.equal((await fetch(held.baseUrl)).status, 200);
+      writeFileSync(join(fixture.root, '.ai/release-spec'), 'release');
+      assert.equal((await firstExit)[0], 0, firstLog);
+      assert.equal((await secondExit)[0], 0, log);
+      const after = descriptor(fixture.root);
+      if (invalidation !== 'down') launchedPids.add(after.app.pid);
+    } finally {
+      writeFileSync(join(fixture.root, '.ai/release-spec'), 'release');
+      first.kill('SIGKILL');
+      second?.kill('SIGKILL');
+    }
+  });
+}
 
 /** What a lane's source checkout runs once before linking: install, then build-e2e.sh. */
 function prebuildE2e(fixture: { root: string }, env: NodeJS.ProcessEnv): void {

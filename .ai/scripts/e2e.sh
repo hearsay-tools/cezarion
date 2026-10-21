@@ -15,6 +15,14 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 
+# Hold the environment through this entire command, before any descriptor/build mutation.
+# The second entry registers the shell as well, so a killed supervisor cannot unprotect it.
+if [ "${TEST_ENV_LEASE_ENTRY:-}" != "$SCRIPT_DIR/e2e.sh" ]; then
+  exec node "$SCRIPT_DIR/test-env-lease.mjs" run sh "$SCRIPT_DIR/e2e.sh" "$@"
+fi
+unset TEST_ENV_LEASE_ENTRY
+node "$SCRIPT_DIR/test-env-lease.mjs" join "$$"
+
 skip() {
   cat >&2 <<EOF
 
@@ -82,6 +90,8 @@ if ! bootstrap; then
   echo "TEST_E2E_STATUS=failed" >&2
   exit 1
 fi
+
+export TEST_ENV_LEASE_BOOTSTRAPPED=1
 
 # ---- 2. gate on the provider ------------------------------------------------
 DESCRIPTOR="$REPO_ROOT/.ai/qa/test-env.json"
