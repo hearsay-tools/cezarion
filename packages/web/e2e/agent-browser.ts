@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { visualSampleExpression } from './visual-ready'
@@ -17,12 +17,13 @@ import { tmpdirExceedsSocketBudget } from '../../../.ai/scripts/resolve-browser-
 
 const repoRoot = resolve(import.meta.dirname, '../../..')
 const descriptorPath = resolve(repoRoot, '.ai/qa/test-env.json')
-const fixtureGitSandbox = mkdtempSync(join(realpathSync(process.platform === 'win32'
-  ? (process.env.SystemRoot ? join(process.env.SystemRoot, 'Temp') : 'C:\\Temp')
-  : '/tmp'), 'cez-e2e-git-'))
-const fixtureGitConfig = join(fixtureGitSandbox, 'gitconfig')
-writeFileSync(fixtureGitConfig, '')
-process.once('exit', () => rmSync(fixtureGitSandbox, { recursive: true, force: true }))
+/**
+ * The empty Git config a spec-owned server reads as `GIT_CONFIG_GLOBAL`: the file the shared test
+ * env already writes (`.ai/scripts/test-env-up.sh`), at one stable path, so a run leaves nothing
+ * behind. A directory made per import and removed on `exit` outlived every Vitest worker, which
+ * stops without that event; one host held 10,126 of them (hearsay-tools/cezarion#1104).
+ */
+const fixtureGitConfig = resolve(repoRoot, '.ai/qa/gitconfig')
 
 /**
  * The built CLI a spec spawns when it needs its OWN cezar rather than the shared test env
@@ -378,6 +379,10 @@ export function fixtureServeEnv(
   // Bound both discovery and the child at tmpdir so nested repos inside temp
   // still fail the safety check, while the host worktree cannot be inherited.
   env.GIT_CEILING_DIRECTORIES = realpathSync(tmpdir())
+  // Emptied on every boot, as the shared env does, so a stray `git config --global` from one
+  // fixture never reaches the next.
+  mkdirSync(dirname(fixtureGitConfig), { recursive: true })
+  writeFileSync(fixtureGitConfig, '')
   env.GIT_CONFIG_GLOBAL = fixtureGitConfig
   env.GIT_CONFIG_NOSYSTEM = '1'
   env.GIT_AUTHOR_NAME = 'Cezar Tests'

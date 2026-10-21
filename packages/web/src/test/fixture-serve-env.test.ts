@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, realpathSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { fixtureServeEnv } from '../../e2e/agent-browser'
 
@@ -78,6 +78,16 @@ it('removes inherited and caller-supplied Git redirection from both discovery an
   expect(env.GIT_CONFIG_NOSYSTEM).toBe('1')
   expect(env.GIT_CEILING_DIRECTORIES).toBe(realpathSync(tmpdir()))
   expect(env.CEZ_HOME).toBe(join(realpathSync(path), '.cez-home'))
+})
+// hearsay-tools/cezarion#1104: a Git sandbox made per import, removed only on `exit`, outlived every
+// Vitest worker (10,126 of them in /tmp on one host). Fixtures share the shared env's stable file.
+it('points every fixture at the shared test env Git config and keeps it empty', () => {
+  const config = resolve(import.meta.dirname, '../../../../.ai/qa/gitconfig')
+  mkdirSync(dirname(config), { recursive: true })
+  writeFileSync(config, '# left by a stray `git config --global`\n')
+  const first = fixtureServeEnv(root()), second = fixtureServeEnv(root())
+  expect([first.GIT_CONFIG_GLOBAL, second.GIT_CONFIG_GLOBAL]).toEqual([config, config])
+  expect(readFileSync(config, 'utf8')).toBe('')
 })
 it('refuses uncertain discovery instead of treating it as a non-Git fixture', () => {
   expect(() => fixtureServeEnv(join(root(), 'missing'))).toThrow()
