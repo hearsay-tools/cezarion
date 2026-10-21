@@ -184,8 +184,11 @@ function SessionActivityCard({
   const conflictText = conflicts.length === 1 ? `PR #${conflicts[0]} conflicts` : `${conflicts.length} PRs conflict`
   const waitReferences = ciWaitReferences(run)
   const summaryReferences = [...new Map([...references, ...waitReferences].map(reference => [referenceKey(reference), reference])).values()]
+  // The saved canonical identity names the provider. The display helper can omit an identity
+  // that repeats the model, and a runner name does not identify who served the model.
+  const provider = run.modelIdentity?.includes('/') ? run.modelIdentity.split('/')[0] : undefined
   const agentSummary: SummaryItem[] = [
-    { id: 'provider', priority: 2, content: identity.identity?.split('/')[0] ?? identity.runner },
+    ...(provider ? [{ id: 'provider', priority: 2, content: provider }] : []),
     { id: 'model', priority: 4, content: identity.model },
     { id: 'effort', priority: 3, content: identity.effort },
     ...(cost ? [{ id: 'cost', priority: 1, content: cost }] : []),
@@ -212,7 +215,7 @@ function SessionActivityCard({
       <button
         type="button"
         aria-expanded={open}
-        aria-label={`Session activity: ${statusText}${conflicts.length ? '; pull request conflicts' : ''}${cost ? `; cost ${cost}` : ''}`}
+        aria-label={`Session activity: ${statusText}${conflicts.length ? '; pull request conflicts' : ''}${cost ? `; cost ${cost}` : ''}${!open ? `; runner ${identity.runner}; model ${identity.model}; effort ${identity.effort}${summaryReferences.length ? `; ${summaryReferences.map(reference => `${reference.kind} #${reference.number}`).join('; ')}` : ''}` : ''}`}
         onClick={() => {
           openByRun.set(run.id, !open)
           setOpen(!open)

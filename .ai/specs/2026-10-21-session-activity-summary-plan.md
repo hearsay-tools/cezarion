@@ -28,3 +28,13 @@
 4. Move worker capacity into a separate row above worker links, outside their disclosure.
 5. Verify focused unit results, web typecheck/build and real browser widths. Capture and publish expanded, folded and narrow screenshots.
 6. Ask for screenshot approval. Open the draft PR only after approval.
+
+## Verification evidence
+
+- Web typecheck and production web build pass.
+- Focused dock, summary, wait, relationships and session-details suites pass through Squeal.
+- Real Chrome: ten widths from 320 to 1080 pixels; both themes; 200% zoom; priority removal and restoration; PR link and keyboard focus.
+- Review-fix `proof_base`: `6f7951872de96c32edeea5c0eed76a606feab07c`.
+- Disposable-worktree command: `npm test -- packages/web/src/routes/task-thread/run-activity-dock.test.tsx`.
+- With the current test copied onto the old source: five expected failures (provider identity and accessible summaries), 45 passes.
+- With only the fixed `run-activity-dock.tsx` copied into that same worktree: all 50 tests pass. The disposable worktree was removed.

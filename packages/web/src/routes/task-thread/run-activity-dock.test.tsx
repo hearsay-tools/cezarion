@@ -434,7 +434,7 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
     expect(summary().textContent).toContain('Waiting for CI')
     expect(summary().textContent).toContain('$1.26')
     expect(summary().textContent).not.toContain('Next check')
-    expect(summary().getAttribute('aria-label')).toBe('Session activity: Waiting for CI; cost $1.26')
+    expect(summary().getAttribute('aria-label')).toContain('Session activity: Waiting for CI; cost $1.26')
   })
 
   it('shows the status and next check first when expanded, with wait details behind it', () => {
@@ -512,6 +512,19 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
     expect(summary().textContent).toContain('codex')
     expect(summary().textContent).toContain('gpt-6')
     expect(summary().textContent).toContain('high')
+    expect(summary().getAttribute('aria-label')).toContain('runner codex; model gpt-6; effort high')
+  })
+
+  it('reads the saved provider even when the model already includes it', () => {
+    renderDock(fresh({ runner: 'claude', model: 'anthropic/opus', modelIdentity: 'anthropic/opus' }), [])
+    ensureOpen()
+    expect(section('usage')?.querySelector('[data-summary-item="provider"]')?.textContent).toBe('anthropic')
+  })
+
+  it('omits the provider when no canonical identity was saved', () => {
+    renderDock(fresh({ runner: 'codex', model: 'gpt-6' }), [])
+    ensureOpen()
+    expect(section('usage')?.querySelector('[data-summary-item="provider"]')).toBeNull()
   })
 
   it('surfaces the waiting PR in the folded status and card', () => {
@@ -520,6 +533,7 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
     expect(section('status-row')?.querySelector('[data-slot="pr-chip"]')?.textContent).toContain('474')
     fireEvent.click(summary())
     expect(summary().querySelector('[data-slot="pr-chip"]')?.textContent).toContain('474')
+    expect(summary().getAttribute('aria-label')).toContain('PR #474')
   })
 
   it('surfaces Issue and PR chips in the folded Workspace row and card', () => {
@@ -530,6 +544,8 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
     fireEvent.click(summary())
     expect(summary().querySelector('[data-slot="issue-chip"]')?.textContent).toContain('15')
     expect(summary().querySelector('[data-slot="pr-chip"]')?.textContent).toContain('42')
+    expect(summary().getAttribute('aria-label')).toContain('Issue #15')
+    expect(summary().getAttribute('aria-label')).toContain('PR #42')
   })
 
   it('keeps capacity above the worker disclosure when the list is folded', async () => {
