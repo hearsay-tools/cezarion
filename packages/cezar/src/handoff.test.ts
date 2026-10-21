@@ -347,4 +347,17 @@ describe('handoffInstructions', () => {
     expect(handoffInstructions({ tools: false, followups: false })).toBe(HANDOFF_ONLY_INSTRUCTIONS);
     expect(handoffInstructions({ tools: false, followups: true })).toBe(HANDOFF_INSTRUCTIONS);
   });
+
+  // hearsay-tools/cezarion#1428: agents asked about drafts and findings they never sent, once
+  // after a plain ask and once after the content lived only in rejected tool-call arguments.
+  it('both variants require the full decision context as assistant text before the question', () => {
+    for (const followups of [false, true]) {
+      const tools = handoffInstructions({ tools: true, followups });
+      expect(tools).toContain('Before you call cezar_ask, send everything the decision depends on (the full draft, every finding, what each option means) as assistant text in this turn.');
+      expect(tools).toContain('The user sees only your assistant text and the question card. Your reasoning and the arguments of a tool call, a rejected call included, never reach them, so never call content "above" unless you sent it as assistant text.');
+      const markers = handoffInstructions({ tools: false, followups });
+      expect(markers).toContain('Before the CEZ:ASK line, send everything the decision depends on (the full draft, every finding, what each option means) as ordinary text in the same message.');
+      expect(markers).toContain('The user sees only your message text and the chips. Your reasoning never reaches them, so never call content "above" unless you sent it as message text.');
+    }
+  });
 });

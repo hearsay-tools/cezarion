@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { humanAskClosedEventSchema, humanInputDeliveredEventSchema, type RunEvent } from './events.ts';
 
-export { askOptionSchema, askQuestionSchema, askRequestSchema } from './ask-schema.ts';
+export { ASK_LIMITS, askOptionSchema, askQuestionSchema, askRequestSchema } from './ask-schema.ts';
 export type { AskOption, AskQuestion, AskRequest } from './ask-schema.ts';
 import { askRequestSchema } from './ask-schema.ts';
 
