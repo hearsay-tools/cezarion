@@ -143,8 +143,9 @@ function workerTargetPhrase(wait: WorkerWaitEntry): string {
 
 /** The footer a delivered turn ends with: every wait still open, or undefined when none is. The
  *  user's reply settles a question and a question the user saw cannot be cancelled, so cancel is
- *  offered only for CI waits, worker waits and timers (hearsay-tools/cezarion#1234). */
-export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
+ *  offered only for CI waits, worker waits and timers (hearsay-tools/cezarion#1234), and only
+ *  when the session has cezar tools (hearsay-tools/cezarion#1270). */
+export function openWaitsFooter(waits: readonly Wait[], { tools }: { tools: boolean } = { tools: true }): string | undefined {
   const open = waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait));
   if (!open.length) return undefined;
   const items = open.map((wait) => {
@@ -156,6 +157,7 @@ export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
   });
   const asked = open.some((wait) => wait.kind === 'human');
   const cancellable = open.some((wait) => wait.kind !== 'human');
+  if (!tools) return `Still open: ${items.join('; ')}.${asked ? " The user's reply answers it." : ''}`;
   const close = !asked ? 'Call cezar_cancel_wait for any you no longer need.'
     : cancellable ? "The user's reply answers your question; call cezar_cancel_wait for any CI wait, worker wait or timer you no longer need."
     : "The user's reply answers it.";
