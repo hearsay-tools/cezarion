@@ -132,7 +132,11 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       // Cancellation has committed before the external check command can complete.
       expect(disk(run.id).lastWaits.find((entry: { id: string }) => entry.id === wait.id)).toMatchObject({ phase: 'cancelled' });
       writeFileSync(gate, '');
-      const late = await supervisor.watch({ ...wait, phase: 'parked' } as Parameters<CiWatcherSupervisor['watch']>[0], new AbortController().signal);
+      const request = { ...wait, phase: 'parked' } as Parameters<CiWatcherSupervisor['watch']>[0];
+      // Reap the cancelled in-flight query before obtaining a genuine late conflict.
+      await supervisor.watch(request, new AbortController().signal);
+      const late = await supervisor.watch(request, new AbortController().signal);
+      expect(late).toMatchObject({ outcome: 'conflicting', mergeable: 'CONFLICTING' });
       const engine = manager as unknown as { resolveWait(id: string, waitId: string, result: unknown): void };
       engine.resolveWait(run.id, wait.id, late);
       expect(open(run.id)).toBeUndefined();
