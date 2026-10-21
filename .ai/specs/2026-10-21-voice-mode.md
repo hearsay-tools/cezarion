@@ -187,7 +187,7 @@ only the ones that apply):
 | Question | Kind | Options |
 | --- | --- | --- |
 | Is this a command for the cockpit? | yes/no | — |
-| Which action? | pick one | catalog entries for v1: open, answer, change answer, tell it, confirm, cancel, pick numbered candidate, none |
+| Which action? | pick one | catalog entries for v1: open, answer (also changes an answer), tell it, confirm, cancel, none |
 | Which status? | pick one | the status map, plus none |
 | Which position? | pick one | first, next, previous, last, 1…N, none |
 | For each question on the open card: which choice? | pick one (one yes/no per choice for multi-select) | that question's choices, plus "my own words", plus "not addressed" |
@@ -208,8 +208,9 @@ actions with their outcomes (Jev has no memory between calls).
   - `POST /api/v1/p/:projectId/voice/decide`. Request: the sentence plus a small context (current
     view, open run id, a pending proposal if any). Response: a discriminated union on `action`
     (`open` with status and position; `answer` with one entry per addressed question, each either a
-    choice label or Other text; `tell` with text; `confirm`; `cancel`; `pick` with a number;
-    `none`), plus confidence and a `decisionId`.
+    choice label or Other text; `tell` with text; `confirm`; `cancel`; `none`), plus confidence
+    and a `decisionId`. A numbered pick never reaches the route: the browser reads a bare number
+    ("two", "2") itself while numbered candidates are shown.
   - `POST /api/v1/p/:projectId/voice/outcome` `{ decisionId, outcome }`, where `outcome` is
     `executed` (navigation ran), `confirmed`, `cancelled`, `replaced` (a new sentence replaced the
     proposal) or `abandoned` (the palette closed, or the user navigated away, with a proposal or a
@@ -239,8 +240,7 @@ actions with their outcomes (Jev has no memory between calls).
 - **Dry run:** under `CEZ_DRY_RUN=1` the engine is always a deterministic fake, even when a key is
   set, so dry runs never reach the network. The fake understands a fixed phrase set: "open
   <position> <status>", "answer <choice text | the Nth answer | other words> to question <N>",
-  "tell it: <text>", "yes, confirmed", "no" / "cancel", and a bare number for a numbered pick.
-  That covers the browser E2E cases.
+  "tell it: <text>", "yes, confirmed", and "no" / "cancel". That covers the browser E2E cases.
 - **Remote mode:** works unchanged; it is plain HTTP and needs no microphone.
 
 ## Transitions out
