@@ -242,6 +242,12 @@ Rules that follow from that:
 
 ## Validation
 
+The pinned TypeScript 7 package is the native compiler and offers no stable
+JavaScript compiler API (`typescript` exports only version fields). For
+source-scanning tests, reuse regex scans over `blank()` from
+`packages/cezar/src/test-wait-discipline.testkit.ts`; see
+`contract-import-boundaries.test.ts` and `test-wait-discipline.test.ts` for examples.
+
 A fresh task worktree (`.ai/cezar/worktrees/<runId>`) has no `node_modules`. Run `pnpm install --frozen-lockfile` in that worktree before the commands below — otherwise Node walks up to the main checkout and typecheck/tests compile against that tree's sources, not this one.
 
 **If Squeal is installed and validating this worktree, use it for iteration.**
