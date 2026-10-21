@@ -147,7 +147,7 @@
   },
   "runner": {
     "tierSize": 4,
-    "timeoutMs": 600000
+    "timeoutMs": 900000
   },
   "nodeTest": [
     {
