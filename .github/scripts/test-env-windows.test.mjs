@@ -21,6 +21,9 @@ test('Windows wrapper serializes callers, preserves arguments, and kills mutator
     const old = spawnSync('git', ['show', `${process.env.TEST_ENV_PROOF_BASE}:.ai/scripts/test-env-lease.mjs`], { encoding: 'utf8' });
     assert.equal(old.status, 0, old.stderr);
     writeFileSync(helper, old.stdout);
+    const oldPs = spawnSync('git', ['show', `${process.env.TEST_ENV_PROOF_BASE}:.ai/scripts/test-env-windows.ps1`], { encoding: 'utf8' });
+    // The identity-only proof predates this helper; the containment proof has it.
+    if (oldPs.status === 0) writeFileSync(join(scripts, 'test-env-windows.ps1'), oldPs.stdout);
   }
   // Native children and the escaped cached server run the exact production launcher.
   writeFileSync(join(root, 'mutator.cjs'), `require('node:fs').writeFileSync('mutator.pid', String(process.pid)); require('node:fs').writeFileSync('job.txt', process.env.TEST_ENV_LEASE_JOB); setInterval(() => {}, 1000)`);
@@ -51,17 +54,20 @@ test('Windows wrapper serializes callers, preserves arguments, and kills mutator
     const jobName = readFileSync(join(root, 'job.txt'), 'utf8');
     const membership = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class Membership { [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr OpenJobObject(uint a,bool i,string n); [DllImport("kernel32.dll")] public static extern IntPtr OpenProcess(uint a,bool i,int p); [DllImport("kernel32.dll")] public static extern bool IsProcessInJob(IntPtr p,IntPtr j,out bool r); }'; $j=[Membership]::OpenJobObject(4,$false,'${jobName}'); $p=[Membership]::OpenProcess(0x1000,$false,${mutator}); $r=$false; $ok=[Membership]::IsProcessInJob($p,$j,[ref]$r); Write-Output "job=$j process=$p queried=$ok member=$r"`], { encoding: 'utf8', timeout: 10_000 });
     stage(`mutator job membership: ${membership.stdout}; ${membership.stderr}`);
+    assert.match(membership.stdout, /queried=True member=True/, 'mutator must belong to the lifetime job');
     stage('arguments verified; testing exclusion');
     await assert.rejects(acquireTestEnvLease(root, { timeoutMs: 50 }), /timed out/);
     stage('exclusion verified; killing supervisor');
     supervisor.kill('SIGKILL');
     await exited;
     stage('supervisor exited; checking mutator cleanup');
-    await until(() => { try { process.kill(mutator, 0); return false; } catch (error) { return error.code === 'ESRCH'; } });
-    stage('mutator stopped; checking cached server');
-    process.kill(cached, 0);
+    // Start recovery immediately: it must never grant while a mutator is live.
     const next = await acquireTestEnvLease(root, { timeoutMs: 30_000 });
-    next.release();
+    try {
+      assert.throws(() => process.kill(mutator, 0), { code: 'ESRCH' });
+      stage('lease reclaimed with mutator stopped; checking cached server');
+      process.kill(cached, 0);
+    } finally { next.release(); }
     console.log('PASS: native wrapper, shell identity, argv, exclusive lease, job cleanup, cached server survival');
   } finally {
     supervisor.kill('SIGKILL');
@@ -74,6 +80,7 @@ test('Windows wrapper serializes callers, preserves arguments, and kills mutator
     stage(`cleanup; captured output: ${log}`);
     const snapshot = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -eq ${mutator || 0} -or $_.ParentProcessId -eq ${supervisor.pid} } | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json`], { encoding: 'utf8', timeout: 10_000 });
     stage(`native process snapshot: ${snapshot.stdout}; ${snapshot.stderr}`);
+    if (mutator) { try { process.kill(mutator, 'SIGKILL'); } catch {} }
     try { rmSync(root, { recursive: true, force: true }); } catch (error) { stage(`fixture cleanup: ${error.message}`); }
   }
 });

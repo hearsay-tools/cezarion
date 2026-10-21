@@ -22,7 +22,7 @@ function run(t, args = [], { installed = true, exit = 0, bootExit = 0, inherited
   }
   // A temporary checkout cannot join the caller checkout's lease.
   const env = { ...inheritedEnv, PATH: `${root}/bin:${process.env.PATH}` };
-  for (const key of ['TEST_ENV_LEASE_TOKEN', 'TEST_ENV_LEASE_ENTRY', 'TEST_ENV_LEASE_BOOTSTRAPPED', 'TEST_ENV_LEASE_JOB']) delete env[key];
+  for (const key of ['TEST_ENV_LEASE_TOKEN', 'TEST_ENV_LEASE_ENTRY', 'TEST_ENV_LEASE_BOOTSTRAPPED', 'TEST_ENV_LEASE_JOB', 'TEST_ENV_LEASE_BROKER']) delete env[key];
   const result = spawnSync('sh', ['.ai/scripts/e2e.sh', ...args], {
     cwd: root, encoding: 'utf8', env,
   });

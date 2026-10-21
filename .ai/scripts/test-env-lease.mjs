@@ -3,8 +3,9 @@
 // Short SQLite transactions make join/release/reclamation atomic, including after SIGKILL.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { connect, createServer } from 'node:net';
 import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
@@ -151,33 +152,75 @@ export async function acquireTestEnvLease(root, { token, pid = process.pid, grou
   } catch (error) { db.close(); throw error; }
 }
 
+// Only the supervisor outside the mutation job can start the cached app.
+// This local pipe admits the existing detach-app operation, never a shell command.
+async function detachApp(args, root) {
+  const fd = openSync(resolve(root, args[0]), 'w');
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (key.startsWith('TEST_ENV_LEASE_')) delete env[key];
+  try {
+    const child = spawn(process.execPath, args.slice(1), { cwd: root, detached: true, stdio: ['ignore', fd, fd], env });
+    await new Promise((done, fail) => { child.once('spawn', done); child.once('error', fail); });
+    child.unref();
+    return child.pid;
+  } finally { closeSync(fd); }
+}
+async function cachedAppBroker(root, token) {
+  const pipe = `\\\\.\\pipe\\cez-test-env-${randomUUID()}`;
+  const sockets = new Set();
+  const server = createServer(socket => {
+    socket.setEncoding('utf8');
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+    socket.on('error', () => {});
+    socket.setTimeout(15_000, () => socket.destroy());
+    let data = '';
+    let handled = false;
+    socket.on('data', chunk => {
+      if (handled) return;
+      data += chunk;
+      if (Buffer.byteLength(data) > 65536) { socket.destroy(); return; }
+      if (!data.includes('\n')) return;
+      handled = true;
+      void (async () => {
+        try {
+          const request = JSON.parse(data);
+          if (request.token !== token || request.operation !== 'detach-app' ||
+              !Array.isArray(request.args) || request.args.length < 2 || request.args.length > 128 ||
+              !request.args.every(arg => typeof arg === 'string' && !arg.includes('\0'))) throw new Error('invalid cached-app request');
+          const pid = await detachApp(request.args, root);
+          socket.end(JSON.stringify({ pid }) + '\n');
+        } catch (error) { socket.end(JSON.stringify({ error: error.message }) + '\n'); }
+      })();
+    });
+  });
+  await new Promise((done, fail) => { server.once('error', fail); server.listen(pipe, done); });
+  return { pipe, close() { for (const socket of sockets) socket.destroy(); server.close(); } };
+}
+async function requestCachedApp(args) {
+  return new Promise((done, fail) => {
+    const socket = connect(process.env.TEST_ENV_LEASE_BROKER);
+    socket.setEncoding('utf8');
+    let data = '';
+    socket.setTimeout(15_000, () => socket.destroy(new Error('cached-app broker timed out')));
+    socket.on('error', fail);
+    socket.on('connect', () => socket.write(JSON.stringify({ operation: 'detach-app', token: process.env.TEST_ENV_LEASE_TOKEN, args }) + '\n'));
+    socket.on('data', chunk => { data += chunk; if (Buffer.byteLength(data) > 4096) socket.destroy(new Error('invalid cached-app receipt')); });
+    socket.on('end', () => {
+      try {
+        const receipt = JSON.parse(data);
+        if (!Number.isSafeInteger(receipt.pid) || receipt.pid <= 0) throw new Error(receipt.error || 'invalid cached-app receipt');
+        done(receipt.pid);
+      } catch (error) { fail(error); }
+    });
+  });
+}
 async function main(args) {
   const root = resolve(import.meta.dirname, '../..');
-  if (args[0] === 'detach-app' && process.platform === 'win32' && process.env.TEST_ENV_LEASE_JOB) {
-    const receipt = resolve(root, '.ai/qa', `detached-${randomUUID()}.json`);
-    try {
-      const command = windowsCommand([process.execPath, resolve(process.argv[1]), 'detach-app-escaped', receipt, ...args.slice(1)]);
-      const output = windowsProbe('breakaway', windowsPayload({ command }));
-      if (output === undefined) throw new Error('cannot detach cached app from Windows test job');
-      const { pid } = JSON.parse(readFileSync(receipt, 'utf8'));
-      console.log(pid);
-    } finally { rmSync(receipt, { force: true }); }
-    return;
-  }
-  const receipt = args[0] === 'detach-app-escaped' ? args.splice(1, 1)[0] : undefined;
-  if (args[0] === 'detach-app' || args[0] === 'detach-app-escaped') {
-    // The cached server outlives tests and must not hold their command group alive.
-    // Node's detached spawn works with and without an external `setsid` command.
-    const fd = openSync(args[1], 'w');
-    const env = { ...process.env };
-    for (const key of ['TEST_ENV_LEASE_TOKEN', 'TEST_ENV_LEASE_ENTRY', 'TEST_ENV_LEASE_BOOTSTRAPPED', 'TEST_ENV_LEASE_JOB']) delete env[key];
-    try {
-      const child = spawn(process.execPath, args.slice(2), { detached: true, stdio: ['ignore', fd, fd], env });
-      await new Promise((resolveSpawn, reject) => { child.once('spawn', resolveSpawn); child.once('error', reject); });
-      child.unref();
-      if (receipt) writeFileSync(receipt, JSON.stringify({ pid: child.pid }));
-      else console.log(child.pid);
-    } finally { closeSync(fd); }
+  if (args[0] === 'detach-app') {
+    if (process.platform === 'win32' && process.env.TEST_ENV_LEASE_JOB && !process.env.TEST_ENV_LEASE_BROKER) throw new Error('missing cached-app broker');
+    console.log(process.platform === 'win32' && process.env.TEST_ENV_LEASE_JOB
+      ? await requestCachedApp(args.slice(1)) : await detachApp(args.slice(1), root));
     return;
   }
   if (args[0] === 'join') {
@@ -194,8 +237,10 @@ async function main(args) {
     token: process.env.TEST_ENV_LEASE_TOKEN,
     onWait: message => console.error(`[test-env] ${message}`),
   });
+  let broker;
   try {
-    const env = { ...process.env, TEST_ENV_LEASE_TOKEN: lease.token, TEST_ENV_LEASE_ENTRY: args[2], ...(job ? { TEST_ENV_LEASE_JOB: job } : {}) };
+    if (job) broker = await cachedAppBroker(root, lease.token);
+    const env = { ...process.env, TEST_ENV_LEASE_TOKEN: lease.token, TEST_ENV_LEASE_ENTRY: args[2], ...(job ? { TEST_ENV_LEASE_JOB: job, TEST_ENV_LEASE_BROKER: broker.pipe } : {}) };
     const command = job ? ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', windowsScript, 'run', windowsPayload({ job, parent: process.pid, start: identity(process.pid).start, command: windowsCommand(args.slice(1)) })] : args.slice(1);
     const child = spawn(command[0], command.slice(1), {
       stdio: 'inherit', detached: !job, env,
@@ -217,7 +262,7 @@ async function main(args) {
       process.off('SIGTERM', term);
       process.off('SIGINT', int);
     }
-  } finally { lease.release(); }
+  } finally { broker?.close(); lease.release(); }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

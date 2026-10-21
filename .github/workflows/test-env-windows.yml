@@ -38,6 +38,19 @@ jobs:
           }
           # GitHub's pwsh wrapper otherwise propagates the expected red exit.
           $global:LASTEXITCODE = 0
+      - name: Prove shell descendants escape the pre-broker job
+        shell: pwsh
+        env:
+          TEST_ENV_PROOF_BASE: '3d352052def6d38bc9f6172b6f3c06089f960f35'
+        run: |
+          git fetch --depth=1 origin $env:TEST_ENV_PROOF_BASE
+          $output = node --test .github/scripts/test-env-windows.test.mjs 2>&1 | Out-String
+          $failed = $LASTEXITCODE -ne 0
+          Write-Output $output
+          if (!$failed -or $output -notmatch 'mutator must belong to the lifetime job') {
+            throw 'Expected the pre-broker mutator containment failure'
+          }
+          $global:LASTEXITCODE = 0
       - name: Verify production lease on native Windows
         shell: pwsh
         run: node --test .github/scripts/test-env-windows.test.mjs

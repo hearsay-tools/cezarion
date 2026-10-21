@@ -26,7 +26,7 @@ public static class LeaseWindows {
   public static IntPtr Open(string name) {
     var job=CreateJobObject(IntPtr.Zero,name);
     if(job==IntPtr.Zero) throw new Win32Exception();
-    var info=new Extended(); info.Basic.Flags=0x2000|0x800; // KILL_ON_JOB_CLOSE | BREAKAWAY_OK
+    var info=new Extended(); info.Basic.Flags=0x2000; // KILL_ON_JOB_CLOSE; mutators must never break away
     if(!SetInformationJobObject(job,9,ref info,(uint)Marshal.SizeOf<Extended>())) { CloseHandle(job); throw new Win32Exception(); }
     return job;
   }
@@ -40,9 +40,9 @@ public static class LeaseWindows {
     finally { Marshal.FreeHGlobal(data); CloseHandle(job); }
   }
   [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int kind);
-  public static uint Start(string command, IntPtr job, bool escape) {
+  public static uint Start(string command, IntPtr job) {
     var si=new Startup(); si.cb=(uint)Marshal.SizeOf<Startup>(); si.flags=0x100; si.input=GetStdHandle(-10); si.output=GetStdHandle(-11); si.error=GetStdHandle(-12); ProcessInfo pi;
-    if(!CreateProcess(null,new StringBuilder(command),IntPtr.Zero,IntPtr.Zero,true,4u|(escape?0x01000000u:0u),IntPtr.Zero,null,ref si,out pi)) throw new Win32Exception();
+    if(!CreateProcess(null,new StringBuilder(command),IntPtr.Zero,IntPtr.Zero,true,4u,IntPtr.Zero,null,ref si,out pi)) throw new Win32Exception();
     try {
       if(job!=IntPtr.Zero && !AssignProcessToJobObject(job,pi.process)) throw new Win32Exception();
       if(ResumeThread(pi.thread)==0xffffffff) throw new Win32Exception();
@@ -55,12 +55,6 @@ public static class LeaseWindows {
 
 if ($Mode -eq 'live') { [LeaseWindows]::Live($Payload); exit }
 $inputData = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Payload)) | ConvertFrom-Json
-if ($Mode -eq 'breakaway') {
-  $childPid = [LeaseWindows]::Start($inputData.command, [IntPtr]::Zero, $true)
-  $child = Get-Process -Id $childPid -ErrorAction SilentlyContinue
-  if ($child) { $child.WaitForExit() }
-  exit
-}
 if ($Mode -ne 'run') { throw 'Unknown Windows lease mode' }
 $job = [LeaseWindows]::Open($inputData.job)
 try {
@@ -71,7 +65,7 @@ try {
   [void]$parent.Handle
   if ([string]$parent.StartTime.ToUniversalTime().Ticks -ne $inputData.start) { throw 'Lease supervisor identity changed' }
   if ($parent.HasExited) { throw 'Lease supervisor exited before command launch' }
-  $childPid = [LeaseWindows]::Start($inputData.command, $job, $false)
+  $childPid = [LeaseWindows]::Start($inputData.command, $job)
   $child = Get-Process -Id $childPid -ErrorAction SilentlyContinue
   if (!$child) { exit 1 }
   while (!$child.WaitForExit(100)) {

@@ -158,7 +158,7 @@ done
 
 // Fixtures are independent checkouts, even when Squeal runs inside a leased browser setup.
 const fixtureEnv = { ...process.env };
-for (const key of ['TEST_ENV_LEASE_TOKEN', 'TEST_ENV_LEASE_ENTRY', 'TEST_ENV_LEASE_BOOTSTRAPPED', 'TEST_ENV_LEASE_JOB']) delete fixtureEnv[key];
+for (const key of ['TEST_ENV_LEASE_TOKEN', 'TEST_ENV_LEASE_ENTRY', 'TEST_ENV_LEASE_BOOTSTRAPPED', 'TEST_ENV_LEASE_JOB', 'TEST_ENV_LEASE_BROKER']) delete fixtureEnv[key];
 
 const E2E_BUILD = '.ai/qa/build/cezar';
 
