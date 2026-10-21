@@ -933,6 +933,22 @@ const VARIANT_HINTS: Record<string, string | undefined> = {
 const RESTART_CONTINUATION_PROMPT =
   'The cezar process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.';
 
+/** Compose only at delivery. The durable continuation retains its original text/attachments. */
+function withResumeContext(prompt: string, message: RunRecord['continuationMessage']): string {
+  const context = message?.resumeContext;
+  if (!context?.failure && !context?.restarted) return prompt;
+  const parts: string[] = [];
+  if (context.restarted) parts.push('The cezar process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context.');
+  if (context.failure) {
+    const { stepId, error } = context.failure;
+    // Error messages can contain newlines; keep the diagnostic on one line without changing
+    // the saved error, or the human text that follows it.
+    parts.push(`The previous ${stepId ? `step ${JSON.stringify(stepId)}` : 'turn'} failed: ${error.replace(/[\r\n\u2028\u2029]+/g, ' ')}`);
+  }
+  parts.push('Background commands from that session may have stopped; verify their state before restarting them.');
+  return `${parts.join(' ')}\n${prompt}`;
+}
+
 interface PendingContinuation {
   stepId: string;
   sessionId: string | undefined;
@@ -3223,6 +3239,21 @@ export class RunManager {
     }
   }
 
+  /** Save restart evidence before queue admission or the next startup await. */
+  private checkpointRestartContext(run: RunRecord, queuedStepId?: string): RunRecord {
+    const message = run.continuationMessage ?? (queuedStepId ? {
+      ...this.toQueuedMessage(run.id, []), id: queuedStepId, text: 'Continue.', origin: 'lifecycle' as const,
+    } : undefined);
+    if (!message) return run;
+    const updated = this.store.updateRun(run.id, { continuationMessage: {
+      ...message,
+      ...(message.origin === 'lifecycle' && message.text === RESTART_CONTINUATION_PROMPT ? { text: 'Continue.' } : {}),
+      resumeContext: { ...message.resumeContext, restarted: true },
+    } }) ?? run;
+    this.store.flush();
+    return updated;
+  }
+
   /**
    * Make one `queued` RECORD executable again — the engine half a queued run needs but does not
    * persist (`pendingJobs` / `pendingContinuations` are process-local, the record is not).
@@ -3247,6 +3278,7 @@ export class RunManager {
       ? [...run.steps].reverse().find((step) => step.id !== queuedContinuation.id && step.sessionId)
       : undefined;
     if (queuedContinuation && sessionStep?.sessionId) {
+      if (reason === 'cezar restarted') run = this.checkpointRestartContext(run, queuedContinuation.id);
       // An accepted worker's continuation extends the step owning the resumed session, so its
       // runner and account come from that step's pinned identity (#452), never the run-level
       // first-step fields — those would re-queue a claude review's Continue as a codex turn with
@@ -3465,7 +3497,10 @@ export class RunManager {
         for (const wait of openWaits(run)) this.armWait(run.id, wait);
         // Only the durable, explicitly human payload may resume an unanswered
         // question. A refused recovery leaves attention, not terminal failure.
-        if (run.continuationMessage?.origin === 'human') this.continueRun(run.id, {}, true);
+        if (run.continuationMessage?.origin === 'human') {
+          run = this.checkpointRestartContext(run);
+          this.continueRun(run.id, {}, true);
+        }
         continue;
       }
       // No process survived. Open waits re-arm from their stored deadlines (an overdue timer
@@ -3524,6 +3559,7 @@ export class RunManager {
       }
       // `running`: the process died mid-turn. Mark it interrupted (the state
       // continueRun expects), then pick the work back up from the last session.
+      run = this.checkpointRestartContext(run);
       const interruptedStepId = run.currentStepId;
       const finishedAt = new Date().toISOString();
       for (const step of run.steps) {
@@ -5825,7 +5861,7 @@ export class RunManager {
     }
     // Every delivered turn ends with the waits still open.
     const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? [], { tools: !state.toolless });
-    if (footer) content = [...content, { type: 'text', text: footer }];
+    if (footer) content = [...content, { type: 'text', text: `\n\n${footer}` }];
     // A refusal queued for a closed session (hearsay-tools/cezarion#1301): this turn is the nudge's.
     const refusal = !!this.store.getRun(runId)?.agentInputs?.some(input => input.purpose === 'completion-refusal' && inputIds.includes(input.id));
     const flight: NonNullable<ActiveRun['agentInputFlight']> = { session, inputIds,
@@ -6181,7 +6217,7 @@ export class RunManager {
     // answers every human wait, so the footer names none.
     const footer = userAuthored ? openWaitsFooter((this.store.getRun(runId)?.waits ?? []).filter(wait => wait.kind !== 'human'), { tools: !state.toolless }) : undefined;
     const delivered = userAuthored ? state.session.sendMessage([...deliverable, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : []),
-      ...(footer ? [{ type: 'text' as const, text: footer }] : [])])
+      ...(footer ? [{ type: 'text' as const, text: `\n\n${footer}` }] : [])])
       : this.submitAgentInput(runId, state, deliverable);
     if (delivered && expanded !== blocks) this.provisionLiveSlashSkill(runId, state, blocks);
     if (delivered) {
@@ -6573,6 +6609,10 @@ export class RunManager {
       this.resetWakeDelivery(runId); this.resetAutomaticWakes(runId);
     }
 
+    const previousStep = [...run.steps].reverse().find(step => step.status !== 'pending');
+    const failure = previousStep?.status === 'failed' && previousStep.error
+      ? { stepId: previousStep.id, error: previousStep.error }
+      : run.error ? { error: run.error } : undefined;
     let continuationNumber = 1;
     while (run.steps.some(step => step.id === `continue-${continuationNumber}`)) continuationNumber++;
     const stepId = `continue-${continuationNumber}`;
@@ -6583,11 +6623,18 @@ export class RunManager {
       ...(opts.text?.trim() ? [{ type: 'text' as const, text: opts.text.trim() }] : []),
       ...(opts.images ?? []),
     ]);
-    const prompt = message.text || 'Continue.';
+    const lifecycleRestart = message.text === RESTART_CONTINUATION_PROMPT
+      && (recovered ? recovered.origin === 'lifecycle' : deferForCapacity && !conversation && !opts.answerInputId);
+    const prompt = lifecycleRestart ? 'Continue.' : message.text || 'Continue.';
+    // Generated restart text becomes structured evidence. Human text remains verbatim,
+    // even when it happens to equal the old lifecycle fallback.
+    const resumeContext = lifecycleRestart ? { ...recovered?.resumeContext, restarted: true as const }
+      : recovered?.resumeContext ?? (failure ? { failure } : undefined);
     // Accepting a continuation is a crash boundary: both its recoverable status
     // and the original prompt/URLs must reach disk before the first startup await.
     const acceptedPatch = {
       continuationMessage: { ...message, id: stepId, text: prompt,
+        ...(resumeContext ? { resumeContext } : {}),
         ...(conversation ? { agentInputId: conversation.input.id } : opts.answerInputId ? { agentInputId: opts.answerInputId } : {}),
         // A parent's answer (#505) answers the ask exactly like a human's.
         origin: recovered ? recovered.origin : deferForCapacity && !opts.answerInputId ? 'lifecycle' as const : 'human' as const },
@@ -7195,8 +7242,8 @@ export class RunManager {
     try {
     // Provisioning determines the actual capability, including a fresh session after recovery.
     const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? [], { tools: !!ciTools });
-    const openingPrompt = expandRegistrySlashSkillText(prompt, state.skills ?? [], continuationFiles) +
-      (setupNote ? `\n\n${setupNote}` : '') + (footer ? `\n\n${footer}` : '');
+    const openingPrompt = withResumeContext(expandRegistrySlashSkillText(prompt, state.skills ?? [], continuationFiles) +
+      (setupNote ? `\n\n${setupNote}` : '') + (footer ? `\n\n${footer}` : ''), checkpoint);
     const continuationTail = composeSystemPrompt(
       record?.systemPrompt,
       delegation?.instructions,

@@ -568,6 +568,14 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
 
 /** Criteria driven through `whileOpen` rather than one settled observation. */
 const CONTROL_CRITERIA = [
+  // hearsay-tools/cezarion#1380: workflows/resume-diagnostics-parity.test.ts.
+  { id: 'R85', scenario: 'provider-error' },
+  { id: 'R86', scenario: 'done' },
+  { id: 'R87', scenario: 'done' },
+  { id: 'R88', scenario: 'provider-error' },
+  { id: 'R89', scenario: 'provider-error' },
+  { id: 'R90', scenario: 'done' },
+  { id: 'R91', scenario: 'done' },
   { id: 'D1', scenario: 'baseline' },
   // hearsay-tools/cezarion#1284: a forked skill starts no native subagent in a restricted session.
   { id: 'D2', scenario: 'forked-skill' },
@@ -630,6 +638,9 @@ const CONTROL_CRITERIA = [
   { id: 'R82', scenario: 'baseline' },
   { id: 'R83', scenario: 'baseline' },
   { id: 'R84', scenario: 'baseline' },
+  // hearsay-tools/cezarion#1399: workflows/ci-wait-rerun-parity.test.ts keeps
+  // partial green pending during a rerun, including recovery without a session.
+  { id: 'R85', scenario: 'baseline' },
   { id: 'R28', scenario: 'baseline' },
   { id: 'R29', scenario: 'baseline' },
   { id: 'R30', scenario: 'baseline' },

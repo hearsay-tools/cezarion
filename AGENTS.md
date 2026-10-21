@@ -78,6 +78,27 @@ exit must also say so. For example,
 its list of input mechanisms and exits does not enumerate the transitions out of
 every state the change retains.
 
+**Enumerate tool-list kinds before changing a runner's tool flags.** A spec or
+plan that changes how `allowedTools` or `bashAllowlist` maps onto a runner's tool
+flags MUST carry a **Tool-list kinds** table, reviewed with the spec or plan
+before implementation starts. Use one row per kind, for each affected runner:
+**Input kind | Emitted runner flags | Callable built-in, MCP and extension tools
+at shipped defaults**. Show effective tool access, not only the flags sent;
+state when a runner ignores a restriction or cannot distinguish two input kinds.
+
+Cover all of these kinds: `allowedTools` unset; the step default from
+`allowedToolsForStep`; a list inherited from another runner's default (such as a
+pi worker spawned from a Claude parent); a hand-written copy of the default
+list; the default plus an extra built-in or custom name; the default plus an
+`mcp__` name; a narrowed list; an empty list; and a list with a `bashAllowlist`.
+
+hearsay-tools/cezarion#1305 and hearsay-tools/cezarion#1360 are the worked
+example: the pi plan compared rules for recognizing the default list without
+enumerating their inputs. Reviews then found extra MCP names, extra non-default
+names and hand-written default copies with different access implications. The
+table makes those cases explicit for design review; it does not decide which
+ones should share a policy.
+
 **Commit an outcome with what it depends on, or after it.** A write that records
 an outcome (`delivered`, `charged`, `settled`, `answered`) must commit atomically
 with the write holding what that outcome needs, or after that write commits.

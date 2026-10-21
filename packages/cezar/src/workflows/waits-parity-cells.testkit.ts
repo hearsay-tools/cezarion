@@ -357,7 +357,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         fireTimer(timer.id);
         await until(() => settled(run.id, timer.id)?.phase === 'delivered' && prompted(runner, timerText(timer, 'u2')).length > 0);
         const wake = prompted(runner, timerText(timer, 'u2')).at(-1)!;
-        expect(wake).toContain(`Still open: CI wait ${ci.id} for acme/repo#12`);
+        expect(wake).toContain(`\n\nStill open: CI wait ${ci.id} for acme/repo#12`);
         expect(wake).not.toContain(`timer ${timer.id}`);
         await until(() => turnEnds(run.id) > turns && parkedOn(run.id, waitOfKind(run.id, 'ci')));
         expect(store.getRun(run.id)?.waits).toEqual([expect.objectContaining({ id: ci.id, phase: 'open' })]);
@@ -377,7 +377,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         const text = `${HARNESS_ADAPTERS[runner].scenarios.hold!}\nPlease also update the docs`;
         expect(manager.sendMessage(run.id, [{ type: 'text', text }])).toBe(true);
         await until(() => prompted(runner, 'Please also update the docs').length > 0);
-        expect(prompted(runner, 'Please also update the docs').at(-1)).toContain(`Still open: CI wait ${ci.id} for acme/repo#12`);
+        expect(prompted(runner, 'Please also update the docs').at(-1)).toContain(`\n\nStill open: CI wait ${ci.id} for acme/repo#12`);
         expect(waitOfKind(run.id, 'ci')).toMatchObject({ id: ci.id, phase: 'open' });
         expect(external.aborted()).toBe(false);
         await until(() => turnEnds(run.id) > turns && parkedOn(run.id, waitOfKind(run.id, 'ci')));

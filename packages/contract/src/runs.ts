@@ -148,6 +148,12 @@ export const continuationMessageSchema = queuedMessageSchema.extend({
   origin: z.enum(['human', 'lifecycle']).optional(),
   /** An attributed parent message used as the opening prompt, never a human answer. */
   agentInputId: z.uuid().optional(),
+  /** Captured before clearing the run error. Keep generated context separate from human
+   * text so repeated restart recovery never accumulates diagnostic prefixes. */
+  resumeContext: z.object({
+    failure: z.object({ stepId: z.string().optional(), error: z.string() }).optional(),
+    restarted: z.literal(true).optional(),
+  }).optional(),
 });
 
 /** One aggregated sample of a run's live process tree (`src/core/process-usage.ts`). */

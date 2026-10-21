@@ -119,7 +119,10 @@ and an orchestrator keeps a whole queue of them moving.
   push a **draft PR** — never an auto-merge.
 - ♻️ **Losing a session when it fails.** Every run records its `claude` session id.
   Take it over interactively in one click (`claude --resume <id>`), or continue it
-  in-process from the cockpit.
+  in-process from the cockpit. After a failure, Continue tells the agent which
+  step failed and gives its saved error before your message. Restart recovery
+  also explains the restart when replaying a saved message. Background commands
+  may have stopped; the agent is told to verify their state before restarting them.
 - 🔀 **Locked into one agent vendor.** Most tools wed you to a single CLI. cezar
   drives **Claude Code, Codex and OpenCode (experimental)** through one runner seam — set a
   default, pick a backend per task, or mix them inside one workflow (implement
@@ -575,6 +578,13 @@ wake-up** turned off in **Settings → Resources**, `cezar_wait` refuses a timer
 with `wake_budget_spent`, and a run with nothing else to wait on waits for you. The
 budget is kept on the task, so a cockpit restart keeps it; a message from you or a
 Continue starts it again.
+
+A CI wait stays pending while any GitHub Actions workflow run on its captured
+head commit is incomplete, even when a rerun temporarily hides that run's checks.
+It checks again every 30 seconds within the original deadline. Once those runs
+complete, it reads the checks again to decide the result. A result describes what
+GitHub reported; it does not predict workflows that have not appeared yet or grant
+merge approval.
 
 The agent asks you with `cezar_ask`, a card of one to four questions in the ask
 format. A question with two to four options shows them as choices; a question without

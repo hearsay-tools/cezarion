@@ -1214,6 +1214,12 @@ the observation. Later successful settlement must leave that failed attempt inta
 Clean session closure while CI is pending still parks without failure. No runner
 exemptions or normalized-event injection.
 
+**R85** (hearsay-tools/cezarion#1399), in `workflows/ci-wait-rerun-parity.test.ts`,
+drives every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native CI tool
+call with the real supervisor and a controlled GitHub wire. A partial green check
+list stays pending while a rerun is active, then delivers one observation after
+the checks return and finish. Recovery covers the same wait without a live session.
+
 **U0–U19** (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234, hearsay-tools/cezarion#1260, hearsay-tools/cezarion#1235, with U2c, U2t, U2w, U3w, U5a, U5c, U5d, U6s, U7d, U7h, U7w, U9c, U9h, U9u, U9w, U14m and U16b) pin the
 wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
 normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`, `cezar_ask`,
@@ -1553,17 +1559,17 @@ records `worktreeSetup.status === 'done'`, and the paragraph saying what ran rea
 message on each runner's own wire. The note is appended in `workflows/run.ts` before the
 runner seam, so no runner can lose it on the way. No runner is exempt.
 
-**R86–R90** (hearsay-tools/cezarion#1408), in `core/skill-provision-parity.test.ts`, drive every
+**R92–R96** (hearsay-tools/cezarion#1408), in `core/skill-provision-parity.test.ts`, drive every
 `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire on a skill-driven task in its
-own worktree. The selected skill names a companion. R86: Start installs both in `.claude`,
-`.agents` and `.cursor` `skills/`, and nothing under them shows in `git status`. R87: an
-ordinary Continue, whose prompt names no skill, reinstalls the step skill's companion. R88:
-`recover()` resumes a persisted continuation with no live session and reinstalls it. R89: a
+own worktree. The selected skill names a companion. R92: Start installs both in `.claude`,
+`.agents` and `.cursor` `skills/`, and nothing under them shows in `git status`. R93: an
+ordinary Continue, whose prompt names no skill, reinstalls the step skill's companion. R94:
+`recover()` resumes a persisted continuation with no live session and reinstalls it. R95: a
 live `/name` message is delivered at once, its companions install after it, and one durable
 lifecycle agent input names what landed; a repeat installs nothing and sends nothing. That
 input follows the agent-input rules: a pending question holds it until the question is
 answered. Cezar does not rely on a runner's native lookup seeing a skill added mid-session,
-so the input is the delivery on every runner. R90: Stop while the install is held launches no
+so the input is the delivery on every runner. R96: Stop while the install is held launches no
 agent. No runner is exempt.
 
 Crash-diagnostic rows **S15–S17** (hearsay-tools/cezarion#499) drive every `RUNNER_IDS` adapter's
