@@ -1195,6 +1195,11 @@ Calls made by the agent:
   unless one is already open, in the live store and in the cold index alike. Recovery's
   `surfaceHumanWait` attaches it to the transcript's pending ask, so no second card appears.
   On any other row, or when false, the summary is dropped.
+- **Recovery adopts an unanswered transcript ask.** A live row can carry an unanswered
+  `ask.requested` with no human wait and a stored summary of false (summaries were refreshed
+  lazily before 4b). Recovery opens an agent human wait for it (`via: 'ask-line'`,
+  `turnId: 'recovered'`, `askSeq` the ask's seq), so it still reads Needs you; no second card is
+  shown (`adoptTranscriptAsk`).
 - **No store schema bump.** The planned schema 9 is not needed: a schema-8 build reads a 4b row
   correctly, because every reader it has derives attention from the human wait as well. A row
   4b rewrites only loses the two dropped keys.
@@ -1215,6 +1220,7 @@ tables hold for the states they list. One row per exit.
 | | A human message or the ask's answer | The user | The answer settles the wait at acceptance and is delivered at the next turn boundary, as for any human wait |
 | | Finish, Stop or delete | The user | Settles as for any parked run; the wait is cancelled |
 | | No pending ask in the transcript | Recovery | The wait stays open and the run reads Needs you; only a human action ends it, as for any open question (phase 2a) |
+| A live row with an unanswered `ask.requested` and no human wait | Restart recovery | `RunManager.recover` → `adoptTranscriptAsk` | An open agent human wait is committed with the ask's `askSeq`; the run reads Needs you; its exits are the rows above |
 | `running` wake turn with a shown question (`askSeq`) | The turn ends | The runner's turn end | Parks `waiting` on the open human wait; Needs you, as before 4b |
 | | The user answers | The user | The wait settles; the answer is delivered at the turn boundary (transcript receipt) |
 | | Stop | The user | The session ends; the run settles `cancelled` |

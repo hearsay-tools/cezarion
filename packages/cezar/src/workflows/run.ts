@@ -3512,6 +3512,9 @@ export class RunManager {
       // A worker no process survived for is a closed session: Cezar's fallback question goes as at an
       // idle close, and the worker recovers as its plain park did (hearsay-tools/cezarion#1301).
       if (run.delegation?.role === 'worker' && run.status === 'waiting' && this.supersedeWorkerFallback(run.id)) run = this.store.getRun(run.id)!;
+      // Phase 4b (hearsay-tools/cezarion#1236): attention reads the human wait, so an unanswered ask
+      // an older cezar left without one gets one now, attached to that ask.
+      if (this.adoptTranscriptAsk(run.id)) run = this.store.getRun(run.id)!;
       // hearsay-tools/cezarion#1234: a crash after a human wait's registration and before its turn
       // end shows the question now. The run waits on the user, its other waits re-armed.
       if (this.unsurfacedHumanWait(run.id)) {
@@ -5596,6 +5599,21 @@ export class RunManager {
     // Fallback human gates use the same exact successful-delivery receipt as asks,
     // without inventing a structured question card or changing its summary. Indexed (#880).
     return this.store.transcriptFacts(runId).pendingGateSeq;
+  }
+
+  /** An unanswered `ask.requested` with no open human wait (a row written before every ask opened
+   *  one) gets an open agent wait shown as that ask. Answer delivery still reads the transcript. */
+  private adoptTranscriptAsk(runId: string): boolean {
+    const askSeq = this.pendingHumanAskSeq(runId);
+    const run = this.store.getRun(runId);
+    if (askSeq === undefined || !run || run.waits?.some(wait => wait.kind === 'human' && wait.phase === 'open')) return false;
+    try {
+      this.store.commitWait(runId, { id: randomUUID(), kind: 'human', source: 'agent', via: 'ask-line', registeredAt: new Date().toISOString(), phase: 'open', turnId: 'recovered', askSeq });
+      return true;
+    } catch (error) {
+      console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
   }
 
   private hasPendingHumanAsk(runId: string): boolean {

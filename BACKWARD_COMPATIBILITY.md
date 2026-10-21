@@ -377,7 +377,8 @@ loads that way:
   open `human` wait with `via: 'ask-line'`, `turnId: 'legacy'` and an id derived from the
   run id, unless the run already has an open human wait; recovery attaches it to the
   transcript's pending ask, so the card is not shown twice. On any other run, or when
-  false, the summary is dropped. This needs no schema bump: a schema-8 build reads the
+  false, the summary is dropped. Recovery also opens such a wait for a live run whose
+  transcript holds an unanswered ask with no human wait, attached to that ask. This needs no schema bump: a schema-8 build reads the
   rewritten row correctly, because it computes the same attention from the human wait.
 - An unreadable wait entry, legacy or new, is dropped by itself: the run and its
   readable waits load, `lastWaitsError` says what happened, and the status is left

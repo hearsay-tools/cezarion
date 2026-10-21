@@ -27,6 +27,7 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { parseTaskMarkers } from '../runs/task-markers.ts';
 import { appendTurnText, trackTurnTail, RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
+import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { readPersistedRuns, crashStore } from '../runs/run-store.testkit.ts';
 import { monitoringTimerOf, monitoringWakeOf } from './waits.testkit.ts';
 
@@ -1693,6 +1694,25 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     });
     unregisterRunProcess(record.id);
     surviving?.end();
+  }, 30_000);
+
+  // Phase 4b (hearsay-tools/cezarion#1236): attention reads the human wait, so a row an older cezar
+  // left with an unanswered ask and no wait gets one at recovery, attached to that ask.
+  it('opens a human wait at recovery for an unanswered ask the record has no wait for', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, candidate => candidate?.status === 'waiting');
+    manager.dispose();
+    store.updateRun(record.id, { waits: undefined });
+    const ask = store.appendEvent(record.id, { type: 'ask.requested', requestId: 'legacy-question',
+      questions: [{ header: 'Choice', question: 'Which implementation?', options: [{ label: 'First' }, { label: 'Second' }] }] });
+    manager = createFixtureManager(store, repoRoot);
+    await manager.recover();
+    const human = store.getRun(record.id)?.waits?.filter(wait => wait.kind === 'human' && wait.phase === 'open') ?? [];
+    expect(human).toEqual([expect.objectContaining({ source: 'agent', askSeq: ask.seq })]);
+    expect(store.getRun(record.id)?.status).toBe('waiting');
+    expect(deriveAttention(store.getRun(record.id)!).label).toBe('needs you');
+    expect(store.readEvents(record.id).filter(event => event.type === 'ask.requested')).toHaveLength(1);
   }, 30_000);
 
   it('honors cancellation that races an idle-close callback', async () => {
