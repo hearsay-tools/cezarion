@@ -1112,12 +1112,6 @@
       "count": 3
     },
     {
-      "file": "workflows/system-prompt.test.ts",
-      "rule": "sleep",
-      "site": "await new Promise((resolve) => setTimeout(resolve, 700));",
-      "count": 2
-    },
-    {
       "file": "workflows/worker-destroy.test.ts",
       "rule": "short-bound",
       "site": "await vi.waitFor(() => expect(store.getRun(w.id)?.status).toBe('failed'), { timeout: 500 });",
