@@ -23,7 +23,7 @@ export const ciPrIdentitySchema = z.object({
   headSha: sha,
 }).strict();
 export type CiPrIdentity = z.infer<typeof ciPrIdentitySchema>;
-export const ciWaitOutcomeSchema = z.enum(['passed', 'failed', 'cancelled', 'skipped', 'no_checks', 'head_changed', 'deadline', 'error']);
+export const ciWaitOutcomeSchema = z.enum(['passed', 'failed', 'cancelled', 'skipped', 'no_checks', 'head_changed', 'conflicting', 'deadline', 'error']);
 export const ciWaitErrorCodeSchema = z.enum(['invalid_request', 'unsupported_host', 'gh_missing', 'authentication', 'inaccessible_pr', 'malformed_data', 'output_limit', 'query_timeout', 'command_failed', 'wait_conflict', 'capacity', 'unavailable', 'unauthorized', 'persistence',
   'manager_disposed', 'capability_revoked', 'run_missing', 'run_not_running', 'run_stopping',
   'session_replaced', 'session_closed', 'run_cancelled', 'finish_requested', 'generation_mismatch',
@@ -45,6 +45,8 @@ export const ciWaitResultSchema = z.object({
   outcome: ciWaitOutcomeSchema,
   headSha: sha,
   observedHeadSha: sha.optional(),
+  mergeable: z.enum(['MERGEABLE', 'CONFLICTING', 'UNKNOWN']).optional(),
+  mergeStateStatus: z.string().max(64).optional(),
   observedAt: z.iso.datetime(),
   checks: z.array(z.object({ name: z.string().max(256), state: z.string().max(256), link: z.string().max(2048) }).strict()).max(100),
   totalChecks: z.number().int().nonnegative(),

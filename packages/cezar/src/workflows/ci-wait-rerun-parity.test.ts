@@ -31,7 +31,7 @@ const lastWaitOf=(id:string)=>store.getRun(id)?.lastWaits?.find(wait=>wait.kind=
 describe('hidden CI reruns across native harnesses', {timeout:30_000},()=>{
  useWorkerWaitFixture();
  for(const runner of RUNNER_IDS) for(const recovered of [false,true]) {
-  it(`${runner} R81 ${recovered?'recovered without a session':'fresh'} keeps partial green pending until rerun checks return`,async()=>{
+  it(`${runner} R85 ${recovered?'recovered without a session':'fresh'} keeps partial green pending until rerun checks return`,async()=>{
    const state=join(root,'rerun-state');writeFileSync(state,'hidden');
    const github=new GithubCiClient({command:{file:process.execPath,args:[fixture]},env:{...process.env,CI_FIXTURE_RERUN_STATE:state}});
    const checks=github.checks.bind(github),runs=github.hasActiveRuns.bind(github);
