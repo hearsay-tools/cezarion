@@ -1,14 +1,18 @@
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import childProcess, { type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import * as worktrees from '../git-worktree.ts';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { withOwnedInputRun, waitFor } from './harness-parity.testkit.ts';
-import { killFromPidFile, readPid, writePidSource } from '../pid-file.testkit.ts';
 
-const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+// The hang guard for a fixture step that runs a native mock turn or a real save, sized like
+// driveRun's 30 s settle bound in harness-parity.test.ts. Pinned to one CPU beside eight busy
+// loops, the first park took up to 7.7 s and R25's first Finish up to 8.2 s, and one Finish
+// went past the 10 s waitFor default (hearsay-tools/cezarion#1322).
+const FIXTURE_STEP_MS = 30_000;
+
 // Real native frames on every HARNESS_ADAPTERS runner. Registered as R24/R25
 // in the parity guard; no wire exemption exists for filesystem cleanup.
 describe('harness parity — autosave cleanup (#495)', () => {
@@ -36,53 +40,61 @@ describe('harness parity — autosave cleanup (#495)', () => {
         try {
           await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId }) => {
             manager.enqueueOwnedRun(runId);
-            await waitFor(() => store.getRun(runId)?.status === 'waiting');
+            // bound: FIXTURE_STEP_MS, for the native mock's first turn; the predicate is the run parking.
+            await waitFor(() => store.getRun(runId)?.status === 'waiting', FIXTURE_STEP_MS);
             if (continuation) {
               manager.finish(runId);
-              await waitFor(() => !manager.isActive(runId));
+              // bound: FIXTURE_STEP_MS, for the first Finish and its real final save under the product budget.
+              await waitFor(() => !manager.isActive(runId), FIXTURE_STEP_MS);
               expect(manager.continueRun(runId, { text: 'mock:baseline' }).ok).toBe(true);
-              await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
+              // bound: FIXTURE_STEP_MS, for the continuation's turn; the predicate is the run parking again.
+              await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting', FIXTURE_STEP_MS);
             }
             const dir = store.getRun(runId)!.worktreePath!;
             writeFileSync(join(dir, 'progress.txt'), 'recover me\n');
-            const bin = mkdtempSync(join(tmpdir(), 'cez-parity-git-'));
-            const path = process.env.PATH;
+            // The intercepted Git is the next save's `status --porcelain`. Its spawn starts a
+            // process that never exits, with autosave's own options (cwd, process group,
+            // environment), and every other Git call runs real Git. Before
+            // hearsay-tools/cezarion#1322 a Node shim on PATH stood in for every Git call and
+            // booted Node for each one. R25's save waited behind more than ten of them, and
+            // the stubbed 500 ms budget could kill the intercepted shim before it wrote its
+            // pid, so the wait for that pid could never pass.
+            const spawn = childProcess.spawn;
+            let git: ChildProcess | undefined;
             let obscure = true;
             const kill = process.kill.bind(process);
             const probe = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
-              const file = join(bin, 'pid');
               // While obscure, keep the intercepted Git in an unproven state:
               // EPERM on the group probe, and no TERM/KILL delivery. SIGKILL can
               // otherwise leave a /proc zombie that autosave treats as proof of
               // death, skipping the blocked-cleanup note (hearsay-tools/cezarion#950).
-              const git = readPid(file);
-              if (git !== undefined && pid === -git && obscure) {
+              // Its pid is known from the spawn, so no signal reaches it during startup.
+              if (obscure && git?.pid !== undefined && pid === -git.pid) {
                 if (signal === 0) throw Object.assign(new Error('unreadable'), { code: 'EPERM' });
                 return true;
               }
               return kill(pid, signal);
             });
-            writeFileSync(join(bin, 'git'), `#!${process.execPath}\n
-const fs = require('node:fs');
-const args = process.argv.slice(2);
-if (args.includes('status') && args.includes('--porcelain')) {
-  process.on('SIGTERM', () => {});
-  ${writePidSource(join(bin, 'pid'))}
-  setInterval(() => {}, 1000);
-} else {
-  const r = require('node:child_process').spawnSync(${JSON.stringify(realGit)}, args, {stdio:'inherit'});
-  process.exit(r.status ?? 1);
-}
-`, { mode: 0o755 });
-            process.env.PATH = `${bin}:${path}`;
+            const intercept = vi.spyOn(childProcess, 'spawn').mockImplementation(((...args: unknown[]) => {
+              const [command, argv, options] = args;
+              if (git || command !== 'git' || !Array.isArray(argv) || !argv.includes('status') || !argv.includes('--porcelain')) {
+                return Reflect.apply(spawn, childProcess, args);
+              }
+              git = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], options as SpawnOptions);
+              return git;
+            }) as typeof spawn);
+            // autosave-git.ts imports `spawn` by name; this republishes the spy to it.
+            syncBuiltinESMExports();
             budget = { timeoutMs: 500, killGraceMs: 100, confirmMs: 100 };
             try {
               expect(manager.finish(runId)).toBe(true);
-              // Under load the stubbed 700ms Git budget is not the wait: reaching
-              // autosave from finish is (hearsay-tools/cezarion#950). Wait for the
-              // intercepted Git spawn first, then for the blocked-cleanup note.
-              await waitFor(() => existsSync(join(bin, 'pid')));
+              // bound: hang guard from Finish to the intercepted spawn: the session end, the
+              // turn-end diff stat and the save's start, all with real Git (hearsay-tools/cezarion#950).
+              // Pinned beside eight busy loops it took under 1 s.
+              await waitFor(() => git !== undefined);
+              // bound: hang guard; the stubbed budget reports the blocked cleanup 700 ms after the spawn.
               await waitFor(() => store.readEvents(runId).some(event => event.type === 'note' && String(event.message).includes('termination not confirmed')));
+              // bound: hang guard for the run settling while the blocked save keeps its cleanup hold.
               await waitFor(() => !manager.isActive(runId));
               expect(store.readWorkerExecution(runId)?.phase).toBe('complete');
               expect(manager.claimForPublish(runId)).toBeNull();
@@ -90,14 +102,16 @@ if (args.includes('status') && args.includes('--porcelain')) {
               expect(manager.continueRun(runId, { text: 'another writer' }).ok).toBe(false);
               expect(readFileSync(join(dir, 'progress.txt'), 'utf8')).toBe('recover me\n');
             } finally {
-              process.env.PATH = path;
               obscure = false;
+              intercept.mockRestore();
+              syncBuiltinESMExports();
               // Also reaps the old unbounded implementation during mutation tests.
-              killFromPidFile(join(bin, 'pid'), 'SIGKILL', kill);
+              git?.kill('SIGKILL');
               probe.mockRestore();
+              // Each save settles on autosave's own proof that its Git process group is gone.
               await Promise.allSettled(saves);
+              // bound: hang guard; the run already settled above unless an earlier step failed.
               await waitFor(() => !manager.isActive(runId));
-              rmSync(bin, { recursive: true, force: true });
             }
             expect(store.readWorkerExecution(runId)?.phase).toBe('complete');
             expect(store.readEvents(runId).some(event => event.type === 'note' && String(event.message).includes('autosave failed'))).toBe(true);
