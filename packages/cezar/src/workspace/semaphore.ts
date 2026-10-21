@@ -107,6 +107,10 @@ export interface SemaphoreParticipant {
    *  workspace's longest-waiting run instead of whichever manager happens to
    *  have registered first. */
   oldestQueuedAt(): number | null;
+  /** Epoch ms of the oldest wake of a started run in this manager's queue, or null for none
+   *  (hearsay-tools/cezarion#1236). A manager holding a wake is pumped before any manager whose
+   *  queue holds only unstarted runs. Optional so a stub participant sorts as before. */
+  oldestWakeAt?(): number | null;
   /**
    * Agent accounts this participant is holding, by KIND (spec
    * 2026-08-03-auto-resume-after-usage-limit, `RunManager.accountHolds`).
@@ -270,10 +274,12 @@ export class WorkspaceSemaphore {
         const ordered = [...this.participants]
           .map((participant) => ({
             participant,
+            // Wakes of started runs go first, oldest first (hearsay-tools/cezarion#1236).
+            wake: participant.oldestWakeAt?.() ?? Number.MAX_SAFE_INTEGER,
             // Empty queues sort last — they have nothing to claim the slot with.
             since: participant.oldestQueuedAt() ?? Number.MAX_SAFE_INTEGER,
           }))
-          .sort((a, b) => a.since - b.since);
+          .sort((a, b) => a.wake - b.wake || a.since - b.since);
         for (const { participant } of ordered) await participant.pump();
       } while (this.pendingRelease);
     } finally {

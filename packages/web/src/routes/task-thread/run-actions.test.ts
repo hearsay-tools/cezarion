@@ -104,6 +104,20 @@ describe('runActionFlags — the visibility matrix, all 7 statuses × archived',
     })
   })
 
+  // A usage-limit hold is `waiting` with no session (hearsay-tools/cezarion#1236): it keeps the
+  // controls of the scheduled failed run it replaced, so Continue (and its runner/account
+  // pickers), Archive and Delete stay offered, and Stop only when it holds wait results.
+  it('a usage-limit hold offers Continue, Archive and Delete, never Finish, and no Stop without waits', () => {
+    const held = run('waiting', { autoResumeAt: '2026-07-14T13:00:00.000Z' })
+    expect(runActionFlags(held)).toEqual({
+      finish: false, continueRun: true, terminal: true, archive: true, markUnread: false, pin: true,
+      cancel: false, deleteRun: true, notes: true,
+    })
+    expect(runActionFlags({ ...held, waits: [heldWait('resolved')] }).cancel).toBe(true)
+    expect(isRunActive(held)).toBe(false)
+    expect(isRunActive(run('waiting'))).toBe(true)
+  })
+
   it('a failed run with no waits, or only settled ones, offers no Stop', () => {
     expect(runActionFlags(run('failed')).cancel).toBe(false)
     expect(runActionFlags(run('failed', { waits: [] })).cancel).toBe(false)
@@ -166,7 +180,7 @@ describe('runActionFlags.markUnread — the read→unread affordance (#775)', ()
     { name: 'done status caught mid-transition, no finishedAt', record: run('done', { seenAt: SEEN_AT }), expected: false },
     // Not offered: a usage-limit failure with a resume booked is not a done item — it has an
     // appointment to continue, so there is no outcome to push back into the unread list.
-    { name: 'failed run waiting out a usage limit', record: finished('failed', { seenAt: SEEN_AT, autoResumeAt: '2026-08-03T19:33:53.000Z' }), expected: false },
+    { name: 'run waiting out a usage limit', record: run('waiting', { seenAt: SEEN_AT, autoResumeAt: '2026-08-03T19:33:53.000Z' }), expected: false },
   ]
 
   for (const status of ['queued', 'running', 'waiting'] as RunStatus[]) {
@@ -196,7 +210,7 @@ describe('isRunActive', () => {
     ['failed', false],
     ['cancelled', false],
   ] as Array<[RunStatus, boolean]>)('%s → %s', (status, expected) => {
-    expect(isRunActive(status)).toBe(expected)
+    expect(isRunActive({ status })).toBe(expected)
   })
 })
 

@@ -52,12 +52,12 @@ const STATUS_ORDER: Partial<Record<RunSummary['status'], number>> = {
   cancelled: 7,
 }
 
-/** Not a status of its own: `scheduled` is a `failed` run holding a live resume deadline, which
- *  is the same rule the status pill and the sidebar bucket read (`lib/attention.ts`). */
+/** Not a status of its own: `scheduled` is a `waiting` run holding a live resume deadline (a
+ *  usage-limit hold, hearsay-tools/cezarion#1236), the rule the status pill reads (`lib/attention.ts`). */
 const SCHEDULED_WEIGHT = 3
 
 const statusWeight = (run: RunSummary): number =>
-  run.status === 'failed' && run.autoResumeAt !== undefined
+  run.status === 'waiting' && run.autoResumeAt !== undefined
     ? SCHEDULED_WEIGHT
     : STATUS_ORDER[run.status] ?? 9
 
@@ -117,10 +117,6 @@ export function bucketOf(run: RunSummary, view: ListView): BucketLabel {
   if (deriveAttention(run).bucket === 'waiting') return 'Needs you'
   if (run.status === 'waiting') return 'Working'
   if (run.status === 'running' || run.status === 'queued') return 'Working'
-  // A run waiting out a provider usage limit is `failed` on the record but has an appointment to
-  // resume itself (spec 2026-08-03-auto-resume-after-usage-limit) — it belongs with the work in
-  // flight, not filed under Finished as an outcome. It asks for nothing, so never "Needs you".
-  if (run.status === 'failed' && run.autoResumeAt) return 'Working'
   return 'Finished'
 }
 

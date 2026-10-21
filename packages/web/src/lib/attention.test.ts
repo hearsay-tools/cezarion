@@ -145,17 +145,17 @@ describe('ATTENTION_RANK', () => {
 })
 
 describe('a run waiting out a usage limit', () => {
-  const scheduled = run({ status: 'failed', autoResumeAt: '2026-08-03T19:33:53.000Z' })
+  const scheduled = run({ status: 'waiting', autoResumeAt: '2026-08-03T19:33:53.000Z' })
 
-  it('reads as scheduled and parked, never as a red failure', () => {
-    // It IS `failed` on the record, but the failure is about to undo itself (spec
-    // 2026-08-03-auto-resume-after-usage-limit) — amber and still, like `queued`.
+  it('reads as a usage limit, parked and still, never as a red failure', () => {
+    // A waiting run with a resume booked (spec 2026-10-17-unified-waits, hearsay-tools/cezarion#1236):
+    // neutral and still, like `queued`.
     expect(deriveAttention(scheduled)).toEqual({
       bucket: 'none',
       tone: 'neutral',
       shape: 'ring',
       pulse: false,
-      label: 'scheduled',
+      label: 'usage limit',
     })
   })
 
@@ -166,7 +166,7 @@ describe('a run waiting out a usage limit', () => {
     expect(wantsAttention(run({ status: 'failed' }))).toBe(true)
   })
 
-  it('only applies to a FAILED run — a live run with a stale stamp is still live', () => {
+  it('only applies to a WAITING run — a live run with a stale stamp is still live', () => {
     expect(deriveAttention(run({ status: 'running', autoResumeAt: '2026-08-03T19:33:53.000Z' })).label)
       .toBe('running')
   })
@@ -318,7 +318,7 @@ describe('status key (#617)', () => {
     ['waiting for capacity', parkedRoot({ phase: 'resolved' }), { tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' }],
     ['wait result owed', run({ status: 'waiting', waits: [{ ...openCi(), phase: 'resolved', resolvedAt: '2026-10-17T15:20:00.000Z' }] }), { tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' }],
     ['queued', run({ status: 'queued' }), { tone: 'neutral', shape: 'ring', pulse: false, label: 'queued' }],
-    ['scheduled', run({ status: 'failed', autoResumeAt: '2026-08-03T19:33:53.000Z' }), { tone: 'neutral', shape: 'ring', pulse: false, label: 'scheduled' }],
+    ['usage limit', run({ status: 'waiting', autoResumeAt: '2026-08-03T19:33:53.000Z' }), { tone: 'neutral', shape: 'ring', pulse: false, label: 'usage limit' }],
     ['done', run({ status: 'done' }), { tone: 'success', shape: 'filled', pulse: false, label: 'done' }],
     ['failed', run({ status: 'failed' }), { tone: 'danger', shape: 'filled', pulse: false, label: 'failed' }],
     ['cancelled', run({ status: 'cancelled' }), { tone: 'neutral', shape: 'filled', pulse: false, label: 'cancelled' }],

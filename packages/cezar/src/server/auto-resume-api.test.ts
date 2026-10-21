@@ -48,13 +48,13 @@ describe('per-task auto-resume cancellation', () => {
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
-  /** A run parked exactly as a usage limit leaves it: failed, with a resume promised. */
+  /** A run parked exactly as a usage limit leaves it: waiting, with a resume promised
+   *  (hearsay-tools/cezarion#1236). */
   function limited(): string {
     const run = store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [] });
     store.updateRun(run.id, {
-      status: 'failed',
+      status: 'waiting',
       error: 'Claude AI usage limit reached|1785782478',
-      finishedAt: '2026-08-03T18:40:00.000Z',
       autoResumeAt: '2026-08-03T18:41:48.000Z',
     });
     return run.id;
@@ -62,6 +62,7 @@ describe('per-task auto-resume cancellation', () => {
 
   it('retires the pending resume and answers cancelled', async () => {
     const id = limited();
+    expect(store.getRun(id)?.autoResumeAt).toBeDefined();
     const res = await apiRequest(app, `/api/v1/runs/${id}/auto-resume`, { method: 'DELETE' });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ cancelled: true });

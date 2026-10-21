@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
+import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import {
   AUTO_RESUME_GRACE_MS,
@@ -43,11 +44,14 @@ describe('a run stopped by a usage limit resumes itself', () => {
     steps: [{ id: 'work', name: 'Work', prompt: '{{task}}' }],
   };
 
-  /** Drive one real run to a terminal status. */
+  /** Drive one real run to a terminal status, or to the usage-limit park that waits for its resume
+   *  (hearsay-tools/cezarion#1236). */
   async function settle(runId: string): Promise<void> {
     const terminal = new Set(['done', 'review', 'failed', 'cancelled']);
+    const held = () => store.getRun(runId)?.status === 'waiting' && store.getRun(runId)?.autoResumeAt !== undefined;
+    // bound: a mock turn ends in well under a second; 20 s covers a loaded host.
     const deadline = Date.now() + 20_000;
-    while (!terminal.has(store.getRun(runId)?.status ?? '')) {
+    while (!terminal.has(store.getRun(runId)?.status ?? '') && !held()) {
       if (Date.now() > deadline) throw new Error('run did not finish in time');
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
@@ -93,7 +97,9 @@ describe('a run stopped by a usage limit resumes itself', () => {
     await settle(record.id);
 
     const failed = store.getRun(record.id);
-    expect(failed?.status).toBe('failed');
+    // A usage limit parks the run for its resume, keeping the provider's message (phase 4a).
+    expect(failed?.status).toBe('waiting');
+    expect(failed?.finishedAt).toBeUndefined();
     expect(failed?.error).toContain('Claude AI usage limit reached|');
     // Read the reset instant back out of the message the provider actually sent, and require the
     // schedule to be exactly that plus the grace. Anchoring on the message rather than on
@@ -137,7 +143,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     await expect
       .poll(() => store.getRun(record.id)?.autoResumeAt, { timeout: 20_000 })
       .toBeDefined();
-    expect(store.getRun(record.id)?.status).toBe('failed');
+    expect(store.getRun(record.id)?.status).toBe('waiting');
   }, 40_000);
 
   it('never leaves a deadline behind: a record with no armed timer heals on the next sweep', async () => {
@@ -185,6 +191,9 @@ describe('a run stopped by a usage limit resumes itself', () => {
     await expect
       .poll(() => store.getRun(record.id)?.autoResumeAt, { timeout: 20_000 })
       .toBeUndefined();
+    // A withdrawn appointment settles the run failed, with the provider's message (owner, 2026-10-21).
+    expect(store.getRun(record.id)?.status).toBe('failed');
+    expect(store.getRun(record.id)?.error).toContain('usage limit reached');
   }, 40_000);
 
   it('holds the queue while the account is limited — the rest never start', async () => {
@@ -494,6 +503,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     expect(manager.cancelAutoResume(resigned.id)).toBe(true);
     store.setArchived(resigned.id, true);
     expect(store.getRun(resigned.id)?.autoResumeAt).toBeUndefined();
+    expect(store.getRun(resigned.id)?.status).toBe('failed');
 
     // …and no later sweep may bring it back, however the deadline got there.
     store.updateRun(resigned.id, { autoResumeAt: new Date(Date.now() - 1_000).toISOString() });
@@ -521,6 +531,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     await manager.recover();
 
     expect(store.getRun(record.id)?.autoResumeAt).toBeUndefined();
+    expect(store.getRun(record.id)?.status).toBe('failed');
     expect(store.getRun(record.id)?.steps.some((step) => step.id === 'continue-1')).toBe(false);
     const events = store.readEvents(record.id);
     expect(events.some((event) => String(event.message ?? '').includes('automatic resume expired'))).toBe(true);
@@ -544,7 +555,28 @@ describe('a run stopped by a usage limit resumes itself', () => {
     manager.cancelAutoResume(dropped.id);
 
     expect(store.getRun(dropped.id)?.autoResumeAt).toBeUndefined();
+    expect(store.getRun(dropped.id)?.status).toBe('failed');
     expect(store.getRun(kept.id)?.autoResumeAt).toBeDefined();
+    expect(store.getRun(kept.id)?.status).toBe('waiting');
+  }, 40_000);
+
+  it('commits a withdrawn appointment before it reports the cancel', async () => {
+    // A crash right after "Don't resume" must not find the appointment still on disk: recovery
+    // would re-arm it and start work the user cancelled (hearsay-tools/cezarion#1236).
+    manager = createFixtureManager(store, repoRoot);
+    const record = manager.startRun(workflow, { task: 'mock:limit ship it', worktree: false });
+    await settle(record.id);
+    store.flush();
+    const committed = () => readPersistedRuns(join(repoRoot, '.ai/cezar')).find((row) => row.id === record.id);
+    expect(committed()).toMatchObject({ status: 'waiting', autoResumeAt: expect.any(String) });
+
+    expect(manager.cancelAutoResume(record.id)).toBe(true);
+
+    // Read at once, before any debounced save: what another process would see.
+    const row = committed();
+    expect(row.status).toBe('failed');
+    expect(row.autoResumeAt).toBeUndefined();
+    expect(row.finishedAt).toEqual(expect.any(String));
   }, 40_000);
 
   it('cancels an armed resume when the setting is switched off mid-wait', async () => {
@@ -566,6 +598,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // The deadline is gone from the record too — leaving it would keep the thread promising a
     // resume that will never come.
     await expect.poll(() => store.getRun(record.id)?.autoResumeAt, { timeout: 5_000 }).toBeUndefined();
+    expect(store.getRun(record.id)?.status).toBe('failed');
     const events = store.readEvents(record.id);
     expect(events.some((event) => String(event.message ?? '').includes('automatic resume cancelled'))).toBe(true);
   }, 30_000);
@@ -578,6 +611,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     await settle(record.id);
 
     expect(store.getRun(record.id)?.autoResumeAt).toBeUndefined();
+    expect(store.getRun(record.id)?.status).toBe('failed');
     const events = store.readEvents(record.id);
     expect(events.some((event) => String(event.message ?? '').includes('automatic resume cap reached'))).toBe(true);
   }, 30_000);
@@ -613,4 +647,88 @@ describe('a run stopped by a usage limit resumes itself', () => {
     const events = store.readEvents(record.id);
     expect(events.some((event) => String(event.message ?? '').includes('resuming automatically (1/12)'))).toBe(true);
   }, 40_000);
+  it('re-arms a waiting usage-limit run across a restart without reopening it', async () => {
+    const first = createFixtureManager(store, repoRoot);
+    const record = first.startRun(workflow, { task: 'mock:limit ship it', worktree: false });
+    await settle(record.id);
+    const at = store.getRun(record.id)?.autoResumeAt;
+    first.dispose();
+
+    manager = createFixtureManager(store, repoRoot);
+    await manager.recover();
+    // The appointment stands: same time, still waiting, no new step, no Needs you.
+    expect(store.getRun(record.id)).toMatchObject({ status: 'waiting', autoResumeAt: at });
+    expect(store.getRun(record.id)?.steps.some((step) => step.id === 'continue-1')).toBe(false);
+    expect([...manager.accountHolds().deadline]).toContain('claude:default');
+  }, 40_000);
+
+  it('treats a human message during the hold as the user\'s own Continue', async () => {
+    manager = createFixtureManager(store, repoRoot);
+    const record = manager.startRun(workflow, { task: 'mock:limit ship it', worktree: false });
+    await settle(record.id);
+    store.updateRun(record.id, { task: 'mock:done ship it' });
+
+    // The limited run has no session, so the cockpit's message is a Continue, as on a failed run.
+    expect(manager.continueRun(record.id, { text: 'mock:done carry on' })).toEqual({ ok: true });
+    expect(store.getRun(record.id)?.autoResumeAt).toBeUndefined();
+    await expect
+      .poll(() => store.getRun(record.id)?.steps.find((step) => step.id === 'continue-1')?.status, { timeout: 20_000 })
+      .toBe('done');
+  }, 40_000);
+
+  it('queues a human Continue while another run holds the same account, and starts it once that hold lifts', async () => {
+    // The approved 4a design (hearsay-tools/cezarion#1236): a Continue retires its own appointment
+    // and joins the line as a wake, still subject to another run's known deadline on the account.
+    manager = createFixtureManager(store, repoRoot);
+    const a = manager.startRun(workflow, { task: 'mock:limit probe a', worktree: false });
+    await settle(a.id);
+    // B starts on the same account only once A's hold is out of the way, then hits the limit too.
+    store.updateRun(a.id, { autoResumeAt: undefined, status: 'failed' });
+    const b = manager.startRun(workflow, { task: 'mock:limit probe b', worktree: false });
+    await settle(b.id);
+    store.updateRun(a.id, { status: 'waiting', finishedAt: undefined, autoResumeAt: new Date(Date.now() + 3_600_000).toISOString() });
+    store.updateRun(b.id, { task: 'mock:done ship it' });
+
+    expect(manager.continueRun(b.id, { text: 'mock:done carry on' })).toEqual({ ok: true });
+    // Its own appointment is gone; A's deadline keeps it in the line.
+    expect(store.getRun(b.id)?.autoResumeAt).toBeUndefined();
+    expect(store.getRun(b.id)?.status).toBe('queued');
+    expect(store.getRun(b.id)?.continuationMessage?.origin).toBe('human');
+    // A real pump that sees A's hold must leave it queued.
+    await (manager as unknown as { pump(): Promise<void> }).pump();
+    expect(store.getRun(b.id)?.status).toBe('queued');
+
+    manager.cancelAutoResume(a.id);
+    await expect
+      .poll(() => store.getRun(b.id)?.steps.find((step) => step.id === 'continue-1')?.status, { timeout: 20_000 })
+      .toBe('done');
+  }, 60_000);
+
+  it('keeps a wait that resolves during the hold for the resume to deliver', async () => {
+    const first = createFixtureManager(store, repoRoot);
+    const record = first.startRun(workflow, { task: 'mock:limit ship it', worktree: false });
+    await settle(record.id);
+    first.dispose();
+    // A timer the run left open when the limit hit, due now. Without the hold it would reopen the
+    // run for its result; the usage limit holds it until the resume.
+    const timerId = '99999999-9999-4999-8999-999999999999';
+    const due = new Date(Date.now() - 1_000).toISOString();
+    store.updateRun(record.id, { waits: [{ id: timerId, kind: 'timer', source: 'agent', via: 'cezar_wait', registeredAt: due, deadline: due, phase: 'open', turnId: 'turn', seconds: 60 }] });
+
+    manager = createFixtureManager(store, repoRoot);
+    await manager.recover();
+    await expect.poll(() => store.getRun(record.id)?.waits?.find((wait) => wait.id === timerId)?.phase, { timeout: 10_000 }).toBe('resolved');
+    expect(store.getRun(record.id)?.status).toBe('waiting');
+    expect(store.getRun(record.id)?.steps.some((step) => step.id === 'continue-1')).toBe(false);
+
+    // The window reopens: the resume's opening turn delivers the result.
+    manager.dispose();
+    store.updateRun(record.id, { task: 'mock:done ship it', autoResumeAt: new Date(Date.now() - 1_000).toISOString() });
+    manager = createFixtureManager(store, repoRoot);
+    await manager.recover();
+    await expect
+      .poll(() => [...(store.getRun(record.id)?.waits ?? []), ...(store.getRun(record.id)?.lastWaits ?? [])].find((wait) => wait.id === timerId)?.phase, { timeout: 20_000 })
+      .toBe('delivered');
+    expect(store.readEvents(record.id).some((event) => String(event.message ?? '').includes('resuming automatically (1/12)'))).toBe(true);
+  }, 60_000);
 });

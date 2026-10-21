@@ -151,6 +151,20 @@ describe('RunActivityDock — one card, one row per section', () => {
     expect(document.querySelectorAll('[data-slot="plan-item"]')).toHaveLength(0)
   })
 
+  it('shows an unsettled subagent as stalled during a usage-limit hold, which has no session', () => {
+    // hearsay-tools/cezarion#1236: a hold is `waiting` with no live session, so nothing will settle
+    // the row until the resume; it must not pulse as live.
+    renderDock(run({ status: 'waiting', autoResumeAt: '2099-01-01T00:00:00.000Z' }))
+    fireEvent.click(sectionHead('subagents'))
+    expect(document.querySelectorAll('[data-slot="agent-item"] [data-stalled="true"]')).toHaveLength(1)
+  })
+
+  it('keeps an unsettled subagent live while a waiting run holds its session', () => {
+    renderDock(run({ status: 'waiting' }))
+    fireEvent.click(sectionHead('subagents'))
+    expect(document.querySelectorAll('[data-slot="agent-item"] [data-stalled="true"]')).toHaveLength(0)
+  })
+
   it('keeps every row a 44px touch target', () => {
     renderDock(run())
     for (const key of ['workflow', 'subagents', 'plan']) {

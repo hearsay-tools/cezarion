@@ -148,6 +148,12 @@ export const continuationMessageSchema = queuedMessageSchema.extend({
   origin: z.enum(['human', 'lifecycle']).optional(),
   /** An attributed parent message used as the opening prompt, never a human answer. */
   agentInputId: z.uuid().optional(),
+  /** Captured before clearing the run error. Keep generated context separate from human
+   * text so repeated restart recovery never accumulates diagnostic prefixes. */
+  resumeContext: z.object({
+    failure: z.object({ stepId: z.string().optional(), error: z.string() }).optional(),
+    restarted: z.literal(true).optional(),
+  }).optional(),
 });
 
 /** One aggregated sample of a run's live process tree (`src/core/process-usage.ts`). */
@@ -310,8 +316,9 @@ export const runRecordSchema = z.object({
   /** Live native approval attention; grants themselves never persist. */
   hasPendingPermission: z.boolean().optional(),
   /** Exact ISO-8601 instant this run resumes itself after a provider usage limit stopped it
-   *  (spec 2026-08-03-auto-resume-after-usage-limit). Present only on a `failed` run with a
-   *  pending automatic resume — its absence is what "no resume is scheduled" looks like. */
+   *  (spec 2026-08-03-auto-resume-after-usage-limit). Present only on a `waiting` run with a
+   *  pending automatic resume (hearsay-tools/cezarion#1236; a `failed` one before) — its absence
+   *  is what "no resume is scheduled" looks like. */
   autoResumeAt: z.string().optional(),
   /** Consecutive automatic resumes since the last human turn, against the safety cap. */
   autoResumeAttempts: z.number().optional(),

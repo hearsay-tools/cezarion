@@ -216,27 +216,38 @@ async function conversingParent(runner: RunnerId) {
 
 const timerText = (wait: Wait, note: string) => `Timer ${wait.id} fired: ${note}. Continue toward the task goal; register another wait if you are still waiting.`;
 
-// Each runner's cells run from their own `waits-<runner>-parity.test.ts`: one file runs serially,
-// and every runner's cells in one file outgrew a CI shard's time limit (hearsay-tools/cezarion#1301).
-// `waits-parity.test.ts` runs the criteria guard and the single-runner cells.
-export function describeWaitParity(scope: RunnerId | 'once'): void {
-  const runners: RunnerId[] = scope === 'once' ? [] : [scope];
+// Each runner's cells run from their own files: one file runs serially, and every runner's cells in
+// one file outgrew a CI shard's time limit (hearsay-tools/cezarion#1301). One runner's cells in one
+// file then outgrew Squeal's 600 s per-file cap on a loaded host, so each runner has two files:
+// `waits-<runner>-parity.test.ts` runs the `base` rows and `waits-<runner>-workers-parity.test.ts`
+// the `workers` rows (hearsay-tools/cezarion#1288). `waits-parity.test.ts` runs the criteria guard
+// and the single-runner cells.
+export type WaitParityPart = 'base' | 'workers';
+export const WAIT_PARITY_FILES: Readonly<Record<WaitParityPart, (runner: RunnerId) => string>> = {
+  base: runner => `waits-${runner}-parity.test.ts`,
+  workers: runner => `waits-${runner}-workers-parity.test.ts`,
+};
+
+export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPart } | 'once'): void {
+  const runnersFor = (part: WaitParityPart): RunnerId[] => scope !== 'once' && scope.part === part ? [scope.runner] : [];
   describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', { timeout: 45_000 }, () => {
     useWorkerWaitFixture();
     afterEach(() => vi.restoreAllMocks());
 
     if (scope === 'once') {
       it('runs every runner\'s cells from its own file', () => {
-        for (const runner of RUNNER_IDS) expect(existsSync(new URL(`./waits-${runner}-parity.test.ts`, import.meta.url)), runner).toBe(true);
+        for (const runner of RUNNER_IDS) for (const file of Object.values(WAIT_PARITY_FILES)) {
+          expect(existsSync(new URL(`./${file(runner)}`, import.meta.url)), file(runner)).toBe(true);
+        }
       });
 
       it('registers every criterion', () => {
-        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U26', 'U25']);
+        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U26', 'U25']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
     }
 
-    for (const runner of runners) {
+    for (const runner of runnersFor('base')) {
       for (const tools of [false, true]) {
         it(`${runner} U26 footer capability follows provisioning on opening, live delivery, Continue and no-session recovery (${tools ? 'tools' : 'markers'})`, async () => {
           nativeWire(runner);
@@ -346,7 +357,7 @@ export function describeWaitParity(scope: RunnerId | 'once'): void {
         fireTimer(timer.id);
         await until(() => settled(run.id, timer.id)?.phase === 'delivered' && prompted(runner, timerText(timer, 'u2')).length > 0);
         const wake = prompted(runner, timerText(timer, 'u2')).at(-1)!;
-        expect(wake).toContain(`Still open: CI wait ${ci.id} for acme/repo#12`);
+        expect(wake).toContain(`\n\nStill open: CI wait ${ci.id} for acme/repo#12`);
         expect(wake).not.toContain(`timer ${timer.id}`);
         await until(() => turnEnds(run.id) > turns && parkedOn(run.id, waitOfKind(run.id, 'ci')));
         expect(store.getRun(run.id)?.waits).toEqual([expect.objectContaining({ id: ci.id, phase: 'open' })]);
@@ -366,7 +377,7 @@ export function describeWaitParity(scope: RunnerId | 'once'): void {
         const text = `${HARNESS_ADAPTERS[runner].scenarios.hold!}\nPlease also update the docs`;
         expect(manager.sendMessage(run.id, [{ type: 'text', text }])).toBe(true);
         await until(() => prompted(runner, 'Please also update the docs').length > 0);
-        expect(prompted(runner, 'Please also update the docs').at(-1)).toContain(`Still open: CI wait ${ci.id} for acme/repo#12`);
+        expect(prompted(runner, 'Please also update the docs').at(-1)).toContain(`\n\nStill open: CI wait ${ci.id} for acme/repo#12`);
         expect(waitOfKind(run.id, 'ci')).toMatchObject({ id: ci.id, phase: 'open' });
         expect(external.aborted()).toBe(false);
         await until(() => turnEnds(run.id) > turns && parkedOn(run.id, waitOfKind(run.id, 'ci')));
@@ -494,6 +505,66 @@ export function describeWaitParity(scope: RunnerId | 'once'): void {
           checkpoint('u8-blocker-waiting');
           await until(() => store.getRun(blocker.id)?.status === 'waiting');
           checkpoint('u8-parked-waiting-after-wake');
+          await until(() => store.getRun(parked.id)?.status === 'waiting' && !agentWaits(parked.id).length);
+        });
+      }
+
+      it(`${runner} U8l a wake of a started run takes the slot before an unstarted task that queued earlier, at maxParallel 1`, async () => {
+        nativeWire(runner);
+        expect(semaphore.maxParallel()).toBe(1);
+        if (runner === 'opencode') process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = join(root, 'u8l-parked-sessions.json');
+        const parked = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'timer', seconds: 60, note: 'u8l' }), runner });
+        await until(() => parkedOn(parked.id, waitOfKind(parked.id, 'timer')));
+        const wait = waitOfKind(parked.id, 'timer')!;
+        // A closed session: its wake is a scheduler continuation, which needs a regular slot.
+        engine().active.get(parked.id)!.session.end();
+        await until(() => !manager.isActive(parked.id) && store.getRun(parked.id)?.status === 'waiting');
+        const release = join(root, 'u8l-release');
+        process.env.CEZ_MOCK_RELEASE_FILE = release;
+        if (runner === 'opencode') process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = join(root, 'u8l-blocker-sessions.json');
+        const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-gated']!, runner });
+        let task: { id: string } | undefined;
+        try {
+          await until(() => store.readEvents(blocker.id).some(event => event.type === 'turn.started'));
+          // Queued before the wake joins the line.
+          task = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
+          expect(store.getRun(task.id)?.status).toBe('queued');
+          fireTimer(wait.id);
+          await until(() => engine().queue.includes(parked.id));
+          expect(engine().queue.indexOf(task.id)).toBeLessThan(engine().queue.indexOf(parked.id));
+        } finally { writeFileSync(release, ''); }
+        await until(() => settled(parked.id, wait.id)?.phase === 'delivered');
+        const deliveredAt = Date.parse(settled(parked.id, wait.id)!.deliveredAt!);
+        await until(() => store.readEvents(task!.id).some(event => event.type === 'turn.started'));
+        const taskStarted = Date.parse(store.readEvents(task.id).find(event => event.type === 'turn.started')!.ts);
+        expect(taskStarted).toBeGreaterThanOrEqual(deliveredAt);
+        await until(() => terminal.includes(store.getRun(task!.id)?.status ?? '') || store.getRun(task!.id)?.status === 'waiting');
+      });
+
+      for (const hold of ['deadline', 'in-flight'] as const) {
+        it(`${runner} U8h a ci result for a park on a held account waits in the line and is delivered once the hold lifts (${hold})`, async () => {
+          const external = github();
+          nativeWire(runner);
+          if (runner === 'opencode') process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = join(root, 'u8h-sessions.json');
+          const parked = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'ci', pr }), runner });
+          await until(() => parkedOn(parked.id, waitOfKind(parked.id, 'ci')));
+          const wait = waitOfKind(parked.id, 'ci')!;
+          expect(engine().monitoring.has(parked.id)).toBe(true);
+          // Another task on the same account waits out a usage limit, or its resume is testing the
+          // window (hearsay-tools/cezarion#1236).
+          const { agentProfile } = store.getRun(parked.id)!;
+          const holder = store.createRun({ title: 'held', workflow: 'quick-task', task: 'held', steps: [] });
+          store.updateRun(holder.id, hold === 'deadline'
+            ? { status: 'waiting', runner, agentProfile, autoResumeAt: new Date(Date.now() + 600_000).toISOString() }
+            : { status: 'running', runner, agentProfile, autoResumeAttempts: 1 });
+          expect([...manager.accountHolds()[hold === 'deadline' ? 'deadline' : 'inFlight']]).toContain(`${runner}:${agentProfile ?? 'default'}`);
+          external.settle();
+          // The result waits in the line, undelivered, while the account is held.
+          await until(() => store.getRun(parked.id)?.waits?.find(entry => entry.id === wait.id)?.phase === 'resolved' && engine().queue.includes(parked.id));
+          expect(settled(parked.id, wait.id)).toBeUndefined();
+          if (hold === 'deadline') manager.cancelAutoResume(holder.id);
+          else { store.updateRun(holder.id, { status: 'failed', autoResumeAttempts: undefined }); manager.cancelAutoResume(holder.id); }
+          await until(() => settled(parked.id, wait.id)?.phase === 'delivered');
           await until(() => store.getRun(parked.id)?.status === 'waiting' && !agentWaits(parked.id).length);
         });
       }
@@ -1311,7 +1382,9 @@ export function describeWaitParity(scope: RunnerId | 'once'): void {
         expect(manager.finish(run.id)).toBe(true);
         await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
       });
+    }
 
+    for (const runner of runnersFor('workers')) {
       it(`${runner} U2w ci and worker open: the worker resolving wakes the agent with ci still open and in the footer, and the later ci result is delivered`, async () => {
         const external = github();
         const { p, w } = await parentWithWorker(runner);

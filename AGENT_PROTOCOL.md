@@ -1150,6 +1150,12 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
+The cells are defined in `core/harness-parity-cells.testkit.ts`. Each runner's
+`RUNNER_IDS` cells run from its own `core/harness-<runner>-parity.test.ts`.
+`core/harness-parity.test.ts` runs the matrix guard, the single-runner cells and
+a guard that every runner has its file (hearsay-tools/cezarion#1288). Below,
+`core/harness-parity.test.ts` names this whole matrix.
+
 **P1** (hearsay-tools/cezarion#1049, hearsay-tools/cezarion#1266) routes an
 approval from each native mock that carries one through `RunManager`, the
 cockpit HTTP decision route, and the exact native reply: the Codex JSON-RPC
@@ -1208,11 +1214,17 @@ the observation. Later successful settlement must leave that failed attempt inta
 Clean session closure while CI is pending still parks without failure. No runner
 exemptions or normalized-event injection.
 
+**R85** (hearsay-tools/cezarion#1399), in `workflows/ci-wait-rerun-parity.test.ts`,
+drives every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native CI tool
+call with the real supervisor and a controlled GitHub wire. A partial green check
+list stays pending while a rerun is active, then delivers one observation after
+the checks return and finish. Recovery covers the same wait without a live session.
+
 **U0–U19** (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234, hearsay-tools/cezarion#1260, hearsay-tools/cezarion#1235, with U2c, U2t, U2w, U3w, U5a, U5c, U5d, U6s, U7d, U7h, U7w, U9c, U9h, U9u, U9w, U14m and U16b) pin the
 wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
 normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`, `cezar_ask`,
 `cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
-`workflows/waits-parity.testkit.ts`, defined in `workflows/waits-parity-cells.testkit.ts` and run from one `waits-<runner>-parity.test.ts` per runner, with the criteria guard in `waits-parity.test.ts`. U1
+`workflows/waits-parity.testkit.ts`, defined in `workflows/waits-parity-cells.testkit.ts` and run from two files per runner: `waits-<runner>-parity.test.ts` for the base rows and `waits-<runner>-workers-parity.test.ts` for the worker rows (U2w onward), with the criteria guard in `waits-parity.test.ts` (hearsay-tools/cezarion#1288). U1
 registers a CI wait and a timer through `cezar_wait`, parks, and wakes with each result.
 U2 opens both: the timer wakes, the CI wait stays open and is in that turn's footer,
 the turn end re-parks without a new registration, and the later CI result is
@@ -1221,7 +1233,12 @@ delivers its result in a later turn. U4 cancels with `cezar_cancel_wait`, and no
 is delivered. U7 lands `cezar_wait_for_ci`, the monitoring line and `ScheduleWakeup`
 in the same list with their `via`; only `ScheduleWakeup` is exempt, as
 `native scheduler tool exists only on the Claude wire`. U8 parks on a CI wait, and separately on a
-timer, at `maxParallel: 1` and wakes without queueing behind the held slot. U9 leaves the run
+timer, at `maxParallel: 1` and wakes without queueing behind the held slot. U8l
+(hearsay-tools/cezarion#1236) holds the only slot while a timer park's wake and an
+unstarted task wait in the line, and the wake takes the freed slot first, though the
+task queued earlier. U8h settles a CI wait for a park whose account a seeded
+usage-limit record holds, once with a deadline hold and once with a resume in flight:
+the result waits in the line and is delivered once the hold lifts. U9 leaves the run
 recoverable after a provider failure and after a clean close with each kind open, and
 the next wake delivers. U10 resolves two timers before one boundary with 39 wakes spent:
 one turn carries both and spends one wake, and a third timer due at the budget is

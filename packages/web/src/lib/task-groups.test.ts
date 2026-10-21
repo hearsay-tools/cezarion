@@ -95,7 +95,7 @@ describe('bucketOf', () => {
     // Failed on the record, but it has an appointment to resume itself (spec
     // 2026-08-03-auto-resume-after-usage-limit) — it is work in flight, not an outcome. And it
     // asks for nothing, so never "Needs you".
-    const scheduled = run({ status: 'failed', autoResumeAt: '2026-08-03T19:33:53.000Z' })
+    const scheduled = run({ status: 'waiting', autoResumeAt: '2026-08-03T19:33:53.000Z' })
     expect(bucketOf(scheduled, 'active')).toBe('Working')
     expect(bucketOf(run({ status: 'failed' }), 'active')).toBe('Finished')
     // Archived still collapses everything, schedule or not.
@@ -130,9 +130,9 @@ describe('sortRuns', () => {
     // one resuming at 11:40 however old each is (spec 2026-08-03-auto-resume-after-usage-limit).
     // Creation order is deliberately the inverse of appointment order here.
     const runs = [
-      run({ id: 'late', status: 'failed', autoResumeAt: '2026-08-03T11:40:00.000Z', createdAt: '2026-07-14T12:00:00.000Z' }),
-      run({ id: 'soon', status: 'failed', autoResumeAt: '2026-08-03T11:14:00.000Z', createdAt: '2026-07-14T08:00:00.000Z' }),
-      run({ id: 'mid', status: 'failed', autoResumeAt: '2026-08-03T11:20:00.000Z', createdAt: '2026-07-14T10:00:00.000Z' }),
+      run({ id: 'late', status: 'waiting', autoResumeAt: '2026-08-03T11:40:00.000Z', createdAt: '2026-07-14T12:00:00.000Z' }),
+      run({ id: 'soon', status: 'waiting', autoResumeAt: '2026-08-03T11:14:00.000Z', createdAt: '2026-07-14T08:00:00.000Z' }),
+      run({ id: 'mid', status: 'waiting', autoResumeAt: '2026-08-03T11:20:00.000Z', createdAt: '2026-07-14T10:00:00.000Z' }),
     ]
     expect(sortRuns(runs, 'active').map((r) => r.id)).toEqual(['soon', 'mid', 'late'])
   })
@@ -166,15 +166,16 @@ describe('sortRuns', () => {
   })
 
   it('puts a scheduled run between running and queued — the pipeline in the order it happens', () => {
-    // A usage-limit wait is work with an appointment, not an outcome (spec
+    // A usage-limit hold is work with an appointment, not an outcome (spec
     // 2026-08-03-auto-resume-after-usage-limit), so it must never sink into the terminal block
-    // with the plain failures. Reading top-down answers "what happens next".
+    // with the plain failures, nor rise with the waits that need a human (hearsay-tools/cezarion#1236).
+    // Reading top-down answers "what happens next".
     const runs = [
       run({ id: 'failed', status: 'failed', createdAt: '2026-07-14T12:00:00.000Z' }),
       run({ id: 'queued', status: 'queued', createdAt: '2026-07-14T11:00:00.000Z' }),
       run({
         id: 'scheduled',
-        status: 'failed',
+        status: 'waiting',
         autoResumeAt: '2026-08-03T19:33:53.000Z',
         createdAt: '2026-07-14T08:00:00.000Z',
       }),
