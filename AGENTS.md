@@ -391,6 +391,20 @@ Verification, and let CI's Vitest shards decide. Squeal reports and
 `squeal why <check>` output are the same evidence. The rerun is not a full pass;
 green CI shards are. A failure in a file the branch touches never qualifies: fix it.
 
+**When filing a load-dependent test failure, preserve the diagnostic evidence.**
+Quote the full error line verbatim, with nothing cut, including any list after
+its `;`. Name the stack frame that throws the error, rather than an operation
+named in the message. Give the full log location: the originating repo's
+`.ai/cezar/runs/<runId>.ndjson` (or `.ndjson.br`), or `squeal why <check>`
+with the check identifier and its worktree path.
+
+Plain text searches do not read Brotli-compressed `.ndjson.br` logs. To read one,
+replace `<file.ndjson.br>` with its path:
+
+```bash
+node -e "process.stdout.write(require('node:zlib').brotliDecompressSync(require('node:fs').readFileSync(process.argv[1])))" '<file.ndjson.br>'
+```
+
 CI's final gate covers:
 
 ```bash
