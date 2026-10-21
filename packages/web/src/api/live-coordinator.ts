@@ -1,5 +1,5 @@
-import { healthResponseSchema } from '@open-mercato/cezar-api-client/contract/health'
 import type { LiveRunDemand } from '@open-mercato/cezar-api-client'
+import { healthPayloadSchema } from './health-payload'
 import { createLiveFallback, type FallbackEntry } from './live-fallback'
 import { LEASE_MS, LIVE_PROTOCOL, LIVE_WORKER_NAME, RENEW_MS, liveDemandSchema, ownerOutputSchema, type LiveDemand, type LiveFrame } from './live-protocol'
 import { pageIsActive, subscribePageActivity } from './live-visibility'
@@ -181,9 +181,9 @@ export function createLiveCoordinator() {
     void (async () => {
       const response = await fetch(`${session!.apiBase}/api/v1/health`, { credentials: 'include', signal: current.signal, cache: 'no-store' })
       if (!response.ok) throw new Error(`bootstrap HTTP ${response.status}`)
-      const health = healthResponseSchema.pick({ capabilities: true, bootProject: true }).parse(await response.json())
+      const health = healthPayloadSchema.pick({ capabilities: true, bootProject: true }).parse(await response.json())
       current.signal.throwIfAborted()
-      session = { ...session!, local: health.capabilities.localHandoff, bootProject: health.bootProject }
+      session = { ...session!, local: health.capabilities.localHandoff === true, bootProject: health.bootProject }
       for (const entry of subscriptions.values()) if (entry.bootAlias && entry.demand.kind === 'run') entry.demand.projectId = health.bootProject
       await reconcileLive(current.signal)
       await Promise.all(available().filter(entry => entry.demand.kind === 'run').map(entry => recover(entry, 'document resumed', current.signal)))

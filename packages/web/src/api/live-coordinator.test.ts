@@ -205,3 +205,16 @@ it('uses the restored deployment mode and boot alias before resubscribing a task
   const batch = vi.mocked(fetch).mock.calls.find(([path]) => String(path).endsWith('/run-event-batches'))!
   expect(JSON.parse(String(batch[1]!.body)).runs).toEqual([{ projectId: 'new-boot', runId: 'a', afterSeq: 8 }])
 })
+
+it('restores live delivery from an older server whose health lacks newer capabilities', async () => {
+  coordinator.subscribe({ kind: 'workspace' }, {})
+  coordinator.configure(local)
+  window.dispatchEvent(new Event('pagehide'))
+  const healthy = vi.mocked(fetch).getMockImplementation()!
+  vi.mocked(fetch).mockImplementation(async (path, init) => String(path).endsWith('/health')
+    ? new Response(JSON.stringify({ bootProject: 'boot', capabilities: { localHandoff: true, followups: true, singleProject: false } }))
+    : healthy(path, init))
+  window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
+  await vi.advanceTimersByTimeAsync(0)
+  expect(Worker.all).toHaveLength(2)
+})
