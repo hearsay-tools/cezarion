@@ -213,13 +213,25 @@ named executable exemptions. Prove the relevant regression fails without the
 fix. See `AGENT_PROTOCOL.md` §7 for the contract and examples. Do not defer this
 coverage to a separate issue.
 
+Keep each parity test file under about 300 s on an idle host, so that it stays
+inside Squeal's 600 s per-file cap on a loaded host. When a parity suite grows
+past that, run its `RUNNER_IDS` cells from one file per runner, defined once in
+a `*-cells.testkit.ts`, and add a guard that every runner has its file. Split a
+runner's file again by row group when one runner alone is too slow.
+`core/harness-parity-cells.testkit.ts` and
+`workflows/waits-parity-cells.testkit.ts` are the examples
+(hearsay-tools/cezarion#1288).
+
 Before opening a PR that changes `packages/cezar/src/workflows/run.ts`'s wait,
 turn-end, failure or step-settlement paths, verify every suite matching
 `packages/cezar/src/core/*-parity.test.ts` and
 `packages/cezar/src/workflows/*-parity.test.ts`: with Squeal, run
 `squeal status --wait 60000 packages/cezar/src/core/*-parity.test.ts packages/cezar/src/workflows/*-parity.test.ts`
-and require a passing verdict for all selected files (repeat if still pending);
-without Squeal, run
+and require a passing verdict for all selected files. Repeat the wait only for
+files that are still pending. A file that Squeal reports as unknown (it timed out
+at its per-file cap, or was never queued) does not become pending if you wait
+again. Run it with `npm test -- <file>`, and record that command and its result
+next to the Squeal verdict for the other files. Without Squeal, run
 `npm test -- packages/cezar/src/core/*-parity.test.ts packages/cezar/src/workflows/*-parity.test.ts`.
 
 ## The HTTP API
@@ -434,6 +446,66 @@ lists that spec:
 grep -lF 'Automations' packages/web/e2e/*.e2e.ts
 ```
 
+### One-CPU load reproduction
+
+For a failure that appears under CPU contention, use this optional diagnostic
+from the repo root. It needs **Linux**, Bash, `taskset` (util-linux), and GNU
+`timeout` (coreutils). Choose a focused test file and name; replace both
+placeholders below. This is a controlled reproduction, not a routine test rerun
+or a replacement for the failure bundle. With Squeal validating, read its failure
+report first and follow its installed skill: use this command only when the
+controlled-load result is needed and unknown, not to duplicate background checks.
+
+```bash
+# Select the first CPU allowed to this shell, including inside a cpuset.
+cpu=$(awk '/^Cpus_allowed_list:/ { split($2, cpus, /[,-]/); print cpus[1] }' /proc/self/status)
+LOOPS=2 timeout --kill-after=5s 120s taskset -c "$cpu" bash <<'BASH'
+set -eu
+pids=()
+cleanup() {
+  if ((${#pids[@]})); then
+    kill "${pids[@]}" 2>/dev/null || true
+    wait "${pids[@]}" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+for ((i = 0; i < LOOPS; i++)); do
+  sh -c 'while :; do :; done' &
+  pids+=("$!")
+done
+npm test -- <test-file> -t '<test-name>'
+BASH
+```
+
+The shell, busy loops, test command and its children inherit the same logical
+CPU affinity unless a child explicitly changes it. Together they can consume
+one logical CPU, not the whole host; other sessions using that CPU still compete
+with them. Start with `LOOPS=2`, then increase in small steps only as needed.
+For CPU-bound work, the failing host's load average divided by its available
+logical CPU count gives a rough starting point for runnable work per CPU.
+Each busy loop adds one runnable competitor, and the test adds its own work.
+For example, load 48 over 24 CPUs suggests roughly two runnable tasks per CPU,
+not an exact prescription of two loops. Load average includes I/O waits; CPU
+quotas, priorities and test parallelism also change the result. Record the CPU,
+loop count, command, revision and observed outcome. Eight loops reproduced the
+reported R24/R25 failures in hearsay-tools/cezarion#1392; it is no universal
+threshold or guarantee of reproduction.
+
+Normal completion or test failure runs the EXIT cleanup, which stops and reaps
+only the recorded loop PIDs. Ctrl-C uses the same cleanup. The 120-second limit
+sends SIGTERM to the command group, including test descendants. If Bash remains
+alive five seconds later, GNU `timeout` sends SIGKILL. If Bash exits first,
+`timeout` exits too: a descendant that ignores SIGTERM can survive. This bounds
+the reproduction command, not every possible descendant. After an interrupted
+or timed-out test, check for remaining test processes and stop those you own
+before another attempt. A timeout normally returns 124 (or 137 after SIGKILL),
+not a test assertion result. Do not add `--foreground`: it would exclude children
+from the timeout's group handling. Increase the limit only for a known longer
+focused test, and keep it finite. Traps cannot run after SIGKILL of the shell
+itself; do not kill the outer timeout to stop the reproduction.
+
 **In a unit test, a timeout is a hang guard, never the thing the test waits on.**
 Wait for the product's own signal: an event, a callback, a store write, a file
 the fixture publishes. A test that proves something did NOT happen moves past
@@ -452,6 +524,15 @@ signal or a `// bound:` reason, never a baseline entry. After fixing a site,
 shrink the baseline with
 `TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts`.
 The scan cannot see a shrunk product budget, so review checks that one.
+
+When a PR adds or splits a Vitest unit test file taking longer than about one
+minute on CI, add or update its repository-relative path and measured duration
+in milliseconds under `durationsMs` in `.github/test-durations.json`. Use the
+passed per-file Vitest suite-summary line in the CI log, not an individual test
+timing or total job duration; record the source run and commit in provenance.
+For split files, measure each resulting file separately. Keep browser E2E weights
+in their separate manifest. See [the Vitest sequencer](docs/sdlc/ci.md) for its
+balancing-only role and median fallback for unlisted files.
 
 **The final gate and full-suite runs belong in CI.** Do not run the entire local
 gate, `squeal run --all`, or the full Vitest or browser suite just to finish a
@@ -617,7 +698,8 @@ element, the target's count/rect/computed style and the element under its centre
 `wait` gives up, and `packages/web/e2e/failure-setup.ts` writes the same bundle from
 `onTestFailed` for a plain `expect` failure. The thrown error names the directory; CI
 uploads it as the `cockpit-failures-shard-<n>` artifact and lists it in the step summary.
-Read the bundle before theorizing about a flake. Writing or fixing a spec starts at
+Read the bundle before theorizing about a flake. For CPU-dependent failures, see
+[One-CPU load reproduction](#one-cpu-load-reproduction). Writing or fixing a spec starts at
 `packages/web/e2e/README.md`: the wait rules the `e2e-wait-discipline` unit test enforces,
 how to read a bundle, and the single-test reproduction with an env-gated server delay.
 

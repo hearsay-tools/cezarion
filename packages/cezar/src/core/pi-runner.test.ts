@@ -10,7 +10,9 @@ import { parseAskMarker } from './ask.js';
 import { detectEnvironment } from './backend-detect.js';
 import { createRunner } from './runner-factory.js';
 import { buildPiArgs, PiRunner } from './pi-runner.js';
+import { cezarToolNames } from '../ci-wait/tools.js';
 import { appendTurnText } from '../workflows/run.js';
+import { allowedToolsForStep } from '../workflows/types.js';
 
 /**
  * The `pi` runner (#387): a new AgentBackend slotted into the runner seam as
@@ -732,13 +734,23 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
   });
 });
 
+const cezarExtensionArgs = [
+  '--extension',
+  expect.stringMatching(/scripts\/pi-retry-degraded-service\.mjs$/),
+  '--extension',
+  expect.stringMatching(/scripts\/pi-project-skills\.mjs$/),
+];
+
+/** The default-list tail (hearsay-tools/cezarion#1305): no allowlist, the named built-ins activated by the extension. */
+const defaultToolArgs = (builtins: string) => [
+  '--no-builtin-tools',
+  '--extension',
+  expect.stringMatching(/scripts\/pi-default-tools\.mjs$/),
+  '--cezar-builtin-tools',
+  builtins,
+];
+
 describe('pi RPC argv', () => {
-  const cezarExtensionArgs = [
-    '--extension',
-    expect.stringMatching(/scripts\/pi-retry-degraded-service\.mjs$/),
-    '--extension',
-    expect.stringMatching(/scripts\/pi-project-skills\.mjs$/),
-  ];
 
   it('always loads the project-skills extension from a shipped script, before the CI extension (hearsay-tools/cezarion#1295)', () => {
     for (const spec of [
@@ -777,8 +789,7 @@ describe('pi RPC argv', () => {
       'Keep changes focused.',
       '--model',
       'openai/gpt-5.1',
-      '--tools',
-      'read,bash,edit,write,grep,find',
+      ...defaultToolArgs('read,bash,edit,write,grep,find'),
     ]);
   });
 
@@ -803,14 +814,14 @@ describe('pi RPC argv', () => {
     ).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--tools', 'read']);
   });
 
-  it('maps the complete subagent trio onto pi --tools so the default extras list is representable', () => {
+  it('maps the complete subagent trio onto pi tool names so the default extras list is representable', () => {
     expect(
       buildPiArgs({
         cwd: '/repo',
         userPrompt: 'task',
         allowedTools: ['Read', 'Edit', 'Write', 'Grep', 'Glob', 'Bash', 'Subagent', 'SubagentSupervisor', 'SubagentWait'],
       }),
-    ).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--tools', 'read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait']);
+    ).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, ...defaultToolArgs('read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait')]);
   });
 
   it('does not inject Subagent when allowedTools is an explicit subset', () => {
@@ -831,6 +842,100 @@ describe('pi RPC argv', () => {
     expect(
       buildPiArgs({ cwd: '/repo', userPrompt: 'task', effort: 'auto' }),
     ).not.toContain('--thinking');
+  });
+});
+
+// hearsay-tools/cezarion#1305: pi reads --tools as an allowlist, so a default list hid every MCP
+// and extension tool. The default list now leaves the registry alone and activates the named
+// built-ins through an extension; a narrowed list keeps the allowlist; a list that maps to
+// nothing fails closed instead of falling back to pi's own default.
+describe('pi tool selection (hearsay-tools/cezarion#1305)', () => {
+  const ci = { name: 'cezar_ci_test', command: 'node', args: ['/x.mjs'] };
+  const base = { cwd: '/repo', userPrompt: 'task' };
+  const stepDefault = allowedToolsForStep(undefined, 'pi');
+  const toolFlags = (args: string[]) => args.filter((arg) => ['--tools', '--no-tools', '--no-builtin-tools', '--cezar-builtin-tools'].includes(arg));
+  const extensions = (args: string[]) => args.flatMap((arg, index) => (arg === '--extension' ? [args[index + 1]!] : []));
+
+  it('sends no allowlist for the step default, and names its built-ins to the default-tools extension', () => {
+    const args = buildPiArgs({ ...base, allowedTools: stepDefault });
+    expect(args).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, ...defaultToolArgs('read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait')]);
+    expect(args).not.toContain('--tools');
+    expect(existsSync(extensions(args).at(-1)!)).toBe(true);
+  });
+
+  it('keeps the default path for the six base tools alone, the list a worker inherits from a Claude parent', () => {
+    expect(buildPiArgs({ ...base, allowedTools: allowedToolsForStep(undefined, 'claude') })).toEqual([
+      '--mode', 'rpc', ...cezarExtensionArgs, ...defaultToolArgs('read,edit,write,grep,find,bash'),
+    ]);
+  });
+
+  it('narrows to the --tools allowlist when the list names a tool outside the pi default, so the grant stays limited to it', () => {
+    const named = 'read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait,ls,webfetch';
+    expect(buildPiArgs({ ...base, allowedTools: [...stepDefault, 'ls', 'WebFetch'] })).toEqual([
+      '--mode', 'rpc', ...cezarExtensionArgs, '--tools', named,
+    ]);
+    expect(buildPiArgs({ ...base, allowedTools: [...allowedToolsForStep(undefined, 'claude'), 'review_tool'] })).toEqual([
+      '--mode', 'rpc', ...cezarExtensionArgs, '--tools', 'read,edit,write,grep,find,bash,review_tool',
+    ]);
+  });
+
+  it('narrows to the --tools allowlist when the list names an mcp__ tool, so the grant stays limited to it', () => {
+    const named = 'read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait,mcp__plug__word';
+    expect(buildPiArgs({ ...base, allowedTools: [...stepDefault, 'mcp__plug__word'] })).toEqual([
+      '--mode', 'rpc', ...cezarExtensionArgs, '--tools', named,
+    ]);
+    expect(buildPiArgs({ ...base, allowedTools: [...stepDefault, 'mcp__plug__word'], cezarTools: ci })).toEqual([
+      '--mode', 'rpc', ...cezarExtensionArgs, '--extension', expect.stringMatching(/scripts\/pi-ci-wait\.mjs$/),
+      '--tools', [named, ...cezarToolNames({})].join(','),
+    ]);
+  });
+
+  it('admits the cezar tools through the CI extension on the default path, not through a list', () => {
+    const args = buildPiArgs({ ...base, allowedTools: stepDefault, cezarTools: ci });
+    expect(extensions(args)).toEqual([
+      expect.stringMatching(/scripts\/pi-retry-degraded-service\.mjs$/),
+      expect.stringMatching(/scripts\/pi-project-skills\.mjs$/),
+      expect.stringMatching(/scripts\/pi-ci-wait\.mjs$/),
+      expect.stringMatching(/scripts\/pi-default-tools\.mjs$/),
+    ]);
+    expect(args).not.toContain('--tools');
+    expect(args[args.indexOf('--cezar-builtin-tools') + 1]!.split(',').filter((name) => name.startsWith('cezar_'))).toEqual([]);
+  });
+
+  it('keeps --exclude-tools subagent on the default path under restrictNativeDelegation', () => {
+    const args = buildPiArgs({ ...base, allowedTools: stepDefault, restrictNativeDelegation: true });
+    expect(args).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--exclude-tools', 'subagent', ...defaultToolArgs('read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait')]);
+  });
+
+  it('keeps the --tools allowlist for a narrowed list', () => {
+    expect(toolFlags(buildPiArgs({ ...base, allowedTools: ['Read'] }))).toEqual(['--tools']);
+    expect(buildPiArgs({ ...base, allowedTools: ['Read'] })).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--tools', 'read']);
+    expect(buildPiArgs({ ...base, allowedTools: ['Read'], cezarTools: ci })).toEqual([
+      '--mode', 'rpc', ...cezarExtensionArgs, '--extension', expect.stringMatching(/scripts\/pi-ci-wait\.mjs$/),
+      '--tools', ['read', ...cezarToolNames({})].join(','),
+    ]);
+  });
+
+  it('treats a bashAllowlist on the default list as narrowed: --tools without bash', () => {
+    expect(buildPiArgs({ ...base, allowedTools: stepDefault, bashAllowlist: ['npm test'] })).toEqual([
+      '--mode', 'rpc', ...cezarExtensionArgs, '--tools', 'read,edit,write,grep,find,subagent,subagent_supervisor,subagent_wait',
+    ]);
+  });
+
+  it('fails closed with --no-tools when a given list maps to nothing', () => {
+    expect(buildPiArgs({ ...base, allowedTools: [] })).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--no-tools']);
+    expect(buildPiArgs({ ...base, allowedTools: ['Bash'], bashAllowlist: ['git status'] })).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--no-tools']);
+  });
+
+  it('admits only the cezar tools when an empty list carries cezarTools', () => {
+    const args = buildPiArgs({ ...base, allowedTools: [], cezarTools: ci });
+    expect(toolFlags(args)).toEqual(['--tools']);
+    expect(args[args.indexOf('--tools') + 1]).toBe(cezarToolNames({}).join(','));
+  });
+
+  it('sends no tool flag when allowedTools is undefined, leaving pi its own default', () => {
+    expect(toolFlags(buildPiArgs(base))).toEqual([]);
+    expect(toolFlags(buildPiArgs({ ...base, cezarTools: ci }))).toEqual([]);
   });
 });
 
