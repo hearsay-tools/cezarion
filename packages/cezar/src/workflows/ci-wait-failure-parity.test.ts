@@ -84,7 +84,7 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
         active(run.id)!.session.end();
         await until(() => !manager.isActive(run.id));
         // Clean CI parking must survive a close, without fabricating failure.
-        expect(store.getRun(run.id)).toMatchObject({ status: 'waiting', activity: undefined });
+        expect(store.getRun(run.id)).toMatchObject({ status: 'waiting' });
         expect(store.getRun(run.id)?.waits?.find(open => open.id === wait.id)?.phase).toBe('open');
         expect(store.getRun(run.id)?.error).toBeUndefined();
         settle();

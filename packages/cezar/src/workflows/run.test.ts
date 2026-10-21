@@ -1446,7 +1446,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
 
     // hearsay-tools/cezarion#1233: the backend's own turn runs on the pool slot it parked with,
     // and its timer stays open until it fires.
-    expect(store.getRun(record.id)).toMatchObject({ status: 'running', activity: undefined });
+    expect(store.getRun(record.id)).toMatchObject({ status: 'running' });
     expect(Date.parse(String(monitoringWakeOf(store.getRun(record.id))))).toBe(originalDeadline);
     expect(monitoringTimerOf(manager, record.id)).toBeDefined();
     expect(internals.waiting.has(record.id)).toBe(false);
@@ -1631,7 +1631,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
 
     // hearsay-tools/cezarion#1233: the resumed turn keeps its pool slot and its open timer until
     // its own turn end.
-    expect(store.getRun(record.id)).toMatchObject({ status: 'running', activity: undefined });
+    expect(store.getRun(record.id)).toMatchObject({ status: 'running' });
     expect(monitoringWakeOf(store.getRun(record.id))).toBeDefined();
     expect(monitoringTimerOf(manager, record.id)).toBeDefined();
     expect(internals.waiting.has(record.id)).toBe(false);

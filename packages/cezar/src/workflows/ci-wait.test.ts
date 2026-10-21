@@ -715,7 +715,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     const timer = await registerTimer(run.id, 600);
     store.flush();
     const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<Record<string, unknown> & { id: string }>;
-    Object.assign(disk.find(entry => entry.id === run.id)!, { status: 'review', activity: undefined });
+    Object.assign(disk.find(entry => entry.id === run.id)!, { status: 'review' });
     await restart(false, disk);
     await until(() => (store.getRun(run.id)?.waits ?? []).length === 0);
     expect([settledById(run.id, ci.id)?.phase, settledById(run.id, timer.id)?.phase]).toEqual(['cancelled', 'cancelled']);

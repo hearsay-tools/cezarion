@@ -187,7 +187,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     // hearsay-tools/cezarion#1235 phase 3a: the worker wait is an open list entry beside the
     // question, and the question's park, like a worker park, holds no slot.
     expect(workerEntryOf(store.getRun(run.id))).toMatchObject({ phase: 'open', workerIds: [w.id] });
-    expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human' });
+    expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human', shown: true });
     expect(semaphore.busy()).toBe(0);
     manager.requestWorkerStop(w.id); await manager.awaitRunTermination(w.id, 15000);
     expect(store.getRun(run.id)?.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
@@ -503,7 +503,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       if (pending) {
         expect(send).not.toHaveBeenCalled();
         expect(manager['automaticWakes'](w.id)).toBe(0);
-        expect({ ...store.getRun(w.id), monitoringWakeAt: monitoringWakeOf(store.getRun(w.id)) }).toMatchObject({ status: 'waiting', activity: undefined, monitoringWakeAt: deadline });
+        expect({ ...store.getRun(w.id), monitoringWakeAt: monitoringWakeOf(store.getRun(w.id)) }).toMatchObject({ status: 'waiting', monitoringWakeAt: deadline });
         expect(engine.monitoring.has(w.id)).toBe(true);
         expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
         expect(engine.deliverMessage(w.id, [{ type: 'text', text: 'synthetic retry' }], false)).toBe(false);

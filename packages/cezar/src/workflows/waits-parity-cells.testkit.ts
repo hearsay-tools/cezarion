@@ -133,7 +133,7 @@ async function expectHumanWaitAnswered(id: string, via: Wait['via']) {
   expect(wait).toMatchObject({ kind: 'human', via, phase: 'open' });
   expect(asks(id)).toHaveLength(1);
   expect(wait!.askSeq).toBe(asks(id)[0]!.seq);
-  expect(toRunSummary(store.getRun(id)!).waitingOn).toEqual({ kind: 'human' });
+  expect(toRunSummary(store.getRun(id)!).waitingOn).toEqual({ kind: 'human', shown: true });
   expect(deriveAttention(store.getRun(id)!).label).toBe('needs you');
   expect(manager.sendMessage(id, [{ type: 'text', text: answerOf(id) }])).toBe(true);
   await until(() => settled(id, wait!.id)?.phase === 'delivered' && answered(id, wait!.askSeq!));
@@ -1195,7 +1195,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         expect(wait!.questions).toBeUndefined();
         expect(store.getRun(run.id)?.automaticWakes).toBe(1);
         expect(store.readEvents(run.id).filter(event => event.type === 'note' && event.message === NO_WAIT_NOTE)).toHaveLength(1);
-        expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human' });
+        expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human', shown: true });
         expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
         // The user's reply answers it and restarts the budget; the reply's own turn is nudged again.
         expect(manager.sendMessage(run.id, [{ type: 'text', text: 'carry on' }])).toBe(true);
