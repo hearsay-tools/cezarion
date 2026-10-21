@@ -2272,6 +2272,47 @@ never answered by lifecycle input, and no automatic merge/review acceptance exis
 
 ---
 
+### Claude selected-model refusals (hearsay-tools/cezarion#1351)
+
+A live Claude process can retry the exact “There's an issue with the selected
+model (...)” result after that same reported session and model completed a
+successful turn with usage. Eligibility requires an `is_error` result with
+explicit zero input/output usage, zero other accounting counters and no work in
+that attempt. The refusal's own assistant text is diagnostic; tools, reasoning,
+other text, background-task or hook system frames, tool progress, nonzero usage
+or cost forbid replay. Missing identity or usage,
+changed model, authentication, rate limits and other errors keep their existing
+failure paths. A resumed session id alone proves no success: eligibility starts
+afresh in every runner process.
+
+The shipped default is two extra submissions, after 5 and 15 seconds, on the
+same session with the exact input content and unchanged model, account and grants.
+Each retry records its reason, attempt and delay as a note. Each native attempt
+has balanced v2 turn events, but intermediate refusals emit no v1 fatal error or
+workflow `turn-end`. Retry state is process-local; there is no durable wake,
+new run status, configuration or migration. A successful retry settles the input
+once and drains later human input; new worker input is refused during backoff
+and retry. Later human input is held in order. Exhaustion preserves the first
+refusal and follows the existing failure path. Stop, Finish, timeout, process
+exit and output closure cancel the retry timer. An unexpected exit during
+backoff preserves the refusal rather than returning false success.
+
+| State | Trigger | Who fires it | Behavior at shipped defaults |
+|---|---|---|---|
+| Active attempt | Eligible result | Claude reader | Bounded backoff; keep logical input pending |
+| Backoff | 5s or 15s expires | Runner timer | Same input, fresh native UUID, same logical delivery IDs |
+| Retry attempt | Success | Claude reader | Normal settlement; release later input |
+| Retry attempt | Exhaustion or other error | Claude reader | Existing fatal path, first refusal retained |
+| Attempt or backoff | Stop, Finish, timeout, process exit or output closure | Existing teardown and reader | Cancel retry; settle through existing cleanup |
+| Recovery without session | Restart | Existing recovery | No inferred success; no retry until live success is observed |
+
+`claude-model-refusal.test.ts` drives Claude's native mock with controlled time.
+Shared row **S32**, in `model-refusal-parity.test.ts`, uses every `RUNNER_IDS`
+entry's own `HARNESS_ADAPTERS` wire after a successful turn. Claude exhausts its
+two retries; the other runners retain their native terminal-rejection policy.
+Every cell must preserve a diagnosis and settle. This does not assert that the
+other protocols expose Claude's exact zero-usage selected-model result.
+
 <a id="codex-retrying-stream-errors-550"></a>
 
 ### Codex retrying stream errors (hearsay-tools/cezarion#550)
