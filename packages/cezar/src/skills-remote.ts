@@ -413,7 +413,7 @@ async function landingPath(path: string): Promise<string | null> {
 }
 
 /** `path` lands inside `root`, itself a realpath. */
-async function landsInside(root: string, path: string): Promise<boolean> {
+export async function landsInside(root: string, path: string): Promise<boolean> {
   const landing = await landingPath(path);
   return landing !== null && (landing === root || landing.startsWith(root.endsWith(sep) ? root : root + sep));
 }
@@ -502,7 +502,12 @@ export const TEAM_SKILL_AGENT_DIRS = ['.claude', '.agents', '.cursor'] as const;
  * never a half-empty one. An existing directory without the marker may be the
  * user's own: it is overlaid as before, never pruned, and never marked.
  */
-export async function materializeSkillDir(repoRoot: string, skill: Skill): Promise<string[]> {
+export async function materializeSkillDir(
+  repoRoot: string,
+  skill: Skill,
+  /** Keeps one written copy out of git; defaults to the shared `info/exclude`. */
+  ignore: (agentDir: string) => Promise<void> = (agentDir) => excludeFromGit(repoRoot, `${agentDir}/skills/${skill.name}/`),
+): Promise<string[]> {
   const source = await resolveSkillDirSource(skill);
   if (!source || !skill.team) return [];
   const files = await readSkillDirFiles(source);
@@ -528,7 +533,7 @@ export async function materializeSkillDir(repoRoot: string, skill: Skill): Promi
     if (ours) await removeUnlisted(destDir, new Set([...files.keys(), TEAM_SKILL_MARKER]));
     written.push(agentDir);
   }
-  for (const agentDir of written) await excludeFromGit(repoRoot, `${agentDir}/skills/${skill.name}/`);
+  for (const agentDir of written) await ignore(agentDir);
   return written.map((agentDir) => resolve(repoRoot, agentDir, 'skills', skill.name));
 }
 
@@ -592,7 +597,7 @@ async function pruneSkillFiles(root: string, keep: string, now: number): Promise
 }
 
 /** Append a pattern to git's `info/exclude` (idempotent, non-fatal). */
-async function excludeFromGit(repoRoot: string, pattern: string): Promise<void> {
+export async function excludeFromGit(repoRoot: string, pattern: string): Promise<void> {
   try {
     // Resolve the real exclude file: in a linked worktree (spec 006) `.git`
     // is a file and `info/exclude` lives in the shared common dir — which
