@@ -251,6 +251,15 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
     },
   );
 
+  // A usage-limit hold is `waiting` with no session until its resume (hearsay-tools/cezarion#1236):
+  // the engine has let go of the session, as the cockpit's `cliTargetResumes` says.
+  it('a run held for its usage-limit resume still resumes its session', async () => {
+    const run = makeRun('claude', 'sess-1');
+    store.updateRun(run.id, { status: 'waiting', autoResumeAt: new Date(Date.now() + 600_000).toISOString() });
+    const res = await openIn(run.id, 'cli:claude');
+    expect(((await res.json()) as { command: string }).command).toBe('claude --resume sess-1');
+  });
+
   it('hosted mode (CEZ_REMOTE=1) 409s before any session lookup, CLI or not', async () => {
     process.env.CEZ_REMOTE = '1';
     const run = makeRun('claude', 'sess-1');
