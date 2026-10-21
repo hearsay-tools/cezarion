@@ -11,9 +11,10 @@ import { toast } from '@/components/ui/toaster'
  * "This task is not over — it is waiting out a usage limit" (spec
  * 2026-08-03-auto-resume-after-usage-limit).
  *
- * A run stopped by a provider limit is `failed`, so without this the thread reads exactly like a
- * task that broke: a red footer and a Continue button nobody presses, while a timer they cannot
- * see is about to resume it. The hint lives in the DOCK, beside the paused/queued hints, because
+ * A run stopped by a provider limit waits for its resume with no session (`waiting` +
+ * `autoResumeAt`, hearsay-tools/cezarion#1236), so without this the thread reads like a task that
+ * stalled: a Continue button nobody needs to press, while a timer they cannot see is about to
+ * resume it. The hint lives in the DOCK, beside the paused/queued hints, because
  * that is where the thread already answers "what is expected of me right now?" — and the answer
  * here is "nothing".
  *

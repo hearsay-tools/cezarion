@@ -250,12 +250,13 @@ describe('ThreadView', () => {
     expect(textarea.placeholder).toBe('Reply — / for skills, @ for files…')
   })
 
-  it('held by a usage limit → the dock says when it resumes itself, and links the setting', () => {
+  it('held by a usage limit → the dock says when it resumes itself, and links the setting', async () => {
     renderView(
       <ThreadView
         run={run('waiting', {
           error: 'step "work" failed: Claude AI usage limit reached|1754236800',
           autoResumeAt: '2026-08-03T17:00:30.000Z',
+          steps: [{ id: 'work', name: 'Work', kind: 'agent', status: 'failed', iterations: 1, tokensUsed: 0, sessionId: 'sess-1', backend: 'claude' }],
         })}
         thread={reduceThread(EVENTS)}
       />,
@@ -272,6 +273,12 @@ describe('ThreadView', () => {
     expect(screen.getByRole('link', { name: 'Auto-resume settings' }).getAttribute('href')).toBe(
       '/settings/global/resources',
     )
+    // No session until the resume (hearsay-tools/cezarion#1236): the composer continues the run
+    // now, as on the scheduled failed run, and offers no Stop that the server would refuse.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' }).hasAttribute('disabled')).toBe(false))
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    // The auto-resume hint says what happens; the paused hint of a live session does not repeat it.
+    expect(document.querySelector('[data-slot="paused-hint"]')).toBeNull()
   })
 
   it('offers a per-task opt-out that hits DELETE /auto-resume for THIS run only', async () => {

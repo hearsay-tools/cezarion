@@ -10,7 +10,7 @@ import { isRunActive } from './run-actions'
 export function useStopAction(run: ApiRun) {
   const queryClient = useQueryClient()
   const [requestedRun, setRequestedRun] = useState<string>()
-  const active = isRunActive(run.status)
+  const active = isRunActive(run)
   useEffect(() => {
     if (!active || (requestedRun && requestedRun !== run.id)) setRequestedRun(undefined)
   }, [active, run.id, requestedRun])

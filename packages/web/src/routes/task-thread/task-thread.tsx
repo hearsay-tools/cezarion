@@ -36,7 +36,7 @@ import { useContinueAction } from './follow-up-engine'
 import { findSubagent, subagentChildren } from './subagent-dock'
 import { SubagentSheet } from './subagent-sheet'
 import { AcceptCelebration, ReviewPanel } from './review-panel'
-import { archiveInComposer, offersComposerFinish, queuePosition, runActionFlags } from './run-actions'
+import { archiveInComposer, isRunActive, offersComposerFinish, queuePosition, runActionFlags } from './run-actions'
 import { ArchiveButton } from './archive-action'
 import { useFinishRun } from './use-finish-run'
 import { useStopAction } from './stop-action'
@@ -195,7 +195,8 @@ export function ThreadView({
   // show (#474). Derived from the same reduced turns the thread renders — no new subscription.
   // The legacy session-open rule (web/app.js `updateDetail`): the composer can deliver while
   // the engine owns a live session — running queues the message, waiting answers it.
-  const sessionOpen = run.status === 'running' || run.status === 'waiting'
+  // A usage-limit hold is `waiting` with no session until its resume (hearsay-tools/cezarion#1236).
+  const sessionOpen = (run.status === 'running' || run.status === 'waiting') && isRunActive(run)
   // Closed runs keep their in-flight sub-agent cards as historical rows.
   const runIsTerminal = !sessionOpen && run.status !== 'queued'
   // Queued sends amend the original prompt; they do not open a provider session.
@@ -446,7 +447,7 @@ export function ThreadView({
               before the composer offers a Continue nobody needs to press. */}
           <AutoResumeHint run={run} />
 
-          {run.status === 'waiting' ? (
+          {run.status === 'waiting' && sessionOpen ? (
             <div
               data-slot="paused-hint"
               className="flex items-center gap-2 px-1 text-xs text-muted-foreground"
