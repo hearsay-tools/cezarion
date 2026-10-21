@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { computeWaitingOn, type WaitingOnInput, type WorkerWaitEntry } from './waits.ts';
-import { ATTENTION_RANK, deriveAttention, workerWaitLabel, type Attention, type AttentionInput } from './attention.ts';
+import { ATTENTION_RANK, DEFAULT_WEBHOOK_TRIGGERS, deriveAttention, deriveWebhookState, WEBHOOK_TRIGGERS, workerWaitLabel, type Attention, type AttentionInput } from './attention.ts';
 import type { RunStatus } from './runs.ts';
 
 /**
@@ -357,5 +357,46 @@ describe('computeWaitingOn and worker entries', () => {
     const summary = { status: 'waiting', delegation: { role: 'root' }, waitingOn: { kind: 'workers', count: 3 } } as unknown as AttentionInput;
     expect(deriveAttention(summary).label).toBe('waiting on 3 workers');
     expect(deriveAttention({ ...summary, hasPendingHumanAsk: true }).label).toBe('needs you');
+  });
+});
+
+// hearsay-tools/cezarion#1356: the state a project webhook filters on, read off the same ladder.
+describe('deriveWebhookState', () => {
+  const ci = { kind: 'ci' as const, waitId: '11111111-1111-4111-8111-111111111111', prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' };
+  const timer = { kind: 'timer' as const, waitId: '22222222-2222-4222-8222-222222222222', at: '2026-10-17T15:05:00.000Z' };
+  const cases: ReadonlyArray<[string, AttentionInput, ReturnType<typeof deriveWebhookState>]> = [
+    ['a plain waiting run', { status: 'waiting' }, 'needs-you'],
+    ['a pending question', { status: 'waiting', hasPendingHumanAsk: true, waitingOn: ci }, 'needs-you'],
+    ['a review', { status: 'review' }, 'needs-you'],
+    ['a live permission request on a running run', { status: 'running', hasPendingPermission: true }, 'needs-you'],
+    ['a failed run', { status: 'failed' }, 'failed'],
+    ['a failed run with a scheduled resume', { status: 'failed', autoResumeAt: '2026-10-17T16:00:00.000Z' }, undefined],
+    ['a done run', { status: 'done' }, 'done'],
+    ['a cancelled run', { status: 'cancelled' }, 'cancelled'],
+    ['a running run', { status: 'running' }, 'running'],
+    ['a queued run', { status: 'queued' }, undefined],
+    ['a root on its workers', { status: 'waiting', delegation: { role: 'root' }, waitingOn: { kind: 'workers', count: 2 } } as AttentionInput, 'waiting-workers'],
+    ['a worker on its parent\'s reply', { status: 'waiting', delegation: { role: 'worker' }, waitingOn: { kind: 'workers', count: 1, replies: true } } as AttentionInput, 'waiting-workers'],
+    ['a CI wait', { status: 'waiting', waitingOn: ci }, 'waiting-ci'],
+    ['a timer wait', { status: 'waiting', waitingOn: timer }, 'waiting-timer'],
+    // The kind with no option of its own today; a kind added later lands here too.
+    ['a usage-limit wait', { status: 'waiting', waitingOn: { kind: 'usage-limit', at: '2026-10-17T16:00:00.000Z' } }, 'waiting-other'],
+    ['a resolved wait owed a wake', { status: 'waiting', waitWakePending: true }, undefined],
+  ];
+
+  it.each(cases)('reads %s', (_name, input, state) => {
+    expect(deriveWebhookState(input)).toBe(state);
+  });
+
+  it('reads an unknown wait kind as waiting-other', () => {
+    expect(deriveWebhookState({ status: 'waiting', waitingOn: { kind: 'future' } } as unknown as AttentionInput)).toBe('waiting-other');
+  });
+
+  it('only ever answers a trigger, and the default is the four that end a task or need a person', () => {
+    for (const status of ALL_STATUSES) {
+      const state = deriveWebhookState(run({ status }));
+      if (state !== undefined) expect(WEBHOOK_TRIGGERS).toContain(state);
+    }
+    expect(DEFAULT_WEBHOOK_TRIGGERS).toEqual(['needs-you', 'failed', 'done', 'cancelled']);
   });
 });

@@ -103,6 +103,40 @@ describe('task webhook API', () => {
       expect(entry.webhook).toEqual({ url: 'https://bot.example/other' });
     });
 
+    // hearsay-tools/cezarion#1356: the state selection is stored only when named, and a URL or
+    // token edit without it keeps it, the way the token is kept.
+    it('stores triggers, keeps them on a PATCH without them, and keeps [] apart from absent', async () => {
+      const first = await setWebhook({ url: 'https://bot.example/hook', token: 'secret-token' });
+      expect((first.body.project as { webhook: Record<string, unknown> }).webhook).not.toHaveProperty('triggers');
+
+      const saved = await setWebhook({ url: 'https://bot.example/hook', triggers: ['waiting-ci', 'done'] });
+      expect(saved.body.project).toMatchObject({ webhook: { triggers: ['waiting-ci', 'done'], tokenSet: true } });
+      await setWebhook({ url: 'https://bot.example/other', token: 'new-token' });
+      let entry = (await loadWorkspaceConfig()).projects.find((p) => p.id === projectId)!;
+      expect(entry.webhook).toEqual({ url: 'https://bot.example/other', token: 'new-token', triggers: ['waiting-ci', 'done'] });
+
+      const none = await setWebhook({ url: 'https://bot.example/other', triggers: [] });
+      expect(none.body.project).toMatchObject({ webhook: { triggers: [] } });
+      entry = (await loadWorkspaceConfig()).projects.find((p) => p.id === projectId)!;
+      expect(entry.webhook?.triggers).toEqual([]);
+      const listed = await send('/api/v1/projects', 'GET');
+      expect((listed.body.projects as Array<Record<string, unknown>>)[0]!.webhook).toEqual({ url: 'https://bot.example/other', tokenSet: true, triggers: [] });
+    });
+
+    it('refuses an unknown or repeated trigger', async () => {
+      expect((await setWebhook({ url: 'https://bot.example/hook', triggers: ['monitoring'] })).status).toBe(400);
+      expect((await setWebhook({ url: 'https://bot.example/hook', triggers: ['done', 'done'] })).status).toBe(400);
+    });
+
+    it('drops an unknown stored trigger on its own and keeps the rest', async () => {
+      await setWebhook({ url: 'https://bot.example/hook' });
+      await mergeWriteWorkspaceConfig((config) => {
+        (config.projects.find((p) => p.id === projectId)!.webhook as { triggers?: unknown }).triggers = ['done', 'from-a-newer-cezar', 'failed'];
+      });
+      const entry = (await loadWorkspaceConfig()).projects.find((p) => p.id === projectId)!;
+      expect(entry.webhook?.triggers).toEqual(['done', 'failed']);
+    });
+
     it('removes the webhook on null and refuses a non-http URL', async () => {
       await setWebhook({ url: 'https://bot.example/hook', token: 't' });
       const removed = await setWebhook(null);

@@ -3,7 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
+import type { ProjectListEntry, WebhookTrigger } from '@open-mercato/cezar-api-client'
+import { WEBHOOK_TRIGGERS } from '@open-mercato/cezar-api-client/contract/attention'
 import { queryKeys, workspaceQueryKeys } from '@/api/queries'
 import { createQueryClient } from '@/api/query-client'
 import { ListViewProvider } from '@/components/list-view'
@@ -47,11 +48,15 @@ function serve() {
         return json({ projects: liveRegistry, bootProject: 'boot', projectsDir: '~/cezar/projects' })
       }
       if (liveRegistry && url.startsWith('/api/v1/projects/') && method === 'PATCH') {
-        const webhook = (body as { webhook: { url: string; token?: string } | null }).webhook
+        const webhook = (body as { webhook: { url: string; token?: string; triggers?: WebhookTrigger[] } | null }).webhook
         const current = liveRegistry.find((entry) => entry.id === 'demo')!
         const { webhook: previous, ...rest } = current
         const tokenSet = webhook ? (webhook.token === undefined ? previous?.tokenSet ?? false : webhook.token !== '') : false
-        const next: ProjectListEntry = { ...rest, ...(webhook ? { webhook: { url: webhook.url, tokenSet } } : {}) }
+        const triggers = webhook?.triggers ?? previous?.triggers
+        const next: ProjectListEntry = {
+          ...rest,
+          ...(webhook ? { webhook: { url: webhook.url, tokenSet, ...(triggers === undefined ? {} : { triggers }) } } : {}),
+        }
         liveRegistry = liveRegistry.map((entry) => (entry.id === 'demo' ? next : entry))
         return json({ project: next })
       }
@@ -229,6 +234,35 @@ describe('the General page', () => {
     await waitFor(() => {
       expect(requests.filter((r) => r.method === 'PATCH').at(-1)?.body).toEqual({ webhook: null })
     })
+  })
+
+  // hearsay-tools/cezarion#1356
+  it('shows one checkbox per state, starting from the default, and saves the selection', async () => {
+    liveRegistry = [project('boot'), { ...project('demo'), webhook: { url: 'https://bot.example/a', tokenSet: false } }]
+    renderAt('/p/demo/settings', { registry: liveRegistry })
+    await screen.findByLabelText('URL')
+    const boxes = Array.from(document.querySelectorAll<HTMLInputElement>('[data-slot="task-webhook-triggers"] input[type="checkbox"]'))
+    expect(boxes.map((box) => box.dataset.trigger)).toEqual([...WEBHOOK_TRIGGERS])
+    expect(boxes.filter((box) => box.checked).map((box) => box.dataset.trigger)).toEqual(['needs-you', 'failed', 'done', 'cancelled'])
+    const save = screen.getByRole('button', { name: 'Save' })
+    expect(save.hasAttribute('disabled')).toBe(true)
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Waiting on CI/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /^Done/ }))
+    expect(save.hasAttribute('disabled')).toBe(false)
+    fireEvent.click(save)
+    await waitFor(() => {
+      expect(requests.find((r) => r.method === 'PATCH')?.body).toEqual({
+        webhook: { url: 'https://bot.example/a', triggers: ['needs-you', 'failed', 'cancelled', 'waiting-ci'] },
+      })
+    })
+  })
+
+  it('starts from the stored selection, including an empty one', async () => {
+    liveRegistry = [project('boot'), { ...project('demo'), webhook: { url: 'https://bot.example/a', tokenSet: false, triggers: [] } }]
+    renderAt('/p/demo/settings', { registry: liveRegistry })
+    await screen.findByLabelText('URL')
+    expect(screen.getAllByRole('checkbox').filter((box) => (box as HTMLInputElement).checked && box.closest('[data-slot="task-webhook-triggers"]'))).toEqual([])
   })
 
   it('removes the project after a confirm, then leaves the URL that just stopped resolving', async () => {
