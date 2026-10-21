@@ -2,6 +2,7 @@ import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import { PROJECT_TAGS_MAX, PROJECT_TAG_MAX_LENGTH } from '@open-mercato/cezar-contract/project-limits';
+import type { WebhookTrigger } from '@open-mercato/cezar-contract';
 import { forgeKindOfRemote, forgeWebRoot, type ForgeKind } from '../server/forge/index.ts';
 import { getRepoInfo } from '../server/git.ts';
 import {
@@ -189,8 +190,9 @@ type WorkspaceProjectWithoutWebhook = {
 };
 
 export interface ProjectListEntry extends WorkspaceProjectWithoutWebhook {
-  /** The task webhook (#589), token redacted: the wire only says whether one is set. */
-  webhook?: { url: string; tokenSet: boolean };
+  /** The task webhook (#589), token redacted: the wire only says whether one is set. `triggers`
+   *  only when stored (hearsay-tools/cezarion#1356). */
+  webhook?: { url: string; tokenSet: boolean; triggers?: WebhookTrigger[] };
   /** `missing` = root gone/unreadable; `not-git` = exists but no `.git`. */
   status: ProjectStatus;
   /** Current branch when cheaply available (omitted e.g. on an unborn HEAD). */
@@ -224,7 +226,15 @@ export function toProjectListEntry(project: WorkspaceProject, probe: RootProbe):
   return {
     ...rest,
     ...probe,
-    ...(webhook ? { webhook: { url: webhook.url, tokenSet: Boolean(webhook.token) } } : {}),
+    ...(webhook
+      ? {
+          webhook: {
+            url: webhook.url,
+            tokenSet: Boolean(webhook.token),
+            ...(webhook.triggers === undefined ? {} : { triggers: webhook.triggers }),
+          },
+        }
+      : {}),
   };
 }
 

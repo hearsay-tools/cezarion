@@ -1,7 +1,7 @@
 import { basename } from 'node:path'
 import { beforeAll, beforeEach } from 'vitest'
 
-import { configureFailureCapture, lastAttachedBrowser } from './agent-browser'
+import { beginFailureSpec, beginFailureTest, configureFailureCapture, lastAttachedBrowser } from './agent-browser'
 
 /**
  * Failure bundles for every spec (#408), registered once here rather than in each file.
@@ -24,12 +24,12 @@ const specName = (file: string) => basename(file).replace(/\.e2e\.ts$/, '')
 
 beforeAll(({}, suite) => {
   const filepath = 'filepath' in suite ? suite.filepath : suite.file.filepath
-  configureFailureCapture({ spec: specName(filepath), test: 'hooks' })
+  beginFailureSpec(specName(filepath))
 })
 
 beforeEach((context) => {
   const name = { spec: specName(context.task.file.filepath), test: context.task.name }
-  configureFailureCapture(name)
+  beginFailureTest(name)
   context.onTestFailed(({ task }) => {
     const browser = lastAttachedBrowser()
     if (!browser) return
@@ -37,6 +37,6 @@ beforeEach((context) => {
     // driven the browser and must not move this test's bundle under a later name.
     configureFailureCapture(name)
     const bundle = browser.captureTestFailure(task.result?.errors ?? [])
-    if (bundle) console.error(`cezar e2e: failure bundle for "${task.name}" at ${bundle}`)
+    if (bundle) console.error(`cezar e2e: "${task.name}" (failure bundle: ${bundle})`)
   })
 })
