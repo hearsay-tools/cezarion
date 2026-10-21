@@ -348,7 +348,26 @@ async function respond(userText, imageCount, uuid) {
   // `mock:ask-truncated` → a complete payload one closing brace short (#936):
   // the closer repair should still produce one card, note the recovery, and
   // strip the raw marker (which ends on `]`, not `}`).
-  const askMarker = userText.includes('mock:ask-bad')
+  // `mock:multi-ask` → ONE marker with two questions (Library, Build), for the voice-mode E2E
+  // (spec 2026-10-21-voice-mode). Checked before every `mock:ask` form so none of them can
+  // claim the prompt first.
+  const askMarker = userText.includes('mock:multi-ask')
+    ? '\n\nCEZ:ASK ' +
+      JSON.stringify({
+        questions: [
+          {
+            header: 'Library',
+            question: 'Which test library?',
+            options: [{ label: 'Vitest' }, { label: 'Node test' }],
+          },
+          {
+            header: 'Build',
+            question: 'Which build tool?',
+            options: [{ label: 'Vite' }, { label: 'Webpack' }],
+          },
+        ],
+      })
+    : userText.includes('mock:ask-bad')
     ? '\n\nCEZ:ASK {not valid json'
     : userText.includes('mock:ask-invalid')
       ? '\n\nCEZ:ASK {"questions":[]}'
