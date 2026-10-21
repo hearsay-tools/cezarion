@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ApiRun, RunActivity, RunStatus } from '@open-mercato/cezar-contract';
+import type { ApiRun, RunActivity, RunStatus, WebhookTrigger } from '@open-mercato/cezar-contract';
+import { DEFAULT_WEBHOOK_TRIGGERS, deriveWebhookState, type AttentionInput } from '@open-mercato/cezar-contract/attention';
 import { projectStatus } from '../task-cli/projections.ts';
 import { loadWorkspaceConfig } from '../workspace/config.ts';
 import { deriveRunContextEvents } from './event-history.ts';
@@ -10,6 +11,13 @@ import type { RunRecord, RunStore } from './store.ts';
 /**
  * The task webhook (#589, spec 2026-09-25-task-webhook-handoff): a run that opted in with
  * `notify: true` POSTs its status changes to the project's webhook with a Bearer token.
+ *
+ * What it reports is the run's webhook STATE (`deriveWebhookState`, hearsay-tools/cezarion#1356),
+ * not its raw status: one delivery each time the run enters a state the project selected in
+ * `webhook.triggers` (default `DEFAULT_WEBHOOK_TRIGGERS`). Entering Needs you with a question
+ * pending is `task.question`; every other entry is `task.status`. A run in no state (queued, a
+ * scheduled resume, waiting for capacity) sends nothing, and leaving a selected state for an
+ * unselected one sends nothing either.
  *
  * One subscriber per project store, on the store's `'run'` emission. That emission is the single
  * choke point every status change passes through — both turn-end handlers in `workflows/run.ts`,
@@ -26,11 +34,13 @@ import type { RunRecord, RunStore } from './store.ts';
  * drops what was pending (out of scope in #589).
  */
 
-export type TaskWebhookEvent = 'task.status' | 'task.question' | 'task.activity' | 'task.subscribed' | 'task.test';
+export type TaskWebhookEvent = 'task.status' | 'task.question' | 'task.subscribed' | 'task.test';
 
 export interface TaskWebhookTarget {
   url: string;
   token?: string;
+  /** Absent = `DEFAULT_WEBHOOK_TRIGGERS`; `[]` = only `task.subscribed` and `task.test`. */
+  triggers?: readonly WebhookTrigger[];
 }
 
 export interface TaskWebhookPayload {
@@ -42,6 +52,8 @@ export interface TaskWebhookPayload {
   url: string;
   status: RunStatus;
   previousStatus: RunStatus | null;
+  /** The state this delivery reports the run entering; `null` on `task.subscribed`. */
+  state: WebhookTrigger | null;
   activity: RunActivity | null;
   occurredAt: string;
   message?: string;
@@ -116,23 +128,20 @@ function retryable(result: DeliveryResult): boolean {
 
 interface Seen {
   status: RunStatus;
-  activity: RunActivity | null;
-  ask: boolean;
+  state: WebhookTrigger | undefined;
 }
 
 interface Pending {
   event: TaskWebhookEvent;
   run: RunRecord;
   previousStatus: RunStatus | null;
+  /** Set on `task.status` and `task.question`: what `deliver()` filters on. */
+  state?: WebhookTrigger;
   occurredAt: string;
   message?: string;
 }
 
-const seenOf = (run: Pick<RunRecord, 'status' | 'activity' | 'hasPendingHumanAsk'>): Seen => ({
-  status: run.status,
-  activity: run.activity ?? null,
-  ask: run.hasPendingHumanAsk === true,
-});
+const seenOf = (run: AttentionInput): Seen => ({ status: run.status, state: deriveWebhookState(run) });
 
 export class TaskWebhook {
   private readonly seen = new Map<string, Seen>();
@@ -185,15 +194,11 @@ export class TaskWebhook {
       this.enqueue({ event: 'task.subscribed', run, previousStatus: null, occurredAt });
       return;
     }
-    if (before.status !== now.status) {
-      this.enqueue({ event: 'task.status', run, previousStatus: before.status, occurredAt });
-    }
-    if (before.activity !== now.activity) {
-      this.enqueue({ event: 'task.activity', run, previousStatus: null, occurredAt });
-    }
-    if (!before.ask && now.ask) {
-      this.enqueue({ event: 'task.question', run, previousStatus: null, occurredAt });
-    }
+    if (now.state === undefined || before.state === now.state) return;
+    // One delivery per entry: a question that parks the run is one `task.question`, not a
+    // `task.status` to `waiting` beside it.
+    const event = now.state === 'needs-you' && run.hasPendingHumanAsk ? 'task.question' : 'task.status';
+    this.enqueue({ event, run, previousStatus: before.status, state: now.state, occurredAt });
   }
 
   private enqueue(pending: Pending): void {
@@ -226,6 +231,7 @@ export class TaskWebhook {
       url,
       status: run.status,
       previousStatus: pending.previousStatus,
+      state: pending.state ?? null,
       activity: run.activity ?? null,
       occurredAt: pending.occurredAt,
       ...(pending.message === undefined ? {} : { message: pending.message }),
@@ -248,6 +254,9 @@ export class TaskWebhook {
     const project = await this.options.resolveProject().catch(() => undefined);
     // Removed since the run opted in: nothing to send to, and nobody to tell.
     if (!project?.webhook) return;
+    // Filtered here, against the selection as it is now, and before `payload()` so a skipped
+    // change does not use up a `seq` number.
+    if (pending.state !== undefined && !(project.webhook.triggers ?? DEFAULT_WEBHOOK_TRIGGERS).includes(pending.state)) return;
     const payload = await this.payload(pending, project.id);
     const runId = pending.run.id;
     if (this.options.dryRun ?? process.env.CEZ_DRY_RUN === '1') {

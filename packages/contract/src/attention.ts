@@ -207,3 +207,70 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
   }
   return { bucket: 'none', tone: 'neutral', shape: 'filled', pulse: false, label: 'cancelled' };
 }
+
+/**
+ * The task states a project's webhook can send deliveries for (hearsay-tools/cezarion#1356),
+ * named as the cockpit names them. `waiting-other` is every wait kind without an option of its
+ * own, including kinds added later. A change that gives a kind its own option adds that option,
+ * by config migration, to every stored list holding `waiting-other`.
+ */
+export const WEBHOOK_TRIGGERS = [
+  'needs-you',
+  'failed',
+  'done',
+  'cancelled',
+  'running',
+  'waiting-workers',
+  'waiting-ci',
+  'waiting-timer',
+  'waiting-other',
+] as const;
+
+export type WebhookTrigger = (typeof WEBHOOK_TRIGGERS)[number];
+
+/** What a webhook with no stored `triggers` sends: the states that end a task or need a person. */
+export const DEFAULT_WEBHOOK_TRIGGERS: readonly WebhookTrigger[] = ['needs-you', 'failed', 'done', 'cancelled'];
+
+/**
+ * `RunRecord` → the webhook state it is in, or `undefined` for none (hearsay-tools/cezarion#1356).
+ *
+ * Read off `deriveAttention`, so the webhook and the status dot never disagree: a run the dot
+ * shows as parked on a clock or a free slot — `queued`, a usage limit's scheduled resume,
+ * waiting for capacity — is in no state and sends nothing. A wait kind the dot has no rung for
+ * reads as Needs you there and as `waiting-other` here, since nobody is asked anything.
+ */
+export function deriveWebhookState(run: AttentionInput): WebhookTrigger | undefined {
+  const attention = deriveAttention(run);
+  if (attention.bucket === 'permission') return 'needs-you';
+  if (attention.bucket === 'error') return 'failed';
+  switch (run.status) {
+    case 'done':
+      return 'done';
+    case 'cancelled':
+      return 'cancelled';
+    case 'running':
+      return 'running';
+    case 'review':
+      return 'needs-you';
+    case 'waiting':
+      break;
+    default:
+      return undefined;
+  }
+  if (attention.label === 'waiting for capacity') return undefined;
+  if (run.hasPendingHumanAsk) return 'needs-you';
+  const waitingOn = resolveWaitingOn(run);
+  switch (waitingOn?.kind) {
+    case undefined:
+    case 'human':
+      return 'needs-you';
+    case 'workers':
+      return 'waiting-workers';
+    case 'ci':
+      return 'waiting-ci';
+    case 'timer':
+      return 'waiting-timer';
+    default:
+      return 'waiting-other';
+  }
+}
