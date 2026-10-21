@@ -1,6 +1,6 @@
 # Resolve a CI wait on an observed PR conflict
 
-Proposal for [hearsay-tools/cezarion#1339](https://github.com/hearsay-tools/cezarion/issues/1339). Status: **proposed, awaiting design approval**. No product implementation is authorized by this document. Approve the design and Continue the same task to proceed; do not relabel to dispatch another task.
+Proposal for [hearsay-tools/cezarion#1339](https://github.com/hearsay-tools/cezarion/issues/1339). Status: **accepted for implementation in this session on 2026-10-21**. After the design and trade-offs were presented with accept/amend/reject choices, the human instructed this same task to continue autonomously to completion without further confirmation. Implementation follows that instruction; do not relabel to dispatch another task.
 
 ## Evidence and eligibility
 
@@ -22,7 +22,7 @@ An observation is external evidence, never merge approval or task completion; al
 
 `RunManager.startCiWatch` validates results; `settleWait` retries failed persistence; `resolveWait` uses `commitWait` to save both the resolved wait and lifecycle input before queuing a wake. Keep this crash boundary and wait-ID deduplication. `workflows/waits.ts::waitResultText` already carries the structured result to the model with the approval caveat. Never depend on an `ActiveRun` entry to persist a resolution.
 
-## Recommended behavior (author's proposal, not owner approval)
+## Accepted behavior
 
 Extend the existing bounded PR metadata query to include GitHub's `mergeable` and `mergeStateStatus`. Use the richer metadata read in place of current head probes, including initial/final snapshot reads and the 30-second probes while the checks watcher is still running. Adding fields to the existing query avoids another recurring process or polling loop. Keep registration receipt identity unchanged; conflict is a result delivered through the normal wait lifecycle after registration.
 
@@ -92,4 +92,4 @@ No product tests are changed for this proposal. On approved implementation:
 6. Contract tests accept old results, validate new metadata and outcome and enforce the 32 KiB cap. Check route/client parity and all discriminated/exhaustive UI consumers. Verify visible conflict wording and lack of merge-approval claims. Typecheck affected workspaces and run required build checks.
 7. Before a future implementation PR changing run.ts settlement/recovery, require every core/workflows `*-parity.test.ts` suite through Squeal as mandated in AGENTS.md, plus targeted CI supervisor, scheduling, contract, store and workflow suites. Prove relevant regression red/green without clobbering unrelated edits. Report slow-tier coverage accurately. No verification gate is waived here.
 
-Approval is the outstanding product decision: accept this observation/outcome policy and its priority/default/cost boundaries, or request design changes. **Design approval and Continue on this same task are the next steps.**
+The design gate was presented in this session and the subsequent human instruction was to continue autonomously until complete. Implementation and verification continue on the same task.

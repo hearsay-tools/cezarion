@@ -1,4 +1,4 @@
-// Wire fixture: gh pr view --json url,number,headRefOid and gh pr checks --json
+// Wire fixture: gh pr view --json url,number,headRefOid,mergeable,mergeStateStatus and gh pr checks --json
 // gh 2.100.0 (installed 2026-09-22): https://github.com/cli/cli/blob/v2.100.0/pkg/cmd/pr/checks/checks.go
 // JSON fields/buckets and empty-check diagnostic pinned to that upstream implementation.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -18,7 +18,7 @@ if (mode === 'transient') {
  if (count < 3) { console.error('HTTP 503 service unavailable'); process.exit(1); }
 }
 if (args[1] === 'view') {
- console.log(JSON.stringify({url:'https://github.com/org/repo/pull/12',number:12,headRefOid: phase === 'head_changed' ? 'b'.repeat(40) : head}));
+ console.log(JSON.stringify({url:'https://github.com/org/repo/pull/12',number:12,headRefOid: phase === 'head_changed' ? 'b'.repeat(40) : head, mergeable: phase === 'conflicting' ? 'CONFLICTING' : 'MERGEABLE', mergeStateStatus: phase === 'conflicting' ? 'DIRTY' : 'CLEAN'}));
 } else if (args.includes('--watch')) {
  if(mode.startsWith('watch_')) { writeFileSync(process.env.CI_FIXTURE_COUNTER,'done'); process.exit(mode === 'watch_failed' ? 1 : 0); }
  if (mode === 'pending' || mode === 'stubborn') {
