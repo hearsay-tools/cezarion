@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { summaryOf } from '@/test/run-summary-fixture'
+import { openHumanWait } from '@/test/run-summary-fixture'
 import { describe, expect, it } from 'vitest'
 
 import type { RunRecord, RunSummary, RunStatus } from '@open-mercato/cezar-api-client'
@@ -145,17 +146,17 @@ describe('ATTENTION_RANK', () => {
 })
 
 describe('a run waiting out a usage limit', () => {
-  const scheduled = run({ status: 'failed', autoResumeAt: '2026-08-03T19:33:53.000Z' })
+  const scheduled = run({ status: 'waiting', autoResumeAt: '2026-08-03T19:33:53.000Z' })
 
-  it('reads as scheduled and parked, never as a red failure', () => {
-    // It IS `failed` on the record, but the failure is about to undo itself (spec
-    // 2026-08-03-auto-resume-after-usage-limit) — amber and still, like `queued`.
+  it('reads as a usage limit, parked and still, never as a red failure', () => {
+    // A waiting run with a resume booked (spec 2026-10-17-unified-waits, hearsay-tools/cezarion#1236):
+    // neutral and still, like `queued`.
     expect(deriveAttention(scheduled)).toEqual({
       bucket: 'none',
       tone: 'neutral',
       shape: 'ring',
       pulse: false,
-      label: 'scheduled',
+      label: 'usage limit',
     })
   })
 
@@ -166,7 +167,7 @@ describe('a run waiting out a usage limit', () => {
     expect(wantsAttention(run({ status: 'failed' }))).toBe(true)
   })
 
-  it('only applies to a FAILED run — a live run with a stale stamp is still live', () => {
+  it('only applies to a WAITING run — a live run with a stale stamp is still live', () => {
     expect(deriveAttention(run({ status: 'running', autoResumeAt: '2026-08-03T19:33:53.000Z' })).label)
       .toBe('running')
   })
@@ -178,14 +179,6 @@ describe('wantsAttention', () => {
     const expected = status === 'waiting' || status === 'review' || status === 'failed'
     expect(wantsAttention(run({ status }))).toBe(expected)
   })
-})
-
-// The monitoring activity is no longer a park (hearsay-tools/cezarion#1301): CI and timer parks are
-// open waits, so an old row's leftover activity reads as the status it carries.
-it("reads an old row's activity: 'monitoring' as its plain status", () => {
-  expect(deriveAttention(run({ status: 'running', activity: 'monitoring' })).label).toBe('running')
-  expect(wantsAttention(run({ status: 'running', activity: 'monitoring' }))).toBe(false)
-  expect(deriveAttention(run({ status: 'done', activity: 'monitoring' })).label).toBe('done')
 })
 
 describe('tone vocabulary', () => {
@@ -245,13 +238,13 @@ it("never reads an old row's delegation.wait", () => {
 })
 
 it('keeps a parked parent with a pending human ask in list attention without transcript context', () => {
-  const record = onWaits('waiting', [workerEntry()], { hasPendingHumanAsk: true })
+  const record = onWaits('waiting', [workerEntry(), openHumanWait()])
   expect(deriveAttention(record)).toEqual({ bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' })
   expect(wantsAttention(record)).toBe(true)
 })
 
 it('keeps a resolved worker wait with a pending human ask in list attention', () => {
-  const record = onWaits('waiting', [workerEntry({ phase: 'resolved' })], { hasPendingHumanAsk: true })
+  const record = onWaits('waiting', [workerEntry({ phase: 'resolved' }), openHumanWait()])
   expect(deriveAttention(record)).toEqual({ bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' })
   expect(wantsAttention(record)).toBe(true)
 })
@@ -262,12 +255,17 @@ it('keeps a running parent with a resolved worker wait as running', () => {
   })
 })
 
-it('keeps a queued parent with a resolved worker wait and a pending ask as queued', () => {
-  const record = onWaits('queued', [workerEntry({ phase: 'resolved' })], { hasPendingHumanAsk: true })
-  expect(deriveAttention(record)).toEqual({
-    bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'queued',
+// Rung 3 (phase 4b, hearsay-tools/cezarion#1236): a question the user cannot see yet does not
+// outrank the queued wake; one the user sees is Needs you at any live status.
+it('reads a queued parent with a resolved worker wait by whether its question is shown', () => {
+  const unshown = onWaits('queued', [workerEntry({ phase: 'resolved' }), openHumanWait()])
+  expect(deriveAttention(unshown)).toEqual({
+    bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity',
   })
-  expect(wantsAttention(record)).toBe(false)
+  expect(wantsAttention(unshown)).toBe(false)
+  const shown = onWaits('queued', [workerEntry({ phase: 'resolved' }), openHumanWait(3)])
+  expect(deriveAttention(shown).label).toBe('needs you')
+  expect(wantsAttention(shown)).toBe(true)
 })
 
 /** A CI or timer park is `waiting` with an open wait (spec 2026-10-17-unified-waits, phase 1).
@@ -296,7 +294,7 @@ describe('a run parked on an open wait', () => {
   })
 
   it('is Needs you again with a pending human ask', () => {
-    const record = run({ status: 'waiting', waits: [openCi()], hasPendingHumanAsk: true })
+    const record = run({ status: 'waiting', waits: [openCi(), openHumanWait()] })
     expect(deriveAttention(record).label).toBe('needs you')
     expect(wantsAttention(record)).toBe(true)
   })
@@ -318,7 +316,7 @@ describe('status key (#617)', () => {
     ['waiting for capacity', parkedRoot({ phase: 'resolved' }), { tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' }],
     ['wait result owed', run({ status: 'waiting', waits: [{ ...openCi(), phase: 'resolved', resolvedAt: '2026-10-17T15:20:00.000Z' }] }), { tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' }],
     ['queued', run({ status: 'queued' }), { tone: 'neutral', shape: 'ring', pulse: false, label: 'queued' }],
-    ['scheduled', run({ status: 'failed', autoResumeAt: '2026-08-03T19:33:53.000Z' }), { tone: 'neutral', shape: 'ring', pulse: false, label: 'scheduled' }],
+    ['usage limit', run({ status: 'waiting', autoResumeAt: '2026-08-03T19:33:53.000Z' }), { tone: 'neutral', shape: 'ring', pulse: false, label: 'usage limit' }],
     ['done', run({ status: 'done' }), { tone: 'success', shape: 'filled', pulse: false, label: 'done' }],
     ['failed', run({ status: 'failed' }), { tone: 'danger', shape: 'filled', pulse: false, label: 'failed' }],
     ['cancelled', run({ status: 'cancelled' }), { tone: 'neutral', shape: 'filled', pulse: false, label: 'cancelled' }],

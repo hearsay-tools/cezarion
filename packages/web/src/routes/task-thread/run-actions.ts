@@ -17,8 +17,18 @@ export { cliTargetRunner }
 /** "Active" in the legacy sense: the engine still owns the run (a queued run is parked but
  *  claimed). `review` is deliberately NOT active — a parked review can be continued, archived
  *  or deleted like any finished run. */
-export function isRunActive(status: RunStatus): boolean {
-  return status === 'running' || status === 'queued' || status === 'waiting'
+export function isRunActive(run: Pick<RunRecord, 'status' | 'autoResumeAt'>): boolean {
+  // A usage-limit hold is `waiting` with no session (hearsay-tools/cezarion#1236): the engine
+  // has let go of it until its resume, so it keeps a closed run's controls. It takes the record,
+  // never a bare status, so no caller can read a hold as active.
+  if (run.status === 'waiting' && run.autoResumeAt !== undefined) return false
+  return run.status === 'running' || run.status === 'queued' || run.status === 'waiting'
+}
+
+/** A live agent session owns the run: running, or waiting with its session open. A usage-limit
+ *  hold is `waiting` with no session (hearsay-tools/cezarion#1236), so it is not open. */
+export function isSessionOpen(run: Pick<RunRecord, 'status' | 'autoResumeAt'>): boolean {
+  return (run.status === 'running' || run.status === 'waiting') && isRunActive(run)
 }
 
 /** The latest agent session across steps — what Continue/Terminal resume. */
@@ -71,7 +81,7 @@ export function resumeCommand(runner: Runner | undefined, sessionId: string): st
  *  has its own worktree, because the resume only makes sense from in there. Absent for an id
  *  `resumeCommand` refuses (#431), exactly as for a run that never recorded a session. */
 export function resumeHint(run: ApiRun): string | undefined {
-  if (isRunActive(run.status)) return undefined
+  if (isRunActive(run)) return undefined
   const sessionId = lastSessionId(run)
   if (sessionId === undefined) return undefined
   if (!SAFE_SESSION_ID.test(sessionId)) return undefined
@@ -93,7 +103,7 @@ export function resumeHint(run: ApiRun): string | undefined {
 export function cliTargetResumes(run: RunRecord, targetId: string): boolean {
   const runner = cliTargetRunner(targetId)
   if (!runner) return false
-  if (isRunActive(run.status)) return false
+  if (isRunActive(run)) return false
   return runner === lastSessionBackend(run) && lastSessionId(run) !== undefined
 }
 
@@ -129,10 +139,11 @@ export interface RunActionFlags {
   deleteRun: boolean
 }
 
-/** A failed run that kept its wait results at the delivery bound: Continue delivers them once,
- *  Stop discards them and leaves it failed. Finish stays off, as on every failed run. */
+/** A failed run that kept its wait results at the delivery bound, or a usage-limit hold that
+ *  holds waits (hearsay-tools/cezarion#1236): Continue delivers them once, Stop discards them and
+ *  leaves it failed. Finish stays off, as on every failed run. */
 export function holdsWaitResults(run: RunRecord): boolean {
-  return run.status === 'failed' && (run.waits?.length ?? 0) > 0
+  return (run.status === 'failed' || (run.status === 'waiting' && run.autoResumeAt !== undefined)) && (run.waits?.length ?? 0) > 0
 }
 
 /** Only a saved original workflow that has never executed may be requeued. */
@@ -143,10 +154,10 @@ export function isStoppedBeforeStarting(run: RunRecord): boolean {
 }
 
 export function runActionFlags(run: RunRecord): RunActionFlags {
-  const active = isRunActive(run.status)
+  const active = isRunActive(run)
   const hasSession = lastSessionId(run) !== undefined
   return {
-    finish: run.status === 'waiting' || run.status === 'review',
+    finish: (run.status === 'waiting' && active) || run.status === 'review',
     continueRun: !active && !run.stopping &&
       run.delegation?.role !== 'invalid' &&
       !(run.delegation?.role === 'worker' && run.delegation.destroy) &&
@@ -170,9 +181,9 @@ export function archiveInComposer(run: RunRecord): boolean {
 
 /** Promote only an authoritative clear verdict on a Needs-you task. Unknown eligibility
  * stays hidden until the detail response arrives; the client never reconstructs blockers. */
-export function offersComposerFinish(run: ApiRun, hasPendingHumanAsk = false): boolean {
+export function offersComposerFinish(run: ApiRun): boolean {
   return run.status === 'waiting' && run.finishBlocked === null &&
-    deriveAttention(run, hasPendingHumanAsk).bucket === 'waiting'
+    deriveAttention(run).bucket === 'waiting'
 }
 
 /**

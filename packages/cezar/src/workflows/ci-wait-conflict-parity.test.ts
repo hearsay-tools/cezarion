@@ -54,7 +54,7 @@ describe('native conflict observation durability and wake parity', { timeout: 35
         expect(manager.continueRun(run.id, { text: HARNESS_ADAPTERS[runner].scenarios.baseline! }).ok).toBe(true);
         await until(() => store.getRun(run.id)?.status === 'waiting' && !!active(run.id)?.session.open);
       }
-      const wait = await manager.registerCiWait(run.id, { pr, timeout_seconds: 120 }, active(run.id)!.ciGeneration);
+      const wait = await manager.registerWait(run.id, { kind: 'ci', pr, timeout_seconds: 120 }, 'cezar_wait', active(run.id)!.ciGeneration);
       if (mode === 'recovered') {
         resources.toolless = true; // Missing tool controller must not prevent saved-input delivery.
         await restart();
@@ -129,7 +129,7 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
       await until(() => store.getRun(run.id)?.status === 'waiting');
       const generation = active(run.id)!.ciGeneration;
-      const wait = await manager.registerCiWait(run.id, { pr, timeout_seconds: 120 }, generation);
+      const wait = await manager.registerWait(run.id, { kind: 'ci', pr, timeout_seconds: 120 }, 'cezar_wait', generation);
       if (wait.kind !== 'ci') throw new Error('Expected a CI wait');
       await until(() => existsSync(log) && readFileSync(log, 'utf8').includes('name,state,link,bucket'));
       expect(manager.cancelWait(run.id, wait.id, generation)).toEqual({ cancelled: true });

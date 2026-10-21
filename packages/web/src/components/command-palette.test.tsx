@@ -1,4 +1,5 @@
 import { summaryOf } from '@/test/run-summary-fixture'
+import { openHumanWait } from '@/test/run-summary-fixture'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
@@ -646,8 +647,7 @@ describe('Recently finished group', () => {
           id: 'r-parked',
           projectId: 'shop',
           title: 'Waiting out the limit',
-          status: 'failed',
-          finishedAt: '2026-07-15T10:00:00Z',
+          status: 'waiting',
           autoResumeAt: '2026-07-15T14:00:00Z',
         }),
       ],
@@ -1135,9 +1135,9 @@ it('preserves parked-parent wait phases without listing owned workers', async ()
 })
 
 it('preserves pending human attention in live and indexed palette rows', async () => {
-  const live = run({ id: 'live-asking', title: 'Live question', status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })
+  const live = run({ id: 'live-asking', title: 'Live question', status: 'waiting', waits: [openHumanWait(1)], delegation: { role: 'root', permissions: [], receipts: [] } })
   renderPalette({ projects: [project({ id: 'cezar' }), project({ id: 'other' })], runs: [live], indexed: [
-    { ...live, id: 'indexed-asking', title: 'Indexed question', projectId: 'other', delegation: { role: 'root' }, waitingOn: { kind: 'workers', count: 0 } },
+    { ...live, id: 'indexed-asking', title: 'Indexed question', projectId: 'other', delegation: { role: 'root' }, waitingOn: { kind: 'human', shown: true } },
   ] })
   openWith({ metaKey: true })
   await screen.findByText('Indexed question')

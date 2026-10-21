@@ -38,8 +38,6 @@ export interface WaitEntry extends Partial<AttentionFields> {
   id: string;
   /** `unknown`: the deadline passed before any poll answered. */
   status: RunStatus | 'missing' | 'unknown';
-  activity?: string;
-  hasPendingHumanAsk?: boolean;
 }
 
 export interface WaitResult {
@@ -55,9 +53,7 @@ function entryFor(id: string, run: RunSummary | undefined): WaitEntry {
   return {
     id,
     status: run.status,
-    ...(run.activity === undefined ? {} : { activity: run.activity }),
     ...attentionFields(run),
-    hasPendingHumanAsk: run.hasPendingHumanAsk ?? false,
   };
 }
 
@@ -75,7 +71,7 @@ export function endsWait(entry: WaitEntry, until: WaitUntil): boolean {
 
 /** What `deriveAttention` reads, as one comparable key: a change in any of it can move the run. */
 function attentionKey(entry: WaitEntry): string {
-  return JSON.stringify([entry.status, entry.activity, entry.hasPendingHumanAsk, entry.attention, entry.attentionLabel]);
+  return JSON.stringify([entry.status, entry.attention, entry.attentionLabel]);
 }
 
 /** A failure is only a terminal non-success; stopping for attention is not one. */

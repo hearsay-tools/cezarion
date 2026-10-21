@@ -383,30 +383,28 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
   it("reads a stored activity:'monitoring' as a waiting park (#490, store schema 4)", () => {
     const store = RunStore.open(dataDir);
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
-    // A fresh record has no activity (additive/optional).
-    expect(run.activity).toBeUndefined();
-    store.updateRun(run.id, { status: 'running', activity: 'monitoring' });
+    store.updateRun(run.id, { status: 'running' });
     store.close();
+    // An older cezar stored the park as `activity` (phase 4b dropped it from the schema).
+    seedRuns(dataDir, readPersistedRuns(dataDir).map((row) => ({ ...row, activity: 'monitoring' })));
 
     // Schema 4 no longer keeps `activity`: a stored monitoring park reads as `waiting`, with no
     // open wait when it named no wake deadline (unified waits, hearsay-tools/cezarion#1233).
     const reopened = RunStore.open(dataDir, { keepLive: true });
     expect(reopened.getRun(run.id)).toMatchObject({ status: 'waiting' });
-    expect(reopened.getRun(run.id)?.activity).toBeUndefined();
     expect(reopened.getRun(run.id)?.waits).toBeUndefined();
     reopened.close();
     expect(readPersistedRuns(dataDir).find((row) => row.id === run.id)).not.toHaveProperty('activity');
   });
 
-  it('clears monitoring activity on terminal writes and leaves open waits for RunManager to cancel', () => {
+  it('leaves open waits for RunManager to cancel on terminal writes', () => {
     const store = RunStore.open(dataDir);
     const run = store.createRun({ title: 'monitor', task: 'monitor', workflow: 'quick-task', steps: [] });
-    store.updateRun(run.id, { status: 'running', activity: 'monitoring' });
+    store.updateRun(run.id, { status: 'running' });
     store.commitWait(run.id, { id: '44444444-4444-4444-8444-444444444444', kind: 'timer', source: 'agent', via: 'cezar_wait',
       registeredAt: '2026-07-25T10:10:00.000Z', deadline: '2026-07-25T10:15:00.000Z', phase: 'open', turnId: 'turn', seconds: 300 });
     store.updateRun(run.id, { status: 'done' });
     expect(store.getRun(run.id)).toMatchObject({ status: 'done', waits: [{ phase: 'open' }] });
-    expect(store.getRun(run.id)?.activity).toBeUndefined();
   });
 
   it('drops the legacy wake-cap flag when records reopen (store schema 4)', () => {
@@ -424,7 +422,6 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
     }]);
     const loaded = RunStore.open(dataDir).getRun(LEGACY_RUN.id);
     expect(loaded?.status).toBe('done');
-    expect(loaded?.activity).toBeUndefined();
     expect(loaded?.waits).toBeUndefined();
     expect(loaded).not.toHaveProperty('monitoringWakeAt');
   });
@@ -432,7 +429,6 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
   it('still loads an old record that predates activity (#490)', () => {
     seedRuns(dataDir, [LEGACY_RUN]);
     const store = RunStore.open(dataDir);
-    expect(store.getRun('legacy-1')?.activity).toBeUndefined();
   });
 
   it('never lets an unknown activity value through the schema boundary (#490)', () => {
@@ -443,7 +439,6 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const store = RunStore.open(dataDir);
     expect(store.getRun('bad-activity')).toBeDefined();
-    expect(store.getRun('bad-activity')?.activity).toBeUndefined();
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('could not be read'));
   });
 
@@ -2395,6 +2390,7 @@ describe('RunStore — read receipts (#unread-done-items)', () => {
     const limited = () => {
       const id = finishedRun(store, 'failed');
       store.updateRun(id, {
+        status: 'waiting',
         autoResumeAt: '2026-08-03T18:41:48.000Z',
         autoResumeAttempts: 2,
       });
@@ -2441,7 +2437,7 @@ describe('RunStore — read receipts (#unread-done-items)', () => {
     // task the UI never presented as unread, and reported a count larger than the badge showed.
     const store = RunStore.open(dataDir);
     const scheduled = finishedRun(store, 'failed');
-    store.updateRun(scheduled, { autoResumeAt: '2026-08-03T18:41:48.000Z', autoResumeAttempts: 1 });
+    store.updateRun(scheduled, { status: 'waiting', autoResumeAt: '2026-08-03T18:41:48.000Z', autoResumeAttempts: 1 });
     const ordinary = finishedRun(store, 'done');
 
     // The count is the badge's number: one, not two.
@@ -2450,18 +2446,21 @@ describe('RunStore — read receipts (#unread-done-items)', () => {
     expect(store.getRun(scheduled)?.seenAt).toBeUndefined();
   });
 
-  it('markAllRead stamps the same run once its resume is no longer pending (#803)', () => {
-    // The exclusion is about the APPOINTMENT, not the failure: clear the schedule and the run is
-    // an ordinary unread `failed` done item again. Without this, the clause above would be
-    // indistinguishable from "never stamp a failed run", which is a different (wrong) rule.
+  it('autoResumeAt lives only on a waiting run (hearsay-tools/cezarion#1236)', () => {
+    // A usage-limited run waits for its resume; a withdrawal settles it failed, and any other
+    // status retires the appointment, so a failed run never carries one.
     const store = RunStore.open(dataDir);
     const id = finishedRun(store, 'failed');
+    store.updateRun(id, { status: 'waiting', autoResumeAt: '2026-08-03T18:41:48.000Z' });
+    expect(store.getRun(id)?.autoResumeAt).toBe('2026-08-03T18:41:48.000Z');
+    store.updateRun(id, { status: 'failed' });
+    expect(store.getRun(id)?.autoResumeAt).toBeUndefined();
     store.updateRun(id, { autoResumeAt: '2026-08-03T18:41:48.000Z' });
+    expect(store.getRun(id)?.autoResumeAt).toBeUndefined();
+    store.updateRun(id, { status: 'waiting', autoResumeAt: '2026-08-03T18:41:48.000Z' });
+    store.updateRun(id, { status: 'running' });
+    expect(store.getRun(id)?.autoResumeAt).toBeUndefined();
     expect(store.markAllRead()).toBe(0);
-
-    store.updateRun(id, { autoResumeAt: undefined });
-    expect(store.markAllRead()).toBe(1);
-    expect(store.getRun(id)?.seenAt).toBeDefined();
   });
 });
 
@@ -2729,6 +2728,7 @@ describe('RunStore — archive cascades to owned workers (#250)', () => {
     const { parent, worker } = parentWithWorker(store, 'running');
     store.setPinned(worker.id, true);
     store.updateRun(worker.id, {
+      status: 'waiting',
       autoResumeAt: '2026-08-03T18:41:48.000Z',
       autoResumeAttempts: 1,
     });
@@ -2808,9 +2808,9 @@ describe('RunStore — archive cascades to owned workers (#250)', () => {
       const pinnedRunning = mk('running');
       store.setPinned(pinnedRunning, true);
       const scheduled = mk('failed');
-      store.updateRun(scheduled, { autoResumeAt: SCHEDULED_AT, autoResumeAttempts: 1 });
+      store.updateRun(scheduled, { status: 'waiting', autoResumeAt: SCHEDULED_AT, autoResumeAttempts: 1 });
       const scheduledPinned = mk('failed');
-      store.updateRun(scheduledPinned, { autoResumeAt: SCHEDULED_AT, autoResumeAttempts: 1 });
+      store.updateRun(scheduledPinned, { status: 'waiting', autoResumeAt: SCHEDULED_AT, autoResumeAttempts: 1 });
       store.setPinned(scheduledPinned, true);
       const running = mk('running');
       const { parent, worker } = parentWithWorker(store, 'running');

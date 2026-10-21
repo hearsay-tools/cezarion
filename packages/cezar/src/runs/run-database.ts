@@ -30,7 +30,7 @@ export const RUNS_IMPORT_COMPLETE_KEY = 'import-complete';
 /** `PRAGMA user_version` of a database this build created. A higher number means a newer cezar
  *  wrote it; that is refused rather than read, because a newer schema may store what this one
  *  would silently drop on its next write. */
-export const RUN_DATABASE_SCHEMA_VERSION = 7;
+export const RUN_DATABASE_SCHEMA_VERSION = 8;
 
 /**
  * The oldest `user_version` the READ-ONLY reader can read as it stands (`openReadOnly`). It never
@@ -211,6 +211,15 @@ const MIGRATIONS: readonly string[] = [
   -- it refuse the store as unsupported-schema instead; the recovery is to run this version again.
   --
   -- No live recompute: isLiveRecord already calls a row with an open wait live, of any kind.
+  `,
+  `
+  -- Schema 8 changes no table: a usage-limited run is written waiting with autoResumeAt, no longer
+  -- failed with it (hearsay-tools/cezarion#1236, phase 4a), and this build reads an old failed row
+  -- with autoResumeAt as waiting (reconcileLoadedRun, store.ts). A schema-7 build would clear the
+  -- appointment from a waiting row and show the run as Needs you, so the bump makes it refuse the
+  -- store as unsupported-schema instead; the recovery is to run this version again.
+  --
+  -- No live recompute: isLiveRecord already calls a row with autoResumeAt live, at any status.
   `,
 ];
 

@@ -1,0 +1,82 @@
+name: Windows test environment lease
+on:
+  pull_request:
+    paths:
+      - '.ai/scripts/test-env-*'
+      - '.ai/scripts/e2e.sh'
+      - '.github/scripts/test-env-windows*'
+      - '.github/workflows/test-env-windows.yml'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  native-lease:
+    name: Native Windows lease verification
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.15.0'
+      - name: Probe native process lifetime and Git Bash identity
+        shell: pwsh
+        run: ./.github/scripts/test-env-windows-probe.ps1
+      - name: Prove the Windows regression against the pre-fix helper
+        shell: pwsh
+        env:
+          TEST_ENV_PROOF_BASE: '07039865b6483d4b40ec8816818c0ec5497a87db'
+        run: |
+          git fetch --depth=1 origin $env:TEST_ENV_PROOF_BASE
+          $output = node --test .github/scripts/test-env-windows.test.mjs 2>&1 | Out-String
+          $failed = $LASTEXITCODE -ne 0
+          Write-Output $output
+          if (!$failed -or $output -notmatch 'cannot verify test environment lease identity') {
+            throw 'Expected the pre-fix Windows identity failure'
+          }
+          # GitHub's pwsh wrapper otherwise propagates the expected red exit.
+          $global:LASTEXITCODE = 0
+      - name: Prove shell descendants escape the pre-broker job
+        shell: pwsh
+        env:
+          TEST_ENV_PROOF_BASE: '3d352052def6d38bc9f6172b6f3c06089f960f35'
+        run: |
+          git fetch --depth=1 origin $env:TEST_ENV_PROOF_BASE
+          $output = node --test .github/scripts/test-env-windows.test.mjs 2>&1 | Out-String
+          $failed = $LASTEXITCODE -ne 0
+          Write-Output $output
+          if (!$failed -or $output -notmatch 'mutator must belong to the lifetime job') {
+            throw 'Expected the pre-broker mutator containment failure'
+          }
+          $global:LASTEXITCODE = 0
+      - name: Prove the nested broker regression
+        shell: pwsh
+        env:
+          TEST_ENV_PROOF_BASE: 'a1c38255f5e1c32a6b0d71b9647a935ac1943320'
+        run: |
+          git fetch --depth=1 origin $env:TEST_ENV_PROOF_BASE
+          $output = node --test .github/scripts/test-env-windows.test.mjs 2>&1 | Out-String
+          $failed = $LASTEXITCODE -ne 0
+          Write-Output $output
+          if (!$failed -or $output -notmatch 'cached server must survive every enclosing job') {
+            throw 'Expected the nested cached-server lifetime failure'
+          }
+          $global:LASTEXITCODE = 0
+      - name: Prove the broker environment regression
+        shell: pwsh
+        env:
+          TEST_ENV_PROOF_BASE: 'fce355d201ee86ebff914a42fe23c0bc4787f7dc'
+        run: |
+          git fetch --depth=1 origin $env:TEST_ENV_PROOF_BASE
+          $output = node --test .github/scripts/test-env-windows.test.mjs 2>&1 | Out-String
+          $failed = $LASTEXITCODE -ne 0
+          Write-Output $output
+          if (!$failed -or $output -notmatch 'cached app must inherit bootstrap environment') {
+            throw 'Expected the lost bootstrap environment failure'
+          }
+          $global:LASTEXITCODE = 0
+      - name: Verify production lease on native Windows
+        shell: pwsh
+        run: node --test .github/scripts/test-env-windows.test.mjs

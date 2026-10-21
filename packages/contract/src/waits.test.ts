@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { RunRecord } from './runs.ts';
 import {
+  asksQuestion,
   askErrorCodeSchema,
   cezarAskAnswerSchema,
   cezarAskRequestSchema,
@@ -161,7 +162,8 @@ describe('computeWaitingOn', () => {
     expect(computeWaitingOn({ waits: [timer] })?.kind).toBe('timer');
     expect(computeWaitingOn({ waits: [ci, ...completionWaits()] })?.kind).toBe('workers');
     expect(computeWaitingOn({ waits: [ci], autoResumeAt: '2026-10-17T16:00:00.000Z' })?.kind).toBe('usage-limit');
-    expect(computeWaitingOn({ waits: [ci], hasPendingHumanAsk: true })?.kind).toBe('human');
+    expect(computeWaitingOn({ waits: [ci, openHuman()] })).toEqual({ kind: 'human' });
+    expect(computeWaitingOn({ waits: [ci, openHuman({ askSeq: 4 })] })).toEqual({ kind: 'human', shown: true });
     expect(computeWaitingOn({ waits: [{ ...ci, phase: 'resolved' }] })).toBeUndefined();
   });
 
@@ -201,7 +203,8 @@ describe('computeWaitingOn', () => {
 
   it('produces values the waitingOn schema accepts', () => {
     for (const input of [
-      { hasPendingHumanAsk: true },
+      { waits: [openHuman()] },
+      { waits: [openHuman({ askSeq: 4 })] },
       { autoResumeAt: '2026-10-17T16:00:00.000Z' },
       { waits: completionWaits() },
       { waits: [openCi()] },
@@ -568,7 +571,7 @@ describe('deadline-less cezar worker entries (hearsay-tools/cezarion#1301)', () 
     expect(view).toEqual({ id: bare.id, via: 'completion', workerIds: [W1], mode: 'all', phase: 'registered', outcomes: [], wakeId: bare.id });
     expect(workerCompletionWaitSchema.safeParse(view).success).toBe(true);
     expect(completionWaitView({ status: 'waiting', waits: [bare], delegation: root })?.phase).toBe('parked');
-    expect(completionWaitView({ status: 'waiting', hasPendingHumanAsk: true, waits: [bare], delegation: root })?.phase).toBe('registered');
+    expect(completionWaitView({ status: 'waiting', waits: [bare, openHuman()], delegation: root })?.phase).toBe('registered');
     expect(completionWaitView({ waits: [{ ...bare, phase: 'resolved', result: { reason: 'outcome' } }], delegation: root })).toMatchObject({ phase: 'wake-pending', reason: 'outcome' });
     // A deadlined entry, an upgraded completion wait included, is the legacy view's.
     expect(completionWaitView({ waits: [workerWaitEntrySchema.parse(workerBase(targets))], delegation: root })).toBeUndefined();
@@ -598,5 +601,20 @@ describe('computeWaitingOn with worker entries', () => {
     expect(computeWaitingOn({ waits: [openRequestWait({ requestOutcomes: answered })] })).toEqual({ kind: 'workers', count: 0, replies: true });
     expect(computeWaitingOn({ waits: [openWorkerWait(), ...completionWaits()] })).toEqual({ kind: 'workers', count: 4 });
     expect(computeWaitingOn({ waits: [openRequestWait(), ...completionWaits()] })).toEqual({ kind: 'workers', count: 3 });
+  });
+});
+
+// Review of #1437: Cezar's worker fallback is a real question (it carries `questions`), so
+// `cez task status` and the webhook's `task.question` must see it; its other waits ask nothing.
+describe('asksQuestion', () => {
+  const human = (over: Record<string, unknown>) => ({ id: '00000000-0000-4000-8000-0000000000ac', kind: 'human', source: 'agent', via: 'cezar_ask',
+    registeredAt: '2026-10-21T00:00:00.000Z', phase: 'open', turnId: 't', ...over }) as unknown as NonNullable<RunRecord['waits']>[number];
+  it('is true for the agent\'s question and for Cezar\'s fallback question, false for Cezar\'s plain waits', () => {
+    expect(asksQuestion({ waits: [human({})] })).toBe(true);
+    expect(asksQuestion({ waits: [human({ source: 'cezar', via: 'no-wait', questions: [{ header: 'Worker', question: 'What next?' }] })] })).toBe(true);
+    expect(asksQuestion({ waits: [human({ source: 'cezar', via: 'no-wait' })] })).toBe(false);
+    expect(asksQuestion({ waits: [human({ source: 'cezar', via: 'budget' })] })).toBe(false);
+    expect(asksQuestion({ waits: [human({ phase: 'resolved' })] })).toBe(false);
+    expect(asksQuestion({})).toBe(false);
   });
 });

@@ -12,15 +12,14 @@ import { previewStopResult } from '../preview/registration.ts';
 import { askErrorMessage, askInvalidInput, ciErrorMessage, doneErrorMessage, doneInvalidInput, previewInvalidInput, previewOversized, previewRefusal, waitInvalidInput } from './errors.ts';
 import { previewToolEnabled } from './tools.ts';
 import { cezarAskAnswerSchema, cezarAskRequestSchema, cezarCancelWaitAnswerSchema, cezarCancelWaitRequestSchema, cezarDoneAnswerSchema, cezarDoneRequestSchema, cezarWaitAnswerSchema, cezarWaitRequestSchema, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarCancelWaitRequest, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitAnswer, type CezarWaitRequest, type Wait, type WaitVia } from '@open-mercato/cezar-contract/waits';
-import { ciWaitRequestSchema, ciWaitReceiptSchema, ciWaitErrorCodeSchema, type CiWait } from '@open-mercato/cezar-contract/ci-wait';
+import { ciWaitErrorCodeSchema } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, previewStopResultSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, previewServeResultSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { jsonZodValidator } from '../server/validators.ts';
 import type { AgentRunSpec } from '../core/agent-runner.ts';
 
 /**
  * hearsay-tools/cezarion#1233: what `registerWait` settles to. The agent sees `answer`; an accepted
- * registration also carries the entry it opened, which the deprecated `cezar_wait_for_ci` route
- * needs for its unchanged receipt (head SHA, registration time).
+ * registration also carries the entry it opened.
  */
 export type WaitRegistration =
   | { answer: Extract<CezarWaitAnswer, { ok: true }>; wait: Wait }
@@ -30,7 +29,7 @@ type PreviewRegistration = (request: PreviewServeRequest, signal: AbortSignal) =
 type PreviewStop = (request: PreviewStopRequest, signal: AbortSignal) => Promise<PreviewStopResult>;
 /** The session's trusted callbacks: run identity comes from here, never from the model's arguments. */
 export type CezarToolHandlers = {
-  /** `via` names the tool that opened the wait: `cezar_wait`, or the `cezar_wait_for_ci` alias. */
+  /** `via` names the tool that opened the wait. */
   registerWait: (request: CezarWaitRequest, via: WaitVia, signal: AbortSignal) => Promise<WaitRegistration>;
   /** `cezar_ask` (hearsay-tools/cezarion#1234): opens the run's human wait with its card. */
   ask: (request: CezarAskRequest, signal: AbortSignal) => Promise<CezarAskAnswer>;
@@ -117,13 +116,12 @@ function ciRefusalCode(code: unknown) {
   return parsed.success ? parsed.data : undefined;
 }
 const thrownCode = (error: unknown) => error && typeof error === 'object' && 'code' in error ? error.code : undefined;
-/** The alias receipt keeps the phase names it answered before the wait list. */
-const receiptPhase = { open: 'registered', resolved: 'wake-pending', delivered: 'delivered', cancelled: 'withdrawn' } as const satisfies Record<Wait['phase'], CiWait['phase']>;
 
 /**
- * Typed private route inventory: GET holds adapter lifetime; POST wait opens a CI or timer wait
- * and POST cancel-wait closes one (hearsay-tools/cezarion#1233); POST ask opens the human wait and
- * POST done finishes the task at the turn's end (hearsay-tools/cezarion#1234); POST ci-wait is the deprecated CI alias; POST
+ * Typed private route inventory: GET ci-wait holds adapter lifetime (the path is historical; its POST
+ * went with `cezar_wait_for_ci` in hearsay-tools/cezarion#1236); POST wait opens a CI, worker or
+ * timer wait and POST cancel-wait closes one (hearsay-tools/cezarion#1233); POST ask opens the human
+ * wait and POST done finishes the task at the turn's end (hearsay-tools/cezarion#1234); POST
  * preview-serve registers a dev server (#781); preview-stop controls its approved process (#803).
  */
 export function ciToolRoutes(capabilities: Map<string, Capability>) {
@@ -139,9 +137,6 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
       if (!capability) return c.json(unauthorized, 401);
       c.set('capability', capability);
       await next();
-      // The shared middleware uses the public API error envelope. Normalize this
-      // private family to the CI contract without forwarding request contents.
-      if (c.res.status === 400) c.res = c.json({ code: 'invalid_request' as const, message: 'Invalid CI wait arguments' }, 400);
     })
     .get('/api/v1/tools/ci-wait', c => {
       const signal = c.get('capability').lifetime.signal;
@@ -152,26 +147,6 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         signal.addEventListener('abort', close, { once: true });
         release = () => signal.removeEventListener('abort', close);
       }, cancel() { release(); } }), { headers: { 'content-type': 'text/plain', 'cache-control': 'no-store' } });
-    })
-    .post('/api/v1/tools/ci-wait', bodyLimit({ maxSize: 16_384, onError: c => c.json({ code: 'invalid_request' as const, message: 'CI request exceeds 16 KiB' }, 413) }), jsonZodValidator(ciWaitRequestSchema, { code: 'invalid_input', message: 'Invalid CI wait arguments' }), async c => {
-      const capability = c.get('capability');
-      try {
-        const registration = await capability.registerWait({ kind: 'ci', ...c.req.valid('json') }, 'cezar_wait_for_ci', capability.lifetime.signal);
-        capability.lifetime.signal.throwIfAborted();
-        if (!registration.answer.ok) {
-          const code = ciRefusalCode(registration.answer.code);
-          return c.json(code ? { code, message: ciErrorMessage(code) } : unavailable, 503);
-        }
-        const wait = 'wait' in registration ? registration.wait : undefined;
-        if (wait?.kind !== 'ci') return c.json(unavailable, 503);
-        const receipt = ciWaitReceiptSchema.parse({ waitId: wait.id, prUrl: wait.prUrl, repository: wait.repository, prNumber: wait.prNumber, headSha: wait.headSha, registeredAt: wait.registeredAt, deadline: wait.deadline, phase: receiptPhase[wait.phase] });
-        return c.json(receipt);
-      } catch (error) {
-        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
-        const code = ciRefusalCode(thrownCode(error));
-        if (code) return c.json({ code, message: ciErrorMessage(code) }, 503);
-        return c.json(unavailable, 503);
-      }
     })
     .use('/api/v1/tools/wait', async (c, next) => {
       const capability = authorized(c.req.header('authorization'));

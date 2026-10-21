@@ -9,7 +9,6 @@ import { isDeepStrictEqual } from 'node:util';
 import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
-import { HUMAN_ASK_EVENT_TYPES } from '@open-mercato/cezar-contract/ask';
 import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
 import { workerWaitSchema } from '@open-mercato/cezar-contract/delegation';
 import {
@@ -44,7 +43,7 @@ import { storedDelegationStateSchema } from './delegation-state.ts';
 import { HistoryCompressor } from './history-compressor.ts';
 import { LiveItemSnapshots } from './live-item-snapshots.ts';
 import { emptyFacts, stampOf, TranscriptFactsIndex, type TranscriptFacts } from './transcript-facts.ts';
-import { hasPlainHistory, historyStat, historyPaths, readHistoryText, readHistoryTextAsync, removeHistory, restoreHistory } from './history-file.ts';
+import { hasPlainHistory, historyPaths, readHistoryText, readHistoryTextAsync, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
 import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, sharedCwdScan, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
@@ -71,14 +70,6 @@ import { claimOwnerLive, closeClaimSession, openClaimSession, type ClaimOwner } 
 import type { RunnerId } from '../core/agent-runner.ts';
 
 export type RunStatus = 'queued' | 'running' | 'waiting' | 'review' | 'done' | 'failed' | 'cancelled';
-/**
- * A sub-state of `running` (spec 2026-07-18-subagent-monitoring-status, #490):
- * the agent ended its turn still working on its own downstream work (a sub-agent
- * or a monitored command) and declared it with the `CEZ:MONITORING` marker — so
- * the cockpit shows a non-attention "monitoring" label instead of "needs you".
- * Only ever set while `status === 'running'`; cleared on resume/terminal.
- */
-export type RunActivity = 'monitoring';
 export type StepStatus =
   | 'pending'
   | 'running'
@@ -287,12 +278,6 @@ export const runRecordSchema = z.object({
   destroyRetry: contractRunRecordSchema.shape.destroyRetry.catch(undefined),
   status: z.enum(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']),
   stopping: contractRunRecordSchema.shape.stopping.catch(undefined),
-  /** Sub-state of `running` (spec 2026-07-18-subagent-monitoring-status, #490):
-   *  `monitoring` while the agent is still working on its own downstream work.
-   *  Optional/absent on old runs; cleared when the run resumes or ends. Store schema 4 reads a
-   *  stored one into the wait list (`upgradeLegacyWaits`), so a loaded record never carries it. */
-  activity: z.enum(['monitoring']).optional(),
-  hasPendingHumanAsk: contractRunRecordSchema.shape.hasPendingHumanAsk.catch(undefined),
   hasPendingPermission: contractRunRecordSchema.shape.hasPendingPermission.catch(undefined),
   /**
    * Exact deadline at which a run stopped by a provider USAGE LIMIT resumes itself
@@ -428,9 +413,10 @@ export const runRecordSchema = z.object({
   workflowDef: workflowDefSchema.optional().catch(undefined),
 });
 
-/** The keys a schema-3 record used for CI and monitoring parks. Schema 4 reads them into `waits`
- *  and never writes them (spec 2026-10-17-unified-waits, § Compatibility). */
-const LEGACY_WAIT_KEYS = ['ciWait', 'lastCiWait', 'lastCiWaitError', 'monitoringWakeAt', 'monitoringWakeCapReached', 'activity'] as const;
+/** The keys an older record used for parks. Schema 4 reads the CI and monitoring ones into
+ *  `waits`; phase 4b (hearsay-tools/cezarion#1236) reads the pending-question summary into a human
+ *  wait. None is written again (spec 2026-10-17-unified-waits, § Compatibility). */
+const LEGACY_WAIT_KEYS = ['ciWait', 'lastCiWait', 'lastCiWaitError', 'monitoringWakeAt', 'monitoringWakeCapReached', 'activity', 'hasPendingHumanAsk'] as const;
 const UNREADABLE_WAIT = 'Wait unavailable — a saved wait is unreadable; register a new wait.';
 
 function hasLegacyWaitFields(row: unknown): boolean {
@@ -530,7 +516,17 @@ export function holdsWorkerWait(run: Pick<RunRecord, 'delegation' | 'waits'>): b
 /** A stable id for the timer a legacy monitoring park becomes. The row keeps its legacy JSON
  *  until it is next written, so every read of it must name the same wait. */
 function legacyTimerId(runId: unknown, wakeAt: string): string {
-  const hex = createHash('sha256').update(`legacy-monitoring-timer:${String(runId)}:${wakeAt}`).digest('hex');
+  return legacyWaitId(`legacy-monitoring-timer:${String(runId)}:${wakeAt}`);
+}
+
+/** The human wait a stored pending-question summary becomes: one per run, the same on every read. */
+function legacyHumanWaitId(runId: unknown): string {
+  return legacyWaitId(`legacy-pending-ask:${String(runId)}`);
+}
+
+/** A name-based (version 5 shaped) UUID, so a row read twice upgrades to the same entry. */
+function legacyWaitId(name: string): string {
+  const hex = createHash('sha256').update(name).digest('hex');
   const variant = (8 | (Number.parseInt(hex[16]!, 16) & 3)).toString(16);
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
@@ -547,6 +543,11 @@ function legacyTimerId(runId: unknown, wakeAt: string): string {
  *   (`seconds` is what remains, clamped to a timer's bounds); without one, no wait. Either way a
  *   `running` run parks as `waiting`, its running step with it, as every waiting park writes it.
  *   On a finished run the fields are stale and only dropped.
+ * - `hasPendingHumanAsk: true` on a `waiting` run with no open human wait (phase 4b,
+ *   hearsay-tools/cezarion#1236): an open `human` wait, `ask-line`, with no `askSeq`. Recovery shows
+ *   it (`surfaceHumanWait`), which attaches it to the question still pending in the transcript
+ *   instead of raising a second card. Anywhere else the summary is dropped: the human wait it stood
+ *   beside since phase 2 already says the same.
  *
  * - `delegation.wait`/`lastWait` registered by the agent (store schema 6, hearsay-tools/cezarion#1235)
  *   → `workerWaitEntry`, then settled by what became of the wake input (`wakeId`, else the wait's own
@@ -633,6 +634,15 @@ export function upgradeLegacyWaits(row: Record<string, unknown>): void {
       });
     }
     if (row.status === 'running') setLiveStatus(row, 'running', 'waiting');
+  }
+  const asksHuman = (entry: unknown) => !!entry && typeof entry === 'object' && (entry as { kind?: unknown }).kind === 'human' && (entry as { phase?: unknown }).phase === 'open';
+  if (row.hasPendingHumanAsk === true && row.status === 'waiting' &&
+    !(Array.isArray(row.waits) && row.waits.some(asksHuman)) && !opened.some(asksHuman)) {
+    opened.push({
+      id: legacyHumanWaitId(row.id), kind: 'human', source: 'agent', via: 'ask-line',
+      registeredAt: typeof row.createdAt === 'string' && z.iso.datetime().safeParse(row.createdAt).success ? row.createdAt : new Date(0).toISOString(),
+      phase: 'open', turnId: 'legacy',
+    });
   }
   if (opened.length) {
     const current = Array.isArray(row.waits) ? row.waits as Array<{ id?: unknown }> : [];
@@ -879,6 +889,12 @@ function promptNamesRepo(url: string, task: string): boolean {
  * an archived run, so a cleared field is the whole cancellation.
  */
 function clearPendingAutoResume(run: RunRecord): void {
+  // A withdrawn appointment settles the run failed with its kept error (hearsay-tools/cezarion#1236),
+  // the state a usage-limited run was in before it waited.
+  if (run.status === 'waiting' && run.autoResumeAt !== undefined) {
+    run.status = 'failed';
+    run.finishedAt ??= new Date().toISOString();
+  }
   run.autoResumeAt = undefined;
   run.autoResumeAttempts = undefined;
 }
@@ -1173,6 +1189,12 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
     }
   }
   run.stopping = undefined;
+  // A usage-limited run is waiting for its resume (hearsay-tools/cezarion#1236, phase 4a). Rows a
+  // schema-7 cezar wrote kept it failed with the appointment; they read as the waiting run they are.
+  if (run.status === 'failed' && run.autoResumeAt !== undefined) {
+    run.status = 'waiting';
+    run.finishedAt = undefined;
+  }
   // A run that was live when the previous process exited can never finish —
   // surface that instead of a forever-"running" ghost. `review` survives
   // restarts on purpose: the gate is pure data (worktree + branch + record)
@@ -1180,7 +1202,9 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
   // all still work.
   if (
     !opts?.keepLive &&
-    (run.status === 'running' || run.status === 'queued' || run.status === 'waiting')
+    (run.status === 'running' || run.status === 'queued' || run.status === 'waiting') &&
+    // A usage-limit park runs no process, so no exit interrupted it: its appointment stands.
+    !(run.status === 'waiting' && run.autoResumeAt !== undefined)
   ) {
     run.status = 'failed';
     run.error = 'interrupted — cezar process exited during the run';
@@ -1189,13 +1213,12 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
       if (step.status === 'running' || step.status === 'waiting') step.status = 'failed';
     }
   }
-  if (!['running', 'waiting', 'queued'].includes(run.status)) run.activity = undefined;
   // Open waits are left alone at every status: RunManager cancels them when a run ends (spec
   // 2026-10-17-unified-waits), and recovery reads the ones a crash left behind.
   // A pending usage-limit resume survives the restart on purpose (the wait can be
   // hours) — `RunManager.recover()` re-arms it from this field. It can only mean
-  // anything on a `failed` run, so anywhere else it is stale bookkeeping.
-  if (run.status !== 'failed') run.autoResumeAt = undefined;
+  // anything on a `waiting` run, so anywhere else it is stale bookkeeping.
+  if (run.status !== 'waiting') run.autoResumeAt = undefined;
   // Heal a record written before `referencedPrDeclaration` existed: a task that re-declared
   // `CEZ:PR` with the PR it had just CREATED cleared the PR it was ABOUT, because no candidate
   // could match the created number. The evidence is all still on the record — only the
@@ -1286,16 +1309,15 @@ export function rescopeRun(run: RunRecord, handle?: RepoHandle | null): boolean 
 }
 
 /**
- * Every field `RunStore.open` may rewrite while loading a record: what `reconcileLoadedRun` and
- * `refreshHumanAskSummary` assign. Compared before and after, it tells open() which rows
- * normalization changed, so it marks those dirty and no others. Edit it together with either
- * function, or a normalized row stays unsaved (the store tests pin each field).
+ * Every field `RunStore.open` may rewrite while loading a record: what `reconcileLoadedRun`
+ * assigns. Compared before and after, it tells open() which rows normalization changed, so it
+ * marks those dirty and no others. Edit it together with that function, or a normalized row stays unsaved (the store tests pin each field).
  */
 function loadNormalizedFields(run: RunRecord): string {
   return JSON.stringify([
-    run.stopping, run.status, run.finishedAt, run.error, run.activity, run.autoResumeAt,
+    run.stopping, run.status, run.finishedAt, run.error, run.autoResumeAt,
     run.referencedPullRequestUrl, run.pullRequests,
-    run.issueNumber, run.referencedIssueUrl, run.referencedIssueNumberSeeded, run.hasPendingHumanAsk, run.hasPendingPermission, run.steps.map((step) => step.status),
+    run.issueNumber, run.referencedIssueUrl, run.referencedIssueNumberSeeded, run.hasPendingPermission, run.steps.map((step) => step.status),
   ]);
 }
 
@@ -1414,7 +1436,6 @@ const AUTOMATION_ORIGIN_HEAL_SQL =
 
 /** Mark-all-read's rule (see `RunStore.markAllRead`) over the columns and the stored summary. */
 const MARK_ALL_READ_SQL = "archived = 0 AND status IN ('done', 'failed') AND finished_at IS NOT NULL" +
-  " AND NOT (status = 'failed' AND json_extract(summary, '$.autoResumeAt') IS NOT NULL)" +
   " AND (json_extract(summary, '$.seenAt') IS NULL OR json_extract(summary, '$.seenAt') < finished_at)";
 
 /** History retention's candidates among the given ids (a JSON array): finished, without
@@ -1628,8 +1649,8 @@ const workerProcessRecordSchema = z.object({ generation: z.string().uuid(), cont
   processes: z.array(recordedProcessSchema).max(WORKER_PROCESS_CAP) }).strict();
 const startToken = (pid: number) => { const token = processStartToken(pid); return token === undefined ? {} : { startToken: token }; };
 
-/** The bulk-archive sweep's one predicate (#780): finished, not archived, not scheduled (a
- *  `failed` run waiting out a usage limit), not an owned worker (those leave with their parent),
+/** The bulk-archive sweep's one predicate (#780): finished (a run waiting out a usage limit is
+ *  `waiting`, hearsay-tools/cezarion#1236), not archived, not an owned worker (those leave with their parent),
  *  then filtered by pin state. Mirrored clause for clause by `isSweepable` in the cockpit's
  *  `lib/tasks-table.ts`. */
 export function isSweepable(
@@ -1638,7 +1659,6 @@ export function isSweepable(
   automation?: boolean,
 ): boolean {
   if (run.archived || !['done', 'failed', 'cancelled'].includes(run.status)) return false;
-  if (run.status === 'failed' && run.autoResumeAt !== undefined) return false;
   if (run.delegation?.role === 'worker') return false;
   if (automation !== undefined && isAutomationTask(run) !== automation) return false;
   if (scope === 'unpinned') return !run.pinned;
@@ -1891,22 +1911,6 @@ export class RunStore extends EventEmitter {
    *  the row's family. */
   private adoptLoadedRun({ run, extras, upgraded }: DecodedRun, opts: { keepLive?: boolean; onlyIfChanged?: boolean; settle?: boolean; stop?: boolean }, row: RunRow): void {
     const before = loadNormalizedFields(run);
-    if (run.delegation?.role === 'root' && (run.status === 'waiting' || holdsWorkerWait(run))) {
-      let facts = this.facts.peek(run.id);
-      if (!facts) {
-        // No transcript is a legacy summary, not evidence that an answer is pending.
-        try {
-          const history = historyStat(this.dataDir, run.id);
-          if (history.plainSize === 0 || (history.plainSize === undefined && !history.archive)) facts = emptyFacts();
-        } catch { /* unreadable history remains conservative until readiness */ }
-      }
-      if (facts) this.applyHumanAskSummary(run, facts);
-      else {
-        this.deferredAskSummaries.add(run.id);
-        // Until authoritative history is ready, a missing/stale summary cannot dismiss an ask.
-        run.hasPendingHumanAsk = true;
-      }
-    }
     if (opts.settle) settleOrphanedRun(run, { stop: opts.stop });
     else reconcileLoadedRun(run, opts);
     const changed = upgraded === true || loadNormalizedFields(run) !== before;
@@ -2083,7 +2087,7 @@ export class RunStore extends EventEmitter {
    * history.
    */
   private isAnchor(id: string, run: RunRecord): boolean {
-    return isLiveRecord(run) || this.deferredAskSummaries.has(id) || this.pins.has(id) || this.dirty.has(id) || this.committing.has(id);
+    return isLiveRecord(run) || this.pins.has(id) || this.dirty.has(id) || this.committing.has(id);
   }
 
   /** The family roots with an anchoring member in memory. */
@@ -2976,6 +2980,17 @@ export class RunStore extends EventEmitter {
       ...(stepId ? { steps: run.steps.map((step) => step.id === stepId ? { ...step, status: 'waiting' as const } : step) } : {}) }]]));
   }
 
+  /** A usage-limit appointment withdrawn, committed at once instead of on the debounced save
+   *  (hearsay-tools/cezarion#1236): a crash right after the withdrawal must not find it on disk,
+   *  or recovery re-arms work the user cancelled. A run held for its resume settles `failed`. */
+  commitAutoResumeWithdrawal(id: string): void {
+    const run = this.peek(id);
+    if (!run || (run.autoResumeAt === undefined && run.autoResumeAttempts === undefined)) return;
+    const held = run.status === 'waiting' && run.autoResumeAt !== undefined;
+    this.commitIndex(new Map([[id, { ...run, autoResumeAt: undefined, autoResumeAttempts: undefined,
+      ...(held ? { status: 'failed' as const, finishedAt: new Date().toISOString() } : {}) }]]));
+  }
+
   /** The wake counters alone, committed at once instead of on the debounced save: a crash after
    *  an autonomous nudge or a failed delivery keeps what it spent or counted. */
   commitWakeCounters(id: string, counters: WakeCounters): void {
@@ -3001,17 +3016,6 @@ export class RunStore extends EventEmitter {
   /** Legacy CI checkpoint over `commitWait`, kept until its callers move (unified waits, Task 4). */
   commitCiWait(id: string, wait: CiWait, input?: AgentInput): void {
     this.commitWait(id, ciWaitEntry(ciWaitSchema.parse(wait)), input);
-  }
-
-  /** Legacy withdrawal: cancels every open or resolved CI wait, optionally accepting human input in
-   *  the same commit. Kept until its callers move (unified waits, Task 4). */
-  commitCiWaitWithdrawal(id: string, acceptedHumanMessage?: QueuedMessage): void {
-    const run = this.peek(id);
-    const next = run && withWaitsCancelled(run, (run.waits ?? []).filter((wait) => wait.kind === 'ci').map((wait) => wait.id));
-    if (!run || !next) return;
-    this.commitIndex(new Map([[id, { ...next,
-      ...(acceptedHumanMessage ? { queuedMessages: [...(run.queuedMessages ?? []), queuedMessageSchema.parse(acceptedHumanMessage)] } : {}),
-    }]]));
   }
 
   /** Legacy CI delivery over `commitWaitDelivery`: only a resolved CI wait's own input. Kept until
@@ -3365,16 +3369,12 @@ export class RunStore extends EventEmitter {
     }
     // Waits are not cleared here: RunManager cancels them explicitly when a run ends (spec
     // 2026-10-17-unified-waits), so a terminal patch never retires one as a side effect.
-    if (normalized.status && !['running', 'waiting', 'queued'].includes(normalized.status)) {
-      normalized.activity = undefined;
-    }
     // …and the mirror image for the usage-limit resume (spec
-    // 2026-08-03-auto-resume-after-usage-limit): it is a promise made ABOUT a failed run, so a
-    // run coming back to life — the resume itself, a user Continue, a re-queue — retires it.
-    // The manager's timer re-checks the record before it fires, so a cleared field is enough.
-    if (normalized.status && ['running', 'waiting', 'queued'].includes(normalized.status)) {
-      normalized.autoResumeAt = undefined;
-    }
+    // 2026-08-03-auto-resume-after-usage-limit): it is the appointment of a `waiting` run
+    // (hearsay-tools/cezarion#1236), so a run coming back to life — the resume itself, a user
+    // Continue, a re-queue — or settling retires it. The manager's timer re-checks the record
+    // before it fires, so a cleared field is enough.
+    if (normalized.status && normalized.status !== 'waiting') normalized.autoResumeAt = undefined;
     const archived = Object.prototype.hasOwnProperty.call(normalized, 'archived')
       ? Boolean(normalized.archived)
       : undefined;
@@ -3385,6 +3385,7 @@ export class RunStore extends EventEmitter {
     // Restore before mutating so a throw leaves status and archived unchanged (#818 S3).
     if (archived === false) restoreHistory(this.dataDir, id);
     Object.assign(run, this.redactPatch(normalized));
+    if (run.status !== 'waiting') run.autoResumeAt = undefined;
     if (normalized.task !== undefined) this.resolveEditedTaskRefs(run);
     if (archived !== undefined) this.applyArchived(run, archived);
     else this.touch(run);
@@ -3524,7 +3525,7 @@ export class RunStore extends EventEmitter {
       if (row && !this.held.has(memberId)) this.decodeCold(row); // records the synchronous write fence
       if (this.deleted.has(memberId) || this.quarantined.has(memberId) || this.pins.has(memberId) || isActive(memberId) ||
         hasRegisteredRunProcess(memberId) || isLiveRecord(run) || row?.live ||
-        run.hasPendingHumanAsk || run.hasPendingPermission || run.delegation?.role === 'invalid' ||
+        run.waits?.some((wait) => wait.kind === 'human' && wait.phase === 'open') || run.hasPendingPermission || run.delegation?.role === 'invalid' ||
         !['review', 'done', 'failed', 'cancelled'].includes(run.status) || autosaveCleanupBlocker(this.dataDir, memberId)) return undefined;
       const facts = this.facts.peek(memberId);
       if (!facts || facts.pendingAsk !== undefined) return undefined;
@@ -3775,9 +3776,8 @@ export class RunStore extends EventEmitter {
    *   - cancelled runs are never unread — you stopped them yourself;
    *   - archived ones never are either, since archiving is a stronger "done with this"
    *     than reading;
-   *   - and a `failed` run with a pending `autoResumeAt` is not a done item AT ALL
-   *     (`isScheduledResume`, spec 2026-08-03-auto-resume-after-usage-limit): it has an
-   *     appointment to pick the work back up, so there is no outcome to have missed.
+   *   - and a run waiting out a usage limit is not a done item AT ALL: it is `waiting` with
+   *     its appointment (hearsay-tools/cezarion#1236), so there is no outcome to have missed.
    *
    *  Keeping the two rules identical is what makes the returned count the number the
    *  cockpit's unread badge was showing. The `autoResumeAt` clause is the one that drifted
@@ -3809,7 +3809,6 @@ export class RunStore extends EventEmitter {
       const unread =
         !run.archived &&
         (run.status === 'done' || run.status === 'failed') &&
-        !(run.status === 'failed' && run.autoResumeAt !== undefined) &&
         run.finishedAt !== undefined &&
         (run.seenAt === undefined || run.seenAt < run.finishedAt);
       if (!unread) continue;
@@ -3839,7 +3838,6 @@ export class RunStore extends EventEmitter {
     appendFileSync(this.eventsPath(runId), line, 'utf8');
     this.facts.append(runId, full, Buffer.byteLength(line));
     this.maybeEnqueueHistoryCompress(run);
-    if (HUMAN_ASK_EVENT_TYPES.has(full.type) && this.syncHumanAskSummary(run)) this.touch(run);
     this.liveItems.observe(runId, full, false);
     this.emit('event', { runId, event: full });
 
@@ -4086,12 +4084,17 @@ export class RunStore extends EventEmitter {
     return this.facts.get(runId) ?? emptyFacts();
   }
 
+  /** The run's transcript facts when they are known: undefined when the transcript exists but its
+   *  facts are not current or cannot be read, so a caller can tell "no ask" from "no evidence". */
+  knownTranscriptFacts(runId: string): Readonly<TranscriptFacts> | undefined {
+    return this.facts.peek(runId);
+  }
+
   hasProjection(runId: string, projectionId: string): boolean {
     return this.transcriptFacts(runId).projectionIds.includes(projectionId);
   }
 
   private factsWarming: Promise<void> = Promise.resolve();
-  private readonly deferredAskSummaries = new Set<string>();
 
   /** Indexed family enumeration, including members not yet flushed to SQLite. */
   listFamilyRunIds(rootId: string): string[] {
@@ -4108,7 +4111,7 @@ export class RunStore extends EventEmitter {
     if (familyRootId !== undefined) return this.listFamilyRunIds(familyRootId);
     const ids = new Set<string>();
     for (const [id, run] of this.held) {
-      if (!isLiveRecord(run) && !this.deferredAskSummaries.has(id)) continue;
+      if (!isLiveRecord(run)) continue;
       const root = familyRootOf(run);
       for (const member of root === undefined ? [id] : this.listFamilyRunIds(root)) ids.add(member);
     }
@@ -4117,40 +4120,15 @@ export class RunStore extends EventEmitter {
 
   /** Readiness owns no run snapshot across an await: refresh only the currently held owner. */
   async prepareTranscriptFacts(runIds: Iterable<string>): Promise<void> {
-    const ids = new Set(runIds);
-    try {
-      for (const id of ids) {
-        // Exact sidecars resolve immediately too: recovery must yield to timers/I/O between IDs.
-        await new Promise<void>(resolve => setImmediate(resolve));
-        const facts = await this.facts.ready(id);
-        this.refreshDeferredAskSummary(id, facts);
-      }
-    } catch (error) {
-      this.releaseDeferredAskSummaries(ids);
-      throw error;
+    for (const id of new Set(runIds)) {
+      // Exact sidecars resolve immediately too: recovery must yield to timers/I/O between IDs.
+      await new Promise<void>(resolve => setImmediate(resolve));
+      await this.facts.ready(id);
     }
   }
 
   prepareRecoveryFacts(familyRootId?: string): Promise<void> {
     return this.prepareTranscriptFacts(this.recoveryFactIds(familyRootId));
-  }
-
-  private refreshDeferredAskSummary(id: string, facts: Readonly<TranscriptFacts> | undefined): void {
-    if (!this.db || !this.deferredAskSummaries.has(id)) return;
-    const run = this.held.get(id);
-    this.deferredAskSummaries.delete(id);
-    if (!run || this.writeRefusal(id)) return;
-    if (this.applyHumanAskSummary(run, facts)) this.touch(run);
-    // Pending roots anchor their family until this refresh; release it after the write settles.
-    this.scheduleSave();
-  }
-
-  /** Failed readiness cannot retain settled families indefinitely. Keep their current summaries
-   * untouched; the normal fenced save/eviction path releases only otherwise-unanchored owners. */
-  private releaseDeferredAskSummaries(ids: Iterable<string>): void {
-    let released = false;
-    for (const id of ids) if (this.deferredAskSummaries.delete(id)) released = true;
-    if (released) this.scheduleSave();
   }
 
   /** Register IDs only here; the index yields between cache reads and off-loop rebuilds. */
@@ -4181,12 +4159,7 @@ export class RunStore extends EventEmitter {
         for (const id of ids) if (!live.has(id)) ids.delete(id);
       }
       for (const id of present) ids.add(id);
-      try {
-        await this.facts.warm(ids);
-        for (const id of this.deferredAskSummaries) this.refreshDeferredAskSummary(id, this.facts.peek(id));
-      } catch {
-        this.releaseDeferredAskSummaries(ids);
-      }
+      await this.facts.warm(ids);
     }).catch(() => undefined);
   }
 
@@ -4205,20 +4178,6 @@ export class RunStore extends EventEmitter {
     }
   }
 
-  /** The owned store's `refreshHumanAskSummary`, from the index, on the same rules: no history
-   *  (legacy runs) keeps the summary, an unreadable one requests attention. True when it changed. */
-  private syncHumanAskSummary(run: RunRecord): boolean {
-    return this.applyHumanAskSummary(run, this.facts.get(run.id));
-  }
-
-  private applyHumanAskSummary(run: RunRecord, facts: Readonly<TranscriptFacts> | undefined): boolean {
-    const next = !facts ? true
-      : facts.bytes > 0 || facts.archive !== undefined ? facts.pendingAsk !== undefined
-      : run.hasPendingHumanAsk === true;
-    if (next === run.hasPendingHumanAsk) return false;
-    run.hasPendingHumanAsk = next;
-    return true;
-  }
 
   readEvents(runId: string): RunEvent[] {
     try {
@@ -4552,7 +4511,6 @@ export class RunStore extends EventEmitter {
     const dir = join(this.dataDir, 'runs');
     if (realpathSync(dir) !== resolve(dir)) throw new Error('History storage redirected');
     this.facts.forget(id);
-    this.deferredAskSummaries.delete(id);
     removeHistory(this.dataDir, id);
     rmSync(this.handoffPath(id), { force: true });
     rmSync(this.imagesDir(id), { recursive: true, force: true });
@@ -4653,7 +4611,6 @@ export class RunStore extends EventEmitter {
     if (!this.historyOwed.delete(id)) return;
     try {
       this.facts.forget(id);
-      this.deferredAskSummaries.delete(id);
       removeHistory(this.dataDir, id);
       rmSync(this.handoffPath(id), { force: true });
       rmSync(this.imagesDir(id), { recursive: true, force: true });

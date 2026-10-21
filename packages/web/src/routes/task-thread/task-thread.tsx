@@ -20,6 +20,7 @@ import {
 } from '@/api/queries'
 import { useRunHistory, type RunHistoryState } from '@/api/run-history'
 import { pendingHumanAsk } from '@open-mercato/cezar-api-client/contract/ask'
+import { asksQuestion } from '@open-mercato/cezar-api-client/contract/waits'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { Composer, type ComposerHandle } from '@/components/composer/composer'
@@ -37,7 +38,7 @@ import { useContinueAction } from './follow-up-engine'
 import { findSubagent, subagentChildren } from './subagent-dock'
 import { SubagentSheet } from './subagent-sheet'
 import { AcceptCelebration, ReviewPanel } from './review-panel'
-import { archiveInComposer, offersComposerFinish, queuePosition, runActionFlags } from './run-actions'
+import { archiveInComposer, isSessionOpen, offersComposerFinish, queuePosition, runActionFlags } from './run-actions'
 import { ArchiveButton } from './archive-action'
 import { useFinishRun } from './use-finish-run'
 import { useStopAction } from './stop-action'
@@ -204,12 +205,15 @@ export function ThreadView({
       }),
     [run.id],
   )
+  // Attention reads the open human wait on the record; the transcript's unanswered ask only
+  // decides whether the composer answers it (hearsay-tools/cezarion#1236, split by fact).
   const pendingAsk = history ? pendingHumanAsk(history.currentEvents) : undefined
-  const hasPendingHumanAsk = history
+  const transcriptAsk = history
     ? pendingAsk !== undefined
     : currentThread.turns.some(turn => turn.items.some(item => item.kind === 'ask' && !item.resolved))
   // A voice answer proposal outlives its card (a virtualized row unmounts while the question is
-  // open), so the thread says when the question itself settled or the user left the task.
+  // open), so the thread says when the question itself settled or the user left the task. The
+  // id comes from the transcript, the same source the ask card renders from.
   const pendingAskId = history
     ? (typeof pendingAsk?.requestId === 'string' ? pendingAsk.requestId : undefined)
     : currentThread.turns.flatMap(turn => turn.items).find(item => item.kind === 'ask' && !item.resolved)?.id
@@ -218,13 +222,14 @@ export function ThreadView({
     if (!historyLoading) voiceStore.syncPendingAsk(run.id, pendingAskId)
   }, [run.id, pendingAskId, historyLoading])
   useEffect(() => () => voiceStore.leaveTask(run.id), [run.id])
-  const attention = deriveAttention(run, hasPendingHumanAsk)
+  const attention = deriveAttention(run)
   const footer = threadFooter(run.status, run.error)
   // The Agents dock's data: the current fan-out's sub-agents, or [] when there is none to
   // show (#474). Derived from the same reduced turns the thread renders — no new subscription.
   // The legacy session-open rule (web/app.js `updateDetail`): the composer can deliver while
   // the engine owns a live session — running queues the message, waiting answers it.
-  const sessionOpen = run.status === 'running' || run.status === 'waiting'
+  // A usage-limit hold is `waiting` with no session until its resume (hearsay-tools/cezarion#1236).
+  const sessionOpen = isSessionOpen(run)
   // Closed runs keep their in-flight sub-agent cards as historical rows.
   const runIsTerminal = !sessionOpen && run.status !== 'queued'
   // Queued sends amend the original prompt; they do not open a provider session.
@@ -242,7 +247,8 @@ export function ThreadView({
   // meanings. A rejection is already a danger toast from inside the hook — swallowed here so the
   // click handler does not also surface it as an unhandled rejection.
   const finishAction = useFinishRun(run.id)
-  const needsAnswer = hasPendingHumanAsk || run.hasPendingHumanAsk === true
+  // Cezar's own waits ask nothing, so they leave empty Continue available (review of #1437).
+  const needsAnswer = transcriptAsk || asksQuestion(run)
   const hasContinuation = !sessionOpen && !queued && continueAction.available
   const continuable = hasContinuation && continueAction.canContinue
   // A closed session can never settle its in-flight items — nothing in the reducer rewrites a
@@ -348,7 +354,7 @@ export function ThreadView({
   useKeyboardInsetVar(scroll.restickIfStuck)
   return (
     <div data-route="task-thread" data-run-id={run.id} className="flex min-h-full flex-col">
-      <RunHeader run={run} hasPendingHumanAsk={hasPendingHumanAsk} onMarkedUnread={() => onMarkedUnread?.(run.id)} />
+      <RunHeader run={run} onMarkedUnread={() => onMarkedUnread?.(run.id)} />
 
       {/* Row spacing lives on each thread row (pb-2.5, both render modes measure alike);
           this gap only separates the sections — rows, empty state, footer, review panel. */}
@@ -389,7 +395,7 @@ export function ThreadView({
 
         {/* Live turn heartbeat: quiet gaps between bursts still show progress. Monitoring
             keeps `running` while parked, so it must not show the working spinner. */}
-        {run.status === 'running' && run.activity !== 'monitoring' ? <WorkingIndicator /> : null}
+        {run.status === 'running' ? <WorkingIndicator /> : null}
 
         {/* Closed states read as the body's last line; the WAITING state lives in the dock
             (mockup `.paused-hint`), right above the composer it is asking the user to use. */}
@@ -469,13 +475,13 @@ export function ThreadView({
           {/* Keyed by run id, like the docks it replaced: the route survives a task change, so
               an unkeyed dock would carry the previous run's collapse state — its own and every
               nested section's — into the next one. */}
-          <RunActivityDock key={run.id} run={run} currentThread={currentThread} hasPendingHumanAsk={hasPendingHumanAsk} onOpenWorker={setOpenAgentId} />
+          <RunActivityDock key={run.id} run={run} currentThread={currentThread} onOpenWorker={setOpenAgentId} />
 
-          {/* A usage-limit stop is the one `failed` state that is still going somewhere — the
-              dock says so before the composer offers a Continue nobody needs to press. */}
+          {/* A usage-limit hold is a `waiting` run with a resume booked — the dock says when,
+              before the composer offers a Continue nobody needs to press. */}
           <AutoResumeHint run={run} />
 
-          {run.status === 'waiting' ? (
+          {run.status === 'waiting' && sessionOpen ? (
             <div
               data-slot="paused-hint"
               className="flex items-center gap-2 px-1 text-xs text-muted-foreground"
@@ -513,7 +519,7 @@ export function ThreadView({
             voiceProposal={tellProposed}
             onStop={runActionFlags(run).cancel ? stopAction.stop : undefined}
             onFinish={
-              offersComposerFinish(run, hasPendingHumanAsk)
+              offersComposerFinish(run)
                 ? () => finishAction.mutateAsync().catch(() => undefined)
                 : undefined
             }

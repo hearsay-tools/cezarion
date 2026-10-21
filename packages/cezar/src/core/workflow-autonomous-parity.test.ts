@@ -148,7 +148,7 @@ describe('autonomous turn-end parity — #426', () => {
           // waiting rather than burning the whole timeout waiting for completion.
           // Progress is the manager's own nudge count (see ROW_SETTLE_MS).
           await waitForProgressing(
-            () => store.getRun(runId)?.status === 'waiting' || ['done', 'review', 'failed'].includes(store.getRun(runId)?.status ?? '') || store.getRun(runId)?.activity === 'monitoring',
+            () => store.getRun(runId)?.status === 'waiting' || ['done', 'review', 'failed'].includes(store.getRun(runId)?.status ?? ''),
             () => store.getRun(runId)?.automaticWakes,
             ROW_SETTLE_MS,
           );

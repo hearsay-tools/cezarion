@@ -8,9 +8,9 @@ import type { ApiRun, RunStatus, RunSummary } from '@open-mercato/cezar-contract
  *
  * Both default shapes carry `attention` + `attentionLabel` (#553/#609): the cockpit's own answer
  * to "does this run want a human", from the contract's `deriveAttention`, so a bot never has to
- * learn cezar's status vocabulary to decide whether to act. `waiting` is attention even when
- * `hasPendingHumanAsk` is false; `running` + `activity: monitoring` is neither settled nor
- * attention. `--full` prints the contract `ApiRun` untouched — the derived fields are not on it.
+ * learn cezar's status vocabulary to decide whether to act. `waiting` is attention even when no
+ * question is pending; `waiting` on an open CI or timer wait is neither settled nor attention.
+ * `--full` prints the contract `ApiRun` untouched — the derived fields are not on it.
  */
 
 export const TERMINAL_STATUSES: readonly RunStatus[] = ['done', 'review', 'failed', 'cancelled'];
@@ -32,10 +32,15 @@ export interface AttentionFields {
   attentionLabel: string;
 }
 
-/** The two derived fields, from the same function the cockpit's Needs You reads. */
+/** The two derived fields, from the same function the cockpit's Needs You reads. A usage-limit
+ *  hold also names its resume instant (hearsay-tools/cezarion#1236): the cockpit shows it beside
+ *  the label, and a CLI reader has only the label. */
 export function attentionFields(run: Parameters<typeof deriveAttention>[0]): AttentionFields {
   const attention = deriveAttention(run);
-  return { attention: attention.bucket, attentionLabel: attention.label };
+  const label = attention.label === 'usage limit' && run.autoResumeAt
+    ? `usage limit, resumes ${run.autoResumeAt}`
+    : attention.label;
+  return { attention: attention.bucket, attentionLabel: label };
 }
 
 export function projectStatus(run: ApiRun, url: string, question?: unknown) {
@@ -43,10 +48,8 @@ export function projectStatus(run: ApiRun, url: string, question?: unknown) {
     id: run.id,
     title: runTitle(run),
     status: run.status,
-    activity: run.activity,
     ...attentionFields(run),
     currentStepId: run.currentStepId,
-    hasPendingHumanAsk: run.hasPendingHumanAsk ?? false,
     question,
     branch: run.branch,
     diffStat: run.diffStat,
@@ -74,9 +77,7 @@ export function projectListRow(run: RunSummary | ApiRun) {
     id: run.id,
     title: runTitle(run),
     status: run.status,
-    activity: run.activity,
     ...attentionFields(run),
-    hasPendingHumanAsk: run.hasPendingHumanAsk ?? false,
     // One next-action datum per status; details such as branch/diff/tokens stay on status.
     currentStepId: run.status === 'running' ? run.currentStepId : undefined,
     pullRequestUrl: SUCCESS_STATUSES.includes(run.status) ? run.pullRequestUrl : undefined,

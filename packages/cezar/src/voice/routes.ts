@@ -5,12 +5,12 @@ import {
   voiceOutcomeRequestSchema,
   type VoiceDecideRequest,
 } from '@open-mercato/cezar-contract/voice';
-import { readPendingHumanAsk } from '../runs/human-ask-summary.ts';
 import { jsonZodValidator } from '../server/validators.ts';
 import type { ProjectApiEnv } from '../server/server.ts';
 import { appendVoiceLog, type RecentVoiceActions } from './decision-log.ts';
 import { decideVoice } from './decide.ts';
 import { VoiceEngineError, type DecisionEngine } from './engine.ts';
+import { readPendingHumanAsk } from './pending-ask.ts';
 
 /** The one refusal both routes answer while voice mode is off (capability `voice`). */
 export const VOICE_OFF = 'Voice mode is off: set CEZ_VOICE=1 and TYPESAFE_API_KEY, then restart cezar';
@@ -40,10 +40,10 @@ export function createVoiceRoutes(deps: VoiceRouteDeps) {
       const project = c.get('project');
       const body = c.req.valid('json');
       // An id this project does not know is "no open task", not an error: the tab can outlive the run.
-      const known = body.openRunId !== undefined && project.store.getRun(body.openRunId) !== undefined;
+      const openRun = body.openRunId === undefined ? undefined : project.store.getRun(body.openRunId);
       const { openRunId: _unknown, ...rest } = body;
-      const request: VoiceDecideRequest = known ? body : rest;
-      const ask = known ? readPendingHumanAsk(project.dataDir, body.openRunId!) : undefined;
+      const request: VoiceDecideRequest = openRun ? body : rest;
+      const ask = openRun ? readPendingHumanAsk(project.dataDir, openRun) : undefined;
       const decisionId = deps.uuid?.() ?? randomUUID();
       deps.recent.load(project.id, project.dataDir);
       const recent = deps.recent.last(project.id);

@@ -211,14 +211,15 @@ with `autoResumeAt`, not `failed`.
 
 1. live permission prompt → needs permission (unchanged)
 2. `failed` without a resume → failed
-3. an open human wait, at any status → **Needs you**
+3. an open human wait the user sees (`askSeq`), at any live status → **Needs you**; one not
+   shown yet only while `waiting` (phase 4b)
 4. `review` → needs review
 5. `running` → running
-6. `waiting` + usage limit → "usage limit, resumes 15:00"
+6. `waiting` + usage limit → "usage limit" (the sidebar meta line adds "resumes in 12m")
 7. `waiting` + workers → "waiting on 2 workers" (robot)
-8. `waiting` + CI → "waiting for CI on org/repo#12" (ring)
-9. `waiting` + timer → "next check 15:05" (ring)
-10. `waiting` with a resolved wake in the line → "waiting for a slot"
+8. `waiting` + CI → "waiting for CI" (ring; the status line names the check time)
+9. `waiting` + timer → "monitoring" (ring; the sidebar meta line adds "next check 15:05")
+10. `waiting` with a resolved wake in the line → "waiting for capacity"
 11. `queued`, `done`, `cancelled` as today
 
 `hasPendingHumanAsk`, `ciWait`/`lastCiWait`, `delegation.wait`/`lastWait` (for
@@ -1052,3 +1053,190 @@ wait ends on its workers' settlement, the completion human wait with workers sti
 worker's next settlement, message or question, and the fallback question on the parent's reply.
 Finish never ends a completion park early: the readiness check refuses it while any blocker
 remains.
+
+## Phase 4a decisions
+
+Phase 4a (hearsay-tools/cezarion#1236) is the first half of phase 4. It puts wakes of started runs
+ahead of new tasks, holds every line entry on a usage-limited account, and stores a usage-limited
+run as `waiting`. The "Slots and the line", "Status and display" and "Liveness bounds" sections
+stay authoritative; this section records the calls made within "Left to the builder".
+
+Calls made by the owner (2026-10-21):
+
+- **The split.** 4a is this section and references the issue without closing it. 4b, the next
+  pull request on the same issue, closes it: the rest of the `deriveAttention` rewrite on
+  `waitingOn`, removal of the legacy park state, removal of `cezar_wait_for_ci` and its private
+  route (with its `BACKWARD_COMPATIBILITY.md` entry), and removal of
+  `RunStore.commitCiWaitWithdrawal` and the `human_ask_pending` / `human_ask_unanswered` codes.
+  4b gets its own decisions section and Transitions out table.
+- **A withdrawn appointment ends `failed`.** A per-task cancel, an archive, the setting switched
+  off, a missed window, the cap or a refused resume settles the held run `failed`, with its kept
+  error and the note it has today. The end state is the one before 4a.
+
+Calls made by the agent:
+
+- **The line has two classes** (`workflows/line-order.ts`, `nextLineEntry`). A *wake* is a queued
+  wait wake or a queued continuation (a scheduler continuation, a usage-limit resume, a
+  Continue), ordered by when it joined the line (`waitWakeQueuedAt`, or the continuation's
+  `lineJoinedAt`). A queued owned worker counts as a wake that joined at its creation: it is
+  its family's work in progress, so its parent's later wake (a worker wait that timed out) does
+  not take the slot before the worker has run. An *unstarted* run is any other queued job, in
+  queue order. Wakes go first. An entry
+  that cannot leave (no capacity, an account hold, a cleanup, a pending finish) keeps its place,
+  and the next eligible entry is taken.
+- **Across projects**, the workspace semaphore wakes the project with the oldest wake first
+  (`oldestWakeAt()`, optional on a participant), then the oldest queued entry as before.
+- **Every line entry honours an account hold.** A CI or timer wake for a run in the monitoring
+  pool joined no line before; while its account is held it now joins the line, keeps its
+  monitoring slot, and leaves (without a regular slot) on the first pump after the hold lifts. A
+  `deadline` hold blocks every entry on the account. An `inFlight` hold blocks every entry except
+  other resumes, so it blocks a wake.
+- **A usage-limited run is `waiting` with `autoResumeAt`.** The failure path writes `waiting`, no
+  `finishedAt`, and keeps `error`. The store clears `autoResumeAt` on every status but `waiting`,
+  so a resume that starts (`running`) retires the appointment. `failed` + `autoResumeAt` from an
+  older store loads as `waiting` + `autoResumeAt` (schema 8).
+- **The held run is never woken by its own waits.** They stay open, resolve and stay owed; the
+  resume's opening turn delivers them, as a scheduler continuation delivers results.
+- **A human message or Continue during the hold** is the user's own Continue: it retires the
+  appointment and joins the line as a wake (origin human, budget reset, human waits answered). It
+  starts at once when a slot is free and no other run holds its account; another run's known
+  deadline on that account keeps it queued until the hold lifts. Human input into a live session
+  still skips the line.
+- **Holds are keyed by the execution account** (`workflows/execution-account.ts`): a live
+  session's step settings, a queued continuation's backend, else the step that holds the run's
+  latest session, else the record's `runner` and `agentProfile`. A mixed-runner step is held by
+  the account it ran on, on both sides of the hold.
+- **A held wake is not advertised.** `oldestWakeAt()` leaves out a wake its account holds, so
+  another project's eligible wake gets a freed slot first.
+- **A withdrawal is committed before it is reported** (`RunStore.commitAutoResumeWithdrawal`):
+  status, `finishedAt` and the cleared appointment are written at once, then the timer goes and
+  the note is appended.
+- **The cockpit treats a hold as a closed session** (`isRunActive(run)`): Continue with its
+  runner and account pickers, Archive, Delete and Don't resume; Stop only when it holds wait
+  results; no paused hint and no Finish.
+- **Stop during the hold** keeps the behaviour of the scheduled `failed` run: with open waits,
+  Stop discards them, withdraws the resume and the run ends `failed`; with none, Stop is refused.
+- **Restart.** Recovery re-arms the held run's open waits and leaves the resume to
+  `reconcileAutoResumes`; it does not reopen a session.
+- **Attention.** `waitingOn.kind === 'usage-limit'` reads `{ bucket: 'none', tone: 'neutral',
+  shape: 'ring', pulse: false, label: 'usage limit' }`, after the human rung and before workers.
+  The old `failed` + `autoResumeAt` → `scheduled` rung is gone. The cockpit's meta line says
+  `usage limit, resumes in 12m`; `cez task` says `usage limit, resumes <ISO time>`. The sidebar
+  group family keeps the word `scheduled`.
+- **Webhook.** A usage-limit hold sends no delivery, as the scheduled resume sent none
+  (`deriveWebhookState` returns `undefined`).
+
+### Transitions out (phase 4a)
+
+Required by AGENTS.md for every state 4a adds or keeps. Shipped defaults: `maxParallel: 2`,
+`maxMonitoringSessions: 2`, auto-resume on, at most 12 resumes. Earlier tables hold for the states
+they list. One row per exit.
+
+| State | Trigger | Who or what fires it | Behavior at shipped defaults |
+| --- | --- | --- | --- |
+| `waiting` + `autoResumeAt` (usage limit, no session, no slot) | The resume time passes | The auto-resume timer (`fireAutoResume`), re-armed by `reconcileAutoResumes` after a restart | A resume continuation joins the line as a wake; it starts when a slot is free (a resume passes an `inFlight` hold); its opening turn delivers every resolved wait |
+| | A human message or Continue | The user | The appointment is retired; the continuation joins the line as a wake and starts when a slot is free and no other run holds the account |
+| | Per-task cancel (`DELETE /runs/:id/auto-resume`) or archive | The user | Settles `failed` with the kept error and the note it has today |
+| | Auto-resume switched off | The user (settings), seen by the next pump | Settles `failed`, note `automatic resume cancelled — auto-resume is switched off` |
+| | The window was missed by over a day | `reconcileAutoResumes` | Settles `failed` with the expiry note |
+| | The cap is reached, the run is archived or unreadable at fire time | `fireAutoResume` | Settles `failed` with the matching note |
+| | `continueRun` refuses at fire time | `fireAutoResume` | Settles `failed` with the `could not start` note |
+| | Stop with open waits | The user | Waits discarded, the resume withdrawn; settles `failed` |
+| | Stop with no open wait | The user | Refused, as for the scheduled `failed` run before 4a; the hold stays |
+| | Delete | The user | The run and its timers go |
+| | One of its waits resolves | The wait's own watcher or timer | Stays resolved and owed; no wake; the resume delivers it |
+| | Restart | Recovery | Open waits re-armed; the resume re-armed by `reconcileAutoResumes` |
+| A wake held by an account hold (live session, regular or monitoring slot) | The hold lifts | The resume timer, the resume's turn end, a per-task cancel, an archive or the settings change, each of which pumps | Admitted by that pump and delivered at the session's turn boundary |
+| | Stop, cancel or delete | The user | Waits cancelled; the queued wake is dropped |
+| | A human message | The user | Delivered at once (human input skips the line); the held results stay owed and go with the next admitted wake |
+| A wake queued behind capacity (no hold) | A slot frees | Any slot release (the semaphore wakes the project with the oldest wake first) | Admitted before any unstarted run |
+| An unstarted run queued | A slot frees with no wake able to leave and no hold on its account | Slot release | Starts, as before 4a |
+
+Every state above has a default exit that needs no human: the resume timer for the hold (or a
+settlement to `failed`), a pump for a held or queued wake, and a slot release for an unstarted
+run.
+
+## Phase 4b decisions
+
+Phase 4b (hearsay-tools/cezarion#1236) closes the issue. It finishes the `deriveAttention`
+rewrite on `waitingOn`, removes the legacy park state, removes `cezar_wait_for_ci` and its
+private route, and removes `RunStore.commitCiWaitWithdrawal` and the `human_ask_pending` /
+`human_ask_unanswered` codes. "Status and display" above is amended to match.
+
+Calls made by the owner (2026-10-21):
+
+- **Drop both wire fields.** `activity` and `hasPendingHumanAsk` leave the contract, the API,
+  `cez task` JSON, worker inspection and the webhook payload. `BACKWARD_COMPATIBILITY.md` §2
+  names the migration: read `waitingOn`, the open human wait, or `attention` / `attentionLabel`.
+- **Split by fact.** "A pending question" was two facts: the user has not answered (the human
+  wait, settled when the answer is accepted) and the agent has not received the answer (the
+  transcript receipt: `ask.requested` without a matching `human-input-delivered`, retired at
+  delivery). Everything that shows state (attention, `waitingOn`, summaries, the webhook, the
+  CLI) reads the open human wait. Answer delivery in `workflows/run.ts` keeps the transcript
+  receipt.
+- **Labels stay.** `waiting for CI` and `monitoring` keep their words. The sidebar meta line adds
+  the time, as it does for a usage limit: `monitoring, next check 15:05`.
+
+Calls made by the agent:
+
+- **Rung 3 reads `shown`.** `waitingOn` `{ kind: 'human' }` gains an optional `shown: true` when
+  an open human wait has an `askSeq`. A shown question reads Needs you at any live status, a wake
+  turn's included; an unshown one (an upgraded legacy row before recovery attaches it, or an ask
+  being recorded) reads Needs you only while the run is `waiting`. The old `hasPendingHumanAsk`
+  argument gave the same answer for a running wake turn, so no state lost its badge.
+- **The `run.ts` gates do not move.** The `cezar_done` refusal, the autonomous-nudge skip, the
+  turn-end question check and the session auto-end all ask "has the agent received the answer",
+  which is the transcript receipt. Moving them to the human wait would let a turn end or a nudge
+  fire between the user's answer and its delivery. Each of them already also reads the open wait
+  where state matters (the nudge skips on any open wait; the turn-end check ORs an open human
+  wait).
+- **The legacy summary is upgraded on read.** `hasPendingHumanAsk: true` on a waiting row becomes
+  an open human wait (`via: 'ask-line'`, `turnId: 'legacy'`, a run-derived id, no `askSeq`),
+  unless one is already open, in the live store and in the cold index alike. Recovery's
+  `surfaceHumanWait` attaches it to the transcript's pending ask, so no second card appears.
+  On any other row, or when false, the summary is dropped.
+- **Recovery adopts an unanswered transcript ask.** A live row can carry an unanswered
+  `ask.requested` with no human wait and a stored summary of false (summaries were refreshed
+  lazily before 4b). Recovery opens an agent human wait for it (`via: 'ask-line'`,
+  `turnId: 'recovered'`, `askSeq` the ask's seq), so it still reads Needs you; no second card is
+  shown (`adoptTranscriptAsk`). An open Cezar human wait that is not shown as that ask (a crash
+  after the ask was saved, before the live handler replaced it) is withdrawn first, as the live
+  ask does, so the run reports the agent's question.
+- **Recovery settles a stale legacy wait.** A stored `hasPendingHumanAsk: true` can predate the
+  answer's receipt (`human-input-delivered` reached the transcript, the row's save did not). An
+  upgraded wait (`turnId: 'legacy'`, no `askSeq`) is settled as answered at recovery when the
+  transcript's facts are known, non-empty and hold no unanswered ask (`settleAnsweredLegacyAsk`);
+  unreadable facts are no evidence, and the wait stays open.
+- **`asksQuestion` decides the CLI's `question` and the webhook's `task.question`.** It is true for
+  an open agent human wait and for a Cezar wait that carries a card (a worker's fallback question
+  to its parent); Cezar's `no-wait`, `budget` and `completion` waits ask nothing. The cockpit's
+  composer uses it too, so those waits keep the one-click Continue.
+- **No store schema bump.** The planned schema 9 is not needed: a schema-8 build reads a 4b row
+  correctly, because every reader it has derives attention from the human wait as well. A row
+  4b rewrites only loses the two dropped keys.
+- **`activity` leaves `isLiveRecord`.** No decoded record has carried it since schema 4, which
+  rewrote every row it loaded. A row an older cezar stored with `activity` keeps its `live`
+  column (never recomputed on read), so open still loads and rewrites it.
+- **Kept on purpose.** `parkAfterAck` and the monitoring slot pool stay; both still have callers.
+  The `via: 'cezar_wait_for_ci'` enum value stays so old rows parse.
+
+### Transitions out (phase 4b)
+
+Required by AGENTS.md for every state 4b changes or keeps. Shipped defaults as in 4a. Earlier
+tables hold for the states they list. One row per exit.
+
+| State | Trigger | Who or what fires it | Behavior at shipped defaults |
+| --- | --- | --- | --- |
+| `waiting` with an upgraded human wait (no `askSeq`) | Restart recovery | `RunManager.recover` → `surfaceHumanWait` | The wait is attached to the transcript's pending ask (`askSeq` set); the card shows once; the run reads Needs you |
+| | A human message or the ask's answer | The user | The answer settles the wait at acceptance and is delivered at the next turn boundary, as for any human wait |
+| | Finish, Stop or delete | The user | Settles as for any parked run; the wait is cancelled |
+| | No unanswered ask in the transcript (its answer was delivered after the row was saved) | Recovery → `settleAnsweredLegacyAsk` | The wait settles as answered; the run reads as its remaining waits say |
+| A live row with an unanswered `ask.requested` and no human wait, or only a Cezar human wait not shown as that ask | Restart recovery | `RunManager.recover` → `adoptTranscriptAsk` | The Cezar wait is withdrawn; an open agent human wait is committed with the ask's `askSeq`; the run reads Needs you; its exits are the rows above |
+| `running` wake turn with a shown question (`askSeq`) | The turn ends | The runner's turn end | Parks `waiting` on the open human wait; Needs you, as before 4b |
+| | The user answers | The user | The wait settles; the answer is delivered at the turn boundary (transcript receipt) |
+| | Stop | The user | The session ends; the run settles `cancelled` |
+| `queued` wake with an unshown human wait | A slot frees | Slot release | Starts; the opening turn shows the question; Needs you |
+| | A human message | The user | Delivered at once; the wait settles |
+
+Every state 4b changes keeps a default exit that needs no human except the open question itself,
+whose only exit is a human answer by design (phase 2a).

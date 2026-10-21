@@ -212,7 +212,6 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && refused().length === 1 && store.getRun(p.id)?.status === 'waiting');
     expect(completionNudges(p.id)).toHaveLength(1);
     expect(store.getRun(p.id)?.waits).toEqual([expect.objectContaining({ id: timer!.id, phase: 'open' })]);
-    expect(store.getRun(p.id)?.activity).toBeUndefined();
     expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
     expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle') ?? []).toEqual([]);

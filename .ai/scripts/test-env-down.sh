@@ -8,6 +8,14 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
+
+# Hold the environment through this entire command, before any descriptor/build mutation.
+# The second entry registers the shell as well, so a killed supervisor cannot unprotect it.
+if [ "${TEST_ENV_LEASE_ENTRY:-}" != "$SCRIPT_DIR/test-env-down.sh" ]; then
+  exec node "$SCRIPT_DIR/test-env-lease.mjs" run sh "$SCRIPT_DIR/test-env-down.sh" "$@"
+fi
+unset TEST_ENV_LEASE_ENTRY
+node "$SCRIPT_DIR/test-env-lease.mjs" join "$$"
 QA_DIR="$REPO_ROOT/.ai/qa"
 ENV_DESCRIPTOR="$QA_DIR/test-env.json"
 

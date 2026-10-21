@@ -20,7 +20,7 @@ describe('unread input liveness bound (#505)', { timeout: 45_000 }, () => {
   }
   const inputOf = (runId: string, id: string) => store.getRun(runId)?.agentInputs?.find(input => input.id === id);
   // A parent with a live worker parks as monitoring; without one, as waiting.
-  const parked = (runId: string) => store.getRun(runId)?.status === 'waiting' || store.getRun(runId)?.activity === 'monitoring';
+  const parked = (runId: string) => store.getRun(runId)?.status === 'waiting';
 
   it('resubmits input the harness accepted and silently dropped, then it is read', async () => {
     vi.stubEnv('CEZ_MOCK_DROP_LINES', 'drop-me'); vi.stubEnv('CEZ_MOCK_DROP_ONCE', '1');

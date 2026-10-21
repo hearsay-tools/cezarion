@@ -1,4 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
+import { openHumanWait } from '@/test/run-summary-fixture'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router'
@@ -252,12 +253,13 @@ describe('ThreadView', () => {
     expect(textarea.placeholder).toBe('Reply — / for skills, @ for files…')
   })
 
-  it('failed by a usage limit → the dock says when it resumes itself, and links the setting', () => {
+  it('held by a usage limit → the dock says when it resumes itself, and links the setting', async () => {
     renderView(
       <ThreadView
-        run={run('failed', {
+        run={run('waiting', {
           error: 'step "work" failed: Claude AI usage limit reached|1754236800',
           autoResumeAt: '2026-08-03T17:00:30.000Z',
+          steps: [{ id: 'work', name: 'Work', kind: 'agent', status: 'failed', iterations: 1, tokensUsed: 0, sessionId: 'sess-1', backend: 'claude' }],
         })}
         thread={reduceThread(EVENTS)}
       />,
@@ -274,6 +276,12 @@ describe('ThreadView', () => {
     expect(screen.getByRole('link', { name: 'Auto-resume settings' }).getAttribute('href')).toBe(
       '/settings/global/resources',
     )
+    // No session until the resume (hearsay-tools/cezarion#1236): the composer continues the run
+    // now, as on the scheduled failed run, and offers no Stop that the server would refuse.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' }).hasAttribute('disabled')).toBe(false))
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    // The auto-resume hint says what happens; the paused hint of a live session does not repeat it.
+    expect(document.querySelector('[data-slot="paused-hint"]')).toBeNull()
   })
 
   it('offers a per-task opt-out that hits DELETE /auto-resume for THIS run only', async () => {
@@ -295,7 +303,7 @@ describe('ThreadView', () => {
       <QueryClientProvider client={createQueryClient()}>
         <MemoryRouter>
           <ThreadView
-            run={run('failed', { autoResumeAt: '2026-08-03T17:00:30.000Z' })}
+            run={run('waiting', { autoResumeAt: '2026-08-03T17:00:30.000Z' })}
             thread={reduceThread(EVENTS)}
           />
         </MemoryRouter>
@@ -1244,11 +1252,10 @@ describe('TaskThreadRoute', () => {
       title: 'mock:limit ship it',
       workflow: 'quick-task',
       task: 'mock:limit ship it',
-      status: 'failed',
+      status: 'waiting',
       error: 'step "task" failed: Claude AI usage limit reached|1785785603',
       autoResumeAt: '2026-08-03T19:33:53.000Z',
       createdAt: '2026-08-03T19:23:00.000Z',
-      finishedAt: '2026-08-03T19:23:13.000Z',
       tokensUsed: 0,
       archived: false,
       steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'failed', iterations: 1, tokensUsed: 0, sessionId: 's1' }],
@@ -1597,8 +1604,9 @@ const workerWait = (over: Record<string, unknown> = {}) => ({
   registeredAt: '2026-09-05T00:00:00.000Z', deadline: '2026-09-06T00:00:00.000Z', phase: 'open' as const, turnId: 'turn-1',
   timeoutSeconds: 600, workerIds: ['worker'], revisions: [], outcomes: [], ...over,
 })
-const onWorkerWait = (over: Record<string, unknown> = {}) =>
-  ({ delegation: { role: 'root' as const, permissions: [], receipts: [] }, waits: [workerWait(over)] }) as unknown as Partial<ApiRun>
+const onWorkerWait = (over: Record<string, unknown> = {}, askSeq?: number) =>
+  ({ delegation: { role: 'root' as const, permissions: [], receipts: [] },
+    waits: [workerWait(over), ...(askSeq === undefined ? [] : [openHumanWait(askSeq)])] }) as unknown as Partial<ApiRun>
 
 it.each(['parked', 'wake-pending'] as const)('uses honest dock copy for %s worker waits', phase => {
   renderView(<ThreadView run={run('waiting', onWorkerWait(phase === 'parked' ? {} : { phase: 'resolved', resolvedAt: '2026-09-05T00:05:00.000Z' }))} thread={reduceThread([])} />)
@@ -1610,7 +1618,7 @@ it.each(['parked', 'wake-pending'] as const)('uses honest dock copy for %s worke
 })
 it('keeps a visible human ask above parked worker context in the header and dock', () => {
   const thread = reduceThread([line(1, 'ask.requested', { requestId: 'ask', questions: [{ header: 'Choice', question: 'Choose a path', options: [{ label: 'Proceed', description: 'Continue' }] }] })])
-  renderView(<ThreadView run={run('waiting', onWorkerWait())} thread={thread} />)
+  renderView(<ThreadView run={run('waiting', onWorkerWait({}, 1))} thread={thread} />)
   expect(document.querySelector('[data-slot="paused-hint"]')?.textContent).toContain('waiting for your reply')
   expect(document.querySelector('[data-slot="pill"]')?.textContent?.toLowerCase()).toContain('needs you')
   expect(screen.getByText('Choose a path')).toBeTruthy()
@@ -1626,10 +1634,19 @@ it.each([false, true].flatMap(fallback => (['pending', 'refused-human-attempt', 
     ...(mode === 'matched-answer' ? [line(12, 'human-input-delivered', { askSeq: 10 })] : []),
   ]
   const history: import('@/api/run-history').RunHistoryState = { visibleEvents, currentEvents, isPending: false, contextPending: false, fallback, hasOlder: true, isFetchingOlder: false, olderError: undefined, loadOlder: async () => {}, jumpToLatest: async () => {}, retainedPages: 1 }
-  renderView(<ThreadView run={run('waiting', onWorkerWait({ deadline: '2026-09-07T12:00:00.000Z' }))} thread={reduceThread(visibleEvents)} currentThread={reduceThread(currentEvents)} history={history} />)
   const expectedPending = mode !== 'matched-answer' && mode !== 'old-history'
+  // The record holds the human wait while the question is open, as the server writes it.
+  renderView(<ThreadView run={run('waiting', onWorkerWait({ deadline: '2026-09-07T12:00:00.000Z' }, expectedPending ? 10 : undefined))} thread={reduceThread(visibleEvents)} currentThread={reduceThread(currentEvents)} history={history} />)
   expect(document.querySelector('[data-slot="paused-hint"]')?.textContent).toContain(expectedPending ? 'waiting for your reply' : 'Waiting on 1 worker')
   expect(document.querySelector('[data-slot="pill"]')?.textContent?.toLowerCase()).toContain(expectedPending ? 'needs you' : 'waiting on 1 worker')
+})
+
+// Split by fact (phase 4b, hearsay-tools/cezarion#1236): attention reads the record's human wait.
+// The transcript's unanswered ask decides only whether the composer answers it.
+it('reads attention from the record, not from an ask the transcript still shows', () => {
+  const thread = reduceThread([line(1, 'ask.requested', { requestId: 'ask', questions: [{ header: 'Choice', question: 'Choose a path', options: [{ label: 'Proceed' }] }] })])
+  renderView(<ThreadView run={run('waiting', onWorkerWait())} thread={thread} />)
+  expect(document.querySelector('[data-slot="pill"]')?.textContent?.toLowerCase()).toContain('waiting on 1 worker')
 })
 
 describe('composer execution actions (#201)', () => {
@@ -1658,8 +1675,15 @@ describe('composer execution actions (#201)', () => {
     expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
   })
 
+  // Review of #1437: Cezar's own wait (`no-wait`) asks nothing, so it keeps the one-click Continue.
+  it('offers empty Continue beside a Cezar wait that asks no question', async () => {
+    const cezarWait = { ...openHumanWait(), source: 'cezar' as const, via: 'no-wait' as const }
+    renderView(<ThreadView run={run('done', { waits: [cezarWait], steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 's1' }] })} thread={reduceThread([])} />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' }).hasAttribute('disabled')).toBe(false))
+  })
+
   it('requires an answer instead of offering empty Continue for a pending human question', async () => {
-    renderView(<ThreadView run={run('done', { hasPendingHumanAsk: true, steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 's1' }] })} thread={reduceThread([])} />)
+    renderView(<ThreadView run={run('done', { waits: [openHumanWait()], steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 's1' }] })} thread={reduceThread([])} />)
     await waitFor(() => expect(screen.getByRole('textbox').hasAttribute('disabled')).toBe(false))
     expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true)
@@ -1728,7 +1752,7 @@ describe('composer replies after idle close (#315)', () => {
   async function setup(messageStatus = 409, hasSession = true) {
     const fixture = run('waiting', {
       runner: 'claude',
-      hasPendingHumanAsk: true,
+      waits: [openHumanWait(1)],
       steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'waiting', iterations: 1, tokensUsed: 0,
         ...(hasSession ? { sessionId: 'session-1' } : {}) }],
     })
@@ -1943,14 +1967,14 @@ describe('the composer action row (#281)', () => {
     // The canonical Needs-you task: an agent stopped to ask you something. `finishBlockedReason`
     // refuses this only on a `root`, so an ordinary task finishes straight through its open
     // session — and locking the promotion out of it would miss the case #281 was filed about.
-    renderThread(run('waiting', { hasPendingHumanAsk: true }))
+    renderThread(run('waiting', { waits: [openHumanWait()] }))
     expect((finishButton() as HTMLButtonElement)?.disabled).toBe(false)
   })
 
   it('a blocked root has no Finish action', () => {
     renderThread(run('waiting', {
       finishBlocked: 'Answer the pending human question before finishing.',
-      hasPendingHumanAsk: true,
+      waits: [openHumanWait()],
       delegation: { role: 'root', permissions: [], receipts: [] },
     }))
     expect(finishButton()).toBeNull()

@@ -19,6 +19,10 @@ function harness() {
       if(state.failComment) {state.failComment=false;throw new Error('comment secret');}
       state.comments.push(args);return {data:{id:state.comments.length}};
     }
+    if(route==='POST /repos/{owner}/{repo}/issues/{issue_number}/labels') {
+      if(state.failLabel) {state.failLabel=false;throw new Error('label secret');}
+      return {data:args.labels};
+    }
     throw new Error(route);
   };
   const github={request,paginate:async(route,args)=>{

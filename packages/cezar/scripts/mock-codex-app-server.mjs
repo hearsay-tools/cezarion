@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Load only when configured: ordinary mock turns retain their event-loop ordering.
+const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
+  : (await import('./mock-failure-control.mjs')).readFailureControl();
 // Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
 import { spawn as watchdogSpawn } from 'node:child_process';
 import { closeSync as watchdogCloseInput, renameSync as watchdogRename, writeFileSync as watchdogWrite } from 'node:fs';
@@ -411,7 +414,7 @@ rl.on('line', async (line) => {
     }
     if (turnText.includes('mock:ci-wait')) {
       const { ciPrompt } = await import('./mock-ci-tool.mjs');
-      const text = await mcpToolGate('cezar_wait_for_ci') ? await ciPrompt('codex', ciWire, turnText) : 'user rejected MCP tool call';
+      const text = await mcpToolGate('cezar_wait') ? await ciPrompt('codex', ciWire, turnText) : 'user rejected MCP tool call';
       emit({ method: 'item/completed', params: { item: { type: 'agentMessage', id: 'ci-result', text } } });
       emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
       return;
@@ -557,7 +560,9 @@ rl.on('line', async (line) => {
       }
       return;
     }
-    if (turnText.includes('mock:provider-error') || turnText.includes('mock:empty-success')) {
+    const selectedFailure = failureControl?.failureFor(turnText);
+    const nativeFailure = selectedFailure instanceof Promise ? await selectedFailure : selectedFailure;
+    if (failureControl ? nativeFailure === 'provider' : turnText.includes('mock:provider-error') || turnText.includes('mock:empty-success')) {
       // Derived from the 0.147 rollout and upstream envelope; see the source
       // core/__fixtures__/codex/provider-error.md and its independent golden NDJSON.
       const completion = {"method": "turn/completed", "params": {"threadId": "th_mock_1", "turn": {"id": "turn_mock_1", "items": [], "itemsView": "notLoaded", "status": "failed", "error": {"message": "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.\"}}", "codexErrorInfo": "other", "additionalDetails": null}, "startedAt": 1788632328, "completedAt": 1788632331, "durationMs": 3502}}};

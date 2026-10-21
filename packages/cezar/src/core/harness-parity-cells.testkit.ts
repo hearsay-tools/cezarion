@@ -69,6 +69,7 @@ import {
   exemptionFor,
   HARNESS_ADAPTERS,
   SHUTDOWN_CRITERIA,
+  MODEL_REFUSAL_CRITERIA,
   PERMISSION_CRITERIA,
   WORKFLOW_TIMEOUT_CRITERIA,
   NO_PROGRESS_CRITERIA,
@@ -88,7 +89,7 @@ import {
   type SeamObservation,
   waitFor,
 } from './harness-parity.testkit.ts';
-import { blockRunWrites, crashStore, muteLockedDatabaseLogs, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
+import { blockRunWrites, crashStore, muteLockedDatabaseLogs, readPersistedRuns, seedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 
@@ -546,7 +547,7 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
     settled: (record) => record?.status === 'waiting',
     assert: (obs) => {
       // hearsay-tools/cezarion#1233: `waiting` plus an open timer reads as monitoring.
-      expect(obs.record).toMatchObject({ status: 'waiting', activity: undefined });
+      expect(obs.record).toMatchObject({ status: 'waiting' });
       expect(monitoringWakeOf(obs.record)).toBeDefined();
       expect(deriveAttention(obs.record!).label).toBe('monitoring');
     },
@@ -558,7 +559,7 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
     scenario: 'subagent',
     settled: (record) => record?.status === 'waiting',
     assert: (obs) => {
-      expect(obs.record).toMatchObject({ status: 'waiting', activity: undefined });
+      expect(obs.record).toMatchObject({ status: 'waiting' });
       expect(monitoringWakeOf(obs.record)).toBeDefined();
       expect(deriveAttention(obs.record!).label).toBe('monitoring');
     },
@@ -1470,13 +1471,13 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           await driveRun(backend, { prompt: `${promptFor(backend, 'subagent-after-park')} parity-release=${release}` },
             record => record?.status === 'waiting', 30_000,
             async ({ store, runId }) => {
-              expect(store.getRun(runId)).toMatchObject({ status: 'waiting', activity: undefined });
+              expect(store.getRun(runId)).toMatchObject({ status: 'waiting' });
               const wake = monitoringWakeOf(store.getRun(runId));
               expect(wake).toBeDefined();
               const before = store.readEvents(runId).length;
-              const changes: Array<{ status: string; activity?: string; monitoringWakeAt?: string }> = [];
+              const changes: Array<{ status: string; monitoringWakeAt?: string }> = [];
               const recordChange = (record: NonNullable<RunObservation['record']>) => {
-                if (record.id === runId) changes.push({ status: record.status, activity: record.activity, monitoringWakeAt: monitoringWakeOf(record) });
+                if (record.id === runId) changes.push({ status: record.status, monitoringWakeAt: monitoringWakeOf(record) });
               };
               store.on('run', recordChange);
               try {
@@ -1485,8 +1486,8 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
                   backend === 'opencode'
                     ? event.type === 'usage.updated' && (event.usage as { total?: number } | undefined)?.total === 424242
                     : JSON.stringify(event).includes('Post-park child update processed.')));
-                expect({ ...store.getRun(runId), monitoringWakeAt: monitoringWakeOf(store.getRun(runId)) }).toMatchObject({ status: 'waiting', activity: undefined, monitoringWakeAt: wake });
-                for (const change of changes) expect(change).toEqual({ status: 'waiting', activity: undefined, monitoringWakeAt: wake });
+                expect({ ...store.getRun(runId), monitoringWakeAt: monitoringWakeOf(store.getRun(runId)) }).toMatchObject({ status: 'waiting', monitoringWakeAt: wake });
+                for (const change of changes) expect(change).toEqual({ status: 'waiting', monitoringWakeAt: wake });
                 const after = store.readEvents(runId).slice(before);
                 expect(after.some(event => event.type === 'turn.started')).toBe(false);
                 const childItems = (backend === 'opencode' ? store.readEvents(runId).slice(0, before) : after)
@@ -1520,20 +1521,20 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           await driveRun(backend, { prompt: `${promptFor(backend, 'hook-after-park')} parity-release=${release}` },
             record => record?.status === 'waiting', 30_000,
             async ({ store, runId }) => {
-              expect(store.getRun(runId)).toMatchObject({ status: 'waiting', activity: undefined });
+              expect(store.getRun(runId)).toMatchObject({ status: 'waiting' });
               const wake = monitoringWakeOf(store.getRun(runId));
               expect(wake).toBeDefined();
               const before = store.readEvents(runId).length;
-              const changes: Array<{ status: string; activity?: string; monitoringWakeAt?: string }> = [];
+              const changes: Array<{ status: string; monitoringWakeAt?: string }> = [];
               const recordChange = (record: NonNullable<RunObservation['record']>) => {
-                if (record.id === runId) changes.push({ status: record.status, activity: record.activity, monitoringWakeAt: monitoringWakeOf(record) });
+                if (record.id === runId) changes.push({ status: record.status, monitoringWakeAt: monitoringWakeOf(record) });
               };
               store.on('run', recordChange);
               try {
                 writeFileSync(release, 'go');
                 await waitFor(() => store.readEvents(runId).slice(before).some(event => JSON.stringify(event).includes('Late hook processed.')));
-                expect({ ...store.getRun(runId), monitoringWakeAt: monitoringWakeOf(store.getRun(runId)) }).toMatchObject({ status: 'waiting', activity: undefined, monitoringWakeAt: wake });
-                for (const change of changes) expect(change).toEqual({ status: 'waiting', activity: undefined, monitoringWakeAt: wake });
+                expect({ ...store.getRun(runId), monitoringWakeAt: monitoringWakeOf(store.getRun(runId)) }).toMatchObject({ status: 'waiting', monitoringWakeAt: wake });
+                for (const change of changes) expect(change).toEqual({ status: 'waiting', monitoringWakeAt: wake });
                 expect(store.readEvents(runId).slice(before).some(event => event.type === 'turn.started')).toBe(false);
                 const hooks = store.readEvents(runId)
                   .filter(event => event.type === 'item.completed' && (event.item as { kind?: string } | undefined)?.kind === 'hook')
@@ -1572,8 +1573,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           expect(v1HasMarker).toBe(false);
         }
         const run = await driveRun(backend, 'ask-snapshot', record => record?.status === 'waiting' || TERMINAL.includes(record?.status ?? ''));
-        expect(run.record).toMatchObject({ status: 'waiting', hasPendingHumanAsk: true });
-        expect(run.record?.activity).toBeUndefined();
+        expect(run.record).toMatchObject({ status: 'waiting', waits: expect.arrayContaining([expect.objectContaining({ kind: 'human', phase: 'open' })]) });
         expect(monitoringWakeOf(run.record)).toBeUndefined();
         expect(askEvents(run)).toHaveLength(1);
         expect(askEvents(run)[0]?.questions).toMatchObject([{ header: 'Library', question: 'Which test library?' }]);
@@ -1600,7 +1600,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           await withOwnedInputRun(backend, ask.scenario, async ({ store, manager, runId }) => {
             manager.enqueueOwnedRun(runId);
             await waitFor(() => store.getRun(runId)?.status === 'waiting');
-            expect(store.getRun(runId)?.hasPendingHumanAsk).toBe(true);
+            expect(hasPendingAsk(store, runId)).toBe(true);
             // Check the real ask card too: relabelling the question fixture as a
             // plan fixture must not silently remove create_plan coverage.
             const expectedHeader = ask.kind === 'cursor/create_plan' ? 'Plan'
@@ -1621,7 +1621,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
               expect(statuses).not.toContain('waiting');
               expect(store.getRun(runId)?.status).toBe('done');
               expect(store.getRun(runId)?.steps[0]?.status).toBe('done');
-              expect(store.getRun(runId)?.hasPendingHumanAsk).toBe(false);
+              expect(hasPendingAsk(store, runId)).toBe(false);
             } finally {
               store.off('run', recordStatus);
             }
@@ -2052,6 +2052,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
     describe('harness parity — the matrix itself', () => {
       const allIds = [
         ...SHUTDOWN_CRITERIA.map(c => c.id),
+    ...MODEL_REFUSAL_CRITERIA.map(c => c.id),
         ...PERMISSION_CRITERIA.map(c => c.id),
         ...MONITORING_TURN_CRITERIA.map(c => c.id),
         ...MONITORING_ACK_CRITERIA.map(c => c.id),
@@ -2076,7 +2077,9 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
       const scenarioOf = (id: string): ScenarioName => {
         const permission = PERMISSION_CRITERIA.find(c => c.id === id);
         if (permission) return permission.scenario;
-        const shutdown = SHUTDOWN_CRITERIA.find(c => c.id === id);
+        const refusal = MODEL_REFUSAL_CRITERIA.find(c => c.id === id);
+    if (refusal) return refusal.scenario;
+    const shutdown = SHUTDOWN_CRITERIA.find(c => c.id === id);
         if (shutdown) return shutdown.scenario;
         const monitor = [...MONITORING_TURN_CRITERIA, ...MONITORING_ACK_CRITERIA, ...MONITORING_ORDER_CRITERIA].find(c => c.id === id);
         if (monitor) return monitor.scenario;
@@ -2477,10 +2480,10 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         const controller = await CiToolController.start();
         const dir = mkdtempSync(join(tmpdir(), 'cez-tools-list-'));
         try {
-          const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'ci', source: 'agent', via: 'cezar_wait_for_ci', phase: 'open' } }), ask: async () => ({ ok: false, code: 'unavailable', message: 'none' }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', open_waits: [] }) });
+          const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'ci', source: 'agent', via: 'cezar_wait', phase: 'open' } }), ask: async () => ({ ok: false, code: 'unavailable', message: 'none' }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', open_waits: [] }) });
           const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, allowedTools, env: { ...session.env, CEZ_MOCK_ARGS_FILE: join(dir, 'wire'), CEZ_MOCK_CI_PR: wait.prUrl, CEZ_MOCK_CI_RESULT: join(dir, 'result'), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
           expect(obs.v1.filter((event) => event.type === 'error')).toEqual([]);
-          const waits = ['cezar_wait_for_ci', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'];
+          const waits = ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'];
           const expected = enabled ? [...waits, 'cezar_preview_serve', 'cezar_preview_stop'] : waits;
           expect(JSON.parse(readFileSync(join(dir, 'result'), 'utf8')).names).toEqual(expected);
           const argv: string[] = JSON.parse(readFileSync(join(dir, 'wire'), 'utf8').trim().split('\n')[0]!);
@@ -2899,7 +2902,6 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             expect(manager.sendMessage(runId, [{ type: 'text', text: `mock:agent-echo ${prose}` }])).toBe(true);
             await waitFor(() => store.readEvents(runId).some(event => event.type === 'text' && String(event.text).includes(prose)));
             await waitFor(() => store.getRun(runId)?.status === 'waiting');
-            expect(store.getRun(runId)?.activity).toBeUndefined();
             expect(manager.isActive(runId)).toBe(true);
           });
       }, 60_000);
@@ -3216,7 +3218,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   });
 
   // cezar's own tools are covered where they run: Codex rows of ci-wait-parity park only
-  // when the mock's MCP tool gate lets cezar_wait_for_ci through unasked.
+  // when the mock's MCP tool gate lets cezar_wait through unasked.
   describeRunners('MCP tool approval routing (hearsay-tools/cezarion#1294)', () => {
     for (const backend of runners) {
       const exemption = exemptionFor('P9', backend);

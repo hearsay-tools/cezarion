@@ -1137,7 +1137,7 @@ it('hides indexed workers while preserving parked-parent waiting phases', async 
 })
 
 it('shows a parked parent human question from the slim workspace index', async () => {
-  stubFetch({ runs: [{ ...RUNS[0]!, id: 'asking-parent', status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root' }, waitingOn: { kind: 'human' } }] })
+  stubFetch({ runs: [{ ...RUNS[0]!, id: 'asking-parent', status: 'waiting', delegation: { role: 'root' }, waitingOn: { kind: 'human' } }] })
   renderPage()
   await waitFor(() => expect(document.querySelector('[data-slot="global-task-row"][data-run-id="asking-parent"]')).not.toBeNull())
   const row = document.querySelector('[data-slot="global-task-row"][data-run-id="asking-parent"]')

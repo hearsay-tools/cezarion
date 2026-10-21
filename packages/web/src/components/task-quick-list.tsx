@@ -20,7 +20,8 @@ import { ELLIPSIS_HIDDEN_CLASS, useEllipsisHiddenChildren } from '@/lib/ellipsis
 import { groupMetaParts, referenceKey, resumeLabel, sharedReferenceKeys } from '@/lib/group-summary'
 import { useNoHover } from '@/lib/use-no-hover'
 import { useIsDesktop } from '@/lib/use-desktop'
-import { shortAge } from '@/lib/format'
+import { checkTimeText, shortAge } from '@/lib/format'
+import { resolveWaitingOn } from '@open-mercato/cezar-api-client/contract/waits'
 import { isUnread, unreadMarkerTone } from '@/lib/read-state'
 import { directionalUsageText } from '@/components/directional-usage'
 import {
@@ -854,15 +855,24 @@ function useAgeDropped(ref: React.RefObject<HTMLElement | null>, enabled: boolea
 
 /** The meta line's state word (#617): the attention label only for the states the issue lists,
  *  where the dot alone cannot say it — monitoring, the dependency waits (waiting on N workers,
- *  on worker replies, on a parent reply), needs review, needs permission, failed, scheduled,
+ *  on worker replies, on a parent reply), needs review, needs permission, failed, usage limit,
  *  queued (with its position, `queued #2`) and running. `needs you`, `done` and `cancelled` get
  *  none: the amber, green and grey filled dots already are the whole story. */
 function metaStateWord(attention: Attention, queuePosition: number | null, run: RunSummary, now: number): string | undefined {
   const { label } = attention
   if (label === 'queued') return queuePosition !== null ? `queued #${queuePosition}` : label
   if (label === 'needs you' || label === 'done' || label === 'cancelled') return undefined
-  // When, not just that (#617 01b): `resumes in 12m` / `resumes 14:05`, else `scheduled`.
-  if (label === 'scheduled') return resumeLabel(run.autoResumeAt, now)
+  // When, not just that (#617 01b): `usage limit, resumes in 12m`, or `usage limit` once due.
+  if (label === 'usage limit') {
+    const resume = resumeLabel(run.autoResumeAt, now)
+    return resume === 'scheduled' ? label : `${label}, ${resume}`
+  }
+  // The same detail for a timer: `monitoring, next check 15:05` (phase 4b, hearsay-tools/cezarion#1236).
+  const waitingOn = label === 'monitoring' ? resolveWaitingOn(run) : undefined
+  if (waitingOn?.kind === 'timer') {
+    const at = new Date(waitingOn.at)
+    if (Number.isFinite(at.getTime())) return `${label}, next check ${checkTimeText(at, new Date(now))}`
+  }
   return label
 }
 

@@ -21,7 +21,7 @@ beforeAll(async () => {
   mkdirSync(artifacts, { recursive: true })
   const runs = ['waiting', 'done', 'running'].flatMap((status, section) => Array.from({ length: 4 }, (_, i) => ({
     id: `limit-${section}-${i}`, title: `${['Needs attention', 'Finished task', 'Working task'][section]} ${i + 1}`, task: 'Sidebar fixture',
-    workflow: 'quick-task', runner: 'claude', status: status === 'running' ? 'failed' : status, ...(status === 'running' ? { autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() } : {}), createdAt: new Date(Date.now() - i * 60000).toISOString(),
+    workflow: 'quick-task', runner: 'claude', status: status === 'running' ? 'waiting' : status, ...(status === 'running' ? { autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() } : {}), createdAt: new Date(Date.now() - i * 60000).toISOString(),
     tokensUsed: 0, archived: false, steps: [],
   })))
   writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify(runs))

@@ -40,6 +40,14 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # works unchanged inside a git worktree (no `git rev-parse`, no cwd assumption).
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 
+# Hold the environment through this entire command, before any descriptor/build mutation.
+# The second entry registers the shell as well, so a killed supervisor cannot unprotect it.
+if [ "${TEST_ENV_LEASE_ENTRY:-}" != "$SCRIPT_DIR/test-env-up.sh" ]; then
+  exec node "$SCRIPT_DIR/test-env-lease.mjs" run sh "$SCRIPT_DIR/test-env-up.sh" "$@"
+fi
+unset TEST_ENV_LEASE_ENTRY
+node "$SCRIPT_DIR/test-env-lease.mjs" join "$$"
+
 QA_DIR="$REPO_ROOT/.ai/qa"
 ENV_DESCRIPTOR="$QA_DIR/test-env.json"
 LOCK_DIR="$QA_DIR/test-env.lock"
@@ -187,7 +195,8 @@ json_get() { node -e '
 ' "$1" "$2" 2>/dev/null; }
 
 # ---- 2. lock — one bootstrap at a time --------------------------------------
-# Released when the bootstrap finishes rather than held for the environment's lifetime:
+# The outer test-env lease protects the full invocation. This inner lock serializes
+# nested bootstraps belonging to the SAME invocation. Released after bootstrap:
 # the server `readFileSync`s its web/dist per request, so a later rebuild under a
 # running app is picked up on the next reload instead of corrupting it. The reuse check's
 # "source newer than startedAt" test is what keeps a stale build from being tested.
@@ -572,14 +581,10 @@ start_app() {
 
   log "starting cezar on $BASE_URL (CEZ_DRY_RUN=1${SERVER_ENV:+ $SERVER_ENV})"
   # --no-open: a test boot must never hijack the operator's browser.
-  if command -v setsid >/dev/null 2>&1; then
-    (cd "$REPO_ROOT" && exec setsid nohup node "$E2E_BUILD_ROOT/dist/index.js" --port "$PORT" --no-open --repo "$SERVED_ROOT" \
-      >"$APP_LOG" 2>&1 </dev/null) &
-  else
-    (cd "$REPO_ROOT" && exec nohup node "$E2E_BUILD_ROOT/dist/index.js" --port "$PORT" --no-open --repo "$SERVED_ROOT" \
-      >"$APP_LOG" 2>&1 </dev/null) &
-  fi
-  APP_PID=$!
+  # Detach through Node on every host: the cached app survives the caller and is
+  # outside the command group retained by a crashed build's lifetime lease.
+  APP_PID=$(cd "$REPO_ROOT" && node "$SCRIPT_DIR/test-env-lease.mjs" detach-app "$APP_LOG" \
+    "$E2E_BUILD_ROOT/dist/index.js" --port "$PORT" --no-open --repo "$SERVED_ROOT")
 
   health_started=$(date +%s)
   health_deadline=$((health_started + HEALTH_TIMEOUT))

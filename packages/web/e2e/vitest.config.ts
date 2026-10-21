@@ -26,7 +26,8 @@ export default defineConfig({
     // and restores it afterwards — otherwise whatever the operator last registered in the
     // gitignored `.ai/qa/cez-home` decides whether the sidebar renders its flat or its grouped
     // shell, and every spec asserting flat-shell selectors becomes a coin flip. See the module.
-    globalSetup: ['./environment.ts', './workspace-registry.ts'],
+    // Environment owns registry setup/restore so it releases its lease AFTER restoration.
+    globalSetup: ['./environment.ts'],
     // A real browser is slower than jsdom, but a smoke test that needs more than this is broken.
     testTimeout: 60_000,
     hookTimeout: 60_000,

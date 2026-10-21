@@ -66,7 +66,7 @@ export async function resumeAfterIdleTeardown<T>(
  * session continues), which is exactly the seam the ask card was missing.
  */
 export function askDeliveryMode(run: RunRecord): AskDeliveryMode {
-  if (isRunActive(run.status)) return 'live'
+  if (isRunActive(run)) return 'live'
   return runActionFlags(run).continueRun ? 'resume' : 'unavailable'
 }
 

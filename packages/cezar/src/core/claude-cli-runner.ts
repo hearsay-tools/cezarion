@@ -173,13 +173,33 @@ export class ClaudeCliRunner implements AgentRunner {
     const humanUnsettled = new Set<string>();
     let queuedTurnPending = false;
     const submissions = new InputSubmissions();
+    // Only live, observed success grants replay eligibility (hearsay-tools/cezarion#1351).
+    let reportedModel: string | undefined;
+    let reportedSession: string | undefined;
+    let successfulIdentity: string | undefined;
+    let attemptDidWork = false;
+    const sentLines = new Map<string, string>();
+    const deferredHuman: { id: string; content: ContentBlock[] }[] = [];
+    let refusalRetry: { uuid: string; line: string; message: string; attempts: number } | undefined;
+    let refusalTimer: NodeJS.Timeout | undefined;
+    const cancelRefusalRetry = () => {
+      if (refusalTimer) clearTimeout(refusalTimer);
+      refusalTimer = undefined;
+      refusalRetry = undefined;
+    };
+    child.once('exit', () => {
+      if (refusalTimer) clearTimeout(refusalTimer);
+      refusalTimer = undefined;
+      // Retain the diagnosis until stdout drains: a final result can still
+      // be buffered when the process exit event arrives.
+    });
     const scheduleAutoEnd = () => {
       // Never arm the close window while an accepted turn is still running:
       // the timer the opening result would start here has nothing to cancel it,
       // and closing stdin under a queued turn truncates it (#146). The final
       // result brings the count to 0 and arms the window as before.
       if (!opts.autoEndAfterFirstTurn || !stdinOpen || autoEndTimer || agentWritePending) return;
-      if (unsettled.size > 0) return;
+      if (unsettled.size > 0 || refusalRetry || deferredHuman.length) return;
       autoEndTimer = setTimeout(() => {
         autoEndTimer = undefined;
         if (opts.shouldAutoEnd?.() !== false) end();
@@ -188,8 +208,16 @@ export class ClaudeCliRunner implements AgentRunner {
     };
     let pendingMarkerAsk = false;
     let turnTextStart = 0;
-    const sendMessage = (content: ContentBlock[], acknowledge?: (error?: Error | null) => void, inputIds: readonly string[] = [], humanFollowUp = false): boolean => {
+    const sendMessage = (content: ContentBlock[], acknowledge?: (error?: Error | null) => void, inputIds: readonly string[] = [], humanFollowUp = false, retryWrite = false): boolean => {
       if (!stdinOpen) return false;
+      if (refusalRetry && !retryWrite) {
+        if (!humanFollowUp) return false;
+        const id = randomUUID();
+        // Snapshot now: caller-owned arrays must not change an accepted input.
+        deferredHuman.push({ id, content: structuredClone(content) });
+        humanUnsettled.add(id);
+        return true;
+      }
       // A line written while a turn runs joins that turn instead of opening one (#505).
       const opensTurn = unsettled.size === 0;
       if (opensTurn) queuedTurnPending = false;
@@ -197,6 +225,7 @@ export class ClaudeCliRunner implements AgentRunner {
       if (opensTurn) {
         pendingMarkerAsk = false;
         turnTextStart = textChunks.length;
+        attemptDidWork = false;
       }
       // A follow-up inside the reopen window cancels the scheduled close.
       if (autoEndTimer) {
@@ -213,6 +242,7 @@ export class ClaudeCliRunner implements AgentRunner {
       try {
         child.stdin.write(`${line}\n`, acknowledge);
         unsettled.add(uuid);
+        sentLines.set(uuid, line);
         // Agent writes always pass an acknowledgement, even without inputIds (nudges, #544).
         // The opening/seed prompt shares this path without an ack, but it is not a human
         // follow-up — only session.sendMessage holds (#871 / #486).
@@ -246,6 +276,7 @@ export class ClaudeCliRunner implements AgentRunner {
     const end = (): void => {
       if (!stdinOpen) return;
       stdinOpen = false;
+      cancelRefusalRetry();
       try {
         child.stdin.end();
       } catch {
@@ -263,6 +294,7 @@ export class ClaudeCliRunner implements AgentRunner {
 
     const interrupt = (): void => {
       stdinOpen = false;
+      cancelRefusalRetry();
       if (hasExited() || killTimer) return;
       signalChild('SIGTERM');
       killTimer = setTimeout(() => {
@@ -332,7 +364,78 @@ export class ClaudeCliRunner implements AgentRunner {
             continue;
           }
           opts.onActivity?.();
-          const mappedMessage = normalizeIntentionalTeardownResult(msg, terminatedByCezar);
+          if (msg.type === 'system' && msg.subtype === 'init') {
+            reportedModel = typeof msg.model === 'string' && msg.model !== '' ? msg.model : undefined;
+            reportedSession = typeof msg.session_id === 'string' && msg.session_id !== '' ? msg.session_id : undefined;
+          }
+          // Background tasks and hooks can start work without assistant content
+          // or token usage. Only init is known to be identity-only metadata.
+          if ((msg.type === 'system' && msg.subtype !== 'init') || msg.type === 'tool_progress') attemptDidWork = true;
+          if (msg.type === 'assistant' || msg.type === 'user') {
+            // A refusal's own visible text is diagnostic, not model work. Any
+            // other output, tool call/result, reasoning or nonzero usage forbids replay.
+            if (msg.message?.usage && !zeroClaudeUsage(msg.message.usage)) attemptDidWork = true;
+            const content = msg.message?.content;
+            if (content !== undefined && !Array.isArray(content)) attemptDidWork = true;
+            for (const block of Array.isArray(content) ? content : []) {
+              if (!block || typeof block !== 'object') { attemptDidWork = true; continue; }
+              const b = block as { type?: string; text?: string };
+              if (b.type !== 'text' || selectedModelRefusal(b.text) !== reportedModel || !reportedModel) attemptDidWork = true;
+            }
+          }
+          const identity = reportedModel && reportedSession ? JSON.stringify([reportedSession, reportedModel]) : undefined;
+          const retryable = !terminatedByCezar && stdinOpen && !attemptDidWork
+            && msg.type === 'result' && msg.is_error === true
+            && identity !== undefined && identity === successfulIdentity
+            && selectedModelRefusal(msg.result) === reportedModel
+            && zeroClaudeUsage(msg.usage)
+            && zeroClaudeModelUsage(msg.modelUsage)
+            && (msg.total_cost_usd === undefined || msg.total_cost_usd === 0)
+            && unsettled.size === 1
+            && (msg.user_message_uuids === undefined || (Array.isArray(msg.user_message_uuids) && msg.user_message_uuids.length === 1
+              && msg.user_message_uuids[0] === [...unsettled][0]));
+          const uuid = [...unsettled][0];
+          const lineToRetry = uuid ? sentLines.get(uuid) : undefined;
+          if (retryable && uuid && lineToRetry && (!refusalRetry || refusalRetry.attempts < 2)) {
+            // Native attempts remain balanced, but a retryable result must not
+            // emit v1 error/turn-end: those would fail or park the workflow.
+            emitUi(state => mapClaudeMessage(msg, state));
+            refusalRetry ??= { uuid, line: lineToRetry, message: msg.result!, attempts: 0 };
+            const retry = refusalRetry;
+            const delay = retry.attempts++ === 0 ? 5000 : 15000;
+            onEvent?.({ type: 'note', message: `Claude model refusal: ${retry.message}; retrying (${retry.attempts}/2) in ${delay / 1000}s` });
+            refusalTimer = setTimeout(() => {
+              refusalTimer = undefined;
+              if (!stdinOpen || hasExited() || refusalRetry !== retry) return;
+              const input = JSON.parse(retry.line) as { message: { content: ContentBlock[] } };
+              // A fresh native UUID, the same logical input IDs, and byte-for-byte
+              // content. Already-observed consumption is never acknowledged twice.
+              const ids = submissions.consume(retry.uuid);
+              const human = humanUnsettled.delete(retry.uuid);
+              unsettled.delete(retry.uuid);
+              sentLines.delete(retry.uuid);
+              if (!sendMessage(input.message.content, error => {
+                if (!error || !stdinOpen) return;
+                cancelRefusalRetry();
+                onEvent?.({ type: 'error', message: retry.message });
+                interrupt();
+              }, ids, human, true)) {
+                cancelRefusalRetry();
+                onEvent?.({ type: 'error', message: retry.message });
+                interrupt();
+                return;
+              }
+              retry.uuid = [...unsettled][0]!;
+              retry.line = sentLines.get(retry.uuid)!;
+            }, delay);
+            refusalTimer.unref?.();
+            continue;
+          }
+          // Keep the original diagnosis on exhaustion, even if the final result
+          // differs. Other errors outside a retry still use their native message.
+          const originalRefusal = msg.type === 'result' && msg.is_error && refusalRetry?.message;
+          const mappedMessage = normalizeIntentionalTeardownResult(
+            originalRefusal ? { ...msg, result: originalRefusal } : msg, terminatedByCezar);
           emitUi((state) => mapClaudeMessage(mappedMessage, state));
 
           let delta = 0;
@@ -350,6 +453,9 @@ export class ClaudeCliRunner implements AgentRunner {
           }
 
           if (msg.type === 'result') {
+            if (msg.is_error !== true && msg.subtype === 'success' && costWeightedTokens(msg.usage) > 0) successfulIdentity = identity;
+            const wasRetrying = refusalRetry !== undefined;
+            cancelRefusalRetry();
             if (typeof msg.total_cost_usd === 'number' && Number.isFinite(msg.total_cost_usd) && msg.total_cost_usd >= 0) {
               onEvent?.({ type: 'cost', usd: msg.total_cost_usd });
             }
@@ -365,6 +471,7 @@ export class ClaudeCliRunner implements AgentRunner {
             // pipe, and only a named UUID or a replay echo proves the model read it (#486).
             const covered = settled.flatMap(id => {
               unsettled.delete(id);
+              sentLines.delete(id);
               if (named) humanUnsettled.delete(id);
               return msg.is_error === true ? [] : submissions.consume(id);
             });
@@ -377,7 +484,20 @@ export class ClaudeCliRunner implements AgentRunner {
             // CLI never runs must not look like activity. Decided before the turn-end
             // callback, which may itself submit (and announce) the next prompt.
             queuedTurnPending = unsettled.size > 0;
+            // Remaining inputs belong to the next turn. Clear the completed
+            // turn's work before any queued frame (including system activity)
+            // arrives; resetting at its first assistant frame would erase work.
+            if (queuedTurnPending) attemptDidWork = false;
             onEvent?.({ type: 'turn-end' });
+            // Drain later human input only after a successful logical turn.
+            // Failed turns retain the hold until the workflow tears down.
+            if (wasRetrying && msg.is_error !== true && stdinOpen) {
+              for (const input of deferredHuman.splice(0)) {
+                humanUnsettled.delete(input.id);
+                sendMessage(input.content, undefined, [], true);
+              }
+              opts.onAgentInputReady?.();
+            }
             scheduleAutoEnd();
           }
         }
@@ -391,7 +511,11 @@ export class ClaudeCliRunner implements AgentRunner {
       } finally {
         if (deadline) clearTimeout(deadline);
         if (autoEndTimer) clearTimeout(autoEndTimer);
+        if (refusalRetry && stdinOpen && !terminatedByCezar && !timedOut) {
+          onEvent?.({ type: 'error', message: refusalRetry.message });
+        }
         stdinOpen = false;
+        cancelRefusalRetry();
       }
 
       // Clean stdout EOF is not a read failure, but a still-running child would
@@ -469,7 +593,7 @@ export class ClaudeCliRunner implements AgentRunner {
       sendMessage: content => sendMessage(content, undefined, [], true),
       sendAgentMessage: (content, inputIds = [], options) => {
         // #505: allowed mid-turn — the CLI steers the line into the running turn.
-        if (!stdinOpen || (pendingMarkerAsk && !options?.besideQuestion) || agentWritePending) return false;
+        if (!stdinOpen || refusalRetry || (pendingMarkerAsk && !options?.besideQuestion) || agentWritePending) return false;
         let resolve!: () => void, reject!: (error: Error) => void;
         const acknowledged = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
         agentWritePending = true;
@@ -487,7 +611,9 @@ export class ClaudeCliRunner implements AgentRunner {
         // transport boundary, not a promise that the model executed the input.
         return acknowledged;
       },
-      discardQueuedMessages: () => undefined,
+      discardQueuedMessages: () => {
+        for (const input of deferredHuman.splice(0)) humanUnsettled.delete(input.id);
+      },
       holdsHumanInput: () => humanUnsettled.size > 0,
       heldHumanInputCount: () => humanUnsettled.size,
       end,
@@ -649,6 +775,8 @@ function mockClaudePath(): string {
 interface ClaudeStreamMessage {
   type?: string;
   subtype?: string;
+  model?: string;
+  session_id?: string;
   parent_tool_use_id?: string | null;
   message?: {
     role?: string;
@@ -660,11 +788,45 @@ interface ClaudeStreamMessage {
   usage?: RawUsage;
   is_error?: boolean;
   total_cost_usd?: number;
+  modelUsage?: unknown;
   /** #505: stdin echo at consumption (`--replay-user-messages`) and result coverage. */
   uuid?: string;
   isReplay?: boolean;
   user_message_uuids?: unknown[];
   queued_turn_count?: number;
+}
+
+/** Fail closed on absent/partial/invalid usage; include cache and nested counters. */
+function zeroClaudeUsage(usage: unknown): boolean {
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return false;
+  const record = usage as Record<string, unknown>;
+  if (record.input_tokens !== 0 || record.output_tokens !== 0) return false;
+  const zero = (value: unknown): boolean => typeof value === 'number' ? value === 0
+    : value !== null && typeof value === 'object' && !Array.isArray(value) && Object.values(value).every(zero);
+  return Object.entries(record).every(([key, value]) =>
+    // Claude includes this non-accounting metadata in some usage envelopes.
+    (key === 'service_tier' && typeof value === 'string') || zero(value));
+}
+
+/** Per-model accounting must agree with the aggregate before replay is safe. */
+function zeroClaudeModelUsage(usage: unknown): boolean {
+  if (usage === undefined) return true;
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return false;
+  return Object.values(usage).every(model => {
+    if (!model || typeof model !== 'object' || Array.isArray(model)) return false;
+    const record = model as Record<string, unknown>;
+    if (record.inputTokens !== 0 || record.outputTokens !== 0) return false;
+    return Object.entries(record).every(([key, value]) =>
+      key === 'contextWindow' || key === 'maxOutputTokens'
+        ? typeof value === 'number' && Number.isFinite(value) && value >= 0
+        : value === 0);
+  });
+}
+
+function selectedModelRefusal(text: unknown): string | undefined {
+  return typeof text === 'string'
+    ? /^There's an issue with the selected model \(([^()]+)\)\. It may not exist or you may not have access to it\. Run --model to pick a different model\.$/.exec(text.trim())?.[1]
+    : undefined;
 }
 
 function normalizeIntentionalTeardownResult(

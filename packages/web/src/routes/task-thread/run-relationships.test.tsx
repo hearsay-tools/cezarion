@@ -205,14 +205,14 @@ it('lists every historical worker beyond 32 without slicing (#816)', async () =>
 })
 it('shows how much worker capacity the parent uses (#816)', async () => {
   setup(root, async () => json({ workers: [worker], capacity: capacityOf(12, 40) }))
-  const group = await section()
-  expect(await within(group).findByText('Capacity 12 of 32 in use')).toBeTruthy()
-  expect(within(group).queryByText(/All 32 worker slots are in use/)).toBeNull()
+  await section()
+  expect(await screen.findByText('12 of 32 in use')).toBeTruthy()
+  expect(screen.queryByText(/All worker slots are in use/)).toBeNull()
 })
 it('explains exhausted capacity and its recovery (#816)', async () => {
   setup(root, async () => json({ workers: [worker], capacity: capacityOf(32) }))
-  const group = await section()
-  expect(await within(group).findByText('All 32 worker slots are in use. Clean up finished workers to free a slot.')).toBeTruthy()
+  await section()
+  expect(await screen.findByText('All worker slots are in use. Clean up finished workers to free a slot.')).toBeTruthy()
 })
 it('offers Clean up only for settled workers that are not verifiably destroyed (#816)', async () => {
   const live = { ...workerAt(1), status: 'running' as const, destroy: undefined }

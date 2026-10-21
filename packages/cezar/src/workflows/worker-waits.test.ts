@@ -7,7 +7,7 @@ import type { Wait } from '@open-mercato/cezar-contract/waits';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { RunStore } from '../runs/store.ts';
-import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
@@ -386,14 +386,14 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
 
   it('a worker message reaches a parent with a pending cezar_ask card beside it; the card stays answerable', async () => {
     const f = await conversing('mock:ask');
-    await until(() => store.getRun(f.p.id)?.hasPendingHumanAsk === true);
+    await until(() => hasPendingAsk(store, f.p.id) === true);
     const askSeq = eventsOf(f.p.id, 'ask.requested')[0]!.seq;
     const send = vi.spyOn(sessionOf(f.p.id), 'sendAgentMessage');
     const id = await say(f, 'worker', f.p.id, 'progress', 'Still working');
     await until(() => delivered(f.p.id, id));
     expect(send.mock.calls.find(call => call[1]?.includes(id))?.[2]).toEqual({ besideQuestion: true });
     // The card is still the one the human answers, with its askSeq.
-    await until(() => store.getRun(f.p.id)?.hasPendingHumanAsk === true && store.getRun(f.p.id)?.status === 'waiting');
+    await until(() => hasPendingAsk(store, f.p.id) === true && store.getRun(f.p.id)?.status === 'waiting');
     expect(eventsOf(f.p.id, 'ask.requested')).toHaveLength(1);
     expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'Vitest' }])).toBe(true);
     await until(() => eventsOf(f.p.id, 'human-input-delivered').some(event => event.askSeq === askSeq));
@@ -466,7 +466,9 @@ describe('human messages beside an owed timer wait', { timeout: 45_000 }, () => 
   useWorkerWaitFixture();
   afterEach(() => vi.restoreAllMocks());
 
-  /** A parent whose timer came due during a restart, queued behind a worker that holds the one slot. */
+  /** A parent whose timer comes due after a restart, queued behind a worker that holds the one slot.
+   *  The timer fires once the worker has the slot: a wake already in the line would go ahead of a
+   *  worker that has not started (hearsay-tools/cezarion#1236). */
   async function queuedTimerWake() {
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
@@ -475,10 +477,10 @@ describe('human messages beside an owed timer wait', { timeout: 45_000 }, () => 
     if (!answer.ok) throw Error('refused');
     const timer = entryOf(p.id, answer.wait_id)!;
     if (timer.kind === 'human') throw Error('unexpected human wait');
-    store.commitWait(p.id, { ...timer, deadline: new Date().toISOString() });
     await restart();
     await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(blocker.id)?.sessionEverOpened === true);
-    expect(store.getRun(p.id)?.status).toBe('queued');
+    (manager as unknown as { waitTimers: Map<string, { timer: { _onTimeout(): void } }> }).waitTimers.get(timer.id)!.timer._onTimeout();
+    await until(() => store.getRun(p.id)?.status === 'queued');
     expect(entryOf(p.id, timer.id)?.phase).toBe('resolved');
     return { p, blocker, timer };
   }

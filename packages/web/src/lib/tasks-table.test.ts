@@ -64,7 +64,7 @@ describe('formatMem', () => {
 describe('scheduledResume', () => {
   const NOW = new Date('2026-08-03T19:00:00.000Z')
   const scheduled = (autoResumeAt?: string) =>
-    scheduledResume(run({ status: 'failed', autoResumeAt }), NOW)
+    scheduledResume(run({ status: 'waiting', autoResumeAt }), NOW)
 
   it('is the clock time alone for an appointment later the same day', () => {
     const answer = scheduled('2026-08-03T19:33:53.000Z')
@@ -271,8 +271,8 @@ describe('sweepableRunCount / isSweepable', () => {
     run({ status: 'cancelled' }),
     run({ status: 'done', pinned: true }),
     run({ status: 'running', pinned: true }),
-    run({ status: 'failed', autoResumeAt: '2026-10-03T10:00:00.000Z' }),
-    run({ status: 'failed', pinned: true, autoResumeAt: '2026-10-03T10:00:00.000Z' }),
+    run({ status: 'waiting', autoResumeAt: '2026-10-03T10:00:00.000Z' }),
+    run({ status: 'waiting', pinned: true, autoResumeAt: '2026-10-03T10:00:00.000Z' }),
     run({ status: 'running' }),
     run({ status: 'review' }),
     run({ status: 'done', archived: true }),
@@ -289,7 +289,7 @@ describe('sweepableRunCount / isSweepable', () => {
 
   it('finishedRunCount is the unscoped sweep and skips scheduled runs', () => {
     expect(finishedRunCount(fixture())).toBe(sweepableRunCount(fixture()))
-    expect(finishedRunCount([run({ status: 'failed', autoResumeAt: '2026-10-03T10:00:00.000Z' })])).toBe(0)
+    expect(finishedRunCount([run({ status: 'waiting', autoResumeAt: '2026-10-03T10:00:00.000Z' })])).toBe(0)
   })
 })
 

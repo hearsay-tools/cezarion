@@ -82,19 +82,18 @@ export function useRunRecordReconcile(run: ApiRun | undefined, events: RunEvent[
   const parkedSeq = useMemo(() => parkedTurnSeq(events), [events])
   const runId = run?.id
   const status = run?.status
-  const activity = run?.activity
 
   useEffect(() => {
     const staleSettled = settledSeq !== 0 && (status === 'running' || status === 'waiting')
-    const stalePark = parkedSeq !== 0 && status === 'running' && activity !== 'monitoring'
+    const stalePark = parkedSeq !== 0 && status === 'running'
     if ((!staleSettled && !stalePark) || runId === undefined) return
     const timer = setTimeout(() => {
       // The list gets the same refresh: the sidebar buckets ("Working") read from it.
       void queryClient.invalidateQueries({ queryKey: queryKeys.runs.detail(runId) })
       void queryClient.invalidateQueries({ queryKey: queryKeys.runs.list() })
     }, STALE_RECORD_GRACE_MS)
-    // The healthy path's exit: the workspace stream patches status/activity to an authoritative
+    // The healthy path's exit: the workspace stream patches status to an authoritative
     // record consistent with the transcript, and this cleanup cancels the refetch before it fires.
     return () => clearTimeout(timer)
-  }, [settledSeq, parkedSeq, runId, status, activity, queryClient])
+  }, [settledSeq, parkedSeq, runId, status, queryClient])
 }

@@ -1,8 +1,8 @@
-import { cezarAskRequestSchema, cezarCancelWaitRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema } from '@open-mercato/cezar-contract/waits';
-import { ciWaitRequestSchema } from '@open-mercato/cezar-contract/ci-wait';
+import { cezarAskRequestSchema, cezarCancelWaitRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type CezarAskAnswer } from '@open-mercato/cezar-contract/waits';
+import { ASK_LIMITS } from '@open-mercato/cezar-contract/ask-schema';
 import { previewStopRequestSchema, previewServeRequestSchema } from '@open-mercato/cezar-contract/preview';
 import { z } from 'zod';
-import { callCezarAsk, callCezarCancelWait, callCezarDone, callCezarWait, callCiWait, callPreviewServe, callPreviewStop } from './client.ts';
+import { callCezarAsk, callCezarCancelWait, callCezarDone, callCezarWait, callPreviewServe, callPreviewStop } from './client.ts';
 
 /**
  * The one list of cezar tools (#781). The MCP adapter lists it, Pi's extension registers it, and
@@ -11,11 +11,8 @@ import { callCezarAsk, callCezarCancelWait, callCezarDone, callCezarWait, callCi
 type ToolResult = { content: Array<{ type: 'text'; text: string }>; isError?: boolean; details: unknown };
 export type CezarTool = {
   definition: { name: string; description: string; inputSchema: { type: 'object'; properties?: Record<string, unknown>; [key: string]: unknown } };
-  /**
-   * #497: deferred-tool harnesses show a bare name, so the server instructions carry this line.
-   * Absent for a deprecated tool: it stays listed and admitted, but nothing suggests it.
-   */
-  trigger?: string;
+  /** #497: deferred-tool harnesses show a bare name, so the server instructions carry this line. */
+  trigger: string;
   /** Pi's tool label. */
   label: string;
   invoke(input: unknown): Promise<ToolResult>;
@@ -24,21 +21,6 @@ export type CezarTool = {
 /** Live preview is on under the exact value `1` only (spec 2026-10-02-live-preview-v1). */
 export function previewToolEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CEZ_PREVIEW === '1';
-}
-
-/** hearsay-tools/cezarion#1233: deprecated alias of `cezar_wait` with kind "ci", removed in phase 4 (#1236). */
-export const ciToolDefinition = {
-  name: 'cezar_wait_for_ci',
-  description: 'Deprecated: use cezar_wait with kind "ci". Register a bounded CI wait for a GitHub pull request. End your turn after registration; Cezar resumes you with an observation. No marker is needed. Passing reported checks does not prove all expected workflows appeared and is not merge approval.',
-  inputSchema: { ...z.toJSONSchema(ciWaitRequestSchema, { io: 'input' }), type: 'object' as const },
-};
-export async function invokeCiTool(input: unknown) {
-  try {
-    const receipt = await callCiWait(input);
-    return { content: [{ type: 'text' as const, text: `${JSON.stringify(receipt)}\nRegistered. Please end your turn to wait; no marker is needed. This observation is not merge approval.` }], details: receipt };
-  } catch (error) {
-    return { isError: true, content: [{ type: 'text' as const, text: error instanceof Error ? error.message : 'CI tool unavailable' }], details: {} };
-  }
 }
 
 /**
@@ -82,13 +64,21 @@ export const waitToolDefinition = {
  */
 export const askToolDefinition = {
   name: 'cezar_ask',
-  description: 'Ask the user, then end your turn: Cezar shows your questions as a card, the run waits for the answer, and the user\'s reply wakes you. Ask only for a decision that is the user\'s to make or input you cannot find. Each question takes a header of at most 12 characters, the question, and 2–4 options shown as choices; leave the options out to let the user type the answer. The user can always type a reply of their own. Other open waits keep running while you wait.',
+  description: `Ask the user, then end your turn: Cezar shows your questions as a card, the run waits for the answer, and the user's reply wakes you. Before you call it, send everything the decision depends on (the full draft, every finding, what each option means) as assistant text: the user sees only your assistant text and this card, never your reasoning or these arguments. Ask only for a decision that is the user's to make or input you cannot find. Each question takes a header of at most ${ASK_LIMITS.header} characters, a short question of at most ${ASK_LIMITS.question} characters, and ${ASK_LIMITS.minOptions}–${ASK_LIMITS.maxOptions} options shown as choices; leave the options out to let the user type the answer. The user can always type a reply of their own. Other open waits keep running while you wait.`,
   inputSchema: { ...z.toJSONSchema(cezarAskRequestSchema, { io: 'input' }), type: 'object' as const },
 };
+/**
+ * hearsay-tools/cezarion#1428: agents asked about drafts they never sent, and treated the context
+ * they cut from a rejected card as sent. Both hints say where that context belongs.
+ */
+export function askAnswerHint(answer: CezarAskAnswer): string {
+  if (answer.ok) return 'Asked. The user sees this card and your assistant text, never your reasoning or these arguments. If the question refers to a draft or findings you have not sent as assistant text, send them in full now. Then end your turn; the user\'s answer wakes you.';
+  if (answer.code === 'invalid_request') return 'Not asked. The user never sees the arguments of a rejected call: send any detail you cut from the card as assistant text first, then call cezar_ask again with a short question.';
+  return 'Not asked. Fix the call from the message, or continue without asking.';
+}
 export async function invokeAskTool(input: unknown) {
   const answer = await callCezarAsk(input);
-  const hint = answer.ok ? 'Asked. End your turn; the user\'s answer wakes you.' : 'Not asked. Fix the call from the message, or continue without asking.';
-  return { content: [{ type: 'text' as const, text: `${JSON.stringify(answer)}\n${hint}` }], isError: !answer.ok, details: answer };
+  return { content: [{ type: 'text' as const, text: `${JSON.stringify(answer)}\n${askAnswerHint(answer)}` }], isError: !answer.ok, details: answer };
 }
 
 export const cancelWaitToolDefinition = {
@@ -127,7 +117,7 @@ export const previewToolDefinition = {
   inputSchema: { ...z.toJSONSchema(previewServeRequestSchema, { io: 'input' }), type: 'object' as const },
 };
 
-/** JSON first, then the hint as a plain sentence: the shape `cezar_wait_for_ci` answers in. */
+/** JSON first, then the hint as a plain sentence: the shape every cezar tool answers in. */
 export async function invokePreviewTool(input: unknown) {
   const result = await callPreviewServe(input);
   return { content: [{ type: 'text' as const, text: `${JSON.stringify(result)}\n${result.hint}` }], isError: !result.ok, details: result };
@@ -144,16 +134,14 @@ export async function invokePreviewStopTool(input: unknown) {
 }
 const PREVIEW_STOP_TOOL: CezarTool = { definition: previewStopToolDefinition, trigger: 'load when your Cezar-started preview server needs stopping or restarting.', label: 'Stop live preview', invoke: invokePreviewStopTool };
 
-// Deprecated: still listed, so every runner keeps admitting it, but with no trigger line.
-const CI_TOOL: CezarTool = { definition: ciToolDefinition, label: 'Wait for CI', invoke: invokeCiTool };
 const WAIT_TOOL: CezarTool = { definition: waitToolDefinition, trigger: 'load when you are waiting on CI for a PR, or want to re-check something later; end your turn after it answers.', label: 'Wait', invoke: invokeWaitTool };
-const ASK_TOOL: CezarTool = { definition: askToolDefinition, trigger: 'load when you need the user: a decision only they can make, or missing input; end your turn after it answers.', label: 'Ask the user', invoke: invokeAskTool };
+const ASK_TOOL: CezarTool = { definition: askToolDefinition, trigger: 'load when you need the user: a decision only they can make, or missing input; send the full context as assistant text before you call it, and end your turn after it answers.', label: 'Ask the user', invoke: invokeAskTool };
 const CANCEL_WAIT_TOOL: CezarTool = { definition: cancelWaitToolDefinition, trigger: 'load when a wait you registered is no longer needed.', label: 'Cancel wait', invoke: invokeCancelWaitTool };
 const DONE_TOOL: CezarTool = { definition: doneToolDefinition, trigger: 'load when the task is complete and verified.', label: 'Done', invoke: invokeDoneTool };
 const PREVIEW_TOOL: CezarTool = { definition: previewToolDefinition, trigger: 'load when you have started, or are about to start, a web server the user should click through.', label: 'Live preview', invoke: invokePreviewTool };
 
 export function cezarTools(env: NodeJS.ProcessEnv = process.env): CezarTool[] {
-  const waits = [CI_TOOL, WAIT_TOOL, ASK_TOOL, CANCEL_WAIT_TOOL, DONE_TOOL];
+  const waits = [WAIT_TOOL, ASK_TOOL, CANCEL_WAIT_TOOL, DONE_TOOL];
   return previewToolEnabled(env) ? [...waits, PREVIEW_TOOL, PREVIEW_STOP_TOOL] : waits;
 }
 export function cezarToolNames(env: NodeJS.ProcessEnv = process.env): string[] {
@@ -171,6 +159,6 @@ export function cezarToolEnvNames(env: NodeJS.ProcessEnv = process.env): string[
 export function cezarServerInstructions(env: NodeJS.ProcessEnv = process.env): string {
   return [
     'The interface to Cezarion, the orchestrator running this session. Load a tool below when its situation comes up.',
-    ...cezarTools(env).flatMap(tool => tool.trigger ? [`- ${tool.definition.name}: ${tool.trigger}`] : []),
+    ...cezarTools(env).map(tool => `- ${tool.definition.name}: ${tool.trigger}`),
   ].join('\n');
 }

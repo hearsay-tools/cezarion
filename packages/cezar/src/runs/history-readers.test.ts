@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { compressHistory, historyPaths } from './history-file.ts';
 import { RunStore } from './store.ts';
 
@@ -83,7 +82,7 @@ describe('history readers', () => {
     expect(hits).toEqual([]);
   });
 
-  it('store.readEvents and refreshHumanAskSummary read a compressed transcript', async () => {
+  it('store.readEvents reads a compressed transcript', async () => {
     const { dir, store } = openStore();
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     store.appendEvent(run.id, { type: 'note', message: 'before archive' });
@@ -99,9 +98,6 @@ describe('history readers', () => {
     expect(store.readEvents(run.id).map((event) => ({ seq: event.seq, type: event.type }))).toEqual(
       events.map((event) => ({ seq: event.seq, type: event.type })),
     );
-    const summary = { id: run.id, hasPendingHumanAsk: false };
-    expect(refreshHumanAskSummary(summary, dir)).toBe(true);
-    expect(summary.hasPendingHumanAsk).toBe(true);
   });
 
   it('appending to a compressed run restores it first', async () => {

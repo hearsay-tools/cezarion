@@ -36,7 +36,7 @@ describe('worker wait after an approved continuation (#475)', { timeout: 30_000 
     await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));
     const wait = register(p.id, [w.id]);
     expect(waitOf(store.getRun(p.id))).toMatchObject({ id: wait.id, workerIds: [w.id] });
-    expect(store.getRun(p.id)).toMatchObject({ status: 'waiting', hasPendingHumanAsk: true });
+    expect(store.getRun(p.id)).toMatchObject({ status: 'waiting', waits: expect.arrayContaining([expect.objectContaining({ kind: 'human', phase: 'open' })]) });
   });
 
   it('a new question during the answer turn does not refuse a worker wait', async () => {

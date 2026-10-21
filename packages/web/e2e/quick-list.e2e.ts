@@ -1698,7 +1698,7 @@ describe('archive from the sidebar (#780)', () => {
     finishedRun('arc-a', 'Tidy the release notes', 10),
     finishedRun('arc-b', 'Rename the config loader', 20),
     finishedRun('arc-pinned', 'Pinned and finished', 30, { pinned: true, pinnedAt: ago(5 * 60_000) }),
-    finishedRun('arc-scheduled', 'Waiting out a usage limit', 40, { status: 'failed', autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() }),
+    finishedRun('arc-scheduled', 'Waiting out a usage limit', 40, { status: 'waiting', finishedAt: undefined, autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() }),
   ]
   const rowSel = (id: string) => `${ROW}[data-run-id="${id}"]`
   const archiveBtn = (id: string) => `${rowSel(id)} [data-action="archive-run"]`
@@ -1915,7 +1915,7 @@ describe('swipe to archive on touch (#780 §7)', () => {
   const SWIPE_FIXTURE = [
     // Not finished as far as the sidebar is concerned: it sits in Working, waiting out a usage
     // limit. (A `running` record would not survive the store's boot-time reconcile.)
-    swipeRun('sw-live', 'Waiting out a usage limit', 1, { status: 'failed', pinned: true, autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() }),
+    swipeRun('sw-live', 'Waiting out a usage limit', 1, { status: 'waiting', finishedAt: undefined, pinned: true, autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() }),
     ...Array.from({ length: 10 }, (_, i) => swipeRun(`sw-${i}`, `Finished task ${i}`, 10 + i)),
   ]
   const rowSel = (id: string) => `${ROW}[data-run-id="${id}"]`

@@ -1463,7 +1463,7 @@ describe('the calmer row (#617)', () => {
     expect(dotOf('m')?.getAttribute('data-shape')).toBe('ring')
     expect(dotOf('q')?.getAttribute('data-shape')).toBe('ring')
     expect(dotOf('c')?.getAttribute('data-shape')).toBe('filled')
-    expect(row('m')?.querySelector('[data-slot="task-row-state"]')?.textContent).toBe('monitoring')
+    expect(row('m')?.querySelector('[data-slot="task-row-state"]')?.textContent).toMatch(/^monitoring, next check /)
   })
 
   it('makes references keyboard-reachable links on the meta line', () => {
@@ -1520,17 +1520,17 @@ describe('meta-line state words (#617, the issue\'s list exactly)', () => {
       run({ id: 'run', status: 'running' }),
       run({ id: 'rev', status: 'review' }),
       run({ id: 'fail', status: 'failed' }),
-      // Already due: no time left to name, so the word falls back to `scheduled`.
-      run({ id: 'sched', status: 'failed', autoResumeAt: ago(60_000) }),
+      // Already due: no time left to name, so the word is `usage limit` alone.
+      run({ id: 'sched', status: 'waiting', autoResumeAt: ago(60_000) }),
       run({ id: 'q', status: 'queued' }),
       run({ id: 'wk', status: 'waiting', delegation: workers, waits: [workerWait({ workerIds: ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'] })] } as Partial<RunRecord>),
       run({ id: 'rep', status: 'waiting', delegation: workers, waits: [workerWait({ workerIds: [], requestIds: ['00000000-0000-4000-8000-000000000009'] })] } as Partial<RunRecord>),
     ] })
-    expect(stateOf('mon')).toBe('monitoring')
+    expect(stateOf('mon')).toMatch(/^monitoring, next check /)
     expect(stateOf('run')).toBeNull()
     expect(stateOf('rev')).toBe('needs review')
     expect(stateOf('fail')).toBe('failed')
-    expect(stateOf('sched')).toBe('scheduled')
+    expect(stateOf('sched')).toBe('usage limit')
     expect(stateOf('q')).toBe('queued #1')
     expect(stateOf('wk')).toBe('waiting on 2 workers')
     expect(stateOf('rep')).toBe('waiting on worker replies')
@@ -1690,9 +1690,20 @@ describe('references on a device that cannot hover (#617 01b)', () => {
   })
 })
 
-it('says when a scheduled run resumes, in the meta line (#617 01b)', () => {
-  renderList({ runs: [run({ id: 's', status: 'failed', autoResumeAt: new Date(NOW + 12 * 60_000).toISOString() })] })
-  expect(row('s')?.querySelector('[data-slot="task-row-state"]')?.textContent).toBe('resumes in 12m')
+it('says when a usage-limited run resumes, in the meta line (#617 01b)', () => {
+  renderList({ runs: [run({ id: 's', status: 'waiting', autoResumeAt: new Date(NOW + 12 * 60_000).toISOString() })] })
+  expect(row('s')?.querySelector('[data-slot="task-row-state"]')?.textContent).toBe('usage limit, resumes in 12m')
+})
+
+// Phase 4b (hearsay-tools/cezarion#1236): the label stays `monitoring`; the meta line says when.
+it('says when a timer park checks next, in the meta line', () => {
+  const at = new Date(NOW + 5 * 60_000).toISOString()
+  renderList({ runs: [run({ id: 'm', status: 'waiting', waits: [{ kind: 'timer', id: '00000000-0000-4000-8000-0000000000d1', source: 'agent', via: 'cezar_wait',
+    registeredAt: new Date(NOW).toISOString(), deadline: at, phase: 'open', turnId: 'turn-1', seconds: 300 }] })] })
+  const time = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(new Date(at))
+  const sameDay = new Date(at).toDateString() === new Date(NOW).toDateString()
+  const text = sameDay ? time : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(at))
+  expect(row('m')?.querySelector('[data-slot="task-row-state"]')?.textContent).toBe(`monitoring, next check ${text}`)
 })
 
 describe('variant line 1 under width pressure (#617 fix round)', () => {
@@ -2189,7 +2200,7 @@ describe('sidebar archive (#780)', () => {
         run({ id: 'pinned-fin', title: 'Pinned done', status: 'failed', pinned: true }),
         run({ id: 'live', status: 'running' }),
         run({ id: 'ask', status: 'waiting' }),
-        run({ id: 'sched', status: 'failed', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
+        run({ id: 'sched', status: 'waiting', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
         run({ id: 'pinned-live', status: 'running', pinned: true }),
       ],
       onTogglePin: vi.fn(),
@@ -2274,7 +2285,7 @@ describe('sidebar archive (#780)', () => {
     renderList({
       runs: [
         run({ id: 'p3', pinned: true, status: 'running' }),
-        run({ id: 'p4', pinned: true, status: 'failed', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
+        run({ id: 'p4', pinned: true, status: 'waiting', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
       ],
       onSweep,
     })
@@ -2355,7 +2366,7 @@ describe('swipe to archive on touch (#780 §7)', () => {
         run({ id: 'pin', status: 'cancelled', pinned: true }),
         run({ id: 'live', status: 'running' }),
         run({ id: 'ask', status: 'waiting' }),
-        run({ id: 'sched', status: 'failed', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
+        run({ id: 'sched', status: 'waiting', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
       ],
       onArchiveRun: vi.fn(),
       onTogglePin: vi.fn(),
@@ -2505,6 +2516,6 @@ describe('complete compact sidebar references', () => {
     expect(row(working.id).querySelector('[data-slot="task-row-state"]')).toBeNull()
     fireEvent.click(container.querySelector('[data-group-id="mixed"][data-slot="group-tile"]')!)
     expect(row(pinned.id).querySelector('[data-slot="task-row-state"]')?.textContent).toBe('running')
-    expect(row(monitoring.id).querySelector('[data-slot="task-row-state"]')?.textContent).toBe('monitoring')
+    expect(row(monitoring.id).querySelector('[data-slot="task-row-state"]')?.textContent).toMatch(/^monitoring, next check /)
   })
 })
