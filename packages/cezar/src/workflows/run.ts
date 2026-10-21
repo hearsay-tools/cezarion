@@ -5757,7 +5757,7 @@ export class RunManager {
       if (state.atTurnBoundary !== session || !inputIds.length || !inputIds.every(id => owed.has(id))) return false;
     }
     // Every delivered turn ends with the waits still open.
-    const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? []);
+    const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? [], { tools: !state.toolless });
     if (footer) content = [...content, { type: 'text', text: `\n\n${footer}` }];
     // A refusal queued for a closed session (hearsay-tools/cezarion#1301): this turn is the nudge's.
     const refusal = !!this.store.getRun(runId)?.agentInputs?.some(input => input.purpose === 'completion-refusal' && inputIds.includes(input.id));
@@ -6111,7 +6111,7 @@ export class RunManager {
       ? this.pendingConversationBatch(runId, state) : undefined;
     // The open-waits footer is the turn's last block; `submitAgentInput` adds its own. This message
     // answers every human wait, so the footer names none.
-    const footer = userAuthored ? openWaitsFooter((this.store.getRun(runId)?.waits ?? []).filter(wait => wait.kind !== 'human')) : undefined;
+    const footer = userAuthored ? openWaitsFooter((this.store.getRun(runId)?.waits ?? []).filter(wait => wait.kind !== 'human'), { tools: !state.toolless }) : undefined;
     const delivered = userAuthored ? state.session.sendMessage([...deliverable, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : []),
       ...(footer ? [{ type: 'text' as const, text: `\n\n${footer}` }] : [])])
       : this.submitAgentInput(runId, state, deliverable);
@@ -7093,9 +7093,6 @@ export class RunManager {
     // through `deliverMessage`, so it needs the SAME delivery-only `/skill` rewrite the
     // live path applies (#811). Delivery-only: the `user-message` event above already
     // persisted the user's original text, and the transcript must keep showing that.
-    const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? []);
-    const openingPrompt = expandRegistrySlashSkillText(prompt, state.skills ?? []) +
-      (setupNote ? `\n\n${setupNote}` : '') + (footer ? `\n\n${footer}` : '');
     state.agentSessionError = undefined;
     let session: AgentSession | undefined;
     if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
@@ -7120,6 +7117,10 @@ export class RunManager {
     }
     state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
     try {
+    // Provisioning determines the actual capability, including a fresh session after recovery.
+    const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? [], { tools: !!ciTools });
+    const openingPrompt = expandRegistrySlashSkillText(prompt, state.skills ?? []) +
+      (setupNote ? `\n\n${setupNote}` : '') + (footer ? `\n\n${footer}` : '');
     const continuationTail = composeSystemPrompt(
       record?.systemPrompt,
       delegation?.instructions,
@@ -7793,8 +7794,6 @@ export class RunManager {
     // Opening prompts bypass deliverMessage. Expand before workflow and attachment
     // context so a leading registry skill matches, without changing the stored task.
     userPrompt = expandRegistrySlashSkillText(userPrompt, state.skills ?? []);
-    const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? []);
-    if (footer) userPrompt += `\n\n${footer}`;
     if (chainNote) userPrompt = `${chainNote}\n\n---\n\n${userPrompt}`;
     if (checkFailure) {
       userPrompt += `\n\nA verification command failed after the previous attempt. Fix the cause. Failing output:\n\n${checkFailure}`;
@@ -8040,6 +8039,9 @@ export class RunManager {
       return null;
     }
     state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
+    // Opening prompts bypass live delivery; do not infer tools before provisioning finishes.
+    const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? [], { tools: !!ciTools });
+    if (footer) userPrompt += `\n\n${footer}`;
     try {
       session = startManagedSession(runner,
         {

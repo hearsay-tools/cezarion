@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -84,6 +84,23 @@ test('node test Git fixtures use isolated config and a fixed identity', (t) => {
   git('commit', '--allow-empty', '-qm', 'fixture');
   assert.equal(git('log', '-1', '--format=%an <%ae>'), 'Cezar Tests <tests@cezar.invalid>');
   assert.equal(process.env.GIT_CONFIG_NOSYSTEM, '1');
+  // Only what scripts/test-git-env.mjs writes: automatic maintenance off, nothing from the host.
+  assert.deepEqual(git('config', '--global', '--list').split('\n'), ['gc.auto=0', 'maintenance.auto=false']);
+});
+
+// hearsay-tools/cezarion#1279: after a commit, Git 2.54+ maintenance repacks in the background
+// once `objects/17/` holds two loose objects. dirSkillFixture's "say hi v1\n" blob is 172608…,
+// so one commit id in 256 also lands there, and the repack deleted a loose object while
+// `ensureBareClone` was copying it ("failed to copy file … No such file or directory").
+test('node test Git fixtures start no automatic maintenance after a commit (#1279)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'cez-git-maintenance-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+  const commit = spawnSync('git', ['commit', '--allow-empty', '-qm', 'traced'], {
+    cwd: dir, encoding: 'utf8', env: { ...process.env, GIT_TRACE: '1' },
+  });
+  assert.equal(commit.status, 0, commit.stderr);
+  assert.doesNotMatch(commit.stderr, /\b(?:maintenance run|gc) --auto\b/);
 });
 
 // ---- isSafeRef / isPinnedSha: ref injection guard (#428) ---------------------

@@ -231,12 +231,59 @@ export function describeWaitParity(scope: RunnerId | 'once'): void {
       });
 
       it('registers every criterion', () => {
-        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U25']);
+        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U26', 'U25']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
     }
 
     for (const runner of runners) {
+      for (const tools of [false, true]) {
+        it(`${runner} U26 footer capability follows provisioning on opening, live delivery, Continue and no-session recovery (${tools ? 'tools' : 'markers'})`, async () => {
+          nativeWire(runner);
+          // Only tool availability is controlled; every prompt crosses the real native runner.
+          const capability = () => {
+            if (!tools) vi.spyOn((manager as unknown as { ciResources: { controller(): Promise<unknown> } }).ciResources, 'controller').mockResolvedValue(undefined);
+          };
+          capability();
+          const task = `${HARNESS_ADAPTERS[runner].scenarios.baseline!} footer-opening`;
+          const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task });
+          const timer: Wait = { id: randomUUID(), kind: 'timer', source: 'agent', via: 'monitoring-line', phase: 'open',
+            turnId: 'seed', seconds: 7200, registeredAt: new Date().toISOString(), deadline: new Date(Date.now() + 7_200_000).toISOString() };
+          // Persist before the asynchronous opening launch, as recovery/queued work can leave it.
+          store.updateRun(run.id, { waits: [timer] });
+          const footerOf = (text: string) => {
+            const footer = text.slice(text.lastIndexOf('Still open:'));
+            expect(footer).toContain(`Still open: timer ${timer.id} at ${timer.deadline}.`);
+            if (tools) expect(footer).toContain('Call cezar_cancel_wait for any you no longer need.');
+            else expect(footer).not.toMatch(/cezar_\w+/);
+          };
+          await until(() => parkedOn(run.id, waitOfKind(run.id, 'timer')));
+          footerOf(prompted(runner, 'footer-opening').at(-1)!);
+          const turns = turnEnds(run.id);
+          expect(manager.sendMessage(run.id, [{ type: 'text', text: 'footer-human-message' }])).toBe(true);
+          await until(() => prompted(runner, 'footer-human-message').length > 0 && turnEnds(run.id) > turns && store.getRun(run.id)?.status === 'waiting');
+          footerOf(prompted(runner, 'footer-human-message').at(-1)!);
+          const handlers = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+          const registered = await handlers.registerWait({ kind: 'timer', seconds: 60, note: 'footer-agent-wake' }, 'cezar_wait', new AbortController().signal);
+          if (!('wait' in registered)) throw Error('registration refused');
+          fireTimer(registered.wait.id);
+          await until(() => settled(run.id, registered.wait.id)?.phase === 'delivered' && prompted(runner, 'footer-agent-wake').length > 0 && store.getRun(run.id)?.status === 'waiting');
+          footerOf(prompted(runner, 'footer-agent-wake').at(-1)!);
+          engine().active.get(run.id)!.session.end();
+          await until(() => !manager.isActive(run.id));
+          expect(manager.continueRun(run.id, { text: 'footer-continue' }).ok).toBe(true);
+          await until(() => prompted(runner, 'footer-continue').length > 0 && store.getRun(run.id)?.status === 'waiting');
+          footerOf(prompted(runner, 'footer-continue').at(-1)!);
+          await restart();
+          capability();
+          expect(manager.isActive(run.id)).toBe(false);
+          expect(manager.continueRun(run.id, { text: 'footer-after-recovery' }).ok).toBe(true);
+          await until(() => prompted(runner, 'footer-after-recovery').length > 0 && store.getRun(run.id)?.status === 'waiting');
+          footerOf(prompted(runner, 'footer-after-recovery').at(-1)!);
+          expect(store.getRun(run.id)?.waits).toEqual([timer]);
+        });
+      }
+
       it(`${runner} U1 ci and timer register through cezar_wait on the native wire, park, and wake with their result`, async () => {
         const external = github();
         nativeWire(runner);

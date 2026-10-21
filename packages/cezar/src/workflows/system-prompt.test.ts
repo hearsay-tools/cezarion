@@ -1,4 +1,4 @@
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, fixtureWorkSettled, removeFixtureRepo } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { HANDOFF_INSTRUCTIONS as BASE_HANDOFF, HANDOFF_ONLY_INSTRUCTIONS as BASE_HANDOFF_ONLY, handoffInstructions } from '../handoff.ts';
 import { artifactInstructions } from '../artifacts/lifecycle.ts';
-import { RunStore } from '../runs/store.ts';
+import { RunStore, type RunRecord } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import type { WorkflowDef } from './types.ts';
 import {
@@ -27,6 +27,33 @@ const SESSION_HANDOFF = composeSystemPrompt(artifactInstructions('available'), h
 const SESSION_HANDOFF_ONLY = composeSystemPrompt(artifactInstructions('available'), handoffInstructions({ tools: true, followups: false }));
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
+const TERMINAL = new Set(['done', 'review', 'failed', 'cancelled']);
+
+/**
+ * Resolves with the run once it is terminal, on the store's own `run` event. The hang guard opens
+ * when the run leaves `queued`, so it times this run's work and never a slot another run holds
+ * (hearsay-tools/cezarion#1316).
+ */
+function runSettled(store: RunStore, id: string): Promise<RunRecord> {
+  return new Promise((resolve, reject) => {
+    let guard: ReturnType<typeof setTimeout> | undefined;
+    const finish = (settle: () => void): void => {
+      store.off('run', check);
+      clearTimeout(guard);
+      settle();
+    };
+    function check(record: RunRecord | undefined = store.getRun(id)): void {
+      if (record?.id !== id) return;
+      if (TERMINAL.has(record.status)) return finish(() => resolve(record));
+      if (record.status === 'queued' || guard) return;
+      // bound: one dry-run run (a worktree, one mock turn, a `true` check) took about 3 s at
+      // load 11; 20 s covers a host several times busier and stays under the 30 s test timeout.
+      guard = setTimeout(() => finish(() => reject(new Error(`run did not finish in time (status ${store.getRun(id)?.status})`))), 20_000);
+    }
+    store.on('run', check);
+    check();
+  });
+}
 
 /** Precedence table (R2 2.3): per-run override REPLACES the config default. */
 describe('resolveExtraSystemPrompt', () => {
@@ -119,8 +146,32 @@ describe('systemPrompt end-to-end (dry run)', () => {
   let manager: RunManager;
   const savedEnv: Record<string, string | undefined> = {};
 
+  /** A committed repo with the suite's config default and its one skill. */
+  async function seedRepo(prefix: string): Promise<string> {
+    const root = mkdtempSync(join(tmpdir(), prefix));
+    await run('git', ['init', '-q', '-b', 'main'], { cwd: root });
+    await run('git', ['config', 'gc.auto', '0'], { cwd: root });
+    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: root });
+    writeFileSync(join(root, 'a.txt'), 'one\n');
+    await run('git', ['add', '-A'], { cwd: root });
+    await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: root });
+    mkdirSync(join(root, '.ai/cezar'), { recursive: true });
+    mkdirSync(join(root, '.ai/skills/om-auto-review-pr'), { recursive: true });
+    writeFileSync(
+      join(root, '.ai/skills/om-auto-review-pr/SKILL.md'),
+      `---\nname: om-auto-review-pr\ndescription: ${SKILL_DESCRIPTION}\n---\n${SKILL_BODY}\n`,
+      'utf8',
+    );
+    writeFileSync(
+      join(root, '.ai/cezar', 'config.json'),
+      JSON.stringify({ systemPrompt: CONFIG_PROMPT }),
+      'utf8',
+    );
+    return root;
+  }
+
   beforeAll(async () => {
-    repoRoot = mkdtempSync(join(tmpdir(), 'cez-sysprompt-'));
+    repoRoot = await seedRepo('cez-sysprompt-');
     argsFile = join(repoRoot, 'mock-args.ndjson');
     inheritedTodos = join(repoRoot, 'inherited-todos.json');
     savedEnv.CEZ_DRY_RUN = process.env.CEZ_DRY_RUN;
@@ -143,24 +194,6 @@ describe('systemPrompt end-to-end (dry run)', () => {
     // every run — never merely omit the key — or an opted-out agent writes
     // follow-ups into the parent's inbox. Asserted per test below.
     process.env.CEZ_TODOS_FILE = inheritedTodos;
-    await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
-    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
-    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
-    writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
-    await run('git', ['add', '-A'], { cwd: repoRoot });
-    await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
-    mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
-    mkdirSync(join(repoRoot, '.ai/skills/om-auto-review-pr'), { recursive: true });
-    writeFileSync(
-      join(repoRoot, '.ai/skills/om-auto-review-pr/SKILL.md'),
-      `---\nname: om-auto-review-pr\ndescription: ${SKILL_DESCRIPTION}\n---\n${SKILL_BODY}\n`,
-      'utf8',
-    );
-    writeFileSync(
-      join(repoRoot, '.ai/cezar', 'config.json'),
-      JSON.stringify({ systemPrompt: CONFIG_PROMPT }),
-      'utf8',
-    );
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     // Cap 1 (workspace-level since step 2.5) serializes the suite's runs.
     manager = createFixtureManager(store, repoRoot, {
@@ -199,18 +232,23 @@ describe('systemPrompt end-to-end (dry run)', () => {
     ],
   };
 
+  /** Every run here starts on a free slot. A run an earlier test left queued would run first,
+   *  on this test's time (hearsay-tools/cezarion#1316). */
+  function expectNoLiveRun(): void {
+    expect(store.listRuns().filter((record) => !TERMINAL.has(record.status)).map((record) => record.task)).toEqual([]);
+  }
+
+  /** Returns once the run is terminal and the bookkeeping it started (turn-end markers, the
+   *  namer) has landed. */
   async function runToEnd(
     input: { task: string; systemPrompt?: string; generateFollowups?: boolean },
     selectedWorkflow: WorkflowDef = workflow,
   ): Promise<string> {
+    expectNoLiveRun();
     writeFileSync(argsFile, '', 'utf8'); // fresh capture per run
     const record = manager.startRun(selectedWorkflow, input);
-    const terminal = new Set(['done', 'review', 'failed', 'cancelled']);
-    const deadline = Date.now() + 20_000;
-    while (!terminal.has(store.getRun(record.id)?.status ?? '')) {
-      if (Date.now() > deadline) throw new Error('run did not finish in time');
-      await new Promise((r) => setTimeout(r, 100));
-    }
+    await runSettled(store, record.id);
+    await fixtureWorkSettled(repoRoot);
     return record.id;
   }
 
@@ -233,110 +271,131 @@ describe('systemPrompt end-to-end (dry run)', () => {
     expect(prompt).toBe(composeSystemPrompt(CONFIG_PROMPT, SESSION_HANDOFF));
   }, 30_000);
 
+  /**
+   * These tests call the turn-end and namer seams directly. Their records come from `startRun`,
+   * so title and reference extraction run as in production, but on a manager that never starts a
+   * run: an executing run would race the seam under test, and on the one-slot manager above,
+   * their five runs queued ahead of the next test's run and spent its time
+   * (hearsay-tools/cezarion#1316).
+   */
+  describe('direct seam drives (no run executes)', () => {
+    let seamRoot: string;
+    let seamStore: RunStore;
+    let seamManager: RunManager;
 
-
-  it('live refresh: the namer applies turn context through the mock (direct drive)', async () => {
-    const record = manager.startRun(skillWorkflow, { task: '437' });
-    type NamerSeam = { autoNameRun(id: string, skill: string | undefined, task: string, live?: object): Promise<void> };
-    await (manager as unknown as NamerSeam).autoNameRun(record.id, 'om-auto-review-pr', '437', {
-      turnText: 'fixed the watchdog race',
-      diffStat: '2 files, +10 -3',
+    beforeAll(async () => {
+      seamRoot = await seedRepo('cez-sysprompt-seams-');
+      seamStore = RunStore.open(join(seamRoot, '.ai/cezar'));
+      seamManager = createFixtureManager(seamStore, seamRoot, {
+        semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }),
+      });
     });
-    const after = store.getRun(record.id);
-    expect(after?.titleSummary).toBe('437: implementing cr fixes');
-    expect(after?.titleOrigin).toBe('auto');
-    expect(after?.prNumber).toBe(437);
-  }, 30_000);
 
-  it('turn-end refresh skips under CEZ_DRY_RUN and when the toggle or ownership forbids it', async () => {
-    type Seam = {
-      maybeRefreshTitle(id: string, text: string): Promise<void>;
-      lastNamerKey: Map<string, string>;
-    };
-    const seam = manager as unknown as Seam;
-    const record = manager.startRun(skillWorkflow, { task: '437' });
-
-    // Dry-run guard (without the CEZ_AUTONAME=1 force): no key is recorded,
-    // the namer is never consulted.
-    const forced = process.env.CEZ_AUTONAME;
-    delete process.env.CEZ_AUTONAME;
-    await seam.maybeRefreshTitle(record.id, 'made real progress on the fix');
-    expect(seam.lastNamerKey.has(record.id)).toBe(false);
-    process.env.CEZ_AUTONAME = forced;
-
-    // Outside dry-run, a fast-failing fake binary guards against real spawns.
-    const savedDry = process.env.CEZ_DRY_RUN;
-    const savedBin = process.env.CEZ_CLAUDE_BIN;
-    const savedToggle = process.env.CEZ_TITLE_UPDATES;
-    delete process.env.CEZ_DRY_RUN;
-    process.env.CEZ_CLAUDE_BIN = '/nonexistent/cez-test-claude';
-    try {
-      // Env default OFF → skip before any runner call.
-      process.env.CEZ_TITLE_UPDATES = '0';
-      await seam.maybeRefreshTitle(record.id, 'more progress');
-      expect(seam.lastNamerKey.has(record.id)).toBe(false);
-
-      // Toggle ON but the title is user-owned → skip.
-      process.env.CEZ_TITLE_UPDATES = '1';
-      store.updateRun(record.id, { title: 'Mine', titleSummary: 'Mine', titleOrigin: 'user' });
-      await seam.maybeRefreshTitle(record.id, 'even more progress');
-      expect(seam.lastNamerKey.has(record.id)).toBe(false);
-
-      // Namer-owned + toggle ON → the key is recorded (the call itself fails
-      // fast on the fake binary and leaves the title as-is), and the SAME
-      // inputs never record twice.
-      store.updateRun(record.id, { titleOrigin: 'auto' });
-      await seam.maybeRefreshTitle(record.id, 'progress worth naming');
-      expect(seam.lastNamerKey.get(record.id)).toContain('progress worth naming');
-    } finally {
-      if (savedDry === undefined) delete process.env.CEZ_DRY_RUN;
-      else process.env.CEZ_DRY_RUN = savedDry;
-      if (savedBin === undefined) delete process.env.CEZ_CLAUDE_BIN;
-      else process.env.CEZ_CLAUDE_BIN = savedBin;
-      if (savedToggle === undefined) delete process.env.CEZ_TITLE_UPDATES;
-      else process.env.CEZ_TITLE_UPDATES = savedToggle;
-    }
-  }, 30_000);
-
-  it('marker declarations outrank the namer (spec 2026-07-18-task-ref-markers)', async () => {
-    const record = manager.startRun(skillWorkflow, { task: '437' });
-    await manager.recordTurnEnd(record.id, 'Working on it.\nCEZ:PR=500\nCEZ:TITLE=implementing marker refs');
-    let after = store.getRun(record.id);
-    expect(after?.prNumber).toBe(500);
-    expect(after?.titleSummary).toBe('500: implementing marker refs');
-    expect(after?.titleOrigin).toBe('marker');
-    // A namer answer landing later (mock: "implementing cr fixes" + pr 437)
-    // must not displace the agent's own declaration.
-    type NamerSeam = { autoNameRun(id: string, skill: string | undefined, task: string, live?: object): Promise<void> };
-    await (manager as unknown as NamerSeam).autoNameRun(record.id, 'om-auto-review-pr', '437', {
-      turnText: 'fixed the watchdog race',
-      diffStat: '2 files, +10 -3',
+    afterAll(async () => {
+      await removeFixtureRepo(seamRoot);
     });
-    after = store.getRun(record.id);
-    expect(after?.titleSummary).toBe('500: implementing marker refs');
-    expect(after?.titleOrigin).toBe('marker');
-    expect(after?.prNumber).toBe(500);
-  }, 30_000);
 
-  it('keeps explicit PR precedence when the prompt also names an issue', async () => {
-    const record = manager.startRun(skillWorkflow, { task: 'Review PR #900 for issue #1200' });
-    await manager.recordTurnEnd(record.id, 'CEZ:TITLE=reviewing the change');
-    expect(store.getRun(record.id)?.titleSummary).toBe('900: reviewing the change');
-  }, 30_000);
+    it('live refresh: the namer applies turn context through the mock (direct drive)', async () => {
+      const record = seamManager.startRun(skillWorkflow, { task: '437' });
+      type NamerSeam = { autoNameRun(id: string, skill: string | undefined, task: string, live?: object): Promise<void> };
+      await (seamManager as unknown as NamerSeam).autoNameRun(record.id, 'om-auto-review-pr', '437', {
+        turnText: 'fixed the watchdog race',
+        diffStat: '2 files, +10 -3',
+      });
+      const after = seamStore.getRun(record.id);
+      expect(after?.titleSummary).toBe('437: implementing cr fixes');
+      expect(after?.titleOrigin).toBe('auto');
+      expect(after?.prNumber).toBe(437);
+    }, 30_000);
 
-  it('keeps the originating issue in a follow-up title marker', async () => {
-    const record = manager.startRun(skillWorkflow, { task: 'Fix issue #1200' });
-    await manager.recordTurnEnd(record.id, 'CEZ:ISSUE=1200\nCEZ:PR=1210');
-    await manager.recordTurnEnd(record.id, 'CEZ:ISSUE=1216\nCEZ:TITLE=fixing issue attribution');
-    const after = store.getRun(record.id);
-    expect(after?.issueNumber).toBe(1200);
-    expect(after?.titleSummary).toBe('1200: fixing issue attribution');
-  }, 30_000);
+    it('turn-end refresh skips under CEZ_DRY_RUN and when the toggle or ownership forbids it', async () => {
+      type Seam = {
+        maybeRefreshTitle(id: string, text: string): Promise<void>;
+        lastNamerKey: Map<string, string>;
+      };
+      const seam = seamManager as unknown as Seam;
+      const record = seamManager.startRun(skillWorkflow, { task: '437' });
+
+      // Dry-run guard (without the CEZ_AUTONAME=1 force): no key is recorded,
+      // the namer is never consulted.
+      const forced = process.env.CEZ_AUTONAME;
+      delete process.env.CEZ_AUTONAME;
+      await seam.maybeRefreshTitle(record.id, 'made real progress on the fix');
+      expect(seam.lastNamerKey.has(record.id)).toBe(false);
+      process.env.CEZ_AUTONAME = forced;
+
+      // Outside dry-run, a fast-failing fake binary guards against real spawns.
+      const savedDry = process.env.CEZ_DRY_RUN;
+      const savedBin = process.env.CEZ_CLAUDE_BIN;
+      const savedToggle = process.env.CEZ_TITLE_UPDATES;
+      delete process.env.CEZ_DRY_RUN;
+      process.env.CEZ_CLAUDE_BIN = '/nonexistent/cez-test-claude';
+      try {
+        // Env default OFF → skip before any runner call.
+        process.env.CEZ_TITLE_UPDATES = '0';
+        await seam.maybeRefreshTitle(record.id, 'more progress');
+        expect(seam.lastNamerKey.has(record.id)).toBe(false);
+
+        // Toggle ON but the title is user-owned → skip.
+        process.env.CEZ_TITLE_UPDATES = '1';
+        seamStore.updateRun(record.id, { title: 'Mine', titleSummary: 'Mine', titleOrigin: 'user' });
+        await seam.maybeRefreshTitle(record.id, 'even more progress');
+        expect(seam.lastNamerKey.has(record.id)).toBe(false);
+
+        // Namer-owned + toggle ON → the key is recorded (the call itself fails
+        // fast on the fake binary and leaves the title as-is), and the SAME
+        // inputs never record twice.
+        seamStore.updateRun(record.id, { titleOrigin: 'auto' });
+        await seam.maybeRefreshTitle(record.id, 'progress worth naming');
+        expect(seam.lastNamerKey.get(record.id)).toContain('progress worth naming');
+      } finally {
+        if (savedDry === undefined) delete process.env.CEZ_DRY_RUN;
+        else process.env.CEZ_DRY_RUN = savedDry;
+        if (savedBin === undefined) delete process.env.CEZ_CLAUDE_BIN;
+        else process.env.CEZ_CLAUDE_BIN = savedBin;
+        if (savedToggle === undefined) delete process.env.CEZ_TITLE_UPDATES;
+        else process.env.CEZ_TITLE_UPDATES = savedToggle;
+      }
+    }, 30_000);
+
+    it('marker declarations outrank the namer (spec 2026-07-18-task-ref-markers)', async () => {
+      const record = seamManager.startRun(skillWorkflow, { task: '437' });
+      await seamManager.recordTurnEnd(record.id, 'Working on it.\nCEZ:PR=500\nCEZ:TITLE=implementing marker refs');
+      let after = seamStore.getRun(record.id);
+      expect(after?.prNumber).toBe(500);
+      expect(after?.titleSummary).toBe('500: implementing marker refs');
+      expect(after?.titleOrigin).toBe('marker');
+      // A namer answer landing later (mock: "implementing cr fixes" + pr 437)
+      // must not displace the agent's own declaration.
+      type NamerSeam = { autoNameRun(id: string, skill: string | undefined, task: string, live?: object): Promise<void> };
+      await (seamManager as unknown as NamerSeam).autoNameRun(record.id, 'om-auto-review-pr', '437', {
+        turnText: 'fixed the watchdog race',
+        diffStat: '2 files, +10 -3',
+      });
+      after = seamStore.getRun(record.id);
+      expect(after?.titleSummary).toBe('500: implementing marker refs');
+      expect(after?.titleOrigin).toBe('marker');
+      expect(after?.prNumber).toBe(500);
+    }, 30_000);
+
+    it('keeps explicit PR precedence when the prompt also names an issue', async () => {
+      const record = seamManager.startRun(skillWorkflow, { task: 'Review PR #900 for issue #1200' });
+      await seamManager.recordTurnEnd(record.id, 'CEZ:TITLE=reviewing the change');
+      expect(seamStore.getRun(record.id)?.titleSummary).toBe('900: reviewing the change');
+    }, 30_000);
+
+    it('keeps the originating issue in a follow-up title marker', async () => {
+      const record = seamManager.startRun(skillWorkflow, { task: 'Fix issue #1200' });
+      await seamManager.recordTurnEnd(record.id, 'CEZ:ISSUE=1200\nCEZ:PR=1210');
+      await seamManager.recordTurnEnd(record.id, 'CEZ:ISSUE=1216\nCEZ:TITLE=fixing issue attribution');
+      const after = seamStore.getRun(record.id);
+      expect(after?.issueNumber).toBe(1200);
+      expect(after?.titleSummary).toBe('1200: fixing issue attribution');
+    }, 30_000);
+  });
 
   it('mock:refs end to end: markers set the record, silence the wrong chip, and stay out of the transcript', async () => {
     const id = await runToEnd({ task: 'do the thing mock:refs mock:done' });
-    // Settle window for the fire-and-forget turn-end bookkeeping.
-    await new Promise((resolve) => setTimeout(resolve, 700));
     const after = store.getRun(id);
     expect(after?.prNumber).toBe(4242);
     expect(after?.issueNumber).toBe(17);
@@ -356,19 +415,15 @@ describe('systemPrompt end-to-end (dry run)', () => {
   }, 30_000);
 
   it('a user rename made before the namer answers is never overwritten', async () => {
+    expectNoLiveRun();
     writeFileSync(argsFile, '', 'utf8');
     const record = manager.startRun(skillWorkflow, { task: '437' });
     // What PATCH /api/v1/runs/:id does, synchronously after creation:
     store.updateRun(record.id, { title: 'My name', titleSummary: 'My name', titleOrigin: 'user' });
 
-    const terminal = new Set(['done', 'review', 'failed', 'cancelled']);
-    const deadline = Date.now() + 20_000;
-    while (!terminal.has(store.getRun(record.id)?.status ?? '')) {
-      if (Date.now() > deadline) throw new Error('run did not finish in time');
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    // Settle window for the async namer to (not) apply.
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    await runSettled(store, record.id);
+    // The namer this run started has answered once the fixture's work settles, so the title is final.
+    await fixtureWorkSettled(repoRoot);
     const after = store.getRun(record.id);
     expect(after?.titleSummary).toBe('My name');
     expect(after?.titleOrigin).toBe('user');
@@ -391,12 +446,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
     // Step-0 extraction persisted the reference (skill-hint → PR).
     expect(record?.prNumber).toBe(432);
     // The fire-and-forget namer replaces the heuristic with the mock's short
-    // title (task auto-naming spec) — async, so poll for it.
-    const deadline = Date.now() + 15_000;
-    while (store.getRun(id)?.titleSummary !== '432: implementing cr fixes') {
-      if (Date.now() > deadline) break;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
+    // title (task auto-naming spec); runToEnd returns once it has answered.
     const named = store.getRun(id);
     expect(named?.titleSummary).toBe('432: implementing cr fixes');
     expect(named?.titleOrigin).toBe('auto');
