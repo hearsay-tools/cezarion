@@ -1214,6 +1214,12 @@ the observation. Later successful settlement must leave that failed attempt inta
 Clean session closure while CI is pending still parks without failure. No runner
 exemptions or normalized-event injection.
 
+**R85** (hearsay-tools/cezarion#1399), in `workflows/ci-wait-rerun-parity.test.ts`,
+drives every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native CI tool
+call with the real supervisor and a controlled GitHub wire. A partial green check
+list stays pending while a rerun is active, then delivers one observation after
+the checks return and finish. Recovery covers the same wait without a live session.
+
 **U0–U19** (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234, hearsay-tools/cezarion#1260, hearsay-tools/cezarion#1235, with U2c, U2t, U2w, U3w, U5a, U5c, U5d, U6s, U7d, U7h, U7w, U9c, U9h, U9u, U9w, U14m and U16b) pin the
 wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
 normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`, `cezar_ask`,

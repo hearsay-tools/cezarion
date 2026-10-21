@@ -629,6 +629,9 @@ const CONTROL_CRITERIA = [
   { id: 'R82', scenario: 'baseline' },
   { id: 'R83', scenario: 'baseline' },
   { id: 'R84', scenario: 'baseline' },
+  // hearsay-tools/cezarion#1399: workflows/ci-wait-rerun-parity.test.ts keeps
+  // partial green pending during a rerun, including recovery without a session.
+  { id: 'R85', scenario: 'baseline' },
   { id: 'R28', scenario: 'baseline' },
   { id: 'R29', scenario: 'baseline' },
   { id: 'R30', scenario: 'baseline' },

@@ -576,6 +576,13 @@ with `wake_budget_spent`, and a run with nothing else to wait on waits for you. 
 budget is kept on the task, so a cockpit restart keeps it; a message from you or a
 Continue starts it again.
 
+A CI wait stays pending while any GitHub Actions workflow run on its captured
+head commit is incomplete, even when a rerun temporarily hides that run's checks.
+It checks again every 30 seconds within the original deadline. Once those runs
+complete, it reads the checks again to decide the result. A result describes what
+GitHub reported; it does not predict workflows that have not appeared yet or grant
+merge approval.
+
 The agent asks you with `cezar_ask`, a card of one to four questions in the ask
 format. A question with two to four options shows them as choices; a question without
 options is open, and the card shows a text box for your answer. The task reads Needs
