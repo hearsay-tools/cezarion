@@ -79,3 +79,33 @@ describe('one-time writes after a crash-left reservation', () => {
     expect(launch).not.toHaveBeenCalled();
   });
 });
+
+describe('one-time writes that race or keep the due time (#1465 review)', () => {
+  const NOW = Date.parse('2026-10-22T13:00:00Z');
+  const dirs: string[] = [];
+  afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+
+  function fixture() {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-once-service-')); dirs.push(dir);
+    const automationStore = AutomationStore.open(join(dir, 'automations'), { now: () => new Date(NOW) });
+    const runs = RunStore.open(join(dir, 'runs'));
+    const project: AutomationServiceProject = { id: 'p', root: dir, automationStore, store: runs, manager: {} as RunManager };
+    const service = createAutomationService({
+      timeZone: () => 'UTC',
+      scheduleHandle: () => ({ projectId: 'p', store: automationStore, timeZone: 'UTC', now: () => NOW, launch: async () => ({ runId: 'task' }) }),
+      emitChange: () => {}, changed: () => {},
+      githubAvailability: async () => ({ available: false, reason: 'none' }),
+      hasGithubRemote: async () => false,
+      now: () => NOW,
+    });
+    return { service, project, automationStore };
+  }
+
+  it('an edit of only the latest start on a past-due Missed schedule is saved', async () => {
+    const { service, project, automationStore } = fixture();
+    const stored = automationStore.create({ name: 'Once', enabled: false, kind: 'schedule', schedule: { type: 'once', at: '2026-10-20T09:00', timeZone: 'UTC' }, task: { prompt: 'Go' } });
+    automationStore.setState(stored.id, (state) => ({ ...state, onceOutcome: 'missed' }));
+    const saved = await service.update(project, stored.id, { name: stored.name, enabled: false, kind: 'schedule', schedule: { type: 'once', at: '2026-10-20T09:00', timeZone: 'UTC', latestStartMinutes: 30 }, task: stored.task, expectedRevision: stored.revision });
+    expect(saved).toMatchObject({ ok: true, automation: { schedule: { latestStartMinutes: 30 } } });
+  });
+});

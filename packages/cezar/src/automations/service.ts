@@ -150,6 +150,12 @@ function sameSchedule(a: AutomationDefinition['schedule'], b: AutomationDefiniti
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
+/** The due time alone: a change of `latestStartMinutes` keeps the instant a one-time schedule fires at. */
+function sameDueTime(a: AutomationDefinition['schedule'], b: AutomationDefinition['schedule']): boolean {
+  if (a?.type === 'once' && b?.type === 'once') return a.at === b.at && a.timeZone === b.timeZone;
+  return sameSchedule(a, b);
+}
+
 export function createAutomationService(deps: AutomationServiceDeps) {
   const now = () => deps.now?.() ?? Date.now();
 
@@ -328,7 +334,7 @@ export function createAutomationService(deps: AutomationServiceDeps) {
       const write = async (previousOnDisk?: AutomationDefinition) => {
         if (previousOnDisk && isOnceSchedule(previousOnDisk) || input.schedule?.type === 'once') {
           const previous = previousOnDisk ?? stored;
-          const moved = !sameSchedule(previous.schedule, input.schedule);
+          const moved = !sameDueTime(previous.schedule, input.schedule);
           const enabling = (input.enabled ?? false) && !previous.enabled;
           if (moved || enabling) {
             const refusal = pastDue(input.schedule);
