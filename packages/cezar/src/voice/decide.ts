@@ -94,7 +94,7 @@ const POSITIONS: Record<string, string> = {
 };
 
 const COMMAND_WORDS =
-  'Not part of any answer or message: words that address the cockpit or the agent ("answer that", "tell it", "reply with", "say"), words that point at a question ("to question two", "for the runner"), and filler ("um", "okay", "so").';
+  'Words said to the cockpit, not to the agent: the words that hand the reply over ("answer that", "tell it", "tell it to", "tell the agent to", "reply with", "say that"), the words that name which card question an answer is for ("to question two", "for the runner"), and filler ("um", "okay", "so").';
 
 function choiceQuestion(instructions: string, options: Record<string, string | null>): EngineQuestion {
   return { type: 'choice', instructions: UNTRUSTED + instructions, options };
@@ -106,17 +106,19 @@ function noulQuestion(instructions: string, yes: string, no: string): EngineQues
 
 type Card = NonNullable<VoiceEngineState['card']>;
 
-/** What a word may belong to: `command` first, then each card question, or the message without a card. */
+/** What a word may belong to: routing first, then each card question, then the message. */
 function wordTargets(card: Card | undefined): Record<string, string> {
   const targets: Record<string, string> = { [COMMAND_LABEL]: COMMAND_WORDS };
-  if (card === undefined) {
-    targets[MESSAGE_LABEL] = 'Part of the message the user wants sent to the agent.';
-    return targets;
-  }
-  card.forEach((entry, i) => {
+  card?.forEach((entry, i) => {
     const options = entry.options?.length ? ` Options: ${entry.options.map((o) => o.label).join(', ')}.` : '';
     targets[questionLabel(i)] = `Part of the answer to question ${entry.number} of \`card\` ("${entry.header}": ${entry.question}${options})`;
   });
+  // With a card shown, a request for the agent that answers none of its questions ("ask me another
+  // question") is still a reply: the card offers a reply below it (hearsay-tools/cezarion#1463).
+  targets[MESSAGE_LABEL] =
+    card === undefined
+      ? 'Part of what the agent should read: what to tell it, what to ask it, or what it should do.'
+      : 'Part of a message to the agent that answers no question on `card`: a request or instruction for the agent, such as "ask me another question" or "skip this question".';
   return targets;
 }
 
@@ -362,10 +364,10 @@ export async function decideVoice(args: {
       const text = found.get(questionLabel(i));
       return text === undefined ? [] : [cardAnswer(answers, question, i, text)];
     });
-    if (entries.length === 0) return done(none(ask.questions.length > 1 ? 'ambiguous' : 'unclear'));
-    return done({ action: 'answer', decisionId, runId: request.openRunId, askRequestId: ask.requestId, answers: entries, confidence });
+    if (entries.length > 0) return done({ action: 'answer', decisionId, runId: request.openRunId, askRequestId: ask.requestId, answers: entries, confidence });
   }
+  // No answer words: a message to the agent, shown with or without a card.
   const text = found.get(MESSAGE_LABEL);
-  if (text === undefined) return done(none('unclear'));
+  if (text === undefined) return done(none(ask && ask.questions.length > 1 ? 'ambiguous' : 'unclear'));
   return done({ action: 'tell', decisionId, runId: request.openRunId, text, confidence });
 }

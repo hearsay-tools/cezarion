@@ -135,10 +135,13 @@ From AGENTS.md (research § F):
 ### Answer the question card
 
 Applies to the open task's pending question card (`AskCard`, up to four questions, each with a
-header, optional choices, multi-select or not, and an Other box). While a card is shown, every reply
+header, optional choices, multi-select or not, and an Other box). While a card is shown, a reply
 to the open task answers it, however it is worded: "answer that …", "tell it that …", "reply …",
-"say …", or only the answer words. The engine labels each word of the sentence with the question it
-answers, or as a command word (§ How it decides). A question can be named by number ("to question
+"say …", or only the answer words. A request for the agent that answers none of the card's
+questions ("tell the agent to ask me one more question", "tell it skip the question") is a message
+instead (§ Tell it): the card offers a reply below it. When a sentence holds both answer words and
+message words, it answers the card. The engine labels each word of the sentence with the question it
+answers, as message, or as routing (§ How it decides). A question can be named by number ("to question
 first", "question two") or by header ("for Library"); the naming words never become part of an
 answer. On a one-question card no naming is needed. For every question that gets words:
 
@@ -173,7 +176,8 @@ says so in one line and does nothing.
 "Tell it: …" puts the dictated text after the trigger into the open task's message box as a
 proposal. Confirming sends it through the composer's existing path. This also covers needs-you
 tasks with no question card (a parked turn). With a question card shown, the same sentence answers
-the card instead (§ Answer the question card). The message is the words the engine labels as
+the card when its words answer a card question, and stays a message otherwise (§ Answer the
+question card). The message is the words the engine labels as
 message, copied as dictated.
 
 Every proposal row names its target task: `Answer “<task>”: <header>: <value>; …` and
@@ -216,7 +220,7 @@ scope, then the action within it, then, for a reply, which words go where.
 | Which status? | pick one | the status map, plus none | always |
 | Which position? | pick one | first, next, previous, last, 1…N, none | always |
 | Which session action? | pick one | respond; confirm and cancel only while a proposal is shown; none | with an open task |
-| For each word `W01`, `W02`, …: which part of the reply? | pick one | command, then `q1`…`qN` for the card's questions, or `message` without a card | with an open task |
+| For each word `W01`, `W02`, …: which part of the reply? | pick one | routing, then `q1`…`qN` for the card's questions, then `message` | with an open task |
 | For each card question with choices: which choice does its answer mean? | pick one (one yes/no per choice for multi-select) | that question's choices, plus other | with an open task and a card |
 
 The routing:
@@ -230,9 +234,11 @@ The routing:
    stale `askRequestId` gives `stale-context`, and otherwise the word labels give the reply.
 
 **Per-word labels.** The engine sees the sentence and the numbered words, and labels each word where
-it stands, so in "tell it that that file is fine" the first "that" is a command word and the second
-is content. Code forces the words of a question reference ("to question two", "for Library") to
-command, takes each word's top label, and copies each target's words out of the sentence exactly as
+it stands, so in "tell it that that file is fine" the first "that" is a routing word and the second
+is content. The label is `routing`, words said to the cockpit rather than the agent, and not
+`command`: live Jev read an instruction for the agent ("ask me one more question") as a command and
+dropped it. Code forces the words of a question reference ("to question two", "for Library") to
+routing, takes each word's top label, and copies each target's words out of the sentence exactly as
 said (`copyRange` in `packages/cezar/src/voice/sentence.ts`). A target is kept only when the mean
 confidence of its words is at least `EXTRACT_MIN` (`packages/cezar/src/voice/thresholds.ts`). The
 mean, not the minimum, because live Jev gives correct edge words low confidence; the value sits just

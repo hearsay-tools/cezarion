@@ -6,7 +6,7 @@ describe('the voice replay set', () => {
     const names = REPLAY_CASES.map((c) => c.name);
     expect(new Set(names).size).toBe(names.length);
     const actions = new Set(REPLAY_CASES.map((c) => c.expect.action));
-    expect([...actions].sort()).toEqual(['answer', 'none', 'tell']);
+    expect([...actions].sort()).toEqual(['answer', 'none', 'open', 'tell']);
     const reasons = REPLAY_CASES.flatMap((c) => (c.expect.action === 'none' ? [c.expect.reason] : []));
     expect(new Set(reasons)).toEqual(new Set(['unclear', 'unsupported', 'no-open-task', 'stale-context']));
   });

@@ -71,7 +71,7 @@ describe('FakeVoiceEngine', () => {
     const answers = await run(sentence, { card: CARD });
     expect(picked(answers, QUESTION_IDS.scope)).toBe('session');
     expect(picked(answers, QUESTION_IDS.sessionAction)).toBe('respond');
-    expect(wordLabels(answers, sentence)).toEqual(['command', 'q1', 'command', 'command', 'command', 'command', 'q2', 'q2', 'q2', 'command', 'command', 'command']);
+    expect(wordLabels(answers, sentence)).toEqual(['routing', 'q1', 'routing', 'routing', 'routing', 'routing', 'q2', 'q2', 'q2', 'routing', 'routing', 'routing']);
     expect(keyText(picked(answers, QUESTION_IDS.option(0)))).toBe('Vitest');
     expect(keyText(picked(answers, QUESTION_IDS.option(1)))).toBe('Webpack');
   });
@@ -79,18 +79,18 @@ describe('FakeVoiceEngine', () => {
   it('labels "answer that …" on a one-question card without the command words', async () => {
     const sentence = 'answer that use both';
     const answers = await run(sentence, { card: ONE });
-    expect(wordLabels(answers, sentence)).toEqual(['command', 'command', 'q1', 'q1']);
+    expect(wordLabels(answers, sentence)).toEqual(['routing', 'routing', 'q1', 'q1']);
     expect(picked(answers, QUESTION_IDS.option(0))).toBe('other');
   });
 
   it('labels a message without a card', async () => {
     const sentence = 'tell it: run the tests again';
     const answers = await run(sentence);
-    expect(wordLabels(answers, sentence)).toEqual(['command', 'command', 'message', 'message', 'message', 'message']);
+    expect(wordLabels(answers, sentence)).toEqual(['routing', 'routing', 'message', 'message', 'message', 'message']);
     const instruction = 'tell it to run the tests again'
-    expect(wordLabels(await run(instruction), instruction)).toEqual(['command', 'command', 'command', 'message', 'message', 'message', 'message'])
+    expect(wordLabels(await run(instruction), instruction)).toEqual(['routing', 'routing', 'routing', 'message', 'message', 'message', 'message'])
     const reply = 'reply with go ahead';
-    expect(wordLabels(await run(reply), reply)).toEqual(['command', 'command', 'message', 'message']);
+    expect(wordLabels(await run(reply), reply)).toEqual(['routing', 'routing', 'message', 'message']);
   });
 
   it('names a choice by label in any case, and by ordinal word', async () => {

@@ -72,7 +72,9 @@ export const QUESTION_IDS = {
 } as const;
 
 /** The label of a word that is no part of a reply. Targets are `q1`…`qN` with a card, else `message`. */
-export const COMMAND_LABEL = 'command';
+/** Words said to the cockpit rather than the agent. Not `command`: Jev read an instruction for the
+ *  agent ("ask me one more question") as a command (hearsay-tools/cezarion#1463 live testing). */
+export const COMMAND_LABEL = 'routing';
 export const MESSAGE_LABEL = 'message';
 export const questionLabel = (i: number) => `q${i + 1}`;
 

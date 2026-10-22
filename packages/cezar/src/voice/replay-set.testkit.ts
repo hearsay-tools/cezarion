@@ -1,5 +1,5 @@
 import type { AskQuestion } from '@open-mercato/cezar-contract/ask';
-import type { VoiceAnswer, VoiceDecideRequest, VoiceDecision } from '@open-mercato/cezar-contract/voice';
+import type { VoiceAnswer, VoiceDecideRequest, VoiceDecision, VoicePosition, VoiceStatus } from '@open-mercato/cezar-contract/voice';
 import { decideVoice } from './decide.ts';
 import { QUESTION_IDS, textKey, type DecisionEngine, type EngineAnswer } from './engine.ts';
 import { splitWords } from './sentence.ts';
@@ -25,6 +25,7 @@ type NoneReason = Extract<VoiceDecision, { action: 'none' }>['reason'];
 export type ExpectedDecision =
   | { action: 'answer'; answers: VoiceAnswer[] }
   | { action: 'tell'; text: string }
+  | { action: 'open'; status: VoiceStatus; position: VoicePosition }
   | { action: 'none'; reason: NoneReason };
 
 export interface ReplayCase {
@@ -62,6 +63,11 @@ const CHECKS = {
   ],
 };
 
+const NEXT = {
+  requestId: 'ask-next',
+  questions: [{ header: 'Next action', question: 'What should I do next?', options: [{ label: 'Keep going' }, { label: 'Park it' }, { label: 'Stop here' }] }],
+};
+
 const respond: Record<string, ScriptedAnswer> = {
   is_command: { noul: 0.95 },
   scope: { choice: 'session', confidence: 0.9 },
@@ -73,7 +79,7 @@ function words(list: string): Record<string, ScriptedAnswer> {
   return Object.fromEntries(
     list.split(' ').map((entry, k) => {
       const [label = 'c', confidence] = entry.split(':');
-      return [QUESTION_IDS.word(k), { choice: label === 'c' ? 'command' : label, confidence: confidence ? Number(confidence) : 0.9 }];
+      return [QUESTION_IDS.word(k), { choice: label === 'c' ? 'routing' : label, confidence: confidence ? Number(confidence) : 0.9 }];
     }),
   );
 }
@@ -169,6 +175,51 @@ export const REPLAY_CASES: ReplayCase[] = [
     openTask: true,
     scripted: { ...respond, ...words('c c c:0.48 message message message message') },
     expect: { action: 'tell', text: 'run the tests again' },
+  },
+  {
+    name: 'a request for the agent while a card is shown',
+    sentence: 'tell the agent to ask me one more question',
+    ask: NEXT,
+    openTask: true,
+    scripted: { ...respond, ...words('c c c c message message message message message') },
+    expect: { action: 'tell', text: 'ask me one more question' },
+  },
+  {
+    name: '"skip the question" while a card is shown',
+    sentence: 'Tell it skip the question',
+    ask: NEXT,
+    openTask: true,
+    scripted: { ...respond, ...words('c c message message message') },
+    expect: { action: 'tell', text: 'skip the question' },
+  },
+  {
+    name: '"tell it to" answering a card by meaning',
+    sentence: 'Tell it to park it',
+    ask: NEXT,
+    openTask: true,
+    scripted: { ...respond, ...words('c c c q1 q1'), ...picks(0, 'Park it') },
+    expect: { action: 'answer', answers: [option(0, 'Park it')] },
+  },
+  {
+    name: '"tell it to" with no card',
+    sentence: 'Tell it to park it',
+    openTask: true,
+    scripted: { ...respond, ...words('c c c message message') },
+    expect: { action: 'tell', text: 'park it' },
+  },
+  {
+    name: 'opening another task while a card is shown',
+    sentence: 'open the next needs you item',
+    ask: NEXT,
+    openTask: true,
+    scripted: {
+      is_command: { noul: 0.9 },
+      scope: { choice: 'project', confidence: 0.95 },
+      project_action: { choice: 'open', confidence: 0.9 },
+      status: { choice: 'needs-you', confidence: 0.9 },
+      position: { choice: 'next', confidence: 0.8 },
+    },
+    expect: { action: 'open', status: 'needs-you', position: 'next' },
   },
   {
     name: 'only command words',
@@ -269,6 +320,11 @@ export function mismatch(expected: ExpectedDecision, decision: VoiceDecision): s
   if (expected.action === 'tell' && decision.action === 'tell') {
     return expected.text === decision.text ? undefined : `expected text "${expected.text}", got "${decision.text}"`;
   }
+  if (expected.action === 'open' && decision.action === 'open') {
+    const want = `${expected.status} ${expected.position}`;
+    const got = `${decision.status} ${decision.position}`;
+    return want === got ? undefined : `expected open ${want}, got open ${got}`;
+  }
   if (expected.action === 'none' && decision.action === 'none') {
     return expected.reason === decision.reason ? undefined : `expected reason ${expected.reason}, got ${decision.reason}`;
   }
@@ -280,7 +336,7 @@ export function targetConfidences(sentence: string, answers: Record<string, Engi
   const byLabel: Record<string, number[]> = {};
   splitWords(sentence).forEach((_, k) => {
     const answer = answers[QUESTION_IDS.word(k)];
-    if (answer?.type !== 'choice' || answer.choice === 'command') return;
+    if (answer?.type !== 'choice' || answer.choice === 'routing') return;
     (byLabel[answer.choice] ??= []).push(answer.confidence);
   });
   return Object.fromEntries(

@@ -59,7 +59,7 @@ function stub(given: Record<string, Spec>): DecisionEngine & { calls: { question
 
 /** One label per word of the sentence, as `w0`, `w1`, … answers; `c` is `command`. */
 function labels(list: string[], confidence = 0.9): Record<string, Spec> {
-  return Object.fromEntries(list.map((label, k) => [`w${k}`, { choice: label === 'c' ? 'command' : label, confidence }]));
+  return Object.fromEntries(list.map((label, k) => [`w${k}`, { choice: label === 'c' ? 'routing' : label, confidence }]));
 }
 
 const command = { is_command: { noul: 0.95 } };
@@ -210,6 +210,19 @@ describe('decideVoice: replies to a question card', () => {
       given: { q0_option: { choice: 'other' } },
     });
     expect(asOther.decision).toMatchObject({ answers: [{ question: 0, kind: 'other', text: 'we should use vitest' }] });
+  });
+
+  it('sends a request for the agent as a message while a card is shown', async () => {
+    const { decision } = await reply('tell it skip the question', ['c', 'c', 'message', 'message', 'message'], { ask: RUNNER });
+    expect(decision).toEqual({ action: 'tell', decisionId: DECISION_ID, runId: RUN_ID, text: 'skip the question', confidence: 0.85 });
+  });
+
+  it('answers the card when a reply has both answer and message words', async () => {
+    const { decision } = await reply('answer jest and hurry', ['c', 'q1', 'c', 'message'], {
+      ask: RUNNER,
+      given: { q0_option: { choice: textKey('Jest') } },
+    });
+    expect(decision).toMatchObject({ action: 'answer', answers: [{ question: 0, kind: 'option', labels: ['Jest'] }] });
   });
 
   it('routes "tell it that …" to the card when one is shown', async () => {
@@ -432,12 +445,13 @@ describe('buildVoiceQuestions', () => {
     expect(options(q, 'position')['1']).toBe('The first one.');
   });
 
-  it('labels each word with command first, then the card questions', () => {
+  it('labels each word with routing first, then the card questions and the message', () => {
     const q = buildVoiceQuestions(state, words);
-    expect(Object.keys(options(q, 'w0'))).toEqual(['command', 'q1']);
+    expect(Object.keys(options(q, 'w0'))).toEqual(['routing', 'q1', 'message']);
+    expect(options(q, 'w0').message).toMatch(/answers no question/);
     expect(options(q, 'w0').q1).toContain('"Library": Which? Options: Vitest, Node test.');
     expect(q.w1!.instructions).toContain('W02 ("previous")');
-    expect(Object.keys(options(buildVoiceQuestions({ ...state, card: undefined }, words), 'w0'))).toEqual(['command', 'message']);
+    expect(Object.keys(options(buildVoiceQuestions({ ...state, card: undefined }, words), 'w0'))).toEqual(['routing', 'message']);
   });
 
   it('wraps every option label in curly quotes and keeps other bare', () => {
