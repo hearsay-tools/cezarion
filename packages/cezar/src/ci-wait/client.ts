@@ -55,7 +55,9 @@ function callTool<T>(input: unknown, env: NodeJS.ProcessEnv, route: string, sche
   const socketPath = env.CEZ_TOOL_SOCKET; const token = env.CEZ_TOOL_TOKEN;
   if (!socketPath || !token) return Promise.resolve(unavailable);
   return new Promise(resolve => {
-    const req = request({ socketPath, path: `/api/v1/tools/${route}`, method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } }, response => {
+    // One connection per call (hearsay-tools/cezarion#1465): Node 24.15 raised an uncaught EPIPE
+    // from a pooled keep-alive socket after a large schedule call when the controller closed.
+    const req = request({ socketPath, agent: false, path: `/api/v1/tools/${route}`, method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } }, response => {
       const chunks: Buffer[] = []; let bytes = 0;
       response.on('data', (chunk: Buffer) => { bytes += chunk.length; if (bytes > maxAnswerBytes) req.destroy(); else chunks.push(chunk); });
       response.on('error', () => resolve(unavailable));
