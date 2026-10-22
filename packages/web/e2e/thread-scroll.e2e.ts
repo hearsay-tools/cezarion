@@ -541,6 +541,10 @@ describe('tool cards remain below assistant messages after live appends', () => 
       })()`)
       assertSeparated()
     }
+    // The desktop footer stays over later history while reading. At the live tail it must
+    // still follow the final row, so every message can be read above the controls.
+    browser.click('[data-slot="jump-to-latest"]')
+    browser.waitForFunction(nearBottom)
     expect(waitForSettledSample(browser, `(() => {
       const r = document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect();
       const rows = document.querySelector('[data-slot="thread-rows"]').getBoundingClientRect();
