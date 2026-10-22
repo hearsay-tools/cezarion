@@ -5,8 +5,8 @@
 **Parallel coding agents orchestrator** — a local cockpit for running and
 tracking AI coding-agent tasks in your repo.
 
-Type a task, pick a workflow and an agent — **Claude Code, Codex, OpenCode, pi or OMP
-(OpenCode, pi and OMP experimental), or a mix of them per step** — and watch it work live: steps, tool calls,
+Type a task, pick a workflow and an agent — **Claude Code, Codex, OpenCode, Cursor, pi or
+OMP (OpenCode, pi and OMP experimental), or a mix of them per step** — and watch it work live: steps, tool calls,
 tokens, diffs, in a browser cockpit that runs entirely on your machine.
 Your CLI logins, your `gh`, your files. No accounts, no database server, no cloud.
 
@@ -59,10 +59,10 @@ Click any thumbnail for the full-size screenshot.
 
 | Orchestrate parallel agents | Watch a run live | Parallel variants |
 |:--:|:--:|:--:|
-| [![The Tasks view — parallel runs, a queue with positions, per-run cost and peak memory, and a variants compare card](docs/screenshots/task-view.png)](docs/screenshots/task-view.png) | [![A running task streaming agent text, tool calls and screenshots live](docs/screenshots/live-run.png)](docs/screenshots/live-run.png) | [![Two competing variants of the same task compared side by side — pick the winner](docs/screenshots/variants-compare.png)](docs/screenshots/variants-compare.png) |
+| [![The Tasks view — two projects on the rail, running and queued tasks with queue positions, per-run tokens, cost and peak memory, pull requests, and a ×2 variant group](docs/screenshots/task-view.png)](docs/screenshots/task-view.png) | [![A running task streaming agent text, tool calls and test output live](docs/screenshots/live-run.png)](docs/screenshots/live-run.png) | [![Two competing variants of the same task compared side by side — pick the winner](docs/screenshots/variants-compare.png)](docs/screenshots/variants-compare.png) |
 | *Run and queue many tasks at once — each in its own worktree — with live status, cost and peak memory per run.* | *Every step, tool call, token and screenshot — streamed as it happens.* | *Run a task ×2/×3 in isolated worktrees, compare the diffs, keep one.* |
 | **Workflow builder** | **GitHub, one click away** | **Skills + fire-and-forget** |
-| [![The workflow builder — drag skills into an ordered chain of agent steps and shell checks](docs/screenshots/workflow-builder.png)](docs/screenshots/workflow-builder.png) | [![The GitHub tab — hand an open issue to the agent with a workflow and skills](docs/screenshots/github-issues.png)](docs/screenshots/github-issues.png) | [![The task composer — pick a skill playbook and flip the Autonomous flag to run unattended](docs/screenshots/skills-autonomous.png)](docs/screenshots/skills-autonomous.png) |
+| [![The workflow builder — drag skills into an ordered chain of agent steps and shell checks](docs/screenshots/workflow-builder.png)](docs/screenshots/workflow-builder.png) | [![The GitHub tab — hand an open issue to the agent with a workflow and skills](docs/screenshots/github-issues.png)](docs/screenshots/github-issues.png) | [![The task composer — pick a skill playbook, a runner and a model, and flip the Autonomous flag to run unattended](docs/screenshots/skills-autonomous.png)](docs/screenshots/skills-autonomous.png) |
 | *Stitch skills and shell checks into a reusable YAML chain, no code.* | *Open issues and PRs via your `gh` — run the agent straight on an issue.* | *Pick a Markdown skill and flip **Autonomous** — the run never stops to ask, so you can walk away.* |
 
 ---
@@ -75,7 +75,7 @@ it does better than any of them:
 
 - 🪶 **Genuinely zero config.** `npx cezarion` in your repo and you're running —
   no wizard, no API keys, no env vars, no schema, no database server. It rides the
-  `claude` / `codex` / `opencode` / `pi` / `omp` logins and the `gh` you already have, and every
+  `claude` / `codex` / `opencode` / `agent` (Cursor) / `pi` / `omp` logins and the `gh` you already have, and every
   missing piece degrades gracefully instead of blocking you.
 - 🖥️ **Built for a server (VPS mode).** cezar is made to live on a **VPS, cloud,
   or dedicated box** as an always-on janitor for your repo — headless-first, with
@@ -114,9 +114,11 @@ and an orchestrator keeps a whole queue of them moving.
   flag and a run never parks to ask — it keeps going until the task is done. Pair
   it with a **skill** (a Markdown playbook) and you've got fire-and-forget
   automation: hand off "fix this", "upgrade that", "triage these" and walk away.
-- ✅ **The agent finishes and you have to trust it.** cezar ends non-trivial runs at
-  a **review gate**: inspect the diff, send notes back into the same session, or
-  push a **draft PR** — never an auto-merge.
+- ✅ **The agent finishes and you have to trust it.** Every task's diff stays on
+  its own branch: inspect it, send notes back into the same session, or push a
+  **draft PR** — never an auto-merge. Turn on the optional **review gate**
+  (`CEZ_REVIEW_GATE=1` or Settings → Agents) and a finished run with changes
+  waits in `review` for you.
 - ♻️ **Losing a session when it fails.** Every run records its `claude` session id.
   Take it over interactively in one click (`claude --resume <id>`), or continue it
   in-process from the cockpit. After a failure, Continue tells the agent which
@@ -124,10 +126,12 @@ and an orchestrator keeps a whole queue of them moving.
   also explains the restart when replaying a saved message. Background commands
   may have stopped; the agent is told to verify their state before restarting them.
 - 🔀 **Locked into one agent vendor.** Most tools wed you to a single CLI. cezar
-  drives **Claude Code, Codex and OpenCode (experimental)** through one runner seam — set a
+  drives **Claude Code, Codex, OpenCode, Cursor, pi and OMP** (OpenCode, pi and OMP
+  experimental) through one runner seam — set a
   default, pick a backend per task, or mix them inside one workflow (implement
-  with one agent, review with another) — and through **OpenCode** you can point
-  a run at **open-source or local models**, not just the big vendors. See
+  with one agent, review with another) — and through **OpenCode**, **pi** or
+  **OMP** you can point a run at **open-source or local models**, not just the
+  big vendors. See
   [Agent backends](#coding-agent-backends).
 - 🖥️ **Close the laptop and the work stops.** A local agent only runs while your
   machine is on and awake. Put cezar on a **VPS, cloud box, or dedicated server**
@@ -158,8 +162,12 @@ and an orchestrator keeps a whole queue of them moving.
 
 **Prerequisites:** Node 24.15+, at least one logged-in agent CLI — the
 [`claude` CLI](https://github.com/anthropics/claude-code) (Pro/Max subscription),
-the [`codex` CLI](https://github.com/openai/codex), or
-[OpenCode](https://opencode.ai) — and, optionally, `git` and the `gh` CLI.
+the [`codex` CLI](https://github.com/openai/codex),
+[OpenCode](https://opencode.ai), the
+[Cursor CLI](https://cursor.com/docs/cli/installation) (`agent`),
+[pi](https://github.com/badlogic/pi-mono), or
+[OMP](https://github.com/can1357/oh-my-pi) — and, optionally, `git` and the
+`gh` CLI.
 
 ```bash
 cd your-repo
@@ -193,7 +201,7 @@ CLIs you are already logged into, `claude` by default.
 
 > **Just kicking the tires?** Set `CEZ_DRY_RUN=1` to run against a bundled mock
 > instead of the real CLI — the whole cockpit works with no `claude` login, so
-> you can explore runs, diffs, variants and the review gate offline.
+> you can explore runs, diffs and variants offline.
 
 ### Nightly builds — help us shape cezar 🌙
 
@@ -207,7 +215,7 @@ npx cezarion@nightly       # everything merged as of last night
 **Come build this with us.** cezar is shaped by the people who run it on real
 repos: if you try a nightly and something feels wrong — a workflow that stalls, a
 diff that reads badly, a runner that should exist — [open an
-issue](https://github.com/wjarka/cezar/issues) and tell us. That feedback,
+issue](https://github.com/hearsay-tools/cezarion/issues) and tell us. That feedback,
 early, is worth more than a bug report six weeks after a release, and it is how
 most of the features here got their final shape.
 
@@ -217,7 +225,7 @@ can be rough, a flag or a screen may change under you, and something occasionall
 breaks in a way no test caught. Nothing is at risk beyond your patience — every
 task runs in its own git worktree and cezar never auto-merges — but if you need a
 boring day, stay on the stable release. Pin a nightly you liked with its exact
-version (`npx cezarion@0.9.2-nightly.20260813.126` — the cockpit prints the
+version (`npx cezarion@<nightly-version>` — the cockpit prints the
 version it booted, and the date in it tells you how old the build is), and drop
 back to stable any time with a plain `npx cezarion`.
 
@@ -243,9 +251,10 @@ resolves to the latest stable release.
 
 You describe a task. cezar runs it as a **workflow** — an ordered list of agent
 steps and shell checks — shelling out to your locally installed agent CLI
-(Claude Code by default; Codex and OpenCode are drop-in alternatives, per task
-or per step). Each task gets its own git worktree; the cockpit streams every
-event live and parks the run at a review gate when there's a diff to inspect.
+(Claude Code by default; Codex, OpenCode, Cursor, pi and OMP are drop-in
+alternatives, per task or per step). Each task gets its own git worktree; the
+cockpit streams every event live and leaves the diff on the task's branch for
+you to inspect.
 
 ```
    you type a task
@@ -256,11 +265,12 @@ event live and parks the run at a review gate when there's a diff to inspect.
    └─────────────┘
         │
         ▼
-   ┌──────────────────────────────┐     ┌───────────────────────────────┐
-   │  git worktree per task       │     │  agent CLI  (your login)      │
-   │  (isolated branch, parallel) │◄───►│ claude · codex · opencode · pi│
-   └──────────────────────────────┘     │  Bash open · no prompts       │
-        │                                 └───────────────────────────────┘
+   ┌──────────────────────────────┐     ┌────────────────────────────────┐
+   │  git worktree per task       │     │  agent CLI  (your login)       │
+   │  (isolated branch, parallel) │◄───►│  claude · codex · opencode ·   │
+   └──────────────────────────────┘     │  cursor · pi · omp             │
+        │                               │  Bash open · no prompts        │
+        │                               └────────────────────────────────┘
         │  agent text · tool calls · tool results · tokens · cost
         ▼
    ┌─────────────┐   SSE (replay + live)   ┌──────────────────────────┐
@@ -269,13 +279,15 @@ event live and parks the run at a review gate when there's a diff to inspect.
    │ ·Markdown   │                         │  Skills · Workflows      │
    └─────────────┘                         └──────────────────────────┘
                                                   │
-                                          review gate: read the diff →
-                                          send notes back · draft PR · finish
+                                          read the diff → send notes back ·
+                                          draft PR · finish
 ```
 
 When a check fails, the workflow can loop back to an earlier step (bounded by
 `max`) with the failing output appended to the retried agent's prompt. Nothing
-auto-merges: a run with changes rests in `review` until you act on it.
+auto-merges: a finished run's changes stay on its branch until you act on them.
+With the optional review gate on, a run with changes rests in `review` instead
+of `done`.
 
 ---
 
@@ -285,7 +297,7 @@ Three words, no jargon — **task**, **skill**, **chain**:
 
 - 📋 **Tasks** are the unit of work. Every task is a **run**: `queued → running →
   review / done / failed / cancelled`, with a live event log, per-step token and
-  cost usage, cancel/delete, and — for anything with a diff — a review gate. Attach
+  cost usage, cancel/delete, and — for anything with a diff — a reviewable branch. Attach
   screenshots, PDFs, `.txt` or `.md` files to the task (paperclip, ⌘V or drag-drop;
   the agent gets each one as a real file on disk), or send follow-up messages into
   the live session while it works.
@@ -300,7 +312,7 @@ Three words, no jargon — **task**, **skill**, **chain**:
   AI draft a chain for your task that you review, trim and start. The built-in
   `quick-task` (one agent step) works with zero setup.
 
-Five moves that make the cockpit worth the browser tab:
+The moves that make the cockpit worth the browser tab:
 
 - 🗃️ **Queue + orchestration.** Start as many tasks as you like: cezar runs up to
   `maxParallel` at once across every project (default **2**; a non-git directory
@@ -324,14 +336,24 @@ Five moves that make the cockpit worth the browser tab:
   unlimited) and reclaims the rest — directory only, the `cez/<id8>` branch is
   always kept, so the work stays recoverable. Settings → Resources shows every
   worktree's disk use with per-row delete and a **Reclaim now** button.
-- 🛡️ **Review gate.** A finished run with changes waits in `review`. Read the diff,
-  type notes that go straight back into the agent's session, or push a
-  `gh pr create --draft`. You stay the merge button.
+- 🛡️ **You stay the merge button.** Read a finished run's diff, type notes that go
+  straight back into the agent's session, or push a `gh pr create --draft`.
+  Nothing auto-merges. The **review gate** is optional (`CEZ_REVIEW_GATE=1`, or
+  Settings → Agents): with it on, a successful run with changes parks in `review`
+  until you accept it. Autonomous runs always skip it.
+- 🗂️ **Every project in one cockpit.** One `cez serve` hosts every repo you
+  register; the desktop rail switches between them, and **All tasks** shows every
+  project's tasks in one table. See
+  [Multiple projects, one cockpit](#multiple-projects-one-cockpit).
+- 👥 **Owned workers (opt-in).** With `CEZ_DELEGATION=1`, a task's agent can spawn
+  its own tracked workers — on the same or another runner — message them, and
+  collect their diffs; you still review the result. See
+  [Owned workers](#owned-workers-opt-in).
 - 📱 **Runs on your coding server, drives from your pocket.** The cockpit is a
   responsive web app streaming over SSE, so the box running cezar can be a
   **VPS, cloud, or dedicated server** you never sit in front of. Point a browser
   — laptop or **phone** — at it and run an **always-on coding team** on the move:
-  start tasks, watch them live, and hit the review gate from anywhere.
+  start tasks, watch them live, and review their diffs from anywhere.
 
 ---
 
@@ -920,7 +942,7 @@ steps:
     skill: project-conventions   # optional — from .ai/skills or .ai/cezar/skills
     # model: opus                # optional per-step model override
     # effort: high               # optional per-step effort: low · medium · high · xhigh · max
-    # runner: codex              # optional per-step backend: claude · codex · opencode · pi
+    # runner: codex              # optional per-step backend: claude · codex · opencode · cursor · pi · omp
     # timeoutMs: 7200000          # optional agent-step wall-clock cap (2 hours); 0 = no limit
     # allowedTools: [Read, Edit, Write, Grep, Glob, Bash]
   - id: verify
@@ -971,9 +993,10 @@ the task's worktree — but note the zero-config default list (`Read`, `Edit`,
 `Write`, `Grep`, `Glob`, `Bash`) grants unrestricted `Bash` unless a step sets
 `bashAllowlist`, so treat a run as having full shell access in its worktree,
 not a sandboxed allowlist. Set `CEZ_APPROVAL_GATE=1` to opt into Claude's
-interactive approval UI. Codex and OpenCode are driven through their own
-native protocols and don't honor `allowedTools` at all; OpenCode's own
-permission config decides what it asks — see
+interactive approval UI. Codex, OpenCode and Cursor are driven through their
+own native protocols and don't honor `allowedTools` at all; OpenCode's own
+permission config decides what it asks. pi and OMP map `allowedTools` onto
+their own tool allowlists — see
 [Coding agent backends](#coding-agent-backends) for what each one actually
 locks down. Nothing runs on a server you don't own.
 
@@ -1290,7 +1313,7 @@ never blocks startup):
   // the source against a moving branch head — cezar verifies it resolves to
   // exactly that commit, and reports it as `team.commit`.
   "worktreeRetention": 10,   // keep the last N finished worktrees on disk; 0 = unlimited (branch always kept)
-  "defaultRunner": "claude", // agent backend: "claude" (default) · "codex" · "opencode" · "pi"
+  "defaultRunner": "claude", // agent backend: "claude" (default) · "codex" · "opencode" · "cursor" · "pi" · "omp"
   "modelsLocked": true,      // optional: native per-runner model is fixed/read-only; runner stays selectable
   "plannerModel": "sonnet",  // model the "Plan first" button uses to draft chains
   "baseBranch": "develop",   // branch worktrees fork from + PRs target (also settable in the Git tab)
@@ -1370,8 +1393,8 @@ Without the key nothing runs, exactly as before. Examples:
 ### Editing the agents' own config (Settings → Agent config)
 
 cezar picks *which* agent runs; **Settings → Agent config** lets you edit *how* it
-behaves — the raw config files Claude, Codex and OpenCode read for settings,
-MCP, and memory. In the multi-project cockpit the section is project-scoped:
+behaves — the raw config files Claude, Codex, OpenCode, Cursor, pi and OMP read
+for settings, MCP, and memory. In the multi-project cockpit the section is project-scoped:
 repo-relative files resolve from the selected project's root, while user-scope
 files continue to resolve from the agent's home.
 
@@ -1393,8 +1416,8 @@ as in [Quick start](#quick-start)).
 **2. Clone & install**
 
 ```bash
-git clone https://github.com/wjarka/cezar.git
-cd cezar
+git clone https://github.com/hearsay-tools/cezarion.git
+cd cezarion
 npm install --global pnpm@12.11.2
 pnpm install --frozen-lockfile
 ```
