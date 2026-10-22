@@ -120,8 +120,11 @@ export function onceResolved(schedule: Parameters<typeof onceInstant>[0]): { dat
     const other = zonedParts(ms, zone)
     return !!other && other.day === parts.day && other.hour === parts.hour && other.minute === parts.minute
   }
-  const laterToo = sameWall(instant + HOUR_MS)
-  if (!laterToo && !sameWall(instant - HOUR_MS)) return resolved
+  // The clocks go back by the zone's own step, which is not always an hour (Lord Howe: 30 min).
+  const step = (timeZoneOffsetMs(zone, instant - 12 * HOUR_MS) ?? 0) - (timeZoneOffsetMs(zone, instant + 12 * HOUR_MS) ?? 0)
+  if (step <= 0) return resolved
+  const laterToo = sameWall(instant + step)
+  if (!laterToo && !sameWall(instant - step)) return resolved
   const offset = (timeZoneOffsetMs(zone, instant) ?? 0) / 60_000
   const utc = `UTC${offset < 0 ? '-' : '+'}${two(Math.floor(Math.abs(offset) / 60))}:${two(Math.abs(offset) % 60)}`
   return { ...resolved, note: `${typed.time} happens twice that day; it runs at ${laterToo ? 'the first' : 'the second'} (${utc}).` }

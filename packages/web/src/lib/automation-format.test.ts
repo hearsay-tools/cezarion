@@ -65,6 +65,8 @@ describe('onceResolved', () => {
   it.each([
     ['Europe/Warsaw', '2026-10-25T02:30', 'the second', 'UTC+01:00'],
     ['America/New_York', '2026-11-01T01:30', 'the first', 'UTC-04:00'],
+    // Review of #1469: Lord Howe goes back 30 minutes, not an hour.
+    ['Australia/Lord_Howe', '2027-04-04T01:45', 'the second', 'UTC+10:30'],
   ])('a time in a %s overlap names which of the two it runs at', (timeZone, at, which, offset) => {
     expect(onceResolved(once(at, timeZone))).toEqual({
       date: expect.any(String), time: at.slice(11), note: `${at.slice(11)} happens twice that day; it runs at ${which} (${offset}).`,
