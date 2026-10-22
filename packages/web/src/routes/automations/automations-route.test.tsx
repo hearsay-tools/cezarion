@@ -154,3 +154,21 @@ it('an archived one-time schedule opens read-only with its task, inputs, log and
   fireEvent.click(screen.getByRole('button', { name: 'Delete schedule' }))
   await waitFor(() => expect(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/automations/o1'))).toBe(true))
 })
+
+// Review of #1469: a cancelled schedule can keep an earlier failed-launch row. The server refuses
+// a retry of an archived schedule, so its read-only page offers none.
+it('an archived schedule shows its failed-launch rows without Retry task', async () => {
+  const archived = {
+    ...stored, id: 'o1', name: 'Check the rollout', schedule: { type: 'once', at: '2030-01-15T09:00', timeZone: 'Europe/Warsaw' },
+    task: { prompt: 'Check it' }, onceStatus: 'archived',
+    archived: { at: '2030-01-15T10:00:00Z', outcome: 'cancelled' },
+  }
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/automation-log?')) return json({ records: [{ seq: 1, ts: '2030-01-15T08:00:05Z', automationId: 'o1', revision: 2, result: 'failed', reason: 'model gone', receiptId: 'r1' }] })
+    return /\/automations\?archived=include$/.test(url) ? json({ ...listBody, automations: [archived] }) : json({ error: 'not found' }, 404)
+  }))
+  mountAt('/automations/o1', 'edit')
+  expect(await screen.findByText('model gone')).not.toBeNull()
+  expect(screen.queryByRole('button', { name: 'Retry task' })).toBeNull()
+})

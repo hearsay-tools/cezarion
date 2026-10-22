@@ -75,7 +75,7 @@ export function ArchivedAutomation({ automation, timeZone, onDeleted }: { automa
           </dl>
         </section>
         <section className="min-w-0">
-          <InlineLog automationId={automation.id} automationName={automation.name} timeZone={timeZone} />
+          <InlineLog automationId={automation.id} automationName={automation.name} timeZone={timeZone} readOnly />
           <Button variant="outline" asChild className="mt-3"><Link to={`/automations/${automation.id}/log`}>Execution log</Link></Button>
         </section>
         <div className="grid justify-items-start gap-2">
