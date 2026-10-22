@@ -210,15 +210,21 @@ function envNumber(env, name, fallback, min, max) {
   return value >= min && value <= max ? value : fallback;
 }
 
+/** Resolves true only when the app is confirmed gone: dead, or its pid now names another process. */
 async function stopApp(pid, start) {
   // Only a verified identity may be signalled: an unreadable one could be a reused pid.
   const same = () => { const current = identity(pid); return !current.dead && current.start === start; };
+  const gone = () => { const current = identity(pid); return Boolean(current.dead || (current.start && current.start !== start)); };
   // The app can exit and its pid be reused between polls: never signal another process.
-  if (!same()) return;
-  try { process.kill(pid, 'SIGTERM'); } catch { return; }
-  const deadline = performance.now() + STOP_GRACE_MS;
-  while (same() && performance.now() < deadline) await delay(100);
-  if (same()) try { process.kill(pid, 'SIGKILL'); } catch { /* exited meanwhile */ }
+  if (same()) {
+    try { process.kill(pid, 'SIGTERM'); } catch { /* checked below */ }
+    const deadline = performance.now() + STOP_GRACE_MS;
+    while (same() && performance.now() < deadline) await delay(100);
+    if (same()) try { process.kill(pid, 'SIGKILL'); } catch { /* checked below */ }
+    // SIGKILL is asynchronous; give the kernel a moment to reap before the verdict.
+    for (let tries = 0; tries < 20 && same(); tries++) await delay(50);
+  }
+  return gone();
 }
 
 function markStopped(root, pid) {
@@ -278,8 +284,9 @@ async function watchApp(pid, start, root, served, env = process.env) {
       if (reason) {
         try {
           log(`stopping cezar pid ${pid}: ${reason}`);
-          await stopApp(pid, start);
-          markStopped(root, pid);
+          // An app that could not be confirmed gone keeps its descriptor, so down can still stop it.
+          if (await stopApp(pid, start)) markStopped(root, pid);
+          else log(`could not confirm cezar pid ${pid} stopped; left its descriptor for test-env-down.sh`);
         } finally { db.prepare('DELETE FROM holders WHERE id = ?').run(`watcher-${process.pid}`); }
         return;
       }
