@@ -87,6 +87,8 @@ describe('FakeVoiceEngine', () => {
     const sentence = 'tell it: run the tests again';
     const answers = await run(sentence);
     expect(wordLabels(answers, sentence)).toEqual(['command', 'command', 'message', 'message', 'message', 'message']);
+    const instruction = 'tell it to run the tests again'
+    expect(wordLabels(await run(instruction), instruction)).toEqual(['command', 'command', 'command', 'message', 'message', 'message', 'message'])
     const reply = 'reply with go ahead';
     expect(wordLabels(await run(reply), reply)).toEqual(['command', 'command', 'message', 'message']);
   });

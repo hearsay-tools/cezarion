@@ -26,7 +26,7 @@ const ORDINAL_CHOICE = [
   new RegExp(`^(?:option|choice|answer)\\s+(${ORD})$`, 'i'),
 ];
 /** The command words a reply starts with, after any filler; what follows is the reply. */
-const REPLY_PREFIX = /^(?:(?:um+|uh+|so|okay|ok)\b[\s,]*)*(?:answer(?:\s+that)?|tell\s+(?:it|the\s+agent|them)(?:\s+that)?|reply(?:\s+with)?|say(?:\s+that)?|message\s+it)\b[\s:,]*/i;
+const REPLY_PREFIX = /^(?:(?:um+|uh+|so|okay|ok)\b[\s,]*)*(?:answer(?:\s+that)?|tell\s+(?:it|the\s+agent|them)(?:\s+that|\s+to)?|reply(?:\s+with)?|say(?:\s+that)?|message\s+it)\b[\s:,]*/i;
 /** Words that join a reply's parts: "and", "then", a dangling "to"/"for". */
 const CONNECTOR = /^(?:and|then|to|for)[,.]?$/i;
 
