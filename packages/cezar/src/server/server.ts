@@ -3597,6 +3597,8 @@ export function createApp(deps: ServerDeps) {
         timeZone,
       }),
       onChange: (automationId, revision) => emitAutomationChange(project, automationId, revision),
+      // A route's write settles a crash-left reservation first, as the timer does (#1465).
+      reconcile: async () => { reconcileAutomationReceipts(project.automationStore, project.store); },
     };
   };
 

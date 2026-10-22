@@ -842,4 +842,45 @@ describe('ScheduleRunner once (#1465)', () => {
     expect((await runner.fire(definition)).result).toBe('skipped');
     expect(launch).not.toHaveBeenCalled();
   });
+
+  // Review of #1465: a reservation another cockpit left after this one booted. It settles before
+  // any decision: a claiming run archives the schedule, no run leaves it Failed. Never Missed,
+  // never a second task.
+  describe('a crash-left reservation', () => {
+    function crashLeftover(store: AutomationStore, receiptId: string): void {
+      const at = iso(FIRST_RUN);
+      appendFileSync(join(store.dataDir, 'automation-receipts.ndjson'), `${JSON.stringify({ receiptId, receiptKey: KEY, eventId: KEY.slice('nightly:'.length), automationId: 'nightly', revision: 1, status: 'reserved', occurrenceAt: at, observedAt: at, updatedAt: at })}\n`);
+    }
+    async function crashSetup(schedule: ScheduleAutomationDefinition['schedule'] = ONCE) {
+      const base = await setup({ schedule });
+      const runs = RunStore.open(join(base.dir, 'runs'));
+      const runner = new ScheduleRunner({ projectId: 'p', store: base.store, timeZone: 'UTC', launch: base.launch, now: base.clock.now, reconcile: async () => { reconcileAutomationReceipts(base.store, runs); } });
+      base.runner.dueAt(base.definition);
+      return { ...base, runner, runs };
+    }
+
+    it('a claiming run past the latest start archives the schedule as launched, not Missed', async () => {
+      const { store, definition, runner, launch, clock, runs } = await crashSetup({ ...ONCE, latestStartMinutes: 30 });
+      crashLeftover(store, 'claimed');
+      const run = runs.createRun({ title: 't', workflow: 'quick-task', task: 'x', steps: [], automationTrigger: { automationId: 'nightly', automationRevision: 1, receiptId: 'claimed', trigger: 'schedule', occurrenceAt: iso(FIRST_RUN) } });
+      clock.set(FIRST_RUN + 2 * HOUR);
+      expect((await runner.fire(definition)).result).toBe('duplicate');
+      expect(launch).not.toHaveBeenCalled();
+      expect(store.get('nightly')?.archived).toMatchObject({ outcome: 'launched', runId: run.id, receiptId: 'claimed' });
+      expect(store.logs({ automationId: 'nightly', result: 'missed' })).toEqual([]);
+    });
+
+    it('no claiming run: reconciliation leaves the schedule Failed and the next fire launches nothing', async () => {
+      const { store, definition, runner, launch, clock, runs } = await crashSetup();
+      crashLeftover(store, 'lost');
+      expect(reconcileAutomationReceipts(store, runs)).toBe(1);
+      expect(store.get('nightly')?.enabled).toBe(false);
+      expect(store.state('nightly')).toMatchObject({ onceOutcome: 'failed' });
+      expect(store.state('nightly')?.nextRunAt).toBeUndefined();
+      clock.set(FIRST_RUN + 1_000);
+      await runner.fire(definition);
+      expect(launch).not.toHaveBeenCalled();
+      expect(store.latestReceipts().get(KEY)).toMatchObject({ receiptId: 'lost', status: 'launch-error' });
+    });
+  });
 });

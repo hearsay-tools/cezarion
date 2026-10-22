@@ -248,7 +248,9 @@ export class ScheduleRunner {
     if (due === null) return { result: 'skipped' };
     const occurrenceAt = new Date(due).toISOString();
     if (due > now) return { result: 'skipped', occurrenceAt };
-    if (this.healArchive(definition)) return { result: 'duplicate', occurrenceAt };
+    if (await this.settleOnce(definition)) return { result: 'duplicate', occurrenceAt };
+    // Settling may have found a crash-lost launch and left the schedule Failed: no automatic exit.
+    if (this.handle.store.get(definition.id)?.enabled === false) return { result: 'skipped', occurrenceAt };
     const cutoff = onceCutoff(definition.schedule);
     if (cutoff !== null && now > cutoff) {
       const minutes = Math.round((now - due) / 60_000);
@@ -331,25 +333,22 @@ export class ScheduleRunner {
     return { result, runId, occurrenceAt: occurrence.at };
   }
 
-  /**
-   * A `once` that ended without a task: pause the CURRENT revision and record why, in one write.
-   * Already paused, archived or gone: nothing to do (the reason still lands in state).
-   */
   private stopOnce(id: string, outcome: 'failed' | 'missed'): void {
+    stopOnceSchedule(this.handle.store, id, outcome, this.handle.onChange);
+  }
+
+  /**
+   * Settles every unresolved receipt of a `once` before any decision on it: a `reserved` receipt
+   * no launch here is running is a crash leftover, perhaps another cockpit's after this one booted.
+   * Reconciliation turns it into `launched` (a task claims it; the archive then heals) or
+   * `launch-error` (the schedule is Failed). Answers the archived definition, as `healArchive`.
+   */
+  async settleOnce(definition: OnceScheduleDefinition): Promise<AutomationDefinition | undefined> {
     const { store } = this.handle;
-    store.reload();
-    const current = store.get(id);
-    const arm = () => ({ nextRunAt: undefined, onceOutcome: outcome });
-    if (current && !current.archived) {
-      const { revision, createdAt: _c, updatedAt: _u, id: _id, ...editable } = current;
-      try {
-        const stopped = store.update(id, revision, { ...editable, enabled: false }, arm);
-        this.handle.onChange?.(stopped.id, stopped.revision);
-        return;
-      } catch { /* edited meanwhile: record the reason on whatever is current */ }
-    }
-    store.setState(id, (state) => ({ ...state, ...arm() }));
-    this.handle.onChange?.(id, current?.revision ?? 0);
+    const leftover = [...store.latestReceipts().values()]
+      .some((row) => row.automationId === definition.id && row.status === 'reserved' && !store.isReservationInFlight(row.receiptId));
+    if (leftover) await this.handle.reconcile?.();
+    return this.healArchive(definition);
   }
 
   /**
@@ -575,4 +574,30 @@ function reasonFor(occurrence: ScheduleOccurrence, timeZone: string): string {
     case 'late': return `Started late; it was due at ${when}.`;
     case 'retry': return `Retried the ${when} launch.`;
   }
+}
+
+/**
+ * A `once` that ended without a task: pause the CURRENT revision and record why, in one write.
+ * Already paused, archived or gone: nothing to do (the reason still lands in state). Shared with
+ * receipt reconciliation, which settles a crash-lost launch into Failed the same way.
+ */
+export function stopOnceSchedule(
+  store: AutomationStore,
+  id: string,
+  outcome: 'failed' | 'missed',
+  onChange?: (automationId: string, revision: number) => void,
+): void {
+  store.reload();
+  const current = store.get(id);
+  const arm = () => ({ nextRunAt: undefined, onceOutcome: outcome });
+  if (current && !current.archived) {
+    const { revision, createdAt: _c, updatedAt: _u, id: _id, ...editable } = current;
+    try {
+      const stopped = store.update(id, revision, { ...editable, enabled: false }, arm);
+      onChange?.(stopped.id, stopped.revision);
+      return;
+    } catch { /* edited meanwhile: record the reason on whatever is current */ }
+  }
+  store.setState(id, (state) => ({ ...state, ...arm() }));
+  onChange?.(id, current?.revision ?? 0);
 }

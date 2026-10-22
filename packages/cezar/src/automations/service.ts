@@ -206,8 +206,11 @@ export function createAutomationService(deps: AutomationServiceDeps) {
       store.reload();
       const current = store.get(id);
       if (!current) return fail(404, 'not found');
-      const healed = isOnceSchedule(current) ? new ScheduleRunner(deps.scheduleHandle(project)).healArchive(current) : undefined;
-      const fresh = healed ?? current;
+      // Settle first: a crash-left reservation may already have a task (archive, refuse) or none
+      // (Failed). Either way the write below acts on what settling left.
+      if (isOnceSchedule(current)) await new ScheduleRunner(deps.scheduleHandle(project)).settleOnce(current);
+      const fresh = store.get(id);
+      if (!fresh) return fail(404, 'not found');
       if (fresh.archived && !allowArchived) return fail(409, ONCE_ARCHIVED);
       return await write(fresh);
     } finally {

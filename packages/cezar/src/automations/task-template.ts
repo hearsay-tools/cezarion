@@ -4,10 +4,10 @@ import { stepsIssue, type WorkflowDef } from '../workflows/types.ts';
 import type { RunStore } from '../runs/store.ts';
 import type { RunManager, StartRunInput } from '../workflows/run.ts';
 import { AutomationCandidateChangedError, GithubPoller, type GithubCandidate } from './github-poller.ts';
-import type { ScheduleOccurrence } from './schedule-runner.ts';
+import { stopOnceSchedule, type ScheduleOccurrence } from './schedule-runner.ts';
 import type { AutomationStore } from './store.ts';
 import { githubBaselineState } from './github-baseline.ts';
-import { isGithubAutomation } from './types.ts';
+import { isGithubAutomation, isOnceSchedule } from './types.ts';
 import type { AutomationDefinition, GithubAutomationDefinition, ScheduleAutomationDefinition } from './types.ts';
 
 export const GITHUB_PLACEHOLDERS: ReadonlySet<string> = new Set([
@@ -205,6 +205,10 @@ export function reconcileAutomationReceipts(automationStore: AutomationStore, ru
     // "Retry task" keys on a `failed` row carrying the receipt. Best effort, as the brake's row:
     // a busy log lock must not undo a reconciliation that already held.
     if (!runId) {
+      // A one-time schedule whose launch was lost is Failed, which has no automatic exit
+      // (hearsay-tools/cezarion#1465): left enabled, the next timer would relaunch it unasked.
+      const definition = automationStore.get(receipt.automationId);
+      if (definition && isOnceSchedule(definition)) stopOnceSchedule(automationStore, definition.id, 'failed');
       const { candidate } = receipt;
       void automationStore.appendLog({
         automationId: receipt.automationId,
