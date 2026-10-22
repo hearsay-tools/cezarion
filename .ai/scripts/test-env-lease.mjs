@@ -3,8 +3,9 @@
 // Short SQLite transactions make join/release/reclamation atomic, including after SIGKILL.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { closeSync, mkdirSync, openSync, readdirSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, resolve } from 'node:path';
 import { connect, createServer } from 'node:net';
 import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -91,6 +92,31 @@ function groupLive(pgid) {
   return undefined;
 }
 
+// Inside an open write transaction: drop the rows of dead holders, return the live ones.
+function liveHolders(db) {
+  return db.prepare('SELECT * FROM holders').all().filter(holder => {
+    const current = identity(holder.pid);
+    const reused = holder.start && current.start && holder.start !== current.start;
+    const dead = (reused || current.dead) && (!holder.pgid || groupLive(holder.pgid) === false);
+    if (dead) db.prepare('DELETE FROM holders WHERE id = ?').run(holder.id);
+    return !dead;
+  });
+}
+
+function openLeaseDb(root, { create = true } = {}) {
+  const dir = resolve(root, '.ai/qa');
+  // The watcher must never recreate a checkout deleted under it.
+  if (create) mkdirSync(dir, { recursive: true });
+  const db = new DatabaseSync(resolve(dir, 'test-env-lease.sqlite'));
+  try {
+    db.exec('PRAGMA busy_timeout=1000');
+    db.exec('CREATE TABLE IF NOT EXISTS holders (id TEXT PRIMARY KEY, token TEXT NOT NULL, pid INTEGER NOT NULL, start TEXT, pgid INTEGER)');
+    // Rebuildable local state from an earlier development version remains usable.
+    if (!db.prepare('PRAGMA table_info(holders)').all().some(column => column.name === 'pgid')) db.exec('ALTER TABLE holders ADD COLUMN pgid INTEGER');
+    return db;
+  } catch (error) { db.close(); throw error; }
+}
+
 /** A token admits only descendants of a still-live, verified holder. No token means a new run.
  * Each participant gets its OWN row: killing the wrapper cannot unprotect a live Vitest child.
  */
@@ -98,28 +124,16 @@ export async function acquireTestEnvLease(root, { token, pid = process.pid, grou
   if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('invalid test environment lease pid');
   const own = identity(pid);
   if (!own.start) throw new Error(`cannot verify test environment lease identity for pid ${pid}`);
-  const dir = resolve(root, '.ai/qa');
-  mkdirSync(dir, { recursive: true });
-  const db = new DatabaseSync(resolve(dir, 'test-env-lease.sqlite'));
-  db.exec('PRAGMA busy_timeout=1000');
+  const db = openLeaseDb(root);
   const id = randomUUID();
   const deadline = performance.now() + timeoutMs;
   let logged = false;
   try {
-    db.exec('CREATE TABLE IF NOT EXISTS holders (id TEXT PRIMARY KEY, token TEXT NOT NULL, pid INTEGER NOT NULL, start TEXT, pgid INTEGER)');
-    // Rebuildable local state from an earlier development version remains usable.
-    if (!db.prepare('PRAGMA table_info(holders)').all().some(column => column.name === 'pgid')) db.exec('ALTER TABLE holders ADD COLUMN pgid INTEGER');
     while (true) {
       db.exec('BEGIN IMMEDIATE');
       let holders;
       try {
-        holders = db.prepare('SELECT * FROM holders').all().filter(holder => {
-          const current = identity(holder.pid);
-          const reused = holder.start && current.start && holder.start !== current.start;
-          const dead = (reused || current.dead) && (!holder.pgid || groupLive(holder.pgid) === false);
-          if (dead) db.prepare('DELETE FROM holders WHERE id = ?').run(holder.id);
-          return !dead;
-        });
+        holders = liveHolders(db);
         if (token && !holders.some(holder => holder.token === token && holder.start && identity(holder.pid).start === holder.start)) {
           throw new Error('invalid inherited test environment lease: no verified live holder');
         }
@@ -162,8 +176,125 @@ async function detachApp(args, root, effectiveEnv = process.env) {
     const child = spawn(process.execPath, args.slice(1), { cwd: root, detached: true, stdio: ['ignore', fd, fd], env });
     await new Promise((done, fail) => { child.once('spawn', done); child.once('error', fail); });
     child.unref();
+    // The app has no end of its own (#1448): a sibling watcher stops it once nothing uses it.
+    // A failed watcher start leaves the app as before, stoppable by test-env-down.sh.
+    const start = identity(child.pid).start;
+    const repo = args.indexOf('--repo');
+    const served = repo >= 0 && args[repo + 1] ? resolve(root, args[repo + 1]) : root;
+    // Its own log, next to the app's, so the app log holds only the app's output.
+    if (start) {
+      let watchFd;
+      try {
+        watchFd = openSync(resolve(dirname(resolve(root, args[0])), 'test-env-watch.log'), 'a');
+        const watcher = spawn(process.execPath, [import.meta.filename, 'watch-app', String(child.pid), start, root, served], {
+          cwd: tmpdir(), detached: true, stdio: ['ignore', watchFd, watchFd], env, windowsHide: true,
+        });
+        await new Promise(done => { watcher.once('spawn', done); watcher.once('error', done); });
+        watcher.unref();
+      } catch { /* best effort: the caller must still record the app it started */ }
+      finally { if (watchFd !== undefined) closeSync(watchFd); }
+    }
     return child.pid;
   } finally { closeSync(fd); }
+}
+
+const IDLE_DEFAULT_MINUTES = 30;
+const INTERVAL_DEFAULT_SECONDS = 30;
+const STOP_GRACE_MS = 10_000;
+
+// test-env-up.sh refuses a malformed value before boot; a bad value reaching here uses the default.
+function envNumber(env, name, fallback, min, max) {
+  const text = env[name];
+  if (text === undefined || !/^\d+(\.\d+)?$/.test(text)) return fallback;
+  const value = Number(text);
+  return value >= min && value <= max ? value : fallback;
+}
+
+/** Resolves true only when the app is confirmed gone: dead, or its pid now names another process. */
+async function stopApp(pid, start) {
+  // Only a verified identity may be signalled: an unreadable one could be a reused pid.
+  const same = () => { const current = identity(pid); return !current.dead && current.start === start; };
+  const gone = () => { const current = identity(pid); return Boolean(current.dead || (current.start && current.start !== start)); };
+  // The app can exit and its pid be reused between polls: never signal another process.
+  if (same()) {
+    try { process.kill(pid, 'SIGTERM'); } catch { /* checked below */ }
+    const deadline = performance.now() + STOP_GRACE_MS;
+    while (same() && performance.now() < deadline) await delay(100);
+    if (same()) try { process.kill(pid, 'SIGKILL'); } catch { /* checked below */ }
+    // SIGKILL is asynchronous; give the kernel a moment to reap before the verdict.
+    for (let tries = 0; tries < 20 && same(); tries++) await delay(50);
+  }
+  return gone();
+}
+
+function markStopped(root, pid) {
+  const file = resolve(root, '.ai/qa/test-env.json');
+  try {
+    const descriptor = JSON.parse(readFileSync(file, 'utf8'));
+    // A later boot owns a descriptor naming another app; leave it alone.
+    if (descriptor?.app?.pid !== pid) return;
+    descriptor.status = 'stopped';
+    // The pid is free for reuse now: teardown_stale and test-env-down.sh must not signal it.
+    delete descriptor.app.pid;
+    writeFileSync(file, JSON.stringify(descriptor, null, 2) + '\n');
+  } catch { /* absent or corrupt: test-env-up.sh treats it as stale */ }
+}
+
+/** Stop the detached app when its checkout is deleted, or when no lease holder has existed for
+ * the idle period (TEST_ENV_IDLE_EXIT_MINUTES, 0 = never). Exit when the app exits on its own. */
+async function watchApp(pid, start, root, served, env = process.env) {
+  const idleMs = envNumber(env, 'TEST_ENV_IDLE_EXIT_MINUTES', IDLE_DEFAULT_MINUTES, 0, Infinity) * 60_000;
+  // Node turns a timer delay outside its range into 1 ms, a busy loop: keep it inside 0.1–3600 s.
+  const intervalMs = envNumber(env, 'TEST_ENV_WATCH_INTERVAL_SECONDS', INTERVAL_DEFAULT_SECONDS, 0.1, 3600) * 1000;
+  const log = message => console.log(`[test-env] watcher ${message}`);
+  log(`${process.pid} watching cezar pid ${pid}`);
+  let lastBusy = performance.now();
+  while (true) {
+    await delay(intervalMs);
+    const current = identity(pid);
+    if (current.dead || (current.start && current.start !== start)) return;
+    if (!existsSync(root)) {
+      // The lease database was inside the checkout: no holder can remain.
+      log(`stopping cezar pid ${pid}: checkout deleted`);
+      await stopApp(pid, start);
+      return;
+    }
+    if (!existsSync(resolve(root, '.ai/qa'))) {
+      // Its descriptor went with it, so no run can reuse this app.
+      log(`stopping cezar pid ${pid}: test-env state deleted`);
+      await stopApp(pid, start);
+      return;
+    }
+    let db;
+    try {
+      db = openLeaseDb(root, { create: false });
+      db.exec('BEGIN IMMEDIATE');
+      let reason;
+      try {
+        if (liveHolders(db).length > 0) lastBusy = performance.now();
+        else if (!existsSync(served)) reason = 'served project deleted';
+        else if (idleMs > 0 && performance.now() - lastBusy >= idleMs) reason = `idle ${idleMs / 60_000} minutes`;
+        // Claim the environment in the same transaction that saw no holder: a run that starts
+        // now waits for this row, then cold-boots, instead of attaching to a stopping app.
+        const own = reason && identity(process.pid).start;
+        if (own) db.prepare('INSERT INTO holders (id, token, pid, start, pgid) VALUES (?, ?, ?, ?, NULL)').run(`watcher-${process.pid}`, randomUUID(), process.pid, own);
+        else reason = undefined;
+        db.exec('COMMIT');
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
+      if (reason) {
+        try {
+          log(`stopping cezar pid ${pid}: ${reason}`);
+          // An app that could not be confirmed gone keeps its descriptor, so down can still stop it.
+          if (await stopApp(pid, start)) markStopped(root, pid);
+          else log(`could not confirm cezar pid ${pid} stopped; left its descriptor for test-env-down.sh`);
+        } finally { db.prepare('DELETE FROM holders WHERE id = ?').run(`watcher-${process.pid}`); }
+        return;
+      }
+    } catch (error) {
+      // A busy database, or state deleted mid-poll, is retried at the next poll.
+      if (existsSync(resolve(root, '.ai/qa'))) log(`poll failed: ${error.message}`);
+    } finally { db?.close(); }
+  }
 }
 async function cachedAppBroker(root, token) {
   const pipe = `\\\\.\\pipe\\cez-test-env-${randomUUID()}`;
@@ -227,6 +358,12 @@ async function main(args) {
       ? await requestCachedApp(args.slice(1)) : await detachApp(args.slice(1), root));
     return;
   }
+  if (args[0] === 'watch-app') {
+    const pid = Number(args[1]);
+    if (!Number.isSafeInteger(pid) || pid <= 1 || !args[2] || !args[3] || !args[4]) throw new Error('usage: test-env-lease.mjs watch-app <pid> <start> <root> <served>');
+    await watchApp(pid, args[2], args[3], args[4]);
+    return;
+  }
   if (args[0] === 'join') {
     // The shell itself must be recorded, not this short-lived registration process. The
     // supervising `run` owns its lifetime; an abruptly orphaned shell stays protected too.
@@ -234,7 +371,7 @@ async function main(args) {
     if (!process.env.TEST_ENV_LEASE_TOKEN) { lease.release(); throw new Error('missing inherited test environment lease'); }
     return;
   }
-  if (args[0] !== 'run' || args[1] !== 'sh' || !args[2]) throw new Error('usage: test-env-lease.mjs run sh <script> [args] | join <pid>');
+  if (args[0] !== 'run' || args[1] !== 'sh' || !args[2]) throw new Error('usage: test-env-lease.mjs run sh <script> [args] | join <pid> | watch-app <pid> <start> <root> <served>');
   const job = process.platform === 'win32' ? `Local\\CezTestEnv-${randomUUID()}` : undefined;
   const lease = await acquireTestEnvLease(root, {
     group: job,

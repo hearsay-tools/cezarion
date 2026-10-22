@@ -73,6 +73,16 @@ if ! node -e 'const s=process.argv[1]; process.exit(/^[1-9][0-9]*$/.test(s) && N
   echo "TEST_ENV_HEALTH_TIMEOUT_SECONDS must be a positive integer number of seconds" >&2
   exit 2
 fi
+# The detached app's watcher (test-env-lease.mjs watch-app) reads both; refuse a bad value here,
+# before anything boots (#1448); unset or empty uses the default. 0 minutes turns the idle exit off; a deleted checkout still stops it.
+if ! node -e 'const s=process.argv[1]; process.exit(s === "" || /^\d+(\.\d+)?$/.test(s) ? 0 : 1)' -- "${TEST_ENV_IDLE_EXIT_MINUTES:-}"; then
+  echo "TEST_ENV_IDLE_EXIT_MINUTES must be a non-negative number of minutes (default 30; 0 turns the idle exit off)" >&2
+  exit 2
+fi
+if ! node -e 'const s=process.argv[1]; process.exit(s === "" || (/^\d+(\.\d+)?$/.test(s) && Number(s) >= 0.1 && Number(s) <= 3600) ? 0 : 1)' -- "${TEST_ENV_WATCH_INTERVAL_SECONDS:-}"; then
+  echo "TEST_ENV_WATCH_INTERVAL_SECONDS must be a number of seconds from 0.1 to 3600 (default 30)" >&2
+  exit 2
+fi
 TEST_ENV_CACHE_TTL_SECONDS=${TEST_ENV_CACHE_TTL_SECONDS:-600}
 
 # The preparation chain: install workspace links/dependencies, then build-e2e.sh — server
@@ -144,6 +154,8 @@ set +f
 # Recorded as "none" rather than empty, so a descriptor written before the key existed (and
 # possibly booted with ambient opt-ins) never matches and is cold-booted once.
 SERVER_ENV_KEY=${SERVER_ENV:-none}
+# The watcher reads its policy once, at boot: a reuse under another policy would keep the old one.
+WATCH_KEY="idle=${TEST_ENV_IDLE_EXIT_MINUTES:-30} interval=${TEST_ENV_WATCH_INTERVAL_SECONDS:-30}"
 
 # ---- generic contract logic -------------------------------------------------
 
@@ -255,6 +267,7 @@ try_reuse() {
   url=$(json_get "$ENV_DESCRIPTOR" baseUrl)
   started=$(json_get "$ENV_DESCRIPTOR" startedAt)
   [ "$(json_get "$ENV_DESCRIPTOR" environment.serverEnv)" = "$SERVER_ENV_KEY" ] || { log "not reusing: the requested --server-env set changed (now: $SERVER_ENV_KEY)"; return 1; }
+  [ "$(json_get "$ENV_DESCRIPTOR" environment.watch)" = "$WATCH_KEY" ] || { log "not reusing: the watcher settings changed (now: $WATCH_KEY)"; return 1; }
   [ "$(json_get "$ENV_DESCRIPTOR" servedRoot)" = "$SERVED_ROOT" ] && [ -d "$SERVED_ROOT" ] || { log "not reusing: the served project is not $SERVED_ROOT"; return 1; }
   { [ -n "$pid" ] && [ -n "$url" ]; } || { log "not reusing: descriptor has no app pid or base URL"; return 1; }
   # A state file is a claim, not proof: the PID must still be alive…
@@ -624,7 +637,7 @@ write_descriptor() {
   [ "${CEZ_SINGLE_PROJECT:-}" = 1 ] && SINGLE_PROJECT=true
   node -e '
     const fs = require("fs");
-    const [out, baseUrl, port, pid, cmd, bInstalled, bCmd, bVer, bNotes, desc, singleProject, platform, launchPath, servedRoot, serverEnv] = process.argv.slice(1);
+    const [out, baseUrl, port, pid, cmd, bInstalled, bCmd, bVer, bNotes, desc, singleProject, platform, launchPath, servedRoot, serverEnv, watch] = process.argv.slice(1);
     let launch = {};
     try { launch = JSON.parse(fs.readFileSync(launchPath, "utf8")); } catch { /* resolver absent */ }
     const browser = {
@@ -651,7 +664,7 @@ write_descriptor() {
       app: { startCommand: cmd, port: Number(port), healthPath: "/api/v1/health", pid: Number(pid) },
       services: [],
       credentials: [],
-      environment: { singleProject: singleProject === "true", serverEnv },
+      environment: { singleProject: singleProject === "true", serverEnv, watch },
       browser,
       testRunner: { name: "other", config: "packages/web/e2e/vitest.config.ts" },
       platform,
@@ -662,7 +675,7 @@ write_descriptor() {
     "${SERVER_ENV:+$SERVER_ENV }CEZ_DRY_RUN=1 CEZ_HOME=.ai/qa/cez-home node $E2E_BUILD_ROOT/dist/index.js --port $PORT --no-open --repo $SERVED_ROOT" \
     "$BROWSER_INSTALLED" "$BROWSER_COMMAND" "$BROWSER_VERSION" "$BROWSER_NOTES" "$BROWSER_DESCRIPTOR" \
     "$SINGLE_PROJECT" "$(uname -s 2>/dev/null | grep -qi Linux && { grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null && echo wsl2 || echo linux; } || echo darwin)" \
-    "$BROWSER_LAUNCH_JSON" "$SERVED_ROOT" "$SERVER_ENV_KEY"
+    "$BROWSER_LAUNCH_JSON" "$SERVED_ROOT" "$SERVER_ENV_KEY" "$WATCH_KEY"
 }
 
 # ---- main -------------------------------------------------------------------
