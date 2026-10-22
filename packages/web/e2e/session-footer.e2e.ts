@@ -144,12 +144,12 @@ it('scrolls a keyboard-focused transcript control above the desktop footer', () 
   const target = '[data-slot="tool-card"][data-kind="execute"] > button'
   browser.waitForFunction(`document.querySelector('${target}') !== null`)
   browser.evaluate(`document.querySelector('[data-slot="main"]').dispatchEvent(new WheelEvent('wheel', { deltaY: -1800, bubbles: true }))`)
-  browser.waitForFunction(`(() => {
+  browser.waitForValue(`(() => {
     const button = document.querySelector('${target}');
     const rendered = button.checkVisibility({ contentVisibilityAuto: true });
     button.scrollIntoView({ block: 'center' });
     return rendered;
-  })()`)
+  })()`, rendered => rendered === true)
   browser.evaluate(`(() => {
     const main = document.querySelector('[data-slot="main"]');
     const button = document.querySelector('${target}');
