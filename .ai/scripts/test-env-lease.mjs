@@ -210,6 +210,8 @@ function envNumber(env, name, fallback, allowZero) {
 
 async function stopApp(pid, start) {
   const same = () => { const current = identity(pid); return !current.dead && (!current.start || current.start === start); };
+  // The app can exit and its pid be reused between polls: never signal another process.
+  if (!same()) return;
   try { process.kill(pid, 'SIGTERM'); } catch { return; }
   const deadline = performance.now() + STOP_GRACE_MS;
   while (same() && performance.now() < deadline) await delay(100);
