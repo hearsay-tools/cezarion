@@ -61,11 +61,23 @@ export type VoicePosition = z.infer<typeof voicePositionSchema>;
 
 export const voiceSidebarViewSchema = z.enum(['active', 'automations']);
 
+/** The kind of page the user is on when they speak (hearsay-tools/cezarion#1463). */
+export const VOICE_VIEWS = ['task', 'compare', 'new-task', 'github', 'git', 'automations', 'inbox', 'settings', 'other'] as const;
+export const voiceViewSchema = z.enum(VOICE_VIEWS);
+export type VoiceView = z.infer<typeof voiceViewSchema>;
+
 export const voiceDecideRequestSchema = z
   .object({
     text: z.string().trim().min(1).max(VOICE_TEXT_MAX),
     sidebarView: voiceSidebarViewSchema,
     openRunId: runIdParamSchema.shape.id.optional(),
+    view: voiceViewSchema.optional(),
+    /**
+     * The question card the palette shows for `openRunId`: its request id, `null` when it shows none,
+     * absent when it does not know yet (the thread is still loading). A reply decided against another
+     * card than the server's pending one is stale.
+     */
+    askRequestId: z.string().min(1).max(200).nullable().optional(),
     proposal: z
       .object({
         decisionId: z.uuid(),
@@ -124,7 +136,7 @@ export const voiceDecisionSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('none'),
     decisionId,
-    reason: z.enum(['not-a-command', 'no-open-task', 'no-open-question', 'unclear']),
+    reason: z.enum(['not-a-command', 'no-open-task', 'no-open-question', 'unclear', 'ambiguous', 'stale-context', 'unsupported']),
   }),
 ]);
 export type VoiceDecision = z.infer<typeof voiceDecisionSchema>;
