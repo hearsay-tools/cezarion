@@ -113,9 +113,10 @@ type Card = NonNullable<VoiceEngineState['card']>;
 /** What a word may belong to: routing first, then each card question, then the message. */
 function wordTargets(card: Card | undefined): Record<string, string> {
   const targets: Record<string, string> = { [COMMAND_LABEL]: COMMAND_WORDS };
+  // Number and header only: every word question repeats these targets, and `card` already carries
+  // each question's text and options once (hearsay-tools/cezarion#1464 review).
   card?.forEach((entry, i) => {
-    const options = entry.options?.length ? ` Options: ${entry.options.map((o) => o.label).join(', ')}.` : '';
-    targets[questionLabel(i)] = `Part of the answer to question ${entry.number} of \`card\` ("${entry.header}": ${entry.question}${options})`;
+    targets[questionLabel(i)] = `Part of the answer to question ${entry.number} of \`card\` ("${entry.header}").`;
   });
   // With a card shown, a request for the agent that answers none of its questions ("ask me another
   // question") is still a reply: the card offers a reply below it (hearsay-tools/cezarion#1463).

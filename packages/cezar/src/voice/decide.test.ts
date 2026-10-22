@@ -452,7 +452,8 @@ describe('buildVoiceQuestions', () => {
     const q = buildVoiceQuestions(state, words);
     expect(Object.keys(options(q, 'w0'))).toEqual(['routing', 'q1', 'message']);
     expect(options(q, 'w0').message).toMatch(/answers no question/);
-    expect(options(q, 'w0').q1).toContain('"Library": Which? Options: Vitest, Node test.');
+    // Every word question repeats its targets, so they name the question without its text or options.
+    expect(options(q, 'w0').q1).toBe('Part of the answer to question 1 of `card` ("Library").');
     expect(q.w1!.instructions).toContain('W02 ("previous")');
     expect(Object.keys(options(buildVoiceQuestions({ ...state, card: undefined }, words), 'w0'))).toEqual(['routing', 'message']);
   });
