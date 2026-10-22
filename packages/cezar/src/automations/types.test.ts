@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   automationDefinitionSchema,
   isGithubAutomation,
+  isOnceSchedule,
   isScheduleAutomation,
   automationDefinitionsFileSchema,
   automationRuntimeStateSchema,
@@ -101,5 +102,37 @@ describe('automation schemas', () => {
     const schedule = automationDefinitionSchema.safeParse({ ...base, kind: 'schedule' });
     expect(schedule.success).toBe(false);
     expect(!schedule.success && schedule.error.issues.map((issue) => issue.path)).toContainEqual(['schedule']);
+  });
+});
+
+describe('one-time schedules', () => {
+  const once = {
+    ...definition,
+    kind: 'schedule',
+    events: undefined,
+    intervalSeconds: undefined,
+    filters: undefined,
+    schedule: { type: 'once', at: '2026-10-29T09:00', timeZone: 'Europe/Warsaw', latestStartMinutes: 60 },
+  };
+
+  it('round-trips an archived once definition and narrows it', () => {
+    const archived = { at: '2026-10-29T08:00:05.000Z', outcome: 'launched', runId: 'r1', receiptId: 'x', trigger: 'schedule' };
+    const parsed = automationDefinitionSchema.parse({ ...once, archived });
+    expect(parsed.archived).toEqual(archived);
+    expect(isOnceSchedule(parsed)).toBe(true);
+    expect(isScheduleAutomation(parsed)).toBe(true);
+  });
+
+  it('does not narrow a recurring schedule as once', () => {
+    const parsed = automationDefinitionSchema.parse({ ...once, schedule: { type: 'daily', hour: 4 } });
+    expect(isOnceSchedule(parsed)).toBe(false);
+  });
+
+  it('refuses a once schedule without a zone', () => {
+    expect(automationDefinitionSchema.safeParse({ ...once, schedule: { type: 'once', at: '2026-10-29T09:00' } }).success).toBe(false);
+  });
+
+  it('keeps onceOutcome in runtime state', () => {
+    expect(automationRuntimeStateSchema.parse({ onceOutcome: 'missed' }).onceOutcome).toBe('missed');
   });
 });

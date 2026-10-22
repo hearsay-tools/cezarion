@@ -68,7 +68,7 @@ Top-level keys:
 - "events" (GitHub poll, required): 1-4 of pull_request.opened, issue.opened, issue.labeled, issue.unlabeled.
 - "intervalSeconds" (GitHub poll): how often GitHub is polled, 60-86400 seconds; default 300.
 - "filters" (GitHub poll): may be {}; every key is optional, and a candidate must pass ALL the given filters.
-- "schedule" (schedule, required): "type" is "daily" or "weekdays" (Mon-Fri) at "hour" and "minute"; "weekly" adds "day" (1 = Monday ... 7 = Sunday); "hours" uses "every" (1 | 2 | 3 | 4 | 6 | 8 | 12) from 00:00. Schedules run in the cockpit's own time zone.
+- "schedule" (schedule, required): "type" is "daily" or "weekdays" (Mon-Fri) at "hour" and "minute"; "weekly" adds "day" (1 = Monday ... 7 = Sunday); "hours" uses "every" (1 | 2 | 3 | 4 | 6 | 8 | 12) from 00:00. These repeating shapes run in the cockpit's own time zone. "once" runs a single time: "at" is the local wall time "YYYY-MM-DDTHH:MM" in "timeZone" (an IANA name such as Europe/Warsaw, required), and the optional "latestStartMinutes" (10-43200) is how late after "at" a start may still launch when Cezarion was not running; without it a late start always launches. Once its task exists, a one-time schedule is archived and never fires again.
 - "task": the ordinary task each match or occurrence launches.
 
 "filters" keys:

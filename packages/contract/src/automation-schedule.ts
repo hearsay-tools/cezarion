@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isoWeekday, zonedParts, zonedWallTimeToUtc } from './zoned-time.ts';
+import { isValidTimeZone, isoWeekday, zonedParts, zonedWallTimeToUtc } from './zoned-time.ts';
 
 /**
  * A scheduled automation's trigger (spec `.ai/specs/2026-10-02-scheduled-automations.md`, issue
@@ -7,12 +7,16 @@ import { isoWeekday, zonedParts, zonedWallTimeToUtc } from './zoned-time.ts';
  * by the server's schedule runner and the cockpit's editor preview — one implementation, so what
  * the editor previews is what the timer fires.
  *
- * Four bounded shapes rather than cron: every day at HH:MM, weekdays at HH:MM, one weekday at
- * HH:MM, every N hours from midnight. A cron string is DERIVED for display (`cronOf` /
+ * Four bounded repeating shapes rather than cron: every day at HH:MM, weekdays at HH:MM, one
+ * weekday at HH:MM, every N hours from midnight. A cron string is DERIVED for display (`cronOf` /
  * `parseCron`), never stored and never evaluated — the shapes are what the math runs.
+ *
+ * The fifth shape, `once` (hearsay-tools/cezarion#1465), fires a single time: `at` is a wall
+ * time in its OWN `timeZone`, never the server's, and `latestStartMinutes` bounds how late a
+ * start after downtime may be. It has no cron form.
  */
 
-export const SCHEDULE_TYPES = ['daily', 'weekdays', 'weekly', 'hours'] as const;
+export const SCHEDULE_TYPES = ['daily', 'weekdays', 'weekly', 'hours', 'once'] as const;
 export type ScheduleType = (typeof SCHEDULE_TYPES)[number];
 
 /** The `every` choices for the `hours` shape — the ones that divide a day evenly. */
@@ -21,6 +25,17 @@ export type ScheduleEvery = (typeof SCHEDULE_HOURS_OPTIONS)[number];
 
 export const WEEKDAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 const WEEKDAY_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] as const;
+
+/** The shortest late-start window: the runner's grace window, so jitter never misses a once. */
+export const ONCE_MIN_LATEST_START_MINUTES = 10;
+export const ONCE_MAX_LATEST_START_MINUTES = 43_200;
+const ONCE_AT_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+const REPEATING_KEYS = ['hour', 'minute', 'day', 'every'] as const;
+const ONCE_KEYS = ['at', 'timeZone', 'latestStartMinutes'] as const;
+
+export function unknownTimeZoneMessage(zone: string): string {
+  return `unknown time zone "${zone}"; use an IANA name such as Europe/Warsaw`;
+}
 
 export const automationScheduleSchema = z.object({
   type: z.enum(SCHEDULE_TYPES),
@@ -34,6 +49,23 @@ export const automationScheduleSchema = z.object({
   every: z.union([
     z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(6), z.literal(8), z.literal(12),
   ]).optional(),
+  /** `once`: the local wall time `YYYY-MM-DDTHH:MM` in `timeZone`. */
+  at: z.string().regex(ONCE_AT_PATTERN, 'at must be YYYY-MM-DDTHH:MM').optional(),
+  /** `once`: the IANA zone `at` is read in. Required there, refused on the repeating shapes. */
+  timeZone: z.string().optional(),
+  /** `once`: how late after `at` a start may still launch. Absent = no limit. */
+  latestStartMinutes: z.number().int().min(ONCE_MIN_LATEST_START_MINUTES).max(ONCE_MAX_LATEST_START_MINUTES).optional(),
+}).superRefine((schedule, ctx) => {
+  const present = (key: string) => (schedule as Record<string, unknown>)[key] !== undefined;
+  const refuse = (key: string, message: string) => ctx.addIssue({ code: 'custom', path: [key], message });
+  if (schedule.type !== 'once') {
+    for (const key of ONCE_KEYS) if (present(key)) refuse(key, `${key} applies only to a once schedule`);
+    return;
+  }
+  for (const key of REPEATING_KEYS) if (present(key)) refuse(key, `${key} does not apply to a once schedule`);
+  if (schedule.at === undefined) refuse('at', 'a once schedule needs at (YYYY-MM-DDTHH:MM)');
+  if (schedule.timeZone === undefined) refuse('timeZone', 'a once schedule needs a timeZone');
+  else if (!isValidTimeZone(schedule.timeZone)) refuse('timeZone', unknownTimeZoneMessage(schedule.timeZone));
 });
 export type AutomationSchedule = z.infer<typeof automationScheduleSchema>;
 
@@ -44,6 +76,9 @@ export interface NormalizedSchedule {
   minute: number;
   day: number;
   every: ScheduleEvery;
+  at?: string;
+  timeZone?: string;
+  latestStartMinutes?: number;
 }
 
 export function normalizeSchedule(schedule: AutomationSchedule): NormalizedSchedule {
@@ -53,7 +88,35 @@ export function normalizeSchedule(schedule: AutomationSchedule): NormalizedSched
     minute: schedule.minute ?? 0,
     day: schedule.day ?? 1,
     every: schedule.every ?? 6,
+    ...(schedule.at !== undefined ? { at: schedule.at } : {}),
+    ...(schedule.timeZone !== undefined ? { timeZone: schedule.timeZone } : {}),
+    ...(schedule.latestStartMinutes !== undefined ? { latestStartMinutes: schedule.latestStartMinutes } : {}),
   };
+}
+
+/** A `once` schedule's instant (UTC ms), read in its own zone; `null` for other shapes or a bad zone. */
+export function onceInstant(schedule: AutomationSchedule): number | null {
+  if (schedule.type !== 'once' || !schedule.at || !schedule.timeZone) return null;
+  const parts = onceWallParts(schedule.at);
+  return parts && zonedWallTimeToUtc(parts.year, parts.month, parts.day, parts.hour, parts.minute, schedule.timeZone);
+}
+
+/** `at`'s calendar fields, or `null` when it is not `YYYY-MM-DDTHH:MM`. */
+export function onceWallParts(at: string): { year: number; month: number; day: number; hour: number; minute: number } | null {
+  const match = ONCE_AT_PATTERN.exec(at);
+  if (!match) return null;
+  const [year, month, day, hour, minute] = match.slice(1).map(Number) as [number, number, number, number, number];
+  return { year, month, day, hour, minute };
+}
+
+/**
+ * The last instant a `once` may still start: `latestStartMinutes` after it, never less than the
+ * runner's 10-minute grace window. `null` when there is no limit (or no instant).
+ */
+export function onceCutoff(schedule: AutomationSchedule): number | null {
+  const instant = onceInstant(schedule);
+  if (instant === null || schedule.latestStartMinutes === undefined) return null;
+  return instant + Math.max(schedule.latestStartMinutes, ONCE_MIN_LATEST_START_MINUTES) * 60_000;
 }
 
 const pad = (n: number): string => String(n).padStart(2, '0');
@@ -63,10 +126,12 @@ export function hm(hour: number, minute = 0): string {
   return `${pad(hour)}:${pad(minute)}`;
 }
 
-/** The trigger cell's text: `every day at 04:00`, `weekdays at 07:30`, `every 6 hours`, `Tuesdays at 02:00`. */
+/** The trigger cell's text: `every day at 04:00`, `weekdays at 07:30`, `every 6 hours`, `Tuesdays at 02:00`,
+ *  `once on Thu 29 Oct 2026 at 09:00 (Europe/Warsaw)`. */
 export function scheduleLabel(schedule: AutomationSchedule): string {
   const s = normalizeSchedule(schedule);
   switch (s.type) {
+    case 'once': return onceLabel(s);
     case 'daily': return `every day at ${hm(s.hour, s.minute)}`;
     case 'weekdays': return `weekdays at ${hm(s.hour, s.minute)}`;
     case 'hours': return s.every === 1 ? 'every hour' : `every ${s.every} hours`;
@@ -74,10 +139,22 @@ export function scheduleLabel(schedule: AutomationSchedule): string {
   }
 }
 
-/** The derived five-field cron string (cron's Sunday is 0). */
+function onceLabel(s: NormalizedSchedule): string {
+  const parts = s.at ? onceWallParts(s.at) : null;
+  if (!parts) return 'once';
+  const { year, month, day, hour, minute } = parts;
+  const weekday = WEEKDAY_NAMES[isoWeekday(year, month, day) - 1];
+  const monthName = MONTH_NAMES[month - 1];
+  return `once on ${weekday} ${day} ${monthName} ${year} at ${hm(hour, minute)} (${s.timeZone ?? 'UTC'})`;
+}
+
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+
+/** The derived five-field cron string (cron's Sunday is 0). A `once` has none: cron has no year. */
 export function cronOf(schedule: AutomationSchedule): string {
   const s = normalizeSchedule(schedule);
   switch (s.type) {
+    case 'once': throw new Error('a once schedule has no cron form');
     case 'daily': return `${s.minute} ${s.hour} * * *`;
     case 'weekdays': return `${s.minute} ${s.hour} * * 1-5`;
     case 'hours': return `0 */${s.every} * * *`;
@@ -117,9 +194,10 @@ export function parseCron(expression: string): AutomationSchedule | null {
   return null;
 }
 
-/** The wall times (hour, minute) a shape fires at on one calendar day, given that day's weekday. */
+/** The wall times (hour, minute) a repeating shape fires at on one calendar day, given that day's weekday. */
 function wallTimesOn(s: NormalizedSchedule, weekday: number): Array<[number, number]> {
   switch (s.type) {
+    case 'once': return [];
     case 'daily': return [[s.hour, s.minute]];
     case 'weekdays': return weekday <= 5 ? [[s.hour, s.minute]] : [];
     case 'weekly': return weekday === s.day ? [[s.hour, s.minute]] : [];
@@ -136,6 +214,9 @@ function wallTimesOn(s: NormalizedSchedule, weekday: number): Array<[number, num
  * `limit` so a caller asking for a year of hourly runs gets the first `limit`, not a stall.
  * Each (day, wall time) yields at most one instant, and no instant is yielded twice, which is
  * what makes a DST fall-back hour fire once and a spring-forward gap fire once.
+ *
+ * A `once` yields its single instant when it lies in the range, read in its own zone: `timeZone`
+ * is ignored for it.
  */
 export function occurrencesBetween(
   schedule: AutomationSchedule,
@@ -144,6 +225,10 @@ export function occurrencesBetween(
   timeZone: string,
   limit = 1_000,
 ): number[] {
+  if (schedule.type === 'once') {
+    const at = onceInstant(schedule);
+    return at !== null && at >= fromMs && at < toMs && limit > 0 ? [at] : [];
+  }
   const s = normalizeSchedule(schedule);
   const start = zonedParts(fromMs, timeZone);
   if (!start || toMs <= fromMs) return [];
@@ -173,6 +258,10 @@ export function occurrencesBetween(
 
 /** The first instant strictly after `afterMs`, or `null` for an unknown zone. */
 export function nextOccurrence(schedule: AutomationSchedule, afterMs: number, timeZone: string): number | null {
+  if (schedule.type === 'once') {
+    const at = onceInstant(schedule);
+    return at !== null && at > afterMs ? at : null;
+  }
   // Every shape recurs within 7 days; 9 covers a weekly at the far end of a DST week.
   const [first] = occurrencesBetween(schedule, afterMs + 1, afterMs + 9 * 86_400_000, timeZone, 1);
   return first ?? null;

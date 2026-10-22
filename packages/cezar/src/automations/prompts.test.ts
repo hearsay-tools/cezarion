@@ -19,7 +19,8 @@ const objectKeys = (schema: unknown): string[] => {
   return Object.keys(current.shape ?? {});
 };
 
-const SERVER_OWNED = new Set(['id', 'revision', 'enabled', 'createdAt', 'updatedAt']);
+// `archived` is written by the server when a one-time schedule's task exists or it is cancelled.
+const SERVER_OWNED = new Set(['id', 'revision', 'enabled', 'createdAt', 'updatedAt', 'archived']);
 
 describe('AUTOMATION_SCHEMA_REFERENCE', () => {
   it('names every definition key a caller may send', () => {

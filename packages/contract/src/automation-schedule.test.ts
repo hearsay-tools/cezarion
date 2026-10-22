@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  automationScheduleSchema,
   cronOf,
   nextOccurrence,
   normalizeSchedule,
   occurrencesBetween,
+  onceCutoff,
+  onceInstant,
   parseCron,
   scheduleLabel,
   type AutomationSchedule,
@@ -101,5 +104,63 @@ describe('nextOccurrence', () => {
 
   it('answers null for an unknown zone', () => {
     expect(nextOccurrence({ type: 'daily' }, 0, 'Nowhere/Land')).toBeNull();
+  });
+});
+
+describe('once', () => {
+  const once = { type: 'once', at: '2026-10-29T09:00', timeZone: 'Europe/Warsaw' } as const;
+
+  it('resolves its instant in its own zone', () => {
+    expect(new Date(onceInstant(once)!).toISOString()).toBe('2026-10-29T08:00:00.000Z');
+  });
+
+  it('yields its single occurrence regardless of the caller zone', () => {
+    const at = onceInstant(once)!;
+    expect(occurrencesBetween(once, at - 1, at + 1, 'UTC')).toEqual([at]);
+    expect(occurrencesBetween(once, at + 1, at + 86_400_000, 'UTC')).toEqual([]);
+    expect(nextOccurrence(once, at - 60_000, 'UTC')).toBe(at);
+    expect(nextOccurrence(once, at, 'UTC')).toBeNull();
+  });
+
+  it('labels', () => {
+    expect(scheduleLabel(once)).toBe('once on Thu 29 Oct 2026 at 09:00 (Europe/Warsaw)');
+  });
+
+  it('floors the cutoff at the grace window', () => {
+    expect(onceCutoff({ ...once, latestStartMinutes: 10 })! - onceInstant(once)!).toBe(600_000);
+    expect(onceCutoff({ ...once, latestStartMinutes: 360 })! - onceInstant(once)!).toBe(21_600_000);
+    expect(onceCutoff(once)).toBeNull();
+  });
+
+  it('resolves a spring-forward wall time to one instant', () => {
+    expect(onceInstant({ type: 'once', at: '2026-03-29T02:30', timeZone: 'Europe/Warsaw' })).not.toBeNull();
+  });
+
+  it('answers null for a recurring shape', () => {
+    expect(onceInstant({ type: 'daily', hour: 4 })).toBeNull();
+  });
+
+  it.each([
+    [{ type: 'once', at: '2026-10-29T09:00' }, 'timeZone'],
+    [{ type: 'once', timeZone: 'UTC' }, 'at'],
+    [{ type: 'once', at: '2026-10-29 09:00', timeZone: 'UTC' }, 'at'],
+    [{ type: 'once', at: '2026-10-29T09:00', timeZone: 'Mars/Base' }, 'unknown time zone \\"Mars/Base\\"; use an IANA name such as Europe/Warsaw'],
+    [{ type: 'once', at: '2026-10-29T09:00', timeZone: 'UTC', latestStartMinutes: 5 }, 'latestStartMinutes'],
+    [{ type: 'once', at: '2026-10-29T09:00', timeZone: 'UTC', latestStartMinutes: 43_201 }, 'latestStartMinutes'],
+    [{ type: 'daily', timeZone: 'UTC' }, 'timeZone'],
+    [{ type: 'daily', at: '2026-10-29T09:00' }, 'at'],
+    [{ type: 'once', at: '2026-10-29T09:00', timeZone: 'UTC', hour: 4 }, 'hour'],
+  ])('refuses %j', (input, needle) => {
+    const result = automationScheduleSchema.safeParse(input);
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues)).toContain(needle);
+  });
+
+  it('accepts a full once shape', () => {
+    expect(automationScheduleSchema.safeParse({ ...once, latestStartMinutes: 60 }).success).toBe(true);
+  });
+
+  it('has no cron form', () => {
+    expect(() => cronOf(once)).toThrow();
   });
 });

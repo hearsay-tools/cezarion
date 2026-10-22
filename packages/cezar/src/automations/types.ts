@@ -81,6 +81,17 @@ export const automationDefinitionObjectSchema = z
     // Passthrough like every other persisted layer: a schedule key a later build adds survives a save here.
     schedule: automationScheduleSchema.passthrough().optional(),
     task: automationTaskSchema,
+    /** `once` schedules only (hearsay-tools/cezarion#1465): the archive record. */
+    archived: z
+      .object({
+        at: z.string().datetime(),
+        outcome: z.enum(['launched', 'cancelled']),
+        runId: z.string().optional(),
+        receiptId: z.string().optional(),
+        trigger: z.enum(['schedule', 'late', 'manual', 'retry']).optional(),
+      })
+      .passthrough()
+      .optional(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
   })
@@ -162,6 +173,8 @@ export const automationRuntimeStateSchema = z
     etags: z.record(z.string(), z.string()).optional(),
     backoffUntil: z.string().datetime().optional(),
     consecutiveFailures: z.number().int().nonnegative().optional(),
+    /** once schedule: it stopped without a task — the launch failed, or it started past its cutoff. */
+    onceOutcome: z.enum(['failed', 'missed']).optional(),
   })
   .passthrough();
 
@@ -212,6 +225,8 @@ export const automationLogResultSchema = z.enum([
   'manual',
   'catch-up',
   'failed',
+  // once schedule
+  'missed',
 ]);
 
 export const automationLogRecordSchema = z
@@ -261,6 +276,18 @@ export type ScheduleAutomationDefinition = AutomationDefinition & {
   kind: 'schedule';
   schedule: AutomationSchedule;
 };
+
+/** A `once` schedule: the shape fires a single time, then the definition is archived. */
+export type OnceScheduleDefinition = ScheduleAutomationDefinition & {
+  schedule: AutomationSchedule & { type: 'once'; at: string; timeZone: string };
+};
+
+export function isOnceSchedule(definition: AutomationDefinition): definition is OnceScheduleDefinition {
+  return isScheduleAutomation(definition)
+    && definition.schedule.type === 'once'
+    && typeof definition.schedule.at === 'string'
+    && typeof definition.schedule.timeZone === 'string';
+}
 
 export function isGithubAutomation(definition: AutomationDefinition): definition is GithubAutomationDefinition {
   return definition.kind === 'github'
