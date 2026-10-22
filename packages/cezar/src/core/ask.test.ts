@@ -235,14 +235,16 @@ describe('parseAskMarker', () => {
     expect(parseAskMarkerResult(`CEZ:ASK ${JSON.stringify({ questions: [question] })}`)).not.toHaveProperty('request.context');
   });
 
-  it('never lets a malformed context hide a valid card: an overlong one is clipped, an empty or non-string one dropped', () => {
-    const question = { header: 'Choice', question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] };
-    const long = parseAskMarkerResult(`CEZ:ASK ${JSON.stringify({ context: 'x'.repeat(20_001), questions: [question] })}`);
-    expect(long).toMatchObject({ kind: 'valid', normalized: true, request: { context: 'x'.repeat(20_000) } });
+  // Review of hearsay-tools/cezarion#1458: context can hold the warning an approval depends on, so
+  // a bad one is never clipped or dropped: the card is refused and the raw marker text stays.
+  it('refuses a card whose context is overlong, empty or not a string, and keeps the raw text', () => {
+    const question = { header: 'Choice', question: 'Deploy now?', options: [{ label: 'Yes' }, { label: 'No' }] };
+    const warning = 'Do not deploy until the backup is verified.';
+    const turn = `CEZ:ASK ${JSON.stringify({ context: 'x'.repeat(20_000) + warning, questions: [question] })}`;
+    expect(parseAskMarkerResult(turn)).toMatchObject({ kind: 'invalid-structure' });
+    expect(stripAskMarker(turn)).toContain(warning);
     for (const context of ['', 42]) {
-      const result = parseAskMarkerResult(`CEZ:ASK ${JSON.stringify({ context, questions: [question] })}`);
-      expect(result).toMatchObject({ kind: 'valid', normalized: true, request: { questions: [question] } });
-      expect(result).not.toHaveProperty('request.context');
+      expect(parseAskMarkerResult(`CEZ:ASK ${JSON.stringify({ context, questions: [question] })}`)).toMatchObject({ kind: 'invalid-structure' });
     }
   });
 

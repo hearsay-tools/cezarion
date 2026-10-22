@@ -289,7 +289,7 @@ describe('private wait routes', () => {
     expect(await callCezarAsk({ context: 'c', questions: [{ header: 'Area', question: 'Which?', options: [{ label: 'Only' }] }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.options\` must be 2–4 options with unique labels, or left out for an open question. ${askTail}` });
     expect(await callCezarAsk({ kind: 'human', ...card }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `Unknown field "kind". ${askTail}` });
     expect(JSON.parse((await raw(session.env, '{', undefined, 'ask')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
-    expect(JSON.parse((await raw(session.env, ' '.repeat(131_073), undefined, 'ask')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
+    expect(JSON.parse((await raw(session.env, ' '.repeat(262_145), undefined, 'ask')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
     expect(await callCezarWait({ kind: 'human', ...card }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: '`kind` must be "ci", "worker" or "timer"; ask the user with cezar_ask.' });
     expect(ask).not.toHaveBeenCalled();
     expect(register).not.toHaveBeenCalled();
@@ -337,6 +337,19 @@ describe('private wait routes', () => {
     expect(long.context).toHaveLength(20_000);
     await expect(callCezarAsk(long, session.env)).resolves.toEqual(asked);
     expect(ask).toHaveBeenLastCalledWith(long, expect.any(AbortSignal));
+  });
+
+  // Review of hearsay-tools/cezarion#1458: the body limit admits the largest card the schema
+  // accepts, every field at its limit in characters JSON escapes to six bytes.
+  it('POST /tools/ask admits the largest schema-valid card, however its JSON is escaped', async () => {
+    const ask = vi.fn(async (): Promise<CezarAskAnswer> => asked);
+    const session = (await controller()).provision(handlers({ ask }));
+    const esc = (n: number, tag: string) => tag + '\u0001'.repeat(n - tag.length);
+    const largest = { context: esc(20_000, ''), questions: [0, 1, 2, 3].map(q => ({
+      id: esc(64, `${q}`), header: esc(12, `${q}`), question: esc(400, `${q}`), multiSelect: true,
+      options: [0, 1, 2, 3].map(o => ({ label: esc(60, `${o}`), description: esc(280, `${o}`) })) })) };
+    expect(JSON.stringify(largest).length).toBeGreaterThan(131_072);
+    await expect(callCezarAsk(largest, session.env)).resolves.toEqual(asked);
   });
 });
 
