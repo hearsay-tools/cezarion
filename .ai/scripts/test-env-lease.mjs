@@ -211,7 +211,8 @@ function envNumber(env, name, fallback, min, max) {
 }
 
 async function stopApp(pid, start) {
-  const same = () => { const current = identity(pid); return !current.dead && (!current.start || current.start === start); };
+  // Only a verified identity may be signalled: an unreadable one could be a reused pid.
+  const same = () => { const current = identity(pid); return !current.dead && current.start === start; };
   // The app can exit and its pid be reused between polls: never signal another process.
   if (!same()) return;
   try { process.kill(pid, 'SIGTERM'); } catch { return; }
